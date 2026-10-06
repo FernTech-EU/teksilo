@@ -328,3 +328,118 @@ fn a_dirty_upload_costs_at_most_half_a_full_one() {
         "a dirty upload ({dirty:?}) costs more than half a full one ({full:?})"
     );
 }
+
+/// The live pass's frame time, lock holds and commit-to-upload delay in
+/// steady state, printed rather than asserted, for the measurements AC6, AC12
+/// and AC13 name: a producer thread committing at 60 Hz against a render
+/// loop at 60 Hz, for five seconds per workload and phase. Offscreen, so no
+/// acquire wait is included, and a render that finds the lock held is not
+/// followed by the extra frame the producer's unlock asks a window for.
+///
+/// Each workload runs twice. With the two loops in phase, every render wakes
+/// as the producer writes, the worst case for contention; half a period
+/// apart, they never meet. A real window and producer drift between the two.
+/// Run it in an optimized build:
+///
+/// ```sh
+/// cargo test -p teksilo-render --release --features live-image-timings \
+///     --test live_image_cost -- --ignored --nocapture measure
+/// ```
+#[cfg(any(debug_assertions, feature = "live-image-timings"))]
+#[test]
+#[ignore = "a measurement, printed: run it in an optimized build with the live-image-timings feature"]
+fn measure_the_live_pass_at_60_hz() {
+    let _one_at_a_time = TIMED.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(g) = gpu("live_cost_measure") else {
+        return;
+    };
+    // AC7's workload: four rects covering 8 % of a 720 × 1280 frame per
+    // commit; then full 1920 × 1080 frames.
+    let workloads: [(&str, u32, u32, bool); 2] = [
+        ("720x1280, 4 rects, 8 %", W, H, false),
+        ("1920x1080 full", 1920, 1080, true),
+    ];
+    for ((name, w, h, full), phase) in workloads
+        .into_iter()
+        .flat_map(|workload| [(workload, "in phase"), (workload, "half a period apart")])
+    {
+        let source = LiveImageSource::new(LivePixelFormat::Bgrx8);
+        let writer = source.writer();
+        let frame = vec![0x80u8; (w * h * 4) as usize];
+        writer
+            .write_frame(w, h, &frame, (w * 4) as usize)
+            .expect("a valid frame");
+        let waker = Arc::new(CountingWaker::new());
+        let consumer = source.attach(Some(waker as Arc<dyn RedrawWaker>));
+        let mut renderer = pollster::block_on(require_test_renderer("live_cost_measure"))
+            .expect("the adapter opened above")
+            .0;
+        renderer.render(&drawing(&consumer), &g.view, 1.0, 16, 16, [0.0; 4]);
+
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let producer = {
+            let (writer, stop) = (writer.clone(), stop.clone());
+            std::thread::spawn(move || {
+                // 4 × 192 × 96 = 73 728 px, 8 % of 720 × 1280.
+                let rects = [
+                    PixelRect::new(16, 16, 192, 96),
+                    PixelRect::new(500, 300, 192, 96),
+                    PixelRect::new(40, 900, 192, 96),
+                    PixelRect::new(480, 1150, 192, 96),
+                ];
+                let rect_px = vec![0x40u8; 192 * 96 * 4];
+                let mut next = Instant::now();
+                let mut shade = 0u8;
+                while !stop.load(std::sync::atomic::Ordering::Acquire) {
+                    shade = shade.wrapping_add(1);
+                    if full {
+                        let px = vec![shade; (w * h * 4) as usize];
+                        writer.write_frame(w, h, &px, (w * 4) as usize).unwrap();
+                    } else {
+                        let mut guard = writer.lock().unwrap();
+                        for rect in rects {
+                            guard.write_rect(rect, &rect_px, 192 * 4).unwrap();
+                        }
+                        guard.commit();
+                    }
+                    next += Duration::from_micros(16_667);
+                    std::thread::sleep(next.saturating_duration_since(Instant::now()));
+                }
+            })
+        };
+        if phase != "in phase" {
+            std::thread::sleep(Duration::from_micros(8_333));
+        }
+        let started = Instant::now();
+        let mut next = Instant::now();
+        while started.elapsed() < Duration::from_secs(5) {
+            renderer.render(&drawing(&consumer), &g.view, 1.0, 16, 16, [0.0; 4]);
+            next += Duration::from_micros(16_667);
+            std::thread::sleep(next.saturating_duration_since(Instant::now()));
+        }
+        stop.store(true, std::sync::atomic::Ordering::Release);
+        producer.join().expect("the producer");
+        g.idle();
+        let t = renderer.live_texture_timings();
+        let s = renderer.live_texture_stats();
+        println!(
+            "{} — {name}, {phase}: prepare p50 {} p99 {} max {} µs; lock hold p50 {} p99 {} max {} µs; \
+             commit to upload p50 {} p99 {} max {} µs; {} uploads, {} contended, {} blocking \
+             waits, over {} renders",
+            g.adapter(),
+            t.prepare.p50,
+            t.prepare.p99,
+            t.prepare.max,
+            t.lock_hold.p50,
+            t.lock_hold.p99,
+            t.lock_hold.max,
+            t.commit_to_upload.p50,
+            t.commit_to_upload.p99,
+            t.commit_to_upload.max,
+            s.uploads_full + s.uploads_partial,
+            s.contended,
+            s.blocking_waits,
+            t.prepare.samples,
+        );
+    }
+}
