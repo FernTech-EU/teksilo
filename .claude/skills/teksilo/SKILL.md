@@ -178,6 +178,13 @@ the app pins something newer.
   section. Doc caveat as of 0.12.1: the `data-models` guide's §3
   `ListDataSource` snippet is stale (it omits `type Key: ItemKey`) — trust the
   `data-source` guide and the extracted API.
+- **Pixels another thread rewrites go through `LiveImage`, never `ImageWidget`.**
+  A VM screen, a video or a camera writes a `LiveImageSource` from its own
+  thread (`writer.write_frame(..)`, or a transaction marking only what changed),
+  and `LiveImage::new(source)` shows it: no repaint, no leak. A new
+  `ImageWidget` name per frame never frees its texture; the same name never
+  shows new pixels. Keep a writer alive while the picture should show: when
+  the last one drops, the source frees its pixels.
 - **Composing-widget invariant:** the id returned from `build()`, the root id
   used by `layout_response`, and `children()` must all be the same root child.
 - **Testing is headless:** `teksilo::core::{WidgetTree, LayoutContext::for_testing}`
@@ -243,4 +250,4 @@ binding and still reports success. Full catalog, error codes and probe workflow:
 |---|---|
 | `reference/teksilo_app_guide.md` | Anything about the app-author surface: entry point, Widget trait, layout model, Signal/Prop, events, intents & shortcuts, theming, animation, accessibility overrides, i18n, settings, data models, widget catalog, toasts, drag-and-drop, `EventContext`, breaking changes 0.9 → 0.12. The default first read. |
 | `reference/teksu.md` | Writing, reading, translating or debugging a `teksu!` block. Routing rules, slot arity, diagnostics, limitations, the formatter. |
-| `reference/automation.md` | Driving or testing the running app: wiring the bridge, attaching, the 34-tool catalog by job, error codes, and the probe harness workflow. |
+| `reference/automation.md` | Driving or testing the running app: wiring the bridge, attaching, the 36-tool catalog by job, error codes, and the probe harness workflow. |

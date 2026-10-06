@@ -30,8 +30,10 @@ Screenshots render offscreen on the tree thread via `pollster::block_on`
 offscreen path the widget previewer's PNG export uses).
 
 **What the stock binary drives.** `teksilo-automation-mcp --headless` builds a
-small *built-in demo* (a heading, two buttons, a text field, a checkbox, plus
-a list-row-in-a-scroller fixture the touch ops' arbitration checks press), it
+small *built-in demo* (a heading, two buttons, a text field, a checkbox, a
+list-row-in-a-scroller fixture the touch ops' arbitration checks press, and a
+96 × 64 live picture whose pixels encode their position and generation, with
+buttons that commit one frame or start a 60 Hz producer), it
 is the toolkit's own conformance harness and a worked reference, **not** your
 app. To headlessly automate *your* app there are two paths:
 
@@ -209,7 +211,7 @@ bridge, the method is the identity. The GUI-free DTO toolkit is available as
 
 The server binary builds from `cargo build -p teksilo-automation-mcp`.
 
-## Tool surface (34 tools)
+## Tool surface (36 tools)
 
 Every tool that changes the UI accepts an optional `settle` argument (see the
 settle model below), and so does `screenshot`, it is catalogued non-mutating,
@@ -218,8 +220,8 @@ no question anyone asked. The two exceptions to the pattern are `advance_clock`,
 which takes only `millis` because it *is* the clock op, and the read-only query
 tools, `snapshot_tree`, `read_node`, `layout_tree`, `inspect_node`,
 `find_node`, `assert_node`, `list_windows`, `query_pointers`, `get_overlays`,
-`get_shortcuts`, `list_live_regions`, `pull_announcements`, which observe
-without touching the tree. Every tool's parameters are `deny_unknown_fields`, so sending `settle`
+`get_shortcuts`, `list_live_regions`, `pull_announcements`, `live_image_stats`,
+`live_image_map`, which observe without touching the tree. Every tool's parameters are `deny_unknown_fields`, so sending `settle`
 where it is not accepted is a hard error, not a silent no-op; that is
 deliberate, since the alternative is a script that believes it settled and
 never did.
@@ -321,6 +323,16 @@ refused with `BAD_ARGUMENT`, naming the owner to aim at. A touch sequence
 resolves every node it names before its first step, so one that is missing
 dispatches nothing.
 
+**Aiming at a live picture's pixel.** In place of `x` and `y`, the same three
+tools take `source: [x, y]`, a pixel of the `LiveImage` that `node` names. The
+press lands at the centre of where that source pixel is drawn, whatever the
+fit, the orientation, the device-pixel snapping, the window's scale and any
+transform above the picture. A pixel outside the source, or one the fit crops
+out of view (under `Cover` or `None`), is refused with `BAD_ARGUMENT`, because
+the press would land on another widget. A node that shows no live picture is
+`BAD_ARGUMENT`, and one not yet laid out is `NO_GEOMETRY`. Give `x` and `y`, or
+`source`: exactly one of the two.
+
 **`type_text` types as a keyboard does.** Each character is one key pressed and
 released, the press carrying the character as its text:
 
@@ -355,6 +367,25 @@ reports a chord (`Ins`, `Menu`, `F13`), or spelled out (`insert`,
 `pull_announcements`
 
 **Time / settle**, `advance_clock`, `settle`, `wait_for_condition`
+
+**Live pictures**, `live_image_stats`, `live_image_map`
+
+- `live_image_stats {node}` returns a `LiveImage`'s counters. `source` has the
+  generation, the displayed generation, commits, wakes and writers.
+  `attachment` has the window generation, frames drawn, captures, uploads,
+  deferred and paused frames, and paints. `textures` has what the window's
+  renderer holds and uploads for live pictures, and `wakes` the window's wake
+  counters. Frames flow when `generation` rises and `window_generation`
+  follows, while `paints` stays flat. Headless, `textures` is absent until the
+  first screenshot creates the renderer, and `wakes` is always absent: there
+  is no window.
+- `live_image_map {node, source?, source_rect?, window?}` returns where the
+  picture lies in the window: `content`, `visible` (the part inside the
+  widget's box), the source and displayed sizes, the orientation and the scale.
+  With `source` it adds `source_point`, the window-logical centre of that
+  pixel. With `source_rect` it adds `source_window_rect`. With `window` it
+  adds `pixel`, the source pixel drawn at that point, or `null` on the
+  letterbox. A picture with no placement yet answers `NO_GEOMETRY`.
 
 **Visual**, `screenshot` (returns an MCP image content block)
 
@@ -627,7 +658,13 @@ and returns it as an MCP **image content block**, alongside a metadata block:
 ```
 
 `warnings` is added only when there is one to report (see the WebView blind
-spot below).
+spot below), and `live_images` only when the image shows a live picture: for
+each one, its `node`, the `generation` the image holds, whether it drew an
+older picture or only the background (`deferred`), and its `rect` in the image's
+pixels. A producer keeps committing between two calls, so this is the exact
+record of what the PNG holds; reading `live_image_stats` afterwards races with
+it. A capture shows each picture's latest commit, through a pause and in a
+window nobody can see.
 
 **`scale` is not decoration.** Pixel dimensions are physical, and a live window
 on a HiDPI display is not laid out at that size: an 800×600 logical window

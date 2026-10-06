@@ -252,6 +252,12 @@ by crate for clarity, not because crates version independently.
   cuts a saved screenshot to a live picture by its metadata, with a PNG
   reader and writer that need only the standard library. `tools.py` wraps
   the two new tools.
+- `example_live_image.py` among the probe harness's worked examples, run in
+  CI against `live-image-demo`: frames flowing between two screenshots, no
+  repaint while they do, a press landing on its source pixel at the four
+  corners and the centre in both orientations, two fingers and their
+  cancels, keys reaching the picture and Ctrl+Tab leaving it, a rotation
+  reshaping the box, and a window silent while its producer is paused.
 
 #### Render
 
@@ -303,6 +309,14 @@ by crate for clarity, not because crates version independently.
 - `MemoryWebViewRecords::scale_log`: the scale factor each `set_bounds` of a
   web view was given, for a test of what an engine that positions in device
   pixels receives.
+
+#### Demos
+
+- **`cargo run -p live-image-demo`** — a phone-shaped guest screen that a
+  60 Hz producer thread redraws by dirty rects: rotate it, pause the producer
+  and watch the window go idle, switch to `Nearest`, open a second window on
+  the same source, and press, drag, touch or type into it, mapped to the
+  guest's pixels.
 
 ### Changed
 

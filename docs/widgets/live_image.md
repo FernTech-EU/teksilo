@@ -3,6 +3,8 @@
 
 # LiveImage
 
+![LiveImage preview](img/live_image.png)
+
 LiveImage — shows a picture another thread rewrites many times a second.
 
 A virtual machine's screen, a video frame, a camera preview: the pixels
@@ -63,6 +65,14 @@ picture calls `a11y_hidden` instead. Pixels are
 not accessible content, and a commit never changes the node: only a
 status change does, when the `placeholder`
 becomes or stops being its description.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![LiveImage at Touch density](img/live_image-touch.png)
 
 ## Builder methods at a glance
 

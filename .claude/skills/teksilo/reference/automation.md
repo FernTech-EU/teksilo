@@ -80,7 +80,7 @@ the live bridge above.
 
 ## 3. The tool catalog, by job
 
-34 tools. On connect the server hands the client a "how to drive this app"
+36 tools. On connect the server hands the client a "how to drive this app"
 briefing plus a JSON schema per tool, so a capable agent can self-guide the
 **snapshot → find node → act → settle → assert** loop. What follows is the map,
 not a substitute for the schemas.
@@ -115,6 +115,20 @@ node — the position its handlers receive — and stay exact under a `Scale`, a
 `Rotate` or a `SceneView`, where `bounds.x + x` does not. `scroll` turns at the
 node's centre, or at `at: [x, y]` (node-local), by pixels or with `lines: true`
 by lines, as a wheel notch does.
+
+**Live pictures.** A `LiveImage`'s pixels are in no accessibility node, and its
+fit, letterbox, rotation and scale decide where a guest pixel is on screen. So
+aim with `source: [x, y]` in place of `x`, `y` (with the picture's `node`) on
+`inject_pointer`, `long_press` and touch steps: the press lands on the centre of
+that source pixel. `live_image_map {node}` gives where the picture lies and
+converts both ways (`source` → `source_point`, `window` → `pixel`, `null` on the
+letterbox); `live_image_stats {node}` gives the source's, the attachment's and
+the window's counters (frames flow when `generation` rises and
+`window_generation` follows with `paints` flat). A screenshot's metadata lists
+`live_images` — each picture's `node`, the `generation` the image holds and its
+`rect` in the image — which is the exact record: `live_image_stats` read
+afterwards races with the producer. The harness's `teksilo_probe.live_image`
+wraps all of it (`click_source`, `source_of`, `capture`, `crop_visible`).
 
 `type_text` types as a keyboard does: each character is a key pressed and
 released, a letter as its named key (Shift for a capital), a space, line break

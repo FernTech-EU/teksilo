@@ -451,11 +451,11 @@ jobs:
             exit 1
           fi
 
-          # The probes drive these three demo apps' own debug binaries — the
+          # The probes drive these four demo apps' own debug binaries — the
           # automation bridge is `#[cfg(debug_assertions)]`, so it must be a
           # `cargo build`, not `cargo test`'s hashed test-binary output, which
           # `teksilo_probe.resolve.app_binary` does not look under.
-          cargo build -p data-collections -p dialogs-and-popovers -p rich-text-editor
+          cargo build -p data-collections -p dialogs-and-popovers -p rich-text-editor -p live-image-demo
 
           sudo apt-get install --no-install-recommends -y openbox
 

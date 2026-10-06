@@ -270,6 +270,39 @@ The older `RepaintWindowRequest { window_id }`, posted through
 window and redraws every window. `teksilo-terminal` uses the trigger; see
 [terminal.md](terminal.md).
 
+## Off-thread pixels: `LiveImage`
+
+A picture another thread rewrites at display rate (a VM screen, a video, a
+camera preview) is not a repaint at all. The producer commits into a
+`LiveImageSource`. The commit wakes each window that shows the source once,
+until that window's next frame, and the frame uploads the changed bytes into
+its texture while it replays its cached paint. No `paint()` runs, no widget is
+marked, nothing lays out, and no `AppEvent` is posted outside macOS. A producer
+that stops committing costs nothing, so a paused VM screen draws zero frames.
+Only a change of the source's size or status relayouts the widget. See
+[live-image.md](live-image.md).
+
+## Windows nobody can see
+
+A minimised window, or one the platform reports fully occluded, draws
+nothing: no acquire, no render, no present, no live-picture upload. Its state
+stays current all the same. Idle callbacks run, layout runs (so clocks and
+off-thread content advance), and the accessibility tree is delivered, because
+a screen reader can act on a window nobody sees. A request for a redraw to
+such a window marks a *non-visual tick* instead. Ticks run at most ten times a
+second per window, whatever asks for them. Going hidden draws one last frame,
+and coming back asks for one redraw. A pixel wake from a producer is dropped
+while the window is hidden, and the first frame after it is shown uploads the
+latest commit.
+
+On Wayland the compositor decides what is shown. A window presents with
+`pre_present_notify`, so winit holds each later redraw until the compositor's
+frame callback. A compositor sends no callback to a surface it does not show,
+and winit reports no minimise on Wayland. So a redraw still undelivered after
+100 ms counts as withheld, and the window is ticked like a hidden one until
+the redraw arrives. Neither a hidden window nor one whose redraw is on its way
+can make the loop spin on a timer deadline that is already due.
+
 ## Three animation paths: signal vs shader vs per-frame-effect
 
 Teksilo carries three motion paths that coexist. Pick by shape:

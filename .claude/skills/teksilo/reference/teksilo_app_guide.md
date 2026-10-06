@@ -226,7 +226,8 @@ overflow rather than truncate.
 
 **Layout primitives:** `HStack`, `VStack`, `ZStack`, `Grid`, `Wrap`, `Padding`, `Spacer`,
 `Center`, `Expand`, `Shrinkable`, `FixedSize`, `MinSize`, `MaxSize`, `AspectRatio`,
-`Switcher`, `Divider`, `IconWidget`, `ImageWidget`, `MasonryLayout`, `FormLayout`.
+`Switcher`, `Divider`, `IconWidget`, `ImageWidget`, `LiveImage`, `MasonryLayout`,
+`FormLayout`.
 
 ## Signals & reactivity
 
@@ -895,7 +896,7 @@ primary accelerator (Control on Windows/Linux, ⌘ on macOS), which is what a sh
 *declared* `Ctrl+S` resolves to. `ctrl` stays literal Control everywhere — on macOS it
 injects a key that matches no binding **and still reports success**.
 
-Beyond mouse and keyboard, the catalog (34 tools) drives **touch and pen**:
+Beyond mouse and keyboard, the catalog (36 tools) drives **touch and pen**:
 `inject_pointer` takes `kind` (`mouse` / `touch` / `pen`, with `pressure` and `tilt` for a
 stylus), and `inject_touch_sequence` runs a whole multi-touch gesture step by step, reporting
 the **arbitration** after each one — the frozen `touch_action`, every competitor with its role
@@ -970,6 +971,45 @@ dependency is needed. Announce action results with `Live::Polite`, but avoid
 announcing every polling tick. The example disables live announcements on meters.
 Literal labels via `lit!` need no translation catalog. Settings, toast hosts and
 `teksu!` are optional for this application shape.
+
+### Content from another thread: `LiveImage` and `RepaintTrigger`
+
+A picture a thread rewrites many times a second (a VM screen, a video, a camera
+preview) is a `LiveImageSource`. The thread writes it; `LiveImage` shows it. A
+commit uploads only what changed and repaints no widget, and the texture is
+freed at the first frame that no longer draws it:
+
+```rust
+use teksilo::prelude::*;
+use teksilo::widgets::{LiveImage, LiveImageSizing};
+
+let screen = LiveImageSource::new(LivePixelFormat::Bgrx8);
+let writer = screen.writer();            // Send + Clone; keep one alive
+std::thread::spawn(move || loop {
+    let mut tx = writer.lock().unwrap();  // a transaction: mark only what changed
+    tx.write_rect(PixelRect::new(0, 0, 64, 32), &status_bar_pixels(), 64 * 4).unwrap();
+    tx.commit();
+    std::thread::sleep(std::time::Duration::from_millis(16));
+});
+let view = LiveImage::new(screen)
+    .sizing(LiveImageSizing::Aspect)
+    .alt(lit!("Virtual machine screen"));
+```
+
+Forward input to the guest with `LiveImageHandle::map_to_source(local)`, from the
+widget's handle (`LiveImageHandle::new()` + `.with_handle(&h)`), on handlers
+attached through `WidgetBuilder` (`focusable`, `keyboard_capture(true)` for every
+key, `multi_contact(MultiContact::All)` for every finger). Never show changing
+pixels through `ImageWidget`: a name registers once and is never freed. Guide:
+`cargo teksilo show docs/live-image.md`.
+
+Content a single widget paints from another thread (a terminal's output, a
+parser's result) uses a `RepaintTrigger`: attach it in `build()` with
+`ctx.attach_repaint_trigger(&trigger)`, store the change on the thread, then
+`trigger.request_repaint()` (or `request_relayout()`; `request_pull()` with
+`ctx.on_trigger_pull(..)` to take it in even while the widget is not shown). Only
+that widget repaints, and only its window wakes. `RepaintWindowRequest` is
+deprecated: it repainted every widget of the window.
 
 ## Breaking changes 0.9 → 0.13
 

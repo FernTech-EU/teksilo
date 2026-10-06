@@ -15,7 +15,7 @@ The sidebar contains the full guide and generated API catalog.
 | Support accessibility | [Overrides](accessibility-overrides.md), [text scale](text-scale.md), [targets](density-and-targets.md) |
 | Translate the application | [Internationalization](i18n.md) |
 | Manage application state | [Settings](settings.md), [windows](multi-window.md), [async](async.md) |
-| Build specialized views | [Charts](charts.md), [scenes](teksilo-scene.md), [docking](docking.md), [editors](code-editor.md) |
+| Build specialized views | [Charts](charts.md), [scenes](teksilo-scene.md), [docking](docking.md), [editors](code-editor.md), [live pictures](live-image.md) |
 | Support touch and pen | [Pointer input](touch-and-pen.md), [text editing](text-touch-editing.md), [ink](ink.md) |
 | Diagnose behavior | [Inspector](inspector.md), [automation](automation-mcp.md), [agent tooling](agent-tooling.md) |
 | Extend the framework | [Architecture](architecture.md), [custom pointer controls](porting-widgets-to-the-pointer-model.md) |
