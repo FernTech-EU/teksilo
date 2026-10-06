@@ -462,6 +462,12 @@ impl Renderer {
         self.live.set_refresh_interval(interval);
     }
 
+    /// The refresh interval last set.
+    #[doc(hidden)]
+    pub fn live_refresh_interval(&self) -> std::time::Duration {
+        self.live.refresh_interval()
+    }
+
     /// Test hooks for the live pass: the largest side it accepts, the
     /// staging one write and one frame may take, the parked pool's budget,
     /// and a texture creation that reports no memory.

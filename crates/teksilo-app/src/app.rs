@@ -291,6 +291,10 @@ fn present_in_tree_modal_request(
 /// [`TeksiloAppHandler::refresh_occluded_band`].
 const OSK_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
+/// How long the loop sleeps at most while textures a renderer dropped wait
+/// for the GPU to free them. See [`TeksiloAppHandler::update_control_flow`].
+pub(crate) const GPU_RECLAIM_POLL: Duration = Duration::from_millis(8);
+
 /// Convert a screen-space physical rectangle into the part of `window`'s client
 /// area it covers, in window-logical pixels.
 ///
@@ -470,6 +474,8 @@ pub(crate) struct IdleTrace {
     waker_totals: HashMap<WindowId, (u64, u64)>,
     control_flow_wait: u64,
     control_flow_wait_until: u64,
+    /// Control-flow decisions that kept a deadline for the GPU reclaim poll.
+    gpu_reclaim_waits: u64,
     timer_windows: usize,
     animation_timers: usize,
     tooltip_timers: usize,
@@ -503,6 +509,7 @@ impl IdleTrace {
                 waker_totals: HashMap::new(),
                 control_flow_wait: 0,
                 control_flow_wait_until: 0,
+                gpu_reclaim_waits: 0,
                 timer_windows: 0,
                 animation_timers: 0,
                 tooltip_timers: 0,
@@ -517,11 +524,15 @@ impl IdleTrace {
         timer_windows: usize,
         animation_timers: usize,
         tooltip_timers: usize,
+        gpu_reclaim: bool,
     ) {
         if has_deadline {
             self.control_flow_wait_until += 1;
         } else {
             self.control_flow_wait += 1;
+        }
+        if gpu_reclaim {
+            self.gpu_reclaim_waits += 1;
         }
         self.timer_windows = timer_windows;
         self.animation_timers = animation_timers;
@@ -615,7 +626,7 @@ impl IdleTrace {
         }
 
         eprintln!(
-            "teksilo_idle_trace t={:.3} redraw_requested={} rendered_frames={} hidden_redraws={} ticks={} resume_time_reached={} request_redraw_all={} cross_window_redraws={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{},frame_request:{}}} idle_callbacks={} app_events={} posted_wakes={{draw:{},layout:{}}} waker_wakes={} waker_wakes_dropped={} control_flow={{wait:{},wait_until:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
+            "teksilo_idle_trace t={:.3} redraw_requested={} rendered_frames={} hidden_redraws={} ticks={} resume_time_reached={} request_redraw_all={} cross_window_redraws={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{},frame_request:{}}} idle_callbacks={} app_events={} posted_wakes={{draw:{},layout:{}}} waker_wakes={} waker_wakes_dropped={} control_flow={{wait:{},wait_until:{},gpu_reclaim:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
             self.started.elapsed().as_secs_f64(),
             self.redraw_requested,
             self.rendered_frames,
@@ -638,6 +649,7 @@ impl IdleTrace {
             self.waker_wakes_dropped,
             self.control_flow_wait,
             self.control_flow_wait_until,
+            self.gpu_reclaim_waits,
             self.timer_windows,
             self.animation_timers,
             self.tooltip_timers,
@@ -665,6 +677,7 @@ impl IdleTrace {
         self.waker_wakes_dropped = 0;
         self.control_flow_wait = 0;
         self.control_flow_wait_until = 0;
+        self.gpu_reclaim_waits = 0;
     }
 }
 
@@ -697,6 +710,9 @@ struct TeksiloAppHandler {
     initial_created: bool,
     idle_budget: Duration,
     idle_trace: Option<IdleTrace>,
+    /// The GPU reclaim poll, [`teksilo_render::poll_gpu_reclaim`]: a field
+    /// so the loop test can make it report pending.
+    gpu_reclaim: fn() -> bool,
     typesetter: SharedTypesetter,
     /// Kept alive for the lifetime of the event loop so that the
     /// `notify::RecommendedWatcher` background thread keeps running.
@@ -770,6 +786,7 @@ impl TeksiloAppHandler {
             initial_created: false,
             idle_budget: Duration::from_millis(4),
             idle_trace: IdleTrace::from_env(),
+            gpu_reclaim: teksilo_render::poll_gpu_reclaim,
             typesetter,
             _i18n_watcher: i18n_watcher,
             _settings_watcher: settings_watcher,
@@ -1019,6 +1036,21 @@ impl TeksiloAppHandler {
             });
         }
 
+        // Textures a renderer dropped (a live picture left a window, a window
+        // closed) are freed once the GPU has finished the last submission
+        // that used them, at a device maintenance only a submission or a poll
+        // runs. A loop that draws nothing more submits nothing, so it polls
+        // for them instead, waking every `GPU_RECLAIM_POLL` until they are
+        // freed, normally within two frames. No frame is drawn for it.
+        let reclaim_pending = (self.gpu_reclaim)();
+        if reclaim_pending {
+            let reclaim = now + GPU_RECLAIM_POLL;
+            earliest_deadline = Some(match earliest_deadline {
+                Some(current) => current.min(reclaim),
+                None => reclaim,
+            });
+        }
+
         // The ONLY consumer that forces true `ControlFlow::Poll`: an installed
         // loop-tick owner (e.g. the `teksilo-async` executor) with runnable
         // work. Async task processing wants to run as fast as possible and is
@@ -1049,6 +1081,7 @@ impl TeksiloAppHandler {
                 timer_windows,
                 animation_timers,
                 tooltip_timers,
+                reclaim_pending,
             );
         }
     }
@@ -1604,10 +1637,13 @@ impl TeksiloAppHandler {
         );
         let frame = current.tree.render();
         let frame = self.sync_window_glyph_atlas(&mut current, frame, event_loop);
-        // The GPU readback inside `capture_offscreen` can `.expect()`-panic on
-        // device loss (compositor restart, driver crash, memory pressure).
-        // Catch it so the window is still reinserted (no zombie) and the app
-        // survives — a screenshot failure must not abort a live session.
+        // A lost device fails the readback as a value. A panic anywhere in
+        // the render (a wgpu validation error goes to its panicking default
+        // handler) is caught too, so the window is still reinserted (no
+        // zombie) and the app survives: a screenshot failure must not abort a
+        // live session. A live picture's lock is released on unwind, and its
+        // texture cursor moves only after its writes, so the next frame plans
+        // its upload again.
         let captured = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             current
                 .platform_window
@@ -1618,12 +1654,22 @@ impl TeksiloAppHandler {
         self.wm.reinsert_managed(winit_id, current);
 
         let reply = match captured {
-            Ok((rgba, w, h)) if w != 0 && h != 0 => {
-                crate::automation_bridge::screenshot_reply(&rgba, w, h, scale, warnings)
+            Ok(Ok(shot)) if shot.width != 0 && shot.height != 0 => {
+                crate::automation_bridge::screenshot_reply(
+                    &shot.rgba,
+                    shot.width,
+                    shot.height,
+                    scale,
+                    warnings,
+                )
             }
-            Ok(_) => {
+            Ok(Ok(_)) => {
                 AutomationReply::err(codes::BAD_ARGUMENT, "crop region empty / outside window")
             }
+            Ok(Err(error)) => AutomationReply::err(
+                codes::GPU_READBACK_FAILED,
+                format!("offscreen capture failed: {error}"),
+            ),
             Err(_) => AutomationReply::err(
                 codes::GPU_READBACK_FAILED,
                 "offscreen capture failed (GPU device lost?)",
@@ -2846,6 +2892,9 @@ impl TeksiloAppHandler {
                     let lx = (pos.x as f64 / sf).round() as i32;
                     let ly = (pos.y as f64 / sf).round() as i32;
                     managed.state.set_position_from_os((lx, ly));
+                    // It may have moved to a display with another refresh
+                    // rate, at the same scale.
+                    managed.platform_window.track_display_refresh();
                 }
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
@@ -2853,6 +2902,7 @@ impl TeksiloAppHandler {
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.translation_state.set_scale_factor(scale_factor);
                     managed.platform_window.set_scale_factor(scale_factor);
+                    managed.platform_window.track_display_refresh();
                     managed.tree.set_device_scale_factor(scale_factor as f32);
                     // The safe area is reported in points; moving between
                     // displays can change both the scale and the housing.

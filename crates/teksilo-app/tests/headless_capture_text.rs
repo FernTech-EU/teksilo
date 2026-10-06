@@ -3,7 +3,7 @@
 
 //! An offscreen capture of a headless app draws its text.
 //!
-//! `Renderer::render` does not upload the glyph atlas, so a capture that only
+//! The renderer does not upload the glyph atlas, so a capture that only
 //! renders the tree draws every glyph blank. `HeadlessApp::render_for_capture`
 //! uploads it first. Needs a GPU adapter; returns early without one.
 
@@ -39,7 +39,7 @@ fn covered_pixels(
         view_formats: &[],
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    renderer.render(frame, &view, 1.0, W, H, [0.0, 0.0, 0.0, 0.0]);
+    renderer.render_capture(frame, &view, 1.0, W, H, [0.0, 0.0, 0.0, 0.0]);
     let pixels = teksilo_render::test_support::read_texture_rgba(device, queue, &texture, W, H);
     pixels
         .as_chunks::<4>()

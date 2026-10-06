@@ -638,6 +638,61 @@ struct WindowGpu {
     display_lost: bool,
 }
 
+/// A window rendered offscreen and read back: what
+/// [`PlatformWindow::capture_offscreen`] returns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct OffscreenCapture {
+    /// Tightly packed RGBA8, `width × height` pixels, no padding.
+    pub rgba: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    /// Where these pixels sit in the window's surface, in physical pixels:
+    /// the whole surface, or the crop asked for, clamped to it. Empty when
+    /// the crop missed the surface.
+    pub region: teksilo_canvas::PixelRect,
+}
+
+/// The surface pixels a crop rect (physical pixels) covers: its edges
+/// rounded outwards, clamped to a `w × h` surface. Empty when it misses.
+fn crop_region(rect: teksilo_canvas::Rect, w: u32, h: u32) -> teksilo_canvas::PixelRect {
+    let x0 = (rect.x.floor().max(0.0) as u32).min(w);
+    let y0 = (rect.y.floor().max(0.0) as u32).min(h);
+    let x1 = ((rect.x + rect.width).ceil().max(0.0) as u32).min(w);
+    let y1 = ((rect.y + rect.height).ceil().max(0.0) as u32).min(h);
+    if x1 <= x0 || y1 <= y0 {
+        return teksilo_canvas::PixelRect::new(x0, y0, 0, 0);
+    }
+    teksilo_canvas::PixelRect::new(x0, y0, x1 - x0, y1 - y0)
+}
+
+/// The pixels of `region` out of a tightly packed RGBA buffer `w` pixels
+/// wide that contains it.
+fn crop_rgba(src: &[u8], w: u32, region: teksilo_canvas::PixelRect) -> Vec<u8> {
+    let row_bytes = region.width as usize * 4;
+    let mut out = Vec::with_capacity(row_bytes * region.height as usize);
+    for y in region.y..region.y + region.height {
+        let start = (y as usize * w as usize + region.x as usize) * 4;
+        out.extend_from_slice(&src[start..start + row_bytes]);
+    }
+    out
+}
+
+/// One refresh of the display `window` is on, when the display reports its
+/// rate.
+fn display_refresh_interval(window: &Window) -> Option<std::time::Duration> {
+    let millihertz = window.current_monitor()?.refresh_rate_millihertz()?;
+    Some(refresh_interval_from_millihertz(millihertz))
+}
+
+/// The interval of a refresh rate in millihertz. Rates below 20 Hz or above
+/// 1 kHz are read as those bounds: a frame never waits more than 50 ms for a
+/// producer, and always waits at least one millisecond.
+fn refresh_interval_from_millihertz(millihertz: u32) -> std::time::Duration {
+    let millihertz = millihertz.clamp(20_000, 1_000_000);
+    std::time::Duration::from_nanos(1_000_000_000_000 / u64::from(millihertz))
+}
+
 impl PlatformWindow {
     /// Everything both constructors do: surface, shared device, swapchain
     /// configuration, renderer. Kept in one place because the two entry points
@@ -695,8 +750,11 @@ impl PlatformWindow {
 
         // The renderer stays per-window: it owns the glyph atlas, the path
         // atlas and the blur pool, and it is `!Sync` besides.
-        let renderer =
+        let mut renderer =
             Renderer::with_device_health(gpu.device, gpu.queue, surface_format, gpu.health);
+        if let Some(interval) = display_refresh_interval(window) {
+            renderer.set_live_refresh_interval(interval);
+        }
         WindowGpu {
             surface,
             surface_config,
@@ -829,6 +887,22 @@ impl PlatformWindow {
         self.scale_factor = factor;
     }
 
+    /// Read the refresh rate of the display the window is on, and have a
+    /// presented frame wait about one refresh of it for a producer holding a
+    /// live picture's lock. Done when the window is created; call it again
+    /// when the window may have moved to another display. A display that
+    /// reports no rate keeps the last one (60 Hz until one is read).
+    pub fn track_display_refresh(&mut self) {
+        if let Some(interval) = display_refresh_interval(&self.window) {
+            self.renderer.set_live_refresh_interval(interval);
+        }
+    }
+
+    /// What this window's renderer holds and uploads for live pictures.
+    pub fn live_texture_stats(&self) -> teksilo_render::LiveTextureStats {
+        self.renderer.live_texture_stats()
+    }
+
     /// Resize the surface.
     ///
     /// A resize that arrives once the display server has gone is dropped:
@@ -927,18 +1001,25 @@ impl PlatformWindow {
         FrameOutcome::Rendered
     }
 
-    /// Render `frame` into an offscreen texture and read it back as
-    /// tightly-packed RGBA8 bytes, returning `(rgba, width, height)`.
+    /// Render `frame` into an offscreen texture of the surface's size and
+    /// read it back as tightly packed RGBA8.
     ///
     /// Used by the debug-only automation bridge to capture a *live* window
     /// without going through the swapchain — the surface texture is
     /// configured `RENDER_ATTACHMENT` only (no `COPY_SRC`), so it can't be
-    /// read back directly. The offscreen texture uses the window's own
-    /// surface format so it matches the renderer's pipelines; a BGRA
-    /// readback is swizzled to RGBA here so the output is always RGBA. With
-    /// `crop = Some(rect)` (physical pixels, clamped to the surface) only
-    /// that sub-rectangle is returned. Returns an empty `(vec, 0, 0)` if
-    /// the crop is fully outside the surface.
+    /// read back directly. It renders through the window's own renderer with
+    /// [`Renderer::render_capture`]: every live picture shows its latest
+    /// commit, and the window's next frame draws the textures this one
+    /// filled. The whole frame is rendered, then `crop` (physical pixels,
+    /// clamped to the surface) is cut out on the CPU: rendering only part of
+    /// a frame through the window's renderer would drop the textures of the
+    /// live pictures it left out. The offscreen texture uses the window's
+    /// own surface format so it matches the renderer's pipelines; a BGRA
+    /// readback is swizzled to RGBA here so the output is always RGBA. A
+    /// crop outside the surface returns an empty capture.
+    ///
+    /// Fails, without panicking, when the device cannot read the texture
+    /// back (it was lost).
     ///
     /// Note: a native `WebView` subview composites *on top of* the wgpu
     /// surface and is invisible to this readback (a transparent hole).
@@ -947,36 +1028,12 @@ impl PlatformWindow {
         frame: &teksilo_canvas::RenderFrame,
         clear_color: [f32; 4],
         crop: Option<teksilo_canvas::Rect>,
-    ) -> (Vec<u8>, u32, u32) {
-        fn crop_rgba(
-            src: &[u8],
-            w: u32,
-            h: u32,
-            rect: teksilo_canvas::Rect,
-        ) -> (Vec<u8>, u32, u32) {
-            let x0 = (rect.x.floor().max(0.0) as u32).min(w);
-            let y0 = (rect.y.floor().max(0.0) as u32).min(h);
-            let x1 = ((rect.x + rect.width).ceil().max(0.0) as u32).min(w);
-            let y1 = ((rect.y + rect.height).ceil().max(0.0) as u32).min(h);
-            if x1 <= x0 || y1 <= y0 {
-                return (Vec::new(), 0, 0);
-            }
-            let cw = x1 - x0;
-            let ch = y1 - y0;
-            let mut out = Vec::with_capacity((cw * ch * 4) as usize);
-            for y in y0..y1 {
-                let row_start = ((y * w + x0) * 4) as usize;
-                let row_end = row_start + (cw * 4) as usize;
-                out.extend_from_slice(&src[row_start..row_end]);
-            }
-            (out, cw, ch)
-        }
-
+    ) -> Result<OffscreenCapture, teksilo_render::test_support::ReadbackError> {
         let (w, h) = self.surface_size();
         let format = self.surface_config.format;
         // The readback assumes a 4-byte, 8-bit RGBA/BGRA layout (the BGRA
-        // swizzle below + `read_texture_rgba`'s fixed 4-bytes-per-pixel copy).
-        // Desktop wgpu surfaces are always one of these four; a packed
+        // swizzle below + `try_read_texture_rgba`'s fixed 4-bytes-per-pixel
+        // copy). Desktop wgpu surfaces are always one of these four; a packed
         // (Rgb10a2) or wide (Rgba16Float) surface format would read back
         // garbage, so flag it loudly in debug builds.
         debug_assert!(
@@ -1008,16 +1065,16 @@ impl PlatformWindow {
             });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.renderer
-            .render(frame, &view, self.scale_factor as f32, w, h, clear_color);
-        let mut bytes = teksilo_render::test_support::read_texture_rgba(
+            .render_capture(frame, &view, self.scale_factor as f32, w, h, clear_color);
+        let mut bytes = teksilo_render::test_support::try_read_texture_rgba(
             self.renderer.device(),
             self.renderer.queue(),
             &texture,
             w,
             h,
-        );
-        // `read_texture_rgba` copies raw channel bytes; a BGRA surface
-        // needs its B/R swapped to become RGBA for PNG encoding.
+        )?;
+        // The readback copies raw channel bytes; a BGRA surface needs its B
+        // and R swapped to become RGBA for PNG encoding.
         if matches!(
             format,
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
@@ -1026,10 +1083,16 @@ impl PlatformWindow {
                 px.swap(0, 2);
             }
         }
-        match crop {
-            Some(rect) => crop_rgba(&bytes, w, h, rect),
-            None => (bytes, w, h),
-        }
+        let region = match crop {
+            Some(rect) => crop_region(rect, w, h),
+            None => teksilo_canvas::PixelRect::full(w, h),
+        };
+        Ok(OffscreenCapture {
+            rgba: crop_rgba(&bytes, w, region),
+            width: region.width,
+            height: region.height,
+            region,
+        })
     }
 
     /// Ask winit for a redraw. A no-op once the window's wake target is
@@ -1303,6 +1366,64 @@ impl Drop for PlatformWindow {
     /// must not reach a window that is going away.
     fn drop(&mut self) {
         self.wake.disconnect();
+    }
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::{crop_region, crop_rgba, refresh_interval_from_millihertz};
+    use std::time::Duration;
+    use teksilo_canvas::{PixelRect, Rect};
+
+    /// A crop's edges round outwards to whole pixels and clamp to the
+    /// surface; one that misses the surface is empty.
+    #[test]
+    fn a_crop_covers_every_pixel_it_touches_inside_the_surface() {
+        assert_eq!(
+            crop_region(Rect::new(1.5, 2.25, 3.0, 4.5), 10, 10),
+            PixelRect::new(1, 2, 4, 5)
+        );
+        assert_eq!(
+            crop_region(Rect::new(-3.0, 8.0, 20.0, 5.0), 10, 10),
+            PixelRect::new(0, 8, 10, 2)
+        );
+        assert!(crop_region(Rect::new(12.0, 0.0, 4.0, 4.0), 10, 10).is_empty());
+        assert!(crop_region(Rect::new(2.0, 2.0, 0.0, 3.0), 10, 10).is_empty());
+    }
+
+    /// The crop is cut from rows of the full surface, not from its start.
+    #[test]
+    fn the_cropped_pixels_are_the_regions_own() {
+        let (w, h) = (5u32, 4u32);
+        let src: Vec<u8> = (0..w * h)
+            .flat_map(|i| [i as u8, (i >> 8) as u8, 7, 255])
+            .collect();
+        let region = PixelRect::new(1, 2, 3, 2);
+        let out = crop_rgba(&src, w, region);
+        let firsts: Vec<u8> = out.chunks(4).map(|px| px[0]).collect();
+        assert_eq!(firsts, vec![11, 12, 13, 16, 17, 18]);
+        assert!(crop_rgba(&src, w, PixelRect::new(0, 0, 0, 0)).is_empty());
+    }
+
+    /// One refresh of the display, its rate bounded to 20 Hz – 1 kHz.
+    #[test]
+    fn a_display_rate_becomes_one_refresh() {
+        assert_eq!(
+            refresh_interval_from_millihertz(60_000),
+            Duration::from_nanos(16_666_666)
+        );
+        assert_eq!(
+            refresh_interval_from_millihertz(144_000),
+            Duration::from_nanos(6_944_444)
+        );
+        assert_eq!(
+            refresh_interval_from_millihertz(0),
+            Duration::from_millis(50)
+        );
+        assert_eq!(
+            refresh_interval_from_millihertz(u32::MAX),
+            Duration::from_millis(1)
+        );
     }
 }
 

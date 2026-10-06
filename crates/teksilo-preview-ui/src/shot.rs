@@ -290,11 +290,14 @@ impl Shooter {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // A capture: every live picture shows its latest commit, whatever
+        // its producer is doing.
         self.renderer
-            .render(&frame, &view, self.scale, width, height, clear);
+            .render_capture(&frame, &view, self.scale, width, height, clear);
 
         let rgba =
-            test_support::read_texture_rgba(&self.device, &self.queue, &texture, width, height);
+            test_support::try_read_texture_rgba(&self.device, &self.queue, &texture, width, height)
+                .map_err(|error| format!("snapshot readback failed: {error}"))?;
         let ink_ratio = ink_ratio(&rgba);
         Ok(Shot {
             rgba,

@@ -295,6 +295,11 @@ impl<B: LiveTextureBackend> LivePass<B> {
         self.refresh = refresh;
     }
 
+    /// The refresh interval last set: 60 Hz until one is.
+    pub fn refresh_interval(&self) -> Duration {
+        self.refresh
+    }
+
     /// Test hook: the staging a presented frame spends before a large
     /// whole-frame upload waits for the next frame.
     #[doc(hidden)]

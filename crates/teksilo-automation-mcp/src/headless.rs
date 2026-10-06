@@ -238,7 +238,9 @@ fn screenshot(
         view_formats: &[],
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    renderer.render(&frame, &view, 1.0, w, h, [0.0, 0.0, 0.0, 0.0]);
+    // A capture: every live picture shows its latest commit, whatever its
+    // producer is doing, and the render is not counted as a displayed frame.
+    renderer.render_capture(&frame, &view, 1.0, w, h, [0.0, 0.0, 0.0, 0.0]);
     // Fallible, not panicking: a lost device must cost the caller one
     // screenshot, not the whole session. This thread owns the `!Send` tree, so
     // a panic here would take every subsequent tool call down with it.

@@ -85,6 +85,12 @@ by crate for clarity, not because crates version independently.
   waits for it: it posts to the event loop through the route
   `set_off_main_wake_route` installs, or without one hands the redraw to the
   main queue.
+- `PlatformWindow::live_texture_stats`, what the window's renderer holds and
+  uploads for live pictures, and `PlatformWindow::track_display_refresh`,
+  which reads the refresh rate of the display the window is on: a presented
+  frame waits about one refresh of it for a producer holding a live
+  picture's lock. Windows read it when created, and teksilo-app again when
+  one moves or changes scale.
 
 #### Terminal
 
@@ -279,6 +285,21 @@ by crate for clarity, not because crates version independently.
   events (`app_events`), wakes windows posted to the event loop
   (`posted_wakes`), and window wakes routed and dropped while a window drew
   nothing (`waker_wakes`, `waker_wakes_dropped`).
+- Textures a closed window or a removed live picture held are freed while
+  the app is idle: the event loop polls the GPU, waking every 8 ms until it
+  has freed them, and draws nothing for it. `TEKSILO_IDLE_TRACE` counts the
+  turns that kept such a wake (`control_flow.gpu_reclaim`).
+- Automation screenshots, those of the headless automation server and the
+  widget previewer's captures render with `Renderer::render_capture`: a live
+  picture shows its latest commit, and the capture is not counted as a frame
+  its producer's picture was displayed in.
+
+#### Platform
+
+- **Breaking.** `PlatformWindow::capture_offscreen` returns
+  `Result<OffscreenCapture, ReadbackError>`: the pixels, their size, and
+  where they sit in the window's surface (`region`). A device that cannot
+  read the capture back fails it instead of panicking.
 
 #### Render
 

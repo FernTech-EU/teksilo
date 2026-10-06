@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Sixteen claims, and they do not all carry the same weight. Verified by
+//! Twenty claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -66,7 +66,16 @@
 //!   a waker kept past the end of the loop wakes harmlessly (taking out all
 //!   three disconnects reproduces winit's X11 panic);
 //! - **(o)** a state wake to a window that draws runs a non-visual tick and
-//!   asks winit for no redraw.
+//!   asks winit for no redraw;
+//! - **(p)** a screenshot through `capture_offscreen` shows a live picture's
+//!   latest commit, counts as a capture rather than a frame drawn or
+//!   displayed, and leaves the texture the next frame draws;
+//! - **(q)** a window that moves reads its display's refresh rate again;
+//! - **(r)** a window closing while its picture's producer commits at full
+//!   speed detaches the attachment, so the commits wake nobody, and the loop
+//!   polls the textures it held free without drawing a frame, waking within
+//!   the poll interval while they wait;
+//! - **(s)** a producer committing through the end of the loop does not panic.
 //!
 //! Two are weaker than they look, and the reason is not fixable from here.
 //! **(c)**, the safe area, and the missing-override half of **(d)** compare a
@@ -84,6 +93,11 @@
 //! decides the two on the platforms where they are not constants. Each site
 //! says so where it stands.
 //!
+//! **(q)** holds only on a display that reports its refresh rate; one that
+//! reports none leaves the interval as it was, which is also what a missing
+//! read leaves. And the read at window creation is unwitnessed: it differs
+//! from the 60 Hz default only on a display that is not 60 Hz.
+//!
 //! Still unwitnessed by anything, here or elsewhere, and named so a reviewer
 //! knows to read them rather than trust them: the accessibility waker's
 //! installation in `create_window` and the handlers calling it ((j) posts the
@@ -97,6 +111,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use teksilo_core::window::SoftKeyboardSupport;
@@ -108,9 +123,17 @@ use winit::platform::x11::EventLoopBuilderExtX11;
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::WindowId;
 
+use teksilo_canvas::live_image::{
+    LiveImageDraw, LiveImageSource, LiveImageStats, LiveImageWriter, LivePixelFormat,
+};
 use teksilo_canvas::wake::{RedrawWaker, WakeKind};
+use teksilo_canvas::{Canvas, ImageGeometry, Rect, Size, SizeProposal};
+use teksilo_core::binding::BindingLevel;
+use teksilo_core::build_context::BuildContext;
+use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
+use teksilo_core::{LiveImageAttachment, LiveImageSignals, WidgetId};
 
-use super::{AppEvent, TeksiloAppBuilder, TeksiloAppHandler, WindowWake};
+use super::{AppEvent, GPU_RECLAIM_POLL, TeksiloAppBuilder, TeksiloAppHandler, WindowWake};
 use crate::input_routing::tests::{Shared, click, cursor, logging_leaf, touch};
 use crate::redraw_gate::{TICK_INTERVAL, WITHHELD_AFTER};
 use crate::window_config::WindowConfig;
@@ -237,6 +260,132 @@ fn app_with_recorder(log: &Shared, waker_at_build: &Rc<Cell<usize>>) -> TeksiloA
         )
 }
 
+/// Shows a live source at its frame size, attached in `build()` as any
+/// live picture is: the size bound at `Relayout`, one quad per paint over
+/// the widget's bounds.
+#[derive(Debug)]
+struct LivePicture {
+    source: LiveImageSource,
+    signals: LiveImageSignals,
+    attachment: RefCell<Option<LiveImageAttachment>>,
+}
+
+impl LivePicture {
+    fn new(source: &LiveImageSource) -> Self {
+        Self {
+            source: source.clone(),
+            signals: LiveImageSignals::new(source),
+            attachment: RefCell::new(None),
+        }
+    }
+}
+
+impl Widget for LivePicture {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let attachment = ctx.attach_live_image(&self.source, &self.signals);
+        let id = ctx.self_id();
+        self.signals
+            .frame_size
+            .bind_to(id, ctx.binding_registry(), BindingLevel::Relayout);
+        *self.attachment.borrow_mut() = Some(attachment);
+        vec![]
+    }
+
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        let (w, h) = self.signals.frame_size.get().unwrap_or((0, 0));
+        Size::new(w as f32, h as f32).into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        _children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        if let (Some(attachment), Some(size)) = (
+            self.attachment.borrow().as_ref(),
+            self.signals.frame_size.get(),
+        ) {
+            let local = Rect::new(0.0, 0.0, bounds.width, bounds.height);
+            attachment.set_geometry(ImageGeometry::new(size, Default::default(), local, local));
+        }
+    }
+
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
+        if let Some(attachment) = self.attachment.borrow().as_ref() {
+            canvas.draw_live_image(attachment.consumer(), &LiveImageDraw::new(bounds, bounds));
+        }
+    }
+}
+
+/// A `w × h` frame of one opaque colour.
+fn solid(w: u32, h: u32, rgba: [u8; 4]) -> Vec<u8> {
+    rgba.repeat((w * h) as usize)
+}
+
+/// A source with one solid frame committed, and its writer.
+fn solid_source(w: u32, h: u32, rgba: [u8; 4]) -> (LiveImageSource, LiveImageWriter) {
+    let source = LiveImageSource::new(LivePixelFormat::Rgba8);
+    let writer = source.writer();
+    writer
+        .write_frame(w, h, &solid(w, h, rgba), (w * 4) as usize)
+        .expect("a solid frame");
+    (source, writer)
+}
+
+/// Open a window whose root shows `source`, read as shown whatever the X
+/// server says (a rootless Xwayland with no window manager reports its
+/// windows fully obscured), and draw its first frame.
+fn live_window(
+    app: &mut TeksiloAppHandler,
+    event_loop: &ActiveEventLoop,
+    title: &str,
+    source: &LiveImageSource,
+) -> WindowId {
+    let source = source.clone();
+    let teksilo_id = app.wm.create_window(
+        WindowConfig::new()
+            .title(title)
+            .size(200, 150)
+            .root(move |tree, _state| tree.add(LivePicture::new(&source))),
+        event_loop,
+    );
+    let window = app
+        .wm
+        .winit_id_for_teksilo(teksilo_id)
+        .expect("the window was just created");
+    let managed = app.wm.get_by_winit_mut(window).expect("the live window");
+    managed.occluded = false;
+    managed.minimized = false;
+    managed.sync_hidden();
+    managed.redraw.delivered();
+    app.window_event(event_loop, window, WindowEvent::RedrawRequested);
+    window
+}
+
+/// What the live window's one picture did.
+fn picture_stats(app: &TeksiloAppHandler, window: WindowId) -> LiveImageStats {
+    let managed = &app.wm.windows_map()[&window];
+    managed
+        .tree
+        .live_image_stats(managed.tree.roots()[0])
+        .expect("the root shows a live picture")
+}
+
+/// Commit frames to `writer` as fast as it takes them, until `stop`.
+fn flood(writer: LiveImageWriter, stop: Arc<AtomicBool>) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut shade = 0u8;
+        while !stop.load(Ordering::Acquire) {
+            shade = shade.wrapping_add(1);
+            writer
+                .write_frame(32, 24, &solid(32, 24, [shade, 0, 0, 255]), 32 * 4)
+                .expect("a frame");
+        }
+    })
+}
+
 #[test]
 #[ignore = "needs a display server and a wgpu adapter; CI runs it under Xvfb \
             (see the test-x11 job in .github/workflows/ci.yml)"]
@@ -248,6 +397,17 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
     let waker_at_build = Rc::new(Cell::new(0_usize));
     let saved_waker: Rc<RefCell<Option<Arc<dyn RedrawWaker>>>> = Rc::default();
     let saved = saved_waker.clone();
+    // Claim (s): a producer still committing when the loop ends.
+    let exit_flood: Rc<
+        RefCell<
+            Option<(
+                LiveImageSource,
+                Arc<AtomicBool>,
+                std::thread::JoinHandle<()>,
+            )>,
+        >,
+    > = Rc::default();
+    let exit_flood_in = exit_flood.clone();
     let counter = app_events_seen.clone();
     let builder = app_with_recorder(&log, &waker_at_build).on_app_event(move |event| {
         if matches!(event, AppEvent::External(_)) {
@@ -844,6 +1004,217 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             assert!(!managed.redraw.awaits_redraw(), "and drew nothing");
         }
 
+        // -- (p) a screenshot shows a live picture's latest commit, and is not
+        // one of the window's frames
+        //
+        // Through `capture_offscreen`, the path the automation bridge takes.
+        // Rendering it with `render` rather than `render_capture` counts the
+        // capture as a frame drawn and a frame displayed, which reddens this.
+        {
+            let (source, writer) = solid_source(16, 12, [255, 0, 0, 255]);
+            let picture = live_window(app, event_loop, "teksilo loop test: live", &source);
+            let first = picture_stats(app, picture);
+            assert_eq!(
+                (first.attachment.frames_drawn, first.attachment.uploads),
+                (1, 1),
+                "the window's first frame drew and uploaded the picture"
+            );
+            assert_eq!(source.displayed_generation(), 1);
+
+            writer
+                .write_frame(16, 12, &solid(16, 12, [0, 0, 255, 255]), 16 * 4)
+                .expect("a blue frame");
+            let managed = app.wm.get_by_winit_mut(picture).expect("the live window");
+            let root = managed.tree.roots()[0];
+            let scale = managed.tree.device_scale_factor();
+            let b = managed.tree.bounds(root);
+            let crop = Rect::new(b.x * scale, b.y * scale, b.width * scale, b.height * scale);
+            let frame = managed.tree.render();
+            let shot = managed
+                .platform_window
+                .capture_offscreen(&frame, [0.0; 4], Some(crop))
+                .expect("the window's device reads back");
+            assert_eq!(
+                (shot.region.x, shot.region.y, shot.width, shot.height),
+                (
+                    crop.x.floor() as u32,
+                    crop.y.floor() as u32,
+                    (crop.x + crop.width).ceil() as u32 - crop.x.floor() as u32,
+                    (crop.y + crop.height).ceil() as u32 - crop.y.floor() as u32
+                ),
+                "the capture is the widget's box, in surface pixels"
+            );
+            assert_eq!(shot.rgba.len(), (shot.width * shot.height * 4) as usize);
+            let centre = ((shot.height / 2 * shot.width + shot.width / 2) * 4) as usize;
+            assert_eq!(
+                &shot.rgba[centre..centre + 4],
+                &[0, 0, 255, 255],
+                "the screenshot shows the commit no frame has drawn yet"
+            );
+            let captured = picture_stats(app, picture);
+            assert_eq!(captured.attachment.captures, 1);
+            assert_eq!(
+                captured.attachment.frames_drawn, 1,
+                "a capture is not a frame drawn"
+            );
+            assert_eq!(captured.attachment.uploads, 2);
+            assert_eq!(
+                source.displayed_generation(),
+                1,
+                "nor a frame displayed: the producer's commit 2 is not on screen"
+            );
+
+            // The window's next frame draws the texture the capture filled.
+            app.window_event(event_loop, picture, WindowEvent::RedrawRequested);
+            let shown = picture_stats(app, picture);
+            assert_eq!(shown.attachment.frames_drawn, 2);
+            assert_eq!(shown.attachment.uploads, 2, "nothing left to upload");
+            assert_eq!(source.displayed_generation(), 2);
+            assert_eq!(
+                app.wm.windows_map()[&picture]
+                    .platform_window
+                    .live_texture_stats()
+                    .textures,
+                1
+            );
+
+            // -- (q) the window follows its display's refresh rate
+            //
+            // A move may change displays: it reads the rate again. Taking the
+            // read out of the `Moved` arm reddens this, on a display that
+            // reports a rate.
+            let managed = app.wm.get_by_winit_mut(picture).expect("the live window");
+            managed
+                .platform_window
+                .renderer_mut()
+                .set_live_refresh_interval(Duration::from_secs(1));
+            app.window_event(
+                event_loop,
+                picture,
+                WindowEvent::Moved(winit::dpi::PhysicalPosition::new(0, 0)),
+            );
+            let managed = &app.wm.windows_map()[&picture];
+            let rate = managed
+                .platform_window
+                .window()
+                .current_monitor()
+                .and_then(|monitor| monitor.refresh_rate_millihertz());
+            let interval = managed.platform_window.renderer().live_refresh_interval();
+            match rate {
+                Some(millihertz) => assert_eq!(
+                    interval,
+                    Duration::from_nanos(
+                        1_000_000_000_000 / u64::from(millihertz.clamp(20_000, 1_000_000))
+                    ),
+                    "one refresh of the display the window is on"
+                ),
+                None => assert_eq!(
+                    interval,
+                    Duration::from_secs(1),
+                    "a display that reports no rate keeps the last one"
+                ),
+            }
+            let teksilo_id = app.wm.windows_map()[&picture].teksilo_id;
+            app.wm.close_window(teksilo_id);
+            drop(writer);
+        }
+
+        // -- (r) a window closing while its picture's producer commits at
+        // full speed, and the textures it held freed without a frame
+        //
+        // The tree goes with the window, so its attachment detaches and the
+        // producer's commits wake nobody. Its renderer goes too and flags the
+        // device; the loop polls it until the GPU has freed the textures, and
+        // draws nothing for it. Taking the poll out of `update_control_flow`
+        // leaves the device flagged forever; taking the reclaim term out of
+        // the control flow lets the loop sleep with it flagged.
+        {
+            let (source, writer) = solid_source(32, 24, [0, 255, 0, 255]);
+            let closing = live_window(app, event_loop, "teksilo loop test: closing", &source);
+            assert_eq!(picture_stats(app, closing).attachment.frames_drawn, 1);
+            let stop = Arc::new(AtomicBool::new(false));
+            let producer = flood(writer, stop.clone());
+            let started = source.generation();
+            while source.generation() < started + 50 {
+                std::thread::yield_now();
+            }
+            // Every reclaim already recorded is polled empty first, so the
+            // count below is this close's.
+            while teksilo_render::poll_gpu_reclaim() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let teksilo_id = app.wm.windows_map()[&closing].teksilo_id;
+            app.wm.close_window(teksilo_id);
+            let stats = source.stats();
+            assert_eq!(
+                (stats.attachments, stats.observed_attachments),
+                (0, 0),
+                "the closed window's attachment detached"
+            );
+            let wakes = stats.wakes;
+            let after_close = source.generation();
+            while source.generation() < after_close + 100 {
+                std::thread::yield_now();
+            }
+            assert_eq!(
+                source.stats().wakes,
+                wakes,
+                "commits after the close wake nobody"
+            );
+            assert_eq!(
+                teksilo_render::gpu_reclaim::pending_reclaims(),
+                1,
+                "the closed window's renderer flagged its device"
+            );
+
+            // The reclaim term, alone: with the poll reporting textures
+            // still on the GPU, the loop wakes within the poll interval, and
+            // without it, nothing else would wake it that soon.
+            app.gpu_reclaim = || false;
+            let before = Instant::now();
+            app.update_control_flow(event_loop);
+            if let ControlFlow::WaitUntil(t) = event_loop.control_flow() {
+                assert!(
+                    t > before + GPU_RECLAIM_POLL,
+                    "sanity: nothing else wakes the loop within the poll interval"
+                );
+            }
+            app.gpu_reclaim = || true;
+            app.update_control_flow(event_loop);
+            let after = Instant::now();
+            match event_loop.control_flow() {
+                ControlFlow::WaitUntil(t) => assert!(
+                    t <= after + GPU_RECLAIM_POLL,
+                    "textures waiting to be freed wake the loop to poll for them"
+                ),
+                other => panic!("expected a WaitUntil for the reclaim poll, got {other:?}"),
+            }
+            app.gpu_reclaim = teksilo_render::poll_gpu_reclaim;
+
+            // The real poll, through the loop's own turn and no frame.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while teksilo_render::gpu_reclaim::pending_reclaims() != 0 {
+                assert!(
+                    Instant::now() < deadline,
+                    "the loop never polled the closed window's textures free"
+                );
+                app.about_to_wait(event_loop);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            stop.store(true, Ordering::Release);
+            producer.join().expect("the producer outlived its window");
+        }
+
+        // -- (s) the loop ending while a producer commits: see after the loop
+        {
+            let (source, writer) = solid_source(32, 24, [255, 255, 0, 255]);
+            let staying = live_window(app, event_loop, "teksilo loop test: exiting", &source);
+            assert_eq!(picture_stats(app, staying).attachment.frames_drawn, 1);
+            let stop = Arc::new(AtomicBool::new(false));
+            let producer = flood(writer, stop.clone());
+            *exit_flood_in.borrow_mut() = Some((source, stop, producer));
+        }
+
         // -- (b) a window blocked by a modal child
         //
         // Open a real modal over it, then hand the *parent* three events and
@@ -908,4 +1279,28 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
     })
     .join()
     .expect("a wake after the event loop ended must not panic");
+
+    // -- (s) a producer that commits through the end of the loop
+    //
+    // It woke its window at every commit until `exiting` disconnected the
+    // waker, kept committing while the windows dropped, and commits on now
+    // with nobody attached. A wake reaching winit after the loop panics the
+    // producer's thread on X11.
+    let (source, stop, producer) = exit_flood
+        .borrow_mut()
+        .take()
+        .expect("claim (s) started its producer");
+    let ended = source.generation();
+    while source.generation() < ended + 100 {
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        source.stats().attachments,
+        0,
+        "the windows' attachments went with them"
+    );
+    stop.store(true, Ordering::Release);
+    producer
+        .join()
+        .expect("a producer committing as the loop ended must not panic");
 }
