@@ -1426,6 +1426,9 @@ impl Renderer {
                                 current_opacity = opacity_stack.pop().unwrap_or(1.0);
                             }
                             teksilo_canvas::DrawCommand::Rasterized(_) => {}
+                            // This renderer holds no live textures: a live
+                            // picture draws nothing here.
+                            teksilo_canvas::DrawCommand::LiveImage(_) => {}
                             teksilo_canvas::DrawCommand::AnimatedQuad(idx) => {
                                 let Some(draw) = frame.animated_quads.get(*idx) else {
                                     continue;

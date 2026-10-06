@@ -57,6 +57,15 @@ by crate for clarity, not because crates version independently.
   size. A transaction (`LiveImageWriteGuard`) holds the source's lock: it is
   `!Send`, and the workspace's `clippy.toml` shows how to make clippy refuse
   one held across an `.await`.
+- `Canvas::draw_live_image`, which draws a live picture: `LiveImageDraw`
+  says where (the whole picture and the part that shows, cropped by texture
+  coordinates), how it is sampled and turned, and whether it is paused; the
+  frame carries a `LiveImageQuad` in `RenderFrame::live_images`, with a
+  `DrawCommand::LiveImage`, and no pixels. `LiveTextureStats` reports what a
+  renderer holds and uploads for live pictures, and
+  `live_image::testing::LiveImageMirror` runs the renderer's live pass with
+  textures in memory, for headless tests (`MirrorReport` says what one frame
+  did).
 
 #### App
 
@@ -201,6 +210,9 @@ by crate for clarity, not because crates version independently.
 
 #### Canvas
 
+- **Breaking.** `RenderFrame` is `#[non_exhaustive]`: build one with
+  `RenderFrame::new()` or `Default`, then set its fields. `DrawCommand` gains
+  `LiveImage`, which an exhaustive `match` on it must handle.
 - `teksilo-canvas` depends on `parking_lot` 0.12, which wgpu and winit
   already bring into every windowed application; it is new to the
   dependency graph of an app that uses only teksilo-core, teksilo-data or

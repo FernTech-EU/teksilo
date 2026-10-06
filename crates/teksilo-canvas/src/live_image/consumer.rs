@@ -18,8 +18,8 @@ use crate::wake::{RedrawWaker, WakeFlag, WakeKind};
 /// one window. It carries the attachment's wake flags, its window's waker,
 /// the size and status its window last laid out, and its counters.
 ///
-/// What a painted frame carries in place of pixels: `Clone` is an `Arc`
-/// clone, and equality is identity.
+/// A [`LiveImageQuad`](super::LiveImageQuad) carries it, never pixels:
+/// `Clone` is an `Arc` clone, and equality is identity.
 #[derive(Clone)]
 pub struct LiveImageConsumer {
     pub(crate) shared: Arc<ConsumerShared>,
@@ -58,24 +58,23 @@ struct AttachmentCounters {
 }
 
 /// What one render did for one attachment.
-#[doc(hidden)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct RenderRecord {
+pub(crate) struct RenderRecord {
     /// The quad was in the render.
-    pub drawn: bool,
+    pub(crate) drawn: bool,
     /// The render wrote at least one rect of the source.
-    pub uploaded: bool,
+    pub(crate) uploaded: bool,
     /// The render drew an older texture or only the background: the lock was
     /// busy, or the size changed after layout.
-    pub deferred: bool,
+    pub(crate) deferred: bool,
     /// Every quad of the source in the render was paused.
-    pub paused: bool,
+    pub(crate) paused: bool,
     /// The texture was kept because of it.
-    pub kept: bool,
+    pub(crate) kept: bool,
     /// A capture for a screenshot, not a presented frame.
-    pub capture: bool,
+    pub(crate) capture: bool,
     /// The generation the window's texture holds afterwards.
-    pub window_generation: u64,
+    pub(crate) window_generation: u64,
 }
 
 impl ConsumerShared {
@@ -265,39 +264,33 @@ impl LiveImageConsumer {
 
     /// The live pass, for a quad drawn unpaused, before it reads the
     /// generation.
-    #[doc(hidden)]
-    pub fn take_pixels(&self) -> bool {
+    pub(crate) fn take_pixels(&self) -> bool {
         self.shared.pixels.take()
     }
 
     /// The live pass, for a paused quad: commits merge into the raised flag
     /// instead of waking the window.
-    #[doc(hidden)]
-    pub fn park_pixels(&self) {
+    pub(crate) fn park_pixels(&self) {
         self.shared.pixels.park();
     }
 
-    #[doc(hidden)]
-    pub fn set_observed(&self, observed: bool) {
+    pub(crate) fn set_observed(&self, observed: bool) {
         let count = &self.shared.source.shared.counters.observed;
         self.shared
             .set_counted(&self.shared.observed, observed, count);
     }
 
-    #[doc(hidden)]
-    pub fn set_paused(&self, paused: bool) {
+    pub(crate) fn set_paused(&self, paused: bool) {
         let count = &self.shared.source.shared.counters.paused;
         self.shared.set_counted(&self.shared.paused, paused, count);
     }
 
     /// `Canvas::draw_live_image`: one paint of the widget.
-    #[doc(hidden)]
-    pub fn count_paint(&self) {
+    pub(crate) fn count_paint(&self) {
         self.shared.counters.paints.fetch_add(1, Ordering::Relaxed);
     }
 
-    #[doc(hidden)]
-    pub fn record_render(&self, record: RenderRecord) {
+    pub(crate) fn record_render(&self, record: RenderRecord) {
         let c = &self.shared.counters;
         if record.capture {
             c.captures.fetch_add(1, Ordering::Relaxed);
@@ -340,8 +333,7 @@ impl LiveImageConsumer {
     /// consumer's flag, and wakes it. No `SeqCst` is needed, and a failed
     /// `try_lock` being a `Relaxed` load is enough: coherence orders it after
     /// an unlock that happens before it.
-    #[doc(hidden)]
-    pub fn try_read(&self) -> ReadAttempt<'_> {
+    pub(crate) fn try_read(&self) -> ReadAttempt<'_> {
         let shared = &*self.shared.source.shared;
         if held::holds(shared.id) {
             shared.request_handoff(&self.shared);
@@ -365,8 +357,7 @@ impl LiveImageConsumer {
     /// Lock the source, waiting at most `timeout` for the open transaction,
     /// parked so that its unlock hands the lock over. On timeout, as
     /// [`try_read`](Self::try_read).
-    #[doc(hidden)]
-    pub fn read_for(&self, timeout: Duration) -> ReadAttempt<'_> {
+    pub(crate) fn read_for(&self, timeout: Duration) -> ReadAttempt<'_> {
         let shared = &*self.shared.source.shared;
         if held::holds(shared.id) {
             shared.request_handoff(&self.shared);

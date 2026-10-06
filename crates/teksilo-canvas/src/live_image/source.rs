@@ -22,7 +22,9 @@ use crate::wake::{RedrawWaker, WakeFlag, WakeKind};
 ///
 /// The first `Send` type in Teksilo that feeds the renderer: `Send + Sync`,
 /// `Clone` is an `Arc` clone, and equality is identity. Producers write
-/// through a [`LiveImageWriter`]; widgets show it with `LiveImage`.
+/// through a [`LiveImageWriter`]; widgets show it with `LiveImage`, or with
+/// [`Canvas::draw_live_image`](crate::Canvas::draw_live_image) in a widget of
+/// one's own.
 ///
 /// It holds one frame, latest wins. A commit that lands before a window has
 /// shown the one before is merged into what that window uploads next, so a

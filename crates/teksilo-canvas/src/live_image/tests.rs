@@ -8,7 +8,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::internal::{LiveMeta, ReadAttempt, RenderRecord, UploadPlan};
+use super::consumer::RenderRecord;
+use super::internal::{LiveMeta, ReadAttempt, UploadPlan};
 use super::source::{test_hooks, validate_size};
 use super::*;
 use crate::wake::{CountingWaker, RedrawWaker, WakeKind};

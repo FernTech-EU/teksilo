@@ -64,20 +64,31 @@
 
 mod consumer;
 mod damage;
+mod draw;
 mod held;
 #[doc(hidden)]
 pub mod internal;
 mod lock;
 mod meta;
+mod mirror;
+mod pass;
 mod source;
 mod stats;
 mod writer;
 
 pub use crate::image_geometry::{ImageOrientation, PixelRect};
 pub use consumer::LiveImageConsumer;
+pub use draw::{LiveImageDraw, LiveImageQuad};
+pub use pass::LiveTextureStats;
 pub use source::{LiveImageSource, LiveImageSourceBuilder};
 pub use stats::{LiveImageAttachmentStats, LiveImageSourceStats, LiveImageStats};
 pub use writer::{LiveImageWriteGuard, LiveImageWriter, RowsMut};
+
+/// Test helpers, compiled in every build like a widget tree's test API.
+pub mod testing {
+    pub use super::mirror::{LiveImageMirror, MirrorReport};
+    pub use crate::wake::CountingWaker;
+}
 
 /// The byte order of one pixel: 4 bytes, row-major from the top-left
 /// corner, sRGB-encoded colour, straight (not premultiplied) alpha.

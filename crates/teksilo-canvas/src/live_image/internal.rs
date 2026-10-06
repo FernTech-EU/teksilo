@@ -9,9 +9,12 @@ use std::time::Instant;
 use super::LivePixelFormat;
 use super::source::StateGuard;
 
-pub use super::consumer::RenderRecord;
 pub use super::damage::{DamageRects, UploadPlan};
 pub use super::meta::LiveMeta;
+pub use super::pass::{
+    BAND_BYTES, LivePass, LivePassMode, LiveTextureBackend, PARK_BUDGET, PARK_MAX_TEXTURE,
+    PassCounts, QuadDecision, STAGING_BUDGET, TextureOutOfMemory,
+};
 
 /// The source, locked for a renderer to copy bytes out of. Nothing is
 /// created while it is held; it unlocks on drop, and an unwinding panic
@@ -21,7 +24,7 @@ pub struct LiveImageRead<'a> {
 }
 
 /// How a lock attempt for a read ended.
-pub enum ReadAttempt<'a> {
+pub(crate) enum ReadAttempt<'a> {
     Locked(LiveImageRead<'a>),
     /// A producer holds the lock: the unlock that follows wakes the window.
     Busy,
