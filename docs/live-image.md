@@ -256,6 +256,12 @@ and `example_live_image.py` drives the demo end to end.
   `PlatformWindow::live_texture_timings()` reads the same figures. The demo
   forwards the feature: `cargo run -p live-image-demo --release --features
   live-image-timings`.
+- `cargo run -p live-image-bench --release --features live-image-timings`
+  shows one picture fed by a chosen workload (`--workload rects|full|copy`,
+  `--size`, `--rotate-every`, a second window opened and closed on a
+  schedule, `--churn`), and `tools/live_image_measure.py` runs the
+  acceptance scenarios with it on Linux, reading the trace, the UI thread's
+  CPU time and the process's GPU memory.
 
 ## See also
 

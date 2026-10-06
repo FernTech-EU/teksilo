@@ -273,6 +273,50 @@ calls: an identical frame 50 µs, a frame with a 64 × 64 change 59 µs, against
 47 µs for a plain `LiveImageWriter::write_frame` of the same frame. In debug
 builds the figures are 75 µs, 183 µs and 49 µs.
 
+**In a window (AC6 to AC14, G.1, G.2).** `tools/live_image_measure.py` runs
+`live-image-bench` (release, `live-image-timings`) once per scenario, in a
+private `kwin_wayland --virtual` session at 60 Hz with AT-SPI accessibility
+off. It reads the idle trace's live lines, the UI thread's `utime + stime`
+from `/proc/<pid>/task/<pid>/stat`, and the process's `drm-total-gtt` plus
+`drm-total-vram` from `/proc/<pid>/fdinfo`. Each scenario ran 60 s after a 10 s
+warm-up, or 300 s for G.1 and G.2. The timing columns are the worst of the
+trace's per-second lines, each over its latest 1,024 samples, in µs; the
+commit-to-upload columns are in ms.
+
+| Scenario | UI thread | `prepare` p50 / p99 | lock hold p99 | commit to upload p50 / p99 | uploads a second, least | contended |
+|---|---|---|---|---|---|---|
+| AC7's workload: four rects, 8 % of 720 × 1280 | 3.7 % | 100 / 245 | 231 | 3.9 / 5.6 | 59 | 0 |
+| Full 1920 × 1080 frames | 7.7 % | 807 / 1,060 | 1,046 | 9.6 / 11.5 | 59 | 0 |
+| Same, rotated every 5 s, in two windows | 14.0 % | 697 / 1,666 and 559 / 1,070 | 1,663 and 1,062 | 5.0 / 7.5 and 3.8 / 5.5 | 60 | 0 |
+| Copies only: 16 rows scrolled, one strip written, 720 × 1280 | 5.5 % | 377 / 495 | 480 | 0.5 / 1.4 | 60 | 0 of 3,609 frames |
+| Full 720 × 1280 frames, 300 s | 5.9 % | 377 / 583 | 577 | 2.2 / 4.1 | 59 | 0 |
+| Full 1920 × 1080 frames, 300 s | 7.2 % | 876 / 1,131 | 1,124 | 13.9 / 15.7 | 59 | 0 |
+| Mounted and unmounted every 0.5 s, 300 s | 2.4 % | 302 / 2,317 | 2,294 | 3.9 / 18.5 | 30, mounted half the time | 0 |
+
+- **GPU memory.** Over 300 s, the process's GTT and VRAM did not move at
+  either size (AC9 allows 19 and 32 MiB), with one texture throughout, of
+  w × h × 4 bytes. A second window opened and closed four times went back to
+  within 1 MiB of its level before the open 2–51 ms after each close (AC11),
+  from 220.3 MiB at the first open to 220.5 at the last. One earlier run kept
+  4 MiB of GTT after its single close and never released it; with four
+  cycles there was no growth from one to the next, which reads as an
+  allocator block kept rather than a leak. Unmounted, the churn's level
+  stayed between 220.3 and 220.5 MiB over 304 cycles (G.2).
+- **Two windows.** The window that uploads first holds the lock 1.66 ms at
+  p99, against 1.06 ms for the second and 1.05–1.12 ms for one window alone,
+  which puts AC13 over its goal (1.5 ms). Rotations make no difference: two
+  windows with none measured 1.60 ms. It is not staging churn. The UI thread
+  took 5.8 minor faults a second with two windows (one window: 0), against
+  the 2,025 a frame that marked churn at 7680 × 4320. Unprivileged `perf` is
+  off on this host, so this is the page-fault reading, not a profile. Two
+  8 MiB copies per commit share the APU's memory with the GPU.
+- **A remount** costs a texture's creation and its first upload, hence the
+  churn row's p99 above 2 ms; it is not one of AC13's cases.
+- **With accessibility on** (an AT-SPI client attached), AC7's workload took
+  3.8 % and full 1080p frames 8.2 %, but commit-to-upload p50 rose to 12.6 ms
+  and 12.7 ms. At 10 Hz each commit then costs two frames and four timer
+  wakes, against one and one with accessibility off (see Open questions).
+
 **Hidden windows (AC16, PR-2, private `kwin_wayland --virtual`).** Minimised,
 the window drew no frame and used 0.01 s of CPU from 0.5 s to 5 s, and it drew
 again on restore. Without `pre_present_notify`, the same window rendered 31–32
@@ -312,16 +356,17 @@ commits, which is AC20's last clause.
 | AC2 | Met off macOS | The recording-poster tests of the wake layer; claims (j) and (k) of the X11 event-loop test. macOS is not run here. |
 | AC3 | Met | Headless paint counters and stats; F.3 (`paints` flat while 31 frames went by). |
 | AC4, AC5 | Met | Headless, `CountingWaker`, one and two trees. |
-| AC6 | Met offscreen | The 60 Hz table under Measurements. Not yet measured in a window under `Fifo`. |
-| AC7, AC8 | Not measured | Need per-thread `/proc` sampling of Miragem's workload on the release host. |
-| AC9 | Bookkeeping met | `LiveTextureStats::bytes` matches the formula in the D tests, mip levels included. GTT drift over 300 s is not measured. |
+| AC6 | Met | In a window under `Fifo`: p99 0.25 ms for AC7's workload, 1.06 ms for full 1080p (Measurements, "In a window"). Offscreen: the 60 Hz table. |
+| AC7 | Met on the bench | 3.7 % of a core with AC7's workload (3.8 % with accessibility on), floor included. Miragem itself is not on Teksilo yet, so its real tree is not measured. |
+| AC8 | Met | At least 59 uploads every second over 60 s; UI thread 7.7 %. |
+| AC9 | Met | `LiveTextureStats::bytes` matches the formula (D tests). GPU memory drift 0.0 MiB over 300 s at 720 × 1280 and at 1080p, one texture throughout. |
 | AC10 | Met | Mirror and GPU tests (D.5, D.6), on lavapipe in CI. |
-| AC11 | Met; GTT not measured | Claim (r): the attachment detaches and the reclaim poll frees the textures without a frame. |
-| AC12 | Not measured | Needs a real window: the offscreen figure is the phase difference. |
-| AC13 | Met offscreen on RADV | The 60 Hz table under Measurements. |
-| AC14 | Not measured in a window | Offscreen: 1–2 % in phase, 0 half a period apart. |
+| AC11 | Met | Claim (r); in a window, GPU memory back within 1 MiB 2–51 ms after each of four closes, with no growth across them. |
+| AC12 | Reported | Commit to upload p50 / p99: 3.9 / 5.6 ms (AC7's workload), 9.6 / 11.5 ms (full 1080p); 12.6 / 16.3 ms with accessibility on. |
+| AC13 | Not met with two windows | Lock hold p99 1.66 ms in the first of two windows; 1.05–1.12 ms with one window, rotations included. Not staging churn (page faults); see Measurements. |
+| AC14 | Met | A copy-only producer: 0 contended frames of 3,609 over 60 s. |
 | AC15 | Met | `live_image_cost.rs`; the figures under Measurements. |
-| AC16 | Met on KWin; Windows and macOS by hand | PR-2's F.5; F.3's X11 run for screenshots of a hidden window. |
+| AC16 | Met on KWin; Windows and macOS by hand | PR-2's F.5, rerun at the tip; on the live demo, no frame over 9 s minimised, two screenshots of the hidden window 0.5 s apart holding later commits, and the latest commit shown on restore. F.3's X11 run for screenshots of a hidden window. |
 | AC17 | Met | Headless pause tests (B.14, B.15, C.18–C.22), D.20, D.21. |
 | AC18 | Met with the PR-3 deviation | J.1–J.5; one private `WindowWake` per burst. |
 | AC19 | Met | J.6–J.8, the Avatar cache test, D.27; a picture a culling parent parks frees its texture at the next frame (`c15_a_culled_picture_frees_its_texture_at_the_next_frame`). |
@@ -329,7 +374,21 @@ commits, which is AC20's last clause.
 
 ## 12. Open questions
 
-None. The three left at the end of PR-5 are settled: a culling parent's
-parked child now leaves the composed frame (AC19), `source` aiming refuses
-what a press would not reach (section 6), and an app reads the timings in its
-idle trace (section 9, commit 35).
+The three left at the end of PR-5 are settled: a culling parent's parked
+child now leaves the composed frame (AC19), `source` aiming refuses what a
+press would not reach (section 6), and an app reads the timings in its idle
+trace (section 9, commit 35). Measuring in a window found these, none of them
+LiveImage's and all of them already in 0.15.1:
+
+- **AC13 with two windows** (Measurements). The staging ring is gated on
+  per-call staging allocation showing in the AC6 or AC13 profiles, and the
+  page faults say it does not.
+- **The accessibility delivery throttle** (teksilo-app,
+  `MOVE_DELIVERY_INTERVAL`). With an AT attached, a frame within 100 ms of
+  the last delivery asks for a wake 100 ms after that delivery, even when
+  nothing changed since, and the wake draws a frame. An app that updates
+  now and then draws each update twice for a screen-reader user.
+- **The Wayland pen catch-up** (teksilo-app, `pump_pen_sources`). Every
+  external wake arms a 4 ms look for the tablet shim, even on a seat that
+  has announced no tablet tool, so each producer wake costs two loop
+  iterations.

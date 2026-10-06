@@ -755,7 +755,7 @@ jobs:
       # The idle trace's live-image timings exist only behind a feature no
       # default build turns on.
       - name: Lint (live-image-timings)
-        run: cargo clippy -p teksilo-app -p live-image-demo --all-targets --features teksilo-app/live-image-timings -- -D warnings -A deprecated
+        run: cargo clippy -p teksilo-app -p live-image-demo -p live-image-bench --all-targets --features teksilo-app/live-image-timings -- -D warnings -A deprecated
 
   # The off-thread wake protocols are lock-free, and a lost wake there is a
   # picture that freezes until something unrelated redraws, which no ordinary

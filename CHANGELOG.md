@@ -339,6 +339,13 @@ by crate for clarity, not because crates version independently.
   while frames keep coming, switch to `Nearest`, open a second window on the
   same source, and press, drag, touch or type into it, mapped to the guest's
   pixels.
+- **`cargo run -p live-image-bench`** — one live picture and a producer
+  whose workload the command line chooses (rects, whole frames or copies
+  only, any size, rotations, a second window opened and closed on a
+  schedule, the picture mounted and unmounted), for measuring what a live
+  picture costs in a real window. `tools/live_image_measure.py` runs the
+  acceptance scenarios with it on Linux and reports the UI thread's CPU,
+  the live pass's timings and the process's GPU memory.
 
 ### Changed
 
