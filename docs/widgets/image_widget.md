@@ -63,22 +63,6 @@ let _avatar = ImageWidget::new(&icon)
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/image_widget/index.html)
 
-## `pub enum ImageFit`
-
-How the image is fitted within its layout bounds.
-
-```rust
-pub enum ImageFit { /* variants */ }
-```
-
-### Variants
-
-- **`Contain`** — Scale to fit entirely within bounds, preserving aspect ratio. May leave empty space (letterboxing).
-- **`Cover`** — Scale to cover the entire bounds, preserving aspect ratio. May crop the image.
-- **`Fill`** — Stretch to fill bounds exactly, ignoring aspect ratio.
-- **`ScaleDown`** — Like Contain but never upscales — if the image is smaller than bounds, it is centered at its natural size.
-- **`None`** — Draw the image at its natural pixel size, neither scaling up nor down. If the image is larger than the box it is cropped to the box (positioned by `alignment`); if smaller it sits inside with empty space. CSS `object-fit: none`.
-
 ## `pub struct ImageWidget`
 
 A widget that displays a raster image (PNG, WebP, or raw RGBA pixels) with configurable fit and alignment.

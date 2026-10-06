@@ -6,6 +6,7 @@ pub mod canvas;
 pub mod ellipsis;
 pub mod exif;
 pub mod geometry;
+pub mod image_geometry;
 pub mod paint;
 pub mod path;
 pub mod raster;
@@ -20,8 +21,10 @@ mod xml;
 
 pub use animated::AnimatedIcon;
 pub use canvas::Canvas;
+#[allow(deprecated)]
 pub use exif::Orientation;
 pub use geometry::{EdgeInsets, Point, Rect, Size, SizeProposal, Transform2D, Vec2};
+pub use image_geometry::{ImageFit, ImageGeometry, ImageOrientation, PixelRect};
 pub use paint::{
     FillRule, GradientStop, ImageHandle, LineCap, LineJoin, Paint, StrokeSpace, StrokeStyle,
 };

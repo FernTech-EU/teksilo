@@ -23,6 +23,18 @@ by crate for clarity, not because crates version independently.
   until it is shown) or state its layout reads changed (`Layout`, which always
   reaches it). `CountingWaker` counts the wakes it receives and lets a test
   wait for one.
+- `teksilo_canvas::image_geometry`, where a picture lands in its box and
+  which source pixel a point shows. `ImageGeometry` places a source raster in
+  a widget's box through an `ImageFit` and an `Alignment`, turned by an
+  `ImageOrientation`; it snaps the picture's edges to the device-pixel grid,
+  also under an ancestor's scale, and maps widget-local points to source
+  pixels and source pixels back to widget rects. `oriented_crop` gives the
+  visible part of a picture and the texture coordinates of its corners, from
+  the same tables the mapping uses. `PixelRect` is a rectangle of source
+  pixels. `ImageFit` moved here from teksilo-widgets, which re-exports it,
+  and gained `ImageFit::fitted_rect`.
+- `ImageOrientation::from_exif`, which names one of the eight EXIF values or
+  returns `None`, and `ImageOrientation::displayed_size`.
 
 #### App
 
@@ -220,6 +232,12 @@ by crate for clarity, not because crates version independently.
   a `Rotate` or inside a `SceneView` is somewhere else.
 
 ### Deprecated
+
+#### Canvas
+
+- `teksilo_canvas::Orientation` is renamed `ImageOrientation`, the one
+  orientation every image path uses. The old name stays as a deprecated
+  alias.
 
 #### Core
 

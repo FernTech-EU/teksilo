@@ -64,27 +64,9 @@ use teksilo_tokens::Alignment;
 
 use super::image_mask::{ImageMaskShape, apply_alpha_mask, center_crop_square};
 
-/// How the image is fitted within its layout bounds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ImageFit {
-    /// Scale to fit entirely within bounds, preserving aspect ratio.
-    /// May leave empty space (letterboxing).
-    #[default]
-    Contain,
-    /// Scale to cover the entire bounds, preserving aspect ratio.
-    /// May crop the image.
-    Cover,
-    /// Stretch to fill bounds exactly, ignoring aspect ratio.
-    Fill,
-    /// Like Contain but never upscales — if the image is smaller than
-    /// bounds, it is centered at its natural size.
-    ScaleDown,
-    /// Draw the image at its natural pixel size, neither scaling up nor
-    /// down. If the image is larger than the box it is cropped to the box
-    /// (positioned by [`alignment`](ImageWidget::alignment)); if smaller it
-    /// sits inside with empty space. CSS `object-fit: none`.
-    None,
-}
+/// How the image is fitted within its layout bounds: the CSS `object-fit`
+/// set, shared with every widget that places a picture.
+pub use teksilo_canvas::image_geometry::ImageFit;
 
 /// A widget that displays a raster image (PNG, WebP, or raw RGBA pixels) with configurable fit and alignment.
 pub struct ImageWidget {
@@ -283,36 +265,12 @@ impl ImageWidget {
     /// positioned by [`alignment`](Self::alignment). `rtl` flips the
     /// horizontal Leading/Trailing axis.
     fn fitted_rect(&self, bounds: Rect, rtl: bool) -> Rect {
-        let img_w = self.width as f32;
-        let img_h = self.height as f32;
-        if img_w <= 0.0 || img_h <= 0.0 {
-            return bounds;
-        }
-
-        let (content_w, content_h) = match self.fit {
-            ImageFit::Fill => (bounds.width, bounds.height),
-            ImageFit::Contain => {
-                let scale = (bounds.width / img_w).min(bounds.height / img_h);
-                (img_w * scale, img_h * scale)
-            }
-            ImageFit::Cover => {
-                let scale = (bounds.width / img_w).max(bounds.height / img_h);
-                (img_w * scale, img_h * scale)
-            }
-            ImageFit::ScaleDown => {
-                let scale = (bounds.width / img_w).min(bounds.height / img_h).min(1.0);
-                (img_w * scale, img_h * scale)
-            }
-            ImageFit::None => (img_w, img_h),
-        };
-
-        let x = bounds.x
-            + self
-                .alignment
-                .horizontal
-                .resolve(content_w, bounds.width, rtl);
-        let y = bounds.y + self.alignment.vertical.resolve(content_h, bounds.height);
-        Rect::new(x, y, content_w, content_h)
+        self.fit.fitted_rect(
+            Size::new(self.width as f32, self.height as f32),
+            bounds,
+            self.alignment,
+            rtl,
+        )
     }
 }
 

@@ -11689,6 +11689,7 @@ dependencies = [
  "image-webp",
  "loom",
  "png",
+ "proptest",
  "quick-xml",
  "serde",
  "teksilo-tokens",

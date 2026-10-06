@@ -26,6 +26,11 @@ thiserror = { workspace = true }
 bytemuck = { workspace = true }
 serde = { workspace = true }
 
+[dev-dependencies]
+# Test-only: property-based testing (see the `proptest` entry in the
+# workspace manifest for why proptest rather than cargo-fuzz).
+proptest = { workspace = true }
+
 # The concurrency models' primitives, behind `teksilo_canvas::sync`: only a
 # build with `RUSTFLAGS="--cfg teksilo_loom"` compiles it. A consumer's
 # lockfile lists it; no ordinary build fetches or compiles it.
