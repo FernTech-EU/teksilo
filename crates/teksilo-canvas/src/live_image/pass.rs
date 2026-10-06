@@ -276,6 +276,35 @@ pub struct PassCounts {
     pub kept: u32,
 }
 
+/// How long the parts of the last prepare that hold a source's lock took,
+/// in real time: what a renderer keeping timing histograms reads after
+/// each render. The vectors keep their capacity from one prepare to the
+/// next.
+#[doc(hidden)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PassTimings {
+    /// Each hold of a source's lock, in the order they were taken.
+    pub lock_holds: Vec<Duration>,
+    /// Each upload that completed, from the commit of the generation it
+    /// uploaded to the end of its writes.
+    pub commit_to_upload: Vec<Duration>,
+}
+
+/// End a hold of `read`'s lock begun at `locked`, and record it.
+fn end_hold(timings: &mut PassTimings, read: LiveImageRead<'_>, locked: Instant) {
+    drop(read);
+    timings.lock_holds.push(locked.elapsed());
+}
+
+/// Record the delay of an upload of `read`'s generation that just ended.
+fn record_upload(timings: &mut PassTimings, read: &LiveImageRead<'_>) {
+    if let Some(committed) = read.commit_instant(read.generation()) {
+        timings
+            .commit_to_upload
+            .push(Instant::now().saturating_duration_since(committed));
+    }
+}
+
 /// What processing one source decided.
 #[derive(Default)]
 struct Outcome {
@@ -331,6 +360,7 @@ pub struct LivePass<B: LiveTextureBackend> {
     previous: Vec<LiveImageConsumer>,
     decisions: Vec<QuadDecision>,
     counts: PassCounts,
+    timings: PassTimings,
     stats: LiveTextureStats,
     staging_budget: u64,
     band_bytes: u64,
@@ -347,6 +377,7 @@ impl<B: LiveTextureBackend> LivePass<B> {
             previous: Vec::new(),
             decisions: Vec::new(),
             counts: PassCounts::default(),
+            timings: PassTimings::default(),
             stats: LiveTextureStats::default(),
             staging_budget: STAGING_BUDGET,
             band_bytes: BAND_BYTES,
@@ -413,6 +444,13 @@ impl<B: LiveTextureBackend> LivePass<B> {
         self.counts
     }
 
+    /// How long the last [`prepare`](Self::prepare) held each lock, and
+    /// how long each of its uploads came after its commit.
+    #[doc(hidden)]
+    pub fn last_timings(&self) -> &PassTimings {
+        &self.timings
+    }
+
     pub fn stats(&self) -> LiveTextureStats {
         let mut stats = self.stats;
         stats.textures = 0;
@@ -470,6 +508,8 @@ impl<B: LiveTextureBackend> LivePass<B> {
         self.decisions.clear();
         self.decisions.resize(quads.len(), QuadDecision::default());
         self.counts = PassCounts::default();
+        self.timings.lock_holds.clear();
+        self.timings.commit_to_upload.clear();
         let mut staging_left = self.staging_budget;
         let mut drawn: Vec<LiveImageId> = Vec::with_capacity(order.len());
         for (id, indices) in &order {
@@ -739,10 +779,12 @@ impl<B: LiveTextureBackend> LivePass<B> {
                 };
             }
         };
+        let locked = Instant::now();
         let entry = self.entries.get_mut(&id).expect("inserted above");
         entry.contended = 0;
         if read.size() != Some(wanted) {
             self.stats.stale_deferrals += 1;
+            end_hold(&mut self.timings, read, locked);
             return Outcome {
                 deferred: true,
                 ..Outcome::default()
@@ -764,7 +806,8 @@ impl<B: LiveTextureBackend> LivePass<B> {
             match outcome {
                 FillOutcome::Complete => {
                     staged.tex.generation = read.generation();
-                    drop(read);
+                    record_upload(&mut self.timings, &read);
+                    end_hold(&mut self.timings, read, locked);
                     if entry.current.replace(staged.tex).is_some() {
                         self.backend.released();
                     }
@@ -776,7 +819,7 @@ impl<B: LiveTextureBackend> LivePass<B> {
                 FillOutcome::Partial => {
                     // The previous picture keeps drawing, if any: older than
                     // the latest commit either way.
-                    drop(read);
+                    end_hold(&mut self.timings, read, locked);
                     entry.staged = Some(staged);
                     wake_window(group);
                     Outcome {
@@ -794,7 +837,7 @@ impl<B: LiveTextureBackend> LivePass<B> {
                 // Too much for one frame: fill a second texture over the next
                 // frames rather than stall this one or tear the picture. It is
                 // created outside the lock; the next frame starts filling it.
-                drop(read);
+                end_hold(&mut self.timings, read, locked);
                 let created = self.backend.create_texture(
                     wanted.0,
                     wanted.1,
@@ -857,7 +900,10 @@ impl<B: LiveTextureBackend> LivePass<B> {
             };
             *staging_left = staging_left.saturating_sub(bytes);
             current.generation = read.generation();
-            drop(read);
+            if uploaded {
+                record_upload(&mut self.timings, &read);
+            }
+            end_hold(&mut self.timings, read, locked);
             Outcome {
                 uploaded,
                 ..Outcome::default()

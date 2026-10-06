@@ -309,6 +309,99 @@ fn a_size_changed_after_layout_draws_the_held_texture() {
     );
 }
 
+// ── timings ──
+
+/// What the last frame timed: lock holds and upload delays, as counts.
+fn timed(mirror: &LiveImageMirror) -> (usize, usize) {
+    let t = mirror.last_timings();
+    (t.lock_holds.len(), t.commit_to_upload.len())
+}
+
+/// A lock taken is a hold timed, and an upload completed is a delay timed
+/// from its commit; a frame that takes no lock times nothing, and each frame
+/// times only its own.
+#[test]
+fn each_lock_hold_and_each_completed_upload_is_timed() {
+    let (source, writer) = live(16, 16);
+    let (_, consumer) = widget(&source);
+    let (other_source, _other_writer) = live(4, 4);
+    let (_, other) = widget(&other_source);
+    let mut mirror = LiveImageMirror::new();
+    mirror.consume(&frame(&[&consumer, &other]));
+    assert_eq!(
+        timed(&mirror),
+        (2, 2),
+        "two sources, each locked and uploaded"
+    );
+
+    mirror.consume(&frame(&[&consumer, &other]));
+    assert_eq!(timed(&mirror), (0, 0), "nothing new: no lock taken");
+
+    writer
+        .write_rect(PixelRect::new(0, 0, 2, 2), &[5; 16], 8)
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(20));
+    mirror.consume(&frame(&[&consumer, &other]));
+    assert_eq!(timed(&mirror), (1, 1));
+    assert!(
+        mirror.last_timings().commit_to_upload[0] >= Duration::from_millis(20),
+        "from the commit, not from the frame: {:?}",
+        mirror.last_timings()
+    );
+
+    // A size changed after layout: locked, nothing uploaded.
+    let mut canvas = Canvas::new();
+    lay_out(&consumer);
+    canvas.draw_live_image(&consumer, &draw());
+    let stale = canvas.into_render_frame();
+    writer.write_frame(16, 20, &pixels(16, 20, 1), 64).unwrap();
+    mirror.consume(&stale);
+    assert_eq!(
+        timed(&mirror),
+        (1, 0),
+        "a stale size is a hold without an upload"
+    );
+
+    // Filled five rows a frame: each partial frame holds the lock and
+    // uploads nothing whole; the last completes the upload.
+    mirror.set_staging_budget(16 * 4 * 5);
+    let mut partial = 0;
+    loop {
+        let report = mirror.consume(&frame(&[&consumer]));
+        if report.full_uploads == 1 {
+            assert_eq!(timed(&mirror), (1, 1), "the completing frame");
+            break;
+        }
+        assert_eq!(timed(&mirror), (1, 0), "a partial frame");
+        partial += 1;
+        assert!(partial < 10, "the fill makes progress");
+    }
+    assert_eq!(partial, 3);
+
+    // A whole new frame of the same size, above the budget: the frame that
+    // finds it holds the lock, uploads nothing and stages a second texture.
+    writer.write_frame(16, 20, &pixels(16, 20, 2), 64).unwrap();
+    mirror.consume(&frame(&[&consumer]));
+    assert_eq!(timed(&mirror), (1, 0), "a plan too large for one frame");
+}
+
+/// A busy lock is neither a hold nor an upload.
+#[test]
+fn a_busy_lock_times_nothing() {
+    let (source, writer) = live(4, 4);
+    let (_, consumer) = widget(&source);
+    let mut mirror = LiveImageMirror::new();
+    mirror.consume(&frame(&[&consumer]));
+    writer
+        .write_rect(PixelRect::new(0, 0, 1, 1), &[7; 4], 4)
+        .unwrap();
+    let guard = writer.lock().unwrap();
+    let report = mirror.consume(&frame(&[&consumer]));
+    assert_eq!(report.contended, 1);
+    assert_eq!(timed(&mirror), (0, 0));
+    drop(guard);
+}
+
 // ── release and the parked pool ──
 
 #[test]

@@ -92,6 +92,9 @@ pub struct Renderer {
     /// Live pictures: one texture per source the last frame drew, kept by
     /// the live pass, which runs on every render before anything draws.
     live: LivePass<WgpuBackend>,
+    /// The live pass's timing histograms.
+    #[cfg(any(debug_assertions, feature = "live-image-timings"))]
+    live_timings: crate::live_timings::LiveTimingRings,
     /// This renderer's last submission: what a texture it dropped may still
     /// be used by, for the reclaim poll.
     last_submission: Option<wgpu::SubmissionIndex>,
@@ -282,6 +285,8 @@ impl Renderer {
             quad_bind_group_layout,
             blur_composite_sampler,
             live,
+            #[cfg(any(debug_assertions, feature = "live-image-timings"))]
+            live_timings: crate::live_timings::LiveTimingRings::new(),
             last_submission: None,
         }
     }
@@ -448,6 +453,15 @@ impl Renderer {
         self.live.stats()
     }
 
+    /// How long the live pass has taken: one render's pass for a frame that
+    /// draws a live picture, each hold of a source's lock, and each upload's
+    /// delay from its commit, each over its latest 1,024 samples. In debug
+    /// builds and with the `live-image-timings` feature.
+    #[cfg(any(debug_assertions, feature = "live-image-timings"))]
+    pub fn live_texture_timings(&self) -> crate::LiveImageTimings {
+        self.live_timings.timings()
+    }
+
     /// What the last render decided for each of its frame's live quads, in
     /// order: what a screenshot reports of them.
     #[doc(hidden)]
@@ -575,7 +589,11 @@ impl Renderer {
 
         // Live pictures: before anything is recorded, so their writes land in
         // this submission's pending writes and are sampled by this frame.
+        #[cfg(any(debug_assertions, feature = "live-image-timings"))]
+        let live_started = std::time::Instant::now();
         self.live.prepare(&frame.live_images, mode);
+        #[cfg(any(debug_assertions, feature = "live-image-timings"))]
+        let live_prepared = live_started.elapsed();
 
         // Pre-rasterize all paths in this frame into the path atlas. Cosmetic
         // (device-space) strokes must rasterize the body at the view zoom
@@ -735,7 +753,14 @@ impl Renderer {
             });
         // The live pass's mip rebuilds, before any draw samples them: its
         // uploads are queue writes, which run before this submission.
+        #[cfg(any(debug_assertions, feature = "live-image-timings"))]
+        let mips_started = std::time::Instant::now();
         self.live.backend_mut().encode_mips(&mut encoder);
+        #[cfg(any(debug_assertions, feature = "live-image-timings"))]
+        self.live_timings.record(
+            (!frame.live_images.is_empty()).then(|| live_prepared + mips_started.elapsed()),
+            self.live.last_timings(),
+        );
 
         // Per-frame mutable viewport — overridden inside blur scopes
         // (the offscreen intermediate is sized differently from the

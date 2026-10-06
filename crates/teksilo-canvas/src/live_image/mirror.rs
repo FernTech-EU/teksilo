@@ -267,6 +267,13 @@ impl LiveImageMirror {
         self.pass.stats()
     }
 
+    /// How long the last frame held each source's lock, and how long each of
+    /// its uploads came after its commit.
+    #[doc(hidden)]
+    pub fn last_timings(&self) -> &super::internal::PassTimings {
+        self.pass.last_timings()
+    }
+
     /// A stand-in for the device's largest texture side, to reach the
     /// oversize row with small sources.
     pub fn set_max_dimension(&mut self, max: u32) {

@@ -929,3 +929,48 @@ fn a_frame_above_the_staging_budget_fills_over_several_frames_and_reads_back_who
     assert!(frames > 1, "spread over {frames} frames");
     assert_eq!(g.read(&t), shown(16, 20, 6));
 }
+
+// ── the live pass's timing histograms ──
+
+/// A render drawing a live picture adds one `prepare` sample, each lock it
+/// took one `lock_hold`, each upload it completed one `commit_to_upload`;
+/// a frame with no live picture adds none, and an upload's delay runs from
+/// its commit.
+#[cfg(any(debug_assertions, feature = "live-image-timings"))]
+#[test]
+fn the_timings_count_each_render_hold_and_upload() {
+    let Some(mut g) = gpu("live_timings") else {
+        return;
+    };
+    let (source, writer) = live(LivePixelFormat::Rgba8, 16, 12);
+    let (_, c) = consumer(&source);
+    let t = g.target(16, 12);
+    let samples = |g: &Gpu| {
+        let timings = g.renderer.live_texture_timings();
+        (
+            timings.prepare.samples,
+            timings.lock_hold.samples,
+            timings.commit_to_upload.samples,
+        )
+    };
+    assert_eq!(samples(&g), (0, 0, 0));
+    g.render(&frame_1to1(&c, ScalingFilter::Nearest), &t);
+    assert_eq!(samples(&g), (1, 1, 1), "the first upload");
+    g.render(&frame_1to1(&c, ScalingFilter::Nearest), &t);
+    assert_eq!(samples(&g), (2, 1, 1), "nothing new: no lock");
+    g.render(&RenderFrame::new(), &t);
+    assert_eq!(samples(&g), (2, 1, 1), "no live picture: no sample");
+
+    writer
+        .write_rect(PixelRect::new(0, 0, 4, 4), &solid(16, 9), 16)
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(30));
+    g.capture(&frame_1to1(&c, ScalingFilter::Nearest), &t);
+    assert_eq!(samples(&g), (3, 2, 2), "a capture is timed too");
+    let timings = g.renderer.live_texture_timings();
+    assert!(
+        timings.commit_to_upload.max >= 30_000,
+        "from the commit: {timings:?}"
+    );
+    assert!(timings.lock_hold.max < timings.commit_to_upload.max);
+}

@@ -290,6 +290,13 @@ by crate for clarity, not because crates version independently.
   and one texture serves a `Trilinear` thumbnail and a full-size `Linear`
   view of the same source. `LiveTextureStats::mip_updates` counts the
   chains rebuilt.
+- `Renderer::live_texture_timings`, how long live pictures take: one
+  render's live pass for a frame that draws one, each hold of a source's
+  lock (how long a producer can be kept waiting), and each upload's delay
+  from its commit, as the 50th, 90th and 99th percentiles and the largest of
+  the latest 1,024 samples (`LiveImageTimings`, `Percentiles`). Debug builds
+  always keep them; a release build does with teksilo-render's
+  `live-image-timings` feature.
 
 #### WebView
 
