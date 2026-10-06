@@ -72,6 +72,7 @@ use std::time::{Duration, Instant};
 
 /// How long a requested redraw may stay undelivered on a focused window
 /// before the debug watchdog reports it.
+#[cfg(any(debug_assertions, test))]
 pub(crate) const STALL_REPORT_AFTER: Duration = Duration::from_secs(1);
 
 /// The shortest interval between a window's frame and a non-visual tick
@@ -254,7 +255,8 @@ impl RedrawGate {
 
     /// How long the outstanding request has waited, the first time that
     /// exceeds [`STALL_REPORT_AFTER`]; `None` otherwise, and on every later
-    /// call for the same stall.
+    /// call for the same stall. Read by the debug watchdog only.
+    #[cfg(any(debug_assertions, test))]
     pub(crate) fn take_stall(&self, now: Instant) -> Option<Duration> {
         let since = self.outstanding_since.get()?;
         let waited = now.saturating_duration_since(since);

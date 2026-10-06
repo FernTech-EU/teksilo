@@ -383,7 +383,7 @@ fn picture_stats(app: &TeksiloAppHandler, window: WindowId) -> LiveImageStats {
 
 /// One op through the automation bridge's own route into `window`, answered
 /// on the spot: the route runs it on this, the main, thread.
-#[cfg(feature = "automation")]
+#[cfg(all(feature = "automation", debug_assertions))]
 fn bridge_call(
     app: &mut TeksiloAppHandler,
     event_loop: &ActiveEventLoop,
@@ -409,7 +409,7 @@ fn bridge_call(
 /// Claim (t): the bridge's `live_image_stats` carries the window's renderer
 /// and wake counters on top of the tree's, and its screenshot records the
 /// commit it drew.
-#[cfg(feature = "automation")]
+#[cfg(all(feature = "automation", debug_assertions))]
 fn bridge_live_image_claims(
     app: &mut TeksiloAppHandler,
     event_loop: &ActiveEventLoop,
@@ -1214,7 +1214,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             //
             // Through the bridge's own route. Taking the window's half out of
             // the stats, or the record out of the screenshot, reddens this.
-            #[cfg(feature = "automation")]
+            #[cfg(all(feature = "automation", debug_assertions))]
             bridge_live_image_claims(app, event_loop, picture, &writer);
 
             let teksilo_id = app.wm.windows_map()[&picture].teksilo_id;
