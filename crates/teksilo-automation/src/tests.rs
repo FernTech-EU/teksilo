@@ -4928,6 +4928,272 @@ fn a_source_pixel_that_cannot_be_aimed_at_is_refused() {
     assert!(log.get().is_empty(), "nothing dispatched: {:?}", log.get());
 }
 
+/// Holds the picture at [`LIVE_BOX`] with its right half past its own box
+/// (clipped, or not), and a cover over the quarter of the picture at its
+/// left edge, laid after it so a press there reaches the cover.
+#[derive(Debug)]
+struct Peephole {
+    picture: WidgetId,
+    cover: WidgetId,
+    clips: bool,
+}
+
+impl Widget for Peephole {
+    fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> {
+        self.children()
+    }
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+    fn place_children(
+        &self,
+        bounds: teksilo_canvas::Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        let left = bounds.x + bounds.width - LIVE_BOX.0 / 2.0;
+        for child in children.iter_mut() {
+            let width = if child.id == self.picture {
+                LIVE_BOX.0
+            } else {
+                LIVE_BOX.0 / 4.0
+            };
+            child.origin = teksilo_canvas::Point::new(left, bounds.y);
+            child.size = teksilo_canvas::Size::new(width, LIVE_BOX.1);
+        }
+    }
+    fn children(&self) -> Vec<WidgetId> {
+        vec![self.picture, self.cover]
+    }
+    fn clips_children(&self) -> bool {
+        self.clips
+    }
+}
+
+/// A source pixel a press would not reach is refused as a cropped one is:
+/// one past an ancestor's box, clipped by it or not, and one under a widget
+/// drawn over the picture, each naming what the press would reach instead;
+/// for a mouse, a long press and a touch step alike. A pixel in the part
+/// that shows is pressed as before.
+#[test]
+fn a_source_pixel_a_press_would_not_reach_is_refused() {
+    for clips in [false, true] {
+        let probe = InputProbe::new("over the picture").taking_every_contact();
+        let log = probe.log();
+        let cover = InputProbe::new("over the picture's left edge").taking_every_contact();
+        let covered = cover.log();
+        let mut tree = WidgetTree::new();
+        let probe = tree.add(probe);
+        let (source, writer) = live_source(true);
+        let picture = tree.add(LivePicture {
+            source,
+            _writer: writer,
+            fit: ImageFit::Contain,
+            orientation: ImageOrientation::Normal,
+            signals: teksilo_core::LiveImageSignals::default(),
+            attachment: None,
+            probe,
+        });
+        let cover = tree.add(cover);
+        let peephole = tree.add(Peephole {
+            picture,
+            cover,
+            clips,
+        });
+        let framed = tree.add(Framed {
+            over: Over::Nothing,
+            child: peephole,
+            transform: None,
+        });
+        tree.add(Placed { child: framed });
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let (picture, cover) = (node_ref(picture), node_ref(cover));
+
+        // 96 source columns over the picture's 120 dp, its left edge 60 dp
+        // before the end of its holder's box: columns up to 23 lie under the
+        // cover's 30 dp, 24 to 47 show, and from 48 on they are past the box.
+        let reply = run(&mut tree, &source_click(Some(picture), [40, 32]));
+        assert!(
+            reply.is_ok(),
+            "clips {clips}: a pixel that shows: {reply:?}"
+        );
+        assert_eq!(positions(&log.get(), "down").len(), 1, "{:?}", log.get());
+        log.set(Vec::new());
+
+        let message = expect_err(
+            run(&mut tree, &source_click(Some(picture), [60, 32])),
+            codes::BAD_ARGUMENT,
+        );
+        assert!(message.contains("is hidden"), "clips {clips}: {message}");
+        let message = expect_err(
+            run(&mut tree, &source_click(Some(picture), [10, 32])),
+            codes::BAD_ARGUMENT,
+        );
+        assert!(
+            message.contains(&format!("reaches node {cover}")),
+            "clips {clips}: {message}"
+        );
+        expect_err(
+            run(
+                &mut tree,
+                &AutomationOp::LongPress {
+                    x: None,
+                    y: None,
+                    source: Some([60, 32]),
+                    node: Some(picture),
+                    kind: PointerKindDto::Touch,
+                },
+            ),
+            codes::BAD_ARGUMENT,
+        );
+        let down = |pixel| TouchStep {
+            contact: 0,
+            phase: TouchPhaseDto::Down,
+            x: None,
+            y: None,
+            source: Some(pixel),
+            advance_ms: 0,
+            node: Some(picture),
+        };
+        expect_err(
+            run(
+                &mut tree,
+                &AutomationOp::InjectTouchSequence {
+                    steps: vec![down([40, 32]), down([10, 32])],
+                },
+            ),
+            codes::BAD_ARGUMENT,
+        );
+        assert!(
+            log.get().is_empty() && covered.get().is_empty(),
+            "clips {clips}: nothing dispatched: {:?} {:?}",
+            log.get(),
+            covered.get()
+        );
+    }
+}
+
+/// A 4 dp grip just past the picture's right edge whose hit reaches 9 dp
+/// back over it for a finger or a stylus, as a splitter's does, and not at
+/// all for a mouse.
+#[derive(Debug)]
+struct Grip;
+
+impl Widget for Grip {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+    fn hit_outset(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        _tokens: &teksilo_tokens::InputTokens,
+    ) -> teksilo_canvas::EdgeInsets {
+        if kind.is_direct() {
+            teksilo_canvas::EdgeInsets {
+                leading: 9.0,
+                ..teksilo_canvas::EdgeInsets::ZERO
+            }
+        } else {
+            teksilo_canvas::EdgeInsets::ZERO
+        }
+    }
+}
+
+/// Places the picture at its origin, [`LIVE_BOX`] in size, and [`Grip`]
+/// right after it.
+#[derive(Debug)]
+struct GripBeside {
+    picture: WidgetId,
+    grip: WidgetId,
+}
+
+impl Widget for GripBeside {
+    fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> {
+        self.children()
+    }
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+    fn place_children(
+        &self,
+        bounds: teksilo_canvas::Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            let (x, width) = if child.id == self.picture {
+                (bounds.x, LIVE_BOX.0)
+            } else {
+                (bounds.x + LIVE_BOX.0, 4.0)
+            };
+            child.origin = teksilo_canvas::Point::new(x, bounds.y);
+            child.size = teksilo_canvas::Size::new(width, LIVE_BOX.1);
+        }
+    }
+    fn children(&self) -> Vec<WidgetId> {
+        vec![self.picture, self.grip]
+    }
+}
+
+/// Whether a press reaches the picture is asked for the pointer that
+/// presses: the last column is under a grip's hit for a finger, and not for
+/// a mouse.
+#[test]
+fn a_source_pixel_is_tested_for_the_pointer_that_presses_it() {
+    let probe = InputProbe::new("over the picture").taking_every_contact();
+    let log = probe.log();
+    let mut tree = WidgetTree::new();
+    let probe = tree.add(probe);
+    let (source, writer) = live_source(true);
+    let picture = tree.add(LivePicture {
+        source,
+        _writer: writer,
+        fit: ImageFit::Contain,
+        orientation: ImageOrientation::Normal,
+        signals: teksilo_core::LiveImageSignals::default(),
+        attachment: None,
+        probe,
+    });
+    let grip = tree.add(Grip);
+    let beside = tree.add(GripBeside { picture, grip });
+    let framed = tree.add(Framed {
+        over: Over::Nothing,
+        child: beside,
+        transform: None,
+    });
+    tree.add(Placed { child: framed });
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+    let (picture, grip) = (node_ref(picture), node_ref(grip));
+
+    let last = [LIVE_W - 1, LIVE_H / 2];
+    let reply = run(&mut tree, &source_click(Some(picture), last));
+    assert!(reply.is_ok(), "a mouse reaches the last column: {reply:?}");
+    assert_eq!(positions(&log.get(), "down").len(), 1, "{:?}", log.get());
+    log.set(Vec::new());
+
+    let mut touch = source_click(Some(picture), last);
+    if let AutomationOp::InjectPointer { kind, .. } = &mut touch {
+        *kind = PointerKindDto::Touch;
+    }
+    let message = expect_err(run(&mut tree, &touch), codes::BAD_ARGUMENT);
+    assert!(
+        message.contains(&format!("reaches node {grip}")),
+        "{message}"
+    );
+    let reply = run(&mut tree, &{
+        let mut op = touch.clone();
+        if let AutomationOp::InjectPointer { source, .. } = &mut op {
+            *source = Some([LIVE_W / 2, LIVE_H / 2]);
+        }
+        op
+    });
+    assert!(reply.is_ok(), "a finger reaches the centre: {reply:?}");
+}
+
 /// Before its source has a size a live picture has no placement: `NO_GEOMETRY`
 /// from the map and from aiming, not a refusal of the node.
 #[test]

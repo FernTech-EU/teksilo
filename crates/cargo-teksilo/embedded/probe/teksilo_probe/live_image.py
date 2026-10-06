@@ -109,7 +109,9 @@ def click_source(session: Any, node: int | Mapping, x: int, y: int, *,
 
     `action` and the other keyword arguments are `inject_pointer`'s (`kind`,
     `button`, `ctrl`, `command`, ...). The tool refuses a pixel outside the
-    source, or one the fit crops out of view, with `BAD_ARGUMENT`.
+    source, or one a press would not reach (cropped out of view by the fit,
+    hidden by an ancestor's box or clip, or under another widget), with
+    `BAD_ARGUMENT`.
     """
     return tools.inject_pointer(session, node=_node_id(node), source=[x, y],
                                 action=action, window_id=window_id, **pointer)

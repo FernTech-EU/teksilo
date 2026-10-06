@@ -120,7 +120,9 @@ by lines, as a wheel notch does.
 fit, letterbox, rotation and scale decide where a guest pixel is on screen. So
 aim with `source: [x, y]` in place of `x`, `y` (with the picture's `node`) on
 `inject_pointer`, `long_press` and touch steps: the press lands on the centre of
-that source pixel. `live_image_map {node}` gives where the picture lies and
+that source pixel. A pixel the press would not reach (cropped by the fit,
+clipped, or under another widget) is refused, naming the node it would reach.
+`live_image_map {node}` gives where the picture lies and
 converts both ways (`source` → `source_point`, `window` → `pixel`, `null` on the
 letterbox); `live_image_stats {node}` gives the source's, the attachment's and
 the window's counters (frames flow when `generation` rises and

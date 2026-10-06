@@ -327,9 +327,13 @@ dispatches nothing.
 tools take `source: [x, y]`, a pixel of the `LiveImage` that `node` names. The
 press lands at the centre of where that source pixel is drawn, whatever the
 fit, the orientation, the device-pixel snapping, the window's scale and any
-transform above the picture. A pixel outside the source, or one the fit crops
-out of view (under `Cover` or `None`), is refused with `BAD_ARGUMENT`, because
-the press would land on another widget. A node that shows no live picture is
+transform above the picture. A pixel outside the source is refused with
+`BAD_ARGUMENT`, and so is one the press would not reach, because it would land
+on another widget: cropped out of view by the fit (under `Cover` or `None`),
+past an ancestor's box or clip, or under a widget drawn over the picture. That
+last test is the hit test the press itself takes, for its pointer kind, so a
+grip's wider reach for a finger counts. The refusal names the node the press
+would reach. A node that shows no live picture is
 `BAD_ARGUMENT`, and one not yet laid out is `NO_GEOMETRY`. Give `x` and `y`, or
 `source`: exactly one of the two.
 

@@ -413,7 +413,9 @@ pub struct TouchStep {
     #[serde(default)]
     pub y: Option<f32>,
     /// A pixel of the live picture `node` names, in place of `x` and `y`:
-    /// the step lands at the centre of where it is displayed.
+    /// the step lands at the centre of where it is displayed. Refused, as
+    /// `inject_pointer`'s is, where a finger there would reach another
+    /// widget.
     #[serde(default)]
     pub source: Option<[u32; 2]>,
     /// Aim inside a node instead of the window: with `node`, `x` and `y` are
@@ -778,9 +780,10 @@ pub enum AutomationOp {
         /// Aim at a pixel of a live picture instead: with `node` naming a
         /// `LiveImage`, the press lands at the centre of where source pixel
         /// `[x, y]` is displayed, whatever the fit, orientation, device
-        /// scale or transform. Give it in place of `x` and `y`; a pixel whose
-        /// centre is cropped away (by `Cover`, or `None` on a large picture)
-        /// is refused, since the press would land on another widget.
+        /// scale or transform. Give it in place of `x` and `y`. A pixel is
+        /// refused when the press would land on another widget: its centre
+        /// cropped away (by `Cover`, or `None` on a large picture), outside
+        /// an ancestor's box or clip, or under a widget drawn over it.
         #[serde(default)]
         source: Option<[u32; 2]>,
         /// Aim inside a node instead of the window: with `node`, `x` and `y`
@@ -985,9 +988,10 @@ pub enum AutomationOp {
         /// Aim at a pixel of a live picture instead: with `node` naming a
         /// `LiveImage`, the press lands at the centre of where source pixel
         /// `[x, y]` is displayed, whatever the fit, orientation, device
-        /// scale or transform. Give it in place of `x` and `y`; a pixel whose
-        /// centre is cropped away (by `Cover`, or `None` on a large picture)
-        /// is refused, since the press would land on another widget.
+        /// scale or transform. Give it in place of `x` and `y`. A pixel is
+        /// refused when the press would land on another widget: its centre
+        /// cropped away (by `Cover`, or `None` on a large picture), outside
+        /// an ancestor's box or clip, or under a widget drawn over it.
         #[serde(default)]
         source: Option<[u32; 2]>,
         /// Aim inside a node instead of the window: with `node`, `x` and `y`

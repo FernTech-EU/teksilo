@@ -142,6 +142,13 @@ and `source` aiming read, so input and automation agree with paint.
 `map_to_source` floors: a point in the right half of a displayed pixel maps
 to that pixel, not the next.
 
+`source` aiming refuses a pixel a press would not reach. The fit's crop is
+read from the placement. The rest is the hit test the press itself takes,
+`WidgetTree::hit_test_for` for the op's pointer kind, at the pixel's window
+point. That covers an ancestor's box or clip, a widget drawn over the picture
+and a grip whose hit reaches further for a finger, and the refusal names the
+node the press would reach.
+
 ## 7. One-commit images
 
 `ImageWidget::from_raw`, a masked image and `Avatar`'s picture move their
@@ -327,6 +334,3 @@ commits, which is AC20's last clause.
   debug builds, where timings mean little. Forwarding the feature through
   teksilo-app and printing the timings in the idle trace would reach a
   release build; it is new surface and has not been added.
-- **Aiming at a hidden pixel.** `source` aiming refuses a pixel the fit crops
-  out, as specified, but not one an ancestor's box or clip hides. Such a press
-  reaches whatever is under it.

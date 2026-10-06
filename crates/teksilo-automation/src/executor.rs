@@ -253,7 +253,7 @@ fn execute_op(
             meta,
             command,
         } => {
-            let p = match aim_at(tree, *node, *x, *y, *source) {
+            let p = match aim_at(tree, *node, *x, *y, *source, kind.to_core()) {
                 Ok(p) => p,
                 Err(reply) => return reply,
             };
@@ -461,7 +461,7 @@ fn execute_op(
             node,
             kind,
         } => {
-            let p = match aim_at(tree, *node, *x, *y, *source) {
+            let p = match aim_at(tree, *node, *x, *y, *source, kind.to_core()) {
                 Ok(p) => p,
                 Err(reply) => return reply,
             };
@@ -1361,10 +1361,13 @@ fn run_touch_sequence(
             (Some(x), Some(y), None, Some((_, widget))) => {
                 tree.local_to_window(widget, Point::new(x, y))
             }
-            (None, None, Some(pixel), Some((node, widget))) => {
-                let local = source_centre(tree, widget, node, pixel)?;
-                tree.local_to_window(widget, local)
-            }
+            (None, None, Some(pixel), Some((node, widget))) => source_point(
+                tree,
+                widget,
+                node,
+                pixel,
+                teksilo_tokens::PointerKind::Touch,
+            )?,
             (None, None, Some(_), None) => return Err(source_needs_node()),
             _ => return Err(one_aim()),
         };
@@ -1796,21 +1799,22 @@ fn aim(
 }
 
 /// The window point an op sends, from its `x` and `y` (window-logical, or
-/// local to `node`) or its `source` pixel of the live picture `node` names.
+/// local to `node`) or its `source` pixel of the live picture `node` names,
+/// pressed by a `kind` pointer.
 fn aim_at(
     tree: &mut WidgetTree,
     node: Option<NodeRef>,
     x: Option<f32>,
     y: Option<f32>,
     source: Option<[u32; 2]>,
+    kind: teksilo_tokens::PointerKind,
 ) -> Result<Point, AutomationReply> {
     match (x, y, source, node) {
         (Some(x), Some(y), None, _) => aim(tree, node, x, y),
         (None, None, Some(pixel), Some(node)) => {
             let update = tree.sync_accessibility();
             let widget = aimable_widget(tree, &update, node)?;
-            let local = source_centre(tree, widget, node, pixel)?;
-            Ok(tree.local_to_window(widget, local))
+            source_point(tree, widget, node, pixel, kind)
         }
         (None, None, Some(_), None) => Err(source_needs_node()),
         _ => Err(one_aim()),
@@ -1860,6 +1864,7 @@ fn live_geometry(
 /// The widget-local centre of where source pixel `pixel` of `widget`'s live
 /// picture is displayed. Refused outside the source, and where the fit crops
 /// the pixel's centre away: a press there would land on another widget.
+/// [`source_point`] refuses the rest of what a press would not reach.
 fn source_centre(
     tree: &WidgetTree,
     widget: WidgetId,
@@ -1890,6 +1895,41 @@ fn source_centre(
         ));
     }
     Ok(at)
+}
+
+/// The window point at the centre of where source pixel `pixel` of
+/// `widget`'s live picture is displayed, for a `kind` pointer to press.
+///
+/// Refused as [`source_centre`] refuses, and when the press would not reach
+/// the picture: an ancestor's box or clip hides the point, or something drawn
+/// over it takes the press. The test is the one the press itself goes
+/// through, `WidgetTree::hit_test_for`, so a touch's hit outsets count.
+fn source_point(
+    tree: &WidgetTree,
+    widget: WidgetId,
+    node: NodeRef,
+    pixel: [u32; 2],
+    kind: teksilo_tokens::PointerKind,
+) -> Result<Point, AutomationReply> {
+    let at = tree.local_to_window(widget, source_centre(tree, widget, node, pixel)?);
+    let mut pointer = PointerInfo::mouse(teksilo_core::pointer::EventTime::ZERO);
+    pointer.kind = kind;
+    match tree.hit_test_for(at, &pointer) {
+        Some(hit) if tree.is_descendant_of(hit, widget) => Ok(at),
+        hit => Err(AutomationReply::err(
+            codes::BAD_ARGUMENT,
+            format!(
+                "pixel {pixel:?} of node {node} is hidden at window point ({:.1}, {:.1}): a \
+                 press there reaches {}",
+                at.x,
+                at.y,
+                hit.map_or_else(
+                    || "no widget".to_owned(),
+                    |other| format!("node {}", node_ref_of(other))
+                ),
+            ),
+        )),
+    }
 }
 
 /// A widget-local rect, as the window-logical box its corners reach.

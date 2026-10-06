@@ -247,8 +247,9 @@ by crate for clarity, not because crates version independently.
 - `inject_pointer`, `long_press` and each `inject_touch_sequence` step take
   `source`, a pixel of the live picture `node` names, in place of `x` and
   `y`: the press lands at the centre of where that pixel is drawn, under any
-  fit, orientation and transform. A pixel outside the source, or one the fit
-  crops out of view, is refused.
+  fit, orientation and transform. A pixel outside the source is refused, and
+  so is one the press would not reach: cropped out of view by the fit, past
+  an ancestor's box or clip, or under another widget.
 - A screenshot's metadata lists the live pictures the image shows in
   `live_images`: each one's node, the generation the image holds, whether it
   drew an older picture (`deferred`) and its rect in the image's pixels.

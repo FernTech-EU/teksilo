@@ -186,7 +186,8 @@ pub struct InjectPointerParams {
     /// A pixel `[x, y]` of the LiveImage `node` names, in place of `x` and
     /// `y`: the press lands at the centre of where that source pixel is
     /// displayed, whatever the fit, orientation, scale or transform. A pixel
-    /// cropped away by the fit is refused.
+    /// a press would not reach is refused: cropped away by the fit, hidden by
+    /// an ancestor's box or clip, or under another widget.
     pub source: Option<[u32; 2]>,
     /// Aim inside a node: with `node`, `x` and `y` are node-local logical px,
     /// the position the node's own handlers receive — exact under a `Scale`, a
@@ -244,7 +245,8 @@ pub struct TouchStepParams {
     /// A pixel `[x, y]` of the LiveImage `node` names, in place of `x` and
     /// `y`: the press lands at the centre of where that source pixel is
     /// displayed, whatever the fit, orientation, scale or transform. A pixel
-    /// cropped away by the fit is refused.
+    /// a press would not reach is refused: cropped away by the fit, hidden by
+    /// an ancestor's box or clip, or under another widget.
     pub source: Option<[u32; 2]>,
     /// Aim inside a node: with `node`, `x` and `y` are node-local logical px,
     /// the position the node's own handlers receive. A synthetic node is
@@ -309,7 +311,8 @@ pub struct LongPressParams {
     /// A pixel `[x, y]` of the LiveImage `node` names, in place of `x` and
     /// `y`: the press lands at the centre of where that source pixel is
     /// displayed, whatever the fit, orientation, scale or transform. A pixel
-    /// cropped away by the fit is refused.
+    /// a press would not reach is refused: cropped away by the fit, hidden by
+    /// an ancestor's box or clip, or under another widget.
     pub source: Option<[u32; 2]>,
     /// Aim inside a node: with `node`, `x` and `y` are node-local logical px,
     /// the position the node's own handlers receive — exact under a `Scale`, a
