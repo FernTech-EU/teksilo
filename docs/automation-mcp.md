@@ -300,6 +300,36 @@ because the key really was injected, it just bound to nothing, while
 Control everywhere, for the chords that genuinely are Control on macOS too
 (Ctrl+Tab, a terminal's Ctrl+C).
 
+**`type_text` types as a keyboard does.** Each character is one key pressed and
+released, the press carrying the character as its text:
+
+- an ASCII letter is its named key, `A` to `Z`, with Shift held for a capital;
+- a space is Space, a line break (`\n`, `\r` or `\r\n`) is one Enter, a tab is
+  Tab;
+- any other character is that character's key, with no modifier, because which
+  modifier types a symbol depends on the keyboard layout.
+
+So a shortcut on a letter fires as it would under a user's fingers, a widget
+that matches `Key::A` sees an `A`, and a Tab in a field that does not take one
+moves focus. Text that must arrive without keys is committed through the input
+method: `type_ime {commit}`. The same rules are `WidgetTree::type_text`, so a
+widget test and a probe type alike.
+
+**`inject_key` sends one key**, its press then its release. Two arguments
+refine it:
+
+- `text` is what the press types, as a keyboard attaches it. Omitted, it is the
+  platform's own: the control character of Enter, Tab, Space, Backspace and
+  Escape, and nothing for any other key, so `{key: "a"}` alone types nothing.
+- `phase` is `press` (the default), `down` or `up`. A `down` leaves the key held
+  across calls until an `up` releases it, which is how a probe holds a key
+  through other input or repeats its press as a held key repeats. A `text` on an
+  `up` is refused: a release carries none.
+
+A key is named by the name its `Display` gives, which is how `get_shortcuts`
+reports a chord (`Ins`, `Menu`, `F13`), or spelled out (`insert`,
+`contextmenu`); a single character names its own key.
+
 **Introspection**, `get_overlays`, `get_shortcuts`, `list_live_regions`,
 `pull_announcements`
 

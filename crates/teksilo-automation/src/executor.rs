@@ -30,10 +30,10 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_core::window::WindowOps;
 
 use crate::dto::{
-    AnnouncementDto, Assertion, AssertionResult, AutomationOp, AutomationReply, NodeBounds,
-    NodeRef, PointerKindDto, PointerReport, SemanticNode, SequenceMemberDto, SettleSpec,
-    ShortcutInfo, TouchPhaseDto, TouchSequenceReport, TouchStep, TouchStepReport, WaitCondition,
-    codes,
+    AnnouncementDto, Assertion, AssertionResult, AutomationOp, AutomationReply, KeyPhase,
+    NodeBounds, NodeRef, PointerKindDto, PointerReport, SemanticNode, SequenceMemberDto,
+    SettleSpec, ShortcutInfo, TouchPhaseDto, TouchSequenceReport, TouchStep, TouchStepReport,
+    WaitCondition, codes,
 };
 
 /// Perform one automation operation. See the module docs.
@@ -510,6 +510,8 @@ fn execute_op(
         }
         AutomationOp::InjectKey {
             key,
+            text,
+            phase,
             ctrl,
             shift,
             alt,
@@ -519,12 +521,24 @@ fn execute_op(
             let Some(k) = key_from_str(key) else {
                 return AutomationReply::err(codes::UNKNOWN_NAME, format!("unknown key '{key}'"));
             };
-            press_key(
-                tree,
-                ops,
-                k,
-                modifiers(*ctrl, *shift, *alt, *meta, *command),
-            );
+            // Refused rather than dropped: a release carries no text, and a
+            // caller who wrote one believed it would arrive somewhere.
+            if text.is_some() && *phase == KeyPhase::Up {
+                return AutomationReply::err(
+                    codes::BAD_ARGUMENT,
+                    "a key release carries no text — put `text` on the down or the press",
+                );
+            }
+            let m = modifiers(*ctrl, *shift, *alt, *meta, *command);
+            let text = text.clone().or_else(|| k.to_text().map(str::to_string));
+            match phase {
+                KeyPhase::Press => {
+                    key_down(tree, ops, k, m, text);
+                    key_up(tree, ops, k, m);
+                }
+                KeyPhase::Down => key_down(tree, ops, k, m, text),
+                KeyPhase::Up => key_up(tree, ops, k, m),
+            }
             finish_settle(tree, ops, settle)
         }
         AutomationOp::TypeText { node, text } => {
@@ -534,7 +548,7 @@ fn execute_op(
             };
             // `type_text` routes to the *focused* widget, so focus first.
             focus_for_typing(tree, ops, widget);
-            type_text(tree, ops, text);
+            tree.type_text_with_ops(text, ops);
             finish_settle(tree, ops, settle)
         }
         AutomationOp::TypeIme {
@@ -808,21 +822,31 @@ fn pointer_up(
     );
 }
 
-/// Press and release one key, carrying the text the platform attaches to it
-/// ([`Key::to_text`]) so a driven run matches a hand-driven one.
+/// Press one key, carrying `text` as the platform would attach it.
 ///
-/// It sent `text: None` for every key, which made `inject_key` a *weaker*
+/// `inject_key` passes the caller's text or, failing one, [`Key::to_text`]:
+/// it sent `text: None` for every key, which made `inject_key` a *weaker*
 /// probe than a real keypress rather than an equivalent one — an Escape that
 /// a focused field swallowed came back through this path looking fine.
-fn press_key(tree: &mut WidgetTree, ops: &mut dyn WindowOps, key: Key, modifiers: Modifiers) {
+fn key_down(
+    tree: &mut WidgetTree,
+    ops: &mut dyn WindowOps,
+    key: Key,
+    modifiers: Modifiers,
+    text: Option<String>,
+) {
     tree.dispatch_event_with_ops(
         WidgetEvent::KeyDown {
             key,
             modifiers,
-            text: key.to_text().map(str::to_string),
+            text,
         },
         ops,
     );
+}
+
+/// Release one key. A release carries no text.
+fn key_up(tree: &mut WidgetTree, ops: &mut dyn WindowOps, key: Key, modifiers: Modifiers) {
     tree.dispatch_event_with_ops(WidgetEvent::KeyUp { key, modifiers }, ops);
 }
 
@@ -836,23 +860,6 @@ fn press_key(tree: &mut WidgetTree, ops: &mut dyn WindowOps, key: Key, modifiers
 fn focus_for_typing(tree: &mut WidgetTree, ops: &mut dyn WindowOps, widget: WidgetId) {
     let target = tree.focusable_composite_behind(widget).unwrap_or(widget);
     tree.focus_ops(target, ops);
-}
-
-/// Type `text` into the focused widget, one `KeyDown` per character — the
-/// caller focuses the target first (`focus_ops`). Mirrors `test_api::type_text`,
-/// whose `widget` parameter is likewise unused: focus is what routes a key
-/// event, not the node the caller named.
-fn type_text(tree: &mut WidgetTree, ops: &mut dyn WindowOps, text: &str) {
-    for ch in text.chars() {
-        tree.dispatch_event_with_ops(
-            WidgetEvent::KeyDown {
-                key: Key::Character(ch),
-                modifiers: Modifiers::NONE,
-                text: Some(ch.to_string()),
-            },
-            ops,
-        );
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1091,7 +1098,8 @@ fn inject_direct(
     if pointer_id.is_some() && !addressable {
         return Err(AutomationReply::err(
             codes::BAD_ARGUMENT,
-            "pointer_id addresses a contact that is already down — it belongs              on a move or an up, not on a down or a click, which mint their own",
+            "pointer_id addresses a contact that is already down — it belongs \
+             on a move or an up, not on a down or a click, which mint their own",
         ));
     }
     let explicit = match pointer_id {
@@ -2188,6 +2196,22 @@ fn key_from_str(s: &str) -> Option<Key> {
         "f10" => Some(Key::F10),
         "f11" => Some(Key::F11),
         "f12" => Some(Key::F12),
+        "f13" => Some(Key::F13),
+        "f14" => Some(Key::F14),
+        "f15" => Some(Key::F15),
+        "f16" => Some(Key::F16),
+        "f17" => Some(Key::F17),
+        "f18" => Some(Key::F18),
+        "f19" => Some(Key::F19),
+        "f20" => Some(Key::F20),
+        "f21" => Some(Key::F21),
+        "f22" => Some(Key::F22),
+        "f23" => Some(Key::F23),
+        "f24" => Some(Key::F24),
+        "insert" | "ins" => Some(Key::Insert),
+        // `Menu` is the key's `Display` name, which is how `get_shortcuts`
+        // reports a chord on it.
+        "contextmenu" | "menu" => Some(Key::ContextMenu),
         _ => None,
     };
     if named.is_some() {

@@ -412,6 +412,8 @@ def inject_key(
     key: str,
     *,
     window_id: int | None = None,
+    text: str | None = None,
+    phase: str | None = None,
     ctrl: bool | None = None,
     shift: bool | None = None,
     alt: bool | None = None,
@@ -419,18 +421,23 @@ def inject_key(
     command: bool | None = None,
     settle: Mapping[str, Any] | None = None,
 ) -> Any:
-    """Inject a key press (with optional modifiers) to the focused widget. Use
-    `command` for any accelerator chord (Control on Windows/Linux, Command on
-    macOS) — a shortcut declared Ctrl+S resolves to the Command chord on
-    macOS, so `ctrl` there injects a key that matches no binding and still
-    reports success. `ctrl` stays literal Control, for chords that really are
-    Control everywhere (Ctrl+Tab).
+    """Inject a key press (with optional modifiers) to the focused widget: by
+    default its press and its release, or with `phase` = down or up one half,
+    so a key can stay held across calls. `text` is what the press types, as a
+    keyboard attaches it; omitted, a character key types nothing (use
+    type_text to type). Use `command` for any accelerator chord (Control on
+    Windows/Linux, Command on macOS) — a shortcut declared Ctrl+S resolves to
+    the Command chord on macOS, so `ctrl` there injects a key that matches no
+    binding and still reports success. `ctrl` stays literal Control, for
+    chords that really are Control everywhere (Ctrl+Tab).
 
     Mutating tool.
     """
     args = {
         "window_id": window_id,
         "key": key,
+        "text": text,
+        "phase": phase,
         "ctrl": ctrl,
         "shift": shift,
         "alt": alt,
@@ -449,7 +456,11 @@ def type_text(
     window_id: int | None = None,
     settle: Mapping[str, Any] | None = None,
 ) -> Any:
-    """Focus a node and type text into it.
+    """Focus a node and type text into it as a keyboard does: each character is a
+    key pressed and released, a letter as its named key (Shift held for a
+    capital), a space as Space, a line break as Enter, a tab as Tab. Shortcuts
+    see those keys as they would a user's; to insert text without keys, commit
+    it with type_ime.
 
     Mutating tool.
     """

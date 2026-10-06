@@ -12,6 +12,77 @@ fn lerp_point(from: Point, to: Point, t: f32) -> Point {
     Point::new(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t)
 }
 
+/// The key presses that type `text`: for each, the key, the modifiers held and
+/// the `KeyDown` text. The rules are
+/// [`type_text_with_ops`](WidgetTree::type_text_with_ops)'s.
+fn typed_keys(text: &str) -> Vec<(Key, Modifiers, String)> {
+    let mut keys = Vec::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        let named = match ch {
+            ' ' => Some(Key::Space),
+            '\t' => Some(Key::Tab),
+            '\u{8}' => Some(Key::Backspace),
+            '\u{1b}' => Some(Key::Escape),
+            '\n' => Some(Key::Enter),
+            '\r' => {
+                // One Enter makes one line break, whichever ending the text
+                // spells it with.
+                chars.next_if_eq(&'\n');
+                Some(Key::Enter)
+            }
+            _ => None,
+        };
+        if let Some(key) = named {
+            let text = key.to_text().map_or_else(|| ch.to_string(), str::to_string);
+            keys.push((key, Modifiers::NONE, text));
+            continue;
+        }
+        let modifiers = if ch.is_ascii_uppercase() {
+            Modifiers::SHIFT
+        } else {
+            Modifiers::NONE
+        };
+        keys.push((key_for_char(ch), modifiers, ch.to_string()));
+    }
+    keys
+}
+
+/// The key the platform translator reports for a character key: an ASCII
+/// letter of either case is its `Key::A`..`Key::Z` variant, anything else is
+/// [`Key::Character`]. The inverse of [`Key::to_char`].
+fn key_for_char(ch: char) -> Key {
+    match ch.to_ascii_uppercase() {
+        'A' => Key::A,
+        'B' => Key::B,
+        'C' => Key::C,
+        'D' => Key::D,
+        'E' => Key::E,
+        'F' => Key::F,
+        'G' => Key::G,
+        'H' => Key::H,
+        'I' => Key::I,
+        'J' => Key::J,
+        'K' => Key::K,
+        'L' => Key::L,
+        'M' => Key::M,
+        'N' => Key::N,
+        'O' => Key::O,
+        'P' => Key::P,
+        'Q' => Key::Q,
+        'R' => Key::R,
+        'S' => Key::S,
+        'T' => Key::T,
+        'U' => Key::U,
+        'V' => Key::V,
+        'W' => Key::W,
+        'X' => Key::X,
+        'Y' => Key::Y,
+        'Z' => Key::Z,
+        _ => Key::Character(ch),
+    }
+}
+
 impl WidgetTree {
     /// The content id of the tooltip anchored at `widget` or anywhere inside
     /// it.
@@ -117,14 +188,51 @@ impl WidgetTree {
         self.dispatch_event(WidgetEvent::KeyUp { key, modifiers });
     }
 
-    /// Simulate typing text into the focused widget.
+    /// Simulate typing text into the focused widget, as
+    /// [`type_text_with_ops`](Self::type_text_with_ops) does.
+    ///
+    /// `_widget` is not used: focus routes a key event, not the node a caller
+    /// names, so a test focuses its target first.
     pub fn type_text(&mut self, _widget: WidgetId, text: &str) {
-        for ch in text.chars() {
-            self.dispatch_event(WidgetEvent::KeyDown {
-                key: Key::Character(ch),
-                modifiers: Modifiers::NONE,
-                text: Some(ch.to_string()),
-            });
+        let mut noop = crate::window::NoopWindowOps;
+        self.type_text_with_ops(text, &mut noop);
+    }
+
+    /// Type `text` into the focused widget the way a keyboard does, over the
+    /// caller's [`WindowOps`](crate::window::WindowOps) sink.
+    ///
+    /// Each character is one key pressed and released: a `KeyDown` carrying
+    /// the character as its `text`, then the `KeyUp`, under the key and
+    /// modifiers the platform translator reports for it.
+    ///
+    /// * An ASCII letter is `Key::A`..`Key::Z`, with Shift held for a capital.
+    ///   A shortcut is registered against those variants, and a widget's own
+    ///   key handling matches them, so a letter typed as
+    ///   [`Key::Character`] reached neither.
+    /// * A space is [`Key::Space`]; a line break (`\n`, `\r` or `\r\n`) is one
+    ///   [`Key::Enter`]; a tab is [`Key::Tab`]; U+0008 is
+    ///   [`Key::Backspace`] and U+001B is [`Key::Escape`]. Their `text` is the
+    ///   one [`Key::to_text`] gives. A field that does not take Tab therefore
+    ///   moves focus on one, as it does for a user: typing is keys, and text
+    ///   that must arrive without them is committed through an input method
+    ///   ([`WidgetEvent::ImeCommit`]).
+    /// * Anything else is [`Key::Character`] with no modifier. Which modifier
+    ///   produces a symbol depends on the layout, so none is guessed.
+    ///
+    /// This is the one door both [`type_text`](Self::type_text) and the
+    /// automation bridge's `type_text` go through, so a test and a probe type
+    /// alike.
+    pub fn type_text_with_ops(&mut self, text: &str, ops: &mut dyn crate::window::WindowOps) {
+        for (key, modifiers, text) in typed_keys(text) {
+            self.dispatch_event_with_ops(
+                WidgetEvent::KeyDown {
+                    key,
+                    modifiers,
+                    text: Some(text),
+                },
+                &mut *ops,
+            );
+            self.dispatch_event_with_ops(WidgetEvent::KeyUp { key, modifiers }, &mut *ops);
         }
     }
 
@@ -1395,6 +1503,101 @@ mod tests {
         );
         tree.touch_up(finger, Point::new(50.0, 50.0));
         tree.assert_no_leaked_pointer_state();
+    }
+
+    /// A letter is typed as the platform reports it: its named variant, with
+    /// Shift for a capital, and the character itself as the text.
+    #[test]
+    fn typing_a_letter_is_its_named_key_with_shift_for_a_capital() {
+        assert_eq!(
+            typed_keys("aB"),
+            vec![
+                (Key::A, Modifiers::NONE, "a".to_string()),
+                (Key::B, Modifiers::SHIFT, "B".to_string()),
+            ]
+        );
+    }
+
+    /// The characters a named key types are typed with that key, carrying the
+    /// text `Key::to_text` says the platform attaches. A line break is one
+    /// Enter whichever ending spells it.
+    #[test]
+    fn a_character_a_named_key_types_is_typed_with_that_key() {
+        for key in [
+            Key::Space,
+            Key::Tab,
+            Key::Backspace,
+            Key::Escape,
+            Key::Enter,
+        ] {
+            let text = key.to_text().expect("each of these keys carries text");
+            assert_eq!(
+                typed_keys(text),
+                vec![(key, Modifiers::NONE, text.to_string())],
+                "{key:?}"
+            );
+        }
+        let enter = (Key::Enter, Modifiers::NONE, "\r".to_string());
+        assert_eq!(typed_keys("\n"), vec![enter.clone()]);
+        assert_eq!(typed_keys("\r\n"), vec![enter.clone()]);
+        assert_eq!(typed_keys("\r\r"), vec![enter.clone(), enter.clone()]);
+        assert_eq!(typed_keys("\n\n"), vec![enter.clone(), enter]);
+    }
+
+    /// Everything else is the character key itself, with no modifier: which
+    /// modifier types a symbol depends on the layout.
+    #[test]
+    fn any_other_character_is_its_own_key_with_no_modifier() {
+        assert_eq!(
+            typed_keys("1!é日"),
+            vec![
+                (Key::Character('1'), Modifiers::NONE, "1".to_string()),
+                (Key::Character('!'), Modifiers::NONE, "!".to_string()),
+                (Key::Character('é'), Modifiers::NONE, "é".to_string()),
+                (Key::Character('日'), Modifiers::NONE, "日".to_string()),
+            ]
+        );
+    }
+
+    /// Each character is a key pressed *and released*: a press left without
+    /// its release is a key held down, which a widget that tracks held keys
+    /// (a game viewport, a VM screen) never sees end.
+    #[test]
+    fn typing_presses_and_releases_one_key_per_character() {
+        let seen: Signal<Vec<String>> = Signal::new(Vec::new());
+        let log = seen.clone();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().focusable().on_key(move |event, _ctx| {
+            let line = match event {
+                WidgetEvent::KeyDown {
+                    key,
+                    modifiers,
+                    text,
+                } => format!("down {key:?} shift={} {text:?}", modifiers.shift()),
+                WidgetEvent::KeyUp { key, modifiers } => {
+                    format!("up {key:?} shift={}", modifiers.shift())
+                }
+                _ => return crate::event::EventResponse::Ignored,
+            };
+            let mut v = log.get();
+            v.push(line);
+            log.set(v);
+            crate::event::EventResponse::Handled
+        }));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        tree.focus(id);
+        tree.type_text(id, "aB ");
+        assert_eq!(
+            seen.get(),
+            [
+                "down A shift=false Some(\"a\")",
+                "up A shift=false",
+                "down B shift=true Some(\"B\")",
+                "up B shift=true",
+                "down Space shift=false Some(\" \")",
+                "up Space shift=false",
+            ]
+        );
     }
 
     /// `set_density` is the one density door under A21's name for it.

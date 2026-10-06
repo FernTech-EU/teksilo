@@ -81,6 +81,9 @@ by crate for clarity, not because crates version independently.
 - `ShortcutBuilder::category_label` and `Shortcut::category_text`: a
   localized display text for a shortcut's category, beside the `category` key
   that keeps ordering and grouping stable across languages.
+- `WidgetTree::type_text_with_ops`: `type_text` over the caller's window
+  operations, the one door the automation bridge and `WidgetTree::type_text`
+  both type through.
 
 #### Widgets
 
@@ -89,6 +92,13 @@ by crate for clarity, not because crates version independently.
   sees and types "Fichier", not the key. The header of the group holding
   uncategorized shortcuts, "General", is now translated in every catalogue
   (`shortcut-settings-uncategorized`) instead of being English everywhere.
+
+#### Automation
+
+- `inject_key` takes `text`, what the press types, and `phase` (`press`,
+  `down` or `up`), so a key can be held across calls. It also names `Insert`,
+  `F13` to `F24` and the context-menu key (`insert` / `Ins`, `f13`..`f24`,
+  `contextmenu` / `Menu`), which it refused before.
 
 #### Render
 
@@ -182,6 +192,17 @@ by crate for clarity, not because crates version independently.
   already do: `WGPU_BACKEND=vulkan` makes it open a Vulkan adapter or none,
   instead of falling back to another backend, and `WGPU_POWER_PREF` picks
   the GPU on a machine with two.
+
+#### Automation
+
+- **`type_text` types as a keyboard does**, through the automation bridge and
+  `WidgetTree::type_text` alike. Each character is a key pressed and released,
+  where it used to be a press with no release: an ASCII letter is its named
+  key (`Key::A`..`Key::Z`), with Shift for a capital, a space is Space, a line
+  break is Enter and a tab is Tab, each press carrying the character as its
+  text. A letter shortcut now fires on typed text as it would for a user, and
+  a Tab typed into a field that does not take one moves focus; text that must
+  arrive without keys goes through `type_ime`.
 
 ### Deprecated
 

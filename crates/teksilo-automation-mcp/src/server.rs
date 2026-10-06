@@ -16,8 +16,9 @@ use rmcp::{ErrorData as McpError, ServerHandler, schemars, tool, tool_handler, t
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use teksilo_automation::dto::{
-    Assertion, AutomationOp, AutomationReply, AutomationRequest, DensityDto, PointerAction,
-    PointerButtonDto, PointerKindDto, SettleSpec, TouchPhaseDto, TouchStep, WaitCondition,
+    Assertion, AutomationOp, AutomationReply, AutomationRequest, DensityDto, KeyPhase,
+    PointerAction, PointerButtonDto, PointerKindDto, SettleSpec, TouchPhaseDto, TouchStep,
+    WaitCondition,
 };
 
 use crate::headless::{HostReply, Job};
@@ -299,8 +300,21 @@ pub struct SetDensityParams {
 #[serde(deny_unknown_fields)]
 pub struct InjectKeyParams {
     pub window_id: Option<u64>,
-    /// Key name (Enter, Escape, Tab, F1.., arrows) or a single character.
+    /// Key name (Enter, Escape, Tab, Space, Backspace, Delete, Insert, Home,
+    /// End, PageUp, PageDown, the arrows, F1..F24, CapsLock, ContextMenu) or a
+    /// single character. A letter is its named key, so `a` with `command` is
+    /// the select-all shortcut.
     pub key: String,
+    /// The text the press types, as a keyboard attaches it — what a focused
+    /// text field inserts. Omit it for the platform's own: the control
+    /// character of Enter, Tab, Space, Backspace and Escape, and nothing for
+    /// any other key, so `key: "a"` alone types nothing (use `type_text`, or
+    /// pass `text: "a"`). Refused on `phase: up`: a release carries no text.
+    pub text: Option<String>,
+    /// press (default: down then up), down or up. A `down` leaves the key held
+    /// across calls until an `up` releases it — a chord held across other
+    /// input, or a press repeated as a held key repeats.
+    pub phase: Option<String>,
     pub ctrl: Option<bool>,
     pub shift: Option<bool>,
     pub alt: Option<bool>,
@@ -670,7 +684,7 @@ impl AutomationServer {
     }
 
     #[tool(
-        description = "Inject a key press (with optional modifiers) to the focused widget. Use `command` for any accelerator chord (Control on Windows/Linux, Command on macOS) — a shortcut declared Ctrl+S resolves to the Command chord on macOS, so `ctrl` there injects a key that matches no binding and still reports success. `ctrl` stays literal Control, for chords that really are Control everywhere (Ctrl+Tab)."
+        description = "Inject a key press (with optional modifiers) to the focused widget: by default its press and its release, or with `phase` = down or up one half, so a key can stay held across calls. `text` is what the press types, as a keyboard attaches it; omitted, a character key types nothing (use type_text to type). Use `command` for any accelerator chord (Control on Windows/Linux, Command on macOS) — a shortcut declared Ctrl+S resolves to the Command chord on macOS, so `ctrl` there injects a key that matches no binding and still reports success. `ctrl` stays literal Control, for chords that really are Control everywhere (Ctrl+Tab)."
     )]
     pub(crate) async fn inject_key(
         &self,
@@ -681,6 +695,8 @@ impl AutomationServer {
             p.window_id,
             AutomationOp::InjectKey {
                 key: p.key,
+                text: p.text,
+                phase: key_phase(&p.phase)?,
                 ctrl: p.ctrl.unwrap_or(false),
                 shift: p.shift.unwrap_or(false),
                 alt: p.alt.unwrap_or(false),
@@ -692,7 +708,9 @@ impl AutomationServer {
         .await
     }
 
-    #[tool(description = "Focus a node and type text into it.")]
+    #[tool(
+        description = "Focus a node and type text into it as a keyboard does: each character is a key pressed and released, a letter as its named key (Shift held for a capital), a space as Space, a line break as Enter, a tab as Tab. Shortcuts see those keys as they would a user's; to insert text without keys, commit it with type_ime."
+    )]
     pub(crate) async fn type_text(
         &self,
         Parameters(p): Parameters<TypeTextParams>,
@@ -1078,8 +1096,14 @@ or the shortcuts `set_value` / `type_text` / `focus_node` / `expand` / \
 `collapse` / `scroll`; or raw input `inject_pointer \
 {x,y,action?,button?,ctrl?,shift?,alt?,meta?,command?}` / `right_click {node}` \
 (opens the node's context menu — the coordinate-free form of a secondary \
-click) / `inject_key {key, ctrl?,shift?,alt?,meta?,command?}` / `type_ime` / \
-`drag_node`. Reach for `command`, not `ctrl`, whenever a chord means \"the \
+click) / `inject_key {key, text?, phase?, ctrl?,shift?,alt?,meta?,command?}` / \
+`type_ime` / `drag_node`. `type_text` types as a keyboard does — each character \
+a key pressed and released, a letter as its named key with Shift for a capital, \
+a space as Space, a line break as Enter, a tab as Tab — so shortcuts see what a \
+user's typing would fire; `type_ime {commit}` inserts text with no keys. \
+`inject_key` sends one key: its press and release, or with `phase` down / up one \
+half, so a key can stay held across calls; `text` is what the press types (a \
+character key types nothing without it). Reach for `command`, not `ctrl`, whenever a chord means \"the \
 accelerator\" (save, copy, select-all, accelerator-click): it is Control on \
 Windows and Linux and Command on macOS, which is what a shortcut *declared* \
 `Ctrl+S` resolves to there — so `ctrl` on macOS injects a key that matches no \
@@ -1269,8 +1293,23 @@ fn pointer_action(s: &Option<String>) -> Result<PointerAction, McpError> {
         Some(other) => {
             return Err(McpError::invalid_params(
                 format!(
-                    "unknown pointer action '{other}'                          (click, double_click, down, up, move)"
+                    "unknown pointer action '{other}' \
+                     (click, double_click, down, up, move)"
                 ),
+                None,
+            ));
+        }
+    })
+}
+
+fn key_phase(s: &Option<String>) -> Result<KeyPhase, McpError> {
+    Ok(match s.as_deref().map(str::to_ascii_lowercase).as_deref() {
+        None | Some("press") => KeyPhase::Press,
+        Some("down") => KeyPhase::Down,
+        Some("up") => KeyPhase::Up,
+        Some(other) => {
+            return Err(McpError::invalid_params(
+                format!("unknown key phase '{other}' (press, down, up)"),
                 None,
             ));
         }
@@ -1330,7 +1369,8 @@ fn pointer_button(s: &Option<String>) -> Result<PointerButtonDto, McpError> {
         Some(other) => {
             return Err(McpError::invalid_params(
                 format!(
-                    "unknown pointer button '{other}'                          (primary, secondary, middle, back, forward)"
+                    "unknown pointer button '{other}' \
+                     (primary, secondary, middle, back, forward)"
                 ),
                 None,
             ));

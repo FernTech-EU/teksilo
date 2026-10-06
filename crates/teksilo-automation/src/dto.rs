@@ -254,6 +254,22 @@ pub enum PointerAction {
     Move,
 }
 
+/// Which half of a keystroke an `inject_key` op sends.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyPhase {
+    /// Press and release. The default, and what every `inject_key` sent
+    /// before `phase` existed.
+    #[default]
+    Press,
+    /// The press alone: the key stays down across ops until an `up` releases
+    /// it. How a probe holds a key through a chord, or repeats its press as a
+    /// held key auto-repeats.
+    Down,
+    /// The release alone.
+    Up,
+}
+
 /// Which mouse button an `inject_pointer` op uses.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -802,6 +818,16 @@ pub enum AutomationOp {
     },
     InjectKey {
         key: String,
+        /// The text the press types, as the platform attaches it to a
+        /// `KeyDown` — what a text field inserts. `None` (the default) is the
+        /// platform's own for that key: the control character of Enter, Tab,
+        /// Space, Backspace and Escape, and nothing for any other key. A release
+        /// carries no text, so a `phase: up` refuses it.
+        #[serde(default)]
+        text: Option<String>,
+        /// Press and release (the default), or one half of the keystroke.
+        #[serde(default)]
+        phase: KeyPhase,
         #[serde(default)]
         ctrl: bool,
         #[serde(default)]

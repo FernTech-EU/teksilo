@@ -109,6 +109,13 @@ you can see. Headless is always `1.0`.
 drag-and-drop, `right_click {node}` to open a context menu, and the raw input
 tools `inject_pointer` / `inject_key` / `type_text` / `type_ime`.
 
+`type_text` types as a keyboard does: each character is a key pressed and
+released, a letter as its named key (Shift for a capital), a space, line break
+and tab as Space, Enter and Tab. So shortcuts fire as they would for a user, and
+a Tab in a field moves focus; `type_ime {commit}` inserts text with no keys.
+`inject_key` sends one key: `text` is what its press types (a character key
+types nothing without it), and `phase: "down"` / `"up"` holds a key across calls.
+
 > **For an accelerator chord pass `command: true`, not `ctrl`.** `command` is the
 > platform's primary accelerator (Control on Windows/Linux, ⌘ on macOS), which is
 > what a shortcut *declared* `Ctrl+S` resolves to. `ctrl` stays literal Control

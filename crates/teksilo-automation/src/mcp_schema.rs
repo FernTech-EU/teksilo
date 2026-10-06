@@ -105,12 +105,12 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "inject_key",
-        description: "Inject a key press (with optional modifiers) to the focused widget. Use `command` for any accelerator chord (Control on Windows/Linux, Command on macOS) — a shortcut declared Ctrl+S resolves to the Command chord on macOS, so `ctrl` there injects a key that matches no binding and still reports success. `ctrl` stays literal Control, for chords that really are Control everywhere (Ctrl+Tab).",
+        description: "Inject a key press (with optional modifiers) to the focused widget: by default its press and its release, or with `phase` = down or up one half, so a key can stay held across calls. `text` is what the press types, as a keyboard attaches it; omitted, a character key types nothing (use type_text to type). Use `command` for any accelerator chord (Control on Windows/Linux, Command on macOS) — a shortcut declared Ctrl+S resolves to the Command chord on macOS, so `ctrl` there injects a key that matches no binding and still reports success. `ctrl` stays literal Control, for chords that really are Control everywhere (Ctrl+Tab).",
         mutating: true,
     },
     ToolDescriptor {
         name: "type_text",
-        description: "Focus a node and type text into it.",
+        description: "Focus a node and type text into it as a keyboard does: each character is a key pressed and released, a letter as its named key (Shift held for a capital), a space as Space, a line break as Enter, a tab as Tab. Shortcuts see those keys as they would a user's; to insert text without keys, commit it with type_ime.",
         mutating: true,
     },
     ToolDescriptor {

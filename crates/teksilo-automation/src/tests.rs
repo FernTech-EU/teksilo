@@ -80,6 +80,10 @@ struct Probe {
     /// Each received KeyDown, tagged `named:<Display>` or `char:<c>` so a test
     /// can tell `Key::S` (a named variant) from `Key::Character('s')`.
     received: Signal<Vec<String>>,
+    /// Every key press *and release*, in order: `down:<Display>:<mods>:<text>`
+    /// (`-` for no text) and `up:<Display>:<mods>`. A press without its release
+    /// is a key held down, which only a log of both halves can show.
+    keys: Signal<Vec<String>>,
     /// Each received `Scroll`, as `<dx>,<dy>,<mods>` — so a test can prove the
     /// modifiers a caller asked for actually reached the widget, and not just
     /// the delta.
@@ -122,6 +126,7 @@ impl Probe {
             taps: Signal::new(0),
             typed: Signal::new(String::new()),
             received: Signal::new(Vec::new()),
+            keys: Signal::new(Vec::new()),
             scrolls: Signal::new(Vec::new()),
             presses: Signal::new(Vec::new()),
         }
@@ -190,6 +195,7 @@ impl Widget for Probe {
         let taps = self.taps.clone();
         let typed = self.typed.clone();
         let received = self.received.clone();
+        let keys = self.keys.clone();
         let scrolls = self.scrolls.clone();
         let presses = self.presses.clone();
 
@@ -228,8 +234,12 @@ impl Widget for Probe {
                     ctx.open_window(probe_child_window());
                 }
             })
-            .on_key(move |event, ctx| {
-                if let WidgetEvent::KeyDown { key, .. } = event {
+            .on_key(move |event, ctx| match event {
+                WidgetEvent::KeyDown {
+                    key,
+                    modifiers,
+                    text,
+                } => {
                     if opens_on_key {
                         ctx.open_window(probe_child_window());
                     }
@@ -239,14 +249,27 @@ impl Widget for Probe {
                         other => format!("named:{other}"),
                     });
                     received.set(log);
-                    if let Key::Character(ch) = key {
+                    record(
+                        &keys,
+                        format!(
+                            "down:{key}:{}:{}",
+                            mods_tag(modifiers),
+                            text.as_deref().unwrap_or("-")
+                        ),
+                    );
+                    // What a text field inserts: the press's text, not its key.
+                    if let Some(text) = text {
                         let mut s = typed.get();
-                        s.push(*ch);
+                        s.push_str(text);
                         typed.set(s);
                     }
-                    return EventResponse::Handled;
+                    EventResponse::Handled
                 }
-                EventResponse::Ignored
+                WidgetEvent::KeyUp { key, modifiers } => {
+                    record(&keys, format!("up:{key}:{}", mods_tag(modifiers)));
+                    EventResponse::Handled
+                }
+                _ => EventResponse::Ignored,
             })
             .on_pointer_event(move |event, _ctx| {
                 if let WidgetEvent::PointerDown { modifiers, .. } = event {
@@ -809,13 +832,13 @@ impl Widget for TextSurface {
                     }
                 })
                 .on_key(move |event, _ctx| {
+                    // An editor inserts the press's text, whatever the key.
                     if let WidgetEvent::KeyDown {
-                        key: Key::Character(ch),
-                        ..
+                        text: Some(text), ..
                     } = event
                     {
                         let mut s = typed.get();
-                        s.push(*ch);
+                        s.push_str(text);
                         typed.set(s);
                         return EventResponse::Handled;
                     }
@@ -1077,6 +1100,8 @@ fn inject_key_letter_maps_to_named_variant() {
 
     let mk = |key: &str| AutomationOp::InjectKey {
         key: key.into(),
+        text: None,
+        phase: KeyPhase::Press,
         ctrl: false,
         shift: false,
         alt: false,
@@ -1270,6 +1295,190 @@ fn scroll_without_modifiers_is_still_a_plain_wheel() {
     assert_eq!(scrolls.get(), vec!["0,120,none".to_string()]);
 }
 
+/// A focused `Probe` and the log of every key half it receives.
+fn focused_key_probe() -> (WidgetTree, WidgetId, Signal<Vec<String>>, Signal<String>) {
+    let probe = Probe::new(accesskit::Role::TextInput, "Field");
+    let keys = probe.keys.clone();
+    let typed = probe.typed.clone();
+    let (mut tree, id) = laid_out(probe);
+    tree.focus(id);
+    (tree, id, keys, typed)
+}
+
+/// An `InjectKey` with no modifiers.
+fn key_op(key: &str, text: Option<&str>, phase: KeyPhase) -> AutomationOp {
+    AutomationOp::InjectKey {
+        key: key.into(),
+        text: text.map(str::to_string),
+        phase,
+        ctrl: false,
+        shift: false,
+        alt: false,
+        meta: false,
+        command: false,
+    }
+}
+
+/// Spec I.3. `type_text` types as a keyboard does: each character is a key
+/// pressed and released, a letter as its named key with Shift for a capital,
+/// a space as Space, each press carrying the character as its text. It sent a
+/// `Key::Character` press and no release, so a widget tracking held keys saw
+/// every key stay down, and a letter shortcut or a widget matching `Key::A`
+/// never saw a letter at all.
+#[test]
+fn type_text_presses_and_releases_each_key_as_a_keyboard_does() {
+    let (mut tree, id, keys, typed) = focused_key_probe();
+    let reply = run(
+        &mut tree,
+        &AutomationOp::TypeText {
+            node: node_ref(id),
+            text: "aB c".into(),
+        },
+    );
+    assert!(reply.is_ok(), "{reply:?}");
+    assert_eq!(
+        keys.get(),
+        [
+            "down:A:none:a",
+            "up:A:none",
+            "down:B:shift:B",
+            "up:B:shift",
+            "down:Space:none: ",
+            "up:Space:none",
+            "down:C:none:c",
+            "up:C:none",
+        ]
+    );
+    assert_eq!(typed.get(), "aB c", "a field inserts what was typed");
+}
+
+/// Spec I.3. `phase: down` and `phase: up` in separate ops send exactly one
+/// press and one release, with the key held in between, and `text` reaches
+/// the press. That is how a probe holds a key across other input.
+#[test]
+fn inject_key_can_hold_a_key_across_ops() {
+    let (mut tree, _id, keys, typed) = focused_key_probe();
+    assert!(run(&mut tree, &key_op("a", Some("a"), KeyPhase::Down)).is_ok());
+    assert_eq!(keys.get(), ["down:A:none:a"], "the press alone");
+    assert!(run(&mut tree, &key_op("a", None, KeyPhase::Up)).is_ok());
+    assert_eq!(
+        keys.get(),
+        ["down:A:none:a", "up:A:none"],
+        "and its release, in a later op"
+    );
+    assert_eq!(typed.get(), "a", "the press carried its text");
+}
+
+/// Without `text`, a press carries what the platform attaches to that key:
+/// nothing for a character key, the control character of a named one. That
+/// is what every `inject_key` sent before `text` existed.
+#[test]
+fn inject_key_without_text_keeps_the_platform_default() {
+    let (mut tree, _id, keys, typed) = focused_key_probe();
+    assert!(run(&mut tree, &key_op("a", None, KeyPhase::Press)).is_ok());
+    assert!(run(&mut tree, &key_op("enter", None, KeyPhase::Press)).is_ok());
+    assert_eq!(
+        keys.get(),
+        [
+            "down:A:none:-",
+            "up:A:none",
+            "down:Enter:none:\r",
+            "up:Enter:none"
+        ]
+    );
+    assert_eq!(typed.get(), "\r");
+}
+
+/// A release carries no text, so asking for one is refused rather than
+/// dropped — and nothing is dispatched.
+#[test]
+fn a_key_release_refuses_text() {
+    let (mut tree, _id, keys, _typed) = focused_key_probe();
+    match run(&mut tree, &key_op("a", Some("a"), KeyPhase::Up)) {
+        AutomationReply::Err { code, .. } => assert_eq!(code, codes::BAD_ARGUMENT),
+        other => panic!("expected BAD_ARGUMENT, got {other:?}"),
+    }
+    assert!(keys.get().is_empty(), "{:?}", keys.get());
+}
+
+/// Every named key resolves from the name its `Display` gives — the name
+/// `get_shortcuts` reports a chord by — and from the spelled-out names for the
+/// three that had none (spec I.3: `insert`, `f13`..`f24`, `contextmenu`).
+#[test]
+fn every_named_key_resolves_from_its_display_name() {
+    let named = [
+        Key::Space,
+        Key::Enter,
+        Key::Escape,
+        Key::Tab,
+        Key::Backspace,
+        Key::Delete,
+        Key::Insert,
+        Key::ArrowUp,
+        Key::ArrowDown,
+        Key::ArrowLeft,
+        Key::ArrowRight,
+        Key::Home,
+        Key::End,
+        Key::PageUp,
+        Key::PageDown,
+        Key::A,
+        Key::M,
+        Key::Z,
+        Key::F1,
+        Key::F2,
+        Key::F3,
+        Key::F4,
+        Key::F5,
+        Key::F6,
+        Key::F7,
+        Key::F8,
+        Key::F9,
+        Key::F10,
+        Key::F11,
+        Key::F12,
+        Key::F13,
+        Key::F14,
+        Key::F15,
+        Key::F16,
+        Key::F17,
+        Key::F18,
+        Key::F19,
+        Key::F20,
+        Key::F21,
+        Key::F22,
+        Key::F23,
+        Key::F24,
+        Key::CapsLock,
+        Key::ContextMenu,
+    ];
+    let probe = Probe::new(accesskit::Role::Button, "B");
+    let received = probe.received.clone();
+    let (mut tree, id) = laid_out(probe);
+    let spelled = [
+        ("insert", Key::Insert),
+        ("f13", Key::F13),
+        ("f24", Key::F24),
+        ("contextmenu", Key::ContextMenu),
+    ];
+    let names = named
+        .iter()
+        .map(|key| (key.to_string(), *key))
+        .chain(spelled.iter().map(|(name, key)| (name.to_string(), *key)));
+    for (name, key) in names {
+        // Each key may move focus (Tab) or open nothing; refocus so every
+        // press reaches the probe.
+        tree.focus(id);
+        let reply = run(&mut tree, &key_op(&name, None, KeyPhase::Press));
+        assert!(reply.is_ok(), "{name:?} must resolve: {reply:?}");
+        assert_eq!(
+            received.get().last(),
+            Some(&format!("named:{key}")),
+            "{name:?} must reach the widget as {key:?}"
+        );
+    }
+}
+
 #[test]
 fn inject_key_unknown_is_unknown_name() {
     let (mut tree, _id) = laid_out(Probe::new(accesskit::Role::Button, "B"));
@@ -1279,6 +1488,8 @@ fn inject_key_unknown_is_unknown_name() {
         &mut ops,
         &AutomationOp::InjectKey {
             key: "NopeKey".into(),
+            text: None,
+            phase: KeyPhase::Press,
             ctrl: false,
             shift: false,
             alt: false,
@@ -1893,6 +2104,8 @@ fn an_injected_key_reaches_the_callers_window_ops() {
         &mut ops,
         &AutomationOp::InjectKey {
             key: "n".into(),
+            text: None,
+            phase: KeyPhase::Press,
             ctrl: true,
             shift: true,
             alt: false,
