@@ -440,7 +440,8 @@ fn a_pull_parses_within_its_budget_and_asks_for_the_rest() {
 }
 
 /// A reader held at the cap is let go when the terminal goes, even while
-/// the child runs on.
+/// the child runs on: it drains what the child writes, so the child is not
+/// blocked by a terminal that no longer exists, and ends with the engine.
 #[test]
 fn a_reader_held_at_the_cap_ends_with_the_terminal() {
     let f = Fixture::with(|t| t.on_close(TerminalClosePolicy::LeaveRunning));
@@ -452,11 +453,23 @@ fn a_reader_held_at_the_cap_ends_with_the_terminal() {
     }
     let (output, held) = (f.output.clone(), f.state.clone());
     drop(f);
+    let deadline = Instant::now() + WAIT;
+    while output.pending_len() > 0 {
+        assert!(
+            Instant::now() < deadline,
+            "the child's output was not drained"
+        );
+        std::thread::yield_now();
+    }
     assert!(
-        output.wait_reader_released(WAIT),
-        "the reader waiting for space stopped with the terminal"
+        !output.wait_reader_released(Duration::from_millis(20)),
+        "the engine is held: the reader reads on"
     );
     drop(held);
+    assert!(
+        output.wait_reader_released(WAIT),
+        "the engine gone, the reader ends"
+    );
 }
 
 fn state() -> TerminalState {

@@ -400,12 +400,13 @@ pub trait TerminalEngine {
 /// on a background thread. `Send` so it can cross the thread boundary.
 ///
 /// The view's reader thread runs whether or not the tree has a window, and
-/// stays blocked in a read for as long as it blocks: after the terminal is
-/// gone too, it ends at the read's return, delivering nothing. A PTY's read
-/// returns when output arrives or every process holding the child's side has
-/// closed it: after a kill, a grandchild that inherited it (`cmd &`) keeps
-/// the thread. `MemoryEngine`'s returns when the engine is killed or
-/// dropped.
+/// reads until a read returns the end of the output or an error. Once the
+/// terminal is gone it reads on and discards what it reads, so that a child
+/// left running is not blocked on its writes and a Windows pseudoconsole,
+/// whose close waits for its output to be drained, can close. A reader should
+/// therefore return the end once its engine is killed or dropped: one that
+/// blocks on after that keeps the thread until it returns. The default
+/// engine's and `MemoryEngine`'s do.
 pub type PtyReader = Box<dyn std::io::Read + Send>;
 
 /// A freshly-spawned engine plus the PTY reader for its child's output.

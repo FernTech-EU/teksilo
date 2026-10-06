@@ -159,8 +159,12 @@ pub(crate) struct Taken {
 
 /// Spawn the PTY reader thread: read at most the room left, queue, ask for a
 /// pull; on the output's end, mark it and ask once more. Ends when the
-/// reader reports the end of the output, fails, or the terminal is gone. A
-/// reader blocked in `read` ends at the read's return (see
+/// reader reports the end of the output or fails.
+///
+/// Once the terminal is gone it reads on and discards what it reads, to the
+/// end: a child left running is not blocked on its writes by a terminal that
+/// no longer exists, and a Windows pseudoconsole, whose close waits for its
+/// output to be drained, can close. The end comes when the engine goes (see
 /// [`PtyReader`](crate::engine::PtyReader)).
 pub(crate) fn spawn_reader_thread(
     mut reader: Box<dyn Read + Send>,
@@ -171,29 +175,37 @@ pub(crate) fn spawn_reader_thread(
         .name("teksilo-terminal-pty".into())
         .spawn(move || {
             let mut buf = [0u8; 8192];
-            while let Some(room) = queue.wait_for_space() {
-                let len = room.min(buf.len());
-                match reader.read(&mut buf[..len]) {
-                    Ok(0) => {
-                        if queue.set_eof() {
-                            trigger.request_pull();
+            let mut discarding = false;
+            loop {
+                let len = if discarding {
+                    buf.len()
+                } else {
+                    match queue.wait_for_space() {
+                        Some(room) => room.min(buf.len()),
+                        None => {
+                            discarding = true;
+                            buf.len()
                         }
-                        break;
                     }
+                };
+                match reader.read(&mut buf[..len]) {
+                    Ok(0) => break,
                     Ok(n) => {
-                        if !queue.push(&buf[..n]) {
-                            break;
+                        if discarding {
+                            continue;
                         }
-                        trigger.request_pull();
+                        if queue.push(&buf[..n]) {
+                            trigger.request_pull();
+                        } else {
+                            discarding = true;
+                        }
                     }
                     Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(_) => {
-                        if queue.set_eof() {
-                            trigger.request_pull();
-                        }
-                        break;
-                    }
+                    Err(_) => break,
                 }
+            }
+            if !discarding && queue.set_eof() {
+                trigger.request_pull();
             }
         });
 }
@@ -252,18 +264,65 @@ mod tests {
     /// left.
     #[test]
     fn the_reader_thread_never_queues_past_the_cap() {
-        struct Endless;
+        /// Output without end, until its engine goes.
+        struct Endless(Arc<std::sync::atomic::AtomicBool>);
         impl std::io::Read for Endless {
             fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if self.0.load(std::sync::atomic::Ordering::SeqCst) {
+                    return Ok(0);
+                }
                 buf.fill(b'y');
                 Ok(buf.len())
             }
         }
+        let gone = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let queue = Arc::new(ReaderQueue::with_cap(10_000));
-        spawn_reader_thread(Box::new(Endless), queue.clone(), RepaintTrigger::new());
+        spawn_reader_thread(
+            Box::new(Endless(gone.clone())),
+            queue.clone(),
+            RepaintTrigger::new(),
+        );
         until_waiting(&queue, Duration::from_secs(5));
         assert_eq!(queue.len(), 10_000, "filled to the cap exactly");
         queue.shut_down();
+        gone.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Once the terminal is gone, the reader reads on and discards, to the
+    /// end of the output, and reports no end to a terminal nobody reads.
+    #[test]
+    fn a_reader_drains_to_the_end_once_the_terminal_is_gone() {
+        let queue = Arc::new(ReaderQueue::with_cap(4));
+        let source: Vec<u8> = (0..100).collect();
+        let read = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        struct Counting(
+            std::io::Cursor<Vec<u8>>,
+            Arc<std::sync::atomic::AtomicUsize>,
+        );
+        impl std::io::Read for Counting {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n = self.0.read(buf)?;
+                self.1.fetch_add(n, std::sync::atomic::Ordering::SeqCst);
+                Ok(n)
+            }
+        }
+        spawn_reader_thread(
+            Box::new(Counting(std::io::Cursor::new(source), read.clone())),
+            queue.clone(),
+            RepaintTrigger::new(),
+        );
+        until_waiting(&queue, Duration::from_secs(5));
+        assert_eq!(queue.len(), 4, "held at the cap");
+        queue.shut_down();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while read.load(std::sync::atomic::Ordering::SeqCst) < 100 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the rest was not drained"
+            );
+            std::thread::yield_now();
+        }
+        assert_eq!(queue.len(), 4, "nothing more queued for nobody");
     }
 
     #[test]

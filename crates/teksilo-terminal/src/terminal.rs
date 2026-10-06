@@ -67,12 +67,9 @@ pub enum TerminalClosePolicy {
     /// Kill the child (`SIGKILL`) when the widget is dropped — the default; a
     /// terminal shouldn't outlive its view.
     KillOnDrop,
-    /// Don't kill the child on drop. The terminal's reader thread holds the
-    /// PTY open while it waits for output, so the child gets `SIGHUP` only
-    /// once that read returns: the next time it writes after the terminal is
-    /// gone. It then exits unless it ignores the hangup (e.g. `nohup`, a
-    /// detached `tmux`/`screen`, or `trap '' HUP`); a child that never writes
-    /// again keeps the PTY, and the reader thread, until it exits.
+    /// Don't kill the child on drop. It receives `SIGHUP` when its PTY closes
+    /// as the engine drops, so it exits unless it ignores the hangup (e.g.
+    /// `nohup`, a detached `tmux`/`screen`, or `trap '' HUP`).
     LeaveRunning,
 }
 

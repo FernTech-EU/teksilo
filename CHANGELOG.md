@@ -130,8 +130,9 @@ by crate for clarity, not because crates version independently.
   mounted terminal now runs a reader thread for it, headless included, which
   a test that leaks its tree leaks too.
 - A `TerminalEngineFactory`'s reader is now read on a thread in every tree,
-  headless included, and that thread stays blocked in a read until it
-  returns, after the terminal is gone too.
+  headless included, to the end of its output: once the terminal is gone the
+  thread reads on and discards what it reads, so a reader should return the
+  end once its engine is killed or dropped.
 
 #### Core
 
@@ -205,6 +206,16 @@ by crate for clarity, not because crates version independently.
 
 - **The cursor blinked, and the visual bell faded, only when something else
   repainted the terminal.** Both now repaint it.
+- **A child that stopped reading its input could freeze the application.**
+  Keys, pastes and the terminal's replies to the child's queries waited on
+  the UI thread for the child to take them. They are now written from a
+  thread of their own; what a child that never reads would have queued past
+  4 MiB is dropped.
+- **A child left running (`TerminalClosePolicy::LeaveRunning`) was hung up
+  only the next time it wrote after its terminal went, and a background
+  process the child had started kept the terminal's reader thread alive
+  after a kill.** The PTY now closes when the engine goes, whatever still
+  holds the child's side of it.
 
 #### WebView
 
