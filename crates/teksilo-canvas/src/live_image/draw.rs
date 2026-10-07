@@ -25,6 +25,11 @@ pub struct LiveImageDraw {
     /// window holds none of the painted size. `LiveImage` sets it from
     /// `pause_when_inactive`; a custom widget may set it from any policy.
     pub paused: bool,
+    /// Let the renderer move a picture it draws one texel to one device
+    /// pixel onto the pixel grid, which keeps it sharp. Off for a picture
+    /// whose position is animated, where that step would show. `LiveImage`
+    /// sets it from its `pixel_snap`. Default true.
+    pub pixel_snap: bool,
 }
 
 impl LiveImageDraw {
@@ -36,6 +41,7 @@ impl LiveImageDraw {
             filter: ScalingFilter::default(),
             orientation: ImageOrientation::default(),
             paused: false,
+            pixel_snap: true,
         }
     }
 
@@ -51,6 +57,11 @@ impl LiveImageDraw {
 
     pub fn paused(mut self, paused: bool) -> Self {
         self.paused = paused;
+        self
+    }
+
+    pub fn pixel_snap(mut self, on: bool) -> Self {
+        self.pixel_snap = on;
         self
     }
 }
@@ -77,6 +88,9 @@ pub struct LiveImageQuad {
     /// a window becoming active or inactive repaints every widget, so a
     /// replayed value is never stale.
     pub paused: bool,
+    /// Copied from [`LiveImageDraw::pixel_snap`]: whether the renderer may
+    /// move a one-to-one quad onto the pixel grid.
+    pub pixel_snap: bool,
 }
 
 impl LiveImageQuad {
@@ -99,6 +113,7 @@ impl LiveImageQuad {
             filter: draw.filter,
             painted,
             paused: draw.paused,
+            pixel_snap: draw.pixel_snap,
         }
     }
 

@@ -731,6 +731,20 @@ fn snapping_can_be_turned_off() {
     tree.add(HStack::new().child(id));
     tree.layout(SizeProposal::exact(100.0, 100.0));
     assert!((handle.geometry().unwrap().content.width - 10.3).abs() < 1e-4);
+    assert!(
+        !only_quad(&tree.render()).pixel_snap,
+        "nor may the renderer snap it: the quad says so"
+    );
+}
+
+#[test]
+fn a_snapped_picture_lets_the_renderer_snap_its_quad() {
+    let (source, _writer) = live(16, 12);
+    let mut tree = tree();
+    let id = tree.add(LiveImage::new(source).alt("x"));
+    tree.add(HStack::new().child(id));
+    tree.layout(SizeProposal::exact(100.0, 100.0));
+    assert!(only_quad(&tree.render()).pixel_snap);
 }
 
 #[test]

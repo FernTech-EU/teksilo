@@ -136,8 +136,10 @@ with `device_pixels`, one source pixel per device pixel, so `ImageFit::None`
 and `ScaleDown` keep a texel on a device pixel. `snapped` moves the picture's edges to the
 device-pixel grid through the widget's effective transform times the scale
 factor, and only for a translation plus an axis-aligned scale. A quad's screen
-rect is the content clipped to the bounds and may be fractional; its texels
-still land on pixel centres. `place_children` records the placement on the
+rect is the content clipped to the bounds and may be fractional; the renderer
+still lands the texels of a one-to-one quad on pixel centres, unless its
+draw turned `pixel_snap` off (`LiveImage` passes its own), which an animated
+position needs. `place_children` records the placement on the
 attachment. That is what `LiveImageHandle::map_to_source`, `live_image_map`
 and `source` aiming read, so input and automation agree with paint.
 

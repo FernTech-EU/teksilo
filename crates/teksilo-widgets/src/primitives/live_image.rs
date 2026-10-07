@@ -292,8 +292,10 @@ impl LiveImage {
     /// Snap the picture's edges to the device-pixel grid, which keeps a 1:1
     /// picture sharp. An edge moves by less than one device pixel. Turn it
     /// off only for a picture whose box is animated, where that step would
-    /// show. Snapping applies under translations and scales; a rotated or
-    /// skewed ancestor turns it off. Default true.
+    /// show: the placement is then left where the layout puts it, and the
+    /// renderer does not snap a one-to-one picture either. Snapping applies
+    /// under translations and scales; a rotated or skewed ancestor turns it
+    /// off. Default true.
     pub fn pixel_snap(mut self, on: bool) -> Self {
         self.pixel_snap = on;
         self
@@ -689,7 +691,8 @@ impl Widget for LiveImage {
             &LiveImageDraw::new(content, bounds)
                 .filter(self.scaling)
                 .orientation(self.orientation)
-                .paused(self.pause_when_inactive.get() && !ctx.window_active),
+                .paused(self.pause_when_inactive.get() && !ctx.window_active)
+                .pixel_snap(self.pixel_snap),
         );
         if dimmed {
             canvas.restore_opacity();

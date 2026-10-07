@@ -938,6 +938,43 @@ fn a_one_to_one_picture_at_a_fractional_origin_is_snapped_to_the_pixel_grid() {
     );
 }
 
+/// With `pixel_snap` off, a one-to-one picture at a fractional origin is
+/// drawn where it is, its texels sampled across the pixel boundary, so an
+/// animated position moves smoothly; with it on (the default) the same
+/// picture lands on the grid. The renderer used to snap it either way.
+#[test]
+fn a_one_to_one_picture_with_pixel_snap_off_keeps_its_fractional_origin() {
+    let Some(mut g) = gpu("live_unsnapped") else {
+        return;
+    };
+    let source = LiveImageSource::new(LivePixelFormat::Rgba8);
+    let writer = source.writer();
+    // Red, then blue.
+    writer
+        .write_frame(2, 1, &[255, 0, 0, 255, 0, 0, 255, 255], 8)
+        .unwrap();
+    let (_, c) = consumer(&source);
+    lay_out(&c);
+    let t = g.target(4, 1);
+    let rect = Rect::new(0.25, 0.0, 2.0, 1.0);
+    let pixel_one = |g: &mut Gpu, snap: bool| {
+        let mut canvas = Canvas::new();
+        canvas.draw_live_image(&c, &LiveImageDraw::new(rect, rect).pixel_snap(snap));
+        g.render(&canvas.into_render_frame(), &t);
+        g.read(&t)[4..8].to_vec()
+    };
+    let unsnapped = pixel_one(&mut g, false);
+    assert!(
+        unsnapped[0] > 0 && unsnapped[2] > 0,
+        "pixel 1 samples between the red texel and the blue one: {unsnapped:?}"
+    );
+    assert_eq!(
+        pixel_one(&mut g, true),
+        vec![0, 0, 255, 255],
+        "snapped to the grid, pixel 1 is the blue texel"
+    );
+}
+
 // ── a spread fill, and the reclaim poll ──
 
 #[test]

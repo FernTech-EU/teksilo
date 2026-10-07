@@ -2171,7 +2171,8 @@ impl Renderer {
     /// so a picture is never stretched across a size change. The corners
     /// sample `quad.uv`, which carries the orientation and the crop. A quad
     /// that maps one texel to one device pixel under a transform with no
-    /// rotation or scale is snapped to the pixel grid, as glyphs are.
+    /// rotation or scale is snapped to the pixel grid, as glyphs are, unless
+    /// its draw turned `pixel_snap` off.
     #[allow(clippy::too_many_arguments)]
     fn draw_live_image(
         &self,
@@ -2208,8 +2209,7 @@ impl Renderer {
             flags |= crate::vertex::QUAD_FLAG_SWAP_RB;
         }
         let verts = crate::vertex::live_quad_verts(
-            quad.screen,
-            quad.uv,
+            quad,
             texture.size(),
             scale_factor,
             transform,

@@ -78,7 +78,8 @@ by crate for clarity, not because crates version independently.
   texel of either, for rebuilding part of a halved image.
 - `Canvas::draw_live_image`, which draws a live picture: `LiveImageDraw`
   says where (the whole picture and the part that shows, cropped by texture
-  coordinates), how it is sampled and turned, and whether it is paused; the
+  coordinates), how it is sampled and turned, whether it is paused, and
+  whether the renderer may snap a one-to-one picture to the pixel grid; the
   frame carries a `LiveImageQuad` in `RenderFrame::live_images`, with a
   `DrawCommand::LiveImage`, and no pixels. `LiveTextureStats` reports what a
   renderer holds and uploads for live pictures, and

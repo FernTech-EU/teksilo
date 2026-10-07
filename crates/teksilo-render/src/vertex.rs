@@ -3,6 +3,7 @@
 
 use bytemuck::{Pod, Zeroable};
 
+use teksilo_canvas::live_image::LiveImageQuad;
 use teksilo_canvas::render_frame::PaintData;
 use teksilo_canvas::{DecorationRect, GlyphQuad, PathEntry, ShadowQuad, ShapeQuad, Transform2D};
 
@@ -83,22 +84,23 @@ fn apply_affine(p: [f32; 2], t: &Transform2D) -> [f32; 2] {
     [a * p[0] + c * p[1] + tx, b * p[0] + d * p[1] + ty]
 }
 
-/// The four vertices of a live picture, in device pixels: `screen` (logical
-/// `[x, y, width, height]`) under `transform`, its corners sampling `uv`
-/// (top-leading, top-trailing, bottom-trailing, bottom-leading) of a
-/// `texture`-sized texture. A quad that maps one texel to one device pixel,
-/// under a transform that neither rotates nor scales it, has its origin
-/// rounded to the pixel grid, so it samples texel centres exactly as glyphs
-/// do; any other is placed where the transform puts it.
+/// The four vertices of live picture `quad`, in device pixels: its `screen`
+/// (logical `[x, y, width, height]`) under `transform`, its corners sampling
+/// its `uv` (top-leading, top-trailing, bottom-trailing, bottom-leading) of
+/// a `texture`-sized texture. A quad that maps one texel to one device
+/// pixel, under a transform that neither rotates nor scales it, has its
+/// origin rounded to the pixel grid, so it samples texel centres exactly as
+/// glyphs do, unless its draw turned `pixel_snap` off; any other is placed
+/// where the transform puts it.
 pub(crate) fn live_quad_verts(
-    screen: [f32; 4],
-    uv: [[f32; 2]; 4],
+    quad: &LiveImageQuad,
     texture: (u32, u32),
     scale_factor: f32,
     transform: &Transform2D,
     color: [f32; 4],
     flags: u32,
 ) -> [QuadVertex; 4] {
+    let (screen, uv) = (quad.screen, quad.uv);
     let [x, y, w, h] = screen;
     let (sx, sy, sw, sh) = (
         x * scale_factor,
@@ -114,7 +116,8 @@ pub(crate) fn live_quad_verts(
     let (across, down) = (along(uv[0], uv[1]), along(uv[0], uv[3]));
     let [a, b, c, d, _, _] = transform.m;
     let whole = |v: f32| (v - v.round()).abs() < GLYPH_SNAP_SIZE_EPS;
-    let one_to_one = b.abs() < GLYPH_SNAP_AXIS_EPS
+    let one_to_one = quad.pixel_snap
+        && b.abs() < GLYPH_SNAP_AXIS_EPS
         && c.abs() < GLYPH_SNAP_AXIS_EPS
         && (a * sw - across).abs() < GLYPH_SNAP_SIZE_EPS
         && (d * sh - down).abs() < GLYPH_SNAP_SIZE_EPS

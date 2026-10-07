@@ -152,7 +152,9 @@ box, `fit` (an `ImageFit`) and `alignment` place the picture,
   much smaller than its source.
 
 The picture's edges snap to the device-pixel grid, also under an ancestor's
-scale; `pixel_snap(false)` turns that off.
+scale, and the renderer draws a picture shown one texel to one device pixel
+on the grid. `pixel_snap(false)` turns both off, for a picture whose position
+is animated, where each snap would show as a step.
 
 `background` fills the letterbox. While the source is not `Live`, it fills the
 whole box, and `placeholder` text is centred on it.
