@@ -756,11 +756,13 @@ impl PenSource for WaylandPenSource {
         PenCaps::FULL_PEN
     }
 
-    /// Yes: the tablet listener runs on its own thread — at [`POLL_INTERVAL`]
-    /// while a tool is announced, and on a slower tier while none is — so the
-    /// event loop has to look again after a wake.
+    /// While a tool is announced: the tablet listener then reads on its own
+    /// thread at [`POLL_INTERVAL`], so the event loop has to look again after
+    /// a wake. With none, no packet can arrive (a seat announces a tool before
+    /// it can be in proximity), and a look after every wake would find
+    /// nothing.
     fn polls_off_thread(&self) -> bool {
-        true
+        self.queue.has_tool.load(Ordering::Relaxed)
     }
 }
 

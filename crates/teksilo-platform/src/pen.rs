@@ -527,7 +527,8 @@ pub trait PenSource: std::fmt::Debug {
         PenCaps::NONE
     }
 
-    /// Whether this source fills its buffer from a thread of its own.
+    /// Whether this source fills its buffer from a thread of its own, so a
+    /// packet may still be on its way after the event that woke the loop.
     ///
     /// The event loop needs to know, because it decides whether draining once
     /// per turn is enough. A shim that reads on the **winit thread** — the
@@ -540,7 +541,9 @@ pub trait PenSource: std::fmt::Debug {
     /// catch-up look is armed at [`PEN_POLL_INTERVAL`], which is the interval
     /// that applies once a tool has been announced; a session with none is on
     /// a slower tier, and cannot deliver a packet at all until `tool_added`
-    /// has moved it to the fast one.
+    /// has moved it to the fast one. Such a source answers `false` until then:
+    /// a look armed at every wake would find nothing, and cost the loop a
+    /// second turn per wake on every window of a session with no tablet.
     ///
     /// Defaults to `false`, which is the answer for a source with no thread.
     fn polls_off_thread(&self) -> bool {

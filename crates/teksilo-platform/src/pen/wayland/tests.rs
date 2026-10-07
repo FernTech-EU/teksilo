@@ -584,6 +584,26 @@ fn a_session_with_no_tool_is_not_polled_at_stylus_rate() {
     );
 }
 
+/// The event loop looks again after a wake only while a packet can be on its
+/// way: with no tool announced none can, and a look after every wake cost a
+/// second loop turn per wake on every window of a session with no tablet.
+#[test]
+fn the_loop_looks_again_only_once_a_tool_is_announced() {
+    use super::{PenSource, WaylandPenSource};
+
+    let source = WaylandPenSource {
+        queue: Arc::new(PenQueue::default()),
+    };
+    assert!(!source.polls_off_thread(), "no tool: nothing can arrive");
+    source.queue.has_tool.store(true, Ordering::Relaxed);
+    assert!(
+        source.polls_off_thread(),
+        "a tool: its packets come off thread"
+    );
+    source.queue.has_tool.store(false, Ordering::Relaxed);
+    assert!(!source.polls_off_thread(), "the last one removed");
+}
+
 // ---------------------------------------------------------------------------
 // The frame's own clock
 // ---------------------------------------------------------------------------
@@ -961,9 +981,11 @@ fn a_decoded_run_folds_with_the_compositors_own_stamps() {
 /// All three were live mutation survivors: a `poll` that drops the batch on the
 /// floor, a `capabilities` that stops advertising a pen, and a
 /// `polls_off_thread` that claims to be synchronous each left the whole suite
-/// green. The last is the quiet one — the tablet thread fills this queue
-/// between loop turns, so a source answering `false` there is a stylus whose
-/// ink stops until some *other* event happens to wake the loop.
+/// green. The last is the quiet one — once a tool is announced the tablet
+/// thread fills this queue between loop turns, so a source answering `false`
+/// then is a stylus whose ink stops until some *other* event happens to wake
+/// the loop. With no tool it answers `false` on purpose: see
+/// `the_loop_looks_again_only_once_a_tool_is_announced`.
 #[test]
 fn the_source_hands_the_pump_its_queue_and_its_terms() {
     let queue = Arc::new(PenQueue::default());
@@ -976,10 +998,11 @@ fn the_source_hands_the_pump_its_queue_and_its_terms() {
         PenCaps::FULL_PEN,
         "a tablet tool reports its kind, pressure, tilt and rotation"
     );
+    queue.has_tool.store(true, Ordering::Relaxed);
     assert!(
         source.polls_off_thread(),
-        "the queue is filled by the dispatch thread, so the loop has to look \
-         again after a wake"
+        "with a tool announced, the queue is filled by the dispatch thread, so \
+         the loop has to look again after a wake"
     );
 
     // The dispatch thread's side of the handoff.

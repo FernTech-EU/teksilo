@@ -540,6 +540,10 @@ by crate for clarity, not because crates version independently.
 
 - **An assistive technology acting on a window as the application exited
   could panic it on X11.** It no longer can.
+- **On Wayland, every wake of the event loop cost a second one 4 ms later**,
+  under any compositor offering tablet support, tablet attached or not: the
+  loop looked again for pen packets, which cannot arrive before a tablet
+  tool is announced. It looks again only once one is.
 
 #### Render
 

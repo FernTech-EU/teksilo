@@ -320,6 +320,12 @@ commit-to-upload columns are in ms.
   frame handed the adapter a copy of the tree it held. It now delivers, and
   holds back, only what the adapter lacks: one frame per commit,
   accessibility on or off.
+- **On Wayland** each external wake armed a 4 ms look for the tablet shim's
+  packets, even on a seat with no tablet tool, where none can arrive: a
+  second loop turn per wake. The look is now armed only once a tool is
+  announced. With both fixes, a commit costs one frame and no timer wake,
+  accessibility on or off; AC7's workload took 3.2 % (off) and 2.4 % (on),
+  single runs within the spread between runs.
 - **Commit to upload** depends on where the producer's 60 Hz clock falls
   against the display's, which differs from one run to the next: its p50
   ranged from 2.2 to 13.9 ms across these runs, whatever the scenario.
@@ -384,13 +390,10 @@ commits, which is AC20's last clause.
 The three left at the end of PR-5 are settled: a culling parent's parked
 child now leaves the composed frame (AC19), `source` aiming refuses what a
 press would not reach (section 6), and an app reads the timings in its idle
-trace (section 9, commit 35). Measuring in a window found these, none of them
-LiveImage's and all of them already in 0.15.1:
+trace (section 9, commit 35). Measuring in a window found three more. Two,
+already in 0.15.1 and not LiveImage's, are fixed (Measurements: the
+accessibility delivery, the Wayland pen look). One remains:
 
 - **AC13 with two windows** (Measurements). The staging ring is gated on
   per-call staging allocation showing in the AC6 or AC13 profiles, and the
   page faults say it does not.
-- **The Wayland pen catch-up** (teksilo-app, `pump_pen_sources`). Every
-  external wake arms a 4 ms look for the tablet shim, even on a seat that
-  has announced no tablet tool, so each producer wake costs two loop
-  iterations.
