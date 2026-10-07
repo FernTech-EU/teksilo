@@ -115,10 +115,16 @@ impl OffThreadRegistry {
 
     /// Release everything attached to `id`, on its destruction.
     pub(crate) fn cancel_by_widget(&mut self, id: WidgetId) {
+        self.release_triggers(id);
+        self.detach_live(id);
+    }
+
+    /// Release `id`'s wake state, which its triggers and pull hook share,
+    /// and nothing else: its live images are attached apart.
+    fn release_triggers(&mut self, id: WidgetId) {
         if let Some(node) = self.triggers.remove(&id) {
             node.state.detach();
         }
-        self.detach_live(id);
     }
 
     /// Widget `id` is about to be rebuilt: its new `build()` attaches its
@@ -193,8 +199,9 @@ impl WidgetTree {
     }
 
     /// Widget `id`'s rebuild ran its `build()`: release the triggers it no
-    /// longer attached, and the widget's wake state if it attached nothing
-    /// and set no hook.
+    /// longer attached, and the widget's wake state if it attached none and
+    /// set no hook. The live images that `build()` attached stay: they are
+    /// the widget's, not its triggers'.
     pub(crate) fn finish_off_thread_rebuild(&mut self, id: WidgetId) {
         let Some(node) = self.off_thread.triggers.get_mut(&id) else {
             return;
@@ -203,7 +210,7 @@ impl WidgetTree {
             stale.detach_state(&node.state);
         }
         if node.triggers.is_empty() && node.hook.is_none() {
-            self.off_thread.cancel_by_widget(id);
+            self.off_thread.release_triggers(id);
             if let Some(arena_node) = self.arena.get_mut(id) {
                 arena_node.repaint_wake = None;
             }

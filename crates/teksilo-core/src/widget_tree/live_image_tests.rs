@@ -320,6 +320,100 @@ fn b01_attaching_registers_and_a_rebuild_or_a_destroy_detaches() {
     assert_eq!(f.source.stats().attachments, 0);
 }
 
+/// `Live`, attaching a `RepaintTrigger` too while `with_trigger` holds.
+#[derive(Debug)]
+struct LiveWithTrigger {
+    live: Live,
+    trigger: crate::RepaintTrigger,
+    with_trigger: Rc<Cell<bool>>,
+}
+
+impl Widget for LiveWithTrigger {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        if self.with_trigger.get() {
+            ctx.attach_repaint_trigger(&self.trigger);
+        }
+        self.live.build(ctx)
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        self.live.layout_response(proposal, ctx)
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        ctx: &LayoutContext,
+    ) {
+        self.live.place_children(bounds, proposal, children, ctx);
+    }
+
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        self.live.paint(bounds, canvas, ctx);
+    }
+}
+
+/// A rebuild that stops attaching the widget's last trigger releases the
+/// trigger's wake state, and only that: the live image the same `build()`
+/// attached keeps waking the window and updating its layout signals.
+#[test]
+fn a_rebuild_that_drops_its_last_trigger_keeps_its_live_image() {
+    let source = LiveImageSource::new(LivePixelFormat::Rgba8);
+    let writer = source.writer();
+    writer.write_frame(4, 4, &frame_of(4, 4, 0), 16).unwrap();
+    let mut tree = WidgetTree::new();
+    let waker = Arc::new(CountingWaker::new());
+    tree.set_redraw_waker(Some(waker.clone() as Arc<dyn RedrawWaker>));
+    let with_trigger = Rc::new(Cell::new(true));
+    let widget = LiveWithTrigger {
+        live: Live::new(&source),
+        trigger: crate::RepaintTrigger::new(),
+        with_trigger: with_trigger.clone(),
+    };
+    let (signals, attachment) = (widget.live.signals.clone(), widget.live.attachment.clone());
+    let id = tree.add(widget);
+    let mut mirror = LiveImageMirror::new();
+    let mut frame = |tree: &mut WidgetTree| {
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        mirror.consume(&tree.render())
+    };
+    frame(&mut tree);
+    assert_eq!(tree.repaint_trigger_count(), 1);
+    assert_eq!(tree.live_image_attachment_count(), 1);
+
+    with_trigger.set(false);
+    tree.arena.get_mut(id).unwrap().dirty.needs_rebuild = true;
+    frame(&mut tree);
+    assert_eq!(tree.repaint_trigger_count(), 0, "the trigger is released");
+    assert_eq!(
+        tree.live_image_attachment_count(),
+        1,
+        "the live image the new build attached is kept"
+    );
+    assert_eq!(source.stats().attachments, 1);
+    let kept = attachment.borrow().clone().unwrap();
+    assert!(!kept.is_detached());
+
+    let before = waker.count();
+    writer
+        .write_rect(PixelRect::new(0, 0, 1, 1), &[9; 4], 4)
+        .unwrap();
+    assert_eq!(waker.count(), before + 1, "a commit still wakes the window");
+    assert!(
+        frame(&mut tree).partial_uploads == 1,
+        "and the next frame uploads it"
+    );
+    writer.write_frame(6, 4, &frame_of(6, 4, 1), 24).unwrap();
+    frame(&mut tree);
+    assert_eq!(
+        signals.frame_size.get(),
+        Some((6, 4)),
+        "and a resize still reaches its layout signals"
+    );
+}
+
 // ── AC1-AC4: a pixel commit, and idle ──
 
 #[test]
