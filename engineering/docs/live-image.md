@@ -305,11 +305,14 @@ commit-to-upload columns are in ms.
 - **Two windows.** The window that uploads first holds the lock 1.66 ms at
   p99, against 1.06 ms for the second and 1.05–1.12 ms for one window alone,
   which puts AC13 over its goal (1.5 ms). Rotations make no difference: two
-  windows with none measured 1.60 ms. It is not staging churn. The UI thread
-  took 5.8 minor faults a second with two windows (one window: 0), against
-  the 2,025 a frame that marked churn at 7680 × 4320. Unprivileged `perf` is
-  off on this host, so this is the page-fault reading, not a profile. Two
-  8 MiB copies per commit share the APU's memory with the GPU.
+  windows with none measured 1.60 ms. A `perf` profile of the UI thread (DWARF
+  call graphs, 20 s of full 1080p frames, one window and then two) puts 94 %
+  of `write_texture`'s samples in `memmove`, the frame's copy into wgpu's
+  staging buffer under the lock, and at most 0.6 % in allocation. The UI
+  thread took 5.8 minor faults a second with two windows (one window: 0),
+  against the 2,025 a frame that marked staging churn at 7680 × 4320. So it
+  is the copy itself: each window copies the 8 MiB frame per commit, on an
+  APU whose GPU shares the same memory.
 - **A remount** costs a texture's creation and its first upload, hence the
   churn row's p99 above 2 ms; it is not one of AC13's cases.
 - **With accessibility on** (an AT-SPI client attached), AC7's workload took
@@ -394,6 +397,10 @@ trace (section 9, commit 35). Measuring in a window found three more. Two,
 already in 0.15.1 and not LiveImage's, are fixed (Measurements: the
 accessibility delivery, the Wayland pen look). One remains:
 
-- **AC13 with two windows** (Measurements). The staging ring is gated on
-  per-call staging allocation showing in the AC6 or AC13 profiles, and the
-  page faults say it does not.
+- **AC13 with two windows** (Measurements). The profile rules out staging
+  allocation, so the staging ring's gate (per-call allocation showing in the
+  AC6 or AC13 profiles) does not trip. What would bring the hold under 1.5 ms
+  is one copy per commit instead of one per window. Every window shares one
+  wgpu device (`SharedGpu` in teksilo-platform), so a live texture could be
+  held per device rather than per (window, source), which section 4's rule
+  forbids today. Not decided.
