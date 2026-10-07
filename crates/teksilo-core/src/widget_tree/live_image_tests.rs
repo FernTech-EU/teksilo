@@ -414,6 +414,102 @@ fn a_rebuild_that_drops_its_last_trigger_keeps_its_live_image() {
     );
 }
 
+/// Places a live image as a snapping widget does: records the transform it
+/// snapped under (or none, when `snaps` is false) and counts its
+/// placements.
+#[derive(Debug)]
+struct SnapProbe {
+    source: LiveImageSource,
+    signals: LiveImageSignals,
+    attachment: Option<LiveImageAttachment>,
+    snaps: bool,
+    placed: Rc<Cell<u32>>,
+}
+
+impl Widget for SnapProbe {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        self.attachment = Some(ctx.attach_live_image(&self.source, &self.signals));
+        vec![]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(20.0, 20.0).into()
+    }
+
+    fn place_children(
+        &self,
+        _bounds: Rect,
+        _proposal: SizeProposal,
+        _children: &mut [WidgetPlacement],
+        ctx: &LayoutContext,
+    ) {
+        self.placed.set(self.placed.get() + 1);
+        let attachment = self.attachment.as_ref().unwrap();
+        let under = self.snaps.then(|| {
+            ctx.arena()
+                .map(|arena| arena.effective_transform(attachment.widget_id()))
+                .unwrap()
+        });
+        attachment.set_snapped_under(under);
+    }
+}
+
+/// A transform scope lays nothing out, so a picture snapped under an
+/// ancestor's transform is laid out again when that transform changes, and
+/// only then: not on a frame where it did not change, not between two
+/// rotations (neither snaps, so the placement is the same), and never for a
+/// picture that does not snap.
+#[test]
+fn a_picture_is_laid_out_again_only_when_the_transform_it_snapped_under_moves_the_snap() {
+    use teksilo_canvas::Transform2D;
+    for snaps in [true, false] {
+        let source = LiveImageSource::new(LivePixelFormat::Rgba8);
+        source
+            .writer()
+            .write_frame(4, 4, &frame_of(4, 4, 0), 16)
+            .unwrap();
+        let placed = Rc::new(Cell::new(0));
+        let mut tree = WidgetTree::new();
+        let probe = tree.add(SnapProbe {
+            signals: LiveImageSignals::new(&source),
+            source,
+            attachment: None,
+            snaps,
+            placed: placed.clone(),
+        });
+        let parent = tree.add(Row::new(vec![probe]));
+        let transform = Signal::new(Transform2D::IDENTITY);
+        tree.set_transform(parent, transform.clone());
+        let placements = |tree: &mut WidgetTree, t: Option<Transform2D>| {
+            if let Some(t) = t {
+                transform.set(t);
+            }
+            let before = placed.get();
+            tree.layout(SizeProposal::exact(200.0, 100.0));
+            let _ = tree.render();
+            placed.get() - before
+        };
+        placements(&mut tree, None);
+
+        let moved = placements(&mut tree, Some(Transform2D::translate(0.5, 0.0)));
+        assert_eq!(moved, u32::from(snaps), "snaps {snaps}: a translation");
+        assert_eq!(placements(&mut tree, None), 0, "snaps {snaps}: no change");
+        let turned = placements(&mut tree, Some(Transform2D::rotate(0.3)));
+        assert_eq!(turned, u32::from(snaps), "snaps {snaps}: to a rotation");
+        assert_eq!(
+            placements(&mut tree, Some(Transform2D::rotate(0.6))),
+            0,
+            "snaps {snaps}: between two rotations neither snaps"
+        );
+        let back = placements(&mut tree, Some(Transform2D::IDENTITY));
+        assert_eq!(
+            back,
+            u32::from(snaps),
+            "snaps {snaps}: back from a rotation"
+        );
+    }
+}
+
 // ── AC1-AC4: a pixel commit, and idle ──
 
 #[test]

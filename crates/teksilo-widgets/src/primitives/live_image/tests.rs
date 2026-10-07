@@ -737,6 +737,47 @@ fn snapping_can_be_turned_off() {
     );
 }
 
+/// An ancestor's transform scope changes without a layout pass. The
+/// picture is laid out again and snaps under the new transform: 10.3
+/// logical pixels are 10 device pixels at no scale, and 21 device pixels
+/// (10.5 logical) under a 2x scale. It kept the snap of the transform it
+/// was first laid out under.
+#[test]
+fn an_ancestor_transform_changed_later_snaps_the_picture_anew() {
+    let (source, _writer) = live(16, 12);
+    let image = LiveImage::new(source)
+        .size(10.3, 7.7)
+        .fit(ImageFit::Fill)
+        .alt("x");
+    let handle = image.handle();
+    let mut tree = tree();
+    let id = tree.add(image);
+    let parent = tree.add(HStack::new().child(id));
+    let transform = Signal::new(Transform2D::IDENTITY);
+    tree.set_transform(parent, transform.clone());
+    // The content's width, and the drawn quad's against the part of the
+    // content inside the 10.3-wide box, which is what paint draws.
+    let widths = |tree: &mut WidgetTree| {
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        let frame = tree.render();
+        let geometry = handle.geometry().unwrap();
+        (
+            geometry.content.width,
+            only_quad(&frame).screen[2] - geometry.visible().unwrap().width,
+        )
+    };
+    let (content, drawn_off) = widths(&mut tree);
+    assert!((content - 10.0).abs() < 1e-4 && drawn_off.abs() < 1e-4);
+
+    transform.set(Transform2D::scale(2.0, 2.0));
+    let (content, drawn_off) = widths(&mut tree);
+    assert!(
+        (content - 10.5).abs() < 1e-4,
+        "snapped anew under the scale: {content}"
+    );
+    assert!(drawn_off.abs() < 1e-4, "and painted from that placement");
+}
+
 #[test]
 fn a_snapped_picture_lets_the_renderer_snap_its_quad() {
     let (source, _writer) = live(16, 12);

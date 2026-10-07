@@ -344,10 +344,10 @@ impl ImageGeometry {
     /// snapping would collapse keeps its unsnapped edges. Snapping twice
     /// changes nothing more.
     pub fn snapped(self, to_device: Transform2D) -> Self {
-        let [a, b, c, d, tx, ty] = to_device.m;
-        if b != 0.0 || c != 0.0 || a == 0.0 || d == 0.0 || !(a.is_finite() && d.is_finite()) {
+        if !Self::snaps_under(to_device) {
             return self;
         }
+        let [a, _, _, d, tx, ty] = to_device.m;
         let snap =
             |v: f32, scale: f32, offset: f32| ((v * scale + offset).round() - offset) / scale;
         // One axis: its origin and extent, snapped unless that collapses it.
@@ -370,6 +370,15 @@ impl ImageGeometry {
             content: Rect::new(x, y, width, height),
             ..self
         }
+    }
+
+    /// Whether [`snapped`](Self::snapped) moves edges under `to_device`: a
+    /// transform with no rotation or shear, and a finite scale other than
+    /// zero on both axes. A placement is the same under any two transforms
+    /// it does not snap under.
+    pub fn snaps_under(to_device: Transform2D) -> bool {
+        let [a, b, c, d, _, _] = to_device.m;
+        b == 0.0 && c == 0.0 && a != 0.0 && d != 0.0 && a.is_finite() && d.is_finite()
     }
 
     /// The source size as displayed: swapped for a quarter turn.

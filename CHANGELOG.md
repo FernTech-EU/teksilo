@@ -35,7 +35,8 @@ by crate for clarity, not because crates version independently.
   which source pixel a point shows. `ImageGeometry` places a source raster in
   a widget's box through an `ImageFit` and an `Alignment`, turned by an
   `ImageOrientation`; it snaps the picture's edges to the device-pixel grid,
-  also under an ancestor's scale, and maps widget-local points to source
+  also under an ancestor's scale (`snaps_under` says whether a transform
+  allows it), and maps widget-local points to source
   pixels and source pixels back to widget rects. `oriented_crop` gives the
   visible part of a picture and the texture coordinates of its corners, from
   the same tables the mapping uses. `PixelRect` is a rectangle of source
@@ -190,7 +191,10 @@ by crate for clarity, not because crates version independently.
   only pixels marks no widget: the window replays its cached frame and the
   renderer uploads what changed. A size or status change relayouts the
   widget, also while it is dormant, and draws a frame only if it was shown.
-  `LiveImageAttachment` records the widget's placement for automation.
+  `LiveImageAttachment` records the widget's placement for automation, and
+  the transform it snapped under: when an ancestor's transform changes that
+  snap, the widget is laid out again, which a transform scope alone does
+  not do.
   `WidgetTree::live_image_attachment_count`, `live_image_consumer`,
   `live_image_stats`, `live_image_geometry` and `live_image_attachments`
   look attachments up by widget, through a `WidgetBuilder` wrapper too.

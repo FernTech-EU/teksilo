@@ -50,6 +50,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use teksilo_canvas::ImageGeometry;
 use teksilo_canvas::live_image::{LiveImageConsumer, LiveImageId, LiveImageSource, LiveImageStats};
 use teksilo_canvas::wake::RedrawWaker;
 
@@ -323,11 +324,27 @@ impl WidgetTree {
             return;
         }
         let mut orphans = Vec::new();
+        let mut resnap = Vec::new();
         let mut by_source: Vec<(LiveImageId, Vec<Rc<AttachmentEntry>>)> = Vec::new();
         for (&id, entries) in &self.off_thread.live {
             if self.arena.get(id).is_none() {
                 orphans.push(id);
                 continue;
+            }
+            // Snapped under a transform an ancestor has changed since: a
+            // transform scope repaints and lays nothing out, so the widget is
+            // laid out again here to snap anew. Between two transforms that
+            // neither snaps under, its placement is the same.
+            if self.arena.is_active(id)
+                && entries.iter().any(|entry| {
+                    entry.snapped_under().is_some_and(|then| {
+                        let now = self.arena.effective_transform(id);
+                        now != then
+                            && (ImageGeometry::snaps_under(then) || ImageGeometry::snaps_under(now))
+                    })
+                })
+            {
+                resnap.push(id);
             }
             for entry in entries {
                 let source = entry.consumer.source().id();
@@ -339,6 +356,10 @@ impl WidgetTree {
         }
         for id in orphans {
             self.off_thread.cancel_by_widget(id);
+        }
+        for id in resnap {
+            self.arena.mark_needs_layout(id);
+            self.arena.mark_ancestors_need_layout(id);
         }
         let mut writes = Vec::new();
         for (_, group) in by_source {

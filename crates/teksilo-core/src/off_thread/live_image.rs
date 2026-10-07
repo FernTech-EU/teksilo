@@ -7,8 +7,8 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use teksilo_canvas::ImageGeometry;
 use teksilo_canvas::live_image::{LiveImageConsumer, LiveImageSource, LiveImageStatus};
+use teksilo_canvas::{ImageGeometry, Transform2D};
 
 use crate::signal::Signal;
 use crate::widget_id::WidgetId;
@@ -72,6 +72,8 @@ pub(crate) struct AttachmentEntry {
     pub(crate) signals: LiveImageSignals,
     pub(crate) widget: WidgetId,
     geometry: Cell<Option<ImageGeometry>>,
+    /// The ancestors' transform the widget's placement snapped under.
+    snapped_under: Cell<Option<Transform2D>>,
 }
 
 impl AttachmentEntry {
@@ -85,6 +87,7 @@ impl AttachmentEntry {
             signals,
             widget,
             geometry: Cell::new(None),
+            snapped_under: Cell::new(None),
         }
     }
 }
@@ -92,6 +95,10 @@ impl AttachmentEntry {
 impl AttachmentEntry {
     pub(crate) fn geometry(&self) -> Option<ImageGeometry> {
         self.geometry.get()
+    }
+
+    pub(crate) fn snapped_under(&self) -> Option<Transform2D> {
+        self.snapped_under.get()
     }
 }
 
@@ -118,6 +125,17 @@ impl LiveImageAttachment {
     /// The placement last recorded; `None` before the first layout.
     pub fn geometry(&self) -> Option<ImageGeometry> {
         self.entry.geometry()
+    }
+
+    /// Record, in `place_children`, the transform the placement was snapped
+    /// to the device-pixel grid under: the widget's effective transform
+    /// (`WidgetArena::effective_transform`), or `None` when the placement
+    /// does not snap. A transform scope changes without a layout pass; when
+    /// this transform changes in a way that moves the snap
+    /// (`ImageGeometry::snaps_under` either side), the tree lays the widget
+    /// out again, so it snaps anew.
+    pub fn set_snapped_under(&self, transform: Option<Transform2D>) {
+        self.entry.snapped_under.set(transform);
     }
 
     /// Whether it was released: its widget was rebuilt or destroyed, or its

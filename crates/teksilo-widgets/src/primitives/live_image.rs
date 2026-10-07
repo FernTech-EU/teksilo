@@ -628,11 +628,15 @@ impl Widget for LiveImage {
         let Some(mounted) = &self.mounted else {
             return;
         };
-        let to_device = self.pixel_snap.then(|| {
-            let ancestors = ctx
-                .arena()
+        let snapped_under = self.pixel_snap.then(|| {
+            ctx.arena()
                 .map(|arena| arena.effective_transform(mounted.attachment.widget_id()))
-                .unwrap_or(Transform2D::IDENTITY);
+                .unwrap_or(Transform2D::IDENTITY)
+        });
+        // An ancestor's transform changed later lays this widget out again,
+        // through the attachment, so the snap follows it.
+        mounted.attachment.set_snapped_under(snapped_under);
+        let to_device = snapped_under.map(|ancestors| {
             ancestors.then(&Transform2D::scale(ctx.scale_factor, ctx.scale_factor))
         });
         let placement = self.place(

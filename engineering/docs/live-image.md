@@ -135,7 +135,12 @@ fitting from the picture's natural size, the one its box is measured from:
 with `device_pixels`, one source pixel per device pixel, so `ImageFit::None`
 and `ScaleDown` keep a texel on a device pixel. `snapped` moves the picture's edges to the
 device-pixel grid through the widget's effective transform times the scale
-factor, and only for a translation plus an axis-aligned scale. A quad's screen
+factor, and only for a translation plus an axis-aligned scale. A transform
+scope lays nothing out, so `place_children` records on the attachment the
+transform it snapped under, and the layout pre-pass lays the widget out again
+when the effective transform has changed and either it or the recorded one
+snaps (`ImageGeometry::snaps_under`). Between two rotations nothing is
+laid out, and a picture with `pixel_snap` off records none. A quad's screen
 rect is the content clipped to the bounds and may be fractional; the renderer
 still lands the texels of a one-to-one quad on pixel centres, unless its
 draw turned `pixel_snap` off (`LiveImage` passes its own), which an animated
