@@ -15,14 +15,23 @@
 //! compares devices by an id that two instances in one process can share, so
 //! a registry keyed by `wgpu::Device` would let one device's loss mark
 //! another.
+//!
+//! It carries the device's live textures too: the renderers that share a
+//! latch publish theirs after each render, and one whose texture lacks a
+//! commit another already holds copies that texture on the device instead of
+//! uploading the frame again.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+use teksilo_canvas::live_image::internal::DeviceTextures;
 
 /// The lost-device latch of one device. `Clone` shares it.
 #[derive(Clone, Debug)]
 pub struct DeviceHealth {
     lost: Arc<AtomicBool>,
+    /// The live textures of the renderers on the device.
+    live_textures: DeviceTextures<wgpu::Texture>,
 }
 
 impl DeviceHealth {
@@ -32,6 +41,7 @@ impl DeviceHealth {
     pub fn install(device: &wgpu::Device) -> Self {
         let health = Self {
             lost: Arc::new(AtomicBool::new(false)),
+            live_textures: DeviceTextures::new(),
         };
         let lost = health.lost.clone();
         device.set_device_lost_callback(move |reason, message| {
@@ -51,6 +61,11 @@ impl DeviceHealth {
     /// Whether the device was lost. Once it is, it stays lost.
     pub fn is_lost(&self) -> bool {
         self.lost.load(Ordering::Acquire)
+    }
+
+    /// The live textures of the renderers built with this latch.
+    pub(crate) fn live_textures(&self) -> &DeviceTextures<wgpu::Texture> {
+        &self.live_textures
     }
 
     /// Whether `self` and `other` are the latch of one device.

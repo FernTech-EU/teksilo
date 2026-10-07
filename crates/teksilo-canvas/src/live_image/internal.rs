@@ -16,6 +16,7 @@ pub use super::pass::{
     BAND_BYTES, LivePass, LivePassMode, LiveTextureBackend, PARK_BUDGET, PARK_MAX_TEXTURE,
     PassCounts, PassTimings, QuadDecision, STAGING_BUDGET, TextureOutOfMemory,
 };
+pub use super::siblings::DeviceTextures;
 
 /// The source, locked for a renderer to copy bytes out of. Nothing is
 /// created while it is held; it unlocks on drop, and an unwinding panic

@@ -17,6 +17,12 @@
 //! lock; the passes are recorded into the frame's own encoder, after the
 //! uploads of that frame (a queue write runs before the submission it
 //! precedes) and before any draw.
+//!
+//! A window whose texture lacks the commit another window's texture on the
+//! device holds copies that texture into its own, level 0, at the head of
+//! the same encoder: a texture-to-texture copy on the device, before the
+//! mip passes that read it. The other window submitted the writes that
+//! filled its texture with its own last frame, earlier on the same queue.
 
 use teksilo_canvas::PixelRect;
 use teksilo_canvas::live_image::ScalingFilter;
@@ -150,6 +156,13 @@ struct MipJob {
     opaque: bool,
 }
 
+/// A copy the live pass asked for: level 0 of another window's texture into
+/// level 0 of one of this window's, of the same size.
+struct CopyJob {
+    from: wgpu::Texture,
+    into: wgpu::Texture,
+}
+
 /// The backend: the window's device and queue, the samplers, and the
 /// quad pipeline's texture layout every live bind group is built against.
 pub(crate) struct WgpuBackend {
@@ -162,6 +175,7 @@ pub(crate) struct WgpuBackend {
     trilinear: wgpu::Sampler,
     mip_pipelines: Option<LiveMipPipelines>,
     mip_jobs: Vec<MipJob>,
+    copy_jobs: Vec<CopyJob>,
     health: DeviceHealth,
     max_dimension: u32,
     /// A texture was dropped since the renderer last flagged its device for
@@ -218,6 +232,7 @@ impl WgpuBackend {
             trilinear,
             mip_pipelines: None,
             mip_jobs: Vec::new(),
+            copy_jobs: Vec::new(),
             health,
             max_dimension,
             released: false,
@@ -243,11 +258,28 @@ impl WgpuBackend {
         &self.health
     }
 
-    /// Record the mip passes the live pass asked for into `encoder`: one per
-    /// level above 0, in order, each reading the level below. A whole chain
-    /// clears each level first; a region keeps it and draws only its
-    /// footprint. Run before the frame's first draw.
-    pub(crate) fn encode_mips(&mut self, encoder: &mut wgpu::CommandEncoder) {
+    /// Record what the live pass asked for into `encoder`: first the copies
+    /// of other windows' textures, then the mip passes, one per level above
+    /// 0, in order, each reading the level below. A whole chain clears each
+    /// level first; a region keeps it and draws only its footprint. Run
+    /// before the frame's first draw.
+    pub(crate) fn encode(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        for job in self.copy_jobs.drain(..) {
+            let size = job.into.size();
+            debug_assert_eq!(job.from.size(), size, "the live pass copies one size");
+            if job.from.size() != size {
+                continue;
+            }
+            encoder.copy_texture_to_texture(
+                job.from.as_image_copy(),
+                job.into.as_image_copy(),
+                wgpu::Extent3d {
+                    width: size.width,
+                    height: size.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
         let Some(pipelines) = self.mip_pipelines.as_ref() else {
             return;
         };
@@ -294,6 +326,7 @@ fn filter_index(filter: ScalingFilter) -> usize {
 
 impl LiveTextureBackend for WgpuBackend {
     type Texture = WgpuTexture;
+    type Shared = wgpu::Texture;
 
     fn max_dimension(&self) -> u32 {
         self.max_dimension
@@ -314,8 +347,9 @@ impl LiveTextureBackend for WgpuBackend {
             return Err(TextureOutOfMemory);
         }
         let levels = if mipped { mip_levels(width, height) } else { 1 };
-        // `COPY_SRC` so a level can be read back: what the GPU tests of the
-        // chain and a capture's diagnostics do.
+        // `COPY_SRC` so another window's texture of the source can copy it,
+        // and so a level can be read back: what the GPU tests of the chain
+        // and a capture's diagnostics do.
         let mut usage = wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::COPY_DST
             | wgpu::TextureUsages::COPY_SRC;
@@ -474,6 +508,20 @@ impl LiveTextureBackend for WgpuBackend {
 
     fn texture_bytes(&self, texture: &WgpuTexture) -> u64 {
         mip_bytes(texture.width, texture.height, texture.levels)
+    }
+
+    fn share(&self, texture: &WgpuTexture) -> wgpu::Texture {
+        texture.texture.clone()
+    }
+
+    /// Recorded, and encoded at the head of the frame's encoder by
+    /// [`encode`](Self::encode). Both textures are `Rgba8UnormSrgb`, one
+    /// sample, with `COPY_SRC` and `COPY_DST`.
+    fn copy(&mut self, from: &wgpu::Texture, into: &mut WgpuTexture) {
+        self.copy_jobs.push(CopyJob {
+            from: from.clone(),
+            into: into.texture.clone(),
+        });
     }
 
     fn device_lost(&self) -> bool {

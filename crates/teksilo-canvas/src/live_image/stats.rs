@@ -45,7 +45,9 @@ pub struct LiveImageAttachmentStats {
     pub frames_drawn: u64,
     /// Screenshot renders that drew this attachment.
     pub captures: u64,
-    /// Renders of this window that uploaded at least one rect of the source.
+    /// Renders of this window that brought its texture of the source up to
+    /// date: uploaded at least one rect of it, or copied the texture another
+    /// window on the same GPU device already held of its latest commit.
     pub uploads: u64,
     /// Renders that drew an older texture or only the background: the
     /// producer held the lock, or the size changed after layout.

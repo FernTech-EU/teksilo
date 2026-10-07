@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use super::consumer::RenderRecord;
 use super::internal::{LiveImageRead, ReadAttempt, UploadPlan};
+use super::siblings::{DeviceTextures, Held, Siblings};
 use super::source::Shared;
 use super::{
     LiveImageConsumer, LiveImageId, LiveImageQuad, LiveImageSource, PixelRect, ScalingFilter,
@@ -51,6 +52,10 @@ const MAX_RESTARTS: u8 = 2;
 /// `Vec<u8>` for the mirror.
 pub trait LiveTextureBackend {
     type Texture;
+
+    /// What another pass on the same device keeps of a texture to copy it:
+    /// a handle for the GPU, the bytes for the mirror.
+    type Shared: Clone;
 
     /// The largest side the device accepts.
     fn max_dimension(&self) -> u32;
@@ -94,6 +99,16 @@ pub trait LiveTextureBackend {
 
     /// Bytes `texture` holds.
     fn texture_bytes(&self, texture: &Self::Texture) -> u64;
+
+    /// `texture`, as another pass on the device copies it.
+    fn share(&self, texture: &Self::Texture) -> Self::Shared;
+
+    /// Copy level 0 of `from`, a texture of `into`'s size that another pass
+    /// on the same device holds, into level 0 of `into`. Outside every lock.
+    /// On the GPU, recorded to run before this render's draws and after the
+    /// writes that filled `from`, which the other pass's earlier submission
+    /// carried.
+    fn copy(&mut self, from: &Self::Shared, into: &mut Self::Texture);
 
     /// Whether the device is lost: nothing written reaches the screen again.
     fn device_lost(&self) -> bool {
@@ -152,6 +167,10 @@ pub struct LiveTextureStats {
     pub upload_calls: u64,
     /// Bands of whole-frame uploads spread over several frames.
     pub progressive_bands: u64,
+    /// Textures brought up to their source's latest commit by a copy, on the
+    /// device, of the texture another window there already holds of it,
+    /// rather than by an upload from the source.
+    pub sibling_copies: u64,
     /// Texture creations the device refused for want of memory.
     pub alloc_failures: u64,
     /// Frames that found a producer holding a source's lock.
@@ -338,22 +357,29 @@ struct Outcome {
 ///    wanted size is then staged, outside the lock, when none is current or
 ///    staged.
 /// 6. Nothing new (the generation is the texture's): no lock.
-/// 7. Otherwise lock: without waiting, or for a bounded time when a staged
+/// 7. Another window on the same device holds the latest generation at the
+///    wanted size, and rendered on this thread: copy its texture into this
+///    one on the device, whole, without the lock. A staged texture is
+///    filled so when the current one does not fit, else dropped. The
+///    windows' last render publishes their current textures for this
+///    (see [`LivePass::join_device`]).
+/// 8. Otherwise lock: without waiting, or for a bounded time when a staged
 ///    texture waits for its first upload, after two busy frames in a row,
 ///    and always in a capture. A busy lock draws the held texture; the
 ///    producer's unlock wakes the window. A buffer of another size than the
 ///    one laid out draws the held texture; the size change woke layout.
-/// 8. Under the lock, the staged texture is filled whole and becomes current,
+/// 9. Under the lock, the staged texture is filled whole and becomes current,
 ///    or the current one gets the plan's rects. Nothing is created under the
 ///    lock. A whole-frame upload larger than the staging budget fills a
 ///    staged texture over several presented frames instead, waking the
 ///    window for each, while the previous picture keeps drawing; the render
 ///    that completes it writes the damage since its first band, under the
 ///    same lock, then swaps. No frame ever shows half of two generations.
-/// 9. Every source no quad drew loses its textures; a small texture of a
-///    source that committed once moves to a pool of parked textures, so an
-///    image scrolled out and back is not uploaded again. Consumers that were
-///    in the last render and are not in this one are marked unobserved.
+/// 10. Every source no quad drew loses its textures; a small texture of a
+///     source that committed once moves to a pool of parked textures, so an
+///     image scrolled out and back is not uploaded again. Consumers that
+///     were in the last render and are not in this one are marked
+///     unobserved.
 pub struct LivePass<B: LiveTextureBackend> {
     backend: B,
     entries: HashMap<LiveImageId, Entry<B::Texture>>,
@@ -369,6 +395,8 @@ pub struct LivePass<B: LiveTextureBackend> {
     band_bytes: u64,
     park_budget: u64,
     refresh: Duration,
+    /// This pass's place among the passes of its device, when it joined one.
+    siblings: Option<Siblings<B::Shared>>,
 }
 
 impl<B: LiveTextureBackend> LivePass<B> {
@@ -386,7 +414,25 @@ impl<B: LiveTextureBackend> LivePass<B> {
             band_bytes: BAND_BYTES,
             park_budget: PARK_BUDGET,
             refresh: Duration::from_micros(16_667),
+            siblings: None,
         }
+    }
+
+    /// Join the passes of a device: after each render, this pass publishes
+    /// its current textures to `textures`, and a texture of its own that
+    /// lacks the latest commit another pass there holds is copied from that
+    /// pass's, on the device, instead of uploaded from the source. Only
+    /// passes rendering on one thread copy from each other: a window renders
+    /// whole on its thread, from this pass to its submission, so no other
+    /// window writes the texture between a copy's recording and its
+    /// submission. Joining again leaves the device joined before.
+    pub fn join_device(&mut self, textures: &DeviceTextures<B::Shared>) {
+        self.siblings = Some(Siblings::join(textures));
+    }
+
+    /// The device this pass joined, if any.
+    pub fn device(&self) -> Option<&DeviceTextures<B::Shared>> {
+        self.siblings.as_ref().map(Siblings::table)
     }
 
     pub fn backend(&self) -> &B {
@@ -597,7 +643,7 @@ impl<B: LiveTextureBackend> LivePass<B> {
                 quad.consumer.set_paused(paused && !outcome.lost);
             }
         }
-        // 9. What no quad drew goes, or parks.
+        // 10. What no quad drew goes, or parks.
         let gone: Vec<LiveImageId> = self
             .entries
             .keys()
@@ -618,10 +664,35 @@ impl<B: LiveTextureBackend> LivePass<B> {
             }
         }
         self.previous = quads.iter().map(|q| q.consumer.clone()).collect();
+        self.publish();
         &self.decisions
     }
 
-    /// Steps 3 to 8 for one source.
+    /// Tell the other passes of the device what this one's current textures
+    /// hold, for step 7.
+    fn publish(&mut self) {
+        if self.siblings.is_none() {
+            return;
+        }
+        let held = self
+            .entries
+            .iter()
+            .filter_map(|(&id, entry)| {
+                let tex = entry.current.as_ref()?;
+                Some(Held {
+                    id,
+                    size: tex.size,
+                    generation: tex.generation,
+                    texture: self.backend.share(&tex.texture),
+                })
+            })
+            .collect();
+        if let Some(siblings) = self.siblings.as_mut() {
+            siblings.publish(held);
+        }
+    }
+
+    /// Steps 3 to 9 for one source.
     #[allow(clippy::too_many_arguments)]
     fn process(
         &mut self,
@@ -752,13 +823,44 @@ impl<B: LiveTextureBackend> LivePass<B> {
         }
         let entry = self.entries.get_mut(&id).expect("inserted above");
         let has_staged = entry.staged.is_some();
+        let latest = source.generation();
         if !has_staged
             && entry
                 .current
                 .as_ref()
-                .is_some_and(|t| t.generation == source.generation())
+                .is_some_and(|t| t.generation == latest)
         {
             return Outcome::default();
+        }
+        // 7. Another window on this device holds the latest commit at this
+        // size: copy its texture, whole, on the device.
+        if let Some(from) = self
+            .siblings
+            .as_ref()
+            .and_then(|s| s.find(id, wanted, latest))
+        {
+            let entry = self.entries.get_mut(&id).expect("inserted above");
+            if current_fits {
+                if entry.staged.take().is_some() {
+                    self.backend.released();
+                }
+            } else if let Some(staged) = entry.staged.take()
+                && entry.current.replace(staged.tex).is_some()
+            {
+                self.backend.released();
+            }
+            let current = entry
+                .current
+                .as_mut()
+                .expect("a texture of the wanted size: created above");
+            self.backend.copy(&from, &mut current.texture);
+            current.generation = latest;
+            current.changed(Stale::Whole);
+            self.stats.sibling_copies += 1;
+            return Outcome {
+                uploaded: true,
+                ..Outcome::default()
+            };
         }
         let frame_bytes = u64::from(wanted.0) * u64::from(wanted.1) * 4;
         let blocking = mode == LivePassMode::Capture || has_staged || entry.contended >= 2;

@@ -201,7 +201,10 @@ impl Renderer {
     }
 
     /// [`new`](Self::new), on a device whose lost-device latch `health` is,
-    /// installed once where the device was opened.
+    /// installed once where the device was opened. Renderers built with one
+    /// latch and drawn on one thread share their live pictures' uploads: one
+    /// whose texture lacks a commit another already holds copies that
+    /// texture on the device rather than upload the frame again.
     pub fn with_device_health(
         device: wgpu::Device,
         queue: wgpu::Queue,
@@ -251,12 +254,14 @@ impl Renderer {
             ..Default::default()
         });
 
-        let live = LivePass::new(WgpuBackend::new(
+        let live_textures = health.live_textures().clone();
+        let mut live = LivePass::new(WgpuBackend::new(
             device.clone(),
             queue.clone(),
             quad_bind_group_layout.clone(),
             health,
         ));
+        live.join_device(&live_textures);
 
         Self {
             device,
@@ -751,11 +756,13 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("teksilo_render"),
             });
-        // The live pass's mip rebuilds, before any draw samples them: its
-        // uploads are queue writes, which run before this submission.
+        // The live pass's copies of other windows' textures, then its mip
+        // rebuilds, before any draw samples them. Its uploads are queue
+        // writes, which run before this submission, and the writes that
+        // filled a texture it copies ran with that window's last one.
         #[cfg(any(debug_assertions, feature = "live-image-timings"))]
         let mips_started = std::time::Instant::now();
-        self.live.backend_mut().encode_mips(&mut encoder);
+        self.live.backend_mut().encode(&mut encoder);
         #[cfg(any(debug_assertions, feature = "live-image-timings"))]
         self.live_timings.record(
             (!frame.live_images.is_empty()).then(|| live_prepared + mips_started.elapsed()),

@@ -4,7 +4,9 @@
 //! [`LiveImageMirror`]: the renderer's live pass with textures in CPU memory,
 //! for headless tests.
 
-use super::internal::LiveImageRead;
+use std::sync::Arc;
+
+use super::internal::{DeviceTextures, LiveImageRead};
 use super::mips::{mip_footprint, mip_level_size, mip_levels};
 use super::pass::{
     LivePass, LivePassMode, LiveTextureBackend, LiveTextureStats, QuadDecision, TextureOutOfMemory,
@@ -14,10 +16,12 @@ use crate::RenderFrame;
 
 /// A texture in CPU memory: `width × height`, 4 bytes per pixel in the
 /// source's byte order, and its mip levels above level 0 when it has them.
+/// Level 0 is shared with another mirror's texture that copied it, or that
+/// it was copied from, until one of them is written.
 pub(crate) struct CpuTexture {
     width: u32,
     height: u32,
-    pixels: Vec<u8>,
+    pixels: Arc<Vec<u8>>,
     /// Levels 1 and up, each with its size.
     levels: Vec<(u32, u32, Vec<u8>)>,
 }
@@ -26,7 +30,7 @@ impl CpuTexture {
     /// Level `k`: 0 is the texture itself.
     fn level(&self, k: u32) -> Option<(u32, u32, &[u8])> {
         match k {
-            0 => Some((self.width, self.height, &self.pixels)),
+            0 => Some((self.width, self.height, self.pixels.as_slice())),
             k => self
                 .levels
                 .get(k as usize - 1)
@@ -48,6 +52,7 @@ pub(crate) struct CpuBackend {
 
 impl LiveTextureBackend for CpuBackend {
     type Texture = CpuTexture;
+    type Shared = Arc<Vec<u8>>;
 
     fn max_dimension(&self) -> u32 {
         self.max_dimension
@@ -76,7 +81,7 @@ impl LiveTextureBackend for CpuBackend {
         Ok(CpuTexture {
             width,
             height,
-            pixels: vec![0; width as usize * height as usize * 4],
+            pixels: Arc::new(vec![0; width as usize * height as usize * 4]),
             levels,
         })
     }
@@ -90,10 +95,11 @@ impl LiveTextureBackend for CpuBackend {
         let row = band.width as usize * 4;
         let pitch = texture.width as usize * 4;
         let pixels = read.pixels();
+        let level0 = Arc::make_mut(&mut texture.pixels);
         for y in band.y..band.y + band.height {
             let from = y as usize * stride + band.x as usize * 4;
             let to = y as usize * pitch + band.x as usize * 4;
-            texture.pixels[to..to + row].copy_from_slice(&pixels[from..from + row]);
+            level0[to..to + row].copy_from_slice(&pixels[from..from + row]);
         }
         self.writes.push(band);
     }
@@ -116,7 +122,7 @@ impl LiveTextureBackend for CpuBackend {
             let (below, rest) = texture.levels.split_at_mut(k as usize - 1);
             let (sw, sh, src): (u32, u32, &[u8]) = match below.last() {
                 Some((w, h, px)) => (*w, *h, px),
-                None => (texture.width, texture.height, &texture.pixels),
+                None => (texture.width, texture.height, texture.pixels.as_slice()),
             };
             let (w, h, dst) = &mut rest[0];
             let area = match region {
@@ -136,6 +142,16 @@ impl LiveTextureBackend for CpuBackend {
             }
         }
         self.mip_rebuilds.push(region);
+    }
+
+    fn share(&self, texture: &CpuTexture) -> Arc<Vec<u8>> {
+        Arc::clone(&texture.pixels)
+    }
+
+    /// Share the bytes: the next write to either texture copies them first.
+    fn copy(&mut self, from: &Arc<Vec<u8>>, into: &mut CpuTexture) {
+        debug_assert_eq!(from.len(), into.pixels.len(), "copies are of one size");
+        into.pixels = Arc::clone(from);
     }
 
     fn device_lost(&self) -> bool {
@@ -309,6 +325,23 @@ impl LiveImageMirror {
     #[doc(hidden)]
     pub fn set_park_budget(&mut self, bytes: u64) {
         self.pass.set_park_budget(bytes);
+    }
+
+    /// A mirror on the same device as this one, as a second window on one
+    /// GPU: what its texture lacks and this one's holds, it copies from this
+    /// one's rather than upload, and the other way round. Both render on one
+    /// thread for that.
+    #[doc(hidden)]
+    pub fn on_same_device(&mut self) -> LiveImageMirror {
+        let joined = self.pass.device().cloned();
+        let textures = joined.unwrap_or_else(|| {
+            let textures = DeviceTextures::new();
+            self.pass.join_device(&textures);
+            textures
+        });
+        let mut other = LiveImageMirror::new();
+        other.pass.join_device(&textures);
+        other
     }
 
     /// [`consume`](Self::consume) at a given instant, for tests of the

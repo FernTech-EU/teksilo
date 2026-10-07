@@ -493,21 +493,22 @@ struct LiveTrace {
     rendered: std::collections::HashSet<WindowId>,
     /// The windows the last report owes a line, until it is printed.
     due: Vec<WindowId>,
-    /// Each window's uploads and contended frames when it was last read,
-    /// to print deltas from.
-    totals: HashMap<WindowId, (u64, u64)>,
+    /// Each window's uploads, copies and contended frames when it was last
+    /// read, to print deltas from.
+    totals: HashMap<WindowId, (u64, u64, u64)>,
 }
 
 /// The idle trace's live line for one window, at `t` seconds: its textures,
-/// the uploads and contended frames since `last` (the window's uploads and
-/// contended frames when it was last read), and its timings in µs.
+/// the uploads, copies of another window's texture and contended frames
+/// since `last` (the window's when it was last read), and its timings in
+/// µs.
 #[cfg(feature = "live-image-timings")]
 fn live_trace_line(
     t: f64,
     window: impl std::fmt::Debug,
     stats: &teksilo_render::LiveTextureStats,
     timings: &teksilo_render::LiveImageTimings,
-    last: (u64, u64),
+    last: (u64, u64, u64),
 ) -> String {
     let percentiles = |p: teksilo_render::Percentiles| {
         format!(
@@ -517,11 +518,12 @@ fn live_trace_line(
     };
     let uploads = stats.uploads_full + stats.uploads_partial;
     format!(
-        "teksilo_idle_trace_live t={t:.3} window={window:?} textures={} bytes={} uploads={} contended={} prepare_us={} lock_hold_us={} commit_to_upload_us={}",
+        "teksilo_idle_trace_live t={t:.3} window={window:?} textures={} bytes={} uploads={} copies={} contended={} prepare_us={} lock_hold_us={} commit_to_upload_us={}",
         stats.textures,
         stats.bytes,
         uploads.saturating_sub(last.0),
-        stats.contended.saturating_sub(last.1),
+        stats.sibling_copies.saturating_sub(last.1),
+        stats.contended.saturating_sub(last.2),
         percentiles(timings.prepare),
         percentiles(timings.lock_hold),
         percentiles(timings.commit_to_upload),
@@ -768,7 +770,11 @@ impl IdleTrace {
             let stats = window.live_texture_stats();
             totals.insert(
                 id,
-                (stats.uploads_full + stats.uploads_partial, stats.contended),
+                (
+                    stats.uploads_full + stats.uploads_partial,
+                    stats.sibling_copies,
+                    stats.contended,
+                ),
             );
             if stats.textures == 0 {
                 continue;
@@ -776,7 +782,7 @@ impl IdleTrace {
             let timings = window.live_texture_timings();
             eprintln!(
                 "{}",
-                live_trace_line(t, id, &stats, &timings, last.unwrap_or((0, 0)))
+                live_trace_line(t, id, &stats, &timings, last.unwrap_or_default())
             );
         }
         self.live.totals = totals;
@@ -6494,15 +6500,17 @@ mod live_trace_tests {
         let mut stats = teksilo_render::LiveTextureStats::default();
         (stats.textures, stats.bytes) = (1, 3_686_400);
         (stats.uploads_full, stats.uploads_partial, stats.contended) = (2, 61, 3);
+        stats.sibling_copies = 5;
         let mut timings = teksilo_render::LiveImageTimings::default();
         let p = &mut timings.prepare;
         (p.p50, p.p90, p.p99, p.max, p.samples) = (96, 150, 291, 410, 1024);
         let p = &mut timings.lock_hold;
         (p.p50, p.p90, p.p99, p.max, p.samples) = (95, 140, 296, 400, 2048);
         assert_eq!(
-            live_trace_line(12.5, "main", &stats, &timings, (3, 1)),
+            live_trace_line(12.5, "main", &stats, &timings, (3, 4, 1)),
             "teksilo_idle_trace_live t=12.500 window=\"main\" textures=1 bytes=3686400 \
-             uploads=60 contended=2 prepare_us={p50:96,p90:150,p99:291,max:410,n:1024} \
+             uploads=60 copies=1 contended=2 \
+             prepare_us={p50:96,p90:150,p99:291,max:410,n:1024} \
              lock_hold_us={p50:95,p90:140,p99:296,max:400,n:2048} \
              commit_to_upload_us={p50:0,p90:0,p99:0,max:0,n:0}"
         );

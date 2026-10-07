@@ -134,10 +134,11 @@ by crate for clarity, not because crates version independently.
   With the `live-image-timings` feature (on `teksilo`, or `teksilo-app`) and
   `TEKSILO_IDLE_TRACE=1`, each trace line is followed by a
   `teksilo_idle_trace_live` line per window drawing a live picture: its
-  textures and their bytes, the uploads and contended frames since the
-  previous line, and the percentiles of its live pass, lock holds and
-  commit-to-upload delays. `PlatformWindow::live_texture_timings` reads them
-  with teksilo-platform's feature of the same name.
+  textures and their bytes, the uploads, copies of another window's texture
+  and contended frames since the previous line, and the percentiles of its
+  live pass, lock holds and commit-to-upload delays.
+  `PlatformWindow::live_texture_timings` reads them with teksilo-platform's
+  feature of the same name.
 
 #### Platform
 
@@ -302,8 +303,11 @@ by crate for clarity, not because crates version independently.
   no torn frame is ever drawn. A texture is dropped at the first frame
   without its picture (a small one, a few MiB at most, is kept for a while
   in case it comes back), and one the device cannot hold shows the widget's
-  background instead. `Renderer::live_texture_stats` reports what a
-  renderer holds and uploads.
+  background instead. Windows on one device upload each commit once: a
+  window whose texture lacks a commit another window already holds copies
+  that window's texture on the GPU, without taking the source's lock
+  (`LiveTextureStats::sibling_copies`). `Renderer::live_texture_stats`
+  reports what a renderer holds and uploads.
 - `Renderer::render_capture`, `render` for a screenshot: each live picture
   shows its latest commit, even while a producer holds its lock or the
   picture is paused, and the render counts as a capture, not as a frame a

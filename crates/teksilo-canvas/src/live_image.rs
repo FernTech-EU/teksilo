@@ -73,6 +73,7 @@ mod meta;
 mod mips;
 mod mirror;
 mod pass;
+mod siblings;
 mod source;
 mod stats;
 mod writer;

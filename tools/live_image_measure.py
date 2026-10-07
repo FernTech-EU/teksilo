@@ -9,8 +9,9 @@ G.2), on Linux.
 Runs `live-image-bench` (a release build with the `live-image-timings`
 feature) once per scenario, with `TEKSILO_IDLE_TRACE=1`, and reads:
 
-- the idle trace's `teksilo_idle_trace_live` lines: uploads and contended
-  frames each second, and the percentiles of the live pass (`prepare`),
+- the idle trace's `teksilo_idle_trace_live` lines: uploads, copies of
+  another window's texture and contended frames each second, and the
+  percentiles of the live pass (`prepare`),
   lock holds and commit-to-upload delays, in microseconds;
 - the trace's main lines: rendered frames each second;
 - the UI thread's CPU time, `utime + stime` of `/proc/<pid>/task/<pid>/stat`
@@ -75,12 +76,16 @@ SCENARIOS = [
         ["--workload", "full", "--size", "1920x1080"],
         75, (10, 70),
     ),
+    # From 30 s: a window that copies the other's texture takes few locks,
+    # so its latest 1,024 lock holds can reach back to the start-up's first
+    # upload long after the warm-up; 20 s of the other window's 60 holds a
+    # second refresh its ring whole.
     Scenario(
         "ac13",
         "AC13: full 1920x1080 frames, rotated every 5 s, in two windows",
         ["--workload", "full", "--size", "1920x1080", "--rotate-every", "5",
          "--second-window-at", "0"],
-        75, (10, 70),
+        75, (30, 70),
     ),
     Scenario(
         "ac14",
@@ -118,6 +123,7 @@ SCENARIOS = [
 LIVE = re.compile(
     r"^teksilo_idle_trace_live t=(?P<t>[\d.]+) window=(?P<window>\S+) "
     r"textures=(?P<textures>\d+) bytes=(?P<bytes>\d+) uploads=(?P<uploads>\d+) "
+    r"(?:copies=(?P<copies>\d+) )?"
     r"contended=(?P<contended>\d+) prepare_us=(?P<prepare>\{[^}]*\}) "
     r"lock_hold_us=(?P<lock_hold>\{[^}]*\}) commit_to_upload_us=(?P<c2u>\{[^}]*\})"
 )
@@ -247,10 +253,17 @@ def analyse(run_: Run) -> dict:
     for window in windows:
         rows = [(t, m) for t, m in measured_live if m["window"] == window]
         uploads = [int(m["uploads"]) for _, m in rows]
+        copies = [int(m["copies"] or 0) for _, m in rows]
+        # The commits a window's texture took in, uploaded or copied.
+        updates = [u + c for u, c in zip(uploads, copies)]
         contended = [int(m["contended"]) for _, m in rows]
         worst = {}
         for key in ("prepare", "lock_hold", "c2u"):
-            stats = [percentiles(m[key]) for _, m in rows]
+            # Lock holds and commit-to-upload delays are timed by uploads: a
+            # line of a window that only copied the other window's texture
+            # repeats what its rings held when it last uploaded.
+            timed = rows if key == "prepare" else [(t, m) for t, m in rows if int(m["uploads"])]
+            stats = [percentiles(m[key]) for _, m in timed]
             stats = [p for p in stats if p.get("n", 0) > 0]
             if stats:
                 worst[key] = {
@@ -264,6 +277,8 @@ def analyse(run_: Run) -> dict:
             "uploads_per_line_min": min(uploads[1:], default=None),
             "uploads_per_line_median": sorted(uploads)[len(uploads) // 2] if uploads else None,
             "uploads": sum(uploads),
+            "copies": sum(copies),
+            "updates_per_line_min": min(updates[1:], default=None),
             "contended": sum(contended),
             "textures": sorted({int(m["textures"]) for _, m in rows}),
             "bytes": sorted({int(m["bytes"]) for _, m in rows}),
@@ -293,8 +308,8 @@ def analyse(run_: Run) -> dict:
         "memory": [(round(t, 3), m["gtt"], m["vram"]) for t, m in run_.memory],
         "cpu": [(round(t, 3), c) for t, c in run_.cpu],
         "live": [(round(t, 3), m["window"], int(m["textures"]), int(m["uploads"]),
-                  int(m["contended"]), percentiles(m["prepare"]), percentiles(m["lock_hold"]),
-                  percentiles(m["c2u"])) for t, m in live],
+                  int(m["copies"] or 0), int(m["contended"]), percentiles(m["prepare"]),
+                  percentiles(m["lock_hold"]), percentiles(m["c2u"])) for t, m in live],
         "frames": [(round(t, 3), int(m["frames"])) for t, m in main],
     }
     if s.name == "ac11":
@@ -373,6 +388,11 @@ def verdicts(result: dict) -> list[str]:
     if name in ("ac8", "ac13"):
         lines.append(f"AC6  prepare p99 {p99('prepare')} us (goal <= 1500)")
         lines.append(f"AC13 lock hold p99 {p99('lock_hold')} us (goal <= 1500)")
+    if name == "ac13":
+        for label, w in result.get("windows", {}).items():
+            lines.append(f"AC13 window {label}: {w['uploads']} uploads, {w['copies']} copies, "
+                         f"least taken in a second {w['updates_per_line_min']}")
+        lines.append(f"AC13 UI thread {cpu} % of a core")
     if name == "ac8":
         least = min((w["uploads_per_line_min"] or 0 for w in windows), default=None)
         lines.append(f"AC8  uploads per trace line, least {least} (goal >= 59 a second)")

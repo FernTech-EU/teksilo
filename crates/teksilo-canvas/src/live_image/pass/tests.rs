@@ -3,8 +3,9 @@
 
 //! The live pass, through the mirror: every row of the upload table (spec
 //! 6.1, 6.3), the decision table, release and the parked pool, the pause
-//! rule, capture mode, the staging budget's spread fills, and the frame
-//! plumbing (spec A.17, A.19, C.17).
+//! rule, capture mode, the staging budget's spread fills, the frame
+//! plumbing (spec A.17, A.19, C.17), and two windows on one device copying
+//! each other's textures.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1301,4 +1302,259 @@ fn a_texture_restaged_for_a_large_upload_keeps_its_levels() {
     assert_eq!((report.full_uploads, report.partial_uploads), (0, 0));
     assert_eq!(report.mip_rebuilds, vec![None]);
     assert_chain(&mirror, &source, false);
+}
+
+// ── Two windows on one device ──
+
+/// Two mirrors on one device, as two windows on one GPU.
+fn two_windows() -> (LiveImageMirror, LiveImageMirror) {
+    let mut a = LiveImageMirror::new();
+    let b = a.on_same_device();
+    (a, b)
+}
+
+#[test]
+fn a_second_window_copies_the_frame_the_first_uploaded() {
+    let (source, writer) = live(16, 12);
+    let (_, ca) = widget(&source);
+    let (_, cb) = widget(&source);
+    let (mut a, mut b) = two_windows();
+    assert_eq!(a.consume(&frame(&[&ca])).full_uploads, 1);
+    let report = b.consume(&frame(&[&cb]));
+    assert_eq!(
+        (report.full_uploads, report.partial_uploads, report.bytes),
+        (0, 0, 0),
+        "nothing read from the source"
+    );
+    assert_eq!(b.stats().sibling_copies, 1);
+    assert_eq!(texture(&b, &source), pixels(16, 12, 0));
+    let d = b.decisions()[0];
+    assert!(d.draw && !d.deferred);
+    let s = cb.stats().attachment;
+    assert_eq!(
+        (s.uploads, s.window_generation),
+        (1, source.generation()),
+        "the window's texture was brought up to date"
+    );
+    // A commit: the first window uploads its rect, the second copies.
+    writer
+        .write_rect(PixelRect::new(3, 4, 2, 2), &[7; 16], 8)
+        .unwrap();
+    assert_eq!(a.consume(&frame(&[&ca])).partial_uploads, 1);
+    assert_eq!(b.consume(&frame(&[&cb])).bytes, 0);
+    assert_eq!(b.stats().sibling_copies, 2);
+    assert_eq!(texture(&b, &source), current(&source));
+    assert_eq!(texture(&a, &source), current(&source));
+    // Nothing new: nothing to copy.
+    assert_eq!(b.consume(&frame(&[&cb])), Default::default());
+    assert_eq!(b.stats().sibling_copies, 2);
+    assert_eq!(a.stats().sibling_copies, 0);
+}
+
+#[test]
+fn only_the_latest_commit_is_copied_and_the_window_holding_it_is_copied_from() {
+    let (source, writer) = live(16, 12);
+    let (_, ca) = widget(&source);
+    let (_, cb) = widget(&source);
+    let (mut a, mut b) = two_windows();
+    a.consume(&frame(&[&ca]));
+    b.consume(&frame(&[&cb]));
+    writer
+        .write_rect(PixelRect::new(0, 0, 2, 2), &[1; 16], 8)
+        .unwrap();
+    a.consume(&frame(&[&ca]));
+    writer
+        .write_rect(PixelRect::new(8, 8, 2, 2), &[2; 16], 8)
+        .unwrap();
+    // The first window holds the commit before the latest: the second
+    // uploads what changed since its own texture's.
+    let report = b.consume(&frame(&[&cb]));
+    assert_eq!(report.partial_uploads, 1);
+    assert_eq!(report.bytes, 2 * (2 * 2 * 4), "both commits' rects");
+    assert_eq!(b.stats().sibling_copies, 1, "the first frame's copy only");
+    assert_eq!(texture(&b, &source), current(&source));
+    // Now the second holds the latest, and the first copies it.
+    let report = a.consume(&frame(&[&ca]));
+    assert_eq!((report.partial_uploads, report.bytes), (0, 0));
+    assert_eq!(a.stats().sibling_copies, 1);
+    assert_eq!(texture(&a, &source), current(&source));
+}
+
+#[test]
+fn a_copy_takes_no_lock() {
+    let (source, writer) = live(8, 8);
+    let (_, ca) = widget(&source);
+    let (_, cb) = widget(&source);
+    let (mut a, mut b) = two_windows();
+    a.consume(&frame(&[&ca]));
+    let guard = writer.lock().unwrap();
+    let report = b.consume(&frame(&[&cb]));
+    drop(guard);
+    assert_eq!((report.contended, report.deferred), (0, 0));
+    assert_eq!(b.stats().sibling_copies, 1);
+    assert!(b.decisions()[0].draw);
+    assert!(b.last_timings().lock_holds.is_empty());
+}
+
+#[test]
+fn a_window_laid_out_at_another_size_does_not_copy() {
+    let (source, writer) = live(4, 4);
+    let (_, ca) = widget(&source);
+    let (_, cb) = widget(&source);
+    let (mut a, mut b) = two_windows();
+    a.consume(&frame(&[&ca]));
+    b.consume(&frame(&[&cb]));
+    // The second window was laid out at 4 × 4; the producer resizes, and
+    // the first window lays out and uploads at 5 × 4 before the second's
+    // live pass.
+    let mut canvas = Canvas::new();
+    lay_out(&cb);
+    canvas.draw_live_image(&cb, &draw());
+    let at_4x4 = canvas.into_render_frame();
+    writer.write_frame(5, 4, &pixels(5, 4, 1), 20).unwrap();
+    assert_eq!(a.consume(&frame(&[&ca])).full_uploads, 1);
+    let report = b.consume(&at_4x4);
+    assert_eq!(b.stats().sibling_copies, 1, "the first frame's copy only");
+    assert_eq!(report.deferred, 1, "the 4 × 4 texture still draws");
+    assert_eq!(b.stats().stale_deferrals, 1);
+    // Laid out at 5 × 4, it copies.
+    let report = b.consume(&frame(&[&cb]));
+    assert_eq!((report.full_uploads, report.deferred), (0, 0));
+    assert_eq!(b.stats().sibling_copies, 2);
+    assert_eq!(texture(&b, &source), pixels(5, 4, 1));
+    assert_eq!(b.texture_count(), 1, "the 4 × 4 texture went");
+}
+
+#[test]
+fn a_paused_window_keeps_its_picture_while_the_other_moves_on() {
+    let (source, writer) = live(8, 8);
+    let (_, ca) = widget(&source);
+    let (_, cb) = widget(&source);
+    let (mut a, mut b) = two_windows();
+    a.consume(&frame(&[&ca]));
+    let held = b.consume(&frame(&[&cb]));
+    assert_eq!(held.full_uploads, 0);
+    writer.write_frame(8, 8, &pixels(8, 8, 5), 32).unwrap();
+    a.consume(&frame(&[&ca]));
+    let report = b.consume(&frame_with(&[&cb], draw().paused(true)));
+    assert_eq!(report.paused, 1);
+    assert_eq!(b.stats().sibling_copies, 1, "the first frame's copy only");
+    assert_eq!(texture(&b, &source), pixels(8, 8, 0), "the held frame");
+    assert_eq!(texture(&a, &source), pixels(8, 8, 5));
+}
+
+#[test]
+fn a_fill_spread_over_frames_is_finished_by_a_copy() {
+    let (source, writer) = live(16, 10);
+    writer.write_frame(16, 10, &pixels(16, 10, 4), 64).unwrap();
+    let (_, ca) = widget(&source);
+    let (_, cb) = widget(&source);
+    let (mut a, mut b) = two_windows();
+    b.set_staging_budget(16 * 4 * 3); // three rows a frame
+    // The second window draws first: its fill takes three rows.
+    let report = b.consume(&frame(&[&cb]));
+    assert_eq!(report.deferred, 1);
+    assert_eq!(b.stats().progressive_bands, 1);
+    // The first uploads the frame whole; the second copies the rest of it.
+    assert_eq!(a.consume(&frame(&[&ca])).full_uploads, 1);
+    let report = b.consume(&frame(&[&cb]));
+    assert_eq!((report.deferred, report.bytes), (0, 0));
+    assert_eq!(b.stats().sibling_copies, 1);
+    assert_eq!(b.stats().progressive_bands, 1, "no band after the copy");
+    assert_eq!(texture(&b, &source), pixels(16, 10, 4));
+    assert_eq!(b.texture_count(), 1);
+}
+
+#[test]
+fn a_copied_texture_builds_its_own_chain() {
+    let (source, writer) = live(19, 7);
+    writer
+        .write_frame(19, 7, &speckled(19, 7, 3), 19 * 4)
+        .unwrap();
+    let (_, ca) = widget(&source);
+    let (_, cb) = widget(&source);
+    let (mut a, mut b) = two_windows();
+    a.consume(&frame(&[&ca]));
+    let report = b.consume(&frame_with(&[&cb], trilinear()));
+    assert_eq!(report.full_uploads, 0);
+    assert_eq!(b.stats().sibling_copies, 1);
+    assert_eq!(report.mip_rebuilds, vec![None], "the whole chain");
+    assert_eq!(b.stats().bytes, mip_bytes(19, 7, mip_levels(19, 7)));
+    assert_chain(&b, &source, false);
+    // A later commit copied into the texture that has its levels already:
+    // the whole chain again, since the copy brings no damage.
+    writer
+        .write_rect(PixelRect::new(4, 2, 3, 3), &[200; 36], 12)
+        .unwrap();
+    a.consume(&frame(&[&ca]));
+    let report = b.consume(&frame_with(&[&cb], trilinear()));
+    assert_eq!((report.full_uploads, report.partial_uploads), (0, 0));
+    assert_eq!(b.stats().sibling_copies, 2);
+    assert_eq!(report.mip_rebuilds, vec![None]);
+    assert_eq!(texture(&b, &source), current(&source));
+    assert_chain(&b, &source, false);
+}
+
+#[test]
+fn a_second_texture_for_a_large_plan_goes_when_a_copy_catches_up() {
+    let (source, writer) = live(16, 10);
+    let (_, ca) = widget(&source);
+    let (_, cb) = widget(&source);
+    let (mut a, mut b) = two_windows();
+    a.consume(&frame(&[&ca]));
+    b.consume(&frame(&[&cb]));
+    b.set_staging_budget(16 * 4 * 3);
+    // A whole frame above the second window's budget: it stages a second
+    // texture to fill over the next frames, beside the one it draws.
+    writer.write_frame(16, 10, &pixels(16, 10, 6), 64).unwrap();
+    let report = b.consume(&frame(&[&cb]));
+    assert_eq!(report.deferred, 1);
+    assert_eq!(b.texture_count(), 2);
+    // The first window uploads it; the second copies into the texture it
+    // draws, and the one it staged goes.
+    a.consume(&frame(&[&ca]));
+    let report = b.consume(&frame(&[&cb]));
+    assert_eq!((report.deferred, report.bytes), (0, 0));
+    assert_eq!(b.stats().sibling_copies, 2);
+    assert_eq!(b.texture_count(), 1);
+    assert_eq!(texture(&b, &source), pixels(16, 10, 6));
+}
+
+#[test]
+fn a_window_of_another_thread_is_not_copied_from() {
+    let (source, _writer) = live(8, 8);
+    let (_, ca) = widget(&source);
+    let (_, cb) = widget(&source);
+    let (a, mut b) = two_windows();
+    let a = std::thread::spawn(move || {
+        let mut a = a;
+        assert_eq!(a.consume(&frame(&[&ca])).full_uploads, 1);
+        a
+    })
+    .join()
+    .unwrap();
+    assert_eq!(b.consume(&frame(&[&cb])).full_uploads, 1);
+    assert_eq!(b.stats().sibling_copies, 0);
+    drop(a);
+}
+
+#[test]
+fn a_window_that_closed_or_dropped_the_texture_is_not_copied_from() {
+    let (source, writer) = live(8, 8);
+    let (_, ca) = widget(&source);
+    let (_, cb) = widget(&source);
+    let (mut a, mut b) = two_windows();
+    a.consume(&frame(&[&ca]));
+    // A frame without the picture: the first window's texture goes.
+    a.consume(&RenderFrame::new());
+    assert_eq!(b.consume(&frame(&[&cb])).full_uploads, 1);
+    assert_eq!(b.stats().sibling_copies, 0);
+    writer.write_frame(8, 8, &pixels(8, 8, 2), 32).unwrap();
+    let mut c = b.on_same_device();
+    let (_, cc) = widget(&source);
+    b.consume(&frame(&[&cb]));
+    drop(b);
+    // The window that held it closed.
+    assert_eq!(c.consume(&frame(&[&cc])).full_uploads, 1);
+    assert_eq!(c.stats().sibling_copies, 0);
 }

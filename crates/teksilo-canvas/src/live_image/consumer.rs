@@ -62,7 +62,8 @@ struct AttachmentCounters {
 pub(crate) struct RenderRecord {
     /// The quad was in the render.
     pub(crate) drawn: bool,
-    /// The render wrote at least one rect of the source.
+    /// The render wrote at least one rect of the source, or copied another
+    /// window's texture of it.
     pub(crate) uploaded: bool,
     /// The render drew an older texture or only the background: the lock was
     /// busy, or the size changed after layout.

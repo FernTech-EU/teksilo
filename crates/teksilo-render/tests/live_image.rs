@@ -3,7 +3,8 @@
 
 //! Live pictures on the GPU (spec D.1-D.10, D.12, D.14-D.21): what the live
 //! pass uploads, what the draw shows, byte for byte where the sampling is
-//! 1:1, and the mirror deciding exactly as the GPU does.
+//! 1:1, the mirror deciding exactly as the GPU does, and two windows on one
+//! device uploading a commit once.
 //!
 //! Each test returns early without an adapter unless
 //! `TEKSILO_TEST_REQUIRE_ADAPTER` insists on one; every render runs inside a
@@ -513,8 +514,11 @@ fn d09_a_side_above_the_device_limit_draws_background_without_an_error() {
 
 // ── D.10: two windows ──
 
+/// Two windows on one device catch up with the source each on its own when
+/// neither holds the latest commit; then the one behind copies the other's
+/// texture on the device instead of uploading.
 #[test]
-fn d10_two_renderers_on_one_device_each_catch_up_alone() {
+fn d10_two_renderers_on_one_device_catch_up_with_one_upload_then_one_copy() {
     let Some(mut a) = gpu("live_d10") else { return };
     let Some(mut b) = gpu("live_d10") else { return };
     let (source, writer) = live(LivePixelFormat::Rgba8, 32, 4);
@@ -523,21 +527,128 @@ fn d10_two_renderers_on_one_device_each_catch_up_alone() {
     let (ta, tb) = (a.target(32, 4), b.target(32, 4));
     a.render(&frame_1to1(&ca, ScalingFilter::Nearest), &ta);
     b.render(&frame_1to1(&cb, ScalingFilter::Nearest), &tb);
+    assert_eq!(
+        b.renderer.live_texture_stats().sibling_copies,
+        1,
+        "the first frame, copied"
+    );
     for i in 0..20u32 {
         writer
             .write_rect(PixelRect::new(i, 0, 1, 1), &solid(1, 0xAA), 4)
             .unwrap();
         a.render(&frame_1to1(&ca, ScalingFilter::Nearest), &ta);
     }
+    // One commit more, which the first window does not draw.
+    writer
+        .write_rect(PixelRect::new(31, 3, 1, 1), &solid(1, 0x55), 4)
+        .unwrap();
     let lagged = b.renderer.live_texture_stats();
     b.render(&frame_1to1(&cb, ScalingFilter::Nearest), &tb);
     let caught = b.renderer.live_texture_stats();
     assert_eq!(
-        caught.uploads_full - lagged.uploads_full,
-        1,
-        "twenty commits behind: one Full"
+        (
+            caught.uploads_full - lagged.uploads_full,
+            caught.sibling_copies - lagged.sibling_copies
+        ),
+        (1, 0),
+        "twenty-one commits behind, and no window holds the latest: one Full"
+    );
+    let before = a.renderer.live_texture_stats();
+    a.render(&frame_1to1(&ca, ScalingFilter::Nearest), &ta);
+    let after = a.renderer.live_texture_stats();
+    assert_eq!(
+        (
+            after.uploads_full + after.uploads_partial
+                - before.uploads_full
+                - before.uploads_partial,
+            after.sibling_copies - before.sibling_copies
+        ),
+        (0, 1),
+        "the other window holds the latest: one copy"
     );
     assert_eq!(a.read(&ta), b.read(&tb), "both show the final frame");
+}
+
+/// Each commit is uploaded by the window that draws it first and copied by
+/// the other, whichever it is, and both show it exactly: the copy runs
+/// after the writes that filled its source texture, and before the draw.
+#[test]
+fn d10_each_commit_is_uploaded_once_and_both_windows_show_it_exactly() {
+    let Some(mut a) = gpu("live_d10_copy") else {
+        return;
+    };
+    let Some(mut b) = gpu("live_d10_copy") else {
+        return;
+    };
+    let (w, h) = (300, 200);
+    let format = LivePixelFormat::Bgra8;
+    let (source, writer) = live(format, w, h);
+    let (_, ca) = consumer(&source);
+    let (_, cb) = consumer(&source);
+    let (ta, tb) = (a.target(w, h), b.target(w, h));
+    for seed in 1..=6u8 {
+        writer
+            .write_frame(w, h, &pattern(format, w, h, seed), (w * 4) as usize)
+            .unwrap();
+        if seed % 2 == 1 {
+            a.render(&frame_1to1(&ca, ScalingFilter::Nearest), &ta);
+            b.render(&frame_1to1(&cb, ScalingFilter::Nearest), &tb);
+        } else {
+            b.render(&frame_1to1(&cb, ScalingFilter::Nearest), &tb);
+            a.render(&frame_1to1(&ca, ScalingFilter::Nearest), &ta);
+        }
+        assert!(
+            a.read(&ta) == shown(w, h, seed),
+            "first window, seed {seed}"
+        );
+        assert!(
+            b.read(&tb) == shown(w, h, seed),
+            "second window, seed {seed}"
+        );
+    }
+    let (sa, sb) = (
+        a.renderer.live_texture_stats(),
+        b.renderer.live_texture_stats(),
+    );
+    assert_eq!((sa.sibling_copies, sb.sibling_copies), (3, 3));
+    assert_eq!(
+        sa.uploads_full + sa.uploads_partial + sb.uploads_full + sb.uploads_partial,
+        6,
+        "one upload per commit"
+    );
+    assert_eq!(
+        sb.bytes_uploaded,
+        3 * u64::from(w * h * 4),
+        "the second window uploaded only the commits it drew first"
+    );
+}
+
+/// A window drawing the picture through `Trilinear` builds its own chain
+/// from the level 0 it copied, the same chain as the window that uploaded.
+#[test]
+fn d10_a_copied_texture_builds_the_same_mip_chain() {
+    let Some(mut a) = gpu("live_d10_mips") else {
+        return;
+    };
+    let Some(mut b) = gpu("live_d10_mips") else {
+        return;
+    };
+    let (source, _writer) = live(LivePixelFormat::Rgba8, 64, 48);
+    let (_, ca) = consumer(&source);
+    let (_, cb) = consumer(&source);
+    let (ta, tb) = (a.target(64, 48), b.target(64, 48));
+    a.render(&frame_1to1(&ca, ScalingFilter::Trilinear), &ta);
+    b.render(&frame_1to1(&cb, ScalingFilter::Trilinear), &tb);
+    assert_eq!(b.renderer.live_texture_stats().sibling_copies, 1);
+    assert_eq!(b.renderer.live_texture_stats().uploads_full, 0);
+    for level in 0..7 {
+        let theirs = a.renderer.read_live_texture_level(source.id(), level);
+        assert!(theirs.is_some(), "level {level}");
+        assert!(
+            b.renderer.read_live_texture_level(source.id(), level) == theirs,
+            "level {level}"
+        );
+    }
 }
 
 // ── D.12: a size changed after layout ──

@@ -1250,6 +1250,9 @@ pub struct LiveTextureStatsDto {
     pub bytes_uploaded: u64,
     pub upload_calls: u64,
     pub progressive_bands: u64,
+    /// Textures brought up to date by copying another window's on the GPU.
+    #[serde(default)]
+    pub sibling_copies: u64,
     pub alloc_failures: u64,
     pub contended: u64,
     pub blocking_waits: u64,
@@ -1314,6 +1317,7 @@ impl From<teksilo_canvas::live_image::LiveTextureStats> for LiveTextureStatsDto 
             bytes_uploaded: s.bytes_uploaded,
             upload_calls: s.upload_calls,
             progressive_bands: s.progressive_bands,
+            sibling_copies: s.sibling_copies,
             alloc_failures: s.alloc_failures,
             contended: s.contended,
             blocking_waits: s.blocking_waits,

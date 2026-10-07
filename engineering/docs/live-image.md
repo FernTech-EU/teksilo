@@ -70,8 +70,9 @@ bits), so layout reads them without the lock. The 15-bit sides cover
 `LivePass::prepare` runs before each render records anything. For each source
 the frame draws, in order: take the flags, choose the wanted size, refuse what
 the device cannot hold, keep a paused source's texture without locking,
-create textures outside the lock, skip the lock when nothing is new, lock with
-the bounds above, then fill a staged texture or write the plan's rects. Every
+create textures outside the lock, skip the lock when nothing is new, copy
+another window's texture when it holds the latest commit, lock with the
+bounds above, then fill a staged texture or write the plan's rects. Every
 source no quad drew loses its textures. The rules are numbered in `LivePass`'s
 own documentation, and the mirror and the GPU renderer run that same code
 (the differential tests compare them).
@@ -91,11 +92,27 @@ own documentation, and the mirror and the GPU renderer run that same code
 - **Two painted sizes.** A widget attached across a resize can leave two
   painted sizes in one frame. The pass then chooses deterministically: the
   size the source has now, else the larger.
+- **One upload per commit per device.** After each render, a pass publishes
+  its current textures, each with the generation it holds, to a table its
+  device carries (`DeviceTextures`, held by `DeviceHealth`, so every window
+  on `SharedGpu` shares it). A window whose texture lacks the latest commit,
+  which another window's texture of the same size already holds, records a
+  texture-to-texture copy of level 0 at the head of its frame's encoder,
+  before its mip passes, and takes no lock. It copies the whole frame, since
+  knowing what changed would need the lock; on the device that costs far
+  less than the copy into staging it replaces. Ordering comes from the
+  queue: the other window submitted the writes that filled its texture with
+  its own last frame, and the copy is in a later submission. Only windows
+  rendering on one thread copy from each other, since that is what keeps
+  another window from writing the texture between the copy's recording and
+  its submission; every window renders on the main thread.
 
 ## 4. Texture lifecycle
 
 - One texture per (window, source), shared by every widget of the window that
-  shows the source.
+  shows the source. Windows share no texture: a window paused, resized or
+  hidden keeps its own picture. They share uploads instead (section 3): the
+  second window to draw a commit copies the first's texture on the device.
 - A texture goes at the first frame that does not draw its source. A texture
   of at most 4 MiB, from a source that committed once, moves to a parked pool
   of 16 MiB instead. The pool holds only `Weak` references, gets no wakes and
@@ -231,6 +248,7 @@ and the rest of its list) are not repeated here.
 | Commit 34 | A `--release` CI step for the dirty ratio | None (the plan's choice): the dirty-ratio test is `#[ignore]`d, and the counts it pins in every build are exact. |
 | Commit 35 | Timings read from the `Renderer` | Also from `PlatformWindow`, and printed by the idle trace with `live-image-timings` on teksilo-app or `teksilo`: an app never holds its window's renderer, and the automation bridge, the one other channel, exists only in debug builds. |
 | Commit 35 | `Percentiles { p50, p90, p99, max }` | Also `samples`: without it an empty histogram and one of zero-microsecond samples look alike. The raw durations are recorded by canvas's `LivePass` in every build and folded into histograms by teksilo-render, so no cfg spans two crates. |
+| After PR-5, AC13 | Each window uploads each commit from the source | The second window to draw a commit copies the first's texture on the device, without the lock (section 3). Two windows each copying 8 MiB per commit into staging under the lock put AC13 over its goal. A texture per device would also save GPU memory, but would break the per-window pause, two windows at two sizes during a resize, and the per-window lifecycle and stats, so each window keeps its own. `LiveTextureStats::sibling_copies` counts the copies, an attachment's `uploads` counts both, and the idle trace's live line prints `copies`. D.10 now checks one upload, then one copy. |
 
 ## 10. Measurements
 
@@ -296,7 +314,8 @@ commit-to-upload columns are in ms.
 |---|---|---|---|---|---|---|
 | AC7's workload: four rects, 8 % of 720 × 1280 | 3.7 % | 100 / 245 | 231 | 3.9 / 5.6 | 59 | 0 |
 | Full 1920 × 1080 frames | 7.7 % | 807 / 1,060 | 1,046 | 9.6 / 11.5 | 59 | 0 |
-| Same, rotated every 5 s, in two windows | 14.0 % | 697 / 1,666 and 559 / 1,070 | 1,663 and 1,062 | 5.0 / 7.5 and 3.8 / 5.5 | 60 | 0 |
+| Same, rotated every 5 s, in two windows, each uploading every commit | 14.0 % | 697 / 1,666 and 559 / 1,070 | 1,663 and 1,062 | 5.0 / 7.5 and 3.8 / 5.5 | 60 | 0 |
+| Same, the second window to draw a commit copying the first's texture, from 30 s | 9.4 % | 836 / 1,029 and 6 / 30 | 1,021 (the window that uploads) | 7.5 / 8.8 | 59, uploaded or copied | 0 |
 | Copies only: 16 rows scrolled, one strip written, 720 × 1280 | 5.5 % | 377 / 495 | 480 | 0.5 / 1.4 | 60 | 0 of 3,609 frames |
 | Full 720 × 1280 frames, 300 s | 5.9 % | 377 / 583 | 577 | 2.2 / 4.1 | 59 | 0 |
 | Full 1920 × 1080 frames, 300 s | 7.2 % | 876 / 1,131 | 1,124 | 13.9 / 15.7 | 59 | 0 |
@@ -311,17 +330,33 @@ commit-to-upload columns are in ms.
   cycles there was no growth from one to the next, which reads as an
   allocator block kept rather than a leak. Unmounted, the churn's level
   stayed between 220.3 and 220.5 MiB over 304 cycles (G.2).
-- **Two windows.** The window that uploads first holds the lock 1.66 ms at
-  p99, against 1.06 ms for the second and 1.05–1.12 ms for one window alone,
-  which puts AC13 over its goal (1.5 ms). Rotations make no difference: two
-  windows with none measured 1.60 ms. A `perf` profile of the UI thread (DWARF
-  call graphs, 20 s of full 1080p frames, one window and then two) puts 94 %
-  of `write_texture`'s samples in `memmove`, the frame's copy into wgpu's
-  staging buffer under the lock, and at most 0.6 % in allocation. The UI
-  thread took 5.8 minor faults a second with two windows (one window: 0),
-  against the 2,025 a frame that marked staging churn at 7680 × 4320. So it
-  is the copy itself: each window copies the 8 MiB frame per commit, on an
-  APU whose GPU shares the same memory.
+- **Two windows.** When each window uploaded every commit itself, the one
+  that uploaded first held the lock 1.66 ms at p99, against 1.06 ms for the
+  second and 1.05–1.12 ms for one window alone, which put AC13 over its goal
+  (1.5 ms). Rotations made no difference: two windows with none measured
+  1.60 ms. A `perf` profile of the UI thread (DWARF call graphs, 20 s of full
+  1080p frames, one window and then two) put 94 % of `write_texture`'s
+  samples in `memmove`, the frame's copy into wgpu's staging buffer under the
+  lock, and at most 0.6 % in allocation. The UI thread took 5.8 minor faults
+  a second with two windows (one window: 0), against the 2,025 a frame that
+  marked staging churn at 7680 × 4320. So it was the copy itself: each window
+  copied the 8 MiB frame per commit, on an APU whose GPU shares the same
+  memory.
+- **Two windows, one upload.** The second window to draw a commit now copies
+  the first's texture on the device (section 3). Over three runs, measured
+  from 30 s, the window that uploads held the lock 1.00–1.04 ms at p99, the
+  one that copies took no lock and its live pass 26–30 µs at p99, and the
+  UI thread took 8.9–10.1 % of a core, against 12.0–14.6 % in two runs of
+  the same binary without the copy, the same afternoon. Which window uploads
+  is whichever draws first after a layout, so it can change at a rotation.
+  The measurement starts at 30 s and counts a window's lock holds only from
+  the seconds it uploaded: a window that only copies takes no lock, and the
+  trace's latest 1,024 holds then reach back to its last upload, a rotation's
+  first upload or the start-up's. GPU memory did not move (one texture per
+  window). A second window opened and closed four times went back to within
+  1 MiB of its level 7–47 ms after three of the closes; after the fourth,
+  4 MiB stayed and did not grow, the allocator block that the same run
+  without the copy also kept, at another close.
 - **A remount** costs a texture's creation and its first upload, hence the
   churn row's p99 above 2 ms; it is not one of AC13's cases.
 - **With accessibility on** (an AT-SPI client attached), AC7's workload took
@@ -388,7 +423,7 @@ commits, which is AC20's last clause.
 | AC10 | Met | Mirror and GPU tests (D.5, D.6), on lavapipe in CI. |
 | AC11 | Met | Claim (r); in a window, GPU memory back within 1 MiB 2–51 ms after each of four closes, with no growth across them. |
 | AC12 | Reported | Commit to upload p50 / p99: 3.9 / 5.6 ms (AC7's workload), 9.6 / 11.5 ms (full 1080p). The p50 ranged from 2.2 to 13.9 ms across runs, set by the phase of the producer's clock against the display's. |
-| AC13 | Not met with two windows | Lock hold p99 1.66 ms in the first of two windows; 1.05–1.12 ms with one window, rotations included. Not staging churn (page faults); see Measurements. |
+| AC13 | Met | Two windows: lock hold p99 1.00–1.04 ms in the window that uploads, over three runs; the other copies its texture on the device and takes no lock. One window: 1.05–1.12 ms. Each window uploading every commit gave 1.61–1.69 ms; see Measurements. |
 | AC14 | Met | A copy-only producer: 0 contended frames of 3,609 over 60 s. |
 | AC15 | Met | `live_image_cost.rs`; the figures under Measurements. |
 | AC16 | Met on KWin; Windows and macOS by hand | PR-2's F.5, rerun at the tip; on the live demo, no frame over 9 s minimised, two screenshots of the hidden window 0.5 s apart holding later commits, and the latest commit shown on restore. F.3's X11 run for screenshots of a hidden window. |
@@ -402,14 +437,12 @@ commits, which is AC20's last clause.
 The three left at the end of PR-5 are settled: a culling parent's parked
 child now leaves the composed frame (AC19), `source` aiming refuses what a
 press would not reach (section 6), and an app reads the timings in its idle
-trace (section 9, commit 35). Measuring in a window found three more. Two,
-already in 0.15.1 and not LiveImage's, are fixed (Measurements: the
-accessibility delivery, the Wayland pen look). One remains:
-
-- **AC13 with two windows** (Measurements). The profile rules out staging
-  allocation, so the staging ring's gate (per-call allocation showing in the
-  AC6 or AC13 profiles) does not trip. What would bring the hold under 1.5 ms
-  is one copy per commit instead of one per window. Every window shares one
-  wgpu device (`SharedGpu` in teksilo-platform), so a live texture could be
-  held per device rather than per (window, source), which section 4's rule
-  forbids today. Not decided.
+trace (section 9, commit 35). Measuring in a window found three more, all
+settled. Two, already in 0.15.1 and not LiveImage's, are fixed
+(Measurements: the accessibility delivery, the Wayland pen look). AC13 with
+two windows is met: the profile ruled out staging allocation, so the staging
+ring's gate (per-call allocation showing in the AC6 or AC13 profiles) did
+not trip, and the second window to draw a commit now copies the first's
+texture on the device instead of copying the frame into staging under the
+lock (section 3). A texture per device, which would also save the second
+texture's memory, was weighed and not done (section 9).
