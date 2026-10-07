@@ -114,7 +114,9 @@ pub struct LiveImage { /* fields */ }
 
 Show `source`. A `Signal<LiveImageSource>` switches sources: the
 widget rebuilds and attaches the new one, keeping its handle's
-Signals, and the window drops the old one's texture at its next frame.
+Signals, and the window lets go of the old one's texture at its next
+frame. A small picture its source committed once is kept a while
+instead, in case it comes back.
 
 #### `pub fn fit(mut self, fit: ImageFit) -> Self`
 
