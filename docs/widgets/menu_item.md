@@ -7,6 +7,43 @@
 
 MenuItem — a single command row in a menu or context menu.
 
+## Public functions
+
+### `MenuItem`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(label: impl Into<LocalizedString>)`](#menuitem-new) |
+| `Self` | [`submenu(label: impl Into<LocalizedString>, factory: impl Fn() -> Box<dyn Widget> + 'static)`](#menuitem-submenu) |
+| | **Builder methods** |
+| `Self` | [`on_activate_fn(f: impl Fn(&mut EventContext) + 'static)`](#menuitem-on_activate_fn) |
+| `Self` | [`icon(icon: IconWidget)`](#menuitem-icon) |
+| `Self` | [`icon_keeps_color()`](#menuitem-icon_keeps_color) |
+| `Self` | [`shortcut_label(label: impl Into<String>)`](#menuitem-shortcut_label) |
+| `Self` | [`trailing_hint(text: impl Into<LocalizedString>)`](#menuitem-trailing_hint) |
+| `Self` | [`for_shortcut(id: &'static str)`](#menuitem-for_shortcut) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#menuitem-enabled) |
+| `Self` | [`style(style: impl teksilo_core::styles::MenuItemStyle)`](#menuitem-style) |
+| `Self` | [`text_style(style: impl Into<teksilo_core::color_prop::TextStyleProp>)`](#menuitem-text_style) |
+| `Self` | [`text_role(color: impl Into<teksilo_core::color_prop::ColorProp>)`](#menuitem-text_role) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#menuitem-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#menuitem-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#menuitem-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#menuitem-composite_tooltip) |
+| `Self` | [`submenu_delay(delay: Duration)`](#menuitem-submenu_delay) |
+| `Self` | [`checked(state: Signal<bool>)`](#menuitem-checked) |
+| `Self` | [`reflect_checked(state: impl Into<Prop<bool>>)`](#menuitem-reflect_checked) |
+| `Self` | [`check_state(state: Signal<CheckState>)`](#menuitem-check_state) |
+| `Self` | [`radio(value: usize, selected: Signal<usize>)`](#menuitem-radio) |
+| | **Methods** |
+| `String` | [`label()`](#menuitem-label) |
+| `LocalizedString` | [`label_localized()`](#menuitem-label_localized) |
+| `Option<Rc<dyn Fn(&mut EventContext)>>` | [`action()`](#menuitem-action) |
+| `bool` | [`is_submenu()`](#menuitem-is_submenu) |
+
+## Detailed description
+
 Each item consists of an optional leading icon, a label, an optional
 trailing shortcut label, and an activation closure. `MenuItem` is
 non-generic: actions are type-erased closures identical to `Button`'s
@@ -28,7 +65,7 @@ Check and radio modes are mutually exclusive with `.icon(...)` — the
 Windows convention reserves the leading slot for state glyphs on
 checkable items; a `debug_assert!` fires when both are set.
 
-## An icon that keeps its own colour
+#### An icon that keeps its own colour
 
 `.icon(...)` recolours whatever it is handed with the row's text role, so the
 glyph follows hover, press and disabled alongside the label. That is right for
@@ -75,13 +112,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![MenuItem at Touch density](img/menu_item-touch.png)
 
-## Builder methods at a glance
-
-`on_activate_fn`, `label`, `label_localized`, `action`, `icon`, `icon_keeps_color`, `shortcut_label`, `trailing_hint`, `for_shortcut`, `enabled`, `style`, `text_style`, `text_role`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `submenu`, `submenu_delay`, `is_submenu`, `checked`, `reflect_checked`, `check_state`, `radio`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/menu_item/index.html)
+
+<a id="menuitem"></a>
 
 ## `pub struct MenuItem`
 
@@ -96,9 +131,13 @@ pub struct MenuItem { /* fields */ }
 
 ### Methods
 
+<a id="menuitem-new"></a>
+
 #### `pub fn new(label: impl Into<LocalizedString>) -> Self`
 
 Create a plain menu item with the given label and no action yet.
+
+<a id="menuitem-on_activate_fn"></a>
 
 #### `pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
@@ -106,17 +145,23 @@ Closure invoked on activation.
 Note: shortcut label auto-lookup is not available with this variant
 since there is no typed command to look up.
 
+<a id="menuitem-label"></a>
+
 #### `pub fn label(&self) -> String`
 
 Read the item's display label. Exposed so SplitButton (and any other
 compound widget that embeds a MenuItem) can mirror the label in its
 own chrome.
 
+<a id="menuitem-label_localized"></a>
+
 #### `pub fn label_localized(&self) -> LocalizedString`
 
 Like `label` but returns the unresolved
 `LocalizedString`, so embedders can mirror the label *reactively*
 (re-resolving on a locale switch) instead of freezing a snapshot.
+
+<a id="menuitem-action"></a>
 
 #### `pub fn action(&self) -> Option<Rc<dyn Fn(&mut EventContext)>>`
 
@@ -126,9 +171,13 @@ returned `Rc` aliases MenuItem's own internal handle — invoking it
 has the same effect as the user clicking this menu item (minus the
 overlay dismissal that the tap handler also performs).
 
+<a id="menuitem-icon"></a>
+
 #### `pub fn icon(mut self, icon: IconWidget) -> Self`
 
 Set a leading icon.
+
+<a id="menuitem-icon_keeps_color"></a>
 
 #### `pub fn icon_keeps_color(mut self) -> Self`
 
@@ -156,11 +205,15 @@ colour has two costs the caller takes on:
 Ignored in the check and radio modes, which draw an indicator glyph of the
 framework's own rather than the caller's icon.
 
+<a id="menuitem-shortcut_label"></a>
+
 #### `pub fn shortcut_label(mut self, label: impl Into<String>) -> Self`
 
 Set a trailing shortcut label (e.g., "Ctrl+X"). Shortcut labels are
 typically not translated (they're the key combination literal), so
 this accepts a plain string.
+
+<a id="menuitem-trailing_hint"></a>
 
 #### `pub fn trailing_hint(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -181,6 +234,8 @@ that matter:
 Independent of the accelerator: an item may carry both, in which case
 the chord renders first and the hint follows it.
 
+<a id="menuitem-for_shortcut"></a>
+
 #### `pub fn for_shortcut(mut self, id: &'static str) -> Self`
 
 Bind the trailing shortcut label to a registered
@@ -199,6 +254,8 @@ precedence when both are set.
 A manual `shortcut_label` takes
 precedence when both are set.
 
+<a id="menuitem-enabled"></a>
+
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state — static or signal-bound. A bound `Signal<bool>`
@@ -208,16 +265,22 @@ rebuild. Cursor is always `Pointer` (see `build`); disabled items are
 gated by the arena before hover runs, so a `NotAllowed` cursor cannot
 be applied from a build-time snapshot of this prop either.
 
+<a id="menuitem-style"></a>
+
 #### `pub fn style(mut self, style: impl teksilo_core::styles::MenuItemStyle) -> Self`
 
 Per-call style override. Replaces the theme-wide default
 `MenuItemStyle` for just this MenuItem instance.
+
+<a id="menuitem-text_style"></a>
 
 #### `pub fn text_style(mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>) -> Self`
 
 Override the label's text style (font, size, weight). Accepts a
 `TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default
 (unset) is `TextStyleRole::Body`.
+
+<a id="menuitem-text_role"></a>
 
 #### `pub fn text_role(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
@@ -227,10 +290,14 @@ cascade; setting this replaces that cascade (the hover / disabled
 tint no longer applies), so reserve it for chrome that enforces a
 fixed text role.
 
+<a id="menuitem-tooltip"></a>
+
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Attach a tooltip that appears after a hover delay, same mechanism
 as `Button::tooltip`.
+
+<a id="menuitem-rich_tooltip"></a>
 
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
@@ -239,14 +306,20 @@ registry. Body text supports inline markup
 (``label``, `*italic*`, `**bold**`); the entry's shortcut
 and long-form "more" fields are rendered automatically.
 
+<a id="menuitem-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Attach a rich tooltip driven by inline `TooltipContent`.
+
+<a id="menuitem-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 
 Attach a composite tooltip — third tier, hosting an arbitrary
 widget tree. See `Button::composite_tooltip`.
+
+<a id="menuitem-submenu"></a>
 
 #### `pub fn submenu( label: impl Into<LocalizedString>, factory: impl Fn() -> Box<dyn Widget> + 'static, ) -> Self`
 
@@ -254,14 +327,20 @@ Create a submenu trigger item. The factory is invoked during `build()` to
 pre-create the submenu content (typically a `MenuList`), which is kept
 dormant until the hover delay elapses.
 
+<a id="menuitem-submenu_delay"></a>
+
 #### `pub fn submenu_delay(mut self, delay: Duration) -> Self`
 
 Set a custom submenu open delay (default: 400 ms, IntelliJ's value;
 see `DEFAULT_SUBMENU_OPEN_DELAY` for what that delay also buys).
 
+<a id="menuitem-is_submenu"></a>
+
 #### `pub fn is_submenu(&self) -> bool`
 
 Whether this is a submenu trigger.
+
+<a id="menuitem-checked"></a>
 
 #### `pub fn checked(mut self, state: Signal<bool>) -> Self`
 
@@ -272,6 +351,8 @@ when the signal is `true`, blank otherwise.
 
 Mutually exclusive with `check_state`
 and `radio` — last call wins.
+
+<a id="menuitem-reflect_checked"></a>
 
 #### `pub fn reflect_checked(mut self, state: impl Into<Prop<bool>>) -> Self`
 
@@ -284,6 +365,8 @@ mirror externally-owned state (e.g. `DockingModel::dock_open_signal`),
 where two-way `checked` would fight the model.
 
 Mutually exclusive with the other check / radio binders — last call wins.
+
+<a id="menuitem-check_state"></a>
 
 #### `pub fn check_state(mut self, state: Signal<CheckState>) -> Self`
 
@@ -300,6 +383,8 @@ Windows mixed-state convention.
 
 Mutually exclusive with `checked`
 and `radio` — last call wins.
+
+<a id="menuitem-radio"></a>
 
 #### `pub fn radio(mut self, value: usize, selected: Signal<usize>) -> Self`
 

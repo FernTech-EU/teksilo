@@ -8,6 +8,20 @@
 Center — a single-child wrapper that centers its child within the available
 space.
 
+## Public functions
+
+### `Center`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#center-new) |
+| | **Builder methods** |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#center-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#center-child_opt) |
+
+## Detailed description
+
 On a **bounded axis** (the parent proposes an exact size), `Center` fills
 that dimension and places the child in the middle. On an **unbounded axis**
 (the parent leaves it open, as a stack does on its main axis), `Center`
@@ -24,7 +38,7 @@ the bound — an ellipsis `TextWidget` truncates at the slot width instead
 of overflowing symmetrically, and wrapping text reports its real wrapped
 height.
 
-## When to use
+#### When to use
 
 - Center a small widget inside a bounded slot (e.g., an icon in a fixed
   square cell).
@@ -48,13 +62,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Center at Touch density](img/center-touch.png)
 
-## Builder methods at a glance
-
-`child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/center/index.html)
+
+<a id="center"></a>
 
 ## `pub struct Center`
 
@@ -80,13 +92,19 @@ pub struct Center { /* fields */ }
 
 ### Methods
 
+<a id="center-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create a new `Center` with no child attached.
 
+<a id="center-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline child widget (deferred insertion).
+
+<a id="center-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

@@ -7,6 +7,34 @@
 
 TextWidget — a leaf widget that renders a localized text string.
 
+## Public functions
+
+### `TextWidget`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(text: impl Into<LocalizedString>)`](#textwidget-new) |
+| | **Builder methods** |
+| `Self` | [`color(color: impl Into<ColorProp>)`](#textwidget-color) |
+| `Self` | [`style(style: impl Into<TextStyleProp>)`](#textwidget-style) |
+| `Self` | [`overflow(overflow: TextOverflow)`](#textwidget-overflow) |
+| `Self` | [`single_line()`](#textwidget-single_line) |
+| `Self` | [`min_shrink_width(min: f32)`](#textwidget-min_shrink_width) |
+| `Self` | [`no_shrink()`](#textwidget-no_shrink) |
+| `Self` | [`max_lines(n: usize)`](#textwidget-max_lines) |
+| `Self` | [`text_backend(backend: Rc<RefCell<dyn teksilo_canvas::TextBackend>>)`](#textwidget-text_backend) |
+| `Self` | [`text(state: impl Into<Prop<String>>)`](#textwidget-text) |
+| `Self` | [`markup(enabled: bool)`](#textwidget-markup) |
+| `Self` | [`on_link_click<F>(handler: F)`](#textwidget-on_link_click) |
+| `Self` | [`on_link_hover<F>(handler: F)`](#textwidget-on_link_hover) |
+| `Self` | [`a11y_hidden()`](#textwidget-a11y_hidden) |
+| | **Methods** |
+| `String` | [`resolved_text()`](#textwidget-resolved_text) |
+| `TextGeometryHandle` | [`geometry_handle()`](#textwidget-geometry_handle) |
+
+## Detailed description
+
 `TextWidget` is the building block for every visible label in the framework.
 It delegates measurement and rasterization to the `TextBackend` and supports
 three overflow modes: `TextOverflow::Wrap` (default — grows vertically),
@@ -19,7 +47,7 @@ The default color role is `TextRole::Primary`, resolved against the active
 theme at paint time, so theme switches update text color without any explicit
 binding or rebuild.
 
-# Accessibility
+### Accessibility
 
 A `TextWidget` is reviewable by default: it emits AccessKit text runs —
 one per visual line, with a position and an advance for every character
@@ -53,7 +81,7 @@ compression with `Shrinkable`.
 let _w = TextWidget::new(lit!("Save document")).single_line();
 ```
 
-## Touch and pen
+#### Touch and pen
 
 Inline links are reachable by a plain tap: the handler at `on_tap` follows
 the link run under the press with no modifier of any kind. (The touch
@@ -76,13 +104,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![TextWidget at Touch density](img/text_widget-touch.png)
 
-## Builder methods at a glance
-
-`color`, `style`, `overflow`, `single_line`, `min_shrink_width`, `no_shrink`, `max_lines`, `text_backend`, `text`, `resolved_text`, `markup`, `on_link_click`, `on_link_hover`, `a11y_hidden`, `geometry_handle`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/text_widget/index.html)
+
+<a id="textwidget"></a>
 
 ## `pub struct TextWidget`
 
@@ -92,12 +118,16 @@ pub struct TextWidget { /* fields */ }
 
 ### Methods
 
+<a id="textwidget-new"></a>
+
 #### `pub fn new(text: impl Into<LocalizedString>) -> Self`
 
 Construct a text widget whose content is a `LocalizedString`. The
 text may come from `tr!(...)` (reactive, re-resolves on locale
 change) or from `lit!("…")` for genuinely
 non-translated strings.
+
+<a id="textwidget-color"></a>
 
 #### `pub fn color(mut self, color: impl Into<ColorProp>) -> Self`
 
@@ -112,6 +142,8 @@ The default role is `TextRole::Primary`, so `.color(...)` is only
 needed when a label wants a non-default theme role (Secondary,
 Error, Accent, ...) or a custom color.
 
+<a id="textwidget-style"></a>
+
 #### `pub fn style(mut self, style: impl Into<TextStyleProp>) -> Self`
 
 Set the text style. Accepts a raw `TextStyle`, a
@@ -119,10 +151,14 @@ Set the text style. Accepts a raw `TextStyle`, a
 `Into<TextStyleProp>`. Using a role resolves at paint/layout time, so
 theme typography changes take effect without a rebuild.
 
+<a id="textwidget-overflow"></a>
+
 #### `pub fn overflow(mut self, overflow: TextOverflow) -> Self`
 
 Set how the widget handles text that doesn't fit in the proposed
 width. Default is `TextOverflow::Wrap`.
+
+<a id="textwidget-single_line"></a>
 
 #### `pub fn single_line(self) -> Self`
 
@@ -131,16 +167,22 @@ Use this on labels inside single-line containers (buttons, menu items,
 tab headers, badges, status bar cells, etc.) so long text truncates
 with a trailing "…" instead of wrapping onto multiple lines.
 
+<a id="textwidget-min_shrink_width"></a>
+
 #### `pub fn min_shrink_width(mut self, min: f32) -> Self`
 
 Override the compression floor for single-line / ellipsis text — the
 narrowest width an over-constrained stack may shrink this label to
 before truncating stops. Defaults to the ellipsis-glyph width.
 
+<a id="textwidget-no_shrink"></a>
+
 #### `pub fn no_shrink(mut self) -> Self`
 
 Opt this label out of native shrink: it reports a rigid size and
 overflows (rather than truncating) when its stack is over-constrained.
+
+<a id="textwidget-max_lines"></a>
 
 #### `pub fn max_lines(mut self, n: usize) -> Self`
 
@@ -148,20 +190,28 @@ Cap the paragraph at `n` lines when wrapping. Only meaningful
 in `TextOverflow::Wrap` mode — ignored for ellipsis modes.
 Lines beyond the cap are silently dropped.
 
+<a id="textwidget-text_backend"></a>
+
 #### `pub fn text_backend(mut self, backend: Rc<RefCell<dyn teksilo_canvas::TextBackend>>) -> Self`
 
 Override the text backend used for measurement and rasterization.
 In normal app code the framework provides the backend automatically;
 this method is used by headless tests that inject a `MockTextBackend`.
 
+<a id="textwidget-text"></a>
+
 #### `pub fn text(mut self, state: impl Into<Prop<String>>) -> Self`
 
 Set the text content. Accepts a static `String`/`&str` or a reactive
 `Signal<String>` / `Prop<String>` (resolved and re-rendered on change).
 
+<a id="textwidget-resolved_text"></a>
+
 #### `pub fn resolved_text(&self) -> String`
 
 Get the current text value (resolves from state if bound).
+
+<a id="textwidget-markup"></a>
 
 #### `pub fn markup(mut self, enabled: bool) -> Self`
 
@@ -174,9 +224,13 @@ as a minimal markdown subset:
 Links are dispatched via `on_link_click`
 and colored using `theme.colors.text_link`.
 
+<a id="textwidget-on_link_click"></a>
+
 #### `pub fn on_link_click<F>(mut self, handler: F) -> Self where F: Fn(&str, &mut EventContext) + 'static,`
 
 Called when an inline link is tapped. Enables markup automatically.
+
+<a id="textwidget-on_link_hover"></a>
 
 #### `pub fn on_link_hover<F>(mut self, handler: F) -> Self where F: Fn(&str, bool, Rect, &mut EventContext) + 'static,`
 
@@ -185,6 +239,8 @@ the URL, a `bool` indicating whether the pointer entered (`true`)
 or left (`false`), and the widget-local rect of the link span
 (so anchoring popups next to the link is cheap). Enables markup
 automatically.
+
+<a id="textwidget-a11y_hidden"></a>
 
 #### `pub fn a11y_hidden(mut self) -> Self`
 
@@ -197,6 +253,8 @@ otherwise screen readers announce the same string twice
 Standalone body text (dialog descriptions, form instructions,
 read-only display values) should NOT set this — it stays as a
 `Role::Label` node.
+
+<a id="textwidget-geometry_handle"></a>
 
 #### `pub fn geometry_handle(&self) -> TextGeometryHandle`
 

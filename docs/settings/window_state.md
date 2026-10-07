@@ -5,6 +5,40 @@
 
 Per-window geometry persistence via `WindowStateService`.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`PerWindowState`](#perwindowstate) — Persisted geometry for one labeled window |
+| `struct` | [`WindowStateService`](#windowstateservice) — Persistent, in-memory-backed store for per-window geometry |
+
+## Public functions
+
+### `PerWindowState`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `PerWindowState` | [`sanitize(min_size: (u32, u32), work_area: (u32, u32))`](#perwindowstate-sanitize) |
+
+### `WindowStateService`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Result<Self, SettingsFileError>` | [`open(paths: &AppPaths)`](#windowstateservice-open) |
+| `Result<Self, SettingsFileError>` | [`open_with_delay(paths: &AppPaths, delay: Duration)`](#windowstateservice-open_with_delay) |
+| `Result<Self, SettingsFileError>` | [`open_at(path: PathBuf, delay: Duration)`](#windowstateservice-open_at) |
+| | **Methods** |
+| `Option<PerWindowState>` | [`state_for(label: &str)`](#windowstateservice-state_for) |
+| `Result<(), SettingsFileError>` | [`record(state: PerWindowState)`](#windowstateservice-record) |
+| `Result<(), SettingsFileError>` | [`forget(label: &str)`](#windowstateservice-forget) |
+| `Vec<String>` | [`labels()`](#windowstateservice-labels) |
+| `Result<(), SettingsFileError>` | [`flush_now()`](#windowstateservice-flush_now) |
+| `&Path` | [`path()`](#windowstateservice-path) |
+
+## Detailed description
+
 Each named window — identified by a stable string label such as
 `"main"` or `"inspector"` — can have its position, size, and
 placement (`Floating` / `Maximized` / `Fullscreen`) saved across
@@ -14,7 +48,7 @@ migrated through `Migrator` steps (currently v1 → v2: `maximized:
 bool` → `placement: WindowPlacement`) before deserializing, and
 corrupt files are quarantined automatically by `SettingsFile`.
 
-## `record` is debounced, not synchronous
+#### `record` is debounced, not synchronous
 
 See `WindowStateService`'s "Why this is debounced, unlike
 `SettingsFile`" doc below for the full rationale: `record`/`forget`
@@ -30,7 +64,7 @@ needed. The service is only used directly when building custom window
 management or embedding it outside the standard `TeksiloAppBuilder`
 path.
 
-## Wayland caveat
+#### Wayland caveat
 
 Wayland does not let applications choose their window position;
 the compositor places windows. Position fields (`x`, `y`) are still
@@ -38,7 +72,7 @@ recorded and persisted (so the config roams across an X11/Wayland
 switch), but a Wayland host must ignore them when restoring.
 Width, height, and `WindowPlacement` are honored on every platform.
 
-## Example
+#### Example
 
 ```ignore
 use std::time::Duration;
@@ -65,13 +99,11 @@ if let Some(saved) = svc.state_for("main") {
 ```
 
 
-## Builder methods at a glance
-
-`sanitize`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
+
+<a id="perwindowstate"></a>
 
 ## `pub struct PerWindowState`
 
@@ -89,6 +121,8 @@ pub struct PerWindowState { /* fields */ }
 ```
 
 ### Methods
+
+<a id="perwindowstate-sanitize"></a>
 
 #### `pub fn sanitize(&self, min_size: (u32, u32), work_area: (u32, u32)) -> PerWindowState`
 
@@ -115,6 +149,8 @@ known taskbars). Without an OS hint, pass conservative
 fallbacks like `(1920, 1080)` — the result still improves on
 re-using stale coordinates from a monitor that's no longer
 connected.
+
+<a id="windowstateservice"></a>
 
 ## `pub struct WindowStateService`
 
@@ -148,13 +184,19 @@ pub struct WindowStateService { /* fields */ }
 
 ### Methods
 
+<a id="windowstateservice-open"></a>
+
 #### `pub fn open(paths: &AppPaths) -> Result<Self, SettingsFileError>`
 
 Open the window-state file at the standard location inside `paths`.
 
+<a id="windowstateservice-open_with_delay"></a>
+
 #### `pub fn open_with_delay(paths: &AppPaths, delay: Duration) -> Result<Self, SettingsFileError>`
 
 Open at the standard location with an explicit debounce window.
+
+<a id="windowstateservice-open_at"></a>
 
 #### `pub fn open_at(path: PathBuf, delay: Duration) -> Result<Self, SettingsFileError>`
 
@@ -164,9 +206,13 @@ Open the window-state file at an explicit `path`.
 coalesce into a single disk write. `Duration::ZERO` writes on the
 worker's next tick (used by tests).
 
+<a id="windowstateservice-state_for"></a>
+
 #### `pub fn state_for(&self, label: &str) -> Option<PerWindowState>`
 
 Saved state for the window with `label`, or `None` if there's no entry.
+
+<a id="windowstateservice-record"></a>
 
 #### `pub fn record(&self, state: PerWindowState) -> Result<(), SettingsFileError>`
 
@@ -175,13 +221,19 @@ Record the current geometry for `label`, replacing any prior entry.
 Updates memory immediately and schedules a debounced, locked
 read-merge-write — so a drag costs one write, not one per frame.
 
+<a id="windowstateservice-forget"></a>
+
 #### `pub fn forget(&self, label: &str) -> Result<(), SettingsFileError>`
 
 Forget the entry for `label`.
 
+<a id="windowstateservice-labels"></a>
+
 #### `pub fn labels(&self) -> Vec<String>`
 
 All recorded labels. Useful for "restore last session" features.
+
+<a id="windowstateservice-flush_now"></a>
 
 #### `pub fn flush_now(&self) -> Result<(), SettingsFileError>`
 
@@ -190,6 +242,8 @@ Flush any pending geometry to disk immediately, bypassing the debounce.
 Flushes the **op queue**, never a re-derived snapshot of the in-memory
 document — dumping the snapshot is exactly how a cleanly-exiting process
 would erase a peer's window entry.
+
+<a id="windowstateservice-path"></a>
 
 #### `pub fn path(&self) -> &Path`
 

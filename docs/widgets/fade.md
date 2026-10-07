@@ -7,6 +7,20 @@
 (opacity 0) and visible (opacity 1) when an external
 `Signal<bool>` toggles.
 
+## Public functions
+
+### `Fade`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(visible: impl Into<Prop<bool>>)`](#fade-new) |
+| | **Builder methods** |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#fade-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#fade-child_opt) |
+
+## Detailed description
+
 Drives an `opacity: Signal<f32>` ∈ [0, 1] and applies it to its
 own subtree via `BuildContext::set_opacity`. The framework's
 render walker emits `SetOpacity(value)` before this widget's
@@ -21,7 +35,7 @@ ctx.add(Fade::new(visible.clone()).child(tooltip_content));
 visible.set(true);  // fades in over `motion.duration_fast`
 ```
 
-## Layout semantics
+#### Layout semantics
 
 `Fade` does not change layout. The wrapped child reports its full
 natural size at all opacity values, so reserving space for a
@@ -34,18 +48,16 @@ prefer `OverlayRequest::with_fade`
 instead — that path coordinates the dismiss with the tween so the
 overlay survives until the opacity reaches zero.
 
-## Reduced motion
+#### Reduced motion
 
 Honours `prefers-reduced-motion`: under reduced motion the
 opacity snaps to its end value instead of tweening.
 
-## Builder methods at a glance
-
-`child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/fade/index.html)
+
+<a id="fade"></a>
 
 ## `pub struct Fade`
 
@@ -58,6 +70,8 @@ pub struct Fade { /* fields */ }
 
 ### Methods
 
+<a id="fade-new"></a>
+
 #### `pub fn new(visible: impl Into<Prop<bool>>) -> Self`
 
 Build a fade wrapper bound to `visible`. Initially hidden iff
@@ -67,9 +81,13 @@ Accepts any `Prop<bool>` source — `Signal<bool>`, `Prop<bool>`,
 or a plain `bool` (for static "always visible" / "always
 hidden" cases without a tween).
 
+<a id="fade-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Inline child widget (deferred insertion).
+
+<a id="fade-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

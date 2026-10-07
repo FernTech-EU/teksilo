@@ -6,11 +6,33 @@
 ImageWidget — displays a raster image (PNG, WebP) with a configurable
 sizing policy, content-fit mode, and intra-box alignment.
 
+## Public functions
+
+### `ImageWidget`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(icon: &RasterIcon)`](#imagewidget-new) |
+| `Self` | [`from_raw(pixels: Vec<u8>, width: u32, height: u32)`](#imagewidget-from_raw) |
+| | **Builder methods** |
+| `Self` | [`mask(shape: ImageMaskShape)`](#imagewidget-mask) |
+| `Self` | [`fit(fit: ImageFit)`](#imagewidget-fit) |
+| `Self` | [`alignment(alignment: Alignment)`](#imagewidget-alignment) |
+| `Self` | [`width(w: f32)`](#imagewidget-width) |
+| `Self` | [`height(h: f32)`](#imagewidget-height) |
+| `Self` | [`size(w: f32, h: f32)`](#imagewidget-size) |
+| `Self` | [`resizable(resizable: bool)`](#imagewidget-resizable) |
+| `Self` | [`alt(text: impl Into<String>)`](#imagewidget-alt) |
+| `Self` | [`a11y_hidden()`](#imagewidget-a11y_hidden) |
+
+## Detailed description
+
 Unlike `IconWidget` which is designed
 for small square tintable icons, `ImageWidget` handles arbitrary aspect
 ratios and defaults to full-color rendering.
 
-# Sizing model
+### Sizing model
 
 Two independent concerns, mirroring Qt's `QLabel`/`QPixmap`, SwiftUI's
 `Image`, and CSS's replaced-element model:
@@ -55,13 +77,11 @@ let _avatar = ImageWidget::new(&icon)
     .size(48.0, 48.0);
 ```
 
-## Builder methods at a glance
-
-`from_raw`, `mask`, `fit`, `alignment`, `width`, `height`, `size`, `resizable`, `alt`, `a11y_hidden`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/image_widget/index.html)
+
+<a id="imagewidget"></a>
 
 ## `pub struct ImageWidget`
 
@@ -73,6 +93,8 @@ pub struct ImageWidget { /* fields */ }
 
 ### Methods
 
+<a id="imagewidget-new"></a>
+
 #### `pub fn new(icon: &RasterIcon) -> Self`
 
 Create from a decoded `RasterIcon` (e.g., from `res!()`).
@@ -82,6 +104,8 @@ The texture is named after the icon's identity, so every
 one texture, uploaded once. That texture lives as long as the window:
 an icon decoded afresh for each widget gets a texture of its own each
 time. Pixels that change belong on `from_raw`.
+
+<a id="imagewidget-from_raw"></a>
 
 #### `pub fn from_raw(pixels: Vec<u8>, width: u32, height: u32) -> Self`
 
@@ -95,6 +119,8 @@ and comes back with one upload. Input the source refuses (a zero
 side, a buffer shorter than `width × height × 4`, a side over
 `LiveImageSource::MAX_DIMENSION`) draws nothing, and says so once
 on standard error.
+
+<a id="imagewidget-mask"></a>
 
 #### `pub fn mask(mut self, shape: ImageMaskShape) -> Self`
 
@@ -114,10 +140,14 @@ The masked picture is the widget's own, written once into a live
 source as `from_raw`'s is: the icon's shared
 texture is left alone. `ImageMaskShape::None` is a no-op.
 
+<a id="imagewidget-fit"></a>
+
 #### `pub fn fit(mut self, fit: ImageFit) -> Self`
 
 Set the content-fit mode — how the image pixels map into the box.
 See `ImageFit`.
+
+<a id="imagewidget-alignment"></a>
 
 #### `pub fn alignment(mut self, alignment: Alignment) -> Self`
 
@@ -126,6 +156,8 @@ leaves slack or crops (the CSS `object-position` analogue). Defaults
 to `Alignment::CENTER`. Leading/Trailing resolve against the
 active layout direction (RTL-aware).
 
+<a id="imagewidget-width"></a>
+
 #### `pub fn width(mut self, w: f32) -> Self`
 
 Pin a fixed display width (in logical pixels). The width axis
@@ -133,11 +165,15 @@ becomes rigid — reported as-is and never scaled to a parent
 proposal. With no height pinned, the height derives from the
 image's aspect ratio (CSS `width: Npx; height: auto`).
 
+<a id="imagewidget-height"></a>
+
 #### `pub fn height(mut self, h: f32) -> Self`
 
 Pin a fixed display height (in logical pixels). The height axis
 becomes rigid. With no width pinned, the width derives from the
 image's aspect ratio.
+
+<a id="imagewidget-size"></a>
 
 #### `pub fn size(mut self, w: f32, h: f32) -> Self`
 
@@ -145,6 +181,8 @@ Pin both display width and height (in logical pixels). The box is
 exactly this size, rigid on both axes; the image content is fitted
 inside it via the `fit` mode. This is the
 fixed-size-logo case — `.size(32.0, 32.0)`.
+
+<a id="imagewidget-resizable"></a>
 
 #### `pub fn resizable(mut self, resizable: bool) -> Self`
 
@@ -155,9 +193,13 @@ to opting out of SwiftUI's `.resizable()`. No effect once a
 dimension is pinned via `width` /
 `height` / `size`.
 
+<a id="imagewidget-alt"></a>
+
 #### `pub fn alt(mut self, text: impl Into<String>) -> Self`
 
 Set the accessibility alt text.
+
+<a id="imagewidget-a11y_hidden"></a>
 
 #### `pub fn a11y_hidden(mut self) -> Self`
 

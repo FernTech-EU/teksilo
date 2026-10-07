@@ -6,6 +6,39 @@
 Shared substrate for the data views' source-owned drag-and-drop + lazy
 loading.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`ActivateOn`](#activateon) — How a data-view row/tile is *activated* (opened/committed) by pointer — distinct from *selection*, which also moves on arrow-key navigation |
+| `struct` | [`ViewId`](#viewid) — Opaque, kind-tagged, process-unique identity of a drag-capable data-view instance |
+| `enum` | [`DragTransferMode`](#dragtransfermode) — What the *origin* view does to its own rows once a drag is accepted by a **foreign** target (a different `DropTarget` / view / the OS) |
+| `struct` | [`RowDragData`](#rowdragdata) — The public, generic drag payload every data-view row (or selected set) emits |
+| `struct` | [`RowAnchor`](#rowanchor) — Active drag-drop feedback a tree data view paints itself: a between-rows insertion line (Before/After) or a highlighted row (an into-container drop) |
+
+## Public functions
+
+### `RowDragData`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `Option<&[T]>` | [`items()`](#rowdragdata-items) |
+| `Option<Vec<T>>` | [`into_items()`](#rowdragdata-into_items) |
+| `bool` | [`is_export()`](#rowdragdata-is_export) |
+| `usize` | [`len()`](#rowdragdata-len) |
+| `bool` | [`is_empty()`](#rowdragdata-is_empty) |
+
+### `RowAnchor`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `Option<usize>` | [`index()`](#rowanchor-index) |
+| `bool` | [`is_live()`](#rowanchor-is_live) |
+
+## Detailed description
+
 Centralizes the vocabulary the four data views (`ListView` / `TreeView` /
 `TableView` / `TreeTableView`) share, so DnD validation (`can_accept`) and
 the lazy placeholder are wired one way everywhere:
@@ -23,13 +56,11 @@ the lazy placeholder are wired one way everywhere:
   `(target, position)` pair `can_accept` / `accept_drop` expect.
 - `default_placeholder` — the skeleton for a `Loading` row.
 
-## Builder methods at a glance
-
-`items`, `into_items`, `is_export`, `len`, `is_empty`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/index.html)
+
+<a id="activateon"></a>
 
 ## `pub enum ActivateOn`
 
@@ -50,6 +81,8 @@ pub enum ActivateOn { /* variants */ }
 - **`SingleClick`** — One primary click activates the row (KDE / web / Scrivener convention). Selection and activation happen on the same click.
 - **`DoubleClick`** — A double primary click activates the row; the first click only selects it (Finder / Explorer / Qt and GTK default). This is the `Default`.
 
+<a id="viewid"></a>
+
 ## `pub struct ViewId`
 
 Opaque, kind-tagged, process-unique identity of a drag-capable data-view
@@ -62,6 +95,8 @@ even across windows (each mint is globally unique).
 ```rust
 pub struct ViewId(ViewKind, usize);
 ```
+
+<a id="dragtransfermode"></a>
 
 ## `pub enum DragTransferMode`
 
@@ -78,6 +113,8 @@ pub enum DragTransferMode { /* variants */ }
 
 - **`Copy`** — Leave the origin rows in place (the dragged data is duplicated).
 - **`Move`** — Remove the dragged rows from the origin once accepted elsewhere (or exported as an OS move). This is the `Default`.
+
+<a id="rowdragdata"></a>
 
 ## `pub struct RowDragData`
 
@@ -102,14 +139,20 @@ pub struct RowDragData<T: 'static> { /* fields */ }
 
 ### Methods
 
+<a id="rowdragdata-items"></a>
+
 #### `pub fn items(&self) -> Option<&[T]>`
 
 The dragged items, if this is an export drag (`.exportable(..)` was set
 on the origin). `None` for a reorder-only drag.
 
+<a id="rowdragdata-into_items"></a>
+
 #### `pub fn into_items(self) -> Option<Vec<T>>`
 
 Consume the payload for its items (avoids cloning on the receive side).
+
+<a id="rowdragdata-is_export"></a>
 
 #### `pub fn is_export(&self) -> bool`
 
@@ -117,13 +160,19 @@ Whether this drag carries exportable items — i.e. the origin opted into
 `.exportable(..)`. A foreign receiver should gate on this (a reorder-only
 payload has the same Rust type but carries nothing usable).
 
+<a id="rowdragdata-len"></a>
+
 #### `pub fn len(&self) -> usize`
 
 Number of dragged rows.
 
+<a id="rowdragdata-is_empty"></a>
+
 #### `pub fn is_empty(&self) -> bool`
 
 Whether no rows are carried (never true for a real drag).
+
+<a id="rowanchor"></a>
 
 ## `pub struct RowAnchor`
 
@@ -170,10 +219,14 @@ pub struct RowAnchor { /* fields */ }
 
 ### Methods
 
+<a id="rowanchor-index"></a>
+
 #### `pub fn index(&self) -> Option<usize>`
 
 The row's current flat index, or `None` if it no longer exists in the
 source (it was deleted, or filtered away).
+
+<a id="rowanchor-is_live"></a>
 
 #### `pub fn is_live(&self) -> bool`
 

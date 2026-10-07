@@ -6,6 +6,30 @@
 A borderless-window frame: an invisible overlay of resize strips and
 corner cells along the four edges of a single content widget.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`WindowFrame`](#windowframe) — Invisible overlay of resize strips and corner cells that gives a borderless window draggable edges |
+| `const` | [`WINDOW_FRAME_RESIZE_THICKNESS`](#window_frame_resize_thickness) — Logical-pixel thickness of each resize strip, and the frame's default |
+
+## Public functions
+
+### `WindowFrame`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(host: Rc<dyn PlatformTitleBarHost>)`](#windowframe-new) |
+| | **Builder methods** |
+| `Self` | [`thickness(t: f32)`](#windowframe-thickness) |
+| `Self` | [`content(w: impl teksilo_core::IntoTeksiChild)`](#windowframe-content) |
+| `Self` | [`content_boxed(w: Box<dyn Widget>)`](#windowframe-content_boxed) |
+| | **Methods** |
+| `ResizeBorders` | [`coarse_resize_borders(tokens: &InputTokens)`](#windowframe-coarse_resize_borders) |
+
+## Detailed description
+
 `WindowFrame` is the canonical way to wrap a `TitleBar` + body for an
 undecorated Wayland window. The content child fills the entire window
 bounds — there is *no* visible padding — and the resize strips +
@@ -36,7 +60,7 @@ through each strip's `Widget::hit_outset`, which widens the band to
 the density's target size without moving a pixel of layout; see
 `resize_strip`.
 
-## Telling the OS the same number
+#### Telling the OS the same number
 
 On a platform where the window manager answers the resize hit test itself
 — Windows, through `WM_NCHITTEST` — the frame's own strips never see the
@@ -62,13 +86,11 @@ still publishes. It did not always — the wrapper's forwarding list was
 incomplete, and an unforwarded hook silences a publish with no diagnostic —
 so the list is now exhaustive and lint-guarded at its own impl.
 
-## Builder methods at a glance
-
-`thickness`, `content`, `content_boxed`, `coarse_resize_borders`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/index.html)
+
+<a id="windowframe"></a>
 
 ## `pub struct WindowFrame`
 
@@ -82,25 +104,35 @@ pub struct WindowFrame { /* fields */ }
 
 ### Methods
 
+<a id="windowframe-new"></a>
+
 #### `pub fn new(host: Rc<dyn PlatformTitleBarHost>) -> Self`
 
 Create a frame bound to the given platform host. Use `thickness`
 and `content` to configure it before adding to the tree.
+
+<a id="windowframe-thickness"></a>
 
 #### `pub fn thickness(mut self, t: f32) -> Self`
 
 Logical-pixel thickness of each resize strip. Default:
 `WINDOW_FRAME_RESIZE_THICKNESS`.
 
+<a id="windowframe-content"></a>
+
 #### `pub fn content(mut self, w: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the inner content widget — typically a `VStack` containing a
 `TitleBar` and the application body.
 
+<a id="windowframe-content_boxed"></a>
+
 #### `pub fn content_boxed(mut self, w: Box<dyn Widget>) -> Self`
 
 Set the inner content widget from an already-boxed value. Prefer `content`
 for unboxed widgets; use this variant when the concrete type is not known at the call site.
+
+<a id="windowframe-coarse_resize_borders"></a>
 
 #### `pub fn coarse_resize_borders(&self, tokens: &InputTokens) -> ResizeBorders`
 
@@ -115,6 +147,8 @@ thickness, and a backend must never shrink its own metric to this.
 
 Uniform across the four edges — every strip is built at the same
 thickness — so a caller reading one field reads them all.
+
+<a id="window_frame_resize_thickness"></a>
 
 ## `pub const WINDOW_FRAME_RESIZE_THICKNESS`
 

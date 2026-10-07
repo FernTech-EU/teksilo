@@ -7,7 +7,44 @@
 `ListModel<T>` and a single TOML file,
 merging by **op**, not by whole-document snapshot.
 
-## Why ops, not snapshots
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `trait` | [`Keyed`](#keyed) — An item with a stable, owned identity — the merge key `PersistedListModel` dedupes and diffs by |
+| `enum` | [`ListOp`](#listop) — A replayable mutation of a `PersistedListModel`'s backing list, expressed **by key** so it can be applied to *any* starting `Vec<T>` — in particular, the… |
+| `struct` | [`ListFile`](#listfile) — On-disk shape for a persisted list: a versioned wrapper around `Vec<T>` |
+| `struct` | [`PersistedListModel`](#persistedlistmodel) — A reactive, `Keyed`-item list whose mutations persist to a single TOML file by merging **ops**, not by overwriting a whole-document snapshot |
+
+## Public functions
+
+### `Keyed`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `Self::Key` | [`key()`](#keyed-key-2) |
+| | **Constants and types** |
+| `type` | [`Key`](#keyed-key) |
+
+### `PersistedListModel`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Result<Self, SettingsFileError>` | [`open(path: PathBuf, delay: Duration, migrator: Migrator<ListFile<T>>)`](#persistedlistmodel-open) |
+| | **Methods** |
+| `&ListModel<T>` | [`model()`](#persistedlistmodel-model) |
+|  | [`upsert_front(item: T)`](#persistedlistmodel-upsert_front) |
+| `bool` | [`update_in_place(item: T)`](#persistedlistmodel-update_in_place) |
+| `bool` | [`remove(key: &T::Key)`](#persistedlistmodel-remove) |
+|  | [`clear()`](#persistedlistmodel-clear) |
+| `Result<(), SettingsFileError>` | [`flush_now()`](#persistedlistmodel-flush_now) |
+| `&Path` | [`path()`](#persistedlistmodel-path) |
+
+## Detailed description
+
+#### Why ops, not snapshots
 
 The previous design re-derived the *entire* `Vec<T>` from the live model
 on every mutation and scheduled a debounced write of that whole
@@ -24,14 +61,14 @@ applied against the document read **fresh off disk, under a lock**, at
 flush time — so it replays cleanly on top of whatever a peer wrote in
 the meantime, key by key, instead of overwriting the whole thing.
 
-## Identity
+#### Identity
 
 Every item needs a stable identity to merge by — see `Keyed`. Ops are
 keyed, not indexed: `Remove` only needs to carry a key, never a value,
 which is exactly what a diff of "what's gone" can always produce even
 though the value itself is no longer available once removed.
 
-## Mutating through this type, not through `.model()`
+#### Mutating through this type, not through `.model()`
 
 `.model()` is for **reading** and for reactive binding (`ListView` /
 `Repeater`) — every UI observer wants live updates regardless of who
@@ -45,7 +82,7 @@ is never persisted — there is no observer bridging arbitrary model
 mutations to disk any more (that observer *was* the whole-snapshot
 overwrite bug).
 
-## Example
+#### Example
 
 ```
 use teksilo_settings::{Keyed, Migrator, PersistedListModel};
@@ -68,13 +105,11 @@ plm.upsert_front(Tag { name: "rust".into() });
 plm.flush_now().expect("flush");
 ```
 
-## Builder methods at a glance
-
-`Key`, `key`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
+
+<a id="keyed"></a>
 
 ## `pub trait Keyed`
 
@@ -92,15 +127,21 @@ pub trait Keyed { /* associated items below */ }
 
 ### Associated items
 
+<a id="keyed-key"></a>
+
 #### `type Key: Eq + Hash + Clone + Send + 'static;`
 
 The key type. Typically `String` / `PathBuf` / a small `Copy` id.
+
+<a id="keyed-key-2"></a>
 
 #### `fn key(&self) -> Self::Key;`
 
 This item's identity. Returned by value: cheap for the small key
 types this is meant for (clone a `String`/`PathBuf`/id), and it
 sidesteps borrow-lifetime issues entirely.
+
+<a id="listop"></a>
 
 ## `pub enum ListOp`
 
@@ -120,6 +161,8 @@ pub enum ListOp<T: Keyed> { /* variants */ }
 - **`Remove`** — Remove the entry with this key, if present. No-op otherwise.
 - **`Clear`** — Drop every entry.
 
+<a id="listfile"></a>
+
 ## `pub struct ListFile`
 
 On-disk shape for a persisted list: a versioned wrapper around
@@ -128,6 +171,8 @@ On-disk shape for a persisted list: a versioned wrapper around
 ```rust
 pub struct ListFile<T> { /* fields */ }
 ```
+
+<a id="persistedlistmodel"></a>
 
 ## `pub struct PersistedListModel`
 
@@ -143,6 +188,8 @@ where
 
 ### Methods
 
+<a id="persistedlistmodel-open"></a>
+
 #### `pub fn open( path: PathBuf, delay: Duration, migrator: Migrator<ListFile<T>>, ) -> Result<Self, SettingsFileError>`
 
 Open the file at `path` (running `migrator`, under an exclusive
@@ -155,6 +202,8 @@ patches on every mutation.
 frequent (every `add`/`touch`/`remove` on a live MRU list), so the
 debounce is real and load-bearing here, not vestigial.
 
+<a id="persistedlistmodel-model"></a>
+
 #### `pub fn model(&self) -> &ListModel<T>`
 
 The underlying reactive list handle. Clone it to share with
@@ -162,11 +211,15 @@ The underlying reactive list handle. Clone it to share with
 docs: mutating the returned handle directly does not persist —
 use this type's own mutation methods instead.
 
+<a id="persistedlistmodel-upsert_front"></a>
+
 #### `pub fn upsert_front(&self, item: T)`
 
 Insert `item` at the front, deduping by `item.key()` (removing any
 existing entry with the same key first). Updates the live model
 immediately and enqueues the matching `ListOp::UpsertFront`.
+
+<a id="persistedlistmodel-update_in_place"></a>
 
 #### `pub fn update_in_place(&self, item: T) -> bool`
 
@@ -174,15 +227,21 @@ Replace the entry with `item.key()` **in place** (no reordering).
 Returns `false` (and does nothing) if no entry with that key
 exists locally. Enqueues `ListOp::UpdateInPlace` on success.
 
+<a id="persistedlistmodel-remove"></a>
+
 #### `pub fn remove(&self, key: &T::Key) -> bool`
 
 Remove the entry with this key, if present locally. Returns
 whether anything was removed. Enqueues `ListOp::Remove` on
 success.
 
+<a id="persistedlistmodel-clear"></a>
+
 #### `pub fn clear(&self)`
 
 Drop every entry, locally and on disk.
+
+<a id="persistedlistmodel-flush_now"></a>
 
 #### `pub fn flush_now(&self) -> Result<(), SettingsFileError>`
 
@@ -191,6 +250,8 @@ debounce window. Flushes the **op queue** — never a re-derived
 snapshot of the in-memory list, which is exactly the mechanism
 that used to let a cleanly-exiting process erase a peer's
 newly-added entry.
+
+<a id="persistedlistmodel-path"></a>
 
 #### `pub fn path(&self) -> &Path`
 

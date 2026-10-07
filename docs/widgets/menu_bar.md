@@ -7,6 +7,39 @@
 
 MenuBar — a horizontal application menu bar with keyboard-driven dropdowns.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`CollapsePolicy`](#collapsepolicy) — Controls when a collapsible `MenuBar` switches from the full inline bar to the hamburger `IconButton` representation |
+| `struct` | [`MenuBar`](#menubar) — A horizontal application menu bar with labelled trigger buttons and dropdown menus |
+
+## Public functions
+
+### `MenuBar`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#menubar-new) |
+| `Self` | [`from_model(model: crate::menu::MenuModel)`](#menubar-from_model) |
+| | **Builder methods** |
+| `Self` | [`native_on_macos(mode: crate::menu::NativeMenuMode)`](#menubar-native_on_macos) |
+| `Self` | [`collapsible()`](#menubar-collapsible) |
+| `Self` | [`collapsed_signal(collapsed: Signal<bool>)`](#menubar-collapsed_signal) |
+| `Self` | [`collapse_policy(policy: CollapsePolicy)`](#menubar-collapse_policy) |
+| `Self` | [`hamburger_size(size: IconButtonSize)`](#menubar-hamburger_size) |
+| `Self` | [`no_dispatcher_install()`](#menubar-no_dispatcher_install) |
+| `Self` | [`menu(label: impl Into<LocalizedString>, factory: impl Fn() -> Box<dyn Widget> + 'static)`](#menubar-menu) |
+| `Self` | [`leading_slot(widget: impl Widget + 'static)`](#menubar-leading_slot) |
+| `Self` | [`leading_slots(iter: impl IntoIterator<Item = impl Widget + 'static>)`](#menubar-leading_slots) |
+| `Self` | [`trailing_slot(widget: impl Widget + 'static)`](#menubar-trailing_slot) |
+| `Self` | [`trailing_slots(iter: impl IntoIterator<Item = impl Widget + 'static>)`](#menubar-trailing_slots) |
+| | **Methods** |
+| `Signal<bool>` | [`is_collapsed()`](#menubar-is_collapsed) |
+
+## Detailed description
+
 `MenuBar` renders a row of labelled trigger buttons; activating one opens a
 dropdown `MenuList` as an overlay. Menus can be added via the fluent
 `.menu(label, factory)` API or built from a declarative `MenuModel`
@@ -27,7 +60,7 @@ collapse to a single hamburger `IconButton` when its intrinsic width
 exceeds the allotted space (`CollapsePolicy::Responsive`). `.collapse_policy(Always)`
 forces the hamburger regardless of width.
 
-## Accessibility
+#### Accessibility
 
 The bar carries `Role::MenuBar`; each trigger is `Role::MenuItem` with
 `set_has_popup(Menu)` and `set_expanded` tracking the open dropdown.
@@ -58,13 +91,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![MenuBar at Touch density](img/menu_bar-touch.png)
 
-## Builder methods at a glance
-
-`from_model`, `native_on_macos`, `collapsible`, `collapsed_signal`, `collapse_policy`, `hamburger_size`, `is_collapsed`, `no_dispatcher_install`, `menu`, `leading_slot`, `leading_slots`, `trailing_slot`, `trailing_slots`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/menu_bar/index.html)
+
+<a id="collapsepolicy"></a>
 
 ## `pub enum CollapsePolicy`
 
@@ -80,6 +111,8 @@ pub enum CollapsePolicy { /* variants */ }
 - **`Responsive`** — Collapse to a hamburger only when the bar's intrinsic width exceeds the width it is allotted; otherwise show the full inline bar. Mirrors the responsive `Toolbar` overflow behaviour.
 - **`Always`** — Always show the hamburger, regardless of available width. The "force hamburger" / compact mode.
 
+<a id="menubar"></a>
+
 ## `pub struct MenuBar`
 
 A horizontal application menu bar with labelled trigger buttons and dropdown menus.
@@ -94,9 +127,13 @@ pub struct MenuBar { /* fields */ }
 
 ### Methods
 
+<a id="menubar-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create an empty menu bar with no menus, slots, or collapse policy.
+
+<a id="menubar-from_model"></a>
 
 #### `pub fn from_model(model: crate::menu::MenuModel) -> Self`
 
@@ -106,6 +143,8 @@ top-level menu in the model becomes an in-window dropdown; combine with
 `native_on_macos` to also mirror it into the
 macOS system menu bar.
 
+<a id="menubar-native_on_macos"></a>
+
 #### `pub fn native_on_macos(mut self, mode: crate::menu::NativeMenuMode) -> Self`
 
 Choose how this bar behaves on macOS, where the convention is a global
@@ -113,6 +152,8 @@ menu bar at the top of the screen. Requires the bar to have been built
 with `from_model` and the app to have called
 `install_native_menu()`. No effect on other platforms (the in-window bar
 renders there regardless).
+
+<a id="menubar-collapsible"></a>
 
 #### `pub fn collapsible(mut self) -> Self`
 
@@ -127,6 +168,8 @@ Uses `CollapsePolicy::Responsive`. Observe the collapsed state
 via `is_collapsed`, or bind your own signal
 with `collapsed_signal`.
 
+<a id="menubar-collapsed_signal"></a>
+
 #### `pub fn collapsed_signal(mut self, collapsed: Signal<bool>) -> Self`
 
 Like `collapsible`, but uses the supplied
@@ -136,11 +179,15 @@ decision **writes** this signal (it is not a plain read-only
 input) — kept as a `Signal<bool>` rather than `Prop<bool>` since a
 static value would have nowhere to receive those writes.
 
+<a id="menubar-collapse_policy"></a>
+
 #### `pub fn collapse_policy(mut self, policy: CollapsePolicy) -> Self`
 
 Set the collapse policy (and enable collapsible mode).
 `CollapsePolicy::Always` forces the hamburger regardless of
 available width — i.e. **collapsed by default**.
+
+<a id="menubar-hamburger_size"></a>
 
 #### `pub fn hamburger_size(mut self, size: IconButtonSize) -> Self`
 
@@ -150,10 +197,14 @@ Set the size variant of the collapsed-mode hamburger
 `IconButtonSize::Hero`, etc. so the hamburger matches the
 surrounding chrome. Defaults to `IconButtonSize::Default`.
 
+<a id="menubar-is_collapsed"></a>
+
 #### `pub fn is_collapsed(&self) -> Signal<bool>`
 
 A clone of the collapsed-state signal (`true` while the
 hamburger is shown). Call after `collapsible`.
+
+<a id="menubar-no_dispatcher_install"></a>
 
 #### `pub fn no_dispatcher_install(mut self) -> Self`
 
@@ -165,11 +216,15 @@ disabled. Use this for demo / showcase MenuBars that share a
 window with a primary functional MenuBar — the slot is
 single-occupancy and a second install would `debug_assert!`.
 
+<a id="menubar-menu"></a>
+
 #### `pub fn menu( mut self, label: impl Into<LocalizedString>, factory: impl Fn() -> Box<dyn Widget> + 'static, ) -> Self`
 
 Add a top-level menu entry. `label` is the trigger text (supports `&`
 mnemonic markers, e.g. `"&File"`); `factory` is called each build to
 produce the dropdown content — typically a `MenuList`.
+
+<a id="menubar-leading_slot"></a>
 
 #### `pub fn leading_slot(mut self, widget: impl Widget + 'static) -> Self`
 
@@ -182,6 +237,8 @@ builds it once and reuses it across rebuilds (it
 so the slot — and any state it holds — survives a theme / locale /
 model-version rebuild.
 
+<a id="menubar-leading_slots"></a>
+
 #### `pub fn leading_slots(self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
 
 Add several widgets before the menu buttons, in iterator order.
@@ -189,11 +246,15 @@ Add several widgets before the menu buttons, in iterator order.
 The loop form of `leading_slot`, which already
 stacks on repeat calls: this is the same thing in one call.
 
+<a id="menubar-trailing_slot"></a>
+
 #### `pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self`
 
 Add content after the menu buttons (e.g. a search box or avatar).
 Like `leading_slot`, taken by value and preserved
 across rebuilds.
+
+<a id="menubar-trailing_slots"></a>
 
 #### `pub fn trailing_slots(self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
 

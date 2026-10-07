@@ -5,6 +5,18 @@
 
 Layered drop-shadow helper for elevated surfaces.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `const` | [`DENSITY_TOOLTIP`](#density_tooltip) — Inner-rim alpha multiplier for tooltips — full intensity for maximum lift |
+| `const` | [`DENSITY_SURFACE`](#density_surface) — Inner-rim alpha multiplier for cards, popovers, and menus — moderate lift |
+| `const` | [`DENSITY_DIALOG`](#density_dialog) — Inner-rim alpha multiplier for snackbars and dialogs — subtle lift |
+| `enum` | [`AttachedSide`](#attachedside) — Which geometric edge of the surface is attached to its trigger and should have shadow drawing suppressed on that side |
+| `fn` | [`paint_layered_shadow`](#paint_layered_shadow) — Paint a two-layer drop shadow behind a rounded rect |
+
+## Detailed description
+
 Composes two `Shadow`s underneath a rounded rect:
 - `outer` — the wide soft halo (typically `theme.shape.shadow_*`).
 - `inner` — the sharp short-blur rim that gives the surface a clearly
@@ -22,7 +34,7 @@ Common density presets:
 - `~0.5` — cards, popovers, menus (moderate).
 - `0.0` — disable inner rim entirely (single-layer outer only).
 
-## Attached side
+#### Attached side
 
 Popovers, menus and combo-box dropdowns sit *attached* to the widget
 that opened them. On the side that touches the trigger, drawing a
@@ -45,6 +57,8 @@ paint_layered_shadow(
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/shadow/index.html)
 
+<a id="density_tooltip"></a>
+
 ## `pub const DENSITY_TOOLTIP`
 
 Inner-rim alpha multiplier for tooltips — full intensity for maximum lift.
@@ -52,6 +66,8 @@ Inner-rim alpha multiplier for tooltips — full intensity for maximum lift.
 ```rust
 pub const DENSITY_TOOLTIP: f32 = 1.0;
 ```
+
+<a id="density_surface"></a>
 
 ## `pub const DENSITY_SURFACE`
 
@@ -61,6 +77,8 @@ Inner-rim alpha multiplier for cards, popovers, and menus — moderate lift.
 pub const DENSITY_SURFACE: f32 = 0.5;
 ```
 
+<a id="density_dialog"></a>
+
 ## `pub const DENSITY_DIALOG`
 
 Inner-rim alpha multiplier for snackbars and dialogs — subtle lift.
@@ -68,6 +86,8 @@ Inner-rim alpha multiplier for snackbars and dialogs — subtle lift.
 ```rust
 pub const DENSITY_DIALOG: f32 = 0.3;
 ```
+
+<a id="attachedside"></a>
 
 ## `pub enum AttachedSide`
 
@@ -87,6 +107,8 @@ pub enum AttachedSide { /* variants */ }
 - **`Bottom`** — Suppress the shadow halo on the bottom edge (e.g. a popover opening upward).
 - **`Left`** — Suppress the shadow halo on the left edge.
 - **`Right`** — Suppress the shadow halo on the right edge.
+
+<a id="paint_layered_shadow"></a>
 
 ## `pub fn paint_layered_shadow(...)`
 

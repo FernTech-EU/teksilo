@@ -7,6 +7,22 @@
 
 ZStack — a layout container that layers children on top of each other.
 
+## Public functions
+
+### `ZStack`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#zstack-new) |
+| | **Builder methods** |
+| `Self` | [`alignment(alignment: Alignment)`](#zstack-alignment) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#zstack-child) |
+| `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#zstack-children) |
+| `Self` | [`child_opt(widget: Option<impl Widget + 'static>)`](#zstack-child_opt) |
+
+## Detailed description
+
 The container sizes itself to the maximum width and maximum height across
 all children, measured at an unspecified proposal so background rects do not
 inflate the size. **Height additionally takes a width-bounded query** when the
@@ -44,13 +60,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![ZStack at Touch density](img/zstack-touch.png)
 
-## Builder methods at a glance
-
-`alignment`, `child`, `children`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/zstack/index.html)
+
+<a id="zstack"></a>
 
 ## `pub struct ZStack`
 
@@ -64,22 +78,32 @@ pub struct ZStack { /* fields */ }
 
 ### Methods
 
+<a id="zstack-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create an empty `ZStack` with center alignment.
+
+<a id="zstack-alignment"></a>
 
 #### `pub fn alignment(mut self, alignment: Alignment) -> Self`
 
 Set the alignment applied to every child that does not have a
 per-child override set via `WidgetTree::set_alignment`.
 
+<a id="zstack-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add an inline child widget (deferred insertion).
 
+<a id="zstack-children"></a>
+
 #### `pub fn children( mut self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
 Add multiple inline children from an iterator.
+
+<a id="zstack-child_opt"></a>
 
 #### `pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self`
 

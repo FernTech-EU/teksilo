@@ -7,6 +7,34 @@
 
 RadioTileGroup — an N-ary group of `RadioTile`s with single selection.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`TileLayout`](#tilelayout) — How a `RadioTileGroup` arranges its tiles |
+| `struct` | [`RadioTileGroup`](#radiotilegroup) — An N-ary, single-selection group of selectable-card radios |
+
+## Public functions
+
+### `RadioTileGroup`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(selected: Signal<usize>)`](#radiotilegroup-new) |
+| | **Builder methods** |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#radiotilegroup-label) |
+| `Self` | [`tile(tile: RadioTile)`](#radiotilegroup-tile) |
+| `Self` | [`tiles(tiles: impl IntoIterator<Item = RadioTile>)`](#radiotilegroup-tiles) |
+| `Self` | [`layout(layout: TileLayout)`](#radiotilegroup-layout) |
+| `Self` | [`spacing(spacing: f32)`](#radiotilegroup-spacing) |
+| `Self` | [`line_spacing(spacing: f32)`](#radiotilegroup-line_spacing) |
+| `Self` | [`row_height(height: f32)`](#radiotilegroup-row_height) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#radiotilegroup-enabled) |
+| `Self` | [`style(style: impl teksilo_core::styles::RadioTileStyle)`](#radiotilegroup-style) |
+
+## Detailed description
+
 Like `SegmentedControl`, the
 tile count is not fixed: add any number of tiles, all sharing one
 `Signal<usize>`. The group owns:
@@ -42,13 +70,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![RadioTileGroup at Touch density](img/radio_tile_group-touch.png)
 
-## Builder methods at a glance
-
-`label`, `tile`, `tiles`, `layout`, `spacing`, `line_spacing`, `row_height`, `enabled`, `style`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/radio_tile_group/index.html)
+
+<a id="tilelayout"></a>
 
 ## `pub enum TileLayout`
 
@@ -65,6 +91,8 @@ pub enum TileLayout { /* variants */ }
 - **`Column`** — A vertical column of full-width tiles, each its natural height. Tiles keep their full card content (icon + title + description).
 - **`Vertical`** — A vertical list of **compact** fixed-height full-width rows: `[radio] [icon] [title] [Spacer] [trailing]`, no description — the settings-list look. Every row is a fixed height taken from the active `RadioTileStyle` (the theme's `RadioTileRecipe::vertical_row_height`, 44 dp by default; override per-group with `RadioTileGroup::row_height`), and the group switches each tile to the compact arrangement (leading radio) automatically.
 
+<a id="radiotilegroup"></a>
+
 ## `pub struct RadioTileGroup`
 
 An N-ary, single-selection group of selectable-card radios. See the
@@ -76,36 +104,52 @@ pub struct RadioTileGroup { /* fields */ }
 
 ### Methods
 
+<a id="radiotilegroup-new"></a>
+
 #### `pub fn new(selected: Signal<usize>) -> Self`
 
 Create a group bound to the shared selection signal. Add tiles with
 `tile` / `tiles`.
 
+<a id="radiotilegroup-label"></a>
+
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Accessible name for the group (announced before individual tiles).
+
+<a id="radiotilegroup-tile"></a>
 
 #### `pub fn tile(mut self, tile: RadioTile) -> Self`
 
 Add a tile. Its `value` (position) and shared selection signal are
 assigned automatically.
 
+<a id="radiotilegroup-tiles"></a>
+
 #### `pub fn tiles(mut self, tiles: impl IntoIterator<Item = RadioTile>) -> Self`
 
 Add several tiles from an iterator.
 
+<a id="radiotilegroup-layout"></a>
+
 #### `pub fn layout(mut self, layout: TileLayout) -> Self`
 
 Choose the layout (default `TileLayout::Row`).
+
+<a id="radiotilegroup-spacing"></a>
 
 #### `pub fn spacing(mut self, spacing: f32) -> Self`
 
 Override the gap between tiles along the main axis (and grid columns).
 Defaults to 6 dp for `TileLayout::Vertical`, 12 dp otherwise.
 
+<a id="radiotilegroup-line_spacing"></a>
+
 #### `pub fn line_spacing(mut self, spacing: f32) -> Self`
 
 Gap between rows in `TileLayout::Grid`.
+
+<a id="radiotilegroup-row_height"></a>
 
 #### `pub fn row_height(mut self, height: f32) -> Self`
 
@@ -114,10 +158,14 @@ Takes precedence over the theme value
 (`RadioTileRecipe::vertical_row_height`, 44 dp by default). No effect on
 other layouts.
 
+<a id="radiotilegroup-enabled"></a>
+
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state for the whole group, statically or
 reactively.
+
+<a id="radiotilegroup-style"></a>
 
 #### `pub fn style(mut self, style: impl teksilo_core::styles::RadioTileStyle) -> Self`
 

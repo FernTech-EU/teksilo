@@ -6,6 +6,36 @@
 `TreeCheckedModel` — per-node checkbox state for a tree, with optional
 descendant→ancestor tristate aggregation.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`AggregateMode`](#aggregatemode) — How a parent's `CheckState` relates to its descendants |
+| `struct` | [`TreeCheckedModel`](#treecheckedmodel) — Per-node checkbox state for a `TreeModel<T>`, with optional descendant→ancestor tristate aggregation |
+
+## Public functions
+
+### `TreeCheckedModel`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(tree: TreeModel<T>)`](#treecheckedmodel-new) |
+| `Self` | [`with_mode(tree: TreeModel<T>, mode: AggregateMode)`](#treecheckedmodel-with_mode) |
+| | **Methods** |
+| `AggregateMode` | [`aggregate_mode()`](#treecheckedmodel-aggregate_mode) |
+|  | [`set_aggregate_mode(mode: AggregateMode)`](#treecheckedmodel-set_aggregate_mode) |
+| `Signal<CheckState>` | [`signal_for(node: NodeId)`](#treecheckedmodel-signal_for) |
+| `Signal<bool>` | [`bool_signal_for(node: NodeId)`](#treecheckedmodel-bool_signal_for) |
+| `CheckState` | [`check_state(node: NodeId)`](#treecheckedmodel-check_state) |
+|  | [`check(node: NodeId)`](#treecheckedmodel-check) |
+|  | [`uncheck(node: NodeId)`](#treecheckedmodel-uncheck) |
+|  | [`toggle(node: NodeId)`](#treecheckedmodel-toggle) |
+| `Vec<NodeId>` | [`checked_nodes()`](#treecheckedmodel-checked_nodes) |
+|  | [`clear()`](#treecheckedmodel-clear) |
+
+## Detailed description
+
 Companion to `crate::CheckedModel` for trees. Defaults to the standard
 "Outlook folder selection" semantic: a parent's state is `Checked` if all
 descendants are checked, `Unchecked` if none, `Indeterminate` otherwise;
@@ -21,7 +51,7 @@ cascade-and-recompute pass as the model's own
 re-entry guard prevents the cascade pass from re-firing
 observers it triggers itself.
 
-## Example
+#### Example
 
 ```rust
 # use teksilo_data::{TreeModel, TreeCheckedModel, CheckState};
@@ -40,7 +70,7 @@ model.check(child_b);
 assert_eq!(model.check_state(root), CheckState::Checked);
 ```
 
-## Limitation: tree-mutation desync
+#### Limitation: tree-mutation desync
 
 `signal_for(node)` and `bool_signal_for(node)` cache signals keyed
 by `NodeId`. The cache is never invalidated. If the underlying
@@ -62,13 +92,11 @@ never alias a fresh node. If a future use case needs strict
 invalidation on removal, subscribe to `TreeModel`'s change events
 and clear the relevant entries. Tracked as out-of-scope for V1.
 
-## Builder methods at a glance
-
-`with_mode`, `aggregate_mode`, `set_aggregate_mode`, `signal_for`, `bool_signal_for`, `check_state`, `check`, `uncheck`, `toggle`, `checked_nodes`, `clear`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/tree_checked_model/index.html)
+
+<a id="aggregatemode"></a>
 
 ## `pub enum AggregateMode`
 
@@ -82,6 +110,8 @@ pub enum AggregateMode { /* variants */ }
 
 - **`None`** — Each node owns its state independently; parent states do not reflect their descendants and cascades do not occur.
 - **`DescendantsDriveAncestors`** — All-checked → `Checked`; all-unchecked → `Unchecked`; mixed → `Indeterminate`. Toggling a parent cascades `Checked`/`Unchecked` to all descendants and recomputes every ancestor. This is the default and corresponds to the "Outlook folder selection" tristate pattern.
+
+<a id="treecheckedmodel"></a>
 
 ## `pub struct TreeCheckedModel`
 
@@ -97,22 +127,32 @@ pub struct TreeCheckedModel<T: 'static> { /* fields */ }
 
 ### Methods
 
+<a id="treecheckedmodel-new"></a>
+
 #### `pub fn new(tree: TreeModel<T>) -> Self`
 
 Create a new model wrapping `tree` with the default
 `AggregateMode::DescendantsDriveAncestors` cascade behaviour.
 
+<a id="treecheckedmodel-with_mode"></a>
+
 #### `pub fn with_mode(tree: TreeModel<T>, mode: AggregateMode) -> Self`
 
 Create a new model wrapping `tree` with an explicit `AggregateMode`.
+
+<a id="treecheckedmodel-aggregate_mode"></a>
 
 #### `pub fn aggregate_mode(&self) -> AggregateMode`
 
 Returns the current `AggregateMode` controlling cascade behaviour.
 
+<a id="treecheckedmodel-set_aggregate_mode"></a>
+
 #### `pub fn set_aggregate_mode(&self, mode: AggregateMode)`
 
 Change the cascade behaviour; takes effect on the next write to any node's signal.
+
+<a id="treecheckedmodel-signal_for"></a>
 
 #### `pub fn signal_for(&self, node: NodeId) -> Signal<CheckState>`
 
@@ -123,6 +163,8 @@ wired **idempotently** — including for a signal first materialised by
 a cascade (`write_state`) before its own `signal_for` was ever called
 (a lazily/virtualized-realised row) — so a later external write to it
 still cascades.
+
+<a id="treecheckedmodel-bool_signal_for"></a>
 
 #### `pub fn bool_signal_for(&self, node: NodeId) -> Signal<bool>`
 
@@ -141,20 +183,28 @@ nature, and the model's ancestor recompute still runs. For
 branches you typically want the tristate `signal_for` so
 `Indeterminate` is visible.
 
+<a id="treecheckedmodel-check_state"></a>
+
 #### `pub fn check_state(&self, node: NodeId) -> CheckState`
 
 Returns the current `CheckState` for `node` (defaults to `Unchecked`
 if the node's signal has never been written or read).
+
+<a id="treecheckedmodel-check"></a>
 
 #### `pub fn check(&self, node: NodeId)`
 
 Set `node` to `CheckState::Checked`, triggering the configured cascade and
 ancestor recompute; notifies observers of every affected node's signal.
 
+<a id="treecheckedmodel-uncheck"></a>
+
 #### `pub fn uncheck(&self, node: NodeId)`
 
 Set `node` to `CheckState::Unchecked`, triggering the configured cascade and
 ancestor recompute; notifies observers of every affected node's signal.
+
+<a id="treecheckedmodel-toggle"></a>
 
 #### `pub fn toggle(&self, node: NodeId)`
 
@@ -162,12 +212,16 @@ Toggle `node`'s check state: under `DescendantsDriveAncestors` a leaf
 cycles two-state (`Unchecked` ↔ `Checked`); a branch or `AggregateMode::None`
 cycles the full tristate sequence via `CheckState::next_tristate`.
 
+<a id="treecheckedmodel-checked_nodes"></a>
+
 #### `pub fn checked_nodes(&self) -> Vec<NodeId>`
 
 Returns all `NodeId`s whose current state is exactly `CheckState::Checked`.
 
 Note: may include stale ids if the underlying tree has been mutated since
 the signals were first registered — see the module-level limitation note.
+
+<a id="treecheckedmodel-clear"></a>
 
 #### `pub fn clear(&self)`
 

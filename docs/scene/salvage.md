@@ -6,7 +6,52 @@
 The **owning salvage** door: everything `Scene::remove`
 destroys, moved out instead of dropped.
 
-# Why a second channel exists at all
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`ItemA11yDecorations`](#itema11ydecorations) — The per-item slice of the **logical accessibility tree**, harvested by `Scene::take` and re-attached by… |
+| `struct` | [`RemovedItem`](#removeditem) — One item lifted whole out of a `Scene`: its entry, its magnets and its logical-AT decorations, still owned and still carrying its original… |
+| `enum` | [`RestoreError`](#restoreerror) — Why `Scene::restore` could not put a salvage back |
+| `struct` | [`ReplaceRejected`](#replacerejected) — A refused `Scene::replace_item`: why, and the item it did not take |
+| `enum` | [`ReplaceItemError`](#replaceitemerror) — Why `Scene::replace_item` could not swap an item box |
+
+## Public functions
+
+### `ItemA11yDecorations`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `bool` | [`is_empty()`](#itema11ydecorations-is_empty) |
+
+### `RemovedItem`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `ItemId` | [`id()`](#removeditem-id) |
+| `Point` | [`local_pos()`](#removeditem-local_pos) |
+| `Rect` | [`local_bounds()`](#removeditem-local_bounds) |
+| `Transform2D` | [`transform()`](#removeditem-transform) |
+| `f32` | [`z()`](#removeditem-z) |
+| `SceneLayer` | [`layer()`](#removeditem-layer) |
+| `Option<ItemId>` | [`parent()`](#removeditem-parent) |
+|  | [`detach()`](#removeditem-detach) |
+| `&[ItemId]` | [`children()`](#removeditem-children) |
+| `ItemFlags` | [`flags()`](#removeditem-flags) |
+| `f32` | [`opacity()`](#removeditem-opacity) |
+| `bool` | [`is_widget()`](#removeditem-is_widget) |
+| `Option<&dyn SceneItem>` | [`item()`](#removeditem-item) |
+| `Option<Box<dyn SceneItem>>` | [`into_item()`](#removeditem-into_item) |
+| `Option<std::rc::Rc<dyn std::any::Any>>` | [`payload()`](#removeditem-payload) |
+| `bool` | [`widget_instance_present()`](#removeditem-widget_instance_present) |
+| `&ItemA11yDecorations` | [`a11y()`](#removeditem-a11y) |
+| `usize` | [`magnet_count()`](#removeditem-magnet_count) |
+
+## Detailed description
+
+### Why a second channel exists at all
 
 `ItemChange` travels through a `Signal`, and
 `Signal<T>` requires `T: Clone` (it snapshots the value before fanning out).
@@ -21,7 +66,7 @@ salvage) and the `SceneTransactionRecord`
 delivered to the edit sink (the framework hands it over). Both produce
 `RemovedItem`s; `Scene::restore` puts one back.
 
-# What a removal used to destroy
+### What a removal used to destroy
 
 `Scene::remove` drops, in this order: the entry (its item or widget box, its
 handlers, its geometry, its flags), then the item's slice of the logical
@@ -32,7 +77,7 @@ the event alone would restore the pixels and silently lose every one of
 those. On a crate whose differentiator is per-item accessibility, that is
 the single strongest reason this door exists.
 
-# The edges a naive salvage misses
+### The edges a naive salvage misses
 
 The logical AT tree is a *graph*, and a removal cuts edges on **both**
 sides:
@@ -47,13 +92,11 @@ survivors, i.e. fail at exactly the edge case the salvage is sold on. So
 `ItemA11yDecorations` carries both directions, and the same applies to
 relations, which `remove` retains on either endpoint.
 
-## Builder methods at a glance
-
-`is_empty`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="itema11ydecorations"></a>
 
 ## `pub struct ItemA11yDecorations`
 
@@ -72,10 +115,14 @@ pub struct ItemA11yDecorations { /* fields */ }
 
 ### Methods
 
+<a id="itema11ydecorations-is_empty"></a>
+
 #### `pub fn is_empty(&self) -> bool`
 
 Whether this item carried any logical-AT decoration at all. A restore
 of an undecorated item touches none of the scene's AT maps.
+
+<a id="removeditem"></a>
 
 ## `pub struct RemovedItem`
 
@@ -102,35 +149,51 @@ pub struct RemovedItem { /* fields */ }
 
 ### Methods
 
+<a id="removeditem-id"></a>
+
 #### `pub fn id(&self) -> ItemId`
 
 The id this item had, and the id
 `Scene::restore` puts it back at.
 
+<a id="removeditem-local_pos"></a>
+
 #### `pub fn local_pos(&self) -> Point`
 
 Position in the parent's coordinate frame.
+
+<a id="removeditem-local_bounds"></a>
 
 #### `pub fn local_bounds(&self) -> Rect`
 
 AABB in local coordinates.
 
+<a id="removeditem-transform"></a>
+
 #### `pub fn transform(&self) -> Transform2D`
 
 Local→parent transform.
+
+<a id="removeditem-z"></a>
 
 #### `pub fn z(&self) -> f32`
 
 Paint z-order.
 
+<a id="removeditem-layer"></a>
+
 #### `pub fn layer(&self) -> SceneLayer`
 
 Lightweight paint band.
+
+<a id="removeditem-parent"></a>
 
 #### `pub fn parent(&self) -> Option<ItemId>`
 
 Logical parent at the moment of removal. A restore needs this item
 present, or it fails with `RestoreError::MissingParent`.
+
+<a id="removeditem-detach"></a>
 
 #### `pub fn detach(&mut self)`
 
@@ -148,33 +211,47 @@ coordinates. Use
 `Scene::reparent_keeping_scene_pos`
 after the restore when the item should not visibly move.
 
+<a id="removeditem-children"></a>
+
 #### `pub fn children(&self) -> &[ItemId]`
 
 Direct children at the moment of removal — all of them removed with it,
 and all of them present in the same `Scene::take`
 result.
 
+<a id="removeditem-flags"></a>
+
 #### `pub fn flags(&self) -> ItemFlags`
 
 Behaviour flags.
 
+<a id="removeditem-opacity"></a>
+
 #### `pub fn opacity(&self) -> f32`
 
 Local opacity multiplier.
+
+<a id="removeditem-is_widget"></a>
 
 #### `pub fn is_widget(&self) -> bool`
 
 Whether this was a heavyweight `Widget` entry rather than a lightweight
 `SceneItem` one.
 
+<a id="removeditem-item"></a>
+
 #### `pub fn item(&self) -> Option<&dyn SceneItem>`
 
 The lightweight item, if this was one. `None` for widget entries.
+
+<a id="removeditem-into_item"></a>
 
 #### `pub fn into_item(self) -> Option<Box<dyn SceneItem>>`
 
 Consume the salvage for its lightweight item box — cut-to-clipboard.
 `None` for widget entries (and the salvage is dropped either way).
+
+<a id="removeditem-payload"></a>
 
 #### `pub fn payload(&self) -> Option<std::rc::Rc<dyn std::any::Any>>`
 
@@ -182,6 +259,8 @@ The type-erased payload of a multi-view (`Delegated`) heavyweight
 entry, which is what lets a restored card be rebuilt by every view's
 delegate. `None` for a lightweight item and for a single-view
 (`Scene::add_widget`) entry.
+
+<a id="removeditem-widget_instance_present"></a>
 
 #### `pub fn widget_instance_present(&self) -> bool`
 
@@ -209,16 +288,22 @@ follows: content that must survive an undo goes in through
 `SceneModel::add_widget_item`,
 whose payload every view can rebuild from.
 
+<a id="removeditem-a11y"></a>
+
 #### `pub fn a11y(&self) -> &ItemA11yDecorations`
 
 The logical-AT decorations this item carried — both directions of every
 edge. See `ItemA11yDecorations`.
+
+<a id="removeditem-magnet_count"></a>
 
 #### `pub fn magnet_count(&self) -> usize`
 
 How many magnets were attached to this item. Their ids are preserved by
 a restore, so a consumer keying connections on
 `MagnetId` keeps them.
+
+<a id="restoreerror"></a>
 
 ## `pub enum RestoreError`
 
@@ -235,6 +320,8 @@ pub enum RestoreError { /* variants */ }
 
 - **`IdAlreadyLive`** — An entry with this id is already in the scene. Restoring over it would alias two items onto one identity.  **Defensive.** `Scene::take` retires the id, so a second salvage for it cannot exist while the first is held, and the restore that succeeds consumes the one that does — which makes this unreachable through the public API today. It stays because it is the only thing standing between a future door that breaks that invariant and a corrupted `entry_index`, and refusing is better than aliasing.
 - **`MissingParent`** — The parent the item was removed from is not in the scene. Restore roots-first — `Scene::restore_all` orders a whole `take` result for you — or clear the recorded parent with `RemovedItem::detach` before restoring, which is what a move into a *different* scene normally wants.  The salvage is consumed by the refused call, so a caller that may hit this checks `parent()` (or calls `detach()`) **before** handing it over.
+
+<a id="replacerejected"></a>
 
 ## `pub struct ReplaceRejected`
 
@@ -254,6 +341,8 @@ reconciling would silently vanish.
 ```rust
 pub struct ReplaceRejected { /* fields */ }
 ```
+
+<a id="replaceitemerror"></a>
 
 ## `pub enum ReplaceItemError`
 

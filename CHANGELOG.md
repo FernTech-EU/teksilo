@@ -491,6 +491,19 @@ by crate for clarity, not because crates version independently.
   passing them by position names them. The tools' wire arguments are
   unchanged.
 
+#### Documentation
+
+- **The online catalogs' pages open with a table of contents**, as Qt's
+  class reference does: after the page's first paragraph, its public types,
+  then each type's functions in one table, constructors first, then builder
+  methods, methods, and associated constants and types, each with its return
+  type and linking to its entry. The rest of the module documentation follows
+  under "Detailed description", its headings nested under it rather than
+  shown as top-level titles. In the book, function names are FernTech teal,
+  at a shade each theme keeps readable as text; the pages stay plain
+  Markdown. It replaces the "Builder methods at a glance" line, which listed
+  getters among the builders.
+
 ### Deprecated
 
 #### Canvas
@@ -646,6 +659,10 @@ by crate for clarity, not because crates version independently.
   page lost half a sentence; seventeen pages showed `[`X`]:` as written. The
   pages are regenerated: four get their line back, seventeen show the name
   as code like every other link.
+- **Seventy of the catalog indexes' two hundred entries stopped
+  mid-sentence**, where the first sentence of a page's documentation was
+  wrapped across lines: the brief read only its first line. It now reads the
+  sentence whole.
 
 ## [0.15.1] - 2026-10-04
 

@@ -8,6 +8,17 @@
 ValidationStrip — a small inline message shown below a text field to
 surface a validation outcome.
 
+## Public functions
+
+### `ValidationStrip`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(feedback: Signal<ValidationFeedback>)`](#validationstrip-new) |
+
+## Detailed description
+
 Bound to a `Signal<ValidationFeedback>` produced by a
 `TextInputField`.  The strip
 renders nothing when the feedback is `Pristine` or `Valid`, and shows a
@@ -38,6 +49,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/validation_strip/index.html)
 
+<a id="validationstrip"></a>
+
 ## `pub struct ValidationStrip`
 
 Inline validation-feedback strip. See module docs.
@@ -47,6 +60,8 @@ pub struct ValidationStrip { /* fields */ }
 ```
 
 ### Methods
+
+<a id="validationstrip-new"></a>
 
 #### `pub fn new(feedback: Signal<ValidationFeedback>) -> Self`
 

@@ -7,6 +7,26 @@
 
 TreeView — a virtualized, expandable/collapsible hierarchical list widget.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`TreeRowContext`](#treerowcontext) — Per-row context passed to a 4-arg TreeView delegate |
+| `struct` | [`TreeView`](#treeview) |
+
+## Public functions
+
+### `TreeRowContext`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `std::rc::Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>` | [`toggle_callback()`](#treerowcontext-toggle_callback) |
+| `TreeSliceHandle<T>` | [`slice_handle()`](#treerowcontext-slice_handle) |
+| `teksilo_data::NodeId` | [`node_id()`](#treerowcontext-node_id) |
+
+## Detailed description
+
 Displays a `TreeModel<T>` as an indented tree.
 Internally each view owns a `TreeSlice` for independent
 expand state, so two `TreeView`s on the same model can be open at different
@@ -20,7 +40,7 @@ Row heights come in three modes: uniform (`item_height`, default fast path),
 exact per-flat-index callback (`item_height_fn`), and auto-measured
 (`auto_item_height` — height-for-width per row, scroll-anchored).
 
-## Pan to scroll
+#### Pan to scroll
 
 The view installs `common::scrollable::ScrollableBehavior`,
 which gives it the shared wheel arithmetic, a finger's pan and the
@@ -35,7 +55,7 @@ deferred collapse are raw `PointerUp` arms the arbitration cannot reach, so
 each asks `data_views::release_completes_the_press` whether the release still
 belongs to the row.
 
-## Keyboard
+#### Keyboard
 
 Arrows move the cursor; `Home` / `End` reach the first and last **visible**
 row and `PageUp` / `PageDown` a viewport of them, each moving the selection
@@ -56,7 +76,7 @@ ascends, and `⌥→`/`⌥←` expand or collapse a subtree.
 The full table, and why some of it is platform-specific, is in
 [docs/data-view-keyboard.md](https://github.com/ferntech-eu/teksilo/blob/main/docs/data-view-keyboard.md).
 
-## Example
+#### Example
 
 ```rust
 # use teksilo_widgets::TreeView;
@@ -82,13 +102,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![TreeView at Touch density](img/tree_view-touch.png)
 
-## Builder methods at a glance
-
-`toggle_callback`, `slice_handle`, `node_id`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/tree_view/index.html)
+
+<a id="treerowcontext"></a>
 
 ## `pub struct TreeRowContext`
 
@@ -106,19 +124,27 @@ pub struct TreeRowContext<'a, T: 'static> { /* fields */ }
 
 ### Methods
 
+<a id="treerowcontext-toggle_callback"></a>
+
 #### `pub fn toggle_callback(&self) -> std::rc::Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>`
 
 Toggle callback for this row's chevron. Wires in one line:
 `.on_chevron_toggle_rc(ctx.toggle_callback())`.
+
+<a id="treerowcontext-slice_handle"></a>
 
 #### `pub fn slice_handle(&self) -> TreeSliceHandle<T>`
 
 Cloned handle to the slice — call `.toggle_expand(node)`,
 `.expand(node)`, `.collapse(node)` directly.
 
+<a id="treerowcontext-node_id"></a>
+
 #### `pub fn node_id(&self) -> teksilo_data::NodeId`
 
 The `NodeId` of this row in the backing `TreeModel`.
+
+<a id="treeview"></a>
 
 ## `pub struct TreeView`
 

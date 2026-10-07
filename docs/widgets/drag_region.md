@@ -5,6 +5,21 @@
 
 `DragRegion` — flexible drag region inside a `TitleBar`.
 
+## Public functions
+
+### `DragRegion`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(host: Rc<dyn PlatformTitleBarHost>)`](#dragregion-new) |
+| `Self` | [`with_child(host: Rc<dyn PlatformTitleBarHost>, child: Box<dyn Widget>)`](#dragregion-with_child) |
+| `Self` | [`with_child_id(host: Rc<dyn PlatformTitleBarHost>, id: WidgetId)`](#dragregion-with_child_id) |
+| | **Builder methods** |
+| `Self` | [`close_action(action: Option<Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>>)`](#dragregion-close_action) |
+
+## Detailed description
+
 Captures pointer events that are not consumed by inner content and
 forwards them to the platform host: drag gestures begin a window move,
 double taps toggle maximize, and right-clicks open the system window
@@ -22,7 +37,7 @@ cluster. An optional child widget — typically a centered title — is
 placed at the full region bounds and passes pointer events upward to
 the drag handler when it does not consume them.
 
-# A finger on the title bar
+### A finger on the title bar
 
 The drag region is deliberately **not** a press-time actor: the window move
 starts from `DragPhase::Started`, after the recognizer has decided the
@@ -61,13 +76,11 @@ Three routes serve a contact:
 let region = DragRegion::with_child(host.clone(), TextWidget::new(lit!("My App")));
 ```
 
-## Builder methods at a glance
-
-`with_child`, `with_child_id`, `close_action`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/index.html)
+
+<a id="dragregion"></a>
 
 ## `pub struct DragRegion`
 
@@ -80,20 +93,28 @@ pub struct DragRegion { /* fields */ }
 
 ### Methods
 
+<a id="dragregion-new"></a>
+
 #### `pub fn new(host: Rc<dyn PlatformTitleBarHost>) -> Self`
 
 Create a drag region with no inner content — the entire region is a pure drag handle.
+
+<a id="dragregion-with_child"></a>
 
 #### `pub fn with_child(host: Rc<dyn PlatformTitleBarHost>, child: Box<dyn Widget>) -> Self`
 
 Create a drag region wrapping an arbitrary boxed child widget (typically a centered
 title). Pointer events not consumed by the child bubble up to the drag handler.
 
+<a id="dragregion-with_child_id"></a>
+
 #### `pub fn with_child_id(host: Rc<dyn PlatformTitleBarHost>, id: WidgetId) -> Self`
 
 Create a drag region with an already-registered child identified by `id`.
 Use this when the child widget was added to the tree before constructing the
 region (e.g. when you need the child's `WidgetId` for another reference).
+
+<a id="dragregion-close_action"></a>
 
 #### `pub fn close_action( mut self, action: Option<Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>>, ) -> Self`
 

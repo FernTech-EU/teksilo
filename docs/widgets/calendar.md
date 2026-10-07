@@ -7,20 +7,75 @@
 
 `Calendar` — month-grid date picker, standalone widget.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`DateRange`](#daterange) — Inclusive range of two dates, with `start <= end` enforced at construction |
+| `enum` | [`CalendarMode`](#calendarmode) — What the calendar body is showing — drives the WPF/Avalonia "header-zoom" UX where clicking the title cycles to a coarser grid, letting the user reach any… |
+| `enum` | [`WeekNumberDisplay`](#weeknumberdisplay) — Whether and how week numbers are displayed in the leading column of the day grid |
+| `struct` | [`Calendar`](#calendar) — Standalone month-grid date picker |
+
+## Public functions
+
+### `Calendar`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`single(value: Signal<Option<Date>>)`](#calendar-single) |
+| `Self` | [`range(value: Signal<Option<DateRange>>)`](#calendar-range) |
+| | **Builder methods** |
+| `Self` | [`first_day_of_week(w: Weekday)`](#calendar-first_day_of_week) |
+| `Self` | [`week_numbers(mode: WeekNumberDisplay)`](#calendar-week_numbers) |
+| `Self` | [`show_today_button(show: bool)`](#calendar-show_today_button) |
+| `Self` | [`show_navigation(show: bool)`](#calendar-show_navigation) |
+| `Self` | [`min_date(d: Date)`](#calendar-min_date) |
+| `Self` | [`max_date(d: Date)`](#calendar-max_date) |
+| `Self` | [`disabled_date_filter(f: impl Fn(Date) -> bool + 'static)`](#calendar-disabled_date_filter) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#calendar-label) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#calendar-enabled) |
+| `Self` | [`on_selection_changed(f: impl Fn(Option<Date>, &mut EventContext) + 'static)`](#calendar-on_selection_changed) |
+| `Self` | [`on_range_changed(f: impl Fn(Option<DateRange>, &mut EventContext) + 'static)`](#calendar-on_range_changed) |
+| `Self` | [`on_month_changed(f: impl Fn(YearMonth, &mut EventContext) + 'static)`](#calendar-on_month_changed) |
+| `Self` | [`on_activate(f: impl Fn(Date, &mut EventContext) + 'static)`](#calendar-on_activate) |
+| | **Methods** |
+| `Signal<YearMonth>` | [`visible_month_signal()`](#calendar-visible_month_signal) |
+| `Signal<Date>` | [`focused_date_signal()`](#calendar-focused_date_signal) |
+| `Signal<CalendarMode>` | [`mode_signal()`](#calendar-mode_signal) |
+
+### `DateRange`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(a: Date, b: Date)`](#daterange-new) |
+| | **Methods** |
+| `bool` | [`contains(d: Date)`](#daterange-contains) |
+
+### `CalendarMode`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Builder methods** |
+| `Self` | [`demote()`](#calendarmode-demote) |
+
+## Detailed description
+
 A self-contained calendar with month/year navigation, a 6×7 day grid,
 keyboard navigation matching the WAI-ARIA grid pattern, and full
 AccessKit instrumentation (`Role::Grid` + per-cell `Role::GridCell`).
 Used standalone for event apps and scheduling, and embedded in
 `DateEdit`'s popover.
 
-# Selection modes
+### Selection modes
 
 - `Calendar::single` — pick one day. Bound to `Signal<Option<Date>>`.
 - `Calendar::range` — pick a start + end day. Bound to
   `Signal<Option<DateRange>>`. Click first day → click second day to
   commit. Escape mid-selection cancels the in-progress anchor.
 
-# Behaviour
+### Behaviour
 
 - **Visible month** is independent of the selection — navigating past
   the selected month doesn't lose the selection.
@@ -55,7 +110,7 @@ Used standalone for event apps and scheduling, and embedded in
   - Activating the header title zooms out and takes the keyboard into the
     grid, on the month (year) shown.
 
-# Accessibility
+### Accessibility
 
 Every string below is in the user's language. The words come from the
 framework's Fluent bundle, so an application that registers
@@ -107,7 +162,7 @@ assembled from numbers or from translated names (see
   arrow press, and each change of month, is a focus change to the new
   day, which is what a screen reader speaks.
 
-# Example
+### Example
 
 ```ignore
 use teksilo::widgets::{Calendar, common::datetime::Date};
@@ -120,7 +175,7 @@ ctx.add(
 );
 ```
 
-## Touch and pen
+#### Touch and pen
 
 A day cell is a **tap target**, not a manipulator, and the distinction
 decides what it declares. Its activation is `on_tap`, so it already lands on
@@ -139,13 +194,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Calendar at Touch density](img/calendar-touch.png)
 
-## Builder methods at a glance
-
-`single`, `range`, `first_day_of_week`, `week_numbers`, `show_today_button`, `show_navigation`, `min_date`, `max_date`, `disabled_date_filter`, `label`, `enabled`, `on_selection_changed`, `on_range_changed`, `on_month_changed`, `on_activate`, `visible_month_signal`, `focused_date_signal`, `mode_signal`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/calendar/index.html)
+
+<a id="daterange"></a>
 
 ## `pub struct DateRange`
 
@@ -158,14 +211,20 @@ pub struct DateRange { /* fields */ }
 
 ### Methods
 
+<a id="daterange-new"></a>
+
 #### `pub fn new(a: Date, b: Date) -> Self`
 
 Construct a range; swaps `start` and `end` if needed so the
 invariant `start <= end` always holds.
 
+<a id="daterange-contains"></a>
+
 #### `pub fn contains(&self, d: Date) -> bool`
 
 `true` iff `d` is between `start` and `end` inclusive.
+
+<a id="calendarmode"></a>
 
 ## `pub enum CalendarMode`
 
@@ -186,10 +245,14 @@ pub enum CalendarMode { /* variants */ }
 
 ### Methods
 
+<a id="calendarmode-demote"></a>
+
 #### `pub fn demote(self) -> Self`
 
 Mode after demoting one level (clicking the header title).
 `Years` is the coarsest level — no further demotion.
+
+<a id="weeknumberdisplay"></a>
 
 ## `pub enum WeekNumberDisplay`
 
@@ -204,6 +267,8 @@ pub enum WeekNumberDisplay { /* variants */ }
 - **`None`** — No week-number column (default).
 - **`Iso8601`** — ISO 8601 week number — week 1 is the week containing the first Thursday of the year. Adds a narrow column to the left of the day grid.
 
+<a id="calendar"></a>
+
 ## `pub struct Calendar`
 
 Standalone month-grid date picker. See the `module docs` for
@@ -215,55 +280,79 @@ pub struct Calendar { /* fields */ }
 
 ### Methods
 
+<a id="calendar-single"></a>
+
 #### `pub fn single(value: Signal<Option<Date>>) -> Self`
 
 Construct a calendar in single-selection mode bound to a
 nullable date signal.
+
+<a id="calendar-range"></a>
 
 #### `pub fn range(value: Signal<Option<DateRange>>) -> Self`
 
 Construct a calendar in range-selection mode bound to a
 nullable date-range signal.
 
+<a id="calendar-first_day_of_week"></a>
+
 #### `pub fn first_day_of_week(mut self, w: Weekday) -> Self`
 
 Override the locale-derived first day of the week.
 
+<a id="calendar-week_numbers"></a>
+
 #### `pub fn week_numbers(mut self, mode: WeekNumberDisplay) -> Self`
 
 Show or hide the leading week-number column.
+
+<a id="calendar-show_today_button"></a>
 
 #### `pub fn show_today_button(mut self, show: bool) -> Self`
 
 Show a "Today" button in the footer that jumps focus and selection
 (in single mode) to today.
 
+<a id="calendar-show_navigation"></a>
+
 #### `pub fn show_navigation(mut self, show: bool) -> Self`
 
 Show or hide the prev/next month navigation arrows.
+
+<a id="calendar-min_date"></a>
 
 #### `pub fn min_date(mut self, d: Date) -> Self`
 
 Earliest allowed date; days before this read as disabled.
 
+<a id="calendar-max_date"></a>
+
 #### `pub fn max_date(mut self, d: Date) -> Self`
 
 Latest allowed date; days after this read as disabled.
+
+<a id="calendar-disabled_date_filter"></a>
 
 #### `pub fn disabled_date_filter(mut self, f: impl Fn(Date) -> bool + 'static) -> Self`
 
 Per-cell predicate. `true` ⇒ cell is disabled (no click, no
 keyboard commit, AT marks `disabled`).
 
+<a id="calendar-label"></a>
+
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Override the AT label. Default: "Calendar, May 2026" (localized,
 derived from the visible month).
 
+<a id="calendar-enabled"></a>
+
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state, statically or reactively. Forwarded to the
 arena at build time — a bound `Signal<bool>` updates live.
+
+<a id="calendar-on_selection_changed"></a>
 
 #### `pub fn on_selection_changed( mut self, f: impl Fn(Option<Date>, &mut EventContext) + 'static, ) -> Self`
 
@@ -272,16 +361,22 @@ Fired when the selection changes. In range mode use
 callback fires on every committed-day change in range mode too,
 passing the just-committed endpoint.
 
+<a id="calendar-on_range_changed"></a>
+
 #### `pub fn on_range_changed( mut self, f: impl Fn(Option<DateRange>, &mut EventContext) + 'static, ) -> Self`
 
 Fired in range mode whenever a range is committed (second click
 of the pair). `None` fires when the user resets via Escape or
 when the bound value is externally cleared.
 
+<a id="calendar-on_month_changed"></a>
+
 #### `pub fn on_month_changed(mut self, f: impl Fn(YearMonth, &mut EventContext) + 'static) -> Self`
 
 Fired when the visible month changes (navigation arrows,
 keyboard PageUp/Down, today jump).
+
+<a id="calendar-on_activate"></a>
 
 #### `pub fn on_activate(mut self, f: impl Fn(Date, &mut EventContext) + 'static) -> Self`
 
@@ -290,13 +385,19 @@ Fired in single mode on Enter or click (i.e. when the user
 use this to dismiss themselves only on a real click, not on
 keyboard navigation.
 
+<a id="calendar-visible_month_signal"></a>
+
 #### `pub fn visible_month_signal(&self) -> Signal<YearMonth>`
 
 Reactive accessor for the currently-visible month.
 
+<a id="calendar-focused_date_signal"></a>
+
 #### `pub fn focused_date_signal(&self) -> Signal<Date>`
 
 Reactive accessor for the focused-cell date.
+
+<a id="calendar-mode_signal"></a>
 
 #### `pub fn mode_signal(&self) -> Signal<CalendarMode>`
 

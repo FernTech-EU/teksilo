@@ -7,6 +7,33 @@
 
 GroupBox — titled cluster of controls in Int UI / Jewel style.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `const` | [`GROUP_BOX_CONTENT_INDENT`](#group_box_content_indent) — Horizontal indent of the content area below the title (dp) |
+| `fn` | [`group_box_content_indent`](#group_box_content_indent-2) — `GROUP_BOX_CONTENT_INDENT` scaled by the density's `spacing_factor` (1.00 / 1.15 / 1.30) |
+| `const` | [`GROUP_BOX_TITLE_CONTENT_SPACING`](#group_box_title_content_spacing) — Vertical gap between the title row and the content area (dp) |
+| `fn` | [`group_box_title_content_spacing`](#group_box_title_content_spacing-2) — `GROUP_BOX_TITLE_CONTENT_SPACING` scaled by the density's `spacing_factor` (1.00 / 1.15 / 1.30) |
+| `const` | [`GROUP_BOX_CHECKBOX_GAP`](#group_box_checkbox_gap) — Gap between the checkbox and the adjacent title label in checkable mode (dp) |
+| `fn` | [`group_box_checkbox_gap`](#group_box_checkbox_gap-2) — `GROUP_BOX_CHECKBOX_GAP` scaled by the density's `spacing_factor` (1.00 / 1.15 / 1.30) |
+| `struct` | [`GroupBox`](#groupbox) — A titled cluster of controls with optional enable/disable toggle |
+
+## Public functions
+
+### `GroupBox`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(title: impl Into<LocalizedString>)`](#groupbox-new) |
+| | **Builder methods** |
+| `Self` | [`checkable(checked: Signal<bool>)`](#groupbox-checkable) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#groupbox-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#groupbox-child_opt) |
+
+## Detailed description
+
 A bold title (optionally preceded by a checkbox) sits above an indented
 content area. No border, no frame — pure composition. The standard use
 is grouping related settings controls on a preferences sheet or
@@ -17,7 +44,7 @@ of the content area (via `ctx.enabled_when` with ancestor propagation) AND
 paints a translucent surface overlay over the content so it reads as
 greyed-out. The title checkbox itself stays interactive.
 
-## When to use
+#### When to use
 
 - **GroupBox** — logical cluster with a title; optional enable/disable
   toggle for the whole cluster. Use for settings sections.
@@ -25,7 +52,7 @@ greyed-out. The title checkbox itself stays interactive.
   caption" without a content slot; use to label regions that are not
   collapsed or disabled as a unit.
 
-## Accessibility
+#### Accessibility
 
 The box node carries `Role::Group` and its `name` is set to the title
 string. When checkable and unchecked, `set_disabled()` is set on the
@@ -47,13 +74,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![GroupBox at Touch density](img/group_box-touch.png)
 
-## Builder methods at a glance
-
-`checkable`, `child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/group_box/index.html)
+
+<a id="group_box_content_indent"></a>
 
 ## `pub const GROUP_BOX_CONTENT_INDENT`
 
@@ -62,6 +87,8 @@ Horizontal indent of the content area below the title (dp).
 ```rust
 pub const GROUP_BOX_CONTENT_INDENT: f32 = 24.0;
 ```
+
+<a id="group_box_content_indent-2"></a>
 
 ## `pub fn group_box_content_indent(...)`
 
@@ -72,6 +99,8 @@ pub const GROUP_BOX_CONTENT_INDENT: f32 = 24.0;
 pub fn group_box_content_indent(tokens: &InputTokens) -> f32;
 ```
 
+<a id="group_box_title_content_spacing"></a>
+
 ## `pub const GROUP_BOX_TITLE_CONTENT_SPACING`
 
 Vertical gap between the title row and the content area (dp).
@@ -79,6 +108,8 @@ Vertical gap between the title row and the content area (dp).
 ```rust
 pub const GROUP_BOX_TITLE_CONTENT_SPACING: f32 = 8.0;
 ```
+
+<a id="group_box_title_content_spacing-2"></a>
 
 ## `pub fn group_box_title_content_spacing(...)`
 
@@ -89,6 +120,8 @@ pub const GROUP_BOX_TITLE_CONTENT_SPACING: f32 = 8.0;
 pub fn group_box_title_content_spacing(tokens: &InputTokens) -> f32;
 ```
 
+<a id="group_box_checkbox_gap"></a>
+
 ## `pub const GROUP_BOX_CHECKBOX_GAP`
 
 Gap between the checkbox and the adjacent title label in checkable mode (dp).
@@ -96,6 +129,8 @@ Gap between the checkbox and the adjacent title label in checkable mode (dp).
 ```rust
 pub const GROUP_BOX_CHECKBOX_GAP: f32 = 6.0;
 ```
+
+<a id="group_box_checkbox_gap-2"></a>
 
 ## `pub fn group_box_checkbox_gap(...)`
 
@@ -105,6 +140,8 @@ pub const GROUP_BOX_CHECKBOX_GAP: f32 = 6.0;
 ```rust
 pub fn group_box_checkbox_gap(tokens: &InputTokens) -> f32;
 ```
+
+<a id="groupbox"></a>
 
 ## `pub struct GroupBox`
 
@@ -119,9 +156,13 @@ pub struct GroupBox { /* fields */ }
 
 ### Methods
 
+<a id="groupbox-new"></a>
+
 #### `pub fn new(title: impl Into<LocalizedString>) -> Self`
 
 Create a non-checkable group box with the given `title`.
+
+<a id="groupbox-checkable"></a>
 
 #### `pub fn checkable(mut self, checked: Signal<bool>) -> Self`
 
@@ -129,9 +170,13 @@ Turn this into a checkable GroupBox. When the signal is `false`, events
 to descendants of the content area are blocked via effective-enabled
 ancestor propagation. The title checkbox itself stays interactive.
 
+<a id="groupbox-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the content widget inline (deferred insertion).
+
+<a id="groupbox-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

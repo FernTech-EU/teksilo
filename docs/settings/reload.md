@@ -6,6 +6,18 @@
 `Reloadable` — the contract a (separately-built) file watcher uses to
 push a peer process's write into live state.
 
+## Public functions
+
+### `Reloadable`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `&Path` | [`path()`](#reloadable-path) |
+| `Result<bool, SettingsFileError>` | [`reload_from_disk()`](#reloadable-reload_from_disk) |
+
+## Detailed description
+
 Every persisted type in this crate is cross-process safe on the *write*
 side (see `flush.rs`'s `Patch` design): a write always merges against
 whatever is on disk, under a lock. That alone is not enough — a process
@@ -16,7 +28,7 @@ FSEvents / ReadDirectoryChangesW, wired up outside this crate) to say
 "the file changed, go look," without needing to know anything about the
 concrete type it's reloading.
 
-## The self-write-suppression contract
+#### The self-write-suppression contract
 
 A naive implementation would feed back into itself: this process writes
 `general.toml`, the watcher notices *that very write* a few milliseconds
@@ -45,13 +57,11 @@ Every implementation therefore layers two checks, cheapest first:
 Implementors: `crate::SettingsFile`, `crate::SettingsStore`,
 `crate::PersistedListModel`, `crate::WindowStateService`.
 
-## Builder methods at a glance
-
-`path`, `reload_from_disk`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
+
+<a id="reloadable"></a>
 
 ## `pub trait Reloadable`
 
@@ -71,10 +81,14 @@ pub trait Reloadable { /* associated items below */ }
 
 ### Associated items
 
+<a id="reloadable-path"></a>
+
 #### `fn path(&self) -> &Path;`
 
 The file this instance reads from and writes to. A watcher uses this
 to know which path to associate with which `Reloadable` handle.
+
+<a id="reloadable-reload_from_disk"></a>
 
 #### `fn reload_from_disk(&self) -> Result<bool, SettingsFileError>;`
 

@@ -7,6 +7,22 @@
 
 Padding — a single-child layout container that adds insets around its child.
 
+## Public functions
+
+### `Padding`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(top: impl Into<Prop<f32>>, trailing: impl Into<Prop<f32>>, bottom: impl Into<Prop<f32>>, leading: impl Into<Prop<f32>>)`](#padding-new) |
+| `Self` | [`uniform(amount: impl Into<Prop<f32>>)`](#padding-uniform) |
+| `Self` | [`symmetric(vertical: impl Into<Prop<f32>>, horizontal: impl Into<Prop<f32>>)`](#padding-symmetric) |
+| | **Builder methods** |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#padding-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#padding-child_opt) |
+
+## Detailed description
+
 `Padding` shrink-wraps a child widget and enlarges it by configurable insets
 on each of the four sides. Horizontal insets are **leading/trailing**
 (logical), not left/right (physical), so they flip automatically in RTL
@@ -18,7 +34,7 @@ The grow weight, shrink weight, and compression floor reported by the child
 are forwarded through the padding so a flexible or shrinkable child inside a
 `Padding` stays flexible or shrinkable from the parent's perspective.
 
-## When to use
+#### When to use
 
 - Adding whitespace around a widget without wrapping it in a stack.
 - Applying asymmetric insets (e.g. extra leading inset for a list item).
@@ -43,13 +59,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Padding at Touch density](img/padding-touch.png)
 
-## Builder methods at a glance
-
-`uniform`, `symmetric`, `child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/padding/index.html)
+
+<a id="padding"></a>
 
 ## `pub struct Padding`
 
@@ -66,6 +80,8 @@ pub struct Padding { /* fields */ }
 
 ### Methods
 
+<a id="padding-new"></a>
+
 #### `pub fn new( top: impl Into<Prop<f32>>, trailing: impl Into<Prop<f32>>, bottom: impl Into<Prop<f32>>, leading: impl Into<Prop<f32>>, ) -> Self`
 
 Create a padding with explicit per-side insets.
@@ -74,9 +90,13 @@ Argument order mirrors CSS shorthand: `(top, trailing, bottom, leading)`.
 `trailing` and `leading` are **logical** — they map to physical right and
 left in LTR and are swapped in RTL.
 
+<a id="padding-uniform"></a>
+
 #### `pub fn uniform(amount: impl Into<Prop<f32>>) -> Self`
 
 Create a padding with the same inset on all four sides.
+
+<a id="padding-symmetric"></a>
 
 #### `pub fn symmetric(vertical: impl Into<Prop<f32>>, horizontal: impl Into<Prop<f32>>) -> Self`
 
@@ -85,9 +105,13 @@ Create a padding with equal top/bottom insets and equal leading/trailing insets.
 `vertical` applies to both top and bottom; `horizontal` applies to both
 leading and trailing sides (logical, RTL-aware).
 
+<a id="padding-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline child widget (deferred insertion).
+
+<a id="padding-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

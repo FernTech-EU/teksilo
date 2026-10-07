@@ -6,7 +6,46 @@
 The **reversible-mutation seam**: what the scene tells a data layer so that
 layer can reverse an edit.
 
-# What this is not
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`TxnId`](#txnid) — Process-unique id for one transaction |
+| `enum` | [`ChangeSource`](#changesource) — *Whose* change this is |
+| `enum` | [`HistoryMode`](#historymode) — What a history *above* the scene should do with this transaction |
+| `enum` | [`TxnOutcome`](#txnoutcome) — How a transaction finished |
+| `struct` | [`SceneChange`](#scenechange) — One `ItemChange` plus the context the notification channel needs in order to be usable as a change feed rather than just a repaint trigger |
+| `enum` | [`Salvage`](#salvage) — The ownership an `ItemChange` cannot carry, attached to the removal that produced it |
+| `enum` | [`SceneEdit`](#sceneedit) — One edit inside a `SceneTransactionRecord`, in application order |
+| `struct` | [`SceneTransactionRecord`](#scenetransactionrecord) — One committed transaction, delivered to the edit sink with the scene unborrowed |
+
+## Public functions
+
+### `TxnId`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `u64` | [`as_u64()`](#txnid-as_u64) |
+| `bool` | [`is_none()`](#txnid-is_none) |
+
+### `SceneChange`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `ItemId` | [`id()`](#scenechange-id) |
+
+### `SceneTransactionRecord`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `bool` | [`is_empty()`](#scenetransactionrecord-is_empty) |
+
+## Detailed description
+
+### What this is not
 
 There is no stack here, no history, no command list and no `undo()`. Undo
 belongs to the data layer, and the framework's job stops at handing that
@@ -32,7 +71,7 @@ Both still ride the notification channel, because a view or a cache does
 need to hear about them. The distinction is between *telling* and
 *describing*.
 
-# Two channels, because the types force it
+### Two channels, because the types force it
 
 `Scene::item_change_signal` carries a
 `SceneChange` — an `ItemChange` wrapped in an envelope that says *which
@@ -46,7 +85,7 @@ out, so `T: Clone`, and a removed entry holds a `Box<dyn SceneItem>` or a
 second, owning channel: the `SceneTransactionRecord` delivered to the edit
 sink. See `crate::salvage` for why that matters and what it carries.
 
-# A transaction is a scope, and the scope is the write scope
+### A transaction is a scope, and the scope is the write scope
 
 Every `SceneModel` mutator already runs inside a write scope (that is how
 the change fan-out escapes the `RefCell` borrow), and
@@ -63,7 +102,7 @@ adds no boundary and the outer stamp wins — so an observer that opens its
 own transaction inside a framework-opened gesture cannot split that gesture
 in two.
 
-# Where the sink runs, and why its own writes are journaled
+### Where the sink runs, and why its own writes are journaled
 
 The sink is invoked with **no borrow on the scene**, which is what lets it
 read the scene and write it back. A sink that writes is not a corner case —
@@ -75,13 +114,11 @@ being delivered, and the same delivery loop hands it over on a later round.
 The sink is never re-entered while it is running; it is also never taken out
 of its slot, so a panicking sink does not vanish.
 
-## Builder methods at a glance
-
-`as_u64`, `is_none`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="txnid"></a>
 
 ## `pub struct TxnId`
 
@@ -100,15 +137,21 @@ pub struct TxnId(u64);
 
 ### Methods
 
+<a id="txnid-as_u64"></a>
+
 #### `pub fn as_u64(self) -> u64`
 
 Raw value, for a consumer keying its own map on a transaction.
+
+<a id="txnid-is_none"></a>
 
 #### `pub fn is_none(self) -> bool`
 
 Whether this is the sentinel the change and transaction signals hold
 before anything has been committed. Never `true` for a transaction the
 scene actually opened.
+
+<a id="changesource"></a>
 
 ## `pub enum ChangeSource`
 
@@ -137,6 +180,8 @@ pub enum ChangeSource { /* variants */ }
 - **`Programmatic`** — The app moved the scene itself: a document load, a layout pass, a data re-source, an import, an animation tick. The default, because a mutation nobody claimed is not a user's.
 - **`Remote`** — Applied on behalf of a peer — collaboration, replay, a data-layer redo. A consumer re-broadcasting or recording history is expected to skip these; the framework does not interpret it.
 
+<a id="historymode"></a>
+
 ## `pub enum HistoryMode`
 
 What a history *above* the scene should do with this transaction.
@@ -159,6 +204,8 @@ pub enum HistoryMode { /* variants */ }
 - **`RecordPreserveRedo`** — Push an entry but leave the redo stack alone. For a change that is undoable without invalidating a redo branch.
 - **`Ignore`** — Do not push. Views still reconcile; history does not move.
 
+<a id="txnoutcome"></a>
+
 ## `pub enum TxnOutcome`
 
 How a transaction finished.
@@ -173,6 +220,8 @@ pub enum TxnOutcome { /* variants */ }
 
 - **`Committed`** — The normal ending: the guard dropped, or the write scope closed.
 - **`Abandoned`** — `SceneTransaction::abandon` — a cancelled interaction.  The scene is **not** rolled back. The framework owns no inverse-application routine and will not grow one, because applying an inverse is the first 80 % of an undo stack. The record is delivered so the consumer can revert from the `old` values it was handed, without pushing anything a redo could replay.
+
+<a id="scenechange"></a>
 
 ## `pub struct SceneChange`
 
@@ -190,9 +239,13 @@ pub struct SceneChange { /* fields */ }
 
 ### Methods
 
+<a id="scenechange-id"></a>
+
 #### `pub fn id(&self) -> ItemId`
 
 The item this change is about.
+
+<a id="salvage"></a>
 
 ## `pub enum Salvage`
 
@@ -209,6 +262,8 @@ pub enum Salvage { /* variants */ }
 
 - **`Owned`** — The framework owns the removed entry and is handing it over. Feed it back to `Scene::restore` to undo the removal.
 - **`TakenByCaller`** — The caller used `Scene::take` and already holds the salvage, so the record carries only the fact of the removal.
+
+<a id="sceneedit"></a>
 
 ## `pub enum SceneEdit`
 
@@ -241,6 +296,8 @@ pub enum SceneEdit { /* variants */ }
 - **`Change`** — Any non-removal change, verbatim from the notification channel.
 - **`Removed`** — A removal, with what it destroyed. Descendants come before the named root, the order `remove` announces in.
 
+<a id="scenetransactionrecord"></a>
+
 ## `pub struct SceneTransactionRecord`
 
 One committed transaction, delivered to the edit sink with the scene
@@ -257,6 +314,8 @@ pub struct SceneTransactionRecord { /* fields */ }
 ```
 
 ### Methods
+
+<a id="scenetransactionrecord-is_empty"></a>
 
 #### `pub fn is_empty(&self) -> bool`
 

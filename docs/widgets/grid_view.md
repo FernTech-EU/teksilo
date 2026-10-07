@@ -7,6 +7,77 @@
 
 Virtualized 2D tile grid bound to a `ListModel<T>` / `ListDataSource`.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`TileContext`](#tilecontext) — Context passed to the tile delegate for each realized tile |
+| `struct` | [`GridView`](#gridview) — A virtualized 2D tile grid backed by a `ListModel<T>` |
+| `enum` | [`GridTabTraversal`](#gridtabtraversal) — How Tab moves out of (or within) the grid |
+| `struct` | [`GroupingSections`](#groupingsections) — A `SectionProvider` built by partitioning consecutive equal-key runs of an (already ordered) model |
+
+## Public functions
+
+### `GridView`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(model: ListModel<T>, delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static)`](#gridview-new) |
+| `Self` | [`from_source<S: teksilo_data::ListDataSource<Item = T>>(source: S, delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static)`](#gridview-from_source) |
+| | **Builder methods** |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#gridview-enabled) |
+| `Self` | [`sizing(sizing: impl Into<Prop<GridSizing>>)`](#gridview-sizing) |
+| `Self` | [`tile_size(width: f32, height: f32)`](#gridview-tile_size) |
+| `Self` | [`column_count(count: usize, tile_height: f32)`](#gridview-column_count) |
+| `Self` | [`variable_row_heights(estimated: f32)`](#gridview-variable_row_heights) |
+| `Self` | [`item_height(f: impl Fn(usize) -> f32 + 'static)`](#gridview-item_height) |
+| `Self` | [`waterfall(estimated: f32)`](#gridview-waterfall) |
+| `Self` | [`column_spacing(spacing: f32)`](#gridview-column_spacing) |
+| `Self` | [`row_spacing(spacing: f32)`](#gridview-row_spacing) |
+| `Self` | [`spacing(spacing: f32)`](#gridview-spacing) |
+| `Self` | [`content_inset(inset: EdgeInsets)`](#gridview-content_inset) |
+| `Self` | [`selection(sel: SelectionModel)`](#gridview-selection) |
+| `Self` | [`on_selection_changed(f: impl Fn(&BTreeSet<usize>) + 'static)`](#gridview-on_selection_changed) |
+| `Self` | [`marquee_selection(enabled: bool)`](#gridview-marquee_selection) |
+| `Self` | [`wrap_navigation(enabled: bool)`](#gridview-wrap_navigation) |
+| `Self` | [`tab_traversal(traversal: GridTabTraversal)`](#gridview-tab_traversal) |
+| `Self` | [`show_scrollbar(show: bool)`](#gridview-show_scrollbar) |
+| `Self` | [`overscroll_behavior(behavior: OverscrollBehavior)`](#gridview-overscroll_behavior) |
+| `Self` | [`smooth_scrolling(enabled: bool)`](#gridview-smooth_scrolling) |
+| `Self` | [`smooth_scroll_duration(duration: Duration)`](#gridview-smooth_scroll_duration) |
+| `Self` | [`scroll_bar_style(style: ScrollBarMode)`](#gridview-scroll_bar_style) |
+| `Self` | [`sections<P: SectionProvider>(provider: P)`](#gridview-sections) |
+| `Self` | [`section_header_delegate(f: impl Fn(usize, &str) -> Box<dyn Widget> + 'static)`](#gridview-section_header_delegate) |
+| `Self` | [`section_header_height(height: f32)`](#gridview-section_header_height) |
+| `Self` | [`pinned_section_headers(enabled: bool)`](#gridview-pinned_section_headers) |
+| `Self` | [`a11y_label(label: impl Into<String>)`](#gridview-a11y_label) |
+| `Self` | [`style(style: impl GridViewStyle)`](#gridview-style) |
+| `Self` | [`empty_view(f: impl Fn() -> Box<dyn Widget> + 'static)`](#gridview-empty_view) |
+| `Self` | [`loading_view(f: impl Fn() -> Box<dyn Widget> + 'static)`](#gridview-loading_view) |
+| `Self` | [`is_loading(flag: impl Into<Prop<bool>>)`](#gridview-is_loading) |
+| `Self` | [`reorderable(enabled: bool)`](#gridview-reorderable) |
+| `Self` | [`exportable(mode: DragTransferMode)`](#gridview-exportable) |
+| `Self` | [`export_external(f: impl Fn(&[T]) -> Vec<(String, Vec<u8>)> + 'static)`](#gridview-export_external) |
+| `Self` | [`on_rows_transferred_out(f: impl Fn(&[usize], &mut teksilo_core::widget::EventContext) + 'static)`](#gridview-on_rows_transferred_out) |
+| `Self` | [`accept_foreign_rows(accept: bool)`](#gridview-accept_foreign_rows) |
+| `Self` | [`on_rows_received(f: impl Fn(Vec<T>, usize, &mut teksilo_core::widget::EventContext) + 'static)`](#gridview-on_rows_received) |
+| `Self` | [`on_item_drop(f: impl Fn( teksilo_core::drag_payload::DragPayload, usize, &mut teksilo_core::widget::EventContext, ) -> bool + 'static)`](#gridview-on_item_drop) |
+| `Self` | [`on_tile_activate(f: impl Fn(usize, &mut teksilo_core::widget::EventContext) + 'static)`](#gridview-on_tile_activate) |
+| `Self` | [`activate_on(mode: crate::data_views::ActivateOn)`](#gridview-activate_on) |
+| `Self` | [`tile_context_menu(f: impl Fn(usize, Point, &mut teksilo_core::widget::EventContext) -> Option<Box<dyn Widget>> + 'static)`](#gridview-tile_context_menu) |
+| `Self` | [`type_ahead_label(f: impl Fn(usize) -> String + 'static)`](#gridview-type_ahead_label) |
+| `Self` | [`tile_a11y_label(f: impl Fn(usize) -> String + 'static)`](#gridview-tile_a11y_label) |
+| `Self` | [`type_ahead_timeout(timeout: std::time::Duration)`](#gridview-type_ahead_timeout) |
+| | **Methods** |
+| `&Signal<f32>` | [`scroll_y_signal()`](#gridview-scroll_y_signal) |
+| `&Signal<f32>` | [`max_scroll_y_signal()`](#gridview-max_scroll_y_signal) |
+| `&Signal<f32>` | [`viewport_ratio_y_signal()`](#gridview-viewport_ratio_y_signal) |
+|  | [`ensure_index_visible(index: usize, anchor: ScrollAnchor)`](#gridview-ensure_index_visible) |
+|  | [`scroll_to_index(index: usize, anchor: ScrollAnchor)`](#gridview-scroll_to_index) |
+
+## Detailed description
+
 `GridView` is the photo-gallery / icon-view / file-manager-grid /
 collection-view widget — the 2D sibling of `ListView`
 and `TableView`. It realizes only the
@@ -31,7 +102,7 @@ GridView::new(model, |tc| {
 .selection(selection_model)
 ```
 
-## Pan to scroll
+#### Pan to scroll
 
 The view installs `common::scrollable::ScrollableBehavior`,
 which gives it the shared wheel arithmetic, a finger's pan and the
@@ -41,7 +112,7 @@ container outside — never a residual. Vertical only, despite the grid: this
 view owns no horizontal offset, so a horizontal pan is declined and chains
 outward. A pan that starts on a tile scrolls rather than activating it.
 
-## The rubber band, and why it is not on this node
+#### The rubber band, and why it is not on this node
 
 In `teksilo_data::SelectionMode::Multi` a drag on the empty background
 sweeps a selection rectangle. That drag deliberately does **not** live on
@@ -89,13 +160,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![GridView at Touch density](img/grid_view-touch.png)
 
-## Builder methods at a glance
-
-`from_source`, `enabled`, `sizing`, `tile_size`, `column_count`, `variable_row_heights`, `item_height`, `waterfall`, `column_spacing`, `row_spacing`, `spacing`, `content_inset`, `selection`, `on_selection_changed`, `marquee_selection`, `wrap_navigation`, `tab_traversal`, `show_scrollbar`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `ensure_index_visible`, `scroll_to_index`, `sections`, `section_header_delegate`, `section_header_height`, `pinned_section_headers`, `a11y_label`, `style`, `empty_view`, `loading_view`, `is_loading`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_item_drop`, `on_tile_activate`, `activate_on`, `tile_context_menu`, `type_ahead_label`, `tile_a11y_label`, `type_ahead_timeout`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/grid_view/index.html)
+
+<a id="tilecontext"></a>
 
 ## `pub struct TileContext`
 
@@ -111,6 +180,8 @@ mouse-move and is handled per-tile inside the delegate's own widget
 pub struct TileContext<'a, T: 'static> { /* fields */ }
 ```
 
+<a id="gridview"></a>
+
 ## `pub struct GridView`
 
 A virtualized 2D tile grid backed by a `ListModel<T>`.
@@ -121,19 +192,27 @@ pub struct GridView<T: 'static> { /* fields */ }
 
 ### Methods
 
+<a id="gridview-new"></a>
+
 #### `pub fn new( model: ListModel<T>, delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static, ) -> Self`
 
 Create a grid backed by a `ListModel<T>`. The `delegate` builds the
 widget for each tile from a `TileContext`.
 
+<a id="gridview-from_source"></a>
+
 #### `pub fn from_source<S: teksilo_data::ListDataSource<Item = T>>( source: S, delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static, ) -> Self`
 
 Create a grid backed by any `ListDataSource` (large / external data).
+
+<a id="gridview-enabled"></a>
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Enable or disable the whole view. A disabled view greys out and stops
 accepting focus / selection / keyboard input (arena-gated).
+
+<a id="gridview-sizing"></a>
 
 #### `pub fn sizing(mut self, sizing: impl Into<Prop<GridSizing>>) -> Self`
 
@@ -147,13 +226,19 @@ the same widget instance, so they survive the rebuild (no scroll jump).
 This is the card-size-slider path; mirrors
 `TabWidget::sizing`.
 
+<a id="gridview-tile_size"></a>
+
 #### `pub fn tile_size(mut self, width: f32, height: f32) -> Self`
 
 Sugar for `GridSizing::Fixed` — every tile is exactly `width` × `height`.
 
+<a id="gridview-column_count"></a>
+
 #### `pub fn column_count(mut self, count: usize, tile_height: f32) -> Self`
 
 Sugar for `GridSizing::FixedColumnCount` — exactly `count` columns.
+
+<a id="gridview-variable_row_heights"></a>
 
 #### `pub fn variable_row_heights(mut self, estimated: f32) -> Self`
 
@@ -163,12 +248,16 @@ haven't been measured yet; the scroll position is anchored when an
 estimate is later corrected. Combine with
 `item_height` for exact heights.
 
+<a id="gridview-item_height"></a>
+
 #### `pub fn item_height(mut self, f: impl Fn(usize) -> f32 + 'static) -> Self`
 
 Supply an exact per-**item** natural height. Width-independent, so it
 doesn't depend on the runtime column count: `VariableRowGrid` sizes
 each row to `max(item_height(i))` over its items. Implies variable row
 heights, gives an exact scrollbar, and removes anchoring jitter.
+
+<a id="gridview-waterfall"></a>
 
 #### `pub fn waterfall(mut self, estimated: f32) -> Self`
 
@@ -178,60 +267,88 @@ configured `sizing`; heights are auto-measured (or
 exact via `item_height`). `estimated` seeds
 unmeasured items.
 
+<a id="gridview-column_spacing"></a>
+
 #### `pub fn column_spacing(mut self, spacing: f32) -> Self`
 
 Horizontal gap between tiles (default 8).
+
+<a id="gridview-row_spacing"></a>
 
 #### `pub fn row_spacing(mut self, spacing: f32) -> Self`
 
 Vertical gap between tile rows (default 8).
 
+<a id="gridview-spacing"></a>
+
 #### `pub fn spacing(mut self, spacing: f32) -> Self`
 
 Set both column and row spacing.
+
+<a id="gridview-content_inset"></a>
 
 #### `pub fn content_inset(mut self, inset: EdgeInsets) -> Self`
 
 Inset from the scroll-content edge to the tiles.
 
+<a id="gridview-selection"></a>
+
 #### `pub fn selection(mut self, sel: SelectionModel) -> Self`
 
 Set the selection model (modes `None` / `Single` / `Multi`).
+
+<a id="gridview-on_selection_changed"></a>
 
 #### `pub fn on_selection_changed(mut self, f: impl Fn(&BTreeSet<usize>) + 'static) -> Self`
 
 Called whenever the selection set changes — including programmatic
 changes — with the new set of selected indices.
 
+<a id="gridview-marquee_selection"></a>
+
 #### `pub fn marquee_selection(mut self, enabled: bool) -> Self`
 
 Enable / disable rubber-band marquee selection (default enabled; only
 active when the selection model is in `Multi` mode).
 
+<a id="gridview-wrap_navigation"></a>
+
 #### `pub fn wrap_navigation(mut self, enabled: bool) -> Self`
 
 Whether arrow navigation wraps across row/grid edges (default false).
 
+<a id="gridview-tab_traversal"></a>
+
 #### `pub fn tab_traversal(mut self, traversal: GridTabTraversal) -> Self`
 
 How Tab moves out of (or within) the grid (default `OutOfGrid`).
+
+<a id="gridview-show_scrollbar"></a>
 
 #### `pub fn show_scrollbar(mut self, show: bool) -> Self`
 
 Suppress the internal scrollbar (mount your own via the signal
 accessors so it survives rebuilds).
 
+<a id="gridview-overscroll_behavior"></a>
+
 #### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
 
 Scroll-chaining behavior at the boundary (default `Chain`).
+
+<a id="gridview-smooth_scrolling"></a>
 
 #### `pub fn smooth_scrolling(mut self, enabled: bool) -> Self`
 
 Enable or disable animated wheel scrolling (enabled by default).
 
+<a id="gridview-smooth_scroll_duration"></a>
+
 #### `pub fn smooth_scroll_duration(mut self, duration: Duration) -> Self`
 
 Duration of the smooth scroll animation (default 150 ms).
+
+<a id="gridview-scroll_bar_style"></a>
 
 #### `pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self`
 
@@ -239,49 +356,71 @@ How the scroll bar is displayed (default `Permanent`). `Overlay`
 and `Thin` float the bar over the content instead of reserving a
 layout column, mirroring `ScrollArea::scroll_bar_style`.
 
+<a id="gridview-scroll_y_signal"></a>
+
 #### `pub fn scroll_y_signal(&self) -> &Signal<f32>`
 
 The vertical scroll offset signal.
+
+<a id="gridview-max_scroll_y_signal"></a>
 
 #### `pub fn max_scroll_y_signal(&self) -> &Signal<f32>`
 
 The maximum scroll offset signal (`content_height - viewport_height`).
 
+<a id="gridview-viewport_ratio_y_signal"></a>
+
 #### `pub fn viewport_ratio_y_signal(&self) -> &Signal<f32>`
 
 The vertical viewport-to-content ratio signal (drives the thumb size).
 
+<a id="gridview-ensure_index_visible"></a>
+
 #### `pub fn ensure_index_visible(&self, index: usize, anchor: ScrollAnchor)`
 
 Scroll the minimum distance to bring `index` into view per `anchor`.
+
+<a id="gridview-scroll_to_index"></a>
 
 #### `pub fn scroll_to_index(&self, index: usize, anchor: ScrollAnchor)`
 
 Scroll to `index`, forcing the viewport position per `anchor`
 (`Auto` behaves like `ensure_index_visible`).
 
+<a id="gridview-sections"></a>
+
 #### `pub fn sections<P: SectionProvider>(mut self, provider: P) -> Self`
 
 Group the flat model into sections, rendering a header above each
 section's tile band. Sections compose with the uniform tile layout.
+
+<a id="gridview-section_header_delegate"></a>
 
 #### `pub fn section_header_delegate( mut self, f: impl Fn(usize, &str) -> Box<dyn Widget> + 'static, ) -> Self`
 
 Custom section-header widget builder `(section_index, title)`. Without
 it a default bold-text header is used.
 
+<a id="gridview-section_header_height"></a>
+
 #### `pub fn section_header_height(mut self, height: f32) -> Self`
 
 Height of each section header row (default 28).
+
+<a id="gridview-pinned_section_headers"></a>
 
 #### `pub fn pinned_section_headers(mut self, enabled: bool) -> Self`
 
 Keep the current section's header pinned to the top while scrolling
 through it (SwiftUI `pinnedViews:[.sectionHeaders]`).
 
+<a id="gridview-a11y_label"></a>
+
 #### `pub fn a11y_label(mut self, label: impl Into<String>) -> Self`
 
 Accessible label for the grid container.
+
+<a id="gridview-style"></a>
 
 #### `pub fn style(mut self, style: impl GridViewStyle) -> Self`
 
@@ -289,24 +428,34 @@ Per-call Tier-3 decoration style override (focus ring, marquee,
 insertion bar, pinned-header surface). Precedence: this override →
 `theme.style_slots.grid_view` → the stock `RecipeGridViewStyle`.
 
+<a id="gridview-empty_view"></a>
+
 #### `pub fn empty_view(mut self, f: impl Fn() -> Box<dyn Widget> + 'static) -> Self`
 
 Widget shown when the model is empty.
 
+<a id="gridview-loading_view"></a>
+
 #### `pub fn loading_view(mut self, f: impl Fn() -> Box<dyn Widget> + 'static) -> Self`
 
 Widget overlaid while `is_loading` reads `true`.
+
+<a id="gridview-is_loading"></a>
 
 #### `pub fn is_loading(mut self, flag: impl Into<Prop<bool>>) -> Self`
 
 Reactive loading flag; when `true` the `loading_view`
 is shown above the grid.
 
+<a id="gridview-reorderable"></a>
+
 #### `pub fn reorderable(mut self, enabled: bool) -> Self`
 
 Enable intra-grid drag reordering (and keyboard Alt+Arrow). The move is
 routed through the source's `accept_drop` (a built-in `ListModel`
 reorders via `move_item`; an external source applies its own command).
+
+<a id="gridview-exportable"></a>
 
 #### `pub fn exportable(mut self, mode: DragTransferMode) -> Self where T: Clone,`
 
@@ -326,6 +475,8 @@ accepts them: `DragTransferMode::Move` removes them (via the source's
 `DragTransferMode::Copy` leaves them. A same-view reorder is never a
 transfer, so `mode` never affects it. Requires `T: Clone`.
 
+<a id="gridview-export_external"></a>
+
 #### `pub fn export_external(mut self, f: impl Fn(&[T]) -> Vec<(String, Vec<u8>)> + 'static) -> Self where T: Clone,`
 
 Additionally advertise the dragged tiles as MIME data so they can be
@@ -336,6 +487,8 @@ app-specific `application/x-…`). Implies `exportable`
 (defaulting to `DragTransferMode::Move` if not already set). Requires
 `T: Clone`.
 
+<a id="gridview-on_rows_transferred_out"></a>
+
 #### `pub fn on_rows_transferred_out( mut self, f: impl Fn(&[usize], &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Override how rows moved out to a foreign target are removed from this
@@ -343,6 +496,8 @@ view. Receives the dragged rows' indices (descending-safe) and the live
 context. Without this, an `exportable`
 `Move` drag removes them through the source's
 `on_drag_out` (works out of the box for a `ListModel`).
+
+<a id="gridview-accept_foreign_rows"></a>
 
 #### `pub fn accept_foreign_rows(mut self, accept: bool) -> Self`
 
@@ -353,16 +508,22 @@ items and the insertion index. (Same-view reorder is
 `reorderable`; a custom `ListDataSource` can still
 accept foreign drops through its `can_accept`/`accept_drop` instead.)
 
+<a id="gridview-on_rows_received"></a>
+
 #### `pub fn on_rows_received( mut self, f: impl Fn(Vec<T>, usize, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Handler for rows accepted via `accept_foreign_rows`:
 `(items, insertion_index, ctx)`. Insert them into your model at the
 index.
 
+<a id="gridview-on_item_drop"></a>
+
 #### `pub fn on_item_drop( mut self, f: impl Fn( teksilo_core::drag_payload::DragPayload, usize, &mut teksilo_core::widget::EventContext, ) -> bool + 'static, ) -> Self`
 
 Accept external drops at a flat insertion index. Returns `true` when
 the drop is accepted.
+
+<a id="gridview-on_tile_activate"></a>
 
 #### `pub fn on_tile_activate( mut self, f: impl Fn(usize, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
@@ -370,21 +531,29 @@ Called when a tile is activated (a click per `activate_on`,
 or Enter on the focused tile) — the "open / default action", distinct
 from selection.
 
+<a id="gridview-activate_on"></a>
+
 #### `pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self`
 
 Choose single- vs double-click tile activation (default
 `ActivateOn::DoubleClick`). Enter activates in either
 mode.
 
+<a id="gridview-tile_context_menu"></a>
+
 #### `pub fn tile_context_menu( mut self, f: impl Fn(usize, Point, &mut teksilo_core::widget::EventContext) -> Option<Box<dyn Widget>> + 'static, ) -> Self`
 
 Per-tile context-menu factory: `(index, pointer_position, ctx)` →
 optional menu widget.
 
+<a id="gridview-type_ahead_label"></a>
+
 #### `pub fn type_ahead_label(mut self, f: impl Fn(usize) -> String + 'static) -> Self`
 
 Supply a per-item label for type-ahead navigation (typing letters
 jumps to the first matching item). Required to enable type-ahead.
+
+<a id="gridview-tile_a11y_label"></a>
 
 #### `pub fn tile_a11y_label(mut self, f: impl Fn(usize) -> String + 'static) -> Self`
 
@@ -393,9 +562,13 @@ Supply a per-item accessible name applied to each tile's `GridCell`
 addition to the row/column position. Without it, the cell's name is left
 to its contents.
 
+<a id="gridview-type_ahead_timeout"></a>
+
 #### `pub fn type_ahead_timeout(mut self, timeout: std::time::Duration) -> Self`
 
 Type-ahead reset timeout (default 500 ms; `ZERO` disables).
+
+<a id="gridtabtraversal"></a>
 
 ## `pub enum GridTabTraversal`
 
@@ -409,6 +582,8 @@ pub enum GridTabTraversal { /* variants */ }
 
 - **`OutOfGrid`** — Tab releases focus to the next focusable widget in the window.
 - **`WithinGrid`** — Tab advances to the next tile (wrapping rows); Shift+Tab the previous.
+
+<a id="groupingsections"></a>
 
 ## `pub struct GroupingSections`
 

@@ -7,6 +7,52 @@
 
 ListView — a virtualized, scrollable list backed by a reactive data model.
 
+## Public functions
+
+### `ListView`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(model: ListModel<T>, delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static)`](#listview-new) |
+| `Self` | [`from_source<S: teksilo_data::ListDataSource<Item = T>>(source: S, delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static)`](#listview-from_source) |
+| `Self` | [`from_source_keyed<S: teksilo_data::ListDataSource<Item = T>>(source: S, keyed: KeyedSelectionModel<S::Key>, delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static)`](#listview-from_source_keyed) |
+| | **Builder methods** |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#listview-enabled) |
+| `Self` | [`overscroll_behavior(behavior: OverscrollBehavior)`](#listview-overscroll_behavior) |
+| `Self` | [`smooth_scrolling(enabled: bool)`](#listview-smooth_scrolling) |
+| `Self` | [`smooth_scroll_duration(duration: Duration)`](#listview-smooth_scroll_duration) |
+| `Self` | [`scroll_bar_style(style: ScrollBarMode)`](#listview-scroll_bar_style) |
+| `Self` | [`item_height(height: f32)`](#listview-item_height) |
+| `Self` | [`item_height_fn(f: impl Fn(usize) -> f32 + 'static)`](#listview-item_height_fn) |
+| `Self` | [`auto_item_height(estimated: f32)`](#listview-auto_item_height) |
+| `Self` | [`spacing(spacing: f32)`](#listview-spacing) |
+| `Self` | [`selection(sel: SelectionModel)`](#listview-selection) |
+| `Self` | [`reorderable(enabled: bool)`](#listview-reorderable) |
+| `Self` | [`exportable(mode: DragTransferMode)`](#listview-exportable) |
+| `Self` | [`export_external(f: impl Fn(&[T]) -> Vec<(String, Vec<u8>)> + 'static)`](#listview-export_external) |
+| `Self` | [`on_rows_transferred_out(f: impl Fn(&[usize], &mut teksilo_core::widget::EventContext) + 'static)`](#listview-on_rows_transferred_out) |
+| `Self` | [`accept_foreign_rows(accept: bool)`](#listview-accept_foreign_rows) |
+| `Self` | [`on_rows_received(f: impl Fn(Vec<T>, usize, &mut teksilo_core::widget::EventContext) + 'static)`](#listview-on_rows_received) |
+| `Self` | [`on_activate(f: impl Fn(usize, &mut teksilo_core::widget::EventContext) + 'static)`](#listview-on_activate) |
+| `Self` | [`activate_on(mode: crate::data_views::ActivateOn)`](#listview-activate_on) |
+| `Self` | [`row_tooltip_sticky(on: bool)`](#listview-row_tooltip_sticky) |
+| `Self` | [`row_tooltip(f: impl Fn(usize, &T) -> Option<teksilo_i18n::LocalizedString> + 'static)`](#listview-row_tooltip) |
+| `Self` | [`row_rich_tooltip(f: impl Fn(usize, &T) -> Option<crate::tooltip::RichTooltipSource> + 'static)`](#listview-row_rich_tooltip) |
+| `Self` | [`row_composite_tooltip(f: impl Fn(usize, &T) -> Option<Box<dyn Widget>> + 'static)`](#listview-row_composite_tooltip) |
+| `Self` | [`type_ahead_label(label: impl Fn(&T) -> String + 'static)`](#listview-type_ahead_label) |
+| `Self` | [`type_ahead_timeout(timeout: Duration)`](#listview-type_ahead_timeout) |
+| `Self` | [`show_scrollbar(show: bool)`](#listview-show_scrollbar) |
+| | **Methods** |
+| `Rc<RefCell<Vec<(usize, WidgetId)>>>` | [`realized_row_ids()`](#listview-realized_row_ids) |
+| `&Signal<f32>` | [`scroll_y_signal()`](#listview-scroll_y_signal) |
+| `&Signal<f32>` | [`max_scroll_y_signal()`](#listview-max_scroll_y_signal) |
+| `&Signal<f32>` | [`viewport_ratio_y_signal()`](#listview-viewport_ratio_y_signal) |
+|  | [`scroll_to_index(index: usize)`](#listview-scroll_to_index) |
+|  | [`ensure_index_visible(index: usize)`](#listview-ensure_index_visible) |
+
+## Detailed description
+
 `ListView<T>` materializes widget subtrees only for the rows currently
 visible in its viewport (plus a configurable buffer). Scrolling and model
 changes trigger a localized rebuild that touches only the newly-visible
@@ -21,7 +67,7 @@ deterministic per-row sizes), and **auto-measured** (`auto_item_height` —
 height-for-width measurement with scroll anchoring so content above the
 viewport stays put while estimates converge).
 
-## Pan to scroll
+#### Pan to scroll
 
 The view installs `common::scrollable::ScrollableBehavior`,
 which gives it the shared wheel arithmetic, a finger's pan and the
@@ -32,14 +78,14 @@ horizontal offset, so a horizontal pan is declined and chains outward. A pan
 that starts on a row scrolls rather than activating it or collapsing a
 multi-selection onto it.
 
-## When to use
+#### When to use
 
 - Large or dynamically-loaded lists (thousands of rows) — use `ListView`.
 - Small, always-all-visible collections — use `Repeater` instead.
 - Hierarchical data — use `TreeView`.
 - Multi-column tabular data — use `TableView`.
 
-## Accessibility
+#### Accessibility
 
 The widget is `Role::ListBox`; each row is wrapped in
 `Role::ListBoxOption` with `set_selected` state. Those are the interactive
@@ -95,13 +141,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![ListView at Touch density](img/list_view-touch.png)
 
-## Builder methods at a glance
-
-`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `item_height`, `item_height_fn`, `auto_item_height`, `spacing`, `selection`, `realized_row_ids`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_activate`, `activate_on`, `row_tooltip_sticky`, `row_tooltip`, `row_rich_tooltip`, `row_composite_tooltip`, `type_ahead_label`, `type_ahead_timeout`, `show_scrollbar`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_to_index`, `ensure_index_visible`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/list_view/index.html)
+
+<a id="listview"></a>
 
 ## `pub struct ListView`
 
@@ -115,6 +159,8 @@ pub struct ListView<T: 'static> { /* fields */ }
 
 ### Methods
 
+<a id="listview-new"></a>
+
 #### `pub fn new( model: ListModel<T>, delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static, ) -> Self`
 
 Create a new ListView backed by a `ListModel<T>`.
@@ -122,12 +168,16 @@ Create a new ListView backed by a `ListModel<T>`.
 The `delegate` closure receives `(index, &item, selected)` and returns
 a boxed widget for that item.
 
+<a id="listview-from_source"></a>
+
 #### `pub fn from_source<S: teksilo_data::ListDataSource<Item = T>>( source: S, delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static, ) -> Self`
 
 Create a ListView backed by a custom `ListDataSource`.
 
 Use this for large or external datasets that cannot fit in memory.
 The source must implement `ListDataSource<Item = T>`.
+
+<a id="listview-from_source_keyed"></a>
 
 #### `pub fn from_source_keyed<S: teksilo_data::ListDataSource<Item = T>>( source: S, keyed: KeyedSelectionModel<S::Key>, delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static, ) -> Self where S::Key: ItemKey,`
 
@@ -139,10 +189,14 @@ key-less (`ListView<T>`) — the index↔key mapping is captured from the
 concrete source here. Mutually exclusive with
 `selection` (the last one set wins).
 
+<a id="listview-enabled"></a>
+
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Enable or disable the whole view. A disabled view greys out and stops
 accepting focus / selection / keyboard input (arena-gated).
+
+<a id="listview-overscroll_behavior"></a>
 
 #### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
 
@@ -150,19 +204,27 @@ Set the scroll-chaining behavior at the boundary (default
 `OverscrollBehavior::Chain`; `Contain`
 disables chaining to an ancestor scrollable).
 
+<a id="listview-smooth_scrolling"></a>
+
 #### `pub fn smooth_scrolling(mut self, enabled: bool) -> Self`
 
 Enable or disable animated wheel scrolling (enabled by default).
 
+<a id="listview-smooth_scroll_duration"></a>
+
 #### `pub fn smooth_scroll_duration(mut self, duration: Duration) -> Self`
 
 Duration of the smooth scroll animation (default 150 ms).
+
+<a id="listview-scroll_bar_style"></a>
 
 #### `pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self`
 
 How the scroll bar is displayed (default `Permanent`). `Overlay`
 and `Thin` float the bar over the content instead of reserving a
 layout column, mirroring `ScrollArea::scroll_bar_style`.
+
+<a id="listview-item_height"></a>
 
 #### `pub fn item_height(mut self, height: f32) -> Self`
 
@@ -171,12 +233,16 @@ path. Mutually exclusive with `item_height_fn`
 and `auto_item_height`; the last mode
 setter wins.
 
+<a id="listview-item_height_fn"></a>
+
 #### `pub fn item_height_fn(mut self, f: impl Fn(usize) -> f32 + 'static) -> Self`
 
 Per-item heights from a callback. The callback must be pure (same
 index + same data → same height); it is re-swept from the first
 changed index on every model change. No measurement pass runs —
 this is the deterministic variable-height path.
+
+<a id="listview-auto_item_height"></a>
 
 #### `pub fn auto_item_height(mut self, estimated: f32) -> Self`
 
@@ -187,15 +253,21 @@ stationary as estimates are corrected. `estimated` should be a
 typical row height — a wrong estimate only costs realization
 churn while measurements settle, never incorrect layout.
 
+<a id="listview-spacing"></a>
+
 #### `pub fn spacing(mut self, spacing: f32) -> Self`
 
 Set spacing between items (default 0.0).
+
+<a id="listview-selection"></a>
 
 #### `pub fn selection(mut self, sel: SelectionModel) -> Self`
 
 Set the index-based selection model (positions). For identity-based
 selection that survives reorder / filter / window-slide, build the view
 with `from_source_keyed` instead.
+
+<a id="listview-realized_row_ids"></a>
 
 #### `pub fn realized_row_ids(&self) -> Rc<RefCell<Vec<(usize, WidgetId)>>>`
 
@@ -223,6 +295,8 @@ Only realized rows are present — a row scrolled outside the
 virtualization window has no widget, so look-ups for it return `None`.
 Callers should `scroll_to_index` the row they intend to announce.
 
+<a id="listview-reorderable"></a>
+
 #### `pub fn reorderable(mut self, enabled: bool) -> Self`
 
 Enable intra-widget drag reordering.
@@ -233,6 +307,8 @@ reorders in place, an external source routes the move to its store. The
 hover indicator reflects the source's `can_accept` verdict, so a
 forbidden drop shows no insertion line. Keyboard equivalent:
 Alt+ArrowUp/Down.
+
+<a id="listview-exportable"></a>
 
 #### `pub fn exportable(mut self, mode: DragTransferMode) -> Self where T: Clone,`
 
@@ -264,6 +340,8 @@ while the drag is in flight, those indices can point at different rows —
 use a keyed source, or `on_rows_transferred_out`
 with your own stable identity, for models that change mid-drag.
 
+<a id="listview-export_external"></a>
+
 #### `pub fn export_external(mut self, f: impl Fn(&[T]) -> Vec<(String, Vec<u8>)> + 'static) -> Self where T: Clone,`
 
 Additionally advertise the dragged rows as MIME data so they can be
@@ -274,6 +352,8 @@ app-specific `application/x-…`). Implies `exportable`
 (defaulting to `DragTransferMode::Move` if not already set). Requires
 `T: Clone`.
 
+<a id="listview-on_rows_transferred_out"></a>
+
 #### `pub fn on_rows_transferred_out( mut self, f: impl Fn(&[usize], &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Override how rows moved out to a foreign target are removed from this
@@ -281,6 +361,8 @@ view. Receives the dragged rows' indices (descending-safe) and the live
 context. Without this, an `exportable`
 `Move` drag removes them through the source's
 `on_drag_out` (works out of the box for a `ListModel`).
+
+<a id="listview-accept_foreign_rows"></a>
 
 #### `pub fn accept_foreign_rows(mut self, accept: bool) -> Self`
 
@@ -291,11 +373,15 @@ items and the insertion index. (Same-view reorder is
 `reorderable`; a custom `ListDataSource` can still
 accept foreign drops through its `can_accept`/`accept_drop` instead.)
 
+<a id="listview-on_rows_received"></a>
+
 #### `pub fn on_rows_received( mut self, f: impl Fn(Vec<T>, usize, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Handler for rows accepted via `accept_foreign_rows`:
 `(items, insertion_index, ctx)`. Insert them into your model at the
 index.
+
+<a id="listview-on_activate"></a>
 
 #### `pub fn on_activate( mut self, f: impl Fn(usize, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
@@ -308,11 +394,15 @@ matching `TableView::on_row_activate`
 Distinct from *selection*: arrow-key navigation and **Space** move /
 toggle the selection but do **not** activate.
 
+<a id="listview-activate_on"></a>
+
 #### `pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self`
 
 Choose single- vs double-click activation (default
 `ActivateOn::DoubleClick`). Enter activates in
 either mode.
+
+<a id="listview-row_tooltip_sticky"></a>
 
 #### `pub fn row_tooltip_sticky(mut self, on: bool) -> Self`
 
@@ -332,6 +422,8 @@ is nothing to pin, so the countdown indicator would promise an
 interaction that does not exist and the surface would outlive the
 pointer for no reason.
 
+<a id="listview-row_tooltip"></a>
+
 #### `pub fn row_tooltip( mut self, f: impl Fn(usize, &T) -> Option<teksilo_i18n::LocalizedString> + 'static, ) -> Self`
 
 Per-row plain tooltip: one line of text for the row under the pointer.
@@ -345,11 +437,15 @@ wins, matching the per-widget tooltip matrix.
 Opens to the row's trailing side, never below it: rows stack
 vertically, so a tip below would cover the next row.
 
+<a id="listview-row_rich_tooltip"></a>
+
 #### `pub fn row_rich_tooltip( mut self, f: impl Fn(usize, &T) -> Option<crate::tooltip::RichTooltipSource> + 'static, ) -> Self`
 
 Per-row rich tooltip — a registry key or inline
 `TooltipContent`. See
 `row_tooltip` for the shared semantics.
+
+<a id="listview-row_composite_tooltip"></a>
 
 #### `pub fn row_composite_tooltip( mut self, f: impl Fn(usize, &T) -> Option<Box<dyn Widget>> + 'static, ) -> Self`
 
@@ -360,12 +456,18 @@ and rebuilt with it, so keep the resolver cheap and defer anything
 costly to the body's own first paint, which only runs if the tip is
 actually shown. See `row_tooltip` for the rest.
 
+<a id="listview-type_ahead_label"></a>
+
 #### `pub fn type_ahead_label(mut self, label: impl Fn(&T) -> String + 'static) -> Self`
+
+<a id="listview-type_ahead_timeout"></a>
 
 #### `pub fn type_ahead_timeout(mut self, timeout: Duration) -> Self`
 
 Reset window between keystrokes before the type-ahead search term
 clears (default 500 ms). A zero duration disables type-ahead.
+
+<a id="listview-show_scrollbar"></a>
 
 #### `pub fn show_scrollbar(mut self, show: bool) -> Self`
 
@@ -378,6 +480,8 @@ the external bar up to the signals returned by
 `max_scroll_y_signal` and
 `viewport_ratio_y_signal`.
 
+<a id="listview-scroll_y_signal"></a>
+
 #### `pub fn scroll_y_signal(&self) -> &Signal<f32>`
 
 The current vertical scroll offset, in logical pixels. Drives the
@@ -387,16 +491,22 @@ can read or drive the scroll directly — prefer
 `scroll_to_index` /
 `ensure_index_visible` when possible.
 
+<a id="listview-max_scroll_y_signal"></a>
+
 #### `pub fn max_scroll_y_signal(&self) -> &Signal<f32>`
 
 The maximum scroll offset, `content_height - viewport_height`.
 Updated during layout. Exposed for callers that mount their own
 external scrollbar via `show_scrollbar(false)`.
 
+<a id="listview-viewport_ratio_y_signal"></a>
+
 #### `pub fn viewport_ratio_y_signal(&self) -> &Signal<f32>`
 
 The vertical viewport-to-content ratio (0.0..1.0). Drives the
 thumb size on any external scrollbar.
+
+<a id="listview-scroll_to_index"></a>
 
 #### `pub fn scroll_to_index(&self, index: usize)`
 
@@ -404,6 +514,8 @@ Scroll so the given model index is aligned to the top of the
 viewport. Clamped to the valid scroll range. Safe to call before
 the ListView has been laid out — the clamp will kick in on the
 first layout pass.
+
+<a id="listview-ensure_index_visible"></a>
 
 #### `pub fn ensure_index_visible(&self, index: usize)`
 

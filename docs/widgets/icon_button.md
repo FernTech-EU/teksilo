@@ -7,6 +7,68 @@
 
 IconButton — a square, icon-only, flat-surface button.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`IconButton`](#iconbutton) — A square, icon-only, flat-surface button |
+| `struct` | [`BuiltInIcons`](#builtinicons) — Icon factory set for predefined built-in buttons |
+
+## Public functions
+
+### `IconButton`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(icon: IconWidget)`](#iconbutton-new) |
+| `Self` | [`browse()`](#iconbutton-browse) |
+| `Self` | [`expand()`](#iconbutton-expand) |
+| `Self` | [`search()`](#iconbutton-search) |
+| `Self` | [`copy()`](#iconbutton-copy) |
+| `Self` | [`clear()`](#iconbutton-clear) |
+| `Self` | [`add()`](#iconbutton-add) |
+| `Self` | [`bell()`](#iconbutton-bell) |
+| `Self` | [`menu()`](#iconbutton-menu) |
+| `Self` | [`more()`](#iconbutton-more) |
+| `Self` | [`visibility_toggle(visible: Signal<bool>)`](#iconbutton-visibility_toggle) |
+| | **Builder methods** |
+| `Self` | [`style(style: impl teksilo_core::styles::IconButtonStyle)`](#iconbutton-style) |
+| `Self` | [`style_shared(style: SharedIconButtonStyle)`](#iconbutton-style_shared) |
+| `Self` | [`share_interaction(signal: Signal<InteractionState>)`](#iconbutton-share_interaction) |
+| `Self` | [`embedded()`](#iconbutton-embedded) |
+| `Self` | [`icon_role(role: impl Into<teksilo_core::color_prop::ColorProp>)`](#iconbutton-icon_role) |
+| `Self` | [`focusable(on: bool)`](#iconbutton-focusable) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#iconbutton-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#iconbutton-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#iconbutton-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl teksilo_core::widget::Widget + 'static)`](#iconbutton-composite_tooltip) |
+| `Self` | [`composite_tooltip_boxed(content: Box<dyn teksilo_core::widget::Widget>)`](#iconbutton-composite_tooltip_boxed) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#iconbutton-enabled) |
+| `Self` | [`size(size: IconButtonSize)`](#iconbutton-size) |
+| `Self` | [`toolbar()`](#iconbutton-toolbar) |
+| `Self` | [`large()`](#iconbutton-large) |
+| `Self` | [`hero()`](#iconbutton-hero) |
+| `Self` | [`on_activate_fn(f: impl Fn(&mut EventContext) + 'static)`](#iconbutton-on_activate_fn) |
+| `Self` | [`toggle(state: Signal<bool>)`](#iconbutton-toggle) |
+| `Self` | [`toggle_with_icon(state: Signal<bool>, toggled_icon: IconWidget)`](#iconbutton-toggle_with_icon) |
+| `Self` | [`has_popup(kind: teksilo_core::accesskit::HasPopup)`](#iconbutton-has_popup) |
+| `Self` | [`expanded_when(signal: impl Into<Prop<bool>>)`](#iconbutton-expanded_when) |
+| | **Methods** |
+| `IconButtonSize` | [`size_variant()`](#iconbutton-size_variant) |
+| `bool` | [`is_embedded()`](#iconbutton-is_embedded) |
+
+### `BuiltInIcons`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`defaults()`](#builtinicons-defaults) |
+| | **Associated functions** |
+|  | [`set_global(icons: Self)`](#builtinicons-set_global) |
+
+## Detailed description
+
 Five sizes covering both **embedded** use (inside another widget's
 trailing slot — TextInput's clear-X, ComboBox's chevron, SearchField's
 magnifier) and **stand-alone** use (toolbars, rich menus, hero CTAs).
@@ -35,7 +97,7 @@ let _w = IconButton::clear()
     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.clear")));
 ```
 
-## Predefined constructors
+#### Predefined constructors
 
 Common roles ship with the appropriate icon and an i18n tooltip
 (which doubles as the AT name). They are size- and mode-agnostic —
@@ -51,7 +113,7 @@ let _w = IconButton::search().toolbar();            // 30 dp, full weight — to
 let _w = IconButton::visibility_toggle(visible);    // password-field eye toggle
 ```
 
-## Bistate
+#### Bistate
 
 Two distinct toggle modes:
 
@@ -63,7 +125,7 @@ Two distinct toggle modes:
   bistate: same surface flip plus the icon glyph swaps to a second
   icon. The visibility-toggle pattern (eye ↔ eye-off).
 
-## Slot convention
+#### Slot convention
 
 Host widgets that accept icon buttons follow the `trailing_slot`
 convention established by `TabWidget`:
@@ -81,7 +143,7 @@ let _w = TextInput::new(value)
     );
 ```
 
-## Touch and pen
+#### Touch and pen
 
 Shares `build_interaction_handlers` with `Button`, so it
 gets the framework press, release activation and slide-off abort with it —
@@ -97,13 +159,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![IconButton at Touch density](img/icon_button-touch.png)
 
-## Builder methods at a glance
-
-`style`, `style_shared`, `size_variant`, `is_embedded`, `share_interaction`, `embedded`, `icon_role`, `focusable`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `composite_tooltip_boxed`, `enabled`, `size`, `toolbar`, `large`, `hero`, `on_activate_fn`, `toggle`, `toggle_with_icon`, `has_popup`, `expanded_when`, `browse`, `expand`, `search`, `copy`, `clear`, `add`, `bell`, `menu`, `more`, `visibility_toggle`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/icon_button/index.html)
+
+<a id="iconbutton"></a>
 
 ## `pub struct IconButton`
 
@@ -117,6 +177,8 @@ pub struct IconButton { /* fields */ }
 
 ### Methods
 
+<a id="iconbutton-new"></a>
+
 #### `pub fn new(icon: IconWidget) -> Self`
 
 Create an icon button from a custom icon. Defaults to
@@ -125,12 +187,16 @@ Apply `.embedded()` for the JetBrains "built-in" dim look,
 and one of the size methods (`.large()` / `.toolbar()` /
 `.hero()`) or `.size(...)` to pick a different size.
 
+<a id="iconbutton-style"></a>
+
 #### `pub fn style(mut self, style: impl teksilo_core::styles::IconButtonStyle) -> Self`
 
 Per-call style override. Replaces the theme-wide default
 `IconButtonStyle` for just this IconButton instance — same role
 as `Button::style(...)`. The override fully owns the background +
 border + size composition; icon coloring stays on the widget.
+
+<a id="iconbutton-style_shared"></a>
 
 #### `pub fn style_shared(mut self, style: SharedIconButtonStyle) -> Self`
 
@@ -140,6 +206,8 @@ Per-call style override from an already-shared
 (e.g. a `Toolbar` applying one style to all its icon buttons) can share a
 single `Rc` instead of cloning a concrete style per button.
 
+<a id="iconbutton-size_variant"></a>
+
 #### `pub fn size_variant(&self) -> IconButtonSize`
 
 Returns the configured size variant. Used by wrappers like
@@ -147,12 +215,16 @@ Returns the configured size variant. Used by wrappers like
 that need to reason about the trigger's footprint at build time
 (e.g. to skip a corner decoration that wouldn't fit at Compact).
 
+<a id="iconbutton-is_embedded"></a>
+
 #### `pub fn is_embedded(&self) -> bool`
 
 Returns whether the button is in the JetBrains "built-in" /
 embedded color profile (Secondary at rest). Mirror getter to
 `size_variant` for wrappers that want to
 derive their own chrome colors from the same icon role.
+
+<a id="iconbutton-share_interaction"></a>
 
 #### `pub fn share_interaction(mut self, signal: Signal<InteractionState>) -> Self`
 
@@ -168,6 +240,8 @@ The interaction signal never carries `Disabled`: the arena's
 also needs the disabled look reads
 `ctx.effective_enabled_signal(..)` beside this signal.
 
+<a id="iconbutton-embedded"></a>
+
 #### `pub fn embedded(mut self) -> Self`
 
 Opt into the **embedded** visual treatment — the JetBrains
@@ -177,6 +251,8 @@ designed to live inside another widget's trailing slot
 (TextInput's clear-X, ComboBox's chevron) without competing
 visually with the host's content. Default mode is stand-alone
 (icon at full visual weight, `Primary` always).
+
+<a id="iconbutton-icon_role"></a>
 
 #### `pub fn icon_role(mut self, role: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
@@ -197,6 +273,8 @@ control should look like. When the tint is semantic *state* that stays
 true even though the button can't be pressed — a save/sync indicator, a
 validation badge — wrap it: `.icon_role(ColorProp::undimmed(role))`.
 
+<a id="iconbutton-focusable"></a>
+
 #### `pub fn focusable(mut self, on: bool) -> Self`
 
 Whether the button takes keyboard focus. Default `true` —
@@ -206,30 +284,42 @@ keyboard interaction goes through the parent (e.g. the
 close button inside a tab header — Tab moves between tabs,
 not onto their close buttons).
 
+<a id="iconbutton-tooltip"></a>
+
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Attach a tooltip that appears after a hover delay. Required —
 the tooltip text doubles as the AT name for icon-only buttons.
+
+<a id="iconbutton-rich_tooltip"></a>
 
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
 Attach a rich tooltip resolved from the app-wide tooltip
 registry. See `Button::rich_tooltip`.
 
+<a id="iconbutton-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Attach a rich tooltip driven by inline `TooltipContent`.
+
+<a id="iconbutton-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip( mut self, content: impl teksilo_core::widget::Widget + 'static, ) -> Self`
 
 Attach a composite tooltip — third tier, hosting an arbitrary
 widget tree. See `Button::composite_tooltip`.
 
+<a id="iconbutton-composite_tooltip_boxed"></a>
+
 #### `pub fn composite_tooltip_boxed( mut self, content: Box<dyn teksilo_core::widget::Widget>, ) -> Self`
 
 Attach a composite tooltip from an already-boxed widget — the boxed twin
 of `composite_tooltip`, for hosts that build
 the body via a `Fn() -> Box<dyn Widget>` factory (e.g. a `ToolbarAction`).
+
+<a id="iconbutton-enabled"></a>
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
@@ -248,6 +338,8 @@ same arena `enabled_state`; an external `enabled_when`
 registered after this builder runs wins (last-write semantics)
 and updates reactively from the signal.
 
+<a id="iconbutton-size"></a>
+
 #### `pub fn size(mut self, size: IconButtonSize) -> Self`
 
 Set the size variant. Most callers prefer the named shortcuts
@@ -255,26 +347,36 @@ Set the size variant. Most callers prefer the named shortcuts
 `hero`; use `.size(...)` for `Compact` or for
 programmatic size selection.
 
+<a id="iconbutton-toolbar"></a>
+
 #### `pub fn toolbar(mut self) -> Self`
 
 Shortcut for `.size(IconButtonSize::Toolbar)` (30 dp) — the
 IntelliJ side-toolbar density (left / right / top window edges).
+
+<a id="iconbutton-large"></a>
 
 #### `pub fn large(mut self) -> Self`
 
 Shortcut for `.size(IconButtonSize::Large)` (40 dp) —
 emphasized stand-alone buttons in rich menus and detail panes.
 
+<a id="iconbutton-hero"></a>
+
 #### `pub fn hero(mut self) -> Self`
 
 Shortcut for `.size(IconButtonSize::Hero)` (50 dp) — hero /
 landing-screen CTAs.
+
+<a id="iconbutton-on_activate_fn"></a>
 
 #### `pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Closure invoked on activation. Fires after the toggle signal
 (if any) is flipped, so apps observing the closure see the
 post-flip state.
+
+<a id="iconbutton-toggle"></a>
 
 #### `pub fn toggle(mut self, state: Signal<bool>) -> Self`
 
@@ -286,6 +388,8 @@ The icon glyph is unchanged. Pin / select / lock-toggle pattern.
 For the eye / eye-off pattern where the icon glyph also changes,
 use `toggle_with_icon` instead.
 
+<a id="iconbutton-toggle_with_icon"></a>
+
 #### `pub fn toggle_with_icon(mut self, state: Signal<bool>, toggled_icon: IconWidget) -> Self`
 
 Enable **surface-tint plus icon-swap** bistate: clicking flips
@@ -293,6 +397,8 @@ Enable **surface-tint plus icon-swap** bistate: clicking flips
 swaps to `toggled_icon`. The visibility-toggle pattern (eye ↔
 eye-off). For surface-only bistate (icon stays the same), use
 `toggle`.
+
+<a id="iconbutton-has_popup"></a>
 
 #### `pub fn has_popup(mut self, kind: teksilo_core::accesskit::HasPopup) -> Self`
 
@@ -302,6 +408,8 @@ the a11y node so screen readers announce it as opening the
 named popup kind. Wired automatically by
 `PopoverIconButton`.
 
+<a id="iconbutton-expanded_when"></a>
+
 #### `pub fn expanded_when(mut self, signal: impl Into<Prop<bool>>) -> Self`
 
 Bind a signal reporting whether this button's popup is
@@ -310,35 +418,51 @@ flips it on show / dismiss; IconButton reads it in
 `accessibility()` to publish `set_expanded`. Only meaningful
 alongside `has_popup`.
 
+<a id="iconbutton-browse"></a>
+
 #### `pub fn browse() -> Self`
 
 Browse button (ellipsis icon). Opens a file/directory chooser.
+
+<a id="iconbutton-expand"></a>
 
 #### `pub fn expand() -> Self`
 
 Expand button (diagonal resize arrows). Enlarges a constrained field.
 
+<a id="iconbutton-search"></a>
+
 #### `pub fn search() -> Self`
 
 Search button (magnifier icon). Triggers a search.
+
+<a id="iconbutton-copy"></a>
 
 #### `pub fn copy() -> Self`
 
 Copy button (clipboard icon). Copies the field content.
 
+<a id="iconbutton-clear"></a>
+
 #### `pub fn clear() -> Self`
 
 Clear button (X icon). Clears the field content.
 
+<a id="iconbutton-add"></a>
+
 #### `pub fn add() -> Self`
 
 Add button (plus icon). Adds a new entry.
+
+<a id="iconbutton-bell"></a>
 
 #### `pub fn bell() -> Self`
 
 Notification bell. Used by
 `NotificationCenterButton`
 — the bell-icon trigger that opens the notification log popover.
+
+<a id="iconbutton-menu"></a>
 
 #### `pub fn menu() -> Self`
 
@@ -347,6 +471,8 @@ collapsible `MenuBar` as the
 collapsed representation that reveals the bar when activated.
 Advertises `HasPopup::Menu` for assistive technology.
 
+<a id="iconbutton-more"></a>
+
 #### `pub fn more() -> Self`
 
 "More actions" / overflow button — three **vertical** dots (the kebab
@@ -354,6 +480,8 @@ Advertises `HasPopup::Menu` for assistive technology.
 `…`, list-row overflow). Advertises `HasPopup::Menu` for assistive
 technology. Pair with a `PopoverIconButton` + `MenuList` (use `.bare()`
 so the menu isn't wrapped in a second popover surface).
+
+<a id="iconbutton-visibility_toggle"></a>
 
 #### `pub fn visibility_toggle(visible: Signal<bool>) -> Self`
 
@@ -372,6 +500,8 @@ and the eye glyphs in the opposite order.
 
 The `visible` signal is flipped on each click. The host widget reads
 it to decide whether to mask or show the text.
+
+<a id="builtinicons"></a>
 
 ## `pub struct BuiltInIcons`
 
@@ -403,9 +533,13 @@ pub struct BuiltInIcons { /* fields */ }
 
 ### Methods
 
+<a id="builtinicons-defaults"></a>
+
 #### `pub fn defaults() -> Self`
 
 Return the default icon set (SVGs embedded in teksilo-widgets).
+
+<a id="builtinicons-set_global"></a>
 
 #### `pub fn set_global(icons: Self)`
 

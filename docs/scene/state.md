@@ -6,7 +6,23 @@
 `SceneViewState` — a snapshot of a `SceneView`'s
 pan / zoom / rotation, suitable for persistence between sessions.
 
-## Pattern
+## Public functions
+
+### `SceneViewState`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(pan: Vec2, zoom: f32, rotation: f32)`](#sceneviewstate-new) |
+| | **Methods** |
+| `Vec2` | [`pan()`](#sceneviewstate-pan) |
+| `bool` | [`is_identity()`](#sceneviewstate-is_identity) |
+| | **Constants and types** |
+| `SceneViewState` | [`IDENTITY`](#sceneviewstate-identity) |
+
+## Detailed description
+
+#### Pattern
 
 ```ignore
 use teksilo_scene::{Scene, SceneView, SceneViewState};
@@ -22,7 +38,7 @@ let current: SceneViewState = view.state();
 my_settings.scene_view.set(current);
 ```
 
-## Why a plain struct, not Serialize
+#### Why a plain struct, not Serialize
 
 `teksilo-scene` deliberately doesn't depend on `serde`. Apps that
 want to persist via `teksilo-settings` (which is `serde`-based)
@@ -36,13 +52,11 @@ either:
 
 The struct is plain-old-data — manual round-trip is trivial.
 
-## Builder methods at a glance
-
-`IDENTITY`, `pan`, `is_identity`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="sceneviewstate"></a>
 
 ## `pub struct SceneViewState`
 
@@ -57,17 +71,25 @@ pub struct SceneViewState { /* fields */ }
 
 ### Methods
 
+<a id="sceneviewstate-identity"></a>
+
 #### `pub const IDENTITY: SceneViewState = SceneViewState { pan_x: 0.0, pan_y: 0.0, zoom: 1.0, rotation: 0.0, };`
 
 The identity view state: no pan, zoom 1.0, no rotation.
+
+<a id="sceneviewstate-new"></a>
 
 #### `pub fn new(pan: Vec2, zoom: f32, rotation: f32) -> Self`
 
 Construct a new state with the given pan / zoom / rotation.
 
+<a id="sceneviewstate-pan"></a>
+
 #### `pub fn pan(&self) -> Vec2`
 
 Pan offset as a `Vec2`.
+
+<a id="sceneviewstate-is_identity"></a>
 
 #### `pub fn is_identity(&self) -> bool`
 

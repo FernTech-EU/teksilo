@@ -7,6 +7,25 @@
 
 PrivacySettings — a user-facing panel for telemetry consent management.
 
+## Public functions
+
+### `PrivacySettings`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#privacysettings-new) |
+| | **Builder methods** |
+| `Self` | [`compact(compact: bool)`](#privacysettings-compact) |
+| `Self` | [`show_identity_row(show: bool)`](#privacysettings-show_identity_row) |
+| `Self` | [`show_mode_switch(show: bool)`](#privacysettings-show_mode_switch) |
+| `Self` | [`show_inspect(show: bool)`](#privacysettings-show_inspect) |
+| `Self` | [`inspect_event_count(n: usize)`](#privacysettings-inspect_event_count) |
+| `Self` | [`privacy_policy_url(url: impl Into<String>)`](#privacysettings-privacy_policy_url) |
+| `Self` | [`data_processor_name(name: impl Into<String>)`](#privacysettings-data_processor_name) |
+
+## Detailed description
+
 Embeddable in any container — typically a `Dialog` for first-run consent
 or a dedicated tab in the app's settings UI.  Reads from
 `OpenedTelemetry` and writes to `ConsentStore`; the UI rebuilds
@@ -14,7 +33,7 @@ whenever the consent state signal changes.  When no telemetry is registered
 in `app_state` the widget renders a graceful placeholder so apps without
 analytics pay nothing.
 
-# Sections (top-to-bottom)
+### Sections (top-to-bottom)
 
 1. **Plain-language Art. 13 notice** — controller, processor name,
    purposes, lawful basis, retention, recipients, withdrawal right.
@@ -53,13 +72,11 @@ let panel = PrivacySettings::new()
     .privacy_policy_url("https://example.com/privacy");
 ```
 
-## Builder methods at a glance
-
-`compact`, `show_identity_row`, `show_mode_switch`, `show_inspect`, `inspect_event_count`, `privacy_policy_url`, `data_processor_name`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/index.html)
+
+<a id="privacysettings"></a>
 
 ## `pub struct PrivacySettings`
 
@@ -72,14 +89,20 @@ pub struct PrivacySettings { /* fields */ }
 
 ### Methods
 
+<a id="privacysettings-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create a `PrivacySettings` widget with full layout and all sections shown.
+
+<a id="privacysettings-compact"></a>
 
 #### `pub fn compact(mut self, compact: bool) -> Self`
 
 Use a compact layout suited for first-run modals: hides the mode-switch
 section and tightens spacing. Defaults to `false` (full settings panel).
+
+<a id="privacysettings-show_identity_row"></a>
 
 #### `pub fn show_identity_row(mut self, show: bool) -> Self`
 
@@ -87,27 +110,37 @@ Show or hide the install-id / GDPR Art. 15 + 17 identity row in
 pseudonymous mode. Set to `false` when the host app supplies its own
 equivalent UI. Defaults to `true`.
 
+<a id="privacysettings-show_mode_switch"></a>
+
 #### `pub fn show_mode_switch(mut self, show: bool) -> Self`
 
 Show or hide the anonymous ↔ pseudonymous mode-switch section when both
 adapters are configured. Has no effect if only one mode is available.
 Defaults to `true`.
 
+<a id="privacysettings-show_inspect"></a>
+
 #### `pub fn show_inspect(mut self, show: bool) -> Self`
 
 Show or hide the "Inspect data sent" accordion that lists recent events
 from the telemetry ring buffer. Defaults to `true`.
+
+<a id="privacysettings-inspect_event_count"></a>
 
 #### `pub fn inspect_event_count(mut self, n: usize) -> Self`
 
 Maximum number of recent events shown in the inspect accordion.
 Clamped to at least 1. Defaults to 50.
 
+<a id="privacysettings-privacy_policy_url"></a>
+
 #### `pub fn privacy_policy_url(mut self, url: impl Into<String>) -> Self`
 
 Surface a "Read full privacy policy" link in the Art. 13 notice.
 When not set the link is hidden — the controller is responsible for
 hosting their own policy page.
+
+<a id="privacysettings-data_processor_name"></a>
 
 #### `pub fn data_processor_name(mut self, name: impl Into<String>) -> Self`
 

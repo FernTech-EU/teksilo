@@ -5,6 +5,16 @@
 
 `DataChange` — change notifications for flat collections.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`DataChange`](#datachange) — Describes a mutation to a flat list |
+| `fn` | [`map_index_after_move`](#map_index_after_move) — Map an index through a `DataChange::ItemsMoved { from, to, count }` |
+| `fn` | [`adjust_single_index_for_change`](#adjust_single_index_for_change) — Map a **single** index anchor (not a selection set) through a `DataChange`, or `None` if the row the anchor pointed at no longer exists (it was removed, or… |
+
+## Detailed description
+
 Describes the mutations that `crate::ListModel` (and `crate::ListDataSource`
 implementors) emit to their subscribers. Consumers such as `ListView`,
 `TableView`, and `SortFilterListModel` receive a `DataChange` through their
@@ -32,6 +42,8 @@ assert_eq!(new_idx, 2);
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/data_change/index.html)
 
+<a id="datachange"></a>
+
 ## `pub enum DataChange`
 
 Describes a mutation to a flat list. Emitted by `crate::ListModel` automatically
@@ -50,6 +62,8 @@ pub enum DataChange { /* variants */ }
 - **`WindowLoaded`** — A window of previously-`Loading` rows became `Ready` (lazy / windowed sources). Semantically like `ItemsInserted` for a row-height cache (divergence = `range.start`), but no rows were added — the count was already declared — so a `SelectionModel` must NOT index-shift for it.
 - **`Reset`** — The entire list was replaced; consumers must discard all cached state and rebuild.
 
+<a id="map_index_after_move"></a>
+
 ## `pub fn map_index_after_move(...)`
 
 Map an index through a `DataChange::ItemsMoved { from, to, count }`.
@@ -62,6 +76,8 @@ state (selection, checked-set) to follow items across a reorder.
 ```rust
 pub fn map_index_after_move(idx: usize, from: usize, to: usize, count: usize) -> usize;
 ```
+
+<a id="adjust_single_index_for_change"></a>
 
 ## `pub fn adjust_single_index_for_change(...)`
 

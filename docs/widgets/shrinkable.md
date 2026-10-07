@@ -5,6 +5,23 @@
 
 Shrinkable — a layout modifier that allows its child to compress under an over-constraint.
 
+## Public functions
+
+### `Shrinkable`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#shrinkable-new) |
+| | **Builder methods** |
+| `Self` | [`shrink(weight: f32)`](#shrinkable-shrink) |
+| `Self` | [`min_width(min: f32)`](#shrinkable-min_width) |
+| `Self` | [`min_height(min: f32)`](#shrinkable-min_height) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#shrinkable-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#shrinkable-child_opt) |
+
+## Detailed description
+
 By default every widget is rigid: when a stack runs out of main-axis room, rigid
 children keep their wanted size and overflow the bounds. `Shrinkable` opts a child
 into the over-constraint distribution: the stack divides any deficit across all
@@ -18,7 +35,7 @@ floor set here.
 — a child can both grow on surplus and shrink on deficit by wrapping with
 `Shrinkable` and setting a non-zero `flex` on the inner widget.
 
-## When to use
+#### When to use
 
 - A long text label that should ellipsize before a rigid icon/badge loses space.
 - A thumbnail image column that may compress while a fixed sidebar stays at full width.
@@ -34,13 +51,11 @@ let _row = HStack::new()
     .child(TextWidget::new(lit!("Rigid")));
 ```
 
-## Builder methods at a glance
-
-`shrink`, `min_width`, `min_height`, `child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/shrinkable/index.html)
+
+<a id="shrinkable"></a>
 
 ## `pub struct Shrinkable`
 
@@ -82,26 +97,38 @@ pub struct Shrinkable { /* fields */ }
 
 ### Methods
 
+<a id="shrinkable-new"></a>
+
 #### `pub fn new() -> Self`
 
 A shrinkable wrapper with shrink weight `1.0` and a zero floor.
+
+<a id="shrinkable-shrink"></a>
 
 #### `pub fn shrink(mut self, weight: f32) -> Self`
 
 Set the shrink weight (relative share of an over-constraint deficit this
 child absorbs). Clamped to `>= 0`; `0` makes the child rigid again.
 
+<a id="shrinkable-min_width"></a>
+
 #### `pub fn min_width(mut self, min: f32) -> Self`
 
 Set the minimum width the child may be compressed to.
+
+<a id="shrinkable-min_height"></a>
 
 #### `pub fn min_height(mut self, min: f32) -> Self`
 
 Set the minimum height the child may be compressed to.
 
+<a id="shrinkable-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Wrap an inline child widget (deferred insertion).
+
+<a id="shrinkable-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

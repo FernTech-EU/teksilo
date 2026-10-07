@@ -8,6 +8,28 @@
 ShortcutSettings — user-facing widget for browsing and rebinding
 application shortcuts.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`ShortcutConflict`](#shortcutconflict) — Describes a rebind that collides with an existing binding |
+| `struct` | [`ShortcutSettings`](#shortcutsettings) — A settings panel for browsing and rebinding application shortcuts |
+
+## Public functions
+
+### `ShortcutSettings`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#shortcutsettings-new) |
+| | **Builder methods** |
+| `Self` | [`with_filter(filter: Signal<String>)`](#shortcutsettings-with_filter) |
+| `Self` | [`confirm_conflicts(yes: bool)`](#shortcutsettings-confirm_conflicts) |
+| `Self` | [`on_conflict(f: impl Fn(&ShortcutConflict) + 'static)`](#shortcutsettings-on_conflict) |
+
+## Detailed description
+
 Reads every shortcut registered in the tree's
 `ShortcutRegistry` and
 renders one row per entry, grouped by category, with both primary
@@ -48,13 +70,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![ShortcutSettings at Touch density](img/shortcut_settings-touch.png)
 
-## Builder methods at a glance
-
-`with_filter`, `confirm_conflicts`, `on_conflict`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/shortcut_settings/index.html)
+
+<a id="shortcutconflict"></a>
 
 ## `pub struct ShortcutConflict`
 
@@ -67,6 +87,8 @@ internally to drive the optional inline confirm prompt.
 ```rust
 pub struct ShortcutConflict { /* fields */ }
 ```
+
+<a id="shortcutsettings"></a>
 
 ## `pub struct ShortcutSettings`
 
@@ -83,10 +105,14 @@ pub struct ShortcutSettings { /* fields */ }
 
 ### Methods
 
+<a id="shortcutsettings-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create a settings panel that lists every shortcut currently
 registered in the tree's `ShortcutRegistry`, without a filter.
+
+<a id="shortcutsettings-with_filter"></a>
 
 #### `pub fn with_filter(mut self, filter: Signal<String>) -> Self`
 
@@ -99,6 +125,8 @@ Apps typically drive this from a `TextInput` elsewhere in
 their settings UI; keeping the filter external keeps this
 widget's own surface minimal rather than embedding a search box.
 
+<a id="shortcutsettings-confirm_conflicts"></a>
+
 #### `pub fn confirm_conflicts(mut self, yes: bool) -> Self`
 
 Require explicit confirmation before a rebind unbinds a
@@ -107,6 +135,8 @@ immediately (the historical behavior). When on, a colliding
 rebind shows an inline "already assigned to X — Reassign /
 Cancel" prompt on the row, and the registry is left untouched
 until the user confirms.
+
+<a id="shortcutsettings-on_conflict"></a>
 
 #### `pub fn on_conflict(mut self, f: impl Fn(&ShortcutConflict) + 'static) -> Self`
 

@@ -7,6 +7,48 @@
 
 `DateEdit` — text input + calendar popover, bound to `Signal<Option<Date>>`.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`WidthPolicy`](#widthpolicy) — How a datetime widget claims horizontal space |
+| `enum` | [`ValidationBehavior`](#validationbehavior) — How the date editor reacts to out-of-range or partially invalid input |
+| `struct` | [`DateEdit`](#dateedit) — Single-line date input with optional calendar popover |
+
+## Public functions
+
+### `DateEdit`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(value: Signal<Option<Date>>)`](#dateedit-new) |
+| `Self` | [`required(value: Signal<Date>)`](#dateedit-required) |
+| | **Builder methods** |
+| `Self` | [`style(style: impl teksilo_core::styles::DateEditStyle)`](#dateedit-style) |
+| `Self` | [`min_date(d: Date)`](#dateedit-min_date) |
+| `Self` | [`max_date(d: Date)`](#dateedit-max_date) |
+| `Self` | [`format_pattern(pat: impl Into<String>)`](#dateedit-format_pattern) |
+| `Self` | [`placeholder(text: impl Into<LocalizedString>)`](#dateedit-placeholder) |
+| `Self` | [`first_day_of_week(w: Weekday)`](#dateedit-first_day_of_week) |
+| `Self` | [`show_calendar_button(show: bool)`](#dateedit-show_calendar_button) |
+| `Self` | [`calendar_popover_placement(p: OverlayPlacement)`](#dateedit-calendar_popover_placement) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#dateedit-enabled) |
+| `Self` | [`read_only(read_only: bool)`](#dateedit-read_only) |
+| `Self` | [`validation_behavior(behavior: ValidationBehavior)`](#dateedit-validation_behavior) |
+| `Self` | [`width_policy(policy: WidthPolicy)`](#dateedit-width_policy) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#dateedit-label) |
+| `Self` | [`on_value_changed(f: impl Fn(Option<Date>, &mut EventContext) + 'static)`](#dateedit-on_value_changed) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#dateedit-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#dateedit-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#dateedit-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#dateedit-composite_tooltip) |
+| | **Methods** |
+| `Signal<ValidationFeedback>` | [`validation_feedback_signal()`](#dateedit-validation_feedback_signal) |
+| `Signal<Option<Date>>` | [`value()`](#dateedit-value) |
+
+## Detailed description
+
 A single-line editable date field. The underlying surface is a
 `TextInputField` displaying the formatted date; commit on Enter or
 blur parses the input against the active pattern, clamps to
@@ -14,7 +56,7 @@ blur parses the input against the active pattern, clamps to
 calendar-icon button opens a `Calendar`
 popover anchored below the field for graphical date selection.
 
-# Behaviour
+### Behaviour
 
 - **Value binding**: `Signal<Option<Date>>` is the source of truth.
   External writes re-format the text. `None` shows the placeholder.
@@ -35,7 +77,7 @@ popover anchored below the field for graphical date selection.
 - **Min / Max**: clamps on commit and on step. Out-of-range values
   in the popover cell are disabled.
 
-# Accessibility
+### Accessibility
 
 - Container: `Role::DateInput`, named from the `.label()` builder, its
   value the selected day in full in the tree's locale ("samedi 2 mai
@@ -59,7 +101,7 @@ popover anchored below the field for graphical date selection.
 - The calendar opens on the date the field holds (the text typed in it
   is committed first), on its days, whatever an earlier opening left.
 
-# Example
+### Example
 
 ```ignore
 use teksilo::widgets::{DateEdit, common::datetime::Date};
@@ -73,7 +115,7 @@ ctx.add(
 );
 ```
 
-## Touch and pen
+#### Touch and pen
 
 Nothing to declare here, and the reason applies to the whole date/time
 family (`TimeEdit`,
@@ -95,13 +137,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![DateEdit at Touch density](img/date_edit-touch.png)
 
-## Builder methods at a glance
-
-`style`, `required`, `min_date`, `max_date`, `format_pattern`, `placeholder`, `first_day_of_week`, `show_calendar_button`, `calendar_popover_placement`, `enabled`, `read_only`, `validation_behavior`, `width_policy`, `validation_feedback_signal`, `label`, `on_value_changed`, `value`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/date_edit/index.html)
+
+<a id="widthpolicy"></a>
 
 ## `pub enum WidthPolicy`
 
@@ -122,6 +162,8 @@ pub enum WidthPolicy { /* variants */ }
 - **`Default`** — **Default.** The widget claims its natural width: the mask-derived empty template (`__/__/____` for ISO date, `__:__` for 24h time) measured in the theme body font plus surrounding chrome. The footprint stays fixed as the user types — Int UI form-density convention. This is the `Default`.
 - **`Fill`** — The widget expands to fill the horizontal space its parent offers, instead of capping at the natural mask width. Use inside toolbars, inspector panels, or an `Expand::horizontal` column that should stretch with the surrounding layout.
 
+<a id="validationbehavior"></a>
+
 ## `pub enum ValidationBehavior`
 
 How the date editor reacts to out-of-range or partially invalid input.
@@ -135,6 +177,8 @@ pub enum ValidationBehavior { /* variants */ }
 - **`AutoCorrect`** — Out-of-range inputs are clamped to the nearest valid value (e.g. `12/50/2026` → `12/31/2026`) and announced via `Live::Polite`. Matches macOS Calendar and iOS DatePicker. This is the `Default`.
 - **`Reject`** — Out-of-range inputs are rejected with an inline error message; the field's text is left as-typed so the user can correct it. The bound value is unchanged until a valid date is committed. Matches Excel / Material strict-validation patterns. Use for high-precision contexts where silently rounding is unacceptable.
 
+<a id="dateedit"></a>
+
 ## `pub struct DateEdit`
 
 Single-line date input with optional calendar popover. See the
@@ -146,13 +190,19 @@ pub struct DateEdit { /* fields */ }
 
 ### Methods
 
+<a id="dateedit-new"></a>
+
 #### `pub fn new(value: Signal<Option<Date>>) -> Self`
 
 Construct a date editor bound to a nullable date signal.
 
+<a id="dateedit-style"></a>
+
 #### `pub fn style(mut self, style: impl teksilo_core::styles::DateEditStyle) -> Self`
 
 Per-call style override for the date-edit chrome.
+
+<a id="dateedit-required"></a>
 
 #### `pub fn required(value: Signal<Date>) -> Self`
 
@@ -163,11 +213,15 @@ initialized to `Some(value.get())`, and only goes `None`
 transiently when a commit clears the text (the mirror then leaves
 the source alone until the next valid commit re-establishes it).
 
+<a id="dateedit-min_date"></a>
+
 #### `pub fn min_date(mut self, d: Date) -> Self`
 
 Clamp the selectable range from below. Dates earlier than `d`
 are clamped up to `d` on commit and on step, and are shown as
 disabled in the calendar popover.
+
+<a id="dateedit-max_date"></a>
 
 #### `pub fn max_date(mut self, d: Date) -> Self`
 
@@ -175,40 +229,56 @@ Clamp the selectable range from above. Dates later than `d`
 are clamped down to `d` on commit and on step, and are shown as
 disabled in the calendar popover.
 
+<a id="dateedit-format_pattern"></a>
+
 #### `pub fn format_pattern(mut self, pat: impl Into<String>) -> Self`
 
 Override the locale-derived format pattern (strftime subset, see
 `crate::common::datetime::pattern`).
+
+<a id="dateedit-placeholder"></a>
 
 #### `pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Text displayed when the bound value is `None`. Defaults to empty
 (no placeholder rendered).
 
+<a id="dateedit-first_day_of_week"></a>
+
 #### `pub fn first_day_of_week(mut self, w: Weekday) -> Self`
 
 Override which weekday heads the calendar's column grid.
 Defaults to the locale's convention if not set.
+
+<a id="dateedit-show_calendar_button"></a>
 
 #### `pub fn show_calendar_button(mut self, show: bool) -> Self`
 
 Show or hide the trailing calendar-icon trigger button that opens
 the calendar popover. Default `true`.
 
+<a id="dateedit-calendar_popover_placement"></a>
+
 #### `pub fn calendar_popover_placement(mut self, p: OverlayPlacement) -> Self`
 
 Override where the calendar popover appears relative to the field.
 Default is `OverlayPlacement::BelowPreferred`.
+
+<a id="dateedit-enabled"></a>
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state, statically or reactively. Forwarded to
 the arena at build time.
 
+<a id="dateedit-read_only"></a>
+
 #### `pub fn read_only(mut self, read_only: bool) -> Self`
 
 Make the field read-only: text is selectable and copyable but
 not editable, and step keys are suppressed.
+
+<a id="dateedit-validation_behavior"></a>
 
 #### `pub fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self`
 
@@ -216,6 +286,8 @@ How parse failures are surfaced. Default
 `ValidationBehavior::AutoCorrect` (clamp + announce); switch
 to `ValidationBehavior::Reject` for strict-validation form
 contexts.
+
+<a id="dateedit-width_policy"></a>
 
 #### `pub fn width_policy(mut self, policy: WidthPolicy) -> Self`
 
@@ -225,6 +297,8 @@ mask-derived width. Switch to `WidthPolicy::Fill` to make
 the field stretch to fill the parent's offered width
 (toolbar / inspector pattern).
 
+<a id="dateedit-validation_feedback_signal"></a>
+
 #### `pub fn validation_feedback_signal(&self) -> Signal<ValidationFeedback>`
 
 Reactive handle on the live validation feedback (mirrored from
@@ -232,10 +306,14 @@ the inner field). Composites that want to render their own
 feedback UI elsewhere can bind to this; the default
 `ValidationStrip` slot below the field uses it internally.
 
+<a id="dateedit-label"></a>
+
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Set the accessible label for the field (also shown by any paired
 `FormLayout` label slot). Defaults to the localized "Date" string.
+
+<a id="dateedit-on_value_changed"></a>
 
 #### `pub fn on_value_changed( mut self, f: impl Fn(Option<Date>, &mut EventContext) + 'static, ) -> Self`
 
@@ -244,9 +322,13 @@ new `Option<Date>` and a live `EventContext`. Fires only on
 user-driven commits (typing + blur, Enter, calendar selection),
 not on external writes to the bound signal.
 
+<a id="dateedit-value"></a>
+
 #### `pub fn value(&self) -> Signal<Option<Date>>`
 
 Return a clone of the bound value signal for external observation.
+
+<a id="dateedit-tooltip"></a>
 
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -255,17 +337,23 @@ Mutually exclusive with `Self::rich_tooltip`,
 `Self::rich_tooltip_content`, and `Self::composite_tooltip` —
 this call clears those slots.
 
+<a id="dateedit-rich_tooltip"></a>
+
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
 Attach a rich tooltip looked up by registry key. Mutually exclusive
 with `Self::tooltip`, `Self::rich_tooltip_content`, and
 `Self::composite_tooltip` — this call clears those slots.
 
+<a id="dateedit-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Attach a rich tooltip from inline content. Mutually exclusive with
 `Self::tooltip`, `Self::rich_tooltip`, and
 `Self::composite_tooltip` — this call clears those slots.
+
+<a id="dateedit-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 

@@ -5,7 +5,21 @@
 
 `DeadZone` — a gesture **dead zone** wrapper.
 
-## Touch and pen
+## Public functions
+
+### `DeadZone`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#deadzone-new) |
+| | **Builder methods** |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#deadzone-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#deadzone-child_opt) |
+
+## Detailed description
+
+#### Touch and pen
 
 The no-op tap and drag pair is **kept**, and it is not redundant with the
 `gesture_dead_zone` flag: the flag governs whether an ancestor may enrol this
@@ -15,13 +29,11 @@ press on the wrapper's own bare area, the gap between the controls it protects.
 Reviewed under the arbitration package with that conclusion; nothing about it is
 pointer-kind-specific.
 
-## Builder methods at a glance
-
-`child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/dead_zone/index.html)
+
+<a id="deadzone"></a>
 
 ## `pub struct DeadZone`
 
@@ -61,14 +73,20 @@ pub struct DeadZone { /* fields */ }
 
 ### Methods
 
+<a id="deadzone-new"></a>
+
 #### `pub fn new() -> Self`
 
 A new, empty dead zone. Attach content with `child` or
 `child`.
 
+<a id="deadzone-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Wrap an inline widget.
+
+<a id="deadzone-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

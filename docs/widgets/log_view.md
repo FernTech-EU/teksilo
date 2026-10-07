@@ -7,6 +7,56 @@
 
 `LogView` — a read-only, append-only, tail-following streaming view.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`LogView`](#logview) — A read-only, append-only, tail-following log / console view |
+| `struct` | [`LogViewHandle`](#logviewhandle) — A cloneable handle to append to a `LogView` and drive it |
+
+## Public functions
+
+### `LogView`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#logview-new) |
+| | **Builder methods** |
+| `Self` | [`label(label: impl Into<teksilo_i18n::LocalizedString>)`](#logview-label) |
+| `Self` | [`context_menu(factory: impl Fn( teksilo_canvas::Point, &mut teksilo_core::widget::EventContext, ) -> Option<Box<dyn teksilo_core::widget::Widget>> + 'static)`](#logview-context_menu) |
+| `Self` | [`default_context_menu(enabled: bool)`](#logview-default_context_menu) |
+| `Self` | [`follow_tail(follow: bool)`](#logview-follow_tail) |
+| `Self` | [`scrollback_limit(limit: usize)`](#logview-scrollback_limit) |
+| `Self` | [`severity_highlighter(classify: impl Fn(&str) -> Option<Color> + 'static)`](#logview-severity_highlighter) |
+| `Self` | [`announce_appends(announce: bool)`](#logview-announce_appends) |
+| `Self` | [`font_family(family: impl Into<String>)`](#logview-font_family) |
+| `Self` | [`follow_text_scale(follow: bool)`](#logview-follow_text_scale) |
+| `Self` | [`v_scroll_policy(policy: ScrollPolicy)`](#logview-v_scroll_policy) |
+| `Self` | [`h_scroll_policy(policy: ScrollPolicy)`](#logview-h_scroll_policy) |
+| `Self` | [`background(color: impl Into<teksilo_core::color_prop::ColorProp>)`](#logview-background) |
+| `Self` | [`text_color(color: impl Into<teksilo_core::color_prop::ColorProp>)`](#logview-text_color) |
+| `Self` | [`selection_color(color: impl Into<teksilo_core::color_prop::ColorProp>)`](#logview-selection_color) |
+| | **Methods** |
+| `LogViewHandle` | [`handle()`](#logview-handle) |
+
+### `LogViewHandle`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+|  | [`append(text: &str)`](#logviewhandle-append) |
+|  | [`append_line(line: &str)`](#logviewhandle-append_line) |
+|  | [`append_lines<I, S>(lines: I)`](#logviewhandle-append_lines) |
+|  | [`clear()`](#logviewhandle-clear) |
+|  | [`scroll_to_bottom()`](#logviewhandle-scroll_to_bottom) |
+| `teksilo_core::Signal<usize>` | [`line_count()`](#logviewhandle-line_count) |
+| `teksilo_core::Signal<u64>` | [`document_version()`](#logviewhandle-document_version) |
+| `teksilo_core::Signal<f32>` | [`scroll_y()`](#logviewhandle-scroll_y) |
+| `teksilo_core::Signal<f32>` | [`max_scroll_y()`](#logviewhandle-max_scroll_y) |
+
+## Detailed description
+
 The third face of the editor core, and the one that is *not* an editor. A
 program writes to it, forever, faster than a person types; a person only
 reads, scrolls, selects, and copies. That inversion is why it does not share
@@ -27,7 +77,7 @@ What it adds over the read-only code viewer:
   error line red). Language-agnostic: the view colours a line, the
   application decides what an error looks like.
 
-## Pan to scroll
+#### Pan to scroll
 
 The surface installs `common::scrollable::ScrollableBehavior`
 — the shared wheel arithmetic, a finger's pan, and the `PanClaim`. The wheel
@@ -51,13 +101,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![LogView at Touch density](img/log_view-touch.png)
 
-## Builder methods at a glance
-
-`label`, `context_menu`, `default_context_menu`, `follow_tail`, `scrollback_limit`, `severity_highlighter`, `announce_appends`, `font_family`, `follow_text_scale`, `v_scroll_policy`, `h_scroll_policy`, `background`, `text_color`, `selection_color`, `handle`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/code_editor/index.html)
+
+<a id="logview"></a>
 
 ## `pub struct LogView`
 
@@ -73,10 +121,14 @@ pub struct LogView { /* fields */ }
 
 ### Methods
 
+<a id="logview-new"></a>
+
 #### `pub fn new() -> Self`
 
 A fresh, empty log view: read-only, no caret, no wrapping, following the
 tail, unbounded. Attach a `handle` and append to it.
+
+<a id="logview-label"></a>
 
 #### `pub fn label(mut self, label: impl Into<teksilo_i18n::LocalizedString>) -> Self`
 
@@ -91,11 +143,15 @@ the view reaches the same node.
 Stays locale-reactive: a `tr!(...)` name is re-resolved when the
 locale changes, without a rebuild.
 
+<a id="logview-context_menu"></a>
+
 #### `pub fn context_menu( mut self, factory: impl Fn( teksilo_canvas::Point, &mut teksilo_core::widget::EventContext, ) -> Option<Box<dyn teksilo_core::widget::Widget>> + 'static, ) -> Self`
 
 Replace the built-in right-click menu with `factory`, called on each
 right-click with the **window** position of the click. Returning `None`
 shows no menu.
+
+<a id="logview-default_context_menu"></a>
 
 #### `pub fn default_context_menu(mut self, enabled: bool) -> Self`
 
@@ -106,10 +162,14 @@ The **touch** selection toolbar is *not* affected: it is raised by the
 controller rather than by a right-click, and a log a finger cannot copy
 from is a log a finger cannot use.
 
+<a id="logview-follow_tail"></a>
+
 #### `pub fn follow_tail(self, follow: bool) -> Self`
 
 Whether new lines stick the view to the bottom when it is already there
 (default `true`). Off makes the view hold position while it grows.
+
+<a id="logview-scrollback_limit"></a>
 
 #### `pub fn scrollback_limit(self, limit: usize) -> Self`
 
@@ -122,11 +182,15 @@ set a limit; a bounded or bursty one need not. The cap is soft: eviction
 is batched, so the count can briefly exceed `limit` (by a band that scales
 down with the cap).
 
+<a id="logview-severity_highlighter"></a>
+
 #### `pub fn severity_highlighter(self, classify: impl Fn(&str) -> Option<Color> + 'static) -> Self`
 
 Colour each line by what it is: the classifier maps a line's text to a
 colour, or `None` to leave it in the default colour. The view knows how
 to colour a line; the application knows what an error line looks like.
+
+<a id="logview-announce_appends"></a>
 
 #### `pub fn announce_appends(self, announce: bool) -> Self`
 
@@ -135,41 +199,59 @@ Whether appended lines are announced to assistive technology (default
 handful of meaningful events and hostile for a build log at fifty lines a
 second. The application says which it is.
 
+<a id="logview-font_family"></a>
+
 #### `pub fn font_family(self, family: impl Into<String>) -> Self`
 
 Fallback font family. A log reads best monospaced, so columns align; pass
 a monospace family here.
+
+<a id="logview-follow_text_scale"></a>
 
 #### `pub fn follow_text_scale(self, follow: bool) -> Self`
 
 Whether the view grows text with the global accessibility text scale
 (default `true`).
 
+<a id="logview-v_scroll_policy"></a>
+
 #### `pub fn v_scroll_policy(mut self, policy: ScrollPolicy) -> Self`
 
 Vertical scrollbar policy (default `Auto`).
 
+<a id="logview-h_scroll_policy"></a>
+
 #### `pub fn h_scroll_policy(mut self, policy: ScrollPolicy) -> Self`
 
 Horizontal scrollbar policy (default `Auto`).
+
+<a id="logview-background"></a>
 
 #### `pub fn background(self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the background colour (accepts a `Color`, theme role, or
 `Signal`). Default tracks the theme's `editor_bg`.
 
+<a id="logview-text_color"></a>
+
 #### `pub fn text_color(self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the default text colour. Per-line severity colours (from
 `severity_highlighter`) still win.
 
+<a id="logview-selection_color"></a>
+
 #### `pub fn selection_color(self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the selection colour.
 
+<a id="logview-handle"></a>
+
 #### `pub fn handle(&self) -> LogViewHandle`
 
 A cloneable handle to append to the view and drive it from anywhere.
+
+<a id="logviewhandle"></a>
 
 ## `pub struct LogViewHandle`
 
@@ -188,11 +270,15 @@ pub struct LogViewHandle { /* fields */ }
 
 ### Methods
 
+<a id="logviewhandle-append"></a>
+
 #### `pub fn append(&self, text: &str)`
 
 Append text, split into lines on `\n`. A single trailing newline is a
 terminator, not a blank line, so it is dropped; embedded blank lines are
 kept. Enqueues for the next frame and wakes the view.
+
+<a id="logviewhandle-append_line"></a>
 
 #### `pub fn append_line(&self, line: &str)`
 
@@ -200,30 +286,44 @@ Append one line. `\n` is still split defensively — the document rejects a
 block containing one — so a value that turns out to be multi-line becomes
 several lines rather than an error.
 
+<a id="logviewhandle-append_lines"></a>
+
 #### `pub fn append_lines<I, S>(&self, lines: I) where I: IntoIterator<Item = S>, S: AsRef<str>,`
 
 Append many lines.
+
+<a id="logviewhandle-clear"></a>
 
 #### `pub fn clear(&self)`
 
 Empty the view, resetting it to its pristine state. UI-thread only.
 
+<a id="logviewhandle-scroll_to_bottom"></a>
+
 #### `pub fn scroll_to_bottom(&self)`
 
 Scroll to the bottom, resuming tail-following. UI-thread only.
+
+<a id="logviewhandle-line_count"></a>
 
 #### `pub fn line_count(&self) -> teksilo_core::Signal<usize>`
 
 The live line count — a status bar can bind it.
 
+<a id="logviewhandle-document_version"></a>
+
 #### `pub fn document_version(&self) -> teksilo_core::Signal<u64>`
 
 Bumps on every content change.
+
+<a id="logviewhandle-scroll_y"></a>
 
 #### `pub fn scroll_y(&self) -> teksilo_core::Signal<f32>`
 
 The vertical scroll offset — a follow-state indicator can read it against
 `max_scroll_y`.
+
+<a id="logviewhandle-max_scroll_y"></a>
 
 #### `pub fn max_scroll_y(&self) -> teksilo_core::Signal<f32>`
 

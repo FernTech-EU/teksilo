@@ -8,6 +8,34 @@ a single string. Built on the same `present_modal` infrastructure as
 `MessageBox`, with a `TextInput`
 body between the prompt and the Ok / Cancel buttons.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `type` | [`ValidateResult`](#validateresult) — Verdict from an `InputDialog::validate` callback |
+| `struct` | [`InputDialog`](#inputdialog) — A single-field input modal |
+
+## Public functions
+
+### `InputDialog`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(title: impl Into<LocalizedString>)`](#inputdialog-new) |
+| | **Builder methods** |
+| `Self` | [`prompt(text: impl Into<LocalizedString>)`](#inputdialog-prompt) |
+| `Self` | [`placeholder(text: impl Into<LocalizedString>)`](#inputdialog-placeholder) |
+| `Self` | [`default_text(text: impl Into<String>)`](#inputdialog-default_text) |
+| `Self` | [`ok_label(label: impl Into<LocalizedString>)`](#inputdialog-ok_label) |
+| `Self` | [`cancel_label(label: impl Into<LocalizedString>)`](#inputdialog-cancel_label) |
+| `Self` | [`on_result(f: impl Fn(Option<String>, &mut EventContext) + 'static)`](#inputdialog-on_result) |
+| `Self` | [`validate(f: impl Fn(&str) -> ValidateResult + 'static)`](#inputdialog-validate) |
+| | **Methods** |
+|  | [`present(ctx: &mut EventContext)`](#inputdialog-present) |
+
+## Detailed description
+
 Use `MessageBox` when the dialog
 conveys information without requiring data; use `InputDialog` when
 the modal needs to capture exactly one short string. Forms longer
@@ -26,7 +54,7 @@ InputDialog::new(tr!(rename_title()))
     .present(ctx);
 ```
 
-## Live validation
+#### Live validation
 
 `validate` runs on every keystroke and both **disables OK**
 and shows its message under the field, so a value the caller cannot accept can never
@@ -53,13 +81,11 @@ is noise, and the greyed button already says the dialog is not ready. A message 
 withheld until the field has been edited for the same reason, so a caller can return
 `Err(Some(..))` for the empty case without it flashing on open.
 
-## Builder methods at a glance
-
-`prompt`, `placeholder`, `default_text`, `ok_label`, `cancel_label`, `on_result`, `validate`, `present`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/input_dialog/index.html)
+
+<a id="validateresult"></a>
 
 ## `pub type ValidateResult`
 
@@ -72,6 +98,8 @@ Verdict from an `InputDialog::validate` callback.
 pub type ValidateResult = Result<(), Option<LocalizedString>>;
 ```
 
+<a id="inputdialog"></a>
+
 ## `pub struct InputDialog`
 
 A single-field input modal.
@@ -82,36 +110,52 @@ pub struct InputDialog { /* fields */ }
 
 ### Methods
 
+<a id="inputdialog-new"></a>
+
 #### `pub fn new(title: impl Into<LocalizedString>) -> Self`
 
 Construct a new input dialog with the given title.
+
+<a id="inputdialog-prompt"></a>
 
 #### `pub fn prompt(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Prompt rendered above the input field. Optional but recommended.
 
+<a id="inputdialog-placeholder"></a>
+
 #### `pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Placeholder shown when the field is empty.
 
+<a id="inputdialog-default_text"></a>
+
 #### `pub fn default_text(mut self, text: impl Into<String>) -> Self`
 
 Initial value pre-filled into the field.
+
+<a id="inputdialog-ok_label"></a>
 
 #### `pub fn ok_label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Override the OK button label (defaults to the framework's
 translated "OK" string).
 
+<a id="inputdialog-cancel_label"></a>
+
 #### `pub fn cancel_label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Override the Cancel button label (defaults to the framework's
 translated "Cancel" string).
 
+<a id="inputdialog-on_result"></a>
+
 #### `pub fn on_result(mut self, f: impl Fn(Option<String>, &mut EventContext) + 'static) -> Self`
 
 Result callback. Invoked exactly once when the user accepts
 (`Some(value)`) or cancels (`None`).
+
+<a id="inputdialog-validate"></a>
 
 #### `pub fn validate(mut self, f: impl Fn(&str) -> ValidateResult + 'static) -> Self`
 
@@ -128,6 +172,8 @@ have not yet typed into. The disabled OK is what communicates "not yet" there.
 
 Distinct from `TextInput::validator`,
 which fires on *commit* and cannot gate a dialog's accept path.
+
+<a id="inputdialog-present"></a>
 
 #### `pub fn present(self, ctx: &mut EventContext)`
 

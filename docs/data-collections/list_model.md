@@ -5,6 +5,34 @@
 
 `ListModel<T>` — concrete reactive list backed by a `Vec<T>`.
 
+## Public functions
+
+### `ListModel`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#listmodel-new) |
+| `Self` | [`from_vec(items: Vec<T>)`](#listmodel-from_vec) |
+| | **Builder methods** |
+| `Self` | [`debug_named(_name: impl Into<String>)`](#listmodel-debug_named) |
+| | **Methods** |
+| `usize` | [`len()`](#listmodel-len) |
+| `bool` | [`is_empty()`](#listmodel-is_empty) |
+| `Option<R>` | [`with_item<R>(index: usize, f: impl FnOnce(&T) -> R)`](#listmodel-with_item) |
+|  | [`push(item: T)`](#listmodel-push) |
+|  | [`insert(index: usize, item: T)`](#listmodel-insert) |
+| `T` | [`remove(index: usize)`](#listmodel-remove) |
+|  | [`set(index: usize, item: T)`](#listmodel-set) |
+|  | [`move_item(from: usize, to: usize)`](#listmodel-move_item) |
+| `bool` | [`move_items(indices: &[usize], insert_gap: usize)`](#listmodel-move_items) |
+|  | [`replace_all(items: Vec<T>)`](#listmodel-replace_all) |
+|  | [`clear()`](#listmodel-clear) |
+| `ObserverHandle` | [`observe_changes(f: impl Fn(&DataChange) + 'static)`](#listmodel-observe_changes) |
+|  | [`reconcile_by_key<K: Eq + Hash>(new_items: Vec<T>, key_fn: impl Fn(&T) -> K)`](#listmodel-reconcile_by_key) |
+
+## Detailed description
+
 `ListModel<T>` stores items in a heap-allocated `Vec<T>` behind
 `Rc<RefCell<…>>`. Cloning a handle shares the same underlying data — there
 is no deep copy. Every mutation method (`push`, `insert`, `remove`, `set`,
@@ -17,13 +45,13 @@ to any `ListView` / `TableView` without adaption. For lists too large to
 hold in memory, implement `ListDataSource` directly on your own type
 (paged database cursor, windowed feed, etc.).
 
-## When to use
+#### When to use
 
 Use `ListModel<T>` when the full list fits in memory and you want automatic
 change notifications with no extra setup. Use a custom `ListDataSource`
 when the source is external, huge, or lazy-loaded.
 
-## Notifications
+#### Notifications
 
 Observers registered via `ListModel::observe_changes` receive a
 `DataChange` describing the minimal change: `ItemsInserted`,
@@ -45,13 +73,11 @@ model.remove(2);
 assert_eq!(model.len(), 2);
 ```
 
-## Builder methods at a glance
-
-`from_vec`, `len`, `is_empty`, `with_item`, `push`, `insert`, `remove`, `set`, `move_item`, `move_items`, `replace_all`, `clear`, `observe_changes`, `reconcile_by_key`, `debug_named`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/list_model/index.html)
+
+<a id="listmodel"></a>
 
 ## `pub struct ListModel`
 
@@ -70,21 +96,31 @@ pub struct ListModel<T: 'static> { /* fields */ }
 
 ### Methods
 
+<a id="listmodel-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create an empty list model.
+
+<a id="listmodel-from_vec"></a>
 
 #### `pub fn from_vec(items: Vec<T>) -> Self`
 
 Create a list model from an existing vector.
 
+<a id="listmodel-len"></a>
+
 #### `pub fn len(&self) -> usize`
 
 Number of items in the list.
 
+<a id="listmodel-is_empty"></a>
+
 #### `pub fn is_empty(&self) -> bool`
 
 Whether the list is empty.
+
+<a id="listmodel-with_item"></a>
 
 #### `pub fn with_item<R>(&self, index: usize, f: impl FnOnce(&T) -> R) -> Option<R>`
 
@@ -93,9 +129,13 @@ Access an item by index via a callback. Returns `None` if out of bounds.
 The callback pattern avoids returning a reference that would need to
 outlive the `RefCell` borrow guard.
 
+<a id="listmodel-push"></a>
+
 #### `pub fn push(&self, item: T)`
 
 Append an item to the end of the list.
+
+<a id="listmodel-insert"></a>
 
 #### `pub fn insert(&self, index: usize, item: T)`
 
@@ -104,6 +144,8 @@ Insert an item at the given index.
 # Panics
 Panics if `index > len()`.
 
+<a id="listmodel-remove"></a>
+
 #### `pub fn remove(&self, index: usize) -> T`
 
 Remove and return the item at the given index.
@@ -111,12 +153,16 @@ Remove and return the item at the given index.
 # Panics
 Panics if `index >= len()`.
 
+<a id="listmodel-set"></a>
+
 #### `pub fn set(&self, index: usize, item: T)`
 
 Replace the item at the given index.
 
 # Panics
 Panics if `index >= len()`.
+
+<a id="listmodel-move_item"></a>
 
 #### `pub fn move_item(&self, from: usize, to: usize)`
 
@@ -126,6 +172,8 @@ The item at `from` is removed, then inserted at `to` (post-removal index).
 
 # Panics
 Panics if either index is out of bounds.
+
+<a id="listmodel-move_items"></a>
 
 #### `pub fn move_items(&self, indices: &[usize], insert_gap: usize) -> bool`
 
@@ -143,18 +191,26 @@ rows; a non-contiguous set emits `DataChange::Reset` (that permutation
 is not expressible as one `ItemsMoved`, and selection is dropped). For a
 single index prefer `move_item`.
 
+<a id="listmodel-replace_all"></a>
+
 #### `pub fn replace_all(&self, items: Vec<T>)`
 
 Replace the entire list contents.
+
+<a id="listmodel-clear"></a>
 
 #### `pub fn clear(&self)`
 
 Remove all items from the list.
 
+<a id="listmodel-observe_changes"></a>
+
 #### `pub fn observe_changes(&self, f: impl Fn(&DataChange) + 'static) -> ObserverHandle`
 
 Register an observer that is called on every mutation.
 Returns an `ObserverHandle` — dropping it removes the callback.
+
+<a id="listmodel-reconcile_by_key"></a>
 
 #### `pub fn reconcile_by_key<K: Eq + Hash>(&self, new_items: Vec<T>, key_fn: impl Fn(&T) -> K)`
 
@@ -222,6 +278,8 @@ LIS-based scheme could do slightly better there). For the common
 case this primitive targets — a peer append/remove/edit merged back
 in — the existing relative order of untouched rows is preserved
 as-is, so no moves are emitted at all.
+
+<a id="listmodel-debug_named"></a>
 
 #### `pub fn debug_named(self, _name: impl Into<String>) -> Self`
 

@@ -8,6 +8,38 @@
 StatusBar — a horizontal chrome bar at the bottom of a window for status
 information.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `const` | [`STATUS_BAR_HEIGHT`](#status_bar_height) — StatusBar design tokens |
+| `const` | [`STATUS_BAR_PADDING_HORIZONTAL`](#status_bar_padding_horizontal) |
+| `fn` | [`status_bar_padding_horizontal`](#status_bar_padding_horizontal-2) — `STATUS_BAR_PADDING_HORIZONTAL` scaled by the density's `spacing_factor` (1.00 / 1.15 / 1.30) |
+| `const` | [`STATUS_BAR_ITEM_GAP`](#status_bar_item_gap) |
+| `fn` | [`status_bar_item_gap`](#status_bar_item_gap-2) — `STATUS_BAR_ITEM_GAP` scaled by the density's `spacing_factor` (1.00 / 1.15 / 1.30) |
+| `struct` | [`StatusBar`](#statusbar) — A status bar for displaying information at the bottom of a window |
+
+## Public functions
+
+### `StatusBar`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#statusbar-new) |
+| | **Builder methods** |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#statusbar-child) |
+| `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#statusbar-children) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#statusbar-child_opt) |
+| `Self` | [`background(color: impl Into<ColorProp>)`](#statusbar-background) |
+| `Self` | [`corner_radius(radius: impl Into<Prop<f32>>)`](#statusbar-corner_radius) |
+| `Self` | [`border_color(color: impl Into<ColorProp>)`](#statusbar-border_color) |
+| `Self` | [`border_width(width: impl Into<Prop<f32>>)`](#statusbar-border_width) |
+| `Self` | [`name(name: impl Into<Prop<String>>)`](#statusbar-name) |
+| `Self` | [`announce_changes(announce: bool)`](#statusbar-announce_changes) |
+
+## Detailed description
+
 The bar publishes `Role::Status` so assistive technology can discover it as
 a status landmark. It is **not** a live region by default — use
 `announce_changes(true)` only for bars that
@@ -33,13 +65,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![StatusBar at Touch density](img/status_bar-touch.png)
 
-## Builder methods at a glance
-
-`child`, `children`, `child_opt`, `background`, `corner_radius`, `border_color`, `border_width`, `name`, `announce_changes`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/status_bar/index.html)
+
+<a id="status_bar_height"></a>
 
 ## `pub const STATUS_BAR_HEIGHT`
 
@@ -49,11 +79,15 @@ StatusBar design tokens.
 pub const STATUS_BAR_HEIGHT: f32 = 22.0;
 ```
 
+<a id="status_bar_padding_horizontal"></a>
+
 ## `pub const STATUS_BAR_PADDING_HORIZONTAL`
 
 ```rust
 pub const STATUS_BAR_PADDING_HORIZONTAL: f32 = 8.0;
 ```
+
+<a id="status_bar_padding_horizontal-2"></a>
 
 ## `pub fn status_bar_padding_horizontal(...)`
 
@@ -64,11 +98,15 @@ pub const STATUS_BAR_PADDING_HORIZONTAL: f32 = 8.0;
 pub fn status_bar_padding_horizontal(tokens: &InputTokens) -> f32;
 ```
 
+<a id="status_bar_item_gap"></a>
+
 ## `pub const STATUS_BAR_ITEM_GAP`
 
 ```rust
 pub const STATUS_BAR_ITEM_GAP: f32 = 2.0;
 ```
+
+<a id="status_bar_item_gap-2"></a>
 
 ## `pub fn status_bar_item_gap(...)`
 
@@ -78,6 +116,8 @@ pub const STATUS_BAR_ITEM_GAP: f32 = 2.0;
 ```rust
 pub fn status_bar_item_gap(tokens: &InputTokens) -> f32;
 ```
+
+<a id="statusbar"></a>
 
 ## `pub struct StatusBar`
 
@@ -104,14 +144,20 @@ pub struct StatusBar { /* fields */ }
 
 ### Methods
 
+<a id="statusbar-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create an empty status bar with default styling (`SurfaceRole::Sunken`,
 square corners, no live region).
 
+<a id="statusbar-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add an inline child widget (deferred insertion).
+
+<a id="statusbar-children"></a>
 
 #### `pub fn children( self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
@@ -119,6 +165,8 @@ Add several inline children from an iterator.
 
 The loop form of `child`: one call where a chain of
 `.child(..)` would otherwise repeat per element.
+
+<a id="statusbar-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
@@ -129,16 +177,22 @@ this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
 adds no arena node, so nothing is laid out, painted, or published to the
 accessibility tree, and a stack applies no spacing around it.
 
+<a id="statusbar-background"></a>
+
 #### `pub fn background(mut self, color: impl Into<ColorProp>) -> Self`
 
 Override the background surface. Accepts `Color`, a
 `SurfaceRole`, or a `Signal<Color>`.
 Default (unset) is `SurfaceRole::Sunken`.
 
+<a id="statusbar-corner_radius"></a>
+
 #### `pub fn corner_radius(mut self, radius: impl Into<Prop<f32>>) -> Self`
 
 Override the corner radius. Accepts a static `f32` or a reactive
 `Signal<f32>`. Default (unset) is `0.0` — square corners.
+
+<a id="statusbar-border_color"></a>
 
 #### `pub fn border_color(mut self, color: impl Into<ColorProp>) -> Self`
 
@@ -146,10 +200,14 @@ Override the border color. Accepts `Color`, a
 `BorderRole`, or a `Signal<Color>`.
 Only painted when `border_width` > 0.
 
+<a id="statusbar-border_width"></a>
+
 #### `pub fn border_width(mut self, width: impl Into<Prop<f32>>) -> Self`
 
 Override the border width. Accepts a static `f32` or a reactive
 `Signal<f32>`. Default (unset) is `0.0` — no border.
+
+<a id="statusbar-name"></a>
 
 #### `pub fn name(mut self, name: impl Into<Prop<String>>) -> Self`
 
@@ -157,6 +215,8 @@ Override the accessible name announced for the bar. Accepts a
 static string, a `Signal<String>`, or a `tr!(...)`
 `LocalizedString` (locale-reactive).
 Default (unset) is the localized "Status".
+
+<a id="statusbar-announce_changes"></a>
 
 #### `pub fn announce_changes(mut self, announce: bool) -> Self`
 

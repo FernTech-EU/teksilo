@@ -5,13 +5,191 @@
 
 `SceneModel` — a shared, cloneable handle to a `Scene`.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`SceneModel`](#scenemodel) — A shared, cloneable handle to a `Scene` |
+| `struct` | [`WeakSceneModel`](#weakscenemodel) — A non-owning handle to a `Scene` — `SceneModel` without the ownership |
+| `struct` | [`SceneWriteGuard`](#scenewriteguard) — Write guard over a `SceneModel`'s `Scene`: `Deref`/`DerefMut` to the scene, with the deferred-notification contract of a `SceneModel` mutator |
+| `struct` | [`SceneTransaction`](#scenetransaction) |
+
+## Public functions
+
+### `SceneModel`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#scenemodel-new) |
+| `Self` | [`with_index(index: Box<dyn SpatialIndex>)`](#scenemodel-with_index) |
+| `Self` | [`from_scene(scene: Scene)`](#scenemodel-from_scene) |
+| | **Methods** |
+| `SceneWriteGuard<'_>` | [`write_guard()`](#scenemodel-write_guard) |
+|  | [`flush_changes()`](#scenemodel-flush_changes) |
+|  | [`deliver_records()`](#scenemodel-deliver_records) |
+| `SceneTransaction<'_>` | [`transaction(source: ChangeSource, history: HistoryMode)`](#scenemodel-transaction) |
+| `SceneTransaction<'_>` | [`user_edit()`](#scenemodel-user_edit) |
+| `Option<Box<dyn FnMut(SceneTransactionRecord)>>` | [`set_edit_sink(sink: impl FnMut(SceneTransactionRecord) + 'static)`](#scenemodel-set_edit_sink) |
+| `Option<Box<dyn FnMut(SceneTransactionRecord)>>` | [`clear_edit_sink()`](#scenemodel-clear_edit_sink) |
+| `Signal<TxnId>` | [`transaction_signal()`](#scenemodel-transaction_signal) |
+| `u32` | [`open_transaction_depth()`](#scenemodel-open_transaction_depth) |
+| `CascadeBudget` | [`cascade_budget()`](#scenemodel-cascade_budget) |
+|  | [`set_cascade_budget(budget: CascadeBudget)`](#scenemodel-set_cascade_budget) |
+| `usize` | [`handle_count()`](#scenemodel-handle_count) |
+| `WeakSceneModel` | [`downgrade()`](#scenemodel-downgrade) |
+| `ItemId` | [`add_widget<W: Widget + 'static>(widget: W, rect: Rect)`](#scenemodel-add_widget) |
+| `ItemId` | [`add_widget_item<P: 'static>(payload: P, rect: Rect)`](#scenemodel-add_widget_item) |
+|  | [`set_payload<P: 'static>(id: ItemId, payload: P)`](#scenemodel-set_payload) |
+| `Option<Rc<dyn std::any::Any>>` | [`payload(id: ItemId)`](#scenemodel-payload) |
+| `ItemId` | [`add_item<I: SceneItem + 'static>(item: I, local_pos: Point)`](#scenemodel-add_item) |
+| `ItemId` | [`add_item_dynamic<I: SceneItem + 'static>(item: I, local_pos: Point)`](#scenemodel-add_item_dynamic) |
+| `ItemId` | [`add_boxed_item(item: Box<dyn SceneItem>, local_pos: Point)`](#scenemodel-add_boxed_item) |
+|  | [`set_local_pos(id: ItemId, local_pos: Point)`](#scenemodel-set_local_pos) |
+|  | [`set_local_bounds(id: ItemId, local_bounds: Rect)`](#scenemodel-set_local_bounds) |
+|  | [`set_transform(id: ItemId, transform: Transform2D)`](#scenemodel-set_transform) |
+| `SizePolicy` | [`size_policy(id: ItemId)`](#scenemodel-size_policy) |
+| `bool` | [`set_size_policy(id: ItemId, policy: SizePolicy)`](#scenemodel-set_size_policy) |
+| `bool` | [`set_measured_size(id: ItemId, size: Size)`](#scenemodel-set_measured_size) |
+|  | [`set_geometry_constraint(f: impl Fn(&crate::constrain::ProposedChange<'_>) -> crate::constrain::ChangeVerdict + 'static)`](#scenemodel-set_geometry_constraint) |
+|  | [`clear_geometry_constraint()`](#scenemodel-clear_geometry_constraint) |
+| `bool` | [`has_geometry_constraint()`](#scenemodel-has_geometry_constraint) |
+| `crate::transform_session::TransformFrame` | [`constrain_frame(items: &[ItemId], op: crate::transform_session::TransformOp, start: crate::transform_session::TransformFrame, proposed: crate::transform_session::TransformFrame, source: crate::transform_session::TransformSource)`](#scenemodel-constrain_frame) |
+| `Vec2` | [`constrain_move(items: &[ItemId], start: crate::transform_session::TransformFrame, translation: Vec2, source: crate::transform_session::TransformSource)`](#scenemodel-constrain_move) |
+| `usize` | [`apply_transform_delta(roots: &[ItemId], delta: &crate::transform_session::TransformDelta)`](#scenemodel-apply_transform_delta) |
+| `Vec<ItemId>` | [`selection_roots(ids: &[ItemId])`](#scenemodel-selection_roots) |
+| `Vec<ItemId>` | [`transformable_roots(ids: &[ItemId], op: crate::transform_session::TransformOp)`](#scenemodel-transformable_roots) |
+| `Option<crate::transform_session::TransformFrame>` | [`transform_frame(roots: &[ItemId])`](#scenemodel-transform_frame) |
+| `Option<f32>` | [`scene_rotation(id: ItemId)`](#scenemodel-scene_rotation) |
+|  | [`set_flags(id: ItemId, flags: ItemFlags)`](#scenemodel-set_flags) |
+|  | [`set_flag(id: ItemId, flag: ItemFlags, on: bool)`](#scenemodel-set_flag) |
+|  | [`set_visible(id: ItemId, visible: bool)`](#scenemodel-set_visible) |
+|  | [`set_opacity(id: ItemId, opacity: f32)`](#scenemodel-set_opacity) |
+|  | [`set_item_fill(id: ItemId, fill: impl Into<ColorProp>)`](#scenemodel-set_item_fill) |
+|  | [`clear_item_fill(id: ItemId)`](#scenemodel-clear_item_fill) |
+|  | [`set_item_stroke(id: ItemId, color: impl Into<ColorProp>, style: StrokeStyle)`](#scenemodel-set_item_stroke) |
+|  | [`clear_item_stroke(id: ItemId)`](#scenemodel-clear_item_stroke) |
+|  | [`set_z(id: ItemId, z: f32)`](#scenemodel-set_z) |
+|  | [`bring_to_front(id: ItemId)`](#scenemodel-bring_to_front) |
+|  | [`send_to_back(id: ItemId)`](#scenemodel-send_to_back) |
+|  | [`set_layer(id: ItemId, layer: SceneLayer)`](#scenemodel-set_layer) |
+|  | [`set_item_parent(child: ItemId, parent: Option<ItemId>)`](#scenemodel-set_item_parent) |
+|  | [`remove(id: ItemId)`](#scenemodel-remove) |
+| `Vec<RemovedItem>` | [`take(id: ItemId)`](#scenemodel-take) |
+| `Result<ItemId, RestoreError>` | [`restore(salvage: RemovedItem)`](#scenemodel-restore) |
+| `Result<Vec<ItemId>, RestoreError>` | [`restore_all(salvage: Vec<RemovedItem>)`](#scenemodel-restore_all) |
+| `Result<Box<dyn SceneItem>, ReplaceRejected>` | [`replace_item(id: ItemId, item: Box<dyn SceneItem>)`](#scenemodel-replace_item) |
+| `Option<Placement>` | [`placement(id: ItemId)`](#scenemodel-placement) |
+|  | [`set_placement(id: ItemId, placement: Placement)`](#scenemodel-set_placement) |
+|  | [`reparent_keeping_scene_pos(id: ItemId, parent: Option<ItemId>)`](#scenemodel-reparent_keeping_scene_pos) |
+| `Option<f32>` | [`z_between(below: ItemId, above: ItemId)`](#scenemodel-z_between) |
+|  | [`orphan(id: ItemId)`](#scenemodel-orphan) |
+|  | [`set_item_handlers(id: ItemId, handlers: Option<SceneItemHandlerSet>)`](#scenemodel-set_item_handlers) |
+| `Option<R>` | [`with_handlers_mut<R>(id: ItemId, f: impl FnOnce(&mut SceneItemHandlerSet) -> R)`](#scenemodel-with_handlers_mut) |
+| `MagnetId` | [`add_magnet(item: ItemId, magnet: Magnet)`](#scenemodel-add_magnet) |
+|  | [`remove_magnet(magnet: MagnetId)`](#scenemodel-remove_magnet) |
+|  | [`clear_magnets(item: ItemId)`](#scenemodel-clear_magnets) |
+|  | [`set_magnet_local_pos(magnet: MagnetId, local_pos: Point)`](#scenemodel-set_magnet_local_pos) |
+|  | [`set_magnet_enabled(magnet: MagnetId, enabled: bool)`](#scenemodel-set_magnet_enabled) |
+| `Vec<MagnetId>` | [`magnet_ids_of(item: ItemId)`](#scenemodel-magnet_ids_of) |
+| `Option<ItemId>` | [`magnet_owner(magnet: MagnetId)`](#scenemodel-magnet_owner) |
+| `Option<Point>` | [`magnet_scene_pos(magnet: MagnetId)`](#scenemodel-magnet_scene_pos) |
+| `Option<MagnetRef>` | [`magnet(magnet: MagnetId)`](#scenemodel-magnet) |
+| `Option<MagnetSnap>` | [`compute_item_snap(dragged: ItemId, drag_delta: Vec2, capture_radius: f32, predicate: &dyn Fn(&MagnetRef, &MagnetRef) -> MagnetVerdict)`](#scenemodel-compute_item_snap) |
+| `Option<(MagnetRef, Option<std::rc::Rc<dyn std::any::Any>>)>` | [`compute_port_snap(source: MagnetId, cursor_scene: Point, capture_radius: f32, predicate: &dyn Fn(&MagnetRef, &MagnetRef) -> MagnetVerdict)`](#scenemodel-compute_port_snap) |
+| `Option<MagnetId>` | [`nearest_magnet(scene_pt: Point, radius: f32)`](#scenemodel-nearest_magnet) |
+|  | [`set_scene_rect(rect: Option<Rect>)`](#scenemodel-set_scene_rect) |
+|  | [`pan_axes(axes: PanAxes)`](#scenemodel-pan_axes) |
+|  | [`zoomable(on: bool)`](#scenemodel-zoomable) |
+|  | [`set_pan_bounds(bounds: Option<Rect>)`](#scenemodel-set_pan_bounds) |
+|  | [`set_zoom_range(range: Option<std::ops::RangeInclusive<f32>>)`](#scenemodel-set_zoom_range) |
+| `A11yGroupId` | [`add_a11y_group(builder: A11yGroupBuilder)`](#scenemodel-add_a11y_group) |
+|  | [`remove_a11y_group(id: A11yGroupId)`](#scenemodel-remove_a11y_group) |
+|  | [`set_a11y_parent(child: A11yNode, parent: Option<A11yNode>)`](#scenemodel-set_a11y_parent) |
+|  | [`add_a11y_relation(from: A11yNode, kind: A11yRelation, to: A11yNode)`](#scenemodel-add_a11y_relation) |
+|  | [`set_a11y_live(node: A11yNode, live: accesskit::Live)`](#scenemodel-set_a11y_live) |
+|  | [`set_a11y_landmark(node: A11yNode, role: accesskit::Role)`](#scenemodel-set_a11y_landmark) |
+|  | [`set_a11y_categories(node: A11yNode, categories: &[A11yCategory])`](#scenemodel-set_a11y_categories) |
+| `bool` | [`refresh_dynamic_bounds()`](#scenemodel-refresh_dynamic_bounds) |
+| `Signal<SceneChange>` | [`item_change_signal()`](#scenemodel-item_change_signal) |
+| `Signal<u64>` | [`a11y_change_signal()`](#scenemodel-a11y_change_signal) |
+| `u64` | [`mutation_version()`](#scenemodel-mutation_version) |
+| `u64` | [`structural_version()`](#scenemodel-structural_version) |
+| `Signal<PanAxes>` | [`pan_axes_signal()`](#scenemodel-pan_axes_signal) |
+| `Signal<Option<Rect>>` | [`pan_bounds_signal()`](#scenemodel-pan_bounds_signal) |
+| `Signal<Option<std::ops::RangeInclusive<f32>>>` | [`zoom_range_signal()`](#scenemodel-zoom_range_signal) |
+| `Signal<bool>` | [`zoomable_signal()`](#scenemodel-zoomable_signal) |
+| `usize` | [`len()`](#scenemodel-len) |
+| `bool` | [`is_empty()`](#scenemodel-is_empty) |
+| `Vec<ItemId>` | [`ids()`](#scenemodel-ids) |
+| `Option<Point>` | [`local_pos(id: ItemId)`](#scenemodel-local_pos) |
+| `Option<Rect>` | [`local_bounds(id: ItemId)`](#scenemodel-local_bounds) |
+| `Option<Transform2D>` | [`transform(id: ItemId)`](#scenemodel-transform) |
+| `Transform2D` | [`scene_transform(id: ItemId)`](#scenemodel-scene_transform) |
+| `Option<Point>` | [`scene_pos(id: ItemId)`](#scenemodel-scene_pos) |
+| `Option<Rect>` | [`scene_rect(id: ItemId)`](#scenemodel-scene_rect) |
+| `Option<ItemFlags>` | [`flags(id: ItemId)`](#scenemodel-flags) |
+| `bool` | [`is_effectively_visible(id: ItemId)`](#scenemodel-is_effectively_visible) |
+| `Option<f32>` | [`opacity(id: ItemId)`](#scenemodel-opacity) |
+| `f32` | [`effective_opacity(id: ItemId)`](#scenemodel-effective_opacity) |
+| `Option<f32>` | [`z(id: ItemId)`](#scenemodel-z) |
+| `Option<SceneLayer>` | [`layer(id: ItemId)`](#scenemodel-layer) |
+| `Option<ItemId>` | [`parent_of(id: ItemId)`](#scenemodel-parent_of) |
+| `bool` | [`is_descendant_of(id: ItemId, ancestor: ItemId)`](#scenemodel-is_descendant_of) |
+| `Option<Rect>` | [`scene_rect_extent()`](#scenemodel-scene_rect_extent) |
+| `PanAxes` | [`current_pan_axes()`](#scenemodel-current_pan_axes) |
+| `bool` | [`is_zoomable()`](#scenemodel-is_zoomable) |
+| `Option<Rect>` | [`current_pan_bounds()`](#scenemodel-current_pan_bounds) |
+| `Option<std::ops::RangeInclusive<f32>>` | [`current_zoom_range()`](#scenemodel-current_zoom_range) |
+| `Vec<ItemId>` | [`items_in_rect(scene_rect: Rect)`](#scenemodel-items_in_rect) |
+| `Vec<ItemId>` | [`items_in_region(region: &SceneRegion, mode: ItemSelectionMode, view_scale: f32)`](#scenemodel-items_in_region) |
+| `Option<ItemShape>` | [`item_shape(id: ItemId)`](#scenemodel-item_shape) |
+| `Option<SceneRegion>` | [`item_region(id: ItemId)`](#scenemodel-item_region) |
+| `bool` | [`item_contains(id: ItemId, scene_pt: Point, view_scale: f32)`](#scenemodel-item_contains) |
+| `Option<crate::pick::PaintKey>` | [`paint_key(id: ItemId)`](#scenemodel-paint_key) |
+| `bool` | [`is_hit_testable(id: ItemId)`](#scenemodel-is_hit_testable) |
+| `Option<ItemId>` | [`item_at(scene_pt: Point)`](#scenemodel-item_at) |
+| `Option<ItemId>` | [`item_at_scaled(scene_pt: Point, view_scale: f32)`](#scenemodel-item_at_scaled) |
+| `Vec<ItemId>` | [`items_at(scene_pt: Point)`](#scenemodel-items_at) |
+| `Vec<ItemId>` | [`items_at_scaled(scene_pt: Point, view_scale: f32)`](#scenemodel-items_at_scaled) |
+| `Option<ItemId>` | [`item_at_in_view(screen_pt: Point, view_transform: Transform2D)`](#scenemodel-item_at_in_view) |
+| `Vec<ItemId>` | [`colliding_items(id: ItemId)`](#scenemodel-colliding_items) |
+| `Vec<ItemId>` | [`colliding_items_with(id: ItemId, mode: ItemSelectionMode)`](#scenemodel-colliding_items_with) |
+| `Vec<ItemId>` | [`items_along_path(path: &teksilo_canvas::Path)`](#scenemodel-items_along_path) |
+| `Vec<ItemId>` | [`items_along_path_with(path: &teksilo_canvas::Path, stroke_width: f32, mode: ItemSelectionMode)`](#scenemodel-items_along_path_with) |
+| `Option<A11yNode>` | [`a11y_parent_of(child: A11yNode)`](#scenemodel-a11y_parent_of) |
+| `Vec<(A11yNode, A11yRelation, A11yNode)>` | [`a11y_relations()`](#scenemodel-a11y_relations) |
+| `Option<accesskit::Live>` | [`a11y_live_of(node: A11yNode)`](#scenemodel-a11y_live_of) |
+| `Option<accesskit::Role>` | [`a11y_landmark_of(node: A11yNode)`](#scenemodel-a11y_landmark_of) |
+| `Vec<A11yCategory>` | [`a11y_categories_of(node: A11yNode)`](#scenemodel-a11y_categories_of) |
+
+### `WeakSceneModel`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `Option<SceneModel>` | [`upgrade()`](#weakscenemodel-upgrade) |
+| `bool` | [`is_alive()`](#weakscenemodel-is_alive) |
+
+### `SceneTransaction`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Builder methods** |
+| `Self` | [`squash()`](#scenetransaction-squash) |
+| `Self` | [`ephemeral()`](#scenetransaction-ephemeral) |
+| | **Methods** |
+|  | [`abandon()`](#scenetransaction-abandon) |
+
+## Detailed description
+
 Mirrors the `ListModel = Rc<RefCell<ListModelInner>>` pattern from
 `teksilo-data`: cloning a `SceneModel` produces a **second handle to the
 same scene**, so multiple `SceneView`s can render one
 scene (overview + detail panes, same-document multi-window, headless model
 reuse). Mutate the model once and every attached view reconciles.
 
-## Heavyweight content across views
+#### Heavyweight content across views
 
 A heavyweight `Widget` instance can live in only one arena, so a shared
 model cannot hand the *same* `Box<dyn Widget>` to two views. Two paths:
@@ -25,7 +203,7 @@ model cannot hand the *same* `Box<dyn Widget>` to two views. Two paths:
   its **own** instance from the payload. `set_payload`
   replaces the data and every view rebuilds that item.
 
-## Borrow / observer contract
+#### Borrow / observer contract
 
 Every mutator takes `&self` and runs through `SceneModel::write`, which
 is the `teksilo-data` **mutate-then-notify** discipline adapted to a borrow
@@ -68,13 +246,11 @@ A view **delegate** must also not synchronously mutate the model during a
 build-time call (the view drops all model borrows before invoking it; the
 delegate's *handlers* may mutate later).
 
-## Builder methods at a glance
-
-`write_guard`, `flush_changes`, `deliver_records`, `transaction`, `user_edit`, `set_edit_sink`, `clear_edit_sink`, `transaction_signal`, `open_transaction_depth`, `cascade_budget`, `set_cascade_budget`, `with_index`, `from_scene`, `handle_count`, `downgrade`, `add_widget`, `add_widget_item`, `set_payload`, `payload`, `add_item`, `add_item_dynamic`, `add_boxed_item`, `set_local_pos`, `set_local_bounds`, `set_transform`, `size_policy`, `set_size_policy`, `set_measured_size`, `set_geometry_constraint`, `clear_geometry_constraint`, `has_geometry_constraint`, `constrain_frame`, `constrain_move`, `apply_transform_delta`, `selection_roots`, `transformable_roots`, `transform_frame`, `scene_rotation`, `set_flags`, `set_flag`, `set_visible`, `set_opacity`, `set_item_fill`, `clear_item_fill`, `set_item_stroke`, `clear_item_stroke`, `set_z`, `bring_to_front`, `send_to_back`, `set_layer`, `set_item_parent`, `remove`, `take`, `restore`, `restore_all`, `replace_item`, `placement`, `set_placement`, `reparent_keeping_scene_pos`, `z_between`, `orphan`, `set_item_handlers`, `with_handlers_mut`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `set_scene_rect`, `pan_axes`, `zoomable`, `set_pan_bounds`, `set_zoom_range`, `add_a11y_group`, `remove_a11y_group`, `set_a11y_parent`, `add_a11y_relation`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `mutation_version`, `structural_version`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `len`, `is_empty`, `ids`, `local_pos`, `local_bounds`, `transform`, `scene_transform`, `scene_pos`, `scene_rect`, `flags`, `is_effectively_visible`, `opacity`, `effective_opacity`, `z`, `layer`, `parent_of`, `is_descendant_of`, `scene_rect_extent`, `current_pan_axes`, `is_zoomable`, `current_pan_bounds`, `current_zoom_range`, `items_in_rect`, `items_in_region`, `item_shape`, `item_region`, `item_contains`, `paint_key`, `is_hit_testable`, `item_at`, `item_at_scaled`, `items_at`, `items_at_scaled`, `item_at_in_view`, `colliding_items`, `colliding_items_with`, `items_along_path`, `items_along_path_with`, `a11y_parent_of`, `a11y_relations`, `a11y_live_of`, `a11y_landmark_of`, `a11y_categories_of`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="scenemodel"></a>
 
 ## `pub struct SceneModel`
 
@@ -86,12 +262,16 @@ pub struct SceneModel(pub(crate) Rc<RefCell<Scene>>);
 
 ### Methods
 
+<a id="scenemodel-write_guard"></a>
+
 #### `pub fn write_guard(&self) -> SceneWriteGuard<'_>`
 
 Open a write scope over the scene; see `SceneWriteGuard`.
 
 The one door for a *block* of edits that must fan out together, and the
 door a `&mut Scene` escape hatch should be built on.
+
+<a id="scenemodel-flush_changes"></a>
 
 #### `pub fn flush_changes(&self)`
 
@@ -208,6 +388,8 @@ Queued notifications live in the `Scene`. Dropping the last
 which can only be a batch abandoned by an unwind, and by then there is
 no scene left to observe.
 
+<a id="scenemodel-deliver_records"></a>
+
 #### `pub fn deliver_records(&self)`
 
 Hand every committed transaction to the edit sink, with the scene
@@ -228,6 +410,8 @@ writes the scene commits its own transaction from inside the drain, and
 delivering from there would hand the edit sink a transaction some views
 had not reconciled from yet. The records wait, and the drain's own
 caller delivers them when it settles.
+
+<a id="scenemodel-transaction"></a>
 
 #### `pub fn transaction(&self, source: ChangeSource, history: HistoryMode) -> SceneTransaction<'_>`
 
@@ -269,10 +453,14 @@ let b = model.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), Point::ZE
 } // one transaction, two edits
 ```
 
+<a id="scenemodel-user_edit"></a>
+
 #### `pub fn user_edit(&self) -> SceneTransaction<'_>`
 
 `transaction``(ChangeSource::User,
 HistoryMode::Record)` — one user-visible edit.
+
+<a id="scenemodel-set_edit_sink"></a>
 
 #### `pub fn set_edit_sink( &self, sink: impl FnMut(SceneTransactionRecord) + 'static, ) -> Option<Box<dyn FnMut(SceneTransactionRecord)>>`
 
@@ -305,9 +493,13 @@ document dirty, mirroring it to a peer.
 
 If called from inside the sink itself.
 
+<a id="scenemodel-clear_edit_sink"></a>
+
 #### `pub fn clear_edit_sink(&self) -> Option<Box<dyn FnMut(SceneTransactionRecord)>>`
 
 Remove the edit sink, returning it. The scene stops recording.
+
+<a id="scenemodel-transaction_signal"></a>
 
 #### `pub fn transaction_signal(&self) -> Signal<TxnId>`
 
@@ -321,6 +513,8 @@ a document-dirty flag, a debounced save or a validation pass belongs —
 they want to run once when the user lets go, not six times while the
 item is moving.
 
+<a id="scenemodel-open_transaction_depth"></a>
+
 #### `pub fn open_transaction_depth(&self) -> u32`
 
 How many transaction scopes are currently open on this scene — zero
@@ -333,6 +527,8 @@ stashed in a struct field), so this is the door an assertion knocks on.
 `SceneView` asserts it is zero at the top of every
 build in debug, which catches the common case.
 
+<a id="scenemodel-cascade_budget"></a>
+
 #### `pub fn cascade_budget(&self) -> CascadeBudget`
 
 The runaway-detection budget for this scene's change fan-out — how much
@@ -340,6 +536,8 @@ work **observers** may generate from one batch before the drain declares
 the cascade non-terminating and panics.
 
 See `CascadeBudget` for the rule and its default.
+
+<a id="scenemodel-set_cascade_budget"></a>
 
 #### `pub fn set_cascade_budget(&self, budget: CascadeBudget)`
 
@@ -371,22 +569,32 @@ stored: it would forbid the reactive write-back this channel exists for.
 Takes effect on the next drain: a drain already running read its budget
 when it began, so an observer cannot enlarge its own.
 
+<a id="scenemodel-new"></a>
+
 #### `pub fn new() -> Self`
 
 A handle to a fresh empty scene with the default spatial index.
 
+<a id="scenemodel-with_index"></a>
+
 #### `pub fn with_index(index: Box<dyn SpatialIndex>) -> Self`
 
 A handle to a fresh scene with a custom `SpatialIndex`.
+
+<a id="scenemodel-from_scene"></a>
 
 #### `pub fn from_scene(scene: Scene) -> Self`
 
 Wrap an existing `Scene` in a handle. Used by
 `SceneView::new` for the single-view path.
 
+<a id="scenemodel-handle_count"></a>
+
 #### `pub fn handle_count(&self) -> usize`
 
 Number of distinct handles to this scene (1 = unshared).
+
+<a id="scenemodel-downgrade"></a>
 
 #### `pub fn downgrade(&self) -> WeakSceneModel`
 
@@ -410,16 +618,22 @@ drop(model);
 assert!(weak.upgrade().is_none());
 ```
 
+<a id="scenemodel-add_widget"></a>
+
 #### `pub fn add_widget<W: Widget + 'static>(&self, widget: W, rect: Rect) -> ItemId`
 
 Single-view heavyweight widget (the one-shot `Once` path). The first
 view to build drains it; a second view sharing this model produces no
 child for it. For multi-view, use `add_widget_item`.
 
+<a id="scenemodel-add_widget_item"></a>
+
 #### `pub fn add_widget_item<P: 'static>(&self, payload: P, rect: Rect) -> ItemId`
 
 Multi-view heavyweight item: store a typed `payload`; each view builds
 its own widget instance from it via its delegate. Returns the `ItemId`.
+
+<a id="scenemodel-set_payload"></a>
 
 #### `pub fn set_payload<P: 'static>(&self, id: ItemId, payload: P)`
 
@@ -431,17 +645,25 @@ rebuilds that item's widget on the next pass.
 Panics if `id` is unknown, refers to a single-view `add_widget` (Once)
 entry, or refers to a lightweight item.
 
+<a id="scenemodel-payload"></a>
+
 #### `pub fn payload(&self, id: ItemId) -> Option<Rc<dyn std::any::Any>>`
 
 The current type-erased payload of a `Delegated` item, if any.
+
+<a id="scenemodel-add_item"></a>
 
 #### `pub fn add_item<I: SceneItem + 'static>(&self, item: I, local_pos: Point) -> ItemId`
 
 Add a lightweight `SceneItem` at `local_pos`.
 
+<a id="scenemodel-add_item_dynamic"></a>
+
 #### `pub fn add_item_dynamic<I: SceneItem + 'static>(&self, item: I, local_pos: Point) -> ItemId`
 
 Add a lightweight item with signal-driven (dynamic) bounds.
+
+<a id="scenemodel-add_boxed_item"></a>
 
 #### `pub fn add_boxed_item(&self, item: Box<dyn SceneItem>, local_pos: Point) -> ItemId`
 
@@ -449,9 +671,13 @@ Add an already-boxed lightweight item at `local_pos`. The boxed-`dyn`
 counterpart of `add_item`, used by
 `SceneListAdapter`.
 
+<a id="scenemodel-set_local_pos"></a>
+
 #### `pub fn set_local_pos(&self, id: ItemId, local_pos: Point)`
 
 Move `id` to `local_pos` in its parent's coordinate space; notifies all views.
+
+<a id="scenemodel-set_local_bounds"></a>
 
 #### `pub fn set_local_bounds(&self, id: ItemId, local_bounds: Rect)`
 
@@ -462,13 +688,19 @@ itself to the rectangle rather than adopting it — see
 `Scene::set_local_bounds` for both contracts, which matter here
 because this is the form an app drives per frame.
 
+<a id="scenemodel-set_transform"></a>
+
 #### `pub fn set_transform(&self, id: ItemId, transform: Transform2D)`
 
 Set an additional local-to-parent transform (rotation, scale) on `id`; notifies all views.
 
+<a id="scenemodel-size_policy"></a>
+
 #### `pub fn size_policy(&self, id: ItemId) -> SizePolicy`
 
 Which axes of `id`'s box its widget decides. See `SizePolicy`.
+
+<a id="scenemodel-set_size_policy"></a>
 
 #### `pub fn set_size_policy(&self, id: ItemId, policy: SizePolicy) -> bool`
 
@@ -476,11 +708,15 @@ Hand one or both axes of `id`'s box to its widget, on **every** view of
 this model. See `SizePolicy` and `Scene::set_size_policy` — including
 for the note that it is refused for a lightweight entry.
 
+<a id="scenemodel-set_measured_size"></a>
+
 #### `pub fn set_measured_size(&self, id: ItemId, size: Size) -> bool`
 
 Write a size **derived** from content rather than authored by the user;
 notifies all views. See `Scene::set_measured_size` for which of the two
 geometry doors this is and when to reach for the other one.
+
+<a id="scenemodel-set_geometry_constraint"></a>
 
 #### `pub fn set_geometry_constraint( &self, f: impl Fn(&crate::constrain::ProposedChange<'_>) -> crate::constrain::ChangeVerdict + 'static, )`
 
@@ -530,13 +766,19 @@ model.set_local_pos(card, Point::new(7.0, 9.0));
 assert_eq!(model.local_pos(card), Some(Point::new(7.0, 9.0)));
 ```
 
+<a id="scenemodel-clear_geometry_constraint"></a>
+
 #### `pub fn clear_geometry_constraint(&self)`
 
 Remove the geometry constraint. See `Scene::clear_geometry_constraint`.
 
+<a id="scenemodel-has_geometry_constraint"></a>
+
 #### `pub fn has_geometry_constraint(&self) -> bool`
 
 Whether a geometry constraint is installed.
+
+<a id="scenemodel-constrain_frame"></a>
 
 #### `pub fn constrain_frame( &self, items: &[ItemId], op: crate::transform_session::TransformOp, start: crate::transform_session::TransformFrame, proposed: crate::transform_session::TransformFrame, source: crate::transform_session::TransformSource, ) -> crate::transform_session::TransformFrame`
 
@@ -566,6 +808,8 @@ Twice, each naming what to do instead:
   Asking the constraint reads the scene, and an open write scope holds
   it exclusively. Another *shared* borrow is fine: two reads coexist,
   which is what lets a constraint read the scene it is deciding about.
+
+<a id="scenemodel-constrain_move"></a>
 
 #### `pub fn constrain_move( &self, items: &[ItemId], start: crate::transform_session::TransformFrame, translation: Vec2, source: crate::transform_session::TransformSource, ) -> Vec2`
 
@@ -608,43 +852,63 @@ that changes extent or orientation.
 The same two as `constrain_frame`: from inside
 a running constraint, and while a write scope is open on this model.
 
+<a id="scenemodel-apply_transform_delta"></a>
+
 #### `pub fn apply_transform_delta( &self, roots: &[ItemId], delta: &crate::transform_session::TransformDelta, ) -> usize`
 
 Apply one transform delta to `roots` as a single operation; notifies all
 views. See `Scene::apply_transform_delta`.
 
+<a id="scenemodel-selection_roots"></a>
+
 #### `pub fn selection_roots(&self, ids: &[ItemId]) -> Vec<ItemId>`
 
 `ids` pruned to its roots. See `Scene::selection_roots`.
+
+<a id="scenemodel-transformable_roots"></a>
 
 #### `pub fn transformable_roots( &self, ids: &[ItemId], op: crate::transform_session::TransformOp, ) -> Vec<ItemId>`
 
 The roots of `ids` eligible for `op`. See `Scene::transformable_roots`.
 
+<a id="scenemodel-transform_frame"></a>
+
 #### `pub fn transform_frame( &self, roots: &[ItemId], ) -> Option<crate::transform_session::TransformFrame>`
 
 The selection frame enclosing `roots`. See `Scene::transform_frame`.
+
+<a id="scenemodel-scene_rotation"></a>
 
 #### `pub fn scene_rotation(&self, id: ItemId) -> Option<f32>`
 
 The item's own rotation in scene space, in radians. See
 `Scene::scene_rotation`.
 
+<a id="scenemodel-set_flags"></a>
+
 #### `pub fn set_flags(&self, id: ItemId, flags: ItemFlags)`
 
 Replace the complete `ItemFlags` bitset for `id`; notifies all views.
+
+<a id="scenemodel-set_flag"></a>
 
 #### `pub fn set_flag(&self, id: ItemId, flag: ItemFlags, on: bool)`
 
 Set or clear a single `ItemFlags` bit on `id`; notifies all views.
 
+<a id="scenemodel-set_visible"></a>
+
 #### `pub fn set_visible(&self, id: ItemId, visible: bool)`
 
 Show or hide `id` (also hides its descendants); notifies all views.
 
+<a id="scenemodel-set_opacity"></a>
+
 #### `pub fn set_opacity(&self, id: ItemId, opacity: f32)`
 
 Set the paint opacity of `id` (0.0 = transparent, 1.0 = opaque); notifies all views.
+
+<a id="scenemodel-set_item_fill"></a>
 
 #### `pub fn set_item_fill(&self, id: ItemId, fill: impl Into<ColorProp>)`
 
@@ -653,127 +917,187 @@ Replace a lightweight item's fill colour live; every view repaints
 a theme role, a `Signal<Color>`, or a `Signal<Role>`. See
 `Scene::set_item_fill` for the reactive-colour contract.
 
+<a id="scenemodel-clear_item_fill"></a>
+
 #### `pub fn clear_item_fill(&self, id: ItemId)`
 
 Clear a lightweight item's fill; every view repaints.
+
+<a id="scenemodel-set_item_stroke"></a>
 
 #### `pub fn set_item_stroke(&self, id: ItemId, color: impl Into<ColorProp>, style: StrokeStyle)`
 
 Replace a lightweight item's stroke (colour + `StrokeStyle`) live;
 every view repaints (no relayout/rebuild).
 
+<a id="scenemodel-clear_item_stroke"></a>
+
 #### `pub fn clear_item_stroke(&self, id: ItemId)`
 
 Clear a lightweight item's stroke; every view repaints.
+
+<a id="scenemodel-set_z"></a>
 
 #### `pub fn set_z(&self, id: ItemId, z: f32)`
 
 Set the z-order of `id` within its layer; higher values paint on top.
 
+<a id="scenemodel-bring_to_front"></a>
+
 #### `pub fn bring_to_front(&self, id: ItemId)`
 
 Give `id` the highest z-value in its layer so it paints on top of all siblings.
+
+<a id="scenemodel-send_to_back"></a>
 
 #### `pub fn send_to_back(&self, id: ItemId)`
 
 Give `id` the lowest z-value in its layer so it paints beneath all siblings.
 
+<a id="scenemodel-set_layer"></a>
+
 #### `pub fn set_layer(&self, id: ItemId, layer: SceneLayer)`
 
 Move `id` to a different `SceneLayer` (`Under`, `Interleaved`, `Over`); notifies all views.
 
+<a id="scenemodel-set_item_parent"></a>
+
 #### `pub fn set_item_parent(&self, child: ItemId, parent: Option<ItemId>)`
 
 Re-parent `child` under `parent` (or under the scene root when `None`); notifies all views.
+
+<a id="scenemodel-remove"></a>
 
 #### `pub fn remove(&self, id: ItemId)`
 
 Remove an item and its descendants. Drops any `Delegated` payload `Rc`
 and cleans the item's a11y mappings; alive logical children re-root.
 
+<a id="scenemodel-take"></a>
+
 #### `pub fn take(&self, id: ItemId) -> Vec<RemovedItem>`
+
+<a id="scenemodel-restore"></a>
 
 #### `pub fn restore(&self, salvage: RemovedItem) -> Result<ItemId, RestoreError>`
 
 Put one salvaged item back at its original id. See `Scene::restore`.
+
+<a id="scenemodel-restore_all"></a>
 
 #### `pub fn restore_all(&self, salvage: Vec<RemovedItem>) -> Result<Vec<ItemId>, RestoreError>`
 
 Put a whole `take` result back, roots first. See
 `Scene::restore_all`.
 
+<a id="scenemodel-replace_item"></a>
+
 #### `pub fn replace_item( &self, id: ItemId, item: Box<dyn SceneItem>, ) -> Result<Box<dyn SceneItem>, ReplaceRejected>`
 
 Swap the lightweight item box at `id`, keeping the entry and the id.
 Returns the box that was there. See `Scene::replace_item`.
 
+<a id="scenemodel-placement"></a>
+
 #### `pub fn placement(&self, id: ItemId) -> Option<Placement>`
 
 Where `id` sits, as one value: parent, z, position, transform.
+
+<a id="scenemodel-set_placement"></a>
 
 #### `pub fn set_placement(&self, id: ItemId, placement: Placement)`
 
 Write parent, z, position and transform together, as one change. See
 `Scene::set_placement`.
 
+<a id="scenemodel-reparent_keeping_scene_pos"></a>
+
 #### `pub fn reparent_keeping_scene_pos(&self, id: ItemId, parent: Option<ItemId>)`
 
 Reparent `id` while holding it visually still. See
 `Scene::reparent_keeping_scene_pos`.
+
+<a id="scenemodel-z_between"></a>
 
 #### `pub fn z_between(&self, below: ItemId, above: ItemId) -> Option<f32>`
 
 A `z` strictly between two items', or `None` when there is no room left
 at that locus. See `Scene::z_between`.
 
+<a id="scenemodel-orphan"></a>
+
 #### `pub fn orphan(&self, id: ItemId)`
 
 Promote an item's children to the scene root.
 
+<a id="scenemodel-set_item_handlers"></a>
+
 #### `pub fn set_item_handlers(&self, id: ItemId, handlers: Option<SceneItemHandlerSet>)`
 
 Replace the `SceneItemHandlerSet` of `id`, or clear it with `None`.
+
+<a id="scenemodel-with_handlers_mut"></a>
 
 #### `pub fn with_handlers_mut<R>( &self, id: ItemId, f: impl FnOnce(&mut SceneItemHandlerSet) -> R, ) -> Option<R>`
 
 Mutate an item's handler set through a closure (avoids returning a
 borrow guard tied to the `RefMut`).
 
+<a id="scenemodel-add_magnet"></a>
+
 #### `pub fn add_magnet(&self, item: ItemId, magnet: Magnet) -> MagnetId`
 
 Attach a `Magnet` to `item`; see `Scene::add_magnet`.
+
+<a id="scenemodel-remove_magnet"></a>
 
 #### `pub fn remove_magnet(&self, magnet: MagnetId)`
 
 Remove a magnet by id; see `Scene::remove_magnet`.
 
+<a id="scenemodel-clear_magnets"></a>
+
 #### `pub fn clear_magnets(&self, item: ItemId)`
 
 Remove every magnet on `item`; see `Scene::clear_magnets`.
+
+<a id="scenemodel-set_magnet_local_pos"></a>
 
 #### `pub fn set_magnet_local_pos(&self, magnet: MagnetId, local_pos: Point)`
 
 Move a magnet in its item's local frame; see `Scene::set_magnet_local_pos`.
 
+<a id="scenemodel-set_magnet_enabled"></a>
+
 #### `pub fn set_magnet_enabled(&self, magnet: MagnetId, enabled: bool)`
 
 Enable or disable a magnet; see `Scene::set_magnet_enabled`.
+
+<a id="scenemodel-magnet_ids_of"></a>
 
 #### `pub fn magnet_ids_of(&self, item: ItemId) -> Vec<MagnetId>`
 
 Ids of every magnet on `item`; see `Scene::magnet_ids_of`.
 
+<a id="scenemodel-magnet_owner"></a>
+
 #### `pub fn magnet_owner(&self, magnet: MagnetId) -> Option<ItemId>`
 
 The owning item of a magnet; see `Scene::magnet_owner`.
+
+<a id="scenemodel-magnet_scene_pos"></a>
 
 #### `pub fn magnet_scene_pos(&self, magnet: MagnetId) -> Option<Point>`
 
 A magnet's scene position; see `Scene::magnet_scene_pos`.
 
+<a id="scenemodel-magnet"></a>
+
 #### `pub fn magnet(&self, magnet: MagnetId) -> Option<MagnetRef>`
 
 Resolve a magnet to a `MagnetRef` snapshot; see `Scene::magnet`.
+
+<a id="scenemodel-compute_item_snap"></a>
 
 #### `pub fn compute_item_snap( &self, dragged: ItemId, drag_delta: Vec2, capture_radius: f32, predicate: &dyn Fn(&MagnetRef, &MagnetRef) -> MagnetVerdict, ) -> Option<MagnetSnap>`
 
@@ -782,78 +1106,116 @@ Best item-drag snap; see `Scene::compute_item_snap`. A shared
 candidate snapshots, so the predicate may read but must not mutate
 the model.
 
+<a id="scenemodel-compute_port_snap"></a>
+
 #### `pub fn compute_port_snap( &self, source: MagnetId, cursor_scene: Point, capture_radius: f32, predicate: &dyn Fn(&MagnetRef, &MagnetRef) -> MagnetVerdict, ) -> Option<(MagnetRef, Option<std::rc::Rc<dyn std::any::Any>>)>`
 
 Best port-drag snap; see `Scene::compute_port_snap`.
+
+<a id="scenemodel-nearest_magnet"></a>
 
 #### `pub fn nearest_magnet(&self, scene_pt: Point, radius: f32) -> Option<MagnetId>`
 
 Nearest enabled magnet within `radius`; see `Scene::nearest_magnet`.
 
+<a id="scenemodel-set_scene_rect"></a>
+
 #### `pub fn set_scene_rect(&self, rect: Option<Rect>)`
 
 Set the logical extent of the scene (used for scroll-bar sizing); `None` = unbounded.
+
+<a id="scenemodel-pan_axes"></a>
 
 #### `pub fn pan_axes(&self, axes: PanAxes)`
 
 Restrict panning to horizontal, vertical, or both axes; updates `pan_axes_signal`.
 
+<a id="scenemodel-zoomable"></a>
+
 #### `pub fn zoomable(&self, on: bool)`
 
 Enable or disable pinch/scroll zoom; updates `zoomable_signal`.
+
+<a id="scenemodel-set_pan_bounds"></a>
 
 #### `pub fn set_pan_bounds(&self, bounds: Option<Rect>)`
 
 Clamp the camera pan to `bounds` (scene coordinates); `None` = no limit; updates `pan_bounds_signal`.
 
+<a id="scenemodel-set_zoom_range"></a>
+
 #### `pub fn set_zoom_range(&self, range: Option<std::ops::RangeInclusive<f32>>)`
 
 Restrict the zoom factor to `range`; `None` = no limit; updates `zoom_range_signal`.
+
+<a id="scenemodel-add_a11y_group"></a>
 
 #### `pub fn add_a11y_group(&self, builder: A11yGroupBuilder) -> A11yGroupId`
 
 Register a logical AT group (landmark / rotor category container); returns its stable `A11yGroupId`.
 
+<a id="scenemodel-remove_a11y_group"></a>
+
 #### `pub fn remove_a11y_group(&self, id: A11yGroupId)`
 
 Remove a previously registered AT group; triggers an `a11y_change_signal` bump.
+
+<a id="scenemodel-set_a11y_parent"></a>
 
 #### `pub fn set_a11y_parent(&self, child: A11yNode, parent: Option<A11yNode>)`
 
 Re-parent `child` in the AT tree, overriding the default visual parent; `None` re-attaches under the scene root.
 
+<a id="scenemodel-add_a11y_relation"></a>
+
 #### `pub fn add_a11y_relation(&self, from: A11yNode, kind: A11yRelation, to: A11yNode)`
 
 Declare a cross-node AT relationship (controls, describes, labels) from `from` to `to`.
+
+<a id="scenemodel-set_a11y_live"></a>
 
 #### `pub fn set_a11y_live(&self, node: A11yNode, live: accesskit::Live)`
 
 Mark `node` as a live region (`Polite` or `Assertive`) so assistive tech announces changes to it.
 
+<a id="scenemodel-set_a11y_landmark"></a>
+
 #### `pub fn set_a11y_landmark(&self, node: A11yNode, role: accesskit::Role)`
 
 Assign a landmark `role` to `node` (e.g. `Role::Region`, `Role::Main`) for rotor navigation.
 
+<a id="scenemodel-set_a11y_categories"></a>
+
 #### `pub fn set_a11y_categories(&self, node: A11yNode, categories: &[A11yCategory])`
 
 Register `node` under the given rotor `A11yCategory` slices so it appears in category-filtered navigation.
+
+<a id="scenemodel-refresh_dynamic_bounds"></a>
 
 #### `pub fn refresh_dynamic_bounds(&self) -> bool`
 
 Re-read signal-driven bounds for `add_item_dynamic` entries; returns
 `true` if any changed.
 
+<a id="scenemodel-item_change_signal"></a>
+
 #### `pub fn item_change_signal(&self) -> Signal<SceneChange>`
 
 Reactive signal fired on every structural scene change; all views observe this to reconcile.
+
+<a id="scenemodel-a11y_change_signal"></a>
 
 #### `pub fn a11y_change_signal(&self) -> Signal<u64>`
 
 Reactive monotonic counter bumped on every AT-structure change; views re-walk accessibility on any increment.
 
+<a id="scenemodel-mutation_version"></a>
+
 #### `pub fn mutation_version(&self) -> u64`
 
 Monotonic counter incremented on every mutation; useful for cache invalidation without observing a signal.
+
+<a id="scenemodel-structural_version"></a>
 
 #### `pub fn structural_version(&self) -> u64`
 
@@ -862,113 +1224,169 @@ Monotonic counter incremented on every mutation; useful for cache invalidation w
 version to gate an expensive rebuild on. See
 `Scene::structural_version`.
 
+<a id="scenemodel-pan_axes_signal"></a>
+
 #### `pub fn pan_axes_signal(&self) -> Signal<PanAxes>`
 
 Reactive current `PanAxes` restriction; updated by `pan_axes`.
+
+<a id="scenemodel-pan_bounds_signal"></a>
 
 #### `pub fn pan_bounds_signal(&self) -> Signal<Option<Rect>>`
 
 Reactive camera-pan clamp bounds; updated by `set_pan_bounds`.
 
+<a id="scenemodel-zoom_range_signal"></a>
+
 #### `pub fn zoom_range_signal(&self) -> Signal<Option<std::ops::RangeInclusive<f32>>>`
 
 Reactive zoom-factor clamp range; updated by `set_zoom_range`.
+
+<a id="scenemodel-zoomable_signal"></a>
 
 #### `pub fn zoomable_signal(&self) -> Signal<bool>`
 
 Reactive zoom-enabled flag; updated by `zoomable`.
 
+<a id="scenemodel-len"></a>
+
 #### `pub fn len(&self) -> usize`
 
 Total number of items in the scene (lightweight + heavyweight).
+
+<a id="scenemodel-is_empty"></a>
 
 #### `pub fn is_empty(&self) -> bool`
 
 Returns `true` when the scene contains no items.
 
+<a id="scenemodel-ids"></a>
+
 #### `pub fn ids(&self) -> Vec<ItemId>`
 
 All `ItemId`s currently in the scene, in insertion order.
+
+<a id="scenemodel-local_pos"></a>
 
 #### `pub fn local_pos(&self, id: ItemId) -> Option<Point>`
 
 The local position of `id` in its parent's coordinate space; `None` if `id` is unknown.
 
+<a id="scenemodel-local_bounds"></a>
+
 #### `pub fn local_bounds(&self, id: ItemId) -> Option<Rect>`
 
 The local bounding rect of `id`; `None` if `id` is unknown.
+
+<a id="scenemodel-transform"></a>
 
 #### `pub fn transform(&self, id: ItemId) -> Option<Transform2D>`
 
 The additional local-to-parent transform of `id` (beyond position); `None` if none is set.
 
+<a id="scenemodel-scene_transform"></a>
+
 #### `pub fn scene_transform(&self, id: ItemId) -> Transform2D`
 
 The full local-to-scene transform for `id` (parent chain composed); identity if `id` is unknown.
+
+<a id="scenemodel-scene_pos"></a>
 
 #### `pub fn scene_pos(&self, id: ItemId) -> Option<Point>`
 
 The origin of `id` mapped into scene coordinates; `None` if `id` is unknown.
 
+<a id="scenemodel-scene_rect"></a>
+
 #### `pub fn scene_rect(&self, id: ItemId) -> Option<Rect>`
 
 The bounding rect of `id` in scene coordinates (local bounds transformed by the parent chain); `None` if unknown.
+
+<a id="scenemodel-flags"></a>
 
 #### `pub fn flags(&self, id: ItemId) -> Option<ItemFlags>`
 
 The `ItemFlags` bitset of `id`; `None` if `id` is unknown.
 
+<a id="scenemodel-is_effectively_visible"></a>
+
 #### `pub fn is_effectively_visible(&self, id: ItemId) -> bool`
 
 Returns `true` if `id` and all of its ancestors are visible.
+
+<a id="scenemodel-opacity"></a>
 
 #### `pub fn opacity(&self, id: ItemId) -> Option<f32>`
 
 The own opacity of `id` (ignoring ancestors); `None` if `id` is unknown.
 
+<a id="scenemodel-effective_opacity"></a>
+
 #### `pub fn effective_opacity(&self, id: ItemId) -> f32`
 
 Accumulated opacity for `id` (own × each ancestor's opacity).
+
+<a id="scenemodel-z"></a>
 
 #### `pub fn z(&self, id: ItemId) -> Option<f32>`
 
 The z-order value of `id` within its layer; `None` if `id` is unknown.
 
+<a id="scenemodel-layer"></a>
+
 #### `pub fn layer(&self, id: ItemId) -> Option<SceneLayer>`
 
 The `SceneLayer` of `id`; `None` if `id` is unknown.
+
+<a id="scenemodel-parent_of"></a>
 
 #### `pub fn parent_of(&self, id: ItemId) -> Option<ItemId>`
 
 The direct parent of `id`, or `None` if it is a root item (or unknown).
 
+<a id="scenemodel-is_descendant_of"></a>
+
 #### `pub fn is_descendant_of(&self, id: ItemId, ancestor: ItemId) -> bool`
 
 Returns `true` if `id` is anywhere in `ancestor`'s subtree.
+
+<a id="scenemodel-scene_rect_extent"></a>
 
 #### `pub fn scene_rect_extent(&self) -> Option<Rect>`
 
 The logical extent set via `set_scene_rect`; `None` = unbounded.
 
+<a id="scenemodel-current_pan_axes"></a>
+
 #### `pub fn current_pan_axes(&self) -> PanAxes`
 
 The current pan-axis restriction without subscribing to its signal.
+
+<a id="scenemodel-is_zoomable"></a>
 
 #### `pub fn is_zoomable(&self) -> bool`
 
 Returns `true` if zoom is currently enabled (snapshot; use `zoomable_signal` for reactivity).
 
+<a id="scenemodel-current_pan_bounds"></a>
+
 #### `pub fn current_pan_bounds(&self) -> Option<Rect>`
 
 Current pan-clamp bounds without subscribing to its signal.
+
+<a id="scenemodel-current_zoom_range"></a>
 
 #### `pub fn current_zoom_range(&self) -> Option<std::ops::RangeInclusive<f32>>`
 
 Current zoom-factor clamp range without subscribing to its signal.
 
+<a id="scenemodel-items_in_rect"></a>
+
 #### `pub fn items_in_rect(&self, scene_rect: Rect) -> Vec<ItemId>`
 
 All items whose bounding rects overlap `scene_rect` (spatial-index query).
+
+<a id="scenemodel-items_in_region"></a>
 
 #### `pub fn items_in_region( &self, region: &SceneRegion, mode: ItemSelectionMode, view_scale: f32, ) -> Vec<ItemId>`
 
@@ -979,17 +1397,25 @@ Screen-anchored
 items are skipped, for the same reason `SceneModel::item_at` skips
 them: a scene-space region cannot place them.
 
+<a id="scenemodel-item_shape"></a>
+
 #### `pub fn item_shape(&self, id: ItemId) -> Option<ItemShape>`
 
 An entry's geometry in local coordinates; see `Scene::item_shape`.
+
+<a id="scenemodel-item_region"></a>
 
 #### `pub fn item_region(&self, id: ItemId) -> Option<SceneRegion>`
 
 An entry's own shape as a scene-space region; see `Scene::item_region`.
 
+<a id="scenemodel-item_contains"></a>
+
 #### `pub fn item_contains(&self, id: ItemId, scene_pt: Point, view_scale: f32) -> bool`
 
 Whether `id`'s shape contains `scene_pt`; see `Scene::item_contains`.
+
+<a id="scenemodel-paint_key"></a>
 
 #### `pub fn paint_key(&self, id: ItemId) -> Option<crate::pick::PaintKey>`
 
@@ -1000,6 +1426,8 @@ Defined for **both tiers**, so it is the value to compare when an app
 needs to ask "which of these two is on top?" without re-deriving the
 band/z/insertion rule.
 
+<a id="scenemodel-is_hit_testable"></a>
+
 #### `pub fn is_hit_testable(&self, id: ItemId) -> bool`
 
 Whether `id` takes part in pointer hit-testing — visible along its whole
@@ -1007,6 +1435,8 @@ ancestor chain AND enabled; see `Scene::is_hit_testable`.
 
 The public form of the filter every picker here applies, so an app can
 ask why one of its items is not answering.
+
+<a id="scenemodel-item_at"></a>
 
 #### `pub fn item_at(&self, scene_pt: Point) -> Option<ItemId>`
 
@@ -1022,10 +1452,14 @@ heavyweight widget entries and screen-anchored
 items are skipped — see `SceneModel::item_at_in_view` for the query
 that places the latter.
 
+<a id="scenemodel-item_at_scaled"></a>
+
 #### `pub fn item_at_scaled(&self, scene_pt: Point, view_scale: f32) -> Option<ItemId>`
 
 `Scene::item_at` at an explicit view zoom. The zoom reaches exactly
 one thing: a cosmetic stroke band's width in scene units.
+
+<a id="scenemodel-items_at"></a>
 
 #### `pub fn items_at(&self, scene_pt: Point) -> Vec<ItemId>`
 
@@ -1033,52 +1467,76 @@ All lightweight items whose shape contains `scene_pt`, topmost-first in
 `Scene::paint_key` order. Same tier, flag and
 `IGNORES_TRANSFORMATIONS` rules as `SceneModel::item_at`.
 
+<a id="scenemodel-items_at_scaled"></a>
+
 #### `pub fn items_at_scaled(&self, scene_pt: Point, view_scale: f32) -> Vec<ItemId>`
 
 `Scene::items_at` at an explicit view zoom.
+
+<a id="scenemodel-item_at_in_view"></a>
 
 #### `pub fn item_at_in_view(&self, screen_pt: Point, view_transform: Transform2D) -> Option<ItemId>`
 
 The topmost item under a **screen** point, resolving both hit spaces;
 see `Scene::item_at_in_view`.
 
+<a id="scenemodel-colliding_items"></a>
+
 #### `pub fn colliding_items(&self, id: ItemId) -> Vec<ItemId>`
 
 Items overlapping `id`'s shape, excluding `id`; see
 `Scene::colliding_items`.
 
+<a id="scenemodel-colliding_items_with"></a>
+
 #### `pub fn colliding_items_with(&self, id: ItemId, mode: ItemSelectionMode) -> Vec<ItemId>`
 
 `Scene::colliding_items` under an explicit mode.
+
+<a id="scenemodel-items_along_path"></a>
 
 #### `pub fn items_along_path(&self, path: &teksilo_canvas::Path) -> Vec<ItemId>`
 
 Items lying along `path`; see `Scene::items_along_path`. (This was
 unreachable from a `SceneModel` before — the facade never forwarded it.)
 
+<a id="scenemodel-items_along_path_with"></a>
+
 #### `pub fn items_along_path_with( &self, path: &teksilo_canvas::Path, stroke_width: f32, mode: ItemSelectionMode, ) -> Vec<ItemId>`
 
 `Scene::items_along_path` with an explicit stroke width and mode.
+
+<a id="scenemodel-a11y_parent_of"></a>
 
 #### `pub fn a11y_parent_of(&self, child: A11yNode) -> Option<A11yNode>`
 
 The AT-tree parent of `child` as set by `set_a11y_parent`; `None` = visual default.
 
+<a id="scenemodel-a11y_relations"></a>
+
 #### `pub fn a11y_relations(&self) -> Vec<(A11yNode, A11yRelation, A11yNode)>`
 
 Every declared AT relation, in declaration order.
+
+<a id="scenemodel-a11y_live_of"></a>
 
 #### `pub fn a11y_live_of(&self, node: A11yNode) -> Option<accesskit::Live>`
 
 A node's declared live-region politeness; `None` when it is not one.
 
+<a id="scenemodel-a11y_landmark_of"></a>
+
 #### `pub fn a11y_landmark_of(&self, node: A11yNode) -> Option<accesskit::Role>`
 
 A node's declared landmark role; `None` when it is not a landmark.
 
+<a id="scenemodel-a11y_categories_of"></a>
+
 #### `pub fn a11y_categories_of(&self, node: A11yNode) -> Vec<A11yCategory>`
 
 A node's declared rotor / quick-nav categories.
+
+<a id="weakscenemodel"></a>
 
 ## `pub struct WeakSceneModel`
 
@@ -1101,6 +1559,8 @@ pub struct WeakSceneModel(Weak<RefCell<Scene>>);
 
 ### Methods
 
+<a id="weakscenemodel-upgrade"></a>
+
 #### `pub fn upgrade(&self) -> Option<SceneModel>`
 
 An owning handle to the scene, if any still exists.
@@ -1109,9 +1569,13 @@ An owning handle to the scene, if any still exists.
 point: a constraint outliving its scene does nothing instead of keeping
 it alive.
 
+<a id="weakscenemodel-is_alive"></a>
+
 #### `pub fn is_alive(&self) -> bool`
 
 Whether the scene is still alive, without building a handle.
+
+<a id="scenewriteguard"></a>
 
 ## `pub struct SceneWriteGuard`
 
@@ -1147,6 +1611,8 @@ recovery path can call explicitly.
 pub struct SceneWriteGuard<'a> { /* fields */ }
 ```
 
+<a id="scenetransaction"></a>
+
 ## `pub struct SceneTransaction`
 
 ```rust
@@ -1154,6 +1620,8 @@ pub struct SceneTransaction<'a> { /* fields */ }
 ```
 
 ### Methods
+
+<a id="scenetransaction-squash"></a>
 
 #### `pub fn squash(self) -> Self`
 
@@ -1171,6 +1639,8 @@ case; a caller that writes per sample and wants endpoints asks for it.
 Discrete edits — adds, removals, replacements, flags, parent changes —
 are never coalesced and keep their order.
 
+<a id="scenetransaction-ephemeral"></a>
+
 #### `pub fn ephemeral(mut self) -> Self`
 
 Mark this transaction's changes as per-frame artefacts: they must be
@@ -1182,6 +1652,8 @@ model every frame; without this, an app watching the change stream
 cannot tell that churn from an edit. `ephemeral` rides every
 `SceneChange` and the record, and the framework does nothing else with
 it — what counts as history is the consumer's call.
+
+<a id="scenetransaction-abandon"></a>
 
 #### `pub fn abandon(self)`
 

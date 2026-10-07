@@ -5,6 +5,24 @@
 
 `TreeRowFilter` — sort + tree-aware filter over a `TreeRow` stream.
 
+## Public functions
+
+### `TreeRowFilter`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#treerowfilter-new) |
+| | **Builder methods** |
+| `Self` | [`filter_mode(mode: TreeFilterMode)`](#treerowfilter-filter_mode) |
+| `Self` | [`filter(pred: impl Fn(&T) -> bool + 'static)`](#treerowfilter-filter) |
+| `Self` | [`sort(cmp: impl Fn(&T, &T) -> Ordering + 'static)`](#treerowfilter-sort) |
+| `Self` | [`sort_desc(cmp: impl Fn(&T, &T) -> Ordering + 'static)`](#treerowfilter-sort_desc) |
+| | **Methods** |
+| `Vec<TreeRow<K, T>>` | [`apply(rows: Vec<TreeRow<K, T>>)`](#treerowfilter-apply) |
+
+## Detailed description
+
 The composable sort/filter stage for the `TreeDataSlice`
 pipeline. Where `SortFilterTreeModel` is a full
 projection *over an in-memory `TreeModel`* (it owns its own expand state), an
@@ -33,7 +51,7 @@ re-derives into a clean tree):
   match unless its full ancestor path is visible — which defeats the mode's
   "keep the match and its subtree" intent.
 
-## Revealing the matches
+#### Revealing the matches
 
 `TreeRowFilter` reshapes the *rows*; it does not touch the slice's per-view
 **expand state**. So `KeepAncestors` keeps the ancestor rows, but a
@@ -49,7 +67,7 @@ slice.reload();
 slice.set_all_expanded(filtered);   // reveal while searching, restore after
 ```
 
-## Example
+#### Example
 
 ```
 use teksilo_data::{TreeRowFilter, TreeRow, TreeFilterMode};
@@ -70,13 +88,11 @@ let out = sieve.apply(rows);
 assert_eq!(out.iter().map(|r| r.item).collect::<Vec<_>>(), vec!["Book One", "The Dawn Raid"]);
 ```
 
-## Builder methods at a glance
-
-`filter_mode`, `filter`, `sort`, `sort_desc`, `apply`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/tree_row_filter/index.html)
+
+<a id="treerowfilter"></a>
 
 ## `pub struct TreeRowFilter`
 
@@ -90,15 +106,21 @@ pub struct TreeRowFilter<K: ItemKey, T> { /* fields */ }
 
 ### Methods
 
+<a id="treerowfilter-new"></a>
+
 #### `pub fn new() -> Self`
 
 An identity transform (no filter, no sort). Chain `filter`
 / `sort` to configure it.
 
+<a id="treerowfilter-filter_mode"></a>
+
 #### `pub fn filter_mode(mut self, mode: TreeFilterMode) -> Self`
 
 Set the filter strategy (how ancestors/descendants of a match are kept).
 Defaults to `TreeFilterMode::default()`.
+
+<a id="treerowfilter-filter"></a>
 
 #### `pub fn filter(mut self, pred: impl Fn(&T) -> bool + 'static) -> Self`
 
@@ -106,14 +128,20 @@ Set the match predicate over the row item. A row "matches" when `pred`
 returns `true`; the `filter_mode` decides what else
 stays visible. With no predicate every row is kept.
 
+<a id="treerowfilter-sort"></a>
+
 #### `pub fn sort(mut self, cmp: impl Fn(&T, &T) -> Ordering + 'static) -> Self`
 
 Sort siblings (ascending) by a comparator on the row item. Parent/child
 structure is preserved — only the order within each parent changes.
 
+<a id="treerowfilter-sort_desc"></a>
+
 #### `pub fn sort_desc(mut self, cmp: impl Fn(&T, &T) -> Ordering + 'static) -> Self`
 
 Sort siblings (descending) by a comparator on the row item.
+
+<a id="treerowfilter-apply"></a>
 
 #### `pub fn apply(&self, rows: Vec<TreeRow<K, T>>) -> Vec<TreeRow<K, T>>`
 

@@ -8,6 +8,22 @@
 AspectRatio — a single-child wrapper that constrains layout to a fixed
 width-to-height ratio.
 
+## Public functions
+
+### `AspectRatio`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(ratio: f32)`](#aspectratio-new) |
+| `Self` | [`widescreen()`](#aspectratio-widescreen) |
+| `Self` | [`square()`](#aspectratio-square) |
+| | **Builder methods** |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#aspectratio-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#aspectratio-child_opt) |
+
+## Detailed description
+
 Given a proposal, `AspectRatio` computes the largest rectangle that fits
 within both dimensions while satisfying `width / height == ratio`. When
 only one axis is constrained by the parent, the other is derived from the
@@ -17,7 +33,7 @@ publishes no node of its own to assistive technology: it is a bare
 all semantic meaning. It is never hidden, which would take the child out of
 every platform's tree with it.
 
-## When to use
+#### When to use
 
 - Embedding images, thumbnails, or video placeholders that must stay
   letter-boxed regardless of the available space.
@@ -39,13 +55,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![AspectRatio at Touch density](img/aspect_ratio-touch.png)
 
-## Builder methods at a glance
-
-`widescreen`, `square`, `child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/aspect_ratio/index.html)
+
+<a id="aspectratio"></a>
 
 ## `pub struct AspectRatio`
 
@@ -57,22 +71,32 @@ pub struct AspectRatio { /* fields */ }
 
 ### Methods
 
+<a id="aspectratio-new"></a>
+
 #### `pub fn new(ratio: f32) -> Self`
 
 Create a new aspect ratio wrapper. Ratio is width / height.
+
+<a id="aspectratio-widescreen"></a>
 
 #### `pub fn widescreen() -> Self`
 
 Convenience for 16:9 aspect ratio.
 
+<a id="aspectratio-square"></a>
+
 #### `pub fn square() -> Self`
 
 Convenience for 1:1 aspect ratio.
+
+<a id="aspectratio-child"></a>
 
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline child widget to constrain; the child is stretched to the
 computed aspect-ratio rectangle.
+
+<a id="aspectratio-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

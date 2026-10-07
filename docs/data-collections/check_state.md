@@ -5,6 +5,19 @@
 
 `CheckState` — tri-state checkbox value shared by the data layer and widgets.
 
+## Public functions
+
+### `CheckState`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Builder methods** |
+| `Self` | [`next_tristate()`](#checkstate-next_tristate) |
+| | **Methods** |
+| `bool` | [`is_filled()`](#checkstate-is_filled) |
+
+## Detailed description
+
 Represents the three visual states of a checkbox: unchecked, checked, and
 indeterminate (partial — some but not all descendants are checked). Lives in
 `teksilo-data` rather than `teksilo-widgets` so that `crate::TreeCheckedModel`
@@ -21,13 +34,11 @@ assert_eq!(state.next_tristate(), CheckState::Unchecked);
 assert_eq!(CheckState::from(true), CheckState::Checked);
 ```
 
-## Builder methods at a glance
-
-`is_filled`, `next_tristate`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/check_state/index.html)
+
+<a id="checkstate"></a>
 
 ## `pub enum CheckState`
 
@@ -43,9 +54,13 @@ pub enum CheckState { /* variants */ }
 
 ### Methods
 
+<a id="checkstate-is_filled"></a>
+
 #### `pub fn is_filled(self) -> bool`
 
 Whether the box shows a filled background (checked or indeterminate).
+
+<a id="checkstate-next_tristate"></a>
 
 #### `pub fn next_tristate(self) -> Self`
 

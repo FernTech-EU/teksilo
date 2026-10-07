@@ -7,6 +7,28 @@
 edge when an external `Signal<bool>` toggles. Common patterns:
 drawers, snackbars, side panels, banner notifications.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`SlideEdge`](#slideedge) — Which edge the child slides in from / out to |
+| `struct` | [`Slide`](#slide) — Wraps a child widget and translates it in or out from one edge of its slot whenever `visible` flips |
+
+## Public functions
+
+### `Slide`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(visible: impl Into<Prop<bool>>)`](#slide-new) |
+| | **Builder methods** |
+| `Self` | [`from(edge: SlideEdge)`](#slide-from) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#slide-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#slide-child_opt) |
+
+## Detailed description
+
 ```ignore
 let visible = ctx.signal(false);
 ctx.add(
@@ -18,7 +40,7 @@ ctx.add(
 visible.set(true);   // slides in from below
 ```
 
-## Layout semantics
+#### Layout semantics
 
 `Slide`'s own slot stays in its laid-out position; the child is
 *translated* within the slot via `place_children`. The wrapper
@@ -41,18 +63,16 @@ let _w = Slide::new(visible.clone())
     .child(Fade::new(visible).child(snackbar_content));
 ```
 
-## Reduced motion
+#### Reduced motion
 
 Honours `prefers-reduced-motion`: snaps the child instantly into
 or out of position instead of tweening.
 
-## Builder methods at a glance
-
-`from`, `child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/slide/index.html)
+
+<a id="slideedge"></a>
 
 ## `pub enum SlideEdge`
 
@@ -72,6 +92,8 @@ pub enum SlideEdge { /* variants */ }
 - **`Top`** — Slide from the top edge. Suits drop-down banners or navigation bars.
 - **`Bottom`** — Slide from the bottom edge. Suits snackbars and bottom sheets.
 
+<a id="slide"></a>
+
 ## `pub struct Slide`
 
 Wraps a child widget and translates it in or out from one edge of
@@ -83,19 +105,27 @@ pub struct Slide { /* fields */ }
 
 ### Methods
 
+<a id="slide-new"></a>
+
 #### `pub fn new(visible: impl Into<Prop<bool>>) -> Self`
 
 Create a slide wrapper bound to `visible`; accepts a static `bool`
 or a reactive `Signal<bool>`. Defaults to `SlideEdge::Bottom` —
 override with `.from(...)`.
 
+<a id="slide-from"></a>
+
 #### `pub fn from(mut self, edge: SlideEdge) -> Self`
 
 Edge the child slides in from (and out to).
 
+<a id="slide-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Inline child widget (deferred insertion).
+
+<a id="slide-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

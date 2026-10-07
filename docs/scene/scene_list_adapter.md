@@ -6,6 +6,24 @@
 `SceneListAdapter` — keep lightweight scene items in sync with a
 `teksilo_data` list model or data source.
 
+## Public functions
+
+### `SceneListAdapter`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`from_model(model: &ListModel<T>, scene: SceneModel, delegate: impl Fn(&T, usize) -> Box<dyn SceneItem> + 'static)`](#scenelistadapter-from_model) |
+| `Self` | [`from_source<S: ListDataSource<Item = T> + 'static>(source: Rc<S>, scene: SceneModel, delegate: impl Fn(&T, usize) -> Box<dyn SceneItem> + 'static)`](#scenelistadapter-from_source) |
+| | **Methods** |
+| `Option<ItemId>` | [`item_id_at(index: usize)`](#scenelistadapter-item_id_at) |
+| `Vec<ItemId>` | [`ids()`](#scenelistadapter-ids) |
+| `usize` | [`len()`](#scenelistadapter-len) |
+| `bool` | [`is_empty()`](#scenelistadapter-is_empty) |
+|  | [`clear()`](#scenelistadapter-clear) |
+
+## Detailed description
+
 A scene's lightweight tier (`SceneItem`) has no arena-backed identity
 and no built-in notion of "one item per row of some data collection" —
 unlike `ListView`/`TableView`, which rebuild their child widgets from a
@@ -20,7 +38,7 @@ long as you want the items tracked (typically stashed in the owning
 widget), and it does its work purely through `SceneModel` mutations and
 a `teksilo_data` change observer.
 
-## Delegate contract
+#### Delegate contract
 
 The delegate's return value — a `Box<dyn SceneItem>` — carries its own
 **absolute scene position** via `SceneItem::local_bounds` (exactly like
@@ -40,7 +58,7 @@ the source's row-read (`ListModel::with_item`, which holds the model's
 `(&T, index) -> item` projection; drive data changes from outside it. (This
 is the same contract `ListView`'s delegate has, for the same reason.)
 
-## Reconciliation policy — slot identity is preserved
+#### Reconciliation policy — slot identity is preserved
 
 An adapter row's identity is its **slot**: data index *i* owns one
 `ItemId`, and that id survives a change to the row's content and a change
@@ -89,7 +107,7 @@ Every reconciliation runs inside one
 not a user edit — so a data layer watching the scene sees one grouped change
 per source change rather than N unrelated ones.
 
-## Borrow discipline
+#### Borrow discipline
 
 Every reconciliation reads the source data (via the erased
 `with_item_fn`, which takes its own short-lived borrow per row) and
@@ -101,7 +119,7 @@ the same borrow would panic (or, worse, silently reenter) if the reader
 and the mutator ever aliased the same `RefCell`. Mirrors `ListView`'s
 "collect owned data, drop the borrow, then mutate" contract.
 
-## Example
+#### Example
 
 ```ignore
 use teksilo_data::ListModel;
@@ -129,13 +147,11 @@ cards.push(Card { x: 280.0, y: 0.0, color: Color::GREEN });
 assert_eq!(adapter.len(), 3);
 ```
 
-## Builder methods at a glance
-
-`from_model`, `from_source`, `item_id_at`, `ids`, `len`, `is_empty`, `clear`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="scenelistadapter"></a>
 
 ## `pub struct SceneListAdapter`
 
@@ -163,6 +179,8 @@ pub struct SceneListAdapter<T: 'static> { /* fields */ }
 
 ### Methods
 
+<a id="scenelistadapter-from_model"></a>
+
 #### `pub fn from_model( model: &ListModel<T>, scene: SceneModel, delegate: impl Fn(&T, usize) -> Box<dyn SceneItem> + 'static, ) -> Self`
 
 Track `model`'s rows as scene items in `scene`, built by `delegate`.
@@ -172,6 +190,8 @@ had just fired), then keeps the scene in sync via
 `ListModel::observe_changes` for as long as the returned adapter is
 alive. See the module docs for the delegate contract and
 reconciliation policy.
+
+<a id="scenelistadapter-from_source"></a>
 
 #### `pub fn from_source<S: ListDataSource<Item = T> + 'static>( source: Rc<S>, scene: SceneModel, delegate: impl Fn(&T, usize) -> Box<dyn SceneItem> + 'static, ) -> Self`
 
@@ -184,11 +204,15 @@ same convention as `ListView::from_source` / `TableView`'s erasure.
 See `Self::from_model` for the materialisation + reconciliation
 behaviour, which is identical for both constructors.
 
+<a id="scenelistadapter-item_id_at"></a>
+
 #### `pub fn item_id_at(&self, index: usize) -> Option<ItemId>`
 
 The scene item id materialised for data row `index`, or `None` if
 `index` is out of range or the row has no materialised item (an
 unloaded row of a windowed source).
+
+<a id="scenelistadapter-ids"></a>
 
 #### `pub fn ids(&self) -> Vec<ItemId>`
 
@@ -196,13 +220,19 @@ All ids currently materialised by this adapter, in data order
 (rows with no materialised item are omitted, so this may be shorter
 than the source's row count).
 
+<a id="scenelistadapter-len"></a>
+
 #### `pub fn len(&self) -> usize`
 
 Number of scene items this adapter currently owns.
 
+<a id="scenelistadapter-is_empty"></a>
+
 #### `pub fn is_empty(&self) -> bool`
 
 Whether this adapter currently owns no scene items.
+
+<a id="scenelistadapter-clear"></a>
 
 #### `pub fn clear(&self)`
 

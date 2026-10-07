@@ -7,6 +7,28 @@
 
 Toggle — an animated on/off switch bound to a `Signal<bool>`.
 
+## Public functions
+
+### `Toggle`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(on: Signal<bool>)`](#toggle-new) |
+| | **Builder methods** |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#toggle-label) |
+| `Self` | [`on_change(f: impl Fn(bool, &mut EventContext) + 'static)`](#toggle-on_change) |
+| `Self` | [`labelled_externally()`](#toggle-labelled_externally) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#toggle-enabled) |
+| `Self` | [`variant(variant: ToggleVariant)`](#toggle-variant) |
+| `Self` | [`style(style: impl ToggleStyle)`](#toggle-style) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#toggle-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#toggle-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#toggle-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#toggle-composite_tooltip) |
+
+## Detailed description
+
 Renders as a sliding-knob switch (IntUI default) or one of the alternate
 `ToggleVariant` shapes. All visual chrome is delegated to a `ToggleStyle`
 impl; the widget itself owns only event handling (tap, Space, AccessKit
@@ -15,13 +37,13 @@ impl; the widget itself owns only event handling (tap, Space, AccessKit
 custom look per-call with `.style(impl ToggleStyle)` or theme-wide via
 `theme.style_slots.toggle = Some(Rc::new(…))`.
 
-## Accessibility
+#### Accessibility
 
 Emits `Role::Switch` with `toggled` reflecting the signal value. Always pair
 with `.label(…)` — the debug build asserts that a label is present, and
 screen readers will announce "switch" with no context if it is absent.
 
-## Example
+#### Example
 
 ```rust
 # use teksilo_widgets::Toggle;
@@ -32,7 +54,7 @@ let _w = Toggle::new(dark_mode)
     .label(lit!("Dark mode"));
 ```
 
-## Touch and pen
+#### Touch and pen
 
 The pressed state is the framework's (`docs/touch-and-pen.md` §7.1) — a
 Material 3 thumb that grows on press must not stay grown after the finger
@@ -47,13 +69,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Toggle at Touch density](img/toggle-touch.png)
 
-## Builder methods at a glance
-
-`label`, `on_change`, `labelled_externally`, `enabled`, `variant`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/toggle/index.html)
+
+<a id="toggle"></a>
 
 ## `pub struct Toggle`
 
@@ -65,6 +85,8 @@ pub struct Toggle { /* fields */ }
 
 ### Methods
 
+<a id="toggle-new"></a>
+
 #### `pub fn new(on: Signal<bool>) -> Self`
 
 Create a toggle bound to `on`. The signal is both read (to paint the
@@ -73,9 +95,13 @@ current state) and written (flipped on each activation).
 See `on_change` when flipping it has to reach the
 ambient context rather than only app state.
 
+<a id="toggle-label"></a>
+
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Accessible label announced by AT and optionally displayed beside the switch.
+
+<a id="toggle-on_change"></a>
 
 #### `pub fn on_change(mut self, f: impl Fn(bool, &mut EventContext) + 'static) -> Self`
 
@@ -92,6 +118,8 @@ the value it now holds.
 
 Spelled the same way on `Checkbox`.
 
+<a id="toggle-labelled_externally"></a>
+
 #### `pub fn labelled_externally(mut self) -> Self`
 
 Declare that this toggle's accessible name comes from a **sibling label
@@ -105,11 +133,15 @@ toggle looks nameless. Setting `.label(..)` instead would satisfy the
 assert but render the text a second time, beside a label column that
 already has it.
 
+<a id="toggle-enabled"></a>
+
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state, statically or reactively. Forwarded to the
 arena via `ctx.enabled_when(self_id, self.enabled.clone())` at
 build time.
+
+<a id="toggle-variant"></a>
 
 #### `pub fn variant(mut self, variant: ToggleVariant) -> Self`
 
@@ -119,11 +151,15 @@ active `ToggleStyle` decides what to do with the hint —
 IntUI's default impl honours all four; a custom impl might
 ignore the variant entirely.
 
+<a id="toggle-style"></a>
+
 #### `pub fn style(mut self, style: impl ToggleStyle) -> Self`
 
 Override the active `ToggleStyle` for this widget instance
 only. Useful for one-off custom-painted toggles in a single
 view.
+
+<a id="toggle-tooltip"></a>
 
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -134,12 +170,16 @@ Mutually exclusive with `rich_tooltip`,
 `composite_tooltip` — the last setter
 called wins and clears the others.
 
+<a id="toggle-rich_tooltip"></a>
+
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
 Attach a rich tooltip looked up by registry `key`.
 
 Mutually exclusive with the other tooltip setters — the last
 setter called wins and clears the others.
+
+<a id="toggle-rich_tooltip_content"></a>
 
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
@@ -148,6 +188,8 @@ value rather than a registry key.
 
 Mutually exclusive with the other tooltip setters — the last
 setter called wins and clears the others.
+
+<a id="toggle-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 

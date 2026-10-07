@@ -5,6 +5,22 @@
 
 Switcher — a container that shows exactly one child page at a time.
 
+## Public functions
+
+### `Switcher`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(selected: Signal<usize>)`](#switcher-new) |
+| | **Builder methods** |
+| `Self` | [`capture_child_ids_into(out: Rc<RefCell<Vec<WidgetId>>>)`](#switcher-capture_child_ids_into) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#switcher-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#switcher-child_opt) |
+| `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#switcher-children) |
+
+## Detailed description
+
 `Switcher` is the fundamental tab/wizard/step primitive: it owns N child
 pages and exposes only the one whose index matches the `Signal<usize>` it
 was constructed with. Switching is a signal write — the framework responds
@@ -35,13 +51,11 @@ let _w = Switcher::new(page.clone())
     .child(TextWidget::new(lit!("Step 3")));  // built on first page.set(2)
 ```
 
-## Builder methods at a glance
-
-`capture_child_ids_into`, `child`, `child_opt`, `children`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/switcher/index.html)
+
+<a id="switcher"></a>
 
 ## `pub struct Switcher`
 
@@ -78,11 +92,15 @@ pub struct Switcher { /* fields */ }
 
 ### Methods
 
+<a id="switcher-new"></a>
+
 #### `pub fn new(selected: Signal<usize>) -> Self`
 
 Create a `Switcher` driven by `selected`. The initially selected index
 is `selected.get()` at build time; page 0 is mounted immediately if that
 is the starting value (the most common case).
+
+<a id="switcher-capture_child_ids_into"></a>
 
 #### `pub fn capture_child_ids_into(mut self, out: Rc<RefCell<Vec<WidgetId>>>) -> Self`
 
@@ -98,6 +116,8 @@ first time. Callers that need every id up front should pass
 pre-mounted ids via `Self::child` instead — those are
 eagerly recorded.
 
+<a id="switcher-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add a child page. An `impl Widget` stays Boxed until its index is
@@ -105,6 +125,8 @@ selected for the first time, then is mounted into the arena
 and kept alive across selection changes. A `WidgetId` (an
 already-mounted page) is pre-mounted immediately instead, built
 eagerly regardless of the selected index — see `Slot::PreMounted`.
+
+<a id="switcher-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
@@ -114,6 +136,8 @@ The conditional-child form. `teksu!`'s `if` without an `else` lowers to
 this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
 adds no arena node, so nothing is laid out, painted, or published to the
 accessibility tree, and a stack applies no spacing around it.
+
+<a id="switcher-children"></a>
 
 #### `pub fn children( self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 

@@ -7,6 +7,37 @@ Live cross-process settings sync: a `notify`-based directory watcher
 plus the registry that lets a changed path be dispatched to the
 in-memory `Reloadable` handle that owns it.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `type` | [`SettingsReloadSink`](#settingsreloadsink) — Sink type invoked on the notify worker thread whenever a watched settings directory reports a create/modify event |
+| `struct` | [`SettingsWatcher`](#settingswatcher) — Active directory watcher over one or more settings directories |
+| `struct` | [`SettingsRegistry`](#settingsregistry) — Registry mapping a canonical settings path to the live `Reloadable` handle that owns it, so a file-watcher event naming that path can be dispatched to the… |
+
+## Public functions
+
+### `SettingsWatcher`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Result<Self, notify::Error>` | [`new(dirs: Vec<PathBuf>, sink: SettingsReloadSink)`](#settingswatcher-new) |
+
+### `SettingsRegistry`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#settingsregistry-new) |
+| | **Methods** |
+| `Rc<dyn Reloadable>` | [`register(reloadable: Rc<dyn Reloadable>)`](#settingsregistry-register) |
+| `Result<bool, SettingsFileError>` | [`dispatch(changed_path: &Path)`](#settingsregistry-dispatch) |
+| `Vec<PathBuf>` | [`registered_paths()`](#settingsregistry-registered_paths) |
+| `usize` | [`live_count()`](#settingsregistry-live_count) |
+
+## Detailed description
+
 This is the read-side counterpart to the write-side cross-process
 safety documented in `flush.rs` / `reload.rs`: every write in this
 crate already merges safely against a peer's concurrent write, but a
@@ -15,7 +46,7 @@ it happens to touch the same key itself. `SettingsWatcher` is what
 makes it look again, automatically, the moment a peer's write lands
 on disk.
 
-## Shape, mirrored from `teksilo-i18n`'s `FtlFileWatcher`
+#### Shape, mirrored from `teksilo-i18n`'s `FtlFileWatcher`
 
 `SettingsWatcher` owns a `notify::RecommendedWatcher` background
 thread and a type-erased sink `Arc<dyn Fn(PathBuf) + Send + Sync>`.
@@ -37,7 +68,7 @@ calls its `Reloadable::reload_from_disk`. A path with no registered
 owner (a `.lock` sidecar, a `.tmp` write-in-progress, an unrelated
 file a peer dropped in the same directory) is a harmless no-op.
 
-## The registry
+#### The registry
 
 `SettingsRegistry` maps a canonical path to a `Weak<dyn Reloadable>`.
 It never holds a strong reference itself: whoever opens a persisted
@@ -55,6 +86,8 @@ a service that no longer exists.
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
 
+<a id="settingsreloadsink"></a>
+
 ## `pub type SettingsReloadSink`
 
 Sink type invoked on the notify worker thread whenever a watched
@@ -67,6 +100,8 @@ which hops back onto the UI thread where the (single-threaded,
 ```rust
 pub type SettingsReloadSink = Arc<dyn Fn(PathBuf) + Send + Sync + 'static>;
 ```
+
+<a id="settingswatcher"></a>
 
 ## `pub struct SettingsWatcher`
 
@@ -86,6 +121,8 @@ pub struct SettingsWatcher { /* fields */ }
 
 ### Methods
 
+<a id="settingswatcher-new"></a>
+
 #### `pub fn new(dirs: Vec<PathBuf>, sink: SettingsReloadSink) -> Result<Self, notify::Error>`
 
 Build a watcher over `dirs` (deduplicated by canonical path, so
@@ -100,6 +137,8 @@ when this is called. As long as at least the config directory
 exists (which `AppPaths` implies by the time `SettingsBundle` has
 successfully opened anything in it), watching still works for the
 files that matter.
+
+<a id="settingsregistry"></a>
 
 ## `pub struct SettingsRegistry`
 
@@ -118,9 +157,13 @@ pub struct SettingsRegistry { /* fields */ }
 
 ### Methods
 
+<a id="settingsregistry-new"></a>
+
 #### `pub fn new() -> Self`
 
 A fresh, empty registry.
+
+<a id="settingsregistry-register"></a>
 
 #### `pub fn register(&self, reloadable: Rc<dyn Reloadable>) -> Rc<dyn Reloadable>`
 
@@ -155,6 +198,8 @@ only a `Weak` is retained internally, by design (see the module
 docs). Registering a second `Reloadable` under the same canonical
 path replaces the first entry.
 
+<a id="settingsregistry-dispatch"></a>
+
 #### `pub fn dispatch(&self, changed_path: &Path) -> Result<bool, SettingsFileError>`
 
 Look up `changed_path`'s registered owner and call
@@ -166,11 +211,15 @@ path names nothing registered, or its owner has been dropped —
 in the latter case the dead entry is pruned from the map so it
 doesn't accumulate forever).
 
+<a id="settingsregistry-registered_paths"></a>
+
 #### `pub fn registered_paths(&self) -> Vec<PathBuf>`
 
 The canonical paths currently registered (including entries whose
 owner has since been dropped but not yet pruned by a `dispatch`
 call). Exposed for tests and diagnostics.
+
+<a id="settingsregistry-live_count"></a>
 
 #### `pub fn live_count(&self) -> usize`
 

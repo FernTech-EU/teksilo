@@ -5,10 +5,27 @@
 
 `OverlayTrigger` — the shared "this widget opens that overlay" wrapper.
 
+## Public functions
+
+### `OverlayTrigger`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`around(widget: impl Widget + 'static)`](#overlaytrigger-around) |
+| `Self` | [`around_id(id: WidgetId)`](#overlaytrigger-around_id) |
+| | **Builder methods** |
+| `Self` | [`named(name: impl Into<String>)`](#overlaytrigger-named) |
+| `Self` | [`on_activate(f: impl Fn(&mut EventContext) + 'static)`](#overlaytrigger-on_activate) |
+| | **Methods** |
+| `bool` | [`has_on_activate()`](#overlaytrigger-has_on_activate) |
+
+## Detailed description
+
 Used by `Dialog`, `Snackbar`, `Wizard` and `PopoverWidget` whenever a
 caller replaces the default `Button` trigger with a widget of their own.
 
-## One control, on whichever node takes focus
+#### One control, on whichever node takes focus
 
 To a screen reader a trigger is one control, and the node focus lands on is
 that control: it carries the role, the name, the popup state, and it
@@ -26,7 +43,7 @@ was wrapped, and is decided once, as it mounts:
   the control's own text is what a sighted user reads on it, and a second
   button around the first would be one control heard as two.
 
-## Touch and pen
+#### Touch and pen
 
 The trigger has no geometry and no press visual of its own: it forwards the
 caller's child, whose target and appearance are the child's, and routes the
@@ -34,13 +51,11 @@ pointer handler onto that child's external bucket so it fires beside the
 child's own. The activation is an `on_tap`, so it happens on the release for
 every pointer kind.
 
-## Builder methods at a glance
-
-`around`, `around_id`, `named`, `has_on_activate`, `on_activate`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/overlay_trigger/index.html)
+
+<a id="overlaytrigger"></a>
 
 ## `pub struct OverlayTrigger`
 
@@ -66,13 +81,19 @@ pub struct OverlayTrigger { /* fields */ }
 
 ### Methods
 
+<a id="overlaytrigger-around"></a>
+
 #### `pub fn around(widget: impl Widget + 'static) -> Self`
 
 Wrap any widget as a popover trigger.
 
+<a id="overlaytrigger-around_id"></a>
+
 #### `pub fn around_id(id: WidgetId) -> Self`
 
 `around` for a widget already inserted by id.
+
+<a id="overlaytrigger-named"></a>
 
 #### `pub fn named(self, name: impl Into<String>) -> Self`
 
@@ -81,9 +102,13 @@ Set the trigger's accessible name.
 Used when the wrapped widget takes no focus of its own. A wrapped
 control keeps its own name.
 
+<a id="overlaytrigger-has_on_activate"></a>
+
 #### `pub fn has_on_activate(&self) -> bool`
 
 Whether an activate handler is already installed.
+
+<a id="overlaytrigger-on_activate"></a>
 
 #### `pub fn on_activate(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 

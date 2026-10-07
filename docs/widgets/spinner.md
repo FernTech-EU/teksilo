@@ -7,6 +7,23 @@
 
 `Spinner` — a shader-driven circular-arc loading indicator.
 
+## Public functions
+
+### `Spinner`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(size: f32)`](#spinner-new) |
+| | **Builder methods** |
+| `Self` | [`period(period: Duration)`](#spinner-period) |
+| `Self` | [`arc_fraction(arc_fraction: f32)`](#spinner-arc_fraction) |
+| `Self` | [`stroke_fraction(stroke_fraction: f32)`](#spinner-stroke_fraction) |
+| `Self` | [`color(color: impl Into<ColorProp>)`](#spinner-color) |
+| `Self` | [`label(text: impl Into<LocalizedString>)`](#spinner-label) |
+
+## Detailed description
+
 Uses the same per-slot uniform-buffer pipeline as
 `ProgressBar::indeterminate` (an
 `AnimatedQuadKind` variant), so per-frame cost is one
@@ -40,13 +57,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Spinner at Touch density](img/spinner-touch.png)
 
-## Builder methods at a glance
-
-`period`, `arc_fraction`, `stroke_fraction`, `color`, `label`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/spinner/index.html)
+
+<a id="spinner"></a>
 
 ## `pub struct Spinner`
 
@@ -62,21 +77,29 @@ pub struct Spinner { /* fields */ }
 
 ### Methods
 
+<a id="spinner-new"></a>
+
 #### `pub fn new(size: f32) -> Self`
 
 Construct a spinner of the given square edge length (logical
 pixels). Use small sizes (16–24) for inline spinners and
 larger (32–64) for full-content placeholders.
 
+<a id="spinner-period"></a>
+
 #### `pub fn period(mut self, period: Duration) -> Self`
 
 Override the rotation period. Default: 900 ms (one full
 rotation per period).
 
+<a id="spinner-arc_fraction"></a>
+
 #### `pub fn arc_fraction(mut self, arc_fraction: f32) -> Self`
 
 Override the arc length as a fraction of the full circle.
 Default: 0.25 (a quarter-circle "comet tail" arc).
+
+<a id="spinner-stroke_fraction"></a>
 
 #### `pub fn stroke_fraction(mut self, stroke_fraction: f32) -> Self`
 
@@ -84,10 +107,14 @@ Override the stroke thickness as a fraction of the spinner's
 edge length. Default: 0.12 (so a 24-px spinner has a ~3-px
 stroke).
 
+<a id="spinner-color"></a>
+
 #### `pub fn color(mut self, color: impl Into<ColorProp>) -> Self`
 
 Override the arc colour. Default: `TextRole::Secondary` so the
 spinner picks up theme-aware text-tier styling.
+
+<a id="spinner-label"></a>
 
 #### `pub fn label(mut self, text: impl Into<LocalizedString>) -> Self`
 

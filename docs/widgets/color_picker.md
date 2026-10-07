@@ -7,6 +7,50 @@
 
 `ColorPicker` — embeddable composite color selector.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `const` | [`DEFAULT_SWATCHES`](#default_swatches) — Default 12-color preset palette (Int UI–flavored) |
+| `struct` | [`ColorPicker`](#colorpicker) — Embeddable HSV+RGB+hex+alpha+swatches color picker |
+
+## Public functions
+
+### `ColorPicker`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(value: Signal<Color>)`](#colorpicker-new) |
+| `Self` | [`nullable(value: Signal<Option<Color>>)`](#colorpicker-nullable) |
+| | **Builder methods** |
+| `Self` | [`style(style: impl teksilo_core::styles::ColorPickerStyle)`](#colorpicker-style) |
+| `Self` | [`alpha_enabled(e: bool)`](#colorpicker-alpha_enabled) |
+| `Self` | [`show_hsv_canvas(s: bool)`](#colorpicker-show_hsv_canvas) |
+| `Self` | [`show_hue_strip(s: bool)`](#colorpicker-show_hue_strip) |
+| `Self` | [`show_alpha_strip(s: bool)`](#colorpicker-show_alpha_strip) |
+| `Self` | [`show_rgb_spinners(s: bool)`](#colorpicker-show_rgb_spinners) |
+| `Self` | [`show_hsv_spinners(s: bool)`](#colorpicker-show_hsv_spinners) |
+| `Self` | [`show_hex_input(s: bool)`](#colorpicker-show_hex_input) |
+| `Self` | [`show_preview(s: bool)`](#colorpicker-show_preview) |
+| `Self` | [`show_swatches(s: bool)`](#colorpicker-show_swatches) |
+| `Self` | [`show_footer(s: bool)`](#colorpicker-show_footer) |
+| `Self` | [`on_done(f: impl Fn(&mut EventContext) + 'static)`](#colorpicker-on_done) |
+| `Self` | [`on_cancel(f: impl Fn(&mut EventContext) + 'static)`](#colorpicker-on_cancel) |
+| `Self` | [`swatches(s: impl Into<Prop<Vec<Color>>>)`](#colorpicker-swatches) |
+| `Self` | [`swatch_columns(n: usize)`](#colorpicker-swatch_columns) |
+| `Self` | [`layout(l: ColorPickerLayout)`](#colorpicker-layout) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#colorpicker-label) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#colorpicker-enabled) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#colorpicker-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#colorpicker-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#colorpicker-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#colorpicker-composite_tooltip) |
+| | **Methods** |
+| `Color` | [`current()`](#colorpicker-current) |
+
+## Detailed description
+
 Combines a 2D HSV canvas, 1D hue and alpha strips, RGB and HSV
 component spinners, a hex input, a current-color preview, and an
 optional preset swatch grid into a single bound widget. Driven by a
@@ -14,7 +58,7 @@ optional preset swatch grid into a single bound widget. Driven by a
 subcomponent reads from / writes to the same signal so the various
 representations stay in lockstep.
 
-# Layouts
+### Layouts
 
 - `ColorPickerLayout::Compact` — HSV canvas + hue strip + hex
   input. Minimal vertical footprint, suitable for popovers.
@@ -26,7 +70,7 @@ representations stay in lockstep.
   right, spinners stacked vertically alongside the swatch grid.
   For wide property pages.
 
-# Accessibility
+### Accessibility
 
 Root: `Role::Group` with a localized
 label and `Live::Polite` so screen readers announce committed color
@@ -35,7 +79,7 @@ changes. The HSV canvas's subtree is excluded from the AT tree
 strip, RGB / HSV spinners, hex input, current-color preview, and
 swatch grid each carry their own appropriate role and value.
 
-## Touch and pen
+#### Touch and pen
 
 The hue strip, the alpha strip and the HSV canvas are **continuous
 manipulators** — the value each produces *is* the press position — so all
@@ -62,13 +106,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![ColorPicker at Touch density](img/color_picker-touch.png)
 
-## Builder methods at a glance
-
-`nullable`, `style`, `alpha_enabled`, `show_hsv_canvas`, `show_hue_strip`, `show_alpha_strip`, `show_rgb_spinners`, `show_hsv_spinners`, `show_hex_input`, `show_preview`, `show_swatches`, `show_footer`, `on_done`, `on_cancel`, `swatches`, `swatch_columns`, `layout`, `label`, `enabled`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `current`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/color_picker/index.html)
+
+<a id="default_swatches"></a>
 
 ## `pub const DEFAULT_SWATCHES`
 
@@ -78,6 +120,8 @@ this verbatim or pass their own via `ColorPicker::swatches`.
 ```rust
 pub const DEFAULT_SWATCHES: `Color;
 ```
+
+<a id="colorpicker"></a>
 
 ## `pub struct ColorPicker`
 
@@ -104,9 +148,13 @@ pub struct ColorPicker { /* fields */ }
 
 ### Methods
 
+<a id="colorpicker-new"></a>
+
 #### `pub fn new(value: Signal<Color>) -> Self`
 
 Bind to a non-nullable color signal.
+
+<a id="colorpicker-nullable"></a>
 
 #### `pub fn nullable(value: Signal<Option<Color>>) -> Self`
 
@@ -116,14 +164,20 @@ concrete `Some(color)`. Apps that want a "clear to None"
 affordance should expose a separate Clear button alongside
 the picker.
 
+<a id="colorpicker-style"></a>
+
 #### `pub fn style(mut self, style: impl teksilo_core::styles::ColorPickerStyle) -> Self`
 
 Per-call style override. Higher precedence than the theme-wide
 `style_slots.color_picker` slot.
 
+<a id="colorpicker-alpha_enabled"></a>
+
 #### `pub fn alpha_enabled(mut self, e: bool) -> Self`
 
 Enable or disable the alpha channel (hue-strip alpha strip + `a` spinner + hex digit pair).
+
+<a id="colorpicker-show_hsv_canvas"></a>
 
 #### `pub fn show_hsv_canvas(mut self, s: bool) -> Self`
 
@@ -131,9 +185,13 @@ Show or hide the 2D HSV gradient canvas. Hidden in headless or
 accessibility-only contexts where the pointer-drag surface is
 not useful.
 
+<a id="colorpicker-show_hue_strip"></a>
+
 #### `pub fn show_hue_strip(mut self, s: bool) -> Self`
 
 Show or hide the vertical hue selection strip.
+
+<a id="colorpicker-show_alpha_strip"></a>
 
 #### `pub fn show_alpha_strip(mut self, s: bool) -> Self`
 
@@ -141,25 +199,37 @@ Show or hide the vertical alpha strip. Defaults to the value of
 `alpha_enabled`; call this to decouple them (e.g. show the strip
 without enabling the alpha spinner).
 
+<a id="colorpicker-show_rgb_spinners"></a>
+
 #### `pub fn show_rgb_spinners(mut self, s: bool) -> Self`
 
 Show or hide the RGB (0–255) component spinners row.
+
+<a id="colorpicker-show_hsv_spinners"></a>
 
 #### `pub fn show_hsv_spinners(mut self, s: bool) -> Self`
 
 Show or hide the HSV (hue 0–359°, saturation 0–100%, value 0–100%) spinners row.
 
+<a id="colorpicker-show_hex_input"></a>
+
 #### `pub fn show_hex_input(mut self, s: bool) -> Self`
 
 Show or hide the hex string input field.
+
+<a id="colorpicker-show_preview"></a>
 
 #### `pub fn show_preview(mut self, s: bool) -> Self`
 
 Show or hide the current-color preview swatch (Standard / Wide layouts).
 
+<a id="colorpicker-show_swatches"></a>
+
 #### `pub fn show_swatches(mut self, s: bool) -> Self`
 
 Show or hide the preset swatch grid (Standard / Wide layouts only).
+
+<a id="colorpicker-show_footer"></a>
 
 #### `pub fn show_footer(mut self, s: bool) -> Self`
 
@@ -171,6 +241,8 @@ flip this to `true` so the user has explicit accept / dismiss
 affordances; the buttons fire `Self::on_done` /
 `Self::on_cancel` respectively.
 
+<a id="colorpicker-on_done"></a>
+
 #### `pub fn on_done(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Callback fired when the user activates the footer's Done
@@ -178,6 +250,8 @@ button. The picker has already been writing through to the
 bound signal as the user dragged / typed, so Done's job is
 purely to dismiss the surrounding surface (popover, sheet,
 dialog). Only meaningful when `show_footer(true)`.
+
+<a id="colorpicker-on_cancel"></a>
 
 #### `pub fn on_cancel(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
@@ -189,30 +263,42 @@ callback's typical implementation is
 `value.set(snapshot.get()); ctx.dismiss_self_overlay_chain();`.
 Only meaningful when `show_footer(true)`.
 
+<a id="colorpicker-swatches"></a>
+
 #### `pub fn swatches(mut self, s: impl Into<Prop<Vec<Color>>>) -> Self`
 
 Replace the default 12-color `DEFAULT_SWATCHES` with a custom
 palette — statically, or reactively via a bound `Signal<Vec<Color>>`
 that updates live without rebuilding the picker.
 
+<a id="colorpicker-swatch_columns"></a>
+
 #### `pub fn swatch_columns(mut self, n: usize) -> Self`
 
 Number of columns in the preset swatch grid. Defaults to 6;
 clamped to at least 1.
 
+<a id="colorpicker-layout"></a>
+
 #### `pub fn layout(mut self, l: ColorPickerLayout) -> Self`
 
 Select the overall layout variant. Defaults to `ColorPickerLayout::Standard`.
+
+<a id="colorpicker-label"></a>
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Set the accessible group label for the picker root node.
 Defaults to the localized "Color picker" string.
 
+<a id="colorpicker-enabled"></a>
+
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state, statically or reactively. Forwarded to the
 arena at build time.
+
+<a id="colorpicker-tooltip"></a>
 
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -221,11 +307,15 @@ Attach a plain single-line tooltip shown after a hover delay.
 Mutually exclusive with `Self::rich_tooltip`, `Self::rich_tooltip_content`,
 and `Self::composite_tooltip` — the last setter called wins.
 
+<a id="colorpicker-rich_tooltip"></a>
+
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
 Attach a rich tooltip looked up from the registry by key.
 
 Mutually exclusive with the other tooltip setters — the last call wins.
+
+<a id="colorpicker-rich_tooltip_content"></a>
 
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
@@ -233,11 +323,15 @@ Attach an inline rich tooltip from an already-constructed `crate::tooltip::Toolt
 
 Mutually exclusive with the other tooltip setters — the last call wins.
 
+<a id="colorpicker-composite_tooltip"></a>
+
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 
 Attach a composite tooltip whose body is an arbitrary widget tree.
 
 Mutually exclusive with the other tooltip setters — the last call wins.
+
+<a id="colorpicker-current"></a>
 
 #### `pub fn current(&self) -> Color`
 

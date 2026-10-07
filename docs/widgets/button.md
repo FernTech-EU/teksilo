@@ -7,6 +7,46 @@
 
 Button — a labelled, activatable action trigger.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`InteractionState`](#interactionstate) — Internal interaction state |
+| `enum` | [`IconLocation`](#iconlocation) — Where an optional icon is placed relative to the button label |
+| `struct` | [`Button`](#button) — A labelled action trigger; use `Button::new` and chain builder methods |
+
+## Public functions
+
+### `Button`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(label: impl Into<LocalizedString>)`](#button-new) |
+| | **Builder methods** |
+| `Self` | [`share_interaction(signal: Signal<InteractionState>)`](#button-share_interaction) |
+| `Self` | [`variant(variant: ButtonVariant)`](#button-variant) |
+| `Self` | [`style(style: impl ButtonStyle)`](#button-style) |
+| `Self` | [`label(label: impl Into<teksilo_core::signal::Prop<String>>)`](#button-label) |
+| `Self` | [`on_activate_fn(f: impl Fn(&mut EventContext) + 'static)`](#button-on_activate_fn) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#button-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#button-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#button-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl teksilo_core::widget::Widget + 'static)`](#button-composite_tooltip) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#button-enabled) |
+| `Self` | [`text_role(role: impl Into<teksilo_core::color_prop::ColorProp>)`](#button-text_role) |
+| `Self` | [`text_style(style: impl Into<teksilo_core::color_prop::TextStyleProp>)`](#button-text_style) |
+| `Self` | [`icon(icon: IconWidget, location: IconLocation)`](#button-icon) |
+| `Self` | [`icon_keeps_color()`](#button-icon_keeps_color) |
+| `Self` | [`has_popup(kind: teksilo_core::accesskit::HasPopup)`](#button-has_popup) |
+| `Self` | [`expanded_when(signal: impl Into<Prop<bool>>)`](#button-expanded_when) |
+| `Self` | [`leading(widget: impl Widget + 'static)`](#button-leading) |
+| `Self` | [`trailing(widget: impl Widget + 'static)`](#button-trailing) |
+| | **Methods** |
+| `ButtonVariant` | [`current_variant()`](#button-current_variant) |
+
+## Detailed description
+
 `Button` is the primary action surface in Teksilo. It renders a text
 label (optionally with a leading, trailing, top, or bottom icon), fires
 a closure on click / Space / Enter / AT click, and advertises seven
@@ -14,14 +54,14 @@ design-language variants via `ButtonVariant`. Chrome (fill, border,
 focus ring, padding) is delegated to the active `ButtonStyle`; the
 default `RecipeButtonStyle` implements the Int UI token ladder.
 
-## When to use
+#### When to use
 
 - Primary action: `.variant(ButtonVariant::Filled)` — one per context.
 - Secondary / cancel: default `ButtonVariant::Plain`.
 - Danger: `ButtonVariant::Destructive` (IntUI maps this to Filled).
 - Text-only link: `ButtonVariant::Link` / `ButtonVariant::Ghost`.
 
-## Touch and pen
+#### Touch and pen
 
 The pressed visual is the **framework's**, not the button's own: the router
 keeps one press record per contact and `Button` mirrors it onto its
@@ -41,7 +81,7 @@ hover-leave to correct a hovered state with.
 The whole family — `IconButton`, `CommandLinkButton`, every `Toolbar`
 command — shares `build_interaction_handlers` and gets all of this with it.
 
-## Accessibility
+#### Accessibility
 
 Announces as `Role::Button` with the resolved label as its AT name.
 Keyboard: Space / Enter activate; the lone-KeyUp guard prevents spurious
@@ -64,13 +104,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Button at Touch density](img/button-touch.png)
 
-## Builder methods at a glance
-
-`current_variant`, `share_interaction`, `variant`, `style`, `label`, `on_activate_fn`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `enabled`, `text_role`, `text_style`, `icon`, `icon_keeps_color`, `has_popup`, `expanded_when`, `leading`, `trailing`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/button/index.html)
+
+<a id="interactionstate"></a>
 
 ## `pub enum InteractionState`
 
@@ -87,6 +125,8 @@ pub enum InteractionState { /* variants */ }
 - **`Pressed`**
 - **`Focused`**
 - **`Disabled`**
+
+<a id="iconlocation"></a>
 
 ## `pub enum IconLocation`
 
@@ -105,6 +145,8 @@ pub enum IconLocation { /* variants */ }
 - **`Top`** — Icon above the label.
 - **`Bottom`** — Icon below the label.
 
+<a id="button"></a>
+
 ## `pub struct Button`
 
 A labelled action trigger; use `Button::new` and chain builder methods.
@@ -114,6 +156,8 @@ pub struct Button { /* fields */ }
 ```
 
 ### Methods
+
+<a id="button-new"></a>
 
 #### `pub fn new(label: impl Into<LocalizedString>) -> Self`
 
@@ -125,12 +169,16 @@ version signal, so the inner `TextWidget` re-renders on a locale
 switch without rebuilding the Button — matching `TextWidget::new`.
 `lit!(...)` and the no-manager case resolve to a static `String`.
 
+<a id="button-current_variant"></a>
+
 #### `pub fn current_variant(&self) -> ButtonVariant`
 
 Returns the configured visual variant. Used by wrappers like
 `PopoverButton` that
 derive their own chrome colors from the same recipe-resolution
 path the inner Button uses.
+
+<a id="button-share_interaction"></a>
 
 #### `pub fn share_interaction(mut self, signal: Signal<InteractionState>) -> Self`
 
@@ -148,6 +196,8 @@ look from `ButtonStyleConfig::is_disabled` (or lets its own leaves
 dim at paint via `PaintContext::effective_enabled`) rather than
 from this signal.
 
+<a id="button-variant"></a>
+
 #### `pub fn variant(mut self, variant: ButtonVariant) -> Self`
 
 Set the Tier-1 design-language variant. The active
@@ -155,11 +205,15 @@ Set the Tier-1 design-language variant. The active
 default `RecipeButtonStyle` collapses Destructive → Filled,
 Tinted/Outlined → Plain, Link → Ghost).
 
+<a id="button-style"></a>
+
 #### `pub fn style(mut self, style: impl ButtonStyle) -> Self`
 
 Override the active `ButtonStyle` for this widget instance
 only. Useful for one-off custom-painted buttons (glassmorphism
 CTA, Material-3 ripple, etc.) without forking the Button.
+
+<a id="button-label"></a>
 
 #### `pub fn label(mut self, label: impl Into<teksilo_core::signal::Prop<String>>) -> Self`
 
@@ -177,15 +231,21 @@ Translation note: derive the signal with
 `state.map(|s| tr!(status_label(value = s)).resolve_now())` for translated
 reactive labels — Button only sees the resolved `String`.
 
+<a id="button-on_activate_fn"></a>
+
 #### `pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Closure invoked on activation. Use `ctx.send_intent(...)` to
 route activation through the Action/Intent system, or inline
 the behavior directly.
 
+<a id="button-tooltip"></a>
+
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Attach a tooltip that appears after a hover delay.
+
+<a id="button-rich_tooltip"></a>
 
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
@@ -198,12 +258,16 @@ shortcut / long-form "more" fields are rendered automatically.
 
 Overrides any previously set plain `.tooltip(...)` text.
 
+<a id="button-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Attach a rich tooltip driven by inline
 `TooltipContent` — for
 one-off tooltips that aren't worth registering in the central
 catalog. Overrides any previously set plain `.tooltip(...)`.
+
+<a id="button-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip( mut self, content: impl teksilo_core::widget::Widget + 'static, ) -> Self`
 
@@ -214,6 +278,8 @@ progress bars, conditional rows). Promotes to a focusable
 promotion threshold. Overrides any plain or rich tooltip
 previously set on this button.
 
+<a id="button-enabled"></a>
+
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state, statically or reactively. Disabled buttons
@@ -222,6 +288,8 @@ ignore input and dim their content (the framework's
 label/icon leaves). Forwarded into the arena via
 `ctx.enabled_when(self_id, self.enabled.clone())` at build time —
 a bound signal updates live as it changes.
+
+<a id="button-text_role"></a>
 
 #### `pub fn text_role(mut self, role: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
@@ -234,6 +302,8 @@ sub-widgets (e.g. tab-bar overflow-dropdown triggers that must
 match the strip's `idle_text_role` regardless of hover state).
 Accepts `Color`, `TextRole`, `Signal<Color>`, or `Signal<TextRole>`.
 
+<a id="button-text_style"></a>
+
 #### `pub fn text_style(mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>) -> Self`
 
 Override the label's text style (font, size, weight). By default the
@@ -242,9 +312,13 @@ label uses the inner `TextWidget`'s default style; pass a
 `Signal` of either to change it — e.g. to make the label bold.
 Orthogonal to `Button::text_role`, which only sets the color.
 
+<a id="button-icon"></a>
+
 #### `pub fn icon(mut self, icon: IconWidget, location: IconLocation) -> Self`
 
 Add an icon to the button at the specified location.
+
+<a id="button-icon_keeps_color"></a>
 
 #### `pub fn icon_keeps_color(mut self) -> Self`
 
@@ -266,12 +340,16 @@ special-cased here:
 * A literal colour **does not dim when the button is disabled**. An icon
   that should dim wants a role instead, and then it does not need this.
 
+<a id="button-has_popup"></a>
+
 #### `pub fn has_popup(mut self, kind: teksilo_core::accesskit::HasPopup) -> Self`
 
 Declare that this button is a disclosure trigger for a
 popup (menu, dialog, listbox, tree, grid). Surfaced via
 `set_has_popup` in the a11y node so screen readers announce
 it as leading into the named popup kind.
+
+<a id="button-expanded_when"></a>
 
 #### `pub fn expanded_when(mut self, signal: impl Into<Prop<bool>>) -> Self`
 
@@ -280,6 +358,8 @@ currently visible. The Popover / Dialog wrapper owns the
 signal and flips it on show / dismiss; Button reads it in
 `accessibility()` to publish `set_expanded`. Only
 meaningful alongside `.has_popup(...)`.
+
+<a id="button-leading"></a>
 
 #### `pub fn leading(mut self, widget: impl Widget + 'static) -> Self`
 
@@ -297,6 +377,8 @@ declares an AT role of its own — `ColorSwatch` is the canonical
 case (`Role::ColorWell`) — pass `widget.access_hidden(true)`
 so the trigger reads as a single Button node instead of a
 Button containing a redundant ColorWell child.
+
+<a id="button-trailing"></a>
 
 #### `pub fn trailing(mut self, widget: impl Widget + 'static) -> Self`
 

@@ -7,6 +7,79 @@
 
 `SpinBox` — numeric input with increment/decrement buttons.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`WrapMode`](#wrapmode) — Out-of-range behavior when stepping past `min` or `max` |
+| `enum` | [`StepType`](#steptype) — Step-size policy for each key/button press |
+| `enum` | [`WheelMode`](#wheelmode) — When the mouse wheel is allowed to adjust the value |
+| `enum` | [`WidthPolicy`](#widthpolicy) — How the SpinBox decides its horizontal size envelope |
+| `const` | [`SPIN_BOX_STEP_BUTTON_WIDTH`](#spin_box_step_button_width) — Minimum total width |
+| `const` | [`SPIN_BOX_STEP_BUTTON_HEIGHT`](#spin_box_step_button_height) — Painted height of one stacked step button, in dp |
+| `struct` | [`SpinBox`](#spinbox) — Numeric input with step buttons |
+| `trait` | [`SpinValue`](#spinvalue) — Numeric primitive that a `SpinBox` can hold |
+
+## Public functions
+
+### `SpinBox`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(value: Signal<T>, min: T, max: T)`](#spinbox-new) |
+| | **Builder methods** |
+| `Self` | [`style(style: impl teksilo_core::styles::SpinBoxStyle)`](#spinbox-style) |
+| `Self` | [`single_step(step: T)`](#spinbox-single_step) |
+| `Self` | [`page_step(step: T)`](#spinbox-page_step) |
+| `Self` | [`decimals(decimals: u8)`](#spinbox-decimals) |
+| `Self` | [`localized(on: bool)`](#spinbox-localized) |
+| `Self` | [`use_grouping(on: bool)`](#spinbox-use_grouping) |
+| `Self` | [`suffix(text: impl Into<String>)`](#spinbox-suffix) |
+| `Self` | [`special_value_text(text: impl Into<LocalizedString>)`](#spinbox-special_value_text) |
+| `Self` | [`wrap_mode(mode: WrapMode)`](#spinbox-wrap_mode) |
+| `Self` | [`step_type(step_type: StepType)`](#spinbox-step_type) |
+| `Self` | [`button_layout(layout: ButtonLayout)`](#spinbox-button_layout) |
+| `Self` | [`show_buttons(show: bool)`](#spinbox-show_buttons) |
+| `Self` | [`wheel_mode(mode: WheelMode)`](#spinbox-wheel_mode) |
+| `Self` | [`width(width: f32)`](#spinbox-width) |
+| `Self` | [`width_chars(chars: u32)`](#spinbox-width_chars) |
+| `Self` | [`fill_width()`](#spinbox-fill_width) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#spinbox-label) |
+| `Self` | [`placeholder(text: impl Into<LocalizedString>)`](#spinbox-placeholder) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#spinbox-enabled) |
+| `Self` | [`read_only(read_only: bool)`](#spinbox-read_only) |
+| `Self` | [`text_from_value(f: impl Fn(T) -> LocalizedString + 'static)`](#spinbox-text_from_value) |
+| `Self` | [`value_from_text(f: impl Fn(&str) -> Option<T> + 'static)`](#spinbox-value_from_text) |
+| `Self` | [`on_value_changed(f: impl Fn(T, &mut EventContext) + 'static)`](#spinbox-on_value_changed) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#spinbox-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#spinbox-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#spinbox-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#spinbox-composite_tooltip) |
+| | **Methods** |
+| `Signal<T>` | [`value()`](#spinbox-value) |
+
+### `SpinValue`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`from_f64_saturating(v: f64)`](#spinvalue-from_f64_saturating) |
+| `Option<Self>` | [`parse(s: &str)`](#spinvalue-parse) |
+| | **Builder methods** |
+| `Self` | [`saturating_add(rhs: Self)`](#spinvalue-saturating_add) |
+| `Self` | [`saturating_sub(rhs: Self)`](#spinvalue-saturating_sub) |
+| `Self` | [`saturating_mul_u32(rhs: u32)`](#spinvalue-saturating_mul_u32) |
+| | **Methods** |
+| `f64` | [`to_f64()`](#spinvalue-to_f64) |
+| `String` | [`format(decimals: u8)`](#spinvalue-format) |
+| `Self { /* default implementation */ }` | [`clamp_value(min: Self, max: Self)`](#spinvalue-clamp_value) |
+| | **Associated functions** |
+| `bool` | [`is_integer()`](#spinvalue-is_integer) |
+| `bool` | [`is_valid_input_char(c: char)`](#spinvalue-is_valid_input_char) |
+
+## Detailed description
+
 A generic composite over `SpinValue`
 (integer and floating-point primitives), pairing the
 `TextInputField` editing
@@ -15,7 +88,7 @@ are a synthesis of Qt's `QSpinBox` / `QDoubleSpinBox`, WinUI 3's
 `NumberBox`, GTK's `GtkSpinButton`, and the W3C ARIA
 `spinbutton` role.
 
-# Behaviour
+### Behaviour
 
 - **Value binding**: a `Signal<T>` is the single source of truth.
   Typing and stepping update it; external writes re-format the
@@ -90,7 +163,7 @@ are a synthesis of Qt's `QSpinBox` / `QDoubleSpinBox`, WinUI 3's
   hex, duration, anything. A custom formatter/parser owns the
   whole convention — it is not re-punctuated by the locale layer.
 
-# Accessibility
+### Accessibility
 
 The editing field is the spin button: one AccessKit node with
 `Role::SpinButton`,
@@ -124,7 +197,7 @@ none of the three mutating actions. The step buttons are
 structurally part of the SpinBox and publish no separate a11y
 nodes; stepping is the spin button's `Increment` and `Decrement`.
 
-# Example
+### Example
 
 ```ignore
 use teksilo::widgets::{SpinBox, WrapMode};
@@ -147,7 +220,7 @@ ctx.add(
 );
 ```
 
-## Touch and pen
+#### Touch and pen
 
 The step buttons are the controls sweep's one **unreachable target**, and
 the reason is recorded rather than papered over. Each is 18 x 13 dp inside a
@@ -208,13 +281,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![SpinBox at Touch density](img/spin_box-touch.png)
 
-## Builder methods at a glance
-
-`style`, `single_step`, `page_step`, `decimals`, `localized`, `use_grouping`, `suffix`, `special_value_text`, `wrap_mode`, `step_type`, `button_layout`, `show_buttons`, `wheel_mode`, `width`, `width_chars`, `fill_width`, `label`, `placeholder`, `enabled`, `read_only`, `text_from_value`, `value_from_text`, `on_value_changed`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `value`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/spin_box/index.html)
+
+<a id="wrapmode"></a>
 
 ## `pub enum WrapMode`
 
@@ -231,6 +302,8 @@ pub enum WrapMode { /* variants */ }
 - **`Clamp`** — Clamp to `min` / `max` (default).
 - **`Wrap`** — Wrap around: past `max` jumps to `min`, past `min` jumps to `max`. Matches Qt's `QAbstractSpinBox::wrapping`.
 
+<a id="steptype"></a>
+
 ## `pub enum StepType`
 
 Step-size policy for each key/button press.
@@ -245,6 +318,8 @@ pub enum StepType { /* variants */ }
 
 - **`Fixed`** — Always step by `single_step` (default).
 - **`Adaptive`** — Step by the decimal power-of-ten immediately below the current value's magnitude — e.g. values 1–9 step by 1, 10–99 by 10, 100–999 by 100. Matches Qt's `AdaptiveDecimalStepType`. Integer types honor the same rule using the magnitude of the absolute value.
+
+<a id="wheelmode"></a>
 
 ## `pub enum WheelMode`
 
@@ -261,6 +336,8 @@ pub enum WheelMode { /* variants */ }
 - **`Focused`** — Wheel adjusts only when the field is focused. Default — prevents accidental changes when the user is scrolling a larger surrounding view.
 - **`Hover`** — Wheel adjusts whenever the pointer is over the widget.
 - **`Disabled`** — Wheel never adjusts the value; events bubble to the surrounding scroll container.
+
+<a id="widthpolicy"></a>
 
 ## `pub enum WidthPolicy`
 
@@ -282,6 +359,8 @@ pub enum WidthPolicy { /* variants */ }
 - **`Chars`** — Size the widget to fit this many reference digits (`'0'`) plus the configured suffix, padding, and step buttons. Measurement uses the theme font at build time.
 - **`Fill`** — Let the widget expand horizontally to fill whatever space the parent offers. Equivalent to an infinite pixel cap.
 
+<a id="spin_box_step_button_width"></a>
+
 ## `pub const SPIN_BOX_STEP_BUTTON_WIDTH`
 
 Minimum total width. Below this the stacked step buttons stop
@@ -301,6 +380,8 @@ mechanisms and the `chrome` arithmetic below read the same number.
 pub const SPIN_BOX_STEP_BUTTON_WIDTH: f32 = 18.0;
 ```
 
+<a id="spin_box_step_button_height"></a>
+
 ## `pub const SPIN_BOX_STEP_BUTTON_HEIGHT`
 
 Painted height of one stacked step button, in dp. Only a fallback — the
@@ -309,6 +390,8 @@ real height is half the field's inner height (see `build_step_buttons`).
 ```rust
 pub const SPIN_BOX_STEP_BUTTON_HEIGHT: f32 = 12.0;
 ```
+
+<a id="spinbox"></a>
 
 ## `pub struct SpinBox`
 
@@ -322,30 +405,42 @@ pub struct SpinBox<T: SpinValue> { /* fields */ }
 
 ### Methods
 
+<a id="spinbox-new"></a>
+
 #### `pub fn new(value: Signal<T>, min: T, max: T) -> Self`
 
 Construct a new SpinBox bound to `value` with the given
 inclusive range. `min` must be ≤ `max`.
+
+<a id="spinbox-style"></a>
 
 #### `pub fn style(mut self, style: impl teksilo_core::styles::SpinBoxStyle) -> Self`
 
 Per-call style override. Higher precedence than the theme-wide
 `style_slots.spin_box` slot.
 
+<a id="spinbox-single_step"></a>
+
 #### `pub fn single_step(mut self, step: T) -> Self`
 
 Set the step size for `Up` / `Down` / single wheel tick /
 button tap.
+
+<a id="spinbox-page_step"></a>
 
 #### `pub fn page_step(mut self, step: T) -> Self`
 
 Set the step size for `PageUp` / `PageDown`. When unset,
 defaults to `10 × single_step` at build time.
 
+<a id="spinbox-decimals"></a>
+
 #### `pub fn decimals(mut self, decimals: u8) -> Self`
 
 Number of decimal places shown for floating-point types.
 Ignored for integer types.
+
+<a id="spinbox-localized"></a>
 
 #### `pub fn localized(mut self, on: bool) -> Self`
 
@@ -370,6 +465,8 @@ With no `I18nManager` installed the active locale resolves to the
 C locale, so this is a no-op in tests and in apps that have not
 opted into i18n.
 
+<a id="spinbox-use_grouping"></a>
+
 #### `pub fn use_grouping(mut self, on: bool) -> Self`
 
 Whether the displayed number carries thousands separators.
@@ -383,11 +480,15 @@ group sizes, including the Indic lakh system (`12,34,567`).
 
 Has no effect when `localized` is off.
 
+<a id="spinbox-suffix"></a>
+
 #### `pub fn suffix(mut self, text: impl Into<String>) -> Self`
 
 Qt-style non-editable trailing unit (e.g. `" %"`, `" px"`,
 `" dB"`). Rendered flush-right inside the field's border;
 the caret cannot enter it.
+
+<a id="spinbox-special_value_text"></a>
 
 #### `pub fn special_value_text(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -398,20 +499,28 @@ semantics. The text stays while the field has focus, as
 Qt's `specialValueText` does: keyboard focus selects it, so a
 number typed replaces it, and a step moves off it.
 
+<a id="spinbox-wrap_mode"></a>
+
 #### `pub fn wrap_mode(mut self, mode: WrapMode) -> Self`
 
 Set the out-of-range behavior when stepping past `min` or `max`
 (default: `Clamp`).
+
+<a id="spinbox-step_type"></a>
 
 #### `pub fn step_type(mut self, step_type: StepType) -> Self`
 
 Set the step-size policy (default: `Fixed`). Use
 `StepType::Adaptive` for values that span many orders of magnitude.
 
+<a id="spinbox-button_layout"></a>
+
 #### `pub fn button_layout(mut self, layout: ButtonLayout) -> Self`
 
 Override the step-button layout (default: `Stacked` — stacked
 up/down buttons to the right of the field).
+
+<a id="spinbox-show_buttons"></a>
 
 #### `pub fn show_buttons(mut self, show: bool) -> Self`
 
@@ -422,10 +531,14 @@ often hide the step buttons to reduce visual noise and let
 keyboard / wheel carry the affordance — pass
 `.show_buttons(false)` on those call sites.
 
+<a id="spinbox-wheel_mode"></a>
+
 #### `pub fn wheel_mode(mut self, mode: WheelMode) -> Self`
 
 Set when the mouse wheel adjusts the value (default: `Focused` —
 only when the inner field holds focus).
+
+<a id="spinbox-width"></a>
 
 #### `pub fn width(mut self, width: f32) -> Self`
 
@@ -445,6 +558,8 @@ let _w = SpinBox::new(v.clone(), 0, 9999).fill_width();       // stretch to pare
 let _w = SpinBox::new(v.clone(), 0, 9999).width_chars(5);     // "fits 5 digits"
 ```
 
+<a id="spinbox-width_chars"></a>
+
 #### `pub fn width_chars(mut self, chars: u32) -> Self`
 
 Size the widget to fit exactly `chars` reference digits plus
@@ -462,6 +577,8 @@ let _w = SpinBox::new(port, 0, 65_535).width_chars(5);           // 5 digits
 let _w = SpinBox::new(pct, 0, 100).suffix(" %").width_chars(3);  // 3 + " %"
 ```
 
+<a id="spinbox-fill_width"></a>
+
 #### `pub fn fill_width(mut self) -> Self`
 
 Let the widget expand to fill the horizontal space offered
@@ -469,6 +586,8 @@ by its parent, instead of capping at `width`.
 Use inside toolbars, inspector panels, or an
 `Expand::horizontal` column that should stretch with the
 surrounding layout.
+
+<a id="spinbox-label"></a>
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
@@ -479,15 +598,21 @@ via a `FormLayout` line, `access_labelled_by` or `access_label`
 on the spin box, which all reach the editing field that holds
 focus and publishes the spin button.
 
+<a id="spinbox-placeholder"></a>
+
 #### `pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Set the placeholder text shown in the field when it is empty.
+
+<a id="spinbox-enabled"></a>
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state, statically or reactively. Forwarded to
 the arena at build time via
 `ctx.enabled_when(spinbox_id, self.enabled.clone())`.
+
+<a id="spinbox-read_only"></a>
 
 #### `pub fn read_only(mut self, read_only: bool) -> Self`
 
@@ -497,12 +622,16 @@ no step buttons, and no assistive-technology `Increment` / `Decrement`
 stops `stepBy`. The field keeps focus and selection, so the value can
 still be read and copied.
 
+<a id="spinbox-text_from_value"></a>
+
 #### `pub fn text_from_value(mut self, f: impl Fn(T) -> LocalizedString + 'static) -> Self`
 
 Override the value → display-string conversion. Receives the
 raw value; returns whatever string should appear in the
 field. Suffix and `special_value_text` still apply on top of
 the returned string.
+
+<a id="spinbox-value_from_text"></a>
 
 #### `pub fn value_from_text(mut self, f: impl Fn(&str) -> Option<T> + 'static) -> Self`
 
@@ -518,6 +647,8 @@ parser owns the text convention, so a month field reading
 `"march"` as 3 can be typed by name: every character reaches the
 field, and whatever the parser refuses is reverted at commit.
 
+<a id="spinbox-on_value_changed"></a>
+
 #### `pub fn on_value_changed(mut self, f: impl Fn(T, &mut EventContext) + 'static) -> Self`
 
 Closure fired each time the value is committed (keyboard
@@ -525,6 +656,8 @@ step, button tap, wheel tick, Enter, blur). Bound observers
 on the value signal also see every change; use this hook
 when the caller needs an `EventContext` (e.g. to fire an
 intent).
+
+<a id="spinbox-tooltip"></a>
 
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -534,6 +667,8 @@ Mutually exclusive with `rich_tooltip`,
 `rich_tooltip_content`, and
 `composite_tooltip` — each setter
 clears the other two so the last call wins.
+
+<a id="spinbox-rich_tooltip"></a>
 
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
@@ -545,12 +680,16 @@ exclusive with `tooltip`,
 `rich_tooltip_content`, and
 `composite_tooltip`.
 
+<a id="spinbox-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Attach a rich tooltip with inline content (no registry key
 required). Mutually exclusive with `tooltip`,
 `rich_tooltip`, and
 `composite_tooltip`.
+
+<a id="spinbox-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 
@@ -559,9 +698,13 @@ tree. Mutually exclusive with `tooltip`,
 `rich_tooltip`, and
 `rich_tooltip_content`.
 
+<a id="spinbox-value"></a>
+
 #### `pub fn value(&self) -> Signal<T>`
 
 The bound numeric value signal.
+
+<a id="spinvalue"></a>
 
 ## `pub trait SpinValue`
 
@@ -581,6 +724,8 @@ pub trait SpinValue: sealed::Sealed + Copy + PartialOrd + Debug + 'static { /* a
 
 ### Associated items
 
+<a id="spinvalue-to_f64"></a>
+
 #### `fn to_f64(self) -> f64;`
 
 Lossless widening to `f64`. Used for AccessKit's numeric
@@ -588,11 +733,15 @@ value / min / max / step properties and for
 `StepType::Adaptive` decimal
 analysis.
 
+<a id="spinvalue-from_f64_saturating"></a>
+
 #### `fn from_f64_saturating(v: f64) -> Self;`
 
 Narrowing from `f64` with saturation at the type's full
 range. For integers the conversion truncates toward zero,
 matching Rust's `as` conversion semantics.
+
+<a id="spinvalue-parse"></a>
 
 #### `fn parse(s: &str) -> Option<Self>;`
 
@@ -601,6 +750,8 @@ ignored. Returns `None` for syntactically invalid input
 (but NOT for out-of-range values — the SpinBox clamps
 separately so users can type past the bound and see the
 reformatted clamped result after blur).
+
+<a id="spinvalue-format"></a>
 
 #### `fn format(self, decimals: u8) -> String;`
 
@@ -613,20 +764,28 @@ separator. Formatter closures on `SpinBox`
 (`text_from_value`)
 override this.
 
+<a id="spinvalue-saturating_add"></a>
+
 #### `fn saturating_add(self, rhs: Self) -> Self;`
 
 Saturating addition. Out-of-type-range results clamp at
 `MAX` (or `MIN` for negative overflow on signed types).
 
+<a id="spinvalue-saturating_sub"></a>
+
 #### `fn saturating_sub(self, rhs: Self) -> Self;`
 
 Saturating subtraction. See `saturating_add`.
+
+<a id="spinvalue-saturating_mul_u32"></a>
 
 #### `fn saturating_mul_u32(self, rhs: u32) -> Self;`
 
 Saturating multiplication by a positive integer. Used for
 `page_step = multiplier × single_step` when the caller
 omits a page step.
+
+<a id="spinvalue-is_integer"></a>
 
 #### `fn is_integer() -> bool;`
 
@@ -635,12 +794,16 @@ component, no decimal separator in the default
 `format` path). Controls the default
 character filter and whether `decimals` has any effect.
 
+<a id="spinvalue-is_valid_input_char"></a>
+
 #### `fn is_valid_input_char(c: char) -> bool;`
 
 Default per-character input filter for the editable field.
 Admits digits and, for signed types, `-`; float types also
 admit `.`, `+`, `e`, `E`. Callers can override the whole
 filter on the `SpinBox` builder.
+
+<a id="spinvalue-clamp_value"></a>
 
 #### `fn clamp_value(self, min: Self, max: Self) -> Self { /* default implementation */ }`
 

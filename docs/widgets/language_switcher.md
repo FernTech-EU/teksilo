@@ -7,6 +7,25 @@
 
 LanguageSwitcher — a drop-in UI-language picker for settings screens.
 
+## Public functions
+
+### `LanguageSwitcher`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#languageswitcher-new) |
+| | **Builder methods** |
+| `Self` | [`variant(variant: ComboBoxVariant)`](#languageswitcher-variant) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#languageswitcher-label) |
+| `Self` | [`locales(locales: Vec<LanguageIdentifier>)`](#languageswitcher-locales) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#languageswitcher-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#languageswitcher-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#languageswitcher-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#languageswitcher-composite_tooltip) |
+
+## Detailed description
+
 A thin `ComboBox` preset that lists the application's supported
 locales and switches the active locale on selection. Each entry is
 shown as its **endonym** — the language's own name — followed by the
@@ -45,13 +64,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![LanguageSwitcher at Touch density](img/language_switcher-touch.png)
 
-## Builder methods at a glance
-
-`variant`, `label`, `locales`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/language_switcher/index.html)
+
+<a id="languageswitcher"></a>
 
 ## `pub struct LanguageSwitcher`
 
@@ -63,19 +80,27 @@ pub struct LanguageSwitcher { /* fields */ }
 
 ### Methods
 
+<a id="languageswitcher-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create a switcher that auto-discovers the supported locales from
 the active `I18nManager`.
 
+<a id="languageswitcher-variant"></a>
+
 #### `pub fn variant(mut self, variant: ComboBoxVariant) -> Self`
 
 Pick the inner ComboBox's design-language variant.
+
+<a id="languageswitcher-label"></a>
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Set the accessible / control label (defaults to `"Language"`).
 Pass a `tr!(...)` to localize it.
+
+<a id="languageswitcher-locales"></a>
 
 #### `pub fn locales(mut self, locales: Vec<LanguageIdentifier>) -> Self`
 
@@ -83,11 +108,15 @@ Override the locale list instead of auto-discovering it from the
 active `I18nManager`. Useful in previews / tests, or to restrict
 the offered set.
 
+<a id="languageswitcher-tooltip"></a>
+
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Attach a plain tooltip, forwarded to the inner `ComboBox`.
 Mutually exclusive with the rich / composite variants — last
 call wins.
+
+<a id="languageswitcher-rich_tooltip"></a>
 
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
@@ -95,11 +124,15 @@ Attach a rich tooltip resolved from the app-wide registry,
 forwarded to the inner `ComboBox`. Overrides any previously
 set tooltip.
 
+<a id="languageswitcher-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Attach a rich tooltip driven by inline
 `TooltipContent`, forwarded to
 the inner `ComboBox`. Overrides any previously set tooltip.
+
+<a id="languageswitcher-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 

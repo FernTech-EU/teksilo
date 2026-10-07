@@ -5,6 +5,44 @@
 
 Per-item event handlers, cursor and tooltip overrides.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`SceneTapEvent`](#scenetapevent) — Click-style gesture envelope for scene items |
+| `enum` | [`DragMode`](#dragmode) — What a `SceneView`'s on-canvas pointer drag does in empty space |
+| `struct` | [`SceneItemHandlerSet`](#sceneitemhandlerset) — Per-item event closures + cursor + tooltip + drop acceptance |
+
+## Public functions
+
+### `SceneTapEvent`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(position_scene: Point, button: PointerButton, modifiers: Modifiers)`](#scenetapevent-new) |
+
+### `SceneItemHandlerSet`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#sceneitemhandlerset-new) |
+| | **Methods** |
+| `&mut Self` | [`on_tap<F>(f: F)`](#sceneitemhandlerset-on_tap) |
+| `&mut Self` | [`on_tap_event<F>(f: F)`](#sceneitemhandlerset-on_tap_event) |
+| `&mut Self` | [`on_double_tap<F>(f: F)`](#sceneitemhandlerset-on_double_tap) |
+| `&mut Self` | [`on_double_tap_event<F>(f: F)`](#sceneitemhandlerset-on_double_tap_event) |
+| `&mut Self` | [`on_hover<F>(f: F)`](#sceneitemhandlerset-on_hover) |
+| `&mut Self` | [`on_context_menu<F>(f: F)`](#sceneitemhandlerset-on_context_menu) |
+| `&mut Self` | [`on_context_menu_event<F>(f: F)`](#sceneitemhandlerset-on_context_menu_event) |
+| `&mut Self` | [`accept_tap_buttons(mask: ButtonMask)`](#sceneitemhandlerset-accept_tap_buttons) |
+| `&mut Self` | [`cursor(c: CursorIcon)`](#sceneitemhandlerset-cursor) |
+| `&mut Self` | [`tooltip(t: impl Into<LocalizedString>)`](#sceneitemhandlerset-tooltip) |
+| `&mut Self` | [`accepts_drops(accepts: bool)`](#sceneitemhandlerset-accepts_drops) |
+
+## Detailed description
+
 `SceneItemHandlerSet` is the lightweight-tier counterpart to
 widget-level `HandlerSet`.
 It carries optional closures the `SceneView`
@@ -26,6 +64,8 @@ scene.handlers_mut(id).unwrap()
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
 
+<a id="scenetapevent"></a>
+
 ## `pub struct SceneTapEvent`
 
 Click-style gesture envelope for scene items. Mirrors the
@@ -43,10 +83,14 @@ pub struct SceneTapEvent { /* fields */ }
 
 ### Methods
 
+<a id="scenetapevent-new"></a>
+
 #### `pub fn new(position_scene: Point, button: PointerButton, modifiers: Modifiers) -> Self`
 
 Construct one by hand. Useful for tests; dispatch builds
 these from the live pointer event in `SceneView`.
+
+<a id="dragmode"></a>
 
 ## `pub enum DragMode`
 
@@ -73,6 +117,8 @@ pub enum DragMode { /* variants */ }
 - **`ScrollHandDrag`** — Left-click-drag pans the viewport; item-level drag handlers are bypassed.
 - **`RubberBand`** — Empty-space drag draws a selection marquee; item drag dispatches to the item's drag handler (respecting `IS_DRAGGABLE`). This is the default.
 
+<a id="sceneitemhandlerset"></a>
+
 ## `pub struct SceneItemHandlerSet`
 
 Per-item event closures + cursor + tooltip + drop acceptance.
@@ -86,10 +132,14 @@ pub struct SceneItemHandlerSet { /* fields */ }
 
 ### Methods
 
+<a id="sceneitemhandlerset-new"></a>
+
 #### `pub fn new() -> Self`
 
 An empty handler set — every closure unset, no cursor or
 tooltip.
+
+<a id="sceneitemhandlerset-on_tap"></a>
 
 #### `pub fn on_tap<F>(&mut self, f: F) -> &mut Self where F: Fn(Point, &mut EventContext) + 'static,`
 
@@ -101,6 +151,8 @@ click selection, Ctrl-click toggle, etc.) use
 `Self::on_tap_event` which exposes the full
 `SceneTapEvent`.
 
+<a id="sceneitemhandlerset-on_tap_event"></a>
+
 #### `pub fn on_tap_event<F>(&mut self, f: F) -> &mut Self where F: Fn(&SceneTapEvent, &mut EventContext) + 'static,`
 
 Register a tap callback that receives the full
@@ -109,6 +161,8 @@ Use for modifier-aware patterns (`Shift+click extends
 selection`, `Ctrl+click toggles`, middle-click handlers
 once paired with `accept_tap_buttons`).
 
+<a id="sceneitemhandlerset-on_double_tap"></a>
+
 #### `pub fn on_double_tap<F>(&mut self, f: F) -> &mut Self where F: Fn(Point, &mut EventContext) + 'static,`
 
 Register a double-tap callback (Point-only shim — see
@@ -116,14 +170,20 @@ Register a double-tap callback (Point-only shim — see
 dispatch doesn't recognise double-tap; the field is stored
 but never fired. A future unit wires the recognizer.
 
+<a id="sceneitemhandlerset-on_double_tap_event"></a>
+
 #### `pub fn on_double_tap_event<F>(&mut self, f: F) -> &mut Self where F: Fn(&SceneTapEvent, &mut EventContext) + 'static,`
 
 Rich-event variant of `Self::on_double_tap`.
+
+<a id="sceneitemhandlerset-on_hover"></a>
 
 #### `pub fn on_hover<F>(&mut self, f: F) -> &mut Self where F: Fn(bool, &mut EventContext) + 'static,`
 
 Register a hover callback. Receives `true` on enter,
 `false` on leave.
+
+<a id="sceneitemhandlerset-on_context_menu"></a>
 
 #### `pub fn on_context_menu<F>(&mut self, f: F) -> &mut Self where F: Fn(Point, &mut EventContext) + 'static,`
 
@@ -131,9 +191,13 @@ Register a context-menu callback (right-click). Point-only
 shim; see `Self::on_context_menu_event` for the rich
 variant.
 
+<a id="sceneitemhandlerset-on_context_menu_event"></a>
+
 #### `pub fn on_context_menu_event<F>(&mut self, f: F) -> &mut Self where F: Fn(&SceneTapEvent, &mut EventContext) + 'static,`
 
 Rich-event variant of `Self::on_context_menu`.
+
+<a id="sceneitemhandlerset-accept_tap_buttons"></a>
 
 #### `pub fn accept_tap_buttons(&mut self, mask: ButtonMask) -> &mut Self`
 
@@ -142,9 +206,13 @@ for this item. Default `ButtonMask::PRIMARY`. Right-click
 (`SECONDARY`) always routes through `on_context_menu`
 regardless of this mask.
 
+<a id="sceneitemhandlerset-cursor"></a>
+
 #### `pub fn cursor(&mut self, c: CursorIcon) -> &mut Self`
 
 Override the cursor icon shown over this item.
+
+<a id="sceneitemhandlerset-tooltip"></a>
 
 #### `pub fn tooltip(&mut self, t: impl Into<LocalizedString>) -> &mut Self`
 
@@ -154,6 +222,8 @@ Set a tooltip. Accepts anything convertible into
 Stored unresolved; the SceneView resolves it against the active
 locale when the tooltip is shown, so a `tr!(...)` source tracks
 locale changes.
+
+<a id="sceneitemhandlerset-accepts_drops"></a>
 
 #### `pub fn accepts_drops(&mut self, accepts: bool) -> &mut Self`
 

@@ -5,6 +5,74 @@
 
 The `SceneItem` trait and its supporting context types.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`ItemId`](#itemid) — Opaque identifier for a `SceneItem` inside a `Scene` |
+| `struct` | [`SceneItemPaintContext`](#sceneitempaintcontext) — Context handed to `SceneItem::paint` |
+| `struct` | [`SceneItemA11yContext`](#sceneitema11ycontext) — Context handed to `SceneItem::accessibility` |
+| `enum` | [`AppearanceWrite`](#appearancewrite) — What a `SceneItem` appearance setter did — and, when it did anything, the value it overwrote |
+| `trait` | [`SceneItem`](#sceneitem) — A lightweight, paint-only scene-graph item |
+
+## Public functions
+
+### `ItemId`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `u64` | [`as_u64()`](#itemid-as_u64) |
+
+### `SceneItemPaintContext`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(view_transform: Transform2D, dirty_scene_rect: Option<Rect>, theme: &'a Theme)`](#sceneitempaintcontext-new) |
+| | **Builder methods** |
+| `Self` | [`with_text_scale(text_scale: f32)`](#sceneitempaintcontext-with_text_scale) |
+| `Self` | [`with_window_active(window_active: bool)`](#sceneitempaintcontext-with_window_active) |
+| `Self` | [`with_enabled(enabled: bool)`](#sceneitempaintcontext-with_enabled) |
+
+### `SceneItemA11yContext`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(view_transform: Transform2D, scene_bounds: Rect, item_id: ItemId, local_to_scene: Transform2D)`](#sceneitema11ycontext-new) |
+
+### `AppearanceWrite`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`replaced(previous: T)`](#appearancewrite-replaced) |
+| | **Methods** |
+| `bool` | [`accepted()`](#appearancewrite-accepted) |
+| `Option<Option<T>>` | [`into_previous()`](#appearancewrite-into_previous) |
+
+### `SceneItem`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `Rect` | [`local_bounds()`](#sceneitem-local_bounds) |
+|  | [`set_local_bounds(bounds: Rect)`](#sceneitem-set_local_bounds) |
+|  | [`paint(canvas: &mut Canvas, ctx: &SceneItemPaintContext<'_>)`](#sceneitem-paint) |
+| `AppearanceWrite<ColorProp> { /* default implementation */ }` | [`set_fill(fill: Option<ColorProp>)`](#sceneitem-set_fill) |
+| `AppearanceWrite<(ColorProp, StrokeStyle)> { /* default implementation */ }` | [`set_stroke(stroke: Option<(ColorProp, StrokeStyle)>)`](#sceneitem-set_stroke) |
+| `crate::shape::ItemShape { /* default implementation */ }` | [`shape()`](#sceneitem-shape) |
+| `teksilo_tokens::Color { /* default implementation */ }` | [`thumbnail_color()`](#sceneitem-thumbnail_color) |
+| `ItemFlags { /* default implementation */ }` | [`initial_flags()`](#sceneitem-initial_flags) |
+| `Option<String> { /* default implementation */ }` | [`label()`](#sceneitem-label) |
+| `crate::items::AccessSubtreeMode { /* default implementation */ }` | [`access_subtree_mode()`](#sceneitem-access_subtree_mode) |
+| `crate::cache::CacheMode { /* default implementation */ }` | [`cache_mode()`](#sceneitem-cache_mode) |
+|  | [`register_bindings(_ctx: &mut BuildContext, _view_id: WidgetId)`](#sceneitem-register_bindings) |
+|  | [`accessibility(builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext)`](#sceneitem-accessibility) |
+
+## Detailed description
+
 Lightweight items live in a `Scene` without arena
 overhead. Each carries its own bounds (in **local item coordinates**,
 origin at the item's anchor) and paints itself via
@@ -12,7 +80,7 @@ origin at the item's anchor) and paints itself via
 trait directly for custom items; built-ins live in
 `crate::items`.
 
-# Coordinate model
+### Coordinate model
 
 An item is positioned in its parent's coordinate space by a
 `local_pos: Point` plus an optional `transform: Transform2D`
@@ -23,7 +91,7 @@ scene-coord point into local coords before testing the item's
 `SceneItem::shape`; paint pushes the scene transform
 onto the canvas before calling `SceneItem::paint`.
 
-## When to use
+#### When to use
 
 Implement `SceneItem` when you need a lightweight, paint-only
 decoration or connector that isn't interactive enough to warrant a
@@ -31,7 +99,7 @@ full widget (no keyboard focus, no complex event handling). For
 anything that needs focus, animations, drag-and-drop, or AT by
 default, prefer the heavyweight tier (`Scene::add_widget`).
 
-## Custom item example
+#### Custom item example
 
 ```ignore
 use teksilo_scene::{SceneItem, SceneItemPaintContext};
@@ -50,13 +118,11 @@ impl SceneItem for DotItem {
 }
 ```
 
-## Builder methods at a glance
-
-`as_u64`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="itemid"></a>
 
 ## `pub struct ItemId`
 
@@ -82,9 +148,13 @@ pub struct ItemId(pub(crate) u64);
 
 ### Methods
 
+<a id="itemid-as_u64"></a>
+
 #### `pub fn as_u64(self) -> u64`
 
 Raw numeric value, used by AccessKit's synthetic-NodeId derivation.
+
+<a id="sceneitempaintcontext"></a>
 
 ## `pub struct SceneItemPaintContext`
 
@@ -115,6 +185,8 @@ pub struct SceneItemPaintContext<'a> { /* fields */ }
 
 ### Methods
 
+<a id="sceneitempaintcontext-new"></a>
+
 #### `pub fn new( view_transform: Transform2D, dirty_scene_rect: Option<Rect>, theme: &'a Theme, ) -> Self`
 
 Construct a paint context with the given view transform, optional dirty
@@ -123,17 +195,25 @@ region, and the active theme. `text_scale` defaults to `1.0`,
 carry the accessibility scale, window-active state, and per-item enabled
 state from the widget paint pass.
 
+<a id="sceneitempaintcontext-with_text_scale"></a>
+
 #### `pub fn with_text_scale(mut self, text_scale: f32) -> Self`
 
 Set the global accessibility text-scale factor carried to opted-in items.
+
+<a id="sceneitempaintcontext-with_window_active"></a>
 
 #### `pub fn with_window_active(mut self, window_active: bool) -> Self`
 
 Set whether the host window is currently active (focused and unoccluded).
 
+<a id="sceneitempaintcontext-with_enabled"></a>
+
 #### `pub fn with_enabled(mut self, enabled: bool) -> Self`
 
 Set the effective enabled state of the item being painted.
+
+<a id="sceneitema11ycontext"></a>
 
 ## `pub struct SceneItemA11yContext`
 
@@ -183,6 +263,8 @@ pub struct SceneItemA11yContext { /* fields */ }
 
 ### Methods
 
+<a id="sceneitema11ycontext-new"></a>
+
 #### `pub fn new( view_transform: Transform2D, scene_bounds: Rect, item_id: ItemId, local_to_scene: Transform2D, ) -> Self`
 
 An accessibility context stated field by field — the constructor
@@ -190,6 +272,8 @@ An accessibility context stated field by field — the constructor
 
 The view builds its own; this exists so an item author can call their
 own `accessibility` from a test.
+
+<a id="appearancewrite"></a>
 
 ## `pub enum AppearanceWrite`
 
@@ -228,13 +312,19 @@ pub enum AppearanceWrite<T> { /* variants */ }
 
 ### Methods
 
+<a id="appearancewrite-replaced"></a>
+
 #### `pub fn replaced(previous: T) -> Self`
 
 Sugar for `Accepted { was: Some(previous) }`.
 
+<a id="appearancewrite-accepted"></a>
+
 #### `pub fn accepted(&self) -> bool`
 
 Whether the item took the write.
+
+<a id="appearancewrite-into_previous"></a>
 
 #### `pub fn into_previous(self) -> Option<Option<T>>`
 
@@ -242,6 +332,8 @@ The overwritten slot contents, or `None` when the write was refused.
 
 The outer `Option` is "did anything happen"; the inner one is "was the
 slot occupied".
+
+<a id="sceneitem"></a>
 
 ## `pub trait SceneItem`
 
@@ -277,12 +369,16 @@ pub trait SceneItem: std::fmt::Debug + 'static { /* associated items below */ }
 
 ### Associated items
 
+<a id="sceneitem-local_bounds"></a>
+
 #### `fn local_bounds(&self) -> Rect;`
 
 AABB in **local item coordinates** (origin at the item's
 anchor). The Scene composes this with the item's
 `scene_transform` to compute its scene-space AABB for the
 spatial index.
+
+<a id="sceneitem-set_local_bounds"></a>
 
 #### `fn set_local_bounds(&mut self, bounds: Rect);`
 
@@ -306,6 +402,8 @@ Two obligations, because the Scene reads
   asked for, and say so in your own documentation — the Scene stores
   the answer, so a lie here is a lie in the index.
 
+<a id="sceneitem-paint"></a>
+
 #### `fn paint(&self, canvas: &mut Canvas, ctx: &SceneItemPaintContext<'_>);`
 
 Paint the item into the canvas. The canvas already has this
@@ -317,6 +415,8 @@ item's anchor.
 `window_active`, and per-item `enabled` state, so colour-bearing items
 resolve their `ColorProp` fills/strokes with
 `prop.resolve(ctx.theme, ctx.enabled)`.
+
+<a id="sceneitem-set_fill"></a>
 
 #### `fn set_fill(&mut self, fill: Option<ColorProp>) -> AppearanceWrite<ColorProp> { /* default implementation */ }`
 
@@ -335,6 +435,8 @@ therefore what a data layer reverses the edit from; see
 `AppearanceWrite` for why it rides out of the setter instead of coming
 from a getter.
 
+<a id="sceneitem-set_stroke"></a>
+
 #### `fn set_stroke( &mut self, stroke: Option<(ColorProp, StrokeStyle)>, ) -> AppearanceWrite<(ColorProp, StrokeStyle)> { /* default implementation */ }`
 
 Replace the stroke (colour + `StrokeStyle`), returning what was there
@@ -346,6 +448,8 @@ paths, and groups accept it; text and image items refuse. Default:
 
 Same obligation as `set_fill`: an implementation
 that writes the slot returns what it overwrote.
+
+<a id="sceneitem-shape"></a>
 
 #### `fn shape(&self) -> crate::shape::ItemShape { /* default implementation */ }`
 
@@ -395,6 +499,8 @@ snapshot stores the shape itself and every query reads the same one.
 The pair this replaced (a `&self` predicate for the eager path, a
 boxed closure for the snapshot) had to be kept in agreement by hand.
 
+<a id="sceneitem-thumbnail_color"></a>
+
 #### `fn thumbnail_color(&self) -> teksilo_tokens::Color { /* default implementation */ }`
 
 Dominant color to draw as the item's representation in
@@ -411,6 +517,8 @@ Consumed by `Scene::item_thumbnails`
 — the typical minimap input. Apps with non-standard items
 can override on their own `SceneItem` impls.
 
+<a id="sceneitem-initial_flags"></a>
+
 #### `fn initial_flags(&self) -> ItemFlags { /* default implementation */ }`
 
 The flags this item should carry into the Scene at insert
@@ -425,12 +533,16 @@ stored on the entry. Subsequent flag changes go through
 `Scene::set_flag` /
 `Scene::set_flags`.
 
+<a id="sceneitem-label"></a>
+
 #### `fn label(&self) -> Option<String> { /* default implementation */ }`
 
 Optional human-readable label, surfaced in debug introspection
 and used by the default `SceneItem::accessibility` impl as
 the AT name when an item author hasn't overridden it via the
 per-item `.access_label(...)` chain.
+
+<a id="sceneitem-access_subtree_mode"></a>
 
 #### `fn access_subtree_mode(&self) -> crate::items::AccessSubtreeMode { /* default implementation */ }`
 
@@ -442,6 +554,8 @@ AT subtree treatment for descendants.
 AT name and they're pruned from individual emission, so the
 subtree reads as a single AT element. Built-ins read this
 from their per-item `.access_subtree(...)` chain.
+
+<a id="sceneitem-cache_mode"></a>
 
 #### `fn cache_mode(&self) -> crate::cache::CacheMode { /* default implementation */ }`
 
@@ -461,6 +575,8 @@ for an id is evicted on
 `ItemChange::LocalBoundsChanged` for
 that id.
 
+<a id="sceneitem-register_bindings"></a>
+
 #### `fn register_bindings(&self, _ctx: &mut BuildContext, _view_id: WidgetId) { /* default implementation */ }`
 
 Register reactive bindings the item depends on. Called once
@@ -468,6 +584,8 @@ per `SceneView::build` for every item in
 the scene, with the SceneView's `WidgetId` as `view_id`. Items
 with signal-bound state bind their signals here at the
 appropriate `BindingLevel`.
+
+<a id="sceneitem-accessibility"></a>
 
 #### `fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) { /* default implementation */ }`
 

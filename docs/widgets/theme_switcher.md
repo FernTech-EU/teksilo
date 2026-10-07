@@ -7,6 +7,26 @@
 
 ThemeSwitcher — a drop-in app-theme picker for settings screens & toolbars.
 
+## Public functions
+
+### `ThemeSwitcher`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#themeswitcher-new) |
+| | **Builder methods** |
+| `Self` | [`variant(variant: ComboBoxVariant)`](#themeswitcher-variant) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#themeswitcher-label) |
+| `Self` | [`themes(themes: impl IntoIterator<Item = (impl Into<LocalizedString>, Theme)>)`](#themeswitcher-themes) |
+| `Self` | [`system(include: bool)`](#themeswitcher-system) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#themeswitcher-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#themeswitcher-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#themeswitcher-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#themeswitcher-composite_tooltip) |
+
+## Detailed description
+
 A thin `ComboBox` preset that switches the application theme. By default
 it offers three entries — **Light**, **Dark**, and **System** — where
 *System* follows the native OS theme live: it adopts the OS's actual colours
@@ -45,13 +65,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![ThemeSwitcher at Touch density](img/theme_switcher-touch.png)
 
-## Builder methods at a glance
-
-`variant`, `label`, `themes`, `system`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/theme_switcher/index.html)
+
+<a id="themeswitcher"></a>
 
 ## `pub struct ThemeSwitcher`
 
@@ -63,18 +81,26 @@ pub struct ThemeSwitcher { /* fields */ }
 
 ### Methods
 
+<a id="themeswitcher-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create a switcher offering Light / Dark / System (the System entry
 follows the OS theme live).
 
+<a id="themeswitcher-variant"></a>
+
 #### `pub fn variant(mut self, variant: ComboBoxVariant) -> Self`
 
 Pick the inner ComboBox's design-language variant.
 
+<a id="themeswitcher-label"></a>
+
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Set the accessible / control label (defaults to the translated "Theme").
+
+<a id="themeswitcher-themes"></a>
 
 #### `pub fn themes( mut self, themes: impl IntoIterator<Item = (impl Into<LocalizedString>, Theme)>, ) -> Self`
 
@@ -83,9 +109,13 @@ of `(label, theme)` pairs — e.g. the `teksilo-theme-*` presets. The
 System (follow-OS) entry is still appended unless `system`
 is `false`.
 
+<a id="themeswitcher-system"></a>
+
 #### `pub fn system(mut self, include: bool) -> Self`
 
 Whether to offer the "System" (follow-OS) entry. Default `true`.
+
+<a id="themeswitcher-tooltip"></a>
 
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -93,17 +123,23 @@ Attach a plain tooltip, forwarded to the inner `ComboBox`.
 Mutually exclusive with the rich / composite variants — last
 call wins.
 
+<a id="themeswitcher-rich_tooltip"></a>
+
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
 Attach a rich tooltip resolved from the app-wide registry,
 forwarded to the inner `ComboBox`. Overrides any previously
 set tooltip.
 
+<a id="themeswitcher-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Attach a rich tooltip driven by inline
 `TooltipContent`, forwarded to
 the inner `ComboBox`. Overrides any previously set tooltip.
+
+<a id="themeswitcher-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 

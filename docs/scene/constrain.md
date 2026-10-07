@@ -6,13 +6,32 @@
 The **geometry constraint**: one closure that rewrites a gesture's proposed
 geometry *before* anything is applied.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`ProposedChange`](#proposedchange) — A change a gesture is about to make, offered to the geometry constraint |
+| `enum` | [`ChangeVerdict`](#changeverdict) — What a geometry constraint decides |
+
+## Public functions
+
+### `ProposedChange`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `Vec2` | [`translation()`](#proposedchange-translation) |
+| `TransformFrame` | [`translated(translation: Vec2)`](#proposedchange-translated) |
+
+## Detailed description
+
 Snap-to-grid, axis lock, page-bounds clamping and "this item may not leave
 its lane" are all one hook. It is Qt's
 `QGraphicsItem::itemChange(ItemPositionChange, value) -> value` in the shape
 Rust's borrow rules allow: the scene is lent **read-only** and the decision
 is *returned* rather than written.
 
-# The quantity is a frame, not a pointer
+### The quantity is a frame, not a pointer
 
 A constraint is offered a `TransformFrame` — the scene-space box the
 gesture's items occupy — and hands one back. That choice is the whole reason
@@ -28,7 +47,7 @@ the obvious snap-to-grid example is actually correct:
   item or for a whole selection. Snapping `proposed.rect.x` snaps the thing
   the user is looking at.
 
-# It runs on every route, and it cannot disagree with itself
+### It runs on every route, and it cannot disagree with itself
 
 There is deliberately **no phase parameter**. The constraint is a pure
 function of the proposal, re-run from scratch on every sample including the
@@ -59,7 +78,7 @@ differently would be a bug rather than a feature. Contrast
 `SceneView::magnetism`, which are per-view
 because they say what *this pane* lets you do.
 
-# A programmatic write is never constrained
+### A programmatic write is never constrained
 
 `SceneModel::set_local_pos` and every
 other mutator land **exactly** where they say. Snapping a document load, a
@@ -68,7 +87,7 @@ is Qt's own best-known footgun with `itemChange`, and it is avoided here not
 by where the closure is stored but by *who consults it*: the gesture paths
 do, the mutators do not.
 
-# What it costs
+### What it costs
 
 A scene with **no** constraint pays one `Option` test per gesture sample and
 never builds a call. Measured on a 20 000-item scene, a pointer sample costs
@@ -88,7 +107,7 @@ Re-running rather than caching is deliberate. The answer has to be the same
 for the chrome, the preview, the commit and the announcement, and the
 cheapest way to guarantee that is for there to be nothing to invalidate.
 
-# Testing a policy
+### Testing a policy
 
 A `ProposedChange` is built by the framework and is deliberately not
 consumer-constructible. To exercise a policy closure without a widget tree,
@@ -111,7 +130,7 @@ let applied =
 assert_eq!(applied, Vec2::new(30.0, 0.0));
 ```
 
-# What it may touch
+### What it may touch
 
 It may **read** the scene through the `&Scene` it is handed — a shared
 borrow is already open, and shared plus shared is legal. It may **not**
@@ -121,7 +140,7 @@ checks the constraint flag and panics naming this hook and what to do
 instead (return the verdict), so the failure reads as the bug it is rather
 than as `RefCell already borrowed`.
 
-# Do not capture a `SceneModel`
+### Do not capture a `SceneModel`
 
 `ProposedChange::scene` is the *whole* read surface — every query
 `SceneModel` offers is a shared borrow delegating to
@@ -164,7 +183,7 @@ model.set_geometry_constraint(move |c| match weak.upgrade() {
 `a_constraint_capturing_a_weak_handle_lets_the_scene_drop`) pins both halves
 with a `Drop` sentinel.
 
-# What it may hand back
+### What it may hand back
 
 An applicable frame: every field finite, neither extent negative. That is
 not a formality. A one-character slip in the snap closure above —
@@ -176,13 +195,11 @@ and from every spatial query, with no panic to say so. So an
 sample behaves as `ChangeVerdict::Reject`, and in a debug build it panics
 naming the offending frame rather than losing the item quietly.
 
-## Builder methods at a glance
-
-`translation`, `translated`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="proposedchange"></a>
 
 ## `pub struct ProposedChange`
 
@@ -197,6 +214,8 @@ pub struct ProposedChange<'a> { /* fields */ }
 
 ### Methods
 
+<a id="proposedchange-translation"></a>
+
 #### `pub fn translation(&self) -> Vec2`
 
 The scene-space translation from `start` to
@@ -207,6 +226,8 @@ The quantity an axis lock or a grid snap works in. Exact for a
 the frame's origin, and the extent change is in the two frames
 themselves.
 
+<a id="proposedchange-translated"></a>
+
 #### `pub fn translated(&self, translation: Vec2) -> TransformFrame`
 
 `start` moved by a scene-space translation — the frame to
@@ -214,6 +235,8 @@ hand back from `ChangeVerdict::Adjust` once a move has been rewritten.
 
 The exact inverse of `translation`, so
 `c.translated(c.translation())` is `c.proposed` for a move.
+
+<a id="changeverdict"></a>
 
 ## `pub enum ChangeVerdict`
 

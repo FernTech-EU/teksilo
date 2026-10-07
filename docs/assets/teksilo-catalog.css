@@ -1,0 +1,52 @@
+/* SPDX-License-Identifier: MPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 FernTech */
+
+/*
+ * The API catalogs' function names in FernTech teal, IntUI's accent family,
+ * at a shade that keeps 4.5:1 or more against each mdBook theme's background:
+ * the accent itself, #0FB5CC, is 2.5:1 on white, too light for text.
+ * teksilo-catalog.js marks the names; the pages stay plain Markdown.
+ */
+:root,
+.light {
+    /* IntUI's high-contrast focus teal: 5.0:1 on white. */
+    --tk-fn: #0a7b8b;
+}
+
+.rust {
+    /* The same hue, a shade darker: 4.7:1 on the rust theme's beige. */
+    --tk-fn: #086b78;
+}
+
+.coal,
+.navy,
+.ayu {
+    /* IntUI's dark-mode accent: 7.7:1 and more on the dark themes. */
+    --tk-fn: #19bdd4;
+}
+
+.content .tk-fn,
+.content a code.tk-fn {
+    color: var(--tk-fn);
+}
+
+.content h4 .tk-fn {
+    font-weight: 600;
+}
+
+.content .tk-params {
+    color: var(--fg);
+}
+
+/* A table of contents reads down the page's left edge, not centred. */
+.content table.tk-contents {
+    margin: 0;
+}
+
+/* A row naming a group of functions reads as a caption, not as a member. */
+.content table.tk-contents tr.tk-group td {
+    background: var(--bg);
+    border-left-color: transparent;
+    border-right-color: transparent;
+    padding-top: 0.8em;
+}

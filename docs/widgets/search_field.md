@@ -12,6 +12,32 @@ navigation and the ARIA combobox-with-listbox accessibility pattern.
 The popover is shown via `OverlayRequest` so it floats above sibling
 content and escapes ancestor clipping (same pattern as `ComboBox`).
 
+## Public functions
+
+### `SearchField`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(text: Signal<String>)`](#searchfield-new) |
+| | **Builder methods** |
+| `Self` | [`style(style: impl teksilo_core::styles::SearchFieldStyle)`](#searchfield-style) |
+| `Self` | [`placeholder(text: impl Into<LocalizedString>)`](#searchfield-placeholder) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#searchfield-label) |
+| `Self` | [`drives_listbox(listbox: Signal<Option<WidgetId>>, active: Signal<Option<WidgetId>>)`](#searchfield-drives_listbox) |
+| `Self` | [`enabled(on: impl Into<Prop<bool>>)`](#searchfield-enabled) |
+| `Self` | [`on_submit_fn(f: impl Fn(&mut EventContext) + 'static)`](#searchfield-on_submit_fn) |
+| `Self` | [`with_suggestions(f: impl Fn(&str) -> Vec<String> + 'static)`](#searchfield-with_suggestions) |
+| `Self` | [`max_suggestions(n: usize)`](#searchfield-max_suggestions) |
+| `Self` | [`min_chars(n: usize)`](#searchfield-min_chars) |
+| `Self` | [`on_select(f: impl Fn(&str, &mut EventContext) + 'static)`](#searchfield-on_select) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#searchfield-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#searchfield-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#searchfield-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#searchfield-composite_tooltip) |
+
+## Detailed description
+
 ```ignore
 let query = ctx.signal(String::new());
 SearchField::new(query.clone())
@@ -26,7 +52,7 @@ SearchField::new(query.clone())
     .on_submit_fn(|ctx| ctx.send_intent(AppIntent::Search))
 ```
 
-## Design — comparison with searchable `ComboBox`
+#### Design — comparison with searchable `ComboBox`
 
 A searchable `ComboBox` and a `SearchField` are visually similar
 but semantically different:
@@ -46,7 +72,7 @@ a future refactor could lift a common `OverlayList<T>` primitive
 out of both. For now they're separate so each can keep a small
 API surface tuned to its semantics.
 
-## Accessibility
+#### Accessibility
 
 The field is `Role::SearchInput` with `HasPopup::Listbox` and
 `AutoComplete::List`. When the popup is open it advertises
@@ -66,13 +92,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![SearchField at Touch density](img/search_field-touch.png)
 
-## Builder methods at a glance
-
-`style`, `placeholder`, `label`, `drives_listbox`, `enabled`, `on_submit_fn`, `with_suggestions`, `max_suggestions`, `min_chars`, `on_select`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/search_field/index.html)
+
+<a id="searchfield"></a>
 
 ## `pub struct SearchField`
 
@@ -84,21 +108,31 @@ pub struct SearchField { /* fields */ }
 
 ### Methods
 
+<a id="searchfield-new"></a>
+
 #### `pub fn new(text: Signal<String>) -> Self`
 
 Create a search field bound to `text`, the reactive query string.
+
+<a id="searchfield-style"></a>
 
 #### `pub fn style(mut self, style: impl teksilo_core::styles::SearchFieldStyle) -> Self`
 
 Per-call SearchFieldStyle override.
 
+<a id="searchfield-placeholder"></a>
+
 #### `pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Set the placeholder text shown when the query is empty.
 
+<a id="searchfield-label"></a>
+
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Set an accessible label for the field (announced by screen readers, not visually shown).
+
+<a id="searchfield-drives_listbox"></a>
 
 #### `pub fn drives_listbox( mut self, listbox: Signal<Option<WidgetId>>, active: Signal<Option<WidgetId>>, ) -> Self`
 
@@ -114,13 +148,19 @@ This is for a search field driving a list built by its *host* — a
 command palette, a filter box above a results view. The built-in
 suggestion popup (`suggestions`) wires itself and needs none of this.
 
+<a id="searchfield-enabled"></a>
+
 #### `pub fn enabled(mut self, on: impl Into<Prop<bool>>) -> Self`
 
 Set the initial enabled state. Forwarded to the arena at build time.
 
+<a id="searchfield-on_submit_fn"></a>
+
 #### `pub fn on_submit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Install a callback invoked when the user presses Enter (or activates the search action).
+
+<a id="searchfield-with_suggestions"></a>
 
 #### `pub fn with_suggestions(mut self, f: impl Fn(&str) -> Vec<String> + 'static) -> Self`
 
@@ -129,17 +169,25 @@ When set, the popup appears below the field as soon as the
 user types at least `Self::min_chars` characters and the
 provider returns a non-empty list.
 
+<a id="searchfield-max_suggestions"></a>
+
 #### `pub fn max_suggestions(mut self, n: usize) -> Self`
 
 Cap the number of suggestions shown in the popup (default 8, minimum 1).
+
+<a id="searchfield-min_chars"></a>
 
 #### `pub fn min_chars(mut self, n: usize) -> Self`
 
 Minimum number of characters the user must type before suggestions appear (default 1).
 
+<a id="searchfield-on_select"></a>
+
 #### `pub fn on_select(mut self, f: impl Fn(&str, &mut EventContext) + 'static) -> Self`
 
 Install a callback invoked when the user picks a suggestion (tap, Enter, or Space).
+
+<a id="searchfield-tooltip"></a>
 
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -150,17 +198,23 @@ Mutually exclusive with `rich_tooltip`,
 `composite_tooltip` — calling this
 clears the other slots (last call wins).
 
+<a id="searchfield-rich_tooltip"></a>
+
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
 Show a registry-driven rich tooltip keyed by `key`.
 
 Mutually exclusive with the other tooltip setters — last call wins.
 
+<a id="searchfield-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Show an inline rich tooltip with the given `TooltipContent`.
 
 Mutually exclusive with the other tooltip setters — last call wins.
+
+<a id="searchfield-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 

@@ -5,6 +5,28 @@
 
 `PathItem` — vector path with optional fill and stroke.
 
+## Public functions
+
+### `PathItem`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(path: Path)`](#pathitem-new) |
+| | **Builder methods** |
+| `Self` | [`fill(color: impl Into<ColorProp>)`](#pathitem-fill) |
+| `Self` | [`fill_rule(rule: FillRule)`](#pathitem-fill_rule) |
+| `Self` | [`stroke(color: impl Into<ColorProp>, width: f32)`](#pathitem-stroke) |
+| `Self` | [`stroke_cosmetic(color: impl Into<ColorProp>, width: f32)`](#pathitem-stroke_cosmetic) |
+| `Self` | [`stroke_styled(color: impl Into<ColorProp>, style: StrokeStyle)`](#pathitem-stroke_styled) |
+| `Self` | [`hit_stroke_width(width: f32)`](#pathitem-hit_stroke_width) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#pathitem-label) |
+| `Self` | [`draggable(draggable: bool)`](#pathitem-draggable) |
+| | **Methods** |
+| `&Path` | [`path()`](#pathitem-path) |
+
+## Detailed description
+
 `PathItem` renders an arbitrary vector path in local item coordinates.
 The path can be filled, stroked, or both, and it hit-tests as exactly that
 union: a stroke-only path is clickable along its drawn line and nowhere
@@ -19,7 +41,7 @@ ideal for hairline connector wires that should stay crisp and thin. A
 cosmetic stroke's *clickable band* follows the rendered line at any zoom,
 because the width is converted from device pixels at test time.
 
-## Bounds are derived, not declared
+#### Bounds are derived, not declared
 
 A `PathItem` computes its own `local_bounds` from its geometry (plus the
 stroke's half-width and the grab slack). There is no caller-supplied AABB
@@ -32,13 +54,13 @@ asked for on every axis the path has extent on, and staying there if you
 ask again. On an axis it has none — a perfectly horizontal stroke has no
 height — the box is the band's own thickness and no request can widen it.
 
-## When to use
+#### When to use
 
 Use `PathItem` for connector lines, polygon overlays, freehand shapes,
 or any vector decoration that needs exact-shape click detection along its
 stroke. For solid rectangular regions, prefer the cheaper `RectItem`.
 
-## Example
+#### Example
 
 ```ignore
 use teksilo_scene::{SceneModel, PathItem};
@@ -59,13 +81,11 @@ let item = PathItem::new(path)
 model.add_item(item, Point::new(50.0, 50.0));
 ```
 
-## Builder methods at a glance
-
-`fill`, `fill_rule`, `stroke`, `stroke_cosmetic`, `stroke_styled`, `hit_stroke_width`, `label`, `draggable`, `path`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="pathitem"></a>
 
 ## `pub struct PathItem`
 
@@ -85,6 +105,8 @@ pub struct PathItem { /* fields */ }
 
 ### Methods
 
+<a id="pathitem-new"></a>
+
 #### `pub fn new(path: Path) -> Self`
 
 A path in local coordinates — `(0, 0)` is the item's anchor.
@@ -92,11 +114,15 @@ A path in local coordinates — `(0, 0)` is the item's anchor.
 `local_bounds` is derived from the path (and re-derived whenever the
 stroke or hit band changes), so it always encloses the clickable area.
 
+<a id="pathitem-fill"></a>
+
 #### `pub fn fill(mut self, color: impl Into<ColorProp>) -> Self`
 
 Fill colour. Accepts a plain `Color`, a theme role, a
 `Signal<Color>`, or a `Signal<Role>` — resolved against the active
 theme at paint time.
+
+<a id="pathitem-fill_rule"></a>
 
 #### `pub fn fill_rule(mut self, rule: FillRule) -> Self`
 
@@ -109,16 +135,22 @@ deliberately no hit-only fill rule: a shape that paints as a disc and
 hit-tests as a ring is the two-sources-of-truth bug this whole type
 exists to prevent.
 
+<a id="pathitem-stroke"></a>
+
 #### `pub fn stroke(mut self, color: impl Into<ColorProp>, width: f32) -> Self`
 
 Stroke colour and width in **scene-coordinate** pixels — the stroke
 scales with the view zoom.
+
+<a id="pathitem-stroke_cosmetic"></a>
 
 #### `pub fn stroke_cosmetic(mut self, color: impl Into<ColorProp>, width: f32) -> Self`
 
 Cosmetic stroke: the connector holds a constant **device-pixel** width
 at any zoom (it never thins out or thickens). The renderer keeps the
 path body sharp at the current zoom, so joins/caps stay correct.
+
+<a id="pathitem-stroke_styled"></a>
 
 #### `pub fn stroke_styled(mut self, color: impl Into<ColorProp>, style: StrokeStyle) -> Self`
 
@@ -127,6 +159,8 @@ Stroke with an explicit `StrokeStyle` — dashed, dotted, or custom caps
 distinguishes a pending connector from a solid confirmed one. The style
 is stored verbatim (dash pattern/offset, `Logical` vs `Device` space).
 
+<a id="pathitem-hit_stroke_width"></a>
+
 #### `pub fn hit_stroke_width(mut self, width: f32) -> Self`
 
 Widen the clickable band without widening the drawn line (Konva's
@@ -134,13 +168,19 @@ Widen the clickable band without widening the drawn line (Konva's
 is a target size rather than a rendered thickness. Also widens the
 derived `local_bounds`, so the broad phase keeps up with it.
 
+<a id="pathitem-label"></a>
+
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Human-readable label.
 
+<a id="pathitem-draggable"></a>
+
 #### `pub fn draggable(mut self, draggable: bool) -> Self`
 
 Opt the path into drag-to-move.
+
+<a id="pathitem-path"></a>
 
 #### `pub fn path(&self) -> &Path`
 

@@ -10,13 +10,38 @@ applies it as a centered (or origin-pivoted) scale transform via
 `BuildContext::set_transform` — the renderer's transform stack
 composes it onto the subtree.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`ScaleOrigin`](#scaleorigin) — Pivot point for the scale matrix, expressed relative to the wrapper's slot rectangle |
+| `struct` | [`Scale`](#scale) — Wraps a child widget and animates a uniform 2D visual scale on its subtree when an external `Prop<bool>` toggles between visible and hidden |
+
+## Public functions
+
+### `Scale`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(visible: impl Into<Prop<bool>>)`](#scale-new) |
+| | **Builder methods** |
+| `Self` | [`reflow(reflow: bool)`](#scale-reflow) |
+| `Self` | [`origin(origin: ScaleOrigin)`](#scale-origin) |
+| `Self` | [`duration(duration: Duration)`](#scale-duration) |
+| `Self` | [`easing(easing: Easing)`](#scale-easing) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#scale-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#scale-child_opt) |
+
+## Detailed description
+
 ```ignore
 let visible = ctx.signal(false);
 ctx.add(Scale::new(visible.clone()).child(card));
 visible.set(true);   // scale-in around the slot center
 ```
 
-## Two layout modes
+#### Two layout modes
 
 - **Visual-only (default)** — `reflow=false`. The slot stays at the
   child's natural size at all scale values; only the *visual content*
@@ -32,7 +57,7 @@ visible.set(true);   // scale-in around the slot center
   the slot's top-left as it shrinks — otherwise the visual drifts
   while the slot shrinks).
 
-## Why this isn't just `Collapse`
+#### Why this isn't just `Collapse`
 
 `Collapse` animates only one axis (height by default) and "wipes"
 content via clipping — text inside stays at full size, only the
@@ -40,18 +65,16 @@ visible portion shrinks. `Scale` shrinks uniformly on both axes,
 and text/icons visually get smaller. Different visual vocabulary,
 different use cases.
 
-## Reduced motion
+#### Reduced motion
 
 Honours `prefers-reduced-motion`: snaps progress to its end value
 (visible / hidden) instead of tweening.
 
-## Builder methods at a glance
-
-`reflow`, `origin`, `duration`, `easing`, `child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/scale/index.html)
+
+<a id="scaleorigin"></a>
 
 ## `pub enum ScaleOrigin`
 
@@ -70,6 +93,8 @@ pub enum ScaleOrigin { /* variants */ }
 - **`BottomLeading`** — Pin the bottom-leading corner; content grows/shrinks toward the top-trailing.
 - **`BottomTrailing`** — Pin the bottom-trailing corner; content grows/shrinks toward the top-leading.
 
+<a id="scale"></a>
+
 ## `pub struct Scale`
 
 Wraps a child widget and animates a uniform 2D visual scale on its
@@ -81,6 +106,8 @@ pub struct Scale { /* fields */ }
 
 ### Methods
 
+<a id="scale-new"></a>
+
 #### `pub fn new(visible: impl Into<Prop<bool>>) -> Self`
 
 Create a scale wrapper bound to `visible`; accepts a static `bool`
@@ -88,28 +115,40 @@ or a reactive `Signal<bool>`. Defaults: visual-only (no layout
 reflow), `Center` origin, `MotionTokens::duration_normal` +
 `easing_standard`.
 
+<a id="scale-reflow"></a>
+
 #### `pub fn reflow(mut self, reflow: bool) -> Self`
 
 When `true`, the wrapper's reported size shrinks with progress
 (siblings reflow). Pair with `.origin(ScaleOrigin::TopLeading)`
 for the "card removal" pattern. Default: `false` (visual-only).
 
+<a id="scale-origin"></a>
+
 #### `pub fn origin(mut self, origin: ScaleOrigin) -> Self`
 
 Pivot point for the scale matrix. Default `Center` for visual-
 only mode; consider `TopLeading` when `reflow=true`.
 
+<a id="scale-duration"></a>
+
 #### `pub fn duration(mut self, duration: Duration) -> Self`
 
 Override the tween duration. Default: `MotionTokens::duration_normal`.
+
+<a id="scale-easing"></a>
 
 #### `pub fn easing(mut self, easing: Easing) -> Self`
 
 Override the easing. Default: `MotionTokens::easing_standard`.
 
+<a id="scale-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Inline child widget (deferred insertion).
+
+<a id="scale-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

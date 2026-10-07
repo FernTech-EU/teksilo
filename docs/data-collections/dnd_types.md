@@ -5,6 +5,21 @@
 
 Shared capability types for the data-source drag-and-drop + lazy protocol.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `trait` | [`ItemKey`](#itemkey) — A stable, hashable identity for a row/node |
+| `enum` | [`RowState`](#rowstate) — Whether a realized row's data is resident yet |
+| `enum` | [`DropPosition`](#dropposition) — Where, relative to a target row, a drop lands |
+| `enum` | [`DragEligibility`](#drageligibility) — Whether a row may begin a drag at all (the per-item transferable gate, Qt's `Qt::ItemIsDragEnabled` / `TabBar`'s `with_transferable_predicate`) |
+| `enum` | [`DragSource`](#dragsource) — Who is dragging, from the receiving source's point of view |
+| `struct` | [`DropQuery`](#dropquery) — A hover-time question posed to a source: "may `source` drop at `position` relative to `target`?" The source answers with a `DropResponse` |
+| `enum` | [`DropResponse`](#dropresponse) — A source's verdict on a `DropQuery` |
+| `struct` | [`DropCommit`](#dropcommit) — A drop the user actually committed, handed to `accept_drop` to apply |
+
+## Detailed description
+
 These types are the Teksilo-shaped equivalent of Qt's
 `flags`/`canDropMimeData`/`dropMimeData` (DnD validation) and
 `canFetchMore`/`fetchMore` (lazy loading), expressed as defaulted methods on
@@ -15,7 +30,7 @@ the view merely renders the source's verdict and routes the commit. This is
 what lets an external source of truth (e.g. an entity store) drive a
 view without the view ever mutating a mirror model.
 
-## Key types
+#### Key types
 
 - `ItemKey` — blanket identity trait for any `Clone + Eq + Hash + Debug + 'static` type.
 - `RowState` — whether a lazy row's data is resident (`Ready`) or still loading (`Loading`).
@@ -39,6 +54,8 @@ fn can_accept(&self, query: &teksilo_data::DropQuery<'_, usize>) -> teksilo_data
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/dnd_types/index.html)
 
+<a id="itemkey"></a>
+
 ## `pub trait ItemKey`
 
 A stable, hashable identity for a row/node. Blanket-implemented for every
@@ -52,6 +69,8 @@ is exactly what removes the need to mirror them into a built-in model.
 ```rust
 pub trait ItemKey: Clone + Eq + std::hash::Hash + std::fmt::Debug + 'static { /* associated items below */ }
 ```
+
+<a id="rowstate"></a>
 
 ## `pub enum RowState`
 
@@ -68,6 +87,8 @@ pub enum RowState { /* variants */ }
 - **`Ready`** — Item data is resident; `with_item`/`with_entry` returns `Some`.
 - **`Loading`** — The row exists (counts against `len`/`visible_count`) but its data is not yet loaded; `with_item`/`with_entry` returns `None`.
 
+<a id="dropposition"></a>
+
 ## `pub enum DropPosition`
 
 Where, relative to a target row, a drop lands. `Into` (reparent) is only
@@ -83,6 +104,8 @@ pub enum DropPosition { /* variants */ }
 - **`Into`** — As a child of the target (reparent — trees only).
 - **`After`** — Immediately after the target (sibling, same level).
 
+<a id="drageligibility"></a>
+
 ## `pub enum DragEligibility`
 
 Whether a row may begin a drag at all (the per-item transferable gate, Qt's
@@ -96,6 +119,8 @@ pub enum DragEligibility { /* variants */ }
 
 - **`CanDrag`** — The row can be dragged.
 - **`NoDrag`** — The row cannot be dragged (the gesture is suppressed).
+
+<a id="dragsource"></a>
 
 ## `pub enum DragSource`
 
@@ -117,6 +142,8 @@ pub enum DragSource<'a, K> { /* variants */ }
 - **`SameView`** — An intra-view reorder; `key` identifies the dragged row.
 - **`Foreign`** — A drag from another view or the OS; downcast `payload` to interpret it.
 
+<a id="dropquery"></a>
+
 ## `pub struct DropQuery`
 
 A hover-time question posed to a source: "may `source` drop at `position`
@@ -125,6 +152,8 @@ relative to `target`?" The source answers with a `DropResponse`.
 ```rust
 pub struct DropQuery<'a, K> { /* fields */ }
 ```
+
+<a id="dropresponse"></a>
 
 ## `pub enum DropResponse`
 
@@ -140,6 +169,8 @@ pub enum DropResponse { /* variants */ }
 - **`Accept`** — Allowed: paint the insertion line / reparent box at this position.
 - **`Reject`** — Forbidden: paint the no-drop affordance; the drop will be refused.
 - **`Redirect`** — Allowed, but only at a different position — the view snaps its indicator to `.0` (e.g. a container that accepts children but not sibling reorder redirects `Before`/`After` → `Into`).
+
+<a id="dropcommit"></a>
 
 ## `pub struct DropCommit`
 

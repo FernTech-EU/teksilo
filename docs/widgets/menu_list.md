@@ -7,6 +7,36 @@
 
 MenuList — a themed vertical menu container with keyboard navigation.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`MenuSeparator`](#menuseparator) — A 1 dp horizontal divider line between groups of menu items |
+| `struct` | [`MenuList`](#menulist) — A themed vertical dropdown menu panel with keyboard navigation and type-ahead |
+
+## Public functions
+
+### `MenuList`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#menulist-new) |
+| | **Builder methods** |
+| `Self` | [`type_ahead_timeout(d: Duration)`](#menulist-type_ahead_timeout) |
+| `Self` | [`attached_side(side: crate::shadow::AttachedSide)`](#menulist-attached_side) |
+| `Self` | [`item(widget: impl Widget + 'static)`](#menulist-item) |
+| `Self` | [`items(iter: impl IntoIterator<Item = impl Widget + 'static>)`](#menulist-items) |
+| `Self` | [`item_when(widget: impl Widget + 'static, visible: impl Into<teksilo_core::signal::Prop<bool>>)`](#menulist-item_when) |
+| `Self` | [`items_when<W, V>(iter: impl IntoIterator<Item = (W, V)>)`](#menulist-items_when) |
+| `Self` | [`item_boxed_when(widget: Box<dyn Widget>, visible: impl Into<teksilo_core::signal::Prop<bool>>)`](#menulist-item_boxed_when) |
+| `Self` | [`items_boxed_when<V>(iter: impl IntoIterator<Item = (Box<dyn Widget>, V)>)`](#menulist-items_boxed_when) |
+| `Self` | [`separator()`](#menulist-separator) |
+| `Self` | [`header(widget: impl Widget + 'static)`](#menulist-header) |
+| `Self` | [`max_visible_items(n: usize)`](#menulist-max_visible_items) |
+
+## Detailed description
+
 `MenuList` is the dropdown panel used by `MenuBar`, `MenuContext`, and
 popover-style menus. It provides a themed surface (background, rounded
 border, drop shadow) and owns the full keyboard navigation stack:
@@ -28,7 +58,7 @@ and the cone live in `teksilo_core::overlay`) and publishes that submenu's
 id on a `MenuList`-wide shared state, so sibling items can skip their
 hover-switch while the cursor travels diagonally toward the submenu.
 
-## Accessibility
+#### Accessibility
 
 `Role::Menu`, named after what opened it (a `MenuBar` trigger, the
 `MenuItem::submenu` row, a `PopoverButton`'s button), with the keyboard
@@ -58,13 +88,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![MenuList at Touch density](img/menu_list-touch.png)
 
-## Builder methods at a glance
-
-`type_ahead_timeout`, `attached_side`, `item`, `items`, `item_when`, `items_when`, `item_boxed_when`, `items_boxed_when`, `separator`, `header`, `max_visible_items`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/menu_list/index.html)
+
+<a id="menuseparator"></a>
 
 ## `pub struct MenuSeparator`
 
@@ -73,6 +101,8 @@ A 1 dp horizontal divider line between groups of menu items.
 ```rust
 pub struct MenuSeparator;
 ```
+
+<a id="menulist"></a>
 
 ## `pub struct MenuList`
 
@@ -86,10 +116,14 @@ pub struct MenuList { /* fields */ }
 
 ### Methods
 
+<a id="menulist-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create an empty menu list with no items, no height cap, and the default
 500 ms type-ahead reset window.
+
+<a id="menulist-type_ahead_timeout"></a>
 
 #### `pub fn type_ahead_timeout(mut self, d: Duration) -> Self`
 
@@ -98,15 +132,21 @@ to match Windows' menubar convention. Tests use
 `Duration::ZERO` to force every keypress to start a fresh
 search.
 
+<a id="menulist-attached_side"></a>
+
 #### `pub fn attached_side(mut self, side: crate::shadow::AttachedSide) -> Self`
 
 Suppress drop-shadow drawing on the side that visually merges
 with the menu's trigger. See `crate::shadow::AttachedSide`
 for the available edges.
 
+<a id="menulist-item"></a>
+
 #### `pub fn item(mut self, widget: impl Widget + 'static) -> Self`
 
 Add a menu item (typically a `MenuItem`).
+
+<a id="menulist-items"></a>
 
 #### `pub fn items(self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
 
@@ -114,6 +154,8 @@ Add several menu items from an iterator, in order.
 
 The loop form of `item`: reach for it when the rows come
 from data rather than being written out one call at a time.
+
+<a id="menulist-item_when"></a>
 
 #### `pub fn item_when( self, widget: impl Widget + 'static, visible: impl Into<teksilo_core::signal::Prop<bool>>, ) -> Self`
 
@@ -127,6 +169,8 @@ Because a hidden row never claims its mnemonic letter, two gated rows
 that are mutually exclusive may share one — the letter resolves to
 whichever is visible when it is pressed.
 
+<a id="menulist-items_when"></a>
+
 #### `pub fn items_when<W, V>(self, iter: impl IntoIterator<Item = (W, V)>) -> Self where W: Widget + 'static, V: Into<teksilo_core::signal::Prop<bool>>,`
 
 Add several gated rows from an iterator of `(widget, visible)` pairs.
@@ -135,11 +179,15 @@ The loop form of `item_when`, for a gated row set
 built from data. Each pair carries its own gate, so the rows appear and
 disappear independently.
 
+<a id="menulist-item_boxed_when"></a>
+
 #### `pub fn item_boxed_when( mut self, widget: Box<dyn Widget>, visible: impl Into<teksilo_core::signal::Prop<bool>>, ) -> Self`
 
 `item_when` for an already-boxed widget — used when
 the row type is decided at runtime (e.g. a menu row that is either a
 `MenuItem` or an embedded control).
+
+<a id="menulist-items_boxed_when"></a>
 
 #### `pub fn items_boxed_when<V>(self, iter: impl IntoIterator<Item = (Box<dyn Widget>, V)>) -> Self where V: Into<teksilo_core::signal::Prop<bool>>,`
 
@@ -149,9 +197,13 @@ The loop form of `item_boxed_when`, for a gated
 row set built from data. Each pair carries its own gate, so the rows may
 appear and disappear independently.
 
+<a id="menulist-separator"></a>
+
 #### `pub fn separator(mut self) -> Self`
 
 Add a separator line.
+
+<a id="menulist-header"></a>
 
 #### `pub fn header(mut self, widget: impl Widget + 'static) -> Self`
 
@@ -161,6 +213,8 @@ Skipped by Arrow/Home/End navigation and type-ahead, exactly like
 must expose its own accessible name/role via `accessibility()` (as
 `GroupHeader` does) or it is silently pruned from the AT tree as a
 content-free container.
+
+<a id="menulist-max_visible_items"></a>
 
 #### `pub fn max_visible_items(mut self, n: usize) -> Self`
 

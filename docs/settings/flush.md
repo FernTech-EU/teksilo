@@ -5,13 +5,40 @@
 
 Debounced, **cross-process-safe** atomic file writer.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`FlushError`](#flusherror) — Errors surfaced by `DebouncedWriter::flush_now` |
+| `type` | [`WriteFailureSink`](#writefailuresink) — Invoked (off the caller's thread — on the shared worker thread) when a `DebouncedWriter`'s queued patches are **permanently** discarded: either `flush_writer`… |
+| `fn` | [`set_write_failure_sink`](#set_write_failure_sink) — Register a process-wide sink invoked whenever any `DebouncedWriter` permanently discards a queued write (see `WriteFailureSink`) |
+| `type` | [`LandedStamp`](#landedstamp) — The `(mtime, len)` stamp `disk_stamp` computes for a settings file — named so every `Arc<Mutex<...>>` wrapping it (here and in `WindowStateService`) reads as… |
+| `type` | [`WriteLandedSink`](#writelandedsink) — Invoked on the shared worker thread the instant a `DebouncedWriter`'s queued patches land successfully, with the fresh on-disk `(mtime, len)` stamp (one extra… |
+| `struct` | [`DebouncedWriter`](#debouncedwriter) — Atomic, debounced single-file writer |
+
+## Public functions
+
+### `DebouncedWriter`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(path: PathBuf, delay: Duration)`](#debouncedwriter-new) |
+| | **Methods** |
+| `Result<(), FlushError>` | [`flush_now()`](#debouncedwriter-flush_now) |
+|  | [`set_landed_sink(sink: WriteLandedSink)`](#debouncedwriter-set_landed_sink) |
+| `&Path` | [`path()`](#debouncedwriter-path) |
+| `Duration` | [`delay()`](#debouncedwriter-delay) |
+
+## Detailed description
+
 `DebouncedWriter` accepts `Patch`es — *replayable mutations* — via
 `schedule`, batches rapid bursts inside a
 debounce window, and then applies the whole batch to the document **read from
 disk under an exclusive advisory lock**, writing the result atomically
 (write-temp + fsync + rename).
 
-## Why a patch and not a rendered string
+#### Why a patch and not a rendered string
 
 This writer used to carry a pre-rendered `String`: the caller serialised its
 entire in-memory document and the worker blindly wrote those bytes. That is
@@ -33,7 +60,7 @@ pending mutations (a `Vec<(key, value)>`, a list of ops), so they capture no
 `Rc` and can cross to the worker thread. Callers never see one: they keep
 writing `signal.set(v)`, `mru.add(e)`, `file.mutate(|s| ..)`.
 
-## Single shared I/O thread
+#### Single shared I/O thread
 
 All `DebouncedWriter`s in a process share **one** background I/O thread
 (lazily started on first use). Each writer registers under a unique
@@ -77,19 +104,17 @@ queue before returning, so end-of-process state is never lost (unless the
 flush itself is still failing, in which case the discard is reported
 through `WriteFailureSink` exactly as above).
 
-## Why one thread, not one-per-writer
+#### Why one thread, not one-per-writer
 
 An app that opens the K/V store + recents + window state already has 3
 writers; a richer app might have 5–10, each idle ~99% of the time. One shared
 worker is leaner and has identical semantics from the caller's point of view.
 
-## Builder methods at a glance
-
-`flush_now`, `set_landed_sink`, `path`, `delay`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
+
+<a id="flusherror"></a>
 
 ## `pub enum FlushError`
 
@@ -104,6 +129,8 @@ pub enum FlushError { /* variants */ }
 - **`Disconnected`** — The shared I/O worker thread has panicked or shut down; writes can no longer be delivered.
 - **`Io`** — The atomic write (temp-file + rename) failed at the OS level.
 - **`Merge`** — A `Patch` could not be applied to the document currently on disk — e.g. a peer wrote something this process cannot parse or migrate.
+
+<a id="writefailuresink"></a>
 
 ## `pub type WriteFailureSink`
 
@@ -122,6 +149,8 @@ process-wide via `set_write_failure_sink`.
 pub type WriteFailureSink = Arc<dyn Fn(PathBuf, u32, usize, String) + Send + Sync + 'static>;
 ```
 
+<a id="set_write_failure_sink"></a>
+
 ## `pub fn set_write_failure_sink(...)`
 
 Register a process-wide sink invoked whenever any `DebouncedWriter`
@@ -133,6 +162,8 @@ this to forward the failure to the UI thread as a typed `AppEvent`.
 pub fn set_write_failure_sink(sink: WriteFailureSink);
 ```
 
+<a id="landedstamp"></a>
+
 ## `pub type LandedStamp`
 
 The `(mtime, len)` stamp `disk_stamp` computes for a settings file —
@@ -143,6 +174,8 @@ named so every `Arc<Mutex<...>>` wrapping it (here and in
 ```rust
 pub type LandedStamp = (Option<SystemTime>, Option<u64>);
 ```
+
+<a id="writelandedsink"></a>
 
 ## `pub type WriteLandedSink`
 
@@ -159,6 +192,8 @@ own thread the next time it looks (see
 pub type WriteLandedSink = Arc<dyn Fn(LandedStamp) + Send + Sync + 'static>;
 ```
 
+<a id="debouncedwriter"></a>
+
 ## `pub struct DebouncedWriter`
 
 Atomic, debounced single-file writer.
@@ -174,6 +209,8 @@ pub struct DebouncedWriter { /* fields */ }
 
 ### Methods
 
+<a id="debouncedwriter-new"></a>
+
 #### `pub fn new(path: PathBuf, delay: Duration) -> Self`
 
 Create a writer that will atomically write to `path`, coalescing
@@ -182,10 +219,14 @@ rapid `schedule` bursts inside `delay`.
 `delay = Duration::ZERO` makes every `schedule` flush on the
 worker's very next iteration — useful for tests.
 
+<a id="debouncedwriter-flush_now"></a>
+
 #### `pub fn flush_now(&self) -> Result<(), FlushError>`
 
 Force any queued patches to disk synchronously. Returns `Ok(())` if
 there was nothing queued.
+
+<a id="debouncedwriter-set_landed_sink"></a>
 
 #### `pub fn set_landed_sink(&self, sink: WriteLandedSink)`
 
@@ -202,9 +243,13 @@ after the write actually succeeds — knows the resulting `(mtime,
 len)`. See `WindowStateService::reload_from_disk` for the consumer
 side (F11).
 
+<a id="debouncedwriter-path"></a>
+
 #### `pub fn path(&self) -> &Path`
 
 The destination path this writer flushes to.
+
+<a id="debouncedwriter-delay"></a>
 
 #### `pub fn delay(&self) -> Duration`
 

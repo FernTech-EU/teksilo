@@ -7,6 +7,36 @@
 
 ScrollBar — pointer and keyboard affordance for a `ScrollArea`.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `const` | [`SCROLLBAR_COARSE_TARGET`](#scrollbar_coarse_target) — The width a scroll bar's thumb must be reachable across for a finger |
+| `const` | [`SCROLLBAR_MIN_THUMB_LENGTH`](#scrollbar_min_thumb_length) — The shipped minimum thumb length, at Compact |
+| `const` | [`SCROLLBAR_PART_THUMB`](#scrollbar_part_thumb) — Which part of the bar a `TargetRegion` describes |
+| `const` | [`SCROLLBAR_PART_TRACK`](#scrollbar_part_track) — The track either side of the thumb: a tap there pages |
+| `struct` | [`ScrollBar`](#scrollbar) — A scroll bar that shares reactive scroll-position state with a `ScrollArea` |
+
+## Public functions
+
+### `ScrollBar`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(orientation: ScrollBarOrientation, scroll_position: Signal<f32>, max_scroll: Signal<f32>, viewport_ratio: Signal<f32>)`](#scrollbar-new) |
+| | **Builder methods** |
+| `Self` | [`thickness(thickness: f32)`](#scrollbar-thickness) |
+| `Self` | [`min_thumb_length(len: f32)`](#scrollbar-min_thumb_length) |
+| `Self` | [`reveal(revealed: Signal<bool>)`](#scrollbar-reveal) |
+| `Self` | [`step_size(step: f32)`](#scrollbar-step_size) |
+| `Self` | [`visual(variant: ScrollBarVariant)`](#scrollbar-visual) |
+| `Self` | [`variant(variant: ScrollBarVariant)`](#scrollbar-variant) |
+| `Self` | [`style(style: impl ScrollBarStyle)`](#scrollbar-style) |
+| `Self` | [`thumb_color(color: impl Into<ColorProp>)`](#scrollbar-thumb_color) |
+
+## Detailed description
+
 `ScrollBar` reads and writes a shared `Signal<f32>` scroll position and a
 `Signal<f32>` viewport/content ratio, both supplied by its owning `ScrollArea`.
 Interaction (thumb drag, track click, keyboard Up/Down/Home/End, hover) is
@@ -18,7 +48,7 @@ creates and manages the bars automatically. Use this type when building a custom
 scroll host (e.g. the `RichTextEditor` manages its own bars to avoid the
 wrap/scrollbar circular dependency).
 
-## Reaching the thumb with a finger
+#### Reaching the thumb with a finger
 
 The bar is 8–12 dp wide, and it stays that way at every density: growing it
 would move the content beside it, and a scroll bar is chrome. The thumb is
@@ -37,7 +67,7 @@ finger 15 dp inboard of an 8 dp bar is beside the thumb, not past it.
 The minimum thumb length follows the density (24 dp Compact, 44 dp Touch),
 so a short thumb on a long document is still something a finger can land on.
 
-## Accessibility
+#### Accessibility
 
 Hidden from AT via `set_hidden()`. Scroll actions (Up/Down/Left/Right) are
 advertised on the parent `ScrollView` node, not on the bar, so screen readers
@@ -67,13 +97,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![ScrollBar at Touch density](img/scroll_bar-touch.png)
 
-## Builder methods at a glance
-
-`thickness`, `min_thumb_length`, `reveal`, `step_size`, `visual`, `variant`, `style`, `thumb_color`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/scroll_bar/index.html)
+
+<a id="scrollbar_coarse_target"></a>
 
 ## `pub const SCROLLBAR_COARSE_TARGET`
 
@@ -87,6 +115,8 @@ Android's `ViewConfiguration.MIN_SCROLLBAR_TOUCH_TARGET` — the bar keeps its
 pub const SCROLLBAR_COARSE_TARGET: f32 = 48.0;
 ```
 
+<a id="scrollbar_min_thumb_length"></a>
+
 ## `pub const SCROLLBAR_MIN_THUMB_LENGTH`
 
 The shipped minimum thumb length, at Compact. Raised to the density's
@@ -96,6 +126,8 @@ The shipped minimum thumb length, at Compact. Raised to the density's
 ```rust
 pub const SCROLLBAR_MIN_THUMB_LENGTH: f32 = 24.0;
 ```
+
+<a id="scrollbar_part_thumb"></a>
 
 ## `pub const SCROLLBAR_PART_THUMB`
 
@@ -108,6 +140,8 @@ grab affordance from the paging surface around it.
 pub const SCROLLBAR_PART_THUMB: u16 = 0;
 ```
 
+<a id="scrollbar_part_track"></a>
+
 ## `pub const SCROLLBAR_PART_TRACK`
 
 The track either side of the thumb: a tap there pages.
@@ -115,6 +149,8 @@ The track either side of the thumb: a tap there pages.
 ```rust
 pub const SCROLLBAR_PART_TRACK: u16 = 1;
 ```
+
+<a id="scrollbar"></a>
 
 ## `pub struct ScrollBar`
 
@@ -129,6 +165,8 @@ pub struct ScrollBar { /* fields */ }
 
 ### Methods
 
+<a id="scrollbar-new"></a>
+
 #### `pub fn new( orientation: ScrollBarOrientation, scroll_position: Signal<f32>, max_scroll: Signal<f32>, viewport_ratio: Signal<f32>, ) -> Self`
 
 Create a new ScrollBar with shared state.
@@ -137,9 +175,13 @@ Create a new ScrollBar with shared state.
 - `max_scroll`: shared `Signal<f32>` for maximum scroll offset
 - `viewport_ratio`: shared `Signal<f32>` for viewport/content ratio (0.0..1.0)
 
+<a id="scrollbar-thickness"></a>
+
 #### `pub fn thickness(mut self, thickness: f32) -> Self`
 
 Set the bar thickness (width for vertical, height for horizontal).
+
+<a id="scrollbar-min_thumb_length"></a>
 
 #### `pub fn min_thumb_length(mut self, len: f32) -> Self`
 
@@ -148,6 +190,8 @@ Set the minimum thumb length in pixels, overriding the density.
 Left unset the floor is `SCROLLBAR_MIN_THUMB_LENGTH` raised to the
 density's target size — 24 dp at Compact, 44 dp at Touch — so a short
 thumb on a long document stays something a finger can land on.
+
+<a id="scrollbar-reveal"></a>
 
 #### `pub fn reveal(mut self, revealed: Signal<bool>) -> Self`
 
@@ -159,9 +203,13 @@ in flight; a density whose `RevealPolicy`
 is `Always` seeds it true at build. It only ever adds a reveal — nothing
 here can hide a bar that hover has shown.
 
+<a id="scrollbar-step_size"></a>
+
 #### `pub fn step_size(mut self, step: f32) -> Self`
 
 Set the scroll step for keyboard navigation.
+
+<a id="scrollbar-visual"></a>
 
 #### `pub fn visual(mut self, variant: ScrollBarVariant) -> Self`
 
@@ -169,13 +217,19 @@ Set the visual variant. The active `ScrollBarStyle` picks how
 to paint each variant; the IntUI default ships Permanent /
 Overlay / Thin out of the box.
 
+<a id="scrollbar-variant"></a>
+
 #### `pub fn variant(mut self, variant: ScrollBarVariant) -> Self`
 
 Alias for `visual` using the new variant naming.
 
+<a id="scrollbar-style"></a>
+
 #### `pub fn style(mut self, style: impl ScrollBarStyle) -> Self`
 
 Override the active `ScrollBarStyle` for this widget instance only.
+
+<a id="scrollbar-thumb_color"></a>
 
 #### `pub fn thumb_color(mut self, color: impl Into<ColorProp>) -> Self`
 
