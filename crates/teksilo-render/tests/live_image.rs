@@ -308,6 +308,54 @@ fn d05_a_size_change_stages_a_new_texture_and_frees_the_old() {
     );
 }
 
+/// D.5's resize, with the staged texture's fill blocked by a producer's
+/// transaction and the size back to the current texture's before it runs:
+/// the staged texture, of the size in between, is dropped rather than
+/// written past its bounds.
+#[test]
+fn d05_a_texture_staged_for_a_size_that_went_back_is_dropped_not_filled() {
+    let Some(mut g) = gpu("live_d05_back") else {
+        return;
+    };
+    let (source, writer) = live(LivePixelFormat::Rgba8, 8, 8);
+    let (_, c) = consumer(&source);
+    let t = g.target(8, 8);
+    g.render(&frame_1to1(&c, ScalingFilter::Nearest), &t);
+    writer
+        .write_frame(4, 4, &pattern(LivePixelFormat::Rgba8, 4, 4, 1), 16)
+        .unwrap();
+    let (held, release) = (
+        Arc::new(std::sync::Barrier::new(2)),
+        Arc::new(std::sync::Barrier::new(2)),
+    );
+    let holder = {
+        let (writer, held, release) = (writer.clone(), held.clone(), release.clone());
+        std::thread::spawn(move || {
+            let guard = writer.lock().unwrap();
+            held.wait();
+            release.wait();
+            drop(guard);
+        })
+    };
+    held.wait();
+    g.render(&frame_1to1(&c, ScalingFilter::Nearest), &t);
+    let s = g.renderer.live_texture_stats();
+    assert_eq!(
+        s.textures, 2,
+        "precondition: the 8 x 8 texture and a staged 4 x 4 one"
+    );
+    release.wait();
+    holder.join().unwrap();
+
+    writer
+        .write_frame(8, 8, &pattern(LivePixelFormat::Rgba8, 8, 8, 2), 32)
+        .unwrap();
+    g.render(&frame_1to1(&c, ScalingFilter::Nearest), &t);
+    let s = g.renderer.live_texture_stats();
+    assert_eq!((s.textures, s.bytes), (1, 8 * 8 * 4));
+    assert_eq!(g.read(&t), shown(8, 8, 2));
+}
+
 #[test]
 fn d06_a_frame_without_the_quad_or_a_clear_frees_the_texture() {
     let Some(mut g) = gpu("live_d06") else { return };

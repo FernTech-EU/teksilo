@@ -309,6 +309,54 @@ fn a_size_changed_after_layout_draws_the_held_texture() {
     );
 }
 
+/// A resize staged a texture whose fill met a producer's transaction, and
+/// the size came back to the current texture's before the fill ran. The
+/// staged texture is of the size in between: it must go, not take the
+/// frame. Filled anyway, the mirror wrote out of its bounds, and the GPU
+/// issued an out-of-bounds texture write.
+#[test]
+fn a_texture_staged_for_a_size_that_went_back_is_dropped_not_filled() {
+    let (source, writer) = live(8, 8);
+    let (_, consumer) = widget(&source);
+    let mut mirror = LiveImageMirror::new();
+    mirror.consume(&frame(&[&consumer]));
+    writer.write_frame(4, 4, &pixels(4, 4, 1), 16).unwrap();
+
+    let (held, release) = (
+        Arc::new(std::sync::Barrier::new(2)),
+        Arc::new(std::sync::Barrier::new(2)),
+    );
+    let holder = {
+        let (writer, held, release) = (writer.clone(), held.clone(), release.clone());
+        std::thread::spawn(move || {
+            let guard = writer.lock().unwrap();
+            held.wait();
+            release.wait();
+            drop(guard);
+        })
+    };
+    held.wait();
+    let report = mirror.consume(&frame(&[&consumer]));
+    assert_eq!(report.deferred, 1, "the 4 x 4 frame met the transaction");
+    assert_eq!(
+        mirror.texture_count(),
+        2,
+        "precondition: the 8 x 8 texture and a staged 4 x 4 one"
+    );
+    release.wait();
+    holder.join().unwrap();
+
+    writer.write_frame(8, 8, &pixels(8, 8, 2), 32).unwrap();
+    let report = mirror.consume(&frame(&[&consumer]));
+    assert_eq!(report.deferred, 0);
+    assert_eq!(texture(&mirror, &source), pixels(8, 8, 2));
+    assert_eq!(
+        mirror.texture_count(),
+        1,
+        "the staged 4 x 4 texture is gone, released"
+    );
+}
+
 // ── timings ──
 
 /// What the last frame timed: lock holds and upload delays, as counts.

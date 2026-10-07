@@ -332,8 +332,11 @@ struct Outcome {
 ///    no redraw per commit.
 /// 4. Every quad of the source paused, a texture of the wanted size held,
 ///    a presented frame: keep it, take no lock.
-/// 5. A texture of the wanted size is staged, outside the lock, when none is
-///    current or staged.
+/// 5. A staged texture of another shape than the wanted one is dropped,
+///    whether or not the current texture fits: a resize can leave one when
+///    its fill met a held lock and the size went back. A texture of the
+///    wanted size is then staged, outside the lock, when none is current or
+///    staged.
 /// 6. Nothing new (the generation is the texture's): no lock.
 /// 7. Otherwise lock: without waiting, or for a bounded time when a staged
 ///    texture waits for its first upload, after two busy frames in a row,
@@ -699,16 +702,23 @@ impl<B: LiveTextureBackend> LivePass<B> {
             }
             entry.alloc_failed = None;
         }
-        let staged_fits = entry
+        // A staged texture of another shape than the one wanted now is never
+        // filled, whether or not the current texture fits: a resize whose
+        // staging met a held lock, then a size back to the current texture's,
+        // leaves one of the size in between, and filling it would write the
+        // frame past its bounds. A staged texture that does fit is a fill in
+        // progress, beside a current texture of the same size.
+        if entry
             .staged
             .as_ref()
-            .is_some_and(|s| s.tex.fits(wanted, mips));
-        if !current_fits && !staged_fits {
+            .is_some_and(|s| !s.tex.fits(wanted, mips))
+        {
             let stale_staged = entry.staged.take();
-            if stale_staged.is_some() {
-                self.backend.released();
-            }
+            self.backend.released();
             drop(stale_staged);
+        }
+        let staged_fits = entry.staged.is_some();
+        if !current_fits && !staged_fits {
             match self
                 .backend
                 .create_texture(wanted.0, wanted.1, mipped, &texture_label(&source))
