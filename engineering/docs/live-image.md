@@ -253,8 +253,13 @@ and the rest of its list) are not repeated here.
 ## 10. Measurements
 
 All on the reference host (AMD Radeon 890M, RADV; Mesa lavapipe for the
-software rows), at the commits that introduced them. The figures are one run
-each; treat them as indicative, not as limits.
+software rows), at the commits that introduced them. A figure is one run
+unless it is given as a range, which names its number of runs. They are
+indicative, not limits: the plan made the release host's figures reported,
+not blocking, and CI measures no timing, since a shared runner or a software
+rasterizer would time nothing that holds on a user's machine. What CI holds
+to exact values instead (counts, bytes, pixels, decisions) is listed under
+Acceptance criteria.
 
 **Upload cost (AC15, `tests/live_image_cost.rs`).** A full live upload of
 720 × 1280, against `register_image` of the same picture:
@@ -306,9 +311,13 @@ private `kwin_wayland --virtual` session at 60 Hz with AT-SPI accessibility
 off. It reads the idle trace's live lines, the UI thread's `utime + stime`
 from `/proc/<pid>/task/<pid>/stat`, and the process's `drm-total-gtt` plus
 `drm-total-vram` from `/proc/<pid>/fdinfo`. Each scenario ran 60 s after a 10 s
-warm-up, or 300 s for G.1 and G.2. The timing columns are the worst of the
-trace's per-second lines, each over its latest 1,024 samples, in µs; the
-commit-to-upload columns are in ms.
+warm-up, or 300 s for G.1 and G.2; AC13 with the copy, from 30 s to 70 s (see
+"Two windows, one upload"). The timing columns are the worst of the trace's
+per-second lines, each over its latest 1,024 samples, in µs; the
+commit-to-upload columns are in ms. Full 1920 × 1080 frames in one window
+(AC8) ran twice more on 2026-10-07, before and after the copy: UI thread
+8.2 % and 7.2 %, `prepare` p99 1,185 and 1,056 µs, lock hold p99 1,146 and
+1,042 µs, at least 59 uploads every second.
 
 | Scenario | UI thread | `prepare` p50 / p99 | lock hold p99 | commit to upload p50 / p99 | uploads a second, least | contended |
 |---|---|---|---|---|---|---|
@@ -375,7 +384,8 @@ commit-to-upload columns are in ms.
   single runs within the spread between runs.
 - **Commit to upload** depends on where the producer's 60 Hz clock falls
   against the display's, which differs from one run to the next: its p50
-  ranged from 2.2 to 13.9 ms across these runs, whatever the scenario.
+  ranged from 2.2 to 15.1 ms across these runs and the reruns of
+  2026-10-07, whatever the scenario.
 
 **Hidden windows (AC16, PR-2, private `kwin_wayland --virtual`).** Minimised,
 the window drew no frame and used 0.01 s of CPU from 0.5 s to 5 s, and it drew
@@ -410,22 +420,30 @@ commits, which is AC20's last clause.
 
 ## 11. Acceptance criteria
 
+Two kinds of evidence stand behind these states. Exact evidence runs in CI
+on every commit, or in the headless and GPU test suites a commit must pass:
+counts, byte formulas, pixels and the live pass's decisions. Timing, CPU and
+GPU-memory evidence comes from the reference host (Measurements); there,
+"Met" says that the run, or every run of a range, was within the goal on
+that host, not that the goal holds on every machine. The number of runs is
+given with each such figure.
+
 | ID | State | Evidence |
 |---|---|---|
 | AC1 | Met | Headless: teksilo-canvas `live_image/tests.rs`, teksilo-core `live_image_tests.rs`. Live: F.3's idle check, Wayland and X11. |
 | AC2 | Met off macOS | The recording-poster tests of the wake layer; claims (j) and (k) of the X11 event-loop test. macOS is not run here. |
 | AC3 | Met | Headless paint counters and stats; F.3 (`paints` flat while 31 frames went by). |
 | AC4, AC5 | Met | Headless, `CountingWaker`, one and two trees. |
-| AC6 | Met | In a window under `Fifo`: p99 0.25 ms for AC7's workload, 1.06 ms for full 1080p (Measurements, "In a window"). Offscreen: the 60 Hz table. |
-| AC7 | Met on the bench | 3.7 % of a core with AC7's workload (3.8 % with accessibility on), floor included. Miragem itself is not on Teksilo yet, so its real tree is not measured. |
-| AC8 | Met | At least 59 uploads every second over 60 s; UI thread 7.7 %. |
-| AC9 | Met | `LiveTextureStats::bytes` matches the formula (D tests). GPU memory drift 0.0 MiB over 300 s at 720 × 1280 and at 1080p, one texture throughout. |
+| AC6 | Met on the reference host | In a window under `Fifo`: p99 0.25 ms for AC7's workload (one run), 1.06–1.19 ms for full 1080p (three runs) (Measurements, "In a window"). Offscreen: the 60 Hz table, one run per row. |
+| AC7 | Met on the bench, on the reference host | 2.4–3.8 % of a core with AC7's workload over four runs, accessibility on and off, floor included. Miragem itself is not on Teksilo yet, so its real tree is not measured. |
+| AC8 | Met on the reference host | At least 59 uploads every second over 60 s; UI thread 7.2–8.2 % (three runs). |
+| AC9 | Met | Exact: `LiveTextureStats::bytes` matches the formula (D tests). On the reference host, GPU memory drift 0.0 MiB over 300 s at 720 × 1280 and at 1080p, one texture throughout (one run each). |
 | AC10 | Met | Mirror and GPU tests (D.5, D.6), on lavapipe in CI. |
-| AC11 | Met | Claim (r); in a window, GPU memory back within 1 MiB 2–51 ms after each of four closes, with no growth across them. |
-| AC12 | Reported | Commit to upload p50 / p99: 3.9 / 5.6 ms (AC7's workload), 9.6 / 11.5 ms (full 1080p). The p50 ranged from 2.2 to 13.9 ms across runs, set by the phase of the producer's clock against the display's. |
-| AC13 | Met | Two windows: lock hold p99 1.00–1.04 ms in the window that uploads, over three runs; the other copies its texture on the device and takes no lock. One window: 1.05–1.12 ms. Each window uploading every commit gave 1.61–1.69 ms; see Measurements. |
-| AC14 | Met | A copy-only producer: 0 contended frames of 3,609 over 60 s. |
-| AC15 | Met | `live_image_cost.rs`; the figures under Measurements. |
+| AC11 | Met, but for one 4 MiB block | Exact: claim (r). In a window, four runs of four opens and closes, two before the copy and two after it: GPU memory came back to within 1 MiB 2–51 ms after 13 of the 16 closes. After the other three, one in each of three runs, with and without the copy, 4 MiB stayed, and did not grow where later cycles followed: an allocator block kept, not a texture (one is 7.9 MiB). |
+| AC12 | Reported | Commit to upload p50 / p99: 3.9 / 5.6 ms (AC7's workload), 9.6 / 11.5 ms (full 1080p), one run each. The p50 ranged from 2.2 to 15.1 ms across runs, set by the phase of the producer's clock against the display's, which differs from one run to the next: a spread, not noise to average out. |
+| AC13 | Met on the reference host | Two windows: lock hold p99 1.00–1.04 ms in the window that uploads (three runs); the other copies its texture on the device and takes no lock. One window: 1.04–1.15 ms (four runs). Each window uploading every commit gave 1.61–1.69 ms (two runs); see Measurements. |
+| AC14 | Met on the reference host | A copy-only producer: 0 contended frames of 3,609 over 60 s (one run). |
+| AC15 | Met | Exact: `live_image_cost.rs` counts one `write_texture` per full frame, one per rect and none without a commit, in every build. The time ratios under Measurements are one run per build and adapter. |
 | AC16 | Met on KWin; Windows and macOS by hand | PR-2's F.5, rerun at the tip; on the live demo, no frame over 9 s minimised, two screenshots of the hidden window 0.5 s apart holding later commits, and the latest commit shown on restore. F.3's X11 run for screenshots of a hidden window. |
 | AC17 | Met | Headless pause tests (B.14, B.15, C.18–C.22), D.20, D.21. |
 | AC18 | Met with the PR-3 deviation | J.1–J.5; one private `WindowWake` per burst. |
