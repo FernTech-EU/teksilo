@@ -13,6 +13,7 @@ parameter for the source's `Key`. Each closure resolves index → `Key` (via
 in the view.
 
 Both built-in and external backings flow through
+`TreeSource::from_data_source`: the `TreeView::new(TreeModel)` path wraps a
 `Rc<TreeSlice<T>>` (which implements `TreeDataSource<Key = NodeId>`), while
 `TreeView::from_source` wraps an external `TreeDataSource` with its own `Key`.
 The only built-in-vs-external difference — the `NodeId`-typed `TreeRowContext`

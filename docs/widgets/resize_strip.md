@@ -7,7 +7,7 @@ A thin invisible widget that forwards a window resize gesture to the
 platform host when the user presses the primary button inside it. Used
 to build a 6-px resize frame around a borderless window on Wayland.
 
-This is the frame complement to [`crate::title_bar::DragRegion`]: drag
+This is the frame complement to `crate::title_bar::DragRegion`: drag
 moves the window, resize strips drag the window edges. On platforms
 that don't expose `Window::drag_resize_window` (notably winit's macOS
 backend), `PlatformTitleBarHost::begin_resize` returns

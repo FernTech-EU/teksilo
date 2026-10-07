@@ -42,7 +42,7 @@ item cannot render differently from the same item in `Under`.
 Stated here because it is otherwise implicit in three files:
 
 1. `SceneView::paint` — the app background closure, then the `Under` band
-2. the arena's child walk, sorted by [`PaintKey`]:
+2. the arena's child walk, sorted by `PaintKey`:
    `SceneBandProxy` nodes and heavyweight cards interleaved by `z`
 3. `WetLayerNode` — always the last child, so wet content sits above
    every card and every interleaved item

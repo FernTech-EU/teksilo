@@ -356,18 +356,18 @@ Create a tree item with the given primary label.
 
 #### `pub fn interaction_signal(mut self, signal: Signal<InteractionState>) -> Self`
 
-See [`StandardListItem::interaction_signal`]: the row's own hover/press
+See `StandardListItem::interaction_signal`: the row's own hover/press
 state. To gate revealed controls use
 `reveal_signal`.
 
 #### `pub fn reveal_signal(mut self, signal: Signal<bool>) -> Self`
 
-See [`StandardListItem::reveal_signal`]: whether this row's revealed
+See `StandardListItem::reveal_signal`: whether this row's revealed
 controls should be reachable, answered per density.
 
 #### `pub fn label_slot(mut self, widget: impl Widget + 'static) -> Self`
 
-See [`StandardListItem::label_slot`]: draw this instead of the label's
+See `StandardListItem::label_slot`: draw this instead of the label's
 text, keeping the label as the row's accessible name.
 
 #### `pub fn subtitle(mut self, text: impl Into<LocalizedString>) -> Self`

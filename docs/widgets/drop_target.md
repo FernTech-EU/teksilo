@@ -202,7 +202,7 @@ pub fn region_rect_floored(region: DropRegion, bounds: Rect, factor: f32, floor:
 
 ## `pub struct DropRegionSpec`
 
-Per-region configuration for a multi-zone [`DropTarget`]: an optional hint
+Per-region configuration for a multi-zone `DropTarget`: an optional hint
 plus a reactive enabled flag. Kept as a struct so more per-zone knobs can
 land without a signature churn.
 

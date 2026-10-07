@@ -134,7 +134,7 @@ synchronous `flock` + read + parse + serialize + fsync per frame would make
 dragging visibly janky.
 
 So this service owns its own `DebouncedWriter` and schedules a
-`WindowOp` patch per `record`, exactly like [`crate::PersistedListModel`]:
+`WindowOp` patch per `record`, exactly like `crate::PersistedListModel`:
 in-memory state updates instantly (so `state_for` is always current), and
 the burst collapses into **one** locked read-merge-write at the debounce
 deadline. Frequent writes ⇒ debounced patch; rare writes ⇒ synchronous

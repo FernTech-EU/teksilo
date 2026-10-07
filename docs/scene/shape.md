@@ -357,7 +357,7 @@ not, which is impossible for a shape that lies inside its box, whereas
 a false negative only ever agrees with the cheaper mode.
 
 Where a probe lands exactly on a freeform outline, "strictly inside"
-is decided within [`SHAPE_FLATTEN_TOLERANCE`]: a ray cast against a
+is decided within `SHAPE_FLATTEN_TOLERANCE`: a ray cast against a
 polyline has no meaningful answer on the polyline itself. Against a
 rectangle, the closed form every default shape and every marquee band
 uses, it is exact.

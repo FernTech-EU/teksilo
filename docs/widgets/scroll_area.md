@@ -17,7 +17,7 @@ always on screen). Use `ScrollBarPolicy` to control when each axis shows.
 
 ## Pan to scroll
 
-`ScrollArea` is the reference adopter of [`ScrollableBehavior`]: it
+`ScrollArea` is the reference adopter of `ScrollableBehavior`: it
 declares a both-axis pan claim, so a direct pointer dragging its content is
 synthesised by the router into a positioned `Scroll` and delivered along the
 claimant chain. A release hands its velocity to the tree's fling driver,

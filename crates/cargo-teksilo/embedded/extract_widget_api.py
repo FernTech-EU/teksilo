@@ -2135,7 +2135,13 @@ def _first_sentence(text: str, limit: int = 160) -> str:
 # KEEP only web URLs, in-page anchors, and our own `../api/...` link, and reduce
 # every other link to plain inline code.
 _INLINE_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
-_REF_DEF_RE = re.compile(r"^(\s*)\[([^\]]+)\]:\s*(\S+).*$")
+# A reference definition is a whole line: the label, the target, and at most a
+# quoted or parenthesised title. A line that goes on with prose after the
+# target is not one, whatever it starts with: rustfmt wraps doc comments, so a
+# line can begin `[`X`]: the form a ...` in the middle of a sentence.
+_REF_DEF_RE = re.compile(
+    r"^(\s*)\[([^\]]+)\]:\s*(\S+)(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\s*$"
+)
 
 
 def _as_code(label: str) -> str:
@@ -2162,13 +2168,19 @@ def _catalog_keep_target(target: str) -> bool:
 def _clean_catalog_links(md: str) -> str:
     """Reduce non-resolvable links in catalog doc text to plain inline code."""
     # Pass 1: drop reference DEFINITIONS we can't keep; remember their labels.
+    # As in CommonMark, a definition cannot interrupt a paragraph: it follows a
+    # blank line, the start of the text, or another definition.
     dropped: set[str] = set()
     kept: list[str] = []
+    after_break = True
     for ln in md.split("\n"):
-        m = _REF_DEF_RE.match(ln)
-        if m and not _catalog_keep_target(m.group(3)):
-            dropped.add(m.group(2).strip())
-            continue
+        m = _REF_DEF_RE.match(ln) if after_break else None
+        if m:
+            if not _catalog_keep_target(m.group(3)):
+                dropped.add(m.group(2).strip())
+                continue
+        else:
+            after_break = not ln.strip()
         kept.append(ln)
     md = "\n".join(kept)
 
@@ -2188,9 +2200,15 @@ def _clean_catalog_links(md: str) -> str:
         md = re.sub(re.escape(f"[{lbl}]") + r"(?![\(\[])", code, md)
     # Pass 4: any remaining rustdoc shortcut link `[`X`]` (a backticked label with
     # no inline target and no reference definition) -> plain code, so the brackets
-    # don't leak into the rendered book.
-    md = re.sub(r"\[(`[^`\]]+`)\](?![\(\[:])", r"\1", md)
-    return md
+    # don't leak into the rendered book. A definition kept in pass 1 (a web
+    # target) keeps its label; prose that merely starts like one does not.
+    def shortcut_to_code(ln: str) -> str:
+        m = _REF_DEF_RE.match(ln)
+        if m and _catalog_keep_target(m.group(3)):
+            return ln
+        return re.sub(r"\[(`[^`\]]+`)\](?![\(\[])", r"\1", ln)
+
+    return "\n".join(shortcut_to_code(ln) for ln in md.split("\n"))
 
 
 def _catalog_abilities(pf: ParsedFile, title: str) -> str:
@@ -2708,6 +2726,19 @@ def run_self_tests() -> int:
         assert bad not in nz, f"{bad} survived: {nz}"
     assert "`HStack`" in nz and "see `Ref`." in nz, nz
     assert "](../api/x.html)" in nz and "](https://x.io)" in nz, nz
+    # A wrapped line that begins like a definition is prose: kept, links to
+    # code. Dropping it once cut `LiveImage::with_handle`'s doc in half.
+    wrapped = _clean_catalog_links(
+        "Drive it, made beforehand with\n"
+        "[`LiveImageHandle::new`]: the form a `teksu!` tree can use, where\n"
+        "[`handle`](Self::handle) cannot be called.\n\n"
+        "[`Ref`]: crate::Ref \"a title\"\n[`Other`]: crate::Other"
+    )
+    assert (
+        "`LiveImageHandle::new`: the form a `teksu!` tree can use, where\n"
+        "`handle` cannot be called." in wrapped
+    ), wrapped
+    assert "[`Ref`]:" not in wrapped and "[`Other`]:" not in wrapped, wrapped
 
     # Non-widget crate generalization (teksilo-data): re-exported types become
     # catalog entries, rustdoc links target the crate's own rustdoc dir.

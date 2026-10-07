@@ -22,6 +22,7 @@ point indices. This is the same rationale as
 reason.
 
 Three selection behaviours are available via
+`SelectionMode`: `None`, `Single`, and `Multi`
 (toggle + anchor-based range extension). `ChartSelection::extend_to`
 only extends within the anchor's own series — a cross-series "range" has
 no natural order, so it falls back to a single-point select.

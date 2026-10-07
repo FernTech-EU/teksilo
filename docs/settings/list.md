@@ -18,7 +18,7 @@ flush would overwrite the peer's row right off the disk — the exact
 fix.
 
 Instead, every mutation records a small, **replayable** `ListOp<T>`
-and hands it to the shared debounced writer as a [`crate::flush::Patch`]:
+and hands it to the shared debounced writer as a `crate::flush::Patch`:
 "given the file's current text, apply this one op to it." The patch is
 applied against the document read **fresh off disk, under a lock**, at
 flush time — so it replays cleanly on top of whatever a peer wrote in

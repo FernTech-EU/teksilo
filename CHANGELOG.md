@@ -638,6 +638,15 @@ by crate for clarity, not because crates version independently.
   floated over the box with focus on it, in front of the modal. Both keys now
   do nothing while an in-tree modal is up.
 
+#### Documentation
+
+- **The online widget, data, settings and scene catalogs lost a line of a
+  type's documentation, or showed raw rustdoc brackets,** wherever a wrapped
+  doc line began with a link followed by a colon. `LiveImage::with_handle`'s
+  page lost half a sentence; seventeen pages showed `[`X`]:` as written. The
+  pages are regenerated: four get their line back, seventeen show the name
+  as code like every other link.
+
 ## [0.15.1] - 2026-10-04
 
 ### Added

@@ -70,7 +70,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum ToolBoxOrientation`
 
-Orientation of a [`ToolBox`]: how its collapsible sections are arranged.
+Orientation of a `ToolBox`: how its collapsible sections are arranged.
 
 `Vertical` (the default) stacks sections
 top-to-bottom with horizontal headers and an up/down chevron — the

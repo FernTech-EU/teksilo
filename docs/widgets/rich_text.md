@@ -453,6 +453,7 @@ after mount.
 
 Replace the built-in right-click context menu with a
 user-provided factory. Same shape as the framework's
+`teksilo_core::widget_builder::ContextMenuFactory`: the
 closure receives the click position (widget-local) and a full
 `EventContext`, and returns
 `Some(menu_widget)` to mount or `None` to decline (falling

@@ -131,7 +131,7 @@ pub const ACCORDION_CORNER_RADIUS: f32 = 4.0;
 
 ## `pub enum AccordionOrientation`
 
-Orientation of an [`Accordion`]: how its header sits relative to its
+Orientation of an `Accordion`: how its header sits relative to its
 content. `Vertical` (the default) is a
 horizontal header row above the content; `Horizontal`
 is a narrow vertical header **strip** (rotated-90° label, left/right

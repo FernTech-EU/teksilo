@@ -12,7 +12,7 @@ each view that should share selection state. The current selection is
 exposed as a reactive `Signal<BTreeSet<usize>>` so widgets can bind to
 it without polling.
 
-Three selection behaviours are available via [`SelectionMode`]: `None`
+Three selection behaviours are available via `SelectionMode`: `None`
 (read-only / no interaction), `Single` (at most one item), and `Multi`
 (Ctrl+click toggle + Shift+click range extension via an internal anchor).
 Mutators automatically notify all `Signal` observers after every change,

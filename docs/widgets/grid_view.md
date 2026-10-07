@@ -140,7 +140,7 @@ accepting focus / selection / keyboard input (arena-gated).
 Set the tile sizing / column-count policy.
 
 Accepts a plain `GridSizing` (static) **or** a `Signal<GridSizing>`
-(reactive). A bound signal is observed at [`BindingLevel::Rebuild`]: when
+(reactive). A bound signal is observed at `BindingLevel::Rebuild`: when
 it changes, `build()` rebuilds the cached layout strategy and reflows —
 the internal `scroll_y` / `focused_index` / selection are field signals on
 the same widget instance, so they survive the rebuild (no scroll jump).

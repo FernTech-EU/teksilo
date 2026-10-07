@@ -28,7 +28,7 @@ map:
   translating fine-grained inserts / removes / moves through a sort
   projection is correctness-fragile (an item's sort key can move it to a
   different visible row), so `Reset` is the safe default contract. The
-  one exception is [`DataChange::ItemUpdated`]: the proxy re-evaluates
+  one exception is `DataChange::ItemUpdated`: the proxy re-evaluates
   just that row's filter verdict and its position against its current
   visible neighbours (not the whole list), and if neither changed,
   forwards a scoped `ItemUpdated` at the mapped visible index instead of

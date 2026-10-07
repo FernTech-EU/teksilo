@@ -142,7 +142,7 @@ long as the returned `OpenedSettings` (or any clone of it) is.
 
 ## `pub struct OpenedSettings`
 
-The outcome of [`SettingsBundle::open`]: ready-to-register handles.
+The outcome of `SettingsBundle::open`: ready-to-register handles.
 
 `Clone` is cheap and **shared, not deep**. Each contained service
 is internally `Rc<>`-shaped (matching `ListModel<T>` / `TreeModel<T>`

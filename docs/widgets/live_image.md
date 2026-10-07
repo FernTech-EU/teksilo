@@ -149,7 +149,9 @@ Pin the box to `width` × `height` logical pixels.
 #### `pub fn device_pixels(mut self, on: bool) -> Self`
 
 Measure the picture's own size in device pixels: one source pixel
-per device pixel instead of per logical pixel. With
+per device pixel instead of per logical pixel. The fit starts from
+that size too: `ImageFit::None` draws the whole picture at it, and
+`ImageFit::ScaleDown` never grows it past it. With
 `sizing(Natural)`, `fit(ImageFit::None)` and
 `scaling(ScalingFilter::Nearest)`, every texel lands on one device
 pixel, at any device scale. Default false.
@@ -172,8 +174,10 @@ swaps the width and height the box is sized from. Default
 Snap the picture's edges to the device-pixel grid, which keeps a 1:1
 picture sharp. An edge moves by less than one device pixel. Turn it
 off only for a picture whose box is animated, where that step would
-show. Snapping applies under translations and scales; a rotated or
-skewed ancestor turns it off. Default true.
+show: the placement is then left where the layout puts it, and the
+renderer does not snap a one-to-one picture either. Snapping applies
+under translations and scales; a rotated or skewed ancestor turns it
+off. Default true.
 
 #### `pub fn background(mut self, color: impl Into<ColorProp>) -> Self`
 
@@ -223,6 +227,7 @@ repaints nothing while dimmed. Default false.
 #### `pub fn with_handle(mut self, handle: &LiveImageHandle) -> Self`
 
 Drive this widget through `handle`, made beforehand with
+`LiveImageHandle::new`: the form a `teksu!` tree can use, where
 `handle` cannot be called. A handle follows one
 widget; handing it to a second moves it there.
 

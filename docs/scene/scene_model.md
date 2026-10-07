@@ -1115,7 +1115,7 @@ Whether the scene is still alive, without building a handle.
 
 ## `pub struct SceneWriteGuard`
 
-Write guard over a `SceneModel`'s [`Scene`]: `Deref`/`DerefMut` to the
+Write guard over a `SceneModel`'s `Scene`: `Deref`/`DerefMut` to the
 scene, with the deferred-notification contract of a `SceneModel` mutator.
 
 Holding one keeps a *write scope* open, so every notification the edits

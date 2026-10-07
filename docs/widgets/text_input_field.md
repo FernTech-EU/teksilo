@@ -496,7 +496,7 @@ pub enum ValidationOutcome { /* variants */ }
 
 ## `pub enum ValidationFeedback`
 
-What composites render. Distinct from [`ValidationOutcome`]: the
+What composites render. Distinct from `ValidationOutcome`: the
 outcome is the validator's return value (no time concept); the
 feedback adds a `since` instant so the visual layer can decay an
 auto-correction announcement after a window without re-running the

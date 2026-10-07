@@ -17,7 +17,7 @@ picker writes through the same bound `Signal<Color>`, so external
 observers see live updates as the user drags within the popover
 (no commit step).
 
-Built on [`PopoverButton`]:
+Built on `PopoverButton`:
 the overlay wiring (dormant content + show / dismiss + AT
 `has_popup` + `expanded`) lives there. This file is just the
 ColorEdit-specific assembly — picker config pass-through, the
