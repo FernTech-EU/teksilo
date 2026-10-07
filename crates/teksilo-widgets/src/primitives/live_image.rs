@@ -261,7 +261,9 @@ impl LiveImage {
     }
 
     /// Measure the picture's own size in device pixels: one source pixel
-    /// per device pixel instead of per logical pixel. With
+    /// per device pixel instead of per logical pixel. The fit starts from
+    /// that size too: `ImageFit::None` draws the whole picture at it, and
+    /// `ImageFit::ScaleDown` never grows it past it. With
     /// `sizing(Natural)`, `fit(ImageFit::None)` and
     /// `scaling(ScalingFilter::Nearest)`, every texel lands on one device
     /// pixel, at any device scale. Default false.
@@ -419,25 +421,40 @@ impl LiveImage {
         }
     }
 
-    /// The placement for the window-space box `window`, or `None` with no
-    /// frame size.
-    fn place(&self, window: Rect, rtl: bool, to_device: Option<Transform2D>) -> Option<Placement> {
+    /// The placement for the window-space box `window` at device scale
+    /// `scale`, or `None` with no frame size.
+    ///
+    /// The picture is fitted from its natural size, the one its box is
+    /// measured from: with `device_pixels`, one source pixel per device
+    /// pixel. `Fill`, `Contain` and `Cover` do not depend on it; `None`
+    /// draws at it and `ScaleDown` never grows past it, so a picture
+    /// measured in device pixels is neither cropped nor drawn larger.
+    fn place(
+        &self,
+        window: Rect,
+        rtl: bool,
+        scale: f32,
+        to_device: Option<Transform2D>,
+    ) -> Option<Placement> {
         let frame = self.shared.signals.frame_size.get()?;
-        let fitted = ImageGeometry::compute(
-            Size::new(window.width, window.height),
-            frame,
-            self.fit,
-            self.alignment,
-            rtl,
-            self.orientation,
-        );
+        let bounds = Rect::new(0.0, 0.0, window.width, window.height);
+        let content = self
+            .fit
+            .fitted_rect(self.natural(frame, scale), bounds, self.alignment, rtl);
+        let fitted = ImageGeometry::new(frame, self.orientation, content, bounds);
         Some(Placement::new(fitted, window, to_device))
     }
 
     /// The placement paint draws in `bounds`: the one the last layout
     /// computed, or, when a parent moved the widget without laying it out
     /// again, the same one recomputed there and kept.
-    fn placement_for(&self, mounted: &Mounted, bounds: Rect, rtl: bool) -> Option<Placement> {
+    fn placement_for(
+        &self,
+        mounted: &Mounted,
+        bounds: Rect,
+        rtl: bool,
+        scale: f32,
+    ) -> Option<Placement> {
         let stored = mounted.placement.get();
         match stored {
             Some(p) if p.window == bounds => Some(p),
@@ -448,7 +465,7 @@ impl LiveImage {
             }
             _ => {
                 let to_device = stored.and_then(|p| p.to_device);
-                let fresh = self.place(bounds, rtl, to_device.filter(|_| self.pixel_snap));
+                let fresh = self.place(bounds, rtl, scale, to_device.filter(|_| self.pixel_snap));
                 mounted.placement.set(fresh);
                 fresh
             }
@@ -486,6 +503,15 @@ impl LiveImage {
                 color,
             );
         }
+    }
+}
+
+/// `scale` when it is a device scale, else 1.
+fn usable_scale(scale: f32) -> f32 {
+    if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
     }
 }
 
@@ -584,12 +610,7 @@ impl Widget for LiveImage {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        let scale = if ctx.scale_factor.is_finite() && ctx.scale_factor > 0.0 {
-            ctx.scale_factor
-        } else {
-            1.0
-        };
-        self.box_size(proposal, scale)
+        self.box_size(proposal, usable_scale(ctx.scale_factor))
     }
 
     /// The placement paint will draw and input maps through, computed once
@@ -612,7 +633,12 @@ impl Widget for LiveImage {
                 .unwrap_or(Transform2D::IDENTITY);
             ancestors.then(&Transform2D::scale(ctx.scale_factor, ctx.scale_factor))
         });
-        let placement = self.place(bounds, ctx.is_rtl(), to_device);
+        let placement = self.place(
+            bounds,
+            ctx.is_rtl(),
+            usable_scale(ctx.scale_factor),
+            to_device,
+        );
         mounted.placement.set(placement);
         // A source keeps its size once it has one (a cleared buffer's size
         // stays as its hint), so a placement is never taken back.
@@ -630,7 +656,9 @@ impl Widget for LiveImage {
             return;
         };
         let rtl = matches!(ctx.layout_direction, LayoutDirection::RightToLeft);
-        let shown = self.placement_for(mounted, bounds, rtl).map(|p| p.shown);
+        let shown = self
+            .placement_for(mounted, bounds, rtl, usable_scale(ctx.scale_factor))
+            .map(|p| p.shown);
         let live = self.shared.signals.status.get() == LiveImageStatus::Live;
         // The enabled state needs no binding: an ancestor's change repaints
         // the whole subtree.

@@ -312,6 +312,76 @@ fn c2_natural_is_one_source_pixel_per_logical_or_device_pixel() {
     assert!(close(size_of(&device, at, 1.25), (576.0, 1024.0)));
 }
 
+/// The picture is fitted from the natural size its box is measured from.
+/// With `device_pixels` at scale 2, an 8 × 8 source is 4 × 4 logical
+/// pixels: `None` draws all of it there, at one texel a device pixel, and
+/// `ScaleDown` never grows it past that in a larger box. It used to be
+/// fitted from its 8 × 8 pixels: `None` drew its central quarter, twice the
+/// size, and `ScaleDown` drew it at twice its device-pixel size.
+#[test]
+fn c2_a_picture_measured_in_device_pixels_is_fitted_at_that_size() {
+    let laid_out = |image: LiveImage, proposal: SizeProposal| {
+        let handle = image.handle();
+        let mut tree = tree();
+        tree.set_device_scale_factor(2.0);
+        let id = tree.add(image);
+        tree.add(HStack::new().child(id));
+        tree.layout(proposal);
+        let frame = tree.render();
+        (handle.geometry().unwrap(), only_quad(&frame).uv)
+    };
+    let image = |fit| {
+        LiveImage::new(live(8, 8).0)
+            .device_pixels(true)
+            .fit(fit)
+            .scaling(ScalingFilter::Nearest)
+            .alt("x")
+    };
+    let whole = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+
+    let (g, uv) = laid_out(
+        image(ImageFit::None).sizing(LiveImageSizing::Natural),
+        SizeProposal::exact(50.0, 50.0),
+    );
+    assert_eq!(g.bounds, Rect::new(0.0, 0.0, 4.0, 4.0));
+    assert_eq!(g.content, g.bounds, "all of the source, in its box");
+    assert_eq!(uv, whole);
+
+    let (g, _) = laid_out(
+        image(ImageFit::None).size(10.0, 10.0),
+        SizeProposal::exact(50.0, 50.0),
+    );
+    assert_eq!(
+        g.content,
+        Rect::new(3.0, 3.0, 4.0, 4.0),
+        "centred at its natural size in a larger box"
+    );
+    let (g, _) = laid_out(
+        image(ImageFit::ScaleDown).size(10.0, 10.0),
+        SizeProposal::exact(50.0, 50.0),
+    );
+    assert_eq!(
+        g.content,
+        Rect::new(3.0, 3.0, 4.0, 4.0),
+        "never grown past it"
+    );
+    let (g, _) = laid_out(
+        image(ImageFit::Contain).size(10.0, 10.0),
+        SizeProposal::exact(50.0, 50.0),
+    );
+    assert_eq!(g.content, g.bounds, "a scaling fit is unchanged");
+
+    // Without device pixels, the natural size is the pixel count.
+    let (g, _) = laid_out(
+        LiveImage::new(live(8, 8).0)
+            .fit(ImageFit::None)
+            .size(10.0, 10.0)
+            .alt("x"),
+        SizeProposal::exact(50.0, 50.0),
+    );
+    assert_eq!(g.content, Rect::new(1.0, 1.0, 8.0, 8.0));
+}
+
 #[test]
 fn c7_a_quarter_turn_and_a_resize_reshape_the_box() {
     let (source, writer) = live(720, 1280);

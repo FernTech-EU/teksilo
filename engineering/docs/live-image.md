@@ -130,8 +130,10 @@ public variant. `exiting()` disconnects every window's waker.
 
 ## 6. Placement and input
 
-`ImageGeometry::compute` places the source in the widget's box by fit,
-alignment and orientation. `snapped` moves the picture's edges to the
+`LiveImage` places the source in its box by fit, alignment and orientation,
+fitting from the picture's natural size, the one its box is measured from:
+with `device_pixels`, one source pixel per device pixel, so `ImageFit::None`
+and `ScaleDown` keep a texel on a device pixel. `snapped` moves the picture's edges to the
 device-pixel grid through the widget's effective transform times the scale
 factor, and only for a translation plus an axis-aligned scale. A quad's screen
 rect is the content clipped to the bounds and may be fractional; its texels
