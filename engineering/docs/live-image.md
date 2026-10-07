@@ -21,12 +21,30 @@ plan. Section numbers below (§6.1, AC7, D.13…) are the specification's.
 |---|---|
 | teksilo-canvas `wake` | `RedrawWaker`, `WakeKind`, `WakeFlag`, `WakeGate`, `CountingWaker`: waking one window from any thread, shared with `RepaintTrigger`. |
 | teksilo-canvas `image_geometry` | `ImageFit`, `ImageOrientation`, `ImageGeometry` (placement, device-pixel snapping, both mappings), `PixelRect`, `oriented_crop`. |
-| teksilo-canvas `live_image` | The producer side: source, writer, sessions, write guard, `LiveImageDiffWriter` (see "Whole frames" below), `SourceLock`, the packed meta word, the damage ring and upload planner, the consumer and its wake flags. The draw side: `LiveImageQuad`, `DrawCommand::LiveImage`. The renderer's decisions: `internal::LivePass<B>`, one engine for every backend. `testing::LiveImageMirror` is `LivePass` over a CPU backend. |
+| teksilo-canvas `live_image` | The producer side: source, writer, sessions, write guard, `LiveImageDiffWriter` (see "Whole frames" below), `SourceLock`, the packed meta word, the damage ring and upload planner, the consumer and its wake flags. The draw side: `LiveImageQuad`, `DrawCommand::LiveImage`. The renderer's decisions: `internal::LivePass<B>`, one engine for every backend, and `internal::DeviceTextures`, the per-device table a window copies another's texture through. `testing::LiveImageMirror` is `LivePass` over a CPU backend. |
 | teksilo-core `off_thread` | The registry of off-thread attachments (`RepaintTrigger` and live images), the layout pre-pass that turns their flags into relayouts and status changes, `device_scale_signal`. |
 | teksilo-render | `WgpuBackend` (`live_texture.rs`), `DeviceHealth`, `gpu_reclaim`, `render_capture`, the live mip pass (`live_mip.wgsl` over the full-screen pass the blur shares), the timing histograms (`live_timings.rs`). |
 | teksilo-platform, teksilo-app | The window wake target, the hidden-window gate and `pre_present_notify`, `capture_offscreen` through `render_capture`, the reclaim poll, display-refresh tracking, the automation bridge's live-image half, the idle trace's live line (`live-image-timings`). |
 | teksilo-widgets | `LiveImage`, `LiveImageHandle`, `LiveImageSizing`; `ImageWidget::from_raw`, masked images and `Avatar` on one-commit sources (`CommittedImage`). |
 | teksilo-automation, teksilo-automation-mcp | `live_image_stats`, `live_image_map`, `source` aiming, `ScreenshotMeta::live_images`, the headless fixture; the probe harness's `teksilo_probe.live_image`. |
+
+**Why the wake layer and the protocol are in teksilo-canvas.** teksilo-render
+consumes live pictures and depends on canvas, not on core; a `RenderFrame`
+carries them (`DrawCommand::LiveImage`); and a producer must use them without
+the GUI, which canvas is free of (no wgpu, no winit). So they belong at
+canvas's level or below it. A review on 2026-10-07 asked for a crate of their
+own, on two grounds: "canvas" names only drawing, and every edit to `wake.rs`
+rebuilds canvas and its 22 dependents. The second does not hold: a crate of
+their own would sit below canvas, canvas would depend on it, and the same
+edit would rebuild the same crates. Measured, a comment added to `wake.rs`,
+to `svg.rs` or to a widget's `button.rs` each made `cargo check --workspace`
+recheck all 89 crates, in about 4 s. Two splits were weighed: the wake layer
+alone (about half a day, and it buys only the name), and the producer side
+of live pictures (two to three days, about 25 crate-private items made
+public and hidden across the new boundary, and producers spared only
+canvas's image decoders). Neither was done; canvas's crate documentation now
+says what it holds and why. A later split can keep today's paths as
+re-exports, so it would break no one.
 
 ## 2. The protocol
 

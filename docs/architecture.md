@@ -65,7 +65,7 @@ canvas. Application code can access the document model directly.
 | Layer | Main crates |
 | --- | --- |
 | Values, colors, and theme tokens | `teksilo-tokens` |
-| Drawing interface | `teksilo-canvas` |
+| Drawing interface, live pictures, and waking a window from any thread | `teksilo-canvas` |
 | Tree, state, layout, events, and styles | `teksilo-core` |
 | Reactive collections | `teksilo-data` |
 | Controls and specialized views | `teksilo-widgets`, `teksilo-charts`, `teksilo-scene` |

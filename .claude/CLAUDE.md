@@ -198,7 +198,13 @@ teksilo-canvas          Canvas API, RenderFrame, Path, Paint, geometry, TextBack
                      pull-on-render; `LiveImageDiffWriter` for whole-frame producers — commits only
                      the changed rows, nothing (no lock, no wake) for an identical frame; `internal::LivePass<B>` is the ONE live-pass engine the wgpu
                      renderer and `testing::LiveImageMirror` both run). See docs/live-image.md and
-                     engineering/docs/live-image.md.
+                     engineering/docs/live-image.md. These sit in canvas, not a crate of their own,
+                     because render consumes live pictures and depends on canvas but not core,
+                     `RenderFrame` carries them, and producers stay GUI-free; a separate crate
+                     would sit below canvas and save no rebuild, since canvas would depend on it
+                     (weighed and declined 2026-10-07, engineering/docs/live-image.md §1). The
+                     doc-hidden `sync` module swaps their atomics and locks for loom's under
+                     `cfg(teksilo_loom)`.
 teksilo-core            Widget traits, arena, layout, events, focus, state, gestures, overlays
 teksilo-data            Reactive data models, designed as a *peer* of the GUI, not part of it: depends on
                      teksilo-core only for `Signal<T>` + `ObserverHandle`, so a CLI tool, validation pass,
