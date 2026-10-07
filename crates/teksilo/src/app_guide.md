@@ -967,6 +967,39 @@ announcing every polling tick. The example disables live announcements on meters
 Literal labels via `lit!` need no translation catalog. Settings, toast hosts and
 `teksu!` are optional for this application shape.
 
+### Pixels another thread draws
+
+A VM's screen, a video or a camera preview is a picture another thread
+rewrites many times a second: show it with `LiveImage`, never `ImageWidget`.
+A new `ImageWidget` name per frame never frees its texture, and the same name
+never shows new pixels. The producer writes a `LiveImageSource` from its own
+thread; each commit wakes the window, which uploads only what changed and
+repaints no widget.
+
+```rust
+use teksilo::prelude::*;
+use teksilo::widgets::LiveImage;
+
+let screen = LiveImageSource::new(LivePixelFormat::Bgrx8);
+let writer = screen.writer();
+std::thread::spawn(move || loop {
+    let frame = vec![0u8; 640 * 480 * 4]; // the guest's next frame
+    writer.write_frame(640, 480, &frame, 640 * 4).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(16));
+});
+let view = LiveImage::new(screen).alt(lit!("Virtual machine screen"));
+```
+
+Keep a writer alive for as long as the picture should show: when the last one
+drops, the source frees its pixels and the window its texture. A producer that
+knows what changed writes those rects in one transaction (`writer.lock()`, then
+`commit()`); one that only has whole frames wraps its writer in a
+`LiveImageDiffWriter`, which commits only the rows that changed and nothing for
+an identical frame. Input aimed at the picture maps to source pixels through
+the widget's `LiveImageHandle` (`map_to_source`). Read the guide with
+`cargo teksilo show docs/live-image.md`; in a checkout, `cargo run -p
+live-image-demo` shows a guest screen fed by a 60 Hz producer.
+
 ## Breaking changes 0.9 → 0.13
 
 Each of these fails to resolve at the call site, so the compiler names them — this list is

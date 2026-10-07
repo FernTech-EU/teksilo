@@ -95,9 +95,12 @@ use teksilo_widgets::primitives::ImageFit;
 
 let screen = LiveImageSource::new(LivePixelFormat::Bgrx8);
 let writer = screen.writer();
-std::thread::spawn(move || {
-    let frame = vec![0u8; 720 * 1280 * 4];
+// The producer keeps its writer: when the last one drops, the source
+// frees its pixels and the picture goes.
+std::thread::spawn(move || loop {
+    let frame = vec![0u8; 720 * 1280 * 4]; // the guest's next frame
     writer.write_frame(720, 1280, &frame, 720 * 4).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(16));
 });
 let _view = LiveImage::new(screen)
     .sizing(LiveImageSizing::Aspect)
