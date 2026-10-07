@@ -118,6 +118,14 @@ impl AdapterIds {
         self.outdated = true;
     }
 
+    /// Whether [`deliver`](Self::deliver) with `window_focused` would hand
+    /// out anything but the update it handed out last: the tree's own update
+    /// changed since, so did the window's focus, or nothing was handed out
+    /// yet.
+    pub(crate) fn owes(&self, window_focused: bool) -> bool {
+        self.outdated || self.last.is_none() || window_focused != self.window_focused
+    }
+
     /// `source` as the adapter must be handed it.
     ///
     /// `window_focused` is what the adapter was last told about its window's

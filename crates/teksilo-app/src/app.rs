@@ -783,6 +783,51 @@ impl IdleTrace {
     }
 }
 
+/// Ten a second is fast enough that a magnifier tracking a scroll never looks
+/// stuck, and slow enough that a flung list does not bury AT-SPI under a
+/// bounds-changed signal per node per frame.
+const MOVE_DELIVERY_INTERVAL: Duration = Duration::from_millis(100);
+
+/// What a frame does with the accessibility tree while an assistive
+/// technology is attached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum A11yDelivery {
+    /// Hand the adapter the tree.
+    Deliver,
+    /// Something is owed, but the throttle holds it back: ask for a frame
+    /// then, since nothing else may wake the loop.
+    HoldUntil(Instant),
+    /// The adapter already holds the tree as it is: delivering would hand it
+    /// a copy to compare node by node, and holding back would cost a frame.
+    Nothing,
+}
+
+/// Decide [`A11yDelivery`] for a frame. `owed`: the adapter lacks something
+/// (`WidgetTree::accessibility_delivery_owed`). `needs_full`: the adapter
+/// asked for the whole tree. `walk_changed`: the tree was walked since the
+/// last delivery. A walk, or the first delivery, goes at once; moves alone
+/// go at most every [`MOVE_DELIVERY_INTERVAL`].
+fn a11y_delivery(
+    owed: bool,
+    needs_full: bool,
+    walk_changed: bool,
+    delivered_at: Option<Instant>,
+    now: Instant,
+) -> A11yDelivery {
+    if needs_full {
+        return A11yDelivery::Deliver;
+    }
+    if !owed {
+        return A11yDelivery::Nothing;
+    }
+    match delivered_at {
+        Some(at) if !walk_changed && now.duration_since(at) < MOVE_DELIVERY_INTERVAL => {
+            A11yDelivery::HoldUntil(at + MOVE_DELIVERY_INTERVAL)
+        }
+        _ => A11yDelivery::Deliver,
+    }
+}
+
 /// An app-supplied router for [`AppEvent::External`] payloads that need to
 /// perform **window operations** — open a window, focus one, look one up by its
 /// string id.
@@ -2761,12 +2806,9 @@ impl TeksiloAppHandler {
         let delivered_at = current.a11y_delivered_at;
         let now = std::time::Instant::now();
         let needs_full = current.platform_window.take_accessibility_needs_full_tree();
-        // Ten a second is fast enough that a magnifier tracking a scroll
-        // never looks stuck, and slow enough that a flung list does not
-        // bury AT-SPI under a bounds-changed signal per node per frame.
-        const MOVE_DELIVERY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
-        let mut attached = false;
-        let mut delivered = false;
+        // What this frame did with the tree; `None` when no assistive
+        // technology is attached.
+        let mut delivery = None;
         {
             // Whatever reaches the adapter goes through the tree's delivery,
             // which hands a node that left the reader's tree and came back an
@@ -2779,34 +2821,30 @@ impl TeksiloAppHandler {
                     // Decided in here, not outside: the closure runs only
                     // when an assistive technology is attached, so a window
                     // nobody is reading neither builds nor throttles.
-                    attached = true;
-                    let due = needs_full
-                        || walk != delivered_walk
-                        || delivered_at
-                            .is_none_or(|at| now.duration_since(at) >= MOVE_DELIVERY_INTERVAL);
-                    due.then(|| {
-                        delivered = true;
-                        tree.borrow_mut().deliver_accessibility(window_focused)
-                    })
+                    let owed = tree.borrow().accessibility_delivery_owed(window_focused);
+                    let decided =
+                        a11y_delivery(owed, needs_full, walk != delivered_walk, delivered_at, now);
+                    delivery = Some(decided);
+                    (decided == A11yDelivery::Deliver)
+                        .then(|| tree.borrow_mut().deliver_accessibility(window_focused))
                 },
                 || tree.borrow_mut().deliver_accessibility(window_focused),
             );
         }
-        if delivered {
-            current.a11y_delivered_walk = walk;
-            current.a11y_delivered_at = Some(now);
-        } else if attached {
+        match delivery {
+            Some(A11yDelivery::Deliver) => {
+                current.a11y_delivered_walk = walk;
+                current.a11y_delivered_at = Some(now);
+            }
             // Held back by the throttle, and nothing else will wake the loop
             // once the scroll stops — so the last frame's moves would sit
             // undelivered. Ask for one frame at the end of the window.
-            //
-            // Gated on `attached`: with no assistive technology listening the
-            // closure never runs, and asking for a wake here would spin the
-            // event loop at full rate forever on every app nobody is reading.
-            let deadline = delivered_at
-                .map(|at| at + MOVE_DELIVERY_INTERVAL)
-                .unwrap_or(now);
-            current.tree.request_wake_at(deadline);
+            Some(A11yDelivery::HoldUntil(deadline)) => current.tree.request_wake_at(deadline),
+            // The adapter already holds this walk's content.
+            Some(A11yDelivery::Nothing) => current.a11y_delivered_walk = walk,
+            // No assistive technology listening: nothing is built, and
+            // nothing is owed a frame.
+            None => {}
         }
 
         // Catch-all IME reconcile: covers focus changes from any source
@@ -6489,5 +6527,55 @@ mod live_trace_tests {
         trace.last_report = Instant::now() - Duration::from_secs(2);
         trace.note_tick();
         assert!(trace.live.due.is_empty(), "a tick renders nothing");
+    }
+}
+
+#[cfg(test)]
+mod a11y_delivery_tests {
+    use super::*;
+
+    const MS: Duration = Duration::from_millis(1);
+
+    #[test]
+    fn a_frame_owing_the_adapter_nothing_neither_delivers_nor_asks_for_a_frame() {
+        let t0 = Instant::now();
+        for walk_changed in [false, true] {
+            for since in [None, Some(t0), Some(t0 - 500 * MS)] {
+                assert_eq!(
+                    a11y_delivery(false, false, walk_changed, since, t0 + 10 * MS),
+                    A11yDelivery::Nothing,
+                    "walk changed {walk_changed}, last delivery {since:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn moves_go_ten_a_second_and_the_rest_at_once() {
+        let t0 = Instant::now();
+        assert_eq!(
+            a11y_delivery(true, false, false, Some(t0), t0 + 40 * MS),
+            A11yDelivery::HoldUntil(t0 + MOVE_DELIVERY_INTERVAL),
+            "a move within the interval waits for its end"
+        );
+        assert_eq!(
+            a11y_delivery(true, false, false, Some(t0), t0 + 100 * MS),
+            A11yDelivery::Deliver
+        );
+        assert_eq!(
+            a11y_delivery(true, false, true, Some(t0), t0 + 40 * MS),
+            A11yDelivery::Deliver,
+            "a walk is not throttled"
+        );
+        assert_eq!(
+            a11y_delivery(true, false, false, None, t0),
+            A11yDelivery::Deliver,
+            "nor is the first delivery"
+        );
+        assert_eq!(
+            a11y_delivery(false, true, false, Some(t0), t0 + MS),
+            A11yDelivery::Deliver,
+            "the adapter asked for the whole tree"
+        );
     }
 }

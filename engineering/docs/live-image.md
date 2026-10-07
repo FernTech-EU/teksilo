@@ -313,9 +313,16 @@ commit-to-upload columns are in ms.
 - **A remount** costs a texture's creation and its first upload, hence the
   churn row's p99 above 2 ms; it is not one of AC13's cases.
 - **With accessibility on** (an AT-SPI client attached), AC7's workload took
-  3.8 % and full 1080p frames 8.2 %, but commit-to-upload p50 rose to 12.6 ms
-  and 12.7 ms. At 10 Hz each commit then costs two frames and four timer
-  wakes, against one and one with accessibility off (see Open questions).
+  3.8 % and full 1080p frames 8.2 %. At 10 Hz each commit cost two frames
+  and four timer wakes, against one frame and one wake with accessibility
+  off: the accessibility delivery asked for a frame after any frame drawn
+  within 100 ms of its last update, even with nothing to deliver, and that
+  frame handed the adapter a copy of the tree it held. It now delivers, and
+  holds back, only what the adapter lacks: one frame per commit,
+  accessibility on or off.
+- **Commit to upload** depends on where the producer's 60 Hz clock falls
+  against the display's, which differs from one run to the next: its p50
+  ranged from 2.2 to 13.9 ms across these runs, whatever the scenario.
 
 **Hidden windows (AC16, PR-2, private `kwin_wayland --virtual`).** Minimised,
 the window drew no frame and used 0.01 s of CPU from 0.5 s to 5 s, and it drew
@@ -362,7 +369,7 @@ commits, which is AC20's last clause.
 | AC9 | Met | `LiveTextureStats::bytes` matches the formula (D tests). GPU memory drift 0.0 MiB over 300 s at 720 × 1280 and at 1080p, one texture throughout. |
 | AC10 | Met | Mirror and GPU tests (D.5, D.6), on lavapipe in CI. |
 | AC11 | Met | Claim (r); in a window, GPU memory back within 1 MiB 2–51 ms after each of four closes, with no growth across them. |
-| AC12 | Reported | Commit to upload p50 / p99: 3.9 / 5.6 ms (AC7's workload), 9.6 / 11.5 ms (full 1080p); 12.6 / 16.3 ms with accessibility on. |
+| AC12 | Reported | Commit to upload p50 / p99: 3.9 / 5.6 ms (AC7's workload), 9.6 / 11.5 ms (full 1080p). The p50 ranged from 2.2 to 13.9 ms across runs, set by the phase of the producer's clock against the display's. |
 | AC13 | Not met with two windows | Lock hold p99 1.66 ms in the first of two windows; 1.05–1.12 ms with one window, rotations included. Not staging churn (page faults); see Measurements. |
 | AC14 | Met | A copy-only producer: 0 contended frames of 3,609 over 60 s. |
 | AC15 | Met | `live_image_cost.rs`; the figures under Measurements. |
@@ -383,11 +390,6 @@ LiveImage's and all of them already in 0.15.1:
 - **AC13 with two windows** (Measurements). The staging ring is gated on
   per-call staging allocation showing in the AC6 or AC13 profiles, and the
   page faults say it does not.
-- **The accessibility delivery throttle** (teksilo-app,
-  `MOVE_DELIVERY_INTERVAL`). With an AT attached, a frame within 100 ms of
-  the last delivery asks for a wake 100 ms after that delivery, even when
-  nothing changed since, and the wake draws a frame. An app that updates
-  now and then draws each update twice for a screen-reader user.
 - **The Wayland pen catch-up** (teksilo-app, `pump_pen_sources`). Every
   external wake arms a 4 ms look for the tablet shim, even on a seat that
   has announced no tablet tool, so each producer wake costs two loop

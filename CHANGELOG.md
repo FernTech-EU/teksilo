@@ -550,6 +550,12 @@ by crate for clarity, not because crates version independently.
 
 #### App
 
+- **With a screen reader on, a window drew each change twice.** A frame
+  drawn within a tenth of a second of the last accessibility update asked
+  for another frame at the end of that tenth, even when nothing the reader
+  could hear had changed, and that frame handed the screen reader a copy of
+  the tree it already held. A frame now sends the tree, or holds it back for
+  later, only when something in it changed.
 - **`default-features = false` on `teksilo` still bundled the Arabic and
   Hebrew fallback fonts.** teksilo-app turned them on through its own
   dependency on the text backend, as did `teksilo-theme-material3`'s
