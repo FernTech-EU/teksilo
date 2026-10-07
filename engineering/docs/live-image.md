@@ -138,8 +138,13 @@ own documentation, and the mirror and the GPU renderer run that same code
   restores the strict rule for tests. Stats report `bytes` and `bytes_parked`
   apart.
 - Dropping a texture releases it to wgpu. The device frees it only once the
-  submissions that used it complete. `gpu_reclaim` records each renderer's
-  last submission and polls it with a zero timeout. teksilo-app's control
+  submissions that used it complete. `gpu_reclaim` records, per device, each
+  submission a renderer flags after dropping a texture (its last frame's, or
+  its last one when it closes), keeps every one until it completes, and polls
+  them with a zero timeout. A later flag does not replace an earlier one:
+  windows sharing a device flag in the order they drop textures, not in the
+  order they submitted, and a closing window's last frame can be older than
+  the other window's pending one. teksilo-app's control
   flow keeps a deadline while any reclaim is pending, so a closed window's
   memory returns without another frame (AC11).
 - `DeviceHealth` latches a lost device per device, not per renderer: wgpu's

@@ -10,28 +10,46 @@
 //! so its freed textures would wait for some other window's frame. A
 //! renderer that drops textures records here its device and its last
 //! submission; [`poll_gpu_reclaim`], which the event loop calls when it is
-//! about to sleep, polls each recorded device without blocking until that
-//! submission is complete.
+//! about to sleep, polls each recorded device without blocking until every
+//! submission recorded for it is complete.
 
 use std::sync::Mutex;
 
 use crate::device_health::DeviceHealth;
 
-/// A device with textures waiting to be freed, and the submission after
+/// A device with textures waiting to be freed, and the submissions after
 /// which they can be.
 struct Pending {
     /// Identifies the device: wgpu's own device comparison can mistake two
     /// instances' devices for one (see [`DeviceHealth`]).
     health: DeviceHealth,
     device: wgpu::Device,
-    submission: wgpu::SubmissionIndex,
+    /// Every flagged submission not yet seen complete. A later flag does not
+    /// replace an earlier one: renderers sharing the device flag in the
+    /// order they drop textures, not in the order they submitted (a window
+    /// that closes flags its last frame, which may be older than another
+    /// window's), and wgpu does not let two submissions be compared.
+    submissions: Vec<wgpu::SubmissionIndex>,
+}
+
+/// Whether `submission` is no longer on the GPU, without waiting: complete,
+/// or on a device that can no longer run it.
+fn finished(device: &wgpu::Device, submission: &wgpu::SubmissionIndex) -> bool {
+    let polled = device.poll(wgpu::PollType::Wait {
+        submission_index: Some(submission.clone()),
+        timeout: Some(std::time::Duration::ZERO),
+    });
+    // Only a timeout says it still runs.
+    !matches!(polled, Err(wgpu::PollError::Timeout))
 }
 
 static PENDING: Mutex<Vec<Pending>> = Mutex::new(Vec::new());
 
 /// The device `health` latches dropped textures that `submission`, its
-/// renderer's last, may still use. Merges with a pending record for the same
-/// device: submissions complete in order, so the later one covers both.
+/// renderer's last, may still use. Joins a pending record for the same
+/// device, first forgetting the submissions of it already complete, so a
+/// record holds no more than the flagged work still on the GPU, even where
+/// nothing calls [`poll_gpu_reclaim`].
 pub fn flag_device(
     health: &DeviceHealth,
     device: &wgpu::Device,
@@ -39,11 +57,15 @@ pub fn flag_device(
 ) {
     let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
     match pending.iter_mut().find(|p| p.health.same_device(health)) {
-        Some(p) => p.submission = submission,
+        Some(p) => {
+            let device = &p.device;
+            p.submissions.retain(|s| !finished(device, s));
+            p.submissions.push(submission);
+        }
         None => pending.push(Pending {
             health: health.clone(),
             device: device.clone(),
-            submission,
+            submissions: vec![submission],
         }),
     }
 }
@@ -54,16 +76,14 @@ pub fn flag_device(
 /// frame is drawn for it.
 pub fn poll_gpu_reclaim() -> bool {
     let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
-    pending.retain(|p| {
+    pending.retain_mut(|p| {
         if p.health.is_lost() {
             return false;
         }
-        let done = p.device.poll(wgpu::PollType::Wait {
-            submission_index: Some(p.submission.clone()),
-            timeout: Some(std::time::Duration::ZERO),
-        });
-        // Done: nothing more to wait for. Only a timeout keeps the record.
-        matches!(done, Err(wgpu::PollError::Timeout))
+        let device = &p.device;
+        p.submissions.retain(|s| !finished(device, s));
+        // Done: nothing more to wait for.
+        !p.submissions.is_empty()
     });
     !pending.is_empty()
 }

@@ -112,6 +112,56 @@ fn reclaim_then_a_lost_device_then_a_destroyed_one() {
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     assert_eq!(teksilo_render::gpu_reclaim::pending_reclaims(), 0);
+
+    // Two windows on the device: one flags a submission still on the GPU,
+    // then the other, closing, flags its own last one, older and complete.
+    // The record waits for the newer.
+    let older = queue.submit([]);
+    device
+        .poll(wgpu::PollType::Wait {
+            submission_index: Some(older.clone()),
+            timeout: Some(std::time::Duration::from_secs(10)),
+        })
+        .unwrap();
+    let buffer = || {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("live_device_health_busy"),
+            size: 8 << 20,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    };
+    let (a, b) = (buffer(), buffer());
+    let mut busy = device.create_command_encoder(&Default::default());
+    for _ in 0..256 {
+        busy.copy_buffer_to_buffer(&a, 0, &b, 0, 8 << 20);
+        busy.copy_buffer_to_buffer(&b, 0, &a, 0, 8 << 20);
+    }
+    let newer = queue.submit([busy.finish()]);
+    teksilo_render::gpu_reclaim::flag_device(&health, &device, newer.clone());
+    teksilo_render::gpu_reclaim::flag_device(&health, &device, older);
+    let pending = teksilo_render::poll_gpu_reclaim();
+    let still_running = matches!(
+        device.poll(wgpu::PollType::Wait {
+            submission_index: Some(newer.clone()),
+            timeout: Some(std::time::Duration::ZERO),
+        }),
+        Err(wgpu::PollError::Timeout)
+    );
+    assert!(still_running, "the copies outlast the poll");
+    assert!(
+        pending,
+        "the record waits for the newer submission, flagged first"
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while teksilo_render::poll_gpu_reclaim() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the copies never ended"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert_eq!(teksilo_render::gpu_reclaim::pending_reclaims(), 0);
     renderer.render(&frame(), &view, 1.0, 4, 4, [0.0; 4]);
 
     // Lost: nothing advances, so a probe sees the stream stall.
