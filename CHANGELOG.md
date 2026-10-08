@@ -576,6 +576,15 @@ by crate for clarity, not because crates version independently.
 
 #### App
 
+- **A window that could not draw asked for frames without pause.** When a
+  window's surface refused a frame, the window asked for another at once,
+  every time: on macOS, a window AppKit never showed (one opened while the
+  display slept or the screen was locked) asked about 120,000 times a
+  second, drew nothing and held a core until it was shown, and every new
+  window did so briefly while it first appeared. The first refusal is still
+  retried at once, later ones after a wait that doubles up to a quarter of a
+  second, and on macOS a window AppKit reports not visible is treated as
+  hidden until it is shown.
 - **With a screen reader on, a window drew each change twice.** A frame
   drawn within a tenth of a second of the last accessibility update asked
   for another frame at the end of that tenth, even when nothing the reader

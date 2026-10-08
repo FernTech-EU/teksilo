@@ -66,6 +66,17 @@
 //!
 //! Going hidden asks for one last rendered frame (the inactive look a
 //! compositor's thumbnail shows), and coming back asks for one redraw.
+//!
+//! # Skipped frames
+//!
+//! A frame whose surface refuses to give an image (wgpu reports the window
+//! occluded, or the acquire timed out) is skipped. The first skip in a row
+//! is retried at once: a new macOS window often skips a frame or two while
+//! it first appears. Each later one waits, from [`RETRY_FIRST`] doubling up
+//! to [`RETRY_MAX`] ([`RedrawGate::skipped`]). Retried at once every time, a
+//! window the platform never reports hidden (a macOS window created on a
+//! sleeping display) asked for a redraw on every skipped frame, about
+//! 120,000 a second, and drew nothing. A rendered frame ends the series.
 
 use std::cell::Cell;
 use std::time::{Duration, Instant};
@@ -81,6 +92,22 @@ pub(crate) const TICK_INTERVAL: Duration = Duration::from_millis(100);
 
 /// How long a request may stay undelivered before it counts as withheld.
 pub(crate) const WITHHELD_AFTER: Duration = TICK_INTERVAL;
+
+/// How long the second skipped frame in a row waits for its retry; each
+/// later one waits twice as long, up to [`RETRY_MAX`].
+pub(crate) const RETRY_FIRST: Duration = Duration::from_millis(16);
+
+/// The longest a skipped frame waits for its retry.
+pub(crate) const RETRY_MAX: Duration = Duration::from_millis(250);
+
+/// When to try again after a skipped frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SkippedRetry {
+    /// Ask for a redraw now.
+    Now,
+    /// The window's deadline wakes the loop for it at this instant.
+    At(Instant),
+}
 
 /// What [`RedrawGate::set_hidden`] changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +137,10 @@ pub(crate) struct RedrawGate {
     last_frame_at: Cell<Option<Instant>>,
     /// The one frame a window renders on its way to hidden is still owed.
     transition_frame: Cell<bool>,
+    /// Frames skipped in a row since the window last rendered one.
+    skipped: Cell<u32>,
+    /// When a skipped frame is retried; `None` when none waits.
+    retry_at: Cell<Option<Instant>>,
 }
 
 impl RedrawGate {
@@ -184,6 +215,10 @@ impl RedrawGate {
         if self.hidden.replace(hidden) == hidden {
             return HiddenTransition::Unchanged;
         }
+        // A hidden window's skipped frames are not retried, and a window
+        // shown again starts a new series.
+        self.skipped.set(0);
+        self.retry_at.set(None);
         if hidden {
             self.outstanding_since.set(None);
             self.stall_reported.set(false);
@@ -193,6 +228,39 @@ impl RedrawGate {
             self.tick_pending.set(false);
             self.transition_frame.set(false);
             HiddenTransition::BecameVisible
+        }
+    }
+
+    /// The window's frame was skipped at `now`: when to try again. The first
+    /// skip in a row is retried at once, each later one after a wait that
+    /// doubles from [`RETRY_FIRST`] up to [`RETRY_MAX`]; see the module docs.
+    pub(crate) fn skipped(&self, now: Instant) -> SkippedRetry {
+        let in_a_row = self.skipped.get().saturating_add(1);
+        self.skipped.set(in_a_row);
+        if in_a_row == 1 {
+            return SkippedRetry::Now;
+        }
+        let doublings = (in_a_row - 2).min(16);
+        let wait = RETRY_FIRST.saturating_mul(1 << doublings).min(RETRY_MAX);
+        let at = now + wait;
+        self.retry_at.set(Some(at));
+        SkippedRetry::At(at)
+    }
+
+    /// The window rendered a frame: a series of skipped frames is over.
+    pub(crate) fn rendered(&self) {
+        self.skipped.set(0);
+        self.retry_at.set(None);
+    }
+
+    /// Whether a skipped frame's retry is due at `now`, clearing it if so.
+    pub(crate) fn take_retry(&self, now: Instant) -> bool {
+        match self.retry_at.get() {
+            Some(at) if now >= at => {
+                self.retry_at.set(None);
+                true
+            }
+            _ => false,
         }
     }
 
@@ -222,19 +290,19 @@ impl RedrawGate {
     /// When the loop should next wake for this window, given its tree's next
     /// timer deadline `timer`; `None` when nothing is due.
     ///
-    /// A window that is shown and waits for nothing wakes at `timer`, or for
-    /// a pending state tick once the interval allows it, whichever is first:
-    /// the tick never delays the timer. One awaiting its redraw wakes no
+    /// A window that is shown and waits for nothing wakes at `timer`, for a
+    /// pending state tick once the interval allows it, or for the retry of a
+    /// skipped frame, whichever is first: the tick never delays the timer. One awaiting its redraw wakes no
     /// sooner than the moment that redraw counts as withheld, and one that
     /// draws nothing no sooner than its next tick is allowed; at that moment
     /// a pending tick or a due `timer` runs one.
     pub(crate) fn deadline(&self, now: Instant, timer: Option<Instant>) -> Option<Instant> {
         if !self.hidden.get() && self.outstanding_since.get().is_none() {
             let tick = self.tick_pending.get().then(|| self.next_tick_at(now));
-            return match (timer, tick) {
-                (Some(timer), Some(tick)) => Some(timer.min(tick)),
-                (timer, tick) => timer.or(tick),
-            };
+            return [timer, tick, self.retry_at.get()]
+                .into_iter()
+                .flatten()
+                .min();
         }
         let wanted = match (timer, self.tick_pending.get()) {
             (Some(timer), true) => Some(timer.min(now)),
@@ -297,6 +365,72 @@ mod tests {
             .into_iter()
             .filter_map(|(gate, timer)| gate.deadline(now, timer))
             .min()
+    }
+
+    #[test]
+    fn a_skipped_frame_is_retried_at_once_then_after_a_wait_that_doubles() {
+        let gate = RedrawGate::default();
+        let now = Instant::now();
+        assert_eq!(gate.skipped(now), SkippedRetry::Now, "the first, at once");
+        let waits: Vec<Duration> = (0..8)
+            .map(|_| match gate.skipped(now) {
+                SkippedRetry::At(at) => at - now,
+                SkippedRetry::Now => Duration::ZERO,
+            })
+            .collect();
+        assert_eq!(
+            waits,
+            [16, 32, 64, 128, 250, 250, 250, 250].map(|ms| ms * MS),
+            "doubling from RETRY_FIRST, capped at RETRY_MAX"
+        );
+        // Ten thousand skips in a row still wait the cap: the window cannot
+        // spin, however long its surface refuses.
+        for _ in 0..10_000 {
+            gate.skipped(now);
+        }
+        assert_eq!(gate.skipped(now), SkippedRetry::At(now + RETRY_MAX));
+    }
+
+    #[test]
+    fn a_rendered_frame_or_a_hidden_change_ends_a_series_of_skips() {
+        let gate = RedrawGate::default();
+        let now = Instant::now();
+        gate.skipped(now);
+        gate.skipped(now);
+        gate.rendered();
+        assert_eq!(gate.skipped(now), SkippedRetry::Now, "a new series");
+        assert!(matches!(gate.skipped(now), SkippedRetry::At(_)));
+        gate.set_hidden(true);
+        assert!(
+            !gate.take_retry(now + RETRY_MAX),
+            "a hidden window is not retried"
+        );
+        gate.set_hidden(false);
+        assert_eq!(
+            gate.skipped(now),
+            SkippedRetry::Now,
+            "shown again: a new series"
+        );
+    }
+
+    #[test]
+    fn a_skipped_frames_retry_wakes_the_loop_when_due_and_only_once() {
+        let gate = RedrawGate::default();
+        let now = Instant::now();
+        gate.skipped(now);
+        let SkippedRetry::At(at) = gate.skipped(now) else {
+            panic!("the second skip waits");
+        };
+        let timer = Some(now + 500 * MS);
+        assert_eq!(
+            gate.deadline(now, timer),
+            Some(at),
+            "earlier than the timer"
+        );
+        assert!(!gate.take_retry(at - MS), "not before it is due");
+        assert!(gate.take_retry(at));
+        assert!(!gate.take_retry(at), "taken once");
+        assert_eq!(gate.deadline(now, timer), timer);
     }
 
     #[test]

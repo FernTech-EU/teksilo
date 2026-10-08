@@ -65,8 +65,9 @@ pub enum FrameOutcome {
     /// Per wgpu guidance, skip this frame. On macOS, the initial paint
     /// after window creation often hits `Occluded` one or more times
     /// before Metal finishes compositing, so the caller should still
-    /// request another redraw once — unless it already knows the
-    /// window is hidden (occluded or minimised).
+    /// request another redraw once, and later ones after a growing wait —
+    /// unless it knows the window is hidden (occluded or minimised), or
+    /// [`PlatformWindow::occluded_now`] says it is.
     ///
     /// Wayland does not report a hidden surface this way: acquire keeps
     /// succeeding there. A hidden Wayland window is throttled by the frame
@@ -862,6 +863,27 @@ impl PlatformWindow {
 
     pub fn window(&self) -> &Window {
         &self.window
+    }
+
+    /// Whether the platform says, when asked, that no part of the window is
+    /// visible now: covered entirely, on a display that sleeps, behind a
+    /// locked screen, or not shown yet. macOS answers (`NSWindow`'s
+    /// `occlusionState`), and `None` elsewhere, where winit's events are all
+    /// there is.
+    ///
+    /// winit sends `WindowEvent::Occluded` only when that state changes, so
+    /// a window that was never visible, one created while the display
+    /// slept, never hears it; and wgpu refuses every acquire while AppKit
+    /// does not show the window. Asking is how the caller learns it.
+    pub fn occluded_now(&self) -> Option<bool> {
+        #[cfg(target_os = "macos")]
+        {
+            macos_occlusion::occluded(&self.window)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
     }
 
     /// Get a clonable `Arc` reference to the underlying winit window.
@@ -1743,5 +1765,31 @@ mod accessibility_wake_tests {
         action.do_action(request());
         assert!(rx.try_recv().is_ok(), "still queued after disconnect");
         assert_eq!(posted.load(Ordering::SeqCst), 3, "but nothing is woken");
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod macos_occlusion {
+    use objc2::rc::Retained;
+    use objc2_app_kit::{NSView, NSWindowOcclusionState};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    /// `occlusionState` of the `NSWindow` hosting `window`'s view, lacking
+    /// *Visible*; `None` when the window has no AppKit view or no window yet.
+    /// On the main thread, as every caller in teksilo-app is.
+    pub(super) fn occluded(window: &winit::window::Window) -> Option<bool> {
+        let handle = window.window_handle().ok()?;
+        let RawWindowHandle::AppKit(raw) = handle.as_raw() else {
+            return None;
+        };
+        // Re-retain the NSView winit hands us, as the title-bar host, the
+        // drag destination and the safe-area read do.
+        let view: Retained<NSView> = unsafe { Retained::retain(raw.ns_view.as_ptr().cast()) }?;
+        let ns_window = view.window()?;
+        Some(
+            !ns_window
+                .occlusionState()
+                .contains(NSWindowOcclusionState::Visible),
+        )
     }
 }

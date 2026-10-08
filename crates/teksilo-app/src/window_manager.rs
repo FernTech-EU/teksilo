@@ -200,6 +200,15 @@ pub(crate) struct ManagedWindow {
     /// When `minimized` was last read from winit while unfocused; `None`
     /// since the window last lost focus.
     pub(crate) minimized_probed_at: Option<std::time::Instant>,
+    /// `occluded` was set from asking the platform, not from winit's event,
+    /// and this is when it was last asked; `None` otherwise. A macOS window
+    /// AppKit never showed (created while the display slept) never gets
+    /// `Occluded(true)`: its skipped frame asks instead
+    /// ([`PlatformWindow::occluded_now`](teksilo_platform::PlatformWindow::occluded_now)).
+    /// The reveal normally arrives as `Occluded(false)`; asking again every
+    /// [`OCCLUSION_PROBE_INTERVAL`] keeps the window from staying blank should
+    /// it not.
+    pub(crate) occlusion_probed_at: Option<std::time::Instant>,
     /// Caps Lock active state, toggled on each `Key::CapsLock` press
     /// (winit 0.30 delivers Caps Lock as a discrete key, not via
     /// `ModifiersState`). Pushed to `state.caps_lock` so password fields
@@ -269,6 +278,10 @@ pub(crate) struct ManagedWindow {
 /// window.
 pub(crate) const MINIMIZED_PROBE_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(250);
+
+/// How often a window found occluded by asking the platform asks again.
+pub(crate) const OCCLUSION_PROBE_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(500);
 
 impl ManagedWindow {
     /// Ask winit for a redraw of this window, through the window's
@@ -358,12 +371,53 @@ impl ManagedWindow {
         self.minimized = self.platform_window.window().is_minimized() == Some(true);
     }
 
+    /// A frame was skipped at `now`: when the platform can say, and says the
+    /// window is not visible at all, mark it occluded, so it draws nothing
+    /// and asks for no more frames until it is shown. Whether it now is.
+    pub(crate) fn note_occlusion_after_skip(&mut self, now: std::time::Instant) -> bool {
+        if self.hidden() || self.platform_window.occluded_now() != Some(true) {
+            return self.hidden();
+        }
+        self.occluded = true;
+        self.occlusion_probed_at = Some(now);
+        // The frame that would have been owed on the way to hidden cannot be
+        // drawn either: the surface just refused it.
+        self.sync_hidden_for_frame();
+        true
+    }
+
+    /// Ask the platform again, every [`OCCLUSION_PROBE_INTERVAL`], about a
+    /// window found occluded by asking; shown, it is revealed as winit's
+    /// `Occluded(false)` would.
+    pub(crate) fn probe_occlusion(&mut self, now: std::time::Instant) {
+        let Some(at) = self.occlusion_probed_at else {
+            return;
+        };
+        if now.saturating_duration_since(at) < OCCLUSION_PROBE_INTERVAL {
+            return;
+        }
+        if self.platform_window.occluded_now() == Some(false) {
+            self.occluded = false;
+            self.occlusion_probed_at = None;
+            self.sync_hidden();
+        } else {
+            self.occlusion_probed_at = Some(now);
+        }
+    }
+
     /// When the event loop should next wake for this window: its tree's
     /// next timer deadline, held back while it awaits a redraw it requested
     /// and while it draws nothing. See
     /// [`RedrawGate::deadline`](crate::redraw_gate::RedrawGate::deadline).
     pub(crate) fn wake_deadline(&self, now: std::time::Instant) -> Option<std::time::Instant> {
-        self.redraw.deadline(now, self.tree.next_timer_deadline())
+        let probe = self
+            .occlusion_probed_at
+            .map(|at| at + OCCLUSION_PROBE_INTERVAL);
+        let gate = self.redraw.deadline(now, self.tree.next_timer_deadline());
+        if let Some(probe) = probe {
+            return Some(gate.map_or(probe, |gate| gate.min(probe)));
+        }
+        gate
     }
 }
 
@@ -1221,6 +1275,7 @@ impl WindowManager {
             occluded: false,
             minimized: config.initial_placement.is_minimized(),
             minimized_probed_at: None,
+            occlusion_probed_at: None,
             caps_lock_active: false,
             ime_allowed: None,
             ime_purpose: None,
@@ -1940,10 +1995,14 @@ impl WindowManager {
     /// non-visual tick, rate-limited, for one that draws nothing.
     pub fn request_redraw_due(&self, now: std::time::Instant) {
         for managed in self.windows.values() {
-            if managed
-                .tree
-                .next_timer_deadline()
-                .is_some_and(|deadline| deadline <= now)
+            // `take_retry` first: it clears the retry it reports, so it runs
+            // whether or not a timer is due too.
+            let retry = managed.redraw.take_retry(now);
+            if retry
+                || managed
+                    .tree
+                    .next_timer_deadline()
+                    .is_some_and(|deadline| deadline <= now)
             {
                 managed.request_redraw();
             }

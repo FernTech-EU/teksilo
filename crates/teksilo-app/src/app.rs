@@ -2922,14 +2922,22 @@ impl TeksiloAppHandler {
         );
         match managed.platform_window.render_frame(&frame, clear) {
             teksilo_platform::FrameOutcome::Rendered => {
+                managed.redraw.rendered();
                 if let Some(trace) = &mut self.idle_trace {
                     trace.note_rendered_frame(window_id);
                 }
             }
             teksilo_platform::FrameOutcome::Skipped => {
                 // A hidden window's skipped frame is not retried: it would
-                // block in acquire for nothing. Its reveal asks again.
-                if !managed.hidden() {
+                // block in acquire for nothing. Its reveal asks again. One the
+                // platform reports hidden only when asked (a macOS window
+                // AppKit never showed) is marked hidden here; any other is
+                // retried, at once the first time and then after a growing
+                // wait (see `crate::redraw_gate`).
+                let now = Instant::now();
+                if !managed.note_occlusion_after_skip(now)
+                    && managed.redraw.skipped(now) == crate::redraw_gate::SkippedRetry::Now
+                {
                     managed.request_redraw();
                 }
                 self.wm.reinsert_managed(window_id, current);
@@ -3338,6 +3346,8 @@ impl TeksiloAppHandler {
             WindowEvent::Occluded(occluded) => {
                 let active = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.occluded = occluded;
+                    // winit's word replaces what asking the platform found.
+                    managed.occlusion_probed_at = None;
                     // Both platforms that send this report a window visible
                     // only when it is mapped and not miniaturised, and a
                     // restore without focus sends neither `Focused(true)` nor
@@ -3751,6 +3761,9 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         // A redraw becomes withheld with time alone, so the wake targets learn
         // it here, before the ticks that serve a window drawing nothing.
         let now = Instant::now();
+        for managed in self.wm.iter_mut() {
+            managed.probe_occlusion(now);
+        }
         for managed in self.wm.iter() {
             managed.sync_draws_nothing(now);
         }

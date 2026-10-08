@@ -528,10 +528,15 @@ texture on the device instead of copying the frame into staging under the
 lock (section 3). A texture per device, which would also save the second
 texture's memory, was weighed and not done (section 9).
 
-The macOS run found two more (Measurements, "On macOS"), both open:
-- **A window AppKit never marks visible spins.** The retry of a skipped frame
-  needs a bound, and on macOS the window's occlusion needs reading from
-  AppKit rather than waiting for winit's change event.
+The macOS run found two more (Measurements, "On macOS"):
+- **A window AppKit never marks visible spun: fixed.** A skipped frame is
+  retried at once the first time, then after a wait that doubles from 16 ms
+  to 250 ms (`redraw_gate`), and a rendered frame ends the series. On macOS
+  a skipped frame asks AppKit for the window's `occlusionState`
+  (`PlatformWindow::occluded_now`); not visible, the window is marked
+  occluded and the hidden-window gate closes. winit's `Occluded(false)`
+  normally reveals it; the window also asks again every 500 ms, so it cannot
+  stay blank should that event not come. Not run on a Mac yet.
 - **Metal stages each upload in a new buffer under the lock.** The staging
   ring's gate (per-call allocation in the profile) trips on Metal: the
   uploads need a pool of buffers kept mapped.
