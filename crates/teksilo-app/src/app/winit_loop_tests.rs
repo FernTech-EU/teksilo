@@ -78,7 +78,13 @@
 //! - **(s)** a producer committing through the end of the loop does not panic;
 //! - **(t)** with the `automation` feature, the bridge's `live_image_stats`
 //!   carries the window's textures and wakes, and its screenshot records the
-//!   commit it drew.
+//!   commit it drew;
+//! - **(u)** while nothing on screen can be seen (the session watch's state,
+//!   applied as the loop applies it), every window is hidden and a window
+//!   opened meanwhile is born hidden; the loop rereads the session no sooner
+//!   than its interval, a reading that finds it present shows every window
+//!   with the redraw a reveal owes, and the watch's event never reaches
+//!   `on_app_event`.
 //!
 //! Two are weaker than they look, and the reason is not fixable from here.
 //! **(c)**, the safe area, and the missing-override half of **(d)** compare a
@@ -136,10 +142,13 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::{LiveImageAttachment, LiveImageSignals, WidgetId};
 
-use super::{AppEvent, GPU_RECLAIM_POLL, TeksiloAppBuilder, TeksiloAppHandler, WindowWake};
+use super::{
+    AppEvent, GPU_RECLAIM_POLL, SessionChanged, TeksiloAppBuilder, TeksiloAppHandler, WindowWake,
+};
 use crate::input_routing::tests::{Shared, click, cursor, logging_leaf, touch};
 use crate::redraw_gate::{TICK_INTERVAL, WITHHELD_AFTER};
 use crate::window_config::WindowConfig;
+use crate::window_manager::SESSION_RECHECK_INTERVAL;
 
 /// Forwards every winit callback to the real handler, then runs `step` once —
 /// on the first `about_to_wait`, which is the first moment a window exists and
@@ -1012,6 +1021,84 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             );
             app.window_event(event_loop, window, WindowEvent::Occluded(false));
             app.window_event(event_loop, window, WindowEvent::RedrawRequested);
+        }
+
+        // -- (u) nothing on screen can be seen: every window hides, a window
+        // opened meanwhile is born hidden, and each shows again with a redraw
+        //
+        // What the macOS session watch hears (the displays asleep, the screen
+        // locked, the session switched out) is applied as the loop applies
+        // it; the watch exists on macOS alone, so here it always reads as
+        // present. Taking `session_away` out of `hidden`, or not handing a new
+        // window the manager's state, reddens this.
+        {
+            let start = Instant::now();
+            app.wm.set_session_away(true, start);
+            assert!(
+                app.wm.windows_map()[&window].redraw.is_hidden(),
+                "away, a shown window is hidden"
+            );
+            let away_id = app.wm.create_window(
+                WindowConfig::new()
+                    .title("teksilo loop test: away")
+                    .size(200, 100),
+                event_loop,
+            );
+            let away = app
+                .wm
+                .winit_id_for_teksilo(away_id)
+                .expect("the window was just created");
+            assert!(
+                app.wm.windows_map()[&away].hidden(),
+                "a window opened while away is born hidden"
+            );
+            // Its first frame is the one owed on the way to hidden, as for a
+            // window created minimised; then it draws nothing.
+            app.window_event(event_loop, away, WindowEvent::RedrawRequested);
+            assert!(app.wm.windows_map()[&away].redraw.is_hidden());
+
+            // While away the loop rereads the session, no sooner than the
+            // interval, and a reading that finds it present ends it.
+            assert_eq!(
+                app.wm.session_deadline(),
+                Some(start + SESSION_RECHECK_INTERVAL)
+            );
+            app.wm.recheck_session(start + SESSION_RECHECK_INTERVAL / 2);
+            assert!(
+                app.wm.windows_map()[&window].redraw.is_hidden(),
+                "no reading before the interval"
+            );
+            app.wm.recheck_session(start + SESSION_RECHECK_INTERVAL);
+            assert_eq!(app.wm.session_deadline(), None);
+            for id in [window, away] {
+                let managed = &app.wm.windows_map()[&id];
+                assert!(
+                    !managed.redraw.is_hidden(),
+                    "present again, every window is shown"
+                );
+                assert!(
+                    managed.redraw.awaits_redraw(),
+                    "and asks for the redraw a reveal owes"
+                );
+                app.window_event(event_loop, id, WindowEvent::RedrawRequested);
+            }
+
+            // The watch's event is the framework's alone, and is answered by
+            // reading the watch.
+            app.wm.set_session_away(true, Instant::now());
+            let seen_before = app_events_seen.get();
+            app.user_event(event_loop, AppEvent::External(Box::new(SessionChanged)));
+            assert_eq!(
+                app_events_seen.get(),
+                seen_before,
+                "a session change never reaches on_app_event"
+            );
+            assert!(
+                !app.wm.windows_map()[&window].redraw.is_hidden(),
+                "it reads the watch, which here says present"
+            );
+            app.window_event(event_loop, window, WindowEvent::RedrawRequested);
+            app.wm.close_window(away_id);
         }
 
         // -- (l) the window's waker is installed before its root is built

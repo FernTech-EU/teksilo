@@ -209,6 +209,12 @@ pub(crate) struct ManagedWindow {
     /// [`OCCLUSION_PROBE_INTERVAL`] keeps the window from staying blank should
     /// it not.
     pub(crate) occlusion_probed_at: Option<std::time::Instant>,
+    /// Nothing on screen can be seen at all, the session watch says: on
+    /// macOS, the displays asleep, the screen locked, or another session on
+    /// the console, none of which AppKit reports as occlusion for a window
+    /// already showing. The same for every window; see
+    /// [`WindowManager::set_session_away`].
+    pub(crate) session_away: bool,
     /// Caps Lock active state, toggled on each `Key::CapsLock` press
     /// (winit 0.30 delivers Caps Lock as a discrete key, not via
     /// `ModifiersState`). Pushed to `state.caps_lock` so password fields
@@ -283,6 +289,10 @@ pub(crate) const MINIMIZED_PROBE_INTERVAL: std::time::Duration =
 pub(crate) const OCCLUSION_PROBE_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(500);
 
+/// How often, while nothing on screen can be seen, the session watch rereads
+/// the system's state, should the notification that ends it not come.
+pub(crate) const SESSION_RECHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
 impl ManagedWindow {
     /// Ask winit for a redraw of this window, through the window's
     /// [`RedrawGate`](crate::redraw_gate::RedrawGate). The only way
@@ -293,9 +303,10 @@ impl ManagedWindow {
         });
     }
 
-    /// Minimised or fully occluded: the window draws nothing.
+    /// Minimised, fully occluded, or nothing on screen can be seen: the
+    /// window draws nothing.
     pub(crate) fn hidden(&self) -> bool {
-        self.occluded || self.minimized
+        self.occluded || self.minimized || self.session_away
     }
 
     /// Push [`hidden`](Self::hidden) into the redraw gate and act on what
@@ -504,6 +515,15 @@ pub struct WindowManager {
     /// xdg-activation token to a child process or an IPC peer. Run on the UI
     /// thread.
     pending_token_callbacks: HashMap<winit::window::WindowId, Box<dyn FnOnce(Option<String>)>>,
+    /// Watches whether anything on screen can be seen at all; `None` before
+    /// [`watch_session`](Self::watch_session), and on every platform but
+    /// macOS.
+    session: Option<teksilo_platform::session::SessionWatch>,
+    /// What [`set_session_away`](Self::set_session_away) last applied to
+    /// every window, and what a window created now is born with.
+    session_away: bool,
+    /// While away, when the watch last reread the system's state.
+    session_rechecked_at: Option<std::time::Instant>,
 }
 
 // Doc comments on **every** method here are enforced, not hoped for: a new item
@@ -543,6 +563,9 @@ impl WindowManager {
             app_context_template: None,
             event_proxy: None,
             pending_token_callbacks: HashMap::new(),
+            session: None,
+            session_away: false,
+            session_rechecked_at: None,
         }
     }
 
@@ -596,6 +619,77 @@ impl WindowManager {
     /// to post `CloseWindowRequest` back through the event loop.
     pub fn set_event_proxy(&mut self, proxy: AppEventProxy) {
         self.event_proxy = Some(proxy);
+    }
+
+    /// Start the session watch, on the main thread, once the event proxy is
+    /// installed: each change it hears posts a private
+    /// [`SessionChanged`](crate::app::SessionChanged), which the loop answers
+    /// with [`apply_session`](Self::apply_session). A no-op once watching,
+    /// and on every platform but macOS.
+    pub(crate) fn watch_session(&mut self) {
+        if self.session.is_some() {
+            return;
+        }
+        let Some(proxy) = self.event_proxy.clone() else {
+            return;
+        };
+        self.session = teksilo_platform::session::SessionWatch::new(move || {
+            teksilo_core::AppEventPoster::post_external(
+                &proxy,
+                Box::new(crate::app::SessionChanged),
+            );
+        });
+    }
+
+    /// Apply what the session watch says now; see
+    /// [`set_session_away`](Self::set_session_away).
+    pub(crate) fn apply_session(&mut self, now: std::time::Instant) {
+        let away = self
+            .session
+            .as_ref()
+            .is_some_and(teksilo_platform::session::SessionWatch::away);
+        self.set_session_away(away, now);
+    }
+
+    /// Hide every window while nothing on screen can be seen, and show them
+    /// again when that ends, each with the one redraw a reveal owes. A
+    /// window created meanwhile is born with it. While away, the watch
+    /// rereads the system every [`SESSION_RECHECK_INTERVAL`]
+    /// ([`recheck_session`](Self::recheck_session)).
+    pub(crate) fn set_session_away(&mut self, away: bool, now: std::time::Instant) {
+        self.session_rechecked_at = away.then_some(now);
+        if away == self.session_away {
+            return;
+        }
+        self.session_away = away;
+        for managed in self.windows.values_mut() {
+            managed.session_away = away;
+            managed.sync_hidden();
+        }
+    }
+
+    /// While away, have the watch reread the system's state every
+    /// [`SESSION_RECHECK_INTERVAL`] and clear what it no longer reports: a
+    /// notification that never came would otherwise leave every window
+    /// drawing nothing.
+    pub(crate) fn recheck_session(&mut self, now: std::time::Instant) {
+        let Some(at) = self.session_rechecked_at else {
+            return;
+        };
+        if now.saturating_duration_since(at) < SESSION_RECHECK_INTERVAL {
+            return;
+        }
+        if let Some(session) = &self.session {
+            session.recheck();
+        }
+        self.apply_session(now);
+    }
+
+    /// When [`recheck_session`](Self::recheck_session) is next due; `None`
+    /// while something can be seen.
+    pub(crate) fn session_deadline(&self) -> Option<std::time::Instant> {
+        self.session_rechecked_at
+            .map(|at| at + SESSION_RECHECK_INTERVAL)
     }
 
     /// Install the per-tree app context template that every newly created
@@ -1276,6 +1370,7 @@ impl WindowManager {
             minimized: config.initial_placement.is_minimized(),
             minimized_probed_at: None,
             occlusion_probed_at: None,
+            session_away: self.session_away,
             caps_lock_active: false,
             ime_allowed: None,
             ime_purpose: None,

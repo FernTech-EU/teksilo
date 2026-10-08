@@ -430,7 +430,8 @@ by crate for clarity, not because crates version independently.
 - **A window nobody can see stops drawing.** A minimised window, or one
   fully covered (reported on macOS and X11), renders one last frame and
   then nothing until it is shown again, instead of rendering on every
-  redraw. On Wayland, frames are paced by the compositor's frame callbacks,
+  redraw. On macOS so does every window while the displays sleep, the
+  screen is locked or another user's session has the console. On Wayland, frames are paced by the compositor's frame callbacks,
   which it stops sending to a window it does not show: minimised, covered
   or on another workspace. Such a window still runs its idle callbacks,
   lays out and keeps its accessibility tree delivered, at most ten times a

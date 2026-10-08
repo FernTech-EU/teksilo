@@ -125,6 +125,25 @@ objc2-foundation = { version = "0.3", features = [
     "NSDictionary",
     "NSGeometry",
     "NSEnumerator",
+    # The session watch (`session.rs`): NSWorkspace's notifications, and the
+    # distributed ones a locked screen posts.
+    "NSNotification",
+    "NSDistributedNotificationCenter",
+] }
+# The session watch's reading of the display's sleep and the session's lock
+# and console flags. Both already resolve through objc2-app-kit.
+objc2-core-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "CFDictionary",
+    "CFNumber",
+    "CFString",
+] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = [
+    "std",
+    "libc",
+    "CGDirectDisplay",
+    "CGDisplayConfiguration",
+    "CGSession",
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

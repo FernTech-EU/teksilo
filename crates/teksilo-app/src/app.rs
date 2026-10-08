@@ -1178,6 +1178,15 @@ impl TeksiloAppHandler {
             }
         }
 
+        // While nothing on screen can be seen, the session watch rereads the
+        // system's state now and then (`WindowManager::recheck_session`).
+        if let Some(recheck) = self.wm.session_deadline() {
+            earliest_deadline = Some(match earliest_deadline {
+                Some(current) => current.min(recheck),
+                None => recheck,
+            });
+        }
+
         // The digitizer, whose packets arrive on a thread of its own and so
         // cannot wake the loop by themselves. A bounded `WaitUntil` term, not
         // a `Poll`: see `input_loop::pen_deadline` for when each of its two
@@ -3430,6 +3439,9 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         // was never told about, and that backend is all a machine without a
         // Vulkan driver has. Idempotent, so a resume after suspend is a no-op.
         teksilo_platform::install_display_handle(event_loop.owned_display_handle());
+        // Before the first window, so that it is born knowing whether anything
+        // on screen can be seen. A no-op once watching.
+        self.wm.watch_session();
 
         if !self.initial_created
             && let Some(config) = self.initial_window.take()
@@ -3475,7 +3487,13 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
                     self.window_wake(*wake, event_loop);
                     return;
                 }
-                Err(payload) => AppEvent::External(payload),
+                Err(payload) => match payload.downcast::<SessionChanged>() {
+                    Ok(_) => {
+                        self.wm.apply_session(Instant::now());
+                        return;
+                    }
+                    Err(payload) => AppEvent::External(payload),
+                },
             },
             event => event,
         };
@@ -3761,6 +3779,7 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         // A redraw becomes withheld with time alone, so the wake targets learn
         // it here, before the ticks that serve a window drawing nothing.
         let now = Instant::now();
+        self.wm.recheck_session(now);
         for managed in self.wm.iter_mut() {
             managed.probe_occlusion(now);
         }
@@ -3813,6 +3832,15 @@ pub(crate) struct WindowWake {
     pub(crate) window: WindowId,
     pub(crate) kind: teksilo_canvas::wake::WakeKind,
 }
+
+/// Posted by the session watch, from any thread, each time it hears that
+/// whether anything on screen can be seen has changed (on macOS: the
+/// displays asleep or awake, the screen locked or unlocked, the session
+/// switched out or back). Private to the framework, like [`WindowWake`]; the
+/// loop answers with
+/// [`WindowManager::apply_session`](crate::window_manager::WindowManager::apply_session).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SessionChanged;
 
 /// Payload used by `TitleBarHostCallbacks::request_close` to route a
 /// host-initiated close back to the main event loop. The host's

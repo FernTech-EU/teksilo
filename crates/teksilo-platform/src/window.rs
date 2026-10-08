@@ -866,15 +866,17 @@ impl PlatformWindow {
     }
 
     /// Whether the platform says, when asked, that no part of the window is
-    /// visible now: covered entirely, on a display that sleeps, behind a
-    /// locked screen, or not shown yet. macOS answers (`NSWindow`'s
-    /// `occlusionState`), and `None` elsewhere, where winit's events are all
-    /// there is.
+    /// visible now: covered entirely, or never shown, as a window created
+    /// while the display slept or the screen was locked is until both end.
+    /// macOS answers (`NSWindow`'s `occlusionState`), and `None` elsewhere,
+    /// where winit's events are all there is.
     ///
     /// winit sends `WindowEvent::Occluded` only when that state changes, so
-    /// a window that was never visible, one created while the display
-    /// slept, never hears it; and wgpu refuses every acquire while AppKit
-    /// does not show the window. Asking is how the caller learns it.
+    /// a window that was never visible never hears it; and wgpu refuses
+    /// every acquire while AppKit does not show the window. Asking is how
+    /// the caller learns it. A window already showing stays visible here
+    /// while the displays sleep or the screen is locked: that is the
+    /// [session watch](crate::session)'s to hear.
     pub fn occluded_now(&self) -> Option<bool> {
         #[cfg(target_os = "macos")]
         {

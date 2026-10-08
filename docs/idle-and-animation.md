@@ -285,8 +285,12 @@ Only a change of the source's size or status relayouts the widget. See
 ## Windows nobody can see
 
 A minimised window, or one the platform reports fully occluded, draws
-nothing: no acquire, no render, no present, no live-picture upload. Its state
-stays current all the same. Idle callbacks run, layout runs (so clocks and
+nothing: no acquire, no render, no present, no live-picture upload. On macOS
+so does every window while the displays sleep, the screen is locked or
+another user's session has the console: AppKit does not report those as
+occlusion for a window already showing, so teksilo-platform's
+`SessionWatch` hears them from the system's notifications. A hidden
+window's state stays current all the same. Idle callbacks run, layout runs (so clocks and
 off-thread content advance), and the accessibility tree is delivered, because
 a screen reader can act on a window nobody sees. A request for a redraw to
 such a window marks a *non-visual tick* instead. Ticks run at most ten times a

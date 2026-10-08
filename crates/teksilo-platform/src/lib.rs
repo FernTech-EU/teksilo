@@ -18,6 +18,7 @@ pub mod os_theme;
 pub mod pen;
 pub mod pointer_backend;
 pub mod safe_area;
+pub mod session;
 pub mod soft_keyboard;
 pub mod title_bar_host;
 mod wake;
