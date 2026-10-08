@@ -553,6 +553,28 @@ did not drift over either run.
   wgpu acquired every frame, so AppKit's `occlusionState` kept *Visible*,
   and winit reported no occlusion. Finding C (section 12).
 
+**On macOS, finding C's fix (2026-10-08, late evening).** The same Mac, at
+`7bcf0d57`, from a third checklist:
+- The suites of teksilo-platform and teksilo-app: 369 passed, none failed,
+  the session watch's two tests among them.
+- The display put to sleep at 3 s, the screen locking with it, the second
+  window opened asleep at 10 s, the display woken at 25 s: from the first
+  line after the sleep to the wake, both windows drew no frame and answered
+  no RedrawRequested, the window opened asleep included, and both drew
+  again in the line of the wake. The process used 4.1 s of CPU over the
+  40 s run, against 6.7 s before the fix and 9.4 s awake.
+  `CGDisplayIsAsleep(CGMainDisplayID())`, which the once-a-second reread
+  trusts, read asleep for the whole sleep.
+- The screen locked with ⌃⌘Q for 18 s, the display on: no frame from the
+  first line after the lock to the unlock, and frames again in the half
+  second of the unlock. The reread kept the window hidden throughout, so
+  the session dictionary's lock flag holds while the screen is locked on
+  macOS 26.5.
+- Each window hidden this way was woken once by its producer and then not
+  at all, as a hidden window's pixel flag stays set until a frame takes it.
+- The close loop's ten runs, F.3's 48 checks and the minimise probe's six
+  passed again. Switching to another user's session was not run.
+
 ## 11. Acceptance criteria
 
 Two kinds of evidence stand behind these states. Exact evidence runs in CI
@@ -579,7 +601,7 @@ given with each such figure.
 | AC13 | Met on the reference host; not on Metal | Two windows: lock hold p99 1.00–1.04 ms in the window that uploads (three runs); the other copies its texture on the device and takes no lock. One window: 1.04–1.15 ms (four runs). Each window uploading every commit gave 1.61–1.69 ms (two runs); see Measurements. On an M4 under Metal, one window: 1.82–1.88 ms (one run), with no frame contended; two windows were not run there. |
 | AC14 | Met on the reference host | A copy-only producer: 0 contended frames of 3,609 over 60 s (one run). |
 | AC15 | Met | Exact: `live_image_cost.rs` counts one `write_texture` per full frame, one per rect and none without a commit, in every build. The time ratios under Measurements are one run per build and adapter. |
-| AC16 | Met on KWin and macOS; Windows by hand | PR-2's F.5, rerun at the tip; on the live demo, no frame over 9 s minimised, two screenshots of the hidden window 0.5 s apart holding later commits, and the latest commit shown on restore. F.3's X11 run for screenshots of a hidden window. On macOS, the minimise probe's six checks, twice, and no frame while covered (Measurements, "On macOS" and "On macOS, after the fixes"). |
+| AC16 | Met on KWin and macOS; Windows by hand | PR-2's F.5, rerun at the tip; on the live demo, no frame over 9 s minimised, two screenshots of the hidden window 0.5 s apart holding later commits, and the latest commit shown on restore. F.3's X11 run for screenshots of a hidden window. On macOS, the minimise probe's six checks, three times, no frame while covered, and none through a display sleep or a screen lock since finding C's fix (Measurements, "On macOS" and the two runs after it). |
 | AC17 | Met | Headless pause tests (B.14, B.15, C.18–C.22), D.20, D.21. |
 | AC18 | Met with the PR-3 deviation | J.1–J.5; one private `WindowWake` per burst. |
 | AC19 | Met | J.6–J.8, the Avatar cache test, D.27; a picture a culling parent parks frees its texture at the next frame (`c15_a_culled_picture_frees_its_texture_at_the_next_frame`). |
@@ -634,4 +656,8 @@ third (Measurements, "On macOS, after the fixes"):
   and become active, and the screen lock and unlock, and teksilo-app hides
   every window while any of them holds (section 5). Claim (u) of the X11
   event-loop test covers teksilo-app's side, with four mutations that each
-  redden it; the observers run only on a Mac. Not run on a Mac yet.
+  redden it; the observers run only on a Mac. On the Mac, both windows
+  drew nothing through a display sleep and through a screen lock with the
+  display on, and drew again within the line of the wake or the unlock
+  (Measurements, "On macOS, finding C's fix"). Switching to another user's
+  session, the watch's third reason, was not run there.
