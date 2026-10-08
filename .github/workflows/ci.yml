@@ -573,9 +573,27 @@ jobs:
       # release at all), so they run once — on the `debug` leg — rather than
       # duplicating identical work across both matrix legs.
 
+      # Between releases the corpus is stale by design: only the release commit
+      # regenerates it, through the pre-release hook in
+      # crates/teksilo-corpus/Cargo.toml. Any edit to an indexed document
+      # (docs/, examples/, the app guide, the skill) therefore fails `--check`
+      # on its pull request, and on main until the next release, and failing
+      # those runs reported the release's pending work as a fault in the change.
+      # So the guard fails only on a tag. The Release workflow calls this one,
+      # and there `github.ref` is the tag; a stale corpus at that point means
+      # the release commit was cut without the hook and must not be published.
+      # Everywhere else the staleness is a notice.
       - name: teksilo-corpus staleness guard
         if: matrix.name == 'debug'
-        run: python3 tools/build_corpus.py --check
+        run: |
+          if python3 tools/build_corpus.py --check; then
+            exit 0
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "::error::the release commit carries a stale corpus; was it cut without the pre-release hook in crates/teksilo-corpus/Cargo.toml?"
+            exit 1
+          fi
+          echo "::notice::teksilo-corpus is stale, as expected between releases; the release commit regenerates it"
 
       # The corpus is built in two passes: build_corpus.py chunks the sources,
       # then `cargo teksilo build-vectors` encodes them. The guard above catches

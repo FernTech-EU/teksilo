@@ -117,8 +117,10 @@ and the generator's chunking covers every non-blank line of all 158 documents.
 Laying the chunks back at their offsets leaves gaps exactly where the chunker
 dropped a blank separator line, so the gaps come back as blank lines and the
 result is the original **byte for byte** — checked for all 158 by
-`every_document_reconstructs_byte_exactly`, which reads the real files whenever
-the tests run inside a checkout.
+`every_document_reconstructs_byte_exactly`, which reads the real files of a
+checkout. It needs a corpus regenerated from that checkout, so it is
+`#[ignore]`d and the release's pre-release hook runs it right after
+regenerating one.
 
 `--lines` is **1-based and inclusive**, which is what `search` prints under a hit
 (`(lines 166-172)`) and what an editor's gutter shows; the index stores 0-based

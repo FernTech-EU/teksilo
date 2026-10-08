@@ -542,13 +542,10 @@ mod tests {
     }
 
     #[test]
-    fn every_chunk_line_range_reproduces_its_own_text_in_a_checkout() {
-        // The provenance claim, checked the way a reader would check it:
-        // open `path`, take `line_start..=line_end`, expect this chunk. The
-        // range is no longer how the text is *stored*, which makes it
-        // exactly the kind of field that can rot unnoticed — so it gets a
-        // test rather than an assumption. The ordering half runs even
-        // without a checkout.
+    fn every_chunk_line_range_is_ordered() {
+        // The half of the provenance claim that needs no checkout, and so no
+        // freshly regenerated corpus: it runs on every test run, unlike the
+        // checkout half below.
         let idx = index().unwrap();
         for chunk in &idx.chunks {
             assert!(
@@ -559,7 +556,32 @@ mod tests {
                 chunk.line_end
             );
         }
+    }
 
+    // Ignored on an ordinary test run; the release runs it.
+    //
+    // Its oracle is the checkout's own sources, and the corpus is regenerated
+    // only in the release commit (see the `pre-release-hook` in this crate's
+    // Cargo.toml). Between releases, every edit to an indexed document makes
+    // it fail, so on a pull request it reported the staleness the next release
+    // fixes rather than a fault in the change under review.
+    //
+    // The pre-release hook runs it by name, with `--ignored`, right after it
+    // regenerates the corpus: the one moment the claim must hold, and so the
+    // moment a failure means a real fault in the generator's line ranges.
+    // `build_corpus.py --check` does not cover it: that compares the corpus
+    // with the generator's output, never a chunk's range with the lines a
+    // reader would open. Renaming this test means renaming it in the hook,
+    // which otherwise matches nothing and passes.
+    #[test]
+    #[ignore = "needs a corpus regenerated from this checkout; the pre-release hook runs it"]
+    fn every_chunk_line_range_reproduces_its_own_text_in_a_checkout() {
+        // The provenance claim, checked the way a reader would check it:
+        // open `path`, take `line_start..=line_end`, expect this chunk. The
+        // range is no longer how the text is *stored*, which makes it
+        // exactly the kind of field that can rot unnoticed — so it gets a
+        // test rather than an assumption.
+        let idx = index().unwrap();
         let Some(root) = repo_root() else {
             return;
         };

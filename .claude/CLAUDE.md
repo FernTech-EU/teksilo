@@ -129,11 +129,16 @@ Four things to know when changing it:
   The cargo-release hook in `crates/teksilo-corpus/Cargo.toml` runs both passes
   in the release commit. After editing an indexed document (`docs/`,
   `examples/`, the app guide, the skill), leave the corpus stale: do not run
-  `build_corpus.py` or `build-vectors`. Until the release, three checks report
-  the staleness, and their failing is expected: CI's `build_corpus.py --check`,
-  and under `cargo test --workspace` `teksilo-corpus`'s
-  `every_chunk_line_range_reproduces_its_own_text_in_a_checkout` and
-  `cargo-teksilo`'s `every_document_reconstructs_byte_exactly`.
+  `build_corpus.py` or `build-vectors`. Until the release, CI's
+  `build_corpus.py --check` step reports the staleness as a notice on pull
+  requests and on main, and fails only on a tag (the Release workflow calls
+  `ci.yml`), where a stale corpus means the release commit skipped the hook.
+  The two tests whose oracle is the checkout itself,
+  `teksilo-corpus`'s `every_chunk_line_range_reproduces_its_own_text_in_a_checkout`
+  and `cargo-teksilo`'s `every_document_reconstructs_byte_exactly`, are
+  `#[ignore]`d for the same reason, and the pre-release hook runs them by name
+  right after it regenerates the corpus. Renaming either means renaming it in
+  the hook, which otherwise matches nothing and passes.
 - **Three payloads are embedded and CI guards their identity**:
   `embedded/extract_widget_api.py` against `tools/`, `embedded/skill/` against
   `.claude/skills/teksilo/`, and `embedded/probe/` (whose `tools.py` is
@@ -1233,9 +1238,11 @@ tools/relock-crates-io.sh    # last; CI's `lockfile` job runs `cargo metadata --
 
 Seven things about that list that have each cost real time:
 
-- **A stale corpus fails three checks between releases, and that is expected.**
-  The corpus is regenerated in the release commit only; see the `cargo teksilo`
-  section for the three checks and why nothing should regenerate it earlier.
+- **A stale corpus is expected between releases, and CI only fails on it on
+  a tag.** Run locally, `build_corpus.py --check` still fails on it. The corpus
+  is regenerated in the release commit only; see the `cargo teksilo` section
+  for why nothing should regenerate it earlier, and for the two `#[ignore]`d
+  tests the release runs instead of `cargo test`.
 
 - **The doc gate must be the `--document-private-items` form.** The short form
   never documents a `pub(crate)` item, so it structurally cannot see a broken

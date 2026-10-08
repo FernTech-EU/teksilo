@@ -78,6 +78,17 @@ thiserror = { workspace = true }
 # is left dirty at the new version. Fix the gate and re-run, or `git checkout
 # -- .` to get back to where you started.
 #
+# The last two lines run the two tests whose oracle is the checkout itself:
+# `every_chunk_line_range_reproduces_its_own_text_in_a_checkout` here and
+# `cargo-teksilo`'s `every_document_reconstructs_byte_exactly`. Both are
+# `#[ignore]`d, because between releases the corpus is stale by design and they
+# would fail every pull request for it. Here the corpus has just been
+# regenerated, so a failure is a real fault in the line ranges or in `show`'s
+# reconstruction. They run by exact name: a renamed test matches nothing and
+# passes, so rename it here too. `cargo-teksilo` builds without `semantic`,
+# which neither test needs, so a release whose vectors were fresh does not
+# compile ONNX Runtime for them.
+#
 # NOT included, and each on purpose: `cargo test --workspace` (cargo-release
 # already runs `cargo publish --dry-run` per crate via `verify = true`, and a
 # full headless sweep here would double a release's wall time — run it before
@@ -100,5 +111,7 @@ pre-release-hook = [
 && python3 tools/extract_widget_api.py --catalog-all --api-dir target/doc \
 && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items -j 4 \
 && { python3 tools/build_corpus.py --check --quiet || python3 tools/build_corpus.py; } \
-&& { python3 tools/build_corpus.py --check-vectors --quiet || cargo run -p cargo-teksilo --features semantic -- teksilo build-vectors; }""",
+&& { python3 tools/build_corpus.py --check-vectors --quiet || cargo run -p cargo-teksilo --features semantic -- teksilo build-vectors; } \
+&& cargo test -q -p teksilo-corpus --lib -- --ignored --exact tests::every_chunk_line_range_reproduces_its_own_text_in_a_checkout \
+&& cargo test -q -p cargo-teksilo --no-default-features --bin cargo-teksilo -- --ignored --exact show::tests::every_document_reconstructs_byte_exactly""",
 ]

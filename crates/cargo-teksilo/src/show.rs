@@ -26,7 +26,9 @@
 //! That reconstruction is **byte-exact** for all 158 documents against a real
 //! checkout, which is not an assumption — the test
 //! `every_document_reconstructs_byte_exactly` reads the real files and compares
-//! them, whenever the tests run inside a checkout.
+//! them. It needs a corpus regenerated from that checkout, so it is
+//! `#[ignore]`d and the release's pre-release hook runs it right after
+//! regenerating one.
 //!
 //! # stdout is the document, stderr is the provenance
 //!
@@ -715,7 +717,21 @@ mod tests {
         }
     }
 
+    // Ignored on an ordinary test run; the release runs it.
+    //
+    // Its oracle is the checkout's own files, and the corpus is regenerated
+    // only in the release commit (see the `pre-release-hook` in
+    // crates/teksilo-corpus/Cargo.toml). Between releases, every edit to an
+    // indexed document makes it fail without saying anything about `show`, so
+    // on a pull request it reported the staleness the next release fixes
+    // rather than a fault in the change under review.
+    //
+    // The pre-release hook runs it by name, with `--ignored`, right after it
+    // regenerates the corpus, where a failure is a real reconstruction fault.
+    // Renaming this test means renaming it in the hook, which otherwise
+    // matches nothing and passes.
     #[test]
+    #[ignore = "needs a corpus regenerated from this checkout; the pre-release hook runs it"]
     fn every_document_reconstructs_byte_exactly() {
         // The load-bearing claim: `show` is exposure of data already held, not
         // an approximation of it. Only checkable inside a checkout, since the
