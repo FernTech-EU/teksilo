@@ -575,6 +575,46 @@ did not drift over either run.
 - The close loop's ten runs, F.3's 48 checks and the minimise probe's six
   passed again. Switching to another user's session was not run.
 
+**On Windows (2026-10-09).** Windows 11 (build 22621) in a VirtualBox VM,
+whose adapter has no D3D12 driver, so wgpu ran on D3D12 WARP, the CPU
+rasteriser; a 1610 × 1035 display at 60 Hz and scale 1.0. At `7bcf0d57`,
+run by Claude Code on that machine from a written checklist, with Cyril at
+hand for what needs a person:
+- The workspace's tests, GPU tests failing rather than skipping without an
+  adapter: 10,385 passed, none failed. Among them, on DX12: the three
+  `d10_` tests of the copy between windows and the five `live_mips` tests.
+  The automation server's smoke tests passed over the named-pipe
+  transport, the bridge's with a screenshot.
+- F.3: 48 of 48 checks; the three other curated probes passed (13, 18 and
+  8 checks). The scale was 1.0, so a scale other than 1.0 on Windows is
+  still unexercised.
+- AC16: the minimise probe's six checks, and a minimise by hand: no frame
+  over 11.7 s minimised, one wake dropped, the latest commit on restore.
+- AC2: over 2,474 trace lines, 41 minutes of them shown, no app event, no
+  posted wake and no timer: a draw wake asks winit for the redraw itself.
+- F.4: ten runs of the close loop, all clean, the second window copying
+  the first's texture on the device. The least commits taken in a second,
+  45 to 55, dipped in the second a window opened, which WARP draws on the
+  CPU.
+- With Narrator on, and with a UI Automation client attached mid-run on
+  purpose: one frame per commit at 10 Hz, no timer.
+- The live pass on WARP: `prepare` p99 at a median of 1.2 ms a second for
+  AC7's workload and 4.8 ms for full 1080p frames, lock holds alike, and
+  45 and 52 uploads a second at the median, following a frame rate that
+  itself fell to medians of 46 and 56. WARP draws on the CPUs of a VM, so
+  this says nothing of AC6, AC8 or AC13 on Windows hardware, which remain
+  unmeasured.
+
+Before this run, WARP had failed `live_mips` d23 and d25. It shades the
+texels along a scissor edge at an odd coordinate wrong, so a footprint
+rebuild of the mip chain (`LoadOp::Load` with a scissor) left a row or a
+column of a level transparent black, and the levels below inherited it.
+The footprint scissor now grows outward to even edges, clamped to the
+level (`even_scissor`), which is correct on any adapter: a texel it adds
+is recomputed from current texels of the level below, so the pass writes
+back the value it holds. The run also found the demo's checkboxes showing
+"…" for their labels: a `MinSize` layout fault outside LiveImage.
+
 ## 11. Acceptance criteria
 
 Two kinds of evidence stand behind these states. Exact evidence runs in CI
@@ -588,20 +628,20 @@ given with each such figure.
 | ID | State | Evidence |
 |---|---|---|
 | AC1 | Met | Headless: teksilo-canvas `live_image/tests.rs`, teksilo-core `live_image_tests.rs`. Live: F.3's idle check, Wayland and X11. |
-| AC2 | Met | The recording-poster tests of the wake layer; claims (j) and (k) of the X11 event-loop test. On macOS, one posted event per off-main draw wake, none reaching the app (Measurements, "On macOS"). |
+| AC2 | Met | The recording-poster tests of the wake layer; claims (j) and (k) of the X11 event-loop test. On macOS, one posted event per off-main draw wake, none reaching the app (Measurements, "On macOS"). On Windows, no posted event and no app event over 2,474 trace lines (Measurements, "On Windows"). |
 | AC3 | Met | Headless paint counters and stats; F.3 (`paints` flat while 31 frames went by). |
 | AC4, AC5 | Met | Headless, `CountingWaker`, one and two trees. |
-| AC6 | Met on the reference host; on Metal, for AC7's workload only | In a window under `Fifo`: p99 0.25 ms for AC7's workload (one run), 1.06–1.19 ms for full 1080p (three runs) (Measurements, "In a window"). Offscreen: the 60 Hz table, one run per row. On an M4 under Metal, with staging kept mapped: at most 0.46 ms for AC7's workload on every line after the first, 1.84–1.90 ms for full 1080p (one run each; 1.07 and 3.56 ms before the pool). A copy of the frame alone, paced, takes 1.88 ms at p99 there (Measurements, "On macOS, after the fixes"). |
+| AC6 | Met on the reference host; on Metal, for AC7's workload only | In a window under `Fifo`: p99 0.25 ms for AC7's workload (one run), 1.06–1.19 ms for full 1080p (three runs) (Measurements, "In a window"). Offscreen: the 60 Hz table, one run per row. On an M4 under Metal, with staging kept mapped: at most 0.46 ms for AC7's workload on every line after the first, 1.84–1.90 ms for full 1080p (one run each; 1.07 and 3.56 ms before the pool). A copy of the frame alone, paced, takes 1.88 ms at p99 there (Measurements, "On macOS, after the fixes"). On Windows only WARP has run, which does not measure it (Measurements, "On Windows"). |
 | AC7 | Met on the bench, on the reference host | 2.4–3.8 % of a core with AC7's workload over four runs, accessibility on and off, floor included. Miragem itself is not on Teksilo yet, so its real tree is not measured. |
-| AC8 | Met on the reference host | At least 59 uploads every second over 60 s; UI thread 7.2–8.2 % (three runs). |
+| AC8 | Met on the reference host | At least 59 uploads every second over 60 s; UI thread 7.2–8.2 % (three runs). On Windows only WARP has run, which does not measure it. |
 | AC9 | Met | Exact: `LiveTextureStats::bytes` matches the formula (D tests). On the reference host, GPU memory drift 0.0 MiB over 300 s at 720 × 1280 and at 1080p, one texture throughout (one run each). |
 | AC10 | Met | Mirror and GPU tests (D.5, D.6), on lavapipe in CI. |
 | AC11 | Met, but for one 4 MiB block | Exact: claim (r). In a window, four runs of four opens and closes, two before the copy and two after it: GPU memory came back to within 1 MiB 2–51 ms after 13 of the 16 closes. After the other three, one in each of three runs, with and without the copy, 4 MiB stayed, and did not grow where later cycles followed: an allocator block kept, not a texture (one is 7.9 MiB). |
 | AC12 | Reported | Commit to upload p50 / p99: 3.9 / 5.6 ms (AC7's workload), 9.6 / 11.5 ms (full 1080p), one run each. The p50 ranged from 2.2 to 15.1 ms across runs, set by the phase of the producer's clock against the display's, which differs from one run to the next: a spread, not noise to average out. |
-| AC13 | Met on the reference host; not on Metal | Two windows: lock hold p99 1.00–1.04 ms in the window that uploads (three runs); the other copies its texture on the device and takes no lock. One window: 1.04–1.15 ms (four runs). Each window uploading every commit gave 1.61–1.69 ms (two runs); see Measurements. On an M4 under Metal, one window: 1.82–1.88 ms (one run), with no frame contended; two windows were not run there. |
+| AC13 | Met on the reference host; not on Metal | Two windows: lock hold p99 1.00–1.04 ms in the window that uploads (three runs); the other copies its texture on the device and takes no lock. One window: 1.04–1.15 ms (four runs). Each window uploading every commit gave 1.61–1.69 ms (two runs); see Measurements. On an M4 under Metal, one window: 1.82–1.88 ms (one run), with no frame contended; two windows were not run there. On Windows only WARP has run, which does not measure it. |
 | AC14 | Met on the reference host | A copy-only producer: 0 contended frames of 3,609 over 60 s (one run). |
 | AC15 | Met | Exact: `live_image_cost.rs` counts one `write_texture` per full frame, one per rect and none without a commit, in every build. The time ratios under Measurements are one run per build and adapter. |
-| AC16 | Met on KWin and macOS; Windows by hand | PR-2's F.5, rerun at the tip; on the live demo, no frame over 9 s minimised, two screenshots of the hidden window 0.5 s apart holding later commits, and the latest commit shown on restore. F.3's X11 run for screenshots of a hidden window. On macOS, the minimise probe's six checks, three times, no frame while covered, and none through a display sleep or a screen lock since finding C's fix (Measurements, "On macOS" and the two runs after it). |
+| AC16 | Met on KWin, macOS and Windows | PR-2's F.5, rerun at the tip; on the live demo, no frame over 9 s minimised, two screenshots of the hidden window 0.5 s apart holding later commits, and the latest commit shown on restore. F.3's X11 run for screenshots of a hidden window. On macOS, the minimise probe's six checks, three times, no frame while covered, and none through a display sleep or a screen lock since finding C's fix (Measurements, "On macOS" and the two runs after it). On Windows, the minimise probe's six checks and a minimise by hand, under WARP (Measurements, "On Windows"). |
 | AC17 | Met | Headless pause tests (B.14, B.15, C.18–C.22), D.20, D.21. |
 | AC18 | Met with the PR-3 deviation | J.1–J.5; one private `WindowWake` per burst. |
 | AC19 | Met | J.6–J.8, the Avatar cache test, D.27; a picture a culling parent parks frees its texture at the next frame (`c15_a_culled_picture_frees_its_texture_at_the_next_frame`). |
@@ -661,3 +701,12 @@ third (Measurements, "On macOS, after the fixes"):
   display on, and drew again within the line of the wake or the unlock
   (Measurements, "On macOS, finding C's fix"). Switching to another user's
   session, the watch's third reason, was not run there.
+
+The Windows run found one more, fixed before it ran, and leaves two things
+unmeasured (Measurements, "On Windows"):
+- **WARP mis-shaded a footprint rebuild of the mip chain: fixed.** A
+  scissor edge at an odd coordinate came out transparent black on WARP;
+  the footprint scissor now grows outward to even edges.
+- **Not run on Windows:** a scale other than 1.0, which the VM's display
+  did not have, and AC6, AC8 and AC13 on a machine with a D3D12 driver,
+  which WARP, drawing on the CPU, does not measure.
