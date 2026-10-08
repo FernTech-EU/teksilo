@@ -99,9 +99,20 @@ own documentation, and the mirror and the GPU renderer run that same code
   fills a second texture over several presented frames while the previous
   picture keeps drawing. The render that completes it writes, under the same
   lock, the damage since its first band, then swaps.
-- **Bands.** A write is cut into bands of at most 8 MiB of staging, so a
-  failed staging allocation inside `write_texture` cannot take the device
-  down with a single large copy.
+- **Bands.** A write is cut into bands of at most 8 MiB of staging, so no
+  single copy needs a large staging allocation.
+- **Staging kept mapped.** Under the lock, each band is copied into a chunk
+  of a `MAP_WRITE | COPY_SRC` buffer that is already mapped (`live_staging`,
+  8 MiB chunks, a band at a 256-byte-aligned offset), and its
+  `copy_buffer_to_texture` is recorded at the head of the frame's encoder,
+  before the copies between windows and the mip passes. The chunks a frame
+  wrote are unmapped before its submission and mapped again after it, which
+  wgpu completes once the GPU is done with them; the pool takes them back at
+  its next use, polling the device once before it makes another. A chunk
+  unused for a second goes, and every chunk goes at a frame that holds no
+  live texture. `write_texture`, which stages each call in a buffer it
+  creates, is the fallback when no chunk can be made (finding B, section
+  12).
 - **Texture creation.** Creation runs in an out-of-memory error scope. A
   refusal draws the background and retries after a second or at another
   size. Views and bind groups are made only once the texture exists.
@@ -481,6 +492,17 @@ It found two faults, open at this point (section 12):
   1.55 ms for a copy into a buffer already mapped. Vulkan pools that memory,
   which is why the profile on the reference host found allocation at 0.6 %.
 
+**Staging kept mapped, on the reference host.** With the pool (section 3),
+in alternating runs of the same scenarios: AC7's workload, `prepare` p50 /
+p99 67 / 136 µs against 105 / 213 µs, lock hold p99 126 against 206 µs, UI
+thread 2.9 % against 3.4 % (one run each); full 1080p frames, `prepare` p99
+1,023 and 993 µs against 1,064 and 1,062 µs, lock hold p99 1,009 and 977 µs
+against 1,055 and 1,048 µs, UI thread 7.1 and 7.0 % against 7.2 and 7.1 %
+(two runs each). A first version copied a band row by row, and its 1080p
+p99 read 1,290 µs; a band whose rows already have the copy pitch, as a
+1920-pixel row does, is now one copy, as `write_texture` makes. GPU memory
+did not drift over either run.
+
 ## 11. Acceptance criteria
 
 Two kinds of evidence stand behind these states. Exact evidence runs in CI
@@ -537,6 +559,12 @@ The macOS run found two more (Measurements, "On macOS"):
   occluded and the hidden-window gate closes. winit's `Occluded(false)`
   normally reveals it; the window also asks again every 500 ms, so it cannot
   stay blank should that event not come. Not run on a Mac yet.
-- **Metal stages each upload in a new buffer under the lock.** The staging
-  ring's gate (per-call allocation in the profile) trips on Metal: the
-  uploads need a pool of buffers kept mapped.
+- **Metal staged each upload in a new buffer under the lock: fixed by a
+  pool.** The staging ring's gate (per-call allocation in the profile)
+  tripped on Metal, so uploads are now copied into staging kept mapped
+  (section 3). By the standalone measurement on the M4 it should bring 1080p
+  from 2.7 / 3.7 ms to about 1.0 / 1.55 ms (p50 / p99), at the goal rather
+  than clearly under it: getting the copy out of the lock altogether, by
+  double-buffering the source, was weighed and not done. On the reference
+  host the pool is at parity at 1080p and faster for AC7's workload
+  (Measurements). Not run on a Mac yet.

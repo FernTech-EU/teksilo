@@ -306,8 +306,10 @@ by crate for clarity, not because crates version independently.
   background instead. Windows on one device upload each commit once: a
   window whose texture lacks a commit another window already holds copies
   that window's texture on the GPU, without taking the source's lock
-  (`LiveTextureStats::sibling_copies`). `Renderer::live_texture_stats`
-  reports what a renderer holds and uploads.
+  (`LiveTextureStats::sibling_copies`). An upload is copied into staging the
+  renderer keeps mapped and reuses from frame to frame, not into a buffer
+  allocated for it. `Renderer::live_texture_stats` reports what a renderer
+  holds and uploads.
 - `Renderer::render_capture`, `render` for a screenshot: each live picture
   shows its latest commit, even while a producer holds its lock or the
   picture is paused, and the render counts as a capture, not as a frame a

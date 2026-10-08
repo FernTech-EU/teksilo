@@ -23,6 +23,12 @@
 //! the same encoder: a texture-to-texture copy on the device, before the
 //! mip passes that read it. The other window submitted the writes that
 //! filled its texture with its own last frame, earlier on the same queue.
+//!
+//! An upload is copied, under the source's lock, into a staging buffer kept
+//! mapped (`live_staging`), and the copy into the texture is recorded at the
+//! head of the frame's encoder, before those copies and the mip passes.
+//! `Queue::write_texture`, which allocates a staging buffer per call, is
+//! used only when no staging can be made.
 
 use teksilo_canvas::PixelRect;
 use teksilo_canvas::live_image::ScalingFilter;
@@ -156,6 +162,15 @@ struct MipJob {
     opaque: bool,
 }
 
+/// An upload staged under the lock, copied into the texture in the frame's
+/// encoder.
+struct UploadJob {
+    staged: crate::live_staging::Staged,
+    bytes_per_row: u32,
+    texture: wgpu::Texture,
+    band: PixelRect,
+}
+
 /// A copy the live pass asked for: level 0 of another window's texture into
 /// level 0 of one of this window's, of the same size.
 struct CopyJob {
@@ -176,6 +191,8 @@ pub(crate) struct WgpuBackend {
     mip_pipelines: Option<LiveMipPipelines>,
     mip_jobs: Vec<MipJob>,
     copy_jobs: Vec<CopyJob>,
+    upload_jobs: Vec<UploadJob>,
+    staging: crate::live_staging::StagingPool,
     health: DeviceHealth,
     max_dimension: u32,
     /// A texture was dropped since the renderer last flagged its device for
@@ -233,6 +250,8 @@ impl WgpuBackend {
             mip_pipelines: None,
             mip_jobs: Vec::new(),
             copy_jobs: Vec::new(),
+            upload_jobs: Vec::new(),
+            staging: crate::live_staging::StagingPool::default(),
             health,
             max_dimension,
             released: false,
@@ -258,12 +277,68 @@ impl WgpuBackend {
         &self.health
     }
 
-    /// Record what the live pass asked for into `encoder`: first the copies
-    /// of other windows' textures, then the mip passes, one per level above
-    /// 0, in order, each reading the level below. A whole chain clears each
-    /// level first; a region keeps it and draws only its footprint. Run
-    /// before the frame's first draw.
+    /// After the frame's submission: map the staging it used again, and
+    /// free staging unused a while, or all of it when `idle`, the renderer
+    /// holding no live texture. A freed buffer counts as a release for the
+    /// reclaim poll.
+    pub(crate) fn after_submit(&mut self, idle: bool) {
+        let freed = if idle {
+            self.staging.release_all()
+        } else {
+            self.staging.after_submit()
+        };
+        if freed {
+            self.released = true;
+        }
+    }
+
+    pub(crate) fn staging_stats(&self) -> crate::live_staging::StagingStats {
+        self.staging.stats()
+    }
+
+    pub(crate) fn set_staging_idle_lifetime(&mut self, lifetime: std::time::Duration) {
+        self.staging.set_idle_lifetime(lifetime);
+    }
+
+    pub(crate) fn fail_next_staging(&mut self) {
+        self.staging.fail_next();
+    }
+
+    /// Record what the live pass asked for into `encoder`: first the
+    /// uploads it staged, then the copies of other windows' textures, then
+    /// the mip passes, one per level above 0, in order, each reading the
+    /// level below. A whole chain clears each level first; a region keeps it
+    /// and draws only its footprint. Run before the frame's first draw.
     pub(crate) fn encode(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        // A buffer must not be mapped when a submission uses it.
+        self.staging.finish_frame();
+        for job in self.upload_jobs.drain(..) {
+            encoder.copy_buffer_to_texture(
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &job.staged.buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: job.staged.offset,
+                        bytes_per_row: Some(job.bytes_per_row),
+                        rows_per_image: None,
+                    },
+                },
+                wgpu::TexelCopyTextureInfo {
+                    texture: &job.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: job.band.x,
+                        y: job.band.y,
+                        z: 0,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::Extent3d {
+                    width: job.band.width,
+                    height: job.band.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
         for job in self.copy_jobs.drain(..) {
             let size = job.into.size();
             debug_assert_eq!(job.from.size(), size, "the live pass copies one size");
@@ -436,12 +511,45 @@ impl LiveTextureBackend for WgpuBackend {
         (u64::from(width) * 4).next_multiple_of(u64::from(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT))
     }
 
-    /// One `write_texture` into level 0, straight from the locked buffer:
-    /// no repack, no intermediate copy. The size was re-checked under the
-    /// lock and every rect validated at write time, so the copy fits both
-    /// buffer and texture.
+    /// The band's rows copied into mapped staging, at the device's copy
+    /// pitch, and its copy into level 0 recorded for the frame's encoder.
+    /// Without staging (the device has no memory for a chunk), one
+    /// `write_texture` straight from the locked buffer, which stages it
+    /// itself. The size was re-checked under the lock and every rect
+    /// validated at write time, so the copy fits both buffer and texture.
     fn write(&mut self, texture: &mut WgpuTexture, read: &LiveImageRead<'_>, band: PixelRect) {
         let stride = read.stride();
+        let pitch = self.staged_row_bytes(band.width);
+        let row = band.width as usize * 4;
+        let pixels = read.pixels();
+        let staged = self
+            .staging
+            .stage(&self.device, pitch * u64::from(band.height), |dst| {
+                if row == stride && row as u64 == pitch {
+                    // Whole rows that already have the copy pitch, as a full
+                    // frame 1920 pixels wide does: one copy, as
+                    // `write_texture` makes for the same band.
+                    let from = band.y as usize * stride;
+                    let len = row * band.height as usize;
+                    dst.slice(..len).copy_from_slice(&pixels[from..from + len]);
+                    return;
+                }
+                for r in 0..band.height as usize {
+                    let from = (band.y as usize + r) * stride + band.x as usize * 4;
+                    let to = r * pitch as usize;
+                    dst.slice(to..to + row)
+                        .copy_from_slice(&pixels[from..from + row]);
+                }
+            });
+        if let Some(staged) = staged {
+            self.upload_jobs.push(UploadJob {
+                staged,
+                bytes_per_row: pitch as u32,
+                texture: texture.texture.clone(),
+                band,
+            });
+            return;
+        }
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture.texture,

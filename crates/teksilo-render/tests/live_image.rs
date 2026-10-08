@@ -1170,3 +1170,109 @@ fn the_timings_count_each_render_hold_and_upload() {
     );
     assert!(timings.lock_hold.max < timings.commit_to_upload.max);
 }
+
+// ── Staging: uploads copied into buffers kept mapped ──
+
+/// A stream reuses its staging: after the first frame, every commit is
+/// copied into the chunk the previous one used, once the GPU is done with
+/// it, and what the window shows is the commit, exactly, at a width whose
+/// rows do not fill the device's copy pitch.
+#[test]
+fn a_stream_reuses_one_staging_chunk_and_shows_each_commit_exactly() {
+    let Some(mut g) = gpu("live_staging_reuse") else {
+        return;
+    };
+    let (w, h) = (97, 31);
+    let format = LivePixelFormat::Rgba8;
+    let (source, writer) = live(format, w, h);
+    let (_, c) = consumer(&source);
+    let t = g.target(w, h);
+    for seed in 1..=12u8 {
+        writer
+            .write_frame(w, h, &pattern(format, w, h, seed), (w * 4) as usize)
+            .unwrap();
+        g.render(&frame_1to1(&c, ScalingFilter::Nearest), &t);
+        g.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert!(g.read(&t) == shown(w, h, seed), "seed {seed}");
+    }
+    let s = g.renderer.live_staging_stats();
+    assert_eq!((s.created, s.chunks), (1, 1), "one chunk, reused: {s:?}");
+    assert_eq!(g.renderer.live_texture_stats().uploads_full, 12);
+}
+
+/// A frame cut into bands copies each into the same chunk, one after the
+/// other, and the picture is whole.
+#[test]
+fn bands_of_one_frame_share_a_staging_chunk() {
+    let Some(mut g) = gpu("live_staging_bands") else {
+        return;
+    };
+    let (w, h) = (64, 40);
+    let format = LivePixelFormat::Bgra8;
+    let (source, writer) = live(format, w, h);
+    writer
+        .write_frame(w, h, &pattern(format, w, h, 9), (w * 4) as usize)
+        .unwrap();
+    let (_, c) = consumer(&source);
+    let t = g.target(w, h);
+    g.renderer.set_live_band_bytes(256 * 3); // three rows a band
+    g.render(&frame_1to1(&c, ScalingFilter::Nearest), &t);
+    assert!(g.read(&t) == shown(w, h, 9));
+    assert!(g.renderer.live_texture_stats().upload_calls >= 13);
+    assert_eq!(g.renderer.live_staging_stats().created, 1);
+}
+
+/// Without staging (the device had no memory for a chunk), the upload goes
+/// through `write_texture`, and the picture is the same.
+#[test]
+fn without_staging_an_upload_still_lands_exactly() {
+    let Some(mut g) = gpu("live_staging_fallback") else {
+        return;
+    };
+    let (w, h) = (33, 17);
+    let format = LivePixelFormat::Rgba8;
+    let (source, _writer) = live(format, w, h);
+    let (_, c) = consumer(&source);
+    let t = g.target(w, h);
+    g.renderer.fail_next_live_staging();
+    g.render(&frame_1to1(&c, ScalingFilter::Nearest), &t);
+    assert!(g.read(&t) == shown(w, h, 0));
+    assert_eq!(g.renderer.live_staging_stats().created, 0);
+    assert_eq!(g.renderer.live_texture_stats().uploads_full, 1);
+}
+
+/// Staging unused for its lifetime goes, and all of it goes at the first
+/// frame without a live texture.
+#[test]
+fn unused_staging_is_freed_and_all_of_it_once_no_live_texture_remains() {
+    let Some(mut g) = gpu("live_staging_idle") else {
+        return;
+    };
+    let (source, writer) = live(LivePixelFormat::Rgba8, 16, 16);
+    let (_, c) = consumer(&source);
+    let t = g.target(16, 16);
+    g.render(&frame_1to1(&c, ScalingFilter::Nearest), &t);
+    assert_eq!(g.renderer.live_staging_stats().chunks, 1);
+    // Unused from now on, with no lifetime: the frames that upload nothing
+    // free it once the GPU gave it back.
+    g.renderer.set_live_staging_idle_lifetime(Duration::ZERO);
+    for _ in 0..3 {
+        g.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        g.render(&frame_1to1(&c, ScalingFilter::Nearest), &t);
+    }
+    let s = g.renderer.live_staging_stats();
+    assert_eq!((s.chunks, s.freed), (0, 1), "{s:?}");
+    // A new commit stages again; a frame without the picture drops its
+    // texture, and the staging with it at once.
+    writer
+        .write_rect(PixelRect::new(0, 0, 4, 4), &[7; 64], 16)
+        .unwrap();
+    g.renderer
+        .set_live_staging_idle_lifetime(Duration::from_secs(3600));
+    g.render(&frame_1to1(&c, ScalingFilter::Nearest), &t);
+    assert_eq!(g.renderer.live_staging_stats().chunks, 1);
+    g.renderer.set_live_park_budget(0);
+    g.render(&RenderFrame::new(), &t);
+    assert_eq!(g.renderer.live_texture_stats().textures, 0);
+    assert_eq!(g.renderer.live_staging_stats().chunks, 0);
+}

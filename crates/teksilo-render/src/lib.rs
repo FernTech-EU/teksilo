@@ -7,6 +7,7 @@ pub(crate) mod fullscreen;
 pub mod gpu_reclaim;
 pub mod image_manager;
 pub mod instance;
+pub(crate) mod live_staging;
 pub(crate) mod live_texture;
 #[cfg(any(debug_assertions, feature = "live-image-timings"))]
 pub mod live_timings;

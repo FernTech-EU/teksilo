@@ -515,6 +515,24 @@ impl Renderer {
         self.live.backend_mut().fail_next_create();
     }
 
+    /// Test hooks for the live pass's staging: what the pool holds and did,
+    /// how long an unused chunk lives, and a chunk creation that reports no
+    /// memory (the upload then goes through `write_texture`).
+    #[doc(hidden)]
+    pub fn live_staging_stats(&self) -> crate::live_staging::StagingStats {
+        self.live.backend().staging_stats()
+    }
+
+    #[doc(hidden)]
+    pub fn set_live_staging_idle_lifetime(&mut self, lifetime: std::time::Duration) {
+        self.live.backend_mut().set_staging_idle_lifetime(lifetime);
+    }
+
+    #[doc(hidden)]
+    pub fn fail_next_live_staging(&mut self) {
+        self.live.backend_mut().fail_next_staging();
+    }
+
     /// Level `level` of the live texture this renderer holds for source
     /// `id`, read back as tightly packed RGBA8 with its size; `None` without
     /// that texture or level. A GPU wait: for tests.
@@ -2163,6 +2181,10 @@ impl Renderer {
         }
 
         let submission = self.queue.submit(std::iter::once(encoder.finish()));
+        // The staging this frame's uploads used is mapped again; with no
+        // live texture left, it all goes.
+        let idle = self.live.stats().textures == 0;
+        self.live.backend_mut().after_submit(idle);
         if self.live.backend_mut().take_released() {
             crate::gpu_reclaim::flag_device(
                 self.live.backend().health(),
