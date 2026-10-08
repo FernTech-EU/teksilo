@@ -1195,11 +1195,16 @@ pub(crate) mod tests {
     }
 
     /// What the window's menubar dispatcher answers to Alt+`letter`.
+    ///
+    /// Not on macOS, where the dispatcher has no Alt+letter branch: the OS
+    /// composes Option+letter into an accented character first.
+    #[cfg(not(target_os = "macos"))]
     pub(crate) fn alt_letter(tree: &WidgetTree, letter: char) -> MenubarAction {
         use teksilo_core::event::{Key, Modifiers};
         menubar_answer(tree, Key::Character(letter), Modifiers::ALT)
     }
 
+    #[cfg(not(target_os = "macos"))]
     pub(crate) fn opened_trigger(action: &MenubarAction) -> teksilo_core::widget_id::WidgetId {
         match action {
             MenubarAction::OpenMenu { trigger_id, .. } => *trigger_id,
@@ -1214,6 +1219,7 @@ pub(crate) mod tests {
     /// the bar's own account of what is open, and the account is what went
     /// wrong once already (a menu closed by choosing an item in a submenu was
     /// still reported open).
+    #[cfg(not(target_os = "macos"))]
     fn focus_is_in_menu_holding(tree: &WidgetTree, item: &str) -> bool {
         let Some(menu) = tree.focused() else {
             return false;
@@ -1232,6 +1238,7 @@ pub(crate) mod tests {
     /// the bar, which rolled back after a few pixels, and the trigger under
     /// the clip never saw it.
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn alt_letter_opens_its_menu_from_a_collapsed_menu_bar() {
         let (mut tree, menu_bar, proposal) = tree_with_menu_bar(true);
         let bar = tree.children(menu_bar)[0];
@@ -1259,6 +1266,7 @@ pub(crate) mod tests {
 
     /// The same chord on a bar laid out in full, which never needed a reveal.
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn alt_letter_opens_its_menu_from_an_inline_menu_bar() {
         let (mut tree, _menu_bar, proposal) = tree_with_menu_bar(false);
         let action = alt_letter(&tree, 'e');
@@ -1277,6 +1285,7 @@ pub(crate) mod tests {
     /// Both halves are fixed: Alt+letter expands rather than toggles, and the
     /// state follows the menu's overlay (`menu_bar` tests pin that half).
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn alt_letter_opens_its_menu_after_a_submenu_choice() {
         use teksilo_core::accessibility::widget_id_to_node_id;
         use teksilo_core::accesskit::Action;

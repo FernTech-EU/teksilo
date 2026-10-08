@@ -5745,13 +5745,13 @@ mod tests {
     /// box: Alt+E opens no menu, and neither it nor F10 moves focus out of the
     /// box. A bar collapsed to its hamburger is the case that needs saying:
     /// its reveal floats the bar as an overlay *above* the box, where a menu
-    /// would be in front of the modal and free to act.
+    /// would be in front of the modal and free to act. macOS has no Alt+letter
+    /// mnemonics (the OS composes Option+letter first), so there only F10 is
+    /// checked.
     #[test]
     fn the_menu_bar_keys_do_nothing_behind_an_in_tree_message_box() {
         use crate::input_routing::apply_menubar_action;
-        use crate::input_routing::tests::{
-            alt_letter, menubar_answer, opened_trigger, tree_with_menu_bar,
-        };
+        use crate::input_routing::tests::{menubar_answer, tree_with_menu_bar};
         use teksilo_core::event::{Key, Modifiers};
         use teksilo_core::window::NoopWindowOps;
 
@@ -5770,10 +5770,16 @@ mod tests {
                 "precondition: focus went into the box"
             );
 
-            let open_edit = alt_letter(&tree, 'e');
-            let edit = opened_trigger(&open_edit);
             let focus_file = menubar_answer(&tree, Key::F10, Modifiers::NONE);
-            for action in [open_edit, focus_file] {
+            #[cfg(target_os = "macos")]
+            let actions = [focus_file];
+            #[cfg(not(target_os = "macos"))]
+            let (edit, actions) = {
+                use crate::input_routing::tests::{alt_letter, opened_trigger};
+                let open_edit = alt_letter(&tree, 'e');
+                (opened_trigger(&open_edit), [open_edit, focus_file])
+            };
+            for action in actions {
                 apply_menubar_action(&mut tree, &mut NoopWindowOps, action, proposal);
                 tree.layout(proposal);
                 tree.advance_time(std::time::Duration::from_secs(1));
@@ -5784,6 +5790,7 @@ mod tests {
                     "collapsed: {collapsed}, focus stays in the box"
                 );
             }
+            #[cfg(not(target_os = "macos"))]
             assert!(
                 !tree.accessibility_node(edit).is_expanded(),
                 "collapsed: {collapsed}, no menu opens over the box"

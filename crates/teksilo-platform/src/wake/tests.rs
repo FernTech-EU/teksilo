@@ -105,6 +105,11 @@ impl RequestRedraw for BlockingWindow {
 
 /// E.2: `disconnect` waits for a request already in progress, so nothing
 /// reaches the window after it returns.
+///
+/// The request is a state wake with no route, which asks the window from the
+/// calling thread on every platform. A draw wake would not do: on macOS one
+/// made off the main thread hands its request to the main queue, which
+/// nothing drains in a test.
 #[test]
 fn disconnect_waits_for_an_inflight_wake() {
     let (entered_tx, entered_rx) = mpsc::channel();
@@ -117,7 +122,7 @@ fn disconnect_waits_for_an_inflight_wake() {
     }));
     let waker = {
         let target = target.clone();
-        std::thread::spawn(move || target.wake_draw())
+        std::thread::spawn(move || target.wake_state())
     };
     entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
     let releaser = std::thread::spawn(move || {
