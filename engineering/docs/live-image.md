@@ -173,6 +173,24 @@ contributes no timer deadline. That fixed a 100 %-CPU spin. Wayland's
 `pre_present_notify` is called only after a successful acquire, adjacent to
 present.
 
+On macOS a window already showing stays visible to AppKit while the
+displays sleep, the screen is locked or another user's session has the
+console, so wgpu acquires its frames and winit reports no occlusion. A
+further input hides every window then: teksilo-platform's `SessionWatch`
+observes `NSWorkspace`'s screens-did-sleep and session-did-resign-active
+notifications and their opposites, and the distributed
+`com.apple.screenIsLocked` and `com.apple.screenIsUnlocked`, which Apple
+does not document. Those are registered for immediate delivery: Cocoa
+holds the distributed centre's notifications while the application is
+inactive, as it is under the lock screen. Each reason is set and cleared by
+its own notifications. While any holds, the loop rereads the system every
+second (the main display's sleep, the session's console and lock flags)
+and clears a reason it no longer reports; it never sets one, so a wrong
+reading costs frames drawn for nobody, never a window that does not draw
+again. A window opened meanwhile is born hidden. Elsewhere there is no
+watch: a Wayland compositor stops sending frame callbacks to a surface it
+does not show.
+
 PR-3 added the per-window wake target. Pixel wakes are dropped while the
 window is hidden, and one redraw is requested when it is shown. Geometry and
 relayout wakes always get through. On macOS an off-main wake is a private
@@ -503,6 +521,38 @@ p99 read 1,290 µs; a band whose rows already have the copy pitch, as a
 1920-pixel row does, is now one copy, as `write_texture` makes. GPU memory
 did not drift over either run.
 
+**On macOS, after the fixes (2026-10-08, evening).** The same Mac, at
+`230b9945`, from a second checklist:
+- The suites of teksilo-render, teksilo-app and teksilo-platform on Metal:
+  498 passed, none failed, the four staging tests and the redraw gate's
+  skipped-frame tests among them.
+- A: the bench's second window opened at 10 s on a display put to sleep at
+  3 s, the screen locking with it, and woken at 25 s. No second counted
+  more than two RedrawRequested above its frames. The window opened asleep
+  drew nothing and woke the loop twice a second for its occlusion check,
+  and both windows drew again within 0.6 s of the wake. The process used
+  6.7 s of CPU over the 40 s run, against 9.4 s for the same run awake. In
+  the close loop's ten runs, each second in which a window opened counted
+  2 to 4 RedrawRequested above its frames, against 300 to 1,000 before.
+- F.4: ten runs of the close loop, all clean. F.3: 48 of 48 checks. The
+  minimise probe: six of six.
+- B, one run each. Each trace line's timings cover its latest 1,024
+  samples, so lines from 18 s on hold no start-up sample. AC7's workload:
+  `prepare` p50 / p90 / p99 of 248 / 317 / 376 µs (medians over the
+  lines), against 577 / 733 / 896 before the pool, and a p99 of at most
+  456 µs on every line after the first. Full 1080p frames: 1,213 / 1,429 /
+  1,879 µs against 2,382 / 2,909 / 3,418, and a p99 between 1,836 and
+  1,903 µs once start-up had left the samples. Lock holds ran 12 to 24 µs
+  under `prepare`; no frame was contended. The same evening, a standalone
+  copy of a 1080p frame into a buffer already mapped, paced at 60 Hz, took
+  1,159 / 1,876 µs (p50 / p99), against 1,006 / 1,554 that morning, and
+  124 µs back to back: the live pass costs what that copy costs on this
+  machine when paced, and the pool adds nothing to it.
+- The bench's first window, already showing when the display was put to
+  sleep, drew 59 to 61 frames a second through the sleep and the lock:
+  wgpu acquired every frame, so AppKit's `occlusionState` kept *Visible*,
+  and winit reported no occlusion. Finding C (section 12).
+
 ## 11. Acceptance criteria
 
 Two kinds of evidence stand behind these states. Exact evidence runs in CI
@@ -519,17 +569,17 @@ given with each such figure.
 | AC2 | Met | The recording-poster tests of the wake layer; claims (j) and (k) of the X11 event-loop test. On macOS, one posted event per off-main draw wake, none reaching the app (Measurements, "On macOS"). |
 | AC3 | Met | Headless paint counters and stats; F.3 (`paints` flat while 31 frames went by). |
 | AC4, AC5 | Met | Headless, `CountingWaker`, one and two trees. |
-| AC6 | Met on the reference host; not on Metal | In a window under `Fifo`: p99 0.25 ms for AC7's workload (one run), 1.06–1.19 ms for full 1080p (three runs) (Measurements, "In a window"). Offscreen: the 60 Hz table, one run per row. On an M4 under Metal: 1.07 ms and 3.56 ms (one run each), finding B. |
+| AC6 | Met on the reference host; on Metal, for AC7's workload only | In a window under `Fifo`: p99 0.25 ms for AC7's workload (one run), 1.06–1.19 ms for full 1080p (three runs) (Measurements, "In a window"). Offscreen: the 60 Hz table, one run per row. On an M4 under Metal, with staging kept mapped: at most 0.46 ms for AC7's workload on every line after the first, 1.84–1.90 ms for full 1080p (one run each; 1.07 and 3.56 ms before the pool). A copy of the frame alone, paced, takes 1.88 ms at p99 there (Measurements, "On macOS, after the fixes"). |
 | AC7 | Met on the bench, on the reference host | 2.4–3.8 % of a core with AC7's workload over four runs, accessibility on and off, floor included. Miragem itself is not on Teksilo yet, so its real tree is not measured. |
 | AC8 | Met on the reference host | At least 59 uploads every second over 60 s; UI thread 7.2–8.2 % (three runs). |
 | AC9 | Met | Exact: `LiveTextureStats::bytes` matches the formula (D tests). On the reference host, GPU memory drift 0.0 MiB over 300 s at 720 × 1280 and at 1080p, one texture throughout (one run each). |
 | AC10 | Met | Mirror and GPU tests (D.5, D.6), on lavapipe in CI. |
 | AC11 | Met, but for one 4 MiB block | Exact: claim (r). In a window, four runs of four opens and closes, two before the copy and two after it: GPU memory came back to within 1 MiB 2–51 ms after 13 of the 16 closes. After the other three, one in each of three runs, with and without the copy, 4 MiB stayed, and did not grow where later cycles followed: an allocator block kept, not a texture (one is 7.9 MiB). |
 | AC12 | Reported | Commit to upload p50 / p99: 3.9 / 5.6 ms (AC7's workload), 9.6 / 11.5 ms (full 1080p), one run each. The p50 ranged from 2.2 to 15.1 ms across runs, set by the phase of the producer's clock against the display's, which differs from one run to the next: a spread, not noise to average out. |
-| AC13 | Met on the reference host | Two windows: lock hold p99 1.00–1.04 ms in the window that uploads (three runs); the other copies its texture on the device and takes no lock. One window: 1.04–1.15 ms (four runs). Each window uploading every commit gave 1.61–1.69 ms (two runs); see Measurements. |
+| AC13 | Met on the reference host; not on Metal | Two windows: lock hold p99 1.00–1.04 ms in the window that uploads (three runs); the other copies its texture on the device and takes no lock. One window: 1.04–1.15 ms (four runs). Each window uploading every commit gave 1.61–1.69 ms (two runs); see Measurements. On an M4 under Metal, one window: 1.82–1.88 ms (one run), with no frame contended; two windows were not run there. |
 | AC14 | Met on the reference host | A copy-only producer: 0 contended frames of 3,609 over 60 s (one run). |
 | AC15 | Met | Exact: `live_image_cost.rs` counts one `write_texture` per full frame, one per rect and none without a commit, in every build. The time ratios under Measurements are one run per build and adapter. |
-| AC16 | Met on KWin and macOS; Windows by hand | PR-2's F.5, rerun at the tip; on the live demo, no frame over 9 s minimised, two screenshots of the hidden window 0.5 s apart holding later commits, and the latest commit shown on restore. F.3's X11 run for screenshots of a hidden window. On macOS, the minimise probe's six checks, and no frame while covered (Measurements, "On macOS"). |
+| AC16 | Met on KWin and macOS; Windows by hand | PR-2's F.5, rerun at the tip; on the live demo, no frame over 9 s minimised, two screenshots of the hidden window 0.5 s apart holding later commits, and the latest commit shown on restore. F.3's X11 run for screenshots of a hidden window. On macOS, the minimise probe's six checks, twice, and no frame while covered (Measurements, "On macOS" and "On macOS, after the fixes"). |
 | AC17 | Met | Headless pause tests (B.14, B.15, C.18–C.22), D.20, D.21. |
 | AC18 | Met with the PR-3 deviation | J.1–J.5; one private `WindowWake` per burst. |
 | AC19 | Met | J.6–J.8, the Avatar cache test, D.27; a picture a culling parent parks frees its texture at the next frame (`c15_a_culled_picture_frees_its_texture_at_the_next_frame`). |
@@ -550,7 +600,8 @@ texture on the device instead of copying the frame into staging under the
 lock (section 3). A texture per device, which would also save the second
 texture's memory, was weighed and not done (section 9).
 
-The macOS run found two more (Measurements, "On macOS"):
+The macOS run found two more (Measurements, "On macOS"), and its re-run a
+third (Measurements, "On macOS, after the fixes"):
 - **A window AppKit never marks visible spun: fixed.** A skipped frame is
   retried at once the first time, then after a wait that doubles from 16 ms
   to 250 ms (`redraw_gate`), and a rendered frame ends the series. On macOS
@@ -558,13 +609,29 @@ The macOS run found two more (Measurements, "On macOS"):
   (`PlatformWindow::occluded_now`); not visible, the window is marked
   occluded and the hidden-window gate closes. winit's `Occluded(false)`
   normally reveals it; the window also asks again every 500 ms, so it cannot
-  stay blank should that event not come. Not run on a Mac yet.
-- **Metal staged each upload in a new buffer under the lock: fixed by a
-  pool.** The staging ring's gate (per-call allocation in the profile)
-  tripped on Metal, so uploads are now copied into staging kept mapped
-  (section 3). By the standalone measurement on the M4 it should bring 1080p
-  from 2.7 / 3.7 ms to about 1.0 / 1.55 ms (p50 / p99), at the goal rather
-  than clearly under it: getting the copy out of the lock altogether, by
-  double-buffering the source, was weighed and not done. On the reference
-  host the pool is at parity at 1080p and faster for AC7's workload
-  (Measurements). Not run on a Mac yet.
+  stay blank should that event not come. On the Mac, a window opened on a
+  sleeping display drew nothing, and drew again within 0.6 s of the wake.
+- **Metal staged each upload in a new buffer under the lock: a pool halves
+  it, and 1080p stays over its goal on Metal.** The staging ring's gate
+  (per-call allocation in the profile) tripped on Metal, so uploads are now
+  copied into staging kept mapped (section 3). On the M4 that brought
+  1080p's `prepare` p99 from 3.56 ms to 1.84–1.90 ms and put AC7's workload
+  under its goal. 1080p stays over its 1.5 ms there, at what a paced copy
+  of the frame costs on that machine. Only taking the copy out of the lock
+  would meet it: double-buffering the source, at twice its memory, or a
+  producer writing straight into mapped staging, which would put GPU
+  buffers in the source. Weighed again after the re-run and not done for
+  0.16.0: AC6 and AC13 stand met on the reference host and over on Metal at
+  1080p, where no frame has made the producer wait. On the reference host
+  the pool is at parity at 1080p and faster for AC7's workload
+  (Measurements).
+- **C. A window already showing drew while nothing could be seen: fixed.**
+  With the displays asleep and the screen locked, the bench's first window
+  drew 59 to 61 frames a second for 22 s. AppKit keeps a window that was
+  showing *Visible* then, so wgpu acquires its frames and winit reports no
+  occlusion, and nothing else told teksilo-app. teksilo-platform's
+  `SessionWatch` now hears the displays sleep and wake, the session resign
+  and become active, and the screen lock and unlock, and teksilo-app hides
+  every window while any of them holds (section 5). Claim (u) of the X11
+  event-loop test covers teksilo-app's side, with four mutations that each
+  redden it; the observers run only on a Mac. Not run on a Mac yet.
