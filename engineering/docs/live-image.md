@@ -441,6 +441,46 @@ server, which has no window manager, reports its windows obscured, so the
 window was hidden and drew no frame. Screenshots of it still held the latest
 commits, which is AC20's last clause.
 
+**On macOS (2026-10-08).** A Mac mini with an Apple M4, Metal, an external
+3440 × 1440 display at 100 Hz and scale 1.0, at `e385a694`, run by Claude
+Code on that Mac from a written checklist, with Cyril at hand for what needs
+a person:
+- The test suite on Metal, GPU tests failing rather than skipping without an
+  adapter: 10,380 passed, none failed. The automation server's smoke tests
+  passed over the Unix-socket transport.
+- F.3: 48 of 48 checks, on two runs; the three other curated probes passed.
+  Scale 2.0 was not exercised: the display is not Retina.
+- F.4: twenty runs of full 1080p frames, a second window opened and closed
+  every 1.5 s, every commit waking both windows: every run ended cleanly,
+  with no commit holding the producer past 50 ms. By hand, thirteen opens
+  and closes of the demo's second window and a ⌘Q while it ran were smooth.
+- AC16: the minimise probe passed its six checks (no frame from 0.5 s after
+  the minimise to the restore, the bridge reporting the window hidden, two
+  screenshots of the hidden window at later commits, the latest commit on
+  restore). Covered by another window for 14 s, the window wrote no trace
+  line and dropped one wake.
+- AC2: one posted event per off-main draw wake (60 for 60 frames a second),
+  none reaching the app, no timer.
+- With VoiceOver on: one frame per commit at 10 Hz, no timer.
+- The live pass on Metal: 59 to 60 uploads a second, but `prepare` p99 of
+  1,068 µs for AC7's workload and 3,563 µs for full 1080p frames, lock holds
+  the same, no contended frame (one run each). Finding B below.
+
+It found two faults, open at this point (section 12):
+- **A.** A window AppKit never marks visible, one created on a sleeping
+  display or a locked screen, answered about 120,000 RedrawRequested a
+  second and drew nothing. wgpu's Metal backend refuses to acquire while the
+  window's `occlusionState` lacks *Visible*, winit reports occlusion only
+  when it changes, and a skipped frame was retried without bound unless the
+  window was already known to be hidden. Each new window showed the same
+  briefly, 300 to 1,000 empty RedrawRequested while it first appeared.
+- **B.** wgpu stages each `write_texture` in a buffer it creates for that
+  call, and on Metal that is a new `MTLBuffer`, allocated and first touched
+  under the source's lock. A standalone measurement on the same Mac put a
+  1080p write at 2.7 / 3.7 ms (p50 / p99) paced at 60 Hz, against 1.0 /
+  1.55 ms for a copy into a buffer already mapped. Vulkan pools that memory,
+  which is why the profile on the reference host found allocation at 0.6 %.
+
 ## 11. Acceptance criteria
 
 Two kinds of evidence stand behind these states. Exact evidence runs in CI
@@ -454,10 +494,10 @@ given with each such figure.
 | ID | State | Evidence |
 |---|---|---|
 | AC1 | Met | Headless: teksilo-canvas `live_image/tests.rs`, teksilo-core `live_image_tests.rs`. Live: F.3's idle check, Wayland and X11. |
-| AC2 | Met off macOS | The recording-poster tests of the wake layer; claims (j) and (k) of the X11 event-loop test. macOS is not run here. |
+| AC2 | Met | The recording-poster tests of the wake layer; claims (j) and (k) of the X11 event-loop test. On macOS, one posted event per off-main draw wake, none reaching the app (Measurements, "On macOS"). |
 | AC3 | Met | Headless paint counters and stats; F.3 (`paints` flat while 31 frames went by). |
 | AC4, AC5 | Met | Headless, `CountingWaker`, one and two trees. |
-| AC6 | Met on the reference host | In a window under `Fifo`: p99 0.25 ms for AC7's workload (one run), 1.06–1.19 ms for full 1080p (three runs) (Measurements, "In a window"). Offscreen: the 60 Hz table, one run per row. |
+| AC6 | Met on the reference host; not on Metal | In a window under `Fifo`: p99 0.25 ms for AC7's workload (one run), 1.06–1.19 ms for full 1080p (three runs) (Measurements, "In a window"). Offscreen: the 60 Hz table, one run per row. On an M4 under Metal: 1.07 ms and 3.56 ms (one run each), finding B. |
 | AC7 | Met on the bench, on the reference host | 2.4–3.8 % of a core with AC7's workload over four runs, accessibility on and off, floor included. Miragem itself is not on Teksilo yet, so its real tree is not measured. |
 | AC8 | Met on the reference host | At least 59 uploads every second over 60 s; UI thread 7.2–8.2 % (three runs). |
 | AC9 | Met | Exact: `LiveTextureStats::bytes` matches the formula (D tests). On the reference host, GPU memory drift 0.0 MiB over 300 s at 720 × 1280 and at 1080p, one texture throughout (one run each). |
@@ -467,7 +507,7 @@ given with each such figure.
 | AC13 | Met on the reference host | Two windows: lock hold p99 1.00–1.04 ms in the window that uploads (three runs); the other copies its texture on the device and takes no lock. One window: 1.04–1.15 ms (four runs). Each window uploading every commit gave 1.61–1.69 ms (two runs); see Measurements. |
 | AC14 | Met on the reference host | A copy-only producer: 0 contended frames of 3,609 over 60 s (one run). |
 | AC15 | Met | Exact: `live_image_cost.rs` counts one `write_texture` per full frame, one per rect and none without a commit, in every build. The time ratios under Measurements are one run per build and adapter. |
-| AC16 | Met on KWin; Windows and macOS by hand | PR-2's F.5, rerun at the tip; on the live demo, no frame over 9 s minimised, two screenshots of the hidden window 0.5 s apart holding later commits, and the latest commit shown on restore. F.3's X11 run for screenshots of a hidden window. |
+| AC16 | Met on KWin and macOS; Windows by hand | PR-2's F.5, rerun at the tip; on the live demo, no frame over 9 s minimised, two screenshots of the hidden window 0.5 s apart holding later commits, and the latest commit shown on restore. F.3's X11 run for screenshots of a hidden window. On macOS, the minimise probe's six checks, and no frame while covered (Measurements, "On macOS"). |
 | AC17 | Met | Headless pause tests (B.14, B.15, C.18–C.22), D.20, D.21. |
 | AC18 | Met with the PR-3 deviation | J.1–J.5; one private `WindowWake` per burst. |
 | AC19 | Met | J.6–J.8, the Avatar cache test, D.27; a picture a culling parent parks frees its texture at the next frame (`c15_a_culled_picture_frees_its_texture_at_the_next_frame`). |
@@ -487,3 +527,11 @@ not trip, and the second window to draw a commit now copies the first's
 texture on the device instead of copying the frame into staging under the
 lock (section 3). A texture per device, which would also save the second
 texture's memory, was weighed and not done (section 9).
+
+The macOS run found two more (Measurements, "On macOS"), both open:
+- **A window AppKit never marks visible spins.** The retry of a skipped frame
+  needs a bound, and on macOS the window's occlusion needs reading from
+  AppKit rather than waiting for winit's change event.
+- **Metal stages each upload in a new buffer under the lock.** The staging
+  ring's gate (per-call allocation in the profile) trips on Metal: the
+  uploads need a pool of buffers kept mapped.
