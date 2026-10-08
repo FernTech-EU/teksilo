@@ -370,7 +370,7 @@ impl WgpuBackend {
                     None => (wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), None),
                     Some(changed) => {
                         let f = mip_footprint(changed, k, (w, h));
-                        (wgpu::LoadOp::Load, Some([f.x, f.y, f.width, f.height]))
+                        (wgpu::LoadOp::Load, Some(even_scissor(f, (w, h))))
                     }
                 };
                 crate::fullscreen::run_fullscreen_pass(
@@ -388,6 +388,26 @@ impl WgpuBackend {
             }
         }
     }
+}
+
+/// `footprint` grown outward to even coordinates on every edge, clamped to
+/// the `level`, as a scissor rect.
+///
+/// D3D12 WARP (the Microsoft Basic Render Driver: a GPU-less Windows host,
+/// a VM) shades the texels along a scissor edge on an odd coordinate wrong,
+/// transparent black where the level below is opaque, although the pass
+/// reads by `textureLoad` and its output depends on its own position alone.
+/// Its rasterizer shades in 2×2 quads, and an even edge cuts none. Widening
+/// is correct on every adapter: a texel outside the footprint is a function
+/// of texels of the level below that are current already, so the pass
+/// writes it the value it holds.
+fn even_scissor(footprint: PixelRect, level: (u32, u32)) -> [u32; 4] {
+    // A footprint lies inside its level, so its far edge cannot overflow.
+    let up = |edge: u32, side: u32| ((edge + 1) & !1).min(side);
+    let (x0, y0) = (footprint.x & !1, footprint.y & !1);
+    let x1 = up(footprint.x + footprint.width, level.0);
+    let y1 = up(footprint.y + footprint.height, level.1);
+    [x0, y0, x1 - x0, y1 - y0]
 }
 
 fn filter_index(filter: ScalingFilter) -> usize {
@@ -638,5 +658,33 @@ impl LiveTextureBackend for WgpuBackend {
 
     fn released(&mut self) {
         self.released = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_scissor_grows_to_even_edges_and_stays_in_the_level() {
+        // d23's level 1: an odd top edge moves up a row.
+        assert_eq!(
+            even_scissor(PixelRect::new(50, 101, 149, 156), (360, 640)),
+            [50, 100, 150, 158]
+        );
+        // Even edges are left alone.
+        assert_eq!(
+            even_scissor(PixelRect::new(4, 6, 10, 2), (64, 40)),
+            [4, 6, 10, 2]
+        );
+        // An odd-sided level: the grown edge clamps to its last column.
+        assert_eq!(
+            even_scissor(PixelRect::new(3, 0, 2, 1), (5, 3)),
+            [2, 0, 3, 2]
+        );
+        assert_eq!(
+            even_scissor(PixelRect::new(0, 0, 1, 1), (1, 1)),
+            [0, 0, 1, 1]
+        );
     }
 }
