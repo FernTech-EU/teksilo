@@ -30,7 +30,8 @@ enum Cargo {
     about = "API lookup, documentation, and agent tooling for Teksilo"
 )]
 struct Cli {
-    /// Suppress success messages and informational notes.
+    /// Suppress success messages and informational notes. Which release
+    /// answered, and in which search mode, is still printed.
     #[arg(short, long, global = true, conflicts_with = "verbose")]
     quiet: bool,
     /// Show paths and diagnostic details.
@@ -207,7 +208,7 @@ fn version(root: &Path) -> Result<String, String> {
         )),
         verdict => {
             if let Some(note) = verdict.note() {
-                output::note(note);
+                output::provenance(note);
             }
             Ok(r.version)
         }

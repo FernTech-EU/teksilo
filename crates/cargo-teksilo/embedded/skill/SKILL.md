@@ -107,7 +107,8 @@ cargo teksilo init                         # the harness, plus a teksilo brief f
   BM25 until it is cached; a lookup never starts a download.
 - **`status --json`** reports the resolved version and installed tooling.
   `search --json` returns structured hits with paths and 1-based line ranges.
-  `--quiet` suppresses informational output; `--verbose` adds diagnostics.
+  `--quiet` suppresses informational output but still says which release
+  answered; `--verbose` adds diagnostics.
 
 `cargo teksilo --help` and `cargo teksilo <command> --help` are authoritative for
 flags; this file names the commands, not their whole flag surface.

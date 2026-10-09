@@ -50,8 +50,8 @@ section. `--user` supports `claude`, `vibe`, and `opencode` and writes no harnes
 Shared-file text outside the managed region is preserved. `--force` replaces
 conflicting generated files.
 
-`--quiet` suppresses informational messages; `--verbose` shows paths and
-diagnostics. `search --json`, `status --json`, and `agent list --json` emit
+`--quiet` suppresses informational messages but still says which release
+answered; `--verbose` shows paths and diagnostics. `search --json`, `status --json`, and `agent list --json` emit
 structured output. API declarations and document contents are never shortened.
 
 ## Requirements

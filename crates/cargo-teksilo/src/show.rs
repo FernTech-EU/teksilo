@@ -414,7 +414,7 @@ pub fn run(dir: &Path, request: &ShowRequest) -> Result<i32, ShowError> {
         )));
     }
     if let Some(note) = verdict.note() {
-        crate::output::note(note);
+        crate::output::provenance(note);
     }
 
     let index = teksilo_corpus::index()?;

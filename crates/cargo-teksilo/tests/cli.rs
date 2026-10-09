@@ -7,14 +7,16 @@ use std::{
 };
 
 fn project() -> tempfile::TempDir {
+    project_at(env!("CARGO_PKG_VERSION"))
+}
+fn project_at(version: &str) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("src")).unwrap();
     std::fs::write(dir.path().join("src/lib.rs"), "").unwrap();
     std::fs::write(
         dir.path().join("Cargo.toml"),
         format!(
-            "[package]\nname = \"teksilo\"\nversion = \"{}\"\nedition = \"2021\"\n[workspace]\n",
-            env!("CARGO_PKG_VERSION")
+            "[package]\nname = \"teksilo\"\nversion = \"{version}\"\nedition = \"2021\"\n[workspace]\n"
         ),
     )
     .unwrap();
@@ -168,6 +170,29 @@ fn a_teksilo_behind_a_feature_is_still_found() {
     let data: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(data["teksilo_version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(data["teksilo_enabled_by"], serde_json::json!(["ui"]));
+}
+#[test]
+fn quiet_still_says_which_release_answered() {
+    let root = project();
+    let result = run(
+        root.path(),
+        &["search", "scroll", "--quiet", "--limit", "1"],
+    );
+    ok(&result);
+    let banner = format!("Teksilo {} · lexical", env!("CARGO_PKG_VERSION"));
+    assert_eq!(
+        String::from_utf8_lossy(&result.stdout).lines().next(),
+        Some(banner.as_str())
+    );
+
+    let tool = env!("CARGO_PKG_VERSION");
+    let (minor, patch) = tool.rsplit_once('.').unwrap();
+    let app = format!("{minor}.{}", patch.parse::<u32>().unwrap() + 1);
+    let root = project_at(&app);
+    let result = run(root.path(), &["show", "docs/agent-tooling.md", "--quiet"]);
+    ok(&result);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains(&format!("app uses Teksilo {app}; tool uses {tool}")));
 }
 #[test]
 fn obsolete_commands_are_removed_and_version_is_available() {

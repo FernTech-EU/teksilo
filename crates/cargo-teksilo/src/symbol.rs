@@ -81,7 +81,7 @@ pub fn run(dir: &Path, args: &[String]) -> Result<i32, SymbolError> {
         )));
     }
     if let Some(note) = verdict.note() {
-        crate::output::note(note);
+        crate::output::provenance(note);
     }
 
     let python = find_python().ok_or(SymbolError::NoPython)?;

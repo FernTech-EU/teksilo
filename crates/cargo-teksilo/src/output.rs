@@ -27,3 +27,12 @@ pub fn note(message: impl std::fmt::Display) {
         eprintln!("{message}");
     }
 }
+/// A note about where an answer came from, printed even under `--quiet`.
+///
+/// Which release answered is part of the answer. A caller that turned on
+/// `--quiet` to save output still has to know that the text it is reading
+/// belongs to a release other than the one its app builds against, and has
+/// no other way to learn it.
+pub fn provenance(message: impl std::fmt::Display) {
+    eprintln!("{message}");
+}

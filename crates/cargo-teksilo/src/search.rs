@@ -688,7 +688,7 @@ pub fn run(dir: &Path, args: &[String]) -> Result<i32, SearchError> {
         )));
     }
     if let Some(note) = verdict.note() {
-        crate::output::note(note);
+        crate::output::provenance(note);
     }
 
     let index = teksilo_corpus::index()?;
@@ -788,9 +788,10 @@ fn print_results(
         );
         return;
     }
-    if !crate::output::quiet() {
-        println!("Teksilo {} · {}", index.teksilo_version, mode.label());
-    }
+    // Printed under `--quiet` too: the mode says whether the vocabulary gap
+    // is covered (see the module docs), and the version which release the
+    // text belongs to. Both are part of the result.
+    println!("Teksilo {} · {}", index.teksilo_version, mode.label());
 
     if ranked.is_empty() {
         // Deliberately not "no results": that reads as a fact about the

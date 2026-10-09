@@ -64,7 +64,8 @@ feature enabled, and `status` names the feature that turns teksilo on.
 
 `status` reports the resolved app version and installed tooling without
 changing the lockfile. `--verbose` adds paths and diagnostics. `--quiet`
-suppresses informational output while preserving results and errors.
+suppresses informational output while preserving results, errors, and the
+line that says which release answered.
 
 ## Semantic search
 
