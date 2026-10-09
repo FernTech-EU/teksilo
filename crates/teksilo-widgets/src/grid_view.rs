@@ -156,11 +156,14 @@ use layout::sectioned::SectionedGrid;
 use layout::strategy::{GridLayoutStrategy, TileRect};
 use layout::uniform::UniformGrid;
 use layout::variable_row::VariableRowGrid;
-use sections::{SectionData, SectionProvider};
+use sections::SectionData;
 use selection::{MarqueeConfig, MarqueeState, build_marquee_handler};
 use selection_count::{SelectionCountVoice, selection_count_words};
 
-pub use sections::{GroupingSections, SectionProvider as GridSectionProvider, grouping_sections};
+/// [`SectionProvider`] under the name it first shipped with, when only
+/// `GridView` had sections. Both names are the one trait.
+pub use sections::SectionProvider as GridSectionProvider;
+pub use sections::{GroupingSections, SectionProvider, grouping_sections};
 
 /// Which layout strategy `GridView` builds.
 #[derive(Debug, Clone, Copy)]

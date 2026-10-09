@@ -185,7 +185,7 @@ pub use teksilo_data::CheckState;
 // `use teksilo::widgets::{FocusScope, TraversalScopePolicy}`.
 pub use grid_view::{
     GridSectionProvider, GridSizing, GridTabTraversal, GridView, GroupingSections, ScrollAnchor,
-    TileContext, grouping_sections,
+    SectionProvider, TileContext, grouping_sections,
 };
 pub use group_box::GroupBox;
 pub use group_header::GroupHeader;

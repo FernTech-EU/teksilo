@@ -45,9 +45,9 @@ use teksilo::data::{
 };
 use teksilo::prelude::*;
 use teksilo::widgets::{
-    Button, ButtonVariant, Card, Expand, GridSectionProvider, HStack, ListView, Padding, Panel,
-    Repeater, Spacer, StandardListItem, StandardTreeItem, TabId, TabInfo, TabWidget, TextWidget,
-    Toolbar, TreeView, VStack,
+    Button, ButtonVariant, Card, Expand, HStack, ListView, Padding, Panel, Repeater,
+    SectionProvider, Spacer, StandardListItem, StandardTreeItem, TabId, TabInfo, TabWidget,
+    TextWidget, Toolbar, TreeView, VStack,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
@@ -145,7 +145,7 @@ impl ByArtist {
     }
 }
 
-impl GridSectionProvider for ByArtist {
+impl SectionProvider for ByArtist {
     fn section_count(&self) -> usize {
         self.runs().len()
     }

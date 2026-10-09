@@ -580,8 +580,7 @@ impl<T: 'static> ListView<T> {
     /// Group the items into sections, with a full-width header row above each
     /// one. Takes the same provider as [`GridView::sections`](crate::GridView::sections):
     /// [`grouping_sections`](crate::grouping_sections) partitions runs of
-    /// equal keys, or implement [`GridSectionProvider`](crate::GridSectionProvider)
-    /// yourself.
+    /// equal keys, or implement [`SectionProvider`] yourself.
     ///
     /// Headers are rows of the scrolled content: they are virtualized with the
     /// items, counted in the scroll extent, and compose with all three
@@ -614,7 +613,7 @@ impl<T: 'static> ListView<T> {
     /// on demand instead:
     ///
     /// ```rust
-    /// # use teksilo_widgets::{GridSectionProvider, ListView};
+    /// # use teksilo_widgets::{ListView, SectionProvider};
     /// # use teksilo_widgets::primitives::TextWidget;
     /// # use teksilo_data::ListModel;
     /// # use teksilo_i18n::lit;
@@ -637,7 +636,7 @@ impl<T: 'static> ListView<T> {
     ///     }
     /// }
     ///
-    /// impl GridSectionProvider for ByArtist {
+    /// impl SectionProvider for ByArtist {
     ///     fn section_count(&self) -> usize { self.runs().len() }
     ///     fn items_in_section(&self, s: usize) -> usize { self.runs()[s].1 }
     ///     fn section_title(&self, s: usize) -> String { self.runs()[s].0.clone() }
