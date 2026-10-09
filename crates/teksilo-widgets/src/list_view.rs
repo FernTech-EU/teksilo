@@ -602,8 +602,10 @@ impl<T: 'static> ListView<T> {
     /// putting them back, and the line is drawn above it. Rows dragged up from
     /// below, and rows dropped from another view, open the section after it,
     /// and the line is drawn under the header. A provider that groups by the
-    /// items' content puts a moved item in the section of its own key
-    /// wherever it is dropped, which the line cannot show.
+    /// items' content, such as the `ByArtist` provider below, puts a moved
+    /// item in the section of its own key wherever it is dropped. With such a
+    /// provider the line at a section boundary shows where in the list the
+    /// rows go, not which section they join.
     ///
     /// The view reads the provider's counts again after every change the
     /// model reports, so a provider that derives them from the live model
