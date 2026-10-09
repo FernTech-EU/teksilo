@@ -406,14 +406,11 @@ impl<T: 'static> ListView<T> {
             let s = s.clone();
             Rc::new(move || s.len()) as Rc<dyn Fn() -> usize>
         };
-        // Existence for prune: scan the (cheap, key-only) visible index space —
-        // works for lazy sources too, where keys are known before items load.
-        let contains = {
-            let s = s.clone();
-            Rc::new(move |k: &S::Key| (0..s.len()).any(|i| s.key_at(i).as_ref() == Some(k)))
-                as Rc<dyn Fn(&S::Key) -> bool>
-        };
-        let row_selection = RowSelection::from_keyed(keyed, key_at, len, contains);
+        // Existence for the prune after a removal or a reset is the keys of the
+        // visible index space, which a lazy source knows before its items
+        // load, gathered once per prune rather than scanned once per selected
+        // key.
+        let row_selection = RowSelection::from_keyed_flat(keyed, key_at, len);
         let mut view = Self::create(ListSource::from_data_source_rc(s), delegate);
         view.row_selection = Some(row_selection);
         view

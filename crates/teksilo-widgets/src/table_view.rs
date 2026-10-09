@@ -575,12 +575,9 @@ impl<T: 'static> TableView<T> {
             let s = s.clone();
             Rc::new(move || s.len()) as Rc<dyn Fn() -> usize>
         };
-        let contains = {
-            let s = s.clone();
-            Rc::new(move |k: &S::Key| (0..s.len()).any(|i| s.key_at(i).as_ref() == Some(k)))
-                as Rc<dyn Fn(&S::Key) -> bool>
-        };
-        let row_selection = RowSelection::from_keyed(keyed, key_at, len, contains);
+        // Existence for the prune is the keys over the rows, gathered once per
+        // prune; see `ListView::from_source_keyed`.
+        let row_selection = RowSelection::from_keyed_flat(keyed, key_at, len);
         let anchor_fn = anchor_factory::<S, T>(s.clone());
         let (len_fn, with_item_fn, observe_fn, first_changed_fn) = erase_data_source::<S, T>(s);
         let mut view = Self::create(

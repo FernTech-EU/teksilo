@@ -21,6 +21,10 @@ by crate for clarity, not because crates version independently.
   declared pinned** on a `TableView` or a `TreeTableView`: it put the column
   back on its declared side. It now unpins it, as dragging the column out of
   its pane does. Giving the column's declared side removes its override.
+- **Removing a row from a large keyed selection in a `ListView` or a
+  `TableView` cost the row count times the selection.** The selection now
+  drops the removed keys after reading each of the view's keys once, as a
+  `GridView`'s does.
 
 ## [0.16.0] - 2026-10-09
 
