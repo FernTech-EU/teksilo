@@ -29,8 +29,8 @@ pub use path::{
 pub use raster::{ImageDecodeError, ImageFormat, RasterIcon};
 pub use render_frame::{
     AnimParams, AnimatedQuadClass, AnimatedQuadDraw, BlendMode, CosmeticLine, DecorationKind,
-    DecorationRect, DrawCommand, GlyphQuad, ImageQuad, PaintData, PathEntry, PendingImage,
-    RasterizedQuad, RenderFrame, ShadowQuad, ShapeKind, ShapeQuad,
+    DecorationRect, DrawCommand, GlyphQuad, ImagePixels, ImageQuad, PaintData, PathEntry,
+    PendingImage, RasterizedQuad, RenderFrame, ShadowQuad, ShapeKind, ShapeQuad,
 };
 pub use svg::{
     ResolvedGradient, SvgDrawOp, SvgFill, SvgIcon, SvgOp, SvgPaint, SvgParseError, SvgStop,

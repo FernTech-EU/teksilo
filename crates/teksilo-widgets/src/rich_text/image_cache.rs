@@ -140,11 +140,11 @@ impl ImageCache {
         // catches a second widget in the same frame having already queued the
         // same key, which would otherwise upload identical pixels twice.
         if !entry.registered && !canvas.has_pending_image(name) {
-            canvas.ensure_image_registered(
+            canvas.ensure_shared_image_registered(
                 name,
                 entry.icon.width(),
                 entry.icon.height(),
-                std::borrow::Cow::Owned(entry.icon.pixels().to_vec()),
+                std::sync::Arc::clone(entry.icon.shared_pixels()),
             );
         }
         entry.registered = true;

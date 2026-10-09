@@ -30,7 +30,7 @@
 //!     .follow_text_scale(false);
 //! ```
 
-use std::borrow::Cow;
+use std::sync::Arc;
 
 use teksilo_canvas::svg::{SvgDrawOp, SvgIcon};
 use teksilo_canvas::{
@@ -82,7 +82,7 @@ enum IconSource {
         /// uploaded pixels bake it in (Tintable pre-applies the alpha mask).
         name: String,
         icon: RasterIcon,
-        upload_pixels: Vec<u8>,
+        upload_pixels: Arc<[u8]>,
     },
     /// An animated image (animated WebP).
     /// `frame_upload_pixels` holds pre-computed pixels per frame — used
@@ -98,7 +98,7 @@ enum IconSource {
         /// `base_name` qualified by the mode, as for `Raster`.
         name: String,
         icon: AnimatedIcon,
-        frame_upload_pixels: Vec<Vec<u8>>,
+        frame_upload_pixels: Vec<Arc<[u8]>>,
         /// Legacy signal-based frame index driver. `Some` only when
         /// shader pipeline is disabled (reduced-motion, atlas build
         /// failed, etc.); otherwise frame cycling runs shader-side.
@@ -124,10 +124,9 @@ struct SpriteAtlas {
     /// `ImageManager`.
     name: String,
     /// Full atlas pixels in RGBA row-major. `cols × frame_w` wide,
-    /// `rows × frame_h` tall. Owned `Vec<u8>` so the widget can pass
-    /// `Cow::Owned` to `ensure_image_registered` each paint without
-    /// recomputing; uploaded once by the renderer's image manager.
-    pixels: Vec<u8>,
+    /// `rows × frame_h` tall. Shared so each paint can queue them without
+    /// copying; uploaded once by the renderer's image manager.
+    pixels: Arc<[u8]>,
     width: u32,
     height: u32,
     cols: u32,
@@ -173,11 +172,11 @@ fn mode_qualified(base: &str, mode: IconMode) -> String {
 }
 
 /// Prepare raster pixels for upload: apply alpha mask for tintable mode,
-/// or use original pixels for full-color mode.
-fn prepare_pixels(icon: &RasterIcon, mode: IconMode) -> Vec<u8> {
+/// or share the icon's own pixels for full-color mode.
+fn prepare_pixels(icon: &RasterIcon, mode: IconMode) -> Arc<[u8]> {
     match mode {
-        IconMode::Tintable => icon.to_alpha_mask().pixels().to_vec(),
-        IconMode::FullColor => icon.pixels().to_vec(),
+        IconMode::Tintable => Arc::clone(icon.to_alpha_mask().shared_pixels()),
+        IconMode::FullColor => Arc::clone(icon.shared_pixels()),
     }
 }
 
@@ -340,7 +339,7 @@ impl IconWidget {
         // Try animated first
         if let Ok(anim) = AnimatedIcon::decode_webp(data) {
             let base_name = auto_name("webp", data.as_ptr() as usize);
-            let frame_upload_pixels: Vec<Vec<u8>> = anim
+            let frame_upload_pixels: Vec<Arc<[u8]>> = anim
                 .frames()
                 .iter()
                 .map(|f| prepare_pixels(f, mode))
@@ -390,7 +389,8 @@ impl IconWidget {
     }
 
     /// Create an icon from a pre-decoded [`RasterIcon`].
-    /// Accepts a reference — pixel data is copied internally.
+    /// Accepts a reference — full-color mode shares the icon's pixels, and
+    /// tintable mode keeps an alpha mask computed from them.
     ///
     /// The texture is named after the icon's identity, so every widget
     /// showing this icon (or a clone of it) in one mode shares one texture.
@@ -425,7 +425,7 @@ impl IconWidget {
         let first_frame_key = icon.frames().first().map_or(0, RasterIcon::texture_key);
         let base_name = format!("_icon_anim_{first_frame_key}");
         let mode = IconMode::Tintable;
-        let frame_upload_pixels: Vec<Vec<u8>> = icon
+        let frame_upload_pixels: Vec<Arc<[u8]>> = icon
             .frames()
             .iter()
             .map(|f| prepare_pixels(f, mode))
@@ -617,11 +617,11 @@ impl IconWidget {
         name: &str,
         width: u32,
         height: u32,
-        upload_pixels: &[u8],
+        upload_pixels: &Arc<[u8]>,
         color: Color,
     ) {
         if !canvas.has_pending_image(name) {
-            canvas.ensure_image_registered(name, width, height, Cow::Owned(upload_pixels.to_vec()));
+            canvas.ensure_shared_image_registered(name, width, height, Arc::clone(upload_pixels));
         }
         match self.mode {
             IconMode::Tintable => canvas.draw_tinted_image(bounds, name, color),
@@ -833,11 +833,11 @@ impl Widget for IconWidget {
                 if let (Some(atlas), Some(handle)) = (sprite_atlas, anim_handle) {
                     // Register the atlas pixels (idempotent — skipped
                     // if already pending or uploaded this frame).
-                    canvas.ensure_image_registered(
+                    canvas.ensure_shared_image_registered(
                         atlas.name.clone(),
                         atlas.width,
                         atlas.height,
-                        std::borrow::Cow::Owned(atlas.pixels.clone()),
+                        Arc::clone(&atlas.pixels),
                     );
                     canvas.draw_animated_quad(
                         bounds,
@@ -893,7 +893,7 @@ impl Widget for IconWidget {
 fn build_sprite_atlas(
     name: &str,
     icon: &AnimatedIcon,
-    frame_pixels: &[Vec<u8>],
+    frame_pixels: &[Arc<[u8]>],
 ) -> Option<SpriteAtlas> {
     let frames = icon.frames();
     if frames.is_empty() {
@@ -934,7 +934,7 @@ fn build_sprite_atlas(
 
     Some(SpriteAtlas {
         name: format!("{name}_sprite_atlas"),
-        pixels,
+        pixels: pixels.into(),
         width: atlas_w,
         height: atlas_h,
         cols,

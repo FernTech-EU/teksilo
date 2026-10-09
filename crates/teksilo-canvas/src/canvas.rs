@@ -3,6 +3,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use teksilo_tokens::{Color, CornerRadius, Shadow, TextStyle};
 
@@ -11,8 +12,8 @@ use crate::paint::{FillRule, Paint, StrokeSpace, StrokeStyle};
 use crate::path::Path;
 use crate::render_frame::{
     AnimatedQuadClass, AnimatedQuadDraw, BlendMode, CosmeticLine, DecorationKind, DecorationRect,
-    DrawCommand, GlyphQuad, ImageQuad, PaintData, PathEntry, RenderFrame, ShadowQuad, ShapeKind,
-    ShapeQuad,
+    DrawCommand, GlyphQuad, ImagePixels, ImageQuad, PaintData, PathEntry, PendingImage,
+    RenderFrame, ShadowQuad, ShapeKind, ShapeQuad,
 };
 use crate::text_backend::TextBackend;
 
@@ -735,8 +736,13 @@ impl Canvas {
     }
 
     /// Queue an image for GPU registration. The renderer uploads the
-    /// texture if not already present. For compile-time embedded data,
-    /// use `Cow::Borrowed` for zero-copy.
+    /// texture if not already present.
+    ///
+    /// `Cow::Borrowed` queues the data without copying it, which suits
+    /// compile-time embedded pixels. `Cow::Owned` moves the buffer into an
+    /// `Arc`, copying it once per call, so a buffer kept across paints
+    /// belongs on [`ensure_shared_image_registered`](Self::ensure_shared_image_registered)
+    /// instead.
     pub fn ensure_image_registered(
         &mut self,
         name: impl Into<String>,
@@ -745,18 +751,43 @@ impl Canvas {
         pixels: std::borrow::Cow<'static, [u8]>,
     ) {
         let name = name.into();
-        // Skip if already queued this frame
-        if self.frame.pending_images.iter().any(|p| p.name == name) {
+        // Skip if already queued this frame, before converting anything.
+        if self.has_pending_image(&name) {
             return;
         }
-        self.frame
-            .pending_images
-            .push(crate::render_frame::PendingImage {
-                name,
-                width,
-                height,
-                pixels,
-            });
+        let pixels = match pixels {
+            std::borrow::Cow::Borrowed(pixels) => ImagePixels::Static(pixels),
+            std::borrow::Cow::Owned(pixels) => ImagePixels::Shared(pixels.into()),
+        };
+        self.queue_image(name, width, height, pixels);
+    }
+
+    /// Queue an image for GPU registration from a shared buffer. The
+    /// renderer uploads the texture if not already present.
+    ///
+    /// Queuing costs one reference-count increment and copies no pixels, so
+    /// a widget can call this on every paint with the buffer it keeps.
+    pub fn ensure_shared_image_registered(
+        &mut self,
+        name: impl Into<String>,
+        width: u32,
+        height: u32,
+        pixels: Arc<[u8]>,
+    ) {
+        let name = name.into();
+        if self.has_pending_image(&name) {
+            return;
+        }
+        self.queue_image(name, width, height, ImagePixels::Shared(pixels));
+    }
+
+    fn queue_image(&mut self, name: String, width: u32, height: u32, pixels: ImagePixels) {
+        self.frame.pending_images.push(PendingImage {
+            name,
+            width,
+            height,
+            pixels,
+        });
     }
 
     // --- Paragraph drawing ---
@@ -2036,5 +2067,31 @@ mod tests {
                 "{name}: path bounds {b:?} must equal the shape rect {expect:?}"
             );
         }
+    }
+
+    #[test]
+    fn borrowed_pixels_are_queued_without_a_copy() {
+        static PIXELS: [u8; 4] = [1, 2, 3, 4];
+        let mut canvas = Canvas::new();
+        canvas.ensure_image_registered("still", 1, 1, std::borrow::Cow::Borrowed(&PIXELS));
+        let frame = canvas.into_render_frame();
+        assert!(matches!(
+            frame.pending_images[0].pixels,
+            ImagePixels::Static(p) if p.as_ptr() == PIXELS.as_ptr()
+        ));
+    }
+
+    #[test]
+    fn a_shared_buffer_is_queued_once_and_without_a_copy() {
+        let pixels: Arc<[u8]> = vec![1, 2, 3, 4].into();
+        let mut canvas = Canvas::new();
+        canvas.ensure_shared_image_registered("shared", 1, 1, Arc::clone(&pixels));
+        canvas.ensure_shared_image_registered("shared", 1, 1, Arc::clone(&pixels));
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.pending_images.len(), 1);
+        assert!(matches!(
+            &frame.pending_images[0].pixels,
+            ImagePixels::Shared(p) if Arc::ptr_eq(p, &pixels)
+        ));
     }
 }

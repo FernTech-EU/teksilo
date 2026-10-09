@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-use std::borrow::Cow;
+use std::sync::Arc;
 
 use crate::geometry::{Rect, Transform2D};
 use crate::paint::{FillRule, StrokeSpace, StrokeStyle};
@@ -87,7 +87,8 @@ impl RenderFrame {
         // sub-frames carry empty `anim_params`; the outer tree
         // replaces it wholesale after `render()` is called.
         self.layout_keys.extend_from_slice(&other.layout_keys);
-        // Merge pending image registrations (deduped by renderer)
+        // Merge pending image registrations (deduped by renderer). The clone
+        // shares the pixels; see `ImagePixels`.
         for pending in &other.pending_images {
             if !self.pending_images.iter().any(|p| p.name == pending.name) {
                 self.pending_images.push(pending.clone());
@@ -235,8 +236,38 @@ pub struct PendingImage {
     pub width: u32,
     /// Image height in pixels.
     pub height: u32,
-    /// RGBA pixel data. Uses `Cow` for zero-copy with compile-time data.
-    pub pixels: Cow<'static, [u8]>,
+    /// RGBA pixel data, shared with whoever queued it.
+    pub pixels: ImagePixels,
+}
+
+/// The RGBA pixels of a [`PendingImage`], shared rather than owned.
+///
+/// A widget queues its image on every paint, and every frame assembled from
+/// cached paint output clones the queued entry again, while the renderer
+/// uploads a name only once and ignores it afterwards. Neither variant copies
+/// the pixels on clone, so that steady queuing costs a reference count, not a
+/// buffer.
+///
+/// Dereferences to the pixel bytes.
+#[derive(Debug, Clone)]
+pub enum ImagePixels {
+    /// Pixels that live for the whole program, such as `include_bytes!` data
+    /// or a `LazyLock` buffer.
+    Static(&'static [u8]),
+    /// Pixels kept alive by a reference count, such as a decoded
+    /// [`RasterIcon`](crate::RasterIcon)'s.
+    Shared(Arc<[u8]>),
+}
+
+impl std::ops::Deref for ImagePixels {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match self {
+            Self::Static(pixels) => pixels,
+            Self::Shared(pixels) => pixels,
+        }
+    }
 }
 
 /// A colored rectangle for decorations (selections, cursors, underlines, borders, etc.).
@@ -590,5 +621,27 @@ mod tests {
         assert_eq!(a.draw_order.len(), 2);
         assert_eq!(a.draw_order[0], DrawCommand::SetOpacity(0.5));
         assert_eq!(a.draw_order[1], DrawCommand::RestoreOpacity);
+    }
+
+    #[test]
+    fn merge_shares_pending_pixels_instead_of_copying_them() {
+        let pixels: Arc<[u8]> = vec![0; 16].into();
+        let mut cached = RenderFrame::new();
+        cached.pending_images.push(PendingImage {
+            name: "photo".into(),
+            width: 2,
+            height: 2,
+            pixels: ImagePixels::Shared(Arc::clone(&pixels)),
+        });
+
+        let mut frame = RenderFrame::new();
+        frame.merge(&cached);
+        frame.merge(&cached);
+
+        assert_eq!(frame.pending_images.len(), 1, "deduplicated by name");
+        assert!(
+            matches!(&frame.pending_images[0].pixels, ImagePixels::Shared(p) if Arc::ptr_eq(p, &pixels)),
+            "the merged entry must hold the cached frame's own buffer"
+        );
     }
 }

@@ -13,6 +13,8 @@
 //! supplied: a file's extension is a claim, not evidence, and a `.png` that is
 //! really a JPEG is common enough to be worth being immune to.
 
+use std::sync::Arc;
+
 use crate::exif::{apply_orientation, orientation_from_exif};
 
 /// Error type for image decoding failures.
@@ -77,9 +79,12 @@ impl ImageFormat {
 }
 
 /// A decoded raster icon: RGBA pixel data at a fixed size.
+///
+/// The pixels are reference-counted, so a clone shares them rather than
+/// copying them.
 #[derive(Debug, Clone)]
 pub struct RasterIcon {
-    pixels: Vec<u8>,
+    pixels: Arc<[u8]>,
     width: u32,
     height: u32,
     /// Process-unique identity of these pixels, assigned by every
@@ -95,7 +100,7 @@ impl RasterIcon {
         static NEXT_TEXTURE_KEY: std::sync::atomic::AtomicU64 =
             std::sync::atomic::AtomicU64::new(1);
         Self {
-            pixels,
+            pixels: pixels.into(),
             width,
             height,
             texture_key: NEXT_TEXTURE_KEY.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
@@ -312,7 +317,7 @@ impl RasterIcon {
     pub fn downsample_to_max(&self, max_edge: u32) -> Option<Self> {
         let (target_w, target_h) = crate::resample::fit_within(self.width, self.height, max_edge)?;
 
-        let mut pixels = self.pixels.clone();
+        let mut pixels = self.pixels.to_vec();
         let mut w = self.width;
         let mut h = self.height;
         // Halve while the next halving would still not undershoot the target.
@@ -346,6 +351,15 @@ impl RasterIcon {
 
     /// Raw RGBA pixel data.
     pub fn pixels(&self) -> &[u8] {
+        &self.pixels
+    }
+
+    /// The RGBA pixel data as the shared buffer this icon holds.
+    ///
+    /// Cloning the returned `Arc` copies no pixels, which is what lets a
+    /// widget queue them on every paint through
+    /// [`Canvas::ensure_shared_image_registered`](crate::Canvas::ensure_shared_image_registered).
+    pub fn shared_pixels(&self) -> &Arc<[u8]> {
         &self.pixels
     }
 }
@@ -463,6 +477,13 @@ mod tests {
     fn a_clone_keeps_its_texture_key() {
         let icon = RasterIcon::from_raw(vec![1, 2, 3, 4], 1, 1);
         assert_eq!(icon.clone().texture_key(), icon.texture_key());
+    }
+
+    #[test]
+    fn a_clone_shares_its_pixels() {
+        let icon = RasterIcon::from_raw(vec![1, 2, 3, 4], 1, 1);
+        let clone = icon.clone();
+        assert!(Arc::ptr_eq(icon.shared_pixels(), clone.shared_pixels()));
     }
 
     #[test]

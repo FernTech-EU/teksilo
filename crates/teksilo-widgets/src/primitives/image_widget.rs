@@ -53,7 +53,7 @@
 //!     .size(48.0, 48.0);
 //! ```
 
-use std::borrow::Cow;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use teksilo_canvas::{Canvas, RasterIcon, Rect, Size, SizeProposal};
@@ -91,7 +91,7 @@ pub struct ImageWidget {
     name: String,
     width: u32,
     height: u32,
-    upload_pixels: Vec<u8>,
+    upload_pixels: Arc<[u8]>,
     fit: ImageFit,
     /// Where the fitted image sits within the box when the active fit
     /// leaves slack (`Contain`/`ScaleDown`/`None` smaller than the box) or
@@ -131,7 +131,7 @@ impl ImageWidget {
             name,
             width: icon.width(),
             height: icon.height(),
-            upload_pixels: icon.pixels().to_vec(),
+            upload_pixels: Arc::clone(icon.shared_pixels()),
             fit: ImageFit::Contain,
             alignment: Alignment::CENTER,
             display_width: None,
@@ -158,7 +158,7 @@ impl ImageWidget {
             name: format!("_img_raw_{id}_{width}x{height}"),
             width,
             height,
-            upload_pixels: pixels,
+            upload_pixels: pixels.into(),
             fit: ImageFit::Contain,
             alignment: Alignment::CENTER,
             display_width: None,
@@ -190,7 +190,7 @@ impl ImageWidget {
         }
         let (mut cropped, side) = center_crop_square(&self.upload_pixels, self.width, self.height);
         apply_alpha_mask(&mut cropped, side, side, shape);
-        self.upload_pixels = cropped;
+        self.upload_pixels = cropped.into();
         self.width = side;
         self.height = side;
         // Bump the texture name so the old un-masked entry is
@@ -370,13 +370,13 @@ impl Widget for ImageWidget {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        // Only clone pixels if not already queued — avoid per-frame allocation
+        // Queuing shares the pixels; the check spares the name's allocation.
         if !canvas.has_pending_image(&self.name) {
-            canvas.ensure_image_registered(
+            canvas.ensure_shared_image_registered(
                 &self.name,
                 self.width,
                 self.height,
-                Cow::Owned(self.upload_pixels.clone()),
+                Arc::clone(&self.upload_pixels),
             );
         }
         let rtl = matches!(ctx.layout_direction, LayoutDirection::RightToLeft);
@@ -704,7 +704,7 @@ mod tests {
     fn mask_none_is_passthrough() {
         let original = vec![123, 45, 67, 200, 8, 9, 10, 200];
         let widget = ImageWidget::from_raw(original.clone(), 2, 1).mask(ImageMaskShape::None);
-        assert_eq!(widget.upload_pixels, original);
+        assert_eq!(*widget.upload_pixels, *original);
     }
 
     #[test]
