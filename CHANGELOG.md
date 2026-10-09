@@ -94,6 +94,16 @@ by crate for clarity, not because crates version independently.
 - `cargo teksilo status` reports the agent instructions installed under the
   home directory (a `User` line, `user_agents` in `--json`), and names the
   command that refreshes a copy that differs from the installed tool's.
+- `cargo teksilo symbol` ends with a "See also" section naming the lookups its
+  listing leaves out: `WidgetBuilder` for a widget, and the style protocol a
+  `.style(…)` builder takes.
+- `cargo teksilo search` and `show` say when the teksilo checkout an
+  application builds against has a different copy of a document they print.
+
+#### Documentation
+
+- The application guide has a "Timers and periodic work" section and a
+  "Fonts" section on registering font files.
 
 ### Changed
 
@@ -112,6 +122,11 @@ by crate for clarity, not because crates version independently.
 - `SceneCard`'s Edit accessibility action has id 1000 instead of 0.
 - The skill `cargo teksilo` installs says which release it ships with, and
   tells the agent how to refresh a copy installed for another release.
+- **Behaviour change:** `cargo teksilo --quiet` keeps the line that says which
+  release answered: the `Teksilo <version> · <mode>` line above search results,
+  and the note that the application resolves a different patch release.
+- `cargo teksilo status` says why it shows no teksilo version: no `Cargo.lock`
+  yet, teksilo not a dependency, or a pointer to `--verbose`.
 
 ### Fixed
 
@@ -145,6 +160,13 @@ by crate for clarity, not because crates version independently.
   copy of the guide matches the skill's again.
 - The tooltips guide imported `teksilo_widgets::tooltip`, a path an
   application cannot name; it imports `teksilo::widgets::tooltip`.
+
+#### cargo-teksilo
+
+- `cargo teksilo` finds a teksilo kept behind a Cargo feature. Every command
+  reported that teksilo was not a dependency of an application that declares
+  it optional. `status` names the feature that turns it on (`teksilo_enabled_by`
+  in `--json`).
 
 #### Menus
 
