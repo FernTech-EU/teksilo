@@ -21,6 +21,7 @@ cargo add teksilo
 Replace `src/main.rs` with:
 
 <!-- BEGIN README: hello -->
+<!-- compile-check -->
 ```rust
 use teksilo::prelude::*;
 use teksilo::widgets::Button;
@@ -57,6 +58,7 @@ The window contains a button. Activating it prints `Clicked!` in the terminal.
 Replace `src/main.rs` with this counter:
 
 <!-- BEGIN README: counter -->
+<!-- compile-check -->
 ```rust
 use teksilo::prelude::*;
 use teksilo::widgets::{Button, TextWidget, VStack};

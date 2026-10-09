@@ -8,6 +8,7 @@ Changes can notify widgets through signals and data models.
 
 ## Minimal example
 
+<!-- compile-check -->
 ```rust
 use teksilo::prelude::*;
 use teksilo::settings::SettingsBundle;

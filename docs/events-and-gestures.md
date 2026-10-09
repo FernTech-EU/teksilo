@@ -9,6 +9,7 @@ must also follow the [pointer contract](porting-widgets-to-the-pointer-model.md)
 
 ## Minimal example
 
+<!-- compile-check -->
 ```rust
 use teksilo::prelude::*;
 use teksilo::widgets::Button;

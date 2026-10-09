@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-doc-guard"
+edition = "2024"
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Compiles the programs the guides in docs/ mark with <!-- compile-check -->, as doctests."
+# Not published: the build script reads `docs/` through a workspace-relative
+# path, which does not exist in a crates.io tarball, and the crate exists
+# solely to fail this workspace's tests when a guide's program stops compiling.
+publish = false
+
+[dev-dependencies]
+teksilo = { workspace = true }

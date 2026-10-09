@@ -18,6 +18,7 @@ The backend is constructed by `WindowManager` when the app opts into custom chro
 
 ## Quick start
 
+<!-- compile-check -->
 ```rust
 use teksilo::prelude::*;
 use teksilo::widgets::{Expand, RectWidget, TextWidget, TitleBar, VStack, ZStack};
@@ -42,8 +43,8 @@ fn main() {
                                 .center(TextWidget::new(lit!("drag · double-click to maximize"))),
                         ),
                         // Some configurations have no backend, e.g. X11 with a window manager
-// that lacks `_NET_WM_MOVERESIZE`, where a borderless window could not
-// be moved. Always handle the `None` arm.
+                        // that lacks `_NET_WM_MOVERESIZE`, where a borderless window could not
+                        // be moved. Always handle the `None` arm.
                         None => Box::new(TextWidget::new(lit!(
                             "(custom chrome unsupported, native decorations)",
                         ))),
@@ -57,7 +58,7 @@ fn main() {
 
                     let title_bar_id = tree.add_boxed(title_bar);
                     let body_id = tree.add(body);
-                    tree.add(VStack::new().spacing(0.0).add_child(title_bar_id).add_child(body_id))
+                    tree.add(VStack::new().spacing(0.0).child(title_bar_id).child(body_id))
                 }),
         )
         .run();

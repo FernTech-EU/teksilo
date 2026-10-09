@@ -60,7 +60,7 @@ scaffolding.
 
 ```rust
 use teksilo::prelude::*;
-use teksilo_widgets::tooltip::TooltipContent;
+use teksilo::widgets::tooltip::TooltipContent;
 
 fn main() {
     TeksiloAppBuilder::new()
