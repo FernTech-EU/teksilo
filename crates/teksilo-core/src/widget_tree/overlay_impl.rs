@@ -2643,6 +2643,79 @@ mod tests {
         assert_eq!(tree.active_overlays().len(), 1);
     }
 
+    /// An inert overlay shown over `anchor`: a value readout, say.
+    fn show_inert_overlay(tree: &mut WidgetTree, anchor: WidgetId) -> WidgetId {
+        let content = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.show_overlay(
+            crate::overlay::OverlayRequest::new(
+                content,
+                anchor,
+                crate::overlay::OverlayPlacement::Below,
+                crate::overlay::DismissBehavior::EscapeKey,
+            )
+            .inert(),
+        );
+        content
+    }
+
+    /// An inert overlay is no cascade level. Counted, one inert overlay made a
+    /// single open menu read as a submenu over its parent, and the back key
+    /// closed whichever of the two was on top: the menu when the inert overlay
+    /// was shown first, the inert overlay when it was shown last.
+    #[test]
+    fn back_key_does_not_count_an_inert_overlay_as_a_menu_level() {
+        for inert_first in [true, false] {
+            let mut tree = WidgetTree::new();
+            let anchor = tree.add(FillWidget::new());
+            let menu = tree.add(FillWidget::new());
+            tree.layout(SizeProposal::exact(200.0, 100.0));
+            let show_menu = |tree: &mut WidgetTree| {
+                tree.show_overlay(crate::overlay::OverlayRequest::new(
+                    menu,
+                    anchor,
+                    crate::overlay::OverlayPlacement::Below,
+                    crate::overlay::DismissBehavior::Manual,
+                ));
+            };
+            let inert = if inert_first {
+                let inert = show_inert_overlay(&mut tree, anchor);
+                show_menu(&mut tree);
+                inert
+            } else {
+                show_menu(&mut tree);
+                show_inert_overlay(&mut tree, anchor)
+            };
+            assert_eq!(tree.active_overlays().len(), 2);
+
+            tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+            assert_eq!(
+                tree.active_overlays().len(),
+                2,
+                "inert shown first: {inert_first}: one menu is not a cascade"
+            );
+            assert!(tree.is_visible(menu) && tree.is_visible(inert));
+        }
+    }
+
+    /// Over a submenu, the back key closes the submenu, not an inert overlay
+    /// shown after it on top of the stack.
+    #[test]
+    fn back_key_closes_the_submenu_beneath_an_inert_overlay() {
+        let mut tree = WidgetTree::new();
+        let (parent, submenu) = show_two_nested_overlays(&mut tree);
+        let inert = show_inert_overlay(&mut tree, parent);
+        assert_eq!(tree.active_overlays().len(), 3);
+
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        assert!(!tree.is_visible(submenu), "the submenu closes");
+        assert!(tree.is_visible(parent), "its parent stays open");
+        assert!(
+            tree.is_visible(inert),
+            "the inert overlay is not what closes"
+        );
+    }
+
     /// A focusable leaf that records the keys it is handed, so a test can ask
     /// the question the writer actually asks: did the keystroke reach me?
     #[derive(Debug)]

@@ -572,17 +572,22 @@ impl WidgetTree {
             // reason `OverlayBand::dismissed_by_outside_press` already excludes
             // it from press dismissal.
             //
-            // `dismiss_top` below stays correct because the stack is
-            // band-ordered (`OverlayManager::show_with_auto_dismiss` inserts,
-            // it does not push): a `Standard` overlay always sits above every
-            // `TextAffordance` one, so whenever this count exceeds one the top
-            // of the stack is the menu this key means.
+            // An inert overlay (a slider's value readout, say) is no level
+            // either: it takes no input, so it is neither counted nor what the
+            // key closes. Counted, a readout under one open menu made that menu
+            // read as a submenu and closed it; on top of the stack, it was the
+            // overlay the key closed, and the key was spent on it.
+            //
+            // The topmost *non-inert* overlay is the menu this key means: the
+            // stack is band-ordered (`OverlayManager::show_with_auto_dismiss`
+            // inserts, it does not push), so a `Standard` overlay always sits
+            // above every `TextAffordance` one.
             let nested_menu_overlays = {
                 let ids: Vec<_> = self
                     .overlay_manager
                     .stack
                     .iter()
-                    .filter(|o| o.band == crate::overlay::OverlayBand::Standard)
+                    .filter(|o| o.band == crate::overlay::OverlayBand::Standard && !o.inert)
                     .map(|o| o.id)
                     .collect();
                 ids.into_iter()
@@ -592,21 +597,31 @@ impl WidgetTree {
             // The back key only navigates *menu* cascades; it must never close a
             // dialog / alert / modal that happens to sit on top. Each modal is a
             // scrim+panel overlay pair and the (non-host) scrims inflate the count
-            // above, so also require the *topmost* overlay to be back-navigable —
-            // i.e. a non-host (menu) surface — before dismissing it.
-            let top_id = self.overlay_manager.stack.last().map(|o| o.id);
+            // above, so also require the topmost non-inert overlay to be
+            // back-navigable — i.e. a non-host (menu) surface — before dismissing
+            // it.
+            let top_id = self
+                .overlay_manager
+                .stack
+                .iter()
+                .rev()
+                .find(|o| !o.inert)
+                .map(|o| o.id);
             let top_is_back_navigable = top_id.is_some_and(|id| !self.overlay_is_host_surface(id));
-            if nested_menu_overlays > 1 && top_is_back_navigable {
-                if let Some((_id, content_ids, focus_restore)) = self
-                    .overlay_manager
-                    .dismiss_top_because(crate::overlay::DismissReason::Escape)
+            if nested_menu_overlays > 1
+                && top_is_back_navigable
+                && let Some(top_id) = top_id
+            {
+                let (content_ids, focus_restore) =
+                    self.overlay_manager.dismiss_with_focus_restore_because(
+                        top_id,
+                        crate::overlay::DismissReason::Escape,
+                    );
+                self.dormant_dismissed_content(&content_ids, &mut *ops);
+                if let Some(restore_id) = focus_restore
+                    && self.arena.is_active(restore_id)
                 {
-                    self.dormant_dismissed_content(&content_ids, &mut *ops);
-                    if let Some(restore_id) = focus_restore
-                        && self.arena.is_active(restore_id)
-                    {
-                        self.focus_ops(restore_id, &mut *ops);
-                    }
+                    self.focus_ops(restore_id, &mut *ops);
                 }
                 return;
             }
