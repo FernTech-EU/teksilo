@@ -122,9 +122,17 @@ impl ImageWidget {
     ///
     /// The texture is named after the icon's identity, so every
     /// `ImageWidget` showing this icon (or a clone of it) in a window shares
-    /// one texture, uploaded once. That texture lives as long as the window:
-    /// an icon decoded afresh for each widget gets a texture of its own each
-    /// time. Pixels that change belong on [`from_raw`](Self::from_raw).
+    /// one texture, uploaded once.
+    ///
+    /// That texture, with its mip chain, stays on the GPU for the life of the
+    /// window and is never freed, even once no widget shows the icon. Each
+    /// distinct identity keeps one: a clone of the icon is the same identity,
+    /// but the same bytes decoded again are a new one, and so is every
+    /// [`mask`](Self::mask) call, since it bakes the mask into new pixels.
+    /// Keep decoded images in an application cache and clone them, rather
+    /// than decoding per widget or per realization: in a virtualized grid of
+    /// runtime images such as album covers, a cover decoded each time its
+    /// tile scrolls into view leaves one more texture behind each time.
     pub fn new(icon: &RasterIcon) -> Self {
         let name = format!("_img_{}", icon.texture_key());
         Self {
@@ -151,6 +159,14 @@ impl ImageWidget {
     /// would silently win and subsequent ones would render the wrong
     /// pixels — a latent bug fixed alongside the dynamic-image use
     /// cases that need many short-lived `from_raw` widgets.
+    ///
+    /// Each call is therefore a new image identity. Once drawn, it keeps a
+    /// GPU texture, with its mip chain, for the life of the window, and the
+    /// texture is never freed: a widget built per rebuild, per realization in
+    /// a virtualized view, or per change of its pixels leaves one more
+    /// texture behind each time. For pixels shown more than once, build a
+    /// [`RasterIcon::from_raw`] once, keep it, and show it through
+    /// [`new`](Self::new), whose widgets share one texture.
     pub fn from_raw(pixels: Vec<u8>, width: u32, height: u32) -> Self {
         static NEXT_RAW_ID: AtomicU64 = AtomicU64::new(0);
         let id = NEXT_RAW_ID.fetch_add(1, Ordering::Relaxed);

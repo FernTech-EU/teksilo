@@ -16,9 +16,41 @@ use std::collections::HashMap;
 use crate::mipmap::build_mip_chain;
 
 /// Manages uploaded image textures and their bind groups.
+///
+/// A texture, with its mip chain, stays registered until the renderer that
+/// owns this manager is dropped, which for a window's renderer is when the
+/// window closes. Nothing in the framework calls [`remove`](Self::remove), so
+/// every distinct image name a window has drawn keeps its texture.
 #[derive(Default)]
 pub struct ImageManager {
     images: HashMap<String, ImageEntry>,
+    #[cfg(debug_assertions)]
+    texture_count_warning: TextureCountWarning,
+}
+
+/// How many image textures one renderer may hold before a debug build warns.
+#[cfg(debug_assertions)]
+const TEXTURE_COUNT_WARNING_THRESHOLD: usize = 256;
+
+/// Decides when a debug build warns that a renderer holds too many image
+/// textures: once, the first time the count goes past
+/// [`TEXTURE_COUNT_WARNING_THRESHOLD`].
+#[cfg(debug_assertions)]
+#[derive(Debug, Default)]
+struct TextureCountWarning {
+    warned: bool,
+}
+
+#[cfg(debug_assertions)]
+impl TextureCountWarning {
+    /// Whether to warn now that the renderer holds `count` textures.
+    fn should_warn(&mut self, count: usize) -> bool {
+        if self.warned || count <= TEXTURE_COUNT_WARNING_THRESHOLD {
+            return false;
+        }
+        self.warned = true;
+        true
+    }
 }
 
 struct ImageEntry {
@@ -130,6 +162,16 @@ impl ImageManager {
                 bind_group,
             },
         );
+
+        #[cfg(debug_assertions)]
+        if self.texture_count_warning.should_warn(self.images.len()) {
+            eprintln!(
+                "teksilo-render: this window holds {} image textures and frees none before it \
+                 closes, because every decoded RasterIcon and every ImageWidget::from_raw gets a \
+                 texture of its own; decode each image once and clone the RasterIcon.",
+                self.images.len()
+            );
+        }
     }
 
     /// Get the bind group for a registered image.
@@ -157,5 +199,29 @@ mod tests {
         let mgr = ImageManager::new();
         assert!(!mgr.contains("test"));
         assert!(mgr.get_bind_group("test").is_none());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn texture_count_warning_fires_once_past_the_threshold() {
+        let mut warning = TextureCountWarning::default();
+        for count in 0..=TEXTURE_COUNT_WARNING_THRESHOLD {
+            assert!(!warning.should_warn(count), "warned at {count}");
+        }
+        assert!(
+            warning.should_warn(TEXTURE_COUNT_WARNING_THRESHOLD + 1),
+            "must warn as the count first goes past the threshold"
+        );
+        for count in [
+            TEXTURE_COUNT_WARNING_THRESHOLD + 1,
+            TEXTURE_COUNT_WARNING_THRESHOLD + 2,
+            TEXTURE_COUNT_WARNING_THRESHOLD,
+            10 * TEXTURE_COUNT_WARNING_THRESHOLD,
+        ] {
+            assert!(
+                !warning.should_warn(count),
+                "warned a second time at {count}"
+            );
+        }
     }
 }

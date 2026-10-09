@@ -113,6 +113,15 @@ IconWidget::from_raster(logo, 32.0).mode(IconMode::FullColor)
 
 In full-color mode, the icon's RGB is rendered directly; the widget color only controls opacity.
 
+## Raster images and GPU memory
+
+A window uploads each raster it draws to a GPU texture, with a mip chain, and keeps that texture until the window closes: no image texture is freed before then. The texture is named after the image's identity:
+
+- Clones of one `RasterIcon` share its pixels and its texture, and a `res!()` raster is a single static value, so showing one image in many widgets costs one texture (one per mode for `IconWidget`).
+- Every `RasterIcon::decode`, `RasterIcon::from_raw` and `ImageWidget::from_raw` call is a new identity, even for the same bytes, and gets a texture of its own once drawn.
+
+For images decoded at runtime, such as album covers in a virtualized grid, keep the decoded `RasterIcon`s in an application cache and build each tile's `ImageWidget::new(&icon)` from a cached value. Decoding in the tile's delegate instead adds a texture every time the tile scrolls back into view. Debug builds print a warning when one window holds more than 256 image textures.
+
 ## Creating Icon Assets
 
 ### SVG icons

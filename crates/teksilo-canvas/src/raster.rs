@@ -126,6 +126,17 @@ impl RasterIcon {
     /// open rather than fail. An unrecognised format yields
     /// [`ImageDecodeError::UnsupportedFormat`], whose message names what *is*
     /// supported so the error can be shown to a user unchanged.
+    ///
+    /// Every call returns a new image identity. `ImageWidget::new` and
+    /// `IconWidget::from_raster` name their GPU texture after it, and that
+    /// texture, with its mip chain, stays for the life of each window that
+    /// drew it: it is never freed. Clones of the returned icon share its
+    /// pixels and its texture; decoding the same bytes again gives a new
+    /// identity and a new texture. Keep decoded images in an application cache
+    /// and clone them, rather than decoding per widget or per realization: in
+    /// a virtualized grid of runtime images such as album covers, a cover
+    /// decoded each time its tile scrolls into view leaves one more texture
+    /// behind each time.
     pub fn decode(data: &[u8]) -> Result<Self, ImageDecodeError> {
         match ImageFormat::sniff(data).ok_or(ImageDecodeError::UnsupportedFormat)? {
             ImageFormat::Png => Self::decode_png(data),
@@ -335,6 +346,14 @@ impl RasterIcon {
     }
 
     /// Create from pre-decoded RGBA pixel data.
+    ///
+    /// Every call returns a new image identity, with the same GPU cost as
+    /// [`decode`](Self::decode): once drawn, it keeps a texture, with its mip
+    /// chain, for the life of each window that drew it, and the texture is
+    /// never freed. Clones share the pixels and the texture; another
+    /// `from_raw` with the same bytes gets a texture of its own. Build each
+    /// image once, keep it in an application cache, and clone it where it is
+    /// shown.
     pub fn from_raw(pixels: Vec<u8>, width: u32, height: u32) -> Self {
         Self::with_pixels(pixels, width, height)
     }
