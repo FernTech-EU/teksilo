@@ -47,7 +47,11 @@ extend-exclude = [
 # marzo 2027 alle ore 01:05" ("at 01:05"), read verbatim by its tests, and the
 # academy its rule for the first of the month cites. Phrases rather than
 # words, so "alle" and "Accademia" stay typos everywhere else.
-extend-ignore-re = ["alle ore", "Accademia della Crusca"]
+#
+# French in `command_palette::tests`: "Nouveau projet" ("New project"), the
+# localized command name a French reader types to find it. A phrase for the
+# same reason, so "projet" stays a typo elsewhere.
+extend-ignore-re = ["alle ore", "Accademia della Crusca", "Nouveau projet"]
 
 [default.extend-words]
 # Project / domain vocabulary
