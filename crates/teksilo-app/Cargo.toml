@@ -88,7 +88,7 @@ teksilo-telemetry = { workspace = true, optional = true }
 # `default-features = false`: the umbrella's font features decide which
 # Noto fallback fonts are bundled, and a default-on dependency here would
 # switch the Arabic and Hebrew ones back on for every app.
-teksilo-text = { path = "../teksilo-text", version = "0.15.1", default-features = false }
+teksilo-text = { path = "../teksilo-text", version = "0.16.0", default-features = false }
 # GUI-free automation toolkit + wire-encoding deps for the debug-only
 # `automation` bridge. All optional, off by default.
 teksilo-automation = { workspace = true, optional = true }

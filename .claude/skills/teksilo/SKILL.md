@@ -21,7 +21,7 @@ ask about the DSL, read `reference/teksu.md` first.
 2. **Live API extraction** — `cargo teksilo symbol <Name>`, `cargo doc`, or
    docs.rs, all read from the version the app actually pins.
 3. **The bundled reference prose** — the files under `reference/`. A *map*, not
-   the territory. This copy ships with teksilo **0.15.1**; a section that names
+   the territory. This copy ships with teksilo **0.16.0**; a section that names
    an older version was last verified against that one, and any of it MAY lag
    the version this app pins. Never let it override the compiler or live
    extraction.

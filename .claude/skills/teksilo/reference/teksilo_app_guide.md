@@ -27,7 +27,7 @@ directly.
 
 ```toml
 [dependencies]
-teksilo = "=0.15.1"
+teksilo = "=0.16.0"
 ```
 
 Then in code:
@@ -67,7 +67,7 @@ opt-outs:
 | `telemetry` | Privacy-respecting analytics wiring + `PrivacySettings` widget |
 | `fonts-cjk-sc` / `fonts-thai` / `fonts-all` / `system-emoji` | Extra bundled script fonts / runtime color-emoji fallback |
 
-For a Latin-only minimal build: `teksilo = { version = "=0.15.1", default-features = false, features = ["widgets", "i18n", "clipboard"] }`. Keep `i18n` in the list whenever `widgets` is on: every labelled widget constructor takes `impl Into<LocalizedString>`, and `LocalizedString` has no `From<&str>`, so `tr!` / `lit!` / `localized` are the only way to build a label. Drop it and no widget label can be constructed at all. What `default-features = false` still buys you is the rest of the default set: the bundled Arabic and Hebrew fallback fonts, the inspector, the toast host, and the native file dialogs all go away.
+For a Latin-only minimal build: `teksilo = { version = "=0.16.0", default-features = false, features = ["widgets", "i18n", "clipboard"] }`. Keep `i18n` in the list whenever `widgets` is on: every labelled widget constructor takes `impl Into<LocalizedString>`, and `LocalizedString` has no `From<&str>`, so `tr!` / `lit!` / `localized` are the only way to build a label. Drop it and no widget label can be constructed at all. What `default-features = false` still buys you is the rest of the default set: the bundled Arabic and Hebrew fallback fonts, the inspector, the toast host, and the native file dialogs all go away.
 
 ## App entry point
 
