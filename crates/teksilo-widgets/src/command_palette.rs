@@ -53,6 +53,15 @@
 //! `(category, id)` order. The category takes part in matching, so `file new` finds
 //! the New command filed under File.
 //!
+//! The category a reader sees and matches against is the shortcut's
+//! `category_label` when it has one, and its `category` key otherwise. Give a
+//! localized label (`.category_label(tr!(…))`) and keep the key stable: the key
+//! orders the groups, so it must not change with the language, and the label is
+//! what a French reader types (`fichier nouveau`). Settings ▸ Keymap
+//! (`ShortcutSettings`) uses the same pair, and names the group of shortcuts that
+//! declared no category from the widget catalogue
+//! (`shortcut-settings-uncategorized`).
+//!
 //! # Keyboard
 //!
 //! Focus stays in the search field throughout — that is what makes a palette feel
