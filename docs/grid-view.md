@@ -154,7 +154,7 @@ together, and a selection the application sets moves the focus onto it. Matrix
 | Ctrl+Space | toggle the focused tile's selection |
 | PageUp / PageDown | ± a viewport of rows + scroll |
 | Space | close the open tile's detail band; else check the focused tile if it holds a checkbox, else toggle (`Multi`) / select (`Single`) |
-| Enter | open / close the tile's detail band (with `.detail_row`) and `.on_tile_activate` (else select) |
+| Enter | with `.detail_row`, open the tile's detail band and select the tile, or close the open one; then `.on_tile_activate`. Without a band, or on a tile with nothing to disclose: `.on_tile_activate`, else select |
 | ↓ on the open tile / ↑ in its band | into the band's first focusable control / back to the tile (see [Detail band](#detail-band)) |
 | Esc | clear focus |
 | Ctrl+A | select all (`Multi` mode only); Ctrl+Shift+A deselects |
@@ -237,26 +237,39 @@ GridView::from_source(albums, |tc| Box::new(album_tile(tc.item)))
 
 - `.detail_row(|tc| -> Option<Box<dyn Widget>>)` receives the disclosed tile's
   `TileContext`, the one the tile delegate gets, item included. `None` means
-  the tile has nothing to disclose and the band takes no space.
+  the tile has nothing to disclose and the band takes no space. It is also
+  asked when a tile is activated, to learn whether the tile has anything to
+  disclose, and the content it returns then is dropped: keep it cheap and free
+  of side effects.
 - `.expanded_index(Signal<Option<usize>>)` is the disclosed tile. The grid
   writes it when a tile is activated (a click per `.activate_on`, or Enter):
-  activating a tile opens its band, activating the open tile closes it, and
-  `.on_tile_activate` still fires, after the band has opened or closed. Writing
-  the signal from outside opens and closes the band. Without it the grid keeps
-  a signal of its own.
+  activating a tile opens its band and scrolls it into view, activating the
+  open tile closes it, and `.on_tile_activate` still fires, after the band has
+  opened or closed. Activating a tile with nothing to disclose opens nothing
+  and leaves a band open elsewhere as it is. Writing the signal from outside
+  opens and closes the band, without scrolling. Without it the grid keeps a
+  signal of its own.
 - `.detail_row_height(|index| -> f32)` sizes the band. Without it the band is
   measured height-for-width at the content width (the viewport less its side
   insets), as the variable-height tiles are, with the same scroll anchoring
   when its height changes above the viewport top.
 
 **Layout.** The band sits one row gap under the open row, and everything after
-it moves down by the band and a row gap: in the realized window, in
-`max_scroll_y`, in the focus ring, the drop indicator and every scroll-into-view.
-It is not a row of the grid: tiles keep their row and column numbers. It works
-with the uniform grid, `.variable_row_heights` / `.item_height` (the band goes
-under the row's tallest tile) and `.sections` (it opens inside its section and
-the following headers move down). A `.waterfall` has no rows, so the band is
+it moves down by the band and a row gap: in `max_scroll_y`, in the focus ring,
+the drop indicator and every scroll-into-view (the keyboard's, `.ensure_index_visible`,
+a tile's `ScrollIntoView` action, and focus moving onto a control in the band,
+which the grid scrolls into view when the framework asks it to). It is not a
+row of the grid: tiles keep their row and column numbers. It works with the
+uniform grid, `.variable_row_heights` / `.item_height` (the band goes under the
+row's tallest tile) and `.sections` (it opens inside its section and the
+following headers move down). A `.waterfall` has no rows, so the band is
 ignored there.
+
+A band that opens, closes, moves or changes height above the viewport leaves
+the tiles on screen where they are: the scroll offset takes the difference.
+When the viewport's top edge is inside the band, the rows under it stay put.
+The realized window is the one the viewport would hold with no band, so a band
+that changes needs no tile the grid has not realized already.
 
 **Following the tile.** An insert, a removal or a move keeps the band on its
 tile, and removing the tile closes it. A reset (a `SortFilterListModel` sort or
@@ -266,27 +279,42 @@ keys are its positions, which say nothing about where an item went, so a
 `ListModel` closes the band on a reset whether it is given to `new`,
 `from_source` or `from_source_keyed`.
 
-**Keyboard.** Enter or Space on the open tile closes it. ↓ from the open tile
-moves focus to the first focusable control in the band; ↑ there, when the
-control does not use it, returns focus to the grid with the cursor on the tile.
-A band with nothing focusable is stepped over like any other key. Arrows
-between tiles step over the band, and while focus is in the band the grid's own
-keys stand aside, so a key the band's content lets through moves no tile.
+**Keyboard.** Enter on a tile opens its band and selects the tile; Enter or
+Space on the open tile closes it, and leaves the selection alone. On a tile with
+nothing to disclose Enter and Space do what they do without a band. ↓ from the
+open tile moves focus to the first focusable control in the band, scrolled into
+view; ↑ there, when the control does not use it, returns focus to the grid with
+the cursor on the tile. A band with nothing focusable is stepped over like any
+other key. Arrows between tiles step over the band, and while focus is in the
+band the grid's own keys stand aside, so a key the band's content lets through
+moves no tile. A band that closes, or moves to content with nothing focusable,
+while focus is inside it hands focus back to the grid with the cursor on its
+tile, whatever closed it: a button in the band, a shortcut, a screen reader's
+`Collapse`.
 
 **Rubber band.** The marquee selects tiles where they are, so it never selects
 the band, and a press on the band starts no marquee.
 
-**Accessibility.** The band is a `Role::Group` named after its tile's
-`.tile_a11y_label` (labelled by the tile node otherwise). Every tile publishes
-`expanded`, offers `Expand` or `Collapse` (which open and close the band for a
-screen reader, with no double click needed), and, while open, a `controls`
-relation to the band. The grid's row and column counts and each tile's position
-in the set are unchanged. Opening and closing replace no tile node.
+**Accessibility.** The band is a `Role::Group`, read right after its tile's
+row. It is named after its tile's `.tile_a11y_label`, labelled by the tile node
+without one, and named "Details of item N" (in the user's language) when the
+tile has scrolled out of the realized window and has no node to lend. Every
+tile publishes `expanded`, offers `Expand` or `Collapse` (which open and close
+the band for a screen reader, with no double click needed), and, while open, a
+`controls` relation to the band. A tile with nothing to disclose is offered as
+expandable too, because knowing otherwise means building its band's content for
+every tile the grid realizes; its `Expand` opens nothing and it stays
+collapsed. The grid's row and column counts and each tile's position in the set
+are unchanged. Opening, closing and moving the band replace no tile node; a
+scroll it causes (the reveal of a band a user opened) realizes tiles as any
+scroll does.
 
 **Lifetime.** The band widget is a child of the grid, not of the body pane, so
-scrolling and resizing keep its content (a track list's own scroll and focus).
-The content is rebuilt when the band moves to another tile, and when the grid's
-data changes.
+scrolling, resizing and a lazy source loading a window keep its content (a
+track list's own scroll and focus). The content is rebuilt when the band moves
+to another tile, when its own tile's item arrives (until then it holds a
+placeholder), and when the grid's rows change: an insert, a removal, a move,
+an update or a reset.
 
 ## Other
 
@@ -349,4 +377,8 @@ virtualization window, column derivation, tile placement (uniform / variable /
 waterfall / sectioned), prefix-sum + anchoring, selection (by index and by
 key), 2D keyboard, reorder (source `accept_drop`), type-ahead, source-driven
 lazy loading (`fetch_more` + placeholder rows), the detail band (layout,
-following its tile, keys, rubber band, accessibility), and accessibility roles.
+following its tile, keys, rubber band, accessibility, reveal, focus, scroll
+anchoring, tile node identity, a lazy source's window loads), and
+accessibility roles. `tests/grid_view_keyed_selection_cost.rs` bounds what a
+keyed selection costs as the grid grows, counting allocated bytes and key
+reads rather than time.

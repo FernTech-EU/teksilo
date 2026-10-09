@@ -404,6 +404,8 @@ grid-view-selection-count =
        *[other] Wybrano { $count } elementu
     }
 
+grid-view-detail-name = Szczegóły elementu { $position }
+
 # Edytor kodu. Pełny kontekst: en-US.ftl oraz
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab wstawia wcięcie. { $next } przechodzi do następnej kontrolki, { $previous } do poprzedniej.

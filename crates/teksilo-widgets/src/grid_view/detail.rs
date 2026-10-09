@@ -20,9 +20,17 @@
 //! * [`DetailBand`], the band widget. It is a child of the grid itself, not
 //!   of the body pane: the pane rebuilds whenever a scroll leaves its buffer
 //!   or a resize changes the column count, and the band's content (a track
-//!   list with focus and a scroll offset of its own) must survive both.
-//!   Opening, closing or moving the band rebuilds the band alone, so no tile
-//!   node is replaced either.
+//!   list with focus and a scroll offset of its own) must survive both. To a
+//!   screen reader it is a child of the pane all the same, read right after
+//!   its tile's row (`GridBodyPane::accessibility_children`).
+//!
+//! Opening, closing or moving the band rebuilds the band alone. The pane
+//! realizes the tiles a viewport would hold with no band at all
+//! ([`DetailRowStrategy::visible_range`]), and the grid keeps the content
+//! under the viewport's top edge still when the band changes above it
+//! ([`DetailRowStrategy::settle_placement`]), so the realized window does
+//! not change and no tile node is replaced. A scroll the change causes, the
+//! reveal of a band a user opened, realizes tiles as any scroll does.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -36,13 +44,10 @@ use teksilo_core::signal::Signal;
 use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_data::RowState;
 
 use super::TileContext;
-use super::body_pane::ReadItemFn;
 use super::layout::GridLayoutStrategy;
 use super::layout::strategy::{TileRect, VisibleTileRange};
-use crate::data_views::{RowSelection, default_placeholder};
 
 /// Builds a band's content for the disclosed tile. `None`: the tile has
 /// nothing to disclose, and the band takes no space.
@@ -51,9 +56,35 @@ pub(crate) type DetailBuilder<T> = Rc<dyn Fn(&TileContext<'_, T>) -> Option<Box<
 /// The exact height of the band for a tile.
 pub(crate) type DetailHeightFn = Rc<dyn Fn(usize) -> f32>;
 
+/// The band's content for a tile, erased from the grid's item type: the
+/// widget, `None` when the tile has nothing to disclose, and whether the
+/// tile's item was resident when it was asked. A tile of a lazy source that
+/// has not loaded yet gets a placeholder and `false`.
+pub(crate) type BandContentFn = Rc<dyn Fn(usize) -> (Option<Box<dyn Widget>>, bool)>;
+
 /// Below this, a band height is unchanged: measurements wobble in the last
 /// bits, and a wobble must not move the scroll offset.
 const HEIGHT_EPSILON: f32 = 0.01;
+
+/// What activating a tile did to its band.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Disclosure {
+    /// The tile's band opened, or moved to it from another tile.
+    Opened,
+    /// The tile's band was open and closed.
+    Closed,
+    /// Nothing: the tile has nothing to disclose, or its band was open
+    /// already.
+    Nothing,
+}
+
+/// The band as a layout placed it: the open tile and its band's height, at
+/// a viewport width.
+#[derive(Clone, Copy, PartialEq)]
+struct Placed {
+    width: f32,
+    band: Option<(usize, f32)>,
+}
 
 /// Which tile is disclosed, and what is known about its band.
 pub(crate) struct DetailState {
@@ -78,6 +109,31 @@ pub(crate) struct DetailState {
     /// stand aside then: a key the band's content did not use must not move
     /// the tile cursor behind it.
     pub(crate) focus_within: Signal<bool>,
+    /// The band's content for a tile, set by every `GridView::build` because
+    /// it reads the layout strategy in force. Activation asks it too, to
+    /// learn whether a tile has anything to disclose.
+    content: RefCell<Option<BandContentFn>>,
+    /// A tile a user has just opened: the next layout scrolls its row and its
+    /// band into view.
+    pub(crate) reveal: Cell<Option<usize>>,
+    /// The tile whose band held keyboard focus when `expanded` was written:
+    /// the band's rebuild hands focus back to it when the new content has
+    /// nothing to take it.
+    focus_return: Cell<Option<usize>>,
+    /// Rebuilds the band alone: bumped when the window holding a tile whose
+    /// band was built before its item arrived loads.
+    pub(crate) version: Signal<u64>,
+    /// Whether the band's tile had no resident item when its content was
+    /// built, so it shows a placeholder for content still to come.
+    pub(crate) awaiting_item: Cell<bool>,
+    /// Where the last layout put the band, for the next one to keep the
+    /// content under the viewport's top edge still when it changes. `None`
+    /// after a change to the data, which renumbers the tiles it refers to.
+    placed: Cell<Option<Placed>>,
+    /// Bumped whenever the band's placement changes. The focus ring and the
+    /// drop indicator are painted at tile positions that move with it, by a
+    /// widget whose own bounds do not change.
+    pub(crate) moved: Signal<u64>,
 }
 
 impl DetailState {
@@ -90,6 +146,13 @@ impl DetailState {
             band_id: Cell::new(None),
             enterable: Cell::new(false),
             focus_within: Signal::new(false),
+            content: RefCell::new(None),
+            reveal: Cell::new(None),
+            focus_return: Cell::new(None),
+            version: Signal::new(0),
+            awaiting_item: Cell::new(false),
+            placed: Cell::new(None),
+            moved: Signal::new(0),
         }
     }
 
@@ -106,18 +169,64 @@ impl DetailState {
         self.shown.get() == Some(index) && self.expanded.get() == Some(index)
     }
 
-    /// Disclose `index`, or close it when it is the disclosed tile.
-    pub(crate) fn toggle(&self, index: usize) {
+    /// Install the band's content, built over the layout strategy in force.
+    pub(crate) fn set_content(&self, content: BandContentFn) {
+        *self.content.borrow_mut() = Some(content);
+    }
+
+    fn content_for(&self, index: usize) -> (Option<Box<dyn Widget>>, bool) {
+        // Cloned out, so the application's builder runs with no borrow held.
+        let content = self.content.borrow().clone();
+        match content {
+            Some(content) => content(index),
+            None => (None, true),
+        }
+    }
+
+    /// Activating `index`, by the keyboard or a click: close its band when it
+    /// is the disclosed tile, open it otherwise.
+    pub(crate) fn activate(&self, index: usize) -> Disclosure {
         if self.expanded.get() == Some(index) {
             self.expanded.set(None);
-        } else {
-            self.expanded.set(Some(index));
+            return Disclosure::Closed;
         }
+        self.expand(index)
+    }
+
+    /// Open `index`'s band, and have the next layout scroll it into view.
+    ///
+    /// A tile with nothing to disclose opens nothing, and leaves a band open
+    /// on another tile as it is. Whether it has anything is learned by
+    /// building its band's content once and dropping it, so the builder runs
+    /// twice for a band that opens: once here, once when the band is built.
+    /// Asking it of every tile, to tell a reader which tiles are expandable,
+    /// would build the content of every tile the grid realizes, which is why
+    /// every tile is offered as one (`TileA11y::accessibility`).
+    pub(crate) fn expand(&self, index: usize) -> Disclosure {
+        if self.expanded.get() == Some(index) {
+            return Disclosure::Nothing;
+        }
+        if self.content_for(index).0.is_none() {
+            return Disclosure::Nothing;
+        }
+        self.reveal.set(Some(index));
+        self.expanded.set(Some(index));
+        Disclosure::Opened
     }
 
     /// Whether the band's height comes from measuring it.
     pub(crate) fn measures(&self) -> bool {
         self.height_fn.is_none()
+    }
+
+    /// Forget where the last layout put the band. Called on a change to the
+    /// data: the tile it was recorded under may be another one now, and the
+    /// rows around it have moved anyway.
+    pub(crate) fn forget_placement(&self) {
+        self.placed.set(None);
+        // Focus inside a band the data change closes or moves goes where
+        // the framework puts it after the grid's rebuild: onto the grid.
+        self.focus_return.set(None);
     }
 
     fn height(&self, index: usize, estimate: f32) -> f32 {
@@ -137,11 +246,39 @@ struct Insert {
     index: usize,
     /// Top of the open row: every rect strictly below it moves down.
     row_top: f32,
-    /// Bottom of the open row: the band starts one row gap under it.
+    /// Bottom of the open row.
     row_bottom: f32,
+    /// Top of the band, one row gap under the open row.
+    band_top: f32,
     band_height: f32,
     /// How far everything below the open row moves: a row gap and the band.
     extra: f32,
+}
+
+/// The scroll correction that keeps still the content the viewport's top
+/// edge is on, when the band goes from `old` to `new` at `scroll_y`.
+///
+/// The content is the grid without its band, and the viewport is pinned to
+/// a point of it: the one at its top edge, or, when that edge is inside the
+/// band, the row under the band, at the distance it is on screen. Where that
+/// point lands with the new band is the new top. A band that opens, closes
+/// or moves entirely below the top moves nothing; one above it moves the
+/// offset by what it adds or takes away; a band growing under the top edge
+/// keeps the rows under it still, as a measured row does
+/// (`VariableRowGrid::observe_measured`).
+fn anchor_shift(old: Option<Insert>, new: Option<Insert>, scroll_y: f32) -> f32 {
+    // The pinned point, whether it lies past the old band, and how far
+    // under the viewport's top edge it is on screen.
+    let (point, past, below_top) = match old {
+        Some(o) if scroll_y >= o.band_top + o.extra => (scroll_y - o.extra, true, 0.0),
+        Some(o) if scroll_y >= o.band_top => (o.band_top, true, o.band_top + o.extra - scroll_y),
+        _ => (scroll_y, false, 0.0),
+    };
+    let landed = match new {
+        Some(n) if point > n.band_top || (past && point >= n.band_top) => point + n.extra,
+        _ => point,
+    };
+    landed - below_top - scroll_y
 }
 
 /// A layout strategy with the detail band inserted under the open row.
@@ -179,17 +316,37 @@ impl DetailRowStrategy {
         }
     }
 
-    fn insert(&self, viewport_width: f32) -> Option<Insert> {
-        let index = self.state.open((self.len_fn)())?;
+    /// The wrapped strategy. The band's content reads a tile's row and
+    /// column from it rather than from this wrapper: the wrapper holds the
+    /// state the content is kept in, and a reference back would be a cycle.
+    pub(crate) fn inner(&self) -> Rc<dyn GridLayoutStrategy> {
+        self.inner.clone()
+    }
+
+    fn insert_for(&self, index: usize, band_height: f32, viewport_width: f32) -> Insert {
         let row = self.inner.tile_rect(index, viewport_width);
-        let band_height = self.state.height(index, self.inner.estimated_row_height());
-        Some(Insert {
+        let row_bottom = row.y + row.height;
+        Insert {
             index,
             row_top: row.y,
-            row_bottom: row.y + row.height,
+            row_bottom,
+            band_top: row_bottom + self.row_gap,
             band_height,
             extra: self.row_gap + band_height,
-        })
+        }
+    }
+
+    fn open_band(&self) -> Option<(usize, f32)> {
+        let index = self.state.open((self.len_fn)())?;
+        Some((
+            index,
+            self.state.height(index, self.inner.estimated_row_height()),
+        ))
+    }
+
+    fn insert(&self, viewport_width: f32) -> Option<Insert> {
+        let (index, height) = self.open_band()?;
+        Some(self.insert_for(index, height, viewport_width))
     }
 
     /// A y in this strategy's coordinates, in the wrapped one's. A y inside
@@ -220,36 +377,69 @@ impl DetailRowStrategy {
             ins.index,
             TileRect {
                 x: self.inset.leading,
-                y: ins.row_bottom + self.row_gap,
+                y: ins.band_top,
                 width: (viewport_width - self.inset.horizontal()).max(0.0),
                 height: ins.band_height,
             },
         ))
     }
 
-    /// Record the band's measured `height` and return the scroll correction
-    /// that keeps the content under the viewport top still: the band's change
-    /// in height when the band starts above the top, nothing otherwise. The
-    /// rule a measured row follows (`VariableRowGrid::observe_measured`).
-    pub(crate) fn observe_band_measured(
-        &self,
-        index: usize,
-        height: f32,
-        scroll_y: f32,
-        viewport_width: f32,
-    ) -> f32 {
-        let Some((open, before)) = self.band_rect(viewport_width) else {
+    /// Record the band's measured `height` for tile `index`. The scroll
+    /// correction a change of height calls for comes from
+    /// [`settle_placement`](Self::settle_placement), with every other change
+    /// of the band.
+    pub(crate) fn record_band_height(&self, index: usize, height: f32) {
+        let Some((open, before)) = self.open_band() else {
+            return;
+        };
+        if open == index && (height - before).abs() > HEIGHT_EPSILON {
+            self.state.measured.set(Some((index, height)));
+        }
+    }
+
+    /// Record where the band is now, and return the scroll correction that
+    /// keeps the content under the viewport's top edge still across whatever
+    /// changed since the last layout: the band opening, closing, moving to
+    /// another tile, or taking a new height. See [`anchor_shift`].
+    ///
+    /// Both placements are read from the wrapped strategy as it is now, so a
+    /// row above that was measured again in between, which the body pane
+    /// anchors on its own, is not counted twice. Nothing is corrected across
+    /// a change of width, which lays every row out again, nor after a change
+    /// to the data (`DetailState::forget_placement`).
+    pub(crate) fn settle_placement(&self, scroll_y: f32, viewport_width: f32) -> f32 {
+        let now = Placed {
+            width: viewport_width,
+            band: self.open_band(),
+        };
+        let Some(before) = self.state.placed.replace(Some(now)) else {
+            self.state.moved.set(self.state.moved.get().wrapping_add(1));
             return 0.0;
         };
-        if open != index || (height - before.height).abs() <= HEIGHT_EPSILON {
+        if before == now {
             return 0.0;
         }
-        self.state.measured.set(Some((index, height)));
-        if before.y < scroll_y {
-            height - before.height
-        } else {
-            0.0
+        self.state.moved.set(self.state.moved.get().wrapping_add(1));
+        if (before.width - viewport_width).abs() > HEIGHT_EPSILON {
+            return 0.0;
         }
+        let old = before
+            .band
+            .map(|(index, height)| self.insert_for(index, height, viewport_width));
+        let new = now
+            .band
+            .map(|(index, height)| self.insert_for(index, height, viewport_width));
+        anchor_shift(old, new, scroll_y)
+    }
+
+    /// The span a reveal of tile `index`'s band brings into view: from the
+    /// top of the tile's row to the bottom of the band. `None` when the band
+    /// open is not that tile's.
+    pub(crate) fn reveal_span(&self, index: usize, viewport_width: f32) -> Option<(f32, f32)> {
+        let ins = self
+            .insert(viewport_width)
+            .filter(|ins| ins.index == index)?;
+        Some((ins.row_top, ins.band_top + ins.band_height))
     }
 }
 
@@ -267,6 +457,21 @@ impl GridLayoutStrategy for DetailRowStrategy {
         total + self.insert(viewport_width).map_or(0.0, |ins| ins.extra)
     }
 
+    /// The tiles a viewport whose top edge is at `scroll_y` would hold with
+    /// no band at all: a superset of those on screen with it, by the rows the
+    /// band covers.
+    ///
+    /// The band takes nothing out of the window, so opening, closing or
+    /// moving it at the same place in the content needs no tile the pane has
+    /// not realized already, and no tile node is replaced. When the band
+    /// changes above the viewport, the grid moves the offset so the content
+    /// under the top edge stays put (`settle_placement`), which keeps the
+    /// window's start where it was too.
+    ///
+    /// The window starts at the content under the top edge, which after a
+    /// reset (the offset back at 0) is 0 wherever the band is: the stale row
+    /// table a reset leaves until the next call that passes a count cannot
+    /// shorten it.
     fn visible_range(
         &self,
         scroll_y: f32,
@@ -274,18 +479,11 @@ impl GridLayoutStrategy for DetailRowStrategy {
         viewport_width: f32,
         item_count: usize,
     ) -> VisibleTileRange {
-        let Some(ins) = self.insert(viewport_width) else {
-            return self
-                .inner
-                .visible_range(scroll_y, viewport_height, viewport_width, item_count);
-        };
-        // The viewport with the band cut out of it. Both ends map through
-        // the same monotone function, so the tiles between them are exactly
-        // the tiles on screen.
-        let top = Self::to_inner(scroll_y, &ins);
-        let bottom = Self::to_inner(scroll_y + viewport_height, &ins);
+        let top = self
+            .insert(viewport_width)
+            .map_or(scroll_y, |ins| Self::to_inner(scroll_y, &ins));
         self.inner
-            .visible_range(top, (bottom - top).max(0.0), viewport_width, item_count)
+            .visible_range(top, viewport_height, viewport_width, item_count)
     }
 
     fn tile_rect(&self, index: usize, viewport_width: f32) -> TileRect {
@@ -367,10 +565,10 @@ impl GridLayoutStrategy for DetailRowStrategy {
                 .inner
                 .headers_in_range(scroll_y, viewport_height, viewport_width);
         };
+        // The same window as `visible_range`, for the same reason.
         let top = Self::to_inner(scroll_y, &ins);
-        let bottom = Self::to_inner(scroll_y + viewport_height, &ins);
         self.inner
-            .headers_in_range(top, (bottom - top).max(0.0), viewport_width)
+            .headers_in_range(top, viewport_height, viewport_width)
             .into_iter()
             .map(|(section, r)| (section, Self::shifted(r, &ins)))
             .collect()
@@ -395,18 +593,20 @@ impl GridLayoutStrategy for DetailRowStrategy {
 /// Moves the keyboard back to the open tile from inside its band.
 pub(crate) type ReturnToTile = Rc<dyn Fn(usize, &mut EventContext)>;
 
+/// The band's accessible name when nothing else names it: "Details of item
+/// 5", for the tile at flat `index` 4.
+fn band_name(index: usize) -> String {
+    let position = i64::try_from(index.saturating_add(1)).unwrap_or(i64::MAX);
+    teksilo_i18n::tr_widget!(grid_view_detail_name(position = position))
+        .resolve_now()
+        .to_string()
+}
+
 /// The band widget: the disclosed tile's detail, laid out by `GridView`
 /// under the open row.
-pub(crate) struct DetailBand<T: 'static> {
+pub(crate) struct DetailBand {
     pub(crate) state: Rc<DetailState>,
-    pub(crate) builder: DetailBuilder<T>,
-    pub(crate) read_item_fn: ReadItemFn<T>,
-    pub(crate) row_state_fn: Rc<dyn Fn(usize) -> RowState>,
     pub(crate) len_fn: Rc<dyn Fn() -> usize>,
-    /// For the content's `TileContext`: the grid coordinates of the tile.
-    pub(crate) strategy: Rc<dyn GridLayoutStrategy>,
-    pub(crate) viewport_width: Rc<Cell<f32>>,
-    pub(crate) selection: Option<RowSelection>,
     pub(crate) focused_index: Signal<Option<usize>>,
     /// The tiles' accessible names (`GridView::tile_a11y_label`); the band
     /// is named after its tile.
@@ -417,10 +617,12 @@ pub(crate) struct DetailBand<T: 'static> {
     pub(crate) tile_map: Rc<RefCell<Vec<(usize, WidgetId)>>>,
     /// ↑ from the band's top: focus back on the grid, cursor on the tile.
     pub(crate) return_to_tile: ReturnToTile,
+    /// The grid, which takes focus back when the band closes around it.
+    pub(crate) grid: WidgetId,
     pub(crate) child: Option<WidgetId>,
 }
 
-impl<T: 'static> std::fmt::Debug for DetailBand<T> {
+impl std::fmt::Debug for DetailBand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DetailBand")
             .field("shown", &self.state.shown.get())
@@ -428,56 +630,57 @@ impl<T: 'static> std::fmt::Debug for DetailBand<T> {
     }
 }
 
-impl<T: 'static> DetailBand<T> {
-    fn content(&self, index: usize) -> Option<Box<dyn Widget>> {
-        let width = self.viewport_width.get();
-        let (row, col) = self.strategy.tile_row_col(index, width);
-        let is_selected = self
-            .selection
-            .as_ref()
-            .is_some_and(|s| s.is_selected(index));
-        let is_focused = self.focused_index.get() == Some(index);
-        let mut content = None;
-        let resident = (self.read_item_fn)(index, &mut |item| {
-            content = (self.builder)(&TileContext {
-                index,
-                row,
-                col,
-                item,
-                is_selected,
-                is_focused,
-            });
-        });
-        if resident {
-            content
-        } else {
-            // A tile of a lazy source whose item has not arrived yet: hold the
-            // band's place, as a tile does, rather than collapse it.
-            ((self.row_state_fn)(index) == RowState::Loading).then(default_placeholder)
-        }
-    }
-}
-
-impl<T: 'static> Widget for DetailBand<T> {
+impl Widget for DetailBand {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let state = self.state.clone();
         state
             .expanded
             .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        state
+            .version
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
         state.band_id.set(Some(ctx.self_id()));
+        let returning = state.focus_return.take();
 
         self.child = None;
         state.shown.set(None);
         state.enterable.set(false);
-        if let Some(index) = state.expanded.get().filter(|&i| i < (self.len_fn)())
-            && let Some(content) = self.content(index)
+        state.awaiting_item.set(false);
+        if let Some(index) = state.expanded.get().filter(|&i| i < (self.len_fn)()) {
+            let (content, resident) = state.content_for(index);
+            state.awaiting_item.set(!resident);
+            if let Some(content) = content {
+                let id = ctx.add_boxed(content);
+                self.child = Some(id);
+                state.shown.set(Some(index));
+                state
+                    .enterable
+                    .set(ctx.first_focusable_descendant(id).is_some());
+            }
+        }
+
+        // The band closed, or moved to content with nothing to take focus,
+        // while focus was inside it. Destroying the old content left focus
+        // nowhere, and the framework's restore looks for somewhere to put it
+        // inside this band only, so the grid takes it back, with the cursor
+        // on the tile the band belonged to. Content that can take focus gets
+        // it from that restore.
+        if let Some(tile) = returning
+            && !state.enterable.get()
         {
-            let id = ctx.add_boxed(content);
-            self.child = Some(id);
-            state.shown.set(Some(index));
-            state
-                .enterable
-                .set(ctx.first_focusable_descendant(id).is_some());
+            self.focused_index.set(Some(tile));
+            ctx.focus(self.grid);
+        }
+        {
+            // Read at the write, while the old content still holds focus:
+            // by the rebuild the write causes, it has been destroyed.
+            let watched = state.clone();
+            let handle = state.expanded.observe(move |_| {
+                if watched.focus_within.get() {
+                    watched.focus_return.set(watched.shown.get());
+                }
+            });
+            ctx.own_handle(handle);
         }
 
         let back = self.return_to_tile.clone();
@@ -545,6 +748,12 @@ impl<T: 'static> Widget for DetailBand<T> {
             builder.set_name(name(index));
         } else if let Some(&(_, tile)) = self.tile_map.borrow().iter().find(|(i, _)| *i == index) {
             builder.push_labelled_by(widget_id_to_node_id(tile));
+        } else {
+            // The tile is outside the realized window and has no node to
+            // lend its name, which happens to a band left open while the
+            // grid is scrolled far from it: a group with no name is just
+            // "group" to a reader moving through the window by landmarks.
+            builder.set_name(band_name(index));
         }
     }
 
@@ -554,5 +763,74 @@ impl<T: 'static> Widget for DetailBand<T> {
 
     fn clips_children(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Row 1 of 58 dp rows (58..108), its band of 80 dp from 116.
+    fn band_under_row_1() -> Insert {
+        Insert {
+            index: 4,
+            row_top: 58.0,
+            row_bottom: 108.0,
+            band_top: 116.0,
+            band_height: 80.0,
+            extra: 88.0,
+        }
+    }
+
+    /// The same band under row 3 (174..224).
+    fn band_under_row_3() -> Insert {
+        Insert {
+            index: 10,
+            row_top: 174.0,
+            row_bottom: 224.0,
+            band_top: 232.0,
+            band_height: 80.0,
+            extra: 88.0,
+        }
+    }
+
+    #[test]
+    fn a_band_below_the_top_edge_moves_nothing() {
+        let band = Some(band_under_row_1());
+        assert_eq!(anchor_shift(None, band, 0.0), 0.0, "opened");
+        assert_eq!(anchor_shift(band, None, 0.0), 0.0, "closed");
+        assert_eq!(anchor_shift(band, Some(band_under_row_3()), 100.0), 0.0);
+        assert_eq!(anchor_shift(None, band, 116.0), 0.0, "opened at the top");
+    }
+
+    #[test]
+    fn a_band_above_the_top_edge_moves_the_offset_by_what_it_adds() {
+        let band = Some(band_under_row_1());
+        assert_eq!(anchor_shift(None, band, 580.0), 88.0, "opened");
+        assert_eq!(anchor_shift(band, None, 668.0), -88.0, "closed");
+        assert_eq!(
+            anchor_shift(band, Some(band_under_row_3()), 668.0),
+            0.0,
+            "moved, still above"
+        );
+        let mut taller = band_under_row_1();
+        taller.band_height = 100.0;
+        taller.extra = 108.0;
+        assert_eq!(anchor_shift(band, Some(taller), 668.0), 20.0, "grew");
+    }
+
+    #[test]
+    fn a_band_under_the_top_edge_keeps_the_rows_under_it_still() {
+        // The top edge 30 dp into the band: row 2 is 58 dp down the screen.
+        let band = Some(band_under_row_1());
+        let mut taller = band_under_row_1();
+        taller.band_height = 100.0;
+        taller.extra = 108.0;
+        assert_eq!(anchor_shift(band, Some(taller), 146.0), 20.0, "grew");
+        assert_eq!(
+            anchor_shift(band, None, 146.0),
+            -88.0,
+            "closed: row 2 stays 58 dp down, row 1 comes back above it"
+        );
     }
 }

@@ -403,6 +403,8 @@ grid-view-selection-count =
        *[other] { $count } επιλεγμένα στοιχεία
     }
 
+grid-view-detail-name = Λεπτομέρειες στοιχείου { $position }
+
 # Επεξεργαστής κώδικα. Δείτε το en-US.ftl για το πλήρες πλαίσιο και
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Το Tab προσθέτει εσοχή. Το { $next } μεταβαίνει στο επόμενο στοιχείο ελέγχου, το { $previous } στο προηγούμενο.

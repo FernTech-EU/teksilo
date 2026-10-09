@@ -194,6 +194,11 @@ impl Widget for TileA11y {
         // A disclosure: whether the band is open, the action that changes
         // that (handled on the body pane, beside `Click`), and while open the
         // band it controls.
+        //
+        // Every tile is offered as one, those with nothing to disclose
+        // included: knowing which have something means building the band's
+        // content for each tile realized, on every walk. `Expand` on such a
+        // tile opens nothing (`DetailState::expand`), so it stays collapsed.
         if let Some(ref d) = self.detail {
             let open = d.is_open(self.index);
             builder.set_expanded(open);

@@ -398,6 +398,8 @@ grid-view-selection-count =
        *[other] { $count } öğe seçili
     }
 
+grid-view-detail-name = { $position }. öğenin ayrıntıları
+
 # Kod düzenleyici. Tam bağlam için en-US.ftl ve şu dosyaya bakın:
 # crates/teksilo-widgets/src/code_editor/keyboard.rs
 code-editor-tab-escape-hint = Sekme girinti ekler. { $next } sonraki denetime, { $previous } önceki denetime geçer.

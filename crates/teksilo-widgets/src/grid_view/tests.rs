@@ -3338,3 +3338,560 @@ fn a_list_model_reset_closes_the_band_under_a_keyed_selection() {
     assert_eq!(expanded.get(), None);
     assert_eq!(sorted_keys(&keyed), vec![2, 4]);
 }
+
+// ── Detail band: reveal, focus, repaint, identity, order, lifetime ─────────
+
+/// The grid at `id`, for its private state.
+fn the_grid(tree: &WidgetTree, id: WidgetId) -> &GridView<usize> {
+    tree.widget_as_any(id)
+        .and_then(|any| any.downcast_ref::<GridView<usize>>())
+        .expect("the grid is the widget at `id`")
+}
+
+/// A band holding one button, which can take focus.
+fn band_with_a_button(_tc: &TileContext<'_, usize>) -> Option<Box<dyn Widget>> {
+    Some(Box::new(crate::Button::new(teksilo_i18n::lit!("Play"))) as Box<dyn Widget>)
+}
+
+/// The accessibility node of `widget`.
+fn a11y_node(tree: &WidgetTree, widget: WidgetId) -> teksilo_core::accesskit::Node {
+    let wanted = teksilo_core::accessibility::widget_id_to_node_id(widget);
+    tree.accessibility_tree_snapshot()
+        .nodes
+        .into_iter()
+        .find(|(node_id, _)| *node_id == wanted)
+        .map(|(_, node)| node)
+        .expect("the widget has a node")
+}
+
+/// Whether `rect` lies inside the vertical span `top..bottom`.
+fn within(rect: Rect, top: f32, bottom: f32) -> bool {
+    rect.y >= top - 0.5 && rect.y + rect.height <= bottom + 0.5
+}
+
+/// ↓ from the open tile onto a band below the viewport brings the control it
+/// focuses into view, and so does Tab: the framework's reveal walk asks the
+/// grid, which used to ignore it.
+#[test]
+fn focus_entering_a_band_below_the_viewport_scrolls_it_into_view() {
+    use teksilo_core::event::{Key, Modifiers};
+    for key in [Key::ArrowDown, Key::Tab] {
+        let (mut tree, id, _model, expanded) =
+            band_grid(30, 400.0, 300.0, |g| g.detail_row(band_with_a_button));
+        // Row 4 is 232..282, so its band starts at 290, under the viewport.
+        expanded.set(Some(13));
+        settle(&mut tree, 400.0, 300.0);
+        tree.focus(id);
+        the_grid(&tree, id).focused_index.set(Some(13));
+        let band = band_of(&tree, id);
+        assert!(
+            tree.bounds(band).y > 280.0,
+            "the band starts under the viewport, which is the case this is about"
+        );
+
+        press(&mut tree, key, Modifiers::NONE);
+        settle(&mut tree, 400.0, 300.0);
+        let focused = tree.focused().expect("something has focus");
+        assert!(
+            tree.is_descendant_of(focused, band),
+            "{key:?} put focus on the band's control"
+        );
+        assert!(
+            within(tree.bounds(focused), 0.0, 300.0),
+            "{key:?}: the focused control is on screen, at {:?}",
+            tree.bounds(focused)
+        );
+    }
+}
+
+/// Opening a band under the last visible row scrolls it into view, by Enter
+/// as by a double click, and keeps its tile on screen.
+#[test]
+fn opening_a_band_under_the_last_visible_row_scrolls_it_into_view() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, id, _model, expanded) = band_grid(30, 400.0, 300.0, |g| g);
+    tree.focus(id);
+    the_grid(&tree, id).focused_index.set(Some(13));
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    settle(&mut tree, 400.0, 300.0);
+    assert_eq!(expanded.get(), Some(13));
+    assert!(
+        within(tree.bounds(band_of(&tree, id)), 0.0, 300.0),
+        "Enter: the band is on screen, at {:?}",
+        tree.bounds(band_of(&tree, id))
+    );
+    assert!(tile_y(&tree, id, 13) >= 0.0, "and so is its tile");
+
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    settle(&mut tree, 400.0, 300.0);
+    assert_eq!(expanded.get(), None);
+    the_grid(&tree, id).scroll_y.set(0.0);
+    settle(&mut tree, 400.0, 300.0);
+
+    double_click(&mut tree, id, 13);
+    settle(&mut tree, 400.0, 300.0);
+    assert_eq!(expanded.get(), Some(13));
+    assert!(
+        within(tree.bounds(band_of(&tree, id)), 0.0, 300.0),
+        "double click: the band is on screen, at {:?}",
+        tree.bounds(band_of(&tree, id))
+    );
+}
+
+/// Closing the band while focus is inside it hands focus back to the grid,
+/// with the cursor on the tile, whatever closes it: the application (a close
+/// button in the band, a shortcut), or `Collapse` from a screen reader. The
+/// grid's keys work again afterwards.
+#[test]
+fn closing_the_band_with_focus_inside_it_returns_focus_to_its_tile() {
+    use teksilo_core::accesskit::Action;
+    use teksilo_core::event::{Key, Modifiers};
+    for by_reader in [false, true] {
+        let (mut tree, id, _model, expanded) =
+            band_grid(12, 400.0, 300.0, |g| g.detail_row(band_with_a_button));
+        tree.focus(id);
+        the_grid(&tree, id).focused_index.set(Some(4));
+        press(&mut tree, Key::Enter, Modifiers::NONE);
+        press(&mut tree, Key::ArrowDown, Modifiers::NONE);
+        let band = band_of(&tree, id);
+        assert!(
+            tree.focused()
+                .is_some_and(|f| tree.is_descendant_of(f, band)),
+            "focus starts on the band's control"
+        );
+
+        if by_reader {
+            let tile = tile_at(&tree, id, 4);
+            tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+                action: Action::Collapse,
+                target: Some(tile),
+                target_node: teksilo_core::accessibility::root_node_id(),
+                data: None,
+            });
+        } else {
+            expanded.set(None);
+        }
+        settle(&mut tree, 400.0, 300.0);
+        assert_eq!(expanded.get(), None);
+        assert_eq!(tree.focused(), Some(id), "focus is back on the grid");
+        assert_eq!(grid_focus(&tree, id), Some(4), "on the tile");
+
+        press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+        assert_eq!(grid_focus(&tree, id), Some(5), "and the grid's keys work");
+    }
+}
+
+/// The top edge of the keyboard focus ring in the frame `tree` renders: the
+/// highest of the thin horizontal bars the overlay paints, the only
+/// decorations in a band grid of unpainted tiles.
+fn ring_top(tree: &mut WidgetTree) -> Option<f32> {
+    let frame = tree.render();
+    frame
+        .decorations
+        .iter()
+        .filter(|d| d.rect[3] < 4.0 && d.rect[2] > 50.0)
+        .map(|d| d.rect[1])
+        .reduce(f32::min)
+}
+
+/// The focus ring is painted where its tile is when a band opens or closes
+/// above it, though neither the cursor nor the scroll offset changed.
+#[test]
+fn the_focus_ring_follows_its_tile_when_a_band_opens_above_it() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, id, _model, expanded) = band_grid(12, 400.0, 500.0, |g| g);
+    tree.focus(id);
+    for key in [
+        Key::ArrowRight,
+        Key::ArrowDown,
+        Key::ArrowDown,
+        Key::ArrowRight,
+    ] {
+        press(&mut tree, key, Modifiers::NONE);
+    }
+    settle(&mut tree, 400.0, 500.0);
+    assert_eq!(grid_focus(&tree, id), Some(7));
+    let before = ring_top(&mut tree).expect("the ring is painted");
+    assert!((before - 116.0).abs() < 4.0, "on tile 7's row, at {before}");
+
+    // Opened from outside: the band under row 0 moves row 2 down 88 dp.
+    expanded.set(Some(1));
+    settle(&mut tree, 400.0, 500.0);
+    let after = ring_top(&mut tree).expect("the ring is painted");
+    assert_close(after - before, 88.0, "the ring moved with its tile");
+
+    expanded.set(None);
+    settle(&mut tree, 400.0, 500.0);
+    let closed = ring_top(&mut tree).expect("the ring is painted");
+    assert_close(closed, before, "and back when it closes");
+}
+
+/// Space on a tile with nothing to disclose acts on the selection: Enter on
+/// it opened nothing, so there is no band for Space to close.
+#[test]
+fn space_selects_a_tile_with_nothing_to_disclose() {
+    use teksilo_core::event::{Key, Modifiers};
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let sel = selection.clone();
+    let (mut tree, id, _model, expanded) = band_grid(12, 400.0, 300.0, |g| {
+        g.selection(sel)
+            .detail_row(|tc| if tc.index == 4 { None } else { band_content() })
+    });
+    tree.focus(id);
+    for key in [Key::ArrowRight, Key::ArrowDown, Key::ArrowRight] {
+        press(&mut tree, key, Modifiers::NONE);
+    }
+    assert_eq!(selection.selected_indices(), vec![4]);
+
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    assert_eq!(expanded.get(), None, "tile 4 has nothing to disclose");
+    press(&mut tree, Key::Space, Modifiers::NONE);
+    assert_eq!(
+        selection.selected_indices(),
+        Vec::<usize>::new(),
+        "Space toggled the tile"
+    );
+
+    // Nor does a screen reader's Expand open anything there.
+    let tile = tile_at(&tree, id, 4);
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+        action: teksilo_core::accesskit::Action::Expand,
+        target: Some(tile),
+        target_node: teksilo_core::accessibility::root_node_id(),
+        data: None,
+    });
+    settle(&mut tree, 400.0, 300.0);
+    assert_eq!(expanded.get(), None);
+    assert_eq!(a11y_node(&tree, tile).is_expanded(), Some(false));
+}
+
+/// Enter on a tile that opens a band selects it too: opening a tile is acting
+/// on it, as a double click is. Closing it leaves the selection alone.
+#[test]
+fn enter_selects_the_tile_it_opens() {
+    use teksilo_core::event::{Key, Modifiers};
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let sel = selection.clone();
+    let (mut tree, id, _model, expanded) = band_grid(12, 400.0, 300.0, |g| g.selection(sel));
+    tree.focus(id);
+    press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    press(&mut tree, Key::ArrowRight, Modifiers::CTRL);
+    assert_eq!(selection.selected_indices(), vec![0]);
+    assert_eq!(grid_focus(&tree, id), Some(1));
+
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    assert_eq!(expanded.get(), Some(1));
+    assert_eq!(selection.selected_indices(), vec![1], "the tile it opened");
+
+    selection.select_indices(vec![0, 1], false);
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    assert_eq!(expanded.get(), None);
+    assert_eq!(
+        selection.selected_indices(),
+        vec![0, 1],
+        "closing selects nothing"
+    );
+}
+
+/// Opening, moving and closing the band replace no tile node, the tiles
+/// realized by a scroll made while it was open included: they keep the ids
+/// the grid names as its active descendant.
+#[test]
+fn opening_moving_and_closing_the_band_replace_no_tile_node() {
+    let (mut tree, id, _model, expanded) = band_grid(300, 400.0, 300.0, |g| g);
+    let nodes = tiles(&tree, id);
+    expanded.set(Some(4));
+    settle(&mut tree, 400.0, 300.0);
+    assert_eq!(tiles(&tree, id), nodes, "open: no tile node is replaced");
+
+    // A row's scroll rebuilds the realized tiles, with the band open.
+    the_grid(&tree, id).scroll_y.set(58.0);
+    settle(&mut tree, 400.0, 300.0);
+    let nodes = tiles(&tree, id);
+    for (step, open) in [("move", Some(7)), ("close", None)] {
+        expanded.set(open);
+        settle(&mut tree, 400.0, 300.0);
+        assert_eq!(tiles(&tree, id), nodes, "{step}: no tile node is replaced");
+    }
+}
+
+/// A band opened or closed above the viewport leaves the visible tiles where
+/// they were on screen.
+#[test]
+fn a_band_changing_above_the_viewport_leaves_the_visible_tiles_still() {
+    let (mut tree, id, _model, expanded) = band_grid(300, 400.0, 300.0, |g| g);
+    let scroll = the_grid(&tree, id).scroll_y.clone();
+    scroll.set(580.0);
+    settle(&mut tree, 400.0, 300.0);
+    assert_close(tile_y(&tree, id, 30), 0.0, "row 10 at the top");
+
+    expanded.set(Some(1));
+    settle(&mut tree, 400.0, 300.0);
+    assert_close(tile_y(&tree, id, 30), 0.0, "opened above: row 10 stays");
+    assert_close(scroll.get(), 668.0, "the offset took the band and its gap");
+
+    expanded.set(Some(4));
+    settle(&mut tree, 400.0, 300.0);
+    assert_close(tile_y(&tree, id, 30), 0.0, "moved above: row 10 stays");
+
+    expanded.set(None);
+    settle(&mut tree, 400.0, 300.0);
+    assert_close(tile_y(&tree, id, 30), 0.0, "closed above: row 10 stays");
+    assert_close(scroll.get(), 580.0, "the offset is back");
+}
+
+/// A band taller than the realization buffer, moved while above the
+/// viewport: the tiles on screen stay the nodes they were, all realized in
+/// the first frame after the move.
+#[test]
+fn a_tall_band_moved_above_the_viewport_replaces_no_tile() {
+    let (mut tree, id, _model, expanded) =
+        band_grid(300, 400.0, 300.0, |g| g.detail_row_height(|_i| 1000.0));
+    expanded.set(Some(1));
+    settle(&mut tree, 400.0, 300.0);
+    the_grid(&tree, id).scroll_y.set(2000.0);
+    settle(&mut tree, 400.0, 300.0);
+    // Without the band's 1008 dp, the viewport is 992..1292: rows 17 to 22.
+    assert_close(tile_y(&tree, id, 51), 986.0 + 1008.0 - 2000.0, "row 17");
+    let nodes = tiles(&tree, id);
+
+    expanded.set(Some(4));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(tiles(&tree, id), nodes, "no tile node is replaced");
+    let realized: Vec<usize> = the_grid(&tree, id)
+        .tile_map
+        .borrow()
+        .iter()
+        .map(|(i, _)| *i)
+        .collect();
+    let missing: Vec<usize> = (51..=68).filter(|i| !realized.contains(i)).collect();
+    assert_eq!(
+        missing,
+        Vec::<usize>::new(),
+        "every tile on screen is realized"
+    );
+    assert_close(tile_y(&tree, id, 51), -6.0, "and still where it was");
+}
+
+/// A sort that leaves the band's tile where it was realizes every tile on
+/// screen in its first frame. The reset empties the layout's row table, and
+/// the band asks it for its row before the pane is built; the pane is built
+/// from a synced table all the same, because the reset's own scroll write
+/// re-syncs it first. Exact row heights well above the 10 dp estimate are
+/// what would show a stale table.
+#[test]
+fn a_band_kept_through_a_sort_realizes_the_whole_viewport_at_once() {
+    use teksilo_data::SortDirection;
+    let proxy = teksilo_data::SortFilterListModel::new(ListModel::from_vec((0..43).collect()))
+        .with_comparator("n", |a: &usize, b: &usize| a.cmp(b));
+    let expanded = Signal::new(Some(21));
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::from_source(proxy.clone(), |_tc| Box::new(FixedLeaf(100.0, 90.0)))
+            .tile_size(100.0, 10.0)
+            .item_height(|_i| 90.0)
+            .detail_row(|_tc| band_content())
+            .detail_row_height(|_i| 1000.0)
+            .expanded_index(expanded.clone()),
+    );
+    settle(&mut tree, 400.0, 900.0);
+
+    // 42, 41, … 0: item 21 stays at 21, on row 7 (686..776), on screen.
+    proxy.set_sort(Some("n"), SortDirection::Descending);
+    tree.layout(SizeProposal::exact(400.0, 900.0));
+    assert_eq!(expanded.get(), Some(21));
+    let realized: Vec<usize> = the_grid(&tree, id)
+        .tile_map
+        .borrow()
+        .iter()
+        .map(|(i, _)| *i)
+        .collect();
+    let missing: Vec<usize> = (0..24).filter(|i| !realized.contains(i)).collect();
+    assert_eq!(missing, Vec::<usize>::new(), "rows 0 to 7 are on screen");
+}
+
+/// A screen reader meets the band right after its own row, not after every
+/// tile of the grid: it is read where it is seen.
+#[test]
+fn the_band_is_read_after_its_own_row() {
+    let (mut tree, id, _model, expanded) = band_grid(12, 400.0, 500.0, |g| g);
+    expanded.set(Some(4));
+    settle(&mut tree, 400.0, 500.0);
+    let band = teksilo_core::accessibility::widget_id_to_node_id(band_of(&tree, id));
+    let pane = a11y_node(&tree, body_pane(&tree, id));
+    let order = pane.children().to_vec();
+    let at = |index: usize| {
+        let tile = teksilo_core::accessibility::widget_id_to_node_id(tile_at(&tree, id, index));
+        order
+            .iter()
+            .position(|n| *n == tile)
+            .expect("the tile is read")
+    };
+    let band_at = order
+        .iter()
+        .position(|n| *n == band)
+        .expect("the band is read among the tiles");
+    assert_eq!(band_at, at(5) + 1, "after row 1's last tile");
+    assert_eq!(band_at + 1, at(6), "before row 2's first");
+    assert!(
+        !a11y_node(&tree, id).children().contains(&band),
+        "and only there"
+    );
+}
+
+/// A band whose tile has scrolled out of the realized window, with no
+/// `tile_a11y_label` to name it, still has a name.
+#[test]
+fn a_band_whose_tile_is_not_realized_is_still_named() {
+    teksilo_i18n::thread_local::clear();
+    let (mut tree, id, _model, expanded) = band_grid(300, 400.0, 300.0, |g| g);
+    expanded.set(Some(1));
+    settle(&mut tree, 400.0, 300.0);
+    let band = band_of(&tree, id);
+    assert!(
+        !a11y_node(&tree, band).labelled_by().is_empty(),
+        "labelled by its tile while the tile is realized"
+    );
+
+    let max = the_grid(&tree, id).max_scroll_y.get();
+    the_grid(&tree, id).scroll_y.set(max);
+    settle(&mut tree, 400.0, 300.0);
+    assert!(
+        !the_grid(&tree, id)
+            .tile_map
+            .borrow()
+            .iter()
+            .any(|(i, _)| *i == 1),
+        "tile 1 is far above the window, which is the case this is about"
+    );
+    assert_eq!(a11y_node(&tree, band).label(), Some("Details of item 2"));
+}
+
+/// Items keyed `1000 + index`, of which only those a window load delivered
+/// are resident. The grid asks for windows; the test delivers them.
+struct Lazy {
+    loaded: Rc<RefCell<Vec<bool>>>,
+    asked: Rc<RefCell<std::ops::Range<usize>>>,
+    changes: Signal<Option<DataChange>>,
+}
+
+impl Lazy {
+    fn new(len: usize) -> Self {
+        Self {
+            loaded: Rc::new(RefCell::new(vec![false; len])),
+            asked: Rc::new(RefCell::new(0..0)),
+            changes: Signal::new(None),
+        }
+    }
+
+    fn handle(&self) -> Self {
+        Self {
+            loaded: self.loaded.clone(),
+            asked: self.asked.clone(),
+            changes: self.changes.clone(),
+        }
+    }
+
+    /// Deliver `range`, and say so.
+    fn load(&self, range: std::ops::Range<usize>) {
+        for loaded in &mut self.loaded.borrow_mut()[range.clone()] {
+            *loaded = true;
+        }
+        self.changes.set(Some(DataChange::WindowLoaded { range }));
+    }
+}
+
+impl teksilo_data::ListDataSource for Lazy {
+    type Item = usize;
+    type Key = u64;
+    fn len(&self) -> usize {
+        self.loaded.borrow().len()
+    }
+    fn with_item<R>(&self, i: usize, f: impl FnOnce(&usize) -> R) -> Option<R> {
+        let loaded = self.loaded.borrow().get(i).copied().unwrap_or(false);
+        loaded.then(|| f(&i))
+    }
+    fn key_at(&self, i: usize) -> Option<u64> {
+        (i < self.len()).then_some(1000 + i as u64)
+    }
+    fn row_state(&self, i: usize) -> teksilo_data::RowState {
+        if self.loaded.borrow().get(i).copied().unwrap_or(false) {
+            teksilo_data::RowState::Ready
+        } else {
+            teksilo_data::RowState::Loading
+        }
+    }
+    fn request_window(&self, range: std::ops::Range<usize>) {
+        *self.asked.borrow_mut() = range;
+    }
+    fn observe_changes(&self, f: impl Fn(&DataChange) + 'static) -> teksilo_core::ObserverHandle {
+        self.changes.observe(move |change| {
+            if let Some(change) = change {
+                f(change);
+            }
+        })
+    }
+}
+
+/// A lazy source loading a window keeps the band as it was, its content and
+/// the focus inside it included, and the keyed selection on its tiles. A band
+/// opened on a tile that has not loaded holds a placeholder, and is built
+/// again when that tile's window arrives.
+#[test]
+fn a_window_load_keeps_the_band_and_the_keyed_selection() {
+    use teksilo_core::event::{Key, Modifiers};
+    let source = Lazy::new(90);
+    let keyed = teksilo_data::KeyedSelectionModel::<u64>::new(SelectionMode::Multi);
+    let expanded = Signal::new(None);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        GridView::from_source_keyed(source.handle(), keyed.clone(), |_tc| {
+            Box::new(FixedLeaf(100.0, 50.0)) as Box<dyn Widget>
+        })
+        .tile_size(100.0, 50.0)
+        .detail_row(band_with_a_button)
+        .expanded_index(expanded.clone()),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let asked = source.asked.borrow().clone();
+    source.load(asked);
+    settle(&mut tree, 400.0, 300.0);
+    keyed.select_keys([1001, 1004], false);
+    expanded.set(Some(2));
+    settle(&mut tree, 400.0, 300.0);
+
+    tree.focus(id);
+    the_grid(&tree, id).focused_index.set(Some(2));
+    press(&mut tree, Key::ArrowDown, Modifiers::NONE);
+    let band = band_of(&tree, id);
+    let content = tree.children(band);
+    let focused = tree.focused().expect("focus is on the band's control");
+    assert!(tree.is_descendant_of(focused, band));
+
+    source.load(60..75);
+    settle(&mut tree, 400.0, 300.0);
+    assert_eq!(band_of(&tree, id), band, "the band is the same node");
+    assert_eq!(tree.children(band), content, "with the same content");
+    assert_eq!(tree.focused(), Some(focused), "and focus where it was");
+    let mut keys = keyed.selected_keys();
+    keys.sort_unstable();
+    assert_eq!(keys, vec![1001, 1004]);
+    assert_eq!(selected_tiles(&tree), vec![1, 4]);
+
+    // Tile 80 has not loaded: its band holds a placeholder, with nothing to
+    // focus, until its window arrives.
+    tree.focus(id);
+    expanded.set(Some(80));
+    settle(&mut tree, 400.0, 300.0);
+    let detail = the_grid(&tree, id)
+        .detail
+        .clone()
+        .expect("a band is in force");
+    assert!(!detail.enterable.get(), "a placeholder");
+    source.load(75..90);
+    settle(&mut tree, 400.0, 300.0);
+    assert!(
+        detail.enterable.get(),
+        "the band was built again, with its button"
+    );
+}

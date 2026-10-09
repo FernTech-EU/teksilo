@@ -366,6 +366,8 @@ grid-view-selection-count =
        *[other] { $count } eroj elektitaj
     }
 
+grid-view-detail-name = Detaloj de ero { $position }
+
 code-editor-tab-escape-hint = Tab enŝovas. { $next } movas al la sekva regilo, { $previous } al la antaŭa.
 
 shortcut-settings-uncategorized = Ĝeneralaj

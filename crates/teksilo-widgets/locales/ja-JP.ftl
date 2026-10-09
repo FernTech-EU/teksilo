@@ -403,6 +403,8 @@ grid-view-selection-count =
        *[other] { $count }件の項目を選択中
     }
 
+grid-view-detail-name = 項目 { $position } の詳細
+
 # コードエディター。詳しい経緯は en-US.ftl と次のファイルを参照。
 # crates/teksilo-widgets/src/code_editor/keyboard.rs
 code-editor-tab-escape-hint = Tab キーでインデントします。{ $next } で次のコントロールへ、{ $previous } で前のコントロールへ移動します。

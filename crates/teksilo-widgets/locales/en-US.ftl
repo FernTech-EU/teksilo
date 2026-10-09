@@ -448,6 +448,12 @@ grid-view-selection-count =
        *[other] { $count } items selected
     }
 
+# The accessible name of a GridView detail band whose tile has no name of
+# its own to lend, because it has scrolled out of the realized window and
+# the application gives no tile label. $position is the tile's place in
+# the grid, counting from 1. See crates/teksilo-widgets/src/grid_view/detail.rs.
+grid-view-detail-name = Details of item { $position }
+
 # The description of a CodeEditor that takes Tab, telling a reader how to
 # leave it (WCAG 2.1.2). $next and $previous are key chords written for the
 # platform and the locale: "Ctrl+Tab" and "Ctrl+Shift+Tab" here, "Strg+Tab"

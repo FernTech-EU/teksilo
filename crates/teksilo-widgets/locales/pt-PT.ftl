@@ -413,6 +413,8 @@ grid-view-selection-count =
        *[other] { $count } itens selecionados
     }
 
+grid-view-detail-name = Detalhes do item { $position }
+
 # Editor de código. Consulte en-US.ftl para o contexto completo e
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab aplica avanço. { $next } passa para o controlo seguinte e { $previous } para o anterior.

@@ -66,13 +66,14 @@ pub(crate) struct GridKeyConfig {
     pub(crate) strategy: Rc<dyn GridLayoutStrategy>,
     pub(crate) wrap_navigation: bool,
     pub(crate) tab_traversal: GridTabTraversal,
-    /// Activation (Enter / double-click) — index only; the app looks up the
-    /// item from its own model handle.
+    /// The application's activation (Enter), index only; the app looks up the
+    /// item from its own model handle. The detail band's part in an
+    /// activation is `detail`'s, handled here (`activate_tile`).
     #[allow(clippy::type_complexity)]
     pub(crate) on_tile_activate: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
-    /// The detail band, when one is in force: Space closes it, ↓ from the
-    /// open tile moves into it, and the grid's keys stand aside while focus
-    /// is inside it.
+    /// The detail band, when one is in force: Enter opens and closes it,
+    /// Space closes it, ↓ from the open tile moves into it, and the grid's
+    /// keys stand aside while focus is inside it.
     pub(crate) detail: Option<Rc<super::detail::DetailState>>,
     /// The non-drag reorder, bound once by the grid. `Some` exactly when the
     /// grid is reorderable. `(from, destination) -> ()`: commits through the
@@ -195,12 +196,7 @@ pub(crate) fn build_grid_key_handler(
         // claiming them first made keyboard reorder a dead chord on macOS.
         if let Some(alias) = list_nav::mac_alias(*key, *modifiers, rtl) {
             if alias == list_nav::MacAlias::Activate {
-                cfg.focused_index.set(Some(current));
-                if let Some(ref cb) = cfg.on_tile_activate {
-                    cb(current, ctx);
-                } else if let Some(ref sel) = cfg.selection {
-                    sel.select(current);
-                }
+                activate_tile(&cfg, current, ctx);
                 return EventResponse::Handled;
             }
             return EventResponse::Ignored;
@@ -326,12 +322,7 @@ pub(crate) fn build_grid_key_handler(
                     }
                 }
                 Key::Enter => {
-                    cfg.focused_index.set(Some(current));
-                    if let Some(ref cb) = cfg.on_tile_activate {
-                        cb(current, ctx);
-                    } else if let Some(ref sel) = cfg.selection {
-                        sel.select(current);
-                    }
+                    activate_tile(&cfg, current, ctx);
                     return EventResponse::Handled;
                 }
                 Key::Space if modifiers.ctrl() => {
@@ -353,12 +344,7 @@ pub(crate) fn build_grid_key_handler(
                     cfg.focused_index.set(Some(current));
                     return EventResponse::Handled;
                 }
-                Key::Space
-                    if cfg
-                        .detail
-                        .as_ref()
-                        .is_some_and(|d| d.expanded.get() == Some(current)) =>
-                {
+                Key::Space if cfg.detail.as_ref().is_some_and(|d| d.is_open(current)) => {
                     // Space on the open tile closes its band, as Enter does,
                     // and leaves the selection alone.
                     if let Some(d) = &cfg.detail {
@@ -456,8 +442,35 @@ pub(crate) fn build_grid_key_handler(
     }
 }
 
+/// Enter, and ⌘↓ on macOS: open or close tile `current`'s detail band, then
+/// run the application's activation, which sees the band as the key left it.
+///
+/// Opening the band selects the tile, as the click before a double click
+/// does: opening a tile is acting on it. Closing it leaves the selection
+/// alone. A tile with nothing to disclose, or a grid with no band, follows
+/// the rule activation has without one: Enter selects the tile only when the
+/// application has no activation of its own.
+fn activate_tile(cfg: &GridKeyConfig, current: usize, ctx: &mut EventContext) {
+    use super::detail::Disclosure;
+    cfg.focused_index.set(Some(current));
+    let disclosure = cfg.detail.as_ref().map(|d| d.activate(current));
+    let select = match disclosure {
+        Some(Disclosure::Opened) => true,
+        Some(Disclosure::Closed) => false,
+        Some(Disclosure::Nothing) | None => cfg.on_tile_activate.is_none(),
+    };
+    if select && let Some(ref sel) = cfg.selection {
+        sel.select(current);
+    }
+    if let Some(ref cb) = cfg.on_tile_activate {
+        cb(current, ctx);
+    }
+}
+
 /// The band ↓ enters from tile `current`: `current`'s band, open, with a
-/// control in it to take focus. Without one, ↓ is plain navigation.
+/// control in it to take focus. Without one, ↓ is plain navigation. The
+/// control is revealed as focus lands on it, by the grid's answer to the
+/// framework's `ScrollIntoView`.
 fn enterable_band(
     detail: &super::detail::DetailState,
     current: usize,

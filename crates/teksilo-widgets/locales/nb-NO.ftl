@@ -412,6 +412,8 @@ grid-view-selection-count =
        *[other] { $count } elementer valgt
     }
 
+grid-view-detail-name = Detaljer for element { $position }
+
 # Koderedigering. Se en-US.ftl for full kontekst og
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab rykker inn. { $next } går til neste kontroll, { $previous } til forrige.

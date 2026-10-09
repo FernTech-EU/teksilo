@@ -223,7 +223,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         let (initial_start, initial_end) = self.visible();
         self.prev_built_start.set(initial_start);
         self.prev_built_end.set(initial_end);
-        let leaves_buffer: Rc<dyn Fn(f32)> = {
+        let scroll_handle = {
             let strategy = self.strategy.clone();
             let len = self.len_fn.clone();
             let vp_h = self.viewport_height.clone();
@@ -231,8 +231,8 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             let ps = self.prev_built_start.clone();
             let pe = self.prev_built_end.clone();
             let version = version.clone();
-            Rc::new(move |y| {
-                let vr = strategy.visible_range(y, vp_h.get(), vp_w.get(), (len)());
+            self.scroll_y.observe(move |y| {
+                let vr = strategy.visible_range(*y, vp_h.get(), vp_w.get(), (len)());
                 if vr.start < ps.get() || vr.end > pe.get() {
                     ps.set(vr.start);
                     pe.set(vr.end);
@@ -240,23 +240,21 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 }
             })
         };
-        let on_scroll = leaves_buffer.clone();
-        let scroll_handle = self.scroll_y.observe(move |y| on_scroll(*y));
         ctx.own_handle(scroll_handle);
 
-        // Opening or closing the detail band moves every tile after it: a
-        // relayout. Closing it can bring tiles into view that were under the
-        // band, which the pane builds now, before the frame shows a gap: the
-        // band no longer counts from the moment the signal is written.
+        // Opening, closing or moving the detail band moves every tile after
+        // it: a relayout, and no more. The realized window is the one a
+        // viewport would hold with no band (`DetailRowStrategy::visible_range`),
+        // so a band that changes needs no tile this pane has not built, and
+        // none is replaced. A rebuild here, when the window read at the write
+        // outgrew the built one, replaced every tile node whenever a band in
+        // view closed or moved.
         if let Some(ref d) = self.detail {
             d.expanded.bind_to(
                 ctx.self_id(),
                 ctx.binding_registry(),
                 BindingLevel::Relayout,
             );
-            let scroll_y = self.scroll_y.clone();
-            let handle = d.expanded.observe(move |_| leaves_buffer(scroll_y.get()));
-            ctx.own_handle(handle);
         }
 
         // Column-count change (window resize reflow) → rebuild.
@@ -547,7 +545,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                     if let Some(d) = detail.as_ref() {
                         match action {
                             teksilo_core::accesskit::Action::Expand => {
-                                d.expanded.set(Some(idx));
+                                d.expand(idx);
                                 return EventResponse::Handled;
                             }
                             teksilo_core::accesskit::Action::Collapse => {
@@ -859,6 +857,39 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         // A non-hidden generic group between the `Role::Grid` container and
         // the `Role::GridCell` tiles keeps the AT path well-formed.
         builder.set_role(teksilo_core::accesskit::Role::Group);
+    }
+
+    /// The tiles, with the detail band read after its own row.
+    ///
+    /// The band is the grid root's child, so the pane's rebuilds leave it
+    /// alone, and a screen reader met it after every realized tile: a reader
+    /// walking the grid heard the rows under the open one before the band
+    /// that opened above them. Here it goes before the first realized tile
+    /// under the open row; with none realized above or below it, first or
+    /// last. Closed, it is hidden, and where it sits does not matter.
+    fn accessibility_children(&self) -> Option<Vec<WidgetId>> {
+        let detail = self.detail.as_ref()?;
+        let band = detail.band_id.get()?;
+        let width = self.viewport_width.get();
+        let open_row = detail
+            .open((self.len_fn)())
+            .map(|index| self.strategy.tile_rect(index, width).y);
+        let mut ids = Vec::with_capacity(self.tile_roots.len() + self.header_entries.len() + 1);
+        let mut placed = false;
+        for &(index, id) in &self.tile_roots {
+            if !placed
+                && open_row.is_some_and(|row| self.strategy.tile_rect(index, width).y > row + 0.01)
+            {
+                ids.push(band);
+                placed = true;
+            }
+            ids.push(id);
+        }
+        if !placed {
+            ids.push(band);
+        }
+        ids.extend(self.header_entries.iter().map(|(_, id)| *id));
+        Some(ids)
     }
 
     fn children(&self) -> Vec<WidgetId> {

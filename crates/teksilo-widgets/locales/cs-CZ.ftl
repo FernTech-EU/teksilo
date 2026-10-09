@@ -405,6 +405,8 @@ grid-view-selection-count =
        *[other] Vybráno { $count } položek
     }
 
+grid-view-detail-name = Podrobnosti položky { $position }
+
 # Editor kódu. Viz en-US.ftl pro úplný kontext a
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab odsazuje. { $next } přejde na další ovládací prvek, { $previous } na předchozí.
