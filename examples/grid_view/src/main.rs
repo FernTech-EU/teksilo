@@ -11,6 +11,8 @@
 //!   marquee (drag on the background). Ctrl+A selects all.
 //! - 2D keyboard navigation: arrows / Home / End / Ctrl+Home/End / PageUp /
 //!   PageDown, type-ahead (start typing a caption), Enter to "open".
+//! - A detail band: double-click a photo (or press Enter) and a full-width
+//!   band opens under its row; the same again closes it.
 //! - Drag-to-reorder (and Alt+Arrow) with a live insertion bar.
 //! - Sections grouped by album, with sticky pinned headers.
 //! - A live selection-count status line.
@@ -104,6 +106,14 @@ fn main() {
                     .reorderable(true)
                     .type_ahead_label(move |i| cap_for_type.get(i).cloned().unwrap_or_default())
                     .on_tile_activate(|idx, _ctx| println!("activate tile {idx}"))
+                    .detail_row(|tc| {
+                        let text = format!("{}, in the album {}", tc.item.caption, tc.item.album);
+                        Some(Box::new(
+                            ZStack::new()
+                                .child(RectWidget::new().background(SurfaceRole::Raised))
+                                .child(Padding::uniform(16.0).child(TextWidget::new(lit!(text)))),
+                        ) as Box<dyn Widget>)
+                    })
                     .sections(sections)
                     .pinned_section_headers(true)
                     .a11y_label("Photo library")

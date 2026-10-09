@@ -2714,3 +2714,571 @@ fn a_keyed_selection_change_rebuilds_only_the_tile_it_flips() {
     assert_eq!(after[5..], before[5..], "and no other tile is");
     assert_eq!(selected_tiles(&tree), vec![4]);
 }
+
+// ── Detail band ─────────────────────────────────────────────────────────────
+
+/// A band's content: 80 dp tall at any width.
+fn band_content() -> Option<Box<dyn Widget>> {
+    Some(Box::new(FixedLeaf(10.0, 80.0)))
+}
+
+/// A band's content whose height follows its width, as wrapped text does:
+/// 8000 / width, so 20 dp at 400 and 32 dp at 250.
+#[derive(Debug)]
+struct WrapLeaf;
+impl Widget for WrapLeaf {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        let width = proposal.width.unwrap_or(100.0).max(1.0);
+        Size::new(width, 8000.0 / width).into()
+    }
+}
+
+/// `count` tiles of 100x50 with a detail band built by `band`, configured
+/// further by `configure`, laid out at `width` x `height`. At 400 dp the
+/// grid has three columns and rows step 58 dp, so row `r` spans
+/// `58r .. 58r + 50`.
+fn band_grid(
+    count: usize,
+    width: f32,
+    height: f32,
+    configure: impl FnOnce(GridView<usize>) -> GridView<usize>,
+) -> (
+    WidgetTree,
+    WidgetId,
+    ListModel<usize>,
+    Signal<Option<usize>>,
+) {
+    let model = ListModel::from_vec((0..count).collect());
+    let expanded = Signal::new(None);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let grid = GridView::new(model.clone(), |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+        .tile_size(100.0, 50.0)
+        .detail_row(|_tc| band_content())
+        .expanded_index(expanded.clone());
+    let id = tree.add(configure(grid));
+    settle(&mut tree, width, height);
+    (tree, id, model, expanded)
+}
+
+/// Two passes: a pass that changes the column count or the band rebuilds
+/// the tiles once more.
+fn settle(tree: &mut WidgetTree, width: f32, height: f32) {
+    tree.layout(SizeProposal::exact(width, height));
+    tree.layout(SizeProposal::exact(width, height));
+}
+
+fn band_of(tree: &WidgetTree, grid: WidgetId) -> WidgetId {
+    tree.widget_as_any(grid)
+        .and_then(|any| any.downcast_ref::<GridView<usize>>())
+        .and_then(|g| g.band_id)
+        .expect("the grid has a band")
+}
+
+fn tile_y(tree: &WidgetTree, grid: WidgetId, index: usize) -> f32 {
+    tree.bounds(tile_at(tree, grid, index)).y
+}
+
+/// Two clicks on the tile at `index`, after a pause long enough that they
+/// do not continue an earlier click.
+fn double_click(tree: &mut WidgetTree, grid: WidgetId, index: usize) {
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+    tree.advance_time(std::time::Duration::from_secs(1));
+    let at = tree.bounds(tile_at(tree, grid, index)).center();
+    for _ in 0..2 {
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+    }
+}
+
+fn assert_close(actual: f32, expected: f32, what: &str) {
+    assert!(
+        (actual - expected).abs() < 0.5,
+        "{what}: expected {expected}, got {actual}"
+    );
+}
+
+/// Activating a tile opens a full-width band under the row that holds it,
+/// as tall as its content, and the rows after it move down to make room.
+/// Activating it again closes it. The application's handler fires both
+/// times.
+#[test]
+fn activating_a_tile_opens_a_band_under_its_row() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let activated = Rc::new(Cell::new(0));
+    let count = activated.clone();
+    let (mut tree, id, _model, expanded) = band_grid(12, 400.0, 500.0, |g| {
+        g.on_tile_activate(move |_i, _ctx| count.set(count.get() + 1))
+    });
+    assert_close(tile_y(&tree, id, 6), 116.0, "row 2 before");
+
+    double_click(&mut tree, id, 4);
+    settle(&mut tree, 400.0, 500.0);
+    assert_eq!(expanded.get(), Some(4));
+    assert_eq!(activated.get(), 1, "on_tile_activate still fires");
+    let band = tree.bounds(band_of(&tree, id));
+    assert_close(band.x, 0.0, "band x");
+    assert_close(band.width, 400.0, "band width");
+    assert_close(
+        band.y,
+        116.0,
+        "the band starts a row gap under row 1 (58 + 50 + 8)",
+    );
+    assert_close(band.height, 80.0, "the band is as tall as its content");
+    assert_close(tile_y(&tree, id, 3), 58.0, "the open row stays");
+    assert_close(tile_y(&tree, id, 5), 58.0, "all of it");
+    assert_close(
+        tile_y(&tree, id, 6),
+        204.0,
+        "row 2 moves down by the band and a row gap (116 + 80 + 8)",
+    );
+
+    double_click(&mut tree, id, 4);
+    settle(&mut tree, 400.0, 500.0);
+    assert_eq!(expanded.get(), None);
+    assert_eq!(activated.get(), 2);
+    assert_close(tile_y(&tree, id, 6), 116.0, "row 2 back in place");
+    assert_close(tree.bounds(band_of(&tree, id)).height, 0.0, "no band");
+}
+
+/// The band follows its tile's row when a resize changes the column count,
+/// and is measured again at the new width.
+#[test]
+fn the_band_stays_under_its_tile_when_the_columns_change() {
+    let (mut tree, id, _model, expanded) = band_grid(12, 400.0, 500.0, |g| {
+        g.detail_row(|_tc| Some(Box::new(WrapLeaf) as Box<dyn Widget>))
+    });
+    expanded.set(Some(4));
+    settle(&mut tree, 400.0, 500.0);
+    let band = tree.bounds(band_of(&tree, id));
+    assert_close(band.y, 116.0, "three columns: tile 4 is on row 1");
+    assert_close(band.height, 20.0, "8000 / 400");
+
+    // Two columns fit 250 dp: tile 4 moves to row 2.
+    settle(&mut tree, 250.0, 500.0);
+    let band = tree.bounds(band_of(&tree, id));
+    assert_close(band.y, 174.0, "under row 2 (116 + 50 + 8)");
+    assert_close(band.height, 32.0, "8000 / 250");
+    assert_close(tile_y(&tree, id, 5), 116.0, "tile 5 shares the open row");
+    assert_close(
+        tile_y(&tree, id, 6),
+        214.0,
+        "row 3 under the band (174 + 32 + 8)",
+    );
+}
+
+/// The band counts in the scroll range and in the window of realized tiles:
+/// the tiles it pushes down are realized where they now are.
+#[test]
+fn the_band_counts_in_the_scroll_range_and_the_realized_window() {
+    let (mut tree, id, _model, expanded) =
+        band_grid(300, 400.0, 300.0, |g| g.detail_row_height(|_i| 1000.0));
+    let (scroll, max_scroll) = {
+        let grid = tree
+            .widget_as_any(id)
+            .and_then(|any| any.downcast_ref::<GridView<usize>>())
+            .expect("the grid");
+        (grid.scroll_y.clone(), grid.max_scroll_y.clone())
+    };
+    let before = max_scroll.get();
+
+    expanded.set(Some(0));
+    settle(&mut tree, 400.0, 300.0);
+    assert_close(
+        max_scroll.get(),
+        before + 1008.0,
+        "the band and its row gap lengthen the content",
+    );
+    assert_close(
+        tree.bounds(band_of(&tree, id)).height,
+        1000.0,
+        "detail_row_height sizes the band",
+    );
+
+    // Row 1 now starts at 50 + 8 + 1000 + 8 = 1066. Scrolled to put it
+    // 100 dp down the viewport, it has to be realized, and there.
+    scroll.set(966.0);
+    settle(&mut tree, 400.0, 300.0);
+    assert_close(
+        tile_y(&tree, id, 3),
+        100.0,
+        "row 1, realized under the band",
+    );
+    assert_close(
+        tile_y(&tree, id, 9),
+        216.0,
+        "row 3, a row step further down",
+    );
+}
+
+/// The band stays on its tile through an insert before it, and closes when
+/// the tile is removed, or when a model without keys resets.
+#[test]
+fn the_band_follows_its_tile_and_closes_when_it_is_removed() {
+    let (mut tree, id, model, expanded) = band_grid(12, 400.0, 500.0, |g| g);
+    expanded.set(Some(4));
+    settle(&mut tree, 400.0, 500.0);
+
+    model.insert(0, 99);
+    settle(&mut tree, 400.0, 500.0);
+    assert_eq!(expanded.get(), Some(5), "the tile is now fifth");
+    assert_close(tree.bounds(band_of(&tree, id)).y, 116.0, "still on row 1");
+
+    model.remove(5);
+    settle(&mut tree, 400.0, 500.0);
+    assert_eq!(expanded.get(), None, "its tile is gone");
+
+    expanded.set(Some(2));
+    settle(&mut tree, 400.0, 500.0);
+    model.replace_all((0..12).collect());
+    settle(&mut tree, 400.0, 500.0);
+    assert_eq!(
+        expanded.get(),
+        None,
+        "a reset of a model with no keys says nothing of where the tile went"
+    );
+}
+
+/// A source with keys keeps the band on its tile through a sort, and closes
+/// it when a filter hides the tile.
+#[test]
+fn a_sort_keeps_the_band_on_its_tile_when_the_source_has_keys() {
+    use teksilo_data::SortDirection;
+    let proxy = teksilo_data::SortFilterListModel::new(ListModel::from_vec((0..9).collect()))
+        .with_comparator("n", |a: &usize, b: &usize| a.cmp(b))
+        .with_predicate("even", |_text| Box::new(|n: &usize| n.is_multiple_of(2)));
+    let expanded = Signal::new(Some(1));
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::from_source(proxy.clone(), |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .detail_row(|_tc| band_content())
+            .expanded_index(expanded.clone()),
+    );
+    settle(&mut tree, 400.0, 500.0);
+    assert_close(tree.bounds(band_of(&tree, id)).y, 58.0, "under row 0");
+
+    proxy.set_sort(Some("n"), SortDirection::Descending);
+    settle(&mut tree, 400.0, 500.0);
+    assert_eq!(expanded.get(), Some(7), "8, 7, … 1, 0: tile 1 is at 7");
+    assert_close(tree.bounds(band_of(&tree, id)).y, 174.0, "under row 2");
+
+    proxy.set_filter("even", "on");
+    settle(&mut tree, 400.0, 500.0);
+    assert_eq!(expanded.get(), None, "tile 1 is filtered out");
+}
+
+/// Keys: Enter on a tile opens its band and Enter again closes it; Space on
+/// the open tile closes it too, and leaves the selection as it was.
+#[test]
+fn enter_and_space_on_the_open_tile_close_its_band() {
+    use teksilo_core::event::{Key, Modifiers};
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let sel = selection.clone();
+    let (mut tree, id, _model, expanded) = band_grid(12, 400.0, 300.0, |g| g.selection(sel));
+    tree.focus(id);
+    press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    press(&mut tree, Key::ArrowDown, Modifiers::NONE);
+    press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(grid_focus(&tree, id), Some(4));
+    assert_eq!(selection.selected_indices(), vec![4]);
+
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    assert_eq!(expanded.get(), Some(4));
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    assert_eq!(expanded.get(), None);
+
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    assert_eq!(expanded.get(), Some(4));
+    press(&mut tree, Key::Space, Modifiers::NONE);
+    assert_eq!(expanded.get(), None);
+    assert_eq!(
+        selection.selected_indices(),
+        vec![4],
+        "Space closed the band rather than toggling the selection"
+    );
+}
+
+/// ↓ from the open tile moves focus onto the first control in its band, and
+/// ↑ there, which the control does not use, returns to the tile. A key the
+/// band lets through moves no tile. Between tiles the arrows step over the
+/// band.
+#[test]
+fn down_from_the_open_tile_enters_its_band_and_up_returns() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, id, _model, expanded) = band_grid(12, 400.0, 300.0, |g| {
+        g.detail_row(|_tc| {
+            Some(Box::new(crate::Button::new(teksilo_i18n::lit!("Play"))) as Box<dyn Widget>)
+        })
+    });
+    tree.focus(id);
+    press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    press(&mut tree, Key::ArrowDown, Modifiers::NONE);
+    press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    assert_eq!(expanded.get(), Some(4));
+    let band = band_of(&tree, id);
+
+    press(&mut tree, Key::ArrowDown, Modifiers::NONE);
+    let focused = tree.focused().expect("something has focus");
+    assert!(
+        focused != band && tree.is_descendant_of(focused, band),
+        "focus is on the band's control"
+    );
+    assert_eq!(
+        grid_focus(&tree, id),
+        Some(4),
+        "the cursor waits on the tile"
+    );
+
+    press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(
+        grid_focus(&tree, id),
+        Some(4),
+        "a key the band does not use moves no tile"
+    );
+    assert_eq!(tree.focused(), Some(focused));
+
+    press(&mut tree, Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(tree.focused(), Some(id), "back on the grid");
+    assert_eq!(grid_focus(&tree, id), Some(4), "on the open tile");
+
+    press(&mut tree, Key::ArrowLeft, Modifiers::NONE);
+    press(&mut tree, Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(grid_focus(&tree, id), Some(6), "from tile 3, over the band");
+    assert_eq!(tree.focused(), Some(id));
+    press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    press(&mut tree, Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(grid_focus(&tree, id), Some(4), "from tile 7, over the band");
+}
+
+/// A band with nothing to take focus is stepped over by ↓ like any other.
+#[test]
+fn down_from_an_open_tile_with_nothing_to_focus_moves_to_the_next_row() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, id, _model, expanded) = band_grid(12, 400.0, 300.0, |g| g);
+    tree.focus(id);
+    press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    press(&mut tree, Key::ArrowDown, Modifiers::NONE);
+    press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    assert_eq!(expanded.get(), Some(4));
+    press(&mut tree, Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(grid_focus(&tree, id), Some(7));
+    assert_eq!(tree.focused(), Some(id));
+}
+
+/// To a screen reader the band is a group named after its tile; the tile is
+/// a disclosure, expanded or collapsed, that controls the band while open
+/// and offers the action that changes it. Opening it replaces no tile node
+/// and changes no tile's place in the grid.
+#[test]
+fn the_band_is_a_group_named_after_its_tile_which_controls_it() {
+    use teksilo_core::accesskit::{Action, Role};
+    let (mut tree, id, _model, expanded) = band_grid(12, 400.0, 500.0, |g| {
+        g.tile_a11y_label(|i| format!("Album {i}"))
+    });
+    let node = |tree: &WidgetTree, widget: WidgetId| {
+        let wanted = teksilo_core::accessibility::widget_id_to_node_id(widget);
+        tree.accessibility_tree_snapshot()
+            .nodes
+            .into_iter()
+            .find(|(node_id, _)| *node_id == wanted)
+            .map(|(_, node)| node)
+            .expect("the widget has a node")
+    };
+    let nodes = tiles(&tree, id);
+    let grid_before = node(&tree, id);
+    let tile6_before = node(&tree, tile_at(&tree, id, 6));
+    assert_eq!(
+        node(&tree, tile_at(&tree, id, 4)).is_expanded(),
+        Some(false)
+    );
+
+    expanded.set(Some(4));
+    settle(&mut tree, 400.0, 500.0);
+    assert_eq!(tiles(&tree, id), nodes, "no tile node is replaced");
+    let band = band_of(&tree, id);
+    let band_node = node(&tree, band);
+    assert_eq!(band_node.role(), Role::Group);
+    assert_eq!(band_node.label(), Some("Album 4"));
+
+    let open = node(&tree, tile_at(&tree, id, 4));
+    assert_eq!(open.is_expanded(), Some(true));
+    assert_eq!(
+        open.controls(),
+        &[teksilo_core::accessibility::widget_id_to_node_id(band)]
+    );
+    assert!(open.supports_action(Action::Collapse));
+    let closed = node(&tree, tile_at(&tree, id, 7));
+    assert_eq!(closed.is_expanded(), Some(false));
+    assert!(closed.controls().is_empty());
+    assert!(closed.supports_action(Action::Expand));
+
+    let grid_after = node(&tree, id);
+    assert_eq!(grid_after.row_count(), grid_before.row_count());
+    assert_eq!(grid_after.column_count(), grid_before.column_count());
+    let tile6_after = node(&tree, tile_at(&tree, id, 6));
+    assert_eq!(tile6_after.row_index(), tile6_before.row_index());
+    assert_eq!(
+        tile6_after.position_in_set(),
+        tile6_before.position_in_set()
+    );
+
+    // The actions open and close it, for a reader with no double click.
+    let act = |tree: &mut WidgetTree, action: Action, index: usize| {
+        let target = tile_at(tree, id, index);
+        tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+            action,
+            target: Some(target),
+            target_node: teksilo_core::accessibility::root_node_id(),
+            data: None,
+        });
+        settle(tree, 400.0, 500.0);
+    };
+    act(&mut tree, Action::Expand, 7);
+    assert_eq!(expanded.get(), Some(7));
+    act(&mut tree, Action::Collapse, 7);
+    assert_eq!(expanded.get(), None);
+}
+
+/// The rubber band selects tiles by where they are, band included: a sweep
+/// over the band alone selects nothing, and one across it selects the rows on
+/// either side.
+#[test]
+fn the_rubber_band_selects_no_band() {
+    use teksilo_canvas::Point;
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let sel = selection.clone();
+    let (mut tree, _id, _model, expanded) = band_grid(12, 400.0, 500.0, |g| g.selection(sel));
+    expanded.set(Some(1));
+    settle(&mut tree, 400.0, 500.0);
+    // Row 0 is 0..50, the band 58..138, row 1 now 146..196.
+    let sweep = |tree: &mut WidgetTree, from: Point, to: Point| {
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            from,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(from.x, from.y + 6.0)));
+        tree.dispatch_event(WidgetEvent::pointer_move(to));
+        settle(tree, 400.0, 500.0);
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            to,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        settle(tree, 400.0, 500.0);
+    };
+
+    sweep(&mut tree, Point::new(360.0, 70.0), Point::new(40.0, 130.0));
+    assert_eq!(
+        selection.selected_indices(),
+        Vec::<usize>::new(),
+        "where row 1 was, there is only the band"
+    );
+
+    // Pressed on the band itself, a drag down over row 1 starts no marquee:
+    // the press belongs to the band, not to the grid's background.
+    sweep(&mut tree, Point::new(50.0, 100.0), Point::new(250.0, 170.0));
+    assert_eq!(selection.selected_indices(), Vec::<usize>::new());
+
+    sweep(&mut tree, Point::new(360.0, 10.0), Point::new(40.0, 160.0));
+    assert_eq!(selection.selected_indices(), vec![0, 1, 2, 3, 4, 5]);
+}
+
+/// With variable row heights the band opens under the open row's tallest
+/// tile.
+#[test]
+fn the_band_opens_under_a_variable_height_row() {
+    let (mut tree, id, _model, expanded) = band_grid(12, 400.0, 500.0, |g| {
+        g.item_height(|i| if i == 4 { 90.0 } else { 50.0 })
+    });
+    expanded.set(Some(3));
+    settle(&mut tree, 400.0, 500.0);
+    let band = tree.bounds(band_of(&tree, id));
+    assert_close(band.y, 156.0, "row 1 is 58..148, tile 4 makes it 90 tall");
+    assert_close(
+        tile_y(&tree, id, 6),
+        244.0,
+        "row 2 under the band (156 + 80 + 8)",
+    );
+}
+
+/// In a sectioned grid the band opens inside its section, and the next
+/// section's header moves down with the rows.
+#[test]
+fn the_band_opens_inside_its_section_and_moves_the_next_header_down() {
+    let model = ListModel::from_vec((0..6).collect::<Vec<usize>>());
+    let expanded = Signal::new(Some(0));
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(50.0, 50.0)))
+            .column_count(2, 50.0)
+            .section_header_height(28.0)
+            .sections(TwoSections)
+            .detail_row(|_tc| band_content())
+            .expanded_index(expanded),
+    );
+    settle(&mut tree, 300.0, 600.0);
+    // Section 0: header 0..28, rows 28..78 and 86..136; section 1's header
+    // was at 144 and its first row at 172 (`sections_offset_tiles_below_headers`).
+    assert_close(
+        tree.bounds(band_of(&tree, id)).y,
+        86.0,
+        "under row 0 of section 0",
+    );
+    assert_close(tile_y(&tree, id, 2), 174.0, "section 0's row 1 (86 + 88)");
+    assert_close(tile_y(&tree, id, 3), 260.0, "section 1's row 0 (172 + 88)");
+    let header1 = tiles(&tree, id)[7];
+    assert_close(
+        tree.bounds(header1).y,
+        232.0,
+        "section 1's header (144 + 88)",
+    );
+}
+
+/// A waterfall has no rows to open a band under: the band is never built,
+/// and activation leaves the disclosure alone.
+#[test]
+fn a_waterfall_has_no_band() {
+    let heights = [60.0_f32, 100.0, 40.0, 80.0, 50.0];
+    let model = ListModel::from_vec((0..heights.len()).collect());
+    let expanded = Signal::new(None);
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(80.0, 50.0)))
+            .column_count(2, 60.0)
+            .waterfall(60.0)
+            .item_height(move |i| heights[i])
+            .detail_row(|_tc| band_content())
+            .expanded_index(expanded.clone()),
+    );
+    settle(&mut tree, 200.0, 400.0);
+    double_click(&mut tree, id, 0);
+    settle(&mut tree, 200.0, 400.0);
+    assert_eq!(expanded.get(), None);
+    let band = tree
+        .widget_as_any(id)
+        .and_then(|any| any.downcast_ref::<GridView<usize>>())
+        .and_then(|g| g.band_id);
+    assert_eq!(band, None);
+    assert_close(
+        tile_y(&tree, id, 2),
+        68.0,
+        "item 2 still stacks under item 0",
+    );
+}

@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use teksilo_canvas::{Rect, SizeProposal};
 
-use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
@@ -68,6 +68,10 @@ pub(crate) struct TileA11y {
     /// Concise per-item name (`GridView::tile_a11y_label`); `None` leaves the
     /// cell's name to its contents.
     name: Option<String>,
+    /// The detail band, when one is in force. Every tile then publishes
+    /// whether its band is open, read live: opening one changes the state of
+    /// two tiles and rebuilds neither.
+    detail: Option<Rc<super::detail::DetailState>>,
     /// Rebuild trigger, bumped only when *this* tile's selectedness flips.
     version: Signal<u64>,
 
@@ -84,6 +88,7 @@ impl TileA11y {
         row_index_1based: usize,
         col_index_1based: usize,
         name: Option<String>,
+        detail: Option<Rc<super::detail::DetailState>>,
     ) -> Self {
         Self {
             body,
@@ -92,6 +97,7 @@ impl TileA11y {
             row_index: row_index_1based,
             col_index: col_index_1based,
             name,
+            detail,
             version: Signal::new(0),
             selected: false,
             child: None,
@@ -114,6 +120,13 @@ impl Widget for TileA11y {
         // installed below survives into the build it triggers.
         self.version
             .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        if let Some(ref d) = self.detail {
+            d.expanded.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                BindingLevel::AccessibilityOnly,
+            );
+        }
 
         let selected = self
             .selection
@@ -178,6 +191,21 @@ impl Widget for TileA11y {
         builder.set_row_index(self.row_index);
         builder.set_column_index(self.col_index);
         builder.add_action(teksilo_core::accesskit::Action::Click);
+        // A disclosure: whether the band is open, the action that changes
+        // that (handled on the body pane, beside `Click`), and while open the
+        // band it controls.
+        if let Some(ref d) = self.detail {
+            let open = d.is_open(self.index);
+            builder.set_expanded(open);
+            if open {
+                builder.add_action(teksilo_core::accesskit::Action::Collapse);
+                if let Some(band) = d.band_id.get() {
+                    builder.push_controlled(widget_id_to_node_id(band));
+                }
+            } else {
+                builder.add_action(teksilo_core::accesskit::Action::Expand);
+            }
+        }
         // No `Action::Focus`: a tile is reached through the grid's active
         // descendant and takes no keys of its own. The dispatcher services
         // `Focus` itself, moving keyboard focus onto the node named, focusable

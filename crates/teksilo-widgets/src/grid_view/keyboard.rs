@@ -15,7 +15,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use teksilo_core::event::{EventResponse, Key, WidgetEvent};
+use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::EventContext;
 
@@ -70,6 +70,10 @@ pub(crate) struct GridKeyConfig {
     /// item from its own model handle.
     #[allow(clippy::type_complexity)]
     pub(crate) on_tile_activate: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
+    /// The detail band, when one is in force: Space closes it, ↓ from the
+    /// open tile moves into it, and the grid's keys stand aside while focus
+    /// is inside it.
+    pub(crate) detail: Option<Rc<super::detail::DetailState>>,
     /// The non-drag reorder, bound once by the grid. `Some` exactly when the
     /// grid is reorderable. `(from, destination) -> ()`: commits through the
     /// source's own drop-accept path, follows the tile with focus and
@@ -100,6 +104,12 @@ pub(crate) fn build_grid_key_handler(
         let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
             return EventResponse::Ignored;
         };
+        // A key from inside the detail band that its content did not use
+        // bubbles up to here. It is not about the tiles: a list at its last
+        // row letting ↓ through must not move the tile cursor behind it.
+        if cfg.detail.as_ref().is_some_and(|d| d.focus_within.get()) {
+            return EventResponse::Ignored;
+        }
         let n = (cfg.len_fn)();
         if n == 0 {
             return EventResponse::Ignored;
@@ -249,6 +259,14 @@ pub(crate) fn build_grid_key_handler(
                 Key::ArrowDown => {
                     if cursor.is_none() {
                         Some(0)
+                    } else if *modifiers == Modifiers::NONE
+                        && let Some(band) =
+                            cfg.detail.as_ref().and_then(|d| enterable_band(d, current))
+                    {
+                        // Into the open tile's band, onto its first control.
+                        // The cursor stays on the tile, for ↑ to return to.
+                        ctx.request_focus_into(band);
+                        return EventResponse::Handled;
                     } else if current + cols < n {
                         Some(current + cols)
                     } else {
@@ -331,6 +349,20 @@ pub(crate) fn build_grid_key_handler(
                     // Control keeps it reachable and out of the platform's way.
                     if let Some(ref sel) = cfg.selection {
                         sel.toggle(current);
+                    }
+                    cfg.focused_index.set(Some(current));
+                    return EventResponse::Handled;
+                }
+                Key::Space
+                    if cfg
+                        .detail
+                        .as_ref()
+                        .is_some_and(|d| d.expanded.get() == Some(current)) =>
+                {
+                    // Space on the open tile closes its band, as Enter does,
+                    // and leaves the selection alone.
+                    if let Some(d) = &cfg.detail {
+                        d.expanded.set(None);
                     }
                     cfg.focused_index.set(Some(current));
                     return EventResponse::Handled;
@@ -421,6 +453,19 @@ pub(crate) fn build_grid_key_handler(
         }
         ensure_visible(&cfg, idx, ctx);
         EventResponse::Handled
+    }
+}
+
+/// The band ↓ enters from tile `current`: `current`'s band, open, with a
+/// control in it to take focus. Without one, ↓ is plain navigation.
+fn enterable_band(
+    detail: &super::detail::DetailState,
+    current: usize,
+) -> Option<teksilo_core::widget_id::WidgetId> {
+    if detail.is_open(current) && detail.enterable.get() {
+        detail.band_id.get()
+    } else {
+        None
     }
 }
 

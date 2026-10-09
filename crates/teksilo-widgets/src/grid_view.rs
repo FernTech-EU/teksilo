@@ -36,6 +36,19 @@
 //! other data views use (`data_views::RowSelection`), which turns each click,
 //! key and rubber band into an index or a key.
 //!
+//! ## The detail band
+//!
+//! [`GridView::detail_row`] gives a tile a full-width band that opens directly
+//! under the row holding it, the "album expansion" of a music library. The
+//! band is not a tile and not a row of the grid: a layout strategy wrapped
+//! around the grid's own (`detail::DetailRowStrategy`) moves everything below
+//! the open row down by the band, so virtualization, the scroll range, the
+//! focus ring and the rubber band account for it without knowing about it, and
+//! tiles keep their row and column numbers. The band widget is a child of this
+//! root rather than of the body pane, so it survives the pane's rebuilds on
+//! scroll and resize. A waterfall has no rows and ignores it. See the module
+//! docs of `grid_view/detail.rs`.
+//!
 //! ## Pan to scroll
 //!
 //! The view installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior),
@@ -88,6 +101,7 @@
 
 pub(crate) mod a11y;
 pub(crate) mod body_pane;
+pub(crate) mod detail;
 pub(crate) mod drag;
 pub(crate) mod keyboard;
 pub mod layout;
@@ -397,6 +411,22 @@ pub struct GridView<T: 'static> {
     /// time; a disabled view greys out and stops accepting focus /
     /// selection / keyboard input (arena-gated).
     enabled: Prop<bool>,
+
+    // Detail band
+    /// The disclosed tile (`expanded_index`). A default signal when the
+    /// application supplies none, so activation still opens and closes it.
+    expanded: Signal<Option<usize>>,
+    detail_row: Option<detail::DetailBuilder<T>>,
+    detail_row_height: Option<detail::DetailHeightFn>,
+    /// Built on the first build when a band is in force, and kept: the
+    /// layout, the tiles, the keys and the band share it across rebuilds.
+    detail: Option<Rc<detail::DetailState>>,
+    /// The layout strategy with the band inserted, kept as its concrete
+    /// type for `place_children`, which measures and places the band.
+    detail_layout: Option<Rc<detail::DetailRowStrategy>>,
+    /// The disclosed tile's anchor, for finding it again after a reset.
+    detail_anchor: Rc<RefCell<Option<crate::data_views::RowAnchor>>>,
+    band_id: Option<WidgetId>,
 }
 
 impl<T: 'static> GridView<T> {
@@ -534,6 +564,13 @@ impl<T: 'static> GridView<T> {
             scrollbar_id: None,
             overlay_id: None,
             enabled: Prop::Static(true),
+            expanded: Signal::new(None),
+            detail_row: None,
+            detail_row_height: None,
+            detail: None,
+            detail_layout: None,
+            detail_anchor: Rc::new(RefCell::new(None)),
+            band_id: None,
         }
     }
 
@@ -877,6 +914,19 @@ impl<T: 'static> GridView<T> {
         });
     }
 
+    /// Keep an anchor on the disclosed tile, so a reset that moves it can
+    /// find it again (`follow_the_disclosed_tile`). Re-anchored on every
+    /// write, wherever it comes from; the anchor is built at the write,
+    /// against the data the index refers to.
+    fn track_the_disclosed_tile(&self, ctx: &mut BuildContext, detail: &detail::DetailState) {
+        let anchor_of = self.source.anchor_fn.clone();
+        let slot = self.detail_anchor.clone();
+        *slot.borrow_mut() = detail.expanded.get().map(|i| anchor_of(i));
+        ctx.effect(&detail.expanded, move |expanded| {
+            *slot.borrow_mut() = expanded.map(|i| anchor_of(i));
+        });
+    }
+
     // ── Accessibility / empty state ─────────────────────────────────────
 
     // ── Sections ────────────────────────────────────────────────────────
@@ -1118,26 +1168,108 @@ impl<T: 'static> GridView<T> {
         self
     }
 
+    // ── Detail band ─────────────────────────────────────────────────────
+
+    /// The disclosed tile: `Some(index)` opens a full-width band under the
+    /// row holding tile `index` (see [`detail_row`](Self::detail_row)),
+    /// `None` closes it. The grid writes it when a tile is activated, and
+    /// follows writes made from outside. Without this the grid keeps its own
+    /// signal.
+    pub fn expanded_index(mut self, expanded: Signal<Option<usize>>) -> Self {
+        self.expanded = expanded;
+        self
+    }
+
+    /// The content of the detail band: the "album expansion" of a music
+    /// library, a full-width band opened directly under the row that holds
+    /// the activated tile.
+    ///
+    /// `f` receives the disclosed tile's [`TileContext`], the same one the
+    /// tile delegate gets, and returns the band's content, or `None` when the
+    /// tile has nothing to disclose. The band pushes the following rows down,
+    /// and stays under its tile when a resize changes the column count.
+    ///
+    /// With a band, activating a tile (a click per
+    /// [`activate_on`](Self::activate_on), or Enter) opens it, and activating
+    /// the open tile closes it; [`on_tile_activate`](Self::on_tile_activate)
+    /// still fires. Space on the open tile closes it too. ↓ from the open tile
+    /// moves focus to the first focusable control in the band, and ↑ from
+    /// there, when the control does not use it, returns to the tile. Arrows
+    /// between tiles step over the band, and the rubber band selects no band.
+    ///
+    /// The band follows its tile when the tile moves. A source with item keys
+    /// is followed through a sort or a filter (a reset); a source without
+    /// them is followed through inserts, removals and moves, and closes the
+    /// band on a reset. The band closes when its tile is removed.
+    ///
+    /// The band is measured height-for-width at the content width, or sized
+    /// by [`detail_row_height`](Self::detail_row_height). It works with the
+    /// uniform grid, [`variable_row_heights`](Self::variable_row_heights) and
+    /// [`sections`](Self::sections). A [`waterfall`](Self::waterfall) has no
+    /// rows to put it under and ignores it. Its content is rebuilt when the
+    /// band moves to another tile and when the grid's data changes.
+    ///
+    /// Accessibility: the band is a `Role::Group` named after its tile's
+    /// [`tile_a11y_label`](Self::tile_a11y_label) (or labelled by the tile),
+    /// and every tile carries an `expanded` state, `Expand` / `Collapse`
+    /// actions and, while open, a `controls` relation to the band. The grid's
+    /// row and column counts and the tiles' positions do not count the band.
+    pub fn detail_row(
+        mut self,
+        f: impl Fn(&TileContext<'_, T>) -> Option<Box<dyn Widget>> + 'static,
+    ) -> Self {
+        self.detail_row = Some(Rc::new(f));
+        self
+    }
+
+    /// The detail band's height for the tile at `index`, instead of measuring
+    /// it. See [`detail_row`](Self::detail_row).
+    pub fn detail_row_height(mut self, f: impl Fn(usize) -> f32 + 'static) -> Self {
+        self.detail_row_height = Some(Rc::new(f));
+        self
+    }
+
     // ── Internals ───────────────────────────────────────────────────────
+
+    /// The detail band's shared state, when a band is in force: a
+    /// `detail_row` was given and the layout has rows. Built once.
+    fn ensure_detail(&mut self) -> Option<Rc<detail::DetailState>> {
+        self.detail_row.as_ref()?;
+        let has_rows = self.section_data.is_some()
+            || !matches!(self.strategy_kind, StrategyKind::Waterfall { .. });
+        if !has_rows {
+            return None;
+        }
+        Some(
+            self.detail
+                .get_or_insert_with(|| {
+                    Rc::new(detail::DetailState::new(
+                        self.expanded.clone(),
+                        self.detail_row_height.clone(),
+                    ))
+                })
+                .clone(),
+        )
+    }
 
     /// Build (once) and return the layout strategy. Cached so variable
     /// strategies keep their measurement caches across rebuilds.
     fn ensure_strategy(&mut self) -> Rc<dyn GridLayoutStrategy> {
-        if self.strategy.is_none() {
-            // Sections override the strategy kind (uniform tiles + headers).
-            if let Some(ref data) = self.section_data {
-                let s: Rc<dyn GridLayoutStrategy> = Rc::new(SectionedGrid::new(
-                    self.sizing,
-                    self.col_gap,
-                    self.row_gap,
-                    self.inset,
-                    self.header_height,
-                    data.counts_fn.clone(),
-                ));
-                self.strategy = Some(s);
-                return self.strategy.as_ref().unwrap().clone();
-            }
-            let s: Rc<dyn GridLayoutStrategy> = match self.strategy_kind {
+        if let Some(s) = &self.strategy {
+            return s.clone();
+        }
+        // Sections override the strategy kind (uniform tiles + headers).
+        let inner: Rc<dyn GridLayoutStrategy> = if let Some(ref data) = self.section_data {
+            Rc::new(SectionedGrid::new(
+                self.sizing,
+                self.col_gap,
+                self.row_gap,
+                self.inset,
+                self.header_height,
+                data.counts_fn.clone(),
+            ))
+        } else {
+            match self.strategy_kind {
                 StrategyKind::Uniform => Rc::new(UniformGrid::new(
                     self.sizing,
                     self.col_gap,
@@ -1160,10 +1292,24 @@ impl<T: 'static> GridView<T> {
                     estimated,
                     self.exact_item_height.clone(),
                 )),
-            };
-            self.strategy = Some(s);
-        }
-        self.strategy.as_ref().unwrap().clone()
+            }
+        };
+        let s: Rc<dyn GridLayoutStrategy> = match self.ensure_detail() {
+            Some(state) => {
+                let wrapped = Rc::new(detail::DetailRowStrategy::new(
+                    inner,
+                    state,
+                    self.source.len_fn.clone(),
+                    self.row_gap,
+                    self.inset,
+                ));
+                self.detail_layout = Some(wrapped.clone());
+                wrapped
+            }
+            None => inner,
+        };
+        self.strategy = Some(s.clone());
+        s
     }
 }
 
@@ -1193,6 +1339,35 @@ fn put_the_cursor_on_the_selection(
         && let Some(&tile) = selection.selected_indices().first()
     {
         focused_index.set(Some(tile));
+    }
+}
+
+/// Keep the detail band on its tile after a change to the data, or close it.
+///
+/// A change that says where rows went (an insert, a removal, a move) is
+/// followed by position, for any source: it is exact, and it closes the band
+/// when its tile is the one removed. A reset says nothing about where
+/// anything went; the tile is found again by its key when the source has
+/// keys (a sort or a filter of a `SortFilterListModel`), and the band closes
+/// when it has none, or when the tile is gone.
+fn follow_the_disclosed_tile(
+    detail: &detail::DetailState,
+    anchor: Option<&crate::data_views::RowAnchor>,
+    change: &DataChange,
+    len: usize,
+) {
+    let Some(open) = detail.expanded.get() else {
+        return;
+    };
+    let next = match change {
+        DataChange::Reset => anchor
+            .filter(|a| a.tracks_identity())
+            .and_then(|a| a.index()),
+        _ => teksilo_data::data_change::adjust_single_index_for_change(open, change),
+    }
+    .filter(|&i| i < len);
+    if next != Some(open) {
+        detail.expanded.set(next);
     }
 }
 
@@ -1282,6 +1457,19 @@ impl<T: 'static> Widget for GridView<T> {
         // which is what gives `accessibility` a tile id to nominate.
         self.reveal_focused_tile_on_focus(ctx, strategy.clone());
 
+        // The detail band, when one is in force. Opening and closing it moves
+        // the rows after it, which is a relayout here and nothing more: the
+        // band rebuilds its own content, and no tile is rebuilt.
+        let detail = self.detail_layout.as_ref().and(self.detail.clone());
+        if let Some(ref d) = detail {
+            d.expanded.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                BindingLevel::Relayout,
+            );
+            self.track_the_disclosed_tile(ctx, d);
+        }
+
         // Observe model changes.
         {
             let v = version.clone();
@@ -1291,6 +1479,8 @@ impl<T: 'static> Widget for GridView<T> {
             let len_fn = self.source.len_fn.clone();
             let scroll_reset = self.scroll_y.clone();
             let focused_obs = self.focused_index.clone();
+            let detail_obs = detail.clone();
+            let anchor_obs = self.detail_anchor.clone();
             let handle = (self.source.observe_fn)(Box::new(move |change| {
                 // Keep the keyboard-focus anchor in step too — otherwise it
                 // silently points at the wrong tile after an insert / remove
@@ -1350,6 +1540,12 @@ impl<T: 'static> Widget for GridView<T> {
                     {
                         focused_obs.set(Some(tile));
                     }
+                }
+                if let Some(ref d) = detail_obs {
+                    // Cloned out: moving the band re-anchors it, through an
+                    // observer that writes this slot.
+                    let anchor = anchor_obs.borrow().clone();
+                    follow_the_disclosed_tile(d, anchor.as_ref(), change, (len_fn)());
                 }
                 let next = counter.get() + 1;
                 counter.set(next);
@@ -1494,6 +1690,24 @@ impl<T: 'static> Widget for GridView<T> {
         // it. See `selection_count`.
         let count_voice = self.selection.clone().map(SelectionCountVoice::new);
 
+        // Activating a tile: open or close its detail band first, so the
+        // application's own handler sees the state the activation left.
+        #[allow(clippy::type_complexity)]
+        let activate: Option<Rc<dyn Fn(usize, &mut teksilo_core::widget::EventContext)>> =
+            match &detail {
+                Some(d) => {
+                    let d = d.clone();
+                    let user = self.on_tile_activate.clone();
+                    Some(Rc::new(move |index, ctx| {
+                        d.toggle(index);
+                        if let Some(user) = &user {
+                            user(index, ctx);
+                        }
+                    }))
+                }
+                None => self.on_tile_activate.clone(),
+            };
+
         let mut on_key = build_grid_key_handler(GridKeyConfig {
             len_fn: self.source.len_fn.clone(),
             col_count: self.column_count.clone(),
@@ -1508,7 +1722,8 @@ impl<T: 'static> Widget for GridView<T> {
             strategy: strategy.clone(),
             wrap_navigation: self.wrap_navigation,
             tab_traversal: self.tab_traversal,
-            on_tile_activate: self.on_tile_activate.clone(),
+            on_tile_activate: activate.clone(),
+            detail: detail.clone(),
             reorder_perform: reorder_perform.clone(),
             type_ahead_timeout: self.type_ahead_timeout,
             type_ahead: self.type_ahead.clone(),
@@ -1738,14 +1953,65 @@ impl<T: 'static> Widget for GridView<T> {
         self.scrollbar_id = None;
         self.overlay_id = None;
         self.pinned_header_id = None;
+        self.band_id = None;
 
         let len = self.source.len();
         if len == 0 {
             self.tile_map.borrow_mut().clear();
+            // No tiles, so no band: nothing may still point at the last one.
+            if let Some(ref d) = detail {
+                d.shown.set(None);
+                d.band_id.set(None);
+                d.enterable.set(false);
+            }
             if let Some(ref ef) = self.empty_view {
                 self.empty_id = Some(ctx.add_boxed(ef()));
             }
         } else {
+            // The band before the pane: it records which tile it shows as it
+            // builds, and the pane's realization window is read off that.
+            if let (Some(d), Some(builder)) = (&detail, &self.detail_row) {
+                let return_to_tile: detail::ReturnToTile = {
+                    let grid = ctx.self_id();
+                    let focused = self.focused_index.clone();
+                    let strategy = strategy.clone();
+                    let scroll_y = self.scroll_y.clone();
+                    let max_scroll_y = self.max_scroll_y.clone();
+                    let viewport_height = self.viewport_height.clone();
+                    let viewport_width = self.viewport_width.clone();
+                    let viewport_origin = self.viewport_origin.clone();
+                    Rc::new(move |index, ctx| {
+                        focused.set(Some(index));
+                        ctx.request_focus(grid);
+                        keyboard::reveal_tile(
+                            &strategy,
+                            &scroll_y,
+                            &max_scroll_y,
+                            &viewport_height,
+                            &viewport_width,
+                            &viewport_origin,
+                            index,
+                            ctx,
+                        );
+                    })
+                };
+                self.band_id = Some(ctx.add(detail::DetailBand {
+                    state: d.clone(),
+                    builder: builder.clone(),
+                    read_item_fn: self.source.read_item_fn.clone(),
+                    row_state_fn: self.source.dnd.row_state_fn.clone(),
+                    len_fn: self.source.len_fn.clone(),
+                    strategy: strategy.clone(),
+                    viewport_width: self.viewport_width.clone(),
+                    selection: self.selection.clone(),
+                    focused_index: self.focused_index.clone(),
+                    name_fn: self.tile_a11y_label.clone(),
+                    tile_map: self.tile_map.clone(),
+                    return_to_tile,
+                    child: None,
+                }));
+            }
+
             // Pane → root total refresh (measuring strategies): re-place
             // this root when the body pane's measurements changed the
             // content total, so `max_scroll_y` / the thumb ratio pick up
@@ -1769,7 +2035,8 @@ impl<T: 'static> Widget for GridView<T> {
                 selection: self.selection.clone(),
                 count_voice: count_voice.clone(),
                 focused_index: self.focused_index.clone(),
-                on_tile_activate: self.on_tile_activate.clone(),
+                on_tile_activate: activate.clone(),
+                detail: detail.clone(),
                 activate_on: self.activate_on,
                 reorder_perform: reorder_perform.clone(),
                 tile_context_menu: self.tile_context_menu.clone(),
@@ -1822,6 +2089,7 @@ impl<T: 'static> Widget for GridView<T> {
                 // and hides when the grid loses focus.
                 view_focused: ctx.view_focus_active(),
                 focus_visible: ctx.focus_visible(),
+                band_focus: detail.as_ref().map(|d| d.focus_within.clone()),
                 selection: self.selection.clone(),
                 selection_changed: selection_changed.clone(),
                 scroll_y: self.scroll_y.clone(),
@@ -1889,6 +2157,9 @@ impl<T: 'static> Widget for GridView<T> {
         if let Some(id) = self.body_pane_id {
             children.push(id);
         }
+        if let Some(id) = self.band_id {
+            children.push(id);
+        }
         if let Some(id) = self.empty_id {
             children.push(id);
         }
@@ -1931,7 +2202,7 @@ impl<T: 'static> Widget for GridView<T> {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         let Some(ref strategy) = self.strategy else {
             return;
@@ -1963,6 +2234,24 @@ impl<T: 'static> Widget for GridView<T> {
         let cols = strategy.column_count(body_w).max(1);
         if self.column_count.get() != cols {
             self.column_count.set(cols);
+        }
+
+        // The detail band is measured before the total is asked for, so the
+        // total, and the tiles the pane places after this, already include
+        // its height. Height-for-width at the band's own width, which is the
+        // content's: a band of text wraps there.
+        if let (Some(layout), Some(band), Some(d)) =
+            (&self.detail_layout, self.band_id, &self.detail)
+            && d.measures()
+            && let Some((index, rect)) = layout.band_rect(body_w)
+            && let Some(measured) = ctx.child_size(band, SizeProposal::with_width(rect.width))
+        {
+            let shift =
+                layout.observe_band_measured(index, measured.height, self.scroll_y.get(), body_w);
+            if shift.abs() > 0.01 {
+                // Clamped with everything else below.
+                self.scroll_y.set(self.scroll_y.get() + shift);
+            }
         }
 
         let total = strategy.total_content_height(len, body_w);
@@ -2006,10 +2295,29 @@ impl<T: 'static> Widget for GridView<T> {
             None
         };
 
+        let band_rect = self
+            .detail_layout
+            .as_ref()
+            .and_then(|layout| layout.band_rect(body_w));
+
         let body_rect_origin = bounds.origin();
         let body_size = Size::new(body_w, vp_h);
         for child in children.iter_mut() {
-            if Some(child.id) == self.scrollbar_id {
+            if Some(child.id) == self.band_id {
+                // In content coordinates, like a tile: the pane fills the
+                // same rect and places its tiles at `tile_rect - scroll`.
+                match band_rect {
+                    Some((_, r)) => {
+                        child.origin =
+                            Point::new(bounds.x + r.x, bounds.y + r.y - self.scroll_y.get());
+                        child.size = Size::new(r.width, r.height);
+                    }
+                    None => {
+                        child.origin = bounds.origin();
+                        child.size = Size::ZERO;
+                    }
+                }
+            } else if Some(child.id) == self.scrollbar_id {
                 if needs_sb {
                     // Right edge in all modes — in Overlay / Thin `body_w`
                     // spans the full width, so anchor off `bounds.width`.
@@ -2114,6 +2422,9 @@ impl<T: 'static> Widget for GridView<T> {
         if let Some(id) = self.body_pane_id {
             ids.push(id);
         }
+        if let Some(id) = self.band_id {
+            ids.push(id);
+        }
         if let Some(id) = self.empty_id {
             ids.push(id);
         }
@@ -2150,6 +2461,9 @@ struct GridOverlay {
     /// Input-modality `:focus-visible`. Gates the focus ring to keyboard
     /// navigation, never a mouse click.
     focus_visible: Signal<bool>,
+    /// `true` while focus is inside the detail band, where the ring would
+    /// point at a tile the keyboard is not on.
+    band_focus: Option<Signal<bool>>,
     /// The grid's selection, for the **container focus ring**: when the grid is
     /// keyboard-focused but has no current tile *and* nothing is selected, no
     /// tile chrome marks the focus, so the whole grid outlines itself instead.
@@ -2257,6 +2571,13 @@ impl Widget for GridOverlay {
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
         );
+        if let Some(ref band_focus) = self.band_focus {
+            band_focus.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                BindingLevel::RepaintOnly,
+            );
+        }
         self.marquee.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
@@ -2312,7 +2633,10 @@ impl Widget for GridOverlay {
 
         // Focus ring — keyboard-only (`:focus-visible`) and only while the grid
         // holds focus, so a mouse click never leaves a ring.
-        if !self.view_focused.get() || !self.focus_visible.get() {
+        if !self.view_focused.get()
+            || !self.focus_visible.get()
+            || self.band_focus.as_ref().is_some_and(|f| f.get())
+        {
             return;
         }
         // A stale index (outlived by a not-yet-applied model-change

@@ -87,6 +87,9 @@ pub(crate) struct GridBodyPane<T: 'static> {
     #[allow(clippy::type_complexity)]
     pub(crate) on_tile_activate: Option<Rc<dyn Fn(usize, &mut teksilo_core::widget::EventContext)>>,
     pub(crate) activate_on: crate::data_views::ActivateOn,
+    /// The detail band, when one is in force: the tiles publish whether
+    /// theirs is open, and opening one moves the tiles after it.
+    pub(crate) detail: Option<Rc<super::detail::DetailState>>,
     /// The non-drag reorder, bound once by the grid. `Some` exactly when the
     /// grid is reorderable; each realized tile binds its own index into it and
     /// gets the menu rows and custom actions SC 2.5.7 asks for.
@@ -217,27 +220,44 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         ctx.register_animated_signal(&self.scroll_y);
 
         // Buffer-exit detection → rebuild THIS pane (sibling of scrollbar).
-        let strategy = self.strategy.clone();
-        let len = self.len_fn.clone();
-        let vp_h = self.viewport_height.clone();
-        let vp_w = self.viewport_width.clone();
         let (initial_start, initial_end) = self.visible();
         self.prev_built_start.set(initial_start);
         self.prev_built_end.set(initial_end);
-        let v_scroll = version.clone();
-        let scroll_handle = self.scroll_y.observe({
+        let leaves_buffer: Rc<dyn Fn(f32)> = {
+            let strategy = self.strategy.clone();
+            let len = self.len_fn.clone();
+            let vp_h = self.viewport_height.clone();
+            let vp_w = self.viewport_width.clone();
             let ps = self.prev_built_start.clone();
             let pe = self.prev_built_end.clone();
-            move |y| {
-                let vr = strategy.visible_range(*y, vp_h.get(), vp_w.get(), (len)());
+            let version = version.clone();
+            Rc::new(move |y| {
+                let vr = strategy.visible_range(y, vp_h.get(), vp_w.get(), (len)());
                 if vr.start < ps.get() || vr.end > pe.get() {
                     ps.set(vr.start);
                     pe.set(vr.end);
-                    v_scroll.set(v_scroll.get() + 1);
+                    version.set(version.get() + 1);
                 }
-            }
-        });
+            })
+        };
+        let on_scroll = leaves_buffer.clone();
+        let scroll_handle = self.scroll_y.observe(move |y| on_scroll(*y));
         ctx.own_handle(scroll_handle);
+
+        // Opening or closing the detail band moves every tile after it: a
+        // relayout. Closing it can bring tiles into view that were under the
+        // band, which the pane builds now, before the frame shows a gap: the
+        // band no longer counts from the moment the signal is written.
+        if let Some(ref d) = self.detail {
+            d.expanded.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                BindingLevel::Relayout,
+            );
+            let scroll_y = self.scroll_y.clone();
+            let handle = d.expanded.observe(move |_| leaves_buffer(scroll_y.get()));
+            ctx.own_handle(handle);
+        }
 
         // Column-count change (window resize reflow) → rebuild.
         {
@@ -334,6 +354,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 row + 1,
                 col + 1,
                 a11y_name,
+                self.detail.clone(),
             ));
 
             // A grid is *one* Tab stop — the 2-D cursor is the navigation.
@@ -519,7 +540,25 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 let scroll_y = self.scroll_y.clone();
                 let viewport_h = self.viewport_height.clone();
                 let viewport_w = self.viewport_width.clone();
+                let detail = self.detail.clone();
                 extra = extra.on_access_action(move |action, ctx| {
+                    // Disclosure for assistive technology, which has no
+                    // double click: the tile advertises the one that applies.
+                    if let Some(d) = detail.as_ref() {
+                        match action {
+                            teksilo_core::accesskit::Action::Expand => {
+                                d.expanded.set(Some(idx));
+                                return EventResponse::Handled;
+                            }
+                            teksilo_core::accesskit::Action::Collapse => {
+                                if d.expanded.get() == Some(idx) {
+                                    d.expanded.set(None);
+                                }
+                                return EventResponse::Handled;
+                            }
+                            _ => {}
+                        }
+                    }
                     if action == teksilo_core::accesskit::Action::ScrollIntoView {
                         let delta = strategy.scroll_delta_to_reveal(
                             idx,
@@ -786,8 +825,9 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         // shorter than the estimate previously left a gap at the bottom
         // until the next scroll). Request a pane rebuild for next
         // frame; the strategies' sub-pixel measurement epsilon
-        // guarantees convergence.
-        if measures {
+        // guarantees convergence. A detail band measured shorter than its
+        // estimate leaves the same gap.
+        if measures || self.detail.is_some() {
             let len = (self.len_fn)();
             let vr = self.strategy.visible_range(
                 self.scroll_y.get(),
@@ -805,8 +845,9 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             // thumb ratio BEFORE this measure pass. Re-place it next
             // frame when the total changed — otherwise content past the
             // estimated total stays unreachable until the next scroll.
+            // (The band is measured by the root, before its total.)
             let post_total = self.strategy.total_content_height(len, vp_w);
-            if (post_total - pre_total).abs() > 0.01 {
+            if measures && (post_total - pre_total).abs() > 0.01 {
                 self.total_refresh.set(self.total_refresh.get() + 1);
             }
         }

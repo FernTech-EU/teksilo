@@ -746,19 +746,33 @@ pub(crate) type SnapshotOutFn = Rc<dyn Fn(&[usize]) -> Box<dyn Fn()>>;
 #[derive(Clone)]
 pub struct RowAnchor {
     resolve: Rc<dyn Fn() -> Option<usize>>,
+    /// `false` for a [`fixed`](Self::fixed) anchor, which knows only the
+    /// index it was built with.
+    identity: bool,
 }
 
 impl RowAnchor {
     /// Build an identity-backed anchor from a resolver.
     pub(crate) fn new(resolve: Rc<dyn Fn() -> Option<usize>>) -> Self {
-        Self { resolve }
+        Self {
+            resolve,
+            identity: true,
+        }
     }
 
     /// An anchor for a source with no identity: always reports `index`.
     pub(crate) fn fixed(index: usize) -> Self {
         Self {
             resolve: Rc::new(move || Some(index)),
+            identity: false,
         }
+    }
+
+    /// Whether the anchor follows its row by the source's key. A fixed one
+    /// reports its index whatever happened to the row, which after a reset
+    /// says nothing about where the row went.
+    pub(crate) fn tracks_identity(&self) -> bool {
+        self.identity
     }
 
     /// The row's current flat index, or `None` if it no longer exists in the
