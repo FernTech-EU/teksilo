@@ -369,6 +369,30 @@ Override per-call (`Button::new(lit!("X")).style(MyStyle)`) or theme-wide
 (`theme.style_slots.button = Some(Rc::new(MyStyle))`). `ctx.theme_signal()` /
 `ctx.locale_signal()` exist for cases no role covers — use sparingly.
 
+### Fonts
+
+The bundled faces are Inter, and JetBrains Mono for the `mono` style. To
+use another face, register it on the app builder, before anything is shaped. A theme's
+typography or a text style then names it by its family name, the one in the font file's
+name table. A family that was never registered falls back to Inter without an error.
+
+```rust,ignore
+use std::sync::Arc;
+use teksilo::text::{FontFaceSpec, VecFontRegistrar};
+
+static LITERATA: &[u8] = include_bytes!("../fonts/Literata.ttf");
+
+let fonts = VecFontRegistrar::new(vec![FontFaceSpec {
+    data: Arc::new(LITERATA),  // shares the bytes compiled into the binary, no heap copy
+    is_default: false,         // `true` makes it the face of unstyled text
+    default_size_px: 14.0,     // read only for the default face
+}]);
+TeksiloAppBuilder::new()
+    .register_fonts(fonts)
+    // .theme(..).initial_window(..)
+    .run();
+```
+
 ## Animation
 
 Prefer the fluent `ctx.animate()` spec builder — it captures motion tokens and the
@@ -393,6 +417,135 @@ accessibility — use this for almost all UI transitions).
 `Spinner`, `Unroll` (the horizontal sibling of `Collapse` — `Unroll::new(expanded)`,
 `UnrollFrom::{Leading, Trailing}`). For overlays, `OverlayRequest::with_fade(duration)`
 wires fade-in/out automatically.
+
+## Timers and periodic work
+
+There is no timer type. Time-driven code runs in an effect on `ctx.frame_tick()`, and
+the widget tells the event loop when it next needs to wake. Otherwise the loop sleeps
+until the next input event: an idle window renders no frames at all.
+
+**Every N milliseconds while visible** (a clock, a playback position, a level meter):
+subscribe at that interval, and read the clock in the effect.
+
+```rust
+use std::cell::Cell;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+use teksilo::core::frame_tick_scheduler::FrameTickSubscription;
+use teksilo::prelude::*;
+use teksilo::widgets::TextWidget;
+
+const PERIOD: Duration = Duration::from_millis(100);
+
+#[derive(Debug, Default)]
+struct Elapsed {
+    root: Option<WidgetId>,
+    // Dropping the guard ends the subscription: keep it as long as the widget.
+    tick: Option<FrameTickSubscription>,
+}
+
+impl Widget for Elapsed {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let started = Instant::now();
+        let text = ctx.signal(String::from("0.0 s"));
+        let root = ctx.add(TextWidget::new(lit!("")).text(text.clone()));
+        let last = Rc::new(Cell::new(started));
+        ctx.effect(&ctx.frame_tick(), move |_| {
+            let now = Instant::now();
+            if now - last.get() >= PERIOD {
+                last.set(now);
+                text.set(format!("{:.1} s", (now - started).as_secs_f32()));
+            }
+        });
+        self.tick = Some(ctx.subscribe_frame_tick_throttled(PERIOD));
+        self.root = Some(root);
+        vec![root]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        self.root
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+}
+```
+
+- The effect also runs on every frame another widget asks for (a blinking caret, for
+  one), up to 60 Hz. Compare against the clock as above. Do not count ticks, and do not
+  add up the effect's argument: it is the frame delta, capped at 0.1 s.
+- The subscription follows visibility. In a hidden `Switcher` branch or a background tab
+  it stops waking the loop, and it resumes when the widget is shown again.
+
+**Once, at a deadline** (clear a "Saved" label after two seconds, debounce a search
+field): set the window's wake-up deadline from `ctx.wake_at_handle()` and act in the
+same kind of effect. Everything in the window shares that one deadline, a text caret's
+blink included. So keep the earlier of two deadlines when you set it, and set yours again
+from the effect when another one woke the loop first:
+
+```rust
+use std::cell::Cell;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+use teksilo::prelude::*;
+use teksilo::widgets::{Button, HStack, TextWidget};
+
+/// Wake at `at`, without postponing an earlier deadline set by another widget.
+fn wake_by(wake: &Cell<Option<Instant>>, at: Instant) {
+    wake.set(Some(match wake.get() {
+        Some(earlier) if earlier <= at => earlier,
+        _ => at,
+    }));
+}
+
+#[derive(Debug, Default)]
+struct SaveButton {
+    root: Option<WidgetId>,
+}
+
+impl Widget for SaveButton {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let wake = ctx.wake_at_handle();
+        let clear_at: Rc<Cell<Option<Instant>>> = Rc::new(Cell::new(None));
+        let status = ctx.signal(String::new());
+
+        let (tick_wake, tick_clear_at, tick_status) =
+            (wake.clone(), clear_at.clone(), status.clone());
+        ctx.effect(&ctx.frame_tick(), move |_| match tick_clear_at.get() {
+            Some(at) if Instant::now() >= at => {
+                tick_clear_at.set(None);
+                tick_status.set(String::new());
+            }
+            Some(at) => wake_by(&tick_wake, at), // another deadline woke the loop
+            None => {}
+        });
+
+        let label = TextWidget::new(lit!("")).text(status.clone());
+        let save = Button::new(lit!("Save")).on_activate_fn(move |_ctx| {
+            status.set("Saved".into());
+            let at = Instant::now() + Duration::from_secs(2);
+            clear_at.set(Some(at));
+            wake_by(&wake, at);
+        });
+        let root = ctx.add(HStack::new().spacing(8.0).child(save).child(label));
+        self.root = Some(root);
+        vec![root]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        self.root
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+}
+```
+
+**Work that does not depend on what is on screen** (polling a device, a download's
+progress) belongs on a worker thread that publishes its results: see **Live dashboards
+and background work** below. With the optional async executor and its `teksilo-tokio`
+or `teksilo-async-std` adapter, a `spawn_local` body can also `.await` that runtime's
+sleep (`cargo teksilo show docs/async.md`).
 
 ## Accessibility overrides
 
