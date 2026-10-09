@@ -105,8 +105,12 @@ impl<K: ItemKey> KeyedSelectionModel<K> {
     }
 
     /// Whether `key` is currently selected (O(1)).
+    ///
+    /// Read through a borrow rather than [`Signal::get`], which clones the
+    /// whole set: a view asks this once per position it shows, and a copy
+    /// per question made that the item count times the selection.
     pub fn is_selected(&self, key: &K) -> bool {
-        self.selection.get().contains(key)
+        self.selection.get_ref().contains(key)
     }
 
     /// The currently selected keys (unordered snapshot).
@@ -114,9 +118,10 @@ impl<K: ItemKey> KeyedSelectionModel<K> {
         self.selection.get().into_iter().collect()
     }
 
-    /// Number of selected items.
+    /// Number of selected items (O(1), through a borrow, as
+    /// [`is_selected`](Self::is_selected) reads).
     pub fn count(&self) -> usize {
-        self.selection.get().len()
+        self.selection.get_ref().len()
     }
 
     /// Select a single key, clearing previous selection and setting the anchor.

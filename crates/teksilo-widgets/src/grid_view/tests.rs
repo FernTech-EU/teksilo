@@ -3282,3 +3282,59 @@ fn a_waterfall_has_no_band() {
         "item 2 still stacks under item 0",
     );
 }
+
+/// A `ListModel`'s keys are its positions, and a reset keeps a position for
+/// whatever item lands there, so `replace_all` closes the band through
+/// `from_source` as it does through `new`, rather than leaving it open over
+/// another item.
+#[test]
+fn a_list_model_reset_closes_the_band_through_from_source_too() {
+    let model = ListModel::from_vec((0..12).collect::<Vec<usize>>());
+    let expanded = Signal::new(Some(4));
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(
+        GridView::from_source(model.clone(), |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .detail_row(|_tc| band_content())
+            .expanded_index(expanded.clone()),
+    );
+    settle(&mut tree, 400.0, 500.0);
+
+    model.insert(0, 99);
+    settle(&mut tree, 400.0, 500.0);
+    assert_eq!(expanded.get(), Some(5), "an insert is still followed");
+
+    model.replace_all((100..112).collect());
+    settle(&mut tree, 400.0, 500.0);
+    assert_eq!(
+        expanded.get(),
+        None,
+        "tile 5 is another item now; its position is not its identity"
+    );
+}
+
+/// The same through `from_source_keyed`: the band closes on the reset. The
+/// keyed selection keeps its keys, which for a `ListModel` are positions, so
+/// it stays on the same positions, as `ListView::from_source_keyed`'s does.
+#[test]
+fn a_list_model_reset_closes_the_band_under_a_keyed_selection() {
+    let model = ListModel::from_vec((0..12).collect::<Vec<usize>>());
+    let keyed = teksilo_data::KeyedSelectionModel::<usize>::new(SelectionMode::Multi);
+    let expanded = Signal::new(Some(4));
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(
+        GridView::from_source_keyed(model.clone(), keyed.clone(), |_tc| {
+            Box::new(FixedLeaf(100.0, 50.0))
+        })
+        .tile_size(100.0, 50.0)
+        .detail_row(|_tc| band_content())
+        .expanded_index(expanded.clone()),
+    );
+    settle(&mut tree, 400.0, 500.0);
+    keyed.select_keys([2, 4], false);
+
+    model.replace_all((100..112).collect());
+    settle(&mut tree, 400.0, 500.0);
+    assert_eq!(expanded.get(), None);
+    assert_eq!(sorted_keys(&keyed), vec![2, 4]);
+}

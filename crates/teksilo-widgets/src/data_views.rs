@@ -504,6 +504,52 @@ impl RowSelection {
         len: Rc<dyn Fn() -> usize>,
         contains_key: Rc<dyn Fn(&K) -> bool>,
     ) -> Self {
+        let prune: Rc<dyn Fn()> = {
+            let k = keyed.clone();
+            Rc::new(move || k.prune_missing(|key| contains_key(key)))
+        };
+        Self::keyed(keyed, key_at, len, prune)
+    }
+
+    /// [`from_keyed`](Self::from_keyed) for a flat source, whose keys are
+    /// exactly those `key_at` gives over `0..len()`: a key is still in the
+    /// source when some index maps to it.
+    ///
+    /// The prune after a removal or a reset gathers those keys into a set
+    /// once, the first time it is asked about one, rather than taking a
+    /// per-key `contains_key`. A per-key answer is a scan of the source, made
+    /// once for every selected key, which is the source's length times the
+    /// selection: a select-all over ten thousand tiles followed by one
+    /// removal was a hundred million key reads. A prune with nothing to ask
+    /// about (no selection, no anchor) reads no key at all.
+    pub(crate) fn from_keyed_flat<K: ItemKey>(
+        keyed: KeyedSelectionModel<K>,
+        key_at: Rc<dyn Fn(usize) -> Option<K>>,
+        len: Rc<dyn Fn() -> usize>,
+    ) -> Self {
+        let prune: Rc<dyn Fn()> = {
+            let (k, ka, l) = (keyed.clone(), key_at.clone(), len.clone());
+            Rc::new(move || {
+                let present: std::cell::OnceCell<std::collections::HashSet<K>> =
+                    std::cell::OnceCell::new();
+                k.prune_missing(|key| {
+                    present
+                        .get_or_init(|| (0..l()).filter_map(|i| ka(i)).collect())
+                        .contains(key)
+                });
+            })
+        };
+        Self::keyed(keyed, key_at, len, prune)
+    }
+
+    /// The keyed facade around `prune`, which drops the keys the source no
+    /// longer holds.
+    fn keyed<K: ItemKey>(
+        keyed: KeyedSelectionModel<K>,
+        key_at: Rc<dyn Fn(usize) -> Option<K>>,
+        len: Rc<dyn Fn() -> usize>,
+        prune: Rc<dyn Fn()>,
+    ) -> Self {
         let mode = keyed.mode();
         Self {
             mode,
@@ -607,20 +653,15 @@ impl RowSelection {
                 Rc::new(move |cb| k.selection_signal().observe(move |_| cb()))
             },
             on_change_fn: {
-                let (k, c) = (keyed.clone(), contains_key.clone());
+                let prune = prune.clone();
                 Rc::new(move |change| match change {
                     // Keys are stable across inserts / moves; only removals and
                     // resets can orphan a selected key.
-                    DataChange::ItemsRemoved { .. } | DataChange::Reset => {
-                        k.prune_missing(|key| c(key));
-                    }
+                    DataChange::ItemsRemoved { .. } | DataChange::Reset => prune(),
                     _ => {}
                 })
             },
-            prune_fn: {
-                let (k, c) = (keyed, contains_key);
-                Rc::new(move || k.prune_missing(|key| c(key)))
-            },
+            prune_fn: prune,
             // Keys already survive a version bump via `prune_fn` above —
             // there is no separate index range to clamp.
             prune_range_fn: Rc::new(|_count: usize| {}),

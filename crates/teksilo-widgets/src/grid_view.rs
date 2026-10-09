@@ -444,7 +444,7 @@ impl<T: 'static> GridView<T> {
         source: S,
         delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static,
     ) -> Self {
-        Self::create(ListSource::from_data_source(source), delegate)
+        Self::create(erase_source(Rc::new(source)), delegate)
     }
 
     /// Create a grid backed by any `ListDataSource` with **keyed** selection.
@@ -480,16 +480,12 @@ impl<T: 'static> GridView<T> {
             let s = s.clone();
             Rc::new(move || s.len()) as Rc<dyn Fn() -> usize>
         };
-        // Existence for the prune after a removal: the keys of the index space
-        // the grid shows, which a lazy source knows before its items load.
-        // The same scan `ListView::from_source_keyed` makes.
-        let contains = {
-            let s = s.clone();
-            Rc::new(move |k: &S::Key| (0..s.len()).any(|i| s.key_at(i).as_ref() == Some(k)))
-                as Rc<dyn Fn(&S::Key) -> bool>
-        };
-        let selection = RowSelection::from_keyed(keyed, key_at, len, contains);
-        let mut view = Self::create(ListSource::from_data_source_rc(s), delegate);
+        // Existence for the prune after a removal is the keys of the index
+        // space the grid shows, which a lazy source knows before its items
+        // load: what `ListView::from_source_keyed` asks too, gathered once per
+        // prune instead of scanned once per selected key.
+        let selection = RowSelection::from_keyed_flat(keyed, key_at, len);
+        let mut view = Self::create(erase_source(s), delegate);
         view.selection = Some(selection);
         view
     }
@@ -1200,7 +1196,10 @@ impl<T: 'static> GridView<T> {
     /// The band follows its tile when the tile moves. A source with item keys
     /// is followed through a sort or a filter (a reset); a source without
     /// them is followed through inserts, removals and moves, and closes the
-    /// band on a reset. The band closes when its tile is removed.
+    /// band on a reset. A [`ListModel`]'s keys are its positions, which
+    /// identify no item across a reset, so it counts as a source without
+    /// keys here, through [`from_source`](Self::from_source) as through
+    /// [`new`](Self::new). The band closes when its tile is removed.
     ///
     /// The band is measured height-for-width at the content width, or sized
     /// by [`detail_row_height`](Self::detail_row_height). It works with the
@@ -1323,6 +1322,23 @@ impl<T: 'static> std::fmt::Debug for GridView<T> {
     }
 }
 
+/// The grid's erasure of `source`.
+///
+/// A [`ListModel`] goes through the erasure [`GridView::new`] uses. Its keys
+/// are its positions (`ListModel::key_at(i)` is `i`), and a reset keeps a
+/// position for whatever item lands there, so they identify no tile: erased
+/// as a keyed source, they reported an anchor that tracks its tile, and a
+/// `replace_all` left the detail band open over another item. Every other
+/// source's keys are taken as identities.
+fn erase_source<T: 'static, S: teksilo_data::ListDataSource<Item = T>>(
+    source: Rc<S>,
+) -> ListSource<T> {
+    match (source.as_ref() as &dyn std::any::Any).downcast_ref::<ListModel<T>>() {
+        Some(model) => ListSource::from_model(model.clone()),
+        None => ListSource::from_data_source_rc(source),
+    }
+}
+
 /// In a single selection, move a cursor that is off the selection onto the
 /// selected tile. A grid with no cursor, or a selection on no tile this grid
 /// shows, leaves the cursor where it is. See
@@ -1349,7 +1365,8 @@ fn put_the_cursor_on_the_selection(
 /// when its tile is the one removed. A reset says nothing about where
 /// anything went; the tile is found again by its key when the source has
 /// keys (a sort or a filter of a `SortFilterListModel`), and the band closes
-/// when it has none, or when the tile is gone.
+/// when it has none (a `ListModel`'s positions count as none, see
+/// `erase_source`), or when the tile is gone.
 fn follow_the_disclosed_tile(
     detail: &detail::DetailState,
     anchor: Option<&crate::data_views::RowAnchor>,

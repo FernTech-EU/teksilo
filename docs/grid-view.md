@@ -125,6 +125,11 @@ The contract is `ListView::from_source_keyed`'s:
   keys;
 - an item the source no longer shows, removed or filtered out, leaves the
   selection;
+- a `ListModel`'s keys are its positions, so over a bare `ListModel` a keyed
+  selection stays on positions, through a `replace_all` too, as
+  `ListView::from_source_keyed`'s does; a `SortFilterListModel` over it keys
+  each item by its place in the model underneath, which a sort or a filter does
+  not change;
 - `.on_selection_changed(|set|)` still receives positions: those the selected
   keys have when the selection changes. A sort moves them without changing the
   selection, so it does not fire.
@@ -256,7 +261,10 @@ ignored there.
 **Following the tile.** An insert, a removal or a move keeps the band on its
 tile, and removing the tile closes it. A reset (a `SortFilterListModel` sort or
 filter, `ListModel::replace_all`) keeps it on its tile when the source has item
-keys, and closes it when the source has none or the tile is gone.
+keys, and closes it when the source has none or the tile is gone. A `ListModel`'s
+keys are its positions, which say nothing about where an item went, so a
+`ListModel` closes the band on a reset whether it is given to `new`,
+`from_source` or `from_source_keyed`.
 
 **Keyboard.** Enter or Space on the open tile closes it. ↓ from the open tile
 moves focus to the first focusable control in the band; ↑ there, when the
