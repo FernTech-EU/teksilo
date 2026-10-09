@@ -49,8 +49,12 @@ def sections(source):
         if title in result and title != 'Documentation':
             raise ValueError(f'Duplicate README heading: {title}')
         result[title] = ''.join(lines[start:end]).strip()
+    # Both are complete programs: the book's copies are compiled by the
+    # doc-guard tests, which take a fence marked on the line above it.
     examples = re.findall(r'```rust\n.*?```', source, re.DOTALL)
-    result['hello'], result['counter'] = examples[:2]
+    result['hello'], result['counter'] = (
+        f'<!-- compile-check -->\n{example}' for example in examples[:2]
+    )
     result['install'] = re.search(r'```sh\n.*?```', result['Getting started'], re.DOTALL)[0]
     return result
 
