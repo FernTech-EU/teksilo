@@ -76,6 +76,9 @@ cargo teksilo init                         # the harness, plus a teksilo brief f
   `//!` module header, its `pub` declarations with their `///` docs, and the
   builder methods from its inherent `impl` blocks — skipping trait plumbing and
   `pub(crate)` items. Names may be a type (`Button`) or a module (`button`).
+  Its closing **See also** names what that listing leaves out: `WidgetBuilder`
+  for a widget (handlers, `context_menu`, `access_*`) and the style protocol a
+  `.style(…)` takes. Look those up too before designing around either.
 - **`search`** is hybrid BM25 + semantic retrieval over the framework's
   hand-written guides (69 of them) and worked examples (56 crates). Neither reaches a
   consumer app any other way: the guides live in no crate, and every example is

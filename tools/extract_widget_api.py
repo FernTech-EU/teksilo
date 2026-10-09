@@ -1759,7 +1759,67 @@ def format_markdown(pf: ParsedFile) -> str:
 
     _emit_items_md(pf.items, out)
 
+    see_also = _see_also(pf)
+    if see_also:
+        out.extend(["## See also", "", *see_also, ""])
+
     return "\n".join(out).rstrip() + "\n"
+
+
+# A style protocol taken by a builder: `.style(style: impl SliderStyle)`, a
+# path-qualified `impl teksilo_core::styles::TabStyle`, or a stored
+# `Rc<dyn TabStyle>`.
+STYLE_TRAIT_RE = re.compile(r"\b(?:impl|dyn)\s+(?:\w+::)*([A-Z]\w*Style)\b")
+
+
+def _see_also(pf: ParsedFile) -> list[str]:
+    """The other lookups a file's API depends on, as Markdown bullets.
+
+    The listing holds inherent methods only, so two things a widget is
+    configured through never appear in it: the `WidgetBuilder` methods every
+    widget takes through a blanket impl (`on_tap`, `context_menu`,
+    `focusable`, the `access_*` overrides), and the methods of a style
+    protocol, which decide what a custom style can draw at all. A reader who
+    plans from the listing alone assumes both. Only the lookup output gets
+    this section; the catalog pages link the rustdoc instead.
+    """
+    structs = {it.name for it in pf.items if it.kind == "struct"}
+    # `impl Widget for X` can live in a submodule beside the file (`view/`
+    # beside `view.rs`), so the directory of the same name is read too.
+    sources = [pf.file_path]
+    submodules = pf.file_path.with_suffix("")
+    if submodules.is_dir():
+        sources += sorted(submodules.rglob("*.rs"))
+    widgets: set[str] = set()
+    for source in sources:
+        text = source.read_text(encoding="utf-8")
+        widgets |= {m.group(1) for m in WIDGET_IMPL_RE.finditer(text)}
+    widgets &= structs
+
+    defined_here = {it.name for it in pf.items if it.kind == "trait"}
+    signatures = [it.signature for it in pf.items]
+    signatures += [m.signature for it in pf.items for m in it.methods]
+    styles = {
+        m.group(1) for sig in signatures for m in STYLE_TRAIT_RE.finditer(sig)
+    } - defined_here
+
+    bullets: list[str] = []
+    if widgets and "WidgetBuilder" not in defined_here:
+        names = ", ".join(f"`{name}`" for name in sorted(widgets))
+        one = len(widgets) == 1
+        bullets.append(
+            f"- {names} {'is a widget' if one else 'are widgets'}, so "
+            f"{'it also takes' if one else 'they also take'} the `WidgetBuilder` "
+            "methods this listing leaves out: event handlers (`on_tap`, `on_key`, "
+            "`context_menu`, …), `focusable`, `cursor` and the `access_*` "
+            "overrides. Look up `WidgetBuilder` for them."
+        )
+    for style in sorted(styles):
+        bullets.append(
+            f"- `{style}` is the protocol a custom style implements, and a custom "
+            f"style can draw only what its methods allow. Look up `{style}`."
+        )
+    return bullets
 
 
 def _emit_items_md(items: list[Item], out: list[str]) -> None:
@@ -2652,6 +2712,11 @@ def run_self_tests() -> int:
     _test_density_images()
     _test_summary_scope()
     reg = build_registry()
+    slider = reg.module_to_file["slider"]
+    lookup = format_markdown(parse_file(slider, slider.stem, []))
+    assert "## See also" in lookup, "lookup output lost its See also section"
+    assert "`Slider` is a widget" in lookup, "WidgetBuilder pointer missing"
+    assert "Look up `SliderStyle`" in lookup, "style protocol pointer missing"
     fp = reg.module_to_file["button"]
     pf = parse_file(fp, fp.stem, reg.cfg_by_file.get(fp.resolve(), []))
 
