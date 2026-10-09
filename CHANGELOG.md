@@ -23,6 +23,20 @@ by crate for clarity, not because crates version independently.
 - `ShortcutBuilder::category_label` and `Shortcut::category_text`: a
   localized display text for a shortcut's category, beside the `category` key
   that keeps ordering and grouping stable across languages.
+- `EventContext::track_overlay_placement_by_content(content_id, f)`: an
+  overlay re-placed from its anchor's current bounds on every layout pass while
+  it is up, so it follows the anchor through scrolling, resizing and reflow.
+- `OverlayRequest::new(content_id, anchor, placement, dismiss)` and the
+  builders `.layer(..)`, `.parent_overlay(..)`, `.on_dismiss(..)`,
+  `.with_fade(..)` and `.inert()`. An inert overlay takes no input: pointer
+  input reaches what is under it, Escape closes it without being consumed, and
+  it never moves focus or closes when focus leaves its anchor.
+
+#### Canvas
+
+- `ImagePixels`, `Canvas::ensure_shared_image_registered(name, width, height,
+  Arc<[u8]>)` and `RasterIcon::shared_pixels()`: queue an image for upload
+  without copying its pixels.
 
 #### Widgets
 
@@ -31,8 +45,106 @@ by crate for clarity, not because crates version independently.
   sees and types "Fichier", not the key. The header of the group holding
   uncategorized shortcuts, "General", is now translated in every catalogue
   (`shortcut-settings-uncategorized`) instead of being English everywhere.
+- `GridView::from_source_keyed(source, keyed, delegate)`: a selection held by
+  item key, kept on the same tiles when the grid is sorted or filtered, or a
+  lazy source loads another window. Clicks, Ctrl/⌘- and Shift-clicks, the
+  keyboard and the rubber band all select keys.
+- `GridView::detail_row(|tile| …)`, `.expanded_index(signal)` and
+  `.detail_row_height(|i| …)`: a full-width detail band that opens under the
+  activated tile's row and pushes the following rows down, staying under its
+  tile when the column count changes. Enter or Space closes it, ↓ enters it
+  and ↑ returns to the tile; the tile reports its expanded state to assistive
+  technology and the band is a named group read after its row.
+- `ListView::sections(provider)`, `.section_header_delegate(..)`,
+  `.section_header_height(h)` and `.pinned_section_headers(true)`: group a list
+  under full-width header rows, with the same `SectionProvider` /
+  `grouping_sections` as `GridView`, and optionally keep the current group's
+  header pinned at the top. Headers scroll with the list in every row-height
+  mode, the keyboard steps over them, a control in a header is reached with
+  Tab, and every index the view takes or reports is still an item index.
+- `SectionProvider`: the section trait of `GridView` and `ListView` under a
+  name that is not the grid's. `GridSectionProvider` names the same trait.
+- `TreeTableView::full_width_row(|item| …)` and
+  `.full_width_row_delegate(|item, cx| …)`: draw chosen rows, such as group
+  rows, as one cell across every column. They still select, expand, drag and
+  answer type-ahead, and are one cell to the keyboard and to assistive
+  technology.
+- `TreeTableView::pinned_ancestors(depth)`: keep the ancestor rows of the first
+  visible row pinned under the header, pushed up as the next group arrives. A
+  click on one returns to its row.
+- `TableView` and `TreeTableView` `bind_sort`, `bind_column_widths`,
+  `bind_column_order` and `bind_filters`: use signals the application owns for
+  the sort, column widths, column order and filters, shared between views
+  without mirroring and never overwritten when a view is built.
+- `TableHeader` over `ColumnSpec`s: the table column header (resize, sort,
+  reorder, pinning, filter popover, column-header accessibility) as a widget of
+  its own, for rows an application lays out itself. `resolved_widths_signal()`
+  gives the width each column was laid out at. `TableView` and `TreeTableView`
+  are built on it.
+- `Slider::value_tooltip(|v| …)`: a value readout by the thumb, shown at once
+  while the slider is hovered, dragged or focused from the keyboard, following
+  the value and the thumb. It takes no input, and its text is also the slider's
+  accessible value.
+- `Slider::default_value(v)`: a double-click, or a "Reset to default"
+  accessibility action, resets the value to `v` and reports it through
+  `on_change`.
+
+#### cargo-teksilo
+
+- `cargo teksilo status` reports the agent instructions installed under the
+  home directory (a `User` line, `user_agents` in `--json`), and names the
+  command that refreshes a copy that differs from the installed tool's.
+
+### Changed
+
+- **Breaking (canvas):** `PendingImage::pixels` is an `ImagePixels`
+  (`Static(&'static [u8])` or `Shared(Arc<[u8]>)`), which dereferences to the
+  bytes, instead of a `Cow<'static, [u8]>`.
+- `ImageWidget`, raster and animated `IconWidget`s and rich-text inline images
+  no longer copy their pixels on every repaint or frame assembly, and a
+  `RasterIcon` clone shares its pixels.
+- Debug builds warn once when a window holds more than 256 image textures. The
+  documentation of `ImageWidget`, `RasterIcon` and the renderer states that an
+  image texture is kept until its window closes.
+- **Breaking (core):** `OverlayRequest` is `#[non_exhaustive]`. Build it with
+  `OverlayRequest::new(..)` and its builders; a struct literal no longer
+  compiles outside `teksilo-core`. Its fields stay public.
+- `SceneCard`'s Edit accessibility action has id 1000 instead of 0.
+- The skill `cargo teksilo` installs says which release it ships with, and
+  tells the agent how to refresh a copy installed for another release.
 
 ### Fixed
+
+#### Widgets
+
+- **Behaviour change:** `MinSize` forwards an unbounded axis unbounded and
+  applies its minimum to the child's answer. A `Checkbox` or `RadioButton` in
+  an `HStack` showed its label as "…".
+- A slider whose drag was cancelled no longer stays in its dragged state, and
+  a vertical slider reports its knob's target region where the knob is painted.
+- Dragging a `TableView` or `TreeTableView` column declared `.pinned(..)` into
+  the scrolling area unpins it.
+- `TreeTableView` rebuilds its header when its filters change, so the filter
+  glyph and the popover's text show a filter written from outside.
+- A `ListView`'s drop insertion line and its focus ring are drawn over the
+  rows, and the line is kept whole at the top and bottom of the viewport.
+
+#### Accessibility
+
+- `.access_custom_action(..)` adds to a widget's own custom actions instead of
+  replacing them, so an application's action no longer hides a widget's own
+  (a `SceneCard`'s Edit action).
+
+#### Documentation
+
+- The title-bar guide's quick start compiles again (it called a removed
+  `VStack::add_child`), and the guides' complete programs are now compiled by
+  the test suite.
+- The application guide pinned `teksilo = "=0.14.3"` inside the 0.15 crates.
+  It names the current release, each release rewrites the pin, and the docs.rs
+  copy of the guide matches the skill's again.
+- The tooltips guide imported `teksilo_widgets::tooltip`, a path an
+  application cannot name; it imports `teksilo::widgets::tooltip`.
 
 #### Menus
 
