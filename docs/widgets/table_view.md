@@ -989,7 +989,13 @@ are silently dropped on the next layout pass.
 
 #### `pub fn set_column_pinning(&self, col_id: &str, side: PinnedSide)`
 
-Pin or unpin a single column.
+Put a single column on `side`: `PinnedSide::Leading` or
+`PinnedSide::Trailing` pins it, `PinnedSide::None` unpins it, a
+column declared pinned (`Column::pinned`) included.
+
+Writes `column_pinning_signal` the way a
+header drag does: an entry for a column moved off its declared side,
+and none for a column put back on it.
 
 <a id="tableview-ensure_row_visible"></a>
 

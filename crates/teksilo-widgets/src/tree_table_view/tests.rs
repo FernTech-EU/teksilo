@@ -1613,6 +1613,21 @@ fn column_imperatives_write_their_signals() {
         "clearing the pin restores the order list's arrangement"
     );
 
+    // A column declared pinned unpins too: an entry while it is off its
+    // declared side, none once it is back.
+    let declared = TreeTableView::new(sample_tree())
+        .add_column(name_col().pinned(PinnedSide::Trailing))
+        .add_column(size_col());
+    assert_eq!(declared.display_order(), vec![1, 0]);
+    declared.set_column_pinning("name", PinnedSide::None);
+    assert_eq!(
+        declared.column_pinning_signal().get().get("name"),
+        Some(&PinnedSide::None)
+    );
+    assert_eq!(declared.display_order(), vec![0, 1]);
+    declared.set_column_pinning("name", PinnedSide::Trailing);
+    assert!(declared.column_pinning_signal().get().is_empty());
+
     tt.set_sort(Some("name"), SortDirection::Ascending);
     assert!(tt.sort_signal().get().is_some());
     tt.clear_sort();

@@ -13,6 +13,15 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Widgets
+
+- **`set_column_pinning(id, PinnedSide::None)` could not unpin a column
+  declared pinned** on a `TableView` or a `TreeTableView`: it put the column
+  back on its declared side. It now unpins it, as dragging the column out of
+  its pane does. Giving the column's declared side removes its override.
+
 ## [0.16.0] - 2026-10-09
 
 ### Added

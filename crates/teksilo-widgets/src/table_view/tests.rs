@@ -841,6 +841,34 @@ fn cycle_pinning_back_to_none_via_signal_clear() {
 }
 
 #[test]
+fn set_column_pinning_unpins_a_column_declared_pinned() {
+    // `id` declares Leading; the order list puts `name` first, so the
+    // unpinned pane shows where `id` lands once it leaves the leading one.
+    let tv = TableView::new(rows(3))
+        .add_column(id_col().pinned(super::PinnedSide::Leading))
+        .add_column(name_col());
+    tv.set_column_order(vec!["name".into(), "id".into()]);
+    assert_eq!(tv.display_order(), vec![0, 1]);
+
+    // Off its declared side: an entry, `None` included, as a drag writes.
+    tv.set_column_pinning("id", super::PinnedSide::None);
+    assert_eq!(
+        tv.column_pinning_signal().get().get("id").copied(),
+        Some(super::PinnedSide::None)
+    );
+    assert_eq!(
+        tv.display_order(),
+        vec![1, 0],
+        "unpinned, it follows the order"
+    );
+
+    // Back on its declared side: no entry.
+    tv.set_column_pinning("id", super::PinnedSide::Leading);
+    assert!(tv.column_pinning_signal().get().is_empty());
+    assert_eq!(tv.display_order(), vec![0, 1]);
+}
+
+#[test]
 fn column_order_signal_persists_after_data_change() {
     let model = rows(3);
     let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());

@@ -113,15 +113,22 @@ pub(crate) fn set_column_widths(
     }
 }
 
-/// Pin or unpin a single column. [`PinnedSide::None`] removes the override,
-/// reverting the column to its declared [`Column::pinned`].
+/// Put a single column on `side`, where `declared` is the side the column
+/// declares ([`Column::pinned`]; `PinnedSide::None` for an id the view does
+/// not declare).
+///
+/// The rule a header drag follows: the map holds an entry only for a column
+/// that is not on its declared side, [`PinnedSide::None`] included, so
+/// unpinning a column declared pinned writes `None` and putting a column
+/// back on its declared side removes its entry.
 pub(crate) fn set_column_pinning(
     signal: &Signal<HashMap<String, PinnedSide>>,
     col_id: &str,
     side: PinnedSide,
+    declared: PinnedSide,
 ) {
     let mut m = signal.get();
-    let changed = if matches!(side, PinnedSide::None) {
+    let changed = if side == declared {
         m.remove(col_id).is_some()
     } else {
         m.insert(col_id.to_string(), side) != Some(side)

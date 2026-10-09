@@ -1628,10 +1628,20 @@ impl<T: 'static> TreeTableView<T> {
         &self.column_pinning_signal
     }
 
-    /// Pin or unpin a single column. [`PinnedSide::None`] removes the
-    /// override, reverting the column to its declared pinning.
+    /// Put a single column on `side`: [`PinnedSide::Leading`] or
+    /// [`PinnedSide::Trailing`] pins it, [`PinnedSide::None`] unpins it, a
+    /// column declared pinned ([`Column::pinned`]) included.
+    ///
+    /// Writes [`column_pinning_signal`](Self::column_pinning_signal) the way a
+    /// header drag does: an entry for a column moved off its declared side,
+    /// and none for a column put back on it.
     pub fn set_column_pinning(&self, col_id: &str, side: PinnedSide) {
-        imperative::set_column_pinning(&self.column_pinning_signal, col_id, side);
+        let declared = self
+            .columns
+            .iter()
+            .find(|c| c.spec.id == col_id)
+            .map_or(PinnedSide::None, |c| c.spec.pinned);
+        imperative::set_column_pinning(&self.column_pinning_signal, col_id, side, declared);
     }
 
     /// Begin editing the cell `(row, col_id)`. Silently no-ops if `col_id`

@@ -1069,8 +1069,13 @@ each column's declared `Column::pinned`.
 
 #### `pub fn set_column_pinning(&self, col_id: &str, side: PinnedSide)`
 
-Pin or unpin a single column. `PinnedSide::None` removes the
-override, reverting the column to its declared pinning.
+Put a single column on `side`: `PinnedSide::Leading` or
+`PinnedSide::Trailing` pins it, `PinnedSide::None` unpins it, a
+column declared pinned (`Column::pinned`) included.
+
+Writes `column_pinning_signal` the way a
+header drag does: an entry for a column moved off its declared side,
+and none for a column put back on it.
 
 <a id="treetableview-begin_edit"></a>
 

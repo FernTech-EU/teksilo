@@ -1355,9 +1355,20 @@ impl<T: 'static> TableView<T> {
         imperative::set_if_changed(&self.column_order_signal, order);
     }
 
-    /// Pin or unpin a single column.
+    /// Put a single column on `side`: [`PinnedSide::Leading`] or
+    /// [`PinnedSide::Trailing`] pins it, [`PinnedSide::None`] unpins it, a
+    /// column declared pinned ([`Column::pinned`]) included.
+    ///
+    /// Writes [`column_pinning_signal`](Self::column_pinning_signal) the way a
+    /// header drag does: an entry for a column moved off its declared side,
+    /// and none for a column put back on it.
     pub fn set_column_pinning(&self, col_id: &str, side: PinnedSide) {
-        imperative::set_column_pinning(&self.column_pinning_signal, col_id, side);
+        let declared = self
+            .columns
+            .iter()
+            .find(|c| c.spec.id == col_id)
+            .map_or(PinnedSide::None, |c| c.spec.pinned);
+        imperative::set_column_pinning(&self.column_pinning_signal, col_id, side, declared);
     }
 
     /// Compute the visible column display order: a flat list of indices
