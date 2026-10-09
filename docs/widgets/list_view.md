@@ -21,6 +21,28 @@ deterministic per-row sizes), and **auto-measured** (`auto_item_height` —
 height-for-width measurement with scroll anchoring so content above the
 viewport stays put while estimates converge).
 
+## Sections
+
+`sections` groups the items under full-width header
+rows (a song list grouped by artist, a log grouped by day) from the same
+provider `GridView` takes, and
+`grouping_sections` builds one from runs of
+equal keys. The headers belong to the scrolled content: they are
+virtualized with the rows, counted in the scroll extent, and laid out in all
+three height modes, while being exactly
+`section_header_height` tall themselves
+(28 dp by default, as in `GridView`).
+`pinned_section_headers` keeps the
+header of the section at the top of the viewport pinned there, until the
+next section's header pushes it out.
+
+A header is not an item. Selection, activation, type-ahead, keyboard
+navigation, `scroll_to_index` and drag and drop all speak indices into the
+model, and the keys step over the headers. A drop on a header, or on the
+pinned copy of one, inserts at the boundary before its section's first
+item; the insertion line shows on which side of the header the dropped
+rows land (see `sections`).
+
 ## Pan to scroll
 
 The view installs `common::scrollable::ScrollableBehavior`,
@@ -52,6 +74,15 @@ says "row 147 of 200" rather than counting the realized window. The count
 sits on the container because AccessKit resolves an item's set size by
 walking up from it, unlike ARIA's per-item `aria-setsize`.
 
+A section header is a `Role::Heading` named by its section's title, placed
+just before the section's first realized row in the reading order. It is
+not an option, so it takes no position in the set and the rows keep theirs
+in the whole model. A header stays realized as long as any row of its
+section is, however far above the viewport it has scrolled, so the rows a
+screen reader can reach are always read under a heading naming their
+section. The pinned copy of a header is hidden from assistive technology,
+which reads that in-flow header instead.
+
 The container is the focusable node and rows deliberately are not. The
 container names the cursor's row as its active descendant, which is the row
 assistive technology calls current, and each row says through
@@ -60,7 +91,9 @@ row: the keys move them together, and a selection the application sets
 moves the cursor onto it. The row subtree is kept out of the Tab order, so a
 control the delegate puts in a row (the checkbox `StandardListItem` embeds,
 most often) never becomes a Tab stop of its own. Such a control publishes a
-keyboard toggle instead, which `Space` runs. Full
+keyboard toggle instead, which `Space` runs. A control in a section header
+has no cursor to be reached through, so it is a Tab stop while its header
+is on screen. Full
 keyboard navigation: arrows, Home, End, PageUp, PageDown (each moving the
 selection; in a multiple selection, Ctrl on an arrow or the accelerator on
 the others moves only the cursor), Shift for a range and Ctrl+Shift for an
@@ -97,7 +130,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `item_height`, `item_height_fn`, `auto_item_height`, `spacing`, `selection`, `realized_row_ids`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_activate`, `activate_on`, `row_tooltip_sticky`, `row_tooltip`, `row_rich_tooltip`, `row_composite_tooltip`, `type_ahead_label`, `type_ahead_timeout`, `show_scrollbar`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_to_index`, `ensure_index_visible`
+`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `item_height`, `item_height_fn`, `auto_item_height`, `spacing`, `sections`, `section_header_delegate`, `section_header_height`, `pinned_section_headers`, `selection`, `realized_row_ids`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_activate`, `activate_on`, `row_tooltip_sticky`, `row_tooltip`, `row_rich_tooltip`, `row_composite_tooltip`, `type_ahead_label`, `type_ahead_timeout`, `show_scrollbar`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_to_index`, `ensure_index_visible`
 
 ## API reference
 
@@ -189,7 +222,132 @@ churn while measurements settle, never incorrect layout.
 
 #### `pub fn spacing(mut self, spacing: f32) -> Self`
 
-Set spacing between items (default 0.0).
+Set spacing between items (default 0.0). With
+`sections` it also separates a section's last item
+from the next header; a header sits directly on its first item.
+
+#### `pub fn sections<P: SectionProvider>(mut self, provider: P) -> Self`
+
+Group the items into sections, with a full-width header row above each
+one. Takes the same provider as `GridView::sections`:
+`grouping_sections` partitions runs of
+equal keys, or implement `SectionProvider` yourself.
+
+Headers are rows of the scrolled content: they are virtualized with the
+items, counted in the scroll extent, and compose with all three
+row-height modes. They are not items. Every index the view takes or
+reports — selection, `on_activate`, type-ahead,
+`scroll_to_index`, drag and drop — is still an
+index into the model, and the arrow keys step from item to item over
+the headers.
+
+A drop on a header inserts at the boundary before its section's first
+item, as a drop on the lower half of the row above the header does:
+one index, two places on screen. Which section the dropped rows join is
+the provider's decision, made when it next counts. The insertion line
+assumes the counts survive the drop, as they do for
+`grouping_sections` and for any provider that does not read the items.
+Rows of this list dragged down from above the boundary then close the
+section before the header, since the source takes them out before
+putting them back, and the line is drawn above it. Rows dragged up from
+below, and rows dropped from another view, open the section after it,
+and the line is drawn under the header. A provider that groups by the
+items' content, such as the `ByArtist` provider below, puts a moved
+item in the section of its own key wherever it is dropped. With such a
+provider the line at a section boundary shows where in the list the
+rows go, not which section they join.
+
+The view reads the provider's counts again after every change the
+model reports, so a provider that derives them from the live model
+follows inserts, removals and resets. `grouping_sections` groups the
+model as it is when called; for a model that changes, derive the counts
+on demand instead:
+
+```rust
+# use teksilo_widgets::{ListView, SectionProvider};
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_data::ListModel;
+# use teksilo_i18n::lit;
+struct Song { artist: String, title: String }
+
+/// Runs of songs by the same artist, read from the model each time.
+struct ByArtist(ListModel<Song>);
+
+impl ByArtist {
+    fn runs(&self) -> Vec<(String, usize)> {
+        let mut runs: Vec<(String, usize)> = Vec::new();
+        for i in 0..self.0.len() {
+            let artist = self.0.with_item(i, |s| s.artist.clone()).unwrap_or_default();
+            match runs.last_mut() {
+                Some((last, count)) if *last == artist => *count += 1,
+                _ => runs.push((artist, 1)),
+            }
+        }
+        runs
+    }
+}
+
+impl SectionProvider for ByArtist {
+    fn section_count(&self) -> usize { self.runs().len() }
+    fn items_in_section(&self, s: usize) -> usize { self.runs()[s].1 }
+    fn section_title(&self, s: usize) -> String { self.runs()[s].0.clone() }
+    fn section_counts(&self) -> Vec<usize> {
+        self.runs().into_iter().map(|(_, count)| count).collect()
+    }
+}
+
+let songs = ListModel::from_vec(vec![
+    Song { artist: "Ada".into(), title: "One".into() },
+    Song { artist: "Ada".into(), title: "Two".into() },
+    Song { artist: "Bea".into(), title: "Three".into() },
+]);
+let _list = ListView::new(songs.clone(), |_i, song, _selected| {
+    Box::new(TextWidget::new(lit!(&song.title)))
+})
+.sections(ByArtist(songs))
+.pinned_section_headers(true);
+```
+
+#### `pub fn section_header_delegate( mut self, f: impl Fn(usize, &str) -> Box<dyn Widget> + 'static, ) -> Self`
+
+Build each section's header row from `(section_index, title)`, the
+title being the provider's. Without it a header is the title as plain
+text. The same signature as
+`GridView::section_header_delegate`.
+
+Whatever it builds, the row is published to assistive technology as a
+heading named by the title, so a text label in it that repeats the
+title should be hidden
+(`TextWidget::a11y_hidden`)
+or it is read twice; the default header hides its own.
+
+A control inside it is a Tab stop while the header is on screen. A
+control in a row is not, because the list's cursor reaches it (`Space`
+runs its keyboard toggle), and the cursor steps over headers. Tab then
+goes from the list to the controls of the headers in view, top to
+bottom. The `pinned copy` is a picture
+of the header and takes no Tab stop, and neither does the header it
+covers; arrowing to the section's first item brings that header back
+into view.
+
+#### `pub fn section_header_height(mut self, height: f32) -> Self`
+
+Height of each section header row (default 28, as in `GridView`).
+Headers are not measured, in any row-height mode: the delegate's
+widget is given exactly this height.
+
+#### `pub fn pinned_section_headers(mut self, enabled: bool) -> Self`
+
+Keep the header of the section holding the top of the viewport pinned
+there while its rows scroll beneath it; the next section's header
+pushes it up as it arrives. Rows revealed by the keyboard, by
+`ensure_index_visible` and by
+`scroll_to_index` stop below it.
+
+The pinned copy is drawn on an opaque surface and is hidden from
+assistive technology, which reads the section's own header instead. A
+drop on it is a drop on that header, and a control in it takes no Tab
+stop (see `section_header_delegate`).
 
 #### `pub fn selection(mut self, sel: SelectionModel) -> Self`
 
@@ -405,7 +563,13 @@ viewport. Clamped to the valid scroll range. Safe to call before
 the ListView has been laid out — the clamp will kick in on the
 first layout pass.
 
+With `sections`, the first item of a section brings
+its header to the top with it, and with
+`pinned_section_headers` every item
+stops below the pinned header.
+
 #### `pub fn ensure_index_visible(&self, index: usize)`
 
 Scroll the minimum distance needed to bring the given model
-index fully into the viewport. No-op if already visible.
+index fully into view. No-op if already visible. Sections are
+honoured as in `scroll_to_index`.

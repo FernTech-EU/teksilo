@@ -216,6 +216,7 @@
 - [Stepper](widgets/stepper.md)
 - [Switcher](widgets/switcher.md)
 - [TabBar](widgets/bar.md)
+- [TableHeader](widgets/table_header.md)
 - [TableView](widgets/table_view.md)
 - [TabWidget](widgets/tab_widget.md)
 - [TextInput](widgets/text_input.md)

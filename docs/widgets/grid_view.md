@@ -14,7 +14,6 @@ tiles currently visible (plus a buffer), reflows on resize, supports
 single / multi selection with 2D keyboard navigation, and is fully
 accessible (`Role::Grid` → `Role::GridCell`).
 
-The layout is pluggable via `GridLayoutStrategy`;
 The layout is pluggable via `GridLayoutStrategy`: the stock
 `UniformGrid` gives fixed tile size / fixed column count /
 adaptive min-width grids, `VariableRowGrid` sizes each row to its
@@ -30,6 +29,33 @@ GridView::new(model, |tc| {
 .spacing(8.0)
 .selection(selection_model)
 ```
+
+## Selection by position or by key
+
+`GridView::selection` takes a `SelectionModel`, which holds positions.
+A grid that is sorted or filtered under its selection, or fed by a lazy
+source, is built with `GridView::from_source_keyed` instead: a
+`KeyedSelectionModel` holds the source's keys, so the selection stays on
+the same items when they move. Both reach the grid through the facade the
+other data views use (`data_views::RowSelection`), which turns each click,
+key and rubber band into an index or a key.
+
+## The detail band
+
+`GridView::detail_row` gives a tile a full-width band that opens directly
+under the row holding it, the "album expansion" of a music library. The
+band is not a tile and not a row of the grid: a layout strategy wrapped
+around the grid's own (`detail::DetailRowStrategy`) moves everything below
+the open row down by the band, so virtualization, the scroll range, the
+focus ring and the rubber band account for it without knowing about it, and
+tiles keep their row and column numbers. The band widget is a child of this
+root rather than of the body pane, so it survives the pane's rebuilds on
+scroll and resize, and a lazy source loading a window. A waterfall has no
+rows and ignores it. See the module docs of `grid_view/detail.rs`.
+
+Focus inside the band is revealed like focus anywhere: this root answers
+the framework's `WidgetEvent::ScrollIntoView`, which a scroll container is
+sent when a descendant it clips takes focus.
 
 ## Pan to scroll
 
@@ -91,7 +117,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`from_source`, `enabled`, `sizing`, `tile_size`, `column_count`, `variable_row_heights`, `item_height`, `waterfall`, `column_spacing`, `row_spacing`, `spacing`, `content_inset`, `selection`, `on_selection_changed`, `marquee_selection`, `wrap_navigation`, `tab_traversal`, `show_scrollbar`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `ensure_index_visible`, `scroll_to_index`, `sections`, `section_header_delegate`, `section_header_height`, `pinned_section_headers`, `a11y_label`, `style`, `empty_view`, `loading_view`, `is_loading`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_item_drop`, `on_tile_activate`, `activate_on`, `tile_context_menu`, `type_ahead_label`, `tile_a11y_label`, `type_ahead_timeout`
+`from_source`, `from_source_keyed`, `enabled`, `sizing`, `tile_size`, `column_count`, `variable_row_heights`, `item_height`, `waterfall`, `column_spacing`, `row_spacing`, `spacing`, `content_inset`, `selection`, `on_selection_changed`, `marquee_selection`, `wrap_navigation`, `tab_traversal`, `show_scrollbar`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `ensure_index_visible`, `scroll_to_index`, `sections`, `section_header_delegate`, `section_header_height`, `pinned_section_headers`, `a11y_label`, `style`, `empty_view`, `loading_view`, `is_loading`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_item_drop`, `on_tile_activate`, `activate_on`, `tile_context_menu`, `type_ahead_label`, `tile_a11y_label`, `type_ahead_timeout`, `expanded_index`, `detail_row`, `detail_row_height`
 
 ## API reference
 
@@ -129,6 +155,25 @@ widget for each tile from a `TileContext`.
 #### `pub fn from_source<S: teksilo_data::ListDataSource<Item = T>>( source: S, delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static, ) -> Self`
 
 Create a grid backed by any `ListDataSource` (large / external data).
+
+#### `pub fn from_source_keyed<S: teksilo_data::ListDataSource<Item = T>>( source: S, keyed: KeyedSelectionModel<S::Key>, delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static, ) -> Self where S::Key: ItemKey,`
+
+Create a grid backed by any `ListDataSource` with **keyed** selection.
+
+The `KeyedSelectionModel<S::Key>` holds the selected items by the
+source's key, not by position, so a selection survives the grid being
+sorted (by artist, by year), narrowed by a filter, or a lazy source
+sliding its loaded window: it stays on the same items. Clicks,
+Ctrl/⌘-clicks, Shift-clicks, the keyboard and the rubber band all write
+keys. An item the source no longer shows (removed, or filtered out
+here) leaves the selection, as in `ListView`.
+
+`on_selection_changed` still reports
+indices: the positions the selected keys have when the selection
+changes. A sort moves them without changing the selection, so it does
+not fire. The view stays `GridView<T>`; the index↔key mapping is
+captured from the concrete source here. Mutually exclusive with
+`selection` (the last one set wins).
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
@@ -196,12 +241,16 @@ Inset from the scroll-content edge to the tiles.
 
 #### `pub fn selection(mut self, sel: SelectionModel) -> Self`
 
-Set the selection model (modes `None` / `Single` / `Multi`).
+Set the index-based selection model (modes `None` / `Single` /
+`Multi`). It holds positions: for a selection that stays on its items
+through a sort or a filter, build the grid with
+`from_source_keyed` instead.
 
 #### `pub fn on_selection_changed(mut self, f: impl Fn(&BTreeSet<usize>) + 'static) -> Self`
 
 Called whenever the selection set changes — including programmatic
-changes — with the new set of selected indices.
+changes — with the new set of selected indices. For a keyed selection
+these are the positions its keys have at that moment.
 
 #### `pub fn marquee_selection(mut self, enabled: bool) -> Self`
 
@@ -397,6 +446,76 @@ to its contents.
 
 Type-ahead reset timeout (default 500 ms; `ZERO` disables).
 
+#### `pub fn expanded_index(mut self, expanded: Signal<Option<usize>>) -> Self`
+
+The disclosed tile: `Some(index)` opens a full-width band under the
+row holding tile `index` (see `detail_row`),
+`None` closes it. The grid writes it when a tile is activated (not for
+a tile with nothing to disclose), and follows writes made from
+outside. Without this the grid keeps its own signal.
+
+#### `pub fn detail_row( mut self, f: impl Fn(&TileContext<'_, T>) -> Option<Box<dyn Widget>> + 'static, ) -> Self`
+
+The content of the detail band: the "album expansion" of a music
+library, a full-width band opened directly under the row that holds
+the activated tile.
+
+`f` receives the disclosed tile's `TileContext`, the same one the
+tile delegate gets, and returns the band's content, or `None` when the
+tile has nothing to disclose. It is also asked when a tile is
+activated, to learn whether it has anything, and its answer dropped,
+so it should be cheap and have no side effects. The band pushes the
+following rows down, and stays under its tile when a resize changes
+the column count.
+
+With a band, activating a tile (a click per
+`activate_on`, or Enter) opens it and scrolls it
+into view, and activating the open tile closes it;
+`on_tile_activate` still fires. A tile with
+nothing to disclose opens nothing. In a single selection, Enter also
+selects the tile whose band it opens, unless the application has an
+activation of its own; a multiple selection is left as it is. Space on
+the open tile closes it. ↓ from the open tile
+moves focus to the first focusable control in the band, scrolling it
+into view, and ↑ from there, when the control does not use it, returns
+to the tile. A band that closes with focus inside it hands focus back
+to the grid, on its tile. Arrows between tiles step over the band, and
+the rubber band selects no band.
+
+The band follows its tile when the tile moves. A source with item keys
+is followed through a sort or a filter (a reset); a source without
+them is followed through inserts, removals and moves, and closes the
+band on a reset. A `ListModel`'s keys are its positions, which
+identify no item across a reset, so it counts as a source without
+keys here, through `from_source` as through
+`new`. The band closes when its tile is removed.
+
+The band is measured height-for-width at the content width, or sized
+by `detail_row_height`. It works with the
+uniform grid, `variable_row_heights` and
+`sections`. A `waterfall` has no
+rows to put it under and ignores it. A band that opens, closes or
+moves above the viewport leaves the visible tiles where they are. Its
+content is rebuilt when the band moves to another tile, when its own
+tile's item arrives from a lazy source, and when the grid's rows
+change (an insert, a removal, a move, an update, a reset); a lazy
+source loading other windows leaves it as it is.
+
+Accessibility: the band is a `Role::Group`, read after its tile's
+row, named after its tile's `tile_a11y_label`,
+or labelled by the tile, or, with the tile outside the realized
+window, "Details of item N" in the user's language. Every tile carries
+an `expanded` state, `Expand` / `Collapse` actions and, while open, a
+`controls` relation to the band; a tile with nothing to disclose is
+offered as expandable too, since knowing otherwise means building its
+band, and stays collapsed. The grid's row and column counts and the
+tiles' positions do not count the band.
+
+#### `pub fn detail_row_height(mut self, f: impl Fn(usize) -> f32 + 'static) -> Self`
+
+The detail band's height for the tile at `index`, instead of measuring
+it. See `detail_row`.
+
 ## `pub enum GridTabTraversal`
 
 How Tab moves out of (or within) the grid.
@@ -409,6 +528,32 @@ pub enum GridTabTraversal { /* variants */ }
 
 - **`OutOfGrid`** — Tab releases focus to the next focusable widget in the window.
 - **`WithinGrid`** — Tab advances to the next tile (wrapping rows); Shift+Tab the previous.
+
+## `pub trait SectionProvider`
+
+Partitions a flat model into display sections.
+
+```rust
+pub trait SectionProvider: 'static { /* associated items below */ }
+```
+
+### Associated items
+
+#### `fn section_count(&self) -> usize;`
+
+Number of sections.
+
+#### `fn items_in_section(&self, section: usize) -> usize;`
+
+Number of items in `section`.
+
+#### `fn section_title(&self, section: usize) -> String;`
+
+Display title for `section`.
+
+#### `fn section_counts(&self) -> Vec<usize> { /* default implementation */ }`
+
+Per-section item counts, in order. Used by the layout strategy.
 
 ## `pub struct GroupingSections`
 

@@ -11,7 +11,8 @@ Sibling of `TableView` for tree-shaped data. Each row carries
 a depth level; one designated column (the *tree column*, defaulting to the first)
 shows a twist (chevron) and an indent gutter that toggles the row's children.
 Backed by a `SortFilterTreeModel<T>` so sort, filter, and expand state compose
-without extra bookkeeping. Shares the header, column, keyboard, and selection
+without extra bookkeeping. Shares the header (a hosted
+`TableHeader`), column, keyboard, and selection
 modules with `TableView`.
 
 Rows live in a `TreeBodyPane` — a sibling of the scrollbar — so buffer-exit /
@@ -46,10 +47,35 @@ For a tree whose identity is a domain key rather than a `NodeId`, use
 `KeyedTreeCheckedModel` instead — it
 survives a full re-source, which a `NodeId`-keyed set cannot.
 
+**Group rows that span the table, and the group kept in sight.** A tree
+whose upper levels are groups — songs under albums under artists — draws
+those rows as one band across every column with
+`full_width_row` and
+`full_width_row_delegate`, and
+keeps the groups being scrolled through pinned under the header with
+`pinned_ancestors`:
+
+```ignore
+let view = TreeTableView::from_projection(proxy)
+    .columns(columns)
+    .full_width_row(|row: &Row| !row.is_song())
+    .full_width_row_delegate(|row, _cx: &CellContext| {
+        Box::new(TextWidget::new(lit!(row.summary()))) as Box<dyn Widget>
+    })
+    .pinned_ancestors(2); // the artist, then the album
+```
+
+A band is still a row of the tree — it selects, drags, expands from its
+chevron and answers type-ahead — and one cell to the keyboard and to
+assistive technology. The pinned rows are copies, pushed up as the next
+group arrives, hidden from assistive technology, and every reveal stops
+below them. The two builders say the rest.
+
 ## Accessibility
 
 Root emits `Role::TreeGrid`; rows carry `set_level` + `set_expanded`.
-ArrowLeft / ArrowRight on the tree column collapse / expand.
+ArrowLeft / ArrowRight on the tree column collapse / expand. A full-width
+row holds one cell, spanning every column.
 
 ```ignore
 // Column delegates capture closures — use ignore.
@@ -83,7 +109,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`from_projection`, `from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_foreign_drop`, `activate_on`, `columns`, `tree_column`, `indent_per_level`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `selection_mode`, `selection`, `keyed_selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `stretch_last_column`, `a11y_label`, `show_internal_scrollbars`, `column_resize_policy`, `tab_traversal`, `edit_triggers`, `on_cell_edit_request`, `on_cell_edit_dismissed`, `on_row_activate`, `filter_mode`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_x_signal`, `max_scroll_x_signal`, `viewport_ratio_x_signal`, `sort_signal`, `filters_signal`, `column_widths_signal`, `column_order_signal`, `focused_cell_signal`, `editing_cell_signal`, `projection`, `expand`, `collapse`, `toggle`, `expand_all`, `collapse_all`, `set_focused_cell`, `clear_focused_cell`, `set_sort`, `set_filter`, `clear_filters`, `empty_view`, `clear_sort`, `scroll_to_row`, `ensure_row_visible`, `set_column_width`, `set_column_widths`, `set_column_order`, `column_pinning_signal`, `set_column_pinning`, `begin_edit`, `end_edit`
+`from_projection`, `from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_foreign_drop`, `activate_on`, `columns`, `tree_column`, `indent_per_level`, `full_width_row`, `full_width_row_delegate`, `pinned_ancestors`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `selection_mode`, `selection`, `keyed_selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `stretch_last_column`, `a11y_label`, `show_internal_scrollbars`, `column_resize_policy`, `tab_traversal`, `edit_triggers`, `on_cell_edit_request`, `on_cell_edit_dismissed`, `on_row_activate`, `filter_mode`, `bind_sort`, `bind_column_widths`, `bind_column_order`, `bind_filters`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_x_signal`, `max_scroll_x_signal`, `viewport_ratio_x_signal`, `sort_signal`, `filters_signal`, `column_widths_signal`, `column_order_signal`, `focused_cell_signal`, `editing_cell_signal`, `projection`, `expand`, `collapse`, `toggle`, `expand_all`, `collapse_all`, `set_focused_cell`, `clear_focused_cell`, `set_sort`, `set_filter`, `clear_filters`, `empty_view`, `clear_sort`, `scroll_to_row`, `ensure_row_visible`, `set_column_width`, `set_column_widths`, `set_column_order`, `column_pinning_signal`, `set_column_pinning`, `begin_edit`, `end_edit`
 
 ## API reference
 
@@ -199,8 +225,10 @@ A drop reparents/reorders the dragged node in the underlying
 `TreeModel` (top third of a row = Before, middle = Into / make-child,
 bottom = After). The move is cycle-guarded — dropping a node onto
 itself or into its own subtree is refused (no insertion line). Reorder
-is **suppressed while a sort is active**: with the visible order driven
-by the sort, a manual reorder would have no visible effect.
+is **suppressed while the view is sorted** by one of its own columns:
+with the visible order driven by the sort, a manual reorder would have
+no visible effect. A sort a shared `bind_sort`
+holds for a column this view lacks does not count.
 
 #### `pub fn exportable(mut self, mode: DragTransferMode) -> Self where T: Clone,`
 
@@ -298,6 +326,96 @@ first column.
 
 Override the per-depth indent in the tree column in logical pixels (default
 comes from the active `TableStyle`).
+
+#### `pub fn full_width_row(mut self, is_full_width: impl Fn(&T) -> bool + 'static) -> Self`
+
+Draw the rows whose item satisfies `is_full_width` as **one cell across
+every column** instead of a cell per column: a group row ("an artist ·
+12 songs | 3 albums | 52:10") over rows that fill the columns. What the
+band shows comes from
+`full_width_row_delegate`; without one
+it shows the tree column's own cell, laid across the row.
+
+Asked of the item, like the cell delegates; a row whose item is still
+loading is never full-width. The predicate is read on every build and
+on every key press, so keep it to a field test.
+
+The row stays a row of the tree in every other respect: it selects,
+activates, drags, takes drops and answers type-ahead as any row does,
+its chevron (indent and twist) sits in the band, and ←/→ act on it as
+on the tree column from any column: they collapse and expand it, and ←
+on a collapsed band moves up to its parent. In cell navigation the band
+is one cell: Home and End stay on it, Tab passes it as one stop, and no
+column of it opens an editor. The cursor keeps the column it arrived
+with, so stepping on to an ordinary row lands back in that column.
+
+The band is as wide as the columns together, or the row when they are
+wider, so beside columns narrower than the view it ends where a row's
+selection band, alternating tint and focus ring do. It stays in the
+viewport while the columns
+scroll sideways, so a group row stays readable; its chevron sits where
+the tree column's does with the columns unscrolled. Its height comes
+from the view's height mode like any row's: the uniform height, the
+`row_height_fn` callback, or, under
+`auto_row_height`, the band measured at its
+width.
+
+To assistive technology the row is unchanged (`Role::Row` with its
+level, expanded state and position) and holds one `Role::Cell`
+(`Role::GridCell` in the cell modes) at column 1, with a column span of
+every column and the band as its content.
+
+#### `pub fn full_width_row_delegate( mut self, delegate: impl Fn(&T, &CellContext) -> Box<dyn Widget> + 'static, ) -> Self`
+
+Build the band of a `full_width_row` from its
+item, as a `Column`'s delegate builds a cell. The context describes
+the band as the tree column, whose chevron it carries: `col_id` and
+`col_index` are the tree column's and `is_tree_column` is `true`;
+`is_focused` holds while the cursor is on the row, in any column, and
+`is_selected` while the row is selected (in a cell mode, while any of
+its cells is). The indent and the chevron are drawn before the
+delegate's widget, as in the tree column.
+
+Does nothing without `full_width_row`, which
+says which rows get it.
+
+#### `pub fn pinned_ancestors(mut self, depth: usize) -> Self`
+
+Keep the ancestor rows of the first visible row pinned under the
+header while the view scrolls, outermost first and at most `depth`
+levels of them: the "sticky scroll" of code editors, the artist and
+then the album over the songs. `0` (the default) pins nothing.
+
+A pinned row is pushed up by the next row at its level as that row
+arrives, as a pinned section header is, so it never covers a row it is
+not an ancestor of. It is a copy, drawn with the real row's cells (its
+band, for a `full_width_row`) at the real row's
+height, on the header's surface. The copy shows the row's content, not
+its selection or its focus, and its chevron is a picture. Under
+`auto_row_height` the copy measures the row,
+as the row does once laid out: an ancestor the view scrolled past
+without laying it out takes its height a frame after it is pinned, and
+a reveal made before then counts it at the estimate.
+
+A press on a pinned row does what a plain click on the real row would:
+it ends an open cell edit, selects the row and puts the cursor on it,
+activates it under `ActivateOn::SingleClick`,
+and scrolls it back into view, right under its own pinned ancestors. A
+double click on a copy does not activate it, and a press never reaches
+a control drawn inside the copy. A drop on a pinned row lands on the
+row it shows, and its indicator is drawn over the copy.
+
+Every reveal the view makes (the keyboard moving the cursor,
+`ensure_row_visible`,
+`scroll_to_row`, taking focus, the
+ScrollIntoView action) stops below the ancestors that would be pinned
+over the row, so a copy never covers the row the cursor is on.
+
+The copies are hidden from assistive technology and are not focusable;
+the real rows stay where they are in the tree, scrolled under the
+copies like any row off the top. The stack is re-derived on every
+layout, so an expand, a collapse, an insert or a re-source above or
+inside it shows on the next frame.
 
 #### `pub fn row_height(mut self, height: f32) -> Self`
 
@@ -456,6 +574,47 @@ state behind `Rc<RefCell>`, so calling `.filter_mode()` on a
 clone mutates the shared inner — effectively persisting the
 choice on `self.proxy`.
 
+#### `pub fn bind_sort(mut self, sort: Signal<Option<(String, SortDirection)>>) -> Self`
+
+Use `sort` as this view's sort state instead of a signal of its own:
+header clicks and `set_sort` write it, a write from
+anywhere else updates the header, and
+`sort_signal` returns it. Bind the same signal to
+the `SortFilterTreeModel` to re-sort the rows; one signal shared by
+both is what lets a projection keep its preset comparators while the
+header drives it.
+
+The view writes nothing into it until the user sorts; see
+`TableView`'s module docs, "Column state an
+application owns".
+
+#### `pub fn bind_column_widths(mut self, widths: Signal<HashMap<String, f32>>) -> Self`
+
+Use `widths` as this view's map of column id → width instead of a
+signal of its own: a resize drag and
+`set_column_width` write it, and a write from
+anywhere else resizes the columns. A column with no entry takes its
+declared width; an entry for a column the view lacks is ignored. A
+resize writes the resized column's entry alone; the `Flex` columns
+before it keep their widths in this view, not in the map.
+`column_widths_signal` returns it.
+
+#### `pub fn bind_column_order(mut self, order: Signal<Vec<String>>) -> Self`
+
+Use `order` as this view's column order instead of a signal of its
+own: a reorder drop and `set_column_order`
+write it, and a write from anywhere else reorders the columns. Ids the
+view lacks are skipped when it lays out and kept in place when it
+writes. `column_order_signal` returns it.
+
+#### `pub fn bind_filters(mut self, filters: Signal<HashMap<String, String>>) -> Self`
+
+Use `filters` as this view's per-column filter text instead of a
+signal of its own: the filter popover and
+`set_filter` write it, and
+`filters_signal` returns it. Bind the same
+signal to the `SortFilterTreeModel` to filter the rows.
+
 #### `pub fn scroll_y_signal(&self) -> &Signal<f32>`
 
 Current vertical scroll offset in logical pixels.
@@ -498,7 +657,9 @@ proxy.sort_signal(view.sort_signal().clone());
 
 The binding is deliberately not automatic: a projection may already
 carry preset comparators, predicates, and a filter mode, and adopting
-the view's empty signal at construction would clobber them.
+the view's empty signal at construction would clobber them. To share
+one signal between the two from the start, hand it to
+`bind_sort`; this returns the adopted signal then.
 
 #### `pub fn filters_signal(&self) -> &Signal<HashMap<String, String>>`
 
@@ -516,13 +677,21 @@ let proxy = SortFilterTreeModel::new(tree)
 proxy.filters_signal(view.filters_signal().clone());
 ```
 
+The signal adopted by `bind_filters`, if any.
+
 #### `pub fn column_widths_signal(&self) -> &Signal<HashMap<String, f32>>`
 
-Current column widths in logical pixels, keyed by column id.
+User-resized column widths in logical pixels, keyed by column id. The
+view writes entries only for a resize: the resized column's, and —
+when the map is its own — one for each `Flex` column before it, frozen
+at the width it had. A missing key means the declared width. The
+signal adopted by `bind_column_widths`, if
+any.
 
 #### `pub fn column_order_signal(&self) -> &Signal<Vec<String>>`
 
-Current column display order as a list of column ids.
+Current column display order as a list of column ids. The signal
+adopted by `bind_column_order`, if any.
 
 #### `pub fn focused_cell_signal(&self) -> &Signal<Option<(usize, usize)>>`
 
@@ -600,10 +769,16 @@ Clear the active sort.
 Scroll so that `row` is aligned to the top of the viewport. A no-op
 before the first layout pass.
 
+With `pinned_ancestors`, the top it is
+aligned to is the bottom of its own pinned ancestors.
+
 #### `pub fn ensure_row_visible(&self, row: usize)`
 
 Scroll the minimum distance needed to make `row` visible. A no-op
 before the first layout pass, when the viewport height is not yet known.
+
+With `pinned_ancestors`, "visible" means
+below the ancestors that would be pinned over it.
 
 #### `pub fn set_column_width(&self, col_id: &str, width: f32)`
 
@@ -649,6 +824,9 @@ target it already holds. `display_indices` is a cache `build()` fills,
 so a pre-mount call finds it empty; the order is recomputed on demand
 in that case rather than resolving against nothing and no-opping for a
 third, undocumented reason.
+
+A `full_width_row` has no cell of any column
+to edit, so a row that is one is a no-op too.
 
 #### `pub fn end_edit(&self)`
 

@@ -48,6 +48,35 @@ let volume = Signal::new(0.5_f32);
 let _w = Slider::new(volume, 0.0, 1.0).step(0.05);
 ```
 
+## Value readout and reset
+
+`value_tooltip` shows the value as text beside the
+thumb — "-3.0 dB" on an equalizer band — while the pointer is over the
+slider, while a drag is moving it, and while it has keyboard focus. It is up
+at once rather than after a hover delay, follows the thumb wherever the
+slider goes, and changes as the value does. It takes no input: a press or a
+hover on it belongs to what is under it, and Escape takes it down without
+keeping the key from the field the user pressed it for. The same text
+becomes the slider's accessible value, beside the number, so a reader that
+speaks a value's text says "-3.0 dB" rather than "-3".
+
+`default_value` adds a way back: a double-click on
+the slider, or the "Reset to default" accessibility action, puts the value
+back to the default, as a user change, so `on_change`
+reports it.
+
+```rust
+# use teksilo_core::signal::Signal;
+# use teksilo_i18n::lit;
+# use teksilo_widgets::Slider;
+let gain = Signal::new(0.0_f32);
+let _band = Slider::new(gain, -12.0, 12.0)
+    .step(0.5)
+    .label(lit!("Low shelf"))
+    .value_tooltip(|db| lit!(format!("{db:+.1} dB")))
+    .default_value(0.0);
+```
+
 ## Touch and pen
 
 A slider is a **continuous manipulator**: the value it produces *is* the
@@ -83,7 +112,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`on_change`, `step`, `page_step`, `orientation`, `enabled`, `variant`, `tick_count`, `style`, `label`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`on_change`, `step`, `page_step`, `orientation`, `enabled`, `variant`, `tick_count`, `style`, `label`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `value_tooltip`, `default_value`
 
 ## API reference
 
@@ -126,14 +155,11 @@ range. Use `orientation` to switch to vertical.
 #### `pub fn on_change( mut self, f: impl Fn(f32, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Run `f` for every value this control produces under the **user's**
-Set the discrete step size for keyboard arrows and accessibility
-Increment/Decrement actions. When unset, defaults to 1 % of the
-range.
-Run `f` for every value this control produces under the **user's**
 hand, with an `EventContext`, so it can do what a bare `Signal` write
 cannot (`ctx.send_intent(...)`, opening a window). Fires for a track
-click, for each step of a drag, for the arrows, and for an assistive
-technology's `Increment` / `Decrement` / `SetValue`.
+click, for each step of a drag, for the arrows, for an assistive
+technology's `Increment` / `Decrement` / `SetValue`, and for a reset to
+the `default_value`.
 
 **A drag fires this repeatedly** — once per value it actually produces,
 not once per pointer sample, since a write that changes nothing reports
@@ -146,6 +172,10 @@ Does **not** fire for programmatic writes to the bound signal — there is
 no event in flight to carry. Observe the signal for that.
 
 #### `pub fn step(mut self, step: f32) -> Self`
+
+Set the discrete step size for keyboard arrows and accessibility
+Increment/Decrement actions. When unset, defaults to 1 % of the
+range.
 
 #### `pub fn page_step(mut self, page_step: f32) -> Self`
 
@@ -199,7 +229,9 @@ Attach a plain single-line tooltip shown after a hover delay.
 Mutually exclusive with `rich_tooltip`,
 `rich_tooltip_content`, and
 `composite_tooltip` — the last setter
-wins and clears the others.
+wins and clears the others. Independent of
+`value_tooltip`, which neither replaces nor is
+replaced by any of them.
 
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
@@ -218,3 +250,59 @@ other tooltip setters.
 Attach a composite tooltip whose body is an arbitrary widget tree.
 Uses the heavier `tooltip_delay_heavy` delay. Mutually exclusive
 with the other tooltip setters.
+
+#### `pub fn value_tooltip(mut self, format: impl Fn(f32) -> LocalizedString + 'static) -> Self`
+
+Show the value as text by the thumb, formatted by `format`, while the
+slider is hovered, dragged, or focused from the keyboard.
+
+Unlike a `tooltip`, the readout is up at once, with no
+hover delay; a press does not close it, so it stays up through a drag;
+and it moves with the thumb and changes as the value does, without a
+rebuild. It sits above a horizontal slider's thumb, or below it near
+the top of the window, and beside a vertical slider, on the
+inline-start side when there is room, so it covers neither the thumb
+nor the track. It is re-placed on every layout pass from where the
+slider is then, so it follows a value the application writes, a scroll
+that moves the slider and a resize that stretches it.
+
+It takes no input of its own. A press or a hover on it reaches what is
+under it, and a press there closes a popover it is outside of. Escape
+hides it until the next hover, drag or key, and goes on to whatever
+else wanted the key, the focused field included, as a plain tooltip's
+Escape does. Focus leaving the slider takes it down only when nothing
+else holds it up: the pointer still on the slider keeps it.
+
+The text is also the slider's accessible value, published beside the
+number: UI Automation and macOS carry it, so a reader there says
+"-3.0 dB" rather than "-3". AT-SPI carries the number alone, so Orca
+keeps reading the number.
+
+`format` receives the value the bound signal holds, on every change to
+it. It returns a `LocalizedString`, so a `tr!(..)` message
+re-resolves on a locale change and `lit!(..)` serves text that is not
+translated.
+
+A `tooltip`, rich or composite tooltip set beside it
+keeps its hover delay, its place under the slider and the accessible
+description it gives, and both show; to name the control in the
+readout instead, say so in `format`.
+
+#### `pub fn default_value(mut self, value: f32) -> Self`
+
+Let the user put the value back to `value`: with a double-click on the
+slider, or with the "Reset to default" accessibility action, which this
+also advertises.
+
+The reset is a user change, written through the same path as a drag or
+an arrow key, so `on_change` reports it unless the
+value was already there. It is clamped to the range and not snapped to
+the `step`: a default between two steps lands where it
+was asked to. A double-click's first click jumps the value to where it
+landed, as every click on the track does, so `on_change` reports that
+value and then the default; further clicks in the same burst leave the
+default where it is. A disabled slider ignores the double-click, and
+neither offers nor takes the action.
+
+An application's own `.access_custom_action(..)` on the slider is
+offered beside the reset, not instead of it.

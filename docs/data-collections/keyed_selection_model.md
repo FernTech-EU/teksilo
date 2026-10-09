@@ -80,13 +80,18 @@ A clone of the selection signal for reactive binding.
 
 Whether `key` is currently selected (O(1)).
 
+Read through a borrow rather than `Signal::get`, which clones the
+whole set: a view asks this once per position it shows, and a copy
+per question made that the item count times the selection.
+
 #### `pub fn selected_keys(&self) -> Vec<K>`
 
 The currently selected keys (unordered snapshot).
 
 #### `pub fn count(&self) -> usize`
 
-Number of selected items.
+Number of selected items (O(1), through a borrow, as
+`is_selected` reads).
 
 #### `pub fn select(&self, key: K)`
 

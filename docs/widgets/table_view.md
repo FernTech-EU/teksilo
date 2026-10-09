@@ -20,6 +20,45 @@ the default fast path), exact per-row callback (`row_height_fn`), and
 auto-measured (`auto_row_height` — rows grow to their tallest cell,
 height-for-width). See docs/table-view.md "Row heights".
 
+The header strip is a `TableHeader` over the columns'
+`ColumnSpec`s, which this view and `TreeTableView`
+both compose and which works on its own over rows an application lays out
+itself.
+
+## Column state an application owns
+
+The sort, the column widths, the column order and the filters live in four
+signals the table publishes (`sort_signal()`, `column_widths_signal()`,
+`column_order_signal()`, `filters_signal()`). By default the table creates
+them. `bind_sort`,
+`bind_column_widths`,
+`bind_column_order` and
+`bind_filters` make the table adopt signals the
+application already holds instead, so several views, or a view-model, share
+one state without mirroring it.
+
+- **Adopting writes nothing.** The table never seeds an adopted signal: not
+  when it is built, mounted, laid out or rebuilt. What the signal holds is
+  what the table shows; an empty map, an empty list or `None` means the
+  declared defaults. The table writes only for a user gesture (a header
+  click, a resize drag, a reorder drop, the filter popover, an AccessKit
+  increment) or an imperative setter (`set_sort`, `set_column_widths`, …).
+- **Ids the table does not declare are ignored when read and kept when
+  written.** A width, a filter or an order entry for a column this table
+  lacks changes nothing here, and a reorder in this table moves the
+  dragged column and leaves every other entry where it was. A column with
+  no width entry takes its declared `ColumnWidth`.
+- **A resize writes one width into an adopted map.** The `Flex` columns
+  before the grip keep their widths, so the divider follows the pointer,
+  but in this table only: the widths they had here are not the widths
+  they have in a view of another size sharing the map. A table on its own
+  map writes them into it, so the map it persists matches what it shows.
+- **No feedback loop.** A view reacts to a change by relaying out or
+  rebuilding, never by writing back, so two views bound to the same signals
+  follow each other's edits and settle after one pass.
+- **Bind before any imperative setter.** A setter called earlier in the
+  builder chain wrote the table's own signal, which the bind replaces.
+
 ```ignore
 use teksilo_data::ListModel;
 use teksilo_widgets::table_view::{Column, ColumnWidth, TableView};
@@ -70,7 +109,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `columns`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `column_resize_policy`, `tab_traversal`, `edit_triggers`, `on_cell_edit_request`, `on_cell_edit_dismissed`, `on_row_activate`, `reorderable`, `reorderable_rows`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `activate_on`, `selection_mode`, `selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `stretch_last_column`, `a11y_label`, `show_internal_scrollbars`, `empty_view`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_x_signal`, `max_scroll_x_signal`, `viewport_ratio_x_signal`, `sort_signal`, `column_widths_signal`, `column_order_signal`, `column_pinning_signal`, `focused_cell_signal`, `set_focused_cell`, `clear_focused_cell`, `editing_cell_signal`, `begin_edit`, `end_edit`, `filters_signal`, `set_filter`, `clear_filters`, `scroll_to_row`, `set_sort`, `clear_sort`, `set_column_width`, `set_column_widths`, `set_column_order`, `set_column_pinning`, `ensure_row_visible`
+`from_source`, `from_source_keyed`, `enabled`, `overscroll_behavior`, `smooth_scrolling`, `type_ahead_label`, `type_ahead_timeout`, `smooth_scroll_duration`, `scroll_bar_style`, `add_column`, `columns`, `row_height`, `row_height_fn`, `auto_row_height`, `header_height`, `show_header`, `column_resize_policy`, `tab_traversal`, `edit_triggers`, `on_cell_edit_request`, `on_cell_edit_dismissed`, `on_row_activate`, `reorderable`, `reorderable_rows`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `activate_on`, `selection_mode`, `selection`, `cell_selection`, `alternating_rows`, `grid_lines`, `stretch_last_column`, `a11y_label`, `show_internal_scrollbars`, `empty_view`, `bind_sort`, `bind_column_widths`, `bind_column_order`, `bind_filters`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `scroll_x_signal`, `max_scroll_x_signal`, `viewport_ratio_x_signal`, `sort_signal`, `column_widths_signal`, `column_order_signal`, `column_pinning_signal`, `focused_cell_signal`, `set_focused_cell`, `clear_focused_cell`, `editing_cell_signal`, `begin_edit`, `end_edit`, `filters_signal`, `set_filter`, `clear_filters`, `scroll_to_row`, `set_sort`, `clear_sort`, `set_column_width`, `set_column_widths`, `set_column_order`, `set_column_pinning`, `ensure_row_visible`
 
 ## API reference
 
@@ -393,6 +432,52 @@ visible. Set to `false` when an external scroll bar is wired to
 
 Widget shown when the source is empty.
 
+#### `pub fn bind_sort(mut self, sort: Signal<Option<(String, SortDirection)>>) -> Self`
+
+Use `sort` as this table's sort state instead of a signal of its own:
+header clicks and `set_sort` write it, and a write
+from anywhere else updates the header. `sort_signal`
+returns it. Bind the same signal to a
+`SortFilterListModel` to re-sort
+the rows.
+
+The table writes nothing into it until the user sorts; see the module
+docs, "Column state an application owns", for the full contract.
+
+#### `pub fn bind_column_widths(mut self, widths: Signal<HashMap<String, f32>>) -> Self`
+
+Use `widths` as this table's map of column id → width instead of a
+signal of its own: a resize drag and
+`set_column_width` write it, and a write from
+anywhere else resizes the columns. A column with no entry takes its
+declared `ColumnWidth`; an entry for a column the table lacks is
+ignored. A resize writes the resized column's entry alone; the `Flex`
+columns before it keep their widths in this table, not in the map.
+`column_widths_signal` returns it.
+
+See the module docs, "Column state an application owns".
+
+#### `pub fn bind_column_order(mut self, order: Signal<Vec<String>>) -> Self`
+
+Use `order` as this table's column order instead of a signal of its
+own: a reorder drop and `set_column_order`
+write it, and a write from anywhere else reorders the columns. Ids the
+table lacks are skipped when it lays out and kept in place when it
+writes. `column_order_signal` returns it.
+
+See the module docs, "Column state an application owns".
+
+#### `pub fn bind_filters(mut self, filters: Signal<HashMap<String, String>>) -> Self`
+
+Use `filters` as this table's per-column filter text instead of a
+signal of its own: the filter popover and
+`set_filter` write it.
+`filters_signal` returns it. Bind the same
+signal to a `SortFilterListModel`
+to filter the rows.
+
+See the module docs, "Column state an application owns".
+
 #### `pub fn scroll_y_signal(&self) -> &Signal<f32>`
 
 Current vertical scroll offset in logical pixels.
@@ -425,7 +510,8 @@ horizontal scroll bar thumbs.
 
 Active sort: `Some((col_id, dir))` or `None` when unsorted.
 Mutated by header clicks (cycle: None → Asc → Desc → None) and by
-`set_sort` / `clear_sort`.
+`set_sort` / `clear_sort`. The
+signal adopted by `bind_sort`, if any.
 Bind a `SortFilterListModel` to
 drive a re-sort of the underlying data:
 
@@ -437,9 +523,11 @@ proxy.sort_signal(table.sort_signal().clone());
 
 #### `pub fn column_widths_signal(&self) -> &Signal<HashMap<String, f32>>`
 
-Map of column id → user-overridden width. A column id appears in
-this map only after the user resizes that column; missing keys
-mean "use the declared width policy".
+Map of column id → user-overridden width. The table writes entries
+only for a resize: the resized column's, and — when the map is its
+own — one for each `Flex` column before it, frozen at the width it
+had. Missing keys mean "use the declared width policy". The signal
+adopted by `bind_column_widths`, if any.
 
 #### `pub fn column_order_signal(&self) -> &Signal<Vec<String>>`
 
@@ -448,13 +536,15 @@ header to reorder, or imperatively via
 `set_column_order`. When empty, the
 declared order applies. Pinned-side groups (Leading / None /
 Trailing) are *always* honored — the entries inside this signal
-only re-sort within each group.
+only re-sort within each group. The signal adopted by
+`bind_column_order`, if any.
 
 #### `pub fn column_pinning_signal(&self) -> &Signal<HashMap<String, PinnedSide>>`
 
-Per-id pinning override map. A key here pins the column to that
-side; missing keys fall back to the declared `Column::pinned`.
-Updated when the user drags a column across a pane boundary.
+Per-id pinning override map. A key here puts the column on that side,
+`PinnedSide::None` unpinning a column declared pinned; missing keys
+fall back to the declared `Column::pinned`. Updated when the user
+drags a column across a pane boundary.
 
 #### `pub fn focused_cell_signal(&self) -> &Signal<Option<(usize, usize)>>`
 
@@ -506,6 +596,7 @@ Close the active cell editor without committing (the field's `on_blur` still fir
 Per-column filter text. Updated by filter affordances in
 header cells and by
 `set_filter` / `clear_filters`.
+The signal adopted by `bind_filters`, if any.
 Bind a `SortFilterListModel<T>` to drive the upstream data:
 
 ```ignore
@@ -760,6 +851,74 @@ Per-column-header context handed to a column's header delegate.
 ```rust
 pub struct ColumnContext { /* fields */ }
 ```
+
+## `pub struct ColumnSpec`
+
+What a column is to its header: id, title, width policy and the user
+gestures it allows — every part of a `Column` except how its cells are
+built.
+
+`TableHeader` takes a list of these, which is what
+lets an application put the table header over rows it lays out itself.
+A `Column<T>` carries one too and forwards its builders to it, so the
+two declare a column with the same calls and the same defaults.
+
+The id must be a **stable, unique string**: it is the key the sort, the
+filters, the width map and the column order use.
+
+```rust
+pub struct ColumnSpec { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn new(id: impl Into<String>, title: impl Into<LocalizedString>) -> Self`
+
+A column with a stable id and a localized title. Defaults: a
+`Flex(1.0)` width, resizable, reorderable, neither sortable nor
+filterable, unpinned.
+
+#### `pub fn width(mut self, w: ColumnWidth) -> Self`
+
+How the column's width is resolved. Default `Flex(1.0)`.
+
+#### `pub fn min_width(mut self, px: f32) -> Self`
+
+The narrowest the column resolves or resizes to. Default: the table
+style's `MIN_COLUMN_WIDTH_DEFAULT`.
+
+#### `pub fn max_width(mut self, px: f32) -> Self`
+
+The widest the column resolves or resizes to. Default: unbounded.
+
+#### `pub fn alignment(mut self, a: Alignment) -> Self`
+
+Horizontal alignment of the column's content. Default `Leading`.
+
+#### `pub fn resizable(mut self, b: bool) -> Self`
+
+Whether the header's divider grip resizes the column. Default `true`.
+
+#### `pub fn reorderable(mut self, b: bool) -> Self`
+
+Whether the header cell can be dragged to reorder the column.
+Default `true`.
+
+#### `pub fn sortable(mut self, b: bool) -> Self`
+
+Whether a click on the header cycles the sort. Default `false`.
+
+#### `pub fn filterable(mut self, b: bool) -> Self`
+
+Whether the header offers the filter popover. Default `false`.
+
+#### `pub fn pinned(mut self, side: PinnedSide) -> Self`
+
+Which side, if any, the column is pinned to. Default `None`.
+
+#### `pub fn id(&self) -> &str`
+
+Stable column id.
 
 ## `pub struct Column`
 

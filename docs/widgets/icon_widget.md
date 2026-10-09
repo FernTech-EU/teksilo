@@ -151,7 +151,8 @@ If decoding fails, logs the error in debug mode and produces an empty icon.
 #### `pub fn from_raster(icon: &RasterIcon, size: f32) -> Self`
 
 Create an icon from a pre-decoded `RasterIcon`.
-Accepts a reference — pixel data is copied internally.
+Accepts a reference — full-color mode shares the icon's pixels, and
+tintable mode keeps an alpha mask computed from them.
 
 The texture is named after the icon's identity, so every widget
 showing this icon (or a clone of it) in one mode shares one texture.

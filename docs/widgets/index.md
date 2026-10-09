@@ -182,6 +182,10 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 
 - [TabBar](bar.md) — `TabBar<T>` — header strip driven by a data source
 
+## TableView (submodule)
+
+- [TableHeader](table_header.md) — `TableHeader` — the column header strip of `TableView`
+
 ## TitleBar (submodule)
 
 - [DragRegion](drag_region.md) — `DragRegion` — flexible drag region inside a `TitleBar`
