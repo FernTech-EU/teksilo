@@ -21,12 +21,12 @@
 //! the slider's bounds on every layout pass, so a scroll, a resize or a reflow
 //! that moves the slider moves the readout with it.
 //!
-//! The surface takes no input at all. Its root is `hit_transparent` and
-//! `event_pass_through`, which makes the overlay *inert* to the tree: a press
-//! or a hover over the bubble belongs to whatever is under it, a press there is
-//! outside every overlay it is outside of, Escape retires it without being
-//! spent on it, and it neither records a focus to give back nor closes when
-//! focus leaves the slider. The slider alone decides when it goes.
+//! The surface takes no input at all, so the overlay is shown
+//! [inert](OverlayRequest::inert): a press or a hover over the bubble belongs
+//! to whatever is under it, a press there is outside every overlay it is
+//! outside of, Escape retires it without being spent on it, and it neither
+//! records a focus to give back nor closes when focus leaves the slider. The
+//! slider alone decides when it goes.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -106,15 +106,7 @@ impl Readout {
             TooltipWidget::bound(text)
                 // The slider's own node carries the same text as its value, so
                 // a reader reaching this one too would hear it twice.
-                .access_hidden(true)
-                // Both, on the root: `hit_transparent` takes the frame and the
-                // text inside it out of the hit test, which `event_pass_through`
-                // alone does not (the tree asks children first), and
-                // `event_pass_through` hands the point on to whatever is
-                // beneath. Together they make the overlay inert; see the module
-                // docs for what the tree does with that.
-                .hit_transparent(true)
-                .event_pass_through(true),
+                .access_hidden(true),
         );
         ctx.set_dormant(content);
 
@@ -177,7 +169,8 @@ impl Readout {
                 // being spent on it, the way it takes down a plain tooltip.
                 DismissBehavior::EscapeKey,
             )
-            .on_dismiss(self.on_dismiss()),
+            .on_dismiss(self.on_dismiss())
+            .inert(),
         );
         ctx.track_overlay_placement_by_content(self.content, self.follow());
     }

@@ -295,6 +295,10 @@ pub enum OverlayLayer {
 /// decide, and the builder methods for the rest. The fields stay public, so a
 /// request can still be adjusted after it is built: that is how a value that
 /// is already an `Option` is set, since the builders take the bare value.
+///
+/// Non-exhaustive, so that a field added later reaches every caller as its
+/// default instead of breaking each struct literal.
+#[non_exhaustive]
 pub struct OverlayRequest {
     /// The root widget of the overlay content.
     pub content_id: WidgetId,
@@ -321,6 +325,9 @@ pub struct OverlayRequest {
     /// reverses the tween and defers the actual stack removal by
     /// `duration`. Set with [`OverlayRequest::with_fade`].
     pub fade_duration: Option<Duration>,
+    /// The overlay takes no input. Set with [`OverlayRequest::inert`], which
+    /// says what that means.
+    pub inert: bool,
 }
 
 impl OverlayRequest {
@@ -341,6 +348,7 @@ impl OverlayRequest {
     /// - [`on_dismiss`](Self::on_dismiss()): `None`.
     /// - [`with_fade`](Self::with_fade): `None`, so the overlay appears and
     ///   goes without a fade.
+    /// - [`inert`](Self::inert()): `false`, an overlay that takes input.
     ///
     /// ```
     /// use std::time::Duration;
@@ -372,6 +380,7 @@ impl OverlayRequest {
             parent_overlay: None,
             on_dismiss: None,
             fade_duration: None,
+            inert: false,
         }
     }
 
@@ -413,6 +422,39 @@ impl OverlayRequest {
     /// instead.
     pub fn with_fade(mut self, duration: Duration) -> Self {
         self.fade_duration = Some(duration);
+        self
+    }
+
+    /// Make the overlay inert: something to look at, never to work. Default:
+    /// not inert.
+    ///
+    /// An inert overlay:
+    ///
+    /// - lets **pointer input** through to what is under it, whether that is
+    ///   another overlay or the window: a press or a hover over it is the
+    ///   press or the hover of the widget beneath, and a press there is
+    ///   outside every overlay it is outside of, so it still closes a
+    ///   click-outside popover;
+    /// - is **closed by Escape without consuming the key**, if its
+    ///   [`dismiss`](field@Self::dismiss) is one Escape closes
+    ///   ([`EscapeKey`](DismissBehavior::EscapeKey),
+    ///   [`EscapeOrClickOutside`](DismissBehavior::EscapeOrClickOutside),
+    ///   [`PointerLeave`](DismissBehavior::PointerLeave)); whatever its
+    ///   `dismiss`, [`Manual`](DismissBehavior::Manual) included, the key goes
+    ///   on to what it would have reached with the overlay gone;
+    /// - **never records or restores focus**: focus stays where it is when
+    ///   the overlay appears and when it goes;
+    /// - **does not close when focus leaves its anchor**: the code that raised
+    ///   it decides when it goes.
+    ///
+    /// For an overlay that only reports, such as a slider's value readout. It
+    /// is a property of the request, read once when the overlay is shown. The
+    /// content root's [`hit_transparent`](crate::widget_builder::WidgetBuilder::hit_transparent)
+    /// and [`event_pass_through`](crate::widget_builder::WidgetBuilder::event_pass_through)
+    /// keep their own meanings and play no part in it: an inert overlay needs
+    /// neither, and setting both does not make an overlay inert.
+    pub fn inert(mut self) -> Self {
+        self.inert = true;
         self
     }
 }
@@ -518,18 +560,14 @@ pub(crate) struct ActiveOverlay {
     /// manual) defer the actual removal until the fade-out tween
     /// completes.
     pub fade: Option<OverlayFadeState>,
-    /// The content takes no input at all: its root is both `hit_transparent`
-    /// and `event_pass_through`. Such an overlay is skipped by every question
-    /// the manager answers about the pointer — [`hit_test`](OverlayManager::hit_test),
-    /// outside-press dismissal, [`interactive_rects`](OverlayManager::interactive_rects)
-    /// — so a press or a hover over it belongs to what is beneath it, an
-    /// overlay included, and a press there is outside every overlay it is
-    /// outside of.
-    ///
-    /// Mirrored from the arena by the tree on every layout pass, which is also
-    /// the first point at which the overlay has bounds to be hit at (until
-    /// then it is `false` and cannot be hit anyway), and again before an
-    /// Escape is handled.
+    /// The request's [`inert`](OverlayRequest::inert) flag, copied when the
+    /// overlay is shown and never changed after. Such an overlay is skipped by
+    /// every question the manager answers about the pointer —
+    /// [`hit_test`](OverlayManager::hit_test), outside-press dismissal,
+    /// [`interactive_rects`](OverlayManager::interactive_rects) — so a press or
+    /// a hover over it belongs to what is beneath it, an overlay included, and
+    /// a press there is outside every overlay it is outside of. It is never
+    /// the Escape walk's target and never records a focus to restore.
     pub inert: bool,
     /// Re-derives [`placement`](Self::placement) from the anchor's bounds on
     /// every [`position_overlays`](OverlayManager::position_overlays). See
@@ -759,7 +797,7 @@ impl OverlayManager {
             shown_at_sim: now,
             on_dismiss: request.on_dismiss,
             fade: None,
-            inert: false,
+            inert: request.inert,
             placement_source: None,
         };
         // Sorted insert, not a push: an overlay goes above everything in a
@@ -1061,14 +1099,6 @@ impl OverlayManager {
         }
     }
 
-    /// Record whether an overlay's content takes any input. See
-    /// [`ActiveOverlay::inert`].
-    pub(crate) fn set_inert(&mut self, id: OverlayId, inert: bool) {
-        if let Some(overlay) = self.stack.iter_mut().find(|o| o.id == id) {
-            overlay.inert = inert;
-        }
-    }
-
     /// Update the parent-overlay link of an existing overlay. Used by the
     /// modal-presentation pipeline to retroactively attach the dialog
     /// scrim (pushed first, below the modal in the stack) to the modal
@@ -1293,11 +1323,10 @@ impl OverlayManager {
     ///   was swallowed, not forwarded to the menu underneath.
     ///
     /// `Manual` overlays still block the scan: they are modal-ish by
-    /// construction and own the keystroke. An *inert* one — content that takes
-    /// no input at all, its root both `hit_transparent` and
-    /// `event_pass_through` — owns nothing and is stepped over; the tree
-    /// retires the inert overlays Escape may close beforehand, without
-    /// spending the key.
+    /// construction and own the keystroke. An
+    /// [inert](OverlayRequest::inert) one owns nothing and is stepped over;
+    /// the tree retires the inert overlays Escape may close beforehand,
+    /// without spending the key.
     pub fn try_dismiss_top_on_escape(
         &mut self,
     ) -> Option<(OverlayId, Vec<WidgetId>, Option<WidgetId>)> {
@@ -1356,8 +1385,17 @@ impl OverlayManager {
     }
 
     /// Set the focus_restore target for the topmost overlay.
+    ///
+    /// Does nothing when that overlay is [inert](OverlayRequest::inert): it
+    /// takes no focus, so it has none to give back, and a target recorded
+    /// here would hand focus, when it went, to whatever held it when it
+    /// appeared, however long ago and wherever focus has been since. Every
+    /// show path records its restore target through this, so the rule is
+    /// kept here rather than at each of them.
     pub fn set_top_focus_restore(&mut self, focus_restore: WidgetId) {
-        if let Some(overlay) = self.stack.last_mut() {
+        if let Some(overlay) = self.stack.last_mut()
+            && !overlay.inert
+        {
             overlay.focus_restore = Some(focus_restore);
         }
     }
@@ -1488,8 +1526,9 @@ impl OverlayManager {
     }
 
     /// Screen rects of every overlay that is currently *interactive* —
-    /// open and not yet fading out, the same predicate
-    /// [`hit_test`](Self::hit_test) uses to route pointer events.
+    /// open, not yet fading out and not [inert](OverlayRequest::inert), the
+    /// same predicate [`hit_test`](Self::hit_test) uses to route pointer
+    /// events.
     /// Zero-area entries are skipped: an overlay shown this frame has
     /// not been through its first layout pass yet (`bounds ==
     /// Rect::ZERO`), and a degenerate rect must not be mistaken for a
@@ -1533,10 +1572,9 @@ impl OverlayManager {
     /// vanishing content (and suppress outside-click dismissal of the
     /// overlays beneath it) for the whole fade duration.
     ///
-    /// An *inert* overlay — its content root both `hit_transparent` and
-    /// `event_pass_through` — is skipped for the same reason, permanently:
-    /// nothing in it takes the point, so the point is asked of whatever is
-    /// beneath it, the next overlay down included.
+    /// An [inert](OverlayRequest::inert) overlay is skipped for the same
+    /// reason, permanently: nothing in it takes the point, so the point is
+    /// asked of whatever is beneath it, the next overlay down included.
     pub fn hit_test(&self, point: Point) -> Option<OverlayId> {
         for overlay in self.stack.iter().rev() {
             let fading_out = overlay
@@ -1942,6 +1980,7 @@ mod tests {
         assert_eq!(request.parent_overlay, None);
         assert!(request.on_dismiss.is_none());
         assert_eq!(request.fade_duration, None);
+        assert!(!request.inert);
 
         let callback: OverlayDismissCallback = Rc::new(|_, _| {});
         let request = request.layer(OverlayLayer::NativePopup);
@@ -1957,6 +1996,8 @@ mod tests {
         );
         let request = request.with_fade(Duration::from_millis(150));
         assert_eq!(request.fade_duration, Some(Duration::from_millis(150)));
+        let request = request.inert();
+        assert!(request.inert);
 
         // No builder reaches past its own field.
         assert_eq!(request.content_id, fake_id(10));
@@ -1965,6 +2006,8 @@ mod tests {
         assert!(matches!(request.dismiss, DismissBehavior::EscapeKey));
         assert_eq!(request.layer, OverlayLayer::NativePopup);
         assert_eq!(request.parent_overlay, Some(OverlayId::new(7)));
+        assert!(request.on_dismiss.is_some());
+        assert_eq!(request.fade_duration, Some(Duration::from_millis(150)));
     }
 
     #[test]

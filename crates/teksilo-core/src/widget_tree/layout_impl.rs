@@ -673,9 +673,6 @@ impl WidgetTree {
             );
         }
 
-        // Beside the bounds, which this pass is about to give every overlay:
-        // the manager's pointer queries read both.
-        self.refresh_overlay_inertness();
         let anchor_bounds = |id: WidgetId| -> Option<Rect> {
             self.arena.is_active(id).then(|| self.arena.bounds(id))
         };

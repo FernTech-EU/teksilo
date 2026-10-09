@@ -2887,20 +2887,12 @@ impl WidgetTree {
                 continue;
             }
             let current_focus = self.focused;
-            // Read before the request moves into the manager.
-            let inert = self.overlay_content_is_inert(req.content_id);
             self.overlay_manager.show(req);
             // Overlay show changes the AT tree shape — mirror the
             // `WidgetTree::show_overlay` path. The dismissal sibling
             // (`dismiss_overlay_with_ops`) already flips this.
             self.a11y_dirty = true;
-            // An inert overlay takes no focus, so it has none to give back: a
-            // restore target recorded here would hand focus, when the overlay
-            // went, to whatever held it when the overlay appeared, however
-            // long ago and wherever focus has been since.
-            if let Some(focus_id) = current_focus
-                && !inert
-            {
+            if let Some(focus_id) = current_focus {
                 self.overlay_manager.set_top_focus_restore(focus_id);
             }
         }
@@ -3467,9 +3459,24 @@ impl WidgetTree {
             return None;
         }
 
-        // Delegates to WidgetArena::hit_test_at_with_slop, which honors
-        // event_pass_through and clips_children correctly.
-        self.arena.hit_test_at_with_slop(point, exclude_widget, hit)
+        // The walk of the arena's roots honours event_pass_through and
+        // clips_children. An overlay's content is one of those roots, and an
+        // inert one is left out: the stack has stepped over it above, and a
+        // point over it with nothing beneath it on the stack would otherwise
+        // land in it here, wherever its root falls in the walk.
+        let mut roots = self.arena.roots();
+        let inert: Vec<WidgetId> = self
+            .overlay_manager
+            .stack
+            .iter()
+            .filter(|overlay| overlay.inert)
+            .map(|overlay| overlay.content_id)
+            .collect();
+        if !inert.is_empty() {
+            roots.retain(|root| !inert.contains(root));
+        }
+        self.arena
+            .hit_test_roots_with_slop(roots, point, exclude_widget, hit)
     }
 }
 

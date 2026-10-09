@@ -1017,13 +1017,24 @@ impl WidgetArena {
         exclude: Option<WidgetId>,
         hit: &HitContext<'_>,
     ) -> Option<WidgetId> {
-        let roots = self.roots();
+        self.hit_test_roots_with(&self.roots(), point, exclude, hit)
+    }
+
+    /// [`hit_test_at_with`](Self::hit_test_at_with) over `roots` alone, which
+    /// is a subset of [`roots`](Self::roots) in the same order.
+    fn hit_test_roots_with(
+        &self,
+        roots: &[WidgetId],
+        point: teksilo_canvas::Point,
+        exclude: Option<WidgetId>,
+        hit: &HitContext<'_>,
+    ) -> Option<WidgetId> {
         // Roots take the outset pre-pass too, so a grip that happens to be a
         // top-level node behaves like one nested anywhere else. The window is
         // its "parent", and the window does not clip — and, having no widget,
         // it vetoes nothing.
         let no_veto = |_: WidgetId| false;
-        if let Some(grip) = self.outset_hit(&roots, point, exclude, hit, &no_veto) {
+        if let Some(grip) = self.outset_hit(roots, point, exclude, hit, &no_veto) {
             return Some(grip);
         }
         for &root in roots.iter().rev() {
@@ -1051,8 +1062,21 @@ impl WidgetArena {
         exclude: Option<WidgetId>,
         hit: &HitContext<'_>,
     ) -> Option<WidgetId> {
-        let exact = self.hit_test_at_with(point, exclude, hit);
-        self.apply_slop(self.roots(), point, exclude, hit, exact)
+        self.hit_test_roots_with_slop(self.roots(), point, exclude, hit)
+    }
+
+    /// [`hit_test_at_with_slop`](Self::hit_test_at_with_slop) over `roots`
+    /// alone, which is a subset of [`roots`](Self::roots) in the same order:
+    /// neither pass looks inside a root left out.
+    pub(crate) fn hit_test_roots_with_slop(
+        &self,
+        roots: Vec<WidgetId>,
+        point: teksilo_canvas::Point,
+        exclude: Option<WidgetId>,
+        hit: &HitContext<'_>,
+    ) -> Option<WidgetId> {
+        let exact = self.hit_test_roots_with(&roots, point, exclude, hit);
+        self.apply_slop(roots, point, exclude, hit, exact)
     }
 
     /// [`hit_test_in_subtree`](Self::hit_test_in_subtree) with the slop pass,

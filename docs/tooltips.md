@@ -191,12 +191,11 @@ accessible description, and the readout's text is the slider's accessible
 value. See the `Slider` module documentation.
 
 The readout behaves like a plain tooltip where the rest of the window is
-concerned. Its surface takes no input (its root is `hit_transparent` and
-`event_pass_through`, which the tree treats as an *inert* overlay), so a press
-or a hover on the bubble belongs to whatever is under it, a press there still
-closes a click-outside popover it is outside of, and Escape takes it down
-without being spent on it: the field or dialog the user pressed Escape for
-still gets the key. It records no focus to give back, focus leaving the slider
+concerned. Its surface takes no input, so the slider shows it as an *inert*
+overlay (`OverlayRequest::inert`): a press or a hover on the bubble belongs to
+whatever is under it, a press there still closes a click-outside popover it is
+outside of, and Escape takes it down without being spent on it: the field or
+dialog the user pressed Escape for still gets the key. It records no focus to give back, focus leaving the slider
 does not close it while the pointer is still on the slider, and it is
 re-placed from the slider's bounds on every layout pass, so a scroll or a
 resize carries it along.
@@ -497,10 +496,11 @@ dwells are cleared each pass rather than left to ripen into a stray overlay.
 Escape-dismissible overlay instead of consulting only the top. That satisfies
 WCAG 2.2 SC 1.4.13(a) *Dismissible* for hover content, and stops a tooltip
 raised over an open menu from swallowing the keystroke meant for the menu
-underneath. `Manual` overlays remain opaque to the scan. An *inert* overlay
-(content root both `hit_transparent` and `event_pass_through`, such as the
-slider's value readout) is never the scan's target: it is retired before the
-scan, without consuming the key, as a shown tooltip is.
+underneath. `Manual` overlays remain opaque to the scan. An overlay shown
+*inert* (`OverlayRequest::inert`, such as the slider's value readout) is never
+the scan's target, whatever its `DismissBehavior`: it is retired before the
+scan, without consuming the key, as a shown tooltip is, if its
+`DismissBehavior` is one Escape closes.
 
 ### Waking the event loop
 

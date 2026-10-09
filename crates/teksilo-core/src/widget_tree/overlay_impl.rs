@@ -906,7 +906,7 @@ impl WidgetTree {
     ///   focus rests on its *anchor*, which is the normal state of a
     ///   focus-promoted tip. Judging it by content alone would kill it the
     ///   moment it appeared.
-    /// * An **inert** overlay (see [`Self::overlay_content_is_inert`]) — a value
+    /// * An [**inert**](crate::overlay::OverlayRequest::inert) overlay — a value
     ///   readout over a slider, say. Nothing in it can hold focus or be worked
     ///   from the keyboard, so it is not a disclosure focus can walk out of,
     ///   and the widget that raised it decides when it goes, as a tooltip's
@@ -932,7 +932,7 @@ impl WidgetTree {
         if overlay.is_dismissing() {
             return false;
         }
-        if self.overlay_content_is_inert(overlay.content_id) {
+        if overlay.inert {
             return false;
         }
         !self
@@ -1628,40 +1628,7 @@ impl WidgetTree {
         self.tooltip_pointer_press(None);
     }
 
-    /// Whether the overlay content rooted at `content_id` takes no input at
-    /// all: its root is both `hit_transparent` (nothing in the subtree is a
-    /// target) and `event_pass_through` (what it does not claim belongs to
-    /// whatever is behind it). See [`ActiveOverlay::inert`](crate::overlay::ActiveOverlay::inert).
-    ///
-    /// Either flag alone keeps its own meaning: a pass-through root still has
-    /// targets among its children, and a merely hit-transparent one is a hole
-    /// in the hit test that nothing behind it is asked about.
-    pub(super) fn overlay_content_is_inert(&self, content_id: WidgetId) -> bool {
-        self.arena
-            .get(content_id)
-            .is_some_and(|node| node.hit_transparent && node.event_pass_through)
-    }
-
-    /// Mirror every overlay's inertness from its content root onto the stack,
-    /// where the manager's pointer queries read it.
-    pub(super) fn refresh_overlay_inertness(&mut self) {
-        let flags: Vec<(crate::overlay::OverlayId, bool)> = self
-            .overlay_manager
-            .stack
-            .iter()
-            .map(|overlay| {
-                (
-                    overlay.id,
-                    self.overlay_content_is_inert(overlay.content_id),
-                )
-            })
-            .collect();
-        for (id, inert) in flags {
-            self.overlay_manager.set_inert(id, inert);
-        }
-    }
-
-    /// Retire every inert overlay Escape may close, without consuming the key
+    /// Retire every [inert](crate::overlay::OverlayRequest::inert) overlay Escape may close, without consuming the key
     /// and without moving focus.
     ///
     /// [`tooltip_escape_pressed`](Self::tooltip_escape_pressed)'s rule for
@@ -1672,8 +1639,6 @@ impl WidgetTree {
     /// 1.4.13), and this is what dismisses it. Runs ahead of the stack's own
     /// Escape walk, which steps over inert overlays.
     pub(super) fn inert_overlays_escape_pressed(&mut self, ops: &mut dyn crate::window::WindowOps) {
-        // Shown since the last layout, perhaps: the flag is mirrored there.
-        self.refresh_overlay_inertness();
         let dismissed = self.overlay_manager.dismiss_inert_on_escape();
         if !dismissed.is_empty() {
             self.dormant_dismissed_content(&dismissed, &mut *ops);
@@ -3773,39 +3738,53 @@ mod tests {
     }
 
     /// A 100 x 60 panel at (20, 20), and above it on the stack a 60 x 40
-    /// overlay at `inert_at` whose content takes no input. Returns the tree,
-    /// the panel's content and the inert content.
+    /// overlay of `top` at `top_at`, shown [inert](crate::overlay::OverlayRequest::inert)
+    /// when `inert` says so. Returns the tree, the panel's content and `top`.
+    fn panel_and_an_overlay_above(
+        panel_dismiss: crate::overlay::DismissBehavior,
+        top: impl Widget + 'static,
+        top_dismiss: crate::overlay::DismissBehavior,
+        top_at: Point,
+        inert: bool,
+    ) -> (WidgetTree, WidgetId, WidgetId) {
+        let mut tree = WidgetTree::new();
+        let panel = tree.add(Block(100.0, 60.0));
+        let top = tree.add(top);
+        // Added last, so a walk of the arena's roots, back to front, reaches
+        // the window before either overlay's content: only the stack can say
+        // the panel is above it.
+        let beneath = tree.add(FillWidget::new());
+        tree.show_overlay(crate::overlay::OverlayRequest::new(
+            panel,
+            beneath,
+            crate::overlay::OverlayPlacement::AtPointer(Point::new(20.0, 20.0)),
+            panel_dismiss,
+        ));
+        let request = crate::overlay::OverlayRequest::new(
+            top,
+            beneath,
+            crate::overlay::OverlayPlacement::AtPointer(top_at),
+            top_dismiss,
+        );
+        tree.show_overlay(if inert { request.inert() } else { request });
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        (tree, panel, top)
+    }
+
+    /// [`panel_and_an_overlay_above`] with a plain block shown inert: nothing
+    /// but the request makes it so.
     fn panel_and_an_inert_overlay(
         panel_dismiss: crate::overlay::DismissBehavior,
         inert_dismiss: crate::overlay::DismissBehavior,
         inert_at: Point,
     ) -> (WidgetTree, WidgetId, WidgetId) {
-        use crate::widget_builder::WidgetBuilder;
-
-        let mut tree = WidgetTree::new();
-        let panel = tree.add(Block(100.0, 60.0));
-        let inert = tree.add(
-            Block(60.0, 40.0)
-                .hit_transparent(true)
-                .event_pass_through(true),
-        );
-        // Added last, so a walk of the arena's roots, back to front, reaches
-        // the window before either overlay's content: only the stack can say
-        // the panel is above it.
-        let beneath = tree.add(FillWidget::new());
-        for (content, at, dismiss) in [
-            (panel, Point::new(20.0, 20.0), panel_dismiss),
-            (inert, inert_at, inert_dismiss),
-        ] {
-            tree.show_overlay(crate::overlay::OverlayRequest::new(
-                content,
-                beneath,
-                crate::overlay::OverlayPlacement::AtPointer(at),
-                dismiss,
-            ));
-        }
-        tree.layout(SizeProposal::exact(400.0, 200.0));
-        (tree, panel, inert)
+        panel_and_an_overlay_above(
+            panel_dismiss,
+            Block(60.0, 40.0),
+            inert_dismiss,
+            inert_at,
+            true,
+        )
     }
 
     #[test]
@@ -3886,38 +3865,185 @@ mod tests {
     }
 
     #[test]
-    fn an_inert_overlay_records_no_focus_to_give_back() {
+    fn an_inert_overlay_over_the_window_hands_the_point_to_the_window() {
+        // No overlay beneath to take the point, so it goes to the walk of the
+        // arena's roots, and the inert content is a root that walk reaches
+        // first: added after the page, it is walked before it.
+        let mut tree = WidgetTree::new();
+        let page = tree.add(FillWidget::new());
+        let inert = tree.add(Block(60.0, 40.0));
+        tree.show_overlay(
+            crate::overlay::OverlayRequest::new(
+                inert,
+                page,
+                crate::overlay::OverlayPlacement::AtPointer(Point::new(200.0, 100.0)),
+                crate::overlay::DismissBehavior::EscapeKey,
+            )
+            .inert(),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let at = Point::new(220.0, 110.0);
+        assert!(
+            tree.overlay_content_bounds(tree.overlay_manager.find_by_content(inert).unwrap())
+                .unwrap()
+                .contains(at),
+            "fixture: the inert overlay covers the point"
+        );
+        assert_eq!(tree.hit_test(at), Some(page));
+        tree.pointer_move(at);
+        assert_eq!(tree.hovered(), Some(page), "and so does a hover");
+    }
+
+    #[test]
+    fn a_root_that_is_hit_transparent_and_pass_through_is_not_inert() {
         use crate::widget_builder::WidgetBuilder;
 
-        let mut tree = WidgetTree::new();
-        let field = tree.add(FillWidget::new().focusable());
-        let inert = tree.add(
+        // The two node flags keep their own meanings, and an overlay is inert
+        // only when its request says so. Each assertion is the counterpart of
+        // one of the inert tests above.
+        let flagged = || {
             Block(60.0, 40.0)
                 .hit_transparent(true)
-                .event_pass_through(true),
+                .event_pass_through(true)
+        };
+        let at = Point::new(220.0, 110.0);
+
+        let (mut tree, panel, top) = panel_and_an_overlay_above(
+            crate::overlay::DismissBehavior::ClickOutside,
+            flagged(),
+            crate::overlay::DismissBehavior::Manual,
+            Point::new(200.0, 100.0),
+            false,
         );
-        let ordinary = tree.add(Block(60.0, 40.0));
-        tree.layout(SizeProposal::exact(400.0, 200.0));
-        tree.focus(field);
-        let mut noop = crate::window::NoopWindowOps;
-        for content in [inert, ordinary] {
-            tree.run_with_event_context(&mut noop, |ctx| {
-                ctx.show_overlay(crate::overlay::OverlayRequest::new(
+        let over = tree.overlay_manager.find_by_content(top).unwrap();
+        assert!(
+            tree.overlay_content_bounds(over).unwrap().contains(at),
+            "fixture: the press lands on the flagged overlay"
+        );
+        assert_eq!(
+            tree.overlay_manager.hit_test(at),
+            Some(over),
+            "the stack still answers with the overlay"
+        );
+        assert_eq!(
+            tree.overlay_manager.interactive_rects().len(),
+            2,
+            "which is an interactive rect"
+        );
+        tree.pointer_down_button(at, crate::event::PointerButton::Primary);
+        tree.pointer_up_button(at, crate::event::PointerButton::Primary);
+        assert!(
+            tree.overlay_manager.find_by_content(panel).is_some(),
+            "a press on it is inside the stack, so the panel beneath stays"
+        );
+
+        let (mut tree, panel, top) = panel_and_an_overlay_above(
+            crate::overlay::DismissBehavior::EscapeKey,
+            flagged(),
+            crate::overlay::DismissBehavior::Manual,
+            Point::new(200.0, 100.0),
+            false,
+        );
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        assert!(
+            tree.overlay_manager.find_by_content(panel).is_some()
+                && tree.overlay_manager.find_by_content(top).is_some(),
+            "a `Manual` overlay owns the Escape: nothing beneath it closes"
+        );
+
+        let (mut tree, panel, top) = panel_and_an_overlay_above(
+            crate::overlay::DismissBehavior::EscapeKey,
+            flagged(),
+            crate::overlay::DismissBehavior::EscapeKey,
+            Point::new(200.0, 100.0),
+            false,
+        );
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        assert_eq!(
+            tree.overlay_manager.find_by_content(top),
+            None,
+            "an `EscapeKey` one is what the Escape closes"
+        );
+        assert!(
+            tree.overlay_manager.find_by_content(panel).is_some(),
+            "and it is spent there"
+        );
+    }
+
+    #[test]
+    fn an_inert_overlay_records_no_focus_to_give_back_on_any_show_path() {
+        type Show = fn(&mut WidgetTree, crate::overlay::OverlayRequest, WidgetId);
+        fn from_a_handler(
+            tree: &mut WidgetTree,
+            show: impl FnOnce(&mut crate::widget::EventContext),
+        ) {
+            tree.run_with_event_context(&mut crate::window::NoopWindowOps, show);
+        }
+        let paths: [(&str, Show); 5] = [
+            ("show_overlay", |tree, request, _| {
+                from_a_handler(tree, |ctx| ctx.show_overlay(request))
+            }),
+            ("show_overlay_for", |tree, request, _| {
+                from_a_handler(tree, |ctx| {
+                    ctx.show_overlay_for(request, std::time::Duration::from_secs(60))
+                })
+            }),
+            ("show_overlay_with_reveal", |tree, request, _| {
+                from_a_handler(tree, |ctx| {
+                    ctx.show_overlay_with_reveal(
+                        request,
+                        crate::signal::Signal::new(0.0),
+                        std::time::Duration::from_millis(100),
+                    )
+                })
+            }),
+            ("show_overlay_after", |tree, request, _| {
+                from_a_handler(tree, |ctx| {
+                    ctx.show_overlay_after(request, std::time::Duration::ZERO)
+                });
+                tree.layout(SizeProposal::exact(400.0, 200.0));
+            }),
+            ("show_overlay_from_source", |tree, request, field| {
+                tree.show_overlay_from_source(field, request);
+            }),
+        ];
+        for (path, show) in paths {
+            let mut tree = WidgetTree::new();
+            let field = tree.add(FillWidget::new().focusable());
+            let inert = tree.add(Block(60.0, 40.0));
+            let ordinary = tree.add(Block(60.0, 40.0));
+            tree.layout(SizeProposal::exact(400.0, 200.0));
+            tree.focus(field);
+            for (content, inert) in [(inert, true), (ordinary, false)] {
+                let request = crate::overlay::OverlayRequest::new(
                     content,
                     field,
                     crate::overlay::OverlayPlacement::AtPointer(Point::new(20.0, 20.0)),
                     crate::overlay::DismissBehavior::EscapeKey,
-                ));
-            });
+                );
+                show(
+                    &mut tree,
+                    if inert { request.inert() } else { request },
+                    field,
+                );
+            }
+            let restore = |content: WidgetId| {
+                tree.overlay_manager
+                    .stack
+                    .iter()
+                    .find(|o| o.content_id == content)
+                    .map(|o| o.focus_restore)
+            };
+            assert_eq!(
+                restore(ordinary),
+                Some(Some(field)),
+                "{path}: an ordinary one does"
+            );
+            assert_eq!(
+                restore(inert),
+                Some(None),
+                "{path}: an inert one took no focus"
+            );
         }
-        let restore = |content: WidgetId| {
-            tree.overlay_manager
-                .stack
-                .iter()
-                .find(|o| o.content_id == content)
-                .and_then(|o| o.focus_restore)
-        };
-        assert_eq!(restore(ordinary), Some(field), "an ordinary one does");
-        assert_eq!(restore(inert), None, "an inert one took no focus");
     }
 }
