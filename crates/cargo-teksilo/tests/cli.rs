@@ -172,6 +172,24 @@ fn a_teksilo_behind_a_feature_is_still_found() {
     assert_eq!(data["teksilo_enabled_by"], serde_json::json!(["ui"]));
 }
 #[test]
+fn status_says_why_it_has_no_version() {
+    let root = project();
+    let result = run(root.path(), &["status"]);
+    ok(&result);
+    assert!(
+        String::from_utf8_lossy(&result.stdout)
+            .contains("Teksilo  unknown (no Cargo.lock yet, and status does not create one)")
+    );
+    assert!(!root.path().join("Cargo.lock").exists());
+    ok(&run(
+        root.path(),
+        &["search", "scroll", "--quiet", "--limit", "1"],
+    ));
+    let result = run(root.path(), &["status"]);
+    let expected = format!("Teksilo  {}\n", env!("CARGO_PKG_VERSION"));
+    assert!(String::from_utf8_lossy(&result.stdout).contains(&expected));
+}
+#[test]
 fn quiet_still_says_which_release_answered() {
     let root = project();
     let result = run(

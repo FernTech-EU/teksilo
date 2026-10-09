@@ -60,10 +60,8 @@ pub fn report(dir: &Path) {
         .as_ref()
         .and_then(|r| r.as_ref().ok())
         .and_then(|r| r.enabled_by.as_deref());
-    let error = resolution
-        .as_ref()
-        .and_then(|r| r.as_ref().err())
-        .map(ToString::to_string);
+    let failure = resolution.as_ref().and_then(|r| r.as_ref().err());
+    let error = failure.map(ToString::to_string);
     let rows = root
         .as_ref()
         .map(|r| agent_data(r, false))
@@ -99,9 +97,18 @@ pub fn report(dir: &Path) {
             .map(|r| r.display().to_string())
             .unwrap_or_else(|| "none".into())
     );
+    let unresolved = match failure {
+        Some(resolve::ResolveError::NoLockfile) => {
+            " (no Cargo.lock yet, and status does not create one)"
+        }
+        Some(resolve::ResolveError::NotADependency) => " (not a dependency of this project)",
+        Some(_) => " (run with --verbose to see why)",
+        None => "",
+    };
     println!(
-        "Teksilo  {}{}{}",
+        "Teksilo  {}{}{}{}",
         version.unwrap_or("unknown"),
+        unresolved,
         enabled_by.map(optional_suffix).unwrap_or_default(),
         if compatible == Some(false) {
             " (incompatible)"
@@ -109,6 +116,11 @@ pub fn report(dir: &Path) {
             ""
         }
     );
+    if matches!(failure, Some(resolve::ResolveError::NoLockfile)) {
+        crate::output::note(
+            "help: any other cargo teksilo command, or `cargo generate-lockfile`, creates it",
+        );
+    }
     println!("Probe    {}", probe.as_deref().unwrap_or("missing"));
     println!("Model    {model}");
     println!(

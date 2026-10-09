@@ -110,6 +110,9 @@ pub enum ResolveError {
     )]
     NotADependency,
 
+    #[error("there is no Cargo.lock yet, and this command does not create one")]
+    NoLockfile,
+
     #[error(
         "multiple resolved packages named {0}; run from a single app and remove ambiguous framework dependencies"
     )]
@@ -180,13 +183,34 @@ fn run_cargo_metadata(
     if all_features {
         args.push("--all-features");
     }
-    let out = Command::new(cargo).args(&args).current_dir(dir).output()?;
+    let out = Command::new(&cargo).args(&args).current_dir(dir).output()?;
     if !out.status.success() {
+        // cargo reports a missing lockfile and a stale one with the same
+        // "needs to be updated" error. Only the first has a remedy as plain
+        // as running any other command, so it is told apart here.
+        if locked && workspace_lockfile(&cargo, dir).is_some_and(|lock| !lock.exists()) {
+            return Err(ResolveError::NoLockfile);
+        }
         return Err(ResolveError::Metadata(
             String::from_utf8_lossy(&out.stderr).trim().to_string(),
         ));
     }
     Ok(serde_json::from_slice(&out.stdout)?)
+}
+
+/// Where the workspace containing `dir` keeps its `Cargo.lock`, which is not
+/// `dir` itself for a workspace member.
+fn workspace_lockfile(cargo: &std::ffi::OsStr, dir: &Path) -> Option<PathBuf> {
+    let out = Command::new(cargo)
+        .args(["locate-project", "--workspace", "--message-format", "plain"])
+        .current_dir(dir)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let manifest = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+    Some(manifest.parent()?.join("Cargo.lock"))
 }
 
 /// The features of the selected app that turn on an optional teksilo
