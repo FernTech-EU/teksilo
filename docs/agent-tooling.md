@@ -56,6 +56,9 @@ cargo teksilo --version
 
 Search paths refer to the bundled corpus. Read them with `show`, even when
 those files are absent from your application. `show --list` lists the corpus.
+An application built against a teksilo checkout rather than a release still
+gets the release's text from `search` and `show`; both say so when the
+checkout's copy of a document they print is different.
 `symbol` requires Python 3; other commands do not.
 
 An application that keeps teksilo behind a Cargo feature needs nothing extra:

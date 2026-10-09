@@ -41,7 +41,7 @@
 //! files do end in one today, so the equality holds; a future source file
 //! without a trailing newline would come back with one added.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use teksilo_corpus::Index;
@@ -168,6 +168,60 @@ pub fn document_lines(index: &Index, path: &str) -> Option<Vec<String>> {
         }
     }
     Some(lines)
+}
+
+/// The note to print when the app builds against a framework checkout whose
+/// copy of a document among `paths` is not the text this tool carries.
+///
+/// `symbol` reads the API out of whatever teksilo the app resolves, a
+/// checkout included. `search` and `show` cannot: their text is the corpus
+/// compiled into this binary, which is the release's. On a development
+/// branch the two part ways, and a guide fixed in the checkout goes on being
+/// served broken with nothing to say so. The comparison is exact because
+/// the corpus rebuilds every document byte for byte
+/// (`every_document_reconstructs_byte_exactly`).
+pub fn checkout_note<'a>(
+    index: &Index,
+    resolution: &resolve::Resolution,
+    paths: impl IntoIterator<Item = &'a str>,
+) -> Option<String> {
+    let root = resolution.checkout_root()?;
+    let mut seen = BTreeSet::new();
+    let changed: Vec<&str> = paths
+        .into_iter()
+        .filter(|path| seen.insert(*path))
+        .filter(|path| differs_in_checkout(index, &root, path))
+        .collect();
+    match changed.as_slice() {
+        [] => None,
+        [one] => Some(format!(
+            "note: this is the {} release text of {one}; the checkout this app \
+             builds against has a different one: {}",
+            index.teksilo_version,
+            root.join(one).display()
+        )),
+        many => Some(format!(
+            "note: these are {} release texts; the checkout this app builds \
+             against, {}, has different copies of {}",
+            index.teksilo_version,
+            root.display(),
+            many.join(", ")
+        )),
+    }
+}
+
+/// Whether the checkout at `root` has a copy of corpus document `path` that
+/// reads differently, or none at all.
+fn differs_in_checkout(index: &Index, root: &Path, path: &str) -> bool {
+    let Some(lines) = document_lines(index, path) else {
+        return false;
+    };
+    match std::fs::read_to_string(root.join(path)) {
+        // Normalised as `every_document_reconstructs_byte_exactly` does: the
+        // corpus stores lines with `\r` stripped.
+        Ok(on_disk) => on_disk.replace("\r\n", "\n") != lines.join("\n") + "\n",
+        Err(_) => true,
+    }
 }
 
 /// The 1-based inclusive `range` of `lines`, clamped to what exists.
@@ -442,6 +496,10 @@ pub fn run(dir: &Path, request: &ShowRequest) -> Result<i32, ShowError> {
         }
         Resolved::Unknown(help) => return Err(ShowError::NotFound(help)),
     };
+
+    if let Some(note) = checkout_note(index, &resolution, [path.as_str()]) {
+        crate::output::provenance(note);
+    }
 
     let lines = document_lines(index, &path).expect("resolve_path only returns corpus paths");
     let total = lines.len();
@@ -736,6 +794,42 @@ mod tests {
             let rebuilt = document_lines(index, path).unwrap().join("\n") + "\n";
             assert_eq!(rebuilt, original, "{path} did not reconstruct byte-exactly");
         }
+    }
+
+    #[test]
+    fn a_checkout_copy_that_reads_differently_is_named() {
+        let index = teksilo_corpus::index().unwrap();
+        let path = "docs/agent-tooling.md";
+        let release = document_lines(index, path).unwrap().join("\n") + "\n";
+        let checkout = tempfile::tempdir().unwrap();
+        let root = checkout.path();
+        std::fs::create_dir_all(root.join("tools")).unwrap();
+        std::fs::write(root.join("tools/extract_widget_api.py"), "#").unwrap();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        let widgets = resolve::ResolvedCrate {
+            name: "teksilo-widgets".into(),
+            version: index.teksilo_version.clone(),
+            dir: root.join("crates/teksilo-widgets"),
+        };
+        std::fs::create_dir_all(&widgets.dir).unwrap();
+        let resolution = resolve::Resolution {
+            crates: [(widgets.name.clone(), widgets)].into_iter().collect(),
+            version: index.teksilo_version.clone(),
+            enabled_by: None,
+        };
+
+        let note = checkout_note(index, &resolution, [path]).unwrap();
+        assert!(
+            note.contains(path),
+            "a copy missing from the checkout differs"
+        );
+
+        std::fs::write(root.join(path), &release).unwrap();
+        assert_eq!(checkout_note(index, &resolution, [path]), None);
+
+        std::fs::write(root.join(path), release.replacen("cargo", "Cargo", 1)).unwrap();
+        let note = checkout_note(index, &resolution, [path, path]).unwrap();
+        assert!(note.starts_with("note: this is the"), "{note}");
     }
 
     #[test]

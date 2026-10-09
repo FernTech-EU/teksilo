@@ -720,6 +720,14 @@ pub fn run(dir: &Path, args: &[String]) -> Result<i32, SearchError> {
     // away. A path filter can leave no candidates. Report vector-only
     // evidence explicitly instead of inventing a cosine confidence threshold.
     print_results(index, &parsed, &ranked, mode, lexical_empty);
+    let printed = ranked
+        .iter()
+        .take(parsed.limit)
+        .filter_map(|(id, _)| index.chunk(*id))
+        .map(|chunk| chunk.path.as_str());
+    if let Some(note) = crate::show::checkout_note(index, &resolution, printed) {
+        crate::output::provenance(note);
+    }
     Ok(0)
 }
 
