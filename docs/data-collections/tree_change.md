@@ -5,6 +5,15 @@
 
 TreeChange — change notifications and stable node identifiers for tree collections.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`NodeId`](#nodeid) — Opaque identifier for a node in a `TreeModel` |
+| `enum` | [`TreeChange`](#treechange) — Describes a mutation to a tree structure |
+
+## Detailed description
+
 `NodeId` is an opaque, stable handle for a node in a `crate::TreeModel`.
 Because `TreeModel` is backed by a slotmap, `NodeId` values survive arbitrary
 insertions, removals, and moves — only deleting the node itself invalidates it.
@@ -33,6 +42,8 @@ tree.insert_root(0, "root".to_string());
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/tree_change/index.html)
 
+<a id="nodeid"></a>
+
 ## `pub struct NodeId`
 
 Opaque identifier for a node in a `TreeModel`.
@@ -43,6 +54,8 @@ nodes does not invalidate existing `NodeId` handles (they are SlotMap keys).
 ```rust
 pub struct NodeId(slotmap::DefaultKey);
 ```
+
+<a id="treechange"></a>
 
 ## `pub enum TreeChange`
 

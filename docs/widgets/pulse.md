@@ -6,6 +6,21 @@
 `Pulse` — a wrapper widget that pulses its child's opacity between
 a `min` and `max` value on a fixed period, sine-shaped.
 
+## Public functions
+
+### `Pulse`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`opacity(min: f32, max: f32)`](#pulse-opacity) |
+| | **Builder methods** |
+| `Self` | [`period(period: Duration)`](#pulse-period) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#pulse-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#pulse-child_opt) |
+
+## Detailed description
+
 The classic "blinking red light" / recording-indicator / attention
 beacon pattern. The wrapped subtree pulses smoothly (sine
 interpolation), giving a breathing-light feel rather than a hard
@@ -19,25 +34,23 @@ ctx.add(
 );
 ```
 
-## Layout semantics
+#### Layout semantics
 
 Layout-transparent — the child reports its full natural size at
 all opacity values. Identical layout footprint to `Fade`.
 
-## Reduced motion
+#### Reduced motion
 
 Honours `prefers-reduced-motion`: skips the per-frame driver and
 pins opacity at the midpoint `(min + max) / 2`. The subtree stays
 visible at a steady, non-distracting brightness so the indicator
 still communicates "active" without animating.
 
-## Builder methods at a glance
-
-`opacity`, `period`, `child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/pulse/index.html)
+
+<a id="pulse"></a>
 
 ## `pub struct Pulse`
 
@@ -51,11 +64,15 @@ pub struct Pulse { /* fields */ }
 
 ### Methods
 
+<a id="pulse-opacity"></a>
+
 #### `pub fn opacity(min: f32, max: f32) -> Self`
 
 Wrap a subtree in an opacity pulse between `min` and `max`
 (both clamped to `0..=1`). Uses a sine wave so the transitions
 at both extremes are smooth, not abrupt.
+
+<a id="pulse-period"></a>
 
 #### `pub fn period(mut self, period: Duration) -> Self`
 
@@ -64,9 +81,13 @@ Default: `MotionTokens::duration_indeterminate_sweep` (~900 ms),
 the same continuous-loop budget the indeterminate progress bar
 and spinner use — so a re-themed motion stack stays consistent.
 
+<a id="pulse-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Inline child widget (deferred insertion).
+
+<a id="pulse-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

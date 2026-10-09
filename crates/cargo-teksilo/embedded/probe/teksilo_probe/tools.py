@@ -65,6 +65,8 @@ __all__ = [
     "advance_clock",
     "settle",
     "wait_for_condition",
+    "live_image_stats",
+    "live_image_map",
     "screenshot",
     "TOOL_NAMES",
     "MUTATING",
@@ -302,6 +304,8 @@ def scroll(
     window_id: int | None = None,
     dx: float | None = None,
     dy: float | None = None,
+    at: Sequence[float] | None = None,
+    lines: bool | None = None,
     ctrl: bool | None = None,
     shift: bool | None = None,
     alt: bool | None = None,
@@ -309,7 +313,9 @@ def scroll(
     command: bool | None = None,
     settle: Mapping[str, Any] | None = None,
 ) -> Any:
-    """Scroll the widget under a node by a pixel delta, with optional modifiers
+    """Scroll the widget under a node by a pixel delta, or by lines with `lines`
+    (a wheel notch's delta, source Wheel), at the node's centre or at `at`
+    ([x, y] node-local), with optional modifiers
     (ctrl/shift/alt/meta/command). A modifier-held wheel is its own gesture,
     e.g. Ctrl+wheel to zoom. Use `command` for the platform accelerator
     (Control on Windows/Linux, Command on macOS); `ctrl` is literal Control.
@@ -321,6 +327,8 @@ def scroll(
         "node": node,
         "dx": dx,
         "dy": dy,
+        "at": at,
+        "lines": lines,
         "ctrl": ctrl,
         "shift": shift,
         "alt": alt,
@@ -333,10 +341,12 @@ def scroll(
 
 def inject_pointer(
     session,
-    x: float,
-    y: float,
     *,
     window_id: int | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    source: Sequence[float] | None = None,
+    node: int | None = None,
     action: str | None = None,
     ctrl: bool | None = None,
     shift: bool | None = None,
@@ -350,20 +360,21 @@ def inject_pointer(
     tilt: Sequence[float] | None = None,
     settle: Mapping[str, Any] | None = None,
 ) -> Any:
-    """Inject a pointer event at a point: action = click (default), double_click,
-    down, up or move; button = primary (default), secondary, middle, back,
-    forward; kind = mouse (default), touch or pen; with optional
-    ctrl/shift/alt/meta/command held for the press and release. A touch or pen
-    enters through the tree's pointer door, so the kind reaches the hit test,
-    the slop, the hover rules and the arbitration; pen carries `pressure`
-    (0..1) and `tilt` ([x, y] degrees). Continue a contact a previous call
-    left down with `pointer_id` from query_pointers (on a move or an up; a
-    down and a click mint their own), or drive a whole gesture with
-    inject_touch_sequence. Use `command` for the platform accelerator (Control
-    on Windows/Linux, Command on macOS) — accelerator-click to extend a
-    selection is `command`, not `ctrl`. Unknown names and unknown fields are
-    refused rather than defaulted, and so are pressure/tilt/pointer_id on a
-    mouse.
+    """Inject a pointer event at a point — window-logical px, or local to `node`,
+    the position that node's own handlers receive (exact under a Scale, Rotate
+    or SceneView): action = click (default), double_click, down, up or move;
+    button = primary (default), secondary, middle, back, forward; kind = mouse
+    (default), touch or pen; with optional ctrl/shift/alt/meta/command held
+    for the press and release. A touch or pen enters through the tree's
+    pointer door, so the kind reaches the hit test, the slop, the hover rules
+    and the arbitration; pen carries `pressure` (0..1) and `tilt` ([x, y]
+    degrees). Continue a contact a previous call left down with `pointer_id`
+    from query_pointers (on a move or an up; a down and a click mint their
+    own), or drive a whole gesture with inject_touch_sequence. Use `command`
+    for the platform accelerator (Control on Windows/Linux, Command on macOS)
+    — accelerator-click to extend a selection is `command`, not `ctrl`.
+    Unknown names and unknown fields are refused rather than defaulted, and so
+    are pressure/tilt/pointer_id on a mouse.
 
     Mutating tool.
     """
@@ -371,6 +382,8 @@ def inject_pointer(
         "window_id": window_id,
         "x": x,
         "y": y,
+        "source": source,
+        "node": node,
         "action": action,
         "ctrl": ctrl,
         "shift": shift,
@@ -412,6 +425,8 @@ def inject_key(
     key: str,
     *,
     window_id: int | None = None,
+    text: str | None = None,
+    phase: str | None = None,
     ctrl: bool | None = None,
     shift: bool | None = None,
     alt: bool | None = None,
@@ -419,18 +434,23 @@ def inject_key(
     command: bool | None = None,
     settle: Mapping[str, Any] | None = None,
 ) -> Any:
-    """Inject a key press (with optional modifiers) to the focused widget. Use
-    `command` for any accelerator chord (Control on Windows/Linux, Command on
-    macOS) — a shortcut declared Ctrl+S resolves to the Command chord on
-    macOS, so `ctrl` there injects a key that matches no binding and still
-    reports success. `ctrl` stays literal Control, for chords that really are
-    Control everywhere (Ctrl+Tab).
+    """Inject a key press (with optional modifiers) to the focused widget: by
+    default its press and its release, or with `phase` = down or up one half,
+    so a key can stay held across calls. `text` is what the press types, as a
+    keyboard attaches it; omitted, a character key types nothing (use
+    type_text to type). Use `command` for any accelerator chord (Control on
+    Windows/Linux, Command on macOS) — a shortcut declared Ctrl+S resolves to
+    the Command chord on macOS, so `ctrl` there injects a key that matches no
+    binding and still reports success. `ctrl` stays literal Control, for
+    chords that really are Control everywhere (Ctrl+Tab).
 
     Mutating tool.
     """
     args = {
         "window_id": window_id,
         "key": key,
+        "text": text,
+        "phase": phase,
         "ctrl": ctrl,
         "shift": shift,
         "alt": alt,
@@ -449,7 +469,11 @@ def type_text(
     window_id: int | None = None,
     settle: Mapping[str, Any] | None = None,
 ) -> Any:
-    """Focus a node and type text into it.
+    """Focus a node and type text into it as a keyboard does: each character is a
+    key pressed and released, a letter as its named key (Shift held for a
+    capital), a space as Space, a line break as Enter, a tab as Tab. Shortcuts
+    see those keys as they would a user's; to insert text without keys, commit
+    it with type_ime.
 
     Mutating tool.
     """
@@ -518,13 +542,14 @@ def inject_touch_sequence(
     settle: Mapping[str, Any] | None = None,
 ) -> Any:
     """Drive a whole multi-touch gesture in one call — a list of steps, each
-    naming a finger slot, a phase (down/move/up/cancel), a point, and how many
-    simulated milliseconds to advance first — and report the arbitration after
-    every step: the frozen touch_action, every competitor with its role and
-    state, and the winner. Fingers are named by slot, not by id: identities
-    are minted by the framework and the reply says which one each slot got. A
-    sequence that stops short of its `up` leaves the finger down, which is how
-    a live arbitration stays observable.
+    naming a finger slot, a phase (down/move/up/cancel), a point (window-
+    logical, or local to its `node`), and how many simulated milliseconds to
+    advance first — and report the arbitration after every step: the frozen
+    touch_action, every competitor with its role and state, and the winner.
+    Fingers are named by slot, not by id: identities are minted by the
+    framework and the reply says which one each slot got. A sequence that
+    stops short of its `up` leaves the finger down, which is how a live
+    arbitration stays observable.
 
     Mutating tool.
     """
@@ -605,17 +630,19 @@ def fling(
 
 def long_press(
     session,
-    x: float,
-    y: float,
     *,
     window_id: int | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    source: Sequence[float] | None = None,
+    node: int | None = None,
     kind: str | None = None,
     settle: Mapping[str, Any] | None = None,
 ) -> Any:
-    """Press at a point, hold for exactly the device's long-press threshold,
-    release. The hold is read off the active input profile for the pointer
-    kind, so the call means 'hold long enough' without the script knowing the
-    number.
+    """Press at a point (window-logical, or local to `node`), hold for exactly
+    the device's long-press threshold, release. The hold is read off the
+    active input profile for the pointer kind, so the call means 'hold long
+    enough' without the script knowing the number.
 
     Mutating tool.
     """
@@ -623,6 +650,8 @@ def long_press(
         "window_id": window_id,
         "x": x,
         "y": y,
+        "source": source,
+        "node": node,
         "kind": kind,
         "settle": settle,
     }
@@ -794,6 +823,43 @@ def wait_for_condition(
     return session.call("wait_for_condition", **_present(args))
 
 
+def live_image_stats(session, node: int, *, window_id: int | None = None) -> Any:
+    """A LiveImage's frame counters (generation, window generation, paints,
+    uploads) and its window's textures and wakes.
+
+    Read-only tool.
+    """
+    args = {
+        "window_id": window_id,
+        "node": node,
+    }
+    return session.call("live_image_stats", **_present(args))
+
+
+def live_image_map(
+    session,
+    node: int,
+    *,
+    window_id: int | None = None,
+    source: Sequence[float] | None = None,
+    source_rect: Sequence[float] | None = None,
+    window: Sequence[float] | None = None,
+) -> Any:
+    """Where a LiveImage's picture lies, and its source pixels as window points
+    and back.
+
+    Read-only tool.
+    """
+    args = {
+        "window_id": window_id,
+        "node": node,
+        "source": source,
+        "source_rect": source_rect,
+        "window": window,
+    }
+    return session.call("live_image_map", **_present(args))
+
+
 def screenshot(
     session,
     *,
@@ -850,6 +916,8 @@ TOOL_NAMES = (
     "advance_clock",
     "settle",
     "wait_for_condition",
+    "live_image_stats",
+    "live_image_map",
     "screenshot",
 )
 
@@ -890,6 +958,8 @@ MUTATING = frozenset(
         ("advance_clock", True),
         ("settle", True),
         ("wait_for_condition", True),
+        ("live_image_stats", False),
+        ("live_image_map", False),
         ("screenshot", False),
     )
     if mutating

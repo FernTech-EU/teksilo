@@ -7,6 +7,31 @@
 
 Repeater — non-virtualized dynamic widget list driven by a `ListModel<T>`.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`RepeaterLayout`](#repeaterlayout) — How a `Repeater` arranges its item widgets |
+| `struct` | [`Repeater`](#repeater) — A non-virtualized dynamic collection that creates one child widget per item in a `ListModel<T>` |
+
+## Public functions
+
+### `Repeater`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(model: ListModel<T>, factory: impl Fn(&T) -> Box<dyn Widget> + 'static)`](#repeater-new) |
+| `Self` | [`indexed(model: ListModel<T>, factory: impl Fn(usize, &T) -> Box<dyn Widget> + 'static)`](#repeater-indexed) |
+| | **Builder methods** |
+| `Self` | [`layout(layout: RepeaterLayout)`](#repeater-layout) |
+| `Self` | [`horizontal()`](#repeater-horizontal) |
+| `Self` | [`wrap()`](#repeater-wrap) |
+| `Self` | [`spacing(spacing: f32)`](#repeater-spacing) |
+| `Self` | [`line_spacing(line_spacing: f32)`](#repeater-line_spacing) |
+
+## Detailed description
+
 `Repeater` creates one child widget per item in a `ListModel<T>`
 using a caller-supplied factory closure, arranging them along one axis
 (`RepeaterLayout::Vertical` by default) or as a wrapping flow
@@ -16,7 +41,7 @@ children keep real, stateful widgets (text editors, forms) mounted, which a
 virtualizing `ListView` cannot do because it recycles
 off-screen rows.
 
-# `Repeater::new` — reconciling (the default)
+### `Repeater::new` — reconciling (the default)
 
 The factory takes `&item` and each child widget is **reused across model
 changes**. When the model mutates, `Repeater` reads the
@@ -56,7 +81,7 @@ let _w = Repeater::new(model, |item| {
 .spacing(4.0);
 ```
 
-# `Repeater::indexed` — full rebuild (position-in-content)
+### `Repeater::indexed` — full rebuild (position-in-content)
 
 When the content genuinely depends on position — a numbered list, "N of M",
 a ranking that must renumber on reorder — use `indexed`.
@@ -66,7 +91,7 @@ always current. This is the right pick for cheap, stateless, position-derived
 rows; it does **not** preserve per-child state across changes (that is the
 reason to prefer `new` whenever the index isn't content).
 
-# Accessibility
+### Accessibility
 
 `Repeater` imposes **no** accessibility semantics of its own — it is a
 transparent layout wrapper, so its children surface directly into the
@@ -90,13 +115,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Repeater at Touch density](img/repeater-touch.png)
 
-## Builder methods at a glance
-
-`indexed`, `layout`, `horizontal`, `wrap`, `spacing`, `line_spacing`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/repeater/index.html)
+
+<a id="repeaterlayout"></a>
 
 ## `pub enum RepeaterLayout`
 
@@ -112,6 +135,8 @@ pub enum RepeaterLayout { /* variants */ }
 - **`Horizontal`** — A horizontal row, leading to trailing (RTL-aware via `HStack`). Gap = `Repeater::spacing`.
 - **`Wrap`** — A horizontal flow that wraps to the next line when items exceed the available width — chip rows, badge lists. `Repeater::spacing` is the inter-item gap, `Repeater::line_spacing` the inter-line gap.
 
+<a id="repeater"></a>
+
 ## `pub struct Repeater`
 
 A non-virtualized dynamic collection that creates one child widget per item in a `ListModel<T>`.
@@ -124,6 +149,8 @@ pub struct Repeater<T: 'static> { /* fields */ }
 ```
 
 ### Methods
+
+<a id="repeater-new"></a>
 
 #### `pub fn new(model: ListModel<T>, factory: impl Fn(&T) -> Box<dyn Widget> + 'static) -> Self`
 
@@ -139,6 +166,8 @@ content genuinely depends on position (a numbered list), use
 `Repeater::indexed` instead. See the `module-level docs` for the
 full rationale.
 
+<a id="repeater-indexed"></a>
+
 #### `pub fn indexed( model: ListModel<T>, factory: impl Fn(usize, &T) -> Box<dyn Widget> + 'static, ) -> Self`
 
 Create a Repeater in **full-rebuild** mode: the `factory` receives
@@ -150,22 +179,32 @@ numbers, "N of M", a ranking that renumbers on reorder). It does **not**
 preserve per-child state across changes — prefer `Repeater::new`
 whenever the index isn't part of what each item renders.
 
+<a id="repeater-layout"></a>
+
 #### `pub fn layout(mut self, layout: RepeaterLayout) -> Self`
 
 Choose how items are arranged (default `RepeaterLayout::Vertical`).
+
+<a id="repeater-horizontal"></a>
 
 #### `pub fn horizontal(self) -> Self`
 
 Arrange items horizontally — shorthand for `.layout(RepeaterLayout::Horizontal)`.
 
+<a id="repeater-wrap"></a>
+
 #### `pub fn wrap(self) -> Self`
 
 Arrange items as a wrapping flow — shorthand for `.layout(RepeaterLayout::Wrap)`.
+
+<a id="repeater-spacing"></a>
 
 #### `pub fn spacing(mut self, spacing: f32) -> Self`
 
 Set the gap between items along the main axis (default 0.0). For
 `RepeaterLayout::Wrap` this is the inter-item (horizontal) gap.
+
+<a id="repeater-line_spacing"></a>
 
 #### `pub fn line_spacing(mut self, line_spacing: f32) -> Self`
 

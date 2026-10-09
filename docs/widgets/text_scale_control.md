@@ -7,6 +7,23 @@
 
 `TextScaleControl` — the settings control that grows all text in the app.
 
+## Public functions
+
+### `TextScaleControl`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(factor_signal: Signal<f32>)`](#textscalecontrol-new) |
+| | **Builder methods** |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#textscalecontrol-label) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#textscalecontrol-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#textscalecontrol-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#textscalecontrol-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#textscalecontrol-composite_tooltip) |
+
+## Detailed description
+
 Drop this into a preferences/settings window to let low-vision users scale
 every piece of text uniformly (the framework multiplies the active theme's
 typography by the chosen factor — see
@@ -41,13 +58,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![TextScaleControl at Touch density](img/text_scale_control-touch.png)
 
-## Builder methods at a glance
-
-`label`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/text_scale_control/index.html)
+
+<a id="textscalecontrol"></a>
 
 ## `pub struct TextScaleControl`
 
@@ -63,6 +78,8 @@ pub struct TextScaleControl { /* fields */ }
 
 ### Methods
 
+<a id="textscalecontrol-new"></a>
+
 #### `pub fn new(factor_signal: Signal<f32>) -> Self`
 
 Construct bound to `factor_signal` (a scale factor where `1.0` = 100 %).
@@ -70,16 +87,22 @@ Construct bound to `factor_signal` (a scale factor where `1.0` = 100 %).
 Pass `ctx.settings().signal_for(&teksilo_settings::TEXT_SCALE_KEY)` to get
 automatic persistence; any `Signal<f32>` works for ad-hoc / preview use.
 
+<a id="textscalecontrol-label"></a>
+
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Attach a visible label placed to the leading side of the spinbox
 (e.g. `tr!(text_size())`). Also used as the control's accessible name.
+
+<a id="textscalecontrol-tooltip"></a>
 
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Attach a plain tooltip that appears after a hover delay.
 
 Clears any previously set rich or composite tooltip (last-call wins).
+
+<a id="textscalecontrol-rich_tooltip"></a>
 
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
@@ -89,12 +112,16 @@ Attach a rich tooltip resolved from the app-wide tooltip registry.
 `TooltipRegistry` at build time.
 Clears any previously set plain or composite tooltip (last-call wins).
 
+<a id="textscalecontrol-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Attach a rich tooltip driven by inline
 `TooltipContent`.
 
 Clears any previously set plain or composite tooltip (last-call wins).
+
+<a id="textscalecontrol-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 

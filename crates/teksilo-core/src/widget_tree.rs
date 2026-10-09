@@ -25,12 +25,18 @@ mod adapter_ids_tests;
 mod announcement_ring_tests;
 #[cfg(test)]
 mod announcer_tests;
+#[cfg(test)]
+mod device_scale_tests;
 mod drag_drop_impl;
 mod focus_impl;
 mod gesture_dispatch_impl;
 #[cfg(test)]
 mod hit_targeting_tests;
 mod layout_impl;
+#[cfg(test)]
+mod live_image_tests;
+#[cfg(test)]
+mod local_frame_tests;
 #[cfg(test)]
 mod modal_tests;
 mod overlay_impl;
@@ -39,7 +45,11 @@ mod pointer_cancel;
 mod pointer_router;
 mod pointer_state;
 mod query_impl;
+#[cfg(test)]
+mod redraw_waker_tests;
 mod rendering_impl;
+#[cfg(test)]
+mod repaint_trigger_tests;
 mod test_api;
 pub mod touch_route;
 #[cfg(test)]
@@ -424,7 +434,7 @@ pub struct WidgetTree {
     /// to detect and pause animations for widgets that have scrolled
     /// off-screen. Starts at `0`, which serves as the "never painted"
     /// sentinel; tests that only call `layout()` see the gate bypass.
-    paint_epoch: u64,
+    pub(crate) paint_epoch: u64,
     /// Cached accessibility tree update, rebuilt only when something that
     /// changes the AT tree has happened, not on every layout.
     cached_a11y: Option<accesskit::TreeUpdate>,
@@ -573,6 +583,13 @@ pub struct WidgetTree {
     /// the escape hatch for widgets that must size a device-pixel OS resource
     /// (e.g. a `WebView`'s native subview). 1.0 in headless / test contexts.
     device_scale_factor: f32,
+    /// Reactive mirror of `device_scale_factor`, for the widgets whose layout
+    /// reads it: see [`Self::device_scale_signal`].
+    device_scale_signal: crate::signal::Signal<f32>,
+    /// What the tree's widgets attached for content updated off the UI
+    /// thread (`RepaintTrigger`), and the waker their requests wake. See
+    /// [`crate::off_thread`].
+    pub(crate) off_thread: crate::off_thread::OffThreadRegistry,
     /// Platform safe-area insets for the host window — a notch, a rounded
     /// corner, a home indicator — in logical pixels, fed by `teksilo-app`
     /// after every window resize. Reaches overlay placement through
@@ -1015,6 +1032,8 @@ impl WidgetTree {
             context_menu_announcement: None,
             pending_touch_route: None,
             device_scale_factor: 1.0,
+            device_scale_signal: crate::signal::Signal::new(1.0),
+            off_thread: crate::off_thread::OffThreadRegistry::default(),
             safe_area: teksilo_canvas::EdgeInsets::ZERO,
             occluded_inset: None,
             soft_keyboard_request: None,
@@ -2074,11 +2093,11 @@ impl WidgetTree {
     }
 
     /// Mark every node paint-dirty (no relayout, no rebuild) so the next
-    /// render re-runs their `paint()`. This is the paint-cache invalidation an
-    /// off-thread source needs after posting a [`RepaintWindowRequest`](crate::RepaintWindowRequest):
-    /// a bare redraw request re-presents the cached frame, so a widget whose
-    /// content changed off the UI thread (a terminal's PTY output) must be
-    /// marked dirty for its `paint()` to run again.
+    /// render re-runs their `paint()`. What teksilo-app does on receiving the
+    /// deprecated [`RepaintWindowRequest`](crate::RepaintWindowRequest); a
+    /// widget whose content changes off the UI thread attaches a
+    /// [`RepaintTrigger`](crate::RepaintTrigger) instead, which repaints that
+    /// widget alone.
     pub fn mark_all_needs_paint_only(&mut self) {
         self.arena.mark_all_needs_paint_only();
     }
@@ -2665,6 +2684,11 @@ impl WidgetTree {
         // clear it so paint() re-runs and re-emits DrawCommands with
         // the newly-allocated slot.
         self.animated_quads.cancel_by_widget(widget_id);
+        // Its off-thread attachments: `build()` attaches its triggers and
+        // sets its hook again. The wake state stays, with whatever was
+        // requested and not yet taken: a request is posted with nothing that
+        // names the build it was meant for, as a subscription id is above.
+        self.off_thread.begin_rebuild(widget_id);
 
         let drained_subs = if let Some(node) = self.arena.get_mut(widget_id) {
             node.effect_handles.clear();
@@ -2757,8 +2781,10 @@ impl WidgetTree {
             .unwrap_or(false);
         let old_children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
         if !preserve_children {
+            // The widget being rebuilt is marked for layout and paint
+            // already, which covers what its old children drew.
             for child_id in &old_children {
-                self.destroy_subtree(*child_id);
+                self.destroy_subtree_inner(*child_id, false);
             }
         }
 
@@ -2777,7 +2803,10 @@ impl WidgetTree {
 
         let mut widget_box = match self.arena.take_widget(widget_id) {
             Some(widget) => widget,
-            None => return,
+            None => {
+                self.finish_off_thread_rebuild(widget_id);
+                return;
+            }
         };
 
         let mut build_ctx = crate::build_context::BuildContext {
@@ -2792,6 +2821,7 @@ impl WidgetTree {
         let subscription_handles = std::mem::take(&mut build_ctx.subscription_handles);
 
         self.arena.restore_widget(widget_id, widget_box);
+        self.finish_off_thread_rebuild(widget_id);
 
         for &child_id in &new_children {
             if let Some(child_node) = self.arena.get_mut(child_id) {
@@ -2861,7 +2891,16 @@ impl WidgetTree {
     /// handles and removing their UI-side callbacks. Use this in place of
     /// `arena.destroy()` whenever a widget that may have subscribed to
     /// events is being torn down.
+    ///
+    /// What the subtree drew is in the composed frame, and its ancestors'
+    /// layouts made room for it: both are recomputed, as for a subtree made
+    /// dormant. Without that the next frame, where nothing else changed,
+    /// replayed the destroyed widgets' drawing, and a live picture among
+    /// them kept its texture until something repainted their parent.
     pub(crate) fn destroy_subtree(&mut self, widget_id: WidgetId) {
+        self.arena.mark_ancestors_need_layout(widget_id);
+        self.cached_frame = None;
+        self.a11y_dirty = true;
         self.destroy_subtree_inner(widget_id, false);
     }
 
@@ -2888,6 +2927,8 @@ impl WidgetTree {
         self.animation_scheduler.cancel_by_widget(widget_id);
         // Release the animated-quad slot(s) too.
         self.animated_quads.cancel_by_widget(widget_id);
+        // And what it attached for off-thread content.
+        self.off_thread.cancel_by_widget(widget_id);
         // A tooltip's content widget is parentless (`ctx.add`), so the child
         // walk below never reaches it — reap it explicitly or the entry and
         // its node outlive the anchor for the lifetime of the tree.
@@ -3115,18 +3156,20 @@ impl WidgetTree {
     /// Set the host window HiDPI device scale (physical px per logical px).
     /// Written by `teksilo-app` when the window is created and again on
     /// `WindowEvent::ScaleFactorChanged`. Surfaced to widgets via
-    /// `LayoutContext::scale_factor`.
+    /// `LayoutContext::scale_factor` and [`Self::device_scale_signal`].
     ///
-    /// Layout needs no dirty-marking here: it rides the layout pass that
-    /// follows, and a scale change already triggers a relayout. The
-    /// accessibility tree does, because the scale is the root node's
-    /// transform (AccessKit wants physical coordinates, the tree emits
-    /// logical ones) and a plain relayout does not invalidate the AT cache —
-    /// so dragging a window between a 1x and a 2x monitor would otherwise
-    /// leave every reported rectangle at the old display's scale.
+    /// A scale change relayouts nothing by itself: the tree is logical, and
+    /// when the window's logical size stays the same the next layout pass
+    /// finds nothing to do. A widget whose layout reads the scale binds
+    /// [`Self::device_scale_signal`] at `Relayout`, which this sets. The
+    /// accessibility tree is marked here, because the scale is the root
+    /// node's transform (AccessKit wants physical coordinates, the tree emits
+    /// logical ones): dragging a window between a 1x and a 2x monitor would
+    /// otherwise leave every reported rectangle at the old display's scale.
     pub fn set_device_scale_factor(&mut self, scale_factor: f32) {
         if self.device_scale_factor != scale_factor {
             self.device_scale_factor = scale_factor;
+            self.device_scale_signal.set(scale_factor);
             self.a11y_dirty = true;
         }
     }
@@ -3134,6 +3177,31 @@ impl WidgetTree {
     /// The host window HiDPI device scale most recently set (1.0 by default).
     pub fn device_scale_factor(&self) -> f32 {
         self.device_scale_factor
+    }
+
+    /// Reactive handle on [`Self::device_scale_factor`]. A scale change
+    /// relayouts nothing by itself; a widget whose layout or placement reads
+    /// `LayoutContext::scale_factor` binds this at `BindingLevel::Relayout`.
+    pub fn device_scale_signal(&self) -> crate::signal::Signal<f32> {
+        self.device_scale_signal.clone()
+    }
+
+    /// Set the waker content updated off the UI thread uses to wake this
+    /// tree's window (see [`teksilo_canvas::wake`]). teksilo-app installs each
+    /// window's before its root widget is built, so a source attached in
+    /// `build()` already has it. `None`, the default, wakes nobody: a headless
+    /// tree renders when its owner says so.
+    pub fn set_redraw_waker(
+        &mut self,
+        waker: Option<std::sync::Arc<dyn teksilo_canvas::wake::RedrawWaker>>,
+    ) {
+        self.off_thread.set_waker(waker);
+    }
+
+    /// The waker [`set_redraw_waker`](Self::set_redraw_waker) installed.
+    #[doc(hidden)]
+    pub fn redraw_waker(&self) -> Option<&std::sync::Arc<dyn teksilo_canvas::wake::RedrawWaker>> {
+        self.off_thread.waker()
     }
 
     /// Report the host window's platform safe-area insets — the region the

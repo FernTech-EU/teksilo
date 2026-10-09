@@ -6,6 +6,16 @@
 Anti-aliased alpha masking for raster images — circle / rounded-square
 / square coverage applied in-place to RGBA8 pixel buffers.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`ImageMaskShape`](#imagemaskshape) — Shape of the alpha mask applied to an image |
+| `fn` | [`center_crop_square`](#center_crop_square) — Crop the source RGBA buffer to a centered square of edge `min(w, h)` |
+| `fn` | [`apply_alpha_mask`](#apply_alpha_mask) — Apply an alpha mask in-place to an RGBA8 buffer |
+
+## Detailed description
+
 The retained renderer's `Canvas::set_clip` is rectangular-only, so to
 crop a photo into a circle (avatar, contact icon, channel thumbnail,
 etc.) we modulate the source image's alpha channel with a per-pixel
@@ -30,6 +40,8 @@ assert_eq!(pixels[(16 * 32 + 16) * 4 + 3], 255); // center alpha
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/image_mask/index.html)
 
+<a id="imagemaskshape"></a>
+
 ## `pub enum ImageMaskShape`
 
 Shape of the alpha mask applied to an image.
@@ -50,6 +62,8 @@ pub enum ImageMaskShape { /* variants */ }
 - **`Circle`** — Inscribed circle in the image's bounding square (after a centred crop to the shorter side).
 - **`RoundedSquare`** — Rounded rectangle. The carried `f32` is the corner radius as a fraction of `min(width, height)`, clamped to `0.0..=0.5`.
 
+<a id="center_crop_square"></a>
+
 ## `pub fn center_crop_square(...)`
 
 Crop the source RGBA buffer to a centered square of edge `min(w, h)`.
@@ -59,6 +73,8 @@ already square, a copy of the original is returned.
 ```rust
 pub fn center_crop_square(pixels: &[u8], width: u32, height: u32) -> (Vec<u8>, u32);
 ```
+
+<a id="apply_alpha_mask"></a>
 
 ## `pub fn apply_alpha_mask(...)`
 

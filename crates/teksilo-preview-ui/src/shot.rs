@@ -135,16 +135,17 @@ impl Shooter {
     /// into the typesetter's glyph rasterization, so it belongs to the
     /// shooter rather than to an individual [`ShotOptions`].
     pub fn new(scale: f32) -> Result<Self, String> {
-        let (renderer, device, queue) =
-            match pollster::block_on(test_support::create_test_renderer("teksilo preview shot")) {
-                Some(t) => t,
-                None => {
-                    return Err(
-                        "wgpu adapter unavailable — no GPU backend present for snapshot rendering"
-                            .into(),
-                    );
-                }
-            };
+        let (renderer, device, queue) = match pollster::block_on(
+            test_support::create_offscreen_renderer("teksilo preview shot"),
+        ) {
+            Some(t) => t,
+            None => {
+                return Err(
+                    "wgpu adapter unavailable — no GPU backend present for snapshot rendering"
+                        .into(),
+                );
+            }
+        };
         install_framework_locales();
         let typesetter = SharedTypesetter::new_with_default_font();
         typesetter.set_scale_factor(scale);
@@ -289,11 +290,14 @@ impl Shooter {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // A capture: every live picture shows its latest commit, whatever
+        // its producer is doing.
         self.renderer
-            .render(&frame, &view, self.scale, width, height, clear);
+            .render_capture(&frame, &view, self.scale, width, height, clear);
 
         let rgba =
-            test_support::read_texture_rgba(&self.device, &self.queue, &texture, width, height);
+            test_support::try_read_texture_rgba(&self.device, &self.queue, &texture, width, height)
+                .map_err(|error| format!("snapshot readback failed: {error}"))?;
         let ink_ratio = ink_ratio(&rgba);
         Ok(Shot {
             rgba,

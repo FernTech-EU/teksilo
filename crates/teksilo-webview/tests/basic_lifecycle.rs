@@ -478,3 +478,45 @@ fn the_advertised_click_action_actually_enters_the_page() {
         "an AT-invoked Click must enter the page, not be a no-op"
     );
 }
+
+/// A window moved to a display with another scale keeps its logical size, so
+/// nothing relayouts on its own; the web view binds the device scale and
+/// repositions its native page at the new scale, which an engine positioning
+/// in device pixels (WebKitGTK on X11) needs.
+#[test]
+fn a_scale_change_reissues_set_bounds() {
+    let (registry, records) = memory_registry();
+    let mut tree = tree_with_registry(registry);
+
+    let webview = WebView::new().url("about:blank");
+    let wv_id = webview.id();
+    tree.add(webview);
+    layout(&mut tree);
+    let bounds_ops = |records: &MemoryWebViewRecords| -> Vec<WebViewOp> {
+        records
+            .ops_for(wv_id)
+            .into_iter()
+            .filter(|op| matches!(op, WebViewOp::SetBounds { .. }))
+            .collect()
+    };
+    let before = bounds_ops(&records);
+    assert!(!before.is_empty());
+
+    tree.set_device_scale_factor(2.0);
+    layout(&mut tree);
+    let after = bounds_ops(&records);
+    assert_eq!(
+        after.len(),
+        before.len() + 1,
+        "a scale change repositions the native page once"
+    );
+    assert_eq!(
+        format!("{:?}", after.last()),
+        format!("{:?}", before.last()),
+        "at the same logical bounds"
+    );
+    let scales = records.scale_log(wv_id);
+    assert_eq!(scales.len(), after.len(), "one scale per set_bounds");
+    assert_eq!(scales[scales.len() - 2], 1.0, "the old scale first");
+    assert_eq!(scales.last(), Some(&2.0), "then the new one");
+}

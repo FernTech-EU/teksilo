@@ -7,6 +7,26 @@
 
 ProgressBar — a bar showing progress from 0.0 to 1.0.
 
+## Public functions
+
+### `ProgressBar`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(value: f32)`](#progressbar-new) |
+| `Self` | [`indeterminate()`](#progressbar-indeterminate) |
+| | **Builder methods** |
+| `Self` | [`value(state: impl Into<Prop<f32>>)`](#progressbar-value) |
+| `Self` | [`orientation(orientation: Orientation)`](#progressbar-orientation) |
+| `Self` | [`thickness(thickness: f32)`](#progressbar-thickness) |
+| `Self` | [`track_color(color: impl Into<ColorProp>)`](#progressbar-track_color) |
+| `Self` | [`fill_color(color: impl Into<ColorProp>)`](#progressbar-fill_color) |
+| `Self` | [`style(style: impl teksilo_core::styles::ProgressBarStyle)`](#progressbar-style) |
+| `Self` | [`label(text: impl Into<LocalizedString>)`](#progressbar-label) |
+
+## Detailed description
+
 Supports determinate (fixed or reactive value), indeterminate (animated
 sweep), horizontal, and vertical orientations. The stationary chrome (track
 and determinate fill) is delegated to `ProgressBarStyle`; the indeterminate
@@ -48,13 +68,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![ProgressBar at Touch density](img/progress_bar-touch.png)
 
-## Builder methods at a glance
-
-`indeterminate`, `value`, `orientation`, `thickness`, `track_color`, `fill_color`, `style`, `label`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/progress_bar/index.html)
+
+<a id="progressbar"></a>
 
 ## `pub struct ProgressBar`
 
@@ -66,17 +84,25 @@ pub struct ProgressBar { /* fields */ }
 
 ### Methods
 
+<a id="progressbar-new"></a>
+
 #### `pub fn new(value: f32) -> Self`
 
 Create a determinate progress bar with a static value (0.0–1.0).
+
+<a id="progressbar-indeterminate"></a>
 
 #### `pub fn indeterminate() -> Self`
 
 Create an indeterminate progress bar (animated sweep).
 
+<a id="progressbar-value"></a>
+
 #### `pub fn value(mut self, state: impl Into<Prop<f32>>) -> Self`
 
 Bind the progress value to a reactive state.
+
+<a id="progressbar-orientation"></a>
 
 #### `pub fn orientation(mut self, orientation: Orientation) -> Self`
 
@@ -84,20 +110,28 @@ Set the bar's orientation. Default is `Orientation::Horizontal`.
 Vertical bars use the shader-driven animation path only for horizontal;
 vertical indeterminate bars use the signal-driven path instead.
 
+<a id="progressbar-thickness"></a>
+
 #### `pub fn thickness(mut self, thickness: f32) -> Self`
 
 Set the bar's narrow dimension in logical pixels. For horizontal bars
 this is the height; for vertical bars this is the width. Default is 4.0.
+
+<a id="progressbar-track_color"></a>
 
 #### `pub fn track_color(mut self, color: impl Into<ColorProp>) -> Self`
 
 Override the track background. Default (unset) is `SurfaceRole::Sunken`.
 Accepts `Color`, roles, or `Signal<Color>`.
 
+<a id="progressbar-fill_color"></a>
+
 #### `pub fn fill_color(mut self, color: impl Into<ColorProp>) -> Self`
 
 Override the fill / sweep color. Default (unset) is `SurfaceRole::Accent`.
 Accepts `Color`, roles, or `Signal<Color>`.
+
+<a id="progressbar-style"></a>
 
 #### `pub fn style(mut self, style: impl teksilo_core::styles::ProgressBarStyle) -> Self`
 
@@ -106,6 +140,8 @@ determinate fill). The indeterminate sweep is widget-owned and
 always uses the shader-quad / signal-driven path described in
 the module doc; the style supplies the sweep's *colour*
 recipe via `fill_color_override` / `track_color_override`.
+
+<a id="progressbar-label"></a>
 
 #### `pub fn label(mut self, text: impl Into<LocalizedString>) -> Self`
 

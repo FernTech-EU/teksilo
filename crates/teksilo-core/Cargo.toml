@@ -56,5 +56,8 @@ harness = false
 [[bench]]
 name = "budget_gate"
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(teksilo_loom)'] }
+
 [package.metadata.docs.rs]
 all-features = true

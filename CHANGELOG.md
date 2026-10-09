@@ -15,31 +15,118 @@ by crate for clarity, not because crates version independently.
 
 ### Added
 
-#### Core
+#### Tokens
 
-- `WidgetTree::is_behind_modal`, whether an in-tree modal is up and a widget
-  is behind it, public so code outside the tree can apply the rule the
-  pointer, the Tab cycle and assistive technology already follow.
-- `ShortcutBuilder::category_label` and `Shortcut::category_text`: a
-  localized display text for a shortcut's category, beside the `category` key
-  that keeps ordering and grouping stable across languages.
-- `EventContext::track_overlay_placement_by_content(content_id, f)`: an
-  overlay re-placed from its anchor's current bounds on every layout pass while
-  it is up, so it follows the anchor through scrolling, resizing and reflow.
-- `OverlayRequest::new(content_id, anchor, placement, dismiss)` and the
-  builders `.layer(..)`, `.parent_overlay(..)`, `.on_dismiss(..)`,
-  `.with_fade(..)` and `.inert()`. An inert overlay takes no input: pointer
-  input reaches what is under it, Escape closes it without being consumed, and
-  it never moves focus or closes when focus leaves its anchor.
+- `ColorTokens::disabled_content_opacity`, the opacity at which full-colour
+  content shows in a disabled subtree: the one that turns the theme's
+  primary text into its disabled text over `surface_content`, in linear
+  light, clamped to 0.25..=0.75 (0.38 for Material 3, 0.581 for IntUI
+  light, 0.25 for IntUI dark).
 
 #### Canvas
 
+- `teksilo_canvas::wake`, for code that changes what a window shows from
+  another thread. `RedrawWaker` wakes one window. `WakeKind` says whether only
+  what the window draws changed (`Draw`, which a window nobody can see may skip
+  until it is shown) or state its layout reads changed (`Layout`, which always
+  reaches it). `CountingWaker` counts the wakes it receives and lets a test
+  wait for one.
+- `teksilo_canvas::image_geometry`, where a picture lands in its box and
+  which source pixel a point shows. `ImageGeometry` places a source raster in
+  a widget's box through an `ImageFit` and an `Alignment`, turned by an
+  `ImageOrientation`; it snaps the picture's edges to the device-pixel grid,
+  also under an ancestor's scale (`snaps_under` says whether a transform
+  allows it), and maps widget-local points to source
+  pixels and source pixels back to widget rects. `oriented_crop` gives the
+  visible part of a picture and the texture coordinates of its corners, from
+  the same tables the mapping uses. `PixelRect` is a rectangle of source
+  pixels. `ImageFit` moved here from teksilo-widgets, which re-exports it,
+  and gained `ImageFit::fitted_rect`.
+- `ImageOrientation::from_exif`, which names one of the eight EXIF values or
+  returns `None`, and `ImageOrientation::displayed_size`.
+- `teksilo_canvas::live_image`, for a picture another thread rewrites many
+  times a second: a VM screen, a video frame, a camera preview. A
+  `LiveImageSource` holds the latest frame and any number of windows show it;
+  a producer writes it from any thread through a `LiveImageWriter`, in
+  transactions (`lock`, then `write_rect`, `copy_within`, `fill_rect`,
+  `rows_mut`, `pixels_mut` with `mark_dirty`, `resize`, and `commit`) or with
+  the one-shot `write_frame`, `swap_frame` (which installs the producer's own
+  buffer without a copy and hands the previous one back), `write_rect`,
+  `resize` and `clear`. One commit is one generation; a transaction dropped
+  without `commit()` publishes nothing. Changes coalesce: each window is
+  woken once until it has read them, and uploads the union of what changed
+  since its last upload. `writer_exclusive` starts a new writer session and
+  revokes the old one's writers, for a stream that restarts; the source is
+  `Disconnected`, `Waiting` or `Live` (`LiveImageStatus`) and frees its
+  pixels when a session's last writer drops. `LivePixelFormat` takes RGBA,
+  BGRA and the alpha-less RGBX and BGRX, so no producer converts pixels.
+  `generation`, `displayed_generation` and `is_displayed` let a producer
+  throttle, and `LiveImageSourceStats` counts commits, wakes and writers.
+  `ScalingFilter` names how a live picture is sampled when drawn at another
+  size. A transaction (`LiveImageWriteGuard`) holds the source's lock: it is
+  `!Send`, and the workspace's `clippy.toml` shows how to make clippy refuse
+  one held across an `.await`.
+- `LiveImageDiffWriter`, for a producer that hands over whole frames whether
+  or not anything moved: a VM's framebuffer copied at each vsync, a remote
+  desktop. `write_frame` compares the frame with the last one it wrote and
+  commits only the rows that changed, each cut to the span that changed; an
+  identical frame commits nothing, takes no lock and wakes no window, so a
+  still picture fed at 60 Hz costs the window nothing. It keeps a copy of
+  the last frame (one frame of memory) and writes the next frame whole when
+  something else changed the source meanwhile.
+- `resample::downsample_half_opaque`, `downsample_half` for pixels whose
+  fourth byte is not alpha, and `resample::downsample_half_texel`, one
+  texel of either, for rebuilding part of a halved image.
+- `Canvas::draw_live_image`, which draws a live picture: `LiveImageDraw`
+  says where (the whole picture and the part that shows, cropped by texture
+  coordinates), how it is sampled and turned, whether it is paused, and
+  whether the renderer may snap a one-to-one picture to the pixel grid; the
+  frame carries a `LiveImageQuad` in `RenderFrame::live_images`, with a
+  `DrawCommand::LiveImage`, and no pixels. `LiveTextureStats` reports what a
+  renderer holds and uploads for live pictures, and
+  `live_image::testing::LiveImageMirror` runs the renderer's live pass with
+  textures in memory, for headless tests (`MirrorReport` says what one frame
+  did, `LiveImageMirror::mip_level` reads a level of a texture's mip
+  chain).
 - `ImagePixels`, `Canvas::ensure_shared_image_registered(name, width, height,
   Arc<[u8]>)` and `RasterIcon::shared_pixels()`: queue an image for upload
   without copying its pixels.
 
 #### Widgets
 
+- `LiveImage`, which shows a `LiveImageSource`: a picture another thread
+  rewrites many times a second. A commit that changes only pixels repaints
+  nothing and lays nothing out: the window uploads what changed and draws it
+  where the widget last painted. `LiveImageSizing` sizes the box: `Aspect`,
+  the largest box of the picture's aspect ratio, rounded to whole device
+  pixels; `Fill`; or `Natural`, with `device_pixels` for one source pixel per
+  device pixel. `width`, `height` and `size` pin it. Inside the box the
+  picture is placed by `fit` and `alignment`, turned by `orientation` and
+  sampled by `scaling`, and its edges snap to the device-pixel grid
+  (`pixel_snap`), through any scale an ancestor applies. `background` fills
+  the letterbox, and the whole box, with the `placeholder` text centred on
+  it, while the source is not live. It is one `Role::Image` node named by
+  `alt` (or hidden with `a11y_hidden`), whose description is the placeholder
+  while that shows; a commit never changes it.
+- `LiveImage::pause_when_inactive`, which stops a picture uploading while
+  its window is inactive: it keeps the last frame it uploaded, a commit no
+  longer wakes the window, and the window shows the latest commit, in one
+  upload, once it is active again. Screenshots still show the latest
+  commit, and a `Signal<bool>` turns the pause on and off.
+- `LiveImage::dim_when_disabled`, which dims a live picture in a disabled
+  subtree by the theme's disabled-content opacity, over the widget's
+  background. By default a picture keeps its full strength there.
+- `LiveImageHandle`, from `LiveImage::handle`, or made first with
+  `LiveImageHandle::new` and given with `LiveImage::with_handle`, the form a
+  `teksu!` tree can use. It holds the source's size and status as `Signal`s,
+  kept across a switch of source, the placement of the last layout, and the
+  mapping between widget-local points and source pixels (`map_to_source`,
+  `map_to_source_clamped`, `map_to_source_f32`, `map_from_source`), from the
+  placement paint drew.
+- teksilo-widgets re-exports the live-image types a `LiveImage` takes and
+  returns, and `teksilo::prelude` brings a producer's: `LiveImageSource`,
+  `LiveImageWriter`, `LiveImageDiffWriter`, `LivePixelFormat` and
+  `PixelRect`.
 - `CommandPalette` and `ShortcutSettings` show and match a shortcut's
   category by its label (`PaletteCommand::category_text`), so a French reader
   sees and types "Fichier", not the key. The header of the group holding
@@ -89,6 +176,239 @@ by crate for clarity, not because crates version independently.
   accessibility action, resets the value to `v` and reports it through
   `on_change`.
 
+#### App
+
+- `HeadlessApp::render_for_capture`, which renders a headless app for an
+  offscreen capture with the glyph atlas its text needs uploaded into the
+  renderer first.
+- **The live pass's timings in an application, release builds included.**
+  With the `live-image-timings` feature (on `teksilo`, or `teksilo-app`) and
+  `TEKSILO_IDLE_TRACE=1`, each trace line is followed by a
+  `teksilo_idle_trace_live` line per window drawing a live picture: its
+  textures and their bytes, the uploads, copies of another window's texture
+  and contended frames since the previous line, and the percentiles of its
+  live pass, lock holds and commit-to-upload delays.
+  `PlatformWindow::live_texture_timings` reads them with teksilo-platform's
+  feature of the same name.
+
+#### Platform
+
+- `PlatformWindow::redraw_waker`, a waker any thread can call to have the
+  window run a frame. While the window is hidden (`set_hidden`), a wake that
+  only changes what it draws is dropped and one redraw is requested when it is
+  shown again; `is_hidden` and `live_wake_stats` (with `LiveWakeStats`) report
+  it. `disconnect_redraw_waker` turns every such waker into a no-op, and
+  dropping the window does the same, as does teksilo-app for every window
+  when its event loop ends. On macOS a wake made off the main thread never
+  waits for it: it posts to the event loop through the route
+  `set_off_main_wake_route` installs, or without one hands the redraw to the
+  main queue.
+- `PlatformWindow::live_texture_stats`, what the window's renderer holds and
+  uploads for live pictures, and `PlatformWindow::track_display_refresh`,
+  which reads the refresh rate of the display the window is on: a presented
+  frame waits about one refresh of it for a producer holding a live
+  picture's lock. Windows read it when created, and teksilo-app again when
+  one moves or changes scale.
+
+#### Terminal
+
+- `TerminalEngine::synchronized_update_deadline` and
+  `TerminalEngine::end_synchronized_update`, defaulted, for an engine that
+  holds output back during a synchronized update: the view ends one the
+  child never ends at its deadline.
+- `MemoryOutput`, the child output of a `MemoryEngine`.
+  `MemoryEngineFactory::output()` returns the one the next spawned engine
+  reads; a test writes to it from any thread, or closes it to end the child.
+
+#### Core
+
+- `RepaintTrigger`, for a widget whose content changes on another thread: it
+  marks the widgets it is attached to and wakes only their windows.
+  `request_repaint` repaints them, `request_relayout` lays them and their
+  ancestors out again, and `request_pull` runs the pull hook a widget set
+  with `BuildContext::on_trigger_pull`, which takes the content in whether
+  or not the widget is shown and returns a `PullOutcome`: a widget nobody
+  sees takes its content in without its window drawing a frame. Requests
+  coalesce to one wake per window until the widget has taken them, and
+  survive its rebuilds; a widget that is clipped out or dormant costs one
+  wake until it is painted again. Attach it in `build()` with
+  `BuildContext::attach_repaint_trigger`.
+  `RepaintTriggerStats` counts requests, wakes and what consumed them, and
+  `WidgetTree::repaint_trigger_count` counts the widgets with one attached.
+- `BuildContext::attach_live_image`, which attaches a `LiveImageSource` to
+  the widget being built, in its window. The source's size and status reach
+  layout through `LiveImageSignals`, which the widget binds; its pixels reach
+  the renderer without passing through the widget, which draws the
+  attachment's consumer with `Canvas::draw_live_image`. A commit that changes
+  only pixels marks no widget: the window replays its cached frame and the
+  renderer uploads what changed. A size or status change relayouts the
+  widget, also while it is dormant, and draws a frame only if it was shown.
+  `LiveImageAttachment` records the widget's placement for automation, and
+  the transform it snapped under: when an ancestor's transform changes that
+  snap, the widget is laid out again, which a transform scope alone does
+  not do.
+  `WidgetTree::live_image_attachment_count`, `live_image_consumer`,
+  `live_image_stats`, `live_image_geometry` and `live_image_attachments`
+  look attachments up by widget, through a `WidgetBuilder` wrapper too.
+- `LiveImageSignals` implements `Default`: no size and `Disconnected`, for
+  a widget made before its source is known.
+- `WidgetTree::device_scale_signal` and `BuildContext::device_scale_signal`:
+  the window's device scale as a `Signal`, for widgets whose layout depends on
+  it. Bound at `Relayout`, it relayouts that widget when the window moves to a
+  display with another scale.
+- `WidgetTree::set_redraw_waker`, the waker content updated off the UI thread
+  uses to wake the tree's window. teksilo-app installs each window's before its
+  root widget is built.
+- `WidgetTree::is_behind_modal`, whether an in-tree modal is up and a widget
+  is behind it, public so code outside the tree can apply the rule the
+  pointer, the Tab cycle and assistive technology already follow.
+- `ShortcutBuilder::category_label` and `Shortcut::category_text`: a
+  localized display text for a shortcut's category, beside the `category` key
+  that keeps ordering and grouping stable across languages.
+- `WidgetTree::type_text_with_ops`: `type_text` over the caller's window
+  operations, the one door the automation bridge and `WidgetTree::type_text`
+  both type through.
+- `WidgetTree::window_to_local` and `WidgetTree::local_to_window`: the point a
+  widget's handlers receive for a window point, the conversion the dispatcher
+  applies, and its inverse, which aims input at a point inside a widget under a
+  `Scale`, a `Rotate` or a `SceneView`. `EventContext::to_local` is the same
+  conversion inside a handler, for the positions it is handed in window space:
+  `Scroll` and `PointerCancel`'s `window_position`, `coalesced()` samples.
+- `EventContext::track_overlay_placement_by_content(content_id, f)`: an
+  overlay re-placed from its anchor's current bounds on every layout pass while
+  it is up, so it follows the anchor through scrolling, resizing and reflow.
+- `OverlayRequest::new(content_id, anchor, placement, dismiss)` and the
+  builders `.layer(..)`, `.parent_overlay(..)`, `.on_dismiss(..)`,
+  `.with_fade(..)` and `.inert()`. An inert overlay takes no input: pointer
+  input reaches what is under it, Escape closes it without being consumed, and
+  it never moves focus or closes when focus leaves its anchor.
+
+#### Automation
+
+- `inject_key` takes `text`, what the press types, and `phase` (`press`,
+  `down` or `up`), so a key can be held across calls. It also names `Insert`,
+  `F13` to `F24` and the context-menu key (`insert` / `Ins`, `f13`..`f24`,
+  `contextmenu` / `Menu`), which it refused before.
+- `inject_pointer`, `long_press` and each `inject_touch_sequence` step take
+  `node`, which makes `x` and `y` local to that node: the position its own
+  handlers receive, exact under any transform above it.
+- `scroll` takes `at`, the node-local point the wheel turns at, and `lines`,
+  which scrolls by lines as a wheel notch does (`ScrollSource::Wheel`) rather
+  than by pixels.
+- `live_image_stats {node}`, a live picture's counters: its source's
+  (generation, displayed generation, commits, wakes, writers, attachments),
+  its attachment's in the window (window generation, frames drawn, captures,
+  uploads, deferred and paused frames, paints), and the window's: what its
+  renderer holds and uploads for live pictures, and its wakes. The headless
+  server has no textures to report before its first screenshot, and no
+  wakes.
+- `live_image_map {node}`, where a live picture lies in the window (all of
+  it, the part that shows, its size as stored and as displayed, its
+  orientation, the scale) and, on request, where a source pixel's centre
+  and a source rect are shown (`source`, `source_rect`) and which source
+  pixel a window point shows (`window`; `null` on the letterbox). It answers
+  `NO_GEOMETRY` before the picture's first layout and while its source has
+  no size.
+- `inject_pointer`, `long_press` and each `inject_touch_sequence` step take
+  `source`, a pixel of the live picture `node` names, in place of `x` and
+  `y`: the press lands at the centre of where that pixel is drawn, under any
+  fit, orientation and transform. A pixel outside the source is refused, and
+  so is one the press would not reach: cropped out of view by the fit, past
+  an ancestor's box or clip, or under another widget.
+- A screenshot's metadata lists the live pictures the image shows in
+  `live_images`: each one's node, the generation the image holds, whether it
+  drew an older picture (`deferred`) and its rect in the image's pixels.
+- The headless server's demo has a live picture: 96 × 64 pixels that each
+  encode their position and generation, whose description is the last event
+  it received, with a button that commits one frame and one that starts a
+  60 Hz producer.
+- `teksilo_probe.live_image` in the probe harness: `click_source`,
+  `point_of`, `rect_of`, `source_of`, `capture`, and `crop_visible`, which
+  cuts a saved screenshot to a live picture by its metadata, with a PNG
+  reader and writer that need only the standard library. `tools.py` wraps
+  the two new tools.
+- `example_live_image.py` among the probe harness's worked examples, run in
+  CI against `live-image-demo`: frames flowing between two screenshots, no
+  repaint while they do, a press landing on its source pixel at the four
+  corners and the centre in both orientations, two fingers and their
+  cancels, keys reaching the picture and Ctrl+Tab leaving it, a rotation
+  reshaping the box, whole frames through a `LiveImageDiffWriter` committing
+  only what moved and nothing at all once the guest holds still, and a
+  window silent while its producer is paused.
+
+#### Render
+
+- `test_support::create_offscreen_renderer`, the name shipped code now uses
+  for the offscreen renderer (`create_test_renderer` remains as an alias),
+  and `test_support::require_test_renderer` for GPU tests: with
+  `TEKSILO_TEST_REQUIRE_ADAPTER` set to `any` or `lavapipe` it fails the
+  test, naming the adapter found, instead of letting it return early on a
+  host without the adapter. `test_support::adapter_required` tells a test
+  that goes through the panic-free entry whether that variable is set, and
+  `test_support::is_lavapipe` identifies Mesa's lavapipe.
+- `Renderer` draws the live pictures a frame carries. A window holds one
+  texture per live source it shows and uploads only what changed since its
+  last frame; while a producer holds a source's lock, it keeps showing the
+  previous frame rather than wait. A picture larger than one frame's upload
+  budget fills over several frames while the previous one still shows, so
+  no torn frame is ever drawn. A texture is dropped at the first frame
+  without its picture (a small one, a few MiB at most, is kept for a while
+  in case it comes back), and one the device cannot hold shows the widget's
+  background instead. Windows on one device upload each commit once: a
+  window whose texture lacks a commit another window already holds copies
+  that window's texture on the GPU, without taking the source's lock
+  (`LiveTextureStats::sibling_copies`). An upload is copied into staging the
+  renderer keeps mapped and reuses from frame to frame, not into a buffer
+  allocated for it. `Renderer::live_texture_stats` reports what a renderer
+  holds and uploads.
+- `Renderer::render_capture`, `render` for a screenshot: each live picture
+  shows its latest commit, even while a producer holds its lock or the
+  picture is paused, and the render counts as a capture, not as a frame a
+  producer's picture was displayed in.
+- `DeviceHealth`, the lost-device latch of one GPU device, and
+  `Renderer::with_device_health`, which builds a renderer on a device whose
+  latch is already installed. Once the device is lost, live pictures stop
+  counting frames, so a producer sees its stream stall.
+- `poll_gpu_reclaim`, which frees the textures renderers dropped without
+  waiting for another frame, for an event loop to call before it sleeps.
+- A live picture drawn with `ScalingFilter::Trilinear` samples a mip chain
+  the window builds on the GPU, with the 2×2 box static images get on the
+  CPU, in linear light, premultiplied, and opaque for RGBX and BGRX. A
+  frame that draws the source so rebuilds only what its uploads changed,
+  and one texture serves a `Trilinear` thumbnail and a full-size `Linear`
+  view of the same source. `LiveTextureStats::mip_updates` counts the
+  chains rebuilt.
+- `Renderer::live_texture_timings`, how long live pictures take: one
+  render's live pass for a frame that draws one, each hold of a source's
+  lock (how long a producer can be kept waiting), and each upload's delay
+  from its commit, as the 50th, 90th and 99th percentiles and the largest of
+  the latest 1,024 samples (`LiveImageTimings`, `Percentiles`). Debug builds
+  always keep them; a release build does with teksilo-render's
+  `live-image-timings` feature.
+
+#### WebView
+
+- `MemoryWebViewRecords::scale_log`: the scale factor each `set_bounds` of a
+  web view was given, for a test of what an engine that positions in device
+  pixels receives.
+
+#### Demos
+
+- **`cargo run -p live-image-demo`** — a phone-shaped guest screen that a
+  60 Hz producer thread redraws by dirty rects: rotate it, pause the producer
+  and watch the window go idle, hand over whole frames through a
+  `LiveImageDiffWriter` and hold the guest still to watch it go idle again
+  while frames keep coming, switch to `Nearest`, open a second window on the
+  same source, and press, drag, touch or type into it, mapped to the guest's
+  pixels.
+- **`cargo run -p live-image-bench`** — one live picture and a producer
+  whose workload the command line chooses (rects, whole frames or copies
+  only, any size, rotations, a second window opened and closed on a
+  schedule, the picture mounted and unmounted), for measuring what a live
+  picture costs in a real window. `tools/live_image_measure.py` runs the
+  acceptance scenarios with it on Linux and reports the UI thread's CPU,
+  the live pass's timings and the process's GPU memory.
+
 #### cargo-teksilo
 
 - `cargo teksilo status` reports the agent instructions installed under the
@@ -107,19 +427,171 @@ by crate for clarity, not because crates version independently.
 
 ### Changed
 
-- **Breaking (canvas):** `PendingImage::pixels` is an `ImagePixels`
-  (`Static(&'static [u8])` or `Shared(Arc<[u8]>)`), which dereferences to the
-  bytes, instead of a `Cow<'static, [u8]>`.
+#### Widgets
+
+- `ImageWidget::from_raw`, a masked image and `Avatar`'s picture show their
+  pixels through a live source written once. Their texture goes with the
+  first frame that does not draw them and comes back when one does, so GPU
+  memory follows what is on screen; each image keeps one copy of its
+  pixels instead of three; a thumbnail drawn small samples a mip chain
+  built on the GPU. They appear in `RenderFrame::live_images` rather than
+  `images`. Pixels the source refuses (a zero side, a short buffer, a side
+  over 16384) draw nothing, where a short buffer used to panic. An unmasked
+  `ImageWidget::new(&icon)` keeps the one texture every widget showing the
+  icon shares.
+- An `Avatar` whose image is refused shows its initials, and is announced
+  as them.
 - `ImageWidget`, raster and animated `IconWidget`s and rich-text inline images
   no longer copy their pixels on every repaint or frame assembly, and a
   `RasterIcon` clone shares its pixels.
-- Debug builds warn once when a window holds more than 256 image textures. The
-  documentation of `ImageWidget`, `RasterIcon` and the renderer states that an
-  image texture is kept until its window closes.
+
+#### Terminal
+
+- Output from the child repaints only the terminal and redraws only its own
+  window. Before, each burst repainted every widget of the window and redrew
+  every window of the app.
+- A terminal that is not shown (in a background tab, a hidden window, or
+  scrolled out of view) keeps taking its child's output in: its screen,
+  title, working directory, exit status and what a screen reader reads stay
+  current, and its window draws no frame for it. Before, its output waited,
+  without limit, for the next time it was painted.
+- Output not yet taken in is bounded at 4 MiB: past it the child waits on its
+  write until the terminal catches up. A frame spends at most 8 ms parsing
+  it, and the rest follows in the next frames, so a flood of output never
+  holds up the application's other windows and widgets.
+- A focused terminal no longer draws 60 frames a second to blink its cursor:
+  it wakes twice a second, not at all while no cursor is in view (hidden by
+  the child, or scrolled out), and draws continuously only while the visual
+  bell fades.
+- A terminal in a headless tree that runs mount actions reads its child's
+  output and shows it at the next render.
+- `MemoryEngine`'s child runs until `MemoryOutput::close`, `kill` or the
+  engine's drop, where it used to end at once in a windowed tree; every
+  mounted terminal now runs a reader thread for it, headless included, which
+  a test that leaks its tree leaks too.
+- A `TerminalEngineFactory`'s reader is now read on a thread in every tree,
+  headless included, to the end of its output: once the terminal is gone the
+  thread reads on and discards what it reads, so a reader should return the
+  end once its engine is killed or dropped.
+
+#### Core
+
+- **Breaking.** `AppEvent` is `#[non_exhaustive]`: a `match` on it outside
+  teksilo-core needs a wildcard arm.
 - **Breaking (core):** `OverlayRequest` is `#[non_exhaustive]`. Build it with
   `OverlayRequest::new(..)` and its builders; a struct literal no longer
   compiles outside `teksilo-core`. Its fields stay public.
+
+#### Canvas
+
+- **Breaking.** `RenderFrame` is `#[non_exhaustive]`: build one with
+  `RenderFrame::new()` or `Default`, then set its fields. `DrawCommand` gains
+  `LiveImage`, which an exhaustive `match` on it must handle.
+- `teksilo-canvas` depends on `parking_lot` 0.12, which wgpu and winit
+  already bring into every windowed application; it is new to the
+  dependency graph of an app that uses only teksilo-core, teksilo-data or
+  teksilo-automation.
+- `teksilo-canvas` lists `loom` as a dependency for the `teksilo_loom` cfg,
+  which only its concurrency models set. It adds eight packages to an
+  application's `Cargo.lock` (`loom`, `generator`, `tracing-subscriber`,
+  `tracing-log`, `matchers`, `nu-ansi-term`, `sharded-slab`, `valuable`),
+  which an audit of the lockfile sees; no ordinary build fetches or
+  compiles them.
+- **Breaking (canvas):** `PendingImage::pixels` is an `ImagePixels`
+  (`Static(&'static [u8])` or `Shared(Arc<[u8]>)`), which dereferences to the
+  bytes, instead of a `Cow<'static, [u8]>`.
+
+#### App
+
+- **A window nobody can see stops drawing.** A minimised window, or one
+  fully covered (reported on macOS and X11), renders one last frame and
+  then nothing until it is shown again, instead of rendering on every
+  redraw. On macOS so does every window while the displays sleep, the
+  screen is locked or another user's session has the console. On Wayland, frames are paced by the compositor's frame callbacks,
+  which it stops sending to a window it does not show: minimised, covered
+  or on another workspace. Such a window still runs its idle callbacks,
+  lays out and keeps its accessibility tree delivered, at most ten times a
+  second, and still answers a screen reader's actions, so app state,
+  animations that must finish and what a screen reader hears stay current.
+- A window woken to bring its state up to date, rather than its pixels (an
+  accessibility client attaching or acting, content a widget takes in from
+  another thread), lays out and delivers it without drawing, at most ten
+  times a second, and redraws only if something visible changed.
+- Debug builds report on standard error a focused window that has waited
+  more than a second for a redraw it asked for.
+- `TEKSILO_IDLE_TRACE` lines now carry the time since start (`t=`) and
+  count redraws answered by a hidden window (`hidden_redraws`), the
+  non-visual frames run without drawing (`ticks`), app
+  events (`app_events`), wakes windows posted to the event loop
+  (`posted_wakes`), and window wakes routed and dropped while a window drew
+  nothing (`waker_wakes`, `waker_wakes_dropped`).
+- Textures a closed window or a removed live picture held are freed while
+  the app is idle: the event loop polls the GPU, waking every 8 ms until it
+  has freed them, and draws nothing for it. `TEKSILO_IDLE_TRACE` counts the
+  turns that kept such a wake (`control_flow.gpu_reclaim`).
+- Automation screenshots, those of the headless automation server and the
+  widget previewer's captures render with `Renderer::render_capture`: a live
+  picture shows its latest commit, and the capture is not counted as a frame
+  its producer's picture was displayed in.
+
+#### Platform
+
+- **Breaking.** `PlatformWindow::capture_offscreen` returns
+  `Result<OffscreenCapture, ReadbackError>`: the pixels, their size, and
+  where they sit in the window's surface (`region`). A device that cannot
+  read the capture back fails it instead of panicking.
+
+#### Render
+
+- `Renderer::new` sets its device's lost-device callback, replacing one the
+  caller set. A device shared by several renderers installs one
+  `DeviceHealth` and builds each with `Renderer::with_device_health`; the
+  windows of a teksilo-app share one this way.
+- The offscreen renderer honours wgpu's environment variables, as windows
+  already do: `WGPU_BACKEND=vulkan` makes it open a Vulkan adapter or none,
+  instead of falling back to another backend, and `WGPU_POWER_PREF` picks
+  the GPU on a machine with two.
+- Debug builds warn once when a window holds more than 256 image textures. The
+  documentation of `ImageWidget`, `RasterIcon` and the renderer states which
+  image textures are kept until their window closes.
+
+#### Automation
+
+- **`type_text` types as a keyboard does**, through the automation bridge and
+  `WidgetTree::type_text` alike. Each character is a key pressed and released,
+  where it used to be a press with no release: an ASCII letter is its named
+  key (`Key::A`..`Key::Z`), with Shift for a capital, a space is Space, a line
+  break is Enter and a tab is Tab, each press carrying the character as its
+  text. A letter shortcut now fires on typed text as it would for a user, and
+  a Tab typed into a field that does not take one moves focus; text that must
+  arrive without keys goes through `type_ime`.
+- `scroll` without `at` turns the wheel at the centre of the node as drawn.
+  It took the centre of the node's untransformed box, which under a `Scale`,
+  a `Rotate` or inside a `SceneView` is somewhere else.
+- **The probe harness's `tools.inject_pointer` and `tools.long_press` take
+  `x` and `y` by keyword**, now that `source` can stand in for them: a call
+  passing them by position names them. The tools' wire arguments are
+  unchanged.
+
+#### Documentation
+
+- **The online catalogs' pages open with a table of contents**, as Qt's
+  class reference does: after the page's first paragraph, its public types,
+  then each type's functions in one table, constructors first, then builder
+  methods, methods, and associated constants and types, each with its return
+  type and linking to its entry. The rest of the module documentation follows
+  under "Detailed description", its headings nested under it rather than
+  shown as top-level titles. In the book, function names are FernTech teal,
+  at a shade each theme keeps readable as text; the pages stay plain
+  Markdown. It replaces the "Builder methods at a glance" line, which listed
+  getters among the builders.
+
+#### Scene
+
 - `SceneCard`'s Edit accessibility action has id 1000 instead of 0.
+
+#### cargo-teksilo
+
 - The skill `cargo teksilo` installs says which release it ships with, and
   tells the agent how to refresh a copy installed for another release.
 - **Behaviour change:** `cargo teksilo --quiet` keeps the line that says which
@@ -128,10 +600,125 @@ by crate for clarity, not because crates version independently.
 - `cargo teksilo status` says why it shows no teksilo version: no `Cargo.lock`
   yet, teksilo not a dependency, or a pointer to `--verbose`.
 
+### Deprecated
+
+#### Canvas
+
+- `teksilo_canvas::Orientation` is renamed `ImageOrientation`, the one
+  orientation every image path uses. The old name stays as a deprecated
+  alias.
+
+#### Core
+
+- `RepaintWindowRequest`: attach a `RepaintTrigger` instead. It repaints only
+  the widgets it is attached to and redraws only their window, where
+  `RepaintWindowRequest` repaints every widget of its window and redraws every
+  window. It still works as before, and will be removed in the next breaking
+  release.
+
+### Removed
+
+**Breaking.**
+
+- **The `text` feature, on `teksilo` and on `teksilo-app`.** The text stack
+  (shaping, the glyph atlas, rich text) was already built into every app:
+  the widgets need it. On `teksilo`, turning the feature off only dropped
+  the `teksilo::text` and `teksilo::text_document` re-exports; on
+  `teksilo-app`, it gave the windows no text backend, so every label was
+  blank. A dependency that names `features = ["text"]` must drop it.
+
 ### Fixed
+
+#### Terminal
+
+- **The cursor blinked, and the visual bell faded, only when something else
+  repainted the terminal.** Both now repaint it.
+- **A child that stopped reading its input could freeze the application.**
+  Keys, pastes and the terminal's replies to the child's queries waited on
+  the UI thread for the child to take them. They are now written from a
+  thread of their own; what a child that never reads would have queued past
+  4 MiB is dropped.
+- **Output a child printed inside a synchronized update it never ended (it
+  crashed or was killed mid-frame) stayed hidden** until more output came.
+  It is shown once the update's 150 ms deadline passes.
+- **A child left running (`TerminalClosePolicy::LeaveRunning`) was hung up
+  only the next time it wrote after its terminal went, and a background
+  process the child had started kept the terminal's reader thread alive
+  after a kill.** The PTY now closes when the engine goes, whatever still
+  holds the child's side of it.
+
+#### WebView
+
+- **A web view on a window moved to a display with another scale kept the old
+  scale** until its own bounds changed, which on X11 with WebKitGTK left the
+  page offset or mis-sized. It now repositions its native page at the new
+  scale.
+
+#### Platform
+
+- **An assistive technology acting on a window as the application exited
+  could panic it on X11.** It no longer can.
+- **On Wayland, every wake of the event loop cost a second one 4 ms later**,
+  under any compositor offering tablet support, tablet attached or not: the
+  loop looked again for pen packets, which cannot arrive before a tablet
+  tool is announced. It looks again only once one is.
+
+#### Render
+
+- **A clip starting before the window edge reached too far.** A clipping
+  widget scrolled partly off the leading or top edge of the window (or of a
+  blur's offscreen drawing) clipped its content as far past its trailing
+  edge as it reached before the leading one. It now ends where it should.
+
+#### App
+
+- **A window that could not draw asked for frames without pause.** When a
+  window's surface refused a frame, the window asked for another at once,
+  every time: on macOS, a window AppKit never showed (one opened while the
+  display slept or the screen was locked) asked about 120,000 times a
+  second, drew nothing and held a core until it was shown, and every new
+  window did so briefly while it first appeared. The first refusal is still
+  retried at once, later ones after a wait that doubles up to a quarter of a
+  second, and on macOS a window AppKit reports not visible is treated as
+  hidden until it is shown.
+- **With a screen reader on, a window drew each change twice.** A frame
+  drawn within a tenth of a second of the last accessibility update asked
+  for another frame at the end of that tenth, even when nothing the reader
+  could hear had changed, and that frame handed the screen reader a copy of
+  the tree it already held. A frame now sends the tree, or holds it back for
+  later, only when something in it changed.
+- **`default-features = false` on `teksilo` still bundled the Arabic and
+  Hebrew fallback fonts.** teksilo-app turned them on through its own
+  dependency on the text backend, as did `teksilo-theme-material3`'s
+  `bundled-fonts` and `teksilo-preview-ui`. Those builds now bundle neither;
+  the `fonts-*` features add them back. An app that depends on `teksilo-app`
+  or `teksilo-preview-ui` directly, without the umbrella, no longer gets
+  them either: it enables `fonts-arabic` / `fonts-hebrew` on its own
+  `teksilo-text` dependency.
+- **Automation screenshots could show text as blank.** A screenshot renders
+  the window again through its own renderer, but skipped the glyph-atlas
+  upload a real frame does, so any text first drawn by that render came out
+  blank. The headless automation server never uploaded the atlas at all, so
+  its screenshots had no text. Both now upload it.
+
+#### Automation
+
+- **An injected mouse held no button.** A handler reading
+  `ctx.pointer().buttons` during an `inject_pointer` drag saw none, and
+  `query_pointers` showed the dragging mouse as up. The mouse now holds what
+  the previous ops pressed, as a real one reports it.
+- **An injected finger or stylus was never the primary pointer**, so a probe's
+  finger could not drag a splitter or a dock resize handle, which serve only
+  the primary contact. A finger is now primary when no other
+  finger is down and a stylus when no finger is, as the platform reports them,
+  and the second finger of a gesture stays secondary after the first lifts.
 
 #### Widgets
 
+- **An `Avatar` whose image changed leaked a texture at every change**, as
+  did every avatar row a list re-created, and every `ImageWidget::from_raw`
+  ever shown: nothing freed them. A rebuild that keeps an avatar's image (a
+  new name, presence or locale) now keeps its texture too.
 - **Behaviour change:** `MinSize` forwards an unbounded axis unbounded and
   applies its minimum to the child's answer. A `Checkbox` or `RadioButton` in
   an `HStack` showed its label as "…".
@@ -144,29 +731,16 @@ by crate for clarity, not because crates version independently.
 - A `ListView`'s drop insertion line and its focus ring are drawn over the
   rows, and the line is kept whole at the top and bottom of the viewport.
 
-#### Accessibility
+#### Core
 
-- `.access_custom_action(..)` adds to a widget's own custom actions instead of
-  replacing them, so an application's action no longer hides a widget's own
-  (a `SceneCard`'s Edit action).
-
-#### Documentation
-
-- The title-bar guide's quick start compiles again (it called a removed
-  `VStack::add_child`), and the guides' complete programs are now compiled by
-  the test suite.
-- The application guide pinned `teksilo = "=0.14.3"` inside the 0.15 crates.
-  It names the current release, each release rewrites the pin, and the docs.rs
-  copy of the guide matches the skill's again.
-- The tooltips guide imported `teksilo_widgets::tooltip`, a path an
-  application cannot name; it imports `teksilo::widgets::tooltip`.
-
-#### cargo-teksilo
-
-- `cargo teksilo` finds a teksilo kept behind a Cargo feature. Every command
-  reported that teksilo was not a dependency of an application that declares
-  it optional. `status` names the feature that turns it on (`teksilo_enabled_by`
-  in `--json`).
+- **A widget destroyed at run time stayed on screen** until something else
+  repainted its parent. `EventContext::destroy` took it out of the tree but
+  not out of the frame the window replayed, and its parent did not lay out
+  again without it. Both happen now.
+- **A child a culling container parked could stay on screen**, and a live
+  picture's texture with it, when nothing else in the pass needed a repaint:
+  a scroll the child handled itself, for one. The window replayed the frame
+  it had, parked child included, until something else repainted.
 
 #### Menus
 
@@ -192,6 +766,40 @@ by crate for clarity, not because crates version independently.
   out of the box onto the bar behind it, and a bar collapsed to its hamburger
   floated over the box with focus on it, in front of the modal. Both keys now
   do nothing while an in-tree modal is up.
+
+#### Documentation
+
+- **The online widget, data, settings and scene catalogs lost a line of a
+  type's documentation, or showed raw rustdoc brackets,** wherever a wrapped
+  doc line began with a link followed by a colon. `LiveImage::with_handle`'s
+  page lost half a sentence; seventeen pages showed `[`X`]:` as written. The
+  pages are regenerated: four get their line back, seventeen show the name
+  as code like every other link.
+- **Seventy of the catalog indexes' two hundred entries stopped
+  mid-sentence**, where the first sentence of a page's documentation was
+  wrapped across lines: the brief read only its first line. It now reads the
+  sentence whole.
+- The title-bar guide's quick start compiles again (it called a removed
+  `VStack::add_child`), and the guides' complete programs are now compiled by
+  the test suite.
+- The application guide pinned `teksilo = "=0.14.3"` inside the 0.15 crates.
+  It names the current release, each release rewrites the pin, and the docs.rs
+  copy of the guide matches the skill's again.
+- The tooltips guide imported `teksilo_widgets::tooltip`, a path an
+  application cannot name; it imports `teksilo::widgets::tooltip`.
+
+#### Accessibility
+
+- `.access_custom_action(..)` adds to a widget's own custom actions instead of
+  replacing them, so an application's action no longer hides a widget's own
+  (a `SceneCard`'s Edit action).
+
+#### cargo-teksilo
+
+- `cargo teksilo` finds a teksilo kept behind a Cargo feature. Every command
+  reported that teksilo was not a dependency of an application that declares
+  it optional. `status` names the feature that turns it on (`teksilo_enabled_by`
+  in `--json`).
 
 ## [0.15.1] - 2026-10-04
 
@@ -227,11 +835,11 @@ by crate for clarity, not because crates version independently.
   the window closed. The preview is now torn down like any other widget.
 - **A widget changed while out of view could come back showing its old
   content.** A widget marked for repaint while it was clipped out of a
-  scroll area or under a fully transparent ancestor (or itself fully
-  transparent) lost the mark without repainting, and if it came back into
-  view without moving it replayed the paint it had before the change. Such
-  a widget now drops its stale paint and repaints when it is next visible;
-  a widget that did not change keeps its cached paint as before.
+  scroll area or under a fully transparent ancestor lost the mark without
+  repainting, and if it came back into view without moving it replayed the
+  paint it had before the change. Such a widget now drops its stale paint
+  and repaints when it is next visible; a widget that did not change keeps
+  its cached paint as before.
 - **An accordion opened in a window without focus stayed closed.** The
   animation scheduler paused every animation of a window that was unfocused
   or occluded, one-shot tweens included, so a `Collapse` opened there (by an
@@ -245,7 +853,7 @@ by crate for clarity, not because crates version independently.
 
 #### Render
 
-- **Clipping was misplaced at fractional scales and lost around blurs.** A
+- **Clipping was misplaced on scaled displays and lost around blurs.** A
   clip inside a translated scope (a panned scene, a moved transform
   wrapper) landed at the wrong place whenever the display scale was not 1,
   because the translation was scaled twice. Content drawn after a blur

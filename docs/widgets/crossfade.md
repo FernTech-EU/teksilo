@@ -8,6 +8,19 @@ previous content fades out while the new content fades in over
 the same window. Like `Switcher`,
 but animated.
 
+## Public functions
+
+### `Crossfade`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(key_signal: Signal<K>, builder: impl Fn(&K) -> Box<dyn Widget> + 'static)`](#crossfade-new) |
+| | **Builder methods** |
+| `Self` | [`duration(duration: Duration)`](#crossfade-duration) |
+
+## Detailed description
+
 ```ignore
 let tab = Signal::new(Tab::Overview);
 ctx.add(
@@ -18,7 +31,7 @@ ctx.add(
 );
 ```
 
-## Behavior
+#### Behavior
 
 On each `key` change, both the previous-key widget and the
 current-key widget are rebuilt (via the supplied builder) and
@@ -31,18 +44,16 @@ Builders should be cheap — they may run more than once per
 lifetime as the user navigates through several keys. For data-
 heavy panels, hoist expensive state out of the builder closure.
 
-## Reduced motion
+#### Reduced motion
 
 Honours `prefers-reduced-motion`: snaps the opacity changes
 instead of tweening (instant swap).
 
-## Builder methods at a glance
-
-`duration`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/crossfade/index.html)
+
+<a id="crossfade"></a>
 
 ## `pub struct Crossfade`
 
@@ -54,12 +65,16 @@ pub struct Crossfade<K: Eq + Clone + 'static> { /* fields */ }
 
 ### Methods
 
+<a id="crossfade-new"></a>
+
 #### `pub fn new(key_signal: Signal<K>, builder: impl Fn(&K) -> Box<dyn Widget> + 'static) -> Self`
 
 New `Crossfade` driven by `key_signal`. The `builder` closure
 constructs the widget for a given key value. Builders can be
 invoked multiple times across the widget's lifetime as the
 user transitions through keys.
+
+<a id="crossfade-duration"></a>
 
 #### `pub fn duration(mut self, duration: Duration) -> Self`
 

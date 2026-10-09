@@ -8,7 +8,11 @@ use crate::paint::{FillRule, StrokeSpace, StrokeStyle};
 
 /// The complete render output for one frame. This is the boundary between
 /// platform-independent widget code and GPU-specific rendering code.
+///
+/// `#[non_exhaustive]`: build one with [`RenderFrame::new`] (or `Default`)
+/// and fill its fields.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct RenderFrame {
     pub glyphs: Vec<GlyphQuad>,
     pub images: Vec<ImageQuad>,
@@ -39,6 +43,11 @@ pub struct RenderFrame {
     /// frame until the next tick resumes.
     pub anim_params: Vec<AnimParams>,
     pub draw_order: Vec<DrawCommand>,
+    /// Live pictures: pixels another thread writes, which each window's
+    /// renderer pulls from the source before it draws. A quad carries a
+    /// reference to its source, never bytes, so merging or replaying a
+    /// frame copies nothing. See [`crate::live_image`].
+    pub live_images: Vec<crate::live_image::LiveImageQuad>,
     /// Images that need GPU registration before rendering this frame.
     pub pending_images: Vec<PendingImage>,
     /// Opaque [`TextLayout::layout_key`](crate::text_backend::TextLayout::layout_key)
@@ -71,6 +80,7 @@ impl RenderFrame {
         let rasterized_offset = self.rasterized.len();
         let path_offset = self.paths.len();
         let animated_offset = self.animated_quads.len();
+        let live_offset = self.live_images.len();
 
         self.glyphs.extend_from_slice(&other.glyphs);
         self.images.extend_from_slice(&other.images);
@@ -81,6 +91,7 @@ impl RenderFrame {
         self.rasterized.extend_from_slice(&other.rasterized);
         self.paths.extend_from_slice(&other.paths);
         self.animated_quads.extend_from_slice(&other.animated_quads);
+        self.live_images.extend_from_slice(&other.live_images);
         // `anim_params` is NOT merged index-wise — the widget tree
         // writes one authoritative slice per frame (indexed by
         // registry slot, which is global across the tree). Cached
@@ -106,6 +117,7 @@ impl RenderFrame {
                 DrawCommand::Rasterized(i) => DrawCommand::Rasterized(i + rasterized_offset),
                 DrawCommand::Path(i) => DrawCommand::Path(i + path_offset),
                 DrawCommand::AnimatedQuad(i) => DrawCommand::AnimatedQuad(i + animated_offset),
+                DrawCommand::LiveImage(i) => DrawCommand::LiveImage(i + live_offset),
                 other => other.clone(),
             };
             self.draw_order.push(shifted);
@@ -463,6 +475,9 @@ pub enum DrawCommand {
     /// vertex data; the renderer looks it up from its uniform buffer
     /// via the `slot` stored in `AnimatedQuadDraw`.
     AnimatedQuad(usize),
+    /// A live picture — index into [`RenderFrame::live_images`]. The
+    /// renderer draws the texture its live pass keeps for the quad's source.
+    LiveImage(usize),
     SetClip(Rect),
     ClearClip,
     SetOpacity(f32),

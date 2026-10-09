@@ -7,6 +7,53 @@
 
 Breadcrumb — a navigational trail with automatic overflow into a `…` menu.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `const` | [`BREADCRUMB_ITEM_HEIGHT`](#breadcrumb_item_height) — Minimum height of a single breadcrumb segment in logical pixels |
+| `const` | [`BREADCRUMB_ITEM_PADDING_HORIZONTAL`](#breadcrumb_item_padding_horizontal) — Horizontal inner padding of each segment pill in logical pixels |
+| `fn` | [`breadcrumb_item_padding_horizontal`](#breadcrumb_item_padding_horizontal-2) — `BREADCRUMB_ITEM_PADDING_HORIZONTAL` scaled by the density's `spacing_factor` (1.00 / 1.15 / 1.30) |
+| `const` | [`BREADCRUMB_SEPARATOR_GAP`](#breadcrumb_separator_gap) — Gap reserved for the chevron separator between adjacent segments |
+| `fn` | [`breadcrumb_separator_gap`](#breadcrumb_separator_gap-2) — `BREADCRUMB_SEPARATOR_GAP` scaled by the density's `spacing_factor` (1.00 / 1.15 / 1.30) |
+| `const` | [`BREADCRUMB_CORNER_RADIUS`](#breadcrumb_corner_radius) — Corner radius of the interactive segment hover/focus rectangle |
+| `struct` | [`BreadcrumbItem`](#breadcrumbitem) — A single breadcrumb segment definition |
+| `struct` | [`Breadcrumb`](#breadcrumb) — A breadcrumb navigation row with **automatic overflow**: when the trail is too wide, the middle crumbs collapse into a trailing-of-root `…` menu while the… |
+
+## Public functions
+
+### `Breadcrumb`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#breadcrumb-new) |
+| | **Builder methods** |
+| `Self` | [`label(text: impl Into<LocalizedString>)`](#breadcrumb-label) |
+| `Self` | [`item(item: BreadcrumbItem)`](#breadcrumb-item) |
+| `Self` | [`items(items: impl IntoIterator<Item = BreadcrumbItem>)`](#breadcrumb-items) |
+| `Self` | [`item_id(id: WidgetId)`](#breadcrumb-item_id) |
+| `Self` | [`item_ids(ids: impl IntoIterator<Item = WidgetId>)`](#breadcrumb-item_ids) |
+| `Self` | [`trailing_slot(widget: impl teksilo_core::IntoTeksiChild)`](#breadcrumb-trailing_slot) |
+| | **Methods** |
+| `Signal<bool>` | [`is_overflowing()`](#breadcrumb-is_overflowing) |
+
+### `BreadcrumbItem`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(label: impl Into<LocalizedString>)`](#breadcrumbitem-new) |
+| `Self` | [`current(label: impl Into<LocalizedString>)`](#breadcrumbitem-current) |
+| | **Builder methods** |
+| `Self` | [`on_activate_fn(f: impl Fn(&mut EventContext) + 'static)`](#breadcrumbitem-on_activate_fn) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#breadcrumbitem-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#breadcrumbitem-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#breadcrumbitem-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#breadcrumbitem-composite_tooltip) |
+
+## Detailed description
+
 `Breadcrumb` renders a horizontal row of labelled segments separated by
 chevron glyphs, representing a hierarchical path (file system, settings
 hierarchy, wizard steps, etc.). When the trail is too wide to fit its
@@ -14,7 +61,7 @@ container, middle segments are automatically collapsed into a `…` popover
 menu — the root and the current (last) segment always stay visible,
 matching Windows Explorer, macOS path bar, and web breadcrumb conventions.
 
-## Building a trail
+#### Building a trail
 
 ```rust
 # use teksilo_widgets::{Breadcrumb, BreadcrumbItem};
@@ -28,14 +75,14 @@ let _bc = Breadcrumb::new()
     .item(BreadcrumbItem::current(lit!("Teksilo")));
 ```
 
-## Accessibility
+#### Accessibility
 
 The container uses `Role::Navigation`; each segment uses `Role::Link`.
 The current crumb sets `aria-current="page"`. The decorative separator
 chevrons are hidden from the AT tree. The `…` overflow button declares
 `HasPopup::Menu`.
 
-## Touch and pen
+#### Touch and pen
 
 A crumb navigates on the release. It is as wide as its label, so a short one
 ("A / B / C", a drive letter) can land under the 24 dp target floor; it
@@ -52,13 +99,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Breadcrumb at Touch density](img/breadcrumb-touch.png)
 
-## Builder methods at a glance
-
-`label`, `item`, `items`, `item_id`, `item_ids`, `trailing_slot`, `is_overflowing`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/breadcrumb/index.html)
+
+<a id="breadcrumb_item_height"></a>
 
 ## `pub const BREADCRUMB_ITEM_HEIGHT`
 
@@ -68,6 +113,8 @@ Minimum height of a single breadcrumb segment in logical pixels.
 pub const BREADCRUMB_ITEM_HEIGHT: f32 = 20.0;
 ```
 
+<a id="breadcrumb_item_padding_horizontal"></a>
+
 ## `pub const BREADCRUMB_ITEM_PADDING_HORIZONTAL`
 
 Horizontal inner padding of each segment pill in logical pixels.
@@ -75,6 +122,8 @@ Horizontal inner padding of each segment pill in logical pixels.
 ```rust
 pub const BREADCRUMB_ITEM_PADDING_HORIZONTAL: f32 = 6.0;
 ```
+
+<a id="breadcrumb_item_padding_horizontal-2"></a>
 
 ## `pub fn breadcrumb_item_padding_horizontal(...)`
 
@@ -85,6 +134,8 @@ pub const BREADCRUMB_ITEM_PADDING_HORIZONTAL: f32 = 6.0;
 pub fn breadcrumb_item_padding_horizontal(tokens: &InputTokens) -> f32;
 ```
 
+<a id="breadcrumb_separator_gap"></a>
+
 ## `pub const BREADCRUMB_SEPARATOR_GAP`
 
 Gap reserved for the chevron separator between adjacent segments.
@@ -92,6 +143,8 @@ Gap reserved for the chevron separator between adjacent segments.
 ```rust
 pub const BREADCRUMB_SEPARATOR_GAP: f32 = 4.0;
 ```
+
+<a id="breadcrumb_separator_gap-2"></a>
 
 ## `pub fn breadcrumb_separator_gap(...)`
 
@@ -102,6 +155,8 @@ pub const BREADCRUMB_SEPARATOR_GAP: f32 = 4.0;
 pub fn breadcrumb_separator_gap(tokens: &InputTokens) -> f32;
 ```
 
+<a id="breadcrumb_corner_radius"></a>
+
 ## `pub const BREADCRUMB_CORNER_RADIUS`
 
 Corner radius of the interactive segment hover/focus rectangle.
@@ -109,6 +164,8 @@ Corner radius of the interactive segment hover/focus rectangle.
 ```rust
 pub const BREADCRUMB_CORNER_RADIUS: f32 = 4.0;
 ```
+
+<a id="breadcrumbitem"></a>
 
 ## `pub struct BreadcrumbItem`
 
@@ -120,9 +177,13 @@ pub struct BreadcrumbItem { /* fields */ }
 
 ### Methods
 
+<a id="breadcrumbitem-new"></a>
+
 #### `pub fn new(label: impl Into<LocalizedString>) -> Self`
 
 Construct a non-current (navigable) breadcrumb segment.
+
+<a id="breadcrumbitem-current"></a>
 
 #### `pub fn current(label: impl Into<LocalizedString>) -> Self`
 
@@ -130,29 +191,41 @@ Construct the current (last) breadcrumb segment, announced
 with `aria-current="page"`. Current segments are never
 collapsed into the overflow `…` menu.
 
+<a id="breadcrumbitem-on_activate_fn"></a>
+
 #### `pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Closure invoked on activation.
+
+<a id="breadcrumbitem-tooltip"></a>
 
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Attach a plain single-line tooltip to this breadcrumb segment, shown
 after a hover delay. Clears any previously set rich or composite tooltip.
 
+<a id="breadcrumbitem-rich_tooltip"></a>
+
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
 Attach a rich tooltip to this breadcrumb segment, looked up by registry
 key. Clears any previously set plain or composite tooltip.
+
+<a id="breadcrumbitem-rich_tooltip_content"></a>
 
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Attach a rich tooltip to this breadcrumb segment from inline content.
 Clears any previously set plain or composite tooltip.
 
+<a id="breadcrumbitem-composite_tooltip"></a>
+
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 
 Attach a composite tooltip (arbitrary widget tree) to this breadcrumb
 segment. Clears any previously set plain or rich tooltip.
+
+<a id="breadcrumb"></a>
 
 ## `pub struct Breadcrumb`
 
@@ -167,10 +240,14 @@ pub struct Breadcrumb { /* fields */ }
 
 ### Methods
 
+<a id="breadcrumb-new"></a>
+
 #### `pub fn new() -> Self`
 
 Construct an empty breadcrumb trail. Add segments with
 `item` and `item_id`.
+
+<a id="breadcrumb-label"></a>
 
 #### `pub fn label(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -179,11 +256,15 @@ this breadcrumb from other nav landmarks on the page
 (e.g. "Files", "Settings"). Screen readers announce it as the
 name of the landmark when it gains focus or is summoned.
 
+<a id="breadcrumb-item"></a>
+
 #### `pub fn item(mut self, item: BreadcrumbItem) -> Self`
 
 Append a `BreadcrumbItem` segment to the trail. Items are rendered
 in insertion order, separated by chevron glyphs. Middle items (neither
 root nor current) may be collapsed into the `…` overflow menu.
+
+<a id="breadcrumb-items"></a>
 
 #### `pub fn items(self, items: impl IntoIterator<Item = BreadcrumbItem>) -> Self`
 
@@ -191,6 +272,8 @@ Append several `BreadcrumbItem` segments from an iterator, in order.
 
 The loop form of `item`, and the usual one: a trail is
 normally walked out of a path rather than written crumb by crumb.
+
+<a id="breadcrumb-item_id"></a>
 
 #### `pub fn item_id(mut self, id: WidgetId) -> Self`
 
@@ -200,6 +283,8 @@ Note: a pre-registered crumb never collapses into the overflow menu
 (the breadcrumb has no label/action to synthesize a menu row from) —
 it is treated like the root/current crumbs as always-visible.
 
+<a id="breadcrumb-item_ids"></a>
+
 #### `pub fn item_ids(self, ids: impl IntoIterator<Item = WidgetId>) -> Self`
 
 Insert several pre-registered widgets as breadcrumb segment slots.
@@ -207,12 +292,16 @@ Insert several pre-registered widgets as breadcrumb segment slots.
 The id-carrying twin of `items`. Like `item_id`, none of
 these crumbs ever collapses into the overflow menu.
 
+<a id="breadcrumb-trailing_slot"></a>
+
 #### `pub fn trailing_slot(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Append a trailing widget after all segments, pushed to the far edge
 by an intervening `Spacer`. Common uses: a search icon, refresh button,
 or current-path copy button. When a trailing slot is set, the breadcrumb
 spans the full proposed width.
+
+<a id="breadcrumb-is_overflowing"></a>
 
 #### `pub fn is_overflowing(&self) -> Signal<bool>`
 

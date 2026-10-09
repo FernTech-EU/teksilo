@@ -5,6 +5,34 @@
 
 `TextItem` — text in a local-coord rectangle, with alignment + rotation.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`TextAlign`](#textalign) — Horizontal alignment of a `TextItem` within its `local_bounds` |
+| `struct` | [`TextItem`](#textitem) — Text in a local-coord rectangle, with optional alignment and rotation |
+
+## Public functions
+
+### `TextItem`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(text: impl Into<LocalizedString>, local_bounds: Rect)`](#textitem-new) |
+| `Self` | [`with_signal_text(text: Signal<String>, local_bounds: Rect)`](#textitem-with_signal_text) |
+| | **Builder methods** |
+| `Self` | [`draggable(draggable: bool)`](#textitem-draggable) |
+| `Self` | [`color(color: impl Into<ColorProp>)`](#textitem-color) |
+| `Self` | [`align(align: TextAlign)`](#textitem-align) |
+| `Self` | [`rotation(radians: f32)`](#textitem-rotation) |
+| `Self` | [`follow_text_scale(follow: bool)`](#textitem-follow_text_scale) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#textitem-label) |
+| | **Methods** |
+| `Size` | [`measure(backend: &mut dyn TextBackend)`](#textitem-measure) |
+
+## Detailed description
+
 `TextItem` renders text that wraps within a caller-specified rectangle in
 local item coordinates. Text can be a static localized string (constructed
 via `TextItem::new`) or a live `Signal<String>` (constructed via
@@ -28,7 +56,7 @@ default for scene text, since a scene has its own pan/zoom. Opt in via
 `.follow_text_scale(true)` for labels that should track the app-wide
 setting instead.
 
-## Accessibility
+#### Accessibility
 
 The item emits a `Role::Label` carrying `Role::TextRun` children, so a
 screen reader can review it by character, word and line, braille can be
@@ -39,14 +67,14 @@ zero-width) when it is rotated, when a label override announces a
 different string from the one that was measured, or before the first
 paint.
 
-## When to use
+#### When to use
 
 Use `TextItem` for card labels, node titles, annotation text, or any text
 decoration in the lightweight tier. For editable text or text that needs
 focus, selection, and full accessibility, embed a `RichTextEditor` or
 `TextInput` as a heavyweight scene widget instead.
 
-## Example
+#### Example
 
 ```ignore
 use teksilo_scene::{SceneModel, TextItem, TextAlign};
@@ -64,13 +92,11 @@ model.add_item(item, Point::new(40.0, 40.0));
 ```
 
 
-## Builder methods at a glance
-
-`with_signal_text`, `draggable`, `color`, `align`, `rotation`, `follow_text_scale`, `label`, `measure`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="textalign"></a>
 
 ## `pub enum TextAlign`
 
@@ -90,6 +116,8 @@ pub enum TextAlign { /* variants */ }
 - **`Center`** — Centred within the bounds.
 - **`Trailing`** — Right edge in LTR.
 
+<a id="textitem"></a>
+
 ## `pub struct TextItem`
 
 Text in a local-coord rectangle, with optional alignment and rotation.
@@ -106,6 +134,8 @@ pub struct TextItem { /* fields */ }
 
 ### Methods
 
+<a id="textitem-new"></a>
+
 #### `pub fn new(text: impl Into<LocalizedString>, local_bounds: Rect) -> Self`
 
 A static-text item in local coordinates. The `text` is
@@ -114,6 +144,8 @@ resolved against the active locale on each paint;
 `BindingLevel::RepaintOnly`, so a locale switch repaints and
 re-resolves without rebuilding the composite parent.
 
+<a id="textitem-with_signal_text"></a>
+
 #### `pub fn with_signal_text(text: Signal<String>, local_bounds: Rect) -> Self`
 
 A text item whose content is driven by a `Signal<String>`.
@@ -121,9 +153,13 @@ A text item whose content is driven by a `Signal<String>`.
 `BindingLevel::RepaintOnly` so changes dirty paint and the
 next walk reads the current value.
 
+<a id="textitem-draggable"></a>
+
 #### `pub fn draggable(mut self, draggable: bool) -> Self`
 
 Opt the text into drag-to-move.
+
+<a id="textitem-color"></a>
 
 #### `pub fn color(mut self, color: impl Into<ColorProp>) -> Self`
 
@@ -131,11 +167,15 @@ Override the foreground colour. Accepts a plain `Color`, a theme role,
 a `Signal<Color>`, or a `Signal<Role>` — resolved against the active
 theme at paint time.
 
+<a id="textitem-align"></a>
+
 #### `pub fn align(mut self, align: TextAlign) -> Self`
 
 Horizontal alignment within `local_bounds`. Default
 `TextAlign::Leading`. Needs a text backend to measure the text width;
 a headless canvas with no backend renders leading-aligned.
+
+<a id="textitem-rotation"></a>
 
 #### `pub fn rotation(mut self, radians: f32) -> Self`
 
@@ -143,15 +183,21 @@ Rotate the text about the item's centre by `radians`. Default `0.0`
 (upright). Pair with `Signal::animate_to` on a driving signal for
 animated rotation, or set a fixed angle for a vertical axis title.
 
+<a id="textitem-follow_text_scale"></a>
+
 #### `pub fn follow_text_scale(mut self, follow: bool) -> Self`
 
 Opt this text into the global accessibility text scale, so it grows with
 the app-wide "grow all text" setting. Off by default — the scene's own
 pan/zoom usually governs scene text size.
 
+<a id="textitem-label"></a>
+
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Override the AT label (defaults to the current text content).
+
+<a id="textitem-measure"></a>
 
 #### `pub fn measure(&self, backend: &mut dyn TextBackend) -> Size`
 

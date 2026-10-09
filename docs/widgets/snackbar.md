@@ -7,6 +7,27 @@
 
 Snackbar — a transient, button-triggered floating notification surface.
 
+## Public functions
+
+### `Snackbar`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(label: impl Into<LocalizedString>)`](#snackbar-new) |
+| | **Builder methods** |
+| `Self` | [`style(style: impl teksilo_core::styles::SnackbarStyle)`](#snackbar-style) |
+| `Self` | [`content(content: impl teksilo_core::IntoTeksiChild)`](#snackbar-content) |
+| `Self` | [`variant(variant: ButtonVariant)`](#snackbar-variant) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#snackbar-enabled) |
+| `Self` | [`dismiss_behavior(dismiss: DismissBehavior)`](#snackbar-dismiss_behavior) |
+| `Self` | [`auto_dismiss_after(duration: Duration)`](#snackbar-auto_dismiss_after) |
+| `Self` | [`persistent()`](#snackbar-persistent) |
+| `Self` | [`trigger(trigger: impl teksilo_core::IntoTeksiChild)`](#snackbar-trigger) |
+| `Self` | [`announcement(text: impl Into<LocalizedString>)`](#snackbar-announcement) |
+
+## Detailed description
+
 A `Snackbar` pairs a trigger (a `Button` by default, or any custom
 widget via `.trigger(...)`) with a dormant content surface. Activating
 the trigger presents the surface as an `OverlayPlacement::BottomCenter`
@@ -19,7 +40,7 @@ For richer, stackable, severity-aware notifications see the
 `Toast` system, which also maintains a
 persistent `NotificationArchiveModel`.
 
-## Accessibility
+#### Accessibility
 
 The content surface exposes `Role::Alert` with `Live::Polite` so
 screen readers announce the notification without interrupting the user.
@@ -41,7 +62,7 @@ ctx.add(
 );
 ```
 
-## Touch and pen
+#### Touch and pen
 
 The trigger activates on the release, whether it is the default `Button` or a
 caller's widget, and the actions inside the surface are buttons and links with
@@ -55,13 +76,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Snackbar at Touch density](img/snackbar-touch.png)
 
-## Builder methods at a glance
-
-`style`, `content`, `variant`, `enabled`, `dismiss_behavior`, `auto_dismiss_after`, `persistent`, `trigger`, `announcement`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/snackbar/index.html)
+
+<a id="snackbar"></a>
 
 ## `pub struct Snackbar`
 
@@ -78,15 +97,21 @@ pub struct Snackbar { /* fields */ }
 
 ### Methods
 
+<a id="snackbar-new"></a>
+
 #### `pub fn new(label: impl Into<LocalizedString>) -> Self`
 
 Create a snackbar whose default trigger button shows `label`.
+
+<a id="snackbar-style"></a>
 
 #### `pub fn style(mut self, style: impl teksilo_core::styles::SnackbarStyle) -> Self`
 
 Per-call style override for the snackbar surface chrome.
 Replaces the theme-wide default `SnackbarStyle` for just this
 instance.
+
+<a id="snackbar-content"></a>
 
 #### `pub fn content(mut self, content: impl teksilo_core::IntoTeksiChild) -> Self`
 
@@ -102,33 +127,47 @@ is dark and renders nearly invisible on the dark surface in light
 theme. If you install a light-surface `SnackbarStyle`, color the
 content to match that instead.
 
+<a id="snackbar-variant"></a>
+
 #### `pub fn variant(mut self, variant: ButtonVariant) -> Self`
 
 Override the default trigger `ButtonVariant` (default: `Plain`).
+
+<a id="snackbar-enabled"></a>
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state of the trigger, statically or reactively.
 
+<a id="snackbar-dismiss_behavior"></a>
+
 #### `pub fn dismiss_behavior(mut self, dismiss: DismissBehavior) -> Self`
 
 Override the overlay dismiss behavior (default: `ClickOutside`).
+
+<a id="snackbar-auto_dismiss_after"></a>
 
 #### `pub fn auto_dismiss_after(mut self, duration: Duration) -> Self`
 
 Set the auto-dismiss timeout. The overlay is removed after this
 duration without user interaction (default: 4 s).
 
+<a id="snackbar-persistent"></a>
+
 #### `pub fn persistent(mut self) -> Self`
 
 Keep the snackbar visible until explicitly dismissed; disables
 the auto-dismiss timeout.
+
+<a id="snackbar-trigger"></a>
 
 #### `pub fn trigger(mut self, trigger: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Replace the default `Button` trigger with a custom widget. The
 widget is wired for tap, keyboard (Enter/Space), and AT Click
 activation automatically.
+
+<a id="snackbar-announcement"></a>
 
 #### `pub fn announcement(mut self, text: impl Into<LocalizedString>) -> Self`
 

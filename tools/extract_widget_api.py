@@ -1822,19 +1822,32 @@ def _see_also(pf: ParsedFile) -> list[str]:
     return bullets
 
 
-def _emit_items_md(items: list[Item], out: list[str]) -> None:
+def _emit_anchor(anchors: "dict[int, str] | None", item: Item, out: list[str]) -> None:
+    """The catalog's table of contents links here: an empty anchor before the
+    heading, which mdBook and GitHub both keep (GitHub prefixes its id and
+    still follows the link)."""
+    if anchors and id(item) in anchors:
+        out.append(f'<a id="{anchors[id(item)]}"></a>')
+        out.append("")
+
+
+def _emit_items_md(
+    items: list[Item], out: list[str], anchors: "dict[int, str] | None" = None
+) -> None:
     """Render the struct/enum/type/const/fn items of a file as Markdown.
 
     Shared by `format_markdown` (the `--format md` output) and
     `format_catalog_markdown` (the mdBook catalog pages) so both render the API
-    surface identically.
+    surface identically. The catalog passes `anchors`, the ids its table of
+    contents links to, keyed by `id()` of each item and method.
     """
     for it in items:
         if it.kind == "external":
             # Type defined elsewhere, but has methods in this file.
+            _emit_anchor(anchors, it, out)
             out.append(f"## `impl {it.name}`  *(methods defined in this file)*")
             out.append("")
-            _emit_methods_md(it, out)
+            _emit_methods_md(it, out, anchors)
             continue
 
         flags: list[str] = []
@@ -1844,6 +1857,7 @@ def _emit_items_md(items: list[Item], out: list[str]) -> None:
             flags.append(_fmt_cfg(it.cfg))
         flags_str = f"  *({'; '.join(flags)})*" if flags else ""
 
+        _emit_anchor(anchors, it, out)
         if it.kind == "struct":
             out.append(f"## `pub struct {it.name}`{flags_str}")
         elif it.kind == "enum":
@@ -1897,13 +1911,16 @@ def _emit_items_md(items: list[Item], out: list[str]) -> None:
             out.append("")
 
         if it.methods:
-            _emit_methods_md(it, out)
+            _emit_methods_md(it, out, anchors)
 
 
-def _emit_methods_md(it: Item, out: list[str]) -> None:
+def _emit_methods_md(
+    it: Item, out: list[str], anchors: "dict[int, str] | None" = None
+) -> None:
     out.append("### Associated items" if it.kind == "trait" else "### Methods")
     out.append("")
     for m in it.methods:
+        _emit_anchor(anchors, m, out)
         flags: list[str] = []
         if m.hidden:
             flags.append("hidden")
@@ -2172,19 +2189,48 @@ def _rustdoc_module_url(
 
 
 def _first_sentence(text: str, limit: int = 160) -> str:
-    """First sentence of a module header, for the catalog index brief."""
+    """First sentence of a doc, for a brief: its first prose paragraph (not a
+    heading, not code), joined across the lines it was wrapped on, up to the
+    first full stop that ends a sentence. Joining matters: read line by line,
+    a sentence wrapped before its full stop was cut at the line's end."""
+    para: list[str] = []
+    fenced = False
     for line in text.splitlines():
         s = line.strip()
-        if not s or s.startswith("#") or s.startswith("```"):
+        if s.startswith("```") or s.startswith("~~~"):
+            fenced = not fenced
+            if para:
+                break
             continue
-        # Stop at the first sentence boundary (". " followed by a capital).
-        m = re.search(r"\.(?:\s|$)", s)
-        sentence = s[: m.start()] if m else s
-        sentence = sentence.strip()
-        if len(sentence) > limit:
-            sentence = sentence[: limit - 1].rstrip() + "…"
-        return sentence
-    return ""
+        if fenced:
+            continue
+        if not s or s.startswith("#"):
+            if para:
+                break
+            continue
+        para.append(s)
+    joined = " ".join(para)
+    sentence = joined
+    in_code = False
+    for i, ch in enumerate(joined):
+        if ch == "`":
+            in_code = not in_code
+        elif (
+            ch == "."
+            and not in_code
+            and (i + 1 == len(joined) or joined[i + 1] == " ")
+            and not re.search(r"(?:\be\.g|\bi\.e|\betc|\bvs|\bcf)$", joined[:i])
+        ):
+            sentence = joined[:i]
+            break
+    sentence = sentence.strip()
+    if len(sentence) > limit:
+        # At a word boundary, and never inside a code span left open.
+        cut = sentence[: limit - 1].rsplit(" ", 1)[0].rstrip(",;:—- ")
+        if cut.count("`") % 2:
+            cut = cut[: cut.rindex("`")].rstrip(",;:—- ")
+        sentence = cut + "…"
+    return sentence
 
 
 # Doc text swept from Rust source carries link targets that don't resolve inside
@@ -2195,7 +2241,13 @@ def _first_sentence(text: str, limit: int = 160) -> str:
 # KEEP only web URLs, in-page anchors, and our own `../api/...` link, and reduce
 # every other link to plain inline code.
 _INLINE_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
-_REF_DEF_RE = re.compile(r"^(\s*)\[([^\]]+)\]:\s*(\S+).*$")
+# A reference definition is a whole line: the label, the target, and at most a
+# quoted or parenthesised title. A line that goes on with prose after the
+# target is not one, whatever it starts with: rustfmt wraps doc comments, so a
+# line can begin `[`X`]: the form a ...` in the middle of a sentence.
+_REF_DEF_RE = re.compile(
+    r"^(\s*)\[([^\]]+)\]:\s*(\S+)(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\s*$"
+)
 
 
 def _as_code(label: str) -> str:
@@ -2222,13 +2274,19 @@ def _catalog_keep_target(target: str) -> bool:
 def _clean_catalog_links(md: str) -> str:
     """Reduce non-resolvable links in catalog doc text to plain inline code."""
     # Pass 1: drop reference DEFINITIONS we can't keep; remember their labels.
+    # As in CommonMark, a definition cannot interrupt a paragraph: it follows a
+    # blank line, the start of the text, or another definition.
     dropped: set[str] = set()
     kept: list[str] = []
+    after_break = True
     for ln in md.split("\n"):
-        m = _REF_DEF_RE.match(ln)
-        if m and not _catalog_keep_target(m.group(3)):
-            dropped.add(m.group(2).strip())
-            continue
+        m = _REF_DEF_RE.match(ln) if after_break else None
+        if m:
+            if not _catalog_keep_target(m.group(3)):
+                dropped.add(m.group(2).strip())
+                continue
+        else:
+            after_break = not ln.strip()
         kept.append(ln)
     md = "\n".join(kept)
 
@@ -2248,31 +2306,251 @@ def _clean_catalog_links(md: str) -> str:
         md = re.sub(re.escape(f"[{lbl}]") + r"(?![\(\[])", code, md)
     # Pass 4: any remaining rustdoc shortcut link `[`X`]` (a backticked label with
     # no inline target and no reference definition) -> plain code, so the brackets
-    # don't leak into the rendered book.
-    md = re.sub(r"\[(`[^`\]]+`)\](?![\(\[:])", r"\1", md)
-    return md
+    # don't leak into the rendered book. A definition kept in pass 1 (a web
+    # target) keeps its label; prose that merely starts like one does not.
+    def shortcut_to_code(ln: str) -> str:
+        m = _REF_DEF_RE.match(ln)
+        if m and _catalog_keep_target(m.group(3)):
+            return ln
+        return re.sub(r"\[(`[^`\]]+`)\](?![\(\[])", r"\1", ln)
+
+    return "\n".join(shortcut_to_code(ln) for ln in md.split("\n"))
 
 
-def _catalog_abilities(pf: ParsedFile, title: str) -> str:
-    """A scannable inline list of the primary widget's builder methods."""
-    primary = None
-    for it in pf.items:
-        if it.kind in ("struct", "external") and it.name == title and it.methods:
-            primary = it
-            break
-    if primary is None:
-        for it in pf.items:
-            if it.methods:
-                primary = it
+_RECEIVER_RE = re.compile(r"^(?:&\s*(?:'\w+\s+)?(?:mut\s+)?)?(?:mut\s+)?self\b")
+
+
+def _top_level_split(text: str, sep: str = ",") -> list[str]:
+    """Split `text` at `sep` outside (), <> and [], reading `->` as one token."""
+    parts, depth, cur, i = [], 0, [], 0
+    while i < len(text):
+        if text.startswith("->", i):
+            cur.append("->")
+            i += 2
+            continue
+        ch = text[i]
+        if ch in "(<[":
+            depth += 1
+        elif ch in ")>]":
+            depth -= 1
+        if ch == sep and depth == 0:
+            parts.append("".join(cur).strip())
+            cur = []
+        else:
+            cur.append(ch)
+        i += 1
+    if "".join(cur).strip():
+        parts.append("".join(cur).strip())
+    return parts
+
+
+def _split_fn_signature(sig: str) -> "tuple[str, str, str] | None":
+    """`(name, params, return type)` of a `fn` signature, on one line; `None`
+    for anything else. The return type is empty for a function returning
+    nothing, and stops before a `where` clause. `_fn_generics` gives the
+    generic parameters the name is followed by."""
+    sig = " ".join(sig.split())
+    m = re.search(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)", sig)
+    if not m:
+        return None
+    name, i = m.group(1), m.end()
+    if i < len(sig) and sig[i] == "<":
+        depth = 0
+        while i < len(sig):
+            if sig.startswith("->", i):
+                i += 2
+                continue
+            if sig[i] == "<":
+                depth += 1
+            elif sig[i] == ">":
+                depth -= 1
+                if depth == 0:
+                    i += 1
+                    break
+            i += 1
+    if i >= len(sig) or sig[i] != "(":
+        return None
+    depth, start = 0, i
+    while i < len(sig):
+        if sig[i] == "(":
+            depth += 1
+        elif sig[i] == ")":
+            depth -= 1
+            if depth == 0:
                 break
-    if primary is None:
-        return ""
-    names = [
-        f"`{m.name}`"
-        for m in primary.methods
-        if not m.hidden and m.name not in ("new", "default")
-    ]
-    return ", ".join(names)
+        i += 1
+    params = sig[start + 1 : i].strip()
+    _GENERICS[sig] = sig[m.end() : start].strip()
+    rest = sig[i + 1 :].strip()
+    ret = ""
+    if rest.startswith("->"):
+        ret = re.split(r"\s+where\s|\s*[{;]\s*$", rest[2:].strip())[0].strip()
+    return name, params, ret
+
+
+# The generic parameters `_split_fn_signature` found after each name, by the
+# one-line signature.
+_GENERICS: dict[str, str] = {}
+
+
+def _fn_generics(sig: str) -> str:
+    """`<T: Clone>` of a `fn` signature, or empty."""
+    one = " ".join(sig.split())
+    if one not in _GENERICS:
+        _split_fn_signature(one)
+    return _GENERICS.get(one, "")
+
+
+# The groups of a type's members in the catalog's table of contents, in the
+# order they are listed: how to make one first, as Qt's reference lists its
+# constructors first.
+_FN_GROUPS = (
+    "Constructors",
+    "Builder methods",
+    "Methods",
+    "Associated functions",
+    "Constants and types",
+)
+
+_ASSOC_CONST_RE = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?const\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^=;]+)")
+_ASSOC_TYPE_RE = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?type\s+([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _member_row(m: Item, type_name: str) -> "tuple[str, str, str] | None":
+    """`(group, what the table shows, its type)` of member `m`: for a function
+    its name, generics and parameters without the receiver, and its return
+    type; for an associated constant or type, its name and declared type."""
+    one = " ".join(m.signature.split())
+    c = _ASSOC_CONST_RE.match(one)
+    if c and " fn " not in f" {one} ":
+        return "Constants and types", c.group(1), c.group(2).strip()
+    t = _ASSOC_TYPE_RE.match(one)
+    if t:
+        return "Constants and types", t.group(1), "type"
+    g = _fn_group(m, type_name)
+    if g is None:
+        return None
+    group, shown, ret = g
+    name = _split_fn_signature(m.signature)[0]
+    return group, f"{name}{_fn_generics(m.signature)}({shown})", ret
+
+
+def _fn_group(m: Item, type_name: str) -> "tuple[str, str, str] | None":
+    """`(group, params without the receiver, return type)` of method `m`."""
+    split = _split_fn_signature(m.signature)
+    if split is None:
+        return None
+    _, params, ret = split
+    args = _top_level_split(params)
+    receiver = bool(args) and bool(_RECEIVER_RE.match(args[0]) or args[0].startswith("self:"))
+    shown = ", ".join(args[1:] if receiver else args)
+    names_self = re.search(rf"\b(?:Self|{re.escape(type_name)})\b", ret) is not None
+    if not receiver:
+        group = "Constructors" if names_self else "Associated functions"
+    elif ret == "Self" and re.match(r"^(?:mut\s+)?self\b", args[0]):
+        group = "Builder methods"
+    else:
+        group = "Methods"
+    return group, shown, ret
+
+
+def _slug_id(text: str) -> str:
+    return re.sub(r"[^a-z0-9_]+", "-", text.lower()).strip("-")
+
+
+def _catalog_anchors(pf: ParsedFile) -> "dict[int, str]":
+    """An id for each item and each method the table of contents links to,
+    keyed by `id()`: `<type>` and `<type>-<method>`, lowercase, made unique."""
+    anchors: dict[int, str] = {}
+    used: set[str] = set()
+
+    def unique(base: str) -> str:
+        cand, n = base, 2
+        while cand in used:
+            cand, n = f"{base}-{n}", n + 1
+        used.add(cand)
+        return cand
+
+    for it in pf.items:
+        anchors[id(it)] = unique(_slug_id(it.name) or "item")
+        for m in it.methods:
+            split = _split_fn_signature(m.signature)
+            one = " ".join(m.signature.split())
+            other = _ASSOC_CONST_RE.match(one) or _ASSOC_TYPE_RE.match(one)
+            mname = split[0] if split else (other.group(1) if other else m.name)
+            anchors[id(m)] = unique(f"{_slug_id(it.name)}-{_slug_id(mname)}")
+    return anchors
+
+
+def _cell(text: str) -> str:
+    """Text for a Markdown table cell: a pipe would end the cell."""
+    return text.replace("|", "\\|")
+
+
+def _catalog_contents(pf: ParsedFile, title: str, anchors: "dict[int, str]") -> list[str]:
+    """The page's table of contents, as Qt's class reference opens: its
+    public types, then each type's public functions, constructors first, each
+    name linking to its entry under the API reference."""
+    out: list[str] = []
+    kinds = {"struct": "struct", "enum": "enum", "trait": "trait", "type": "type",
+             "const": "const", "fn": "fn"}
+    listed = [it for it in pf.items if it.kind in kinds and not it.hidden]
+    if len(listed) > 1:
+        out += ["## Public types", "", "| Kind | Name |", "| ---: | :--- |"]
+        for it in listed:
+            brief = _first_sentence(it.doc) if it.doc else ""
+            link = f"[`{it.name}`](#{anchors[id(it)]})"
+            out.append(f"| `{kinds[it.kind]}` | {link}{' — ' + _cell(brief) if brief else ''} |")
+        out.append("")
+
+    with_fns = [it for it in pf.items if it.methods and not it.hidden]
+    with_fns.sort(key=lambda it: it.name != title)  # stable: the page's type first
+    tables: list[str] = []
+    for it in with_fns:
+        groups: dict[str, list[str]] = {g: [] for g in _FN_GROUPS}
+        for m in it.methods:
+            if m.hidden:
+                continue
+            row = _member_row(m, it.name)
+            if row is None:
+                continue
+            group, shown, ret = row
+            call = f"[`{_cell(shown)}`](#{anchors[id(m)]})"
+            groups[group].append(f"| {('`' + _cell(ret) + '`') if ret else ''} | {call} |")
+        if not any(groups.values()):
+            continue
+        # One table per type, as Qt lists a class's functions, so the columns
+        # line up down the page; each group opens with a row naming it.
+        tables += [f"### `{it.name}`", "", "| Returns | Function |", "| ---: | :--- |"]
+        for group in _FN_GROUPS:
+            if groups[group]:
+                tables.append(f"| | **{group}** |")
+                tables += groups[group]
+        tables.append("")
+    if tables:
+        out += ["## Public functions", ""] + tables
+    return out
+
+
+def _demote_headings(md: str, by: int) -> str:
+    """Push the Markdown headings of `md` down `by` levels, outside code fences:
+    a module doc's `# Sizing` belongs under the page's own sections."""
+    lines, fenced = [], False
+    for ln in md.split("\n"):
+        if ln.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        elif not fenced and re.match(r"^#{1,6}\s", ln):
+            ln = "#" * by + ln
+            ln = re.sub(r"^#{7,}", "######", ln)
+        lines.append(ln)
+    return "\n".join(lines)
+
+
+def _split_brief(doc: str) -> "tuple[str, str]":
+    """The first paragraph of a module doc, and the rest."""
+    doc = doc.strip("\n")
+    parts = re.split(r"\n\s*\n", doc, maxsplit=1)
+    return parts[0], (parts[1] if len(parts) > 1 else "")
 
 
 def format_catalog_markdown(
@@ -2297,8 +2575,18 @@ def format_catalog_markdown(
         out.append(f"> Available under: `{_fmt_cfg(pf.cfg)}`")
         out.append("")
 
-    if pf.header_doc:
-        out.append(pf.header_doc.rstrip())
+    anchors = _catalog_anchors(pf)
+    brief, details = _split_brief(pf.header_doc) if pf.header_doc else ("", "")
+    if brief:
+        out.append(brief.rstrip())
+        out.append("")
+
+    out += _catalog_contents(pf, title, anchors)
+
+    if details.strip():
+        out.append("## Detailed description")
+        out.append("")
+        out.append(_demote_headings(details.rstrip(), 2))
         out.append("")
 
     density_images = [
@@ -2324,13 +2612,6 @@ def format_catalog_markdown(
             out.append(f"![{title} at {label} density](img/{slug}{suffix}.png)")
             out.append("")
 
-    abilities = _catalog_abilities(pf, title)
-    if abilities:
-        out.append("## Builder methods at a glance")
-        out.append("")
-        out.append(abilities)
-        out.append("")
-
     out.append("## API reference")
     out.append("")
     out.append(
@@ -2338,7 +2619,7 @@ def format_catalog_markdown(
         f"({_rustdoc_module_url(api_base, pf.file_path, api_dir)})"
     )
     out.append("")
-    _emit_items_md(pf.items, out)
+    _emit_items_md(pf.items, out, anchors)
 
     # The module header + item docs were swept from rustdoc-style source, so they
     # carry links that don't resolve in the book — reduce them to plain code.
@@ -2769,10 +3050,59 @@ def run_self_tests() -> int:
         "[c](TreeView), [d](../crates/x.rs), [api](../api/x.html), [web](https://x.io)\n"
         "see [`Ref`].\n\n[`Ref`]: crate::Ref"
     )
+    # The table of contents: constructors first, every link to an anchor on
+    # the page, and the module doc's headings under "Detailed description".
+    assert "## Public functions" in page, "no table of contents"
+    assert page.index("**Constructors**") < page.index("**Builder methods**"), page[:600]
+    ids = set(re.findall(r'<a id="([^"]+)"></a>', page))
+    targets = re.findall(r"\]\(#([^)]+)\)", page)
+    assert targets and all(t in ids for t in targets), [t for t in targets if t not in ids]
+    assert "Builder methods at a glance" not in page
+    assert _split_fn_signature(
+        "pub fn map<F: Fn(&T) -> U, U>(self, f: F) -> Mapped<U> where U: Clone"
+    ) == ("map", "self, f: F", "Mapped<U>")
+    assert _fn_generics("pub fn map<F: Fn(&T) -> U, U>(self, f: F) -> Mapped<U>") == (
+        "<F: Fn(&T) -> U, U>"
+    )
+    assert _top_level_split("self, f: impl Fn(&T, U) -> V, n: [u8; 4]") == [
+        "self", "f: impl Fn(&T, U) -> V", "n: [u8; 4]"
+    ]
+    probe = Item(kind="fn", name="x", signature="", doc="")
+    for sig, group in (
+        ("pub fn new(a: u8) -> Self", "Constructors"),
+        ("pub fn try_new(a: u8) -> Result<Self, E>", "Constructors"),
+        ("pub fn fit(mut self, fit: ImageFit) -> Self", "Builder methods"),
+        ("pub fn handle(&self) -> LiveImageHandle", "Methods"),
+        ("pub fn take(&mut self) -> Self", "Methods"),
+        ("pub fn seq(self) -> u64", "Methods"),
+        ("pub fn builder() -> GroupBuilder", "Associated functions"),
+        ("pub const NONE: Self = Self(0);", "Constants and types"),
+        ("type Item: 'static;", "Constants and types"),
+    ):
+        probe.signature = sig
+        got = _member_row(probe, "Probe")
+        assert got and got[0] == group, (sig, got)
+    assert _first_sentence("A flexible gap that claims\nall the space. More.") == (
+        "A flexible gap that claims all the space"
+    ), "a brief must join the lines its sentence was wrapped on"
+    assert _first_sentence("Keys, e.g. `a.b`, stay. Next.") == "Keys, e.g. `a.b`, stay"
     for bad in ("](crate::", "](Self::", "](self)", "](TreeView)", "](../crates/", "[`Ref`]:"):
         assert bad not in nz, f"{bad} survived: {nz}"
     assert "`HStack`" in nz and "see `Ref`." in nz, nz
     assert "](../api/x.html)" in nz and "](https://x.io)" in nz, nz
+    # A wrapped line that begins like a definition is prose: kept, links to
+    # code. Dropping it once cut `LiveImage::with_handle`'s doc in half.
+    wrapped = _clean_catalog_links(
+        "Drive it, made beforehand with\n"
+        "[`LiveImageHandle::new`]: the form a `teksu!` tree can use, where\n"
+        "[`handle`](Self::handle) cannot be called.\n\n"
+        "[`Ref`]: crate::Ref \"a title\"\n[`Other`]: crate::Other"
+    )
+    assert (
+        "`LiveImageHandle::new`: the form a `teksu!` tree can use, where\n"
+        "`handle` cannot be called." in wrapped
+    ), wrapped
+    assert "[`Ref`]:" not in wrapped and "[`Other`]:" not in wrapped, wrapped
 
     # Non-widget crate generalization (teksilo-data): re-exported types become
     # catalog entries, rustdoc links target the crate's own rustdoc dir.

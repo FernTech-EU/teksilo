@@ -7,6 +7,30 @@
 
 Checkbox — a two-state or tristate checkbox with an optional label.
 
+## Public functions
+
+### `Checkbox`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(checked: Signal<bool>)`](#checkbox-new) |
+| `Self` | [`tristate(state: Signal<CheckState>)`](#checkbox-tristate) |
+| | **Builder methods** |
+| `Self` | [`on_change(f: impl Fn(bool, &mut EventContext) + 'static)`](#checkbox-on_change) |
+| `Self` | [`labelled_externally()`](#checkbox-labelled_externally) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#checkbox-label) |
+| `Self` | [`caption(text: impl Into<LocalizedString>)`](#checkbox-caption) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#checkbox-enabled) |
+| `Self` | [`variant(variant: CheckboxVariant)`](#checkbox-variant) |
+| `Self` | [`style(style: impl teksilo_core::styles::CheckboxStyle)`](#checkbox-style) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#checkbox-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#checkbox-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#checkbox-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl teksilo_core::widget::Widget + 'static)`](#checkbox-composite_tooltip) |
+
+## Detailed description
+
 `Checkbox` renders a square (or rounded-square / circle) toggle box
 alongside an optional label and caption. Two modes are supported:
 
@@ -22,7 +46,7 @@ Chrome (box shape, fill, focus ring) is driven by the active
 `CheckboxStyle`; three visual variants are available via
 `CheckboxVariant`.
 
-## Touch and pen
+#### Touch and pen
 
 The pressed state comes from the framework press
 (`docs/touch-and-pen.md` §7.1) rather than from this widget: sliding off
@@ -36,7 +60,7 @@ The 24 dp `MinSize` around the 19 dp glyph already meets the WCAG 2.2
 SC 2.5.8 floor at Compact and follows the density ladder above it, so no
 hit-widening mechanism is involved.
 
-## Accessibility
+#### Accessibility
 
 Announces as `Role::CheckBox`. A label is required in debug builds
 unless `.labelled_externally()` is set (for embedding inside a composite
@@ -60,13 +84,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Checkbox at Touch density](img/checkbox-touch.png)
 
-## Builder methods at a glance
-
-`tristate`, `on_change`, `labelled_externally`, `label`, `caption`, `enabled`, `variant`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/checkbox/index.html)
+
+<a id="checkbox"></a>
 
 ## `pub struct Checkbox`
 
@@ -78,9 +100,13 @@ pub struct Checkbox { /* fields */ }
 
 ### Methods
 
+<a id="checkbox-new"></a>
+
 #### `pub fn new(checked: Signal<bool>) -> Self`
 
 Create a two-state checkbox bound to a `Signal<bool>`.
+
+<a id="checkbox-tristate"></a>
 
 #### `pub fn tristate(state: Signal<CheckState>) -> Self`
 
@@ -91,6 +117,8 @@ checks the whole). The `Indeterminate` state is reserved for external
 sources — `TreeCheckedModel` aggregation when descendants are mixed,
 "select all" indicators, etc. Matches the Outlook / Files-app
 folder-checkbox semantic. Useful for parent checkboxes in tree views.
+
+<a id="checkbox-on_change"></a>
 
 #### `pub fn on_change(mut self, f: impl Fn(bool, &mut EventContext) + 'static) -> Self`
 
@@ -108,6 +136,8 @@ the value it now holds.
 
 A tristate checkbox reports a `bool` too: activation cycles
 `Checked` ↔ `Unchecked` only, and `Indeterminate` is external-source-only.
+
+<a id="checkbox-labelled_externally"></a>
 
 #### `pub fn labelled_externally(mut self) -> Self`
 
@@ -130,10 +160,14 @@ embedded checkbox) is the supported use case.
 
 Spelled the same way on `Toggle`.
 
+<a id="checkbox-label"></a>
+
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Set the visible label rendered to the right of the checkbox box,
 also used as the AT name. Required unless `.labelled_externally()` is set.
+
+<a id="checkbox-caption"></a>
 
 #### `pub fn caption(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -141,11 +175,15 @@ Secondary explanatory text rendered below the label, left-aligned
 with the label (not the box). Uses the `small` / `text_secondary`
 style. Has no effect unless `label(...)` is also set.
 
+<a id="checkbox-enabled"></a>
+
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state, statically or reactively. Forwarded to the
 arena via `ctx.enabled_when(self_id, self.enabled.clone())` at
 build time — a bound `Signal<bool>` updates live.
+
+<a id="checkbox-variant"></a>
 
 #### `pub fn variant(mut self, variant: CheckboxVariant) -> Self`
 
@@ -154,25 +192,35 @@ Pick the design-language variant. Default `Square`. The active
 (the IntUI `RecipeCheckboxStyle` honours all three variants
 directly via corner-shape changes).
 
+<a id="checkbox-style"></a>
+
 #### `pub fn style(mut self, style: impl teksilo_core::styles::CheckboxStyle) -> Self`
 
 Per-call style override. Replaces the theme-wide default
 `CheckboxStyle` for just this Checkbox instance — same role as
 `Button::style(...)`.
 
+<a id="checkbox-tooltip"></a>
+
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Attach a plain tooltip shown after a hover delay.
 Clears any previously set rich or composite tooltip (last-call wins).
+
+<a id="checkbox-rich_tooltip"></a>
 
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
 Attach a rich tooltip resolved from the app-wide tooltip
 registry. See `Button::rich_tooltip`.
 
+<a id="checkbox-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Attach a rich tooltip driven by inline `TooltipContent`.
+
+<a id="checkbox-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip( mut self, content: impl teksilo_core::widget::Widget + 'static, ) -> Self`
 

@@ -5,6 +5,33 @@
 
 CommandPalette — type-to-run access to every command an app has registered.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`PaletteCommand`](#palettecommand) — One command as the palette sees it |
+| `struct` | [`CommandPalette`](#commandpalette) — Type-to-run access to every registered command |
+
+## Public functions
+
+### `CommandPalette`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#commandpalette-new) |
+| | **Builder methods** |
+| `Self` | [`placeholder(text: impl Into<LocalizedString>)`](#commandpalette-placeholder) |
+| `Self` | [`empty_text(text: impl Into<LocalizedString>)`](#commandpalette-empty_text) |
+| `Self` | [`include(f: impl Fn(&PaletteCommand) -> bool + 'static)`](#commandpalette-include) |
+| `Self` | [`on_dismiss(f: impl Fn(&mut EventContext) + 'static)`](#commandpalette-on_dismiss) |
+| `Self` | [`show_disabled(show: bool)`](#commandpalette-show_disabled) |
+| | **Methods** |
+| `Signal<String>` | [`query_signal()`](#commandpalette-query_signal) |
+|  | [`present(ctx: &mut EventContext)`](#commandpalette-present) |
+
+## Detailed description
+
 The palette is **application-agnostic**: it holds no list of its own and knows
 nothing about any particular app. Its content is the tree's
 `ShortcutRegistry`, which already
@@ -30,7 +57,7 @@ ctx.register_shortcut_global(
 );
 ```
 
-# Presenting it
+### Presenting it
 
 `CommandPalette::present` shows it centered, dismissed by Escape or a click
 outside:
@@ -46,7 +73,7 @@ is routinely opened from a menu, and a menu is itself a transient overlay.
 Anchoring to the invoking widget would render the palette inside the menu that
 opened it, positioned against a surface that is about to disappear.
 
-# Matching
+### Matching
 
 Typing filters by subsequence, not substring, so `ndw` finds "New Window" and
 `expdoc` finds "Export document". Matches score higher when the typed letters land
@@ -64,20 +91,18 @@ what a French reader types (`fichier nouveau`). Settings ▸ Keymap
 declared no category from the widget catalogue
 (`shortcut-settings-uncategorized`).
 
-# Keyboard
+### Keyboard
 
 Focus stays in the search field throughout — that is what makes a palette feel
 like one. Arrow keys are not editing keys for the field, so they bubble to the
 palette's own handler, which moves the highlight and scrolls it into view. Enter
 runs the highlighted command; Escape dismisses.
 
-## Builder methods at a glance
-
-`placeholder`, `empty_text`, `include`, `on_dismiss`, `show_disabled`, `query_signal`, `present`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/command_palette/index.html)
+
+<a id="palettecommand"></a>
 
 ## `pub struct PaletteCommand`
 
@@ -94,6 +119,8 @@ reaching.
 pub struct PaletteCommand { /* fields */ }
 ```
 
+<a id="commandpalette"></a>
+
 ## `pub struct CommandPalette`
 
 Type-to-run access to every registered command. See the `module docs`.
@@ -104,17 +131,25 @@ pub struct CommandPalette { /* fields */ }
 
 ### Methods
 
+<a id="commandpalette-new"></a>
+
 #### `pub fn new() -> Self`
 
 A palette over every command in the tree's registry.
+
+<a id="commandpalette-placeholder"></a>
 
 #### `pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Replace the search field's placeholder text.
 
+<a id="commandpalette-empty_text"></a>
+
 #### `pub fn empty_text(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Replace the text shown when nothing matches the query.
+
+<a id="commandpalette-include"></a>
 
 #### `pub fn include(mut self, f: impl Fn(&PaletteCommand) -> bool + 'static) -> Self`
 
@@ -124,6 +159,8 @@ The usual reasons are to hide the command that opens the palette itself, and
 to drop registry entries that are key bindings rather than commands a person
 would look for by name.
 
+<a id="commandpalette-on_dismiss"></a>
+
 #### `pub fn on_dismiss(self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Run this after a command is activated, and when Escape is pressed.
@@ -131,15 +168,21 @@ Run this after a command is activated, and when Escape is pressed.
 `present` installs its own, so this is for callers embedding
 the palette in a surface they manage themselves.
 
+<a id="commandpalette-show_disabled"></a>
+
 #### `pub fn show_disabled(mut self, show: bool) -> Self`
 
 Also list commands whose `enabled_when` predicate currently says no, greyed
 out and inert. Off by default: a palette answers "what can I do now", and a
 row that cannot run is a row that has to be explained.
 
+<a id="commandpalette-query_signal"></a>
+
 #### `pub fn query_signal(&self) -> Signal<String>`
 
 The query signal, so a caller can seed or observe what was typed.
+
+<a id="commandpalette-present"></a>
 
 #### `pub fn present(self, ctx: &mut EventContext)`
 

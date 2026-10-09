@@ -5,6 +5,15 @@
 
 ChartChange — change notifications and stable series identifiers for chart collections.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`SeriesId`](#seriesid) — Opaque identifier for a series in a `ChartModel` |
+| `enum` | [`ChartChange`](#chartchange) — Describes a mutation to a chart's series or point data |
+
+## Detailed description
+
 `SeriesId` is an opaque, stable handle for a series in a `crate::ChartModel`.
 Because `ChartModel` is backed by a slotmap, `SeriesId` values survive arbitrary
 series insertions, removals, and reorders — only removing the series itself
@@ -33,6 +42,8 @@ model.add_series("Revenue");
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/chart_change/index.html)
 
+<a id="seriesid"></a>
+
 ## `pub struct SeriesId`
 
 Opaque identifier for a series in a `ChartModel`.
@@ -44,6 +55,8 @@ SlotMap keys).
 ```rust
 pub struct SeriesId(slotmap::DefaultKey);
 ```
+
+<a id="chartchange"></a>
 
 ## `pub enum ChartChange`
 

@@ -17,15 +17,14 @@ keywords = ["gui", "desktop", "widgets", "accessibility", "wgpu"]
 categories = ["gui", "accessibility"]
 
 [features]
-# Default set: widgets, text backend, i18n runtime, plus Arabic and
-# Hebrew fallback fonts so the internationalization demo and common
-# RTL cases work out of the box. Applications that want a Latin-only
-# minimal build can disable fonts via `default-features = false` and
-# re-add only the features they need (e.g. `features = ["widgets",
-# "text", "i18n"]` for text support without the Noto bundles).
+# Default set: widgets, i18n runtime, plus Arabic and Hebrew fallback
+# fonts so the internationalization demo and common RTL cases work out
+# of the box. The text stack is not a feature: every build has it.
+# Applications that want a Latin-only minimal build can disable fonts
+# via `default-features = false` and re-add only the features they need
+# (e.g. `features = ["widgets", "i18n"]` for no Noto bundles).
 default = [
     "widgets",
-    "text",
     "i18n",
     "inspector",
     "toast",
@@ -40,7 +39,6 @@ widgets = ["dep:teksilo-widgets"]
 # feature makes them available, an environment variable makes them loud, and a
 # shipped build carries neither.
 debug-traces = ["teksilo-widgets?/debug-traces"]
-text = ["dep:teksilo-text", "teksilo-app/text"]
 i18n = ["dep:teksilo-i18n"]
 # Debug-only in-app inspector (`F12`, picker, AllBounds overlay,
 # theme/locale switchers, models tab, …). Pulls in `widgets` because
@@ -118,6 +116,11 @@ terminal = ["dep:teksilo-terminal", "teksilo-terminal/alacritty"]
 # `teksilo-automation` toolkit as `teksilo::automation`.
 automation = ["dep:teksilo-automation", "teksilo-app/automation"]
 
+# Timing histograms of the live-image pass (`LiveImage`), printed per window
+# by the idle trace (`TEKSILO_IDLE_TRACE=1`), in release builds too. Off by
+# default: a build without it keeps no samples.
+live-image-timings = ["teksilo-app/live-image-timings"]
+
 # Optional main-thread async executor (`teksilo-async`): adds
 # `TeksiloAppBuilder::install_async()` plus `ctx.spawn_local(...)` /
 # `spawn_blocking` for imperative async-in-UI flows. Off by default — apps
@@ -152,28 +155,24 @@ theme-material3 = ["dep:teksilo-theme-material3"]
 theme-macos = ["dep:teksilo-theme-macos"]
 theme-fluent = ["dep:teksilo-theme-fluent"]
 
-# Font bundle features — forwarded to `teksilo-text`'s own feature set
-# via the `teksilo-text?/...` optional-dep syntax. The `?` means the
-# forwarding only activates when `teksilo-text` itself is in the build
-# (i.e., when the `text` feature is enabled); a user that only wants
-# i18n-without-text will see these as silent no-ops. Applications
-# enable the scripts they ship for and disable the rest.
+# Font bundle features — forwarded to `teksilo-text`'s own feature set.
+# Applications enable the scripts they ship for and disable the rest.
 #
 # Each feature maps 1:1 to a feature of the same name on `teksilo-text`,
 # which in turn decides whether to `include_bytes!` the corresponding
 # Noto Sans variable font at compile time and register it with the
 # typesetter's fallback chain.
-fonts-arabic = ["teksilo-text?/fonts-arabic"]
-fonts-hebrew = ["teksilo-text?/fonts-hebrew"]
-fonts-thai = ["teksilo-text?/fonts-thai"]
-fonts-devanagari = ["teksilo-text?/fonts-devanagari"]
-fonts-cjk-sc = ["teksilo-text?/fonts-cjk-sc"]
-fonts-cjk-jp = ["teksilo-text?/fonts-cjk-jp"]
-fonts-cjk-kr = ["teksilo-text?/fonts-cjk-kr"]
+fonts-arabic = ["teksilo-text/fonts-arabic"]
+fonts-hebrew = ["teksilo-text/fonts-hebrew"]
+fonts-thai = ["teksilo-text/fonts-thai"]
+fonts-devanagari = ["teksilo-text/fonts-devanagari"]
+fonts-cjk-sc = ["teksilo-text/fonts-cjk-sc"]
+fonts-cjk-jp = ["teksilo-text/fonts-cjk-jp"]
+fonts-cjk-kr = ["teksilo-text/fonts-cjk-kr"]
 
 # Convenience meta-features, again forwarded to `teksilo-text`.
-fonts-all-non-cjk = ["teksilo-text?/fonts-all-non-cjk"]
-fonts-all = ["teksilo-text?/fonts-all"]
+fonts-all-non-cjk = ["teksilo-text/fonts-all-non-cjk"]
+fonts-all = ["teksilo-text/fonts-all"]
 
 # Opt-in runtime color-emoji fallback. Forwards to
 # `teksilo-text/system-emoji`, which loads Noto Color Emoji / Apple
@@ -181,7 +180,7 @@ fonts-all = ["teksilo-text?/fonts-all"]
 # system paths at startup. Off by default — color-emoji fonts are
 # large (20-30 MB) and not always present; apps that ship cross-
 # platform UI with emoji should opt in here.
-system-emoji = ["teksilo-text?/system-emoji"]
+system-emoji = ["teksilo-text/system-emoji"]
 
 [dependencies]
 teksilo-tokens = { workspace = true }
@@ -205,7 +204,7 @@ teksilo-widgets = { workspace = true, optional = true }
 # restores the out-of-the-box behavior, and downstream apps that use
 # `default-features = false` on teksilo get a clean slate with no
 # Noto fonts bundled.
-teksilo-text = { path = "../teksilo-text", version = "0.15.1", optional = true, default-features = false }
+teksilo-text = { path = "../teksilo-text", version = "0.15.1", default-features = false }
 teksilo-i18n = { workspace = true, optional = true }
 teksilo-inspector = { workspace = true, optional = true }
 teksilo-webview = { workspace = true, optional = true }

@@ -5,6 +5,40 @@
 
 Spatial index for `Scene` items.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `trait` | [`SpatialIndex`](#spatialindex) — A spatial index over `ItemId`s keyed by axis-aligned scene rectangles |
+| `const` | [`DEFAULT_CELL_SIZE`](#default_cell_size) — Default cell size for `GridHashIndex` — 256 logical pixels |
+| `struct` | [`GridHashIndex`](#gridhashindex) — Uniform grid spatial hash |
+
+## Public functions
+
+### `SpatialIndex`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+|  | [`insert(id: ItemId, bounds: Rect)`](#spatialindex-insert) |
+|  | [`remove(id: ItemId)`](#spatialindex-remove) |
+| `Vec<ItemId>` | [`query(scene_rect: Rect)`](#spatialindex-query) |
+| `bool` | [`contains(id: ItemId)`](#spatialindex-contains) |
+| `usize` | [`len()`](#spatialindex-len) |
+| `bool { /* default implementation */ }` | [`is_empty()`](#spatialindex-is_empty) |
+
+### `GridHashIndex`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(cell_size: f32)`](#gridhashindex-new) |
+| | **Methods** |
+| `f32` | [`cell_size()`](#gridhashindex-cell_size) |
+| `usize` | [`cell_count()`](#gridhashindex-cell_count) |
+
+## Detailed description
+
 `GridHashIndex` is the only shipped implementation — a uniform grid
 hash. The `SpatialIndex` trait is deliberately small — three mutating
 operations (`insert`, `remove`, `query`) plus two read methods
@@ -12,7 +46,7 @@ operations (`insert`, `remove`, `query`) plus two read methods
 (e.g. an R-tree) can supply its own implementation in a one-line change
 via `Scene::with_index`.
 
-## Why grid hash first
+#### Why grid hash first
 
 - Cache-friendly: items in the same cell are stored contiguously.
 - Insert / remove / move are amortised `O(k)` where `k` is the
@@ -57,7 +91,7 @@ Default `cell_size` is `DEFAULT_CELL_SIZE` (`256.0` logical pixels)
 cells and small enough that viewport queries (~800–1200 px) hit a
 manageable fan-out.
 
-## Example
+#### Example
 
 ```ignore
 // ItemId values are obtained from Scene::add_item in real code;
@@ -77,13 +111,11 @@ index.remove(id);
 assert!(index.is_empty());
 ```
 
-## Builder methods at a glance
-
-`insert`, `remove`, `query`, `contains`, `len`, `is_empty`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="spatialindex"></a>
 
 ## `pub trait SpatialIndex`
 
@@ -98,6 +130,8 @@ pub trait SpatialIndex: Send + std::fmt::Debug { /* associated items below */ }
 
 ### Associated items
 
+<a id="spatialindex-insert"></a>
+
 #### `fn insert(&mut self, id: ItemId, bounds: Rect);`
 
 Insert or update an item's bounds. Calling `insert` again with
@@ -105,9 +139,13 @@ the same id replaces the previous bounds (re-buckets the
 item). Equivalent to `remove(id); insert(id, bounds);` on
 implementations that need an explicit update path.
 
+<a id="spatialindex-remove"></a>
+
 #### `fn remove(&mut self, id: ItemId);`
 
 Remove an item. No-op if `id` is not present.
+
+<a id="spatialindex-query"></a>
 
 #### `fn query(&self, scene_rect: Rect) -> Vec<ItemId>;`
 
@@ -117,17 +155,25 @@ positives (items in cells the rect overlaps but whose bounds
 don't actually intersect) — callers that need exact
 intersection narrow with a per-item check.
 
+<a id="spatialindex-contains"></a>
+
 #### `fn contains(&self, id: ItemId) -> bool;`
 
 Whether `id` is currently in the index.
+
+<a id="spatialindex-len"></a>
 
 #### `fn len(&self) -> usize;`
 
 Total number of items in the index.
 
+<a id="spatialindex-is_empty"></a>
+
 #### `fn is_empty(&self) -> bool { /* default implementation */ }`
 
 Whether the index is empty.
+
+<a id="default_cell_size"></a>
 
 ## `pub const DEFAULT_CELL_SIZE`
 
@@ -138,6 +184,8 @@ queries (~800–1200 px) hit a small fan-out.
 ```rust
 pub const DEFAULT_CELL_SIZE: f32 = 256.0;
 ```
+
+<a id="gridhashindex"></a>
 
 ## `pub struct GridHashIndex`
 
@@ -153,15 +201,21 @@ pub struct GridHashIndex { /* fields */ }
 
 ### Methods
 
+<a id="gridhashindex-new"></a>
+
 #### `pub fn new(cell_size: f32) -> Self`
 
 Create a grid with `cell_size` logical pixels per cell.
 Clamped to a minimum of 1.0 to avoid pathological huge bucket
 counts.
 
+<a id="gridhashindex-cell_size"></a>
+
 #### `pub fn cell_size(&self) -> f32`
 
 The configured cell size in logical pixels.
+
+<a id="gridhashindex-cell_count"></a>
 
 #### `pub fn cell_count(&self) -> usize`
 

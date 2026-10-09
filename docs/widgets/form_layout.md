@@ -7,6 +7,26 @@
 
 FormLayout — a two-column settings or preferences form layout.
 
+## Public functions
+
+### `FormLayout`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#formlayout-new) |
+| | **Builder methods** |
+| `Self` | [`label_gap(gap: f32)`](#formlayout-label_gap) |
+| `Self` | [`row_spacing(spacing: f32)`](#formlayout-row_spacing) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#formlayout-label) |
+| `Self` | [`line(label: impl teksilo_core::IntoTeksiChild, field: impl teksilo_core::IntoTeksiChild)`](#formlayout-line) |
+| `Self` | [`lines<L, F>(rows: impl IntoIterator<Item = (L, F)>)`](#formlayout-lines) |
+| `Self` | [`line_ids(rows: impl IntoIterator<Item = (WidgetId, WidgetId)>)`](#formlayout-line_ids) |
+| `Self` | [`full_width(widget: impl teksilo_core::IntoTeksiChild)`](#formlayout-full_width) |
+| `Self` | [`full_width_rows(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#formlayout-full_width_rows) |
+
+## Detailed description
+
 Children are added as label/field pairs via `FormLayout::line` (inline
 widgets) or `FormLayout::line` (pre-registered IDs). Full-width rows
 that span both columns — section headers, `Divider`s, or banners — are
@@ -39,13 +59,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![FormLayout at Touch density](img/form_layout-touch.png)
 
-## Builder methods at a glance
-
-`label_gap`, `row_spacing`, `label`, `line`, `lines`, `line_ids`, `full_width`, `full_width_rows`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/form_layout/index.html)
+
+<a id="formlayout"></a>
 
 ## `pub struct FormLayout`
 
@@ -73,17 +91,25 @@ pub struct FormLayout { /* fields */ }
 
 ### Methods
 
+<a id="formlayout-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create an empty `FormLayout` with zero label gap and zero row spacing.
+
+<a id="formlayout-label_gap"></a>
 
 #### `pub fn label_gap(mut self, gap: f32) -> Self`
 
 Horizontal gap between the label column and the field column.
 
+<a id="formlayout-row_spacing"></a>
+
 #### `pub fn row_spacing(mut self, spacing: f32) -> Self`
 
 Vertical gap between rows.
+
+<a id="formlayout-label"></a>
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
@@ -94,9 +120,13 @@ the page. When unset, the widget demotes to a presentational
 `GenericContainer` — an unnamed landmark is worse than no
 landmark for AT users.
 
+<a id="formlayout-line"></a>
+
 #### `pub fn line( mut self, label: impl teksilo_core::IntoTeksiChild, field: impl teksilo_core::IntoTeksiChild, ) -> Self`
 
 Add a label/field pair row.
+
+<a id="formlayout-lines"></a>
 
 #### `pub fn lines<L, F>(self, rows: impl IntoIterator<Item = (L, F)>) -> Self where L: teksilo_core::IntoTeksiChild, F: teksilo_core::IntoTeksiChild,`
 
@@ -105,6 +135,8 @@ pairs, in order.
 
 The loop form of `line`, and the usual one once the form is
 generated from a settings schema rather than written row by row.
+
+<a id="formlayout-line_ids"></a>
 
 #### `pub fn line_ids(self, rows: impl IntoIterator<Item = (WidgetId, WidgetId)>) -> Self`
 
@@ -116,9 +148,13 @@ spelling that states the id types outright rather than a capability the
 other method lacks. Reach for it when a loop has already registered both
 columns and naming the type reads better than inferring it.
 
+<a id="formlayout-full_width"></a>
+
 #### `pub fn full_width(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add a full-width row spanning both columns.
+
+<a id="formlayout-full_width_rows"></a>
 
 #### `pub fn full_width_rows( self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 

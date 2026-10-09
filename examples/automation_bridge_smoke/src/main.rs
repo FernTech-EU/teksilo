@@ -232,6 +232,8 @@ fn run_smoke() -> Result<(), String> {
             node: probe,
             dx: 0.0,
             dy: -40.0,
+            at: None,
+            lines: false,
             ctrl: false,
             shift: false,
             alt: false,

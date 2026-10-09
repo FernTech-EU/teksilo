@@ -5,6 +5,35 @@
 
 One paint order, read by every picker.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `const` | [`RANK_UNDER`](#rank_under) — The `PaintKey::rank` of a lightweight item in the `Under` band |
+| `const` | [`RANK_WIDGET`](#rank_widget) — The `PaintKey::rank` of a heavyweight widget entry |
+| `const` | [`RANK_OVER`](#rank_over) — The `PaintKey::rank` of a lightweight item in the `Over` band |
+| `struct` | [`PaintKey`](#paintkey) — Where an entry sits in a `SceneView`'s **single** paint order |
+| `fn` | [`claims_press`](#claims_press) — Whether an entry would **act on a press** — the occlusion rule of this module, in one predicate |
+| `fn` | [`hit_testable`](#hit_testable) — Whether an entry takes part in pointer hit-testing at all |
+
+## Public functions
+
+### `PaintKey`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(rank: u8, z: f32, seq: u64)`](#paintkey-new) |
+| `Self` | [`bottom()`](#paintkey-bottom) |
+| `Self` | [`rank_floor(rank: u8)`](#paintkey-rank_floor) |
+| | **Methods** |
+| `u8` | [`rank()`](#paintkey-rank) |
+| `f32` | [`z()`](#paintkey-z) |
+| `u64` | [`seq()`](#paintkey-seq) |
+| `bool` | [`is_above_widgets()`](#paintkey-is_above_widgets) |
+
+## Detailed description
+
 A `SceneView` paints in three passes: the lightweight
 `SceneLayer::Under` band, then the heavyweight widget
 children (the arena's child walk), then the lightweight
@@ -13,7 +42,7 @@ tiers**, and `PaintKey` is that order named as a value, so a hit test can
 be written as a comparison instead of as a second, independently-invented
 rule.
 
-# What is unified here, and what is not
+### What is unified here, and what is not
 
 **The ordering is unified; the narrow phase is shared but not centralised.**
 A hit test runs on the pointer's hot path, where the scene's `RefCell` must
@@ -41,7 +70,7 @@ handle is grabbed by proximity, runs before the item hit test and takes
 priority over it. Folding it into the paint order is a separate decision
 with its own owner.
 
-# The occlusion rule
+### The occlusion rule
 
 **Occlusion follows press-claiming, not painting.** A lightweight entry
 takes a press away from a heavyweight card only if it would *act on that
@@ -71,7 +100,7 @@ handler-less item painted on top of a handler-bearing one still blocks it,
 as it always has. Press-claiming decides one thing only — whether the
 lightweight tier gets to veto a heavyweight card.
 
-# What this rule does *not* reach
+### What this rule does *not* reach
 
 It governs the **pointer**: the arena's hit test, and therefore press
 feedback, focus-on-release, the touch hold route, the cursor and the view's
@@ -81,13 +110,11 @@ two can therefore still disagree about what is under a point — see
 `docs/teksilo-scene-a11y.md`, "Where the pointer and the AT probe still
 disagree".
 
-## Builder methods at a glance
-
-`rank`, `z`, `seq`, `is_above_widgets`, `bottom`, `rank_floor`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="rank_under"></a>
 
 ## `pub const RANK_UNDER`
 
@@ -98,6 +125,8 @@ The `PaintKey::rank` of a lightweight item in the
 pub const RANK_UNDER: u8 = 0;
 ```
 
+<a id="rank_widget"></a>
+
 ## `pub const RANK_WIDGET`
 
 The `PaintKey::rank` of a heavyweight widget entry.
@@ -105,6 +134,8 @@ The `PaintKey::rank` of a heavyweight widget entry.
 ```rust
 pub const RANK_WIDGET: u8 = 1;
 ```
+
+<a id="rank_over"></a>
 
 ## `pub const RANK_OVER`
 
@@ -114,6 +145,8 @@ The `PaintKey::rank` of a lightweight item in the
 ```rust
 pub const RANK_OVER: u8 = 2;
 ```
+
+<a id="paintkey"></a>
 
 ## `pub struct PaintKey`
 
@@ -156,18 +189,26 @@ pub struct PaintKey { /* fields */ }
 
 ### Methods
 
+<a id="paintkey-new"></a>
+
 #### `pub fn new(rank: u8, z: f32, seq: u64) -> Self`
 
 Build a key. `z` is normalised (`NaN` → `0.0`) so the ordering is total.
+
+<a id="paintkey-rank"></a>
 
 #### `pub const fn rank(self) -> u8`
 
 The tier / band digit — one of `RANK_UNDER`, `RANK_WIDGET`,
 `RANK_OVER`.
 
+<a id="paintkey-z"></a>
+
 #### `pub const fn z(self) -> f32`
 
 The entry's z-order within its rank.
+
+<a id="paintkey-seq"></a>
 
 #### `pub const fn seq(self) -> u64`
 
@@ -180,9 +221,13 @@ structural `DataChange`, so equal-`z` ordering inside an adapter-owned
 run does shuffle on an append. That is a property of the adapter, not a
 guarantee this key makes.
 
+<a id="paintkey-is_above_widgets"></a>
+
 #### `pub const fn is_above_widgets(self) -> bool`
 
 True when this key can never lose to a heavyweight entry.
+
+<a id="paintkey-bottom"></a>
 
 #### `pub const fn bottom() -> Self`
 
@@ -191,6 +236,8 @@ A floor below every real key — "admit everything".
 `z` is `-inf` rather than a finite sentinel so that a real entry sitting
 at `f32::MIN` is still admitted, and `Ord` compares `z` with
 `total_cmp`, under which `-inf` is below every finite value.
+
+<a id="paintkey-rank_floor"></a>
 
 #### `pub const fn rank_floor(rank: u8) -> Self`
 
@@ -202,6 +249,8 @@ still take this event". The fine form — one specific entry's key — is
 what the `accepts_child_hit` veto needs, because an
 `Interleaved` entry is above some
 cards and below others.
+
+<a id="claims_press"></a>
 
 ## `pub fn claims_press(...)`
 
@@ -246,6 +295,8 @@ this item, and nothing in the crate routes a drop through this predicate.
 ```rust
 pub fn claims_press(handlers: Option<&SceneItemHandlerSet>, flags: ItemFlags) -> bool;
 ```
+
+<a id="hit_testable"></a>
 
 ## `pub fn hit_testable(...)`
 

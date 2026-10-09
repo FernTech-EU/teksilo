@@ -470,6 +470,7 @@ mod tests {
             "session.py",
             "bridge.py",
             "navigate.py",
+            "live_image.py",
             "tools.py",
             "report.py",
         ] {

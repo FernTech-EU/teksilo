@@ -7,6 +7,29 @@
 
 Link — a clickable text label rendered as underlined inline text.
 
+## Public functions
+
+### `Link`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(text: impl Into<LocalizedString>)`](#link-new) |
+| | **Builder methods** |
+| `Self` | [`visited(visited: impl Into<Prop<bool>>)`](#link-visited) |
+| `Self` | [`style(style: impl teksilo_core::styles::LinkStyle)`](#link-style) |
+| `Self` | [`on_activate_fn(f: impl Fn(&mut EventContext) + 'static)`](#link-on_activate_fn) |
+| `Self` | [`url(url: impl Into<String>)`](#link-url) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#link-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#link-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#link-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl teksilo_core::widget::Widget + 'static)`](#link-composite_tooltip) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#link-enabled) |
+| | **Methods** |
+| `Option<&str>` | [`get_url()`](#link-get_url) |
+
+## Detailed description
+
 `Link` is Teksilo's hyperlink control: it responds to tap, Enter, and
 Space like a `Button`, but renders as styled underlined text rather than a
 bordered box. It supports an optional `url` field (informational — the app
@@ -18,7 +41,7 @@ activate; a bare KeyUp with no preceding KeyDown is ignored (lone-KeyUp
 guard). The focus ring appears only after keyboard navigation
 (`focus_visible`), not after a mouse click.
 
-## Accessibility
+#### Accessibility
 
 `Role::Link` with the label as the AT name. When `url` is set it is
 forwarded to `set_url` so screen readers can announce the destination.
@@ -31,7 +54,7 @@ let _w = Link::new(lit!("Open documentation"))
     .url("https://example.com/docs");
 ```
 
-## Touch and pen
+#### Touch and pen
 
 The pressed state is the framework's (`docs/touch-and-pen.md` §7.1), so it
 survives a slide-off and comes back on re-entry, and a pan claimant winning
@@ -58,13 +81,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Link at Touch density](img/link-touch.png)
 
-## Builder methods at a glance
-
-`visited`, `style`, `on_activate_fn`, `url`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `get_url`, `enabled`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/link/index.html)
+
+<a id="link"></a>
 
 ## `pub struct Link`
 
@@ -76,9 +97,13 @@ pub struct Link { /* fields */ }
 
 ### Methods
 
+<a id="link-new"></a>
+
 #### `pub fn new(text: impl Into<LocalizedString>) -> Self`
 
 Create a link with the given display text.
+
+<a id="link-visited"></a>
 
 #### `pub fn visited(mut self, visited: impl Into<Prop<bool>>) -> Self`
 
@@ -87,40 +112,58 @@ when no transient interaction (hover / press) is active. Visited
 is overridden by hover/press, following the web convention. The
 app owns the signal (typically backed by URL-history state).
 
+<a id="link-style"></a>
+
 #### `pub fn style(mut self, style: impl teksilo_core::styles::LinkStyle) -> Self`
 
 Per-call style override for the link chrome.
+
+<a id="link-on_activate_fn"></a>
 
 #### `pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Closure invoked on activation.
 
+<a id="link-url"></a>
+
 #### `pub fn url(mut self, url: impl Into<String>) -> Self`
 
 Set a URL for the link (informational — not automatically opened).
+
+<a id="link-tooltip"></a>
 
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Attach a plain single-line tooltip shown after a hover delay.
 Mutually exclusive with `rich_tooltip` / `composite_tooltip` — last call wins.
 
+<a id="link-rich_tooltip"></a>
+
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
 Attach a rich tooltip resolved from the app-wide tooltip
 registry. See `Button::rich_tooltip`.
 
+<a id="link-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Attach a rich tooltip driven by inline `TooltipContent`.
+
+<a id="link-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip( mut self, content: impl teksilo_core::widget::Widget + 'static, ) -> Self`
 
 Attach a composite tooltip — third tier, hosting an arbitrary
 widget tree. See `Button::composite_tooltip`.
 
+<a id="link-get_url"></a>
+
 #### `pub fn get_url(&self) -> Option<&str>`
 
 Return the URL previously set via `url`, if any.
+
+<a id="link-enabled"></a>
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 

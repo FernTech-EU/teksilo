@@ -394,10 +394,35 @@ pub trait TerminalEngine {
 
     /// Terminate the child process (SIGKILL / TerminateProcess).
     fn kill(&mut self);
+
+    /// When output the engine is holding back must be shown anyway, `None`
+    /// while it holds nothing back. A synchronized update (DEC private mode
+    /// 2026) the child begins is held until the child ends it; a child that
+    /// never does (it crashed, or was killed, mid-frame) would hide what it
+    /// printed, so the view calls
+    /// [`end_synchronized_update`](Self::end_synchronized_update) once this
+    /// passes. The default holds nothing back.
+    fn synchronized_update_deadline(&self) -> Option<std::time::Instant> {
+        None
+    }
+
+    /// Show what a synchronized update holds back, its deadline having
+    /// passed, and queue the events it produces for
+    /// [`drain_events`](Self::drain_events).
+    fn end_synchronized_update(&mut self) {}
 }
 
 /// The reader half of a spawned engine — a blocking byte source the view drives
 /// on a background thread. `Send` so it can cross the thread boundary.
+///
+/// The view's reader thread runs whether or not the tree has a window, and
+/// reads until a read returns the end of the output or an error. Once the
+/// terminal is gone it reads on and discards what it reads, so that a child
+/// left running is not blocked on its writes and a Windows pseudoconsole,
+/// whose close waits for its output to be drained, can close. A reader should
+/// therefore return the end once its engine is killed or dropped: one that
+/// blocks on after that keeps the thread until it returns. The default
+/// engine's and `MemoryEngine`'s do.
 pub type PtyReader = Box<dyn std::io::Read + Send>;
 
 /// A freshly-spawned engine plus the PTY reader for its child's output.

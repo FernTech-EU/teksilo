@@ -6,6 +6,124 @@
 Toast notification — stackable, action-rich, severity-aware floating
 notification (the "upgrade path" from `Snackbar`).
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `const` | [`DEFAULT_TOAST_AUTO_DISMISS`](#default_toast_auto_dismiss) — Default auto-dismiss duration when the caller does not override it (matches IntelliJ `BALLOON` and Material Snackbar maximum) |
+| `enum` | [`ToastDismissCause`](#toastdismisscause) — Why a toast was dismissed — delivered to the `on_dismiss` callback |
+| `struct` | [`ToastAudience`](#toastaudience) — Opaque per-app routing token |
+| `enum` | [`ToastRoute`](#toastroute) — Resolved delivery target for a toast (and, mirrored, its archived `NotificationEntry`) |
+| `enum` | [`ToastActionStyle`](#toastactionstyle) — How a `ToastAction` should be rendered inside the toast surface |
+| `type` | [`ToastActionCallback`](#toastactioncallback) — Type-erased callback for a `ToastAction` |
+| `struct` | [`ToastAction`](#toastaction) — One actionable element inside a `Toast` — a button or hyperlink the user can click to drive a domain action |
+| `struct` | [`ToastHandle`](#toasthandle) — Returned by `Toast::present` (and `ctx.show_toast(toast)`) |
+| `type` | [`ToastDismissCallback`](#toastdismisscallback) — Type-erased on_dismiss callback receiving the cause + context |
+| `struct` | [`Toast`](#toast) — Toast — a present-able request (NOT a `Widget`) |
+| `trait` | [`EventContextToastExt`](#eventcontexttoastext) — Convenience methods on `EventContext` for the toast system |
+| `struct` | [`ToastRegistry`](#toastregistry) — Cheap to clone (`Rc<RefCell<…>>`) |
+
+## Public functions
+
+### `Toast`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`info(title: impl Into<LocalizedString>)`](#toast-info) |
+| `Self` | [`success(title: impl Into<LocalizedString>)`](#toast-success) |
+| `Self` | [`warning(title: impl Into<LocalizedString>)`](#toast-warning) |
+| `Self` | [`error(title: impl Into<LocalizedString>)`](#toast-error) |
+| `Self` | [`loading(title: impl Into<LocalizedString>)`](#toast-loading) |
+| | **Builder methods** |
+| `Self` | [`body(text: impl Into<LocalizedString>)`](#toast-body) |
+| `Self` | [`leading(widget: impl Widget + 'static)`](#toast-leading) |
+| `Self` | [`action(action: ToastAction)`](#toast-action) |
+| `Self` | [`actions(actions: impl IntoIterator<Item = ToastAction>)`](#toast-actions) |
+| `Self` | [`primary_action(label: impl Into<LocalizedString>, on_invoke: impl Fn(&mut EventContext) + 'static)`](#toast-primary_action) |
+| `Self` | [`auto_dismiss_after(duration: Duration)`](#toast-auto_dismiss_after) |
+| `Self` | [`persistent()`](#toast-persistent) |
+| `Self` | [`priority(priority: ToastPriority)`](#toast-priority) |
+| `Self` | [`id(id: impl Into<String>)`](#toast-id) |
+| `Self` | [`on_click(f: impl Fn(&mut EventContext) + 'static)`](#toast-on_click) |
+| `Self` | [`on_dismiss(f: impl Fn(ToastDismissCause, &mut EventContext) + 'static)`](#toast-on_dismiss) |
+| `Self` | [`show_close_button(show: bool)`](#toast-show_close_button) |
+| `Self` | [`closable_on_escape(allow: bool)`](#toast-closable_on_escape) |
+| `Self` | [`announcement(text: impl Into<LocalizedString>)`](#toast-announcement) |
+| `Self` | [`archive(archive: bool)`](#toast-archive) |
+| `Self` | [`style(style: impl teksilo_core::styles::ToastStyle)`](#toast-style) |
+| `Self` | [`target(audience: ToastAudience)`](#toast-target) |
+| `Self` | [`broadcast()`](#toast-broadcast) |
+| | **Methods** |
+| `ToastHandle` | [`present(ctx: &mut EventContext)`](#toast-present) |
+
+### `ToastAudience`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(id: u64)`](#toastaudience-new) |
+| | **Methods** |
+| `u64` | [`raw()`](#toastaudience-raw) |
+
+### `ToastAction`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(label: impl Into<LocalizedString>, on_invoke: impl Fn(&mut EventContext) + 'static)`](#toastaction-new) |
+| `Self` | [`primary(label: impl Into<LocalizedString>, on_invoke: impl Fn(&mut EventContext) + 'static)`](#toastaction-primary) |
+| `Self` | [`destructive(label: impl Into<LocalizedString>, on_invoke: impl Fn(&mut EventContext) + 'static)`](#toastaction-destructive) |
+| | **Builder methods** |
+| `Self` | [`style(style: ToastActionStyle)`](#toastaction-style) |
+| `Self` | [`closes_toast(closes: bool)`](#toastaction-closes_toast) |
+| `Self` | [`shortcut_id(id: impl Into<String>)`](#toastaction-shortcut_id) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#toastaction-tooltip) |
+| | **Methods** |
+| `String` | [`label()`](#toastaction-label) |
+| `&ToastActionStyle` | [`style_ref()`](#toastaction-style_ref) |
+| `bool` | [`closes_toast_flag()`](#toastaction-closes_toast_flag) |
+| `Option<&str>` | [`shortcut_id_ref()`](#toastaction-shortcut_id_ref) |
+| `Option<&LocalizedString>` | [`tooltip_ref()`](#toastaction-tooltip_ref) |
+| `ToastActionCallback` | [`callback()`](#toastaction-callback) |
+
+### `ToastHandle`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `u64` | [`entry_id()`](#toasthandle-entry_id) |
+| `bool` | [`is_alive()`](#toasthandle-is_alive) |
+|  | [`dismiss(ctx: &mut EventContext)`](#toasthandle-dismiss) |
+
+### `EventContextToastExt`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `ToastHandle` | [`show_toast(toast: Toast)`](#eventcontexttoastext-show_toast) |
+|  | [`dismiss_toast(handle: &ToastHandle)`](#eventcontexttoastext-dismiss_toast) |
+
+### `ToastRegistry`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(options: super::host::ToastInstallOptions)`](#toastregistry-new) |
+| `Self` | [`with_archive(options: super::host::ToastInstallOptions, archive: Rc<NotificationArchiveModel>)`](#toastregistry-with_archive) |
+| | **Methods** |
+| `Option<Rc<NotificationArchiveModel>>` | [`archive()`](#toastregistry-archive) |
+| `&Signal<u64>` | [`version_signal()`](#toastregistry-version_signal) |
+| `Signal<usize>` | [`hover_count_signal()`](#toastregistry-hover_count_signal) |
+| `Signal<Option<ToastAudience>>` | [`window_audience_signal(window_id: TeksiloWindowId)`](#toastregistry-window_audience_signal) |
+|  | [`set_window_audience(window_id: TeksiloWindowId, audience: Option<ToastAudience>)`](#toastregistry-set_window_audience) |
+|  | [`forget_window(window_id: TeksiloWindowId)`](#toastregistry-forget_window) |
+| `usize` | [`live_count()`](#toastregistry-live_count) |
+| | **Associated functions** |
+|  | [`show_settings_write_failed()`](#toastregistry-show_settings_write_failed) |
+
+## Detailed description
+
 Distinct from siblings:
 - `Snackbar` — single-instance, message-only.
   Calling `present_snackbar` dismisses all other overlays first.
@@ -36,13 +154,11 @@ ctx.show_toast(
 );
 ```
 
-## Builder methods at a glance
-
-`info`, `success`, `warning`, `error`, `loading`, `body`, `leading`, `action`, `actions`, `primary_action`, `auto_dismiss_after`, `persistent`, `priority`, `id`, `on_click`, `on_dismiss`, `show_close_button`, `closable_on_escape`, `announcement`, `archive`, `style`, `target`, `broadcast`, `present`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/toast/index.html)
+
+<a id="default_toast_auto_dismiss"></a>
 
 ## `pub const DEFAULT_TOAST_AUTO_DISMISS`
 
@@ -52,6 +168,8 @@ it (matches IntelliJ `BALLOON` and Material Snackbar maximum).
 ```rust
 pub const DEFAULT_TOAST_AUTO_DISMISS: Duration = Duration::from_secs(10);
 ```
+
+<a id="toastdismisscause"></a>
 
 ## `pub enum ToastDismissCause`
 
@@ -72,6 +190,8 @@ pub enum ToastDismissCause { /* variants */ }
 - **`SlotPoolFull`** — The host's slot pool was at `max_visible` and this toast was dropped (Normal priority overflow) or was evicted by a higher-priority arrival. Reported synthetically so `on_dismiss` always fires once per toast — apps that track outstanding toasts via the callback don't leak.
 - **`SwipeDismissed`** — The user swiped the surface away. The touch counterpart of the close button, which is small, hover-adjacent chrome; a swipe is the whole surface and needs no aim.
 
+<a id="toastaudience"></a>
+
 ## `pub struct ToastAudience`
 
 Opaque per-app routing token. teksilo has no notion of what an
@@ -88,15 +208,21 @@ pub struct ToastAudience(u64);
 
 ### Methods
 
+<a id="toastaudience-new"></a>
+
 #### `pub fn new(id: u64) -> Self`
 
 Construct a token from an app-chosen `u64`. The app owns the
 meaning entirely — teksilo never inspects the value beyond
 equality/hash.
 
+<a id="toastaudience-raw"></a>
+
 #### `pub fn raw(&self) -> u64`
 
 The raw numeric value, for debugging/serialization by the app.
+
+<a id="toastroute"></a>
 
 ## `pub enum ToastRoute`
 
@@ -127,6 +253,8 @@ pub enum ToastRoute { /* variants */ }
 - **`Audience`** — Delivered to every window currently assigned this audience.
 - **`Broadcast`** — Delivered to every window, unconditionally.
 
+<a id="toastactionstyle"></a>
+
 ## `pub enum ToastActionStyle`
 
 How a `ToastAction` should be rendered inside the toast surface.
@@ -140,6 +268,8 @@ pub enum ToastActionStyle { /* variants */ }
 - **`Link`** — JetBrains-style hyperlink. Rendered inline with the body row. Default — minimal visual weight, scales to many actions.
 - **`Button`** — Material / Windows-style button. Rendered in a dedicated row below the body. Use for primary calls-to-action ("Retry", "Save", "Discard").
 
+<a id="toastactioncallback"></a>
+
 ## `pub type ToastActionCallback`
 
 Type-erased callback for a `ToastAction`. `Fn` (not `FnMut`) so
@@ -149,6 +279,8 @@ multiple paths (tap, keyboard, AT custom action).
 ```rust
 pub type ToastActionCallback = Rc<dyn Fn(&mut EventContext)>;
 ```
+
+<a id="toastaction"></a>
 
 ## `pub struct ToastAction`
 
@@ -161,24 +293,34 @@ pub struct ToastAction { /* fields */ }
 
 ### Methods
 
+<a id="toastaction-new"></a>
+
 #### `pub fn new( label: impl Into<LocalizedString>, on_invoke: impl Fn(&mut EventContext) + 'static, ) -> Self`
 
 Build an action with the default `Link` style and
 `closes_toast = true` (IntelliJ "expiring action" semantics).
+
+<a id="toastaction-primary"></a>
 
 #### `pub fn primary( label: impl Into<LocalizedString>, on_invoke: impl Fn(&mut EventContext) + 'static, ) -> Self`
 
 Shorthand for `ToastAction::new(label, on_invoke).style(Button { Filled })`.
 The visual-weight default for primary calls-to-action.
 
+<a id="toastaction-destructive"></a>
+
 #### `pub fn destructive( label: impl Into<LocalizedString>, on_invoke: impl Fn(&mut EventContext) + 'static, ) -> Self`
 
 Shorthand for the destructive button variant — red-tinted for
 confirm-style "Delete" / "Discard" actions.
 
+<a id="toastaction-style"></a>
+
 #### `pub fn style(mut self, style: ToastActionStyle) -> Self`
 
 Override the action's visual style. Default is `Link`.
+
+<a id="toastaction-closes_toast"></a>
 
 #### `pub fn closes_toast(mut self, closes: bool) -> Self`
 
@@ -186,6 +328,8 @@ Whether invoking this action also dismisses the toast. Default
 is `true` — matches IntelliJ's "expiring action" semantics.
 Set to `false` for actions that toggle state without closing
 (e.g. "Show details" disclosure inside a sticky toast).
+
+<a id="toastaction-shortcut_id"></a>
 
 #### `pub fn shortcut_id(mut self, id: impl Into<String>) -> Self`
 
@@ -197,33 +341,49 @@ form of this action (in
 is re-invokable by name through the existing Intent
 dispatcher.
 
+<a id="toastaction-tooltip"></a>
+
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Optional tooltip text shown when the pointer hovers the action.
+
+<a id="toastaction-label"></a>
 
 #### `pub fn label(&self) -> String`
 
 Resolve the action label to a plain string using the current locale.
 
+<a id="toastaction-style_ref"></a>
+
 #### `pub fn style_ref(&self) -> &ToastActionStyle`
 
 Return the action's rendering style (link vs button variant).
+
+<a id="toastaction-closes_toast_flag"></a>
 
 #### `pub fn closes_toast_flag(&self) -> bool`
 
 Return `true` when invoking this action also dismisses the toast.
 
+<a id="toastaction-shortcut_id_ref"></a>
+
 #### `pub fn shortcut_id_ref(&self) -> Option<&str>`
 
 Return the associated `Shortcut` id, if any.
+
+<a id="toastaction-tooltip_ref"></a>
 
 #### `pub fn tooltip_ref(&self) -> Option<&LocalizedString>`
 
 Return the optional tooltip text, if one was set via `tooltip`.
 
+<a id="toastaction-callback"></a>
+
 #### `pub fn callback(&self) -> ToastActionCallback`
 
 Clone the invocation callback — cheap because the underlying closure is `Rc`-wrapped.
+
+<a id="toasthandle"></a>
 
 ## `pub struct ToastHandle`
 
@@ -241,6 +401,8 @@ pub struct ToastHandle { /* fields */ }
 
 ### Methods
 
+<a id="toasthandle-entry_id"></a>
+
 #### `pub fn entry_id(&self) -> u64`
 
 Stable per-toast id. Two `ToastHandle`s pointing at the same
@@ -248,17 +410,23 @@ underlying toast share the same `entry_id`. The id is unique
 per `ToastRegistry` (per app) — it doesn't survive across app
 restarts.
 
+<a id="toasthandle-is_alive"></a>
+
 #### `pub fn is_alive(&self) -> bool`
 
 Whether the toast is still in the registry's live set (timer
 hasn't expired, user hasn't dismissed, host hasn't shut down).
 Always `false` for overflow-dropped toasts.
 
+<a id="toasthandle-dismiss"></a>
+
 #### `pub fn dismiss(&self, ctx: &mut EventContext)`
 
 Programmatically dismiss the toast with cause
 `ToastDismissCause::Programmatic`. No-op if the toast is
 already dismissed (timer, user, host shutdown).
+
+<a id="toastdismisscallback"></a>
 
 ## `pub type ToastDismissCallback`
 
@@ -267,6 +435,8 @@ Type-erased on_dismiss callback receiving the cause + context.
 ```rust
 pub type ToastDismissCallback = Rc<dyn Fn(ToastDismissCause, &mut EventContext)>;
 ```
+
+<a id="toast"></a>
 
 ## `pub struct Toast`
 
@@ -284,21 +454,31 @@ pub struct Toast { /* fields */ }
 
 ### Methods
 
+<a id="toast-info"></a>
+
 #### `pub fn info(title: impl Into<LocalizedString>) -> Self`
 
 Info-severity toast (status confirmation, neutral notice).
+
+<a id="toast-success"></a>
 
 #### `pub fn success(title: impl Into<LocalizedString>) -> Self`
 
 Success-severity toast ("Saved", "Connected", "Build finished").
 
+<a id="toast-warning"></a>
+
 #### `pub fn warning(title: impl Into<LocalizedString>) -> Self`
 
 Warning-severity toast.
 
+<a id="toast-error"></a>
+
 #### `pub fn error(title: impl Into<LocalizedString>) -> Self`
 
 Error-severity toast. Defaults to `Live::Assertive`.
+
+<a id="toast-loading"></a>
 
 #### `pub fn loading(title: impl Into<LocalizedString>) -> Self`
 
@@ -308,9 +488,13 @@ Persistent by default; the app calls
 `ToastHandle::dismiss` (typically from the operation's
 completion callback) or replaces it with a success/error toast.
 
+<a id="toast-body"></a>
+
 #### `pub fn body(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Optional secondary line below the title.
+
+<a id="toast-leading"></a>
 
 #### `pub fn leading(mut self, widget: impl Widget + 'static) -> Self`
 
@@ -318,9 +502,13 @@ Replace the default severity glyph with a custom leading
 widget (spinner, app icon, avatar). Boxes the widget so the
 toast remains object-safe.
 
+<a id="toast-action"></a>
+
 #### `pub fn action(mut self, action: ToastAction) -> Self`
 
 Append a `ToastAction` (link or button) to the toast.
+
+<a id="toast-actions"></a>
 
 #### `pub fn actions(self, actions: impl IntoIterator<Item = ToastAction>) -> Self`
 
@@ -329,15 +517,21 @@ Append several `ToastAction`s from an iterator, in order.
 The loop form of `action`. Toasts carry few actions, so
 reach for it only when the set is genuinely data-driven.
 
+<a id="toast-primary_action"></a>
+
 #### `pub fn primary_action( self, label: impl Into<LocalizedString>, on_invoke: impl Fn(&mut EventContext) + 'static, ) -> Self`
 
 Shorthand for appending a filled-button primary action — equivalent to
 `.action(ToastAction::primary(label, on_invoke))`.
 
+<a id="toast-auto_dismiss_after"></a>
+
 #### `pub fn auto_dismiss_after(mut self, duration: Duration) -> Self`
 
 Override the auto-dismiss countdown. Pass `Duration::ZERO` for immediate dismissal
 on the next timer tick; call `persistent` to disable the timer entirely.
+
+<a id="toast-persistent"></a>
 
 #### `pub fn persistent(mut self) -> Self`
 
@@ -345,10 +539,14 @@ Disable auto-dismiss — the toast persists until the user
 clicks the close X, invokes a `closes_toast` action, or the
 app calls `ToastHandle::dismiss`.
 
+<a id="toast-priority"></a>
+
 #### `pub fn priority(mut self, priority: ToastPriority) -> Self`
 
 Set the queue priority. `High` / `Urgent` entries evict the oldest `Normal` entry
 when the slot pool is full; `Urgent` also forces `Live::Assertive` regardless of severity.
+
+<a id="toast-id"></a>
 
 #### `pub fn id(mut self, id: impl Into<String>) -> Self`
 
@@ -395,10 +593,14 @@ document/audience identity into the id yourself, e.g.
 constant, so two windows running the same *kind* of operation
 on two different documents never collide on one entry.
 
+<a id="toast-on_click"></a>
+
 #### `pub fn on_click(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Treat a click on the toast body as a meaningful action — the
 callback fires on tap. Cursor changes to `Pointer` over the body.
+
+<a id="toast-on_dismiss"></a>
 
 #### `pub fn on_dismiss( mut self, f: impl Fn(ToastDismissCause, &mut EventContext) + 'static, ) -> Self`
 
@@ -406,9 +608,13 @@ Notification of dismissal. Fires exactly once per toast on any
 dismiss path (timer, action invocation, close click, escape,
 swipe, programmatic, host shutdown, slot-pool overflow).
 
+<a id="toast-show_close_button"></a>
+
 #### `pub fn show_close_button(mut self, show: bool) -> Self`
 
 Show or hide the trailing close (×) button. Default `true`.
+
+<a id="toast-closable_on_escape"></a>
 
 #### `pub fn closable_on_escape(mut self, allow: bool) -> Self`
 
@@ -416,11 +622,15 @@ Whether pressing Escape while the toast is focused dismisses
 it. Default true. Set to false in apps that have a custom
 Escape-handling story (focus trap, modal-style toast).
 
+<a id="toast-announcement"></a>
+
 #### `pub fn announcement(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Override the screen-reader announcement text without changing
 the visible title. Useful when the visible title is iconic
 ("3") but the spoken text needs context ("3 unread messages").
+
+<a id="toast-archive"></a>
 
 #### `pub fn archive(mut self, archive: bool) -> Self`
 
@@ -429,10 +639,14 @@ drives `NotificationLog`.
 Default `true`. Set `false` for noise-suppressing
 transient notifications like quick "Copied!" feedback.
 
+<a id="toast-style"></a>
+
 #### `pub fn style(mut self, style: impl teksilo_core::styles::ToastStyle) -> Self`
 
 Override the visual chrome for this toast instance. Takes precedence over the
 theme-wide `style_slots.toast` slot and the built-in `RecipeToastStyle` default.
+
+<a id="toast-target"></a>
 
 #### `pub fn target(mut self, audience: ToastAudience) -> Self`
 
@@ -441,12 +655,16 @@ Route this toast to every window currently assigned `audience`
 default origin-window. Overrides any previous `.target()` /
 `.broadcast()` call — last setter wins.
 
+<a id="toast-broadcast"></a>
+
 #### `pub fn broadcast(mut self) -> Self`
 
 Route this toast to every window, unconditionally — for
 genuinely app-wide messages (a data-loss warning, an update
 available notice) rather than one window's concern. Overrides
 any previous `.target()` call — last setter wins.
+
+<a id="toast-present"></a>
 
 #### `pub fn present(self, ctx: &mut EventContext) -> ToastHandle`
 
@@ -456,6 +674,8 @@ Submit the toast through the installed
 programmatic control. If `install_toast` was not called the
 returned handle is in the "dropped" state (`is_alive` returns
 `false`) and a one-shot stderr warning fires explaining the omission.
+
+<a id="eventcontexttoastext"></a>
 
 ## `pub trait EventContextToastExt`
 
@@ -476,11 +696,15 @@ pub trait EventContextToastExt { /* associated items below */ }
 
 ### Associated items
 
+<a id="eventcontexttoastext-show_toast"></a>
+
 #### `fn show_toast(&mut self, toast: Toast) -> ToastHandle;`
 
 Present a `Toast` through the installed
 `ToastHost`. Returns a
 `ToastHandle` for programmatic control.
+
+<a id="eventcontexttoastext-dismiss_toast"></a>
 
 #### `fn dismiss_toast(&mut self, handle: &ToastHandle);`
 
@@ -488,6 +712,8 @@ Programmatically dismiss a toast by handle, with cause
 `ToastDismissCause::Programmatic`. Equivalent to
 `handle.dismiss(ctx)`. No-op if the toast has already been
 dismissed.
+
+<a id="toastregistry"></a>
 
 ## `pub struct ToastRegistry`
 
@@ -500,12 +726,16 @@ pub struct ToastRegistry { /* fields */ }
 
 ### Methods
 
+<a id="toastregistry-new"></a>
+
 #### `pub fn new(options: super::host::ToastInstallOptions) -> Self`
 
 Construct a registry with the given options and no archive.
 Used by tests and by apps that don't want notification
 persistence. The install helper in teksilo calls
 `with_archive` instead.
+
+<a id="toastregistry-with_archive"></a>
 
 #### `pub fn with_archive( options: super::host::ToastInstallOptions, archive: Rc<NotificationArchiveModel>, ) -> Self`
 
@@ -514,11 +744,15 @@ toast push into `archive`. Toasts presented with
 `archive(false)` are NOT mirrored (used for transient
 "Copied!" feedback that shouldn't pollute the log).
 
+<a id="toastregistry-archive"></a>
+
 #### `pub fn archive(&self) -> Option<Rc<NotificationArchiveModel>>`
 
 Access the underlying notification archive (if configured).
 `NotificationLog` and `NotificationCenterButton` read from
 this directly.
+
+<a id="toastregistry-version_signal"></a>
 
 #### `pub fn version_signal(&self) -> &Signal<u64>`
 
@@ -541,10 +775,14 @@ around it. `Signal` now tracks a monotone generation and each
 (`teksilo_core::binding::BindingGroup::last_seen`), so consumers
 no longer contend and the duplicates are gone.
 
+<a id="toastregistry-hover_count_signal"></a>
+
 #### `pub fn hover_count_signal(&self) -> Signal<usize>`
 
 Shared hover-pause refcount. Surfaces increment / decrement
 on hover-enter / leave; the host's frame-tick effect reads it.
+
+<a id="toastregistry-window_audience_signal"></a>
 
 #### `pub fn window_audience_signal( &self, window_id: TeksiloWindowId, ) -> Signal<Option<ToastAudience>>`
 
@@ -553,6 +791,8 @@ call for a given window allocates a fresh `Signal::new(None)`;
 every later call (from that window's `ToastHost`, or from app
 code) returns the SAME signal, so binding to it once and
 mutating it later both work through this one accessor.
+
+<a id="toastregistry-set_window_audience"></a>
 
 #### `pub fn set_window_audience(&self, window_id: TeksiloWindowId, audience: Option<ToastAudience>)`
 
@@ -563,6 +803,8 @@ exactly like the registry itself: `ctx.app_state::<ToastRegistry>()`.
 Typical call site: a window-activation / active-document-changed
 handler that keeps a window's audience in sync with what it's
 currently showing.
+
+<a id="toastregistry-forget_window"></a>
 
 #### `pub fn forget_window(&self, window_id: TeksiloWindowId)`
 
@@ -600,6 +842,8 @@ Idempotent: forgetting a window id that was never registered
 (or was already forgotten) is a safe no-op — `HashMap::remove`
 on a missing key does nothing.
 
+<a id="toastregistry-show_settings_write_failed"></a>
+
 #### `pub fn show_settings_write_failed(`
 
 Enqueue the framework's toast for a permanently-discarded
@@ -630,6 +874,8 @@ through `EventContextToastExt::show_toast`. The only situation
 is already full and this arrival evicts/drops an entry, there is
 nothing behind that callback to lose — the overflow result is
 dropped here deliberately, not silently.
+
+<a id="toastregistry-live_count"></a>
 
 #### `pub fn live_count(&self) -> usize {`
 

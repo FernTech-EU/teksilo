@@ -3,17 +3,16 @@
 
 # Roadmap
 
-Updated 2 October 2026.
+Updated 6 October 2026.
 
 ## Toward V1
 
 The **V1 API freeze is targeted for January 2027**. The remaining work focuses
-on live image display, hardware validation, and feedback from applications
-beyond the maintainer's own use cases. These tracks can proceed in parallel.
+on hardware validation and feedback from applications beyond the maintainer's
+own use cases. These tracks can proceed in parallel.
 
 | Status | Goal | Remaining work |
 | --- | --- | --- |
-| Planned | LiveImage | Add a widget displaying frames produced by another thread for video, VM screens, and camera previews, while keeping the UI responsive. |
 | Pending validation | Touchscreen and stylus hardware | Exercise touch and pen input on real hardware, record device and platform results, and fix discovered defects. |
 | Ongoing | Wider real-world use | Reproduce and fix bugs reported by other users, add regression coverage, and resolve API friction before the freeze. |
 | Target: January 2027 | Public API freeze | Complete intended breaking changes, align documentation and examples, and establish the compatibility baseline for 1.x. |
@@ -25,7 +24,7 @@ reproduction, Teksilo version, platform, and expected behavior where possible.
 
 ## Delivered
 
-These groups summarize the Git history by theme through 2 October 2026.
+These groups summarize the Git history by theme through 6 October 2026.
 Periods overlap because the areas developed together; improvements continue
 in each area. All dates below are in 2026.
 
@@ -38,6 +37,7 @@ in each area. All dates below are in 2026.
 | Data views, docking, and graphics | Virtualized data views, keyed selection, pluggable sources, editable tables, docking, charts, and a scene canvas with selection, snapping, transforms, and ink. Specialized surfaces include code editing, terminal, and log viewing. | April to July; scene extensions in September |
 | Developer tooling and automation | Widget previewer, runtime inspector, DSL formatter and language server, screenshots, cross-platform MCP automation, and cargo teksilo. Documentation and onboarding consolidated in September and October. | April to October |
 | Accessibility and input | Keyboard navigation, focus scopes, contrast checks, accessible text and actions, and screen-reader corrections. Unified touch, pen, and trackpad support shipped in 0.10.0; physical hardware validation remains pending. | Foundations in April; major extensions June to September |
+| Off-thread content and live pictures | `LiveImage` for pictures another thread rewrites at display rate (VM screens, video, camera previews), uploading only what changed and freeing textures at the first frame without them. `RepaintTrigger` for off-thread content a single widget shows, with the terminal on it. Hidden windows draw nothing. Automation aims at and reads back a picture's pixels. | September to October |
 
 Teksilo began on 31 March as FernUI, became Bastyde in May, and adopted the
 Teksilo name on 8 August. See [status and limitations](status-and-limitations.md)

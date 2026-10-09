@@ -4,11 +4,15 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
+use teksilo_canvas::wake::{RedrawWaker, WakeKind};
+
 use winit::event::WindowEvent;
 use winit::window::Window;
 
 use accesskit::ActionRequest;
 use teksilo_render::Renderer;
+
+use crate::wake::{LiveWakeStats, RequestRedraw, WindowWakeTarget};
 
 /// Error returned when surface texture acquisition fails during rendering.
 #[derive(Debug, thiserror::Error)]
@@ -61,8 +65,13 @@ pub enum FrameOutcome {
     /// Per wgpu guidance, skip this frame. On macOS, the initial paint
     /// after window creation often hits `Occluded` one or more times
     /// before Metal finishes compositing, so the caller should still
-    /// request another redraw once — unless it already knows the
-    /// window is occluded via `WindowEvent::Occluded(true)`.
+    /// request another redraw once, and later ones after a growing wait —
+    /// unless it knows the window is hidden (occluded or minimised), or
+    /// [`PlatformWindow::occluded_now`] says it is.
+    ///
+    /// Wayland does not report a hidden surface this way: acquire keeps
+    /// succeeding there. A hidden Wayland window is throttled by the frame
+    /// callbacks `render_frame` requests, which its compositor withholds.
     Skipped,
     /// Surface became outdated (resize, scale change, device switch).
     /// Caller should reconfigure the surface and try again.
@@ -103,6 +112,10 @@ pub struct PlatformWindow {
     /// The accessibility state the adapter's off-thread handlers share with
     /// the UI thread. See [`AccessibilityBridge`].
     a11y_bridge: Arc<AccessibilityBridge>,
+    /// The window's wake target: what [`redraw_waker`](Self::redraw_waker)
+    /// hands out, what the accessibility handlers wake the loop through, and
+    /// what [`request_redraw`](Self::request_redraw) goes through.
+    wake: Arc<WindowWakeTarget>,
 }
 
 /// The state an AccessKit adapter's handlers share with the UI thread.
@@ -185,6 +198,9 @@ struct SharedGpu {
     adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    /// The device's lost-device latch, installed once when it was opened and
+    /// shared by every window's renderer on it.
+    health: teksilo_render::DeviceHealth,
 }
 
 /// The platform display connection the wgpu instance is built against.
@@ -544,10 +560,14 @@ async fn shared_gpu_for(surface: &wgpu::Surface<'static>) -> SharedGpu {
 
     let (adapter, device, queue) = open_gpu_for(surface).await;
 
+    // Installed where the device is opened, the shared one and the
+    // multi-GPU loser alike, so every renderer on it reads one latch.
+    let health = teksilo_render::DeviceHealth::install(&device);
     let gpu = SharedGpu {
         adapter,
         device,
         queue,
+        health,
     };
     // First one in becomes the shared device. Losing here is the multi-GPU case
     // above (or a race that cannot happen while windows are created on one
@@ -619,6 +639,61 @@ struct WindowGpu {
     display_lost: bool,
 }
 
+/// A window rendered offscreen and read back: what
+/// [`PlatformWindow::capture_offscreen`] returns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct OffscreenCapture {
+    /// Tightly packed RGBA8, `width × height` pixels, no padding.
+    pub rgba: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    /// Where these pixels sit in the window's surface, in physical pixels:
+    /// the whole surface, or the crop asked for, clamped to it. Empty when
+    /// the crop missed the surface.
+    pub region: teksilo_canvas::PixelRect,
+}
+
+/// The surface pixels a crop rect (physical pixels) covers: its edges
+/// rounded outwards, clamped to a `w × h` surface. Empty when it misses.
+fn crop_region(rect: teksilo_canvas::Rect, w: u32, h: u32) -> teksilo_canvas::PixelRect {
+    let x0 = (rect.x.floor().max(0.0) as u32).min(w);
+    let y0 = (rect.y.floor().max(0.0) as u32).min(h);
+    let x1 = ((rect.x + rect.width).ceil().max(0.0) as u32).min(w);
+    let y1 = ((rect.y + rect.height).ceil().max(0.0) as u32).min(h);
+    if x1 <= x0 || y1 <= y0 {
+        return teksilo_canvas::PixelRect::new(x0, y0, 0, 0);
+    }
+    teksilo_canvas::PixelRect::new(x0, y0, x1 - x0, y1 - y0)
+}
+
+/// The pixels of `region` out of a tightly packed RGBA buffer `w` pixels
+/// wide that contains it.
+fn crop_rgba(src: &[u8], w: u32, region: teksilo_canvas::PixelRect) -> Vec<u8> {
+    let row_bytes = region.width as usize * 4;
+    let mut out = Vec::with_capacity(row_bytes * region.height as usize);
+    for y in region.y..region.y + region.height {
+        let start = (y as usize * w as usize + region.x as usize) * 4;
+        out.extend_from_slice(&src[start..start + row_bytes]);
+    }
+    out
+}
+
+/// One refresh of the display `window` is on, when the display reports its
+/// rate.
+fn display_refresh_interval(window: &Window) -> Option<std::time::Duration> {
+    let millihertz = window.current_monitor()?.refresh_rate_millihertz()?;
+    Some(refresh_interval_from_millihertz(millihertz))
+}
+
+/// The interval of a refresh rate in millihertz. Rates below 20 Hz or above
+/// 1 kHz are read as those bounds: a frame never waits more than 50 ms for a
+/// producer, and always waits at least one millisecond.
+fn refresh_interval_from_millihertz(millihertz: u32) -> std::time::Duration {
+    let millihertz = millihertz.clamp(20_000, 1_000_000);
+    std::time::Duration::from_nanos(1_000_000_000_000 / u64::from(millihertz))
+}
+
 impl PlatformWindow {
     /// Everything both constructors do: surface, shared device, swapchain
     /// configuration, renderer. Kept in one place because the two entry points
@@ -676,7 +751,11 @@ impl PlatformWindow {
 
         // The renderer stays per-window: it owns the glyph atlas, the path
         // atlas and the blur pool, and it is `!Sync` besides.
-        let renderer = Renderer::new(gpu.device, gpu.queue, surface_format);
+        let mut renderer =
+            Renderer::with_device_health(gpu.device, gpu.queue, surface_format, gpu.health);
+        if let Some(interval) = display_refresh_interval(window) {
+            renderer.set_live_refresh_interval(interval);
+        }
         WindowGpu {
             surface,
             surface_config,
@@ -708,29 +787,28 @@ impl PlatformWindow {
         let a11y_needs_full_tree = Arc::new(AtomicBool::new(true));
         let a11y_bridge = Arc::new(AccessibilityBridge::default());
 
-        // Every handler below runs off the UI thread and ends by asking winit
-        // to redraw this window. That request is the *only* thing that wakes
-        // the event loop: `handle_accessibility_actions` — the sole drain of
-        // the action channel — runs from `window_event`, so without a wakeup an
-        // action issued by Narrator or Orca would sit in the channel until some
-        // unrelated window event happened to arrive. `Window::request_redraw`
-        // is thread-safe, which is why an `Arc<Window>` clone is all a handler
-        // needs.
+        // Every handler below runs off the UI thread and ends by waking the
+        // event loop, which is the *only* thing that gets what it left read:
+        // without a wakeup an action issued by Narrator or Orca would sit in
+        // the channel until some unrelated window event happened to arrive.
+        // A state wake, since what they leave must reach a window that draws
+        // nothing: see `WindowWakeTarget`.
+        let wake = WindowWakeTarget::new(Arc::clone(&window) as Arc<dyn RequestRedraw>);
         let a11y_adapter = accesskit_winit::Adapter::with_direct_handlers(
             event_loop,
             &window,
             TeksiloActivationHandler {
                 needs_full_tree: a11y_needs_full_tree.clone(),
                 bridge: Arc::clone(&a11y_bridge),
-                window: Arc::clone(&window),
+                wake: Arc::clone(&wake),
             },
             TeksiloActionHandler {
                 tx: action_tx,
-                window: Arc::clone(&window),
+                wake: Arc::clone(&wake),
             },
             TeksiloDeactivationHandler {
                 bridge: Arc::clone(&a11y_bridge),
-                window: Arc::clone(&window),
+                wake: Arc::clone(&wake),
             },
         );
 
@@ -749,6 +827,7 @@ impl PlatformWindow {
             a11y_action_rx: action_rx,
             a11y_needs_full_tree,
             a11y_bridge,
+            wake,
         }
     }
 
@@ -764,6 +843,7 @@ impl PlatformWindow {
             display_lost,
         } = Self::surface_and_renderer(&window).await;
         let (_action_tx, action_rx) = mpsc::channel();
+        let wake = WindowWakeTarget::new(Arc::clone(&window) as Arc<dyn RequestRedraw>);
 
         Self {
             window,
@@ -777,11 +857,35 @@ impl PlatformWindow {
             a11y_action_rx: action_rx,
             a11y_needs_full_tree: Arc::new(AtomicBool::new(false)),
             a11y_bridge: Arc::new(AccessibilityBridge::default()),
+            wake,
         }
     }
 
     pub fn window(&self) -> &Window {
         &self.window
+    }
+
+    /// Whether the platform says, when asked, that no part of the window is
+    /// visible now: covered entirely, or never shown, as a window created
+    /// while the display slept or the screen was locked is until both end.
+    /// macOS answers (`NSWindow`'s `occlusionState`), and `None` elsewhere,
+    /// where winit's events are all there is.
+    ///
+    /// winit sends `WindowEvent::Occluded` only when that state changes, so
+    /// a window that was never visible never hears it; and wgpu refuses
+    /// every acquire while AppKit does not show the window. Asking is how
+    /// the caller learns it. A window already showing stays visible here
+    /// while the displays sleep or the screen is locked: that is the
+    /// [session watch](crate::session)'s to hear.
+    pub fn occluded_now(&self) -> Option<bool> {
+        #[cfg(target_os = "macos")]
+        {
+            macos_occlusion::occluded(&self.window)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
     }
 
     /// Get a clonable `Arc` reference to the underlying winit window.
@@ -805,6 +909,30 @@ impl PlatformWindow {
 
     pub fn set_scale_factor(&mut self, factor: f64) {
         self.scale_factor = factor;
+    }
+
+    /// Read the refresh rate of the display the window is on, and have a
+    /// presented frame wait about one refresh of it for a producer holding a
+    /// live picture's lock. Done when the window is created; call it again
+    /// when the window may have moved to another display. A display that
+    /// reports no rate keeps the last one (60 Hz until one is read).
+    pub fn track_display_refresh(&mut self) {
+        if let Some(interval) = display_refresh_interval(&self.window) {
+            self.renderer.set_live_refresh_interval(interval);
+        }
+    }
+
+    /// What this window's renderer holds and uploads for live pictures.
+    pub fn live_texture_stats(&self) -> teksilo_render::LiveTextureStats {
+        self.renderer.live_texture_stats()
+    }
+
+    /// How long this window's live pass has taken, each figure over its
+    /// latest 1,024 samples: see `Renderer::live_texture_timings`. With the
+    /// `live-image-timings` feature.
+    #[cfg(feature = "live-image-timings")]
+    pub fn live_texture_timings(&self) -> teksilo_render::LiveImageTimings {
+        self.renderer.live_texture_timings()
     }
 
     /// Resize the surface.
@@ -893,22 +1021,37 @@ impl PlatformWindow {
         self.renderer
             .render(frame, &view, self.scale_factor as f32, w, h, clear_color);
 
+        // Wayland: request a frame callback with the commit this present
+        // makes. winit then holds the next `RedrawRequested` back until the
+        // compositor sends it, which it does not for a hidden surface, so a
+        // minimised window stops drawing (a no-op on other platforms). winit
+        // never cancels the request, so every call here MUST be followed by
+        // the present on the next line: an early return in between would
+        // leave the window waiting for a callback that never comes.
+        self.window.pre_present_notify();
         self.renderer.queue().present(output);
         FrameOutcome::Rendered
     }
 
-    /// Render `frame` into an offscreen texture and read it back as
-    /// tightly-packed RGBA8 bytes, returning `(rgba, width, height)`.
+    /// Render `frame` into an offscreen texture of the surface's size and
+    /// read it back as tightly packed RGBA8.
     ///
     /// Used by the debug-only automation bridge to capture a *live* window
     /// without going through the swapchain — the surface texture is
     /// configured `RENDER_ATTACHMENT` only (no `COPY_SRC`), so it can't be
-    /// read back directly. The offscreen texture uses the window's own
-    /// surface format so it matches the renderer's pipelines; a BGRA
-    /// readback is swizzled to RGBA here so the output is always RGBA. With
-    /// `crop = Some(rect)` (physical pixels, clamped to the surface) only
-    /// that sub-rectangle is returned. Returns an empty `(vec, 0, 0)` if
-    /// the crop is fully outside the surface.
+    /// read back directly. It renders through the window's own renderer with
+    /// [`Renderer::render_capture`]: every live picture shows its latest
+    /// commit, and the window's next frame draws the textures this one
+    /// filled. The whole frame is rendered, then `crop` (physical pixels,
+    /// clamped to the surface) is cut out on the CPU: rendering only part of
+    /// a frame through the window's renderer would drop the textures of the
+    /// live pictures it left out. The offscreen texture uses the window's
+    /// own surface format so it matches the renderer's pipelines; a BGRA
+    /// readback is swizzled to RGBA here so the output is always RGBA. A
+    /// crop outside the surface returns an empty capture.
+    ///
+    /// Fails, without panicking, when the device cannot read the texture
+    /// back (it was lost).
     ///
     /// Note: a native `WebView` subview composites *on top of* the wgpu
     /// surface and is invisible to this readback (a transparent hole).
@@ -917,36 +1060,12 @@ impl PlatformWindow {
         frame: &teksilo_canvas::RenderFrame,
         clear_color: [f32; 4],
         crop: Option<teksilo_canvas::Rect>,
-    ) -> (Vec<u8>, u32, u32) {
-        fn crop_rgba(
-            src: &[u8],
-            w: u32,
-            h: u32,
-            rect: teksilo_canvas::Rect,
-        ) -> (Vec<u8>, u32, u32) {
-            let x0 = (rect.x.floor().max(0.0) as u32).min(w);
-            let y0 = (rect.y.floor().max(0.0) as u32).min(h);
-            let x1 = ((rect.x + rect.width).ceil().max(0.0) as u32).min(w);
-            let y1 = ((rect.y + rect.height).ceil().max(0.0) as u32).min(h);
-            if x1 <= x0 || y1 <= y0 {
-                return (Vec::new(), 0, 0);
-            }
-            let cw = x1 - x0;
-            let ch = y1 - y0;
-            let mut out = Vec::with_capacity((cw * ch * 4) as usize);
-            for y in y0..y1 {
-                let row_start = ((y * w + x0) * 4) as usize;
-                let row_end = row_start + (cw * 4) as usize;
-                out.extend_from_slice(&src[row_start..row_end]);
-            }
-            (out, cw, ch)
-        }
-
+    ) -> Result<OffscreenCapture, teksilo_render::test_support::ReadbackError> {
         let (w, h) = self.surface_size();
         let format = self.surface_config.format;
         // The readback assumes a 4-byte, 8-bit RGBA/BGRA layout (the BGRA
-        // swizzle below + `read_texture_rgba`'s fixed 4-bytes-per-pixel copy).
-        // Desktop wgpu surfaces are always one of these four; a packed
+        // swizzle below + `try_read_texture_rgba`'s fixed 4-bytes-per-pixel
+        // copy). Desktop wgpu surfaces are always one of these four; a packed
         // (Rgb10a2) or wide (Rgba16Float) surface format would read back
         // garbage, so flag it loudly in debug builds.
         debug_assert!(
@@ -978,16 +1097,16 @@ impl PlatformWindow {
             });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.renderer
-            .render(frame, &view, self.scale_factor as f32, w, h, clear_color);
-        let mut bytes = teksilo_render::test_support::read_texture_rgba(
+            .render_capture(frame, &view, self.scale_factor as f32, w, h, clear_color);
+        let mut bytes = teksilo_render::test_support::try_read_texture_rgba(
             self.renderer.device(),
             self.renderer.queue(),
             &texture,
             w,
             h,
-        );
-        // `read_texture_rgba` copies raw channel bytes; a BGRA surface
-        // needs its B/R swapped to become RGBA for PNG encoding.
+        )?;
+        // The readback copies raw channel bytes; a BGRA surface needs its B
+        // and R swapped to become RGBA for PNG encoding.
         if matches!(
             format,
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
@@ -996,14 +1115,23 @@ impl PlatformWindow {
                 px.swap(0, 2);
             }
         }
-        match crop {
-            Some(rect) => crop_rgba(&bytes, w, h, rect),
-            None => (bytes, w, h),
-        }
+        let region = match crop {
+            Some(rect) => crop_region(rect, w, h),
+            None => teksilo_canvas::PixelRect::full(w, h),
+        };
+        Ok(OffscreenCapture {
+            rgba: crop_rgba(&bytes, w, region),
+            width: region.width,
+            height: region.height,
+            region,
+        })
     }
 
+    /// Ask winit for a redraw. A no-op once the window's wake target is
+    /// disconnected ([`disconnect_redraw_waker`](Self::disconnect_redraw_waker)),
+    /// which is how a request after the event loop ended stays harmless.
     pub fn request_redraw(&self) {
-        self.window.request_redraw();
+        self.wake.request_on_slot();
     }
 
     /// Push an AccessKit TreeUpdate to the adapter (called after layout).
@@ -1088,6 +1216,90 @@ impl PlatformWindow {
         }
     }
 
+    /// This window's wake target, as a waker any thread may call to have the
+    /// window run a frame. See [`teksilo_canvas::wake`] for the two kinds of
+    /// wake and how a burst coalesces.
+    ///
+    /// On macOS, winit runs a redraw requested off the main thread
+    /// synchronously on it, so a draw wake made on another thread never asks
+    /// winit itself there: it posts through the off-main route
+    /// ([`set_off_main_wake_route`](Self::set_off_main_wake_route)), which
+    /// teksilo-app installs, or with none hands the request to the main
+    /// dispatch queue. Either way it returns without waiting for the main
+    /// thread.
+    pub fn redraw_waker(&self) -> Arc<dyn RedrawWaker> {
+        self.wake.clone()
+    }
+
+    /// The route a draw wake made off the main thread posts through, instead
+    /// of asking winit for a redraw from there. Set once, before the first
+    /// wake; later calls are ignored. teksilo-app sets it on macOS, where a
+    /// redraw requested off the main thread waits for it, so that the wake
+    /// reaches the event loop it runs.
+    pub fn set_off_main_wake_route(&self, route: Arc<dyn Fn() + Send + Sync>) {
+        self.wake.set_off_main_route(route);
+    }
+
+    /// The route a state wake posts through: one post per burst, until the
+    /// event loop takes it ([`take_posted_wake`](Self::take_posted_wake)).
+    /// Set once; later calls are ignored. teksilo-app's seam: a posted event
+    /// reaches a window whose redraw the compositor withholds, which a redraw
+    /// request does not.
+    #[doc(hidden)]
+    pub fn set_state_wake_route(&self, route: Arc<dyn Fn() + Send + Sync>) {
+        self.wake.set_state_route(route);
+    }
+
+    /// The event loop received a posted wake of `kind`: re-arm its
+    /// coalescing, before acting on it, so the next wake posts again. Returns
+    /// whether one was pending.
+    #[doc(hidden)]
+    pub fn take_posted_wake(&self, kind: WakeKind) -> bool {
+        self.wake.take_posted(kind)
+    }
+
+    /// `true` while the window is hidden, in which case one redraw is
+    /// requested when it is shown again: for a draw wake the event loop
+    /// received while the window was hidden.
+    #[doc(hidden)]
+    pub fn defer_redraw_until_shown(&self) -> bool {
+        self.wake.defer_until_shown()
+    }
+
+    /// Make every waker [`redraw_waker`](Self::redraw_waker) handed out a
+    /// no-op, and [`request_redraw`](Self::request_redraw) with them. Waits
+    /// for a wake already asking winit; idempotent. Dropping the window does
+    /// it too; teksilo-app does it for every window when the event loop ends.
+    pub fn disconnect_redraw_waker(&self) {
+        self.wake.disconnect();
+    }
+
+    /// Record whether the window is hidden (minimised, fully covered, or
+    /// drawing nothing because its compositor withholds its frames). While it
+    /// is, draw wakes are dropped; showing it requests one redraw if any was.
+    pub fn set_hidden(&self, hidden: bool) {
+        self.wake.set_hidden(hidden);
+    }
+
+    /// The window draws again and a frame is about to run: record it shown,
+    /// without the redraw [`set_hidden`](Self::set_hidden)`(false)` requests
+    /// for draw wakes dropped while it was hidden, which that frame serves.
+    /// teksilo-app's seam for the redraw that ends a withheld one.
+    #[doc(hidden)]
+    pub fn show_for_drawing(&self) {
+        self.wake.show_for_drawing();
+    }
+
+    /// Whether the window is hidden, as last set.
+    pub fn is_hidden(&self) -> bool {
+        self.wake.is_hidden()
+    }
+
+    /// The window's wake counters.
+    pub fn live_wake_stats(&self) -> LiveWakeStats {
+        self.wake.stats()
+    }
+
     /// Drain any pending AccessKit action requests from the adapter.
     ///
     /// They name nodes by the ids the adapter was handed; pass each through
@@ -1119,7 +1331,7 @@ impl PlatformWindow {
 struct TeksiloActivationHandler {
     needs_full_tree: Arc<AtomicBool>,
     bridge: Arc<AccessibilityBridge>,
-    window: Arc<Window>,
+    wake: Arc<WindowWakeTarget>,
 }
 
 /// The tree handed to a client that attached before this window ever drew.
@@ -1145,7 +1357,7 @@ impl accesskit::ActivationHandler for TeksiloActivationHandler {
         // Whether or not we could answer with a real tree, ask for a frame: it
         // is what carries the *next* update to the now-active adapter, and it
         // is also how the UI thread learns that a client attached.
-        self.window.request_redraw();
+        self.wake.wake_state();
         Some(update)
     }
 }
@@ -1154,13 +1366,13 @@ impl accesskit::ActivationHandler for TeksiloActivationHandler {
 /// then wakes the loop so the channel is actually drained.
 struct TeksiloActionHandler {
     tx: mpsc::Sender<ActionRequest>,
-    window: Arc<Window>,
+    wake: Arc<WindowWakeTarget>,
 }
 
 impl accesskit::ActionHandler for TeksiloActionHandler {
     fn do_action(&mut self, request: ActionRequest) {
         let _ = self.tx.send(request);
-        self.window.request_redraw();
+        self.wake.wake_state();
     }
 }
 
@@ -1170,14 +1382,80 @@ impl accesskit::ActionHandler for TeksiloActionHandler {
 /// is attached, none of them is reading the tree either.
 struct TeksiloDeactivationHandler {
     bridge: Arc<AccessibilityBridge>,
-    window: Arc<Window>,
+    wake: Arc<WindowWakeTarget>,
 }
 
 impl accesskit::DeactivationHandler for TeksiloDeactivationHandler {
     fn deactivate_accessibility(&mut self) {
         self.bridge.on_deactivate();
         // The UI thread reads the flag once per frame, so it needs a frame.
-        self.window.request_redraw();
+        self.wake.wake_state();
+    }
+}
+
+impl Drop for PlatformWindow {
+    /// Disconnect the wake target first: a waker another thread still holds
+    /// must not reach a window that is going away.
+    fn drop(&mut self) {
+        self.wake.disconnect();
+    }
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::{crop_region, crop_rgba, refresh_interval_from_millihertz};
+    use std::time::Duration;
+    use teksilo_canvas::{PixelRect, Rect};
+
+    /// A crop's edges round outwards to whole pixels and clamp to the
+    /// surface; one that misses the surface is empty.
+    #[test]
+    fn a_crop_covers_every_pixel_it_touches_inside_the_surface() {
+        assert_eq!(
+            crop_region(Rect::new(1.5, 2.25, 3.0, 4.5), 10, 10),
+            PixelRect::new(1, 2, 4, 5)
+        );
+        assert_eq!(
+            crop_region(Rect::new(-3.0, 8.0, 20.0, 5.0), 10, 10),
+            PixelRect::new(0, 8, 10, 2)
+        );
+        assert!(crop_region(Rect::new(12.0, 0.0, 4.0, 4.0), 10, 10).is_empty());
+        assert!(crop_region(Rect::new(2.0, 2.0, 0.0, 3.0), 10, 10).is_empty());
+    }
+
+    /// The crop is cut from rows of the full surface, not from its start.
+    #[test]
+    fn the_cropped_pixels_are_the_regions_own() {
+        let (w, h) = (5u32, 4u32);
+        let src: Vec<u8> = (0..w * h)
+            .flat_map(|i| [i as u8, (i >> 8) as u8, 7, 255])
+            .collect();
+        let region = PixelRect::new(1, 2, 3, 2);
+        let out = crop_rgba(&src, w, region);
+        let firsts: Vec<u8> = out.chunks(4).map(|px| px[0]).collect();
+        assert_eq!(firsts, vec![11, 12, 13, 16, 17, 18]);
+        assert!(crop_rgba(&src, w, PixelRect::new(0, 0, 0, 0)).is_empty());
+    }
+
+    /// One refresh of the display, its rate bounded to 20 Hz – 1 kHz.
+    #[test]
+    fn a_display_rate_becomes_one_refresh() {
+        assert_eq!(
+            refresh_interval_from_millihertz(60_000),
+            Duration::from_nanos(16_666_666)
+        );
+        assert_eq!(
+            refresh_interval_from_millihertz(144_000),
+            Duration::from_nanos(6_944_444)
+        );
+        assert_eq!(
+            refresh_interval_from_millihertz(0),
+            Duration::from_millis(50)
+        );
+        assert_eq!(
+            refresh_interval_from_millihertz(u32::MAX),
+            Duration::from_millis(1)
+        );
     }
 }
 
@@ -1414,5 +1692,106 @@ mod device_limits_tests {
 
         assert!(asked.max_color_attachments >= 1);
         assert!(asked.max_uniform_buffer_binding_size >= ANIM_UNIFORM_BYTES);
+    }
+}
+
+#[cfg(all(test, not(teksilo_loom)))]
+mod accessibility_wake_tests {
+    use std::sync::atomic::AtomicUsize;
+
+    use accesskit::{ActionHandler, ActivationHandler, DeactivationHandler};
+
+    use super::*;
+
+    struct NoWindow;
+    impl RequestRedraw for NoWindow {
+        fn request_redraw(&self) {
+            panic!("an accessibility handler asked for a redraw instead of posting");
+        }
+    }
+
+    fn request() -> ActionRequest {
+        ActionRequest {
+            action: accesskit::Action::Click,
+            target_tree: accesskit::TreeId::ROOT,
+            target_node: accesskit::NodeId(1),
+            data: None,
+        }
+    }
+
+    /// What a handler leaves must reach a window that draws nothing, so all
+    /// three wake the loop through the state route, never a redraw request;
+    /// after the window's waker is disconnected they still enqueue, and wake
+    /// nothing.
+    #[test]
+    fn accessibility_handlers_wake_through_the_state_route() {
+        let wake = WindowWakeTarget::new(Arc::new(NoWindow));
+        let posted = Arc::new(AtomicUsize::new(0));
+        {
+            let posted = posted.clone();
+            wake.set_state_route(Arc::new(move || {
+                posted.fetch_add(1, Ordering::SeqCst);
+            }));
+        }
+        let bridge = Arc::new(AccessibilityBridge::default());
+        let (tx, rx) = mpsc::channel();
+        let mut action = TeksiloActionHandler {
+            tx,
+            wake: wake.clone(),
+        };
+        let mut activation = TeksiloActivationHandler {
+            needs_full_tree: Arc::new(AtomicBool::new(false)),
+            bridge: bridge.clone(),
+            wake: wake.clone(),
+        };
+        let mut deactivation = TeksiloDeactivationHandler {
+            bridge,
+            wake: wake.clone(),
+        };
+
+        action.do_action(request());
+        assert!(
+            rx.try_recv().is_ok(),
+            "the request is queued for the UI thread"
+        );
+        assert_eq!(posted.load(Ordering::SeqCst), 1);
+        assert!(wake.take_posted(WakeKind::Layout));
+        let _ = activation.request_initial_tree();
+        assert_eq!(posted.load(Ordering::SeqCst), 2);
+        assert!(wake.take_posted(WakeKind::Layout));
+        deactivation.deactivate_accessibility();
+        assert_eq!(posted.load(Ordering::SeqCst), 3);
+
+        wake.disconnect();
+        assert!(wake.take_posted(WakeKind::Layout));
+        action.do_action(request());
+        assert!(rx.try_recv().is_ok(), "still queued after disconnect");
+        assert_eq!(posted.load(Ordering::SeqCst), 3, "but nothing is woken");
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod macos_occlusion {
+    use objc2::rc::Retained;
+    use objc2_app_kit::{NSView, NSWindowOcclusionState};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    /// `occlusionState` of the `NSWindow` hosting `window`'s view, lacking
+    /// *Visible*; `None` when the window has no AppKit view or no window yet.
+    /// On the main thread, as every caller in teksilo-app is.
+    pub(super) fn occluded(window: &winit::window::Window) -> Option<bool> {
+        let handle = window.window_handle().ok()?;
+        let RawWindowHandle::AppKit(raw) = handle.as_raw() else {
+            return None;
+        };
+        // Re-retain the NSView winit hands us, as the title-bar host, the
+        // drag destination and the safe-area read do.
+        let view: Retained<NSView> = unsafe { Retained::retain(raw.ns_view.as_ptr().cast()) }?;
+        let ns_window = view.window()?;
+        Some(
+            !ns_window
+                .occlusionState()
+                .contains(NSWindowOcclusionState::Visible),
+        )
     }
 }

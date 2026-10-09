@@ -7,6 +7,20 @@
 
 TwistArrow — a small chevron that indicates and toggles a tree node's expansion.
 
+## Public functions
+
+### `TwistArrow`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(size: f32, has_children: bool, expanded: bool)`](#twistarrow-new) |
+| | **Builder methods** |
+| `Self` | [`color(color: impl Into<ColorProp>)`](#twistarrow-color) |
+| `Self` | [`on_click(f: impl Fn(&mut EventContext) + 'static)`](#twistarrow-on_click) |
+
+## Detailed description
+
 Renders a right-pointing arrow when collapsed and a down-pointing arrow when
 expanded; a leaf node (where `has_children` is false) paints nothing but
 reserves its slot so the indent column stays aligned across all rows.
@@ -22,7 +36,7 @@ let arrow = TwistArrow::new(16.0, true, false)
     .on_click(|ctx| ctx.send_intent(teksilo_core::Intent::new("tree.toggle")));
 ```
 
-## Touch and pen
+#### Touch and pen
 
 A 12 dp chevron is half the 24 dp target floor and cannot grow — the indent
 column is the tree's own geometry. It declares a `Widget::hit_outset`
@@ -40,13 +54,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![TwistArrow at Touch density](img/twist_arrow-touch.png)
 
-## Builder methods at a glance
-
-`color`, `on_click`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/twist_arrow/index.html)
+
+<a id="twistarrow"></a>
 
 ## `pub struct TwistArrow`
 
@@ -58,11 +70,15 @@ pub struct TwistArrow { /* fields */ }
 
 ### Methods
 
+<a id="twistarrow-new"></a>
+
 #### `pub fn new(size: f32, has_children: bool, expanded: bool) -> Self`
 
 Construct a chevron. `size` is the square side length in logical pixels;
 `has_children` determines whether the glyph is painted; `expanded`
 determines the glyph direction (down = expanded, right/left = collapsed).
+
+<a id="twistarrow-color"></a>
 
 #### `pub fn color(mut self, color: impl Into<ColorProp>) -> Self`
 
@@ -78,6 +94,8 @@ at `Secondary` then sits on that capsule at roughly 2.5:1 — under
 WCAG SC 1.4.11's 3:1 floor, and visibly wrong beside a white label.
 `StandardTreeItem` passes the row's own label role here so the two
 always move together.
+
+<a id="twistarrow-on_click"></a>
 
 #### `pub fn on_click(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 

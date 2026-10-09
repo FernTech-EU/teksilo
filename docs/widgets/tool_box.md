@@ -8,6 +8,59 @@
 ToolBox — a vertical stack of collapsible sections, exactly one expanded
 at a time.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`ToolBoxOrientation`](#toolboxorientation) — Orientation of a `ToolBox`: how its collapsible sections are arranged |
+| `struct` | [`ToolBoxItem`](#toolboxitem) — One section of a `ToolBox` |
+| `const` | [`TOOL_BOX_HEADER_MIN_HEIGHT`](#tool_box_header_min_height) — ToolBox design tokens |
+| `fn` | [`tool_box_header_min_height`](#tool_box_header_min_height-2) — `TOOL_BOX_HEADER_MIN_HEIGHT` raised to the density's `target_size` (24 / 32 / 44 dp) |
+| `const` | [`TOOL_BOX_HEADER_PADDING_HORIZONTAL`](#tool_box_header_padding_horizontal) |
+| `fn` | [`tool_box_header_padding_horizontal`](#tool_box_header_padding_horizontal-2) — `TOOL_BOX_HEADER_PADDING_HORIZONTAL` scaled by the density's `spacing_factor` (1.00 / 1.15 / 1.30) |
+| `const` | [`TOOL_BOX_ICON_TEXT_SPACING`](#tool_box_icon_text_spacing) |
+| `fn` | [`tool_box_icon_text_spacing`](#tool_box_icon_text_spacing-2) — `TOOL_BOX_ICON_TEXT_SPACING` scaled by the density's `spacing_factor` (1.00 / 1.15 / 1.30) |
+| `const` | [`TOOL_BOX_CHEVRON_SIZE`](#tool_box_chevron_size) |
+| `const` | [`TOOL_BOX_INDICATOR_THICKNESS`](#tool_box_indicator_thickness) |
+| `struct` | [`ToolBox`](#toolbox) — A vertical container of collapsible sections with exactly one expanded at a time — the Int UI / `QToolBox` pattern |
+
+## Public functions
+
+### `ToolBox`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(selected: Signal<usize>)`](#toolbox-new) |
+| | **Builder methods** |
+| `Self` | [`orientation(orientation: ToolBoxOrientation)`](#toolbox-orientation) |
+| `Self` | [`fill(fill: bool)`](#toolbox-fill) |
+| `Self` | [`collapsible(collapsible: bool)`](#toolbox-collapsible) |
+| `Self` | [`horizontal()`](#toolbox-horizontal) |
+| `Self` | [`on_header_drag(f: impl Fn(usize, &mut EventContext) + 'static)`](#toolbox-on_header_drag) |
+| `Self` | [`item(label: impl Into<LocalizedString>, content: impl teksilo_core::IntoTeksiChild)`](#toolbox-item) |
+| `Self` | [`add(item: ToolBoxItem)`](#toolbox-add) |
+| `Self` | [`items<I>(items: I)`](#toolbox-items) |
+| `Self` | [`show_dividers(show: bool)`](#toolbox-show_dividers) |
+
+### `ToolBoxItem`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(label: impl Into<LocalizedString>, content: impl Widget + 'static)`](#toolboxitem-new) |
+| `Self` | [`new_id(label: impl Into<LocalizedString>, content_id: WidgetId)`](#toolboxitem-new_id) |
+| | **Builder methods** |
+| `Self` | [`leading(widget: impl Widget + 'static)`](#toolboxitem-leading) |
+| `Self` | [`trailing(widget: impl Widget + 'static)`](#toolboxitem-trailing) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#toolboxitem-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#toolboxitem-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: TooltipContent)`](#toolboxitem-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#toolboxitem-composite_tooltip) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#toolboxitem-enabled) |
+
+## Detailed description
+
 Semantic cousin of Qt's `QToolBox` and the collapsible groups in
 IntelliJ's Settings dialog. Differs from `Accordion`
 (single-item independent disclosure) and `TabWidget`
@@ -35,7 +88,7 @@ ToolBox::new(selected.clone())
     .add(ToolBoxItem::new(lit!("Build"), build_widget).enabled(false))
 ```
 
-## Touch and pen
+#### Touch and pen
 
 A section header activates from its tap, so it already actuates on the
 release. Two things did change:
@@ -60,17 +113,15 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![ToolBox at Touch density](img/tool_box-touch.png)
 
-## Builder methods at a glance
-
-`orientation`, `fill`, `collapsible`, `horizontal`, `on_header_drag`, `item`, `add`, `items`, `show_dividers`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/tool_box/index.html)
 
+<a id="toolboxorientation"></a>
+
 ## `pub enum ToolBoxOrientation`
 
-Orientation of a [`ToolBox`]: how its collapsible sections are arranged.
+Orientation of a `ToolBox`: how its collapsible sections are arranged.
 
 `Vertical` (the default) stacks sections
 top-to-bottom with horizontal headers and an up/down chevron — the
@@ -88,6 +139,8 @@ pub enum ToolBoxOrientation { /* variants */ }
 
 - **`Vertical`** — Sections stacked top-to-bottom; horizontal headers (default).
 - **`Horizontal`** — Sections arranged left-to-right; vertical header strips with rotated labels and left/right chevrons.
+
+<a id="toolboxitem"></a>
 
 ## `pub struct ToolBoxItem`
 
@@ -112,14 +165,20 @@ pub struct ToolBoxItem { /* fields */ }
 
 ### Methods
 
+<a id="toolboxitem-new"></a>
+
 #### `pub fn new(label: impl Into<LocalizedString>, content: impl Widget + 'static) -> Self`
 
 Build an item with an inline content widget. The label may come from
 `tr!(...)` (translated) or `lit!(...)`.
 
+<a id="toolboxitem-new_id"></a>
+
 #### `pub fn new_id(label: impl Into<LocalizedString>, content_id: WidgetId) -> Self`
 
 Build an item whose content is a pre-registered widget id.
+
+<a id="toolboxitem-leading"></a>
 
 #### `pub fn leading(mut self, widget: impl Widget + 'static) -> Self`
 
@@ -129,6 +188,8 @@ the selection indicator bar). Use for a small `IconWidget`, a
 label-sized widget. The slot widget owns its own events — a
 `Checkbox` inside the leading slot toggles independently of
 the header's own tap.
+
+<a id="toolboxitem-trailing"></a>
 
 #### `pub fn trailing(mut self, widget: impl Widget + 'static) -> Self`
 
@@ -140,6 +201,8 @@ button's action; gesture recognisers on the trailing widget stop
 the header's own tap from firing, so a close-button click does
 not also select the section.
 
+<a id="toolboxitem-tooltip"></a>
+
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Attach a plain-text tooltip shown after a hover delay on the header
@@ -148,6 +211,8 @@ or `lit!(...)`. Mirrors `.tooltip(...)` on Button / IconButton /
 MenuItem. Clears any previously set rich or composite tooltip (the
 last tooltip setter called wins).
 
+<a id="toolboxitem-rich_tooltip"></a>
+
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
 Attach a rich tooltip resolved from the app-wide
@@ -155,11 +220,15 @@ Attach a rich tooltip resolved from the app-wide
 Clears any previously set plain or composite tooltip (the last
 tooltip setter called wins).
 
+<a id="toolboxitem-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: TooltipContent) -> Self`
 
 Attach a rich tooltip driven by inline `TooltipContent` — for
 one-offs that don't belong in the registry. Clears any previously
 set plain or composite tooltip (the last tooltip setter called wins).
+
+<a id="toolboxitem-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 
@@ -168,6 +237,8 @@ in a larger, scrollable overlay after a longer hover delay. Use for
 rich on-demand previews: charts, property tables, image thumbnails.
 Clears any previously set plain or rich tooltip (the last tooltip
 setter called wins).
+
+<a id="toolboxitem-enabled"></a>
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
@@ -183,6 +254,8 @@ of this flag. The `Prop` itself is *not* handed to the arena, so
 flipping a bound `Signal<bool>` after build has no effect until the
 `ToolBox` is rebuilt.
 
+<a id="tool_box_header_min_height"></a>
+
 ## `pub const TOOL_BOX_HEADER_MIN_HEIGHT`
 
 ToolBox design tokens.
@@ -190,6 +263,8 @@ ToolBox design tokens.
 ```rust
 pub const TOOL_BOX_HEADER_MIN_HEIGHT: f32 = 28.0;
 ```
+
+<a id="tool_box_header_min_height-2"></a>
 
 ## `pub fn tool_box_header_min_height(...)`
 
@@ -200,11 +275,15 @@ pub const TOOL_BOX_HEADER_MIN_HEIGHT: f32 = 28.0;
 pub fn tool_box_header_min_height(tokens: &InputTokens) -> f32;
 ```
 
+<a id="tool_box_header_padding_horizontal"></a>
+
 ## `pub const TOOL_BOX_HEADER_PADDING_HORIZONTAL`
 
 ```rust
 pub const TOOL_BOX_HEADER_PADDING_HORIZONTAL: f32 = 12.0;
 ```
+
+<a id="tool_box_header_padding_horizontal-2"></a>
 
 ## `pub fn tool_box_header_padding_horizontal(...)`
 
@@ -215,11 +294,15 @@ pub const TOOL_BOX_HEADER_PADDING_HORIZONTAL: f32 = 12.0;
 pub fn tool_box_header_padding_horizontal(tokens: &InputTokens) -> f32;
 ```
 
+<a id="tool_box_icon_text_spacing"></a>
+
 ## `pub const TOOL_BOX_ICON_TEXT_SPACING`
 
 ```rust
 pub const TOOL_BOX_ICON_TEXT_SPACING: f32 = 8.0;
 ```
+
+<a id="tool_box_icon_text_spacing-2"></a>
 
 ## `pub fn tool_box_icon_text_spacing(...)`
 
@@ -230,17 +313,23 @@ pub const TOOL_BOX_ICON_TEXT_SPACING: f32 = 8.0;
 pub fn tool_box_icon_text_spacing(tokens: &InputTokens) -> f32;
 ```
 
+<a id="tool_box_chevron_size"></a>
+
 ## `pub const TOOL_BOX_CHEVRON_SIZE`
 
 ```rust
 pub const TOOL_BOX_CHEVRON_SIZE: f32 = 12.0;
 ```
 
+<a id="tool_box_indicator_thickness"></a>
+
 ## `pub const TOOL_BOX_INDICATOR_THICKNESS`
 
 ```rust
 pub const TOOL_BOX_INDICATOR_THICKNESS: f32 = 1.0;
 ```
+
+<a id="toolbox"></a>
 
 ## `pub struct ToolBox`
 
@@ -257,16 +346,22 @@ pub struct ToolBox { /* fields */ }
 
 ### Methods
 
+<a id="toolbox-new"></a>
+
 #### `pub fn new(selected: Signal<usize>) -> Self`
 
 Create a ToolBox driven by `selected` (visible section index). Set the
 signal to `0` to open the first section by default; modify it
 programmatically or share it across windows for synchronized state.
 
+<a id="toolbox-orientation"></a>
+
 #### `pub fn orientation(mut self, orientation: ToolBoxOrientation) -> Self`
 
 Set the section arrangement orientation (default
 `ToolBoxOrientation::Vertical`).
+
+<a id="toolbox-fill"></a>
 
 #### `pub fn fill(mut self, fill: bool) -> Self`
 
@@ -284,6 +379,8 @@ Default `false` (the panel keeps its content's natural size — the
 historical behaviour, appropriate when the ToolBox itself lives inside
 a scroll area).
 
+<a id="toolbox-collapsible"></a>
+
 #### `pub fn collapsible(mut self, collapsible: bool) -> Self`
 
 Allow **collapsing** the active section: clicking (or Enter/Space on, or
@@ -294,9 +391,13 @@ Default `false` — the classic "exactly one section open" behaviour. This
 is what makes a **single-section** ToolBox a plain collapsible panel
 (header toggles its content), e.g. a dock panel.
 
+<a id="toolbox-horizontal"></a>
+
 #### `pub fn horizontal(mut self) -> Self`
 
 Shorthand for `ToolBox::orientation``(``ToolBoxOrientation::Horizontal``)`.
+
+<a id="toolbox-on_header_drag"></a>
 
 #### `pub fn on_header_drag(mut self, f: impl Fn(usize, &mut EventContext) + 'static) -> Self`
 
@@ -305,20 +406,28 @@ section index) when a drag gesture *starts* on a header; it should
 begin a drag (e.g. `ctx.start_drag(source, payload)`). Tapping a
 header still selects it — the gesture arena tells a tap from a drag.
 
+<a id="toolbox-item"></a>
+
 #### `pub fn item( self, label: impl Into<LocalizedString>, content: impl teksilo_core::IntoTeksiChild, ) -> Self`
 
 Append an item with an inline content widget. Convenience wrapper
 around `ToolBox::add` that skips the `ToolBoxItem` builder for
 the common label-plus-content case.
 
+<a id="toolbox-add"></a>
+
 #### `pub fn add(mut self, item: ToolBoxItem) -> Self`
 
 Append a fully-built `ToolBoxItem` — required when an icon,
 tooltip, or disabled flag is needed.
 
+<a id="toolbox-items"></a>
+
 #### `pub fn items<I>(mut self, items: I) -> Self where I: IntoIterator<Item = ToolBoxItem>,`
 
 Append multiple items from an iterator.
+
+<a id="toolbox-show_dividers"></a>
 
 #### `pub fn show_dividers(mut self, show: bool) -> Self`
 

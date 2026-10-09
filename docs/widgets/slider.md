@@ -7,6 +7,41 @@
 
 Slider — a draggable value selector bound to a `Signal<f32>`.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `const` | [`SLIDER_PART_BODY`](#slider_part_body) — `Widget::target_regions` part id for the whole press surface — the track plus everything either side of it, which is what a tap or a drag acts on |
+| `const` | [`SLIDER_PART_THUMB`](#slider_part_thumb) — `Widget::target_regions` part id for the knob |
+| `struct` | [`Slider`](#slider) — A draggable value selector bound to a `Signal<f32>` in a continuous or discrete range |
+
+## Public functions
+
+### `Slider`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(value: Signal<f32>, min: f32, max: f32)`](#slider-new) |
+| | **Builder methods** |
+| `Self` | [`on_change(f: impl Fn(f32, &mut teksilo_core::widget::EventContext) + 'static)`](#slider-on_change) |
+| `Self` | [`step(step: f32)`](#slider-step) |
+| `Self` | [`page_step(page_step: f32)`](#slider-page_step) |
+| `Self` | [`orientation(orientation: Orientation)`](#slider-orientation) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#slider-enabled) |
+| `Self` | [`variant(variant: SliderVariant)`](#slider-variant) |
+| `Self` | [`tick_count(count: u32)`](#slider-tick_count) |
+| `Self` | [`style(style: impl SliderStyle)`](#slider-style) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#slider-label) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#slider-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#slider-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#slider-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#slider-composite_tooltip) |
+| `Self` | [`value_tooltip(format: impl Fn(f32) -> LocalizedString + 'static)`](#slider-value_tooltip) |
+| `Self` | [`default_value(value: f32)`](#slider-default_value) |
+
+## Detailed description
+
 The widget owns all input handling: pointer drag (click-to-jump and
 thumb-drag), the keyboard, and the `Increment` / `Decrement` /
 `SetValue` accessibility actions. All visual chrome is delegated to a
@@ -14,7 +49,7 @@ thumb-drag), the keyboard, and the `Increment` / `Decrement` /
 IntUI default ships out of the box and is also the theme-wide slot
 override target (`theme.style_slots.slider`).
 
-## Keyboard
+#### Keyboard
 
 - `ArrowRight` / `ArrowUp` and `ArrowLeft` / `ArrowDown` — one
   `step`, defaulting to 1 % of the range.
@@ -29,7 +64,7 @@ override target (`theme.style_slots.slider`).
 The chord table is shared with every other bounded-scalar control; see
 `docs/range-keyboard.md`.
 
-## Accessibility
+#### Accessibility
 
 Exposes `Role::Slider` with numeric value, min, max, step, the page
 distance as `numeric_value_jump`, and orientation. Screen readers
@@ -48,7 +83,7 @@ let volume = Signal::new(0.5_f32);
 let _w = Slider::new(volume, 0.0, 1.0).step(0.05);
 ```
 
-## Value readout and reset
+#### Value readout and reset
 
 `value_tooltip` shows the value as text beside the
 thumb — "-3.0 dB" on an equalizer band — while the pointer is over the
@@ -77,7 +112,7 @@ let _band = Slider::new(gain, -12.0, 12.0)
     .default_value(0.0);
 ```
 
-## Touch and pen
+#### Touch and pen
 
 A slider is a **continuous manipulator**: the value it produces *is* the
 press position, so a finger that lands on it adjusts it — even inside a
@@ -110,13 +145,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Slider at Touch density](img/slider-touch.png)
 
-## Builder methods at a glance
-
-`on_change`, `step`, `page_step`, `orientation`, `enabled`, `variant`, `tick_count`, `style`, `label`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `value_tooltip`, `default_value`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/slider/index.html)
+
+<a id="slider_part_body"></a>
 
 ## `pub const SLIDER_PART_BODY`
 
@@ -127,6 +160,8 @@ plus everything either side of it, which is what a tap or a drag acts on.
 pub const SLIDER_PART_BODY: u16 = 0;
 ```
 
+<a id="slider_part_thumb"></a>
+
 ## `pub const SLIDER_PART_THUMB`
 
 `Widget::target_regions` part id for the knob.
@@ -134,6 +169,8 @@ pub const SLIDER_PART_BODY: u16 = 0;
 ```rust
 pub const SLIDER_PART_THUMB: u16 = 1;
 ```
+
+<a id="slider"></a>
 
 ## `pub struct Slider`
 
@@ -147,10 +184,14 @@ pub struct Slider { /* fields */ }
 
 ### Methods
 
+<a id="slider-new"></a>
+
 #### `pub fn new(value: Signal<f32>, min: f32, max: f32) -> Self`
 
 Create a horizontal slider bound to `value` with the given inclusive
 range. Use `orientation` to switch to vertical.
+
+<a id="slider-on_change"></a>
 
 #### `pub fn on_change( mut self, f: impl Fn(f32, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
@@ -171,11 +212,15 @@ that work when the value settles.
 Does **not** fire for programmatic writes to the bound signal — there is
 no event in flight to carry. Observe the signal for that.
 
+<a id="slider-step"></a>
+
 #### `pub fn step(mut self, step: f32) -> Self`
 
 Set the discrete step size for keyboard arrows and accessibility
 Increment/Decrement actions. When unset, defaults to 1 % of the
 range.
+
+<a id="slider-page_step"></a>
 
 #### `pub fn page_step(mut self, page_step: f32) -> Self`
 
@@ -186,16 +231,22 @@ range a page is 10 % of it, which is what `QAbstractSlider::pageStep`,
 Blink all give, and the same `10 x` rule
 `SpinBox::page_step` uses.
 
+<a id="slider-orientation"></a>
+
 #### `pub fn orientation(mut self, orientation: Orientation) -> Self`
 
 Set the slider orientation (`Horizontal` by default). Vertical
 sliders map Up/Down arrow keys to increase/decrease.
+
+<a id="slider-enabled"></a>
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state, statically or reactively. Forwarded to
 the arena at build time via
 `ctx.enabled_when(slider_id, self.enabled.clone())`.
+
+<a id="slider-variant"></a>
 
 #### `pub fn variant(mut self, variant: SliderVariant) -> Self`
 
@@ -206,22 +257,30 @@ IntUI's default impl paints ticks for `Discrete` and ignores
 `Range` (the widget itself doesn't yet wire dual-thumb
 behaviour).
 
+<a id="slider-tick_count"></a>
+
 #### `pub fn tick_count(mut self, count: u32) -> Self`
 
 Configure the tick count for a `Discrete` slider. The
 IntUI default paints `n` evenly spaced tick marks above the
 track (or to the leading side for vertical orientation).
 
+<a id="slider-style"></a>
+
 #### `pub fn style(mut self, style: impl SliderStyle) -> Self`
 
 Override the active `SliderStyle` for this widget instance
 only.
+
+<a id="slider-label"></a>
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Set an accessible name for the slider, announced by screen readers.
 ARIA requires sliders to have a label; when none is set here the
 caller is responsible for labelling via a wrapping element.
+
+<a id="slider-tooltip"></a>
 
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -233,11 +292,15 @@ wins and clears the others. Independent of
 `value_tooltip`, which neither replaces nor is
 replaced by any of them.
 
+<a id="slider-rich_tooltip"></a>
+
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
 Attach a rich tooltip driven by a registry key. The registry
 entry supplies title, body markup, optional shortcut chip and
 cascade links. Mutually exclusive with the other tooltip setters.
+
+<a id="slider-rich_tooltip_content"></a>
 
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
@@ -245,11 +308,15 @@ Attach a rich tooltip from an inline `TooltipContent`
 value, bypassing the registry lookup. Mutually exclusive with the
 other tooltip setters.
 
+<a id="slider-composite_tooltip"></a>
+
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 
 Attach a composite tooltip whose body is an arbitrary widget tree.
 Uses the heavier `tooltip_delay_heavy` delay. Mutually exclusive
 with the other tooltip setters.
+
+<a id="slider-value_tooltip"></a>
 
 #### `pub fn value_tooltip(mut self, format: impl Fn(f32) -> LocalizedString + 'static) -> Self`
 
@@ -287,6 +354,8 @@ A `tooltip`, rich or composite tooltip set beside it
 keeps its hover delay, its place under the slider and the accessible
 description it gives, and both show; to name the control in the
 readout instead, say so in `format`.
+
+<a id="slider-default_value"></a>
 
 #### `pub fn default_value(mut self, value: f32) -> Self`
 

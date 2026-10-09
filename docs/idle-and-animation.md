@@ -219,36 +219,93 @@ of the four gates. `ctx.prefers_reduced_motion()` is a fifth pre-gate
 for decorative motion: honor it, and you get the zero-motion
 accessibility behavior and a free idle win.
 
-## Off-thread repaint: `RepaintWindowRequest`
+## Off-thread content: `RepaintTrigger`
 
 `ctx.request_frame()` is the UI-thread way to ask for a redraw. But some
 widgets have content that changes on a **background thread**: a terminal
 emulator's PTY-reader thread, a video decoder, a streaming data source. Those
-threads can't touch the widget tree, and posting a bare wake-up is not enough,
-a plain redraw re-presents each node's *cached* paint frame, so the render
-walker never re-runs `paint()` for a node it still thinks is clean. Content that
-changed off the UI thread would never appear.
+threads can't touch the widget tree, and a bare wake-up is not enough: a plain
+redraw re-presents each node's *cached* paint frame, so the render walker never
+re-runs `paint()` for a node it still thinks is clean.
 
-`teksilo_core::RepaintWindowRequest { window_id }` is the off-thread analogue of
-`request_frame`. A background thread posts it through the poster:
+A `teksilo_core::RepaintTrigger` is the off-thread analogue of `request_frame`,
+for one widget. The widget attaches it in every `build()`; the background
+thread stores its change, then requests:
 
 ```rust
-// captured once, in `ctx.run_after_mount(...)`, where poster + window are both reachable:
-let poster = ectx.poster().cloned();               // Arc<dyn AppEventPoster>, Send
-let window_id = ectx.window().map(|w| w.id());      // TeksiloWindowId, Copy
+// in build():
+ctx.attach_repaint_trigger(&self.trigger);
 
-// on the background thread, whenever off-thread content changed:
-poster.post_external(Box::new(RepaintWindowRequest { window_id }));
+// on the background thread, after storing the change:
+trigger.request_repaint();   // what the widget paints changed
+trigger.request_relayout();  // its size or what layout reads changed
 ```
 
-teksilo-app routes the request by marking that window's tree paint-dirty
-(`WidgetTree::mark_all_needs_paint_only()`) *before* the redraw, so the changed
-widget's `paint()` runs again. It **respects the zero-frame rule**: nothing is
-scheduled, a frame is drawn only when an actual off-thread event arrives, so an
-idle terminal (no output) still draws zero frames. Under a flood of off-thread
-events (e.g. `yes` piped into a terminal), coalesce: only post a request when one
-isn't already outstanding, since each mark-dirty is O(nodes). This mechanism was
-introduced for `teksilo-terminal`; see [terminal.md](terminal.md).
+The request marks only that widget and wakes only its window. It **respects the
+zero-frame rule**: nothing is scheduled, a frame is drawn only when a request
+arrives, so a terminal whose child prints nothing draws zero frames (a focused
+one still blinks its caret, two frames a second). Requests coalesce: a burst
+before the next frame is one wake, and a widget that is not painted (dormant,
+clipped out) keeps its request for when it is, at the cost of one wake until
+then however many requests follow. A request pending when the widget is
+rebuilt is still pending after it.
+
+Content that must be taken in **whether or not the widget is shown** (a
+terminal's output, whose screen, title and exit status must stay current in a
+background tab) uses `request_pull()` and a pull hook registered with
+`ctx.on_trigger_pull(|| …)`. The hook runs in the layout pass of the next
+frame and returns a `PullOutcome`: a widget that is not shown takes its
+content in without its window drawing a frame for it, and repaints when it is
+shown again.
+
+A repaint asks the window for a redraw directly. A relayout and a pull
+reach the window as a posted wake instead, which reaches a window that draws
+nothing (minimised, hidden, or its redraw held by the compositor); its event
+loop then decides. If a widget the window showed in its last frame has one
+pending, it draws a frame at once, which takes it in and repaints; otherwise it
+runs a frame that draws nothing, at most ten a second.
+
+The older `RepaintWindowRequest { window_id }`, posted through
+`AppEventPoster::post_external`, is deprecated: it repaints every widget of the
+window and redraws every window. `teksilo-terminal` uses the trigger; see
+[terminal.md](terminal.md).
+
+## Off-thread pixels: `LiveImage`
+
+A picture another thread rewrites at display rate (a VM screen, a video, a
+camera preview) is not a repaint at all. The producer commits into a
+`LiveImageSource`. The commit wakes each window that shows the source once,
+until that window's next frame, and the frame uploads the changed bytes into
+its texture while it replays its cached paint. No `paint()` runs, no widget is
+marked, nothing lays out, and no `AppEvent` is posted outside macOS. A producer
+that stops committing costs nothing, so a paused VM screen draws zero frames.
+Only a change of the source's size or status relayouts the widget. See
+[live-image.md](live-image.md).
+
+## Windows nobody can see
+
+A minimised window, or one the platform reports fully occluded, draws
+nothing: no acquire, no render, no present, no live-picture upload. On macOS
+so does every window while the displays sleep, the screen is locked or
+another user's session has the console: AppKit does not report those as
+occlusion for a window already showing, so teksilo-platform's
+`SessionWatch` hears them from the system's notifications. A hidden
+window's state stays current all the same. Idle callbacks run, layout runs (so clocks and
+off-thread content advance), and the accessibility tree is delivered, because
+a screen reader can act on a window nobody sees. A request for a redraw to
+such a window marks a *non-visual tick* instead. Ticks run at most ten times a
+second per window, whatever asks for them. Going hidden draws one last frame,
+and coming back asks for one redraw. A pixel wake from a producer is dropped
+while the window is hidden, and the first frame after it is shown uploads the
+latest commit.
+
+On Wayland the compositor decides what is shown. A window presents with
+`pre_present_notify`, so winit holds each later redraw until the compositor's
+frame callback. A compositor sends no callback to a surface it does not show,
+and winit reports no minimise on Wayland. So a redraw still undelivered after
+100 ms counts as withheld, and the window is ticked like a hidden one until
+the redraw arrives. Neither a hidden window nor one whose redraw is on its way
+can make the loop spin on a timer deadline that is already due.
 
 ## Three animation paths: signal vs shader vs per-frame-effect
 

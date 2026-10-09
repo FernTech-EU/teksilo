@@ -8,6 +8,19 @@
 Spacer — an invisible, flexible gap that claims all available space on the
 container's main axis.
 
+## Public functions
+
+### `Spacer`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#spacer-new) |
+| | **Builder methods** |
+| `Self` | [`min_length(min: f32)`](#spacer-min_length) |
+
+## Detailed description
+
 Place a `Spacer` inside an `HStack` or
 `VStack` to push adjacent siblings to opposite
 edges; flank a child with two spacers to centre it. A spacer carries flex
@@ -33,13 +46,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Spacer at Touch density](img/spacer-touch.png)
 
-## Builder methods at a glance
-
-`min_length`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/spacer/index.html)
+
+<a id="spacer"></a>
 
 ## `pub struct Spacer`
 
@@ -51,10 +62,14 @@ pub struct Spacer { /* fields */ }
 
 ### Methods
 
+<a id="spacer-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create a spacer with no minimum length (collapses fully when the
 container has no slack to give).
+
+<a id="spacer-min_length"></a>
 
 #### `pub fn min_length(mut self, min: f32) -> Self`
 

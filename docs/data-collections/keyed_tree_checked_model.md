@@ -6,6 +6,33 @@
 `KeyedTreeCheckedModel<K>` — per-node checkbox state for a tree **keyed by a
 stable domain id**, with optional descendant→ancestor tristate aggregation.
 
+## Public functions
+
+### `KeyedTreeCheckedModel`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(children: impl Fn(&K) -> Vec<K> + 'static, parent: impl Fn(&K) -> Option<K> + 'static)`](#keyedtreecheckedmodel-new) |
+| `Self` | [`from_source<S>(source: S)`](#keyedtreecheckedmodel-from_source) |
+| | **Builder methods** |
+| `Self` | [`with_mode(mode: AggregateMode)`](#keyedtreecheckedmodel-with_mode) |
+| | **Methods** |
+| `AggregateMode` | [`aggregate_mode()`](#keyedtreecheckedmodel-aggregate_mode) |
+|  | [`set_aggregate_mode(mode: AggregateMode)`](#keyedtreecheckedmodel-set_aggregate_mode) |
+| `Signal<CheckState>` | [`signal_for(key: K)`](#keyedtreecheckedmodel-signal_for) |
+| `Signal<bool>` | [`bool_signal_for(key: K)`](#keyedtreecheckedmodel-bool_signal_for) |
+| `CheckState` | [`check_state(key: &K)`](#keyedtreecheckedmodel-check_state) |
+|  | [`check(key: K)`](#keyedtreecheckedmodel-check) |
+|  | [`uncheck(key: K)`](#keyedtreecheckedmodel-uncheck) |
+|  | [`toggle(key: K)`](#keyedtreecheckedmodel-toggle) |
+| `Vec<K>` | [`checked_keys()`](#keyedtreecheckedmodel-checked_keys) |
+|  | [`clear()`](#keyedtreecheckedmodel-clear) |
+|  | [`prune_missing(exists: impl Fn(&K) -> bool)`](#keyedtreecheckedmodel-prune_missing) |
+|  | [`reaggregate()`](#keyedtreecheckedmodel-reaggregate) |
+
+## Detailed description
+
 The keyed counterpart of `TreeCheckedModel` — the
 checkbox twin of `KeyedSelectionModel`. Where
 `TreeCheckedModel` is bound to a `TreeModel<T>` and keyed by `NodeId`, this
@@ -25,7 +52,7 @@ bridge, and the re-entry guard are identical to `TreeCheckedModel` — see its
 `module docs` for the detail. This model is a
 share-by-clone handle (`Rc<RefCell<…>>` internally).
 
-## Example
+#### Example
 
 ```
 use teksilo_data::{KeyedTreeCheckedModel, CheckState, TreeDataSlice, TreeRow};
@@ -46,13 +73,11 @@ assert_eq!(checked.check_state(&2), CheckState::Checked); // chapter has only Sc
 assert_eq!(checked.check_state(&1), CheckState::Indeterminate); // Binder: 2 of {chapter, Scene B}
 ```
 
-## Builder methods at a glance
-
-`from_source`, `with_mode`, `aggregate_mode`, `set_aggregate_mode`, `signal_for`, `bool_signal_for`, `check_state`, `check`, `uncheck`, `toggle`, `checked_keys`, `clear`, `prune_missing`, `reaggregate`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/keyed_tree_checked_model/index.html)
+
+<a id="keyedtreecheckedmodel"></a>
 
 ## `pub struct KeyedTreeCheckedModel`
 
@@ -65,11 +90,15 @@ pub struct KeyedTreeCheckedModel<K: ItemKey> { /* fields */ }
 
 ### Methods
 
+<a id="keyedtreecheckedmodel-new"></a>
+
 #### `pub fn new( children: impl Fn(&K) -> Vec<K> + 'static, parent: impl Fn(&K) -> Option<K> + 'static, ) -> Self`
 
 Create a model over a tree whose shape is given by two closures:
 `children(key) -> Vec<K>` and `parent(key) -> Option<K>`. Uses the
 default `AggregateMode::DescendantsDriveAncestors`.
+
+<a id="keyedtreecheckedmodel-from_source"></a>
 
 #### `pub fn from_source<S>(source: S) -> Self where S: TreeDataSource<Key = K> + Clone + 'static,`
 
@@ -79,17 +108,25 @@ source is cloned into the shape closures, so the model reflects the live
 tree — call `prune_missing` after the source
 reloads to drop state for removed nodes.
 
+<a id="keyedtreecheckedmodel-with_mode"></a>
+
 #### `pub fn with_mode(self, mode: AggregateMode) -> Self`
 
 Set the `AggregateMode` at construction.
+
+<a id="keyedtreecheckedmodel-aggregate_mode"></a>
 
 #### `pub fn aggregate_mode(&self) -> AggregateMode`
 
 The current `AggregateMode`.
 
+<a id="keyedtreecheckedmodel-set_aggregate_mode"></a>
+
 #### `pub fn set_aggregate_mode(&self, mode: AggregateMode)`
 
 Change the cascade behaviour; takes effect on the next write.
+
+<a id="keyedtreecheckedmodel-signal_for"></a>
 
 #### `pub fn signal_for(&self, key: K) -> Signal<CheckState>`
 
@@ -99,34 +136,48 @@ the configured aggregation pass. The cascade observer is wired
 (`write_state`) before its own `signal_for` was ever called — so binding a
 lazily-realised (e.g. virtualized) row still cascades on write.
 
+<a id="keyedtreecheckedmodel-bool_signal_for"></a>
+
 #### `pub fn bool_signal_for(&self, key: K) -> Signal<bool>`
 
 Two-state `Signal<bool>` projection of `signal_for`
 (cached, writable). `Checked → true`; anything else → `false`. See
 `crate::TreeCheckedModel::bool_signal_for`.
 
+<a id="keyedtreecheckedmodel-check_state"></a>
+
 #### `pub fn check_state(&self, key: &K) -> CheckState`
 
 The current `CheckState` for `key` (`Unchecked` if never touched).
+
+<a id="keyedtreecheckedmodel-check"></a>
 
 #### `pub fn check(&self, key: K)`
 
 Set `key` to `CheckState::Checked` (triggers cascade + ancestor recompute).
 
+<a id="keyedtreecheckedmodel-uncheck"></a>
+
 #### `pub fn uncheck(&self, key: K)`
 
 Set `key` to `CheckState::Unchecked` (triggers cascade + ancestor recompute).
+
+<a id="keyedtreecheckedmodel-toggle"></a>
 
 #### `pub fn toggle(&self, key: K)`
 
 Toggle `key`: a leaf under `DescendantsDriveAncestors` cycles two-state;
 a branch or `AggregateMode::None` cycles the full tristate sequence.
 
+<a id="keyedtreecheckedmodel-checked_keys"></a>
+
 #### `pub fn checked_keys(&self) -> Vec<K>`
 
 All keys whose current state is exactly `CheckState::Checked`. May
 include stale keys after a tree mutation — call `prune_missing`
 or filter against the current tree yourself.
+
+<a id="keyedtreecheckedmodel-clear"></a>
 
 #### `pub fn clear(&self)`
 
@@ -141,6 +192,8 @@ ends up `Unchecked` and "all children unchecked" is already the
 correct parent aggregate. See `TreeCheckedModel::clear`
 for the non-keyed twin of this same optimization.
 
+<a id="keyedtreecheckedmodel-prune_missing"></a>
+
 #### `pub fn prune_missing(&self, exists: impl Fn(&K) -> bool)`
 
 Drop cached check state (and its signals/observers) for every key for
@@ -149,6 +202,8 @@ surviving parents against the current tree. Call after a reload so a
 deleted node's state doesn't linger in `checked_keys()` **and** the
 ancestors it used to affect show the correct tristate. Mirrors
 `crate::KeyedSelectionModel::prune_missing`.
+
+<a id="keyedtreecheckedmodel-reaggregate"></a>
 
 #### `pub fn reaggregate(&self)`
 

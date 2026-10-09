@@ -5,6 +5,31 @@
 
 `Unroll` — the horizontal sibling of `Collapse`.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`UnrollFrom`](#unrollfrom) — Which edge stays anchored as the child unrolls |
+| `struct` | [`Unroll`](#unroll) — Wraps a child widget and reveals or hides it along the horizontal axis by animating the wrapper's reported width between zero and the child's natural width |
+
+## Public functions
+
+### `Unroll`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(expanded: Signal<bool>)`](#unroll-new) |
+| `Self` | [`from_progress(progress: Signal<f32>)`](#unroll-from_progress) |
+| | **Builder methods** |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#unroll-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#unroll-child_opt) |
+| `Self` | [`reveal_from(from: UnrollFrom)`](#unroll-reveal_from) |
+| | **Methods** |
+| `Option<Signal<f32>>` | [`progress_signal()`](#unroll-progress_signal) |
+
+## Detailed description
+
 Animates a child's *width* between zero and natural while the child
 keeps its full natural layout — the framework's clip pass crops the
 overflow, so the visible reveal tracks progress linearly across the
@@ -42,13 +67,11 @@ let _w = Unroll::new(expanded)
     .child(TextWidget::new(lit!("Reveal me")));
 ```
 
-## Builder methods at a glance
-
-`from_progress`, `child`, `child_opt`, `reveal_from`, `progress_signal`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/unroll/index.html)
+
+<a id="unrollfrom"></a>
 
 ## `pub enum UnrollFrom`
 
@@ -63,6 +86,8 @@ pub enum UnrollFrom { /* variants */ }
 - **`Leading`** — Pin the leading edge; reveal trailing-ward (default).
 - **`Trailing`** — Pin the trailing edge; reveal leading-ward.
 
+<a id="unroll"></a>
+
 ## `pub struct Unroll`
 
 Wraps a child widget and reveals or hides it along the horizontal
@@ -75,10 +100,14 @@ pub struct Unroll { /* fields */ }
 
 ### Methods
 
+<a id="unroll-new"></a>
+
 #### `pub fn new(expanded: Signal<bool>) -> Self`
 
 Self-animated wrapper bound to `expanded`. Initially rolled up
 iff `expanded.get()` is `false` at the first `build()`.
+
+<a id="unroll-from_progress"></a>
 
 #### `pub fn from_progress(progress: Signal<f32>) -> Self`
 
@@ -86,9 +115,13 @@ Externally-driven wrapper. `progress` (an animated 0..1 signal)
 is read every layout; the caller owns the tween. Use when an
 overlay or other coordinator drives the reveal lifecycle.
 
+<a id="unroll-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Inline child widget (deferred insertion).
+
+<a id="unroll-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
@@ -99,10 +132,14 @@ this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
 adds no arena node, so nothing is laid out, painted, or published to the
 accessibility tree, and a stack applies no spacing around it.
 
+<a id="unroll-reveal_from"></a>
+
 #### `pub fn reveal_from(mut self, from: UnrollFrom) -> Self`
 
 Set the edge that stays anchored as the child unrolls. Defaults
 to `UnrollFrom::Leading`.
+
+<a id="unroll-progress_signal"></a>
 
 #### `pub fn progress_signal(&self) -> Option<Signal<f32>>`
 

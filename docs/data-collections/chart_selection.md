@@ -5,6 +5,34 @@
 
 `ChartSelection` — point-level selection state for chart widgets.
 
+## Public functions
+
+### `ChartSelection`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(mode: SelectionMode)`](#chartselection-new) |
+| `Self` | [`attached<T: 'static>(mode: SelectionMode, model: &ChartModel<T>)`](#chartselection-attached) |
+| | **Builder methods** |
+| `Self` | [`debug_named(_name: impl Into<String>)`](#chartselection-debug_named) |
+| | **Methods** |
+|  | [`attach<T: 'static>(model: &ChartModel<T>)`](#chartselection-attach) |
+| `SelectionMode` | [`mode()`](#chartselection-mode) |
+| `Signal<HashSet<(SeriesId, usize)>>` | [`selection_signal()`](#chartselection-selection_signal) |
+| `bool` | [`is_selected(series: SeriesId, index: usize)`](#chartselection-is_selected) |
+| `Vec<(SeriesId, usize)>` | [`selected_points()`](#chartselection-selected_points) |
+| `usize` | [`count()`](#chartselection-count) |
+|  | [`select_point(series: SeriesId, index: usize)`](#chartselection-select_point) |
+|  | [`toggle_point(series: SeriesId, index: usize)`](#chartselection-toggle_point) |
+|  | [`extend_to(series: SeriesId, target: usize)`](#chartselection-extend_to) |
+|  | [`select_points(points: impl IntoIterator<Item = (SeriesId, usize)>, additive: bool)`](#chartselection-select_points) |
+|  | [`clear()`](#chartselection-clear) |
+|  | [`adjust(change: &ChartChange)`](#chartselection-adjust) |
+|  | [`prune(exists: impl Fn(SeriesId, usize) -> bool)`](#chartselection-prune) |
+
+## Detailed description
+
 `ChartSelection` manages which `(series, point index)` pairs are
 selected across a `crate::ChartModel` — the chart counterpart of
 `crate::SelectionModel` (flat lists) and
@@ -22,6 +50,7 @@ point indices. This is the same rationale as
 reason.
 
 Three selection behaviours are available via
+`SelectionMode`: `None`, `Single`, and `Multi`
 (toggle + anchor-based range extension). `ChartSelection::extend_to`
 only extends within the anchor's own series — a cross-series "range" has
 no natural order, so it falls back to a single-point select.
@@ -54,13 +83,11 @@ sel.clear();
 assert_eq!(sel.count(), 0);
 ```
 
-## Builder methods at a glance
-
-`attached`, `attach`, `mode`, `selection_signal`, `is_selected`, `selected_points`, `count`, `select_point`, `toggle_point`, `extend_to`, `select_points`, `clear`, `adjust`, `prune`, `debug_named`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/chart_selection/index.html)
+
+<a id="chartselection"></a>
 
 ## `pub struct ChartSelection`
 
@@ -73,9 +100,13 @@ pub struct ChartSelection { /* fields */ }
 
 ### Methods
 
+<a id="chartselection-new"></a>
+
 #### `pub fn new(mode: SelectionMode) -> Self`
 
 Create a new chart selection with the given mode.
+
+<a id="chartselection-attached"></a>
 
 #### `pub fn attached<T: 'static>(mode: SelectionMode, model: &ChartModel<T>) -> Self`
 
@@ -88,6 +119,8 @@ wiring — mirrors how `crate::ChartWindow` and
 `crate::ChartAggregate` self-wire in their own constructors. The
 manual `Self::adjust` path still works — call it yourself instead
 if you'd rather relay through a custom change pipeline.
+
+<a id="chartselection-attach"></a>
 
 #### `pub fn attach<T: 'static>(&self, model: &ChartModel<T>)`
 
@@ -104,35 +137,51 @@ which holds this very `ObserverHandle`, forming an `Rc` cycle that
 would leak the subscription instead of tearing down when every
 `ChartSelection` handle drops.
 
+<a id="chartselection-mode"></a>
+
 #### `pub fn mode(&self) -> SelectionMode`
 
 The selection mode.
+
+<a id="chartselection-selection_signal"></a>
 
 #### `pub fn selection_signal(&self) -> Signal<HashSet<(SeriesId, usize)>>`
 
 A clone of the selection signal for reactive binding.
 
+<a id="chartselection-is_selected"></a>
+
 #### `pub fn is_selected(&self, series: SeriesId, index: usize) -> bool`
 
 Whether `(series, index)` is currently selected.
+
+<a id="chartselection-selected_points"></a>
 
 #### `pub fn selected_points(&self) -> Vec<(SeriesId, usize)>`
 
 The currently selected points (unordered snapshot).
 
+<a id="chartselection-count"></a>
+
 #### `pub fn count(&self) -> usize`
 
 Number of selected points.
+
+<a id="chartselection-select_point"></a>
 
 #### `pub fn select_point(&self, series: SeriesId, index: usize)`
 
 Select a single point, clearing the previous selection and setting
 the anchor.
 
+<a id="chartselection-toggle_point"></a>
+
 #### `pub fn toggle_point(&self, series: SeriesId, index: usize)`
 
 Toggle a point (Ctrl+click in Multi mode; acts as `select_point` in
 Single mode).
+
+<a id="chartselection-extend_to"></a>
 
 #### `pub fn extend_to(&self, series: SeriesId, target: usize)`
 
@@ -141,6 +190,8 @@ Shift+click). Only extends **within the anchor's own series** — if
 the anchor is unset or belongs to a different series, falls back to
 a single-point select of `(series, target)`.
 
+<a id="chartselection-select_points"></a>
+
 #### `pub fn select_points( &self, points: impl IntoIterator<Item = (SeriesId, usize)>, additive: bool, )`
 
 Replace the selection with `points` (or, when `additive`, union
@@ -148,9 +199,13 @@ them into the current selection). Used by rubber-band / marquee
 selection. In `Single` mode an arbitrary one wins; `None` mode is a
 no-op.
 
+<a id="chartselection-clear"></a>
+
 #### `pub fn clear(&self)`
 
 Clear the selection and anchor.
+
+<a id="chartselection-adjust"></a>
 
 #### `pub fn adjust(&self, change: &ChartChange)`
 
@@ -161,9 +216,13 @@ insertions/removals shift or drop indices within their series.
 Series metadata changes (rename/recolor/visibility/move/insert) and
 in-place point updates never affect which points are selected.
 
+<a id="chartselection-prune"></a>
+
 #### `pub fn prune(&self, exists: impl Fn(SeriesId, usize) -> bool)`
 
 Drop any selected point for which `exists` returns false.
+
+<a id="chartselection-debug_named"></a>
 
 #### `pub fn debug_named(self, _name: impl Into<String>) -> Self`
 

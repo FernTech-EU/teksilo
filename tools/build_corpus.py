@@ -9,7 +9,7 @@ and the runnable demos under ``examples/*/src/**/*.rs``,
 chunks them, and writes a single BM25-ready ``index.json`` into
 ``crates/teksilo-corpus/corpus/``.
 
-Deliberately excluded, for three different reasons:
+Deliberately excluded, for four different reasons:
 
 * ``docs/widgets/``, ``docs/data-collections/``, ``docs/settings/`` and
   ``docs/scene/`` — generated Widget-Catalog pages. A separate
@@ -18,6 +18,11 @@ Deliberately excluded, for three different reasons:
 * ``docs/SUMMARY.md`` — an mdBook table of contents, not prose.
 * ``engineering/docs/`` contains maintainer records and design history outside
   the consumer documentation source tree. It is not indexed.
+* ``examples/live_image_bench/`` — a measurement harness, not a usage
+  example. It drives a live picture through workload modes, scripted window
+  openings and a churn of mounts, so its chunks would rank for every
+  LiveImage question beside ``examples/live_image_demo/``, which is the
+  example to learn from.
 
 **Nothing is copied.** ``corpus/`` holds ``index.json`` and nothing else.
 An earlier version mirrored all 158 source files into ``corpus/`` and
@@ -197,6 +202,10 @@ DEFAULT_OUT_DIR = CORPUS_CRATE_DIR / "corpus"
 # hand-written prose. See the module docstring for why these are excluded.
 EXCLUDED_DOC_SUBDIRS = {"widgets", "data-collections", "settings", "scene"}
 
+# Example crates that are tools, not examples: what they show is how Teksilo
+# is measured, not how an app uses it. See the module docstring.
+EXCLUDED_EXAMPLE_CRATES = {"live_image_bench"}
+
 # The book TOC is navigation, not prose. Engineering records live outside
 # DOCS_DIR and are not consumer search results.
 
@@ -364,6 +373,8 @@ def discover_examples(examples_dir: Path) -> List[Tuple[str, Path, Path]]:
     """Return (crate_name, path_relative_to_src, absolute_path) triples."""
     out: List[Tuple[str, Path, Path]] = []
     for crate_dir in sorted(p for p in examples_dir.iterdir() if p.is_dir()):
+        if crate_dir.name in EXCLUDED_EXAMPLE_CRATES:
+            continue
         src_dir = crate_dir / "src"
         if not src_dir.is_dir():
             continue

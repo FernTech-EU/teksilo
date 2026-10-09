@@ -7,6 +7,23 @@
 
 VStack — a vertical layout container that distributes children top-to-bottom.
 
+## Public functions
+
+### `VStack`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#vstack-new) |
+| | **Builder methods** |
+| `Self` | [`spacing(spacing: impl Into<Prop<f32>>)`](#vstack-spacing) |
+| `Self` | [`alignment(alignment: HAlignment)`](#vstack-alignment) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#vstack-child) |
+| `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#vstack-children) |
+| `Self` | [`child_opt(widget: Option<impl Widget + 'static>)`](#vstack-child_opt) |
+
+## Detailed description
+
 Each child is offered the full container width and its intrinsic preferred
 height.  Positive slack (container height minus the sum of children heights
 minus spacing) is distributed among children that declare a non-zero `flex`
@@ -37,13 +54,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![VStack at Touch density](img/vstack-touch.png)
 
-## Builder methods at a glance
-
-`spacing`, `alignment`, `child`, `children`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/vstack/index.html)
+
+<a id="vstack"></a>
 
 ## `pub struct VStack`
 
@@ -57,27 +72,39 @@ pub struct VStack { /* fields */ }
 
 ### Methods
 
+<a id="vstack-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create an empty vertical stack with `Leading` alignment and zero spacing.
+
+<a id="vstack-spacing"></a>
 
 #### `pub fn spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self`
 
 Set inter-child spacing. Accepts a static `f32` or a reactive
 `Signal<f32>`.
 
+<a id="vstack-alignment"></a>
+
 #### `pub fn alignment(mut self, alignment: HAlignment) -> Self`
 
 Set the cross-axis (horizontal) alignment applied to every child that
 does not have a per-child override set via `WidgetTree::set_alignment`.
 
+<a id="vstack-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add an inline child widget (deferred insertion).
 
+<a id="vstack-children"></a>
+
 #### `pub fn children( mut self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
 Add multiple inline children from an iterator.
+
+<a id="vstack-child_opt"></a>
 
 #### `pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self`
 

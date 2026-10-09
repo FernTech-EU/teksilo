@@ -1873,8 +1873,15 @@ impl WidgetTree {
     /// read the position out of `event`, localizing it here makes
     /// `on_tap` / `on_double_tap` / `on_long_press` / `on_drag` and
     /// `on_pointer_event` all receive widget-local coordinates uniformly.
-    /// See [`WidgetArena::local_pointer_position`].
-    pub(super) fn localize_event(&self, id: WidgetId, event: &WidgetEvent) -> Option<WidgetEvent> {
+    /// See [`WidgetArena::local_pointer_position`]. `frame` is the node's,
+    /// from [`WidgetArena::local_frame`], computed once per node so every
+    /// position in the event is converted by the same walk — and the same
+    /// frame is handed to the node's handlers as
+    /// [`EventContext::to_local`](crate::widget::EventContext::to_local).
+    pub(super) fn localize_event(
+        frame: &crate::arena::LocalFrame,
+        event: &WidgetEvent,
+    ) -> Option<WidgetEvent> {
         match event {
             WidgetEvent::PointerDown {
                 position,
@@ -1882,7 +1889,7 @@ impl WidgetTree {
                 modifiers,
                 pointer,
             } => Some(WidgetEvent::PointerDown {
-                position: self.arena.local_pointer_position(id, *position),
+                position: frame.to_local(*position),
                 button: *button,
                 modifiers: *modifiers,
                 pointer: *pointer,
@@ -1893,7 +1900,7 @@ impl WidgetTree {
                 modifiers,
                 pointer,
             } => Some(WidgetEvent::PointerUp {
-                position: self.arena.local_pointer_position(id, *position),
+                position: frame.to_local(*position),
                 button: *button,
                 modifiers: *modifiers,
                 pointer: *pointer,
@@ -1903,12 +1910,12 @@ impl WidgetTree {
                 modifiers,
                 pointer,
             } => Some(WidgetEvent::PointerMove {
-                position: self.arena.local_pointer_position(id, *position),
+                position: frame.to_local(*position),
                 modifiers: *modifiers,
                 pointer: *pointer,
             }),
             WidgetEvent::Gesture { gesture } => Some(WidgetEvent::Gesture {
-                gesture: self.localize_gesture(id, gesture),
+                gesture: Self::localize_gesture(frame, gesture),
             }),
             // Deliberately no `Scroll` or `PointerCancel` arm. Both name their
             // position `window_position` precisely because it stays in window
@@ -1925,8 +1932,8 @@ impl WidgetTree {
     /// path; arena-recognized gestures are already local because the
     /// `RawPointerEvent` feeding the arena was localized by
     /// [`Self::localize_event`].
-    fn localize_gesture(&self, id: WidgetId, gesture: &GestureEvent) -> GestureEvent {
-        let loc = |p: teksilo_canvas::Point| self.arena.local_pointer_position(id, p);
+    fn localize_gesture(frame: &crate::arena::LocalFrame, gesture: &GestureEvent) -> GestureEvent {
+        let loc = |p: teksilo_canvas::Point| frame.to_local(p);
         let tap = |t: &TapEvent| {
             TapEvent::new(loc(t.position), t.button, t.modifiers).with_pointer(t.pointer)
         };
@@ -2053,15 +2060,17 @@ impl WidgetTree {
         };
 
         for &id in &ancestors {
+            let frame = self.arena.local_frame(id);
             let mut ctx = self
                 .make_event_context(&mut *ops)
                 .with_dispatch_node(id)
-                .with_dispatch_target(target);
+                .with_dispatch_target(target)
+                .with_local_frame(frame);
             ctx.press_claimed_by_interactive_child =
                 tap_owner.is_some_and(|owner| owner != id && self.is_descendant_of(owner, id));
             // Convert any pointer position into this node's widget-local
             // space before its handlers see it (see `localize_event`).
-            let localized = self.localize_event(id, event);
+            let localized = Self::localize_event(&frame, event);
             let event = localized.as_ref().unwrap_or(event);
             let response = if let Some(node) = self.arena.get_mut(id) {
                 Self::try_handler_preview(node, event, &mut ctx).unwrap_or(EventResponse::Ignored)
@@ -2092,15 +2101,17 @@ impl WidgetTree {
         let mut current = Some(target);
         let mut is_target = true;
         while let Some(id) = current {
+            let frame = self.arena.local_frame(id);
             let mut ctx = self
                 .make_event_context(&mut *ops)
                 .with_dispatch_node(id)
-                .with_dispatch_target(target);
+                .with_dispatch_target(target)
+                .with_local_frame(frame);
             ctx.press_claimed_by_interactive_child =
                 tap_owner.is_some_and(|owner| owner != id && self.is_descendant_of(owner, id));
             // Convert any pointer position into this node's widget-local
             // space before its handlers (and its gesture arena) see it.
-            let localized = self.localize_event(id, event);
+            let localized = Self::localize_event(&frame, event);
             let gesture_cx = self.recognizer_context(id);
             // A member that lost the arbitration keeps its handlers and loses
             // only its recognizers — see `sequence_blocks_arena`.
@@ -2191,10 +2202,12 @@ impl WidgetTree {
             return false;
         }
 
+        let frame = self.arena.local_frame(target);
         let mut ctx = self
             .make_event_context(&mut *ops)
             .with_dispatch_node(target)
-            .with_dispatch_target(target);
+            .with_dispatch_target(target)
+            .with_local_frame(frame);
         let gesture_cx = self.recognizer_context(target);
         let arena_blocked = self.sequence_blocks_arena(target);
         let WidgetTree {

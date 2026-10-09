@@ -26,7 +26,9 @@ teksilo-widgets = { workspace = true }
 teksilo-preview = { workspace = true }
 teksilo-render = { workspace = true }
 teksilo-platform = { workspace = true }
-teksilo-text = { workspace = true }
+# `default-features = false`: which Noto fallback fonts ship is the
+# previewer binary's call, not this library's.
+teksilo-text = { path = "../teksilo-text", version = "0.15.1", default-features = false }
 # This crate owns `PreviewerArgs`, the clap fragment a previewer binary
 # flattens into its own parser — so the CLI dependency belongs here with
 # it, not re-declared once per downstream binary.

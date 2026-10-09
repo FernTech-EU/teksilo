@@ -32,6 +32,7 @@ pub mod kinetic;
 pub mod menu_item_id;
 pub mod modal;
 pub mod motion_visibility;
+mod off_thread;
 pub mod overlay;
 pub mod overscroll;
 pub mod paint_prop;
@@ -65,7 +66,9 @@ pub use animation::AnimationRequest;
 pub use animation::AnimationScheduler;
 pub use animation_builder::AnimationSpec;
 pub use announcer::Politeness;
-pub use app_event::{AppEvent, RepaintWindowRequest};
+pub use app_event::AppEvent;
+#[allow(deprecated)]
+pub use app_event::RepaintWindowRequest;
 pub use arena::WidgetArena;
 pub use async_completion::{AsyncCompletionHandle, AsyncCompletionPayload};
 pub use binding::{BindingLevel, BindingRegistry};
@@ -102,6 +105,9 @@ pub use menu_item_id::MenuItemId;
 pub use modal::{
     ModalBuilder, ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest,
     QueuedModalRequest,
+};
+pub use off_thread::{
+    LiveImageAttachment, LiveImageSignals, PullOutcome, RepaintTrigger, RepaintTriggerStats,
 };
 pub use overlay::{
     DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,

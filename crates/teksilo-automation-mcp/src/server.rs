@@ -16,8 +16,9 @@ use rmcp::{ErrorData as McpError, ServerHandler, schemars, tool, tool_handler, t
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use teksilo_automation::dto::{
-    Assertion, AutomationOp, AutomationReply, AutomationRequest, DensityDto, PointerAction,
-    PointerButtonDto, PointerKindDto, SettleSpec, TouchPhaseDto, TouchStep, WaitCondition,
+    Assertion, AutomationOp, AutomationReply, AutomationRequest, DensityDto, KeyPhase,
+    PointerAction, PointerButtonDto, PointerKindDto, SettleSpec, TouchPhaseDto, TouchStep,
+    WaitCondition,
 };
 
 use crate::headless::{HostReply, Job};
@@ -150,6 +151,13 @@ pub struct ScrollParams {
     pub node: u64,
     pub dx: Option<f32>,
     pub dy: Option<f32>,
+    /// Where the wheel turns, as [x, y] node-local logical px — the position
+    /// the node's handlers receive. Default: the centre of the node's bounds,
+    /// transforms included.
+    pub at: Option<[f32; 2]>,
+    /// Scroll by lines (a wheel notch's delta, source `Wheel`) rather than by
+    /// pixels (a driver's, source `Programmatic`). Default false.
+    pub lines: Option<bool>,
     /// Modifiers held during the wheel, as for `inject_key`. A modifier-held
     /// wheel is its own gesture — Ctrl+wheel to zoom is why
     /// `WidgetEvent::Scroll` carries modifiers at all — so a probe needs to be
@@ -171,8 +179,22 @@ pub struct ScrollParams {
 #[serde(deny_unknown_fields)]
 pub struct InjectPointerParams {
     pub window_id: Option<u64>,
-    pub x: f32,
-    pub y: f32,
+    /// With `y`: window-logical px, or local to `node`. Give `x` and `y`, or
+    /// `source`.
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+    /// A pixel `[x, y]` of the LiveImage `node` names, in place of `x` and
+    /// `y`: the press lands at the centre of where that source pixel is
+    /// displayed, whatever the fit, orientation, scale or transform. A pixel
+    /// a press would not reach is refused: cropped away by the fit, hidden by
+    /// an ancestor's box or clip, or under another widget.
+    pub source: Option<[u32; 2]>,
+    /// Aim inside a node: with `node`, `x` and `y` are node-local logical px,
+    /// the position the node's own handlers receive — exact under a `Scale`, a
+    /// `Rotate` or a `SceneView`, where adding the node's origin is not.
+    /// Without it they are window-logical px. A synthetic node (a scene item, a
+    /// text run) has no handlers of its own and is refused.
+    pub node: Option<u64>,
     /// click (default), double_click, down, up, or move.
     pub action: Option<String>,
     /// Modifiers held for the press and the release. Ctrl-click to extend a
@@ -216,8 +238,20 @@ pub struct TouchStepParams {
     pub contact: Option<u32>,
     /// down, move, up or cancel.
     pub phase: String,
-    pub x: f32,
-    pub y: f32,
+    /// With `y`: window-logical px, or local to `node`. Give `x` and `y`, or
+    /// `source`.
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+    /// A pixel `[x, y]` of the LiveImage `node` names, in place of `x` and
+    /// `y`: the press lands at the centre of where that source pixel is
+    /// displayed, whatever the fit, orientation, scale or transform. A pixel
+    /// a press would not reach is refused: cropped away by the fit, hidden by
+    /// an ancestor's box or clip, or under another widget.
+    pub source: Option<[u32; 2]>,
+    /// Aim inside a node: with `node`, `x` and `y` are node-local logical px,
+    /// the position the node's own handlers receive. A synthetic node is
+    /// refused.
+    pub node: Option<u64>,
     /// Simulated milliseconds to advance BEFORE this sample. Default 0. This is
     /// what separates a hold from a tap and a flick from a drag; it is
     /// simulated time, so the result is the same on every machine.
@@ -270,8 +304,22 @@ pub struct FlingParams {
 #[serde(deny_unknown_fields)]
 pub struct LongPressParams {
     pub window_id: Option<u64>,
-    pub x: f32,
-    pub y: f32,
+    /// With `y`: window-logical px, or local to `node`. Give `x` and `y`, or
+    /// `source`.
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+    /// A pixel `[x, y]` of the LiveImage `node` names, in place of `x` and
+    /// `y`: the press lands at the centre of where that source pixel is
+    /// displayed, whatever the fit, orientation, scale or transform. A pixel
+    /// a press would not reach is refused: cropped away by the fit, hidden by
+    /// an ancestor's box or clip, or under another widget.
+    pub source: Option<[u32; 2]>,
+    /// Aim inside a node: with `node`, `x` and `y` are node-local logical px,
+    /// the position the node's own handlers receive — exact under a `Scale`, a
+    /// `Rotate` or a `SceneView`, where adding the node's origin is not.
+    /// Without it they are window-logical px. A synthetic node (a scene item, a
+    /// text run) has no handlers of its own and is refused.
+    pub node: Option<u64>,
     /// mouse (default), touch or pen. The hold is that device's own threshold.
     pub kind: Option<String>,
     pub settle: Option<SettleArg>,
@@ -299,8 +347,21 @@ pub struct SetDensityParams {
 #[serde(deny_unknown_fields)]
 pub struct InjectKeyParams {
     pub window_id: Option<u64>,
-    /// Key name (Enter, Escape, Tab, F1.., arrows) or a single character.
+    /// Key name (Enter, Escape, Tab, Space, Backspace, Delete, Insert, Home,
+    /// End, PageUp, PageDown, the arrows, F1..F24, CapsLock, ContextMenu) or a
+    /// single character. A letter is its named key, so `a` with `command` is
+    /// the select-all shortcut.
     pub key: String,
+    /// The text the press types, as a keyboard attaches it — what a focused
+    /// text field inserts. Omit it for the platform's own: the control
+    /// character of Enter, Tab, Space, Backspace and Escape, and nothing for
+    /// any other key, so `key: "a"` alone types nothing (use `type_text`, or
+    /// pass `text: "a"`). Refused on `phase: up`: a release carries no text.
+    pub text: Option<String>,
+    /// press (default: down then up), down or up. A `down` leaves the key held
+    /// across calls until an `up` releases it — a chord held across other
+    /// input, or a press repeated as a held key repeats.
+    pub phase: Option<String>,
     pub ctrl: Option<bool>,
     pub shift: Option<bool>,
     pub alt: Option<bool>,
@@ -383,6 +444,31 @@ pub struct WaitParams {
     pub expected: Option<String>,
     pub version: Option<u64>,
     pub settle: Option<SettleArg>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LiveImageStatsParams {
+    pub window_id: Option<u64>,
+    /// The LiveImage's node id.
+    pub node: u64,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LiveImageMapParams {
+    pub window_id: Option<u64>,
+    /// The LiveImage's node id.
+    pub node: u64,
+    /// A source pixel `[x, y]`: the reply's `source_point` is the
+    /// window-logical centre of where it is displayed.
+    pub source: Option<[u32; 2]>,
+    /// A source rect `[x, y, width, height]`: the reply's
+    /// `source_window_rect` is where it is displayed.
+    pub source_rect: Option<[u32; 4]>,
+    /// A window-logical point: the reply's `pixel` is the source pixel drawn
+    /// there, or null on the letterbox.
+    pub window: Option<[f32; 2]>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -591,10 +677,12 @@ impl AutomationServer {
     }
 
     #[tool(
-        description = "Scroll the widget under a node by a pixel delta, with optional modifiers \
-                       (ctrl/shift/alt/meta/command). A modifier-held wheel is its own gesture, \
-                       e.g. Ctrl+wheel to zoom. Use `command` for the platform accelerator \
-                       (Control on Windows/Linux, Command on macOS); `ctrl` is literal Control."
+        description = "Scroll the widget under a node by a pixel delta, or by lines with \
+                       `lines` (a wheel notch's delta), at the node's centre or at `at` ([x, y] \
+                       node-local), with optional modifiers (ctrl/shift/alt/meta/command). A \
+                       modifier-held wheel is its own gesture, e.g. Ctrl+wheel to zoom. Use \
+                       `command` for the platform accelerator (Control on Windows/Linux, Command \
+                       on macOS); `ctrl` is literal Control."
     )]
     pub(crate) async fn scroll(
         &self,
@@ -607,6 +695,8 @@ impl AutomationServer {
                 node: p.node,
                 dx: p.dx.unwrap_or(0.0),
                 dy: p.dy.unwrap_or(0.0),
+                at: p.at,
+                lines: p.lines.unwrap_or(false),
                 ctrl: p.ctrl.unwrap_or(false),
                 shift: p.shift.unwrap_or(false),
                 alt: p.alt.unwrap_or(false),
@@ -619,7 +709,7 @@ impl AutomationServer {
     }
 
     #[tool(
-        description = "Inject a pointer event at a point: action = click (default), double_click, down, up or move; button = primary (default), secondary, middle, back, forward; with optional ctrl/shift/alt/meta/command held for the press and release. Use `command` for the platform accelerator (Control on Windows/Linux, Command on macOS) — accelerator-click to extend a selection is `command`, not `ctrl`. Unknown names and unknown fields are refused rather than defaulted."
+        description = "Inject a pointer event at a point — window-logical px, or local to `node` (the position that node's handlers receive), or `source: [x, y]`, a pixel of the LiveImage `node` names: action = click (default), double_click, down, up or move; button = primary (default), secondary, middle, back, forward; with optional ctrl/shift/alt/meta/command held for the press and release. Use `command` for the platform accelerator (Control on Windows/Linux, Command on macOS) — accelerator-click to extend a selection is `command`, not `ctrl`. Unknown names and unknown fields are refused rather than defaulted."
     )]
     pub(crate) async fn inject_pointer(
         &self,
@@ -631,6 +721,8 @@ impl AutomationServer {
             AutomationOp::InjectPointer {
                 x: p.x,
                 y: p.y,
+                source: p.source,
+                node: p.node,
                 action: pointer_action(&p.action)?,
                 button: pointer_button(&p.button)?,
                 kind: pointer_kind(&p.kind)?,
@@ -670,7 +762,7 @@ impl AutomationServer {
     }
 
     #[tool(
-        description = "Inject a key press (with optional modifiers) to the focused widget. Use `command` for any accelerator chord (Control on Windows/Linux, Command on macOS) — a shortcut declared Ctrl+S resolves to the Command chord on macOS, so `ctrl` there injects a key that matches no binding and still reports success. `ctrl` stays literal Control, for chords that really are Control everywhere (Ctrl+Tab)."
+        description = "Inject a key press (with optional modifiers) to the focused widget: by default its press and its release, or with `phase` = down or up one half, so a key can stay held across calls. `text` is what the press types, as a keyboard attaches it; omitted, a character key types nothing (use type_text to type). Use `command` for any accelerator chord (Control on Windows/Linux, Command on macOS) — a shortcut declared Ctrl+S resolves to the Command chord on macOS, so `ctrl` there injects a key that matches no binding and still reports success. `ctrl` stays literal Control, for chords that really are Control everywhere (Ctrl+Tab)."
     )]
     pub(crate) async fn inject_key(
         &self,
@@ -681,6 +773,8 @@ impl AutomationServer {
             p.window_id,
             AutomationOp::InjectKey {
                 key: p.key,
+                text: p.text,
+                phase: key_phase(&p.phase)?,
                 ctrl: p.ctrl.unwrap_or(false),
                 shift: p.shift.unwrap_or(false),
                 alt: p.alt.unwrap_or(false),
@@ -692,7 +786,9 @@ impl AutomationServer {
         .await
     }
 
-    #[tool(description = "Focus a node and type text into it.")]
+    #[tool(
+        description = "Focus a node and type text into it as a keyboard does: each character is a key pressed and released, a letter as its named key (Shift held for a capital), a space as Space, a line break as Enter, a tab as Tab. Shortcuts see those keys as they would a user's; to insert text without keys, commit it with type_ime."
+    )]
     pub(crate) async fn type_text(
         &self,
         Parameters(p): Parameters<TypeTextParams>,
@@ -748,10 +844,13 @@ impl AutomationServer {
 
     #[tool(
         description = "Drive a whole multi-touch gesture in one call and report the arbitration \
-                       after every step. `steps` is a list of {contact?, phase, x, y, advance_ms?}: \
-                       phase is down/move/up/cancel, `contact` names a finger by slot (default 0, \
-                       not a pointer id), and `advance_ms` advances the SIMULATED clock before that \
-                       sample — which is what separates a hold from a tap and a flick from a drag. \
+                       after every step. `steps` is a list of {contact?, phase, x?, y?, node?, \
+                       source?, advance_ms?}: phase is down/move/up/cancel, `contact` names a \
+                       finger by slot (default 0, not a pointer id), `node` makes x, y local to \
+                       that node (or, with `source` in their place, aims at that pixel of the \
+                       LiveImage `node` names), and \
+                       `advance_ms` advances the SIMULATED clock before that sample — which is \
+                       what separates a hold from a tap and a flick from a drag. \
                        The reply gives, per step, the identity that slot got and that pointer's \
                        whole state: the frozen touch_action, every competitor with its role and \
                        state, and the arbitration winner. A sequence that stops short of its `up` \
@@ -770,7 +869,9 @@ impl AutomationServer {
                 phase: touch_phase(&step.phase)?,
                 x: step.x,
                 y: step.y,
+                source: step.source,
                 advance_ms: step.advance_ms.unwrap_or(0),
+                node: step.node,
             });
         }
         self.run(
@@ -838,10 +939,10 @@ impl AutomationServer {
     }
 
     #[tool(
-        description = "Press at a point, hold for exactly the device's long-press threshold, \
-                       release. The hold is read off the active input profile for `kind` \
-                       (mouse/touch/pen), so the call means 'hold long enough' without the script \
-                       knowing the number."
+        description = "Press at a point (window-logical, or local to `node`), hold for exactly \
+                       the device's long-press threshold, release. The hold is read off the active \
+                       input profile for `kind` (mouse/touch/pen), so the call means 'hold long \
+                       enough' without the script knowing the number."
     )]
     pub(crate) async fn long_press(
         &self,
@@ -853,6 +954,8 @@ impl AutomationServer {
             AutomationOp::LongPress {
                 x: p.x,
                 y: p.y,
+                source: p.source,
+                node: p.node,
                 kind: pointer_kind(&p.kind)?,
             },
             settle,
@@ -1012,6 +1115,50 @@ impl AutomationServer {
         .await
     }
 
+    #[tool(
+        description = "A LiveImage's frame counters: its source's (generation, displayed \
+                       generation, commits, wakes), its attachment's (window generation, frames \
+                       drawn, captures, uploads, paints, paused) and its window's live textures \
+                       and wakes. Frames flow when `generation` rises and `window_generation` \
+                       follows, while `paints` stays flat."
+    )]
+    pub(crate) async fn live_image_stats(
+        &self,
+        Parameters(p): Parameters<LiveImageStatsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.run(
+            p.window_id,
+            AutomationOp::LiveImageStats { node: p.node },
+            SettleSpec::default(),
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Where a LiveImage's picture lies (window-logical `content` and \
+                       `visible`), and its source pixels as window points and back: `source` \
+                       gives `source_point`, the centre of that pixel on screen; `source_rect` \
+                       gives `source_window_rect`; `window` gives `pixel`, the source pixel drawn \
+                       there (null on the letterbox). NO_GEOMETRY before its first layout or \
+                       while its source has no size."
+    )]
+    pub(crate) async fn live_image_map(
+        &self,
+        Parameters(p): Parameters<LiveImageMapParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.run(
+            p.window_id,
+            AutomationOp::LiveImageMap {
+                node: p.node,
+                source: p.source,
+                source_rect: p.source_rect,
+                window: p.window,
+            },
+            SettleSpec::default(),
+        )
+        .await
+    }
+
     #[tool(description = "Render the window (or a node's bounds) to a PNG image block.")]
     pub(crate) async fn screenshot(
         &self,
@@ -1076,16 +1223,39 @@ value, toggled/expanded/selected, bounds, and the `actions` it supports. \
 focus, expand, collapse, set_value, increment, decrement, show_context_menu; \
 or the shortcuts `set_value` / `type_text` / `focus_node` / `expand` / \
 `collapse` / `scroll`; or raw input `inject_pointer \
-{x,y,action?,button?,ctrl?,shift?,alt?,meta?,command?}` / `right_click {node}` \
+{x,y,node?,action?,button?,ctrl?,shift?,alt?,meta?,command?}` / `right_click {node}` \
 (opens the node's context menu — the coordinate-free form of a secondary \
-click) / `inject_key {key, ctrl?,shift?,alt?,meta?,command?}` / `type_ime` / \
-`drag_node`. Reach for `command`, not `ctrl`, whenever a chord means \"the \
+click) / `inject_key {key, text?, phase?, ctrl?,shift?,alt?,meta?,command?}` / \
+`type_ime` / `drag_node`. `type_text` types as a keyboard does — each character \
+a key pressed and released, a letter as its named key with Shift for a capital, \
+a space as Space, a line break as Enter, a tab as Tab — so shortcuts see what a \
+user's typing would fire; `type_ime {commit}` inserts text with no keys. \
+`inject_key` sends one key: its press and release, or with `phase` down / up one \
+half, so a key can stay held across calls; `text` is what the press types (a \
+character key types nothing without it). Reach for `command`, not `ctrl`, whenever a chord means \"the \
 accelerator\" (save, copy, select-all, accelerator-click): it is Control on \
 Windows and Linux and Command on macOS, which is what a shortcut *declared* \
 `Ctrl+S` resolves to there — so `ctrl` on macOS injects a key that matches no \
 binding and still reports success, because the key really was injected. `ctrl` \
 stays literal Control, for the chords that genuinely are Control everywhere \
 (Ctrl+Tab).
+
+Aiming. Coordinates are window-logical px, like node bounds. Pass `node` to \
+`inject_pointer`, `long_press` or a touch step and `x`, `y` become local to that \
+node — the position its own handlers receive, exact under a Scale, Rotate or \
+SceneView where bounds.x + x is not. `scroll` turns the wheel at the node's \
+centre or at `at: [x, y]` (node-local), by pixels or, with `lines: true`, by \
+lines as a wheel notch does.
+
+Live pictures. A LiveImage (a VM screen, a video, a camera) shows a source \
+another thread rewrites; its pixels are not in the accessibility tree. \
+`live_image_stats {node}` reports its frame counters: frames flow when \
+`generation` rises and `window_generation` follows, while `paints` stays flat. \
+`live_image_map {node, source?, source_rect?, window?}` gives where the picture \
+lies and maps source pixels to window points and back (NO_GEOMETRY before its \
+first layout). Aim a press at a guest pixel with `inject_pointer {node, \
+source: [x, y]}` (also `long_press` and touch steps). A `screenshot` reply's \
+`live_images` says which generation each picture in the PNG shows, and where.
 
 Touch and pen. `inject_pointer` takes `kind` = mouse (default), touch or pen; a \
 touch or pen enters through the tree's pointer door, so the kind reaches the \
@@ -1269,8 +1439,23 @@ fn pointer_action(s: &Option<String>) -> Result<PointerAction, McpError> {
         Some(other) => {
             return Err(McpError::invalid_params(
                 format!(
-                    "unknown pointer action '{other}'                          (click, double_click, down, up, move)"
+                    "unknown pointer action '{other}' \
+                     (click, double_click, down, up, move)"
                 ),
+                None,
+            ));
+        }
+    })
+}
+
+fn key_phase(s: &Option<String>) -> Result<KeyPhase, McpError> {
+    Ok(match s.as_deref().map(str::to_ascii_lowercase).as_deref() {
+        None | Some("press") => KeyPhase::Press,
+        Some("down") => KeyPhase::Down,
+        Some("up") => KeyPhase::Up,
+        Some(other) => {
+            return Err(McpError::invalid_params(
+                format!("unknown key phase '{other}' (press, down, up)"),
                 None,
             ));
         }
@@ -1330,7 +1515,8 @@ fn pointer_button(s: &Option<String>) -> Result<PointerButtonDto, McpError> {
         Some(other) => {
             return Err(McpError::invalid_params(
                 format!(
-                    "unknown pointer button '{other}'                          (primary, secondary, middle, back, forward)"
+                    "unknown pointer button '{other}' \
+                     (primary, secondary, middle, back, forward)"
                 ),
                 None,
             ));

@@ -7,6 +7,29 @@
 
 Divider — a themed separator line that visually partitions content.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`Divider`](#divider) — A themed separator line |
+| `const` | [`DIVIDER_THICKNESS`](#divider_thickness) — Default visual thickness of a `Divider` stroke |
+
+## Public functions
+
+### `Divider`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#divider-new) |
+| `Self` | [`horizontal()`](#divider-horizontal) |
+| `Self` | [`vertical()`](#divider-vertical) |
+| | **Builder methods** |
+| `Self` | [`thickness(thickness: f32)`](#divider-thickness) |
+| `Self` | [`color(color: impl Into<ColorProp>)`](#divider-color) |
+
+## Detailed description
+
 `Divider` renders a single hairline stroke (`DIVIDER_THICKNESS` = 1 dp by
 default) using the theme's divider color. It comes in two orientations:
 horizontal (the default, spans the proposed width and has a fixed 1 dp
@@ -14,7 +37,7 @@ height) and vertical (spans the proposed height, 1 dp wide). Both the
 thickness and the color can be overridden per-instance without a custom
 style.
 
-## Accessibility
+#### Accessibility
 
 The widget emits `Role::Splitter`, which matches the ARIA separator pattern
 and signals a structural boundary to screen readers.
@@ -36,13 +59,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Divider at Touch density](img/divider-touch.png)
 
-## Builder methods at a glance
-
-`horizontal`, `vertical`, `thickness`, `color`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/divider/index.html)
+
+<a id="divider"></a>
 
 ## `pub struct Divider`
 
@@ -55,27 +76,39 @@ pub struct Divider { /* fields */ }
 
 ### Methods
 
+<a id="divider-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create a horizontal `Divider` with default theme thickness and color.
+
+<a id="divider-horizontal"></a>
 
 #### `pub fn horizontal() -> Self`
 
 Create a horizontal `Divider` — alias for `Divider::new()`.
 
+<a id="divider-vertical"></a>
+
 #### `pub fn vertical() -> Self`
 
 Create a vertical `Divider` that spans the proposed height.
+
+<a id="divider-thickness"></a>
 
 #### `pub fn thickness(mut self, thickness: f32) -> Self`
 
 Override the stroke thickness in logical pixels; defaults to
 `DIVIDER_THICKNESS` (1 dp).
 
+<a id="divider-color"></a>
+
 #### `pub fn color(mut self, color: impl Into<ColorProp>) -> Self`
 
 Override the line color. Accepts `Color`, a role (typically
 `BorderRole`), or a `Signal<Color>`.
+
+<a id="divider_thickness"></a>
 
 ## `pub const DIVIDER_THICKNESS`
 

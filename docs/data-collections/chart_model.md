@@ -5,6 +5,83 @@
 
 `ChartModel<T>` — concrete reactive multi-series chart data model.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`ChartDatum`](#chartdatum) — One numeric data point at a category/x-axis position, with an optional per-point color that overrides the series color (bar charts only) |
+| `struct` | [`ChartSeries`](#chartseries) — A named series of data points with an optional explicit color and a visibility flag, used to construct a `ChartModel` (via `ChartModel::from_series_vec`)… |
+| `struct` | [`SeriesView`](#seriesview) — A read-only, borrowed view over one series — returned by `ChartModel::with_series_view` / `ChartModel::with_all_series` |
+| `struct` | [`ChartModel`](#chartmodel) — A concrete reactive multi-series chart data model |
+
+## Public functions
+
+### `ChartModel`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#chartmodel-new) |
+| `Self` | [`from_series_vec(series: Vec<ChartSeries<T>>)`](#chartmodel-from_series_vec) |
+| `Self` | [`from_points(points: Vec<ChartDatum<T>>)`](#chartmodel-from_points) |
+| | **Builder methods** |
+| `Self` | [`debug_named(_name: impl Into<String>)`](#chartmodel-debug_named) |
+| | **Methods** |
+| `Option<SeriesId>` | [`only_series()`](#chartmodel-only_series) |
+| `SeriesId` | [`add_series(name: impl Into<String>)`](#chartmodel-add_series) |
+| `SeriesId` | [`insert_series(index: usize, name: impl Into<String>)`](#chartmodel-insert_series) |
+|  | [`remove_series(series: SeriesId)`](#chartmodel-remove_series) |
+|  | [`rename_series(series: SeriesId, name: impl Into<String>)`](#chartmodel-rename_series) |
+|  | [`set_series_color(series: SeriesId, color: impl Into<ColorProp>)`](#chartmodel-set_series_color) |
+|  | [`clear_series_color(series: SeriesId)`](#chartmodel-clear_series_color) |
+|  | [`set_series_pattern(series: SeriesId, pattern: SeriesPattern)`](#chartmodel-set_series_pattern) |
+|  | [`clear_series_pattern(series: SeriesId)`](#chartmodel-clear_series_pattern) |
+|  | [`set_series_visible(series: SeriesId, visible: bool)`](#chartmodel-set_series_visible) |
+|  | [`move_series(series: SeriesId, to: usize)`](#chartmodel-move_series) |
+|  | [`clear()`](#chartmodel-clear) |
+|  | [`push_point(series: SeriesId, category: T, value: f32)`](#chartmodel-push_point) |
+|  | [`insert_point(series: SeriesId, index: usize, category: T, value: f32)`](#chartmodel-insert_point) |
+| `ChartDatum<T>` | [`remove_point(series: SeriesId, index: usize)`](#chartmodel-remove_point) |
+|  | [`update_point(series: SeriesId, index: usize, category: T, value: f32)`](#chartmodel-update_point) |
+|  | [`replace_series_data(series: SeriesId, points: Vec<ChartDatum<T>>)`](#chartmodel-replace_series_data) |
+| `usize` | [`series_count()`](#chartmodel-series_count) |
+| `Vec<SeriesId>` | [`series_ids()`](#chartmodel-series_ids) |
+| `Option<SeriesId>` | [`series_id_at(index: usize)`](#chartmodel-series_id_at) |
+| `Option<usize>` | [`series_index_of(series: SeriesId)`](#chartmodel-series_index_of) |
+| `usize` | [`point_count(series: SeriesId)`](#chartmodel-point_count) |
+| `Option<R>` | [`with_series<R>(series: SeriesId, f: impl FnOnce(&str, Option<&ColorProp>, bool) -> R)`](#chartmodel-with_series) |
+| `Option<R>` | [`with_point<R>(series: SeriesId, index: usize, f: impl FnOnce(&ChartDatum<T>) -> R)`](#chartmodel-with_point) |
+| `Option<R>` | [`with_series_view<R>(series: SeriesId, f: impl FnOnce(SeriesView<'_, T>) -> R)`](#chartmodel-with_series_view) |
+| `R` | [`with_all_series<R>(f: impl FnOnce(&[SeriesView<'_, T>]) -> R)`](#chartmodel-with_all_series) |
+| `Signal<u64>` | [`structure_version()`](#chartmodel-structure_version) |
+| `Signal<u64>` | [`style_version()`](#chartmodel-style_version) |
+| `ObserverHandle` | [`observe_changes(f: impl Fn(&ChartChange) + 'static)`](#chartmodel-observe_changes) |
+
+### `ChartDatum`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(category: T, value: f32)`](#chartdatum-new) |
+| | **Builder methods** |
+| `Self` | [`with_color(color: impl Into<ColorProp>)`](#chartdatum-with_color) |
+
+### `ChartSeries`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(name: impl Into<String>)`](#chartseries-new) |
+| | **Builder methods** |
+| `Self` | [`color(color: impl Into<ColorProp>)`](#chartseries-color) |
+| `Self` | [`pattern(pattern: SeriesPattern)`](#chartseries-pattern) |
+| `Self` | [`visibility(visible: bool)`](#chartseries-visibility) |
+| `Self` | [`data(points: Vec<ChartDatum<T>>)`](#chartseries-data) |
+| | **Methods** |
+|  | [`push(category: T, value: f32)`](#chartseries-push) |
+
+## Detailed description
+
 `ChartModel<T>` owns an ordered collection of named series, each holding a
 `Vec<ChartDatum<T>>` (a `category: T` paired with a numeric `value: f32`),
 in a flat SlotMap arena — the same shape as `crate::TreeModel`. Every
@@ -43,13 +120,11 @@ model.push_point(s, "Q3".to_string(), 30.0);
 assert_eq!(model.point_count(s), 3);
 ```
 
-## Builder methods at a glance
-
-`from_series_vec`, `from_points`, `only_series`, `add_series`, `insert_series`, `remove_series`, `rename_series`, `set_series_color`, `clear_series_color`, `set_series_pattern`, `clear_series_pattern`, `set_series_visible`, `move_series`, `clear`, `push_point`, `insert_point`, `remove_point`, `update_point`, `replace_series_data`, `series_count`, `series_ids`, `series_id_at`, `series_index_of`, `point_count`, `with_series`, `with_point`, `with_series_view`, `with_all_series`, `structure_version`, `style_version`, `observe_changes`, `debug_named`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/chart_model/index.html)
+
+<a id="chartdatum"></a>
 
 ## `pub struct ChartDatum`
 
@@ -62,12 +137,18 @@ pub struct ChartDatum<T> { /* fields */ }
 
 ### Methods
 
+<a id="chartdatum-new"></a>
+
 #### `pub fn new(category: T, value: f32) -> Self`
+
+<a id="chartdatum-with_color"></a>
 
 #### `pub fn with_color(mut self, color: impl Into<ColorProp>) -> Self`
 
 Override this point's color (a bar's fill). Ignored by line/pie charts,
 which color by series.
+
+<a id="chartseries"></a>
 
 ## `pub struct ChartSeries`
 
@@ -84,20 +165,34 @@ pub struct ChartSeries<T> { /* fields */ }
 
 ### Methods
 
+<a id="chartseries-new"></a>
+
 #### `pub fn new(name: impl Into<String>) -> Self`
 
+<a id="chartseries-color"></a>
+
 #### `pub fn color(mut self, color: impl Into<ColorProp>) -> Self`
+
+<a id="chartseries-pattern"></a>
 
 #### `pub fn pattern(mut self, pattern: SeriesPattern) -> Self`
 
 Pin this series' non-colour channel instead of taking the one its
 position implies. See `SeriesPattern`.
 
+<a id="chartseries-visibility"></a>
+
 #### `pub fn visibility(mut self, visible: bool) -> Self`
+
+<a id="chartseries-push"></a>
 
 #### `pub fn push(&mut self, category: T, value: f32)`
 
+<a id="chartseries-data"></a>
+
 #### `pub fn data(mut self, points: Vec<ChartDatum<T>>) -> Self`
+
+<a id="seriesview"></a>
 
 ## `pub struct SeriesView`
 
@@ -107,6 +202,8 @@ A read-only, borrowed view over one series — returned by
 ```rust
 pub struct SeriesView<'a, T> { /* fields */ }
 ```
+
+<a id="chartmodel"></a>
 
 ## `pub struct ChartModel`
 
@@ -122,9 +219,13 @@ pub struct ChartModel<T: 'static> { /* fields */ }
 
 ### Methods
 
+<a id="chartmodel-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create an empty chart model with no series.
+
+<a id="chartmodel-from_series_vec"></a>
 
 #### `pub fn from_series_vec(series: Vec<ChartSeries<T>>) -> Self`
 
@@ -132,19 +233,27 @@ Build a model directly from a vector of `ChartSeries` DTOs — the
 primary constructor. Populates the arena in one pass with no
 per-item notification (mirrors `crate::ListModel::from_vec`).
 
+<a id="chartmodel-from_points"></a>
+
 #### `pub fn from_points(points: Vec<ChartDatum<T>>) -> Self`
 
 Build a model with a single anonymous, visible series holding
 `points` — the flat/pie-chart path where series structure doesn't
 matter.
 
+<a id="chartmodel-only_series"></a>
+
 #### `pub fn only_series(&self) -> Option<SeriesId>`
 
 The model's sole series id, iff it has exactly one series.
 
+<a id="chartmodel-add_series"></a>
+
 #### `pub fn add_series(&self, name: impl Into<String>) -> SeriesId`
 
 Append a new, empty, visible series named `name`.
+
+<a id="chartmodel-insert_series"></a>
 
 #### `pub fn insert_series(&self, index: usize, name: impl Into<String>) -> SeriesId`
 
@@ -153,12 +262,16 @@ Insert a new, empty, visible series named `name` at `index`.
 # Panics
 Panics if `index > series_count()`.
 
+<a id="chartmodel-remove_series"></a>
+
 #### `pub fn remove_series(&self, series: SeriesId)`
 
 Remove a series and all of its points.
 
 # Panics
 Panics if `series` is unknown.
+
+<a id="chartmodel-rename_series"></a>
 
 #### `pub fn rename_series(&self, series: SeriesId, name: impl Into<String>)`
 
@@ -167,6 +280,8 @@ already matches the current value.
 
 # Panics
 Panics if `series` is unknown.
+
+<a id="chartmodel-set_series_color"></a>
 
 #### `pub fn set_series_color(&self, series: SeriesId, color: impl Into<ColorProp>)`
 
@@ -178,6 +293,8 @@ value.
 # Panics
 Panics if `series` is unknown.
 
+<a id="chartmodel-clear_series_color"></a>
+
 #### `pub fn clear_series_color(&self, series: SeriesId)`
 
 Clear a series' explicit color (falls back to the chart's palette).
@@ -186,6 +303,8 @@ if the series already has no explicit color.
 
 # Panics
 Panics if `series` is unknown.
+
+<a id="chartmodel-set_series_pattern"></a>
 
 #### `pub fn set_series_pattern(&self, series: SeriesId, pattern: SeriesPattern)`
 
@@ -196,6 +315,8 @@ identifies it. Bumps `Self::style_version` (paint-only), like
 # Panics
 Panics if `series` is unknown.
 
+<a id="chartmodel-clear_series_pattern"></a>
+
 #### `pub fn clear_series_pattern(&self, series: SeriesId)`
 
 Clear a series' explicit pattern, falling back to the one its position
@@ -203,6 +324,8 @@ implies. Bumps `Self::style_version`. A no-op if already unset.
 
 # Panics
 Panics if `series` is unknown.
+
+<a id="chartmodel-set_series_visible"></a>
 
 #### `pub fn set_series_visible(&self, series: SeriesId, visible: bool)`
 
@@ -212,6 +335,8 @@ Show or hide a series. A no-op (no notify, no version bump) if
 # Panics
 Panics if `series` is unknown.
 
+<a id="chartmodel-move_series"></a>
+
 #### `pub fn move_series(&self, series: SeriesId, to: usize)`
 
 Move a series to a new position among its siblings. A no-op (no
@@ -220,9 +345,13 @@ notify, no version bump) if `to` is already the series' position.
 # Panics
 Panics if `series` is unknown or `to` is out of bounds.
 
+<a id="chartmodel-clear"></a>
+
 #### `pub fn clear(&self)`
 
 Remove every series.
+
+<a id="chartmodel-push_point"></a>
 
 #### `pub fn push_point(&self, series: SeriesId, category: T, value: f32)`
 
@@ -231,12 +360,16 @@ Append a point to the end of `series`.
 # Panics
 Panics if `series` is unknown.
 
+<a id="chartmodel-insert_point"></a>
+
 #### `pub fn insert_point(&self, series: SeriesId, index: usize, category: T, value: f32)`
 
 Insert a point at `index` within `series`.
 
 # Panics
 Panics if `series` is unknown or `index > point_count(series)`.
+
+<a id="chartmodel-remove_point"></a>
 
 #### `pub fn remove_point(&self, series: SeriesId, index: usize) -> ChartDatum<T>`
 
@@ -245,12 +378,16 @@ Remove and return the point at `index` within `series`.
 # Panics
 Panics if `series` is unknown or `index >= point_count(series)`.
 
+<a id="chartmodel-update_point"></a>
+
 #### `pub fn update_point(&self, series: SeriesId, index: usize, category: T, value: f32)`
 
 Replace the point at `index` within `series`.
 
 # Panics
 Panics if `series` is unknown or `index >= point_count(series)`.
+
+<a id="chartmodel-replace_series_data"></a>
 
 #### `pub fn replace_series_data(&self, series: SeriesId, points: Vec<ChartDatum<T>>)`
 
@@ -259,44 +396,64 @@ Replace `series`' entire point list.
 # Panics
 Panics if `series` is unknown.
 
+<a id="chartmodel-series_count"></a>
+
 #### `pub fn series_count(&self) -> usize`
 
 Number of series.
+
+<a id="chartmodel-series_ids"></a>
 
 #### `pub fn series_ids(&self) -> Vec<SeriesId>`
 
 The series ids, in display order.
 
+<a id="chartmodel-series_id_at"></a>
+
 #### `pub fn series_id_at(&self, index: usize) -> Option<SeriesId>`
 
 The series id at `index`, if any.
+
+<a id="chartmodel-series_index_of"></a>
 
 #### `pub fn series_index_of(&self, series: SeriesId) -> Option<usize>`
 
 The display index of `series`, if it exists.
 
+<a id="chartmodel-point_count"></a>
+
 #### `pub fn point_count(&self, series: SeriesId) -> usize`
 
 Number of points in `series` (0 if unknown).
+
+<a id="chartmodel-with_series"></a>
 
 #### `pub fn with_series<R>( &self, series: SeriesId, f: impl FnOnce(&str, Option<&ColorProp>, bool) -> R, ) -> Option<R>`
 
 Access a series' metadata (name, color, visibility) via a callback.
 Returns `None` if `series` is unknown.
 
+<a id="chartmodel-with_point"></a>
+
 #### `pub fn with_point<R>( &self, series: SeriesId, index: usize, f: impl FnOnce(&ChartDatum<T>) -> R, ) -> Option<R>`
 
 Access a point within `series` via a callback. Returns `None` if the
 series or index is unknown.
+
+<a id="chartmodel-with_series_view"></a>
 
 #### `pub fn with_series_view<R>( &self, series: SeriesId, f: impl FnOnce(SeriesView<'_, T>) -> R, ) -> Option<R>`
 
 Access a whole-series view (metadata + points slice) via a callback.
 Returns `None` if `series` is unknown.
 
+<a id="chartmodel-with_all_series"></a>
+
 #### `pub fn with_all_series<R>(&self, f: impl FnOnce(&[SeriesView<'_, T>]) -> R) -> R`
 
 Access every series as an ordered slice of views via a callback.
+
+<a id="chartmodel-structure_version"></a>
 
 #### `pub fn structure_version(&self) -> Signal<u64>`
 
@@ -309,12 +466,16 @@ registered via `Self::observe_changes` *before* bumping this
 signal — see the note on `observe_changes` for what that means for a
 callback that reads the signal back synchronously.
 
+<a id="chartmodel-style_version"></a>
+
 #### `pub fn style_version(&self) -> Signal<u64>`
 
 Style version signal — bumped only by a series color or pattern
 change. Bind at `BindingLevel::RepaintOnly`. Same notify-before-bump
 ordering as `Self::structure_version` — see
 `Self::observe_changes`.
+
+<a id="chartmodel-observe_changes"></a>
 
 #### `pub fn observe_changes(&self, f: impl Fn(&ChartChange) + 'static) -> ObserverHandle`
 
@@ -337,6 +498,8 @@ for "has this specific mutation been applied" — the `ChartChange`
 argument already tells you that; use the signal for *external*
 bind-and-rerun consumers (widgets), not from within the notify path
 itself.
+
+<a id="chartmodel-debug_named"></a>
 
 #### `pub fn debug_named(self, _name: impl Into<String>) -> Self`
 

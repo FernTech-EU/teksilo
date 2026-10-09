@@ -8,6 +8,23 @@
 MasonryLayout — a variable-height grid that packs children into the
 shortest column (Pinterest-style).
 
+## Public functions
+
+### `MasonryLayout`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(column_count: usize)`](#masonrylayout-new) |
+| | **Builder methods** |
+| `Self` | [`column_spacing(spacing: f32)`](#masonrylayout-column_spacing) |
+| `Self` | [`item_spacing(spacing: f32)`](#masonrylayout-item_spacing) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#masonrylayout-child) |
+| `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#masonrylayout-children) |
+| `Self` | [`child_opt(widget: Option<impl Widget + 'static>)`](#masonrylayout-child_opt) |
+
+## Detailed description
+
 Each child is measured at the shared column width and placed into
 whichever column currently has the lowest accumulated height.
 Ties between equal-height columns are broken by column index
@@ -35,13 +52,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![MasonryLayout at Touch density](img/masonry-touch.png)
 
-## Builder methods at a glance
-
-`column_spacing`, `item_spacing`, `child`, `children`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/masonry/index.html)
+
+<a id="masonrylayout"></a>
 
 ## `pub struct MasonryLayout`
 
@@ -69,27 +84,39 @@ pub struct MasonryLayout { /* fields */ }
 
 ### Methods
 
+<a id="masonrylayout-new"></a>
+
 #### `pub fn new(column_count: usize) -> Self`
 
 Create a masonry layout with the given number of columns.
 
 The count is clamped to a minimum of 1.
 
+<a id="masonrylayout-column_spacing"></a>
+
 #### `pub fn column_spacing(mut self, spacing: f32) -> Self`
 
 Horizontal gap between columns.
+
+<a id="masonrylayout-item_spacing"></a>
 
 #### `pub fn item_spacing(mut self, spacing: f32) -> Self`
 
 Vertical gap between items within the same column.
 
+<a id="masonrylayout-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add an inline child widget (deferred insertion).
 
+<a id="masonrylayout-children"></a>
+
 #### `pub fn children( mut self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
 Add multiple inline children from an iterator.
+
+<a id="masonrylayout-child_opt"></a>
 
 #### `pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self`
 

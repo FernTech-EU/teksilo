@@ -21,7 +21,7 @@
 - Workspace member globs: `crates/*` (libraries) and `examples/*` (runnable demos).
 - External sibling crates outside the workspace: `text-typeset` and `text-document`, both **ordinary
   crates.io dependencies** pinned in `[workspace.dependencies]`. `text-document` is re-exported up to the
-  umbrella as `teksilo::text_document` (feature `text`, on by default). Local checkouts are a
+  umbrella as `teksilo::text_document`. Local checkouts are a
   `[patch.crates-io]` in a gitignored `.cargo/config.toml` — see README, "Development environment".
 
 ---

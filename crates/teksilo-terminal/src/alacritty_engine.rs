@@ -285,6 +285,15 @@ impl TerminalEngine for AlacrittyEngine {
         self.pty.poll_exit()
     }
 
+    fn synchronized_update_deadline(&self) -> Option<std::time::Instant> {
+        self.parser.sync_timeout().sync_timeout()
+    }
+
+    fn end_synchronized_update(&mut self) {
+        self.parser.stop_sync(&mut self.term);
+        self.pump_events();
+    }
+
     fn kill(&mut self) {
         self.pty.kill();
     }

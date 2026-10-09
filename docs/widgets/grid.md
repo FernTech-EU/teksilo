@@ -7,6 +7,32 @@
 
 Grid — a 2D layout container with explicit row and column tracks.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`TrackSize`](#tracksize) — Sizing mode for a single row or column track in a `Grid` |
+| `struct` | [`Grid`](#grid) — A 2D grid layout container with explicit track declarations |
+
+## Public functions
+
+### `Grid`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#grid-new) |
+| | **Builder methods** |
+| `Self` | [`columns(columns: Vec<TrackSize>)`](#grid-columns) |
+| `Self` | [`rows(rows: Vec<TrackSize>)`](#grid-rows) |
+| `Self` | [`column_gap(gap: impl Into<Prop<f32>>)`](#grid-column_gap) |
+| `Self` | [`row_gap(gap: impl Into<Prop<f32>>)`](#grid-row_gap) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#grid-child) |
+| `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#grid-children) |
+| `Self` | [`child_opt(widget: Option<impl Widget + 'static>)`](#grid-child_opt) |
+
+## Detailed description
+
 Columns and rows are declared as `TrackSize` slices supporting three
 sizing modes: `Fixed(px)` (exact logical pixels), `Auto` (sized to the
 largest child in that track), and `Fractional(fr)` (share of the remaining
@@ -40,13 +66,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Grid at Touch density](img/grid-touch.png)
 
-## Builder methods at a glance
-
-`columns`, `rows`, `column_gap`, `row_gap`, `child`, `children`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/grid/index.html)
+
+<a id="tracksize"></a>
 
 ## `pub enum TrackSize`
 
@@ -62,6 +86,8 @@ pub enum TrackSize { /* variants */ }
 - **`Fractional`** — Share of the remaining space after `Fixed` and `Auto` tracks are resolved; equivalent to the CSS `fr` unit.  Multiple `Fractional` tracks divide the remainder proportionally to their weights.
 - **`Auto`** — Sized to the largest intrinsic dimension among all children in the track; expands to fill content, never clips.
 
+<a id="grid"></a>
+
 ## `pub struct Grid`
 
 A 2D grid layout container with explicit track declarations.
@@ -72,38 +98,54 @@ pub struct Grid { /* fields */ }
 
 ### Methods
 
+<a id="grid-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create a new `Grid` with a single `Auto` column and a single `Auto`
 row; configure track definitions with `columns` and
 `rows`.
 
+<a id="grid-columns"></a>
+
 #### `pub fn columns(mut self, columns: Vec<TrackSize>) -> Self`
 
 Set the column track definitions; each entry describes one column's
 sizing mode.
+
+<a id="grid-rows"></a>
 
 #### `pub fn rows(mut self, rows: Vec<TrackSize>) -> Self`
 
 Set the row track definitions; each entry describes one row's sizing
 mode.
 
+<a id="grid-column_gap"></a>
+
 #### `pub fn column_gap(mut self, gap: impl Into<Prop<f32>>) -> Self`
 
 Set the inter-column gap. Accepts static `f32` or `Signal<f32>`.
+
+<a id="grid-row_gap"></a>
 
 #### `pub fn row_gap(mut self, gap: impl Into<Prop<f32>>) -> Self`
 
 Set the inter-row gap. Accepts static `f32` or `Signal<f32>`.
 
+<a id="grid-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Append an inline child widget in the next cell (row-major order).
+
+<a id="grid-children"></a>
 
 #### `pub fn children( mut self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
 Append multiple inline children from an iterator, each occupying the
 next cell in row-major order.
+
+<a id="grid-child_opt"></a>
 
 #### `pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self`
 

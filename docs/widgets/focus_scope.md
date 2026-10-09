@@ -6,6 +6,20 @@
 `FocusScope` — a layout-transparent wrapper that declares a **traversal
 boundary** for Tab / Shift+Tab focus cycling.
 
+## Public functions
+
+### `FocusScope`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(policy: TraversalScopePolicy)`](#focusscope-new) |
+| | **Builder methods** |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#focusscope-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#focusscope-child_opt) |
+
+## Detailed description
+
 Descendants' `tab_index` values are scoped to the nearest enclosing
 `FocusScope`: two sibling scopes that both number their children `1, 2, 3`
 never interleave — each scope is an independent, ordered unit within its
@@ -31,7 +45,7 @@ left it. Trapping focus inside one prevents that dismissal from ever
 firing. A centered modal needs no wrapper at all: `cycle_focus` already
 roots traversal at the topmost centered overlay's content.
 
-## Layout & accessibility
+#### Layout & accessibility
 
 `FocusScope` imposes no layout — it reports its child's natural size and
 places the child at its own bounds (like `Fade`). It is a
@@ -39,13 +53,11 @@ structural boundary, not an AT element: the wrapped child owns its own
 accessibility semantics. The scope node is never itself a Tab stop
 (`BuildContext::set_traversal_scope` forces it non-focusable).
 
-## Builder methods at a glance
-
-`child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/focus_scope/index.html)
+
+<a id="focusscope"></a>
 
 ## `pub struct FocusScope`
 
@@ -58,13 +70,19 @@ pub struct FocusScope { /* fields */ }
 
 ### Methods
 
+<a id="focusscope-new"></a>
+
 #### `pub fn new(policy: TraversalScopePolicy) -> Self`
 
 Create a traversal scope with the given boundary `policy`.
 
+<a id="focusscope-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Inline child widget (deferred insertion — the form `teksu!` lowers to).
+
+<a id="focusscope-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

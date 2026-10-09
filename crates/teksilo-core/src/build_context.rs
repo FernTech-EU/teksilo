@@ -255,6 +255,50 @@ impl<'a> BuildContext<'a> {
         )
     }
 
+    /// Attach `trigger` to the widget being built, in this window. Call it in
+    /// every `build()`: a rebuild whose `build()` no longer attaches it
+    /// releases it, as does the widget's destruction, and the tree's drop
+    /// releases the rest. A request pending when the widget is rebuilt is
+    /// still pending after it. Attaching the same trigger to the same widget
+    /// twice is a no-op. See [`crate::RepaintTrigger`].
+    pub fn attach_repaint_trigger(&mut self, trigger: &crate::RepaintTrigger) {
+        let id = self.self_id();
+        self.tree.attach_repaint_trigger(id, trigger);
+    }
+
+    /// Attach `source` to the widget being built, in this window, writing its
+    /// size and status into `signals`. Call it in every `build()`: a rebuild
+    /// detaches it and the new `build()` attaches again, the widget's
+    /// destruction detaches it, and the tree's drop detaches the rest.
+    ///
+    /// The source's current size and status are written into `signals`, and
+    /// recorded for the widget's paint, before this returns: a widget built
+    /// after this frame's layout pre-pass, or attached to a source that will
+    /// never commit again, lays out and draws its picture in its first frame.
+    /// Its pixels reach the renderer without passing through the widget: in
+    /// `paint()` the widget hands the attachment's consumer to
+    /// `Canvas::draw_live_image`. See [`teksilo_canvas::live_image`].
+    pub fn attach_live_image(
+        &mut self,
+        source: &teksilo_canvas::live_image::LiveImageSource,
+        signals: &crate::LiveImageSignals,
+    ) -> crate::LiveImageAttachment {
+        let id = self.self_id();
+        self.tree.attach_live_image(id, source, signals)
+    }
+
+    /// Run `hook` on the UI thread in the frame after a `RepaintTrigger`
+    /// attached to the widget being built requests a pull
+    /// ([`crate::RepaintTrigger::request_pull`]), whether or not the widget
+    /// is shown: it takes in what the producer stored and says what changed.
+    /// A widget that is not shown takes it in without its window drawing a
+    /// frame. Set it in every `build()`; it replaces the one an earlier
+    /// build set, and a pull requested before a rebuild runs the new one.
+    pub fn on_trigger_pull(&mut self, hook: impl FnMut() -> crate::PullOutcome + 'static) {
+        let id = self.self_id();
+        self.tree.set_trigger_pull_hook(id, Box::new(hook));
+    }
+
     /// Opt into the shader-driven animated-quad pipeline. The widget
     /// paint() emits ONE `canvas.draw_animated_quad(bounds, handle.slot(),
     /// class)` call; the renderer samples per-slot state from its
@@ -464,6 +508,14 @@ impl<'a> BuildContext<'a> {
     /// rebuild on its own.
     pub fn text_scale_signal(&self) -> crate::signal::Signal<f32> {
         self.tree.text_scale_signal()
+    }
+
+    /// The window's device scale (physical px per logical px), as a signal.
+    /// Bind it at `Relayout` when `layout_response` or `place_children` reads
+    /// `LayoutContext::scale_factor`: a scale change with an unchanged logical
+    /// size relayouts nothing on its own.
+    pub fn device_scale_signal(&self) -> crate::signal::Signal<f32> {
+        self.tree.device_scale_signal()
     }
 
     /// Whether the host window is currently active (`focused AND not

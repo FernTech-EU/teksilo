@@ -89,13 +89,13 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "scroll",
-        description: "Scroll the widget under a node by a pixel delta, with optional modifiers (ctrl/shift/alt/meta/command). A modifier-held wheel is its own gesture, e.g. Ctrl+wheel to zoom. Use `command` for the platform accelerator (Control on Windows/Linux, Command on macOS); `ctrl` is literal Control.",
+        description: "Scroll the widget under a node by a pixel delta, or by lines with `lines` (a wheel notch's delta, source Wheel), at the node's centre or at `at` ([x, y] node-local), with optional modifiers (ctrl/shift/alt/meta/command). A modifier-held wheel is its own gesture, e.g. Ctrl+wheel to zoom. Use `command` for the platform accelerator (Control on Windows/Linux, Command on macOS); `ctrl` is literal Control.",
         mutating: true,
     },
     // ---- Synthetic input ----
     ToolDescriptor {
         name: "inject_pointer",
-        description: "Inject a pointer event at a point: action = click (default), double_click, down, up or move; button = primary (default), secondary, middle, back, forward; kind = mouse (default), touch or pen; with optional ctrl/shift/alt/meta/command held for the press and release. A touch or pen enters through the tree's pointer door, so the kind reaches the hit test, the slop, the hover rules and the arbitration; pen carries `pressure` (0..1) and `tilt` ([x, y] degrees). Continue a contact a previous call left down with `pointer_id` from query_pointers (on a move or an up; a down and a click mint their own), or drive a whole gesture with inject_touch_sequence. Use `command` for the platform accelerator (Control on Windows/Linux, Command on macOS) — accelerator-click to extend a selection is `command`, not `ctrl`. Unknown names and unknown fields are refused rather than defaulted, and so are pressure/tilt/pointer_id on a mouse.",
+        description: "Inject a pointer event at a point — window-logical px, or local to `node`, the position that node's own handlers receive (exact under a Scale, Rotate or SceneView): action = click (default), double_click, down, up or move; button = primary (default), secondary, middle, back, forward; kind = mouse (default), touch or pen; with optional ctrl/shift/alt/meta/command held for the press and release. A touch or pen enters through the tree's pointer door, so the kind reaches the hit test, the slop, the hover rules and the arbitration; pen carries `pressure` (0..1) and `tilt` ([x, y] degrees). Continue a contact a previous call left down with `pointer_id` from query_pointers (on a move or an up; a down and a click mint their own), or drive a whole gesture with inject_touch_sequence. Use `command` for the platform accelerator (Control on Windows/Linux, Command on macOS) — accelerator-click to extend a selection is `command`, not `ctrl`. Unknown names and unknown fields are refused rather than defaulted, and so are pressure/tilt/pointer_id on a mouse.",
         mutating: true,
     },
     ToolDescriptor {
@@ -105,12 +105,12 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "inject_key",
-        description: "Inject a key press (with optional modifiers) to the focused widget. Use `command` for any accelerator chord (Control on Windows/Linux, Command on macOS) — a shortcut declared Ctrl+S resolves to the Command chord on macOS, so `ctrl` there injects a key that matches no binding and still reports success. `ctrl` stays literal Control, for chords that really are Control everywhere (Ctrl+Tab).",
+        description: "Inject a key press (with optional modifiers) to the focused widget: by default its press and its release, or with `phase` = down or up one half, so a key can stay held across calls. `text` is what the press types, as a keyboard attaches it; omitted, a character key types nothing (use type_text to type). Use `command` for any accelerator chord (Control on Windows/Linux, Command on macOS) — a shortcut declared Ctrl+S resolves to the Command chord on macOS, so `ctrl` there injects a key that matches no binding and still reports success. `ctrl` stays literal Control, for chords that really are Control everywhere (Ctrl+Tab).",
         mutating: true,
     },
     ToolDescriptor {
         name: "type_text",
-        description: "Focus a node and type text into it.",
+        description: "Focus a node and type text into it as a keyboard does: each character is a key pressed and released, a letter as its named key (Shift held for a capital), a space as Space, a line break as Enter, a tab as Tab. Shortcuts see those keys as they would a user's; to insert text without keys, commit it with type_ime.",
         mutating: true,
     },
     ToolDescriptor {
@@ -125,7 +125,7 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "inject_touch_sequence",
-        description: "Drive a whole multi-touch gesture in one call — a list of steps, each naming a finger slot, a phase (down/move/up/cancel), a point, and how many simulated milliseconds to advance first — and report the arbitration after every step: the frozen touch_action, every competitor with its role and state, and the winner. Fingers are named by slot, not by id: identities are minted by the framework and the reply says which one each slot got. A sequence that stops short of its `up` leaves the finger down, which is how a live arbitration stays observable.",
+        description: "Drive a whole multi-touch gesture in one call — a list of steps, each naming a finger slot, a phase (down/move/up/cancel), a point (window-logical, or local to its `node`), and how many simulated milliseconds to advance first — and report the arbitration after every step: the frozen touch_action, every competitor with its role and state, and the winner. Fingers are named by slot, not by id: identities are minted by the framework and the reply says which one each slot got. A sequence that stops short of its `up` leaves the finger down, which is how a live arbitration stays observable.",
         mutating: true,
     },
     ToolDescriptor {
@@ -140,7 +140,7 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "long_press",
-        description: "Press at a point, hold for exactly the device's long-press threshold, release. The hold is read off the active input profile for the pointer kind, so the call means 'hold long enough' without the script knowing the number.",
+        description: "Press at a point (window-logical, or local to `node`), hold for exactly the device's long-press threshold, release. The hold is read off the active input profile for the pointer kind, so the call means 'hold long enough' without the script knowing the number.",
         mutating: true,
     },
     ToolDescriptor {
@@ -195,6 +195,17 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
         description: "Poll until a condition holds (node exists / value / gone / version).",
         mutating: true,
     },
+    // ---- Live images ----
+    ToolDescriptor {
+        name: "live_image_stats",
+        description: "A LiveImage's frame counters (generation, window generation, paints, uploads) and its window's textures and wakes.",
+        mutating: false,
+    },
+    ToolDescriptor {
+        name: "live_image_map",
+        description: "Where a LiveImage's picture lies, and its source pixels as window points and back.",
+        mutating: false,
+    },
     // ---- Visual ----
     ToolDescriptor {
         name: "screenshot",
@@ -203,7 +214,7 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
 ];
 
-/// The number of tools in the catalog (34).
+/// The number of tools in the catalog (36).
 pub const TOOL_COUNT: usize = TOOL_CATALOG.len();
 
 #[cfg(test)]

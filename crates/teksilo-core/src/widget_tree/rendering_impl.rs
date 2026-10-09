@@ -472,6 +472,11 @@ fn paint_widget_cached(
             Some(tb) => Canvas::with_text_backend(tb.clone()),
             None => Canvas::new(),
         };
+        // The paint about to run serves every repaint requested off the UI
+        // thread so far: take the request before reading the state.
+        if let Some(wake) = &node.repaint_wake {
+            wake.consume_repaint();
+        }
         node.widget.paint(bounds, &mut canvas, &ctx);
         let widget_frame = canvas.into_render_frame();
 
@@ -1851,10 +1856,10 @@ mod tests {
 
         // The node's own opacity scope stamps it as visited before the
         // sub-perceptual early return, so only the paint stamp tells the
-        // clear loop that `paint()` never ran. The opacity binding would
-        // repaint the node on fade-in anyway; what must hold regardless is
-        // that no stale cache survives, since a cached paint is what later
-        // decides whether a skipped node gets re-marked.
+        // clear loop that `paint()` never ran. Nothing visible depends on it
+        // here: the opacity binding re-marks the node on fade-in, so it
+        // repaints either way. This pins the cache itself, which must not
+        // outlive the change that dirtied it.
         opacity.set(0.0);
         tree.layout(SizeProposal::exact(100.0, 50.0));
         color.set(Color::BLUE);
@@ -1871,8 +1876,12 @@ mod tests {
         assert_eq!(colors, vec![Color::BLUE.to_array()]);
     }
 
+    /// A guard, not a test of the stale-cache fix: dormant nodes never reach
+    /// the end-of-render clear, and activation marks a node for repaint on
+    /// its own. It keeps that path covered beside the cases the fix does
+    /// change.
     #[test]
-    fn node_dirtied_while_dormant_repaints_on_activation() {
+    fn a_node_changed_while_dormant_repaints_when_activated() {
         let probe = ColorProbe::new(Color::RED);
         let color = probe.color.clone();
         let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
@@ -1890,6 +1899,90 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let colors = painted_colors(&tree.render());
         assert_eq!(colors, vec![Color::BLUE.to_array()]);
+    }
+
+    /// Stacks its children at its origin, as `StackWidget` does, and counts
+    /// its layouts.
+    #[derive(Debug)]
+    struct CountingStack {
+        children: Vec<WidgetId>,
+        layouts: Rc<std::cell::Cell<u32>>,
+    }
+
+    impl Widget for CountingStack {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            self.layouts.set(self.layouts.get() + 1);
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn place_children(
+            &self,
+            bounds: Rect,
+            _proposal: SizeProposal,
+            children: &mut [WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+            for child in children.iter_mut() {
+                child.origin = bounds.origin();
+                child.size = bounds.size();
+            }
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            self.children.clone()
+        }
+    }
+
+    /// A destroyed subtree is not in the next frame, though nothing else
+    /// changed and the frame would otherwise be replayed whole, and its
+    /// parent lays out again without it.
+    #[test]
+    fn a_destroyed_subtree_leaves_the_next_frame() {
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let red = tree.add(ColorProbe::new(Color::RED));
+        let blue = tree.add(ColorProbe::new(Color::BLUE));
+        let layouts = Rc::new(std::cell::Cell::new(0));
+        let root = tree.add(CountingStack {
+            children: vec![red, blue],
+            layouts: layouts.clone(),
+        });
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(painted_colors(&tree.render()).len(), 2);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let settled = layouts.get();
+
+        tree.destroy_subtree_for_testing(red);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert!(layouts.get() > settled, "the parent laid out again");
+        assert_eq!(painted_colors(&tree.render()), vec![Color::BLUE.to_array()]);
+
+        // A root has no parent to mark: the composed frame goes all the same.
+        tree.destroy_subtree_for_testing(root);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert!(painted_colors(&tree.render()).is_empty());
+    }
+
+    /// The same through a handler's `EventContext::destroy`, the door an
+    /// application takes at run time.
+    #[test]
+    fn a_subtree_a_handler_destroys_leaves_the_next_frame() {
+        use crate::widget_builder::WidgetBuilder;
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let red = tree.add(ColorProbe::new(Color::RED));
+        let button =
+            tree.add(ColorProbe::new(Color::BLUE).on_tap(move |_tap, ctx| ctx.destroy(red)));
+        tree.add(StackWidget::new().child(red).child(button));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(painted_colors(&tree.render()).len(), 2);
+
+        tree.synthesise_tap(button);
+        assert!(tree.arena.get(red).is_none(), "the tap destroyed it");
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(painted_colors(&tree.render()), vec![Color::BLUE.to_array()]);
     }
 
     #[test]

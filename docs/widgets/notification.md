@@ -7,6 +7,66 @@ Persistent notification archive — the storage and data-model layer
 backing `NotificationLog`, `NotificationCenterButton`, and
 `NotificationLogDialog`.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`NotificationEntry`](#notificationentry) — A single archived notification entry rendered by `NotificationLog` and persisted under `NotificationArchive::Persistent` |
+| `struct` | [`NotificationUpdate`](#notificationupdate) — One in-place mutation applied when a `Toast` with the same `id` as an existing entry is presented again |
+| `enum` | [`ArchivedActionStyle`](#archivedactionstyle) — Visual presentation of an archived action button |
+| `struct` | [`ArchivedAction`](#archivedaction) — A single action stored alongside an archived notification entry |
+| `const` | [`DEFAULT_ARCHIVE_LIMIT`](#default_archive_limit) — Default per-archive entry cap |
+| `const` | [`ARCHIVE_FILE_NAME`](#archive_file_name) — File-name (without extension) used for the persistent archive |
+| `const` | [`UPDATE_HISTORY_LIMIT`](#update_history_limit) — How many `NotificationUpdate` records one row keeps |
+| `enum` | [`NotificationArchive`](#notificationarchive) — Storage mode for the notification archive |
+| `struct` | [`NotificationArchiveModel`](#notificationarchivemodel) — Shared model — clones share state |
+| `struct` | [`NotificationLogDialog`](#notificationlogdialog) — One-liner modal preset around `NotificationLog` |
+
+## Public functions
+
+### `NotificationArchive`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`in_memory()`](#notificationarchive-in_memory) |
+| `Self` | [`in_memory_with_limit(limit: usize)`](#notificationarchive-in_memory_with_limit) |
+| `Self` | [`persistent(file_name: impl Into<String>)`](#notificationarchive-persistent) |
+| `Self` | [`persistent_with_limit(file_name: impl Into<String>, limit: usize)`](#notificationarchive-persistent_with_limit) |
+| | **Methods** |
+| `usize` | [`limit()`](#notificationarchive-limit) |
+
+### `NotificationArchiveModel`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Result<Self, NotificationArchiveError>` | [`open(archive: &NotificationArchive, paths: &AppPaths, debounce: Duration)`](#notificationarchivemodel-open) |
+| `Self` | [`in_memory()`](#notificationarchivemodel-in_memory) |
+| | **Methods** |
+| `&ListModel<NotificationEntry>` | [`entries()`](#notificationarchivemodel-entries) |
+| `&Signal<usize>` | [`unread_count()`](#notificationarchivemodel-unread_count) |
+| `&Signal<u64>` | [`version_signal()`](#notificationarchivemodel-version_signal) |
+| `usize` | [`limit()`](#notificationarchivemodel-limit) |
+| `Result<(), SettingsFileError>` | [`flush_now()`](#notificationarchivemodel-flush_now) |
+|  | [`push(entry: NotificationEntry)`](#notificationarchivemodel-push) |
+|  | [`push_update(entry: NotificationEntry)`](#notificationarchivemodel-push_update) |
+|  | [`mark_read_where(mut predicate: impl FnMut(&NotificationEntry) -> bool)`](#notificationarchivemodel-mark_read_where) |
+|  | [`mark_all_read()`](#notificationarchivemodel-mark_all_read) |
+|  | [`clear()`](#notificationarchivemodel-clear) |
+|  | [`clear_where(mut predicate: impl FnMut(&NotificationEntry) -> bool)`](#notificationarchivemodel-clear_where) |
+|  | [`remove_by_id(id: u64)`](#notificationarchivemodel-remove_by_id) |
+
+### `NotificationLogDialog`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Associated functions** |
+|  | [`show(archive: Rc<NotificationArchiveModel>, ctx: &mut EventContext)`](#notificationlogdialog-show) |
+|  | [`show_with(archive: Rc<NotificationArchiveModel>, ctx: &mut EventContext, configure: impl FnOnce(NotificationLog) -> NotificationLog + 'static)`](#notificationlogdialog-show_with) |
+
+## Detailed description
+
 Every toast presented through the toast registry is mirrored into a
 `NotificationArchiveModel` when archiving is enabled via
 `ToastInstallOptions::archive`. The model is a
@@ -19,7 +79,7 @@ restarts. Action callbacks attached via raw closures are lost on
 archival; actions that should remain re-invokable from the log carry an
 `intent_name` that the log replays through `ctx.send_intent(...)`.
 
-## When to use
+#### When to use
 
 - Pair with `TeksiloAppBuilder::install_toast_default()` to get the full
   bell-button + log + persistence stack for free.
@@ -32,13 +92,11 @@ let archive = ctx.app_state::<Rc<RefCell<NotificationArchiveModel>>>().unwrap();
 let log = NotificationLog::new(archive.clone());
 ```
 
-## Builder methods at a glance
-
-`in_memory`, `in_memory_with_limit`, `persistent`, `persistent_with_limit`, `limit`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/notification/index.html)
+
+<a id="notificationentry"></a>
 
 ## `pub struct NotificationEntry`
 
@@ -50,6 +108,8 @@ fields only — no closures, no `Rc<dyn Fn>` — so it is `Serialize`-friendly.
 pub struct NotificationEntry { /* fields */ }
 ```
 
+<a id="notificationupdate"></a>
+
 ## `pub struct NotificationUpdate`
 
 One in-place mutation applied when a `Toast` with the same `id` as an
@@ -59,6 +119,8 @@ existing row — the "Uploading 3 of 7 → Upload complete" pattern.
 ```rust
 pub struct NotificationUpdate { /* fields */ }
 ```
+
+<a id="archivedactionstyle"></a>
 
 ## `pub enum ArchivedActionStyle`
 
@@ -77,6 +139,8 @@ pub enum ArchivedActionStyle { /* variants */ }
 - **`SecondaryButton`** — Plain (secondary).
 - **`Destructive`** — Destructive (red-tinted).
 
+<a id="archivedaction"></a>
+
 ## `pub struct ArchivedAction`
 
 A single action stored alongside an archived notification entry. Only
@@ -86,6 +150,8 @@ whose live closure has torn down render as inert descriptive labels.
 ```rust
 pub struct ArchivedAction { /* fields */ }
 ```
+
+<a id="default_archive_limit"></a>
 
 ## `pub const DEFAULT_ARCHIVE_LIMIT`
 
@@ -97,6 +163,8 @@ pragmatic limit so persistent files don't grow unbounded.
 pub const DEFAULT_ARCHIVE_LIMIT: usize = 200;
 ```
 
+<a id="archive_file_name"></a>
+
 ## `pub const ARCHIVE_FILE_NAME`
 
 File-name (without extension) used for the persistent archive.
@@ -106,6 +174,8 @@ Resolved through `AppPaths::config_file` into
 ```rust
 pub const ARCHIVE_FILE_NAME: &str = "notifications";
 ```
+
+<a id="update_history_limit"></a>
 
 ## `pub const UPDATE_HISTORY_LIMIT`
 
@@ -119,6 +189,8 @@ as it now stands, whatever the history kept.
 ```rust
 pub const UPDATE_HISTORY_LIMIT: usize = 20;
 ```
+
+<a id="notificationarchive"></a>
 
 ## `pub enum NotificationArchive`
 
@@ -136,13 +208,19 @@ pub enum NotificationArchive { /* variants */ }
 
 ### Methods
 
+<a id="notificationarchive-in_memory"></a>
+
 #### `pub fn in_memory() -> Self`
 
 In-memory archive with the default 200-entry cap.
 
+<a id="notificationarchive-in_memory_with_limit"></a>
+
 #### `pub fn in_memory_with_limit(limit: usize) -> Self`
 
 In-memory archive with a custom cap.
+
+<a id="notificationarchive-persistent"></a>
 
 #### `pub fn persistent(file_name: impl Into<String>) -> Self`
 
@@ -152,9 +230,15 @@ yields `<config_dir>/<app>/notifications.toml`. Apps that
 want a different name pass it here; tests pass an arbitrary
 name and use `AppPaths::for_testing(tmpdir)`.
 
+<a id="notificationarchive-persistent_with_limit"></a>
+
 #### `pub fn persistent_with_limit(file_name: impl Into<String>, limit: usize) -> Self`
 
+<a id="notificationarchive-limit"></a>
+
 #### `pub fn limit(&self) -> usize`
+
+<a id="notificationarchivemodel"></a>
 
 ## `pub struct NotificationArchiveModel`
 
@@ -171,12 +255,16 @@ pub struct NotificationArchiveModel { /* fields */ }
 
 ### Methods
 
+<a id="notificationarchivemodel-open"></a>
+
 #### `pub fn open( archive: &NotificationArchive, paths: &AppPaths, debounce: Duration, ) -> Result<Self, NotificationArchiveError>`
 
 Construct from a `NotificationArchive` config. For
 `Persistent` mode, resolves the path through `AppPaths`.
 Tests use `AppPaths::for_testing(tmpdir)` + `Duration::ZERO`
 debounce.
+
+<a id="notificationarchivemodel-in_memory"></a>
 
 #### `pub fn in_memory() -> Self`
 
@@ -185,14 +273,20 @@ archive with the default cap, without going through paths.
 Mostly useful for tests and apps that explicitly want no
 persistence.
 
+<a id="notificationarchivemodel-entries"></a>
+
 #### `pub fn entries(&self) -> &ListModel<NotificationEntry>`
 
 Reactive handle on the entries. Bind to a `ListView` /
 `Repeater` for live UI.
 
+<a id="notificationarchivemodel-unread_count"></a>
+
 #### `pub fn unread_count(&self) -> &Signal<usize>`
 
 Signal of the unread count. Drives the bell-button badge.
+
+<a id="notificationarchivemodel-version_signal"></a>
 
 #### `pub fn version_signal(&self) -> &Signal<u64>`
 
@@ -204,13 +298,19 @@ for N of them, see
 `ToastRegistry::version_signal`
 for the history of why that had to be said out loud.
 
+<a id="notificationarchivemodel-limit"></a>
+
 #### `pub fn limit(&self) -> usize`
+
+<a id="notificationarchivemodel-flush_now"></a>
 
 #### `pub fn flush_now(&self) -> Result<(), SettingsFileError>`
 
 Force the persistent backing file to disk synchronously.
 No-op for `InMemory`. Tests call this between mutations and
 re-opening the file to verify persistence.
+
+<a id="notificationarchivemodel-push"></a>
 
 #### `pub fn push(&self, entry: NotificationEntry)`
 
@@ -230,6 +330,8 @@ takes the entry's read state, which makes it unread again, even when
 the notice says exactly what it said before: the log and the bell show
 that it happened again. Every other field is merged as
 `push_update` describes.
+
+<a id="notificationarchivemodel-push_update"></a>
 
 #### `pub fn push_update(&self, entry: NotificationEntry)`
 
@@ -264,6 +366,8 @@ toast it mirrors does:
 With no matching row (the user cleared it, or it was evicted), the
 update is pushed as a new row, like `push`.
 
+<a id="notificationarchivemodel-mark_read_where"></a>
+
 #### `pub fn mark_read_where(&self, mut predicate: impl FnMut(&NotificationEntry) -> bool)`
 
 Mark every UNREAD entry matching `predicate` as read,
@@ -274,14 +378,20 @@ entries read on close — calling the unscoped `mark_all_read`
 from a scoped bell would incorrectly clear every OTHER
 window's/audience's unread state too.
 
+<a id="notificationarchivemodel-mark_all_read"></a>
+
 #### `pub fn mark_all_read(&self)`
 
 Mark every archived entry as read; reset `unread_count` to 0.
 Called by `NotificationCenterButton` when its popover closes.
 
+<a id="notificationarchivemodel-clear"></a>
+
 #### `pub fn clear(&self)`
 
 Clear the entire archive (resets `unread_count` to 0).
+
+<a id="notificationarchivemodel-clear_where"></a>
 
 #### `pub fn clear_where(&self, mut predicate: impl FnMut(&NotificationEntry) -> bool)`
 
@@ -291,6 +401,8 @@ scoped counterpart of `clear`: a bell scoped to
 one window/audience must only clear ITS entries — the unscoped
 `clear()` wipes the ENTIRE shared archive (every window's
 history), which would be wrong for a scoped "Clear" button.
+
+<a id="notificationarchivemodel-remove_by_id"></a>
 
 #### `pub fn remove_by_id(&self, id: u64)`
 
@@ -309,6 +421,8 @@ a since-mutated list can silently remove the *wrong* entry; keying
 off `id` instead re-resolves the row's current position at the
 moment of removal, so it always removes the entry the caller meant.
 
+<a id="notificationlogdialog"></a>
+
 ## `pub struct NotificationLogDialog`
 
 One-liner modal preset around `NotificationLog`. Apps usually
@@ -321,10 +435,14 @@ pub struct NotificationLogDialog;
 
 ### Methods
 
+<a id="notificationlogdialog-show"></a>
+
 #### `pub fn show(archive: Rc<NotificationArchiveModel>, ctx: &mut EventContext)`
 
 Present the dialog with the standard chrome (title +
 720x520 default size, escape-or-click-outside dismissal).
+
+<a id="notificationlogdialog-show_with"></a>
 
 #### `pub fn show_with( archive: Rc<NotificationArchiveModel>, ctx: &mut EventContext, configure: impl FnOnce(NotificationLog) -> NotificationLog + 'static, )`
 

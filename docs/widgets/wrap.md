@@ -8,6 +8,23 @@
 Wrap — a horizontal flow layout that wraps children to the next line when
 they exceed the available width.
 
+## Public functions
+
+### `Wrap`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#wrap-new) |
+| | **Builder methods** |
+| `Self` | [`spacing(spacing: impl Into<Prop<f32>>)`](#wrap-spacing) |
+| `Self` | [`line_spacing(spacing: impl Into<Prop<f32>>)`](#wrap-line_spacing) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#wrap-child) |
+| `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#wrap-children) |
+| `Self` | [`child_opt(widget: Option<impl Widget + 'static>)`](#wrap-child_opt) |
+
+## Detailed description
+
 Children are placed left-to-right (or right-to-left under RTL layout) and
 wrapped to the next line when the next item would exceed the container
 width.  Each line's height is the tallest child on that line.  Use
@@ -37,13 +54,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Wrap at Touch density](img/wrap-touch.png)
 
-## Builder methods at a glance
-
-`spacing`, `line_spacing`, `child`, `children`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/wrap/index.html)
+
+<a id="wrap"></a>
 
 ## `pub struct Wrap`
 
@@ -55,27 +70,39 @@ pub struct Wrap { /* fields */ }
 
 ### Methods
 
+<a id="wrap-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create an empty `Wrap` container with zero spacing.
+
+<a id="wrap-spacing"></a>
 
 #### `pub fn spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self`
 
 Horizontal spacing between items on the same line. Accepts a static
 `f32` or a reactive `Signal<f32>`.
 
+<a id="wrap-line_spacing"></a>
+
 #### `pub fn line_spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self`
 
 Vertical spacing between lines. Accepts a static `f32` or a
 reactive `Signal<f32>`.
 
+<a id="wrap-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add an inline child widget (deferred insertion).
 
+<a id="wrap-children"></a>
+
 #### `pub fn children( mut self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
 Add multiple inline children from an iterator.
+
+<a id="wrap-child_opt"></a>
 
 #### `pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self`
 

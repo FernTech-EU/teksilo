@@ -365,6 +365,10 @@ The Canvas delegates text rendering to the shared `Typesetter` instance from tex
 
 Beyond solid colors, the Canvas supports `Paint` types: `LinearGradient`, `RadialGradient`, `ConicGradient`, and `Image`. Gradients are rendered in the SDF fragment shader (Tier 2). Widgets carry a fill as a `PaintProp` (a flat `ColorProp` or a gradient, in `teksilo-core`); `RectWidget` resolves it to a `Paint` at paint time (gradient endpoints are rect-local, computed from the widget's size). Anything `Into<ColorProp>` is also `Into<PaintProp>` as a solid, so the common case is unchanged.
 
+### 16.6 Live Pictures
+
+`Canvas::draw_live_image` draws a picture another thread rewrites, from a `LiveImageSource`'s consumer: one `DrawCommand::LiveImage`, carrying a `LiveImageQuad` and no pixels. The renderer's live pass reads the source under its lock and uploads what changed since the window's last frame, so a pixel-only commit runs no `paint()` and replays the cached frame. The layout pre-pass turns a change of the source's size or status into a relayout of the widget showing it. See [`live-image.md`](live-image.md).
+
 ---
 
 ## 17. Rendering Pipeline
@@ -381,19 +385,21 @@ A frame is produced only when something has changed. Between frames, the applica
 
 **Phase 4: Paint.** Each dirty widget's `paint()` is called with a Canvas. The Canvas accumulates drawing operations and produces a merged `RenderFrame`.
 
-**Phase 5: GPU submission.** Atlas textures are uploaded, vertex buffers are built, draw calls are issued through wgpu. The surface presents.
+**Phase 5: GPU submission.** Atlas textures are uploaded, the live pass uploads what each live picture's source changed, vertex buffers are built, draw calls are issued through wgpu. The surface presents. A window nobody can see (minimised, occluded) skips this phase and its acquire; it still runs phases 1 to 3 when woken.
 
 ### 17.2 RenderFrame
 
-The `RenderFrame` is the boundary between platform-independent logic (teksilo-core, teksilo-canvas) and GPU-specific code (teksilo-render). Its drawable types are `GlyphQuad` (textured from glyph atlas), `ImageQuad` (textured from image), `DecorationRect` (untextured colored rectangle), `CosmeticLine` (hairline), `ShapeQuad` (SDF-rendered shape), `ShadowQuad`, `RasterizedQuad` / `PathEntry` (Tier 3 paths, textured from the path atlas), and `AnimatedQuadDraw` (shader-driven animated quads, with their `AnimParams`). A `draw_order` array records painter's order (back-to-front) for correct occlusion across all drawable types.
+The `RenderFrame` is the boundary between platform-independent logic (teksilo-core, teksilo-canvas) and GPU-specific code (teksilo-render). Its drawable types are `GlyphQuad` (textured from glyph atlas), `ImageQuad` (textured from image), `DecorationRect` (untextured colored rectangle), `CosmeticLine` (hairline), `ShapeQuad` (SDF-rendered shape), `ShadowQuad`, `RasterizedQuad` / `PathEntry` (Tier 3 paths, textured from the path atlas), and `AnimatedQuadDraw` (shader-driven animated quads, with their `AnimParams`), and `LiveImageQuad` (a live picture: its consumer and where to draw it, no pixels). A `draw_order` array records painter's order (back-to-front) for correct occlusion across all drawable types.
 
 ### 17.3 GPU Pipeline
 
-Seven render pipelines in teksilo-render: the **quad pipeline** (textured quads for glyphs, images, rasterized paths), the **rect pipeline** (untextured colored quads for decorations), the **SDF pipeline** (signed distance field shapes with optional gradient fills), the **shadow pipeline**, the **path-gradient pipeline** (gradient-filled Tier 3 paths), and the **anim-proc** / **anim-sprite** pipelines (shader-driven animated quads such as `Spinner`) — plus the dual-Kawase blur passes in `blur.rs`, which run offscreen. Draws are batched per pipeline; a state change (clip, opacity, transform) flushes every open batch.
+Seven render pipelines in teksilo-render: the **quad pipeline** (textured quads for glyphs, images, rasterized paths), the **rect pipeline** (untextured colored quads for decorations), the **SDF pipeline** (signed distance field shapes with optional gradient fills), the **shadow pipeline**, the **path-gradient pipeline** (gradient-filled Tier 3 paths), and the **anim-proc** / **anim-sprite** pipelines (shader-driven animated quads such as `Spinner`) — plus the dual-Kawase blur passes in `blur.rs`, which run offscreen, and the live mip pass (`live_mip.wgsl`), which rebuilds the stale part of a live picture's mip chain before any draw samples it. Both draw through one full-screen pass (`fullscreen.rs`). Live pictures draw through the quad pipeline, with flags for an alpha-less source and a swapped red and blue. Draws are batched per pipeline; a state change (clip, opacity, transform) flushes every open batch.
 
 ### 17.4 Atlas Management
 
-Two atlas textures serve different purposes. The **glyph atlas** is owned by the shared Typesetter (from text-typeset), containing rasterized glyph bitmaps. The **path atlas** (`path_atlas.rs`) stores Tier 3 rasterized path results from tiny-skia. Both use LRU eviction — dormant widgets' entries age out naturally. Application images are not atlased: `ImageManager` uploads each one as its own mip-mapped texture, keyed by name.
+Two atlas textures serve different purposes. The **glyph atlas** is owned by the shared Typesetter (from text-typeset), containing rasterized glyph bitmaps. The **path atlas** (`path_atlas.rs`) stores Tier 3 rasterized path results from tiny-skia. Both use LRU eviction — dormant widgets' entries age out naturally. Application images are not atlased: `ImageManager` uploads each one as its own mip-mapped texture, keyed by name, the first time a frame names it, and **never frees it**: new pixels under a known name are ignored. That suits icons and other images that live as long as the app.
+
+Pixels that change, or images that come and go, belong on a `LiveImageSource` instead (`ImageWidget::from_raw`, masked images and `Avatar` use one-commit sources). Each window holds one texture per source it draws, uploads only what changed, and drops the texture at the first frame that does not draw the source; a texture of at most 4 MiB from a source that committed once is parked in a 16 MiB pool first, so it comes back without an upload. A dropped texture is freed once the GPU has finished the submissions that used it: `gpu_reclaim` polls them, and teksilo-app's event loop keeps a deadline while any is pending, so a closed window's memory returns without another frame.
 
 #### Glyph atlas lifecycle and the eviction contract
 
@@ -443,7 +449,7 @@ A call from a Teksilo command handler into the application's domain layer execut
 
 ### 20.2 Background Work
 
-Long operations run on background threads owned by the application (or by its data layer). The background thread communicates with the UI thread through winit's `EventLoopProxy` — a unidirectional channel that wakes the event loop and delivers custom events. The UI thread processes these events like any other input, triggering data source refreshes and widget repaints.
+Long operations run on background threads owned by the application (or by its data layer). A background thread reaches the UI thread in one of two ways. It posts a custom event through winit's `EventLoopProxy` (`AppEventPoster::post_external`), a unidirectional channel that wakes the event loop; the UI thread processes the event like any other input, triggering data source refreshes and widget repaints. Or, for content a widget reads, it stores the change and requests through a `RepaintTrigger` attached to that widget: a repaint asks the window for a redraw, a relayout or a pull posts a private wake, and only that widget repaints, relayouts or takes the change in, even in a window nobody can see. See [`idle-and-animation.md`](../../docs/idle-and-animation.md), "Off-thread content". Pixels take a third way: the thread writes a `LiveImageSource`, and each window that shows it uploads the change at its next frame, with no repaint at all ([`live-image.md`](live-image.md)).
 
 ### 20.3 Incremental Work
 
@@ -555,10 +561,10 @@ teksilo-core ← accesskit
 teksilo-widgets (core, data, settings, telemetry, i18n, text,
                  platform — the file-dialog and native-menu surfaces)
     ↑
-teksilo-app (wires the text backend into Canvas, teksilo-widgets,
-             teksilo-platform, teksilo-i18n, teksilo-settings —
-             auto-restores/saves window geometry; optionally
-             teksilo-text, teksilo-telemetry, teksilo-webview)
+teksilo-app (wires the text backend into Canvas, teksilo-text,
+             teksilo-widgets, teksilo-platform, teksilo-i18n,
+             teksilo-settings — auto-restores/saves window geometry;
+             optionally teksilo-telemetry, teksilo-webview)
     ↑
 teksilo (umbrella, re-exports)
 ```
@@ -571,7 +577,7 @@ Platform-specific code (winit, wgpu, accesskit_winit) is confined to `teksilo-re
 
 ### 25.2 The teksilo Umbrella
 
-The standard application developer depends on a single crate: `teksilo`. It re-exports the public API and controls feature flags. `widgets`, `text` and `i18n` are default features (opt-out, not opt-in) — alongside `inspector`, `toast`, `file-dialog`, `clipboard` and the `fonts-arabic` / `fonts-hebrew` fallback bundles — because the kinds of applications Teksilo targets — writing tools, editors, IDEs, content managers, long-running desktop apps — routinely need text rendering, translations, and rich text editing. Rich text has no feature of its own: `RichTextEditor` ships in `teksilo-widgets`, and `TextInput` itself derives from it. Sub-crates remain independently publishable for advanced users (custom widget authors, custom renderer implementors).
+The standard application developer depends on a single crate: `teksilo`. It re-exports the public API and controls feature flags. `widgets` and `i18n` are default features (opt-out, not opt-in) — alongside `inspector`, `toast`, `file-dialog`, `clipboard` and the `fonts-arabic` / `fonts-hebrew` fallback bundles — because the kinds of applications Teksilo targets — writing tools, editors, IDEs, content managers, long-running desktop apps — routinely need text rendering, translations, and rich text editing. The text stack (`teksilo-text`, `text-typeset`, `text-document`) is not a feature at all: every build has it. Rich text has no feature of its own either: `RichTextEditor` ships in `teksilo-widgets`, and `TextInput` itself derives from it. Sub-crates remain independently publishable for advanced users (custom widget authors, custom renderer implementors).
 
 ---
 

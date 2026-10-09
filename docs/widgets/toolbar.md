@@ -7,6 +7,87 @@
 
 `Toolbar` — a command bar with automatic **overflow**.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `const` | [`TOOLBAR_HEIGHT_DEFAULT`](#toolbar_height_default) — Toolbar design tokens |
+| `fn` | [`toolbar_height_default`](#toolbar_height_default-2) — `TOOLBAR_HEIGHT_DEFAULT` raised to the density's `target_size` (24 / 32 / 44 dp) |
+| `const` | [`TOOLBAR_SPACING`](#toolbar_spacing) |
+| `fn` | [`toolbar_spacing`](#toolbar_spacing-2) — `TOOLBAR_SPACING` scaled by the density's `spacing_factor` (1.00 / 1.15 / 1.30) |
+| `enum` | [`ToolbarOrientation`](#toolbarorientation) — Layout axis of the toolbar |
+| `struct` | [`ToolbarAction`](#toolbaraction) — A toolbar command: a **label + an icon** (both required), plus optional tooltip/toggle, an activation handler, an overflow priority, and an `always_overflow`… |
+| `trait` | [`ToolbarOverflow`](#toolbaroverflow) — A widget that knows how to represent itself in a `Toolbar`'s overflow menu when it is collapsed (NSToolbar `menuFormRepresentation` / Qt `QWidgetAction`) |
+| `struct` | [`ToolbarItem`](#toolbaritem) — One slot in a `Toolbar` |
+| `struct` | [`Toolbar`](#toolbar) — A command bar with automatic overflow |
+
+## Public functions
+
+### `Toolbar`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#toolbar-new) |
+| | **Builder methods** |
+| `Self` | [`item(item: ToolbarItem)`](#toolbar-item) |
+| `Self` | [`items(items: impl IntoIterator<Item = ToolbarItem>)`](#toolbar-items) |
+| `Self` | [`action(action: ToolbarAction)`](#toolbar-action) |
+| `Self` | [`actions(actions: impl IntoIterator<Item = ToolbarAction>)`](#toolbar-actions) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#toolbar-child) |
+| `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#toolbar-children) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#toolbar-child_opt) |
+| `Self` | [`orientation(orientation: ToolbarOrientation)`](#toolbar-orientation) |
+| `Self` | [`button_size(size: IconButtonSize)`](#toolbar-button_size) |
+| `Self` | [`button_style(style: impl IconButtonStyle)`](#toolbar-button_style) |
+| `Self` | [`spacing(spacing: f32)`](#toolbar-spacing) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#toolbar-label) |
+| `Self` | [`compact(compact: bool)`](#toolbar-compact) |
+| | **Methods** |
+| `Signal<bool>` | [`is_overflowing()`](#toolbar-is_overflowing) |
+
+### `ToolbarAction`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(label: impl Into<LocalizedString>, icon: impl Fn() -> IconWidget + 'static)`](#toolbaraction-new) |
+| | **Builder methods** |
+| `Self` | [`menu(factory: impl Fn() -> MenuList + 'static)`](#toolbaraction-menu) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#toolbaraction-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#toolbaraction-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#toolbaraction-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(factory: impl Fn() -> Box<dyn Widget> + 'static)`](#toolbaraction-composite_tooltip) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#toolbaraction-enabled) |
+| `Self` | [`on_activate(f: impl Fn(&mut EventContext) + 'static)`](#toolbaraction-on_activate) |
+| `Self` | [`toggle(state: Signal<bool>)`](#toolbaraction-toggle) |
+| `Self` | [`priority(priority: i32)`](#toolbaraction-priority) |
+| `Self` | [`always_overflow()`](#toolbaraction-always_overflow) |
+
+### `ToolbarOverflow`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `ToolbarAction` | [`toolbar_menu_form()`](#toolbaroverflow-toolbar_menu_form) |
+
+### `ToolbarItem`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`action(action: ToolbarAction)`](#toolbaritem-action) |
+| `Self` | [`custom(widget: impl Widget + 'static)`](#toolbaritem-custom) |
+| `Self` | [`custom_id(id: WidgetId)`](#toolbaritem-custom_id) |
+| `Self` | [`collapsible(widget: impl Widget + ToolbarOverflow + 'static)`](#toolbaritem-collapsible) |
+| `Self` | [`separator()`](#toolbaritem-separator) |
+| `Self` | [`flexible_space()`](#toolbaritem-flexible_space) |
+| | **Builder methods** |
+| `Self` | [`overflow_as(menu_form: ToolbarAction)`](#toolbaritem-overflow_as) |
+| `Self` | [`overflow_widget(factory: impl Fn() -> Box<dyn Widget> + 'static)`](#toolbaritem-overflow_widget) |
+
+## Detailed description
+
 Excess actions collapse into a trailing chevron (`⌄`) that opens a popover
 menu, mirroring Qt's `QToolBar` extension button, macOS `NSToolbar`'s
 overflow menu, and WinUI `CommandBar`. Synthesized API:
@@ -66,7 +147,7 @@ let _bar = Toolbar::new()
     .item(ToolbarItem::flexible_space());
 ```
 
-## Touch and pen
+#### Touch and pen
 
 Nothing to do here, and it is worth recording why: every command on the bar
 is an `IconButton` or a `PopoverIconButton`, so each one inherits the
@@ -85,13 +166,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Toolbar at Touch density](img/toolbar-touch.png)
 
-## Builder methods at a glance
-
-`item`, `items`, `action`, `actions`, `child`, `children`, `child_opt`, `orientation`, `button_size`, `button_style`, `spacing`, `label`, `compact`, `is_overflowing`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/toolbar/index.html)
+
+<a id="toolbar_height_default"></a>
 
 ## `pub const TOOLBAR_HEIGHT_DEFAULT`
 
@@ -100,6 +179,8 @@ Toolbar design tokens.
 ```rust
 pub const TOOLBAR_HEIGHT_DEFAULT: f32 = 40.0;
 ```
+
+<a id="toolbar_height_default-2"></a>
 
 ## `pub fn toolbar_height_default(...)`
 
@@ -110,11 +191,15 @@ pub const TOOLBAR_HEIGHT_DEFAULT: f32 = 40.0;
 pub fn toolbar_height_default(tokens: &InputTokens) -> f32;
 ```
 
+<a id="toolbar_spacing"></a>
+
 ## `pub const TOOLBAR_SPACING`
 
 ```rust
 pub const TOOLBAR_SPACING: f32 = 4.0;
 ```
+
+<a id="toolbar_spacing-2"></a>
 
 ## `pub fn toolbar_spacing(...)`
 
@@ -124,6 +209,8 @@ pub const TOOLBAR_SPACING: f32 = 4.0;
 ```rust
 pub fn toolbar_spacing(tokens: &InputTokens) -> f32;
 ```
+
+<a id="toolbarorientation"></a>
 
 ## `pub enum ToolbarOrientation`
 
@@ -137,6 +224,8 @@ pub enum ToolbarOrientation { /* variants */ }
 
 - **`Horizontal`** — Items flow left-to-right (default).
 - **`Vertical`** — Items flow top-to-bottom.
+
+<a id="toolbaraction"></a>
 
 ## `pub struct ToolbarAction`
 
@@ -152,6 +241,8 @@ pub struct ToolbarAction { /* fields */ }
 
 ### Methods
 
+<a id="toolbaraction-new"></a>
+
 #### `pub fn new(label: impl Into<LocalizedString>, icon: impl Fn() -> IconWidget + 'static) -> Self`
 
 A new action with the given (translatable) `label` and `icon` factory,
@@ -159,6 +250,8 @@ and a no-op handler. The label is the inline button's tooltip +
 accessible name (the button is icon-only); the icon factory builds the
 glyph for both the inline `IconButton` and the overflow menu row
 (`IconWidget` isn't `Clone`, so it is a factory).
+
+<a id="toolbaraction-menu"></a>
 
 #### `pub fn menu(mut self, factory: impl Fn() -> MenuList + 'static) -> Self`
 
@@ -169,11 +262,15 @@ it becomes a submenu. `MenuList` isn't `Clone`, so pass a factory that
 builds a fresh one. Mutually exclusive with `on_activate` / `toggle`
 (the menu owns the interaction).
 
+<a id="toolbaraction-tooltip"></a>
+
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Plain-text tooltip shown after a hover delay (the inline button is
 icon-only; with none set, the label is used). Overrides any previously
 set rich tooltip — every setter clears the other so last-call wins.
+
+<a id="toolbaraction-rich_tooltip"></a>
 
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
@@ -187,12 +284,16 @@ shortcut / "more" fields are rendered automatically.
 Overrides any previously set plain `.tooltip(...)` — every setter
 clears the other so last-call wins.
 
+<a id="toolbaraction-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Attach a rich tooltip driven by inline
 `TooltipContent` — for
 one-off tooltips that aren't worth registering in the central
 catalog. Overrides any previously set plain `.tooltip(...)`.
+
+<a id="toolbaraction-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self`
 
@@ -204,27 +305,39 @@ factory closure (not a `Box<dyn Widget>` instance, which is not
 inline button. Overrides any previously set tooltip — every setter
 clears the others so last-call wins.
 
+<a id="toolbaraction-enabled"></a>
+
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Enabled state, static or reactive.
 
+<a id="toolbaraction-on_activate"></a>
+
 #### `pub fn on_activate(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Activation handler (tap / Enter / Space / AT click / menu activate).
+
+<a id="toolbaraction-toggle"></a>
 
 #### `pub fn toggle(mut self, state: Signal<bool>) -> Self`
 
 Make this a checkable (toggle) action bound to `state`. Inline it reads
 as a pressed toggle button; in overflow as a checkmark menu item.
 
+<a id="toolbaraction-priority"></a>
+
 #### `pub fn priority(mut self, priority: i32) -> Self`
 
 Overflow priority — actions with the **lowest** priority collapse into
 the menu first (NSToolbar semantics). Default `0`.
 
+<a id="toolbaraction-always_overflow"></a>
+
 #### `pub fn always_overflow(mut self) -> Self`
 
 Always live in the overflow menu, never inline (WinUI secondary command).
+
+<a id="toolbaroverflow"></a>
 
 ## `pub trait ToolbarOverflow`
 
@@ -245,9 +358,13 @@ pub trait ToolbarOverflow { /* associated items below */ }
 
 ### Associated items
 
+<a id="toolbaroverflow-toolbar_menu_form"></a>
+
 #### `fn toolbar_menu_form(&self) -> ToolbarAction;`
 
 The menu-form representation shown when this widget overflows.
+
+<a id="toolbaritem"></a>
 
 ## `pub struct ToolbarItem`
 
@@ -259,24 +376,34 @@ pub struct ToolbarItem { /* fields */ }
 
 ### Methods
 
+<a id="toolbaritem-action"></a>
+
 #### `pub fn action(action: ToolbarAction) -> Self`
 
 A collapsible command.
+
+<a id="toolbaritem-custom"></a>
 
 #### `pub fn custom(widget: impl Widget + 'static) -> Self`
 
 A pinned arbitrary widget (never collapses) — e.g. a search field. Make
 it collapsible with `overflow_as`.
 
+<a id="toolbaritem-custom_id"></a>
+
 #### `pub fn custom_id(id: WidgetId) -> Self`
 
 A pinned arbitrary widget by pre-registered id.
+
+<a id="toolbaritem-collapsible"></a>
 
 #### `pub fn collapsible(widget: impl Widget + ToolbarOverflow + 'static) -> Self`
 
 A collapsible widget that supplies its own menu form via
 `ToolbarOverflow`. When the bar is too narrow, the widget is hidden
 and its `toolbar_menu_form()` appears in the overflow menu.
+
+<a id="toolbaritem-overflow_as"></a>
 
 #### `pub fn overflow_as(mut self, menu_form: ToolbarAction) -> Self`
 
@@ -285,6 +412,8 @@ Make a `custom` widget collapsible with an explicit menu
 `menuFormRepresentation`). Best for controls whose menu form is a
 single command; an icon-only inline control reuses its icon here as the
 menu item's leading glyph (pass it to `ToolbarAction::new`).
+
+<a id="toolbaritem-overflow_widget"></a>
 
 #### `pub fn overflow_widget(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self`
 
@@ -295,14 +424,20 @@ while collapsed, instead of degrading to a one-shot menu row. Best for
 stateful inputs (combo boxes, sliders) that have no meaningful single
 "command" representation.
 
+<a id="toolbaritem-separator"></a>
+
 #### `pub fn separator() -> Self`
 
 A separator line between groups.
+
+<a id="toolbaritem-flexible_space"></a>
 
 #### `pub fn flexible_space() -> Self`
 
 Flexible space that pushes the following items to the trailing edge
 (NSToolbar `flexibleSpace`). Collapses to nothing when over-constrained.
+
+<a id="toolbar"></a>
 
 ## `pub struct Toolbar`
 
@@ -314,15 +449,21 @@ pub struct Toolbar { /* fields */ }
 
 ### Methods
 
+<a id="toolbar-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create an empty toolbar with the default orientation (horizontal) and
 `Compact`, ghost icon buttons. Add commands with `action`
 or layout items with `item`.
 
+<a id="toolbar-item"></a>
+
 #### `pub fn item(mut self, item: ToolbarItem) -> Self`
 
 Add an item (action, pinned widget, separator, flexible space).
+
+<a id="toolbar-items"></a>
 
 #### `pub fn items(self, items: impl IntoIterator<Item = ToolbarItem>) -> Self`
 
@@ -331,9 +472,13 @@ Add several items from an iterator, in order.
 The loop form of `item`: reach for it when the command set
 is data-driven rather than written out call by call.
 
+<a id="toolbar-action"></a>
+
 #### `pub fn action(self, action: ToolbarAction) -> Self`
 
 Sugar for `.item(ToolbarItem::action(a))`.
+
+<a id="toolbar-actions"></a>
 
 #### `pub fn actions(self, actions: impl IntoIterator<Item = ToolbarAction>) -> Self`
 
@@ -342,6 +487,8 @@ Add several collapsible commands from an iterator.
 The loop form of `action`, for a command set built from
 data rather than spelled out one call at a time.
 
+<a id="toolbar-child"></a>
+
 #### `pub fn child(self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add a pinned inline child widget (sugar for
@@ -349,12 +496,16 @@ Add a pinned inline child widget (sugar for
 into the overflow menu — use `action` for collapsible
 commands.
 
+<a id="toolbar-children"></a>
+
 #### `pub fn children( self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
 Add several pinned inline children from an iterator.
 
 The loop form of `child`. Like `child`, every widget added
 this way is pinned and never collapses into the overflow menu.
+
+<a id="toolbar-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
@@ -365,14 +516,20 @@ this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
 adds no arena node, so nothing is laid out, painted, or published to the
 accessibility tree, and a stack applies no spacing around it.
 
+<a id="toolbar-orientation"></a>
+
 #### `pub fn orientation(mut self, orientation: ToolbarOrientation) -> Self`
 
 Set the layout axis (default `ToolbarOrientation::Horizontal`).
+
+<a id="toolbar-button_size"></a>
 
 #### `pub fn button_size(mut self, size: IconButtonSize) -> Self`
 
 Size variant applied to every action's inline `IconButton` and the
 overflow chevron (default `IconButtonSize::Compact`).
+
+<a id="toolbar-button_style"></a>
 
 #### `pub fn button_style(mut self, style: impl IconButtonStyle) -> Self`
 
@@ -381,11 +538,17 @@ overflow chevron — one shared style for the whole bar (the icon-button
 analogue of `theme.style_slots`). Default: the theme's flat / ghost
 icon-button style.
 
+<a id="toolbar-spacing"></a>
+
 #### `pub fn spacing(mut self, spacing: f32) -> Self`
+
+<a id="toolbar-label"></a>
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Override the accessible name (default: the localized "Toolbar").
+
+<a id="toolbar-compact"></a>
 
 #### `pub fn compact(mut self, compact: bool) -> Self`
 
@@ -398,6 +561,8 @@ composes next to other widgets (e.g. a title and a `Spacer`) without
 claiming their space, and still collapses excess actions into the `⌄`
 menu when the slot is genuinely too narrow. Use it to embed a toolbar in a
 constrained header rather than a full-width bar.
+
+<a id="toolbar-is_overflowing"></a>
 
 #### `pub fn is_overflowing(&self) -> Signal<bool>`
 

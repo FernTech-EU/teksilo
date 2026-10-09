@@ -183,11 +183,38 @@ pub(crate) struct ManagedWindow {
     /// platform, and parking animations before the user has even seen
     /// the window would be wrong.
     pub focused: bool,
-    /// Tracks `WindowEvent::Occluded`. macOS-only in winit 0.30 —
-    /// stays `false` on every other platform. Combined with `focused`
-    /// to decide whether the widget tree's animation scheduler should
-    /// run: `active = focused && !occluded`.
+    /// Tracks `WindowEvent::Occluded`, which winit 0.30 emits on macOS (from
+    /// the window's occlusion state) and on X11 (from `VisibilityNotify`), and
+    /// never on Wayland or Windows. Combined with `focused` to decide whether
+    /// the widget tree's animation scheduler should run:
+    /// `active = focused && !occluded`.
     pub occluded: bool,
+    /// The window is minimised, as far as teksilo-app knows: from `Resized`
+    /// and its placement, from the initial placement, and on X11, which
+    /// reports an iconify with no event, from a rate-limited query while
+    /// unfocused ([`refresh_minimized`](Self::refresh_minimized)). Always
+    /// `false` on Wayland, where winit cannot tell; there the compositor
+    /// withholds a hidden window's redraws, and the window is ticked as one
+    /// whose redraw is withheld (see [`crate::redraw_gate`]).
+    pub minimized: bool,
+    /// When `minimized` was last read from winit while unfocused; `None`
+    /// since the window last lost focus.
+    pub(crate) minimized_probed_at: Option<std::time::Instant>,
+    /// `occluded` was set from asking the platform, not from winit's event,
+    /// and this is when it was last asked; `None` otherwise. A macOS window
+    /// AppKit never showed (created while the display slept) never gets
+    /// `Occluded(true)`: its skipped frame asks instead
+    /// ([`PlatformWindow::occluded_now`](teksilo_platform::PlatformWindow::occluded_now)).
+    /// The reveal normally arrives as `Occluded(false)`; asking again every
+    /// [`OCCLUSION_PROBE_INTERVAL`] keeps the window from staying blank should
+    /// it not.
+    pub(crate) occlusion_probed_at: Option<std::time::Instant>,
+    /// Nothing on screen can be seen at all, the session watch says: on
+    /// macOS, the displays asleep, the screen locked, or another session on
+    /// the console, none of which AppKit reports as occlusion for a window
+    /// already showing. The same for every window; see
+    /// [`WindowManager::set_session_away`].
+    pub(crate) session_away: bool,
     /// Caps Lock active state, toggled on each `Key::CapsLock` press
     /// (winit 0.30 delivers Caps Lock as a discrete key, not via
     /// `ModifiersState`). Pushed to `state.caps_lock` so password fields
@@ -245,9 +272,188 @@ pub(crate) struct ManagedWindow {
     /// against the shared bridge's current version on its own redraw
     /// and re-uploads when behind — the version model replaces
     /// consume-once dirty semantics so several windows all converge on
-    /// the same atlas content. `0` = nothing uploaded yet; stays `0`
-    /// (unused) when the `text` feature is off.
+    /// the same atlas content. `0` = nothing uploaded yet.
     pub atlas_uploaded_version: u64,
+    /// The window's redraw bookkeeping: an undelivered request, whether it
+    /// is hidden, a pending non-visual tick; see [`crate::redraw_gate`].
+    /// Every request goes through [`ManagedWindow::request_redraw`].
+    pub(crate) redraw: crate::redraw_gate::RedrawGate,
+}
+
+/// The shortest interval between two `is_minimized` queries of one unfocused
+/// window.
+pub(crate) const MINIMIZED_PROBE_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(250);
+
+/// How often a window found occluded by asking the platform asks again.
+pub(crate) const OCCLUSION_PROBE_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(500);
+
+/// How often, while nothing on screen can be seen, the session watch rereads
+/// the system's state, should the notification that ends it not come.
+pub(crate) const SESSION_RECHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
+impl ManagedWindow {
+    /// Ask winit for a redraw of this window, through the window's
+    /// [`RedrawGate`](crate::redraw_gate::RedrawGate). The only way
+    /// teksilo-app requests one.
+    pub(crate) fn request_redraw(&self) {
+        self.redraw.request_with(std::time::Instant::now(), || {
+            self.platform_window.request_redraw();
+        });
+    }
+
+    /// Minimised, fully occluded, or nothing on screen can be seen: the
+    /// window draws nothing.
+    pub(crate) fn hidden(&self) -> bool {
+        self.occluded || self.minimized || self.session_away
+    }
+
+    /// Push [`hidden`](Self::hidden) into the redraw gate and act on what
+    /// changed: one last frame on the way to hidden (asked of winit
+    /// directly, since the gate no longer asks while hidden), one redraw on
+    /// the way back.
+    pub(crate) fn sync_hidden(&self) {
+        self.sync_hidden_with(false);
+    }
+
+    /// [`sync_hidden`](Self::sync_hidden) from the redraw handler, before the
+    /// frame it runs. That frame is the one either transition asks for: the
+    /// last one on the way to hidden, or the reveal; and it serves the draw
+    /// wakes dropped while the window drew nothing.
+    pub(crate) fn sync_hidden_for_frame(&self) {
+        self.sync_hidden_with(true);
+    }
+
+    fn sync_hidden_with(&self, frame_runs: bool) {
+        let transition = self.redraw.set_hidden(self.hidden());
+        self.push_draws_nothing(std::time::Instant::now(), frame_runs);
+        if frame_runs {
+            return;
+        }
+        match transition {
+            crate::redraw_gate::HiddenTransition::BecameHidden => {
+                self.platform_window.request_redraw();
+            }
+            crate::redraw_gate::HiddenTransition::BecameVisible => self.request_redraw(),
+            crate::redraw_gate::HiddenTransition::Unchanged => {}
+        }
+    }
+
+    /// Tell the window's wake target whether the window draws nothing at
+    /// `now`: hidden, or its redraw withheld (see [`crate::redraw_gate`]).
+    /// While it does, draw wakes are dropped and one redraw is owed for when
+    /// it draws again. Run whenever either half can have changed: on a
+    /// hidden change, on a delivered redraw, and every event-loop turn,
+    /// since a redraw becomes withheld with time alone.
+    pub(crate) fn sync_draws_nothing(&self, now: std::time::Instant) {
+        self.push_draws_nothing(now, false);
+    }
+
+    /// With `frame_runs`, a window that draws is shown without the redraw
+    /// owed for draw wakes dropped meanwhile: the frame about to run serves
+    /// them.
+    fn push_draws_nothing(&self, now: std::time::Instant, frame_runs: bool) {
+        if self.redraw.draws_nothing(now) {
+            self.platform_window.set_hidden(true);
+        } else if frame_runs {
+            self.platform_window.show_for_drawing();
+        } else {
+            self.platform_window.set_hidden(false);
+        }
+    }
+
+    /// Re-read `minimized` from winit while the window is unfocused, at most
+    /// every [`MINIMIZED_PROBE_INTERVAL`]. An X11 iconify sends only
+    /// `Focused(false)`, and `is_minimized` costs a round trip there; on
+    /// Windows and macOS it is a flag read, and on Wayland it answers `None`,
+    /// which reads as not minimised.
+    pub(crate) fn refresh_minimized(&mut self, now: std::time::Instant) {
+        if self.focused {
+            return;
+        }
+        if self
+            .minimized_probed_at
+            .is_some_and(|at| now.saturating_duration_since(at) < MINIMIZED_PROBE_INTERVAL)
+        {
+            return;
+        }
+        self.minimized_probed_at = Some(now);
+        self.minimized = self.platform_window.window().is_minimized() == Some(true);
+    }
+
+    /// A frame was skipped at `now`: when the platform can say, and says the
+    /// window is not visible at all, mark it occluded, so it draws nothing
+    /// and asks for no more frames until it is shown. Whether it now is.
+    pub(crate) fn note_occlusion_after_skip(&mut self, now: std::time::Instant) -> bool {
+        if self.hidden() || self.platform_window.occluded_now() != Some(true) {
+            return self.hidden();
+        }
+        self.occluded = true;
+        self.occlusion_probed_at = Some(now);
+        // The frame that would have been owed on the way to hidden cannot be
+        // drawn either: the surface just refused it.
+        self.sync_hidden_for_frame();
+        true
+    }
+
+    /// Ask the platform again, every [`OCCLUSION_PROBE_INTERVAL`], about a
+    /// window found occluded by asking; shown, it is revealed as winit's
+    /// `Occluded(false)` would.
+    pub(crate) fn probe_occlusion(&mut self, now: std::time::Instant) {
+        let Some(at) = self.occlusion_probed_at else {
+            return;
+        };
+        if now.saturating_duration_since(at) < OCCLUSION_PROBE_INTERVAL {
+            return;
+        }
+        if self.platform_window.occluded_now() == Some(false) {
+            self.occluded = false;
+            self.occlusion_probed_at = None;
+            self.sync_hidden();
+        } else {
+            self.occlusion_probed_at = Some(now);
+        }
+    }
+
+    /// When the event loop should next wake for this window: its tree's
+    /// next timer deadline, held back while it awaits a redraw it requested
+    /// and while it draws nothing. See
+    /// [`RedrawGate::deadline`](crate::redraw_gate::RedrawGate::deadline).
+    pub(crate) fn wake_deadline(&self, now: std::time::Instant) -> Option<std::time::Instant> {
+        let probe = self
+            .occlusion_probed_at
+            .map(|at| at + OCCLUSION_PROBE_INTERVAL);
+        let gate = self.redraw.deadline(now, self.tree.next_timer_deadline());
+        if let Some(probe) = probe {
+            return Some(gate.map_or(probe, |gate| gate.min(probe)));
+        }
+        gate
+    }
+}
+
+/// The routes a window's wake target posts through, as private
+/// [`WindowWake`](crate::app::WindowWake) payloads for `window`: the state
+/// route, and on a platform that needs it (`draw_off_main`, macOS) the route
+/// for draw wakes made off the main thread. `post` sends one payload to the
+/// event loop.
+pub(crate) fn wake_routes(
+    post: impl Fn(Box<dyn std::any::Any + Send>) + Clone + Send + Sync + 'static,
+    window: winit::window::WindowId,
+    draw_off_main: bool,
+) -> (
+    std::sync::Arc<dyn Fn() + Send + Sync>,
+    Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
+) {
+    use teksilo_canvas::wake::WakeKind;
+    let route = move |kind: WakeKind| {
+        let post = post.clone();
+        std::sync::Arc::new(move || post(Box::new(crate::app::WindowWake { window, kind })))
+            as std::sync::Arc<dyn Fn() + Send + Sync>
+    };
+    let state = route(WakeKind::Layout);
+    let draw = draw_off_main.then(|| route(WakeKind::Draw));
+    (state, draw)
 }
 
 /// Manages multiple application windows.
@@ -271,7 +477,6 @@ pub struct WindowManager {
     /// [`PendingClose`].
     pending_closes: Vec<PendingClose>,
     theme: Theme,
-    #[cfg(feature = "text")]
     typesetter: Option<teksilo_text::SharedTypesetter>,
     /// Windows that are blocked by a modal child.
     modal_blocked: HashMap<TeksiloWindowId, TeksiloWindowId>,
@@ -310,6 +515,15 @@ pub struct WindowManager {
     /// xdg-activation token to a child process or an IPC peer. Run on the UI
     /// thread.
     pending_token_callbacks: HashMap<winit::window::WindowId, Box<dyn FnOnce(Option<String>)>>,
+    /// Watches whether anything on screen can be seen at all; `None` before
+    /// [`watch_session`](Self::watch_session), and on every platform but
+    /// macOS.
+    session: Option<teksilo_platform::session::SessionWatch>,
+    /// What [`set_session_away`](Self::set_session_away) last applied to
+    /// every window, and what a window created now is born with.
+    session_away: bool,
+    /// While away, when the watch last reread the system's state.
+    session_rechecked_at: Option<std::time::Instant>,
 }
 
 // Doc comments on **every** method here are enforced, not hoped for: a new item
@@ -339,7 +553,6 @@ impl WindowManager {
             next_id: 1,
             pending_closes: Vec::new(),
             theme,
-            #[cfg(feature = "text")]
             typesetter: None,
             modal_blocked: HashMap::new(),
             a11y_prefs,
@@ -350,6 +563,9 @@ impl WindowManager {
             app_context_template: None,
             event_proxy: None,
             pending_token_callbacks: HashMap::new(),
+            session: None,
+            session_away: false,
+            session_rechecked_at: None,
         }
     }
 
@@ -403,6 +619,77 @@ impl WindowManager {
     /// to post `CloseWindowRequest` back through the event loop.
     pub fn set_event_proxy(&mut self, proxy: AppEventProxy) {
         self.event_proxy = Some(proxy);
+    }
+
+    /// Start the session watch, on the main thread, once the event proxy is
+    /// installed: each change it hears posts a private
+    /// [`SessionChanged`](crate::app::SessionChanged), which the loop answers
+    /// with [`apply_session`](Self::apply_session). A no-op once watching,
+    /// and on every platform but macOS.
+    pub(crate) fn watch_session(&mut self) {
+        if self.session.is_some() {
+            return;
+        }
+        let Some(proxy) = self.event_proxy.clone() else {
+            return;
+        };
+        self.session = teksilo_platform::session::SessionWatch::new(move || {
+            teksilo_core::AppEventPoster::post_external(
+                &proxy,
+                Box::new(crate::app::SessionChanged),
+            );
+        });
+    }
+
+    /// Apply what the session watch says now; see
+    /// [`set_session_away`](Self::set_session_away).
+    pub(crate) fn apply_session(&mut self, now: std::time::Instant) {
+        let away = self
+            .session
+            .as_ref()
+            .is_some_and(teksilo_platform::session::SessionWatch::away);
+        self.set_session_away(away, now);
+    }
+
+    /// Hide every window while nothing on screen can be seen, and show them
+    /// again when that ends, each with the one redraw a reveal owes. A
+    /// window created meanwhile is born with it. While away, the watch
+    /// rereads the system every [`SESSION_RECHECK_INTERVAL`]
+    /// ([`recheck_session`](Self::recheck_session)).
+    pub(crate) fn set_session_away(&mut self, away: bool, now: std::time::Instant) {
+        self.session_rechecked_at = away.then_some(now);
+        if away == self.session_away {
+            return;
+        }
+        self.session_away = away;
+        for managed in self.windows.values_mut() {
+            managed.session_away = away;
+            managed.sync_hidden();
+        }
+    }
+
+    /// While away, have the watch reread the system's state every
+    /// [`SESSION_RECHECK_INTERVAL`] and clear what it no longer reports: a
+    /// notification that never came would otherwise leave every window
+    /// drawing nothing.
+    pub(crate) fn recheck_session(&mut self, now: std::time::Instant) {
+        let Some(at) = self.session_rechecked_at else {
+            return;
+        };
+        if now.saturating_duration_since(at) < SESSION_RECHECK_INTERVAL {
+            return;
+        }
+        if let Some(session) = &self.session {
+            session.recheck();
+        }
+        self.apply_session(now);
+    }
+
+    /// When [`recheck_session`](Self::recheck_session) is next due; `None`
+    /// while something can be seen.
+    pub(crate) fn session_deadline(&self) -> Option<std::time::Instant> {
+        self.session_rechecked_at
+            .map(|at| at + SESSION_RECHECK_INTERVAL)
     }
 
     /// Install the per-tree app context template that every newly created
@@ -494,7 +781,6 @@ impl WindowManager {
 
     /// Install the shared typesetter every window's tree will shape text
     /// through (called by `TeksiloAppHandler` during initialization).
-    #[cfg(feature = "text")]
     pub fn set_typesetter(&mut self, typesetter: teksilo_text::SharedTypesetter) {
         self.typesetter = Some(typesetter);
     }
@@ -816,6 +1102,22 @@ impl WindowManager {
 
         // Create with AccessKit adapter (shows window after adapter is ready)
         let mut pw = pollster::block_on(PlatformWindow::new_with_a11y(window, target));
+        // The routes the window's wake target posts through: state wakes
+        // always (a redraw request does not reach a window whose redraw the
+        // compositor withholds), draw wakes made off the main thread on macOS
+        // (winit runs such a request on the main thread, synchronously). See
+        // `TeksiloAppHandler::window_wake`.
+        if let Some(proxy) = self.event_proxy.clone() {
+            let (state, draw_off_main) = wake_routes(
+                move |payload| proxy.send_external_boxed(payload),
+                pw.window().id(),
+                cfg!(target_os = "macos"),
+            );
+            pw.set_state_wake_route(state);
+            if let Some(route) = draw_off_main {
+                pw.set_off_main_wake_route(route);
+            }
+        }
 
         // Finish wiring the per-window input translator, now that a real
         // surface exists to ask about. What each of the three facts is for is
@@ -906,6 +1208,9 @@ impl WindowManager {
         // device-pixel OS resource (e.g. a `WebView` subview). Refreshed on
         // `ScaleFactorChanged`; the tree is otherwise fully logical.
         tree.set_device_scale_factor(scale_factor as f32);
+        // Before the root builder runs, so a source attached in `build()`
+        // already wakes this window.
+        tree.set_redraw_waker(Some(pw.redraw_waker()));
 
         // Seed the tree from the active i18n manager (if any). Without
         // this, `WidgetTree::new()` defaults to `LayoutDirection::LeftToRight`
@@ -946,39 +1251,35 @@ impl WindowManager {
             tree.set_user_text_scale(self.user_text_scale);
         }
 
-        #[cfg_attr(not(feature = "text"), allow(unused_mut))]
         let mut primed_atlas_version: u64 = 0;
-        #[cfg(feature = "text")]
-        {
-            if let Some(ref typesetter) = self.typesetter {
-                typesetter.set_scale_factor(scale_factor as f32);
-                tree = tree.with_text_backend(typesetter.as_text_backend());
+        if let Some(ref typesetter) = self.typesetter {
+            typesetter.set_scale_factor(scale_factor as f32);
+            tree = tree.with_text_backend(typesetter.as_text_backend());
 
-                // Prime the new window's GPU atlas from the shared
-                // typesetter. The versioned path in
-                // `handle_redraw_requested` only uploads when this
-                // window's `atlas_uploaded_version` lags the bridge; a
-                // window created after the atlas already contains every
-                // glyph it needs (e.g. reopening a modal with the same
-                // labels) would otherwise render text against an empty
-                // per-window atlas texture. Read-only access on purpose:
-                // calling `atlas_info` here would consume the pending
-                // text-activity flag and the eviction-epoch delta that
-                // belong to the creating window's in-flight redraw.
-                let (w, h, pixels, version) = {
-                    let bridge = typesetter.bridge().borrow();
-                    let service = bridge.service();
-                    (
-                        service.atlas_width(),
-                        service.atlas_height(),
-                        service.atlas_pixels().to_vec(),
-                        bridge.atlas_version(),
-                    )
-                };
-                if w > 0 && h > 0 {
-                    pw.renderer_mut().upload_atlas(w, h, &pixels);
-                    primed_atlas_version = version;
-                }
+            // Prime the new window's GPU atlas from the shared
+            // typesetter. The versioned path in
+            // `handle_redraw_requested` only uploads when this
+            // window's `atlas_uploaded_version` lags the bridge; a
+            // window created after the atlas already contains every
+            // glyph it needs (e.g. reopening a modal with the same
+            // labels) would otherwise render text against an empty
+            // per-window atlas texture. Read-only access on purpose:
+            // calling `atlas_info` here would consume the pending
+            // text-activity flag and the eviction-epoch delta that
+            // belong to the creating window's in-flight redraw.
+            let (w, h, pixels, version) = {
+                let bridge = typesetter.bridge().borrow();
+                let service = bridge.service();
+                (
+                    service.atlas_width(),
+                    service.atlas_height(),
+                    service.atlas_pixels().to_vec(),
+                    bridge.atlas_version(),
+                )
+            };
+            if w > 0 && h > 0 {
+                pw.renderer_mut().upload_atlas(w, h, &pixels);
+                primed_atlas_version = version;
             }
         }
 
@@ -1066,6 +1367,10 @@ impl WindowManager {
             title_bar_host,
             focused: true,
             occluded: false,
+            minimized: config.initial_placement.is_minimized(),
+            minimized_probed_at: None,
+            occlusion_probed_at: None,
+            session_away: self.session_away,
             caps_lock_active: false,
             ime_allowed: None,
             ime_purpose: None,
@@ -1076,6 +1381,7 @@ impl WindowManager {
             on_close_blocked,
             on_removed,
             atlas_uploaded_version: primed_atlas_version,
+            redraw: crate::redraw_gate::RedrawGate::default(),
         };
 
         let mut managed = managed;
@@ -1084,7 +1390,8 @@ impl WindowManager {
         // been resized, which for a window created full-screen is the only
         // one that matters.
         {
-            let chrome = crate::app::WindowChrome::new(&managed.platform_window, None);
+            let chrome =
+                crate::app::WindowChrome::new(&managed.platform_window, &managed.redraw, None);
             crate::input_loop::refresh_safe_area(&chrome, &mut managed.tree);
         }
 
@@ -1583,7 +1890,7 @@ impl WindowManager {
         // and avoids. The owner / transient-parent relationship already keeps
         // the modal above its parent.
         teksilo_platform::window_activation::raise(child.platform_window.window(), None);
-        child.platform_window.request_redraw();
+        child.request_redraw();
     }
 
     /// Broadcast a theme change to all windows.
@@ -1748,10 +2055,20 @@ impl WindowManager {
             .and_then(|w| w.title_bar_host.clone())
     }
 
+    /// Make every window's waker a no-op, for when the event loop ends: winit
+    /// panics on X11 when a window is asked for a redraw after that, and a
+    /// thread may keep waking a window the application still holds.
+    /// Idempotent.
+    pub(crate) fn disconnect_redraw_wakers(&self) {
+        for managed in self.windows.values() {
+            managed.platform_window.disconnect_redraw_waker();
+        }
+    }
+
     /// Request redraw on all windows.
     pub fn request_redraw_all(&self) {
         for managed in self.windows.values() {
-            managed.platform_window.request_redraw();
+            managed.request_redraw();
         }
     }
 
@@ -1767,14 +2084,22 @@ impl WindowManager {
     /// inactive window flooded with redraws it never wins is starved of its own
     /// pending repaint and freezes on its last active frame (caret stuck,
     /// colours not desaturated). Targeting only due windows removes both.
+    ///
+    /// Due means the tree's own timer deadline. What the request becomes is
+    /// the window's gate's to decide: a redraw for a shown window, a
+    /// non-visual tick, rate-limited, for one that draws nothing.
     pub fn request_redraw_due(&self, now: std::time::Instant) {
         for managed in self.windows.values() {
-            if managed
-                .tree
-                .next_timer_deadline()
-                .is_some_and(|deadline| deadline <= now)
+            // `take_retry` first: it clears the retry it reports, so it runs
+            // whether or not a timer is due too.
+            let retry = managed.redraw.take_retry(now);
+            if retry
+                || managed
+                    .tree
+                    .next_timer_deadline()
+                    .is_some_and(|deadline| deadline <= now)
             {
-                managed.platform_window.request_redraw();
+                managed.request_redraw();
             }
         }
     }
@@ -1890,6 +2215,7 @@ impl WindowManager {
     /// `request_redraw_due` and reintroducing the exact uncapped
     /// free-running redraw behaviour that pacing was written to remove.
     pub fn request_redraw_needing_render(&mut self) -> usize {
+        let now = std::time::Instant::now();
         let mut poked = 0;
         for managed in self.windows.values_mut() {
             if managed.tree.needs_reconcile() {
@@ -1899,8 +2225,11 @@ impl WindowManager {
                     teksilo_canvas::SizeProposal::exact(size.0 as f32 / sf, size.1 as f32 / sf);
                 managed.tree.layout(proposal);
             }
-            if managed.tree.needs_render() {
-                managed.platform_window.request_redraw();
+            // A window that draws nothing is skipped: its paint marks wait
+            // for the redraw that shows it again, and a request here after
+            // each of its ticks would re-arm the next one forever.
+            if managed.tree.needs_render() && !managed.redraw.draws_nothing(now) {
+                managed.request_redraw();
                 poked += 1;
             }
         }
@@ -2563,6 +2892,38 @@ mod close_guard_tests {
         let guarded = wm.pending_closes.iter().find(|p| p.id == b).unwrap();
         assert!(forced.force, "queue_close must enqueue a forced close");
         assert!(!guarded.force, "request_close must enqueue a guarded close");
+    }
+
+    /// The routes post the framework's private `WindowWake`: the state route
+    /// always, the off-main draw route only where asked for (macOS), so on
+    /// every other platform a draw wake posts no app event (spec AC2/AC18).
+    #[test]
+    fn wake_routes_post_draw_wakes_only_off_main() {
+        use teksilo_canvas::wake::WakeKind;
+        let posted: std::sync::Arc<std::sync::Mutex<Vec<crate::app::WindowWake>>> =
+            Default::default();
+        let post = {
+            let posted = posted.clone();
+            move |payload: Box<dyn std::any::Any + Send>| {
+                let wake = payload
+                    .downcast::<crate::app::WindowWake>()
+                    .expect("a WindowWake payload");
+                posted.lock().unwrap().push(*wake);
+            }
+        };
+        let window = winit::window::WindowId::from(7u64);
+
+        let (state, draw) = wake_routes(post.clone(), window, false);
+        assert!(draw.is_none(), "no off-main draw route unless asked for");
+        state();
+        let got = posted.lock().unwrap().clone();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].window, window);
+        assert_eq!(got[0].kind, WakeKind::Layout);
+
+        let (_, draw) = wake_routes(post, window, true);
+        draw.expect("the off-main draw route")();
+        assert_eq!(posted.lock().unwrap()[1].kind, WakeKind::Draw);
     }
 
     /// Guard rail matching `close_window_on_an_unknown_id_is_a_harmless_no_op`

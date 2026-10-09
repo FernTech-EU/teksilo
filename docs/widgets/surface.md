@@ -5,6 +5,24 @@
 
 `ToastSurface` — the rendered chrome of one toast.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`ToastSurfaceData`](#toastsurfacedata) — Snapshot data passed to a `ToastSurface` for one live entry |
+| `struct` | [`ToastSurface`](#toastsurface) — One rendered toast — chrome owned by `ToastStyle::make_body`, functional pieces (glyph, body, action row, close button) owned by this widget |
+
+## Public functions
+
+### `ToastSurface`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(data: ToastSurfaceData, leading_widget: Option<Box<dyn Widget>>, registry: ToastRegistry, closable_on_escape: bool)`](#toastsurface-new) |
+
+## Detailed description
+
 Built by `ToastHost` for each live entry. Owns the severity
 glyph, title + body column, action row, close button, and the
 `Role::Alert` / `Role::Status` AccessKit node mapping. The visual
@@ -24,6 +42,8 @@ built it.
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/toast/surface/index.html)
 
+<a id="toastsurfacedata"></a>
+
 ## `pub struct ToastSurfaceData`
 
 Snapshot data passed to a `ToastSurface` for one live entry. Owned
@@ -33,6 +53,8 @@ time. `Rc<...>` fields keep callbacks cheap to copy.
 ```rust
 pub struct ToastSurfaceData { /* fields */ }
 ```
+
+<a id="toastsurface"></a>
 
 ## `pub struct ToastSurface`
 
@@ -48,12 +70,16 @@ pub struct ToastSurface { /* fields */ }
 
 ### Methods
 
+<a id="toastsurface-new"></a>
+
 #### `pub fn new( data: ToastSurfaceData, leading_widget: Option<Box<dyn Widget>>, registry: ToastRegistry, closable_on_escape: bool, ) -> Self`
 
 Build a surface for a single live toast entry. Called by `ToastHost`
 once per live registry entry during each rebuild pass. `leading_widget` is `Some` for
 `Toast::loading` (a spinner) and `None` for severity-glyph entries (a `SeverityBadge`
 is synthesised in `build`). `closable_on_escape` mirrors the matching `Toast` field.
+
+<a id="_default_dismiss"></a>
 
 ## `pub fn _default_dismiss(...)`  *(hidden)*
 

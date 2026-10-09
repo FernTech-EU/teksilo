@@ -7,6 +7,30 @@
 size, but tweens the change instead of jumping. The "empty panel
 that suddenly must grow gracefully to accept new content" pattern.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`SmoothSizeAxes`](#smoothsizeaxes) — Which axes participate in the size tween |
+| `struct` | [`SmoothSize`](#smoothsize) — Wraps a child widget and animates the wrapper's reported size toward the child's current natural size whenever that size changes |
+
+## Public functions
+
+### `SmoothSize`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#smoothsize-new) |
+| | **Builder methods** |
+| `Self` | [`axes(axes: SmoothSizeAxes)`](#smoothsize-axes) |
+| `Self` | [`duration(duration: Duration)`](#smoothsize-duration) |
+| `Self` | [`easing(easing: Easing)`](#smoothsize-easing) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#smoothsize-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#smoothsize-child_opt) |
+
+## Detailed description
+
 ```ignore
 ctx.add(
     SmoothSize::new()
@@ -21,7 +45,7 @@ already drive, e.g. a sidebar width), use the existing
 pattern instead — that path doesn't need to measure the child every
 frame.
 
-## Layout semantics
+#### Layout semantics
 
 - The wrapper measures the child's natural size at the proposal
   each layout pass.
@@ -34,18 +58,16 @@ frame.
   `Collapse` — the child's own internal layout
   doesn't reflow each frame, only the clip rect changes.
 
-## Reduced motion
+#### Reduced motion
 
 Honours `prefers-reduced-motion`: snaps to the natural size each
 layout pass instead of tweening.
 
-## Builder methods at a glance
-
-`axes`, `duration`, `easing`, `child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/smooth_size/index.html)
+
+<a id="smoothsizeaxes"></a>
 
 ## `pub enum SmoothSizeAxes`
 
@@ -63,6 +85,8 @@ pub enum SmoothSizeAxes { /* variants */ }
 - **`Height`** — Animate height changes only; width snaps to natural immediately.
 - **`Both`** — Animate both width and height changes. Default.
 
+<a id="smoothsize"></a>
+
 ## `pub struct SmoothSize`
 
 Wraps a child widget and animates the wrapper's reported size toward
@@ -74,26 +98,38 @@ pub struct SmoothSize { /* fields */ }
 
 ### Methods
 
+<a id="smoothsize-new"></a>
+
 #### `pub fn new() -> Self`
 
 New wrapper. Both axes animate by default.
+
+<a id="smoothsize-axes"></a>
 
 #### `pub fn axes(mut self, axes: SmoothSizeAxes) -> Self`
 
 Restrict the tween to one axis (the other tracks the child's
 natural size instantly).
 
+<a id="smoothsize-duration"></a>
+
 #### `pub fn duration(mut self, duration: Duration) -> Self`
 
 Override the tween duration. Default: `MotionTokens::duration_normal`.
+
+<a id="smoothsize-easing"></a>
 
 #### `pub fn easing(mut self, easing: Easing) -> Self`
 
 Override the easing curve. Default: `MotionTokens::easing_standard`.
 
+<a id="smoothsize-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Inline child widget (deferred insertion).
+
+<a id="smoothsize-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

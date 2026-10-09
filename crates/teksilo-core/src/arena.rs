@@ -392,6 +392,10 @@ pub struct WidgetNode {
     /// that repainted from one the walker skipped (clipped out, or under a
     /// sub-perceptual opacity): the skipped one must drop its stale caches.
     pub(crate) paint_consumed_epoch: u64,
+    /// The off-thread wake state of the `RepaintTrigger`s attached to this
+    /// widget, if any: the paint walker takes its repaint flag right before
+    /// `paint()`, and activation takes its relayout flag.
+    pub(crate) repaint_wake: Option<std::sync::Arc<crate::off_thread::NodeWakeState>>,
 
     // --- V2 fields ---
     /// Event handlers the widget attached to itself during its own
@@ -536,6 +540,7 @@ impl WidgetNode {
             paint_raster_scale: 1.0,
             last_painted_epoch: 0,
             paint_consumed_epoch: 0,
+            repaint_wake: None,
             handlers: EventHandlers::new(),
             external_handlers: EventHandlers::new(),
             node_focusable: None,
@@ -560,6 +565,52 @@ impl WidgetNode {
         F: Fn(&EventHandlers) -> bool,
     {
         f(&self.handlers) || f(&self.external_handlers)
+    }
+}
+
+/// One widget's handler space: how a window-logical point maps into the
+/// space its handlers receive positions in, and back out.
+///
+/// Built by [`WidgetArena::local_frame`]. Kept as the transform, its inverse
+/// and the origin rather than folded into one matrix, so that
+/// [`to_local`](Self::to_local) performs exactly the arithmetic the dispatcher
+/// always has — a composed matrix rounds differently — and
+/// [`to_window`](Self::to_window) undoes it step for step.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct LocalFrame {
+    /// From the frame's pre-transform space to window space: the node's
+    /// effective transform, or its parent's for a content-transform node.
+    to_window: teksilo_canvas::Transform2D,
+    /// The inverse of `to_window`, `None` when that is singular. A singular
+    /// transform collapses the subtree, so nothing can aim inside it; both
+    /// directions then apply no transform, as localisation always has, and
+    /// stay each other's inverse.
+    from_window: Option<teksilo_canvas::Transform2D>,
+    /// The bounds origin local points are relative to — zero for a
+    /// content-transform node, whose handlers receive its parent's space.
+    origin: teksilo_canvas::Point,
+}
+
+impl LocalFrame {
+    /// The handler-space point for a window-logical one.
+    pub(crate) fn to_local(self, window: teksilo_canvas::Point) -> teksilo_canvas::Point {
+        let p = match &self.from_window {
+            Some(inverse) => inverse.apply_point(window),
+            // Degenerate transform: fall back to the raw point rather than
+            // dropping the event.
+            None => window,
+        };
+        teksilo_canvas::Point::new(p.x - self.origin.x, p.y - self.origin.y)
+    }
+
+    /// The window-logical point whose handler-space point is `local`: the
+    /// inverse of [`to_local`](Self::to_local).
+    pub(crate) fn to_window(self, local: teksilo_canvas::Point) -> teksilo_canvas::Point {
+        let p = teksilo_canvas::Point::new(local.x + self.origin.x, local.y + self.origin.y);
+        match &self.from_window {
+            Some(_) => self.to_window.apply_point(p),
+            None => p,
+        }
     }
 }
 
@@ -618,6 +669,11 @@ pub struct WidgetArena {
     /// Only nodes with a signal contribute, so the buffer is empty for the
     /// overwhelming majority of trees.
     pending_activation_changes: Vec<(WidgetId, bool)>,
+    /// Widgets whose activation took a relayout a `RepaintTrigger` had
+    /// requested while they slept. One woken inside a layout walk by a
+    /// culling parent was measured before it was woken, possibly at the size
+    /// before the request, so the walk's end marks it for layout again.
+    pub(crate) relayout_rewake: Vec<WidgetId>,
     /// Every node that installed an `effective_enabled_signal`, so the
     /// per-pass refresh visits only opted-in nodes instead of the whole arena.
     /// Unlike `pending_activation_changes` this is NOT a change queue: an
@@ -672,6 +728,7 @@ impl WidgetArena {
             a11y_moved: std::collections::HashMap::new(),
             a11y_resized: false,
             pending_activation_changes: Vec::new(),
+            relayout_rewake: Vec::new(),
             effective_enabled_watchers: Vec::new(),
         }
     }
@@ -935,27 +992,35 @@ impl WidgetArena {
         id: WidgetId,
         window_point: teksilo_canvas::Point,
     ) -> teksilo_canvas::Point {
+        self.local_frame(id).to_local(window_point)
+    }
+
+    /// The frame [`local_pointer_position`](Self::local_pointer_position)
+    /// localises into for `id`, which also maps back out of it. One walk up
+    /// the tree, so a caller with several points to convert (a gesture's,
+    /// a batch's) pays it once.
+    pub(crate) fn local_frame(&self, id: WidgetId) -> LocalFrame {
         let content_transform = self.get(id).map(|n| n.content_transform).unwrap_or(false);
-        if content_transform {
+        let (to_window, origin) = if content_transform {
             // Parent-effective space, no origin subtraction (the node's
             // own transform consumes these coordinates).
             let to_parent = self
                 .parent(id)
                 .map(|p| self.effective_transform(p))
                 .unwrap_or(teksilo_canvas::Transform2D::IDENTITY);
-            return match to_parent.inverse() {
-                Some(inv) => inv.apply_point(window_point),
-                None => window_point,
-            };
-        }
-        let in_local = match self.effective_transform(id).inverse() {
-            Some(inv) => inv.apply_point(window_point),
-            // Degenerate transform: fall back to the raw point rather than
-            // dropping the event.
-            None => window_point,
+            (to_parent, teksilo_canvas::Point::ZERO)
+        } else {
+            let bounds = self.bounds(id);
+            (
+                self.effective_transform(id),
+                teksilo_canvas::Point::new(bounds.x, bounds.y),
+            )
         };
-        let bounds = self.bounds(id);
-        teksilo_canvas::Point::new(in_local.x - bounds.x, in_local.y - bounds.y)
+        LocalFrame {
+            from_window: to_window.inverse(),
+            to_window,
+            origin,
+        }
     }
 
     /// Get all root-level widget IDs (widgets with no parent).
@@ -1854,6 +1919,13 @@ impl WidgetArena {
             node.self_dormant = false;
             node.dirty.needs_layout = true;
             node.dirty.needs_paint = true;
+            // A relayout requested off the UI thread while it slept: take it
+            // (re-arming the request), since the pre-pass skips sleepers.
+            if let Some(wake) = &node.repaint_wake
+                && wake.take_relayout()
+            {
+                self.relayout_rewake.push(id);
+            }
             if was_dormant && node.activation_signal.is_some() {
                 self.pending_activation_changes.push((id, true));
             }

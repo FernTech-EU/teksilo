@@ -8,6 +8,28 @@
 Panel — a themed single-child container that provides a background, border,
 corner radius, and padding.
 
+## Public functions
+
+### `Panel`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#panel-new) |
+| | **Builder methods** |
+| `Self` | [`variant(variant: PanelVariant)`](#panel-variant) |
+| `Self` | [`style(style: impl teksilo_core::styles::PanelStyle)`](#panel-style) |
+| `Self` | [`a11y_presentational()`](#panel-a11y_presentational) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#panel-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#panel-child_opt) |
+| `Self` | [`background(color: impl Into<ColorProp>)`](#panel-background) |
+| `Self` | [`border_color(color: impl Into<ColorProp>)`](#panel-border_color) |
+| `Self` | [`border_width(width: impl Into<Prop<f32>>)`](#panel-border_width) |
+| `Self` | [`corner_radius(radius: impl Into<Prop<f32>>)`](#panel-corner_radius) |
+| `Self` | [`padding(padding: impl Into<Prop<f32>>)`](#panel-padding) |
+
+## Detailed description
+
 The equivalent of Qt's `QFrame`: a visual wrapper whose chrome comes from
 the active `PanelStyle` trait
 implementation. The IntUI default (`RecipePanelStyle`) honours four
@@ -18,7 +40,7 @@ requiring a custom surface (frosted glass, brutalist frame) supply their
 own `impl PanelStyle` per-call (`.style(...)`) or theme-wide via
 `theme.style_slots.panel`.
 
-## Accessibility
+#### Accessibility
 
 Emits `Role::Group` by default. Call `.a11y_presentational()` to suppress
 the group node when the panel is purely decorative (e.g. a toolbar
@@ -43,13 +65,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Panel at Touch density](img/panel-touch.png)
 
-## Builder methods at a glance
-
-`variant`, `style`, `a11y_presentational`, `child`, `child_opt`, `background`, `border_color`, `border_width`, `corner_radius`, `padding`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/panel/index.html)
+
+<a id="panel"></a>
 
 ## `pub struct Panel`
 
@@ -61,9 +81,13 @@ pub struct Panel { /* fields */ }
 
 ### Methods
 
+<a id="panel-new"></a>
+
 #### `pub fn new() -> Self`
 
 Construct a panel with default theme values (Plain variant, no manual overrides).
+
+<a id="panel-variant"></a>
 
 #### `pub fn variant(mut self, variant: PanelVariant) -> Self`
 
@@ -72,6 +96,8 @@ Pick the design-language variant. Default `Plain`. The active
 IntUI default maps Plain → `surface_main`, Sunken →
 `surface_sunken`, Raised → `surface_raised`, Highlighted →
 `accent_subtle_bg`, with matching border defaults).
+
+<a id="panel-style"></a>
 
 #### `pub fn style(mut self, style: impl teksilo_core::styles::PanelStyle) -> Self`
 
@@ -82,6 +108,8 @@ Per-call style override. Replaces the theme-wide default
 `PanelStyleConfig`; custom styles are free to honour or ignore
 them.
 
+<a id="panel-a11y_presentational"></a>
+
 #### `pub fn a11y_presentational(mut self) -> Self`
 
 Mark the panel as presentational for assistive tech: the panel's
@@ -91,9 +119,13 @@ padding) doesn't introduce a spurious `Group` node between an
 outer widget (Toolbar, StatusBar, etc.) and the real content.
 The children stay in the tree, promoted to the panel's parent.
 
+<a id="panel-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline child widget (deferred insertion).
+
+<a id="panel-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
@@ -104,15 +136,21 @@ this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
 adds no arena node, so nothing is laid out, painted, or published to the
 accessibility tree, and a stack applies no spacing around it.
 
+<a id="panel-background"></a>
+
 #### `pub fn background(mut self, color: impl Into<ColorProp>) -> Self`
 
 Override the background. Accepts `Color`, a `SurfaceRole`,
 or a `Signal<Color>`. Default (unset) is `SurfaceRole::Main`.
 
+<a id="panel-border_color"></a>
+
 #### `pub fn border_color(mut self, color: impl Into<ColorProp>) -> Self`
 
 Override the border color. Accepts `Color`, a `BorderRole`,
 or a `Signal<Color>`. Default (unset) is `BorderRole::Default`.
+
+<a id="panel-border_width"></a>
 
 #### `pub fn border_width(mut self, width: impl Into<Prop<f32>>) -> Self`
 
@@ -120,10 +158,14 @@ Override the border width (default: the active `PanelStyle` recipe's own
 border width — `RecipePanelStyle` uses 1 dp).
 Accepts a static `f32` or a reactive `Signal<f32>`.
 
+<a id="panel-corner_radius"></a>
+
 #### `pub fn corner_radius(mut self, radius: impl Into<Prop<f32>>) -> Self`
 
 Override the corner radius (default: theme `radius_popup`).
 Accepts a static `f32` or a reactive `Signal<f32>`.
+
+<a id="panel-padding"></a>
 
 #### `pub fn padding(mut self, padding: impl Into<Prop<f32>>) -> Self`
 

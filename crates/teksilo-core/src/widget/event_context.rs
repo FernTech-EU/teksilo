@@ -171,6 +171,9 @@ pub struct EventContext<'ops> {
     /// `None` for a context made outside per-node dispatch (a gesture timer, a
     /// key-capture callback, an async completion).
     pub(crate) dispatch_node: Option<WidgetId>,
+    /// The handler space of `dispatch_node`: the frame its pointer positions
+    /// were localised into. Read by [`to_local`](EventContext::to_local).
+    pub(crate) local_frame: Option<crate::arena::LocalFrame>,
     /// The node the router resolved as this dispatch's **target** — the
     /// innermost node the arena's hit walk accepted. Read by
     /// [`dispatch_target`](EventContext::dispatch_target).
@@ -524,6 +527,7 @@ impl<'ops> EventContext<'ops> {
             pointer_capture: None,
             pointer_captor: None,
             dispatch_node: None,
+            local_frame: None,
             dispatch_target: None,
             delayed_overlay_requests: Vec::new(),
             timed_overlay_requests: Vec::new(),
@@ -644,6 +648,33 @@ impl<'ops> EventContext<'ops> {
     pub(crate) fn with_dispatch_node(mut self, node: WidgetId) -> Self {
         self.dispatch_node = Some(node);
         self
+    }
+
+    /// Record the handler space of the node whose handler is about to run —
+    /// the frame its event was localised into.
+    pub(crate) fn with_local_frame(mut self, frame: crate::arena::LocalFrame) -> Self {
+        self.local_frame = Some(frame);
+        self
+    }
+
+    /// A window-logical point in the space this handler receives positions
+    /// in: the conversion the dispatcher applied to the event's own position.
+    ///
+    /// For the positions a handler is handed in window space —
+    /// [`WidgetEvent::Scroll`](crate::event::WidgetEvent::Scroll)'s and
+    /// [`WidgetEvent::PointerCancel`](crate::event::WidgetEvent::PointerCancel)'s
+    /// `window_position`, the [`coalesced`](Self::coalesced) samples,
+    /// [`tree_pointer_position`](Self::tree_pointer_position) — when the
+    /// handler works in its own: exact under a `Scale`, a `Rotate` or a
+    /// `SceneView`, where subtracting the widget's origin is not.
+    /// [`WidgetTree::window_to_local`](crate::WidgetTree::window_to_local) is
+    /// the same conversion outside a handler.
+    ///
+    /// `None` for a context made outside per-node dispatch (a gesture timer, a
+    /// key-capture callback, an async completion): there is no widget to be
+    /// local to.
+    pub fn to_local(&self, window_point: teksilo_canvas::Point) -> Option<teksilo_canvas::Point> {
+        self.local_frame.map(|frame| frame.to_local(window_point))
     }
 
     /// What asked for the context menu, inside a

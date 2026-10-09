@@ -23,7 +23,10 @@
 //! to it. Two operations need context [`execute`] doesn't hold —
 //! `list_windows` (the window manager) and `screenshot` (a GPU / platform
 //! window) — and return [`dto::codes::HOST_REQUIRED`]; the headless server
-//! and the live bridge serve those themselves.
+//! and the live bridge serve those themselves. `live_image_stats` is half
+//! the host's: [`execute`] reports the source and the attachment, and the
+//! host adds its window's textures and wakes with [`with_window_stats`]; a
+//! screenshot's live pictures come from [`live_image_shots`].
 //!
 //! This crate has no GUI, render, platform, or async dependency. It mirrors
 //! `teksilo-data`'s "core-only peer" design so a CI harness, a headless
@@ -50,12 +53,13 @@ pub mod wire;
 pub use client::{CLIENT_BIN, CLIENT_VERSION, find_client, install_command};
 pub use dto::{
     AnnouncementDto, Assertion, AssertionResult, AutomationOp, AutomationReply, AutomationRequest,
-    DensityDto, LayoutNode, NodeBounds, NodeRef, PointerAction, PointerButtonDto, PointerKindDto,
-    PointerReport, ScreenshotMeta, SemanticNode, SequenceMemberDto, SettleSpec, ShortcutInfo,
-    TouchPhaseDto, TouchSequenceReport, TouchStep, TouchStepReport, WaitCondition, WindowInfo,
-    codes,
+    DensityDto, LayoutNode, LiveImageAttachmentStatsDto, LiveImageMapReply, LiveImageShot,
+    LiveImageSourceStatsDto, LiveImageStatsReply, LiveTextureStatsDto, LiveWakeStatsDto,
+    NodeBounds, NodeRef, PointerAction, PointerButtonDto, PointerKindDto, PointerReport,
+    ScreenshotMeta, SemanticNode, SequenceMemberDto, SettleSpec, ShortcutInfo, TouchPhaseDto,
+    TouchSequenceReport, TouchStep, TouchStepReport, WaitCondition, WindowInfo, codes,
 };
-pub use executor::{execute, run_settle};
+pub use executor::{execute, live_image_shots, run_settle, with_window_stats};
 pub use mcp_schema::{TOOL_CATALOG, TOOL_COUNT, ToolDescriptor};
 pub use recording_ops::{RecordedWindow, RecordingWindowOps};
 pub use wire::{Endpoint, EndpointFile, Transport};

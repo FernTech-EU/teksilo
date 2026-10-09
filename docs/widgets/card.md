@@ -7,6 +7,27 @@
 
 Card — a surface container with optional header, content, and footer slots.
 
+## Public functions
+
+### `Card`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#card-new) |
+| | **Builder methods** |
+| `Self` | [`header(widget: impl teksilo_core::IntoTeksiChild)`](#card-header) |
+| `Self` | [`content(widget: impl teksilo_core::IntoTeksiChild)`](#card-content) |
+| `Self` | [`footer(widget: impl teksilo_core::IntoTeksiChild)`](#card-footer) |
+| `Self` | [`shadow(shadow: Shadow)`](#card-shadow) |
+| `Self` | [`background(color: impl Into<ColorProp>)`](#card-background) |
+| `Self` | [`corner_radius(radius: impl Into<Prop<f32>>)`](#card-corner_radius) |
+| `Self` | [`padding(padding: impl Into<Prop<f32>>)`](#card-padding) |
+| `Self` | [`variant(variant: CardVariant)`](#card-variant) |
+| `Self` | [`style(style: impl teksilo_core::styles::CardStyle)`](#card-style) |
+
+## Detailed description
+
 `Card` renders an opaque or tinted rounded-rectangle backdrop, an optional
 drop shadow, and up to three stacked content slots (header / content /
 footer). It is the standard building block for list-item cards, dashboard
@@ -16,7 +37,7 @@ padding) is delegated to the active `CardStyle`
 so the visual language can be changed per-call (`.style(...)`) or
 theme-wide via `theme.style_slots.card`.
 
-## When to use
+#### When to use
 
 - `CardVariant::Elevated` — a dashboard tile or list card that should
   "float" above the page surface.
@@ -24,7 +45,7 @@ theme-wide via `theme.style_slots.card`.
 - `CardVariant::Plain` — the content sits on the default surface; no
   visible chrome (useful for spacing only).
 
-## Accessibility
+#### Accessibility
 
 Announces as `Role::Group`. The slots' own accessibility nodes are
 included in the subtree; the card itself carries no additional AT name.
@@ -47,13 +68,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Card at Touch density](img/card-touch.png)
 
-## Builder methods at a glance
-
-`header`, `content`, `footer`, `shadow`, `background`, `corner_radius`, `padding`, `variant`, `style`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/card/index.html)
+
+<a id="card"></a>
 
 ## `pub struct Card`
 
@@ -65,21 +84,31 @@ pub struct Card { /* fields */ }
 
 ### Methods
 
+<a id="card-new"></a>
+
 #### `pub fn new() -> Self`
 
 Construct an empty card with no slots and the default `CardVariant::Plain`.
+
+<a id="card-header"></a>
 
 #### `pub fn header(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the header slot (topmost section) to an inline widget.
 
+<a id="card-content"></a>
+
 #### `pub fn content(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the main content slot (middle section) to an inline widget.
 
+<a id="card-footer"></a>
+
 #### `pub fn footer(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the footer slot (bottommost section) to an inline widget.
+
+<a id="card-shadow"></a>
 
 #### `pub fn shadow(mut self, shadow: Shadow) -> Self`
 
@@ -87,21 +116,29 @@ Override the drop shadow. Accepts a `Shadow` token (see
 `teksilo_tokens::Shadow`). The default shadow comes from the active
 `CardStyle` for the chosen `CardVariant`.
 
+<a id="card-background"></a>
+
 #### `pub fn background(mut self, color: impl Into<ColorProp>) -> Self`
 
 Override the background. Default (unset) is the variant's default
 (`SurfaceRole::Main` for Plain/Outlined/Elevated, `SurfaceRole::Raised`
 for Filled). Accepts `Color`, a role, or `Signal<Color>`.
 
+<a id="card-corner_radius"></a>
+
 #### `pub fn corner_radius(mut self, radius: impl Into<Prop<f32>>) -> Self`
 
 Override the corner radius (default: `CARD_CORNER_RADIUS` in the active `CardStyle`'s recipe — see `recipe_card_style.rs`).
 Accepts a static `f32` or a reactive `Signal<f32>`.
 
+<a id="card-padding"></a>
+
 #### `pub fn padding(mut self, padding: impl Into<Prop<f32>>) -> Self`
 
 Override the padding (default: `CARD_PADDING` in the active `CardStyle`'s recipe — see `recipe_card_style.rs`).
 Accepts a static `f32` or a reactive `Signal<f32>`.
+
+<a id="card-variant"></a>
 
 #### `pub fn variant(mut self, variant: CardVariant) -> Self`
 
@@ -110,6 +147,8 @@ Pick the design-language variant. Default `Plain`. The active
 default maps Plain → no shadow + surface_main, Elevated →
 shadow_md + surface_main, Outlined → border + surface_main,
 Filled → shadow_md + surface_raised).
+
+<a id="card-style"></a>
 
 #### `pub fn style(mut self, style: impl teksilo_core::styles::CardStyle) -> Self`
 

@@ -5,6 +5,42 @@
 
 `ChartAggregate<T>` — a bucket/rollup projection over a `crate::ChartModel`.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`ChartAggregateFn`](#chartaggregatefn) — A reduction applied to the numeric values within one bucket |
+| `struct` | [`ChartAggregate`](#chartaggregate) — A bucket/rollup projection over a `ChartModel<T>` |
+
+## Public functions
+
+### `ChartAggregate`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(source: ChartModel<T>, bucket_size: usize, aggregate_fn: ChartAggregateFn)`](#chartaggregate-new) |
+| | **Methods** |
+|  | [`set_bucket_size(bucket_size: usize)`](#chartaggregate-set_bucket_size) |
+|  | [`set_aggregate_fn(aggregate_fn: ChartAggregateFn)`](#chartaggregate-set_aggregate_fn) |
+| `usize` | [`bucket_size()`](#chartaggregate-bucket_size) |
+| `usize` | [`series_count()`](#chartaggregate-series_count) |
+| `Vec<SeriesId>` | [`series_ids()`](#chartaggregate-series_ids) |
+| `usize` | [`point_count(series: SeriesId)`](#chartaggregate-point_count) |
+| `Option<R>` | [`with_series<R>(series: SeriesId, f: impl FnOnce(&str, Option<&ColorProp>, bool) -> R)`](#chartaggregate-with_series) |
+| `Option<R>` | [`with_point<R>(series: SeriesId, index: usize, f: impl FnOnce(&ChartDatum<T>) -> R)`](#chartaggregate-with_point) |
+| `ObserverHandle` | [`observe_changes(f: impl Fn(&ChartChange) + 'static)`](#chartaggregate-observe_changes) |
+| `Option<usize>` | [`first_changed_index(series: SeriesId)`](#chartaggregate-first_changed_index) |
+
+### `ChartAggregateFn`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `f32` | [`apply(values: &[f32])`](#chartaggregatefn-apply) |
+
+## Detailed description
+
 Wraps a `ChartModel<T>` and exposes each series
 reduced into fixed-size buckets of `bucket_size` source points, each
 bucket collapsed to one `crate::ChartDatum` via a `ChartAggregateFn`
@@ -22,7 +58,7 @@ rebuilding a `ChartAggregate<T>` requires `T: Clone`. Once built,
 read-only queries (`point_count`, `with_point`, …) need only `T:
 'static`.
 
-## Reactivity
+#### Reactivity
 
 A tail append that doesn't change the bucket count updates the
 now-not-yet-full last bucket in place (`PointUpdated`); a tail append
@@ -47,13 +83,11 @@ let weekly = ChartAggregate::new(model, 7, ChartAggregateFn::Mean);
 assert_eq!(weekly.point_count(s), 10); // 70 / 7
 ```
 
-## Builder methods at a glance
-
-`set_bucket_size`, `set_aggregate_fn`, `bucket_size`, `series_count`, `series_ids`, `point_count`, `with_series`, `with_point`, `observe_changes`, `first_changed_index`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/chart_aggregate/index.html)
+
+<a id="chartaggregatefn"></a>
 
 ## `pub enum ChartAggregateFn`
 
@@ -75,6 +109,8 @@ pub enum ChartAggregateFn { /* variants */ }
 
 ### Methods
 
+<a id="chartaggregatefn-apply"></a>
+
 #### `pub fn apply(&self, values: &[f32]) -> f32`
 
 Apply the reduction to a bucket's values.
@@ -88,6 +124,8 @@ caller actually passes an empty slice — `compute_bucket_datum` bails
 out before calling `apply` for an empty bucket — so this only bites a
 direct caller.
 
+<a id="chartaggregate"></a>
+
 ## `pub struct ChartAggregate`
 
 A bucket/rollup projection over a `ChartModel<T>`.
@@ -100,52 +138,74 @@ pub struct ChartAggregate<T: 'static> { /* fields */ }
 
 ### Methods
 
+<a id="chartaggregate-new"></a>
+
 #### `pub fn new(source: ChartModel<T>, bucket_size: usize, aggregate_fn: ChartAggregateFn) -> Self`
 
 Wrap `source`, bucketing every series into groups of `bucket_size`
 source points reduced via `aggregate_fn`. `bucket_size` is clamped
 to a minimum of 1.
 
+<a id="chartaggregate-set_bucket_size"></a>
+
 #### `pub fn set_bucket_size(&self, bucket_size: usize)`
 
 Change the bucket size, rebuilding every series and emitting
 `ChartChange::Reset`. Clamped to a minimum of 1.
+
+<a id="chartaggregate-set_aggregate_fn"></a>
 
 #### `pub fn set_aggregate_fn(&self, aggregate_fn: ChartAggregateFn)`
 
 Change the aggregate reduction, rebuilding every series and emitting
 `ChartChange::Reset`.
 
+<a id="chartaggregate-bucket_size"></a>
+
 #### `pub fn bucket_size(&self) -> usize`
 
 The configured bucket size.
+
+<a id="chartaggregate-series_count"></a>
 
 #### `pub fn series_count(&self) -> usize`
 
 Number of series (same set as the source).
 
+<a id="chartaggregate-series_ids"></a>
+
 #### `pub fn series_ids(&self) -> Vec<SeriesId>`
 
 The series ids, in the source's display order.
 
+<a id="chartaggregate-point_count"></a>
+
 #### `pub fn point_count(&self, series: SeriesId) -> usize`
 
 Number of buckets currently materialized for `series`.
+
+<a id="chartaggregate-with_series"></a>
 
 #### `pub fn with_series<R>( &self, series: SeriesId, f: impl FnOnce(&str, Option<&ColorProp>, bool) -> R, ) -> Option<R>`
 
 Access a series' metadata (delegates straight through to the
 source). Returns `None` if `series` is unknown.
 
+<a id="chartaggregate-with_point"></a>
+
 #### `pub fn with_point<R>( &self, series: SeriesId, index: usize, f: impl FnOnce(&ChartDatum<T>) -> R, ) -> Option<R>`
 
 Access the bucket at `index` within `series`. Returns `None` if
 `series` or `index` is unknown.
 
+<a id="chartaggregate-observe_changes"></a>
+
 #### `pub fn observe_changes(&self, f: impl Fn(&ChartChange) + 'static) -> ObserverHandle`
 
 Register an observer for translated bucket changes. Returns an
 `ObserverHandle` — dropping it removes the callback.
+
+<a id="chartaggregate-first_changed_index"></a>
 
 #### `pub fn first_changed_index(&self, series: SeriesId) -> Option<usize>`
 

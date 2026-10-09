@@ -7,14 +7,27 @@ A thin invisible widget that forwards a window resize gesture to the
 platform host when the user presses the primary button inside it. Used
 to build a 6-px resize frame around a borderless window on Wayland.
 
-This is the frame complement to [`crate::title_bar::DragRegion`]: drag
+## Public functions
+
+### `ResizeStrip`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`horizontal(host: Rc<dyn PlatformTitleBarHost>, edge: ResizeEdge, thickness: f32)`](#resizestrip-horizontal) |
+| `Self` | [`vertical(host: Rc<dyn PlatformTitleBarHost>, edge: ResizeEdge, thickness: f32)`](#resizestrip-vertical) |
+| `Self` | [`corner(host: Rc<dyn PlatformTitleBarHost>, edge: ResizeEdge, size: f32)`](#resizestrip-corner) |
+
+## Detailed description
+
+This is the frame complement to `crate::title_bar::DragRegion`: drag
 moves the window, resize strips drag the window edges. On platforms
 that don't expose `Window::drag_resize_window` (notably winit's macOS
 backend), `PlatformTitleBarHost::begin_resize` returns
 `PlatformError::Unsupported` and the strip becomes a silent no-op —
 macOS handles edge resize via its own native chrome.
 
-## Reaching a 6 dp edge with a finger
+#### Reaching a 6 dp edge with a finger
 
 The strip's thickness is fixed at every density — it is an overlay drawn
 *over* the window's own edge, so widening it would eat into content rather
@@ -34,7 +47,7 @@ Two strips whose bands overlap are settled by distance to their own
 uninflated rectangles, not by sibling order, so the midpoint between two
 adjacent edges belongs to the nearer one.
 
-## One resize per gesture
+#### One resize per gesture
 
 `PlatformTitleBarHost::begin_resize` hands the window to the compositor
 for the rest of the gesture, so it must be asked once. The press that asks
@@ -44,13 +57,11 @@ interactive resize of the same window, which on Wayland means a second
 `xdg_toplevel::resize` against a live one. A mouse is always primary, so the
 gate never fires for one.
 
-## Builder methods at a glance
-
-`horizontal`, `vertical`, `corner`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/index.html)
+
+<a id="resizestrip"></a>
 
 ## `pub struct ResizeStrip`
 
@@ -65,16 +76,22 @@ pub struct ResizeStrip { /* fields */ }
 
 ### Methods
 
+<a id="resizestrip-horizontal"></a>
+
 #### `pub fn horizontal( host: Rc<dyn PlatformTitleBarHost>, edge: ResizeEdge, thickness: f32, ) -> Self`
 
 Build a horizontal (top / bottom) strip of the given height. The
 width is unconstrained — the strip claims whatever its parent
 container offers, so it can stretch across the full window width.
 
+<a id="resizestrip-vertical"></a>
+
 #### `pub fn vertical(host: Rc<dyn PlatformTitleBarHost>, edge: ResizeEdge, thickness: f32) -> Self`
 
 Build a vertical (left / right) strip of the given width. The
 height is unconstrained.
+
+<a id="resizestrip-corner"></a>
 
 #### `pub fn corner(host: Rc<dyn PlatformTitleBarHost>, edge: ResizeEdge, size: f32) -> Self`
 

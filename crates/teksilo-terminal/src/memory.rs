@@ -8,8 +8,10 @@
 //! shell. Mirrors `teksilo_webview::MemoryWebViewBackend`.
 
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::io::Read;
 use std::rc::Rc;
+use std::sync::{Arc, Condvar, Mutex};
 
 use crate::engine::{
     CellSide, GridSnapshot, PtyGeom, Scroll, SelectionKind, SpawnedEngine, TermEvent, TermMode,
@@ -65,6 +67,16 @@ pub struct MemoryShared {
     pub killed: bool,
     /// The value the engine returns from [`TerminalEngine::poll_exit`].
     pub exit: Option<TerminalExit>,
+    /// How long each `advance` takes, so a test can make parsing slow.
+    #[cfg(test)]
+    pub(crate) advance_delay: Option<std::time::Duration>,
+    /// The deadline the engine reports for a synchronized update it holds,
+    /// cleared by `end_synchronized_update`, which counts in
+    /// `synchronized_updates_ended`.
+    #[cfg(test)]
+    pub(crate) synchronized_update: Option<std::time::Instant>,
+    #[cfg(test)]
+    pub(crate) synchronized_updates_ended: u32,
     /// The current scrollback display offset the engine reports.
     pub display_offset: usize,
     /// The scrollback length the engine reports.
@@ -82,10 +94,13 @@ pub struct MemoryShared {
     pub clear_screen_calls: usize,
 }
 
-/// The in-memory engine (see the module docs).
+/// The in-memory engine (see the module docs). Its "child" prints what the
+/// test writes to its [`MemoryOutput`], and runs until that is closed, or the
+/// engine is killed or dropped.
 pub struct MemoryEngine {
     shared: Rc<RefCell<MemoryShared>>,
     geom: PtyGeom,
+    output: MemoryOutput,
 }
 
 impl MemoryEngine {
@@ -111,6 +126,10 @@ impl MemoryEngine {
 
 impl TerminalEngine for MemoryEngine {
     fn advance(&mut self, bytes: &[u8]) {
+        #[cfg(test)]
+        if let Some(delay) = self.shared.borrow().advance_delay {
+            std::thread::sleep(delay);
+        }
         self.shared.borrow_mut().advanced.extend_from_slice(bytes);
     }
     fn write(&mut self, bytes: &[u8]) {
@@ -205,25 +224,210 @@ impl TerminalEngine for MemoryEngine {
     fn poll_exit(&mut self) -> Option<TerminalExit> {
         self.shared.borrow().exit
     }
+    #[cfg(test)]
+    fn synchronized_update_deadline(&self) -> Option<std::time::Instant> {
+        self.shared.borrow().synchronized_update
+    }
+
+    #[cfg(test)]
+    fn end_synchronized_update(&mut self) {
+        let mut shared = self.shared.borrow_mut();
+        shared.synchronized_update = None;
+        shared.synchronized_updates_ended += 1;
+    }
+
     fn kill(&mut self) {
         self.shared.borrow_mut().killed = true;
+        // A killed child prints nothing more: the reader sees the end.
+        self.output.close();
     }
 }
 
-/// A reader that is always at end-of-file — a spawned reader thread reading it
-/// exits immediately (there is no real child).
-struct EofReader;
-
-impl Read for EofReader {
-    fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
-        Ok(0)
+impl Drop for MemoryEngine {
+    /// The child goes with its engine, so a reader blocked on its output ends.
+    fn drop(&mut self) {
+        self.output.close();
     }
 }
 
-/// Spawns [`MemoryEngine`]s sharing one [`MemoryShared`] state.
-#[derive(Default, Clone)]
+/// The output side of one spawned [`MemoryEngine`]'s child: what a test
+/// writes here, the terminal reads as if the child had printed it. `Send`,
+/// `Sync` and `Clone`, so a test can write from any thread.
+///
+/// ```
+/// use teksilo_terminal::MemoryEngineFactory;
+///
+/// let factory = MemoryEngineFactory::new();
+/// let output = factory.output();
+/// let remote = output.clone();
+/// std::thread::spawn(move || remote.write(b"hello")).join().unwrap();
+/// output.close();
+/// ```
+#[derive(Clone)]
+pub struct MemoryOutput {
+    inner: Arc<OutputChannel>,
+}
+
+struct OutputChannel {
+    state: Mutex<OutputState>,
+    changed: Condvar,
+}
+
+#[derive(Default)]
+struct OutputState {
+    pending: VecDeque<u8>,
+    closed: bool,
+    /// The reader returned the end of the output, or was dropped.
+    released: bool,
+    /// The reader is blocked in a read, so a test can tell it is.
+    #[cfg(test)]
+    reading: bool,
+}
+
+impl MemoryOutput {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(OutputChannel {
+                state: Mutex::new(OutputState::default()),
+                changed: Condvar::new(),
+            }),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, OutputState> {
+        self.inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Queue `bytes` as if the child printed them. Ignored once closed.
+    pub fn write(&self, bytes: &[u8]) {
+        let mut state = self.lock();
+        if state.closed {
+            return;
+        }
+        state.pending.extend(bytes);
+        drop(state);
+        self.inner.changed.notify_all();
+    }
+
+    /// End the child's output: the terminal reads what is left, then the end,
+    /// and reports the child's exit at its next pull. Idempotent.
+    pub fn close(&self) {
+        self.lock().closed = true;
+        self.inner.changed.notify_all();
+    }
+
+    /// Bytes written and not yet read by the terminal.
+    #[cfg(test)]
+    pub(crate) fn pending_len(&self) -> usize {
+        self.lock().pending.len()
+    }
+
+    /// Wait until the terminal's reader is blocked in a read, or `timeout`
+    /// passes.
+    #[cfg(test)]
+    pub(crate) fn wait_reader_blocked(&self, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        while !self.lock().reading {
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::yield_now();
+        }
+        true
+    }
+
+    /// Wait until the terminal's reader has seen the end of the output, or
+    /// `timeout` passes.
+    #[cfg(test)]
+    pub(crate) fn wait_reader_released(&self, timeout: std::time::Duration) -> bool {
+        let state = self.lock();
+        let (state, _) = self
+            .inner
+            .changed
+            .wait_timeout_while(state, timeout, |state| !state.released)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.released
+    }
+}
+
+impl std::fmt::Debug for MemoryOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = self.lock();
+        f.debug_struct("MemoryOutput")
+            .field("pending", &state.pending.len())
+            .field("closed", &state.closed)
+            .finish()
+    }
+}
+
+/// The reader the terminal's reader thread reads a [`MemoryEngine`]'s child
+/// through: blocks until the test writes, returns the end once the output is
+/// closed and drained.
+struct MemoryReader {
+    output: MemoryOutput,
+}
+
+impl Read for MemoryReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        #[cfg_attr(not(test), allow(unused_mut))]
+        let mut state = self.output.lock();
+        #[cfg(test)]
+        {
+            state.reading = true;
+        }
+        #[cfg_attr(not(test), allow(unused_mut))]
+        let mut state = self
+            .output
+            .inner
+            .changed
+            .wait_while(state, |state| state.pending.is_empty() && !state.closed)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        #[cfg(test)]
+        {
+            state.reading = false;
+        }
+        if state.pending.is_empty() {
+            state.released = true;
+            drop(state);
+            self.output.inner.changed.notify_all();
+            return Ok(0);
+        }
+        let n = buf.len().min(state.pending.len());
+        for (slot, byte) in buf.iter_mut().zip(state.pending.drain(..n)) {
+            *slot = byte;
+        }
+        Ok(n)
+    }
+}
+
+impl Drop for MemoryReader {
+    fn drop(&mut self) {
+        self.output.lock().released = true;
+        self.output.inner.changed.notify_all();
+    }
+}
+
+/// Spawns [`MemoryEngine`]s sharing one [`MemoryShared`] state. Each spawned
+/// engine's child has an output of its own: take it with
+/// [`output`](Self::output) before the terminal is mounted.
+#[derive(Clone)]
 pub struct MemoryEngineFactory {
     shared: Rc<RefCell<MemoryShared>>,
+    /// The output the next engine spawned reads; replaced at each spawn.
+    /// Shared by clones of the factory.
+    next_output: Rc<RefCell<MemoryOutput>>,
+}
+
+impl Default for MemoryEngineFactory {
+    fn default() -> Self {
+        Self {
+            shared: Rc::default(),
+            next_output: Rc::new(RefCell::new(MemoryOutput::new())),
+        }
+    }
 }
 
 impl MemoryEngineFactory {
@@ -236,6 +440,15 @@ impl MemoryEngineFactory {
     pub fn shared(&self) -> Rc<RefCell<MemoryShared>> {
         self.shared.clone()
     }
+
+    /// The output of the next engine this factory, or a clone of it, spawns.
+    /// Take it before mounting the terminal, like [`shared`](Self::shared).
+    /// Writes made before the spawn are delivered; closing it before the
+    /// spawn makes the child exit at once. After a spawn, a new call returns
+    /// the following engine's.
+    pub fn output(&self) -> MemoryOutput {
+        self.next_output.borrow().clone()
+    }
 }
 
 impl TerminalEngineFactory for MemoryEngineFactory {
@@ -245,12 +458,14 @@ impl TerminalEngineFactory for MemoryEngineFactory {
         geom: PtyGeom,
         _scrollback_lines: usize,
     ) -> std::io::Result<SpawnedEngine> {
+        let output = std::mem::replace(&mut *self.next_output.borrow_mut(), MemoryOutput::new());
         Ok(SpawnedEngine {
             engine: Box::new(MemoryEngine {
                 shared: self.shared.clone(),
                 geom,
+                output: output.clone(),
             }),
-            reader: Box::new(EofReader),
+            reader: Box::new(MemoryReader { output }),
         })
     }
 }

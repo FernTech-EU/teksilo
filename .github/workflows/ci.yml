@@ -48,7 +48,7 @@ env:
 jobs:
   ci:
     name: CI
-    needs: [test-linux, test-x11, test-cross, test-automation, check, rustfmt, clippy, docs, spdx, lockfile]
+    needs: [test-linux, test-x11, test-cross, test-automation, check, rustfmt, clippy, loom, docs, spdx, lockfile]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -61,6 +61,7 @@ jobs:
              [[ "${{ needs.check.result }}" != "success" ]] || \
              [[ "${{ needs.rustfmt.result }}" != "success" ]] || \
              [[ "${{ needs.clippy.result }}" != "success" ]] || \
+             [[ "${{ needs.loom.result }}" != "success" ]] || \
              [[ "${{ needs.docs.result }}" != "success" ]] || \
              [[ "${{ needs.spdx.result }}" != "success" ]] || \
              [[ "${{ needs.lockfile.result }}" != "success" ]]; then
@@ -78,6 +79,15 @@ jobs:
     # which is every tag's first run) compiles the workspace twice over — once
     # for the tests and once for the trybuild fixtures — and overran 30.
     timeout-minutes: 60
+    env:
+      # The offscreen renderer builds its instance from the environment, so
+      # this makes every GPU test open lavapipe or nothing, never a silent
+      # fall back to GL.
+      WGPU_BACKEND: vulkan
+      # A missing adapter, or one that is not lavapipe, fails the GPU tests
+      # that check the requirement instead of letting them return early and
+      # pass. The panic message names the adapter found.
+      TEKSILO_TEST_REQUIRE_ADAPTER: lavapipe
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -90,6 +100,23 @@ jobs:
 
       - name: Install Linux system dependencies
         uses: ./.github/actions/install-linux-deps
+
+      # The runner has no GPU and no Vulkan ICD. lavapipe, Mesa's Vulkan
+      # rasteriser on the CPU, gives every test that renders through
+      # `teksilo_render::test_support` the backend a Linux window uses. The
+      # apt index is fresh from the step above. The manifest's name varies
+      # with the Mesa version and packaging (`lvp_icd.json`,
+      # `lvp_icd.<arch>.json`), hence the glob.
+      - name: Install a software Vulkan device (lavapipe)
+        run: |
+          sudo apt-get install --no-install-recommends -y mesa-vulkan-drivers
+          shopt -s nullglob
+          icds=(/usr/share/vulkan/icd.d/lvp_icd*.json)
+          if [ "${#icds[@]}" -ne 1 ]; then
+            echo "::error::expected one lavapipe ICD manifest, found ${#icds[@]}: ${icds[*]}"
+            exit 1
+          fi
+          echo "VK_DRIVER_FILES=${icds[0]}" >> "$GITHUB_ENV"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -207,7 +234,7 @@ jobs:
       - name: Build tests
         run: |
           cargo test -p teksilo-platform --no-run
-          cargo test -p teksilo-app --lib --no-run
+          cargo test -p teksilo-app --lib --features automation --no-run
 
       # Xvfb alone has NO window manager, which would turn every EWMH assertion
       # into a silent pass rather than a failure — openbox is what makes the
@@ -237,7 +264,8 @@ jobs:
         run: |
           export DISPLAY=:99
           xdpyinfo -display :99 >/dev/null
-          WAYLAND_DISPLAY= cargo test -p teksilo-app --lib -- --ignored --test-threads=1
+          # `automation` adds the bridge's route, which claim (t) drives.
+          WAYLAND_DISPLAY= cargo test -p teksilo-app --lib --features automation -- --ignored --test-threads=1
 
   test-cross:
     name: Test (${{ matrix.name }})
@@ -252,6 +280,10 @@ jobs:
             os: macos-latest
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      # WARP on Windows, Metal on macOS. A GPU test fails if neither opens,
+      # instead of returning early and counting as a pass.
+      TEKSILO_TEST_REQUIRE_ADAPTER: any
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -419,11 +451,11 @@ jobs:
             exit 1
           fi
 
-          # The probes drive these three demo apps' own debug binaries — the
+          # The probes drive these four demo apps' own debug binaries — the
           # automation bridge is `#[cfg(debug_assertions)]`, so it must be a
           # `cargo build`, not `cargo test`'s hashed test-binary output, which
           # `teksilo_probe.resolve.app_binary` does not look under.
-          cargo build -p data-collections -p dialogs-and-popovers -p rich-text-editor
+          cargo build -p data-collections -p dialogs-and-popovers -p rich-text-editor -p live-image-demo
 
           sudo apt-get install --no-install-recommends -y openbox
 
@@ -541,9 +573,27 @@ jobs:
       # release at all), so they run once — on the `debug` leg — rather than
       # duplicating identical work across both matrix legs.
 
+      # Between releases the corpus is stale by design: only the release commit
+      # regenerates it, through the pre-release hook in
+      # crates/teksilo-corpus/Cargo.toml. Any edit to an indexed document
+      # (docs/, examples/, the app guide, the skill) therefore fails `--check`
+      # on its pull request, and on main until the next release, and failing
+      # those runs reported the release's pending work as a fault in the change.
+      # So the guard fails only on a tag. The Release workflow calls this one,
+      # and there `github.ref` is the tag; a stale corpus at that point means
+      # the release commit was cut without the hook and must not be published.
+      # Everywhere else the staleness is a notice.
       - name: teksilo-corpus staleness guard
         if: matrix.name == 'debug'
-        run: python3 tools/build_corpus.py --check
+        run: |
+          if python3 tools/build_corpus.py --check; then
+            exit 0
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "::error::the release commit carries a stale corpus; was it cut without the pre-release hook in crates/teksilo-corpus/Cargo.toml?"
+            exit 1
+          fi
+          echo "::notice::teksilo-corpus is stale, as expected between releases; the release commit regenerates it"
 
       # The corpus is built in two passes: build_corpus.py chunks the sources,
       # then `cargo teksilo build-vectors` encodes them. The guard above catches
@@ -731,6 +781,62 @@ jobs:
         
       - name: Lint
         run: cargo clippy --workspace --all-targets -- -D warnings -A deprecated
+
+      # The idle trace's live-image timings exist only behind a feature no
+      # default build turns on.
+      - name: Lint (live-image-timings)
+        run: cargo clippy -p teksilo-app -p live-image-demo -p live-image-bench --all-targets --features teksilo-app/live-image-timings -- -D warnings -A deprecated
+
+  # The off-thread wake protocols are lock-free, and a lost wake there is a
+  # picture that freezes until something unrelated redraws, which no ordinary
+  # test reproduces. loom runs every interleaving of each model, up to three
+  # preemptions, through `teksilo_canvas::sync`.
+  loom:
+    name: Concurrency models (loom)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTFLAGS: --cfg teksilo_loom
+      LOOM_MAX_PREEMPTIONS: 3
+      # Optimised, not `--release`: the release profile's fat LTO and single
+      # codegen unit only slow the build down.
+      CARGO_PROFILE_TEST_OPT_LEVEL: 3
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # teksilo-platform links winit.
+      - name: Install Linux system dependencies
+        uses: ./.github/actions/install-linux-deps
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: loom
+
+      # The Clippy job never compiles `cfg(teksilo_loom)` code.
+      - name: Lint the loom-only code
+        run: cargo clippy --lib --tests -p teksilo-canvas -p teksilo-platform -p teksilo-core -p teksilo-terminal -- -D warnings -A deprecated
+
+      # Every model is named `loom_*`: under the cfg the facade's types are
+      # loom's, and they panic outside a model, so nothing else may run. A crate
+      # whose models stopped compiling would pass silently without the count.
+      - name: Run the loom models
+        run: |
+          packages="teksilo-canvas teksilo-platform teksilo-core teksilo-terminal"
+          for p in $packages; do
+            n=$(cargo test --lib -p "$p" loom_ -- --list | grep -c ': test$' || true)
+            if [ "$n" -lt 1 ]; then
+              echo "::error::no loom_ model compiled in $p"
+              exit 1
+            fi
+          done
+          cargo test --lib $(printf -- '-p %s ' $packages) loom_
 
   spdx:
     name: SPDX headers

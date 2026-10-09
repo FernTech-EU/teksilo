@@ -6,7 +6,47 @@
 `SceneCard` — the chrome and the gesture regime of a heavyweight scene
 item, with **no opinion about what is inside it**.
 
-# Why it is a card and not a note
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`CardMode`](#cardmode) — What a `SceneCard` is doing |
+| `struct` | [`SceneCard`](#scenecard) — A heavyweight scene item's container: surface, header, body, modes, gestures and accessibility |
+
+## Public functions
+
+### `SceneCard`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(model: SceneModel, item: ItemId)`](#scenecard-new) |
+| | **Builder methods** |
+| `Self` | [`header(widget: impl teksilo_core::IntoTeksiChild)`](#scenecard-header) |
+| `Self` | [`header_trailing(widget: impl teksilo_core::IntoTeksiChild)`](#scenecard-header_trailing) |
+| `Self` | [`body(widget: impl teksilo_core::IntoTeksiChild)`](#scenecard-body) |
+| `Self` | [`surface(f: impl Fn(WidgetId) -> Box<dyn Widget> + 'static)`](#scenecard-surface) |
+| `Self` | [`mode(mode: Signal<CardMode>)`](#scenecard-mode) |
+| `Self` | [`selection(selection: SceneSelection)`](#scenecard-selection) |
+| `Self` | [`label(label: impl Into<Prop<String>>)`](#scenecard-label) |
+| `Self` | [`activate_label(label: impl Into<Prop<String>>)`](#scenecard-activate_label) |
+| `Self` | [`movable(movable: bool)`](#scenecard-movable) |
+| `Self` | [`height_for_width()`](#scenecard-height_for_width) |
+| `Self` | [`size_policy(policy: SizePolicy)`](#scenecard-size_policy) |
+| `Self` | [`on_activate(f: impl Fn(&mut EventContext) + 'static)`](#scenecard-on_activate) |
+| | **Methods** |
+| `Signal<CardMode>` | [`mode_signal()`](#scenecard-mode_signal) |
+
+### `CardMode`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `bool` | [`is_selected()`](#cardmode-is_selected) |
+
+## Detailed description
+
+### Why it is a card and not a note
 
 A note container, a pinned image, an embedded web page, a chart, a group of
 dried ink and a sub-page thumbnail want the same five things — a surface, a
@@ -24,7 +64,7 @@ SceneCard::new(model.clone(), id)
     .body(RichTextEditor::editor(doc))
 ```
 
-# The gesture regime, which is the part that could not be written outside
+### The gesture regime, which is the part that could not be written outside
 
 Three presses, three different owners, decided **structurally** rather than
 by a recognizer race:
@@ -47,7 +87,7 @@ The trailing header slot is wrapped in a
 `Accordion` header precedent exactly — so the `⋮` button can be clicked
 *with the jitter a real click carries* without starting a move.
 
-# What drags a card, and what resizes it
+### What drags a card, and what resizes it
 
 The **header** moves it, always. The selection frame the
 `transform controller` draws moves and resizes it
@@ -67,7 +107,7 @@ and commits **once**, on release, through
 One gesture is one reversible step, and a cancelled gesture has nothing to
 roll back because nothing was written.
 
-# Modes, and why there is no `on_commit`
+### Modes, and why there is no `on_commit`
 
 `CardMode` is a `Signal` the **app owns**. The card writes into it
 (`Editing` on activation, `Selected` when focus leaves its subtree or `Esc`
@@ -80,7 +120,7 @@ is written outside event dispatch. A callback there could not be handed an
 `on_activate` *does* take one, because an
 activation is a gesture or a key and has a dispatch to belong to.
 
-# Accessibility
+### Accessibility
 
 **One** `Role::Group` per card, named by `label`,
 carrying `selected` when the mode says so and a custom **Edit** action that
@@ -113,7 +153,7 @@ hidden subtree still sits node for node, so it could not see that;
 `a_cards_title_and_body_reach_a_screen_reader` walks the filtered tree
 the way an adapter does and pins it.
 
-## Tab stops, and the one thing the card does not decide
+#### Tab stops, and the one thing the card does not decide
 
 The card contributes exactly **one** tab stop — itself, the object handle.
 It does not take its body's away while idle, and the reason is not
@@ -130,7 +170,7 @@ keeping it mounted, so a mode round-trip does not destroy the caret. That
 shape is the framework's answer to this question and the card defers to it
 rather than building a worse one.
 
-## …and the one frame that shape costs
+#### …and the one frame that shape costs
 
 Deferring to the `Switcher` has a consequence the card has to answer for:
 **the editor does not exist yet at the moment the user asks for it.**
@@ -157,13 +197,11 @@ The same gate is what makes the two-way `mode` contract
 true from the outside: a toolbar button that writes `Editing` into the
 signal gets the body focused too, with no dispatch of its own to do it in.
 
-## Builder methods at a glance
-
-`header`, `header_trailing`, `body`, `surface`, `mode`, `mode_signal`, `selection`, `label`, `activate_label`, `movable`, `height_for_width`, `size_policy`, `on_activate`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="cardmode"></a>
 
 ## `pub enum CardMode`
 
@@ -188,10 +226,14 @@ pub enum CardMode { /* variants */ }
 
 ### Methods
 
+<a id="cardmode-is_selected"></a>
+
 #### `pub fn is_selected(self) -> bool`
 
 Whether this mode reads as "selected" to assistive technology. `Editing`
 does: a card being edited is the selected one.
+
+<a id="scenecard"></a>
 
 ## `pub struct SceneCard`
 
@@ -203,6 +245,8 @@ pub struct SceneCard { /* fields */ }
 ```
 
 ### Methods
+
+<a id="scenecard-new"></a>
 
 #### `pub fn new(model: SceneModel, item: ItemId) -> Self`
 
@@ -217,6 +261,8 @@ SceneView::with_model(model.clone())
     })
 ```
 
+<a id="scenecard-header"></a>
+
 #### `pub fn header(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 The grab handle, and the card's title strip.
@@ -227,6 +273,8 @@ A press here moves the card and nothing else — see the
 Takes a widget, a `Box<dyn Widget>` (the shape a card factory hands
 back), or a `WidgetId` already in the tree — one method per slot, so
 the caller does not pick a spelling to match what they happen to hold.
+
+<a id="scenecard-header_trailing"></a>
 
 #### `pub fn header_trailing(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
@@ -240,6 +288,8 @@ a few pixels of jitter still reads as a click.
 Takes a widget, a boxed widget or a `WidgetId`, like
 `header`.
 
+<a id="scenecard-body"></a>
+
 #### `pub fn body(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 The content. Anything at all: a text editor, an image, a chart, a
@@ -251,6 +301,8 @@ body's own gesture arena would have to argue with.
 
 Takes a widget, a boxed widget or a `WidgetId`, like
 `header`.
+
+<a id="scenecard-surface"></a>
 
 #### `pub fn surface(mut self, f: impl Fn(WidgetId) -> Box<dyn Widget> + 'static) -> Self`
 
@@ -270,6 +322,8 @@ card.surface(|content| {
 })
 ```
 
+<a id="scenecard-mode"></a>
+
 #### `pub fn mode(mut self, mode: Signal<CardMode>) -> Self`
 
 Bind the card's mode to an app-owned signal.
@@ -279,9 +333,13 @@ or a shortcut can put a card into `Editing` and the card will focus its
 body. Observe it to persist on commit — see the `scene_card` module docs for
 why there is no separate `on_commit`.
 
+<a id="scenecard-mode_signal"></a>
+
 #### `pub fn mode_signal(&self) -> Signal<CardMode>`
 
 The card's mode signal, for an app that did not supply one.
+
+<a id="scenecard-selection"></a>
 
 #### `pub fn selection(mut self, selection: SceneSelection) -> Self`
 
@@ -293,20 +351,28 @@ a tap on the card and a marquee across it mean the same thing. Without
 one the card still tracks its own `CardMode`, but a tap selects
 nothing.
 
+<a id="scenecard-label"></a>
+
 #### `pub fn label(mut self, label: impl Into<Prop<String>>) -> Self`
 
 The card's accessible name. Locale-reactive when given a `tr!` string.
+
+<a id="scenecard-activate_label"></a>
 
 #### `pub fn activate_label(mut self, label: impl Into<Prop<String>>) -> Self`
 
 The name of the custom accessibility action that enters edit mode.
 Defaults to an untranslated `"Edit"`.
 
+<a id="scenecard-movable"></a>
+
 #### `pub fn movable(mut self, movable: bool) -> Self`
 
 Whether the header moves the card. `true` by default; `false` leaves the
 header as an ordinary strip (and the selection frame as the only way to
 move the card).
+
+<a id="scenecard-height_for_width"></a>
 
 #### `pub fn height_for_width(self) -> Self`
 
@@ -332,10 +398,14 @@ The **horizontal** half is an ordinary resize and converges: the preview
 reflows the card live as the handle moves, nothing reaches the model
 until the release, and the release writes the width once.
 
+<a id="scenecard-size_policy"></a>
+
 #### `pub fn size_policy(self, policy: SizePolicy) -> Self`
 
 `height_for_width`, stated in full. See
 `SizePolicy`.
+
+<a id="scenecard-on_activate"></a>
 
 #### `pub fn on_activate(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 

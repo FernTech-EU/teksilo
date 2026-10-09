@@ -5,6 +5,43 @@
 
 Dynamic, dotted-key K/V store backed by TOML.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `const` | [`DEFAULT_DEBOUNCE`](#default_debounce) — Default debounce window for store flushes |
+| `enum` | [`SettingsStoreError`](#settingsstoreerror) — Errors surfaced by `SettingsStore::open` |
+| `struct` | [`SettingsKey`](#settingskey) — A statically-named setting |
+| `const` | [`TEXT_SCALE_KEY`](#text_scale_key) — Persisted user-controlled global text-scale factor (`1.0` = 100 %) |
+| `struct` | [`SettingsStore`](#settingsstore) — A dynamic dotted-key reactive settings store |
+
+## Public functions
+
+### `SettingsKey`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(key: &'static str, default: fn() -> T)`](#settingskey-new) |
+
+### `SettingsStore`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Result<Self, SettingsStoreError>` | [`open(path: PathBuf)`](#settingsstore-open) |
+| `Result<Self, SettingsStoreError>` | [`open_with_delay(path: PathBuf, delay: Duration)`](#settingsstore-open_with_delay) |
+| `Result<Self, SettingsStoreError>` | [`open_path(path: &Path)`](#settingsstore-open_path) |
+| | **Methods** |
+| `&Path` | [`path()`](#settingsstore-path) |
+| `Result<(), SettingsStoreError>` | [`flush_now()`](#settingsstore-flush_now) |
+| `bool` | [`has(key: &str)`](#settingsstore-has) |
+| `Vec<String>` | [`registered_keys()`](#settingsstore-registered_keys) |
+| `Signal<T>` | [`signal<T>(key: &str, default: T)`](#settingsstore-signal) |
+| `Signal<T>` | [`signal_for<T>(key: &SettingsKey<T>)`](#settingsstore-signal_for) |
+
+## Detailed description
+
 `SettingsStore` is the QSettings analogue: callers ask for any
 dotted key with a type; the store returns a cached `Signal<T>` whose
 mutations write back into an in-memory `toml::Value` and schedule a
@@ -14,7 +51,7 @@ Keys carry static names via `SettingsKey<T>`, or are passed as
 ad-hoc strings via `SettingsStore::signal`. Same key, same type,
 across any number of call sites returns clones of the same `Signal`.
 
-## When to use
+#### When to use
 
 Use `SettingsStore` for **scalar and array-of-scalar** preferences
 (numbers, strings, booleans, `Vec<String>`). It is the right choice
@@ -23,7 +60,7 @@ name. For rich structs with migrations, use
 `SettingsFile<T>` instead — struct values
 serialize as TOML tables and collide with the dotted-key model.
 
-## Invariants enforced at registration
+#### Invariants enforced at registration
 
 * **Type stability** — once a key has been registered with type
   `T`, calling `signal::<U>` on the same key panics. Settings are
@@ -32,7 +69,7 @@ serialize as TOML tables and collide with the dotted-key model.
   with `"editor"` as a leaf value, in either order. Both directions
   panic at the call site that creates the conflict.
 
-## Merging by dirty key, not by whole-document overwrite
+#### Merging by dirty key, not by whole-document overwrite
 
 Every `Signal<T>::set` schedules a `crate::flush::Patch` that carries
 only the keys dirtied since the last schedule — never a full render of
@@ -43,7 +80,7 @@ Skribisto's `general.toml`: today, changing any one of its 26 keys
 reverts every other key a peer process changed, because the whole
 document gets re-serialized from an increasingly stale in-memory copy.
 
-## Reload and the re-entrancy guard
+#### Reload and the re-entrancy guard
 
 `Reloadable::reload_from_disk`
 pushes a peer's on-disk change straight into the already-handed-out
@@ -54,7 +91,7 @@ re-trigger this same write-back observer and bounce the value straight
 back out to disk as if it were a local edit; `StoreInner::applying_external`
 is the flag the observer checks to short-circuit that.
 
-## Cycle-free observer wiring
+#### Cycle-free observer wiring
 
 The cell each key owns includes an `ObserverHandle` returned by
 `signal.observe(|new_val| …)`. The observer's closure captures a
@@ -63,7 +100,7 @@ the store has already been dropped. This avoids a reference cycle: a
 strong capture would trap the entire store inside its own observer,
 leaking for the life of the process.
 
-## Example
+#### Example
 
 ```ignore
 use teksilo_settings::{SettingsKey, SettingsStore};
@@ -89,6 +126,8 @@ store.flush_now()?;                           // force sync (useful in tests)
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
 
+<a id="default_debounce"></a>
+
 ## `pub const DEFAULT_DEBOUNCE`
 
 Default debounce window for store flushes.
@@ -96,6 +135,8 @@ Default debounce window for store flushes.
 ```rust
 pub const DEFAULT_DEBOUNCE: Duration = Duration::from_millis(500);
 ```
+
+<a id="settingsstoreerror"></a>
 
 ## `pub enum SettingsStoreError`
 
@@ -110,6 +151,8 @@ pub enum SettingsStoreError { /* variants */ }
 - **`Io`** — The settings file could not be read or written (missing directory, permission denied, etc.).
 - **`Parse`** — The settings file exists but its contents are not valid TOML.
 - **`Flush`** — An attempt to flush the in-memory state to disk failed.
+
+<a id="settingskey"></a>
 
 ## `pub struct SettingsKey`
 
@@ -129,9 +172,13 @@ pub struct SettingsKey<T: 'static> { /* fields */ }
 
 ### Methods
 
+<a id="settingskey-new"></a>
+
 #### `pub const fn new(key: &'static str, default: fn() -> T) -> Self`
 
 Create a new key descriptor; intended for use in `const` declarations.
+
+<a id="text_scale_key"></a>
 
 ## `pub const TEXT_SCALE_KEY`
 
@@ -148,6 +195,8 @@ pub const TEXT_SCALE_KEY: SettingsKey<f32> =
     SettingsKey::new("accessibility.text_scale", || 1.0_f32);
 ```
 
+<a id="settingsstore"></a>
+
 ## `pub struct SettingsStore`
 
 A dynamic dotted-key reactive settings store.
@@ -161,9 +210,13 @@ pub struct SettingsStore { /* fields */ }
 
 ### Methods
 
+<a id="settingsstore-open"></a>
+
 #### `pub fn open(path: PathBuf) -> Result<Self, SettingsStoreError>`
 
 Open a store at `path` with the default debounce window.
+
+<a id="settingsstore-open_with_delay"></a>
 
 #### `pub fn open_with_delay(path: PathBuf, delay: Duration) -> Result<Self, SettingsStoreError>`
 
@@ -172,21 +225,31 @@ Duration::ZERO` is useful for tests — every set writes through
 on the next worker iteration, and `flush_now()` is fully
 deterministic.
 
+<a id="settingsstore-path"></a>
+
 #### `pub fn path(&self) -> &Path`
 
 Path of the underlying file.
+
+<a id="settingsstore-flush_now"></a>
 
 #### `pub fn flush_now(&self) -> Result<(), SettingsStoreError>`
 
 Force any pending payload to disk synchronously.
 
+<a id="settingsstore-has"></a>
+
 #### `pub fn has(&self, key: &str) -> bool`
 
 Whether the given key has already been registered.
 
+<a id="settingsstore-registered_keys"></a>
+
 #### `pub fn registered_keys(&self) -> Vec<String>`
 
 All keys registered so far. Order is unspecified.
+
+<a id="settingsstore-signal"></a>
 
 #### `pub fn signal<T>(&self, key: &str, default: T) -> Signal<T> where T: Clone + Serialize + DeserializeOwned + 'static,`
 
@@ -201,10 +264,14 @@ clones of the same signal.
   table shape (e.g. `"editor"` is a string and now you ask for
   `"editor.font_size"`).
 
+<a id="settingsstore-signal_for"></a>
+
 #### `pub fn signal_for<T>(&self, key: &SettingsKey<T>) -> Signal<T> where T: Clone + Serialize + DeserializeOwned + 'static,`
 
 Like `signal`, but driven by a strongly-named
 `SettingsKey<T>` constant.
+
+<a id="settingsstore-open_path"></a>
 
 #### `pub fn open_path(path: &Path) -> Result<Self, SettingsStoreError>`
 

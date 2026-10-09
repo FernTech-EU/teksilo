@@ -5,6 +5,39 @@
 
 Schema migrations for persisted files.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `trait` | [`Versioned`](#versioned) — A persisted struct whose schema is versioned |
+| `enum` | [`MigrationError`](#migrationerror) — Errors surfaced by `Migrator::run` |
+| `struct` | [`Migrator`](#migrator) — Schema migration pipeline for a `Versioned` type |
+
+## Public functions
+
+### `Versioned`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `u32` | [`version()`](#versioned-version) |
+|  | [`set_version(v: u32)`](#versioned-set_version) |
+| | **Constants and types** |
+| `u32` | [`CURRENT_VERSION`](#versioned-current_version) |
+
+### `Migrator`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#migrator-new) |
+| | **Builder methods** |
+| `Self` | [`step<F>(from: u32, func: F)`](#migrator-step) |
+| | **Methods** |
+| `Result<T, MigrationError>` | [`run(mut raw: toml::Value)`](#migrator-run) |
+
+## Detailed description
+
 Every persisted struct carries a `version: u32` (via `Versioned`).
 `Migrator<T>` holds an ordered set of `from_version → from_version + 1`
 transformations expressed on raw `toml::Value` — pre-deserialization,
@@ -43,13 +76,11 @@ let migrator: Migrator<Recents> = Migrator::new()
     });
 ```
 
-## Builder methods at a glance
-
-`CURRENT_VERSION`, `version`, `set_version`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
+
+<a id="versioned"></a>
 
 ## `pub trait Versioned`
 
@@ -64,19 +95,27 @@ pub trait Versioned { /* associated items below */ }
 
 ### Associated items
 
+<a id="versioned-current_version"></a>
+
 #### `const CURRENT_VERSION: u32;`
 
 The version this build understands. Bump when the schema changes
 in a way that requires migration.
 
+<a id="versioned-version"></a>
+
 #### `fn version(&self) -> u32;`
 
 The version embedded in this instance.
+
+<a id="versioned-set_version"></a>
 
 #### `fn set_version(&mut self, v: u32);`
 
 Write a new version into this instance. Used by the migrator
 after a successful chain of steps.
+
+<a id="migrationerror"></a>
 
 ## `pub enum MigrationError`
 
@@ -92,6 +131,8 @@ pub enum MigrationError { /* variants */ }
 - **`NoStepFor`** — The chain is missing a step for the encountered version, making it impossible to reach `T::CURRENT_VERSION`.
 - **`Step`** — A migration step closure returned `Err(message)`.
 - **`Deserialize`** — The migrated `toml::Value` did not deserialize as `T`.
+
+<a id="migrator"></a>
 
 ## `pub struct Migrator`
 
@@ -114,6 +155,8 @@ pub struct Migrator<T: Versioned + DeserializeOwned> { /* fields */ }
 
 ### Methods
 
+<a id="migrator-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create an empty migrator with no steps registered.
@@ -122,11 +165,15 @@ If `T::CURRENT_VERSION` is 1 (the initial schema) or the file
 is already at the current version, no steps are needed and
 `run` will succeed immediately.
 
+<a id="migrator-step"></a>
+
 #### `pub fn step<F>(mut self, from: u32, func: F) -> Self where F: Fn(toml::Value) -> Result<toml::Value, String> + Send + Sync + 'static,`
 
 Register a step that promotes a value from `from` to `from + 1`.
 Steps may be registered in any order; `run` finds
 the right one for the current version on demand.
+
+<a id="migrator-run"></a>
 
 #### `pub fn run(&self, mut raw: toml::Value) -> Result<T, MigrationError>`
 

@@ -70,6 +70,7 @@ pub use teksilo_core::styles::{AvatarCorner, AvatarPresence, AvatarShape, Avatar
 use crate::primitives::ImageWidget;
 use crate::primitives::image_mask::ImageMaskShape;
 use crate::primitives::image_widget::ImageFit;
+use crate::primitives::image_widget::{CommittedImage, masked};
 use crate::styles::recipe_avatar_style::{
     AVATAR_FONT_RATIO_1CHAR, AVATAR_FONT_RATIO_2CHAR, AVATAR_ROUNDED_RADIUS_RATIO,
     auto_contrast_text, avatar_pixel_size, hash_pick_palette_color,
@@ -158,6 +159,11 @@ pub struct Avatar {
     /// Per-call override for the chrome (shape fill, border, focus ring,
     /// presence dot).
     style_override: Option<SharedAvatarStyle>,
+    /// The masked picture last committed, and what it was made from. A
+    /// rebuild that leaves the image and the shape as they were (a name,
+    /// a presence or a locale change) shows the same source, so the window
+    /// keeps its texture.
+    image_cache: Option<(ImageKey, Option<Rc<CommittedImage>>)>,
     /// Build-time `AvatarStyle::make_body` root.
     root_child_id: Option<WidgetId>,
 
@@ -174,11 +180,52 @@ pub struct Avatar {
 #[derive(Clone)]
 struct RawImage {
     /// `Rc` so rebuilds (theme switch, locale switch, signal flip)
-    /// don't reclone the byte buffer. The Rc identity is the cache
-    /// key for the inner ImageWidget's texture-atlas name.
+    /// don't reclone the byte buffer; its identity is the image's, for
+    /// [`ImageKey`].
     pixels: Rc<Vec<u8>>,
     width: u32,
     height: u32,
+}
+
+/// What a committed avatar picture was made from: the image's identity
+/// and the mask applied to it.
+#[derive(Clone, Copy, PartialEq)]
+struct ImageKey {
+    image: ImageIdentity,
+    mask: ImageMaskShape,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ImageIdentity {
+    /// The avatar's own pixels, by the address of their `Rc`, which the
+    /// avatar holds for its life.
+    Raw(usize),
+    /// An icon from the image Signal, by its texture key: equal keys mean
+    /// equal pixels.
+    Icon(u64),
+}
+
+/// The current image: its identity, and how to get its pixels when they
+/// have to be committed.
+enum CurrentImage {
+    Raw(RawImage),
+    Icon(Rc<RasterIcon>),
+}
+
+impl CurrentImage {
+    fn identity(&self) -> ImageIdentity {
+        match self {
+            CurrentImage::Raw(raw) => ImageIdentity::Raw(Rc::as_ptr(&raw.pixels) as usize),
+            CurrentImage::Icon(icon) => ImageIdentity::Icon(icon.texture_key()),
+        }
+    }
+
+    fn pixels(&self) -> (Vec<u8>, u32, u32) {
+        match self {
+            CurrentImage::Raw(raw) => ((*raw.pixels).clone(), raw.width, raw.height),
+            CurrentImage::Icon(icon) => (icon.pixels().to_vec(), icon.width(), icon.height()),
+        }
+    }
 }
 
 // ─── Constructors ──────────────────────────────────────────────────────────
@@ -253,6 +300,7 @@ impl Avatar {
             action: None,
             focused: None,
             style_override: None,
+            image_cache: None,
             root_child_id: None,
             tooltip_text: None,
             rich_tooltip_source: None,
@@ -626,26 +674,58 @@ impl Avatar {
         }
     }
 
-    /// Resolve the image source bytes + dims for the current state.
-    /// `Some` ⇒ image mode (will spawn an `ImageWidget` child);
-    /// `None` ⇒ initials-only mode.
-    fn current_image(&self) -> Option<(Rc<Vec<u8>>, u32, u32)> {
+    /// The image of the current state: `Some` ⇒ image mode (an
+    /// `ImageWidget` child), `None` ⇒ initials only.
+    fn current_image(&self) -> Option<CurrentImage> {
         if let Some(sig) = &self.image_signal {
-            return sig
-                .get()
-                .map(|rc| (Rc::new(rc.pixels().to_vec()), rc.width(), rc.height()));
+            return sig.get().map(CurrentImage::Icon);
         }
-        self.image_source
-            .as_ref()
-            .map(|raw| (raw.pixels.clone(), raw.width, raw.height))
+        self.image_source.clone().map(CurrentImage::Raw)
     }
 
-    /// Whether the avatar should expose a11y-image-role semantics.
+    /// The masked picture of `image`, committed once per image and shape:
+    /// `None` when its pixels were refused (they draw nothing, so the
+    /// initials show instead).
+    fn committed(
+        &mut self,
+        image: &CurrentImage,
+        mask: ImageMaskShape,
+    ) -> Option<Rc<CommittedImage>> {
+        let key = ImageKey {
+            image: image.identity(),
+            mask,
+        };
+        if let Some((cached, committed)) = &self.image_cache
+            && *cached == key
+        {
+            return committed.clone();
+        }
+        let (pixels, width, height) = image.pixels();
+        let (pixels, width, height) = masked(pixels, width, height, mask);
+        let committed = match CommittedImage::commit(pixels, width, height) {
+            Ok(committed) => Some(committed),
+            Err(error) => {
+                eprintln!(
+                    "teksilo: an avatar image of {width}x{height} was refused ({error}): \
+                     its initials show instead"
+                );
+                None
+            }
+        };
+        self.image_cache = Some((key, committed.clone()));
+        committed
+    }
+
+    /// Whether the avatar should expose a11y-image-role semantics: it has
+    /// an image, and the last build did not find its pixels refused (the
+    /// initials show then).
     fn has_image_now(&self) -> bool {
-        self.image_signal
+        let has_image = self
+            .image_signal
             .as_ref()
             .is_some_and(|sig| sig.get().is_some())
-            || self.image_source.is_some()
+            || self.image_source.is_some();
+        has_image && !matches!(&self.image_cache, Some((_, None)))
     }
 }
 
@@ -661,7 +741,10 @@ impl Widget for Avatar {
         let initials = self.current_initials();
         let seed = self.current_seed();
         let alt = self.current_alt();
-        let image_bytes = self.current_image();
+        let image = match self.current_image() {
+            Some(image) => self.committed(&image, mask_shape),
+            None => None,
+        };
 
         // 2. Build inner content (`InitialsLeaf` / `ImageWidget`).
         //    The masking lives on `ImageWidget` so Avatar doesn't
@@ -672,10 +755,8 @@ impl Widget for Avatar {
             background: self.background.clone(),
             foreground: self.foreground.clone(),
         };
-        let make_image_widget = |bytes: Rc<Vec<u8>>, w: u32, h: u32, alt: Option<String>| {
-            let mut img = ImageWidget::from_raw((*bytes).clone(), w, h)
-                .fit(ImageFit::Cover)
-                .mask(mask_shape);
+        let make_image_widget = |image: Rc<CommittedImage>, alt: Option<String>| {
+            let mut img = ImageWidget::from_committed(image).fit(ImageFit::Cover);
             if let Some(a) = alt {
                 img = img.alt(a);
             } else {
@@ -690,13 +771,11 @@ impl Widget for Avatar {
         // bound-visibility case the image and initials sit as siblings
         // inside a `ZStack` with `visible_when` bindings; either is
         // mounted alone otherwise.
-        let content_id = match (image_bytes, &self.image_visible) {
-            (Some((bytes, w, h)), Prop::Static(true)) => {
-                ctx.add(make_image_widget(bytes, w, h, alt.clone()))
-            }
+        let content_id = match (image, &self.image_visible) {
+            (Some(image), Prop::Static(true)) => ctx.add(make_image_widget(image, alt.clone())),
             (Some(_), Prop::Static(false)) => ctx.add(make_initials_leaf()),
-            (Some((bytes, w, h)), Prop::Bound(visible_signal)) => {
-                let img_id = ctx.add(make_image_widget(bytes, w, h, alt.clone()));
+            (Some(image), Prop::Bound(visible_signal)) => {
+                let img_id = ctx.add(make_image_widget(image, alt.clone()));
                 let init_id = ctx.add(make_initials_leaf());
                 let v_clone = visible_signal.clone();
                 ctx.visible_when(img_id, v_clone.clone());
@@ -1313,7 +1392,7 @@ mod tests {
         let icon = rgba_solid(8, [50, 100, 200, 255]);
         let frame = render_avatar(Avatar::with_image(&icon).alt(lit!("avatar")));
         assert!(
-            !frame.images.is_empty(),
+            !frame.live_images.is_empty(),
             "image avatar should render an image"
         );
     }
@@ -1496,7 +1575,7 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(32.0, 32.0));
         // With visibility = true, an image quad is emitted.
-        assert!(!tree.render().images.is_empty());
+        assert!(!tree.render().live_images.is_empty());
 
         // Flip visibility — the image child becomes dormant; on the
         // next render frame, no image is drawn.
@@ -1504,7 +1583,7 @@ mod tests {
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let frame_after = tree.render();
         assert!(
-            frame_after.images.is_empty(),
+            frame_after.live_images.is_empty(),
             "image should be hidden when image_visible == false"
         );
         // Sanity: avatar itself is still visible.
@@ -1835,7 +1914,7 @@ mod tests {
         tree.layout(SizeProposal::exact(32.0, 32.0));
         // Logged-out: no image quad emitted.
         assert!(
-            tree.render().images.is_empty(),
+            tree.render().live_images.is_empty(),
             "logged-out avatar must not emit an image quad"
         );
 
@@ -1843,7 +1922,7 @@ mod tests {
         image.set(Some(Rc::new(icon)));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         assert!(
-            !tree.render().images.is_empty(),
+            !tree.render().live_images.is_empty(),
             "logged-in avatar must emit an image quad after the signal flips"
         );
 
@@ -1851,7 +1930,7 @@ mod tests {
         image.set(None);
         tree.layout(SizeProposal::exact(32.0, 32.0));
         assert!(
-            tree.render().images.is_empty(),
+            tree.render().live_images.is_empty(),
             "image quad must disappear when the source signal returns to None"
         );
     }
@@ -1878,7 +1957,7 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(32.0, 32.0));
         // Signal None overrides the static source — initials only.
-        assert!(tree.render().images.is_empty());
+        assert!(tree.render().live_images.is_empty());
     }
 
     #[test]

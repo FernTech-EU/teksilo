@@ -8,6 +8,31 @@
 `ColumnFlow` — flows children into as many columns as the width affords,
 re-partitioning every child when a column is gained or lost.
 
+## Public functions
+
+### `ColumnFlow`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#columnflow-new) |
+| | **Builder methods** |
+| `Self` | [`min_column_width(width: f32)`](#columnflow-min_column_width) |
+| `Self` | [`max_column_width(width: f32)`](#columnflow-max_column_width) |
+| `Self` | [`max_columns(max: usize)`](#columnflow-max_columns) |
+| `Self` | [`column_spacing(spacing: impl Into<Prop<f32>>)`](#columnflow-column_spacing) |
+| `Self` | [`item_spacing(spacing: impl Into<Prop<f32>>)`](#columnflow-item_spacing) |
+| `Self` | [`alignment(alignment: HAlignment)`](#columnflow-alignment) |
+| `Self` | [`column_rule(width: f32, color: impl Into<ColorProp>)`](#columnflow-column_rule) |
+| `Self` | [`semantic_list(enabled: bool)`](#columnflow-semantic_list) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#columnflow-child) |
+| `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#columnflow-children) |
+| `Self` | [`child_opt(widget: Option<impl Widget + 'static>)`](#columnflow-child_opt) |
+| | **Methods** |
+| `Signal<usize>` | [`column_count_signal()`](#columnflow-column_count_signal) |
+
+## Detailed description
+
 The newspaper / CSS multi-column model: content runs down column 0, then
 down column 1, and so on. The column count is derived from the available
 width and `min_column_width` — when the
@@ -36,7 +61,7 @@ let _view = ScrollArea::new().child(
 );
 ```
 
-# Reading order
+### Reading order
 
 Children are distributed as **contiguous runs in source order** — column 0
 takes children `0..i`, column 1 takes `i..j`. So source order, visual
@@ -46,7 +71,7 @@ This is why `ColumnFlow` does not reuse
 packing, which interleaves children and would divorce the visual order from
 the source order.
 
-# Accessibility
+### Accessibility
 
 By default `ColumnFlow` emits a bare `Role::GenericContainer` carrying no
 properties, which the accessibility walker *prunes*, promoting the children
@@ -56,7 +81,7 @@ already right. Add semantics from the outside with `.access_role(..)` /
 `.access_label(..)`, or opt into list semantics with
 `semantic_list`.
 
-# Relationship to CSS multi-column
+### Relationship to CSS multi-column
 
 Close, but not identical. CSS `column-fill: balance` balances content within
 a column height it computes from a *bounded* block size; `ColumnFlow` derives
@@ -72,13 +97,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![ColumnFlow at Touch density](img/column_flow-touch.png)
 
-## Builder methods at a glance
-
-`min_column_width`, `max_column_width`, `max_columns`, `column_spacing`, `item_spacing`, `alignment`, `column_rule`, `semantic_list`, `child`, `children`, `child_opt`, `column_count_signal`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/column_flow/index.html)
+
+<a id="columnflow"></a>
 
 ## `pub struct ColumnFlow`
 
@@ -104,10 +127,14 @@ pub struct ColumnFlow { /* fields */ }
 
 ### Methods
 
+<a id="columnflow-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create a `ColumnFlow` with a 240 dp minimum column width, no maximum
 column width, and no column-count cap.
+
+<a id="columnflow-min_column_width"></a>
 
 #### `pub fn min_column_width(mut self, width: f32) -> Self`
 
@@ -116,6 +143,8 @@ columns are all at least this wide — CSS `column-width` / SwiftUI
 `GridItem(.adaptive(minimum:))` / Compose `GridCells.Adaptive(minSize)`.
 
 A value of zero or less pins the layout to a single column.
+
+<a id="columnflow-max_column_width"></a>
 
 #### `pub fn max_column_width(mut self, width: f32) -> Self`
 
@@ -128,6 +157,8 @@ large display — the reason KDE's `Kirigami.CardsLayout` pairs
 columns no longer fill the width and
 `alignment` decides where the block sits.
 
+<a id="columnflow-max_columns"></a>
+
 #### `pub fn max_columns(mut self, max: usize) -> Self`
 
 Never use more than `max` columns however wide the layout gets.
@@ -137,9 +168,13 @@ size-to-content parent such as a popover): unset, that case reports one
 column, matching CSS `column-count: auto` in a shrink-to-fit context.
 Clamped to at least 1.
 
+<a id="columnflow-column_spacing"></a>
+
 #### `pub fn column_spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self`
 
 Horizontal gap between columns. Accepts an `f32` or a `Signal<f32>`.
+
+<a id="columnflow-item_spacing"></a>
 
 #### `pub fn item_spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self`
 
@@ -148,6 +183,8 @@ Vertical gap between items within a column. Accepts an `f32` or a
 
 Named for items rather than rows because there are no rows here: a
 column's items are independent of its neighbours'.
+
+<a id="columnflow-alignment"></a>
 
 #### `pub fn alignment(mut self, alignment: HAlignment) -> Self`
 
@@ -158,6 +195,8 @@ the columns narrower than their even share — otherwise the columns
 consume the whole width and there is nothing to align. Defaults to
 `HAlignment::Leading`; RTL-aware.
 
+<a id="columnflow-column_rule"></a>
+
 #### `pub fn column_rule(mut self, width: f32, color: impl Into<ColorProp>) -> Self`
 
 Draw a rule of `width` dp, centred in every inter-column gap — CSS
@@ -166,6 +205,8 @@ Draw a rule of `width` dp, centred in every inter-column gap — CSS
 Purely decorative: it emits no accessibility node. Accepts a `Color`, a
 theme role, or a `Signal`. Pass `BorderRole::Divider` to track the
 theme's divider colour.
+
+<a id="columnflow-semantic_list"></a>
 
 #### `pub fn semantic_list(mut self, enabled: bool) -> Self`
 
@@ -180,17 +221,25 @@ Off by default: a layout primitive should not invent semantics its
 content may not have. Turn it on when the children genuinely *are* a
 list of peers. Costs one extra node per child.
 
+<a id="columnflow-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add an inline child widget (deferred insertion).
+
+<a id="columnflow-children"></a>
 
 #### `pub fn children( mut self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
 Add multiple inline children from an iterator.
 
+<a id="columnflow-child_opt"></a>
+
 #### `pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self`
 
 Conditionally add a child. No-op if `None`.
+
+<a id="columnflow-column_count_signal"></a>
 
 #### `pub fn column_count_signal(&self) -> Signal<usize>`
 

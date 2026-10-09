@@ -15,6 +15,13 @@ documentation = "https://docs.rs/teksilo-render"
 keywords = ["wgpu", "renderer", "graphics", "gpu", "glyph-atlas"]
 categories = ["rendering::graphics-api", "graphics", "gui"]
 
+[features]
+# `Renderer::live_texture_timings`, histograms of the live pass's frame
+# time, lock holds and commit-to-upload delays, in a release build: debug
+# builds always have them. Off by default, so a release build keeps no
+# samples.
+live-image-timings = []
+
 [dependencies]
 teksilo-canvas = { workspace = true }
 wgpu = { workspace = true }

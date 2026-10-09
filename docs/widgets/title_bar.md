@@ -5,6 +5,33 @@
 
 Custom window title bar widget.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `type` | [`CloseAction`](#closeaction) — Type alias for the user-supplied close action that overrides the close button's default `ctx.close_window()` |
+| `struct` | [`TitleBar`](#titlebar) — A custom window title bar |
+
+## Public functions
+
+### `TitleBar`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(host: Rc<dyn PlatformTitleBarHost>)`](#titlebar-new) |
+| | **Builder methods** |
+| `Self` | [`controls_visible(visible: impl Into<Prop<bool>>)`](#titlebar-controls_visible) |
+| `Self` | [`height(height: f32)`](#titlebar-height) |
+| `Self` | [`background(color: impl Into<ColorProp>)`](#titlebar-background) |
+| `Self` | [`border(color: impl Into<ColorProp>, width: f32)`](#titlebar-border) |
+| `Self` | [`leading(widget: impl teksilo_core::IntoTeksiChild)`](#titlebar-leading) |
+| `Self` | [`center(widget: impl teksilo_core::IntoTeksiChild)`](#titlebar-center) |
+| `Self` | [`trailing(widget: impl teksilo_core::IntoTeksiChild)`](#titlebar-trailing) |
+| `Self` | [`close_action(action: impl Fn(&mut EventContext) + 'static)`](#titlebar-close_action) |
+
+## Detailed description
+
 `TitleBar` replaces a window's native chrome with a horizontal bar that
 can host menus, tools, and the standard window controls (minimize /
 maximize / close). The platform plumbing — beginning a window drag,
@@ -29,13 +56,11 @@ the host from the widget tree:
 })
 ```
 
-## Builder methods at a glance
-
-`controls_visible`, `height`, `background`, `border`, `leading`, `center`, `trailing`, `close_action`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/index.html)
+
+<a id="closeaction"></a>
 
 ## `pub type CloseAction`
 
@@ -45,6 +70,8 @@ button's default `ctx.close_window()`. Set via `TitleBar::close_action`.
 ```rust
 pub type CloseAction = Rc<dyn Fn(&mut EventContext)>;
 ```
+
+<a id="titlebar"></a>
 
 ## `pub struct TitleBar`
 
@@ -84,6 +111,8 @@ pub struct TitleBar { /* fields */ }
 
 ### Methods
 
+<a id="titlebar-new"></a>
+
 #### `pub fn new(host: Rc<dyn PlatformTitleBarHost>) -> Self`
 
 Construct a `TitleBar` bound to the given platform host.
@@ -91,6 +120,8 @@ Construct a `TitleBar` bound to the given platform host.
 The maximize/restore glyph follows `WindowState::placement` via
 `ctx.window()` at build time — the host no longer owns the
 maximize signal.
+
+<a id="titlebar-controls_visible"></a>
 
 #### `pub fn controls_visible(mut self, visible: impl Into<Prop<bool>>) -> Self`
 
@@ -117,9 +148,13 @@ app composed — so it gates it here.
 An app that hides these **must** keep some other visible way out of
 fullscreen: a menu item, an on-screen button, or a documented shortcut.
 
+<a id="titlebar-height"></a>
+
 #### `pub fn height(mut self, height: f32) -> Self`
 
 Set the title bar's logical-pixel height. Default: 40.
+
+<a id="titlebar-background"></a>
 
 #### `pub fn background(mut self, color: impl Into<ColorProp>) -> Self`
 
@@ -131,6 +166,8 @@ Accepts a `Color`, a `Signal<Color>`, or any of the role types
 variants). Role values resolve at paint time, so the title bar
 retints live across `ctx.set_theme(...)` switches.
 
+<a id="titlebar-border"></a>
+
 #### `pub fn border(mut self, color: impl Into<ColorProp>, width: f32) -> Self`
 
 Draw a 1px-or-thicker bottom border separating the title bar from
@@ -139,10 +176,14 @@ the body.
 Color accepts the same range as `Self::background`; pair with
 `BorderRole::Default` for a theme-tracking divider.
 
+<a id="titlebar-leading"></a>
+
 #### `pub fn leading(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the leading-edge content (e.g. app icon, menus). Rendered to the
 right of the macOS traffic-light inset.
+
+<a id="titlebar-center"></a>
 
 #### `pub fn center(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
@@ -150,10 +191,14 @@ Set the center content (e.g. search box, breadcrumbs). Wrapped in a
 flexible drag region: clicks that are not consumed by the child
 initiate a window drag.
 
+<a id="titlebar-trailing"></a>
+
 #### `pub fn trailing(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the trailing-edge content (e.g. user avatar, notification bell).
 Rendered before the window controls.
+
+<a id="titlebar-close_action"></a>
 
 #### `pub fn close_action(mut self, action: impl Fn(&mut EventContext) + 'static) -> Self`
 

@@ -5,12 +5,39 @@
 
 `SettingsFile<T>` — typed single-struct persistence.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`SettingsFileError`](#settingsfileerror) — Errors surfaced by `SettingsFile` operations (and, by extension, every other persisted type in this crate — they all share this error type) |
+| `struct` | [`SettingsFile`](#settingsfile) — A reactive handle to a single typed file on disk |
+
+## Public functions
+
+### `SettingsFile`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Result<Self, SettingsFileError>` | [`load(path: PathBuf, migrator: Migrator<T>)`](#settingsfile-load) |
+| `Result<Self, SettingsFileError>` | [`load_strict(path: PathBuf, migrator: Migrator<T>)`](#settingsfile-load_strict) |
+| | **Methods** |
+| `Ref<'_, T>` | [`borrow()`](#settingsfile-borrow) |
+| `T` | [`snapshot()`](#settingsfile-snapshot) |
+| `Result<(), SettingsFileError>` | [`replace(new: T)`](#settingsfile-replace) |
+| `Result<(), SettingsFileError>` | [`mutate<F: FnOnce(&mut T)>(f: F)`](#settingsfile-mutate) |
+| `Result<bool, SettingsFileError>` | [`reload_if_stale()`](#settingsfile-reload_if_stale) |
+| `Result<(), SettingsFileError>` | [`flush_now()`](#settingsfile-flush_now) |
+| `&Path` | [`path()`](#settingsfile-path) |
+
+## Detailed description
+
 Used when the persisted shape is a known struct (recents, window
 state) rather than a dynamic K/V map. The current value lives in a
 `RefCell<T>` inside an `Rc<>`-shared inner so that multiple handles
 can observe and mutate the same projection.
 
-## Cross-process safety is the only mode
+#### Cross-process safety is the only mode
 
 Every read and every write goes through the exclusive advisory lock on
 `<path>.lock` (see `crate::lock`):
@@ -61,13 +88,11 @@ let file: SettingsFile<AppPrefs> =
 file.mutate(|p| p.font_size = 16.0).unwrap();
 ```
 
-## Builder methods at a glance
-
-`load`, `load_strict`, `borrow`, `snapshot`, `replace`, `mutate`, `reload_if_stale`, `flush_now`, `path`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
+
+<a id="settingsfileerror"></a>
 
 ## `pub enum SettingsFileError`
 
@@ -86,6 +111,8 @@ pub enum SettingsFileError { /* variants */ }
 - **`Serialize`** — The in-memory value could not be serialized to TOML before writing.
 - **`Flush`** — The debounced background write failed.
 
+<a id="settingsfile"></a>
+
 ## `pub struct SettingsFile`
 
 A reactive handle to a single typed file on disk.
@@ -100,6 +127,8 @@ pub struct SettingsFile<T: Versioned + DeserializeOwned> { /* fields */ }
 ```
 
 ### Methods
+
+<a id="settingsfile-load"></a>
 
 #### `pub fn load(path: PathBuf, migrator: Migrator<T>) -> Result<Self, SettingsFileError>`
 
@@ -142,11 +171,15 @@ this session only, but the file on disk is left completely
 untouched. Use `load_strict` in tests that
 want to assert on the specific failure instead.
 
+<a id="settingsfile-load_strict"></a>
+
 #### `pub fn load_strict(path: PathBuf, migrator: Migrator<T>) -> Result<Self, SettingsFileError>`
 
 Like `load`, but returns parse / migration errors
 instead of quarantining the file. Intended for tests that want
 to assert on a specific failure mode.
+
+<a id="settingsfile-borrow"></a>
 
 #### `pub fn borrow(&self) -> Ref<'_, T>`
 
@@ -154,10 +187,14 @@ Borrow the current value. The returned `Ref` holds a `RefCell`
 guard; do not call any mutating method on this `SettingsFile`
 while a `Ref` is alive.
 
+<a id="settingsfile-snapshot"></a>
+
 #### `pub fn snapshot(&self) -> T`
 
 Clone the current value out. Convenient when you don't want to
 juggle a borrow.
+
+<a id="settingsfile-replace"></a>
 
 #### `pub fn replace(&self, new: T) -> Result<(), SettingsFileError>`
 
@@ -168,6 +205,8 @@ against a concurrent peer write, and the fresh disk stamp is
 recorded so a subsequent reload doesn't re-read our own write back
 in as if it were new. `T::set_version(T::CURRENT_VERSION)` is called
 so the version stamp is always coherent, even if the caller forgot.
+
+<a id="settingsfile-mutate"></a>
 
 #### `pub fn mutate<F: FnOnce(&mut T)>(&self, f: F) -> Result<(), SettingsFileError>`
 
@@ -182,6 +221,8 @@ Takes `f` as `FnOnce` (not `Fn`) and imposes no `Send` bound on `T`:
 this write is synchronous on the calling thread, never replayed on a
 background worker, so there is no reason to tax every call site with
 a `Send`/`Fn` requirement it doesn't need.
+
+<a id="settingsfile-reload_if_stale"></a>
 
 #### `pub fn reload_if_stale(&self) -> Result<bool, SettingsFileError>`
 
@@ -198,6 +239,8 @@ actually change" guarantee is needed (e.g. driven by a file
 watcher, where a coincident stamp match must never be relied on
 alone).
 
+<a id="settingsfile-flush_now"></a>
+
 #### `pub fn flush_now(&self) -> Result<(), SettingsFileError>`
 
 Synchronously write any pending payload to disk. A genuine no-op:
@@ -208,6 +251,8 @@ nothing to flush and nothing that can fail. Kept so callers that
 hold a `SettingsFile` alongside debounced types (`SettingsStore`,
 `PersistedListModel`) can flush everything uniformly without
 special-casing this type.
+
+<a id="settingsfile-path"></a>
 
 #### `pub fn path(&self) -> &Path`
 

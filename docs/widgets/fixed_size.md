@@ -6,6 +6,22 @@
 FixedSize — a layout modifier that pins a child to its natural size,
 optionally overriding one or both dimensions with a reactive value.
 
+## Public functions
+
+### `FixedSize`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#fixedsize-new) |
+| | **Builder methods** |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#fixedsize-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#fixedsize-child_opt) |
+| `Self` | [`width(state: impl Into<Prop<f32>>)`](#fixedsize-width) |
+| `Self` | [`height(state: impl Into<Prop<f32>>)`](#fixedsize-height) |
+
+## Detailed description
+
 Without bindings, `FixedSize` ignores the parent's size proposal and
 always reports the child's intrinsic size. This is useful for widgets
 that must not be stretched or compressed by their containing stack —
@@ -28,13 +44,11 @@ let _sidebar = FixedSize::new()
     .child(RectWidget::new());
 ```
 
-## Builder methods at a glance
-
-`child`, `child_opt`, `width`, `height`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/fixed_size/index.html)
+
+<a id="fixedsize"></a>
 
 ## `pub struct FixedSize`
 
@@ -50,14 +64,20 @@ pub struct FixedSize { /* fields */ }
 
 ### Methods
 
+<a id="fixedsize-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create a `FixedSize` with no child and no dimension bindings; the child's
 natural size will be used for both axes.
 
+<a id="fixedsize-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline child widget (deferred insertion).
+
+<a id="fixedsize-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
@@ -68,9 +88,13 @@ this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
 adds no arena node, so nothing is laid out, painted, or published to the
 accessibility tree, and a stack applies no spacing around it.
 
+<a id="fixedsize-width"></a>
+
 #### `pub fn width(mut self, state: impl Into<Prop<f32>>) -> Self`
 
 Bind width to a reactive state. When the state changes, relayout is triggered.
+
+<a id="fixedsize-height"></a>
 
 #### `pub fn height(mut self, state: impl Into<Prop<f32>>) -> Self`
 

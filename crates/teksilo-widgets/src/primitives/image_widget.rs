@@ -53,45 +53,113 @@
 //!     .size(48.0, 48.0);
 //! ```
 
+use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
+use teksilo_canvas::live_image::{
+    LiveImageDraw, LiveImageError, LiveImageSource, LiveImageWriter, LivePixelFormat, ScalingFilter,
+};
 use teksilo_canvas::{Canvas, RasterIcon, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::build_context::BuildContext;
 use teksilo_core::environment::LayoutDirection;
 use teksilo_core::widget::{LayoutContext, PaintContext, Widget};
+use teksilo_core::{LiveImageAttachment, LiveImageSignals, WidgetId};
 use teksilo_tokens::Alignment;
 
 use super::image_mask::{ImageMaskShape, apply_alpha_mask, center_crop_square};
 
-/// How the image is fitted within its layout bounds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ImageFit {
-    /// Scale to fit entirely within bounds, preserving aspect ratio.
-    /// May leave empty space (letterboxing).
-    #[default]
-    Contain,
-    /// Scale to cover the entire bounds, preserving aspect ratio.
-    /// May crop the image.
-    Cover,
-    /// Stretch to fill bounds exactly, ignoring aspect ratio.
-    Fill,
-    /// Like Contain but never upscales — if the image is smaller than
-    /// bounds, it is centered at its natural size.
-    ScaleDown,
-    /// Draw the image at its natural pixel size, neither scaling up nor
-    /// down. If the image is larger than the box it is cropped to the box
-    /// (positioned by [`alignment`](ImageWidget::alignment)); if smaller it
-    /// sits inside with empty space. CSS `object-fit: none`.
-    None,
+/// How the image is fitted within its layout bounds: the CSS `object-fit`
+/// set, shared with every widget that places a picture.
+pub use teksilo_canvas::image_geometry::ImageFit;
+
+/// A picture written once into a live source, and the writer that keeps
+/// it: a source frees its pixels when its last writer drops.
+pub(crate) struct CommittedImage {
+    source: LiveImageSource,
+    _writer: LiveImageWriter,
+}
+
+impl CommittedImage {
+    /// Write `pixels` (`width × height`, RGBA8, tightly packed) once,
+    /// moving the buffer in without a copy; the error when the source
+    /// refuses it (a zero side, a short buffer, a side over its limit).
+    pub(crate) fn commit(
+        pixels: Vec<u8>,
+        width: u32,
+        height: u32,
+    ) -> Result<Rc<Self>, LiveImageError> {
+        let source = LiveImageSource::builder(LivePixelFormat::Rgba8)
+            .label("image")
+            .build();
+        let writer = source.writer();
+        writer
+            .swap_frame(width, height, width as usize * 4, pixels)
+            .map_err(|rejected| rejected.error)?;
+        Ok(Rc::new(Self {
+            source,
+            _writer: writer,
+        }))
+    }
+
+    /// Its size; never zero, the source refused that.
+    pub(crate) fn size(&self) -> (u32, u32) {
+        self.source.size().unwrap_or((0, 0))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn source(&self) -> &LiveImageSource {
+        &self.source
+    }
+}
+
+/// `pixels` (`width × height`, RGBA8) centre-cropped to a square and masked
+/// to `shape`, with the square's side. A buffer too short for its size is
+/// returned as it is: the source refuses it when it is committed.
+pub(crate) fn masked(
+    pixels: Vec<u8>,
+    width: u32,
+    height: u32,
+    shape: ImageMaskShape,
+) -> (Vec<u8>, u32, u32) {
+    let enough = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|n| n.checked_mul(4))
+        .is_some_and(|needed| width > 0 && height > 0 && pixels.len() >= needed);
+    if matches!(shape, ImageMaskShape::None) || !enough {
+        return (pixels, width, height);
+    }
+    let tight = &pixels[..width as usize * height as usize * 4];
+    let (mut cropped, side) = center_crop_square(tight, width, height);
+    apply_alpha_mask(&mut cropped, side, side, shape);
+    (cropped, side, side)
+}
+
+/// How an image's pixels reach the window.
+enum Pixels {
+    /// `new(&icon)` without a mask: one texture per icon and window, shared
+    /// by every widget showing the icon, named after its identity.
+    Shared { name: String, upload: Arc<[u8]> },
+    /// `from_raw`, or masked: a live source written once at the first
+    /// build, whose texture goes with the first frame that does not draw
+    /// the widget.
+    Owned(Owned),
+}
+
+#[derive(Default)]
+struct Owned {
+    /// The pixels until the first build commits them.
+    pending: Option<Vec<u8>>,
+    committed: Option<Rc<CommittedImage>>,
+    signals: Option<LiveImageSignals>,
+    attachment: Option<LiveImageAttachment>,
 }
 
 /// A widget that displays a raster image (PNG, WebP, or raw RGBA pixels) with configurable fit and alignment.
 pub struct ImageWidget {
-    name: String,
+    pixels: Pixels,
     width: u32,
     height: u32,
-    upload_pixels: Arc<[u8]>,
     fit: ImageFit,
     /// Where the fitted image sits within the box when the active fit
     /// leaves slack (`Contain`/`ScaleDown`/`None` smaller than the box) or
@@ -127,19 +195,21 @@ impl ImageWidget {
     /// That texture, with its mip chain, stays on the GPU for the life of the
     /// window and is never freed, even once no widget shows the icon. Each
     /// distinct identity keeps one: a clone of the icon is the same identity,
-    /// but the same bytes decoded again are a new one, and so is every
-    /// [`mask`](Self::mask) call, since it bakes the mask into new pixels.
-    /// Keep decoded images in an application cache and clone them, rather
-    /// than decoding per widget or per realization: in a virtualized grid of
-    /// runtime images such as album covers, a cover decoded each time its
-    /// tile scrolls into view leaves one more texture behind each time.
+    /// but the same bytes decoded again are a new one. Keep decoded images
+    /// in an application cache and clone them, rather than decoding per
+    /// widget or per realization: in a virtualized grid of runtime images
+    /// such as album covers, a cover decoded each time its tile scrolls into
+    /// view leaves one more texture behind each time. Pixels shown once, or
+    /// that change, belong on [`from_raw`](Self::from_raw), whose texture
+    /// goes with the widget; a [`mask`](Self::mask) takes that path too.
     pub fn new(icon: &RasterIcon) -> Self {
-        let name = format!("_img_{}", icon.texture_key());
         Self {
-            name,
+            pixels: Pixels::Shared {
+                name: format!("_img_{}", icon.texture_key()),
+                upload: Arc::clone(icon.shared_pixels()),
+            },
             width: icon.width(),
             height: icon.height(),
-            upload_pixels: Arc::clone(icon.shared_pixels()),
             fit: ImageFit::Contain,
             alignment: Alignment::CENTER,
             display_width: None,
@@ -150,31 +220,46 @@ impl ImageWidget {
         }
     }
 
-    /// Create from raw RGBA pixel data.
+    /// Create from raw RGBA pixel data, `width × height`, tightly packed.
     ///
-    /// Each call gets a unique texture-atlas key (via a process-local
-    /// atomic counter), so two `from_raw` widgets with the same
-    /// dimensions but different bytes don't alias in the renderer's
-    /// pending-image cache. Without this, the first writer per frame
-    /// would silently win and subsequent ones would render the wrong
-    /// pixels — a latent bug fixed alongside the dynamic-image use
-    /// cases that need many short-lived `from_raw` widgets.
-    ///
-    /// Each call is therefore a new image identity. Once drawn, it keeps a
-    /// GPU texture, with its mip chain, for the life of the window, and the
-    /// texture is never freed: a widget built per rebuild, per realization in
-    /// a virtualized view, or per change of its pixels leaves one more
-    /// texture behind each time. For pixels shown more than once, build a
-    /// [`RasterIcon::from_raw`] once, keep it, and show it through
-    /// [`new`](Self::new), whose widgets share one texture.
+    /// The pixels are written once into a live source when the widget is
+    /// first built, without a copy. The window's texture for them goes with
+    /// the first frame that does not draw the widget (it was destroyed,
+    /// scrolled out or parked), so GPU memory follows what is on screen,
+    /// and comes back with one upload. Input the source refuses (a zero
+    /// side, a buffer shorter than `width × height × 4`, a side over
+    /// [`LiveImageSource::MAX_DIMENSION`]) draws nothing, and says so once
+    /// on standard error.
     pub fn from_raw(pixels: Vec<u8>, width: u32, height: u32) -> Self {
-        static NEXT_RAW_ID: AtomicU64 = AtomicU64::new(0);
-        let id = NEXT_RAW_ID.fetch_add(1, Ordering::Relaxed);
         Self {
-            name: format!("_img_raw_{id}_{width}x{height}"),
+            pixels: Pixels::Owned(Owned {
+                pending: Some(pixels),
+                ..Owned::default()
+            }),
             width,
             height,
-            upload_pixels: pixels.into(),
+            fit: ImageFit::Contain,
+            alignment: Alignment::CENTER,
+            display_width: None,
+            display_height: None,
+            resizable: true,
+            alt: None,
+            a11y_hidden: false,
+        }
+    }
+
+    /// Show a picture already written once, which other widgets may show
+    /// too: `Avatar` keeps one across the rebuilds that leave its image as
+    /// it was.
+    pub(crate) fn from_committed(image: Rc<CommittedImage>) -> Self {
+        let (width, height) = image.size();
+        Self {
+            pixels: Pixels::Owned(Owned {
+                committed: Some(image),
+                ..Owned::default()
+            }),
+            width,
+            height,
             fit: ImageFit::Contain,
             alignment: Alignment::CENTER,
             display_width: None,
@@ -197,23 +282,32 @@ impl ImageWidget {
     /// fit (`Contain`) is left unchanged so callers explicitly pick
     /// a fit when they apply a mask.
     ///
-    /// `ImageMaskShape::None` is a no-op. Re-uploading is keyed off a
-    /// fresh per-mask name so the un-masked version of the same
-    /// source doesn't shadow the masked one in the texture atlas.
+    /// The masked picture is the widget's own, written once into a live
+    /// source as [`from_raw`](Self::from_raw)'s is: the icon's shared
+    /// texture is left alone. `ImageMaskShape::None` is a no-op.
     pub fn mask(mut self, shape: ImageMaskShape) -> Self {
         if matches!(shape, ImageMaskShape::None) {
             return self;
         }
-        let (mut cropped, side) = center_crop_square(&self.upload_pixels, self.width, self.height);
-        apply_alpha_mask(&mut cropped, side, side, shape);
-        self.upload_pixels = cropped.into();
-        self.width = side;
-        self.height = side;
-        // Bump the texture name so the old un-masked entry is
-        // distinct in the per-frame `pending_images` map.
-        static NEXT_MASK_ID: AtomicU64 = AtomicU64::new(0);
-        let id = NEXT_MASK_ID.fetch_add(1, Ordering::Relaxed);
-        self.name = format!("{}_masked_{id}", self.name);
+        let pixels = match std::mem::replace(&mut self.pixels, Pixels::Owned(Owned::default())) {
+            Pixels::Shared { upload, .. } => upload.to_vec(),
+            Pixels::Owned(Owned {
+                pending: Some(pixels),
+                ..
+            }) => pixels,
+            // Already committed: there is nothing left to crop.
+            Pixels::Owned(owned) => {
+                self.pixels = Pixels::Owned(owned);
+                return self;
+            }
+        };
+        let (masked, width, height) = masked(pixels, self.width, self.height, shape);
+        self.pixels = Pixels::Owned(Owned {
+            pending: Some(masked),
+            ..Owned::default()
+        });
+        self.width = width;
+        self.height = height;
         self
     }
 
@@ -299,50 +393,59 @@ impl ImageWidget {
     /// positioned by [`alignment`](Self::alignment). `rtl` flips the
     /// horizontal Leading/Trailing axis.
     fn fitted_rect(&self, bounds: Rect, rtl: bool) -> Rect {
-        let img_w = self.width as f32;
-        let img_h = self.height as f32;
-        if img_w <= 0.0 || img_h <= 0.0 {
-            return bounds;
-        }
-
-        let (content_w, content_h) = match self.fit {
-            ImageFit::Fill => (bounds.width, bounds.height),
-            ImageFit::Contain => {
-                let scale = (bounds.width / img_w).min(bounds.height / img_h);
-                (img_w * scale, img_h * scale)
-            }
-            ImageFit::Cover => {
-                let scale = (bounds.width / img_w).max(bounds.height / img_h);
-                (img_w * scale, img_h * scale)
-            }
-            ImageFit::ScaleDown => {
-                let scale = (bounds.width / img_w).min(bounds.height / img_h).min(1.0);
-                (img_w * scale, img_h * scale)
-            }
-            ImageFit::None => (img_w, img_h),
-        };
-
-        let x = bounds.x
-            + self
-                .alignment
-                .horizontal
-                .resolve(content_w, bounds.width, rtl);
-        let y = bounds.y + self.alignment.vertical.resolve(content_h, bounds.height);
-        Rect::new(x, y, content_w, content_h)
+        self.fit.fitted_rect(
+            Size::new(self.width as f32, self.height as f32),
+            bounds,
+            self.alignment,
+            rtl,
+        )
     }
 }
 
 impl std::fmt::Debug for ImageWidget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let path = match &self.pixels {
+            Pixels::Shared { .. } => "shared",
+            Pixels::Owned(_) => "owned",
+        };
         f.debug_struct("ImageWidget")
             .field("width", &self.width)
             .field("height", &self.height)
             .field("fit", &self.fit)
+            .field("pixels", &path)
             .finish()
     }
 }
 
 impl Widget for ImageWidget {
+    /// An owned picture is committed to its source at the first build, and
+    /// every build attaches it in the widget's window.
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let Pixels::Owned(owned) = &mut self.pixels else {
+            return vec![];
+        };
+        if owned.committed.is_none()
+            && let Some(pixels) = owned.pending.take()
+        {
+            let bytes = pixels.len();
+            match CommittedImage::commit(pixels, self.width, self.height) {
+                Ok(image) => owned.committed = Some(image),
+                Err(error) => eprintln!(
+                    "teksilo: an image of {}x{} with {bytes} bytes of pixels was refused \
+                     ({error}): it draws nothing",
+                    self.width, self.height
+                ),
+            }
+        }
+        if let Some(image) = &owned.committed {
+            let signals = owned
+                .signals
+                .get_or_insert_with(|| LiveImageSignals::new(&image.source));
+            owned.attachment = Some(ctx.attach_live_image(&image.source, signals));
+        }
+        vec![]
+    }
+
     fn layout_response(
         &self,
         proposal: SizeProposal,
@@ -386,17 +489,33 @@ impl Widget for ImageWidget {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        // Queuing shares the pixels; the check spares the name's allocation.
-        if !canvas.has_pending_image(&self.name) {
-            canvas.ensure_shared_image_registered(
-                &self.name,
-                self.width,
-                self.height,
-                Arc::clone(&self.upload_pixels),
-            );
-        }
         let rtl = matches!(ctx.layout_direction, LayoutDirection::RightToLeft);
         let rect = self.fitted_rect(bounds, rtl);
+        let (name, upload) = match &self.pixels {
+            Pixels::Shared { name, upload } => (name, upload),
+            Pixels::Owned(owned) => {
+                // The window's texture holds the pixels; the frame carries
+                // the attachment. `Cover` and an oversized `None` are cut
+                // to the box by texture coordinates, and a thumbnail drawn
+                // small samples the mip chain the window builds.
+                if let Some(attachment) = &owned.attachment {
+                    canvas.draw_live_image(
+                        attachment.consumer(),
+                        &LiveImageDraw::new(rect, bounds).filter(ScalingFilter::Trilinear),
+                    );
+                }
+                return;
+            }
+        };
+        // Queuing shares the pixels; the check spares the name's allocation.
+        if !canvas.has_pending_image(name) {
+            canvas.ensure_shared_image_registered(
+                name,
+                self.width,
+                self.height,
+                Arc::clone(upload),
+            );
+        }
 
         // Modes that overflow the box (`Cover`, or `None` on an oversized
         // image) must not bleed past the widget's layout rectangle. Clip
@@ -412,10 +531,10 @@ impl Widget for ImageWidget {
             || rect.y + rect.height > bounds.y + bounds.height + EPS;
         if overflows {
             canvas.set_clip(bounds);
-            canvas.draw_image(rect, &self.name);
+            canvas.draw_image(rect, name);
             canvas.clear_clip();
         } else {
-            canvas.draw_image(rect, &self.name);
+            canvas.draw_image(rect, name);
         }
     }
 
@@ -431,6 +550,25 @@ impl Widget for ImageWidget {
         builder.set_role(teksilo_core::accesskit::Role::Image);
         if let Some(ref alt) = self.alt {
             builder.set_name(alt);
+        }
+    }
+}
+
+#[cfg(test)]
+impl ImageWidget {
+    /// The shared texture's name, for an unmasked icon.
+    fn shared_name(&self) -> Option<&str> {
+        match &self.pixels {
+            Pixels::Shared { name, .. } => Some(name),
+            Pixels::Owned(_) => None,
+        }
+    }
+
+    /// The pixels an owned picture commits at its first build.
+    fn pending_pixels(&self) -> Option<&[u8]> {
+        match &self.pixels {
+            Pixels::Owned(owned) => owned.pending.as_deref(),
+            Pixels::Shared { .. } => None,
         }
     }
 }
@@ -512,28 +650,49 @@ mod tests {
         let a = ImageWidget::new(&icon);
         let clone = icon.clone();
         let b = ImageWidget::new(&clone);
-        assert_eq!(a.name, format!("_img_{}", icon.texture_key()));
-        assert_eq!(a.name, b.name, "a clone shares the original's texture");
+        let expected = format!("_img_{}", icon.texture_key());
+        assert_eq!(a.shared_name(), Some(expected.as_str()));
+        assert_eq!(
+            a.shared_name(),
+            b.shared_name(),
+            "a clone shares the original's texture"
+        );
 
         // An icon with the same dimensions allocated after the first one is
         // dropped (often at the same address) must not reuse its texture.
         let first_name = {
             let first = Box::new(RasterIcon::from_raw(vec![255; 16], 2, 2));
-            ImageWidget::new(&first).name
+            ImageWidget::new(&first).shared_name().map(str::to_owned)
         };
         let second = Box::new(RasterIcon::from_raw(vec![0; 16], 2, 2));
-        assert_ne!(ImageWidget::new(&second).name, first_name);
+        assert_ne!(
+            ImageWidget::new(&second).shared_name().map(str::to_owned),
+            first_name
+        );
     }
 
     #[test]
-    fn from_raw_unique_name_per_call() {
-        // Two ImageWidgets with identical dimensions but different
-        // bytes used to alias on the per-frame `pending_images` key
-        // (`_img_raw_{w}x{h}`), causing one to silently render the
-        // other's pixels. The atomic-counter-tagged name fixes this.
-        let a = ImageWidget::from_raw(vec![255; 16], 2, 2);
-        let b = ImageWidget::from_raw(vec![0; 16], 2, 2);
-        assert_ne!(a.name, b.name);
+    fn from_raw_widgets_each_own_a_source() {
+        // Two raw images of the same size and different bytes used to alias
+        // on a per-size texture name, so one silently showed the other's
+        // pixels. Each now owns a live source: two quads, two sources, and
+        // nothing on the shared path.
+        let mut tree = WidgetTree::new();
+        tree.add(
+            crate::primitives::HStack::new()
+                .child(ImageWidget::from_raw(vec![255; 16], 2, 2))
+                .child(ImageWidget::from_raw(vec![0; 16], 2, 2)),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+        assert_eq!(frame.live_images.len(), 2);
+        assert!(
+            !frame.live_images[0]
+                .consumer
+                .source()
+                .ptr_eq(frame.live_images[1].consumer.source())
+        );
+        assert!(frame.images.is_empty() && frame.pending_images.is_empty());
     }
 
     #[test]
@@ -707,20 +866,29 @@ mod tests {
         // After cropping to a square (already 32×32 here) and
         // masking, corner pixels have alpha 0.
         let stride = (widget.width * 4) as usize;
-        let top_left_alpha = widget.upload_pixels[3];
-        let top_right_alpha = widget.upload_pixels[stride - 1];
+        let pixels = widget.pending_pixels().expect("masked pixels");
+        let top_left_alpha = pixels[3];
+        let top_right_alpha = pixels[stride - 1];
         assert_eq!(top_left_alpha, 0);
         assert_eq!(top_right_alpha, 0);
         // Centre pixel still opaque.
         let center_idx = (((widget.height / 2) * widget.width + widget.width / 2) * 4 + 3) as usize;
-        assert_eq!(widget.upload_pixels[center_idx], 255);
+        assert_eq!(pixels[center_idx], 255);
     }
 
     #[test]
     fn mask_none_is_passthrough() {
         let original = vec![123, 45, 67, 200, 8, 9, 10, 200];
         let widget = ImageWidget::from_raw(original.clone(), 2, 1).mask(ImageMaskShape::None);
-        assert_eq!(*widget.upload_pixels, *original);
+        assert_eq!(widget.pending_pixels(), Some(original.as_slice()));
+        // And an unmasked icon stays on the shared path.
+        let icon = RasterIcon::from_raw(original.clone(), 2, 1);
+        assert!(
+            ImageWidget::new(&icon)
+                .mask(ImageMaskShape::None)
+                .shared_name()
+                .is_some()
+        );
     }
 
     #[test]
@@ -733,13 +901,14 @@ mod tests {
     }
 
     #[test]
-    fn mask_bumps_name_to_avoid_atlas_collision() {
-        // The masked widget must not share a name with the un-masked
-        // version, otherwise the renderer would reuse the un-masked
-        // pixels in the atlas.
+    fn a_masked_icon_owns_its_pixels_and_leaves_the_shared_texture() {
+        // The masked widget must not draw through the icon's shared
+        // texture, which holds the unmasked pixels.
         let icon = RasterIcon::from_raw(vec![255; 16 * 16 * 4], 16, 16);
         let unmasked = ImageWidget::new(&icon);
         let masked = ImageWidget::new(&icon).mask(ImageMaskShape::Circle);
-        assert_ne!(unmasked.name, masked.name);
+        assert!(unmasked.shared_name().is_some());
+        assert!(masked.shared_name().is_none());
+        assert!(masked.pending_pixels().is_some());
     }
 }

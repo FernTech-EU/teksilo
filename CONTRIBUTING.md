@@ -51,6 +51,54 @@ Teksilo is built under the following seven rules. They apply to your contributio
 5. Test your changes
 6. Submit a pull request
 
+### Running the GPU tests
+
+GPU tests need an adapter and return early without one. CI runs them on
+lavapipe, Mesa's Vulkan rasteriser on the CPU, and fails one that cannot open
+it: the tests that call `test_support::require_test_renderer`, and the
+automation screenshot tests, which check `test_support::adapter_required`.
+To run them the same way on a machine with a GPU (Debian and Ubuntu ship
+lavapipe in `mesa-vulkan-drivers`; the manifest's name may carry an
+architecture suffix):
+
+```bash
+VK_DRIVER_FILES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json) \
+WGPU_BACKEND=vulkan \
+TEKSILO_TEST_REQUIRE_ADAPTER=lavapipe \
+  cargo test -p teksilo-render
+```
+
+`WGPU_BACKEND=vulkan` keeps the tests off GL, which would otherwise win on
+a machine with a GPU. `TEKSILO_TEST_REQUIRE_ADAPTER` takes `lavapipe` or
+`any`; when the adapter does not match, the test fails and names the adapter
+it found.
+
+### Running the loom models
+
+The off-thread wake protocols are checked with [loom](https://docs.rs/loom),
+which runs every interleaving of a small model of them. Their atomics and locks
+come from `teksilo_canvas::sync`, which is the standard library's in an
+ordinary build and loom's under the `teksilo_loom` cfg:
+
+```bash
+RUSTFLAGS="--cfg teksilo_loom" CARGO_TARGET_DIR=target/loom \
+  cargo clippy --lib --tests -p teksilo-canvas -p teksilo-platform -p teksilo-core \
+    -p teksilo-terminal -- -D warnings -A deprecated
+RUSTFLAGS="--cfg teksilo_loom" LOOM_MAX_PREEMPTIONS=3 \
+CARGO_PROFILE_TEST_OPT_LEVEL=3 CARGO_TARGET_DIR=target/loom \
+  cargo test --lib -p teksilo-canvas -p teksilo-platform -p teksilo-core \
+    -p teksilo-terminal loom_
+```
+
+The packages are those the CI job "Concurrency models (loom)" lists; the
+first command lints the code only that cfg compiles, which the ordinary
+Clippy run never sees.
+
+Keep the `loom_` filter: under the cfg, the facade's types panic outside a
+model, so every other test would fail. The cfg is `teksilo_loom`, never a bare
+`loom`, which other crates in the lockfile react to. A separate
+`CARGO_TARGET_DIR` keeps the loom build from invalidating the ordinary one.
+
 ## Developer Certificate of Origin
 
 This project uses the [Developer Certificate of Origin (DCO)](DCO.md).

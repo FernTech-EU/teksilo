@@ -7,6 +7,38 @@
 
 `DateRangeEdit` — single unified control for picking a `DateRange`.
 
+## Public functions
+
+### `DateRangeEdit`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(value: Signal<Option<DateRange>>)`](#daterangeedit-new) |
+| | **Builder methods** |
+| `Self` | [`style(style: impl teksilo_core::styles::DateEditStyle)`](#daterangeedit-style) |
+| `Self` | [`min_date(d: Date)`](#daterangeedit-min_date) |
+| `Self` | [`max_date(d: Date)`](#daterangeedit-max_date) |
+| `Self` | [`format_pattern(p: impl Into<String>)`](#daterangeedit-format_pattern) |
+| `Self` | [`placeholder_start(text: impl Into<LocalizedString>)`](#daterangeedit-placeholder_start) |
+| `Self` | [`placeholder_end(text: impl Into<LocalizedString>)`](#daterangeedit-placeholder_end) |
+| `Self` | [`first_day_of_week(w: Weekday)`](#daterangeedit-first_day_of_week) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#daterangeedit-enabled) |
+| `Self` | [`read_only(read_only: bool)`](#daterangeedit-read_only) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#daterangeedit-label) |
+| `Self` | [`validation_behavior(behavior: ValidationBehavior)`](#daterangeedit-validation_behavior) |
+| `Self` | [`end_width_policy(policy: crate::date_edit::WidthPolicy)`](#daterangeedit-end_width_policy) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#daterangeedit-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#daterangeedit-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#daterangeedit-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#daterangeedit-composite_tooltip) |
+| `Self` | [`on_value_changed(f: impl Fn(Option<DateRange>, &mut EventContext) + 'static)`](#daterangeedit-on_value_changed) |
+| | **Methods** |
+| `Signal<ValidationFeedback>` | [`validation_feedback_signal()`](#daterangeedit-validation_feedback_signal) |
+| `Signal<Option<DateRange>>` | [`value()`](#daterangeedit-value) |
+
+## Detailed description
+
 Visually one widget: a single bordered frame containing two
 `TextInputField` halves separated by a painted arrow glyph, with
 a trailing built-in calendar button that opens a shared
@@ -18,14 +50,14 @@ a trailing built-in calendar button that opens a shared
 └──────────────────────────────────────┘
 ```
 
-# Why one frame?
+### Why one frame?
 
 Two adjacent `DateEdit`s (one frame each) visually read as two
 separate fields that happen to be next to each other. A single
 frame says "this is one range". Same affordance the user is used
 to from booking sites and analytics dashboards.
 
-# Behaviour
+### Behaviour
 
 - **Two text halves** — each masked from the resolved date pattern,
   each with its own validator + segment-stepping (Up/Down on the
@@ -44,7 +76,7 @@ to from booking sites and analytics dashboards.
 - **One validation strip** below the frame — composed feedback
   from both halves (worse of the two wins).
 
-# Accessibility
+### Accessibility
 
 - Container: `Role::DateInput`, its value the two days in full joined
   by words in the tree's locale ("du vendredi premier mai 2026 au mardi
@@ -69,7 +101,7 @@ let _w = DateRangeEdit::new(range.clone())
     .on_value_changed(|r, _ctx| println!("{r:?}"));
 ```
 
-## Touch and pen
+#### Touch and pen
 
 See `DateEdit`'s "Touch and pen" section.
 
@@ -81,13 +113,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![DateRangeEdit at Touch density](img/date_range_edit-touch.png)
 
-## Builder methods at a glance
-
-`style`, `min_date`, `max_date`, `format_pattern`, `placeholder_start`, `placeholder_end`, `first_day_of_week`, `enabled`, `read_only`, `label`, `validation_behavior`, `end_width_policy`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `validation_feedback_signal`, `on_value_changed`, `value`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/date_range_edit/index.html)
+
+<a id="daterangeedit"></a>
 
 ## `pub struct DateRangeEdit`
 
@@ -100,57 +130,83 @@ pub struct DateRangeEdit { /* fields */ }
 
 ### Methods
 
+<a id="daterangeedit-new"></a>
+
 #### `pub fn new(value: Signal<Option<DateRange>>) -> Self`
 
 Create a date-range picker bound to `value`.
+
+<a id="daterangeedit-style"></a>
 
 #### `pub fn style(mut self, style: impl teksilo_core::styles::DateEditStyle) -> Self`
 
 Per-call DateEditStyle override (shared with DateEdit family).
 
+<a id="daterangeedit-min_date"></a>
+
 #### `pub fn min_date(mut self, d: Date) -> Self`
 
 Restrict the selectable start and end dates to those on or after `d`.
 
+<a id="daterangeedit-max_date"></a>
+
 #### `pub fn max_date(mut self, d: Date) -> Self`
 
 Restrict the selectable start and end dates to those on or before `d`.
+
+<a id="daterangeedit-format_pattern"></a>
 
 #### `pub fn format_pattern(mut self, p: impl Into<String>) -> Self`
 
 Override the strftime-subset format pattern for both halves
 (e.g. `"%d/%m/%Y"`). Defaults to the locale-derived pattern.
 
+<a id="daterangeedit-placeholder_start"></a>
+
 #### `pub fn placeholder_start(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Placeholder shown in the start half when no date is set.
+
+<a id="daterangeedit-placeholder_end"></a>
 
 #### `pub fn placeholder_end(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Placeholder shown in the end half when no date is set.
 
+<a id="daterangeedit-first_day_of_week"></a>
+
 #### `pub fn first_day_of_week(mut self, w: Weekday) -> Self`
 
 Override which weekday appears in the first column of the calendar popup.
+
+<a id="daterangeedit-enabled"></a>
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state, statically or reactively. Forwarded to the
 arena at build time.
 
+<a id="daterangeedit-read_only"></a>
+
 #### `pub fn read_only(mut self, read_only: bool) -> Self`
 
 Make both halves read-only; the calendar button is also disabled.
+
+<a id="daterangeedit-label"></a>
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Accessible label for the wrapper `Role::DateInput` node. When not set,
 falls back to the localized `date-range-edit-name` message.
 
+<a id="daterangeedit-validation_behavior"></a>
+
 #### `pub fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self`
 
 How both halves handle invalid or out-of-range text on blur / Enter.
 Defaults to `ValidationBehavior::AutoCorrect`.
+
+<a id="daterangeedit-end_width_policy"></a>
 
 #### `pub fn end_width_policy(mut self, policy: crate::date_edit::WidthPolicy) -> Self`
 
@@ -161,11 +217,15 @@ the end half follows this policy. Default
 `WidthPolicy::Fill` to make the end half absorb extra
 space the parent offers.
 
+<a id="daterangeedit-tooltip"></a>
+
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Show a plain single-line tooltip on hover. Mutually exclusive with the
 rich / composite tooltip slots — this setter clears the other two so the
 last call wins.
+
+<a id="daterangeedit-rich_tooltip"></a>
 
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
@@ -173,11 +233,15 @@ Show a rich tooltip sourced from the registry by `key`. Mutually
 exclusive with the plain / composite tooltip slots — this setter clears
 the other two so the last call wins.
 
+<a id="daterangeedit-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Show a rich tooltip from an inline `TooltipContent` value. Mutually
 exclusive with the plain / registry-key tooltip slots — this setter
 clears the other two so the last call wins.
+
+<a id="daterangeedit-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 
@@ -185,16 +249,22 @@ Show a composite tooltip whose body is an arbitrary widget tree. Mutually
 exclusive with the plain / rich tooltip slots — this setter clears the
 other two so the last call wins.
 
+<a id="daterangeedit-validation_feedback_signal"></a>
+
 #### `pub fn validation_feedback_signal(&self) -> Signal<ValidationFeedback>`
 
 Reactive handle on the composed validation feedback (worse of the two
 halves — `Invalid > Corrected > Valid > Pristine`).
+
+<a id="daterangeedit-on_value_changed"></a>
 
 #### `pub fn on_value_changed( mut self, f: impl Fn(Option<DateRange>, &mut EventContext) + 'static, ) -> Self`
 
 Callback invoked whenever the range changes (including when one half
 clears its value). Receives the new `Option<DateRange>` and an
 `EventContext` for dispatching intents or side effects.
+
+<a id="daterangeedit-value"></a>
 
 #### `pub fn value(&self) -> Signal<Option<DateRange>>`
 

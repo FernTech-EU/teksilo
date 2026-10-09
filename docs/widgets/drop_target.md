@@ -7,6 +7,59 @@
 
 `DropTarget` — a transparent wrapping drop container.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `fn` | [`band_depth`](#band_depth) — The depth of one edge band along the axis it is measured on: the caller's fraction of the extent, raised to `floor` when that fraction does not reach it |
+| `fn` | [`region_at_floored`](#region_at_floored) — `region_at` with `band_depth`'s floor applied per axis |
+| `fn` | [`region_rect_floored`](#region_rect_floored) — `region_rect` with `band_depth`'s floor applied per axis — the paint side of `region_at_floored`, so the zone a user… |
+| `struct` | [`DropRegionSpec`](#dropregionspec) — Per-region configuration for a multi-zone `DropTarget`: an optional hint plus a reactive enabled flag |
+| `struct` | [`DropTarget`](#droptarget) — A transparent container that turns its child into a drop target |
+
+## Public functions
+
+### `DropTarget`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#droptarget-new) |
+| | **Builder methods** |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#droptarget-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#droptarget-child_opt) |
+| `Self` | [`region(region: DropRegion, f: impl FnOnce(DropRegionSpec) -> DropRegionSpec)`](#droptarget-region) |
+| `Self` | [`zone_size_factor(factor: f32)`](#droptarget-zone_size_factor) |
+| `Self` | [`hint(widget: impl teksilo_core::IntoTeksiChild)`](#droptarget-hint) |
+| `Self` | [`accept_any()`](#droptarget-accept_any) |
+| `Self` | [`accept_external()`](#droptarget-accept_external) |
+| `Self` | [`accept_external_files()`](#droptarget-accept_external_files) |
+| `Self` | [`accept_external_text()`](#droptarget-accept_external_text) |
+| `Self` | [`accept_external_extensions<I, S>(extensions: I)`](#droptarget-accept_external_extensions) |
+| `Self` | [`accept_typed<T: 'static>()`](#droptarget-accept_typed) |
+| `Self` | [`accept_when(f: impl Fn(&DragPayload) -> bool + 'static)`](#droptarget-accept_when) |
+| `Self` | [`targeted_signal(signal: Signal<bool>)`](#droptarget-targeted_signal) |
+| `Self` | [`drag_state_signal(signal: Signal<DropTargetDragState>)`](#droptarget-drag_state_signal) |
+| `Self` | [`active_region_signal(signal: Signal<Option<DropRegion>>)`](#droptarget-active_region_signal) |
+| `Self` | [`on_drop(f: impl FnMut(DragPayload, Point, &mut EventContext) -> bool + 'static)`](#droptarget-on_drop) |
+| `Self` | [`on_drop_typed<T: 'static>(mut f: impl FnMut(T, Point, &mut EventContext) -> bool + 'static)`](#droptarget-on_drop_typed) |
+| `Self` | [`on_region_drop(f: impl FnMut(DropRegion, DragPayload, Point, &mut EventContext) -> bool + 'static)`](#droptarget-on_region_drop) |
+| `Self` | [`on_drag_leave(f: impl FnMut(&mut EventContext) + 'static)`](#droptarget-on_drag_leave) |
+| `Self` | [`variant(variant: DropTargetVariant)`](#droptarget-variant) |
+| `Self` | [`style(style: impl DropTargetStyle)`](#droptarget-style) |
+
+### `DropRegionSpec`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#dropregionspec-new) |
+| | **Builder methods** |
+| `Self` | [`hint(widget: impl teksilo_core::IntoTeksiChild)`](#dropregionspec-hint) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#dropregionspec-enabled) |
+
+## Detailed description
+
 Where `DropZone` is a *standalone* "drop files
 here" placeholder with its own label / icon / Browse button, `DropTarget` is
 a *wrapping* container: it turns any existing widget subtree into a drop
@@ -37,7 +90,7 @@ DropTarget::new()
     });
 ```
 
-# Multi-zone drops
+### Multi-zone drops
 
 Beyond the single whole-bounds target, a `DropTarget` can expose up to five
 independently enable-able `DropRegion`s — `Center` / `Top` / `Bottom` /
@@ -72,7 +125,7 @@ strip then falls through to the next-priority enabled zone (or `Center`, or
 rejects). A drop landing in a middle covered by no *enabled* zone is rejected;
 `on_region_drop` therefore only ever receives an enabled region.
 
-# Styling
+### Styling
 
 The per-zone highlight overlay + hint chrome is a Tier-3 `DropTargetStyle`;
 the default `RecipeDropTargetStyle`
@@ -81,7 +134,7 @@ through; an edge strip → translucent fill + accent frame) and a full-bounds
 error border on reject. Override per-call with `DropTarget::style` or
 theme-wide via `theme.style_slots.drop_target`.
 
-# Accessibility
+### Accessibility
 
 The wrapper is a `Role::Group`. `Live` is intentionally **not** set on the
 group (that would announce every change to the wrapped child); instead the
@@ -89,7 +142,7 @@ recipe scopes `Live::Polite` to each hint card so a screen reader announces
 the active zone's hint *appearing*. Each hint is gated by `visible_when`, so a
 non-active zone's hint leaves the AT tree entirely.
 
-## Keyboard accessibility is the caller's responsibility
+#### Keyboard accessibility is the caller's responsibility
 
 An OS drag cannot be initiated from the keyboard, and — unlike
 `DropZone`, which ships a keyboard-operable
@@ -108,7 +161,7 @@ backends are real — OLE on Windows, `NSDraggingDestination` on macOS,
 `wl_data_device` on Wayland, XDND on X11). `DropZone` is the better choice
 when the drop *is* the primary action.
 
-## Touch and pen
+#### Touch and pen
 
 An edge zone's depth is `zone_size_factor` of the axis, **floored** per axis to
 the density's target size: the fraction is the shape the caller asked for and
@@ -136,13 +189,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![DropTarget at Touch density](img/drop_target-touch.png)
 
-## Builder methods at a glance
-
-`child`, `child_opt`, `region`, `zone_size_factor`, `hint`, `accept_any`, `accept_external`, `accept_external_files`, `accept_external_text`, `accept_external_extensions`, `accept_typed`, `accept_when`, `targeted_signal`, `drag_state_signal`, `active_region_signal`, `on_drop`, `on_drop_typed`, `on_region_drop`, `on_drag_leave`, `variant`, `style`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/drop_target/index.html)
+
+<a id="band_depth"></a>
 
 ## `pub fn band_depth(...)`
 
@@ -171,6 +222,8 @@ opposing bands meet and delete the centre.
 pub fn band_depth(extent: f32, factor: f32, floor: f32) -> f32;
 ```
 
+<a id="region_at_floored"></a>
+
 ## `pub fn region_at_floored(...)`
 
 `region_at` with `band_depth`'s floor
@@ -190,6 +243,8 @@ pub fn region_at_floored(
 ) -> Option<DropRegion>;
 ```
 
+<a id="region_rect_floored"></a>
+
 ## `pub fn region_rect_floored(...)`
 
 `region_rect` with `band_depth`'s
@@ -200,9 +255,11 @@ zone a user sees stays the zone that drops.
 pub fn region_rect_floored(region: DropRegion, bounds: Rect, factor: f32, floor: f32) -> Rect;
 ```
 
+<a id="dropregionspec"></a>
+
 ## `pub struct DropRegionSpec`
 
-Per-region configuration for a multi-zone [`DropTarget`]: an optional hint
+Per-region configuration for a multi-zone `DropTarget`: an optional hint
 plus a reactive enabled flag. Kept as a struct so more per-zone knobs can
 land without a signature churn.
 
@@ -212,14 +269,20 @@ pub struct DropRegionSpec { /* fields */ }
 
 ### Methods
 
+<a id="dropregionspec-new"></a>
+
 #### `pub fn new() -> Self`
 
 An enabled spec with no hint.
+
+<a id="dropregionspec-hint"></a>
 
 #### `pub fn hint(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Widget shown (centered in this region's rect, inside a popup card) while
 a drag with an accepted payload hovers **this** region.
+
+<a id="dropregionspec-enabled"></a>
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
@@ -229,6 +292,8 @@ while disabled the zone stops hit-testing (its area falls through to the
 next-priority enabled zone, or `Center`, or rejects), never highlights,
 and never shows its hint. The enabled state is resolved on every drag
 tick, so a `.set(false)` mid-drag takes effect on the next hover.
+
+<a id="droptarget"></a>
 
 ## `pub struct DropTarget`
 
@@ -241,13 +306,19 @@ pub struct DropTarget { /* fields */ }
 
 ### Methods
 
+<a id="droptarget-new"></a>
+
 #### `pub fn new() -> Self`
 
 A drop target with no child yet — call `Self::child` (required).
 
+<a id="droptarget-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 The wrapped content — fills the bounds and is always visible.
+
+<a id="droptarget-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
@@ -257,6 +328,8 @@ The conditional-child form. `teksu!`'s `if` without an `else` lowers to
 this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
 adds no arena node, so nothing is laid out, painted, or published to the
 accessibility tree, and a stack applies no spacing around it.
+
+<a id="droptarget-region"></a>
 
 #### `pub fn region( mut self, region: DropRegion, f: impl FnOnce(DropRegionSpec) -> DropRegionSpec, ) -> Self`
 
@@ -275,11 +348,15 @@ DropTarget::new()
     .on_region_drop(|region, payload, _pos, ctx| { route(region, payload); true });
 ```
 
+<a id="droptarget-zone_size_factor"></a>
+
 #### `pub fn zone_size_factor(mut self, factor: f32) -> Self`
 
 The fraction of the axis each **side** zone occupies (clamped to
 `0.1..=1.0`). `0.2` is the default fifth; `0.5` bisects. Applies to all
 four edge zones in common; `Center` takes the leftover middle.
+
+<a id="droptarget-hint"></a>
 
 #### `pub fn hint(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
@@ -287,13 +364,19 @@ Widget shown centered inside a popup card while a drag with an accepted
 payload hovers. Sugar for `.region(DropRegion::Center, |z| z.hint(w))` —
 the classic whole-bounds single-zone case.
 
+<a id="droptarget-accept_any"></a>
+
 #### `pub fn accept_any(mut self) -> Self`
 
 Accept any payload (internal or external). Explicit form of the default.
 
+<a id="droptarget-accept_external"></a>
+
 #### `pub fn accept_external(mut self) -> Self`
 
 Accept any external (OS) drop, regardless of content.
+
+<a id="droptarget-accept_external_files"></a>
 
 #### `pub fn accept_external_files(mut self) -> Self`
 
@@ -301,10 +384,14 @@ Accept external drops that carry at least one file. Optimistic at hover
 on Wayland (where the file bytes only arrive at drop) if the source
 advertises a `text/uri-list`.
 
+<a id="droptarget-accept_external_text"></a>
+
 #### `pub fn accept_external_text(mut self) -> Self`
 
 Accept external text drops. Optimistic at hover on Wayland if the source
 advertises a text format.
+
+<a id="droptarget-accept_external_extensions"></a>
 
 #### `pub fn accept_external_extensions<I, S>(mut self, extensions: I) -> Self where I: IntoIterator<Item = S>, S: AsRef<str>,`
 
@@ -313,14 +400,20 @@ Accept external file drops whose extension is in `extensions`
 drop (no file bytes yet); it is optimistic if a `text/uri-list` is
 advertised.
 
+<a id="droptarget-accept_typed"></a>
+
 #### `pub fn accept_typed<T: 'static>(mut self) -> Self`
 
 Accept internal drags whose payload carries a value of type `T`.
 Ergonomic companion to `Self::on_drop_typed`.
 
+<a id="droptarget-accept_when"></a>
+
 #### `pub fn accept_when(mut self, f: impl Fn(&DragPayload) -> bool + 'static) -> Self`
 
 Custom predicate — full control over payload inspection.
+
+<a id="droptarget-targeted_signal"></a>
 
 #### `pub fn targeted_signal(mut self, signal: Signal<bool>) -> Self`
 
@@ -328,9 +421,13 @@ The widget writes `true` while a drag with an *accepted* payload is over
 the target, `false` otherwise — SwiftUI's `isTargeted` pattern. Drive
 custom visuals off this signal.
 
+<a id="droptarget-drag_state_signal"></a>
+
 #### `pub fn drag_state_signal(mut self, signal: Signal<DropTargetDragState>) -> Self`
 
 Full three-state version of `Self::targeted_signal`.
+
+<a id="droptarget-active_region_signal"></a>
 
 #### `pub fn active_region_signal(mut self, signal: Signal<Option<DropRegion>>) -> Self`
 
@@ -338,15 +435,21 @@ The widget writes which `DropRegion` an *accepted* drag is currently
 over (`None` when idle, rejecting, or over a disabled middle). Drive
 custom per-zone visuals off this.
 
+<a id="droptarget-on_drop"></a>
+
 #### `pub fn on_drop( mut self, f: impl FnMut(DragPayload, Point, &mut EventContext) -> bool + 'static, ) -> Self`
 
 Handle a drop. Return `true` to accept, `false` to reject. Invoked only
 when the accept filter passes.
 
+<a id="droptarget-on_drop_typed"></a>
+
 #### `pub fn on_drop_typed<T: 'static>( mut self, mut f: impl FnMut(T, Point, &mut EventContext) -> bool + 'static, ) -> Self`
 
 Ergonomic typed drop: implicitly sets `accept_typed::<T>()` and extracts
 the typed value before invoking `f`. Last-call-wins with `Self::on_drop`.
+
+<a id="droptarget-on_region_drop"></a>
 
 #### `pub fn on_region_drop( mut self, f: impl FnMut(DropRegion, DragPayload, Point, &mut EventContext) -> bool + 'static, ) -> Self`
 
@@ -355,14 +458,20 @@ over, plus the payload. Last-call-wins with `Self::on_drop` — when set,
 it is used instead of the plain `on_drop`. Invoked only when the accept
 filter passes; return `true` to accept.
 
+<a id="droptarget-on_drag_leave"></a>
+
 #### `pub fn on_drag_leave(mut self, f: impl FnMut(&mut EventContext) + 'static) -> Self`
 
 Called when a drag leaves the target (pointer exit, drop completion, or
 cancel).
 
+<a id="droptarget-variant"></a>
+
 #### `pub fn variant(mut self, variant: DropTargetVariant) -> Self`
 
 Visual prominence of the hover indicator.
+
+<a id="droptarget-style"></a>
 
 #### `pub fn style(mut self, style: impl DropTargetStyle) -> Self`
 

@@ -730,13 +730,36 @@ impl Canvas {
         self.frame.draw_order.push(DrawCommand::Image(idx));
     }
 
+    /// Draw a live picture: one [`DrawCommand::LiveImage`], carrying no
+    /// pixels and taking no lock. The quad is stamped with the size the
+    /// window's last layout recorded for the source, never a fresher one, so
+    /// it agrees with the layout it is drawn in. Call it on every paint of a
+    /// widget showing a source, even with nothing to show yet: the renderer
+    /// takes a widget's pixel wake only for quads in the frame. Counts one
+    /// paint in the attachment's stats.
+    pub fn draw_live_image(
+        &mut self,
+        consumer: &crate::live_image::LiveImageConsumer,
+        draw: &crate::live_image::LiveImageDraw,
+    ) {
+        consumer.count_paint();
+        let idx = self.frame.live_images.len();
+        self.frame
+            .live_images
+            .push(crate::live_image::LiveImageQuad::new(consumer, draw));
+        self.frame.draw_order.push(DrawCommand::LiveImage(idx));
+    }
+
     /// Check if an image is already queued for registration this frame.
     pub fn has_pending_image(&self, name: &str) -> bool {
         self.frame.pending_images.iter().any(|p| p.name == name)
     }
 
-    /// Queue an image for GPU registration. The renderer uploads the
-    /// texture if not already present.
+    /// Queue an image for GPU registration. The renderer registers a name
+    /// once: the first writer of a name in a frame wins, new pixels under a
+    /// name the renderer already holds are ignored, and its texture is never
+    /// freed. Pixels that change belong on a
+    /// [`LiveImageSource`](crate::live_image::LiveImageSource).
     ///
     /// `Cow::Borrowed` queues the data without copying it, which suits
     /// compile-time embedded pixels. `Cow::Owned` moves the buffer into an
@@ -950,6 +973,9 @@ impl Canvas {
             s.screen[1] += offset.y;
             s.shape_rect[0] += offset.x;
             s.shape_rect[1] += offset.y;
+        }
+        for l in &mut shifted.live_images {
+            l.offset(offset.x, offset.y);
         }
         self.frame.merge(&shifted);
     }

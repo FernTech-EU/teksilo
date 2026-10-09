@@ -19,71 +19,21 @@
 //! flipped, so the mirroring cases are implemented rather than treated as
 //! nonsense.
 
-/// How the stored pixel grid must be transformed to be displayed upright.
-///
-/// The discriminants are the TIFF `Orientation` values, so
-/// [`Orientation::from_tiff`] is a direct mapping.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Orientation {
-    /// 1 — stored upright. The overwhelmingly common case.
-    #[default]
-    Normal,
-    /// 2 — mirrored left-to-right.
-    FlipHorizontal,
-    /// 3 — rotated 180°.
-    Rotate180,
-    /// 4 — mirrored top-to-bottom.
-    FlipVertical,
-    /// 5 — transposed (mirrored along the main diagonal).
-    Transpose,
-    /// 6 — rotated 90° clockwise for display.
-    Rotate90,
-    /// 7 — transversed (mirrored along the anti-diagonal).
-    Transverse,
-    /// 8 — rotated 270° clockwise for display.
-    Rotate270,
-}
+pub use crate::image_geometry::ImageOrientation;
 
-impl Orientation {
-    /// Map a raw TIFF `Orientation` value. Anything outside 1..=8 — including
-    /// the 0 some buggy encoders write — is treated as [`Orientation::Normal`],
-    /// which is the only safe reading of a value that cannot be trusted.
-    pub fn from_tiff(value: u16) -> Self {
-        match value {
-            2 => Self::FlipHorizontal,
-            3 => Self::Rotate180,
-            4 => Self::FlipVertical,
-            5 => Self::Transpose,
-            6 => Self::Rotate90,
-            7 => Self::Transverse,
-            8 => Self::Rotate270,
-            _ => Self::Normal,
-        }
-    }
-
-    /// Whether applying this orientation swaps width and height.
-    pub fn swaps_axes(self) -> bool {
-        matches!(
-            self,
-            Self::Transpose | Self::Rotate90 | Self::Transverse | Self::Rotate270
-        )
-    }
-
-    /// Whether this is a no-op, so callers can skip the buffer copy entirely.
-    pub fn is_identity(self) -> bool {
-        self == Self::Normal
-    }
-}
+/// The orientation an EXIF block names.
+#[deprecated(since = "0.16.0", note = "renamed `ImageOrientation`")]
+pub type Orientation = ImageOrientation;
 
 /// Read the `Orientation` tag out of an EXIF block.
 ///
 /// `data` is the payload of a JPEG `APP1` segment, with or without the leading
 /// `"Exif\0\0"` marker — `zune-jpeg` hands over the block either way depending
-/// on the file, so both are accepted. Returns [`Orientation::Normal`] for any
+/// on the file, so both are accepted. Returns [`ImageOrientation::Normal`] for any
 /// input this parser cannot make sense of; a photograph displayed unrotated is
 /// a far better failure than a parse error propagating out of image decoding.
-pub fn orientation_from_exif(data: &[u8]) -> Orientation {
-    parse_orientation(data).map_or(Orientation::Normal, Orientation::from_tiff)
+pub fn orientation_from_exif(data: &[u8]) -> ImageOrientation {
+    parse_orientation(data).map_or(ImageOrientation::Normal, ImageOrientation::from_tiff)
 }
 
 /// The fallible core, kept separate so every bail-out is a plain `?`.
@@ -149,7 +99,7 @@ pub fn apply_orientation(
     pixels: Vec<u8>,
     width: u32,
     height: u32,
-    orientation: Orientation,
+    orientation: ImageOrientation,
 ) -> (Vec<u8>, u32, u32) {
     if orientation.is_identity() {
         return (pixels, width, height);
@@ -170,14 +120,14 @@ pub fn apply_orientation(
         for x in 0..w {
             // Where the source texel lands in the display-oriented image.
             let (dx, dy) = match orientation {
-                Orientation::Normal => (x, y),
-                Orientation::FlipHorizontal => (w - 1 - x, y),
-                Orientation::Rotate180 => (w - 1 - x, h - 1 - y),
-                Orientation::FlipVertical => (x, h - 1 - y),
-                Orientation::Transpose => (y, x),
-                Orientation::Rotate90 => (h - 1 - y, x),
-                Orientation::Transverse => (h - 1 - y, w - 1 - x),
-                Orientation::Rotate270 => (y, w - 1 - x),
+                ImageOrientation::Normal => (x, y),
+                ImageOrientation::FlipHorizontal => (w - 1 - x, y),
+                ImageOrientation::Rotate180 => (w - 1 - x, h - 1 - y),
+                ImageOrientation::FlipVertical => (x, h - 1 - y),
+                ImageOrientation::Transpose => (y, x),
+                ImageOrientation::Rotate90 => (h - 1 - y, x),
+                ImageOrientation::Transverse => (h - 1 - y, w - 1 - x),
+                ImageOrientation::Rotate270 => (y, w - 1 - x),
             };
             let src = (y * w + x) * 4;
             let dst = (dy * dst_w + dx) * 4;
@@ -225,21 +175,24 @@ mod tests {
 
     #[test]
     fn reads_little_endian_orientation() {
-        assert_eq!(orientation_from_exif(&exif_le(6)), Orientation::Rotate90);
+        assert_eq!(
+            orientation_from_exif(&exif_le(6)),
+            ImageOrientation::Rotate90
+        );
     }
 
     #[test]
     fn reads_big_endian_orientation_without_preamble() {
         assert_eq!(
             orientation_from_exif(&exif_be_bare(8)),
-            Orientation::Rotate270
+            ImageOrientation::Rotate270
         );
     }
 
     #[test]
     fn garbage_reads_as_normal() {
-        assert_eq!(orientation_from_exif(b"not exif"), Orientation::Normal);
-        assert_eq!(orientation_from_exif(&[]), Orientation::Normal);
+        assert_eq!(orientation_from_exif(b"not exif"), ImageOrientation::Normal);
+        assert_eq!(orientation_from_exif(&[]), ImageOrientation::Normal);
         // A truncated block must not panic on the slice arithmetic.
         let full = exif_le(6);
         for cut in 0..full.len() {
@@ -249,8 +202,8 @@ mod tests {
 
     #[test]
     fn out_of_range_value_reads_as_normal() {
-        assert_eq!(orientation_from_exif(&exif_le(0)), Orientation::Normal);
-        assert_eq!(orientation_from_exif(&exif_le(9)), Orientation::Normal);
+        assert_eq!(orientation_from_exif(&exif_le(0)), ImageOrientation::Normal);
+        assert_eq!(orientation_from_exif(&exif_le(9)), ImageOrientation::Normal);
     }
 
     /// A 2×1 image: left pixel red, right pixel green.
@@ -260,7 +213,7 @@ mod tests {
 
     #[test]
     fn flip_horizontal_swaps_the_two_pixels() {
-        let (out, w, h) = apply_orientation(two_by_one(), 2, 1, Orientation::FlipHorizontal);
+        let (out, w, h) = apply_orientation(two_by_one(), 2, 1, ImageOrientation::FlipHorizontal);
         assert_eq!((w, h), (2, 1));
         assert_eq!(&out[0..4], &[0, 255, 0, 255]);
         assert_eq!(&out[4..8], &[255, 0, 0, 255]);
@@ -268,7 +221,7 @@ mod tests {
 
     #[test]
     fn rotate90_swaps_dimensions_and_stacks_the_pixels() {
-        let (out, w, h) = apply_orientation(two_by_one(), 2, 1, Orientation::Rotate90);
+        let (out, w, h) = apply_orientation(two_by_one(), 2, 1, ImageOrientation::Rotate90);
         // A 2-wide, 1-tall strip rotated 90° clockwise is 1 wide and 2 tall.
         // Write "RG" on paper and turn it clockwise: it reads top-to-bottom,
         // so the originally-left (red) pixel ends up on *top*.
@@ -280,15 +233,15 @@ mod tests {
     #[test]
     fn rotate270_is_the_inverse_of_rotate90() {
         let src: Vec<u8> = (0..(3 * 2 * 4)).map(|i| i as u8).collect();
-        let (px, w, h) = apply_orientation(src.clone(), 3, 2, Orientation::Rotate90);
-        let (back, bw, bh) = apply_orientation(px, w, h, Orientation::Rotate270);
+        let (px, w, h) = apply_orientation(src.clone(), 3, 2, ImageOrientation::Rotate90);
+        let (back, bw, bh) = apply_orientation(px, w, h, ImageOrientation::Rotate270);
         assert_eq!((bw, bh), (3, 2));
         assert_eq!(back, src);
     }
 
     #[test]
     fn normal_is_a_passthrough() {
-        let (out, w, h) = apply_orientation(two_by_one(), 2, 1, Orientation::Normal);
+        let (out, w, h) = apply_orientation(two_by_one(), 2, 1, ImageOrientation::Normal);
         assert_eq!((w, h), (2, 1));
         assert_eq!(out, two_by_one());
     }
@@ -296,7 +249,7 @@ mod tests {
     #[test]
     fn every_orientation_preserves_the_pixel_count() {
         for v in 1..=8u16 {
-            let o = Orientation::from_tiff(v);
+            let o = ImageOrientation::from_tiff(v);
             let (out, w, h) = apply_orientation(vec![9u8; 6 * 4], 3, 2, o);
             assert_eq!(out.len(), 6 * 4, "value {v}");
             assert_eq!((w * h) as usize, 6, "value {v}");
@@ -309,7 +262,7 @@ mod tests {
         let src: Vec<u8> = (0..(3 * 2 * 4)).map(|i| i as u8).collect();
         let (mut px, mut w, mut h) = (src.clone(), 3u32, 2u32);
         for _ in 0..4 {
-            let r = apply_orientation(px, w, h, Orientation::Rotate90);
+            let r = apply_orientation(px, w, h, ImageOrientation::Rotate90);
             px = r.0;
             w = r.1;
             h = r.2;

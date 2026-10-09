@@ -9,7 +9,8 @@
 //! them held a leak the audit found: the calendar's zoom cell, which only
 //! exists after a header click, and the privacy-settings rows, which
 //! painted their label twice. A widget nothing renders is a widget nothing
-//! checks, so those are constructed here by hand. The rest of the
+//! checks, so those are constructed here by hand, as is a live image
+//! before its first frame. The rest of the
 //! unregistered set — the toast surface, the modal bodies, the menu and
 //! popover surfaces — are covered by tests in their own modules, where
 //! their private construction paths are reachable.
@@ -79,6 +80,23 @@ fn a_calendar_holds_the_invariants() {
     use crate::calendar::Calendar;
     let date = teksilo_core::signal::Signal::new(None);
     assert_invariants("calendar", Calendar::single(date));
+}
+
+#[test]
+fn a_live_image_holds_the_invariants() {
+    // No catalog entry builds one before its source has a frame, which is
+    // when its placeholder shows. The placeholder is painted text and the
+    // node's description, never a label node of its own.
+    use crate::primitives::live_image::{LiveImage, LiveImageSource, LivePixelFormat};
+    let waiting = LiveImageSource::new(LivePixelFormat::Rgba8);
+    let _writer = waiting.writer();
+    assert_invariants(
+        "live image",
+        LiveImage::new(waiting)
+            .size(200.0, 100.0)
+            .placeholder("Starting the machine")
+            .alt("Machine screen"),
+    );
 }
 
 #[cfg(feature = "telemetry")]

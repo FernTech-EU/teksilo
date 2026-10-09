@@ -10,7 +10,7 @@ publish.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Canvas and geometry layer for Teksilo — RenderFrame, Path, Paint and the TextBackend trait."
+description = "The bottom layer of Teksilo, with no GPU or window: the canvas widgets paint into and its RenderFrame, geometry, paths, paint, the TextBackend trait, live pictures, and waking a window from any thread."
 documentation = "https://docs.rs/teksilo-canvas"
 keywords = ["canvas", "graphics", "geometry", "gui", "paths"]
 categories = ["graphics", "rendering", "gui"]
@@ -25,6 +25,21 @@ zune-core = { workspace = true }
 thiserror = { workspace = true }
 bytemuck = { workspace = true }
 serde = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+# Test-only: property-based testing (see the `proptest` entry in the
+# workspace manifest for why proptest rather than cargo-fuzz).
+proptest = { workspace = true }
+
+# The concurrency models' primitives, behind `teksilo_canvas::sync`: only a
+# build with `RUSTFLAGS="--cfg teksilo_loom"` compiles it. A consumer's
+# lockfile lists it; no ordinary build fetches or compiles it.
+[target.'cfg(teksilo_loom)'.dependencies]
+loom = { workspace = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(teksilo_loom)'] }
 
 [package.metadata.docs.rs]
 all-features = true

@@ -8,6 +8,36 @@ a `TitleBar`. Rendered only when
 `PlatformTitleBarHost::renders_custom_controls` is `true`
 (Windows, Wayland, and X11 with a capable window manager; never on macOS).
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`WindowControlsLayout`](#windowcontrolslayout) — Layout snapshot that `WindowControls` exports to its parent `TitleBar` so the `after_paint` aggregator can read the per-button `WidgetId`s |
+| `type` | [`ControlAction`](#controlaction) — Action invoked when a `ControlButton` is tapped |
+| `struct` | [`ControlButton`](#controlbutton) — A compact, flush-fitting window-control button |
+| `struct` | [`WindowControls`](#windowcontrols) — The minimize / maximize / close cluster, laid out as an HStack of `ControlButton`s |
+
+## Public functions
+
+### `WindowControls`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(host: Rc<dyn PlatformTitleBarHost>, show_restore: Signal<bool>, close_action: Option<CloseAction>)`](#windowcontrols-new) |
+
+### `ControlButton`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(glyph: &'static str, width: f32, height: f32, fg: impl Into<ColorProp>)`](#controlbutton-new) |
+| | **Builder methods** |
+| `Self` | [`hover_background(role: SurfaceRole)`](#controlbutton-hover_background) |
+| `Self` | [`on_tap(action: impl Fn(&mut EventContext) + 'static)`](#controlbutton-on_tap) |
+
+## Detailed description
+
 These are deliberately NOT built on top of the regular `Button` widget:
 `Button` carries a 72 dp minimum width, themed padding, focus ring and
 border, none of which are appropriate for a flush-fitting Win11-style
@@ -22,7 +52,7 @@ between Maximize and Restore. The glyph itself does not swap — both
 states render `□`, since text-typeset's font fallback has no reliable
 "two stacked squares" glyph (see `WindowControls::build`).
 
-## Touch and pen
+#### Touch and pen
 
 A control cell clears the conformance floor on both axes at every density, so
 nothing here needs widening, and each button activates on the release. The cell
@@ -36,6 +66,8 @@ hover on any platform and loses nothing by it.
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/index.html)
+
+<a id="windowcontrolslayout"></a>
 
 ## `pub struct WindowControlsLayout`
 
@@ -55,6 +87,8 @@ child is currently visible.
 pub struct WindowControlsLayout { /* fields */ }
 ```
 
+<a id="controlaction"></a>
+
 ## `pub type ControlAction`
 
 Action invoked when a `ControlButton` is tapped.
@@ -62,6 +96,8 @@ Action invoked when a `ControlButton` is tapped.
 ```rust
 pub type ControlAction = Rc<dyn Fn(&mut EventContext)>;
 ```
+
+<a id="controlbutton"></a>
 
 ## `pub struct ControlButton`
 
@@ -82,20 +118,28 @@ pub struct ControlButton { /* fields */ }
 
 ### Methods
 
+<a id="controlbutton-new"></a>
+
 #### `pub fn new(glyph: &'static str, width: f32, height: f32, fg: impl Into<ColorProp>) -> Self`
 
 Create a control button with the given Unicode glyph, fixed cell dimensions, and
 foreground color role. The hover background defaults to transparent until overridden
 via `hover_background`.
 
+<a id="controlbutton-hover_background"></a>
+
 #### `pub fn hover_background(mut self, role: SurfaceRole) -> Self`
 
 Set the surface role painted over the title bar background while the pointer is inside
 the button cell. The default is `SurfaceRole::Transparent` (flat).
 
+<a id="controlbutton-on_tap"></a>
+
 #### `pub fn on_tap(mut self, action: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Register the callback invoked when the user taps this button.
+
+<a id="windowcontrols"></a>
 
 ## `pub struct WindowControls`
 
@@ -109,6 +153,8 @@ pub struct WindowControls { /* fields */ }
 ```
 
 ### Methods
+
+<a id="windowcontrols-new"></a>
 
 #### `pub fn new( host: Rc<dyn PlatformTitleBarHost>, show_restore: Signal<bool>, close_action: Option<CloseAction>, ) -> Self`
 

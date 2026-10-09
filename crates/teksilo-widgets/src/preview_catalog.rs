@@ -18,7 +18,8 @@
 //! Coverage in v1:
 //! - Tier A (flat knob surface): Button, Checkbox, RadioButton, Toggle,
 //!   Slider, ProgressBar, Badge, Link, ComboBox, SegmentedControl,
-//!   IconWidget, Divider.
+//!   IconWidget, Divider, LiveImage (on a source holding one commit of a
+//!   fixed test card).
 //! - Tier B (composites with fixture variants): Card, Panel, GroupBox,
 //!   GroupHeader, IconButton, Snackbar, Breadcrumb, Toolbar,
 //!   StatusBar, Accordion, RadioGroup, SplitButton.
@@ -1564,6 +1565,209 @@ impl WidgetCatalog for IconWidget {
 register_widget_catalog_at!(
     "crates/teksilo-widgets/src/primitives/icon_widget.rs",
     IconWidget
+);
+
+// ---------------------------------------------------------------------------
+// LiveImage
+// ---------------------------------------------------------------------------
+
+/// The catalog's test card, 96 × 64 and the same every time: colour bars in
+/// the top half, a checker in the bottom half and a white diagonal across
+/// both, so a fit, an orientation and a scaling filter each show.
+fn live_test_card() -> (u32, u32, Vec<u8>) {
+    const BARS: [[u8; 3]; 6] = [
+        [230, 230, 230],
+        [230, 200, 40],
+        [40, 200, 210],
+        [60, 190, 60],
+        [210, 60, 190],
+        [210, 50, 50],
+    ];
+    let (w, h) = (96u32, 64u32);
+    let mut px = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let rgb = if x * h / w == y {
+                [255, 255, 255]
+            } else if y < h / 2 {
+                BARS[(x * BARS.len() as u32 / w) as usize]
+            } else if (x / 8 + y / 8) % 2 == 0 {
+                [40, 44, 52]
+            } else {
+                [120, 126, 140]
+            };
+            px.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+        }
+    }
+    (w, h, px)
+}
+
+/// A [`LiveImage`](crate::LiveImage) on a source holding one commit of [`live_test_card`],
+/// or none: the catalog's stand-in for a producer. It owns the writer, which
+/// a source needs to keep its pixels: once its last writer drops, it frees
+/// them and shows nothing.
+#[derive(Debug)]
+struct OneCommitPicture {
+    source: crate::LiveImageSource,
+    _writer: crate::LiveImageWriter,
+    fit: crate::ImageFit,
+    sizing: crate::LiveImageSizing,
+    scaling: crate::ScalingFilter,
+    orientation: crate::ImageOrientation,
+    background: bool,
+    child: Option<teksilo_core::widget_id::WidgetId>,
+}
+
+impl Widget for OneCommitPicture {
+    fn build(
+        &mut self,
+        ctx: &mut teksilo_core::build_context::BuildContext,
+    ) -> Vec<teksilo_core::widget_id::WidgetId> {
+        let mut image = crate::LiveImage::new(self.source.clone())
+            .fit(self.fit)
+            .sizing(self.sizing)
+            .scaling(self.scaling)
+            .orientation(self.orientation)
+            .placeholder(lit!("Waiting for frames"))
+            .alt(lit!("Test card"));
+        if matches!(self.sizing, crate::LiveImageSizing::Aspect) {
+            image = image.width(240.0);
+        }
+        if self.background {
+            image = image.background(SurfaceRole::Sunken);
+        }
+        let id = ctx.add(image);
+        self.child = Some(id);
+        vec![id]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: teksilo_canvas::SizeProposal,
+        ctx: &teksilo_core::widget::LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        self.child
+            .and_then(|id| ctx.child_layout_response(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0).into())
+    }
+
+    fn place_children(
+        &self,
+        bounds: teksilo_canvas::Rect,
+        _proposal: teksilo_canvas::SizeProposal,
+        children: &mut [teksilo_core::widget::WidgetPlacement],
+        _ctx: &teksilo_core::widget::LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<teksilo_core::widget_id::WidgetId> {
+        self.child.into_iter().collect()
+    }
+}
+
+impl WidgetCatalog for crate::LiveImage {
+    fn id() -> &'static str {
+        "live_image"
+    }
+    fn group() -> &'static str {
+        "Primitives"
+    }
+    fn display_name() -> &'static str {
+        "LiveImage"
+    }
+    fn knobs() -> KnobSpec {
+        KnobSpec::new()
+            .choice(
+                "fit",
+                "Fit",
+                &["Contain", "Cover", "Fill", "ScaleDown", "None"],
+                0,
+            )
+            .choice("sizing", "Sizing", &["Aspect", "Fill", "Natural"], 0)
+            .choice("scaling", "Scaling", &["Linear", "Nearest", "Trilinear"], 0)
+            .choice(
+                "orientation",
+                "Orientation",
+                &[
+                    "Normal",
+                    "Rotate90",
+                    "Rotate180",
+                    "Rotate270",
+                    "FlipHorizontal",
+                ],
+                0,
+            )
+            .bool_("background", "Background", false)
+            // A source with a writer and no frame yet: the placeholder.
+            .bool_("committed", "Has a frame", true)
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![
+            PreviewVariant::defaults("default"),
+            PreviewVariant::knobs("nearest", KnobOverrides::new().choice("scaling", 1)),
+            PreviewVariant::knobs(
+                "cover",
+                KnobOverrides::new().choice("fit", 1).choice("sizing", 1),
+            ),
+            PreviewVariant::knobs("rotated", KnobOverrides::new().choice("orientation", 1)),
+            PreviewVariant::knobs("natural", KnobOverrides::new().choice("sizing", 2)),
+            PreviewVariant::knobs(
+                "waiting",
+                KnobOverrides::new()
+                    .bool_("committed", false)
+                    .bool_("background", true),
+            ),
+        ]
+    }
+    fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
+        let source = crate::LiveImageSource::builder(crate::LivePixelFormat::Rgba8)
+            .label("catalog-test-card")
+            .build();
+        let writer = source.writer();
+        if knobs.bool_("committed").get() {
+            let (w, h, px) = live_test_card();
+            // A valid frame of a fixed size: it cannot be refused.
+            let _ = writer.write_frame(w, h, &px, (w * 4) as usize);
+        }
+        Box::new(OneCommitPicture {
+            source,
+            _writer: writer,
+            fit: match knobs.choice("fit").get() {
+                1 => crate::ImageFit::Cover,
+                2 => crate::ImageFit::Fill,
+                3 => crate::ImageFit::ScaleDown,
+                4 => crate::ImageFit::None,
+                _ => crate::ImageFit::Contain,
+            },
+            sizing: match knobs.choice("sizing").get() {
+                1 => crate::LiveImageSizing::Fill,
+                2 => crate::LiveImageSizing::Natural,
+                _ => crate::LiveImageSizing::Aspect,
+            },
+            scaling: match knobs.choice("scaling").get() {
+                1 => crate::ScalingFilter::Nearest,
+                2 => crate::ScalingFilter::Trilinear,
+                _ => crate::ScalingFilter::Linear,
+            },
+            orientation: match knobs.choice("orientation").get() {
+                1 => crate::ImageOrientation::Rotate90,
+                2 => crate::ImageOrientation::Rotate180,
+                3 => crate::ImageOrientation::Rotate270,
+                4 => crate::ImageOrientation::FlipHorizontal,
+                _ => crate::ImageOrientation::Normal,
+            },
+            background: knobs.bool_("background").get(),
+            child: None,
+        })
+    }
+}
+register_widget_catalog_at!(
+    "crates/teksilo-widgets/src/primitives/live_image.rs",
+    crate::LiveImage
 );
 
 // =========================================================================

@@ -34,8 +34,8 @@ fn key_press_writes_to_child() {
     let id = tree.add(Terminal::with_engine_factory(factory));
 
     tree.layout(SizeProposal::exact(400.0, 300.0));
-    // Post-mount spawn creates the engine (no poster in a headless tree, so no
-    // reader thread — the engine itself is still installed and writable).
+    // Post-mount spawn creates the engine and its reader thread; the thread
+    // ends with the tree (the engine is killed, which ends its output).
     tree.run_mount_actions(&mut NoopWindowOps);
     tree.focus(id);
 

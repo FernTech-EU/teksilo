@@ -5,6 +5,91 @@
 
 `TextInputField` — editable single-line text surface primitive.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`InputPurpose`](#inputpurpose) — The semantic purpose of a text field, surfaced to assistive technology as a specialised AccessKit role (WCAG 1.3.5 Identify Input Purpose / EN 301 549) |
+| `enum` | [`EchoMode`](#echomode) — How a secure (`TextInputField::secure`) field echoes typed characters |
+| `enum` | [`AtRevealPolicy`](#atrevealpolicy) — How a *revealed* secure field reports to assistive technology |
+| `struct` | [`TextInputField`](#textinputfield) — Editable single-line text surface primitive |
+| `struct` | [`TextFieldHandle`](#textfieldhandle) — A live handle on a `TextInputField` — its text-editing commands, for a caller outside the widget |
+| `enum` | [`ValidationOutcome`](#validationoutcome) — What a validator returns for a given commit attempt |
+| `enum` | [`ValidationFeedback`](#validationfeedback) — What composites render |
+
+## Public functions
+
+### `TextInputField`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(text: Signal<String>)`](#textinputfield-new) |
+| | **Builder methods** |
+| `Self` | [`placeholder(text: impl Into<String>)`](#textinputfield-placeholder) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#textinputfield-enabled) |
+| `Self` | [`read_only(read_only: bool)`](#textinputfield-read_only) |
+| `Self` | [`max_length(max_length: usize)`](#textinputfield-max_length) |
+| `Self` | [`on_submit_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinputfield-on_submit_fn) |
+| `Self` | [`on_access_set_value(f: impl Fn(&str, &mut EventContext) -> bool + 'static)`](#textinputfield-on_access_set_value) |
+| `Self` | [`on_blur_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinputfield-on_blur_fn) |
+| `Self` | [`char_filter(f: impl Fn(char) -> bool + 'static)`](#textinputfield-char_filter) |
+| `Self` | [`suffix(text: impl Into<Prop<String>>)`](#textinputfield-suffix) |
+| `Self` | [`text_height(height: f32)`](#textinputfield-text_height) |
+| `Self` | [`interaction_signal(signal: Signal<InteractionState>)`](#textinputfield-interaction_signal) |
+| `Self` | [`input_mask(mask: impl AsRef<str>)`](#textinputfield-input_mask) |
+| `Self` | [`mask_placeholder(c: char)`](#textinputfield-mask_placeholder) |
+| `Self` | [`validator(f: impl Fn(&str) -> ValidationOutcome + 'static)`](#textinputfield-validator) |
+| `Self` | [`secure(echo_mode: EchoMode)`](#textinputfield-secure) |
+| `Self` | [`input_purpose(purpose: InputPurpose)`](#textinputfield-input_purpose) |
+| `Self` | [`active_descendant(active: Signal<Option<WidgetId>>)`](#textinputfield-active_descendant) |
+| `Self` | [`controls(listbox: Signal<Option<WidgetId>>)`](#textinputfield-controls) |
+| `Self` | [`echo_char(c: char)`](#textinputfield-echo_char) |
+| `Self` | [`revealed(revealed: Signal<bool>)`](#textinputfield-revealed) |
+| `Self` | [`at_reveal_policy(policy: AtRevealPolicy)`](#textinputfield-at_reveal_policy) |
+| `Self` | [`allow_copy(allow: bool)`](#textinputfield-allow_copy) |
+| `Self` | [`share_handle(handle: &TextFieldHandle)`](#textinputfield-share_handle) |
+| | **Methods** |
+| `Signal<ValidationFeedback>` | [`validation_feedback_signal()`](#textinputfield-validation_feedback_signal) |
+| `Signal<String>` | [`text()`](#textinputfield-text) |
+| `TextFieldHandle` | [`handle()`](#textinputfield-handle) |
+| `Signal<InteractionState>` | [`interaction()`](#textinputfield-interaction) |
+| `Signal<usize>` | [`caret_position()`](#textinputfield-caret_position) |
+| `std::rc::Rc<dyn Fn(usize)>` | [`caret_setter()`](#textinputfield-caret_setter) |
+
+### `TextFieldHandle`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`detached()`](#textfieldhandle-detached) |
+| | **Methods** |
+| `Signal<bool>` | [`focused_signal()`](#textfieldhandle-focused_signal) |
+| `bool` | [`is_live()`](#textfieldhandle-is_live) |
+| `String` | [`text()`](#textfieldhandle-text) |
+| `bool` | [`has_selection()`](#textfieldhandle-has_selection) |
+| `bool` | [`allows_copy()`](#textfieldhandle-allows_copy) |
+| `bool` | [`is_read_only()`](#textfieldhandle-is_read_only) |
+|  | [`select_all()`](#textfieldhandle-select_all) |
+|  | [`copy(ctx: &EventContext)`](#textfieldhandle-copy) |
+|  | [`cut(ctx: &EventContext)`](#textfieldhandle-cut) |
+|  | [`paste(ctx: &EventContext)`](#textfieldhandle-paste) |
+|  | [`undo()`](#textfieldhandle-undo) |
+|  | [`redo()`](#textfieldhandle-redo) |
+| `Signal<bool>` | [`can_undo()`](#textfieldhandle-can_undo) |
+| `Signal<bool>` | [`can_redo()`](#textfieldhandle-can_redo) |
+
+### `ValidationFeedback`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `bool` | [`is_invalid()`](#validationfeedback-is_invalid) |
+| `bool` | [`is_corrected()`](#validationfeedback-is_corrected) |
+| `Option<String>` | [`message()`](#validationfeedback-message) |
+
+## Detailed description
+
 This is the raw editing primitive that powers the styled
 `TextInput` composite and any
 other widget that needs inline editable text — `SpinBox` being
@@ -40,7 +125,7 @@ Features:
 - AccessKit `Role::TextInput` with value, selection, and
   character/word boundary metadata.
 
-# Example
+### Example
 
 ```ignore
 let text = ctx.signal(String::new());
@@ -53,13 +138,11 @@ ctx.add(
 ```
 
 
-## Builder methods at a glance
-
-`placeholder`, `enabled`, `read_only`, `max_length`, `on_submit_fn`, `on_access_set_value`, `on_blur_fn`, `char_filter`, `suffix`, `text_height`, `interaction_signal`, `input_mask`, `mask_placeholder`, `validator`, `secure`, `input_purpose`, `active_descendant`, `controls`, `echo_char`, `revealed`, `at_reveal_policy`, `allow_copy`, `validation_feedback_signal`, `text`, `share_handle`, `handle`, `interaction`, `caret_position`, `caret_setter`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/text_input_field/index.html)
+
+<a id="inputpurpose"></a>
 
 ## `pub enum InputPurpose`
 
@@ -87,6 +170,8 @@ pub enum InputPurpose { /* variants */ }
 - **`Number`** — Numeric entry — e.g. a quantity or code (`Role::NumberInput`).
 - **`Search`** — Search query (`Role::SearchInput`).
 
+<a id="echomode"></a>
+
 ## `pub enum EchoMode`
 
 How a secure (`TextInputField::secure`) field echoes typed
@@ -102,6 +187,8 @@ pub enum EchoMode { /* variants */ }
 - **`NoEcho`** — Show nothing at all — not even the length. The caret stays at the start. Qt's `NoEcho`.
 - **`RevealWhileTyping`** — Show plaintext while the field is focused (being edited) and re-mask on blur. Qt's `PasswordEchoOnEdit`.
 
+<a id="atrevealpolicy"></a>
+
 ## `pub enum AtRevealPolicy`
 
 How a *revealed* secure field reports to assistive technology.
@@ -114,6 +201,8 @@ pub enum AtRevealPolicy { /* variants */ }
 
 - **`SwapRole`** — When revealed, expose the field as a normal `Role::TextInput` carrying the plaintext value — matching what is visibly on screen and the web `type=password ↔ type=text` swap. When masked, it reverts to `Role::PasswordInput`. (Default.)
 - **`AlwaysProtected`** — Always report `Role::PasswordInput` and never expose plaintext to assistive tech, even while visually revealed. Higher confidentiality at the cost of consistency with the screen.
+
+<a id="textinputfield"></a>
 
 ## `pub struct TextInputField`
 
@@ -128,9 +217,13 @@ pub struct TextInputField { /* fields */ }
 
 ### Methods
 
+<a id="textinputfield-new"></a>
+
 #### `pub fn new(text: Signal<String>) -> Self`
 
 Construct a new field bound to `text`.
+
+<a id="textinputfield-placeholder"></a>
 
 #### `pub fn placeholder(mut self, text: impl Into<String>) -> Self`
 
@@ -141,16 +234,22 @@ parent's responsibility (`TextInput` overlays a
 via AccessKit's `placeholder` property so screen readers
 announce it.
 
+<a id="textinputfield-enabled"></a>
+
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state, statically or reactively. Disabled blocks
 input and AccessKit interaction. Forwarded to the arena at build
 time.
 
+<a id="textinputfield-read_only"></a>
+
 #### `pub fn read_only(mut self, read_only: bool) -> Self`
 
 Mark the field read-only. Caret and selection still work;
 inserts, deletes, paste, undo/redo, and cut are all no-ops.
+
+<a id="textinputfield-max_length"></a>
 
 #### `pub fn max_length(mut self, max_length: usize) -> Self`
 
@@ -158,11 +257,15 @@ Hard cap on document length in `char`s (grapheme count is
 approximated — each `char` counts as one unit, matching
 `String::chars().count()`).
 
+<a id="textinputfield-on_submit_fn"></a>
+
 #### `pub fn on_submit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Closure fired on `Enter`. Unlike `on_blur_fn`, this does
 not move focus — the field stays focused and the caret
 stays where it was.
+
+<a id="textinputfield-on_access_set_value"></a>
 
 #### `pub fn on_access_set_value( mut self, f: impl Fn(&str, &mut EventContext) -> bool + 'static, ) -> Self`
 
@@ -187,11 +290,15 @@ because the document→signal sync is deferred to the next frame tick, so
 a host reading the signal here would parse the text from *before* this
 edit and revert.
 
+<a id="textinputfield-on_blur_fn"></a>
+
 #### `pub fn on_blur_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Closure fired once per focus-loss, after selection/scroll
 have been reset. SpinBox-style callers parse and reformat
 here; validators revalidate here.
+
+<a id="textinputfield-char_filter"></a>
 
 #### `pub fn char_filter(mut self, f: impl Fn(char) -> bool + 'static) -> Self`
 
@@ -202,6 +309,8 @@ Composes with `max_length` and the built-in control/newline
 strip (filter runs after the strip). Whole-string validity
 (e.g. "at most one decimal point") is a commit-time concern
 for `on_blur` / `on_submit`.
+
+<a id="textinputfield-suffix"></a>
 
 #### `pub fn suffix(mut self, text: impl Into<Prop<String>>) -> Self`
 
@@ -217,6 +326,8 @@ Typical use: a `SpinBox` with `special_value_text` binds an empty
 string to the suffix whenever the value equals `min`, and the
 configured unit string otherwise.
 
+<a id="textinputfield-text_height"></a>
+
 #### `pub fn text_height(mut self, height: f32) -> Self`
 
 Override the intrinsic text-area height. The field is a
@@ -226,6 +337,8 @@ reports `DEFAULT_TEXT_HEIGHT`. A wrapping composite like
 (in `crate::styles::recipe_text_input_style`) minus
 border + padding here so the visuals line up with the
 rest of the form.
+
+<a id="textinputfield-interaction_signal"></a>
 
 #### `pub fn interaction_signal(mut self, signal: Signal<InteractionState>) -> Self`
 
@@ -237,6 +350,8 @@ private signal that observers can still read via
 `interaction`, but composites
 that drive a focus ring or border color usually want to
 push their own.
+
+<a id="textinputfield-input_mask"></a>
 
 #### `pub fn input_mask(mut self, mask: impl AsRef<str>) -> Self`
 
@@ -253,12 +368,16 @@ On parse error (only the trailing-backslash case in practice),
 the mask is silently dropped — the field falls back to its
 no-mask behaviour rather than panicking.
 
+<a id="textinputfield-mask_placeholder"></a>
+
 #### `pub fn mask_placeholder(mut self, c: char) -> Self`
 
 Override the visible character used for unfilled editable mask
 positions. Default: the `TEXT_FIELD_MASK_PLACEHOLDER_CHAR`
 recipe constant (in `crate::styles::recipe_text_input_style`,
 `_`).
+
+<a id="textinputfield-validator"></a>
 
 #### `pub fn validator(mut self, f: impl Fn(&str) -> ValidationOutcome + 'static) -> Self`
 
@@ -269,6 +388,8 @@ drives `validation_feedback_signal`.
 **Does not run per-keystroke** — that's `char_filter`'s
 job. Mixing per-keystroke text rewriting with validation
 produces caret-jump bugs and is explicitly out of scope.
+
+<a id="textinputfield-secure"></a>
 
 #### `pub fn secure(mut self, echo_mode: EchoMode) -> Self`
 
@@ -282,6 +403,8 @@ OS IME stays enabled so non-Latin passwords can still be composed,
 with the preedit masked on screen and hidden from AT. Pair with
 `revealed` for a reveal toggle.
 
+<a id="textinputfield-input_purpose"></a>
+
 #### `pub fn input_purpose(mut self, purpose: InputPurpose) -> Self`
 
 Declare the field's semantic `InputPurpose` (WCAG 1.3.5), which
@@ -290,6 +413,8 @@ selects a specialised AccessKit role (`EmailInput`, `PhoneNumberInput`,
 (the password role wins). Does not change IME behaviour — winit's
 `ImePurpose` has no email/number/url variants — nor drive OS autofill,
 which AccessKit cannot express (see `docs/a11y/a11y_issues.md`).
+
+<a id="textinputfield-active_descendant"></a>
 
 #### `pub fn active_descendant(mut self, active: Signal<Option<WidgetId>>) -> Self`
 
@@ -307,17 +432,23 @@ highlight that is announced to nobody.
 Bound at `AccessibilityOnly`, so moving the highlight re-walks the AT
 tree without a rebuild or a repaint. Pair with `controls`.
 
+<a id="textinputfield-controls"></a>
+
 #### `pub fn controls(mut self, listbox: Signal<Option<WidgetId>>) -> Self`
 
 Publish a `controls` relation to the listbox this field drives, so an
 AT client can navigate from the input to the list it is filtering.
 The companion of `active_descendant`.
 
+<a id="textinputfield-echo_char"></a>
+
 #### `pub fn echo_char(mut self, c: char) -> Self`
 
 Override the masking glyph (default `'•'`, U+2022). Any
 uniform-width character works; the engine emits exactly one per
 source `char`.
+
+<a id="textinputfield-revealed"></a>
 
 #### `pub fn revealed(mut self, revealed: Signal<bool>) -> Self`
 
@@ -326,16 +457,22 @@ shows plaintext regardless of `EchoMode`; when `false` it
 masks. Shared with the eye `IconButton::visibility_toggle`.
 
 
+<a id="textinputfield-at_reveal_policy"></a>
+
 #### `pub fn at_reveal_policy(mut self, policy: AtRevealPolicy) -> Self`
 
 How a *revealed* secure field reports to assistive tech. Default
 `AtRevealPolicy::SwapRole`.
+
+<a id="textinputfield-allow_copy"></a>
 
 #### `pub fn allow_copy(mut self, allow: bool) -> Self`
 
 Permit (or forbid) copy / cut. Plain fields default `true`;
 `secure` flips the default to `false`. Even when
 `false`, copy is allowed while the field is revealed.
+
+<a id="textinputfield-validation_feedback_signal"></a>
 
 #### `pub fn validation_feedback_signal(&self) -> Signal<ValidationFeedback>`
 
@@ -344,9 +481,13 @@ Composites bind to this to render the inline feedback strip
 below the field. Always present; reads `Pristine` until the
 first commit (or forever if no validator is installed).
 
+<a id="textinputfield-text"></a>
+
 #### `pub fn text(&self) -> Signal<String>`
 
 The `Signal<String>` this field is bound to.
+
+<a id="textinputfield-share_handle"></a>
 
 #### `pub fn share_handle(mut self, handle: &TextFieldHandle) -> Self`
 
@@ -356,6 +497,8 @@ For a composing widget — `TextInput` wraps this field — that must hand
 out a handle of its own **before** it builds the field it will delegate
 to. Sharing the slot and the focus signal makes the wrapper's handle and
 the field's the same handle, rather than two that agree by accident.
+
+<a id="textinputfield-handle"></a>
 
 #### `pub fn handle(&self) -> TextFieldHandle`
 
@@ -373,10 +516,14 @@ Like `caret_setter`, the handle reaches its state through the slot the
 widget late-populates, so it may be taken while the tree is being
 described and used once it is live.
 
+<a id="textinputfield-interaction"></a>
+
 #### `pub fn interaction(&self) -> Signal<InteractionState>`
 
 The interaction signal this field writes on focus changes.
 Call before inserting the field into the tree.
+
+<a id="textinputfield-caret_position"></a>
 
 #### `pub fn caret_position(&self) -> Signal<usize>`
 
@@ -385,6 +532,8 @@ offsets). Updates after every keyboard or pointer action that
 moves the cursor. Used by composing widgets that need to know
 where the caret is — e.g. `DateEdit` reads this to figure out
 which date segment Up/Down should step.
+
+<a id="textinputfield-caret_setter"></a>
 
 #### `pub fn caret_setter(&self) -> std::rc::Rc<dyn Fn(usize)>`
 
@@ -401,6 +550,8 @@ document cursor to `position`, clamped to the document
 length. Used by `DateEdit` / `TimeEdit` segment-stepping to
 keep the caret within its current segment after Up/Down.
 
+<a id="textfieldhandle"></a>
+
 ## `pub struct TextFieldHandle`
 
 A live handle on a `TextInputField` — its text-editing commands, for a
@@ -416,69 +567,101 @@ pub struct TextFieldHandle { /* fields */ }
 
 ### Methods
 
+<a id="textfieldhandle-detached"></a>
+
 #### `pub fn detached() -> Self`
 
 A handle not yet attached to any field — for a composing widget that
 hands one out before building the field it will delegate to. Every
 method answers "nothing" until `TextInputField::share_handle` binds it.
 
+<a id="textfieldhandle-focused_signal"></a>
+
 #### `pub fn focused_signal(&self) -> Signal<bool>`
 
 `true` while this field holds the keyboard focus. Observable, so a
 router can follow the caret without polling.
 
+<a id="textfieldhandle-is_live"></a>
+
 #### `pub fn is_live(&self) -> bool`
 
 Is the widget built and still alive?
+
+<a id="textfieldhandle-text"></a>
 
 #### `pub fn text(&self) -> String`
 
 The field's current text.
 
+<a id="textfieldhandle-has_selection"></a>
+
 #### `pub fn has_selection(&self) -> bool`
 
 Is any text selected right now?
+
+<a id="textfieldhandle-allows_copy"></a>
 
 #### `pub fn allows_copy(&self) -> bool`
 
 May this field's content be copied at all? A password field says no —
 see `TextInputField::allow_copy`.
 
+<a id="textfieldhandle-is_read_only"></a>
+
 #### `pub fn is_read_only(&self) -> bool`
 
 Is the field refusing edits? Cut and Paste are meaningless when it is.
+
+<a id="textfieldhandle-select_all"></a>
 
 #### `pub fn select_all(&self)`
 
 Select the whole field.
 
+<a id="textfieldhandle-copy"></a>
+
 #### `pub fn copy(&self, ctx: &EventContext)`
 
 Copy the selection to the clipboard.
+
+<a id="textfieldhandle-cut"></a>
 
 #### `pub fn cut(&self, ctx: &EventContext)`
 
 Cut the selection to the clipboard.
 
+<a id="textfieldhandle-paste"></a>
+
 #### `pub fn paste(&self, ctx: &EventContext)`
 
 Paste over the selection.
+
+<a id="textfieldhandle-undo"></a>
 
 #### `pub fn undo(&self)`
 
 Undo this field's own last edit.
 
+<a id="textfieldhandle-redo"></a>
+
 #### `pub fn redo(&self)`
 
 Redo this field's own last undone edit.
+
+<a id="textfieldhandle-can_undo"></a>
 
 #### `pub fn can_undo(&self) -> Signal<bool>`
 
 Is there anything to undo? Debounced like the editor's twin.
 
+<a id="textfieldhandle-can_redo"></a>
+
 #### `pub fn can_redo(&self) -> Signal<bool>`
 
 Is there anything to redo?
+
+<a id="validationoutcome"></a>
 
 ## `pub enum ValidationOutcome`
 
@@ -494,9 +677,11 @@ pub enum ValidationOutcome { /* variants */ }
 - **`Corrected`** — Input was accepted after normalization. The field replaces its text with `corrected`, the bound `Signal<String>` observes the new value, and the feedback signal carries `message` for composites to surface as a polite announcement.  Use for clamping, completion, and reformat. Examples: `"12/50/2026"` → `Corrected { corrected: "12/31/2026", … }` for "day clamped to month length"; `"2026"` → `Corrected { corrected: "2026-01-01", … }` for "year-only completed to start of year".
 - **`Invalid`** — Input is rejected. The field reverts its text to the pre-edit value and the feedback signal carries `message` for composites to surface as an assertive error.
 
+<a id="validationfeedback"></a>
+
 ## `pub enum ValidationFeedback`
 
-What composites render. Distinct from [`ValidationOutcome`]: the
+What composites render. Distinct from `ValidationOutcome`: the
 outcome is the validator's return value (no time concept); the
 feedback adds a `since` instant so the visual layer can decay an
 auto-correction announcement after a window without re-running the
@@ -515,13 +700,19 @@ pub enum ValidationFeedback { /* variants */ }
 
 ### Methods
 
+<a id="validationfeedback-is_invalid"></a>
+
 #### `pub fn is_invalid(&self) -> bool`
 
 Convenience: is this state currently signalling an error?
 
+<a id="validationfeedback-is_corrected"></a>
+
 #### `pub fn is_corrected(&self) -> bool`
 
 Convenience: was the last commit auto-corrected?
+
+<a id="validationfeedback-message"></a>
 
 #### `pub fn message(&self) -> Option<String>`
 

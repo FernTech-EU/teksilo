@@ -7,6 +7,29 @@
 
 `DropZone` — a "drop files here" target for external (OS) drag-and-drop.
 
+## Public functions
+
+### `DropZone`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(label: impl Into<LocalizedString>)`](#dropzone-new) |
+| | **Builder methods** |
+| `Self` | [`subtitle(text: impl Into<LocalizedString>)`](#dropzone-subtitle) |
+| `Self` | [`accept_extensions<I, S>(extensions: I)`](#dropzone-accept_extensions) |
+| `Self` | [`allow_multiple(allow: bool)`](#dropzone-allow_multiple) |
+| `Self` | [`show_browse_button(show: bool)`](#dropzone-show_browse_button) |
+| `Self` | [`starting_dir(path: impl Into<PathBuf>)`](#dropzone-starting_dir) |
+| `Self` | [`browse_label(label: impl Into<LocalizedString>)`](#dropzone-browse_label) |
+| `Self` | [`icon(icon: impl Widget + 'static)`](#dropzone-icon) |
+| `Self` | [`style(style: impl DropZoneStyle)`](#dropzone-style) |
+| `Self` | [`on_files_dropped(f: impl FnMut(Vec<PathBuf>, &mut EventContext) + 'static)`](#dropzone-on_files_dropped) |
+| `Self` | [`on_text_dropped(f: impl FnMut(String, &mut EventContext) + 'static)`](#dropzone-on_text_dropped) |
+| `Self` | [`on_urls_dropped(f: impl FnMut(Vec<String>, &mut EventContext) + 'static)`](#dropzone-on_urls_dropped) |
+
+## Detailed description
+
 A bordered, tinted region that accepts files / text / URLs dragged in from
 the operating system (Finder, Explorer, Nautilus) or another application.
 It reacts to hover (accept / reject highlight) and fires typed callbacks on
@@ -30,14 +53,14 @@ is available. All four desktop backends are real (OLE on Windows,
 — see `teksilo-platform/src/external_dnd.rs`), so the Browse button is the
 keyboard route rather than a fallback for a platform that cannot drop.
 
-# Styling
+### Styling
 
 The bordered, tinted chrome is a Tier-3 `DropZoneStyle`; the default
 `RecipeDropZoneStyle` tracks the
 interaction state. Override per-call with `DropZone::style` or theme-wide
 via `theme.style_slots.drop_zone`.
 
-# Accessibility
+### Accessibility
 
 The zone is a `Role::Group` labelled by its prompt, with a `Live::Polite`
 status line that announces hover ("Drop to add 3 files"), success
@@ -45,7 +68,7 @@ status line that announces hover ("Drop to add 3 files"), success
 ARIA's `aria-grabbed` / `aria-dropeffect` are deprecated, so live-region
 announcements plus the Browse fallback are the supported pattern.
 
-## Touch and pen
+#### Touch and pen
 
 The zone is one target and the whole surface of it, so nothing here needs a
 floor or an outset, and an external drop carries no press to move to a release.
@@ -61,13 +84,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![DropZone at Touch density](img/drop_zone-touch.png)
 
-## Builder methods at a glance
-
-`subtitle`, `accept_extensions`, `allow_multiple`, `show_browse_button`, `starting_dir`, `browse_label`, `icon`, `style`, `on_files_dropped`, `on_text_dropped`, `on_urls_dropped`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/drop_zone/index.html)
+
+<a id="dropzone"></a>
 
 ## `pub struct DropZone`
 
@@ -79,6 +100,8 @@ pub struct DropZone { /* fields */ }
 
 ### Methods
 
+<a id="dropzone-new"></a>
+
 #### `pub fn new(label: impl Into<LocalizedString>) -> Self`
 
 Build a drop zone with the given prompt (e.g. `tr!("drop_files_here")`).
@@ -88,9 +111,13 @@ prompt's `TextWidget`, so a `tr!(...)` label re-resolves on a locale
 switch without rebuilding the zone — the same model as
 `Button::new`.
 
+<a id="dropzone-subtitle"></a>
+
 #### `pub fn subtitle(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Secondary line under the prompt (e.g. `tr!("png_or_jpeg")`).
+
+<a id="dropzone-accept_extensions"></a>
 
 #### `pub fn accept_extensions<I, S>(mut self, extensions: I) -> Self where I: IntoIterator<Item = S>, S: Into<String>,`
 
@@ -98,10 +125,14 @@ Restrict accepted files to these extensions (without leading dots,
 case-insensitive). Empty (the default) accepts any file. Text and URL
 drops are unaffected.
 
+<a id="dropzone-allow_multiple"></a>
+
 #### `pub fn allow_multiple(mut self, allow: bool) -> Self`
 
 Whether more than one file may be dropped at once. Default `true`.
 When `false`, a multi-file drop is rejected.
+
+<a id="dropzone-show_browse_button"></a>
 
 #### `pub fn show_browse_button(mut self, show: bool) -> Self`
 
@@ -113,6 +144,8 @@ Movements) as well as SC 2.1.1 — so an application that hides it owes the
 same action another affordance of its own, reachable by keyboard and by a
 single pointer. See
 [the non-drag alternatives page](https://github.com/ferntech-eu/teksilo/blob/main/docs/a11y/non-drag-alternatives.md).
+
+<a id="dropzone-starting_dir"></a>
 
 #### `pub fn starting_dir(mut self, path: impl Into<PathBuf>) -> Self`
 
@@ -126,25 +159,37 @@ offers, and for the same reason: an app that remembers where its writer last
 picked files has no way to say so otherwise, because this widget builds its own
 `FileDialogRequest` internally rather than taking one.
 
+<a id="dropzone-browse_label"></a>
+
 #### `pub fn browse_label(mut self, label: impl Into<LocalizedString>) -> Self`
+
+<a id="dropzone-icon"></a>
 
 #### `pub fn icon(mut self, icon: impl Widget + 'static) -> Self`
 
 An icon widget shown above the prompt (any widget — typically an
 `IconWidget`).
 
+<a id="dropzone-style"></a>
+
 #### `pub fn style(mut self, style: impl DropZoneStyle) -> Self`
 
 Override the Tier-3 `DropZoneStyle` for this instance only.
+
+<a id="dropzone-on_files_dropped"></a>
 
 #### `pub fn on_files_dropped( mut self, f: impl FnMut(Vec<PathBuf>, &mut EventContext) + 'static, ) -> Self`
 
 Called with the dropped (or browsed) file paths. Files are only
 accepted when this is set.
 
+<a id="dropzone-on_text_dropped"></a>
+
 #### `pub fn on_text_dropped(mut self, f: impl FnMut(String, &mut EventContext) + 'static) -> Self`
 
 Called with dropped plain text. Text drops are only accepted when set.
+
+<a id="dropzone-on_urls_dropped"></a>
 
 #### `pub fn on_urls_dropped( mut self, f: impl FnMut(Vec<String>, &mut EventContext) + 'static, ) -> Self`
 

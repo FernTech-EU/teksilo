@@ -30,7 +30,9 @@ pub struct LayoutContext<'a> {
     /// only as the escape hatch for widgets that bridge to a device-pixel OS
     /// resource (e.g. a `WebView` sizing its native subview, which on some
     /// toolkits — WebKitGTK on X11 — ignores fractional scaling and needs
-    /// device pixels). 1.0 in headless / test contexts.
+    /// device pixels). 1.0 in headless / test contexts. A widget that reads
+    /// it binds `BuildContext::device_scale_signal` at `Relayout`: a scale
+    /// change with an unchanged logical size relayouts nothing on its own.
     pub scale_factor: f32,
     /// Combined user×OS text-scale factor (`1.0` = 100 %). Distinct from
     /// `scale_factor` (HiDPI device pixels): this is the *logical* accessibility

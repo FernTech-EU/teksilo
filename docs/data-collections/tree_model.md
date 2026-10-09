@@ -5,6 +5,37 @@
 
 `TreeModel` — concrete reactive tree with shared, cloneable handles.
 
+## Public functions
+
+### `TreeModel`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#treemodel-new) |
+| | **Builder methods** |
+| `Self` | [`debug_named(_name: impl Into<String>)`](#treemodel-debug_named) |
+| | **Methods** |
+| `usize` | [`root_count()`](#treemodel-root_count) |
+| `NodeId` | [`root(index: usize)`](#treemodel-root) |
+| `usize` | [`child_count(parent: NodeId)`](#treemodel-child_count) |
+| `NodeId` | [`child(parent: NodeId, index: usize)`](#treemodel-child) |
+| `Option<NodeId>` | [`parent(node: NodeId)`](#treemodel-parent) |
+| `usize` | [`depth(node: NodeId)`](#treemodel-depth) |
+| `bool` | [`has_children(node: NodeId)`](#treemodel-has_children) |
+| `Vec<NodeId>` | [`children(node: NodeId)`](#treemodel-children) |
+| `Option<R>` | [`with_item<R>(node: NodeId, f: impl FnOnce(&T) -> R)`](#treemodel-with_item) |
+| `Option<NodeId>` | [`find_by(predicate: impl Fn(&T) -> bool)`](#treemodel-find_by) |
+| `NodeId` | [`insert_root(index: usize, item: T)`](#treemodel-insert_root) |
+| `NodeId` | [`insert_child(parent: NodeId, index: usize, item: T)`](#treemodel-insert_child) |
+|  | [`remove(node: NodeId)`](#treemodel-remove) |
+|  | [`move_node(node: NodeId, new_parent: NodeId, new_index: usize)`](#treemodel-move_node) |
+|  | [`move_to_root(node: NodeId, new_index: usize)`](#treemodel-move_to_root) |
+|  | [`update(node: NodeId, item: T)`](#treemodel-update) |
+| `ObserverHandle` | [`observe_changes(f: impl Fn(&TreeChange) + 'static)`](#treemodel-observe_changes) |
+
+## Detailed description
+
 `TreeModel<T>` owns a hierarchy of `T` items in a flat SlotMap arena with
 parent-child links. Every structural mutation (`insert_root`, `insert_child`,
 `remove`, `move_node`, `update`) emits a `TreeChange` to all registered
@@ -21,7 +52,7 @@ For per-view expand/collapse state wrap the model in a
 `TreeSlice`. For sort/filter projections use
 `SortFilterTreeModel`.
 
-## Example
+#### Example
 
 ```rust
 # use teksilo_data::{TreeModel, TreeChange};
@@ -38,13 +69,11 @@ clone.insert_root(1, "root2");
 assert_eq!(tree.root_count(), 2); // both handles share the same data
 ```
 
-## Builder methods at a glance
-
-`root_count`, `root`, `child_count`, `child`, `parent`, `depth`, `has_children`, `children`, `with_item`, `find_by`, `insert_root`, `insert_child`, `remove`, `move_node`, `move_to_root`, `update`, `observe_changes`, `debug_named`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/tree_model/index.html)
+
+<a id="treemodel"></a>
 
 ## `pub struct TreeModel`
 
@@ -62,13 +91,19 @@ pub struct TreeModel<T: 'static> { /* fields */ }
 
 ### Methods
 
+<a id="treemodel-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create an empty tree model with no roots and no observers.
 
+<a id="treemodel-root_count"></a>
+
 #### `pub fn root_count(&self) -> usize`
 
 Number of root-level nodes.
+
+<a id="treemodel-root"></a>
 
 #### `pub fn root(&self, index: usize) -> NodeId`
 
@@ -77,9 +112,13 @@ Get the `NodeId` of a root-level node by index.
 # Panics
 Panics if `index >= root_count()`.
 
+<a id="treemodel-child_count"></a>
+
 #### `pub fn child_count(&self, parent: NodeId) -> usize`
 
 Number of children of the given node.
+
+<a id="treemodel-child"></a>
 
 #### `pub fn child(&self, parent: NodeId, index: usize) -> NodeId`
 
@@ -88,29 +127,43 @@ Get the `NodeId` of a child by parent and index.
 # Panics
 Panics if the parent or index is invalid.
 
+<a id="treemodel-parent"></a>
+
 #### `pub fn parent(&self, node: NodeId) -> Option<NodeId>`
 
 Get the parent of a node, or `None` if it is a root.
+
+<a id="treemodel-depth"></a>
 
 #### `pub fn depth(&self, node: NodeId) -> usize`
 
 Compute the depth of a node (0 for roots).
 
+<a id="treemodel-has_children"></a>
+
 #### `pub fn has_children(&self, node: NodeId) -> bool`
 
 Whether the given node has any children.
+
+<a id="treemodel-children"></a>
 
 #### `pub fn children(&self, node: NodeId) -> Vec<NodeId>`
 
 Get the children of a node as a vector of `NodeId`.
 
+<a id="treemodel-with_item"></a>
+
 #### `pub fn with_item<R>(&self, node: NodeId, f: impl FnOnce(&T) -> R) -> Option<R>`
 
 Access a node's data via a callback. Returns `None` if the node doesn't exist.
 
+<a id="treemodel-find_by"></a>
+
 #### `pub fn find_by(&self, predicate: impl Fn(&T) -> bool) -> Option<NodeId>`
 
 Find the first node matching a predicate (depth-first from roots).
+
+<a id="treemodel-insert_root"></a>
 
 #### `pub fn insert_root(&self, index: usize, item: T) -> NodeId`
 
@@ -119,6 +172,8 @@ Insert a new root-level node at the given index.
 # Panics
 Panics if `index > root_count()`.
 
+<a id="treemodel-insert_child"></a>
+
 #### `pub fn insert_child(&self, parent: NodeId, index: usize, item: T) -> NodeId`
 
 Insert a new child node under the given parent at the given index.
@@ -126,12 +181,16 @@ Insert a new child node under the given parent at the given index.
 # Panics
 Panics if the parent is invalid or `index > child_count(parent)`.
 
+<a id="treemodel-remove"></a>
+
 #### `pub fn remove(&self, node: NodeId)`
 
 Remove a node and its entire subtree.
 
 # Panics
 Panics if the node is invalid.
+
+<a id="treemodel-move_node"></a>
 
 #### `pub fn move_node(&self, node: NodeId, new_parent: NodeId, new_index: usize)`
 
@@ -141,9 +200,13 @@ Move a node (and its subtree) to a new parent at the given index.
 Panics if any of the nodes are invalid, or if the target is a
 descendant of the source (would create a cycle).
 
+<a id="treemodel-move_to_root"></a>
+
 #### `pub fn move_to_root(&self, node: NodeId, new_index: usize)`
 
 Move a node to the root level at the given index.
+
+<a id="treemodel-update"></a>
 
 #### `pub fn update(&self, node: NodeId, item: T)`
 
@@ -152,10 +215,14 @@ Update a node's data in place.
 # Panics
 Panics if the node is invalid.
 
+<a id="treemodel-observe_changes"></a>
+
 #### `pub fn observe_changes(&self, f: impl Fn(&TreeChange) + 'static) -> ObserverHandle`
 
 Register an observer for tree change notifications.
 Returns an `ObserverHandle` — dropping it removes the callback.
+
+<a id="treemodel-debug_named"></a>
 
 #### `pub fn debug_named(self, _name: impl Into<String>) -> Self`
 

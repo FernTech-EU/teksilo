@@ -7,6 +7,48 @@
 
 RadioTile — a "selectable card" radio option.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`RadioTileIndicatorSide`](#radiotileindicatorside) — Which side of the top row the radio indicator sits on |
+| `struct` | [`RadioTile`](#radiotile) — A single selectable-card radio option |
+
+## Public functions
+
+### `RadioTile`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#radiotile-new) |
+| | **Builder methods** |
+| `Self` | [`selection(value: usize, selected: Signal<usize>)`](#radiotile-selection) |
+| `Self` | [`icon(widget: impl Widget + 'static)`](#radiotile-icon) |
+| `Self` | [`icon_boxed(widget: Box<dyn Widget>)`](#radiotile-icon_boxed) |
+| `Self` | [`title(title: impl Into<LocalizedString>)`](#radiotile-title) |
+| `Self` | [`description(text: impl Into<LocalizedString>)`](#radiotile-description) |
+| `Self` | [`body(widget: impl Widget + 'static)`](#radiotile-body) |
+| `Self` | [`body_boxed(widget: Box<dyn Widget>)`](#radiotile-body_boxed) |
+| `Self` | [`trailing(text: impl Into<LocalizedString>)`](#radiotile-trailing) |
+| `Self` | [`trailing_slot(widget: impl Widget + 'static)`](#radiotile-trailing_slot) |
+| `Self` | [`compact(compact: bool)`](#radiotile-compact) |
+| `Self` | [`title_style(style: impl Into<TextStyleProp>)`](#radiotile-title_style) |
+| `Self` | [`title_color(color: impl Into<ColorProp>)`](#radiotile-title_color) |
+| `Self` | [`description_style(style: impl Into<TextStyleProp>)`](#radiotile-description_style) |
+| `Self` | [`description_color(color: impl Into<ColorProp>)`](#radiotile-description_color) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#radiotile-enabled) |
+| `Self` | [`variant(variant: RadioTileVariant)`](#radiotile-variant) |
+| `Self` | [`show_indicator(show: bool)`](#radiotile-show_indicator) |
+| `Self` | [`indicator_side(side: RadioTileIndicatorSide)`](#radiotile-indicator_side) |
+| `Self` | [`style(style: impl RadioTileStyle)`](#radiotile-style) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#radiotile-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#radiotile-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#radiotile-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#radiotile-composite_tooltip) |
+
+## Detailed description
+
 A `RadioTile` behaves as a single radio button (`Role::RadioButton`,
 `set_toggled`) rendered as a bordered, rounded card: a leading icon, a
 bold title, an inline radio indicator, and a muted, wrapping description.
@@ -16,13 +58,13 @@ model). Group them with
 `RadioTileGroup` for layout,
 roving keyboard navigation, and the AT "N of M" positional announcement.
 
-## Content model
+#### Content model
 
 Typed slots cover the common case (matching the reference design):
 `.icon(..)`, `.title(..)`, `.description(..)`. For arbitrary content, the
 `.body(..)` slot replaces the description column with any widget subtree.
 
-## Accessibility
+#### Accessibility
 
 Reports `Role::RadioButton` with `set_toggled` mirroring selection, the
 title as the accessible name, and the description as the accessible
@@ -40,7 +82,7 @@ RadioTileGroup::new(selected)
     .tile(RadioTile::new().icon(icon2).title(tr!(bundle())).description(tr!(bundle_desc())))
 ```
 
-## Touch and pen
+#### Touch and pen
 
 A tile is a whole-card target, comfortably past the floor at every density, and
 it activates on the release. What the touch sweep changed is its **pressed**
@@ -60,13 +102,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![RadioTile at Touch density](img/radio_tile-touch.png)
 
-## Builder methods at a glance
-
-`selection`, `icon`, `icon_boxed`, `title`, `description`, `body`, `body_boxed`, `trailing`, `trailing_slot`, `compact`, `title_style`, `title_color`, `description_style`, `description_color`, `enabled`, `variant`, `show_indicator`, `indicator_side`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/radio_tile/index.html)
+
+<a id="radiotileindicatorside"></a>
 
 ## `pub enum RadioTileIndicatorSide`
 
@@ -82,6 +122,8 @@ pub enum RadioTileIndicatorSide { /* variants */ }
 - **`Trailing`** — Trailing edge of the row — top-right in LTR, top-left in RTL.
 - **`Leading`** — Leading edge of the row — top-left in LTR, top-right in RTL.
 
+<a id="radiotile"></a>
+
 ## `pub struct RadioTile`
 
 A single selectable-card radio option. See the `module docs`.
@@ -92,6 +134,8 @@ pub struct RadioTile { /* fields */ }
 
 ### Methods
 
+<a id="radiotile-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create a tile with no selection binding. The enclosing
@@ -99,28 +143,40 @@ Create a tile with no selection binding. The enclosing
 this tile's `value` (its position) and shared selection signal. Use
 `selection` for a standalone tile.
 
+<a id="radiotile-selection"></a>
+
 #### `pub fn selection(mut self, value: usize, selected: Signal<usize>) -> Self`
 
 Bind this tile to an explicit `value` + shared `Signal<usize>` for use
 **outside** a `RadioTileGroup`. Inside a group this is set automatically.
+
+<a id="radiotile-icon"></a>
 
 #### `pub fn icon(mut self, widget: impl Widget + 'static) -> Self`
 
 Leading icon slot (top-left of the tile). Any widget — typically an
 `IconWidget`.
 
+<a id="radiotile-icon_boxed"></a>
+
 #### `pub fn icon_boxed(mut self, widget: Box<dyn Widget>) -> Self`
 
 Leading icon slot, pre-boxed.
+
+<a id="radiotile-title"></a>
 
 #### `pub fn title(mut self, title: impl Into<LocalizedString>) -> Self`
 
 Bold title text (the tile's accessible name).
 
+<a id="radiotile-description"></a>
+
 #### `pub fn description(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Muted, multi-line description (the tile's accessible description).
 Ignored when a `body` is set.
+
+<a id="radiotile-body"></a>
 
 #### `pub fn body(mut self, widget: impl Widget + 'static) -> Self`
 
@@ -129,9 +185,13 @@ precedence over `description`. Note: a body's own
 content is exposed to assistive technology as-is (unlike the typed
 description, which is folded into the tile's accessible description).
 
+<a id="radiotile-body_boxed"></a>
+
 #### `pub fn body_boxed(mut self, widget: Box<dyn Widget>) -> Self`
 
 Custom body slot, pre-boxed.
+
+<a id="radiotile-trailing"></a>
 
 #### `pub fn trailing(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -140,10 +200,14 @@ notes"). Tints to the accent color when the tile is selected. Most
 useful with the compact vertical arrangement. Ignored when a
 `trailing_slot` is set.
 
+<a id="radiotile-trailing_slot"></a>
+
 #### `pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self`
 
 Arbitrary right-aligned trailing widget (badge, count, chevron, …).
 Takes precedence over `trailing`.
+
+<a id="radiotile-compact"></a>
 
 #### `pub fn compact(mut self, compact: bool) -> Self`
 
@@ -152,21 +216,31 @@ Compact single-line arrangement: `[indicator] [icon] [title] [Spacer]
 `RadioTileGroup::layout(TileLayout::Vertical)` sets this automatically
 (and moves the indicator to the leading edge).
 
+<a id="radiotile-title_style"></a>
+
 #### `pub fn title_style(mut self, style: impl Into<TextStyleProp>) -> Self`
 
 Override the title text style (default `TextStyleRole::BodyBold`).
+
+<a id="radiotile-title_color"></a>
 
 #### `pub fn title_color(mut self, color: impl Into<ColorProp>) -> Self`
 
 Override the title text color (default `TextRole::Primary`).
 
+<a id="radiotile-description_style"></a>
+
 #### `pub fn description_style(mut self, style: impl Into<TextStyleProp>) -> Self`
 
 Override the description text style (default `TextStyleRole::Small`).
 
+<a id="radiotile-description_color"></a>
+
 #### `pub fn description_color(mut self, color: impl Into<ColorProp>) -> Self`
 
 Override the description text color (default `TextRole::Secondary`).
+
+<a id="radiotile-enabled"></a>
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
@@ -174,35 +248,51 @@ Set the enabled state, statically or reactively. A disabled tile
 is skipped by the group's keyboard navigation and cannot be
 selected.
 
+<a id="radiotile-variant"></a>
+
 #### `pub fn variant(mut self, variant: RadioTileVariant) -> Self`
 
 Pick the card variant (default `Outlined`).
+
+<a id="radiotile-show_indicator"></a>
 
 #### `pub fn show_indicator(mut self, show: bool) -> Self`
 
 Whether to render the inline radio indicator (default `true`). When
 `false`, the selection cue is the card highlight alone.
 
+<a id="radiotile-indicator_side"></a>
+
 #### `pub fn indicator_side(mut self, side: RadioTileIndicatorSide) -> Self`
 
 Which side of the top row the radio indicator sits on (default `Trailing`).
+
+<a id="radiotile-style"></a>
 
 #### `pub fn style(mut self, style: impl RadioTileStyle) -> Self`
 
 Per-call style override — replaces the theme-wide `RadioTileStyle`
 for just this tile.
 
+<a id="radiotile-tooltip"></a>
+
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Attach a plain single-line tooltip shown on hover.
+
+<a id="radiotile-rich_tooltip"></a>
 
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
 Attach a rich tooltip resolved from the app-wide tooltip registry.
 
+<a id="radiotile-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Attach a rich tooltip driven by inline `TooltipContent`.
+
+<a id="radiotile-composite_tooltip"></a>
 
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 

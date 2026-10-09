@@ -24,6 +24,7 @@ Inventories consumed by tests remain maintained at these paths.
 - [Drag-operation census](drag-operation-census.md)
 - [Hover-affordance census](hover-affordance-census.md)
 - [Kinetic Scrolling](kinetic-scrolling.md)
+- [LiveImage: design record](live-image.md)
 - [Property-Based Testing Reference](property-testing.md)
 - [Settings & Persisted State Reference](settings.md)
 - [Styling migration record](styling-migration.md)

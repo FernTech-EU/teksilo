@@ -7,6 +7,41 @@
 
 ComboBox — dropdown selection widget.
 
+## Public functions
+
+### `ComboBox`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(items: impl IntoIterator<Item = impl Into<String>>, selected: Signal<Option<String>>)`](#combobox-new) |
+| `Self` | [`from_items<F>(items: impl IntoIterator<Item = T>, selected: Signal<Option<T>>, item_label: F)`](#combobox-from_items) |
+| `Self` | [`from_model<F>(model: ListModel<T>, selected: Signal<Option<T>>, item_label: F)`](#combobox-from_model) |
+| `Self` | [`from_source<S, F>(source: S, selected: Signal<Option<T>>, item_label: F)`](#combobox-from_source) |
+| | **Builder methods** |
+| `Self` | [`item_label(f: impl Fn(&T) -> LocalizedString + 'static)`](#combobox-item_label) |
+| `Self` | [`render_item(f: impl Fn(&T, bool) -> Box<dyn Widget> + 'static)`](#combobox-render_item) |
+| `Self` | [`render_selected(f: impl Fn(&T) -> Box<dyn Widget> + 'static)`](#combobox-render_selected) |
+| `Self` | [`on_select(f: impl Fn(&T, &mut EventContext) + 'static)`](#combobox-on_select) |
+| `Self` | [`max_visible_items(n: usize)`](#combobox-max_visible_items) |
+| `Self` | [`type_ahead_timeout(d: Duration)`](#combobox-type_ahead_timeout) |
+| `Self` | [`placeholder(text: impl Into<LocalizedString>)`](#combobox-placeholder) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#combobox-label) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#combobox-enabled) |
+| `Self` | [`variant(variant: ComboBoxVariant)`](#combobox-variant) |
+| `Self` | [`style(style: impl ComboBoxStyle)`](#combobox-style) |
+| `Self` | [`text_style(style: impl Into<teksilo_core::color_prop::TextStyleProp>)`](#combobox-text_style) |
+| `Self` | [`text_role(color: impl Into<teksilo_core::color_prop::ColorProp>)`](#combobox-text_role) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#combobox-tooltip) |
+| `Self` | [`rich_tooltip(key: impl Into<String>)`](#combobox-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#combobox-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#combobox-composite_tooltip) |
+| `Self` | [`searchable(enabled: bool)`](#combobox-searchable) |
+| `Self` | [`search_query(query: Signal<String>)`](#combobox-search_query) |
+| `Self` | [`filter(f: impl Fn(&str, &T) -> bool + 'static)`](#combobox-filter) |
+
+## Detailed description
+
 Generic over the item type `T: Clone + PartialEq + 'static`. Selection is
 value-based: the bound `Signal<Option<T>>` survives reorder and insertion
 of the backing model. Items come from one of four input paths:
@@ -19,7 +54,7 @@ of the backing model. Items come from one of four input paths:
 The dropdown panel's node is created during `build()` and kept dormant, but
 its subtree is deferred — built the first time the combo is opened.
 
-# Keyboard
+### Keyboard
 
 The keys move a *highlight* through the list, and only a commit changes
 the value: the W3C ARIA select-only combobox pattern. A reader arrowing to
@@ -60,7 +95,7 @@ The widget is split across four internal modules:
   `FilteredItemList` inner widget.
 - `tests` holds the headless unit tests.
 
-## Touch and pen
+#### Touch and pen
 
 The closed box is one target — the arrow column is paint inside it, not a
 second target — and it opens the dropdown from its tap, so already on the
@@ -79,13 +114,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![ComboBox at Touch density](img/combo_box-touch.png)
 
-## Builder methods at a glance
-
-`from_items`, `from_model`, `from_source`, `item_label`, `render_item`, `render_selected`, `on_select`, `max_visible_items`, `type_ahead_timeout`, `placeholder`, `label`, `enabled`, `variant`, `style`, `text_style`, `text_role`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `searchable`, `search_query`, `filter`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/combo_box/index.html)
+
+<a id="combobox"></a>
 
 ## `pub struct ComboBox`
 
@@ -116,6 +149,8 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> { /* fields */ }
 
 ### Methods
 
+<a id="combobox-new"></a>
+
 #### `pub fn new( items: impl IntoIterator<Item = impl Into<String>>, selected: Signal<Option<String>>, ) -> Self`
 
 Create a ComboBox from a list of strings.
@@ -125,6 +160,8 @@ owned `String`s, resolved `LocalizedString`s, etc. For
 translated items, resolve translations before passing in,
 e.g. `vec![tr!(apple()).resolve_now(), ...]`.
 
+<a id="combobox-from_items"></a>
+
 #### `pub fn from_items<F>( items: impl IntoIterator<Item = T>, selected: Signal<Option<T>>, item_label: F, ) -> Self where F: Fn(&T) -> LocalizedString + 'static,`
 
 Static list of typed items. `item_label` is the display extractor —
@@ -132,21 +169,29 @@ it's required at construction so the compiler enforces it rather
 than a runtime check. For `T = String`, use `ComboBox::new` which
 defaults to the identity label.
 
+<a id="combobox-from_model"></a>
+
 #### `pub fn from_model<F>(model: ListModel<T>, selected: Signal<Option<T>>, item_label: F) -> Self where F: Fn(&T) -> LocalizedString + 'static,`
 
 Backed by a reactive `ListModel<T>`. Inserts, removes, and reorders
 propagate into the dropdown automatically. If the currently-selected
 value disappears from the model, `selected` becomes `None`.
 
+<a id="combobox-from_source"></a>
+
 #### `pub fn from_source<S, F>(source: S, selected: Signal<Option<T>>, item_label: F) -> Self where S: ListDataSource<Item = T> + 'static, F: Fn(&T) -> LocalizedString + 'static,`
 
 Backed by a custom `ListDataSource` — for external or paged data.
+
+<a id="combobox-item_label"></a>
 
 #### `pub fn item_label(mut self, f: impl Fn(&T) -> LocalizedString + 'static) -> Self`
 
 Override the display-label extractor. Rarely needed — prefer passing
 `item_label` to the constructor. Useful for the `ComboBox<String>`
 path when you want a non-identity projection.
+
+<a id="combobox-render_item"></a>
 
 #### `pub fn render_item(mut self, f: impl Fn(&T, bool) -> Box<dyn Widget> + 'static) -> Self`
 
@@ -173,6 +218,8 @@ label may be announced twice — one from the wrapper, one from the
 inner text. Wrap primary text nodes in `.a11y_hidden()` to avoid
 duplication, and reserve visible widgets for presentation only.
 
+<a id="combobox-render_selected"></a>
+
 #### `pub fn render_selected(mut self, f: impl Fn(&T) -> Box<dyn Widget> + 'static) -> Self`
 
 Custom renderer for the trigger's *selected value* — the widget shown
@@ -191,6 +238,8 @@ accessibility tree — the ComboBox's own `accessibility(builder)`
 already announces the selected value via `set_value`, so the custom
 visual can never double-announce. When nothing is selected the
 trigger shows the `placeholder` text.
+
+<a id="combobox-on_select"></a>
 
 #### `pub fn on_select(mut self, f: impl Fn(&T, &mut EventContext) + 'static) -> Self`
 
@@ -211,10 +260,14 @@ It fires **only on user-driven commits**, not on external writes
 to the `selected` signal (those are observed via `ctx.effect`).
 The `selected` signal is updated *before* the callback runs.
 
+<a id="combobox-max_visible_items"></a>
+
 #### `pub fn max_visible_items(mut self, n: usize) -> Self`
 
 Maximum number of items shown before the dropdown becomes scrollable.
 Defaults to 8. Clamped to at least 1.
+
+<a id="combobox-type_ahead_timeout"></a>
 
 #### `pub fn type_ahead_timeout(mut self, d: Duration) -> Self`
 
@@ -223,12 +276,16 @@ begin a fresh prefix; within `d` they extend it. Defaults to 500 ms,
 matching `MenuList::type_ahead_timeout`. Pass `Duration::ZERO` to
 treat each keystroke independently.
 
+<a id="combobox-placeholder"></a>
+
 #### `pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Placeholder text shown in the trigger when `selected` is `None`.
 Accepts a `tr!(...)` directly (resolved at build); use
 `placeholder_literal` for an
 untranslated string.
+
+<a id="combobox-label"></a>
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
@@ -237,10 +294,14 @@ Accessible label describing what this combo box is for
 placeholder and of the current selection — screen readers
 announce this as the name of the control.
 
+<a id="combobox-enabled"></a>
+
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state, statically or reactively. Forwarded to
 the arena at build time.
+
+<a id="combobox-variant"></a>
 
 #### `pub fn variant(mut self, variant: ComboBoxVariant) -> Self`
 
@@ -250,6 +311,8 @@ The active `ComboBoxStyle` decides what to do with the hint —
 IntUI's default impl honours `Outlined` (default) and `Plain`;
 a custom impl (Material 3, macOS, etc.) might paint differently.
 
+<a id="combobox-style"></a>
+
 #### `pub fn style(mut self, style: impl ComboBoxStyle) -> Self`
 
 Override the active `ComboBoxStyle` for this widget instance
@@ -258,17 +321,23 @@ resolves its dimensions from `theme.input` (the density
 `InputTokens`); custom impls
 can paint anything they want around the selected-label slot.
 
+<a id="combobox-text_style"></a>
+
 #### `pub fn text_style(mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>) -> Self`
 
 Override the selected-value text style (font, size, weight).
 Accepts a `TextStyleRole`, a `TextStyle`, or a `Signal` of either.
 Default (unset) is `TextStyleRole::Body`.
 
+<a id="combobox-text_role"></a>
+
 #### `pub fn text_role(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the selected-value text color. Accepts `Color`, a role, or
 a `Signal` of either. Default (unset) is enabled-derived
 (`Primary` / `Disabled`); setting this replaces that cascade.
+
+<a id="combobox-tooltip"></a>
 
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -281,6 +350,8 @@ Mutually exclusive with `rich_tooltip` /
 `rich_tooltip_content` /
 `composite_tooltip` — last call wins.
 
+<a id="combobox-rich_tooltip"></a>
+
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 
 Attach a rich tooltip resolved from the app-wide tooltip registry.
@@ -289,6 +360,8 @@ The `key` is looked up via
 time; the resolved body supports inline markup, a shortcut chip,
 and a "more" disclosure. Overrides any previously set tooltip.
 
+<a id="combobox-rich_tooltip_content"></a>
+
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
 Attach a rich tooltip driven by inline
@@ -296,12 +369,16 @@ Attach a rich tooltip driven by inline
 tooltips that aren't worth registering centrally. Overrides any
 previously set tooltip.
 
+<a id="combobox-composite_tooltip"></a>
+
 #### `pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self`
 
 Attach a composite tooltip — third tier, hosting an arbitrary
 widget tree (tabbed sections, charts, conditional rows). Promotes
 to a focusable `Role::Dialog` after the standard dwell. Overrides
 any plain or rich tooltip previously set.
+
+<a id="combobox-searchable"></a>
 
 #### `pub fn searchable(mut self, enabled: bool) -> Self`
 
@@ -319,12 +396,16 @@ The query signal is created internally. Use
 `search_query` to supply your own if you
 want to observe or drive the query externally.
 
+<a id="combobox-search_query"></a>
+
 #### `pub fn search_query(mut self, query: Signal<String>) -> Self`
 
 Bind the search field to an external `Signal<String>`. Implies
 `searchable(true)`. Useful for observing or
 programmatically setting the query from outside the widget
 (e.g. a "Clear" button, persistence across sessions).
+
+<a id="combobox-filter"></a>
 
 #### `pub fn filter(mut self, f: impl Fn(&str, &T) -> bool + 'static) -> Self`
 

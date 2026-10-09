@@ -5,6 +5,25 @@
 
 `RectItem` — filled / stroked rectangle in local item coords.
 
+## Public functions
+
+### `RectItem`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(local_bounds: Rect)`](#rectitem-new) |
+| | **Builder methods** |
+| `Self` | [`fill(color: impl Into<ColorProp>)`](#rectitem-fill) |
+| `Self` | [`stroke(color: impl Into<ColorProp>, width: f32)`](#rectitem-stroke) |
+| `Self` | [`stroke_cosmetic(color: impl Into<ColorProp>, width: f32)`](#rectitem-stroke_cosmetic) |
+| `Self` | [`stroke_styled(color: impl Into<ColorProp>, style: StrokeStyle)`](#rectitem-stroke_styled) |
+| `Self` | [`corner_radius(radius: f32)`](#rectitem-corner_radius) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#rectitem-label) |
+| `Self` | [`draggable(draggable: bool)`](#rectitem-draggable) |
+
+## Detailed description
+
 `RectItem` is the simplest and cheapest lightweight scene item: a rectangle
 in local item coordinates with an optional fill and/or stroke. Its
 hit-test is its own `shape` — the box, exact, for a
@@ -26,7 +45,7 @@ an inactive window). Change a colour live via
 `SceneModel::set_item_fill` /
 `set_item_stroke`.
 
-## When to use
+#### When to use
 
 Use `RectItem` for background tiles, card backgrounds, selection highlights,
 grid cells, or any rectangular decoration in the lightweight tier. For
@@ -35,7 +54,7 @@ context-menu handler needs no widget (wire one through
 `Scene::handlers_mut`), but for interactive content needing keyboard
 focus, embed a full widget with `Scene::add_widget`.
 
-## Example
+#### Example
 
 ```ignore
 use teksilo_scene::{SceneModel, RectItem};
@@ -55,13 +74,11 @@ let item = RectItem::new(Rect::new(0.0, 0.0, 120.0, 80.0))
 model.add_item(item, Point::new(40.0, 40.0));
 ```
 
-## Builder methods at a glance
-
-`fill`, `stroke`, `stroke_cosmetic`, `stroke_styled`, `corner_radius`, `label`, `draggable`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="rectitem"></a>
 
 ## `pub struct RectItem`
 
@@ -76,6 +93,8 @@ pub struct RectItem { /* fields */ }
 
 ### Methods
 
+<a id="rectitem-new"></a>
+
 #### `pub fn new(local_bounds: Rect) -> Self`
 
 A rectangle of the given size in local item coordinates. The
@@ -83,22 +102,30 @@ passed `local_bounds` is stored verbatim — typically
 `Rect::new(0.0, 0.0, w, h)`. No fill, no stroke — set at least
 one or the item is invisible.
 
+<a id="rectitem-fill"></a>
+
 #### `pub fn fill(mut self, color: impl Into<ColorProp>) -> Self`
 
 Fill colour. Accepts a plain `Color`, a theme
 role, a `Signal<Color>`, or a `Signal<Role>` — resolved against the
 active theme at paint time.
 
+<a id="rectitem-stroke"></a>
+
 #### `pub fn stroke(mut self, color: impl Into<ColorProp>, width: f32) -> Self`
 
 Stroke colour and width in **scene-coordinate** pixels — the border
 scales with the view zoom (a 1px border becomes 2px at 2× zoom).
+
+<a id="rectitem-stroke_cosmetic"></a>
 
 #### `pub fn stroke_cosmetic(mut self, color: impl Into<ColorProp>, width: f32) -> Self`
 
 Cosmetic stroke: the border holds a constant **device-pixel** width at
 any zoom (a hairline that never thins out or thickens). Ideal for grid
 cells and card outlines in a pannable/zoomable scene.
+
+<a id="rectitem-stroke_styled"></a>
 
 #### `pub fn stroke_styled(mut self, color: impl Into<ColorProp>, style: StrokeStyle) -> Self`
 
@@ -112,11 +139,15 @@ A dashing style costs a CPU-rasterized path: `Canvas` diverts it away
 from the decoration-rect / SDF pipelines, which cannot express a dash.
 Solid and cosmetic strokes keep the cheap route.
 
+<a id="rectitem-corner_radius"></a>
+
 #### `pub fn corner_radius(mut self, radius: f32) -> Self`
 
 Rounded corners for fill and stroke, in scene-coordinate pixels.
 Default `0.0` (square corners). A positive radius routes fill/stroke
 through the SDF rounded-rect path.
+
+<a id="rectitem-label"></a>
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
@@ -124,6 +155,8 @@ Human-readable label used for debug and the default AT name.
 Accepts anything convertible into `LocalizedString` — most
 commonly `tr!(...)`, or `lit!(...)` for a deliberately
 untranslated one. A bare `&str` does not convert.
+
+<a id="rectitem-draggable"></a>
 
 #### `pub fn draggable(mut self, draggable: bool) -> Self`
 

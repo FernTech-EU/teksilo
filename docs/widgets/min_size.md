@@ -5,6 +5,24 @@
 
 MinSize — a layout modifier that ensures a child reaches a minimum width and/or height.
 
+## Public functions
+
+### `MinSize`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(width: f32, height: f32)`](#minsize-new) |
+| `Self` | [`width(width: f32)`](#minsize-width) |
+| `Self` | [`height(height: f32)`](#minsize-height) |
+| | **Builder methods** |
+| `Self` | [`min_width(state: impl Into<Prop<f32>>)`](#minsize-min_width) |
+| `Self` | [`min_height(state: impl Into<Prop<f32>>)`](#minsize-min_height) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#minsize-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#minsize-child_opt) |
+
+## Detailed description
+
 The child's reported size is clamped upward so it never falls below the
 configured minimum on each constrained axis. A bounded proposal below the
 minimum is raised to it before it is forwarded, so that wrap-aware children
@@ -21,7 +39,7 @@ the `MinSize` floor.
 
 For the inverse operation (capping a maximum size) see `MaxSize`.
 
-# Hit targets: take the floor from the theme
+### Hit targets: take the floor from the theme
 
 `MinSize` is the mechanism for a minimum hit box, but the *number* belongs to
 the active density rather than to the call site. Route it through
@@ -50,13 +68,11 @@ WCAG 2.2 SC 2.5.8 *Target Size (Minimum)*, level AA — the floor
 and SC 2.5.5 *Target Size (Enhanced)*, level AAA, which is what the `Touch`
 ladder aims for. 44 dp is never the AA figure.
 
-## Builder methods at a glance
-
-`width`, `height`, `min_width`, `min_height`, `child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/min_size/index.html)
+
+<a id="minsize"></a>
 
 ## `pub struct MinSize`
 
@@ -70,29 +86,43 @@ pub struct MinSize { /* fields */ }
 
 ### Methods
 
+<a id="minsize-new"></a>
+
 #### `pub fn new(width: f32, height: f32) -> Self`
 
 Enforce a minimum on both axes: the child's width will be at least `width` and its height at least `height`.
+
+<a id="minsize-width"></a>
 
 #### `pub fn width(width: f32) -> Self`
 
 Enforce a minimum only on the width axis; the height axis is unconstrained by this modifier.
 
+<a id="minsize-height"></a>
+
 #### `pub fn height(height: f32) -> Self`
 
 Enforce a minimum only on the height axis; the width axis is unconstrained by this modifier.
+
+<a id="minsize-min_width"></a>
 
 #### `pub fn min_width(mut self, state: impl Into<Prop<f32>>) -> Self`
 
 Bind min width to a reactive state.
 
+<a id="minsize-min_height"></a>
+
 #### `pub fn min_height(mut self, state: impl Into<Prop<f32>>) -> Self`
 
 Bind min height to a reactive state.
 
+<a id="minsize-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline child widget (deferred insertion).
+
+<a id="minsize-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

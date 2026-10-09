@@ -7,6 +7,23 @@
 
 HStack — a horizontal layout container that distributes children left-to-right.
 
+## Public functions
+
+### `HStack`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#hstack-new) |
+| | **Builder methods** |
+| `Self` | [`spacing(spacing: impl Into<Prop<f32>>)`](#hstack-spacing) |
+| `Self` | [`alignment(alignment: VAlignment)`](#hstack-alignment) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#hstack-child) |
+| `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#hstack-children) |
+| `Self` | [`child_opt(widget: Option<impl Widget + 'static>)`](#hstack-child_opt) |
+
+## Detailed description
+
 Children are given their intrinsic width and the stack's cross-axis height.
 Positive slack (leftover space) is distributed among children that carry a
 non-zero `flex` weight (e.g. `Spacer`, `Expand`); negative slack (over-constraint)
@@ -34,13 +51,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![HStack at Touch density](img/hstack-touch.png)
 
-## Builder methods at a glance
-
-`spacing`, `alignment`, `child`, `children`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/hstack/index.html)
+
+<a id="hstack"></a>
 
 ## `pub struct HStack`
 
@@ -56,9 +71,13 @@ pub struct HStack { /* fields */ }
 
 ### Methods
 
+<a id="hstack-new"></a>
+
 #### `pub fn new() -> Self`
 
 Create an empty `HStack` with no spacing and `VAlignment::Center`.
+
+<a id="hstack-spacing"></a>
 
 #### `pub fn spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self`
 
@@ -66,17 +85,25 @@ Set inter-child spacing. Accepts a static `f32` or a reactive
 `Signal<f32>` — use a signal derived from
 `ctx.theme_signal()` to track theme-driven spacing changes.
 
+<a id="hstack-alignment"></a>
+
 #### `pub fn alignment(mut self, alignment: VAlignment) -> Self`
 
 Set the vertical alignment for children that are shorter than the stack's height.
+
+<a id="hstack-child"></a>
 
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add an inline child widget (deferred insertion).
 
+<a id="hstack-children"></a>
+
 #### `pub fn children( mut self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
 Add multiple inline children from an iterator.
+
+<a id="hstack-child_opt"></a>
 
 #### `pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self`
 

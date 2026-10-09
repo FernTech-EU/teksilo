@@ -6,6 +6,28 @@
 `SceneView` — the viewport widget that hosts a `Scene` and
 places its items at scene coordinates.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `const` | [`DEFAULT_RETENTION_MARGIN`](#default_retention_margin) — Default `SceneView::retention_margin`, in screen pixels |
+| `struct` | [`DebugOverlay`](#debugoverlay) — Visual debug overlays painted on top of normal scene rendering |
+| `enum` | [`FocusDirection`](#focusdirection) — Direction passed to a `SceneView::focus_order` callback when the app wants to override the default Tab cycle |
+| `struct` | [`SceneView`](#sceneview) — A pannable/zoomable viewport that renders a `Scene`'s items at scene coordinates and routes user input (scroll, pinch, drag, keyboard) back into the camera… |
+
+## Public functions
+
+### `DebugOverlay`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `bool` | [`is_active()`](#debugoverlay-is_active) |
+| | **Constants and types** |
+| `DebugOverlay` | [`ALL`](#debugoverlay-all) |
+
+## Detailed description
+
 `SceneView` is the bridge between the model layer (`Scene` /
 `SceneModel`) and the render/event pipeline. It
 manages a pan/zoom/rotation camera, materialises heavyweight widgets
@@ -14,7 +36,7 @@ handlers, and feeds synthetic AT nodes to AccessKit for every visible
 lightweight item. Multiple `SceneView`s can share one `SceneModel` and
 reconcile independently on every mutation.
 
-## Composition
+#### Composition
 
 - **Placement.** `place_children` plants each materialised
   heavyweight widget at its scene-space rect (composed from the
@@ -38,7 +60,7 @@ reconcile independently on every mutation.
 - **Idle gating.** Pan / zoom that's reached its terminal tick
   stops scheduling frames via the engine's per-node `paint_epoch`.
 
-## Input wiring
+#### Input wiring
 
 - **`on_scroll`** — trackpad two-finger pan (`ScrollDelta::Pixels`)
   and mouse wheel (`ScrollDelta::Lines`) animate the pan signals
@@ -79,7 +101,7 @@ reconcile independently on every mutation.
   is the competitor a finger meets first and it wins at the smaller drag
   slop — the marquee, not the camera.
 
-## Example
+#### Example
 
 ```rust
 # use teksilo_scene::{Scene, SceneModel, SceneView, SceneSelectionMode, RectItem};
@@ -106,13 +128,11 @@ let _view_b = SceneView::with_model(model.clone())
 assert!(model.local_pos(item_id).is_some());
 ```
 
-## Builder methods at a glance
-
-`ALL`, `is_active`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="default_retention_margin"></a>
 
 ## `pub const DEFAULT_RETENTION_MARGIN`
 
@@ -126,6 +146,8 @@ becomes visible.
 ```rust
 pub const DEFAULT_RETENTION_MARGIN: f32 = 96.0;
 ```
+
+<a id="debugoverlay"></a>
 
 ## `pub struct DebugOverlay`
 
@@ -154,13 +176,19 @@ pub struct DebugOverlay { /* fields */ }
 
 ### Methods
 
+<a id="debugoverlay-all"></a>
+
 #### `pub const ALL: DebugOverlay = DebugOverlay { item_bounds: true, content_bounds: true, viewport: true, selection_bounds: true, };`
 
 All overlays enabled. Useful to catch any anomaly visually.
 
+<a id="debugoverlay-is_active"></a>
+
 #### `pub fn is_active(&self) -> bool`
 
 Whether at least one debug overlay is enabled.
+
+<a id="focusdirection"></a>
 
 ## `pub enum FocusDirection`
 
@@ -181,6 +209,8 @@ pub enum FocusDirection { /* variants */ }
 
 - **`Forward`** — Advance to the next item — corresponds to the Tab key.
 - **`Backward`** — Retreat to the previous item — corresponds to Shift+Tab.
+
+<a id="sceneview"></a>
 
 ## `pub struct SceneView`
 
@@ -205,6 +235,8 @@ pub struct SceneView { /* fields */ }
 
 ### Methods
 
+<a id="sceneview-veto_snapshot_scans"></a>
+
 #### `pub fn veto_snapshot_scans(&self) -> u64`  *(hidden)*
 
 How many times this view has walked its handler snapshot to answer the
@@ -216,6 +248,8 @@ cards must advance it by **one**, not by *n* — the regression the
 `veto_scaling_probe` test gates, and one that is invisible to every
 other observable the crate publishes (the verdicts are identical either
 way; only the cost moves).
+
+<a id="sceneview-veto_key_probes"></a>
 
 #### `pub fn veto_key_probes(&self) -> u64`  *(hidden)*
 

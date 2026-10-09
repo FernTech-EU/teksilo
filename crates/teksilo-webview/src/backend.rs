@@ -518,6 +518,9 @@ pub enum WebViewOp {
 #[derive(Clone, Default)]
 pub struct MemoryWebViewRecords {
     ops: Rc<RefCell<Vec<WebViewOp>>>,
+    /// The scale factor of each `set_bounds`, beside its op: kept apart so
+    /// `WebViewOp::SetBounds` stays scale-independent.
+    scales: Rc<RefCell<Vec<(WebViewId, f32)>>>,
 }
 
 impl MemoryWebViewRecords {
@@ -549,6 +552,18 @@ impl MemoryWebViewRecords {
                 } if *web_view_id == id => Some(*visible),
                 _ => None,
             })
+            .collect()
+    }
+
+    /// The ordered scale factors the `set_bounds` of a web view were given,
+    /// one per [`WebViewOp::SetBounds`]: what an engine that positions in
+    /// device pixels converts the logical bounds with.
+    pub fn scale_log(&self, id: WebViewId) -> Vec<f32> {
+        self.scales
+            .borrow()
+            .iter()
+            .filter(|(web_view_id, _)| *web_view_id == id)
+            .map(|(_, scale)| *scale)
             .collect()
     }
 
@@ -604,13 +619,17 @@ struct MemoryWebViewHandle {
 }
 
 impl WebViewHandle for MemoryWebViewHandle {
-    fn set_bounds(&self, bounds: Rect, _scale_factor: f32) {
+    fn set_bounds(&self, bounds: Rect, scale_factor: f32) {
         // Record logical bounds (scale-independent) so test assertions stay
-        // resolution-agnostic.
+        // resolution-agnostic; the scale goes to its own log.
         self.records.push(WebViewOp::SetBounds {
             web_view_id: self.web_view_id,
             bounds,
         });
+        self.records
+            .scales
+            .borrow_mut()
+            .push((self.web_view_id, scale_factor));
     }
     fn load_url(&self, url: &str) {
         self.records.push(WebViewOp::LoadUrl {

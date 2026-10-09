@@ -5,6 +5,89 @@
 
 `ItemShape` — the one geometry source of truth for the lightweight tier.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `const` | [`SHAPE_FLATTEN_TOLERANCE`](#shape_flatten_tolerance) — Curve-flattening tolerance, in **local item coordinates** |
+| `const` | [`HIT_BAND_SLACK`](#hit_band_slack) — Grab tolerance added to every stroke band's half-width, in local coordinates |
+| `struct` | [`ShapeGeometry`](#shapegeometry) — A `Path` plus its flattening, computed once and shared by handle |
+| `struct` | [`ItemShape`](#itemshape) — What an item's geometry **is**, in local item coordinates — the single source of truth for hit-test, marquee, collision and path queries |
+| `enum` | [`ItemSelectionMode`](#itemselectionmode) — How a region query decides whether an item is picked — Qt's `Qt::ItemSelectionMode`, one variant for one |
+| `struct` | [`SceneRegion`](#sceneregion) — The region a geometry query asks about |
+
+## Public functions
+
+### `ShapeGeometry`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(path: Path)`](#shapegeometry-new) |
+| `Rc<Self>` | [`shared(path: Path)`](#shapegeometry-shared) |
+| | **Methods** |
+| `&Path` | [`path()`](#shapegeometry-path) |
+| `&[Subpath]` | [`outline()`](#shapegeometry-outline) |
+| `Rect` | [`bounds()`](#shapegeometry-bounds) |
+
+### `ItemShape`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`bounds(rect: Rect)`](#itemshape-bounds) |
+| `Self` | [`rounded_rect(rect: Rect, radius: f32)`](#itemshape-rounded_rect) |
+| `Self` | [`ellipse(rect: Rect)`](#itemshape-ellipse) |
+| `Self` | [`path(geometry: Rc<ShapeGeometry>)`](#itemshape-path) |
+| `Self` | [`from_path(path: Path)`](#itemshape-from_path) |
+| `Self` | [`none()`](#itemshape-none) |
+| | **Builder methods** |
+| `Self` | [`filled(rule: FillRule)`](#itemshape-filled) |
+| `Self` | [`unfilled()`](#itemshape-unfilled) |
+| `Self` | [`stroked(width: f32, space: StrokeSpace)`](#itemshape-stroked) |
+| `Self` | [`hit_stroke_width(width: f32)`](#itemshape-hit_stroke_width) |
+| | **Methods** |
+| `bool` | [`contains(local_pt: Point, view_scale: f32)`](#itemshape-contains) |
+| `Rect` | [`bounding_rect()`](#itemshape-bounding_rect) |
+| `Rect` | [`bounding_rect_at(view_scale: f32)`](#itemshape-bounding_rect_at) |
+| `bool` | [`is_none()`](#itemshape-is_none) |
+| `bool` | [`intersects_region(region: &SceneRegion, view_scale: f32)`](#itemshape-intersects_region) |
+| `bool` | [`contained_by_region(region: &SceneRegion, view_scale: f32)`](#itemshape-contained_by_region) |
+| `bool` | [`intersects_scene_region(region: &SceneRegion, local_to_scene: &Transform2D, view_scale: f32)`](#itemshape-intersects_scene_region) |
+| `bool` | [`contained_by_scene_region(region: &SceneRegion, local_to_scene: &Transform2D, view_scale: f32)`](#itemshape-contained_by_scene_region) |
+| `SceneRegion` | [`to_scene_region(local_to_scene: &Transform2D)`](#itemshape-to_scene_region) |
+
+### `ItemSelectionMode`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `bool` | [`uses_shape()`](#itemselectionmode-uses_shape) |
+| `bool` | [`requires_containment()`](#itemselectionmode-requires_containment) |
+
+### `SceneRegion`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`rect(rect: Rect)`](#sceneregion-rect) |
+| `Self` | [`empty()`](#sceneregion-empty) |
+| `Self` | [`lasso(path: Path)`](#sceneregion-lasso) |
+| `Self` | [`lasso_with_rule(path: Path, rule: FillRule)`](#sceneregion-lasso_with_rule) |
+| `Self` | [`stroke(path: Path, width: f32)`](#sceneregion-stroke) |
+| `Self` | [`from_geometry(geometry: Rc<ShapeGeometry>, fill: Option<FillRule>, band: Option<f32>)`](#sceneregion-from_geometry) |
+| `Self` | [`from_screen_rect(screen_rect: Rect, screen_to_scene: &Transform2D)`](#sceneregion-from_screen_rect) |
+| | **Methods** |
+| `Rect` | [`bounding_rect()`](#sceneregion-bounding_rect) |
+| `Option<Rect>` | [`as_rect()`](#sceneregion-as_rect) |
+| `bool` | [`is_empty()`](#sceneregion-is_empty) |
+| `SceneRegion` | [`to_local(scene_to_local: &Transform2D)`](#sceneregion-to_local) |
+| `bool` | [`contains_point(p: Point)`](#sceneregion-contains_point) |
+| `bool` | [`has_area()`](#sceneregion-has_area) |
+| `f32` | [`clearance(p: Point)`](#sceneregion-clearance) |
+
+## Detailed description
+
 A `SceneItem` declares *what it is*, once, as a value:
 `SceneItem::shape` returns an `ItemShape` in the
 item's **local** coordinates. Every geometric question the scene can ask —
@@ -15,7 +98,7 @@ this replaced (`shape_contains` plus a snapshot-cloneable `clone_shape_test`
 closure) had to agree by discipline, and the trait's own documentation
 called the divergence "a silent dispatch bug".
 
-# What a shape is
+### What a shape is
 
 A shape is the **union** of at most two parts:
 
@@ -39,7 +122,7 @@ its half-width, so a one-pixel connector is clickable without pixel-perfect
 aim. A coarse pointer gets more on top of that, from the view's miss-only
 slop pass, which widens an item's *box* rather than its shape.
 
-# Cost
+### Cost
 
 Cloning an `ItemShape` is O(1): the path variant is one
 `Rc<ShapeGeometry>` refcount bump and every other variant is small and
@@ -55,7 +138,7 @@ coordinates, so the memo needs no cache key. At 20× zoom a curve therefore
 hit-tests about 5 device pixels coarser than it looks — well inside the
 grab band of any real stroke, but an approximation rather than exactness.
 
-# Spaces
+### Spaces
 
 `ItemShape` is **local**. `SceneRegion` — the thing a marquee, a lasso or
 a collision query asks about — is **scene**-space. The two
@@ -71,13 +154,11 @@ carries one. Usually the region comes down into the item's frame via
 rule, and why no approximation substitutes for it, is on
 `ItemShape::contained_by_scene_region`.
 
-## Builder methods at a glance
-
-`shared`, `path`, `outline`, `bounds`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="shape_flatten_tolerance"></a>
 
 ## `pub const SHAPE_FLATTEN_TOLERANCE`
 
@@ -90,6 +171,8 @@ approximation under one device pixel out to 4× zoom and under ~5 px at 20×.
 ```rust
 pub const SHAPE_FLATTEN_TOLERANCE: f32 = 0.25;
 ```
+
+<a id="hit_band_slack"></a>
 
 ## `pub const HIT_BAND_SLACK`
 
@@ -105,6 +188,8 @@ view's separate miss-only slop pass.
 ```rust
 pub const HIT_BAND_SLACK: f32 = 2.0;
 ```
+
+<a id="shapegeometry"></a>
 
 ## `pub struct ShapeGeometry`
 
@@ -125,27 +210,39 @@ pub struct ShapeGeometry { /* fields */ }
 
 ### Methods
 
+<a id="shapegeometry-new"></a>
+
 #### `pub fn new(path: Path) -> Self`
 
 Wrap a path. Nothing is flattened until something asks.
+
+<a id="shapegeometry-shared"></a>
 
 #### `pub fn shared(path: Path) -> Rc<Self>`
 
 Wrap a path in a fresh shared handle — the form
 `ItemShape::path` takes.
 
+<a id="shapegeometry-path"></a>
+
 #### `pub fn path(&self) -> &Path`
 
 The path this geometry was built from.
+
+<a id="shapegeometry-outline"></a>
 
 #### `pub fn outline(&self) -> &[Subpath]`
 
 The flattened outline, one `Subpath` per `MoveTo` run. Memoised.
 
+<a id="shapegeometry-bounds"></a>
+
 #### `pub fn bounds(&self) -> Rect`
 
 Curve-accurate AABB of the outline. Memoised. `Rect::ZERO` for an
 empty path.
+
+<a id="itemshape"></a>
 
 ## `pub struct ItemShape`
 
@@ -161,10 +258,14 @@ pub struct ItemShape { /* fields */ }
 
 ### Methods
 
+<a id="itemshape-bounds"></a>
+
 #### `pub fn bounds(rect: Rect) -> Self`
 
 The item's local AABB. This is the trait default and it allocates
 nothing.
+
+<a id="itemshape-rounded_rect"></a>
 
 #### `pub fn rounded_rect(rect: Rect, radius: f32) -> Self`
 
@@ -173,10 +274,14 @@ shape, so a click in the transparent corner of a rounded card misses
 it, exactly as the pixels suggest. Closed form; never flattened for a
 point test.
 
+<a id="itemshape-ellipse"></a>
+
 #### `pub fn ellipse(rect: Rect) -> Self`
 
 The ellipse inscribed in `rect`. Closed form; never flattened for a
 point test.
+
+<a id="itemshape-path"></a>
 
 #### `pub fn path(geometry: Rc<ShapeGeometry>) -> Self`
 
@@ -184,6 +289,8 @@ An arbitrary local path, filled under `FillRule::Winding`.
 
 Takes the **shared** handle so the flattening is paid once per item
 lifetime; build the `ShapeGeometry` in your constructor.
+
+<a id="itemshape-from_path"></a>
 
 #### `pub fn from_path(path: Path) -> Self`
 
@@ -195,6 +302,8 @@ that publishes its shape every layout pass should own an
 `Rc<ShapeGeometry>` instead — this one re-flattens every time it is
 asked.
 
+<a id="itemshape-none"></a>
+
 #### `pub fn none() -> Self`
 
 Never hit, never selected, never collides.
@@ -202,6 +311,8 @@ Never hit, never selected, never collides.
 The logical-only `GroupItem` case, and any pure
 accessibility container: clicks fall straight through to whatever is
 beneath.
+
+<a id="itemshape-filled"></a>
 
 #### `pub fn filled(mut self, rule: FillRule) -> Self`
 
@@ -213,6 +324,8 @@ real hole. A `PathItem` takes its rule from its own
 fill rule would be a second source of truth, which is precisely what
 this type exists to abolish.
 
+<a id="itemshape-unfilled"></a>
+
 #### `pub fn unfilled(mut self) -> Self`
 
 Drop the interior, leaving only the stroke band (if any).
@@ -220,6 +333,8 @@ Drop the interior, leaving only the stroke band (if any).
 A stroke-only connector: clicking the empty middle of its bounding box
 must miss, and clicking anywhere along the drawn line must hit. Has no
 effect on the closed forms, which are regions by construction.
+
+<a id="itemshape-stroked"></a>
 
 #### `pub fn stroked(mut self, width: f32, space: StrokeSpace) -> Self`
 
@@ -231,12 +346,16 @@ scale at test time and tracks the rendered line at any zoom.
 `StrokeSpace::Logical` is already in local units and is unaffected by
 zoom.
 
+<a id="itemshape-hit_stroke_width"></a>
+
 #### `pub fn hit_stroke_width(mut self, width: f32) -> Self`
 
 Replace the band's width for **hit** purposes only, independent of what
 is painted (Konva's `hitStrokeWidth`): a 1 dp connector wire made 12 dp
 grabbable. Always in local units — a hit band is a target size, not a
 rendered thickness, so it does not shrink as you zoom in.
+
+<a id="itemshape-contains"></a>
 
 #### `pub fn contains(&self, local_pt: Point, view_scale: f32) -> bool`
 
@@ -248,6 +367,8 @@ transform's linear part. It is consulted only by a
 space (see `ItemFlags::IGNORES_TRANSFORMATIONS`),
 whose local coordinates *are* screen coordinates and which therefore
 has no zoom to convert.
+
+<a id="itemshape-bounding_rect"></a>
 
 #### `pub fn bounding_rect(&self) -> Rect`
 
@@ -280,6 +401,8 @@ mitigation is that zooming out that far turns a hairline into a hair:
 at 0.25× a 40 px cosmetic stroke covers 160 local units, which is a
 blot on screen rather than a line anyone is aiming at.
 
+<a id="itemshape-bounding_rect_at"></a>
+
 #### `pub fn bounding_rect_at(&self, view_scale: f32) -> Rect`
 
 `ItemShape::bounding_rect` at an explicit view zoom — the rectangle
@@ -289,9 +412,13 @@ that zoom.
 Differs from `bounding_rect()` only for a `StrokeSpace::Device` band,
 and only away from 1×.
 
+<a id="itemshape-is_none"></a>
+
 #### `pub fn is_none(&self) -> bool`
 
 Whether this shape can never be hit (`ItemShape::none`).
+
+<a id="itemshape-intersects_region"></a>
 
 #### `pub fn intersects_region(&self, region: &SceneRegion, view_scale: f32) -> bool`
 
@@ -357,10 +484,12 @@ not, which is impossible for a shape that lies inside its box, whereas
 a false negative only ever agrees with the cheaper mode.
 
 Where a probe lands exactly on a freeform outline, "strictly inside"
-is decided within [`SHAPE_FLATTEN_TOLERANCE`]: a ray cast against a
+is decided within `SHAPE_FLATTEN_TOLERANCE`: a ray cast against a
 polyline has no meaningful answer on the polyline itself. Against a
 rectangle, the closed form every default shape and every marquee band
 uses, it is exact.
+
+<a id="itemshape-contained_by_region"></a>
 
 #### `pub fn contained_by_region(&self, region: &SceneRegion, view_scale: f32) -> bool`
 
@@ -408,6 +537,8 @@ weaving between the two, inside their union but inside neither part, is
 reported as not contained. That is the one deliberately conservative
 answer here, and it is one-sided: never a false containment.
 
+<a id="itemshape-intersects_scene_region"></a>
+
 #### `pub fn intersects_scene_region( &self, region: &SceneRegion, local_to_scene: &Transform2D, view_scale: f32, ) -> bool`
 
 Whether this shape, placed by `local_to_scene`, shares area with a
@@ -416,6 +547,8 @@ Whether this shape, placed by `local_to_scene`, shares area with a
 
 This is the door a region query comes in by, and the reason it exists
 is spelled out on `ItemShape::contained_by_scene_region`.
+
+<a id="itemshape-contained_by_scene_region"></a>
 
 #### `pub fn contained_by_scene_region( &self, region: &SceneRegion, local_to_scene: &Transform2D, view_scale: f32, ) -> bool`
 
@@ -462,6 +595,8 @@ while `ContainsItemBoundingRect` must never exceed
 scalar satisfies both, so the only answer that keeps both is the exact
 one.
 
+<a id="itemshape-to_scene_region"></a>
+
 #### `pub fn to_scene_region(&self, local_to_scene: &Transform2D) -> SceneRegion`
 
 Re-publish this shape as a `SceneRegion` in another frame — its own
@@ -496,6 +631,8 @@ nowhere to put a second part. The consequence is confined to
 `Scene::item_region` and the collision
 query built on it: an anisotropically scaled item carrying a stroke
 collides as though its band were the narrowest the map allows.
+
+<a id="itemselectionmode"></a>
 
 ## `pub enum ItemSelectionMode`
 
@@ -533,13 +670,19 @@ pub enum ItemSelectionMode { /* variants */ }
 
 ### Methods
 
+<a id="itemselectionmode-uses_shape"></a>
+
 #### `pub fn uses_shape(self) -> bool`
 
 Whether this mode consults the item's shape (rather than its AABB).
 
+<a id="itemselectionmode-requires_containment"></a>
+
 #### `pub fn requires_containment(self) -> bool`
 
 Whether this mode requires full containment (rather than any overlap).
+
+<a id="sceneregion"></a>
 
 ## `pub struct SceneRegion`
 
@@ -565,26 +708,38 @@ pub struct SceneRegion { /* fields */ }
 
 ### Methods
 
+<a id="sceneregion-rect"></a>
+
 #### `pub fn rect(rect: Rect) -> Self`
 
 An axis-aligned box.
+
+<a id="sceneregion-empty"></a>
 
 #### `pub fn empty() -> Self`
 
 A region that covers nothing. Every query against it is `false`.
 
+<a id="sceneregion-lasso"></a>
+
 #### `pub fn lasso(path: Path) -> Self`
 
 A closed freehand region, filled under `FillRule::Winding`.
+
+<a id="sceneregion-lasso_with_rule"></a>
 
 #### `pub fn lasso_with_rule(path: Path, rule: FillRule) -> Self`
 
 A closed freehand region under an explicit fill rule.
 
+<a id="sceneregion-stroke"></a>
+
 #### `pub fn stroke(path: Path, width: f32) -> Self`
 
 The **stroke band** of a path, `width` wide — "what lies along this
 line?" rather than "what lies inside this loop?".
+
+<a id="sceneregion-from_geometry"></a>
 
 #### `pub fn from_geometry( geometry: Rc<ShapeGeometry>, fill: Option<FillRule>, band: Option<f32>, ) -> Self`
 
@@ -592,6 +747,8 @@ A region from a shared geometry handle, with an explicit interior
 and/or band. The general constructor the others are sugar for; used to
 re-publish an item's own shape as the region a collision query asks
 about.
+
+<a id="sceneregion-from_screen_rect"></a>
 
 #### `pub fn from_screen_rect(screen_rect: Rect, screen_to_scene: &Transform2D) -> Self`
 
@@ -602,17 +759,25 @@ exact transformed quadrilateral when it does not — which is what stops
 a rubber band under a rotated view from selecting everything in the
 enlarged hull of itself.
 
+<a id="sceneregion-bounding_rect"></a>
+
 #### `pub fn bounding_rect(&self) -> Rect`
 
 Broad-phase AABB — what goes to the spatial index. Band-inflated.
+
+<a id="sceneregion-as_rect"></a>
 
 #### `pub fn as_rect(&self) -> Option<Rect>`
 
 `Some(rect)` iff this region is an axis-aligned box with no band.
 
+<a id="sceneregion-is_empty"></a>
+
 #### `pub fn is_empty(&self) -> bool`
 
 Whether the region covers nothing at all.
+
+<a id="sceneregion-to_local"></a>
 
 #### `pub fn to_local(&self, scene_to_local: &Transform2D) -> SceneRegion`
 
@@ -656,9 +821,13 @@ door `Scene::items_in_region` comes in by. What is left here is the
 honest answer for a caller who has asked for a mapped region and will
 measure distances in the target frame.
 
+<a id="sceneregion-contains_point"></a>
+
 #### `pub fn contains_point(&self, p: Point) -> bool`
 
 Whether `p` — in the region's own coordinate space — is inside it.
+
+<a id="sceneregion-has_area"></a>
 
 #### `pub fn has_area(&self) -> bool`
 
@@ -670,6 +839,8 @@ exactly this case.
 A filled outline needs at least three points on some subpath to
 enclose anything; two points are a line, which
 `subpaths_contain_point` already declines to fill.
+
+<a id="sceneregion-clearance"></a>
 
 #### `pub fn clearance(&self, p: Point) -> f32`
 

@@ -7,7 +7,41 @@
 showing all items as dots / rects scaled down, with an overlay
 highlighting the currently visible viewport rectangle.
 
-## Use
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`SceneMinimap`](#sceneminimap) — A small thumbnail rendering of a `Scene`'s content, with the live viewport rectangle highlighted |
+| `struct` | [`MinimapReadout`](#minimapreadout) — Where the viewport sits inside the picture the minimap is drawing — the numbers behind the AT node's announced value, as plain fractions |
+
+## Public functions
+
+### `SceneMinimap`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(content_bounds: Rect, viewport: Signal<Rect>)`](#sceneminimap-new) |
+| | **Builder methods** |
+| `Self` | [`size(width: f32, height: f32)`](#sceneminimap-size) |
+| `Self` | [`items(items: Vec<(Rect, Color)>)`](#sceneminimap-items) |
+| `Self` | [`background(color: Color)`](#sceneminimap-background) |
+| `Self` | [`border(border: Option<(Color, f32)>)`](#sceneminimap-border) |
+| `Self` | [`viewport_color(color: Color)`](#sceneminimap-viewport_color) |
+| `Self` | [`content_outline(outline: Option<(Color, f32)>)`](#sceneminimap-content_outline) |
+| `Self` | [`on_click<F>(callback: F)`](#sceneminimap-on_click) |
+| `Self` | [`access_readout<F>(phrasing: F)`](#sceneminimap-access_readout) |
+
+### `MinimapReadout`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(extent: Rect, viewport: Rect, position: Point, coverage: Size)`](#minimapreadout-new) |
+
+## Detailed description
+
+#### Use
 
 ```
 use teksilo_scene::{Scene, SceneView, SceneMinimap};
@@ -40,7 +74,7 @@ scene mutations and rebuild the widget tree (or wire a
 `Signal<Vec<(Rect, Color)>>` if your app needs per-frame
 reactivity).
 
-## Design
+#### Design
 
 Deliberately decoupled from `SceneView`: it doesn't reach into
 the scene model. Instead it consumes a content extent (the rect
@@ -54,7 +88,7 @@ viewport overlay is reactive on its own — the minimap re-paints
 whenever the SceneView's pan / zoom changes, with no manual
 plumbing.
 
-## The projection, and why it expands
+#### The projection, and why it expands
 
 `content_bounds` is a *floor*, not a frame. The rect actually
 projected onto the drawing area is the **effective extent**:
@@ -92,7 +126,7 @@ and the picture shrinks evenly as the extent grows. Expect
 letterbox margins when the widget's aspect ratio differs from the
 extent's.
 
-## The clip
+#### The clip
 
 `paint` clips **everything it emits** — background, outline,
 thumbnails, indicator and the widget's own border — to the widget's
@@ -120,7 +154,7 @@ on the widget wherever the parent placed it. At the root of a tree
 that translation is the identity and the ordering is unobservable,
 which is why the tests exercise a nested, offset minimap too.
 
-## The border is inside the frame
+#### The border is inside the frame
 
 `Canvas::stroke_rect` centres each edge line on the rect boundary,
 so stroking the widget area directly would hang half of the width
@@ -135,7 +169,7 @@ Clamping the width instead was rejected: it would silently render
 something other than what the caller asked for, and it would still
 leave the last half-pixel straddling the edge.
 
-## Accessibility
+#### Accessibility
 
 The minimap's whole job is to say *where you are* and let you go
 somewhere else. Both halves are on the AT node, and the second half
@@ -248,13 +282,11 @@ every AT walk, so it follows a locale change),
 `.access_description(…)` adds long-form context, and the rest of
 `docs/accessibility-overrides.md` applies unchanged.
 
-## Builder methods at a glance
-
-`size`, `items`, `background`, `border`, `viewport_color`, `content_outline`, `on_click`, `access_readout`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="sceneminimap"></a>
 
 ## `pub struct SceneMinimap`
 
@@ -277,15 +309,21 @@ pub struct SceneMinimap { /* fields */ }
 
 ### Methods
 
+<a id="sceneminimap-new"></a>
+
 #### `pub fn new(content_bounds: Rect, viewport: Signal<Rect>) -> Self`
 
 Construct a minimap that shows at least `content_bounds` (the
 scene-coord extent guaranteed to be visible), with `viewport`
 driving the live overlay rectangle.
 
+<a id="sceneminimap-size"></a>
+
 #### `pub fn size(mut self, width: f32, height: f32) -> Self`
 
 Override the minimap size. Default `200×150`.
+
+<a id="sceneminimap-items"></a>
 
 #### `pub fn items(mut self, items: Vec<(Rect, Color)>) -> Self`
 
@@ -298,9 +336,13 @@ Item rects widen the projected extent, so a thumbnail outside
 a stale or hand-picked `content_bounds` shrinks the picture
 instead of painting outside the frame.
 
+<a id="sceneminimap-background"></a>
+
 #### `pub fn background(mut self, color: Color) -> Self`
 
 Background fill color. Default semi-transparent white.
+
+<a id="sceneminimap-border"></a>
 
 #### `pub fn border(mut self, border: Option<(Color, f32)>) -> Self`
 
@@ -314,9 +356,13 @@ outer rim of the picture instead of the sibling next door, and
 the width is honoured as given rather than clamped. A width that
 is not finite and positive draws nothing.
 
+<a id="sceneminimap-viewport_color"></a>
+
 #### `pub fn viewport_color(mut self, color: Color) -> Self`
 
 Color of the viewport overlay rectangle. Default solid blue.
+
+<a id="sceneminimap-content_outline"></a>
 
 #### `pub fn content_outline(mut self, outline: Option<(Color, f32)>) -> Self`
 
@@ -328,6 +374,8 @@ The outline tracks `content_bounds` *through the projection*,
 so once the viewport wanders off it the outline visibly
 shrinks and offsets — that is the cue. A width that is not
 finite and positive draws nothing.
+
+<a id="sceneminimap-on_click"></a>
 
 #### `pub fn on_click<F>(mut self, callback: F) -> Self where F: Fn(Point, &mut EventContext) + 'static,`
 
@@ -361,6 +409,8 @@ not a recomputed one — so click-to-recentre lands on what the user is
 looking at, even while the viewport is off the content or the parent
 handed the minimap less room than it asked for.
 
+<a id="sceneminimap-access_readout"></a>
+
 #### `pub fn access_readout<F>(mut self, phrasing: F) -> Self where F: Fn(MinimapReadout) -> LocalizedString + 'static,`
 
 Phrase the accessible readout yourself.
@@ -375,6 +425,8 @@ coordinates. The default is English, built by the same numbers.
 One closure for both the value and the announcement on purpose: they
 are the same sentence read at two moments, and two hooks would let
 them disagree.
+
+<a id="minimapreadout"></a>
 
 ## `pub struct MinimapReadout`
 
@@ -395,6 +447,8 @@ pub struct MinimapReadout { /* fields */ }
 ```
 
 ### Methods
+
+<a id="minimapreadout-new"></a>
 
 #### `pub fn new(extent: Rect, viewport: Rect, position: Point, coverage: Size) -> Self`
 

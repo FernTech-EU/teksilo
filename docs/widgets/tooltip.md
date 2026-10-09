@@ -7,6 +7,20 @@
 
 Tooltip system — hover-triggered overlays with configurable delay.
 
+## Public functions
+
+### `TooltipWidget`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(text: impl Into<LocalizedString>)`](#tooltipwidget-new) |
+| `Self` | [`bound(text: impl Into<Prop<String>>)`](#tooltipwidget-bound) |
+| | **Builder methods** |
+| `Self` | [`style(style: impl teksilo_core::styles::TooltipStyle)`](#tooltipwidget-style) |
+
+## Detailed description
+
 Three tiers, increasing in expressive power:
 
 - `TooltipWidget` — single line of localized text in a themed
@@ -33,7 +47,7 @@ tracking, and dwell-promotion timer in `teksilo-core`. The per-widget
 setters (`.tooltip` / `.rich_tooltip` / `.composite_tooltip`) are
 mutually exclusive (last-one-wins): each setter clears the others.
 
-## Example — plain tooltip
+#### Example — plain tooltip
 
 ```rust
 # use teksilo_widgets::tooltip::TooltipWidget;
@@ -49,13 +63,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![TooltipWidget at Touch density](img/tooltip-touch.png)
 
-## Builder methods at a glance
-
-`bound`, `style`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/tooltip/index.html)
+
+<a id="tooltipwidget"></a>
 
 ## `pub struct TooltipWidget`
 
@@ -74,11 +86,15 @@ pub struct TooltipWidget { /* fields */ }
 
 ### Methods
 
+<a id="tooltipwidget-new"></a>
+
 #### `pub fn new(text: impl Into<LocalizedString>) -> Self`
 
 Construct a tooltip from a localized string. With an `I18nManager`
 installed the body stays locale-reactive (re-resolves on locale
 change); otherwise it's a static snapshot.
+
+<a id="tooltipwidget-bound"></a>
 
 #### `pub fn bound(text: impl Into<Prop<String>>) -> Self`
 
@@ -89,6 +105,8 @@ reused across many anchors and its text is set just before each
 show. Callers wanting locale reactivity should resolve their
 `LocalizedString` against the active locale when setting the
 signal.
+
+<a id="tooltipwidget-style"></a>
 
 #### `pub fn style(mut self, style: impl teksilo_core::styles::TooltipStyle) -> Self`
 

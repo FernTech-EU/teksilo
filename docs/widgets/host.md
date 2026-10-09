@@ -5,6 +5,25 @@
 
 `ToastHost` — invisible sibling widget that owns the toast queue.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`ToastInstallOptions`](#toastinstalloptions) — Configuration for the installed `ToastHost` |
+| `struct` | [`ToastHost`](#toasthost) — Invisible sibling widget that owns the toast queue |
+
+## Public functions
+
+### `ToastHost`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(registry: ToastRegistry, options: ToastInstallOptions)`](#toasthost-new) |
+| `Self` | [`wrapping(_user_root: WidgetId, registry: ToastRegistry, options: ToastInstallOptions)`](#toasthost-wrapping) |
+
+## Detailed description
+
 Installed by `install_toast(opts)` in the `teksilo` umbrella. The
 umbrella's `TeksiloAppBuilderToastExt::install_toast` registers a
 `DefaultPostRoot` closure that wraps
@@ -44,13 +63,11 @@ nothing in a given rebuild just produces zero new surfaces, which
 is cheap and lets one shared queue serve every window without a
 per-window registry.
 
-## Builder methods at a glance
-
-`wrapping`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/toast/host/index.html)
+
+<a id="toastinstalloptions"></a>
 
 ## `pub struct ToastInstallOptions`
 
@@ -60,6 +77,8 @@ Configuration for the installed `ToastHost`. Passed to
 ```rust
 pub struct ToastInstallOptions { /* fields */ }
 ```
+
+<a id="toasthost"></a>
 
 ## `pub struct ToastHost`
 
@@ -77,10 +96,14 @@ pub struct ToastHost { /* fields */ }
 
 ### Methods
 
+<a id="toasthost-new"></a>
+
 #### `pub fn new(registry: ToastRegistry, options: ToastInstallOptions) -> Self`
 
 Construct a host bound to the given registry. Add to the tree
 alongside the user root inside a `ZStack`.
+
+<a id="toasthost-wrapping"></a>
 
 #### `pub fn wrapping( _user_root: WidgetId, registry: ToastRegistry, options: ToastInstallOptions, ) -> Self`
 

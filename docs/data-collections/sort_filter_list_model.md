@@ -5,6 +5,38 @@
 
 Composable sort + filter projection over a flat list source.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`SortDirection`](#sortdirection) — Sort direction emitted by `TableView` / `TreeTableView` headers and consumed by sort projections |
+| `struct` | [`SortFilterListModel`](#sortfilterlistmodel) — Flat list source projecting an upstream `ListModel<T>` / `ListDataSource<Item = T>` through sort + filter |
+
+## Public functions
+
+### `SortFilterListModel`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(model: ListModel<T>)`](#sortfilterlistmodel-new) |
+| `Self` | [`from_source<S: ListDataSource<Item = T>>(source: S)`](#sortfilterlistmodel-from_source) |
+| | **Builder methods** |
+| `Self` | [`with_comparator(col_id: impl Into<String>, cmp: impl Fn(&T, &T) -> Ordering + 'static)`](#sortfilterlistmodel-with_comparator) |
+| `Self` | [`with_predicate(col_id: impl Into<String>, factory: impl Fn(&str) -> Box<dyn Fn(&T) -> bool> + 'static)`](#sortfilterlistmodel-with_predicate) |
+| | **Methods** |
+|  | [`sort_signal(signal: Signal<Option<(String, SortDirection)>>)`](#sortfilterlistmodel-sort_signal) |
+|  | [`filters_signal(signal: Signal<HashMap<String, String>>)`](#sortfilterlistmodel-filters_signal) |
+|  | [`set_sort(col_id: Option<&str>, dir: SortDirection)`](#sortfilterlistmodel-set_sort) |
+|  | [`clear_sort()`](#sortfilterlistmodel-clear_sort) |
+|  | [`set_filter(col_id: &str, text: &str)`](#sortfilterlistmodel-set_filter) |
+|  | [`clear_filters()`](#sortfilterlistmodel-clear_filters) |
+| `Option<usize>` | [`first_changed_index()`](#sortfilterlistmodel-first_changed_index) |
+| `Option<usize>` | [`source_index_of(visible: usize)`](#sortfilterlistmodel-source_index_of) |
+| `Option<usize>` | [`visible_index_of(source: usize)`](#sortfilterlistmodel-visible_index_of) |
+
+## Detailed description
+
 `SortFilterListModel<T>` wraps a `ListModel<T>` or any
 `ListDataSource<Item = T>` and exposes a `ListDataSource<Item = T>`
 whose visible item order is determined by:
@@ -18,7 +50,7 @@ Filter is applied first, sort second. The result is a flat reactive view
 that drops directly into `TableView`, `ListView`, or `Repeater` via
 `from_source(...)`.
 
-## Reactivity
+#### Reactivity
 
 Three independent change vectors trigger a rebuild of the visible-index
 map:
@@ -28,7 +60,7 @@ map:
   translating fine-grained inserts / removes / moves through a sort
   projection is correctness-fragile (an item's sort key can move it to a
   different visible row), so `Reset` is the safe default contract. The
-  one exception is [`DataChange::ItemUpdated`]: the proxy re-evaluates
+  one exception is `DataChange::ItemUpdated`: the proxy re-evaluates
   just that row's filter verdict and its position against its current
   visible neighbours (not the whole list), and if neither changed,
   forwards a scoped `ItemUpdated` at the mapped visible index instead of
@@ -39,7 +71,7 @@ map:
 - A bound sort signal updates: rebuild and emit `Reset`.
 - A bound filters signal updates: rebuild and emit `Reset`.
 
-## Selection semantics
+#### Selection semantics
 
 Selection on a sorted/filtered view is naturally tracked by **visible
 index**, not by item identity. After a projection rebuild, a downstream
@@ -74,13 +106,11 @@ proxy.set_filter("name", "a");
 assert_eq!(proxy.len(), 2); // Alice, Carol
 ```
 
-## Builder methods at a glance
-
-`from_source`, `with_comparator`, `with_predicate`, `sort_signal`, `filters_signal`, `set_sort`, `clear_sort`, `set_filter`, `clear_filters`, `first_changed_index`, `source_index_of`, `visible_index_of`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/sort_filter_list_model/index.html)
+
+<a id="sortdirection"></a>
 
 ## `pub enum SortDirection`
 
@@ -95,6 +125,8 @@ pub enum SortDirection { /* variants */ }
 - **`Ascending`** — Sort from smallest to largest (A → Z, 0 → 9).
 - **`Descending`** — Sort from largest to smallest (Z → A, 9 → 0).
 
+<a id="sortfilterlistmodel"></a>
+
 ## `pub struct SortFilterListModel`
 
 Flat list source projecting an upstream `ListModel<T>` /
@@ -108,17 +140,25 @@ pub struct SortFilterListModel<T: 'static> { /* fields */ }
 
 ### Methods
 
+<a id="sortfilterlistmodel-new"></a>
+
 #### `pub fn new(model: ListModel<T>) -> Self`
 
 Wrap a `ListModel<T>`.
+
+<a id="sortfilterlistmodel-from_source"></a>
 
 #### `pub fn from_source<S: ListDataSource<Item = T>>(source: S) -> Self`
 
 Wrap any `ListDataSource<Item = T>`.
 
+<a id="sortfilterlistmodel-with_comparator"></a>
+
 #### `pub fn with_comparator( self, col_id: impl Into<String>, cmp: impl Fn(&T, &T) -> Ordering + 'static, ) -> Self`
 
 Register a comparator for a column id. Chainable.
+
+<a id="sortfilterlistmodel-with_predicate"></a>
 
 #### `pub fn with_predicate( self, col_id: impl Into<String>, factory: impl Fn(&str) -> Box<dyn Fn(&T) -> bool> + 'static, ) -> Self`
 
@@ -126,10 +166,14 @@ Register a predicate factory for a column id. The factory receives the
 current filter text (empty = no filter, never invoked) and returns a
 boxed predicate evaluated against each row. Chainable.
 
+<a id="sortfilterlistmodel-sort_signal"></a>
+
 #### `pub fn sort_signal(&self, signal: Signal<Option<(String, SortDirection)>>)`
 
 Bind a sort signal — typically `TableView::sort_signal()`. Updates
 re-project the view. The current value is read once at bind time.
+
+<a id="sortfilterlistmodel-filters_signal"></a>
 
 #### `pub fn filters_signal(&self, signal: Signal<HashMap<String, String>>)`
 
@@ -137,24 +181,34 @@ Bind a filters signal — typically `TableView::filters_signal()`.
 Updates re-project the view. The current value is read once at bind
 time.
 
+<a id="sortfilterlistmodel-set_sort"></a>
+
 #### `pub fn set_sort(&self, col_id: Option<&str>, dir: SortDirection)`
 
 Set the active sort imperatively. If a sort signal is bound this
 writes through the signal; otherwise it mutates internal state and
 emits `DataChange::Reset` directly.
 
+<a id="sortfilterlistmodel-clear_sort"></a>
+
 #### `pub fn clear_sort(&self)`
 
 Clear the active sort.
+
+<a id="sortfilterlistmodel-set_filter"></a>
 
 #### `pub fn set_filter(&self, col_id: &str, text: &str)`
 
 Set or clear a single column's filter. An empty `text` removes the
 entry. If a filters signal is bound this writes through the signal.
 
+<a id="sortfilterlistmodel-clear_filters"></a>
+
 #### `pub fn clear_filters(&self)`
 
 Clear every column's filter.
+
+<a id="sortfilterlistmodel-first_changed_index"></a>
 
 #### `pub fn first_changed_index(&self) -> Option<usize>`
 
@@ -173,9 +227,13 @@ on every rebuild, so per-change reads cannot miss a value). The
 `DataChange::Reset` contract for observers is unchanged — this is
 a side-channel for consumers that can exploit a valid prefix.
 
+<a id="sortfilterlistmodel-source_index_of"></a>
+
 #### `pub fn source_index_of(&self, visible: usize) -> Option<usize>`
 
 Map a visible (post sort+filter) index to its source index.
+
+<a id="sortfilterlistmodel-visible_index_of"></a>
 
 #### `pub fn visible_index_of(&self, source: usize) -> Option<usize>`
 

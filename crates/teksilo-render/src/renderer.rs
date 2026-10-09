@@ -6,8 +6,13 @@ use wgpu;
 use teksilo_canvas::RenderFrame;
 use teksilo_canvas::geometry::Transform2D;
 
+use teksilo_canvas::live_image::LiveTextureStats;
+use teksilo_canvas::live_image::internal::{LivePass, LivePassMode, QuadDecision};
+
 use crate::blur::{BlurPipelines, BlurPool};
+use crate::device_health::DeviceHealth;
 use crate::image_manager::ImageManager;
+use crate::live_texture::WgpuBackend;
 use crate::path_atlas::PathAtlas;
 use crate::stream_buffer::StreamBuffers;
 use crate::vertex::{AnimQuadVertex, QuadVertex, RectVertex, SdfVertex, ShadowVertex};
@@ -84,6 +89,25 @@ pub struct Renderer {
     /// the over-allocated bucket texture's used sub-rect samples
     /// cleanly when composited onto a non-aligned target rect.
     blur_composite_sampler: wgpu::Sampler,
+    /// Live pictures: one texture per source the last frame drew, kept by
+    /// the live pass, which runs on every render before anything draws.
+    live: LivePass<WgpuBackend>,
+    /// The live pass's timing histograms.
+    #[cfg(any(debug_assertions, feature = "live-image-timings"))]
+    live_timings: crate::live_timings::LiveTimingRings,
+    /// This renderer's last submission: what a texture it dropped may still
+    /// be used by, for the reclaim poll.
+    last_submission: Option<wgpu::SubmissionIndex>,
+}
+
+impl Drop for Renderer {
+    /// Every texture this renderer holds goes with it: a window closing
+    /// frees its live textures without waiting for another window's frame.
+    fn drop(&mut self) {
+        if let Some(submission) = self.last_submission.take() {
+            crate::gpu_reclaim::flag_device(self.live.backend().health(), &self.device, submission);
+        }
+    }
 }
 
 struct AtlasTexture {
@@ -163,11 +187,29 @@ struct PendingComposite {
 }
 
 impl Renderer {
-    /// Create a new renderer from an existing wgpu device and queue.
+    /// Create a new renderer from an existing wgpu device and queue. It
+    /// installs the device's lost-device latch: a device shared by several
+    /// renderers opens one latch where it is opened and builds each renderer
+    /// with [`with_device_health`](Self::with_device_health).
     pub fn new(
         device: wgpu::Device,
         queue: wgpu::Queue,
         surface_format: wgpu::TextureFormat,
+    ) -> Self {
+        let health = DeviceHealth::install(&device);
+        Self::with_device_health(device, queue, surface_format, health)
+    }
+
+    /// [`new`](Self::new), on a device whose lost-device latch `health` is,
+    /// installed once where the device was opened. Renderers built with one
+    /// latch and drawn on one thread share their live pictures' uploads: one
+    /// whose texture lacks a commit another already holds copies that
+    /// texture on the device rather than upload the frame again.
+    pub fn with_device_health(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        surface_format: wgpu::TextureFormat,
+        health: DeviceHealth,
     ) -> Self {
         // Read once, here: the atlases grow to a compiled-in ceiling that the
         // device may not be able to honour.
@@ -212,6 +254,15 @@ impl Renderer {
             ..Default::default()
         });
 
+        let live_textures = health.live_textures().clone();
+        let mut live = LivePass::new(WgpuBackend::new(
+            device.clone(),
+            queue.clone(),
+            quad_bind_group_layout.clone(),
+            health,
+        ));
+        live.join_device(&live_textures);
+
         Self {
             device,
             queue,
@@ -238,6 +289,10 @@ impl Renderer {
             blur_pool,
             quad_bind_group_layout,
             blur_composite_sampler,
+            live,
+            #[cfg(any(debug_assertions, feature = "live-image-timings"))]
+            live_timings: crate::live_timings::LiveTimingRings::new(),
+            last_submission: None,
         }
     }
 
@@ -349,6 +404,10 @@ impl Renderer {
     }
 
     /// Render a frame to the given surface texture view.
+    ///
+    /// Live pictures first: the live pass uploads what this window's
+    /// textures lack, under each source's lock, without waiting longer than
+    /// about one refresh for a producer.
     pub fn render(
         &mut self,
         frame: &RenderFrame,
@@ -357,6 +416,166 @@ impl Renderer {
         viewport_width: u32,
         viewport_height: u32,
         clear_color: [f32; 4],
+    ) {
+        self.render_frame(
+            frame,
+            view,
+            scale_factor,
+            viewport_width,
+            viewport_height,
+            clear_color,
+            LivePassMode::Present,
+        );
+    }
+
+    /// [`render`](Self::render) for a screenshot: the frame as the window's
+    /// next one will show it. Each live picture shows its latest commit,
+    /// whatever a producer's lock or a pause says, and every band of a large
+    /// frame is written before the draw. It counts as a capture, not as a
+    /// frame drawn, and tells no producer its frame was displayed.
+    pub fn render_capture(
+        &mut self,
+        frame: &RenderFrame,
+        view: &wgpu::TextureView,
+        scale_factor: f32,
+        viewport_width: u32,
+        viewport_height: u32,
+        clear_color: [f32; 4],
+    ) {
+        self.render_frame(
+            frame,
+            view,
+            scale_factor,
+            viewport_width,
+            viewport_height,
+            clear_color,
+            LivePassMode::Capture,
+        );
+    }
+
+    /// What this renderer holds and did for live pictures.
+    pub fn live_texture_stats(&self) -> LiveTextureStats {
+        self.live.stats()
+    }
+
+    /// How long the live pass has taken: one render's pass for a frame that
+    /// draws a live picture, each hold of a source's lock, and each upload's
+    /// delay from its commit, each over its latest 1,024 samples. In debug
+    /// builds and with the `live-image-timings` feature.
+    #[cfg(any(debug_assertions, feature = "live-image-timings"))]
+    pub fn live_texture_timings(&self) -> crate::LiveImageTimings {
+        self.live_timings.timings()
+    }
+
+    /// What the last render decided for each of its frame's live quads, in
+    /// order: what a screenshot reports of them.
+    #[doc(hidden)]
+    pub fn live_image_decisions(&self) -> &[QuadDecision] {
+        self.live.decisions()
+    }
+
+    /// About how long a presented frame waits for a producer holding a live
+    /// image's lock: one refresh of the display the window is on.
+    #[doc(hidden)]
+    pub fn set_live_refresh_interval(&mut self, interval: std::time::Duration) {
+        self.live.set_refresh_interval(interval);
+    }
+
+    /// The refresh interval last set.
+    #[doc(hidden)]
+    pub fn live_refresh_interval(&self) -> std::time::Duration {
+        self.live.refresh_interval()
+    }
+
+    /// Test hooks for the live pass: the largest side it accepts, the
+    /// staging one write and one frame may take, the parked pool's budget,
+    /// and a texture creation that reports no memory.
+    #[doc(hidden)]
+    pub fn set_live_max_dimension(&mut self, max: u32) {
+        self.live.backend_mut().set_max_dimension(max);
+    }
+
+    #[doc(hidden)]
+    pub fn set_live_band_bytes(&mut self, bytes: u64) {
+        self.live.set_band_bytes(bytes);
+    }
+
+    #[doc(hidden)]
+    pub fn set_live_staging_budget(&mut self, bytes: u64) {
+        self.live.set_staging_budget(bytes);
+    }
+
+    #[doc(hidden)]
+    pub fn set_live_park_budget(&mut self, bytes: u64) {
+        self.live.set_park_budget(bytes);
+    }
+
+    #[doc(hidden)]
+    pub fn fail_next_live_texture(&mut self) {
+        self.live.backend_mut().fail_next_create();
+    }
+
+    /// Test hooks for the live pass's staging: what the pool holds and did,
+    /// how long an unused chunk lives, and a chunk creation that reports no
+    /// memory (the upload then goes through `write_texture`).
+    #[doc(hidden)]
+    pub fn live_staging_stats(&self) -> crate::live_staging::StagingStats {
+        self.live.backend().staging_stats()
+    }
+
+    #[doc(hidden)]
+    pub fn set_live_staging_idle_lifetime(&mut self, lifetime: std::time::Duration) {
+        self.live.backend_mut().set_staging_idle_lifetime(lifetime);
+    }
+
+    #[doc(hidden)]
+    pub fn fail_next_live_staging(&mut self) {
+        self.live.backend_mut().fail_next_staging();
+    }
+
+    /// Level `level` of the live texture this renderer holds for source
+    /// `id`, read back as tightly packed RGBA8 with its size; `None` without
+    /// that texture or level. A GPU wait: for tests.
+    #[doc(hidden)]
+    pub fn read_live_texture_level(
+        &self,
+        id: teksilo_canvas::live_image::LiveImageId,
+        level: u32,
+    ) -> Option<(u32, u32, Vec<u8>)> {
+        let texture = self.live.texture(id)?;
+        if level >= texture.levels() {
+            return None;
+        }
+        let (w, h) = texture.size();
+        let (lw, lh) = teksilo_canvas::live_image::internal::mip_level_size(w, h, level);
+        let pixels = crate::test_support::try_read_texture_level_rgba(
+            &self.device,
+            &self.queue,
+            &texture.texture,
+            level,
+            lw,
+            lh,
+        )
+        .ok()?;
+        Some((lw, lh, pixels))
+    }
+
+    /// This renderer's device latch.
+    #[doc(hidden)]
+    pub fn device_health(&self) -> &DeviceHealth {
+        self.live.backend().health()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_frame(
+        &mut self,
+        frame: &RenderFrame,
+        view: &wgpu::TextureView,
+        scale_factor: f32,
+        viewport_width: u32,
+        viewport_height: u32,
+        clear_color: [f32; 4],
+        mode: LivePassMode,
     ) {
         // Begin frame for path atlas LRU tracking
         self.path_atlas.begin_frame();
@@ -390,6 +609,14 @@ impl Renderer {
                 );
             }
         }
+
+        // Live pictures: before anything is recorded, so their writes land in
+        // this submission's pending writes and are sampled by this frame.
+        #[cfg(any(debug_assertions, feature = "live-image-timings"))]
+        let live_started = std::time::Instant::now();
+        self.live.prepare(&frame.live_images, mode);
+        #[cfg(any(debug_assertions, feature = "live-image-timings"))]
+        let live_prepared = live_started.elapsed();
 
         // Pre-rasterize all paths in this frame into the path atlas. Cosmetic
         // (device-space) strokes must rasterize the body at the view zoom
@@ -547,6 +774,18 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("teksilo_render"),
             });
+        // The live pass's copies of other windows' textures, then its mip
+        // rebuilds, before any draw samples them. Its uploads are queue
+        // writes, which run before this submission, and the writes that
+        // filled a texture it copies ran with that window's last one.
+        #[cfg(any(debug_assertions, feature = "live-image-timings"))]
+        let mips_started = std::time::Instant::now();
+        self.live.backend_mut().encode(&mut encoder);
+        #[cfg(any(debug_assertions, feature = "live-image-timings"))]
+        self.live_timings.record(
+            (!frame.live_images.is_empty()).then(|| live_prepared + mips_started.elapsed()),
+            self.live.last_timings(),
+        );
 
         // Per-frame mutable viewport — overridden inside blur scopes
         // (the offscreen intermediate is sized differently from the
@@ -1311,10 +1550,18 @@ impl Renderer {
                                 let min_y = p_tl[1].min(p_tr[1]).min(p_bl[1]).min(p_br[1]);
                                 let max_x = p_tl[0].max(p_tr[0]).max(p_bl[0]).max(p_br[0]);
                                 let max_y = p_tl[1].max(p_tr[1]).max(p_bl[1]).max(p_br[1]);
-                                let x = min_x.max(0.0) as u32;
-                                let y = min_y.max(0.0) as u32;
-                                let w = (max_x - min_x).ceil().max(0.0) as u32;
-                                let h = (max_y - min_y).ceil().max(0.0) as u32;
+                                // From the edges, not origin plus size: a
+                                // clip that starts left of or above the
+                                // target loses that part, and its far edge
+                                // must stay where it is.
+                                let x0 = min_x.floor().max(0.0);
+                                let y0 = min_y.floor().max(0.0);
+                                let x1 = max_x.ceil().max(x0);
+                                let y1 = max_y.ceil().max(y0);
+                                let x = x0 as u32;
+                                let y = y0 as u32;
+                                let w = (x1 - x0) as u32;
+                                let h = (y1 - y0) as u32;
                                 // Clamp to viewport — wgpu requires x+w <= width, y+h <= height.
                                 let x = x.min(viewport_width);
                                 let y = y.min(viewport_height);
@@ -1418,6 +1665,41 @@ impl Renderer {
                                 current_opacity = opacity_stack.pop().unwrap_or(1.0);
                             }
                             teksilo_canvas::DrawCommand::Rasterized(_) => {}
+                            teksilo_canvas::DrawCommand::LiveImage(idx) => {
+                                // Its own bind group, as an image's: flush
+                                // and draw it alone.
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.path_gradient_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    path_gradient_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                self.draw_live_image(
+                                    pass,
+                                    frame,
+                                    *idx,
+                                    scale_factor,
+                                    viewport_width,
+                                    viewport_height,
+                                    current_opacity,
+                                    &current_transform,
+                                    index_binding,
+                                );
+                            }
                             teksilo_canvas::DrawCommand::AnimatedQuad(idx) => {
                                 let Some(draw) = frame.animated_quads.get(*idx) else {
                                     continue;
@@ -1898,7 +2180,87 @@ impl Renderer {
             }
         }
 
-        self.queue.submit(std::iter::once(encoder.finish()));
+        let submission = self.queue.submit(std::iter::once(encoder.finish()));
+        // The staging this frame's uploads used is mapped again; with no
+        // live texture left, it all goes.
+        let idle = self.live.stats().textures == 0;
+        self.live.backend_mut().after_submit(idle);
+        if self.live.backend_mut().take_released() {
+            crate::gpu_reclaim::flag_device(
+                self.live.backend().health(),
+                &self.device,
+                submission.clone(),
+            );
+        }
+        self.last_submission = Some(submission);
+    }
+
+    /// Draw live quad `idx` of `frame` from the texture the live pass kept
+    /// for its source: only when that texture has the quad's painted size,
+    /// so a picture is never stretched across a size change. The corners
+    /// sample `quad.uv`, which carries the orientation and the crop. A quad
+    /// that maps one texel to one device pixel under a transform with no
+    /// rotation or scale is snapped to the pixel grid, as glyphs are, unless
+    /// its draw turned `pixel_snap` off.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_live_image(
+        &self,
+        pass: &mut wgpu::RenderPass,
+        frame: &RenderFrame,
+        idx: usize,
+        scale_factor: f32,
+        viewport_width: u32,
+        viewport_height: u32,
+        opacity: f32,
+        transform: &Transform2D,
+        index_binding: Option<(&wgpu::Buffer, u64, u64)>,
+    ) {
+        let (Some(quad), Some(decision)) =
+            (frame.live_images.get(idx), self.live.decisions().get(idx))
+        else {
+            return;
+        };
+        if !decision.draw {
+            return;
+        }
+        let Some(texture) = self.live.texture(quad.consumer.source().id()) else {
+            return;
+        };
+        let Some(bind_group) = texture.bind_group(quad.filter) else {
+            return;
+        };
+        let format = quad.consumer.source().format();
+        let mut flags = crate::vertex::QUAD_FLAG_COLOR_GLYPH;
+        if format.is_opaque() {
+            flags |= crate::vertex::QUAD_FLAG_OPAQUE;
+        }
+        if format.is_bgr() {
+            flags |= crate::vertex::QUAD_FLAG_SWAP_RB;
+        }
+        let verts = crate::vertex::live_quad_verts(
+            quad,
+            texture.size(),
+            scale_factor,
+            transform,
+            [1.0, 1.0, 1.0, opacity],
+            flags,
+        );
+        let ndc: [QuadVertex; 4] = std::array::from_fn(|i| QuadVertex {
+            position: pixel_to_ndc(verts[i].position, viewport_width, viewport_height),
+            ..verts[i]
+        });
+        let bytes: &[u8] = bytemuck::cast_slice(&ndc);
+        let Some((vb, v_off, v_len)) = self.streams.quad.write(&self.queue, bytes) else {
+            return;
+        };
+        let Some((ib, _, _)) = index_binding else {
+            return;
+        };
+        pass.set_pipeline(&self.quad_pipeline);
+        pass.set_bind_group(0, bind_group, &[]);
+        pass.set_vertex_buffer(0, vb.slice(v_off..v_off + v_len));
+        pass.set_index_buffer(ib.slice(0..24), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..6, 0, 0..1);
     }
 
     // draw_rect, draw_sdf, draw_quad, draw_shadow, draw_path_quad removed —
@@ -2294,14 +2656,16 @@ fn run_kawase_chain(
         let params_offset = pipelines.params.push(queue, &params);
         let bind_group = pool.make_bind_group(device, src_handle, pipelines.params.buffer());
 
-        run_kawase_pass(
+        crate::fullscreen::run_fullscreen_pass(
             encoder,
             &pipelines.down,
             &bind_group,
-            params_offset,
+            &[params_offset],
             pool.view(dst),
             dst_used_w,
             dst_used_h,
+            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            None,
             "kawase_down_pass",
         );
 
@@ -2326,14 +2690,16 @@ fn run_kawase_chain(
         let params_offset = pipelines.params.push(queue, &params);
         let bind_group = pool.make_bind_group(device, src_handle, pipelines.params.buffer());
 
-        run_kawase_pass(
+        crate::fullscreen::run_fullscreen_pass(
             encoder,
             &pipelines.up,
             &bind_group,
-            params_offset,
+            &[params_offset],
             pool.view(dst),
             dst_used_w,
             dst_used_h,
+            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            None,
             "kawase_up_pass",
         );
 
@@ -2347,46 +2713,6 @@ fn run_kawase_chain(
         bucket_w: current.3,
         bucket_h: current.4,
     }
-}
-
-/// Run one full-screen-triangle Kawase pass. The viewport is set to
-/// `(used_w, used_h)` — the destination bucket may be larger but we
-/// only write the upper-left sub-rect that the next pass will sample
-/// from.
-#[allow(clippy::too_many_arguments)]
-fn run_kawase_pass(
-    encoder: &mut wgpu::CommandEncoder,
-    pipeline: &wgpu::RenderPipeline,
-    bind_group: &wgpu::BindGroup,
-    params_offset: u32,
-    target_view: &wgpu::TextureView,
-    used_w: u32,
-    used_h: u32,
-    label: &str,
-) {
-    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some(label),
-        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: target_view,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                store: wgpu::StoreOp::Store,
-            },
-            depth_slice: None,
-        })],
-        depth_stencil_attachment: None,
-        timestamp_writes: None,
-        occlusion_query_set: None,
-        multiview_mask: None,
-    });
-    pass.set_pipeline(pipeline);
-    pass.set_bind_group(0, bind_group, &[params_offset]);
-    // Full-screen triangle covers the whole viewport — restricting the
-    // viewport to the used sub-rect keeps the over-allocated bucket
-    // clean and (more importantly) limits the fragment work.
-    pass.set_viewport(0.0, 0.0, used_w as f32, used_h as f32, 0.0, 1.0);
-    pass.draw(0..3, 0..1);
 }
 
 /// Composite the final blurred intermediate onto the parent target as
@@ -3032,7 +3358,11 @@ pub(crate) fn stream_quad_counts(frame: &RenderFrame) -> StreamQuadCounts {
     StreamQuadCounts {
         rect: frame.decorations.len() + frame.cosmetic_lines.len(),
         sdf: frame.shapes.len(),
-        quad: frame.glyphs.len() + solid_paths + frame.images.len() + composite_quads,
+        quad: frame.glyphs.len()
+            + solid_paths
+            + frame.images.len()
+            + frame.live_images.len()
+            + composite_quads,
         shadow: frame.shadows.len(),
         anim_proc: frame.animated_quads.len(),
         path_gradient: gradient_paths,
@@ -3332,7 +3662,7 @@ mod tests {
         use teksilo_tokens::Color;
 
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_gradient_path_device"),
+            crate::test_support::require_test_renderer("teksilo_render_gradient_path_device"),
         ) else {
             return; // no GPU adapter (headless CI) — skip.
         };
@@ -3427,7 +3757,7 @@ mod tests {
         use teksilo_tokens::Color;
 
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_partial_alpha_device"),
+            crate::test_support::require_test_renderer("teksilo_render_partial_alpha_device"),
         ) else {
             return;
         };
@@ -3493,7 +3823,7 @@ mod tests {
     #[test]
     fn glyph_quad_renders_over_shape_in_offscreen_target() {
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_test_device"),
+            crate::test_support::require_test_renderer("teksilo_render_test_device"),
         ) else {
             return;
         };
@@ -3571,7 +3901,7 @@ mod tests {
         // on the integer grid so linear sampling is exact: interior
         // pixels fully opaque, surrounding pixels fully transparent.
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_snap_test_device"),
+            crate::test_support::require_test_renderer("teksilo_render_snap_test_device"),
         ) else {
             return;
         };
@@ -3663,7 +3993,7 @@ mod tests {
     #[test]
     fn fractional_origin_path_renders_pixel_exact() {
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_path_snap_test_device"),
+            crate::test_support::require_test_renderer("teksilo_render_path_snap_test_device"),
         ) else {
             return;
         };
@@ -3778,7 +4108,7 @@ mod tests {
     fn a_blur_scope_does_not_take_the_kernel_of_a_later_one() {
         use teksilo_canvas::Rect;
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_blur_isolation_device"),
+            crate::test_support::require_test_renderer("teksilo_render_blur_isolation_device"),
         ) else {
             return; // no GPU adapter (headless CI) — skip.
         };
@@ -3822,7 +4152,7 @@ mod tests {
     #[test]
     fn each_kawase_pass_gets_its_own_parameter_slot() {
         let Some((_renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_blur_slots_device"),
+            crate::test_support::require_test_renderer("teksilo_render_blur_slots_device"),
         ) else {
             return; // no GPU adapter (headless CI) — skip.
         };
@@ -3928,7 +4258,7 @@ mod tests {
     fn a_clip_under_a_translation_lands_where_the_content_does_at_fractional_scale() {
         use teksilo_canvas::Rect;
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_clip_translate_device"),
+            crate::test_support::require_test_renderer("teksilo_render_clip_translate_device"),
         ) else {
             return; // no GPU adapter (headless CI) — skip.
         };
@@ -3963,7 +4293,7 @@ mod tests {
     fn a_clip_still_applies_after_a_blur_scope_reopens_the_pass() {
         use teksilo_canvas::Rect;
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_clip_after_blur_device"),
+            crate::test_support::require_test_renderer("teksilo_render_clip_after_blur_device"),
         ) else {
             return; // no GPU adapter (headless CI) — skip.
         };
@@ -3992,7 +4322,7 @@ mod tests {
     fn a_clip_set_before_a_blur_scope_does_not_clip_inside_its_intermediate() {
         use teksilo_canvas::Rect;
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_clip_into_blur_device"),
+            crate::test_support::require_test_renderer("teksilo_render_clip_into_blur_device"),
         ) else {
             return; // no GPU adapter (headless CI) — skip.
         };
@@ -4019,5 +4349,66 @@ mod tests {
             "the blurred square shows at the centre of the scope, got {:?}",
             px(38, 8)
         );
+    }
+
+    #[test]
+    fn a_clip_opened_inside_a_blur_scope_stays_in_the_intermediates_space() {
+        use teksilo_canvas::Rect;
+        let Some((mut renderer, device, queue)) = pollster::block_on(
+            crate::test_support::require_test_renderer("teksilo_render_clip_inside_blur_device"),
+        ) else {
+            return; // no GPU adapter (headless CI) — skip.
+        };
+        // The surface clip (x 30..64) is open when the scope at x 30 begins.
+        // Inside the scope a clip covering the whole scope is opened and
+        // closed around the square, then the square is drawn again. With a
+        // single clip stack the inner clip would be intersected with the
+        // surface rect (x >= 30, which in the intermediate's own coordinates
+        // cuts away everything), and closing it would restore that surface
+        // rect onto the intermediate pass.
+        let mut frame = RenderFrame::new();
+        frame
+            .draw_order
+            .push(DrawCommand::SetClip(Rect::new(30.0, 0.0, 34.0, 32.0)));
+        let scope = Rect::new(30.0, 0.0, 16.0, 16.0);
+        frame.draw_order.push(DrawCommand::BeginBlurredSubtree {
+            bounds: scope,
+            radius: 2.0,
+        });
+        frame.draw_order.push(DrawCommand::SetClip(scope));
+        push_white_rect(&mut frame, Rect::new(32.0, 2.0, 12.0, 12.0));
+        frame.draw_order.push(DrawCommand::ClearClip);
+        push_white_rect(&mut frame, Rect::new(32.0, 2.0, 12.0, 12.0));
+        frame.draw_order.push(DrawCommand::EndBlurredSubtree);
+        frame.draw_order.push(DrawCommand::ClearClip);
+
+        let px = render_scaled(&mut renderer, &device, &queue, &frame, 1.0, (64, 32));
+        assert!(
+            px(38, 8)[3] > 128,
+            "the square drawn inside the scope shows, got {:?}",
+            px(38, 8)
+        );
+    }
+
+    #[test]
+    fn a_clip_that_starts_before_the_target_keeps_its_far_edge() {
+        use teksilo_canvas::Rect;
+        let Some((mut renderer, device, queue)) = pollster::block_on(
+            crate::test_support::require_test_renderer("teksilo_render_clip_negative_device"),
+        ) else {
+            return; // no GPU adapter (headless CI) — skip.
+        };
+        // A clip spanning x -10..20, as a clipping widget scrolled partly
+        // off the leading edge has. Its visible part is 0..20.
+        let mut frame = RenderFrame::new();
+        frame
+            .draw_order
+            .push(DrawCommand::SetClip(Rect::new(-10.0, 0.0, 30.0, 20.0)));
+        push_white_rect(&mut frame, Rect::new(0.0, 0.0, 64.0, 20.0));
+        frame.draw_order.push(DrawCommand::ClearClip);
+
+        let px = render_scaled(&mut renderer, &device, &queue, &frame, 1.0, (64, 32));
+        assert_eq!(px(18, 10)[3], 255, "inside the clip");
+        assert_eq!(px(24, 10)[3], 0, "past the clip's far edge");
     }
 }

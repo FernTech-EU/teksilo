@@ -208,6 +208,19 @@ impl WidgetTree {
         })
     }
 
+    /// Whether [`deliver_accessibility`](Self::deliver_accessibility) would
+    /// hand the adapter anything it does not already hold: the tree changed
+    /// since the last delivery (a walk with new content, a node moved), the
+    /// window's focus changed, or nothing was delivered yet. When it would
+    /// not, a delivery hands the adapter a copy of what it has, which it
+    /// compares node by node to find nothing. `window_focused` as for
+    /// `deliver_accessibility`; read after this frame's
+    /// [`sync_accessibility`](Self::sync_accessibility).
+    #[doc(hidden)]
+    pub fn accessibility_delivery_owed(&self, window_focused: bool) -> bool {
+        self.cached_a11y.is_none() || self.adapter_ids.owes(window_focused)
+    }
+
     /// An action a platform adapter asked for, with its node ids back in the
     /// tree's own. `None` when it names an id that
     /// [`deliver_accessibility`](Self::deliver_accessibility) handed out once
@@ -1682,6 +1695,67 @@ mod tests {
         let _ = tree.sync_accessibility();
 
         assert_eq!(tree.at_version().get(), version);
+    }
+
+    /// A delivery owes the adapter nothing once it holds the tree as it is,
+    /// and something after a move, new content, or the window's focus
+    /// changing. teksilo-app delivers, and asks for a frame to deliver a
+    /// held-back update, only while something is owed.
+    #[test]
+    fn a_delivery_is_owed_only_for_what_the_adapter_does_not_hold() {
+        let mut tree = WidgetTree::new();
+        let inner = tree.add(FillWidget::new().label("Row"));
+        let offset = crate::signal::Signal::new(0.0f32);
+        let root = tree.add(Mover {
+            offset: offset.clone(),
+            child: inner,
+        });
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        assert!(
+            tree.accessibility_delivery_owed(true),
+            "nothing delivered yet"
+        );
+        let _ = tree.deliver_accessibility(true);
+        assert!(!tree.accessibility_delivery_owed(true));
+        assert!(
+            tree.accessibility_delivery_owed(false),
+            "the window's focus changes what the adapter keeps"
+        );
+
+        let _ = tree.sync_accessibility();
+        assert!(
+            !tree.accessibility_delivery_owed(true),
+            "an idle frame owes nothing"
+        );
+
+        offset.set(20.0);
+        tree.arena.mark_needs_layout(root);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        assert!(tree.accessibility_delivery_owed(true), "a move is owed");
+        let _ = tree.deliver_accessibility(true);
+        assert!(!tree.accessibility_delivery_owed(true));
+
+        // A walk that finds the same tree owes nothing either.
+        let walks = tree.a11y_walk_generation();
+        tree.set_theme(crate::presets::intui::dark());
+        let _ = tree.sync_accessibility();
+        assert!(
+            tree.a11y_walk_generation() > walks,
+            "precondition: it walked"
+        );
+        assert!(!tree.accessibility_delivery_owed(true));
+
+        tree.add(FillWidget::new().label("New"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        assert!(
+            tree.accessibility_delivery_owed(true),
+            "new content is owed"
+        );
+        let _ = tree.deliver_accessibility(true);
+        assert!(!tree.accessibility_delivery_owed(true));
     }
 
     #[test]

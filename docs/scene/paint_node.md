@@ -5,6 +5,37 @@
 
 The two paint positions a `SceneView` cannot reach from its own `paint`.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`WetLayer`](#wetlayer) — A surface for content being authored **right now**, which repaints without taking the scene's item bands with it |
+| `struct` | [`WetNode`](#wetnode) — One of a `WetLayer`'s mounted paint nodes, as `WetLayer::nodes` reports it |
+
+## Public functions
+
+### `WetLayer`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(painter: impl Fn(&mut Canvas, &SceneItemPaintContext<'_>) + 'static)`](#wetlayer-new) |
+| | **Methods** |
+|  | [`request_repaint(ctx: &mut teksilo_core::EventContext<'_>)`](#wetlayer-request_repaint) |
+| `Vec<WetNode>` | [`nodes()`](#wetlayer-nodes) |
+
+### `WetNode`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(id: WidgetId, window: Option<teksilo_core::window::TeksiloWindowId>)`](#wetnode-new) |
+| | **Methods** |
+| `WidgetId` | [`id()`](#wetnode-id) |
+| `Option<teksilo_core::window::TeksiloWindowId>` | [`window()`](#wetnode-window) |
+
+## Detailed description
+
 The render walker gives a widget exactly two places to draw: before its
 child subtree (`paint`) and after it (`post_paint`). Those are the
 `Under` and `Over`
@@ -27,7 +58,7 @@ Both nodes are **paint only**, and that is what makes them affordable:
 | left out of `accessibility_children` | the AT tree is bit-identical; an interleaved item keeps the same synthetic node it had in `Under` |
 | not focusable, no handlers | not a Tab stop, so `tab_stops_within` is unchanged |
 
-# Why there is a bridge rather than a `&SceneView`
+### Why there is a bridge rather than a `&SceneView`
 
 A child node cannot borrow its parent widget. Everything the per-item paint
 loop reads is already a cloneable handle on the view — the model, the
@@ -37,12 +68,12 @@ so `ScenePaintBridge` is those handles in a bundle, and
 `paint_band` **and** by these nodes. One implementation, so an interleaved
 item cannot render differently from the same item in `Under`.
 
-# Layer order
+### Layer order
 
 Stated here because it is otherwise implicit in three files:
 
 1. `SceneView::paint` — the app background closure, then the `Under` band
-2. the arena's child walk, sorted by [`PaintKey`]:
+2. the arena's child walk, sorted by `PaintKey`:
    `SceneBandProxy` nodes and heavyweight cards interleaved by `z`
 3. `WetLayerNode` — always the last child, so wet content sits above
    every card and every interleaved item
@@ -57,13 +88,11 @@ the stroke rise one step at the moment it dries; `Interleaved` (or `Under`)
 has no such step, which is the other reason ink belongs in a band of its
 own.
 
-## Builder methods at a glance
-
-`request_repaint`, `nodes`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="wetlayer"></a>
 
 ## `pub struct WetLayer`
 
@@ -137,6 +166,8 @@ pub struct WetLayer(Rc<WetLayerInner>);
 
 ### Methods
 
+<a id="wetlayer-new"></a>
+
 #### `pub fn new(painter: impl Fn(&mut Canvas, &SceneItemPaintContext<'_>) + 'static) -> Self`
 
 A wet surface painted by `painter`, in **scene** coordinates.
@@ -146,6 +177,8 @@ in, and on nothing else. It owns whatever the app is authoring — a
 stroke's points, a rubber-band shape, a live measurement — typically
 through an `Rc<RefCell<…>>` shared with the pointer handler that feeds
 it.
+
+<a id="wetlayer-request_repaint"></a>
 
 #### `pub fn request_repaint(&self, ctx: &mut teksilo_core::EventContext<'_>)`
 
@@ -200,6 +233,8 @@ So this does **not** make one layer in two window-less trees work; it
 makes the attempt fail where it can be seen. Drive each tree's repaint
 itself, from `nodes`.
 
+<a id="wetlayer-nodes"></a>
+
 #### `pub fn nodes(&self) -> Vec<WetNode>`
 
 The nodes this layer paints into — one per mounted view, in mount order,
@@ -212,6 +247,8 @@ question `request_repaint` answers from its context: **which tree** a
 given node belongs to, which is why this reports
 `WetNode::window` beside the id rather than the id alone. With one
 view (the overwhelmingly common case) that is the one tree there is.
+
+<a id="wetnode"></a>
 
 ## `pub struct WetNode`
 
@@ -230,14 +267,20 @@ pub struct WetNode { /* fields */ }
 
 ### Methods
 
+<a id="wetnode-new"></a>
+
 #### `pub fn new(id: WidgetId, window: Option<teksilo_core::window::TeksiloWindowId>) -> Self`
 
 A node report. The framework builds these; the constructor exists so a
 consumer can build one in a test of its own.
 
+<a id="wetnode-id"></a>
+
 #### `pub fn id(&self) -> WidgetId`
 
 The paint node, in the arena of the window below.
+
+<a id="wetnode-window"></a>
 
 #### `pub fn window(&self) -> Option<teksilo_core::window::TeksiloWindowId>`
 

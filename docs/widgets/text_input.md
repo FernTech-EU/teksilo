@@ -7,6 +7,60 @@
 
 `TextInput` — styled single-line text field composite.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`ValidationState`](#validationstate) — Validation state for the text input field |
+| `struct` | [`TextInput`](#textinput) — Styled single-line text input composite |
+
+## Public functions
+
+### `TextInput`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(text: Signal<String>)`](#textinput-new) |
+| | **Builder methods** |
+| `Self` | [`variant(variant: TextInputVariant)`](#textinput-variant) |
+| `Self` | [`style(style: impl TextInputStyle)`](#textinput-style) |
+| `Self` | [`placeholder(text: impl Into<LocalizedString>)`](#textinput-placeholder) |
+| `Self` | [`label(label: impl Into<LocalizedString>)`](#textinput-label) |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#textinput-enabled) |
+| `Self` | [`read_only(read_only: bool)`](#textinput-read_only) |
+| `Self` | [`max_length(max_length: usize)`](#textinput-max_length) |
+| `Self` | [`show_clear_button(show: bool)`](#textinput-show_clear_button) |
+| `Self` | [`min_width(w: f32)`](#textinput-min_width) |
+| `Self` | [`leading_slot(widget: impl Widget + 'static)`](#textinput-leading_slot) |
+| `Self` | [`trailing_slot(widget: impl Widget + 'static)`](#textinput-trailing_slot) |
+| `Self` | [`on_submit_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinput-on_submit_fn) |
+| `Self` | [`on_access_set_value(f: impl Fn(&str, &mut EventContext) -> bool + 'static)`](#textinput-on_access_set_value) |
+| `Self` | [`on_blur_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinput-on_blur_fn) |
+| `Self` | [`char_filter(f: impl Fn(char) -> bool + 'static)`](#textinput-char_filter) |
+| `Self` | [`suffix(text: impl Into<String>)`](#textinput-suffix) |
+| `Self` | [`input_mask(mask: impl Into<String>)`](#textinput-input_mask) |
+| `Self` | [`input_purpose(purpose: crate::primitives::text_input_field::InputPurpose)`](#textinput-input_purpose) |
+| `Self` | [`active_descendant(active: Signal<Option<WidgetId>>)`](#textinput-active_descendant) |
+| `Self` | [`controls(listbox: Signal<Option<WidgetId>>)`](#textinput-controls) |
+| `Self` | [`validator(f: impl Fn(&str) -> crate::primitives::text_input_field::ValidationOutcome + 'static)`](#textinput-validator) |
+| `Self` | [`validation(validation: impl Into<Prop<ValidationState>>)`](#textinput-validation) |
+| `Self` | [`validation_feedback(feedback: Signal<ValidationFeedback>)`](#textinput-validation_feedback) |
+| `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#textinput-tooltip) |
+| `Self` | [`rich_tooltip_key(key: impl Into<String>)`](#textinput-rich_tooltip_key) |
+| `Self` | [`rich_tooltip(content: tooltip::TooltipContent)`](#textinput-rich_tooltip) |
+| `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#textinput-rich_tooltip_content) |
+| `Self` | [`composite_tooltip(content: impl teksilo_core::widget::Widget + 'static)`](#textinput-composite_tooltip) |
+| | **Methods** |
+| `Signal<usize>` | [`caret_position()`](#textinput-caret_position) |
+| `crate::primitives::TextFieldHandle` | [`handle()`](#textinput-handle) |
+| `std::rc::Rc<std::cell::Cell<Option<WidgetId>>>` | [`field_id()`](#textinput-field_id) |
+| `std::rc::Rc<dyn Fn(usize)>` | [`caret_setter()`](#textinput-caret_setter) |
+| `Signal<ValidationFeedback>` | [`validation_feedback_signal()`](#textinput-validation_feedback_signal) |
+| `Signal<String>` | [`text()`](#textinput-text) |
+
+## Detailed description
+
 Wraps the `TextInputField`
 editing primitive in a bordered, padded frame with placeholder
 overlay, validation, optional clear button, and leading/trailing
@@ -19,7 +73,7 @@ Most applications want `TextInput`. Choose
 when you're building a composite of your own that already
 supplies its frame — `SpinBox` is the canonical in-tree example.
 
-# Example
+### Example
 
 ```ignore
 let search = ctx.signal(String::new());
@@ -30,7 +84,7 @@ TextInput::new(search.clone())
     .on_submit_fn(|ctx| ctx.send_intent(AppIntent::Search))
 ```
 
-## Touch and pen
+#### Touch and pen
 
 The trailing clear affordance is 16 dp of paint and a 24 dp target: raising
 its box would widen every field in the workspace at Compact, so the
@@ -51,13 +105,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![TextInput at Touch density](img/text_input-touch.png)
 
-## Builder methods at a glance
-
-`variant`, `style`, `placeholder`, `label`, `enabled`, `read_only`, `max_length`, `show_clear_button`, `min_width`, `leading_slot`, `trailing_slot`, `on_submit_fn`, `on_access_set_value`, `on_blur_fn`, `char_filter`, `suffix`, `input_mask`, `input_purpose`, `active_descendant`, `controls`, `validator`, `caret_position`, `handle`, `field_id`, `caret_setter`, `validation_feedback_signal`, `validation`, `validation_feedback`, `tooltip`, `rich_tooltip_key`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `text`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/text_input/index.html)
+
+<a id="validationstate"></a>
 
 ## `pub enum ValidationState`
 
@@ -76,6 +128,8 @@ pub enum ValidationState { /* variants */ }
 - **`Warning`** — The committed value is suspicious but accepted; `LocalizedString` is shown as a warning.
 - **`Corrected`** — Last commit was auto-corrected; the field's value has already been replaced with the normalized form. The composite renders the message in secondary text and tints the border accent briefly (decay-managed by the framework's frame loop, not a concern of this enum).
 
+<a id="textinput"></a>
+
 ## `pub struct TextInput`
 
 Styled single-line text input composite.
@@ -88,9 +142,13 @@ pub struct TextInput { /* fields */ }
 
 ### Methods
 
+<a id="textinput-new"></a>
+
 #### `pub fn new(text: Signal<String>) -> Self`
 
 Construct a new text input bound to `text`.
+
+<a id="textinput-variant"></a>
 
 #### `pub fn variant(mut self, variant: TextInputVariant) -> Self`
 
@@ -100,6 +158,8 @@ The IntUI default (`crate::styles::RecipeTextInputStyle`) honours
 `Outlined`, `Filled`, and `Bare`; `Underline` falls back to
 `Outlined` until per-side stroke recipes land.
 
+<a id="textinput-style"></a>
+
 #### `pub fn style(mut self, style: impl TextInputStyle) -> Self`
 
 Override the active `TextInputStyle` for this widget instance
@@ -108,9 +168,13 @@ composition, the placeholder layering, the leading / trailing
 slots and the validation strip — the style only paints the
 frame (border / fill / corner radius).
 
+<a id="textinput-placeholder"></a>
+
 #### `pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Set the placeholder text shown when the field is empty.
+
+<a id="textinput-label"></a>
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
@@ -127,22 +191,32 @@ screen reader on every platform.
 Stays locale-reactive: a `tr!(...)` name is re-resolved when the
 locale changes, without a rebuild.
 
+<a id="textinput-enabled"></a>
+
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
 Set the enabled state, statically or reactively. Forwarded to the
 arena and the inner `TextInputField` at build time.
 
+<a id="textinput-read_only"></a>
+
 #### `pub fn read_only(mut self, read_only: bool) -> Self`
 
 Set the field read-only: text is selectable and copyable but not editable.
+
+<a id="textinput-max_length"></a>
 
 #### `pub fn max_length(mut self, max_length: usize) -> Self`
 
 Limit the number of Unicode scalar values the field will accept.
 
+<a id="textinput-show_clear_button"></a>
+
 #### `pub fn show_clear_button(mut self, show: bool) -> Self`
 
 Show or hide the trailing ✕ button that clears the field text. Default: hidden.
+
+<a id="textinput-min_width"></a>
 
 #### `pub fn min_width(mut self, w: f32) -> Self`
 
@@ -151,19 +225,27 @@ Use to express a design width for date / time / phone-number
 fields whose content is well-known and whose collapse to the
 generic 65 dp floor would look out of place.
 
+<a id="textinput-leading_slot"></a>
+
 #### `pub fn leading_slot(mut self, widget: impl Widget + 'static) -> Self`
 
 Set an arbitrary widget in the leading slot (before the text area).
 Typically an `IconButton` or `IconWidget`.
+
+<a id="textinput-trailing_slot"></a>
 
 #### `pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self`
 
 Set an arbitrary widget in the trailing slot (after the text area).
 Typically an `IconButton` or `IconWidget`.
 
+<a id="textinput-on_submit_fn"></a>
+
 #### `pub fn on_submit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Closure invoked on Enter. Forwarded to `TextInputField`.
+
+<a id="textinput-on_access_set_value"></a>
 
 #### `pub fn on_access_set_value( mut self, f: impl Fn(&str, &mut EventContext) -> bool + 'static, ) -> Self`
 
@@ -172,19 +254,27 @@ set. Forwarded 1:1 to `TextInputField::on_access_set_value`, where the
 reasoning lives. Composites whose text projects a typed value —
 `SpinBox`, the date and time editors — install one.
 
+<a id="textinput-on_blur_fn"></a>
+
 #### `pub fn on_blur_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Closure invoked on focus loss. Forwarded to `TextInputField`.
+
+<a id="textinput-char_filter"></a>
 
 #### `pub fn char_filter(mut self, f: impl Fn(char) -> bool + 'static) -> Self`
 
 Per-character input-filter predicate. Forwarded to
 `TextInputField`.
 
+<a id="textinput-suffix"></a>
+
 #### `pub fn suffix(mut self, text: impl Into<String>) -> Self`
 
 Non-editable trailing string (Qt's `QSpinBox::suffix`).
 Forwarded to `TextInputField`.
+
+<a id="textinput-input_mask"></a>
 
 #### `pub fn input_mask(mut self, mask: impl Into<String>) -> Self`
 
@@ -193,11 +283,15 @@ Install an input mask (Qt grammar). Forwarded 1:1 to
 `DateEdit` use this to project the date format pattern
 onto the editing surface.
 
+<a id="textinput-input_purpose"></a>
+
 #### `pub fn input_purpose( mut self, purpose: crate::primitives::text_input_field::InputPurpose, ) -> Self`
 
 Declare the field's semantic `InputPurpose`
 (WCAG 1.3.5), forwarded to the inner `TextInputField` to select a
 specialised AT role (e.g. `Role::EmailInput`).
+
+<a id="textinput-active_descendant"></a>
 
 #### `pub fn active_descendant(mut self, active: Signal<Option<WidgetId>>) -> Self`
 
@@ -207,10 +301,14 @@ Forwarded 1:1 to `TextInputField::active_descendant`, which is where
 it has to land: AT follows the *focused* node's active descendant, and
 the inner field is the focusable one.
 
+<a id="textinput-controls"></a>
+
 #### `pub fn controls(mut self, listbox: Signal<Option<WidgetId>>) -> Self`
 
 Publish a `controls` relation to the listbox this input drives.
 Forwarded 1:1 to `TextInputField::controls`.
+
+<a id="textinput-validator"></a>
 
 #### `pub fn validator( mut self, f: impl Fn(&str) -> crate::primitives::text_input_field::ValidationOutcome + 'static, ) -> Self`
 
@@ -220,6 +318,8 @@ Install a commit-time validator. Forwarded 1:1 to
 `Self::validation_feedback`) to surface the outcome
 in the inline strip.
 
+<a id="textinput-caret_position"></a>
+
 #### `pub fn caret_position(&self) -> Signal<usize>`
 
 Reactive caret position. Mirrors the inner field's
@@ -227,6 +327,8 @@ Reactive caret position. Mirrors the inner field's
 before `ctx.add(text_input)` — used by composing widgets
 (`DateEdit` segment-stepping) that need to know which
 segment Up/Down should step.
+
+<a id="textinput-handle"></a>
 
 #### `pub fn handle(&self) -> crate::primitives::TextFieldHandle`
 
@@ -241,6 +343,8 @@ lose its own Ctrl+Z to whatever the host routed the chord at instead.
 
 Like `caret_setter`, safe to take before `build`:
 the handle reaches the field through a slot the widget fills in.
+
+<a id="textinput-field_id"></a>
 
 #### `pub fn field_id(&self) -> std::rc::Rc<std::cell::Cell<Option<WidgetId>>>`
 
@@ -262,6 +366,8 @@ A host that only needs "focus this input, whichever node that is" wants
 handle at all.
 
 
+<a id="textinput-caret_setter"></a>
+
 #### `pub fn caret_setter(&self) -> std::rc::Rc<dyn Fn(usize)>`
 
 Programmatic caret setter. Mirrors the inner field's
@@ -270,6 +376,8 @@ is a no-op until `build` runs; afterwards it walks the
 inner field's state and moves the document cursor. Capture
 before `ctx.add(text_input)`.
 
+<a id="textinput-validation_feedback_signal"></a>
+
 #### `pub fn validation_feedback_signal(&self) -> Signal<ValidationFeedback>`
 
 Reactive published validation feedback. Mirrors the inner
@@ -277,6 +385,8 @@ field's `TextInputField::validation_feedback_signal`
 after `build`. Composing widgets observe this to compose
 feedback across multiple fields (range editor's
 worse-of-two ladder, etc.).
+
+<a id="textinput-validation"></a>
 
 #### `pub fn validation(mut self, validation: impl Into<Prop<ValidationState>>) -> Self`
 
@@ -290,6 +400,8 @@ A bound `Signal` becomes the shared write target used internally
 preserving the two-way channel this method has always offered. A
 static value seeds a fresh, unshared signal.
 
+<a id="textinput-validation_feedback"></a>
+
 #### `pub fn validation_feedback(mut self, feedback: Signal<ValidationFeedback>) -> Self`
 
 Bridge a `Signal<ValidationFeedback>` (typically from a
@@ -302,19 +414,27 @@ translating outcomes into the composite's display vocabulary:
 - `Corrected { message, .. }` → `ValidationState::Corrected(message)`
 - `Invalid { message }` → `ValidationState::Error(message)`
 
+<a id="textinput-tooltip"></a>
+
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Attach a plain tooltip. Accepts `tr!(...)` or `lit!(...)`.
+
+<a id="textinput-rich_tooltip_key"></a>
 
 #### `pub fn rich_tooltip_key(mut self, key: impl Into<String>) -> Self`
 
 Attach a registry-driven rich tooltip by key. Mutually exclusive with
 `tooltip` and `composite_tooltip` (last call wins).
 
+<a id="textinput-rich_tooltip"></a>
+
 #### `pub fn rich_tooltip(mut self, content: tooltip::TooltipContent) -> Self`
 
 Attach an inline rich tooltip from a pre-built `tooltip::TooltipContent`.
 Mutually exclusive with `tooltip` and `composite_tooltip` (last call wins).
+
+<a id="textinput-rich_tooltip_content"></a>
 
 #### `pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self`
 
@@ -323,10 +443,14 @@ Canonical alias for `Self::rich_tooltip` — matches the name used by
 `Button`, `ComboBox`, and other widgets. Mutually exclusive with
 `tooltip` and `composite_tooltip` (last call wins).
 
+<a id="textinput-composite_tooltip"></a>
+
 #### `pub fn composite_tooltip( mut self, content: impl teksilo_core::widget::Widget + 'static, ) -> Self`
 
 Attach a composite tooltip — third tier, hosting an arbitrary
 widget tree. See `Button::composite_tooltip`.
+
+<a id="textinput-text"></a>
 
 #### `pub fn text(&self) -> Signal<String>`
 

@@ -459,7 +459,8 @@ Notes:
 
 - Framework payload types (file-dialog results, external drag-and-drop events,
   async completions, native-menu choices, WebView and automation-bridge
-  payloads, `CloseWindowRequest`, title-bar synthetics, `RepaintWindowRequest`)
+  payloads, `CloseWindowRequest`, title-bar synthetics, the deprecated
+  `RepaintWindowRequest`)
   are handled *before* this hook and never reach it, so it never has to
   defend against them.
 - It is a **single slot**, like `on_app_event`, a second call replaces the

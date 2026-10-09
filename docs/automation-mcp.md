@@ -30,8 +30,10 @@ Screenshots render offscreen on the tree thread via `pollster::block_on`
 offscreen path the widget previewer's PNG export uses).
 
 **What the stock binary drives.** `teksilo-automation-mcp --headless` builds a
-small *built-in demo* (a heading, two buttons, a text field, a checkbox, plus
-a list-row-in-a-scroller fixture the touch ops' arbitration checks press), it
+small *built-in demo* (a heading, two buttons, a text field, a checkbox, a
+list-row-in-a-scroller fixture the touch ops' arbitration checks press, and a
+96 × 64 live picture whose pixels encode their position and generation, with
+buttons that commit one frame or start a 60 Hz producer), it
 is the toolkit's own conformance harness and a worked reference, **not** your
 app. To headlessly automate *your* app there are two paths:
 
@@ -209,7 +211,7 @@ bridge, the method is the identity. The GUI-free DTO toolkit is available as
 
 The server binary builds from `cargo build -p teksilo-automation-mcp`.
 
-## Tool surface (34 tools)
+## Tool surface (36 tools)
 
 Every tool that changes the UI accepts an optional `settle` argument (see the
 settle model below), and so does `screenshot`, it is catalogued non-mutating,
@@ -218,8 +220,8 @@ no question anyone asked. The two exceptions to the pattern are `advance_clock`,
 which takes only `millis` because it *is* the clock op, and the read-only query
 tools, `snapshot_tree`, `read_node`, `layout_tree`, `inspect_node`,
 `find_node`, `assert_node`, `list_windows`, `query_pointers`, `get_overlays`,
-`get_shortcuts`, `list_live_regions`, `pull_announcements`, which observe
-without touching the tree. Every tool's parameters are `deny_unknown_fields`, so sending `settle`
+`get_shortcuts`, `list_live_regions`, `pull_announcements`, `live_image_stats`,
+`live_image_map`, which observe without touching the tree. Every tool's parameters are `deny_unknown_fields`, so sending `settle`
 where it is not accepted is a hard error, not a silent no-op; that is
 deliberate, since the alternative is a script that believes it settled and
 never did.
@@ -274,15 +276,21 @@ from a plain one, `WidgetEvent::Scroll` carries modifiers precisely so an app
 can implement Ctrl-wheel-to-zoom, so a probe for such a feature must be able
 to send one, not merely a bare wheel.
 
-The sample it injects reports `ScrollSource::Programmatic`, the app scrolled
-itself. A handler that branches on the source (one notch per item for a wheel,
-follow-exactly for a driver) therefore sees a driven scroll for what it is;
-it used to be told `Wheel`, because that is what a source-less legacy scroll
-event lowers to. The *route* is unchanged: only a `TouchPan` walks the pan
-claimants, so a programmatic scroll bubbles from the hovered widget exactly as
-a wheel notch does and no pan claimant competes for it. A probe that wants the
-wheel's own source should turn one, hover the target and inject a real one,
-rather than expect this tool to impersonate hardware.
+The wheel turns at the centre of the node as drawn (the centre of its resolved
+bounds, transforms included, where `right_click` and `drag_node` aim), or at
+`at: [x, y]`, a node-local point: the tool hovers that point first, so the
+widget under it is the one scrolled.
+
+By default the delta is pixels and the sample reports
+`ScrollSource::Programmatic`, the app scrolled itself. A handler that branches
+on the source (one notch per item for a wheel, follow-exactly for a driver)
+therefore sees a driven scroll for what it is; it used to be told `Wheel`,
+because that is what a source-less legacy scroll event lowers to. The *route*
+is the wheel's: only a `TouchPan` walks the pan claimants, so a programmatic
+scroll bubbles from the hovered widget exactly as a wheel notch does and no
+pan claimant competes for it. `lines: true` sends what a wheel notch sends
+instead: a `ScrollDelta::Lines` delta, which the widget turns into rows or text
+lines itself, reported as `ScrollSource::Wheel`.
 
 **Synthetic input**, `inject_pointer`, `right_click`, `inject_key`,
 `type_text`, `type_ime`, `drag_node`, `inject_touch_sequence`, `pinch`,
@@ -300,10 +308,88 @@ because the key really was injected, it just bound to nothing, while
 Control everywhere, for the chords that genuinely are Control on macOS too
 (Ctrl+Tab, a terminal's Ctrl+C).
 
+**Aiming inside a node.** Every coordinate is window-logical px, like node
+`bounds`. `inject_pointer`, `long_press` and each `inject_touch_sequence` step
+also take `node`: then `x` and `y` are local to that node, the position its
+own handlers receive. The tool sends the press at
+`WidgetTree::local_to_window(node, (x, y))`, the inverse of the conversion the
+dispatcher applies before a handler sees a position, so the handler receives
+exactly `(x, y)`, to rounding under a rotation. Adding the node's
+`bounds.x`/`bounds.y` gives the same point only when no transform sits above the
+node: under a `Scale`, a `Rotate` or inside a `SceneView` it lands somewhere
+else. A synthetic node (a scene item, a text run) has no handlers of its own,
+so a point local to it would be local to its owner's frame instead; it is
+refused with `BAD_ARGUMENT`, naming the owner to aim at. A touch sequence
+resolves every node it names before its first step, so one that is missing
+dispatches nothing.
+
+**Aiming at a live picture's pixel.** In place of `x` and `y`, the same three
+tools take `source: [x, y]`, a pixel of the `LiveImage` that `node` names. The
+press lands at the centre of where that source pixel is drawn, whatever the
+fit, the orientation, the device-pixel snapping, the window's scale and any
+transform above the picture. A pixel outside the source is refused with
+`BAD_ARGUMENT`, and so is one the press would not reach, because it would land
+on another widget: cropped out of view by the fit (under `Cover` or `None`),
+past an ancestor's box or clip, or under a widget drawn over the picture. That
+last test is the hit test the press itself takes, for its pointer kind, so a
+grip's wider reach for a finger counts. The refusal names the node the press
+would reach. A node that shows no live picture is
+`BAD_ARGUMENT`, and one not yet laid out is `NO_GEOMETRY`. Give `x` and `y`, or
+`source`: exactly one of the two.
+
+**`type_text` types as a keyboard does.** Each character is one key pressed and
+released, the press carrying the character as its text:
+
+- an ASCII letter is its named key, `A` to `Z`, with Shift held for a capital;
+- a space is Space, a line break (`\n`, `\r` or `\r\n`) is one Enter, a tab is
+  Tab;
+- any other character is that character's key, with no modifier, because which
+  modifier types a symbol depends on the keyboard layout.
+
+So a shortcut on a letter fires as it would under a user's fingers, a widget
+that matches `Key::A` sees an `A`, and a Tab in a field that does not take one
+moves focus. Text that must arrive without keys is committed through the input
+method: `type_ime {commit}`. The same rules are `WidgetTree::type_text`, so a
+widget test and a probe type alike.
+
+**`inject_key` sends one key**, its press then its release. Two arguments
+refine it:
+
+- `text` is what the press types, as a keyboard attaches it. Omitted, it is the
+  platform's own: the control character of Enter, Tab, Space, Backspace and
+  Escape, and nothing for any other key, so `{key: "a"}` alone types nothing.
+- `phase` is `press` (the default), `down` or `up`. A `down` leaves the key held
+  across calls until an `up` releases it, which is how a probe holds a key
+  through other input or repeats its press as a held key repeats. A `text` on an
+  `up` is refused: a release carries none.
+
+A key is named by the name its `Display` gives, which is how `get_shortcuts`
+reports a chord (`Ins`, `Menu`, `F13`), or spelled out (`insert`,
+`contextmenu`); a single character names its own key.
+
 **Introspection**, `get_overlays`, `get_shortcuts`, `list_live_regions`,
 `pull_announcements`
 
 **Time / settle**, `advance_clock`, `settle`, `wait_for_condition`
+
+**Live pictures**, `live_image_stats`, `live_image_map`
+
+- `live_image_stats {node}` returns a `LiveImage`'s counters. `source` has the
+  generation, the displayed generation, commits, wakes and writers.
+  `attachment` has the window generation, frames drawn, captures, uploads,
+  deferred and paused frames, and paints. `textures` has what the window's
+  renderer holds and uploads for live pictures, and `wakes` the window's wake
+  counters. Frames flow when `generation` rises and `window_generation`
+  follows, while `paints` stays flat. Headless, `textures` is absent until the
+  first screenshot creates the renderer, and `wakes` is always absent: there
+  is no window.
+- `live_image_map {node, source?, source_rect?, window?}` returns where the
+  picture lies in the window: `content`, `visible` (the part inside the
+  widget's box), the source and displayed sizes, the orientation and the scale.
+  With `source` it adds `source_point`, the window-logical centre of that
+  pixel. With `source_rect` it adds `source_window_rect`. With `window` it
+  adds `pixel`, the source pixel drawn at that point, or `null` on the
+  letterbox. A picture with no placement yet answers `NO_GEOMETRY`.
 
 **Visual**, `screenshot` (returns an MCP image content block)
 
@@ -345,11 +431,22 @@ cross-widget arbitration off *which device* is pointing, so a probe that can
 only be a mouse cannot reach any of it. Six tools plus one argument close that.
 
 **`inject_pointer` takes a `kind`**, `mouse` (the default), `touch` or `pen`.
-A mouse is the pre-touch path unchanged; a touch or pen builds a real pointer
-sample and enters through the tree's pointer door, so the kind reaches the
-hit test, the per-kind slop, the hover rules and the arbitration. `pen` also
-carries `pressure` (0.0–1.0) and `tilt` (`[tilt_x, tilt_y]` in degrees), the
-axes a digitizer reports. `pressure`, `tilt` and `pointer_id` are **refused on
+A mouse is the pre-touch path; a touch or pen builds a real pointer sample
+and enters through the tree's pointer door, so the kind reaches the hit test,
+the per-kind slop, the hover rules and the arbitration. `pen` also carries
+`pressure` (0.0–1.0) and `tilt` (`[tilt_x, tilt_y]` in degrees), the axes a
+digitizer reports.
+
+Each device reports what its real counterpart does. A mouse holds the buttons
+the previous ops pressed: a `down` adds its button, a `move` keeps what is held,
+an `up` takes its button away, so a handler reading `ctx.pointer().buttons`
+mid-drag sees the button and `query_pointers` shows the mouse down. A finger or
+a stylus carries the W3C `primary` flag the platform translator gives it: a
+finger is primary when no other finger is live, a stylus when no finger is. The
+flag is decided when the pointer arrives and kept for its life, so the second
+finger of a gesture is not promoted when the first lifts. That matters to a
+widget that serves only the primary contact, such as a splitter or a dock
+handle. `pressure`, `tilt` and `pointer_id` are **refused on
 a mouse** rather than ignored: a silently-dropped `pressure` is the same defect
 as a silently-dropped misspelled field.
 
@@ -416,8 +513,8 @@ an app only meets when the OS takes a gesture away from it.
 
 **Determinism.** Every touch and pen op puts the tree on the simulated clock
 before its first sample, so a step that asked for no interval gets none. (An
-`inject_pointer` with `kind: mouse` does not: it is the pre-touch path, byte for
-byte, and nothing about it is timed.) On the
+`inject_pointer` with `kind: mouse` does not: it is the pre-touch path, and
+nothing about it is timed.) On the
 wall clock two consecutive samples are stamped however many nanoseconds apart
 the host took to dispatch them, and a drag meaning "travel 200 dp, no time
 passes" would instead describe a flick at some thousands of dp per second,
@@ -565,7 +662,13 @@ and returns it as an MCP **image content block**, alongside a metadata block:
 ```
 
 `warnings` is added only when there is one to report (see the WebView blind
-spot below).
+spot below), and `live_images` only when the image shows a live picture: for
+each one, its `node`, the `generation` the image holds, whether it drew an
+older picture or only the background (`deferred`), and its `rect` in the image's
+pixels. A producer keeps committing between two calls, so this is the exact
+record of what the PNG holds; reading `live_image_stats` afterwards races with
+it. A capture shows each picture's latest commit, through a pause and in a
+window nobody can see.
 
 **`scale` is not decoration.** Pixel dimensions are physical, and a live window
 on a HiDPI display is not laid out at that size: an 800×600 logical window

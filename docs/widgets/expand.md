@@ -8,6 +8,25 @@
 Expand — a layout modifier that claims slack space in a stack and
 stretches its child to fill the allocated bounds.
 
+## Public functions
+
+### `Expand`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#expand-new) |
+| `Self` | [`horizontal()`](#expand-horizontal) |
+| `Self` | [`vertical()`](#expand-vertical) |
+| | **Builder methods** |
+| `Self` | [`flex(flex: f32)`](#expand-flex) |
+| `Self` | [`align_child(alignment: Alignment)`](#expand-align_child) |
+| `Self` | [`respect_intrinsic()`](#expand-respect_intrinsic) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#expand-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#expand-child_opt) |
+
+## Detailed description
+
 Inside an `HStack` or
 `VStack`, `Expand` participates in the flex
 distribution pass by reporting a non-zero `flex` weight (default `1.0`).
@@ -40,13 +59,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Expand at Touch density](img/expand-touch.png)
 
-## Builder methods at a glance
-
-`horizontal`, `vertical`, `flex`, `align_child`, `respect_intrinsic`, `child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/expand/index.html)
+
+<a id="expand"></a>
 
 ## `pub struct Expand`
 
@@ -91,9 +108,13 @@ pub struct Expand { /* fields */ }
 
 ### Methods
 
+<a id="expand-new"></a>
+
 #### `pub fn new() -> Self`
 
 Expand on both axes. Default `flex(1)`, child fills bounds.
+
+<a id="expand-horizontal"></a>
 
 #### `pub fn horizontal() -> Self`
 
@@ -103,6 +124,8 @@ a `VStack` (which binds width and distributes height), claims the
 VStack's full width but reports `flex = 0` so it doesn't steal
 vertical slack from siblings — height stays at child intrinsic.
 
+<a id="expand-vertical"></a>
+
 #### `pub fn vertical() -> Self`
 
 Compete for slack on the vertical axis only. Inside a `VStack`,
@@ -111,17 +134,23 @@ an `HStack` (which binds height and distributes width), claims the
 HStack's full height but reports `flex = 0` so it doesn't steal
 horizontal slack from siblings — width stays at child intrinsic.
 
+<a id="expand-flex"></a>
+
 #### `pub fn flex(mut self, flex: f32) -> Self`
 
 Override the flex weight reported to a parent stack. `flex(0.0)` opts
 out of slack distribution (the wrapper still claims any offered
 proposal, useful inside non-stack containers). Default: `1.0`.
 
+<a id="expand-align_child"></a>
+
 #### `pub fn align_child(mut self, alignment: Alignment) -> Self`
 
 Opt out of stretching the child. The child is laid out at its
 natural size and positioned within the Expand's bounds according
 to `alignment`.
+
+<a id="expand-respect_intrinsic"></a>
 
 #### `pub fn respect_intrinsic(mut self) -> Self`
 
@@ -167,9 +196,13 @@ Rule of thumb: reach for this only when the parent genuinely has no
 bound to share (`height = None`). When the parent is bounded — a window
 root, a sized pane — the default zero basis is what you want.
 
+<a id="expand-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline child widget (deferred insertion).
+
+<a id="expand-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

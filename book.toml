@@ -4,11 +4,12 @@
 # mdBook configuration for the Teksilo documentation site.
 #
 # The book sources ARE the existing `docs/` tree: `docs/SUMMARY.md` is the table
-# of contents, and the "Widget Catalog" section is regenerated from widget source
-# by `tools/extract_widget_api.py --md-dir docs/widgets` (the generated pages live
-# under docs/widgets/ and are gitignored — regenerate before building).
+# of contents, and the catalogs (docs/widgets/, docs/data-collections/,
+# docs/settings/, docs/scene/) are generated from source by
+# `tools/extract_widget_api.py --catalog-all`. The generated pages are
+# committed; regenerate them when a type's documentation changes.
 #
-# Build:  python3 tools/extract_widget_api.py --all --md-dir docs/widgets && mdbook build
+# Build:  python3 tools/extract_widget_api.py --catalog-all --api-dir target/doc && mdbook build
 # Serve:  mdbook serve --open
 
 [book]
@@ -29,6 +30,10 @@ edit-url-template = "https://github.com/ferntech-eu/teksilo/edit/main/{path}"
 # The site is served at the domain root (teksilo-docs.pages.dev), not a subpath.
 site-url = "/"
 no-section-label = false
+# The API catalogs' function names in FernTech teal; the generated pages
+# themselves stay plain Markdown.
+additional-css = ["docs/assets/teksilo-catalog.css"]
+additional-js = ["docs/assets/teksilo-catalog.js"]
 
 [output.html.fold]
 enable = true

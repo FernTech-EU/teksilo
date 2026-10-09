@@ -37,7 +37,6 @@ pub enum ThemeMode {
     Native,
 }
 
-#[cfg(feature = "text")]
 use teksilo_text::SharedTypesetter;
 
 use crate::window_config::{SizeToContent, TeksiloWindowId, WindowConfig};
@@ -286,6 +285,10 @@ fn present_in_tree_modal_request(
 /// [`TeksiloAppHandler::refresh_occluded_band`].
 const OSK_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
+/// How long the loop sleeps at most while textures a renderer dropped wait
+/// for the GPU to free them. See [`TeksiloAppHandler::update_control_flow`].
+pub(crate) const GPU_RECLAIM_POLL: Duration = Duration::from_millis(8);
+
 /// Convert a screen-space physical rectangle into the part of `window`'s client
 /// area it covers, in window-logical pixels.
 ///
@@ -361,16 +364,23 @@ fn apply_cursor_to_window(
 /// is the adapter, and it is deliberately without one.
 pub(crate) struct WindowChrome<'a> {
     window: &'a teksilo_platform::PlatformWindow,
+    redraw: &'a crate::redraw_gate::RedrawGate,
     trace: Option<&'a mut IdleTrace>,
 }
 
 impl<'a> WindowChrome<'a> {
-    /// Wrap `window`, optionally noting redraw reasons into `trace`.
+    /// Wrap `window` and its redraw gate, optionally noting redraw reasons
+    /// into `trace`.
     pub(crate) fn new(
         window: &'a teksilo_platform::PlatformWindow,
+        redraw: &'a crate::redraw_gate::RedrawGate,
         trace: Option<&'a mut IdleTrace>,
     ) -> Self {
-        Self { window, trace }
+        Self {
+            window,
+            redraw,
+            trace,
+        }
     }
 }
 
@@ -383,7 +393,9 @@ impl crate::input_loop::InputChrome for WindowChrome<'_> {
         if let Some(trace) = &mut self.trace {
             trace.note_redraw_request(reason);
         }
-        self.window.request_redraw();
+        let window = self.window;
+        self.redraw
+            .request_with(Instant::now(), || window.request_redraw());
     }
 
     fn safe_area(&self) -> teksilo_platform::safe_area::SafeAreaSides {
@@ -414,7 +426,13 @@ impl crate::input_loop::InputChrome for WindowChrome<'_> {
 
 #[derive(Debug)]
 pub(crate) struct IdleTrace {
+    started: Instant,
     last_report: Instant,
+    /// `RedrawRequested` events a hidden window answered without drawing.
+    hidden_redraws: u64,
+    /// Non-visual frames run from `about_to_wait`: for windows that draw
+    /// nothing (hidden, or their redraw withheld), and state ticks.
+    ticks: u64,
     resume_time_reached: u64,
     redraw_requested: u64,
     rendered_frames: u64,
@@ -435,37 +453,117 @@ pub(crate) struct IdleTrace {
     /// targeted cross-window path actually fires versus the blanket one.
     cross_window_redraws: u64,
     idle_callbacks_run: u64,
+    /// App events that reached the public dispatch (`on_app_event` and the
+    /// framework's arms); a framework-private wake is not one.
+    app_events: u64,
+    /// Wakes a window's wake target posted to the event loop, by kind.
+    posted_draw_wakes: u64,
+    posted_layout_wakes: u64,
+    /// Window wakes routed, and draw wakes dropped because the window drew
+    /// nothing: deltas of every window's `LiveWakeStats`.
+    waker_wakes: u64,
+    waker_wakes_dropped: u64,
+    /// Each open window's `LiveWakeStats` at the last sample, to take
+    /// deltas from.
+    waker_totals: HashMap<WindowId, (u64, u64)>,
     control_flow_wait: u64,
     control_flow_wait_until: u64,
+    /// Control-flow decisions that kept a deadline for the GPU reclaim poll.
+    gpu_reclaim_waits: u64,
     timer_windows: usize,
     animation_timers: usize,
     tooltip_timers: usize,
+    #[cfg(feature = "live-image-timings")]
+    live: LiveTrace,
+}
+
+/// What the idle trace prints of live pictures, with the
+/// `live-image-timings` feature: after each report, a line per window that
+/// rendered since the one before and whose last frame drew a live picture.
+#[cfg(feature = "live-image-timings")]
+#[derive(Debug, Default)]
+struct LiveTrace {
+    /// Windows that rendered a frame since the last report.
+    rendered: std::collections::HashSet<WindowId>,
+    /// The windows the last report owes a line, until it is printed.
+    due: Vec<WindowId>,
+    /// Each window's uploads, copies and contended frames when it was last
+    /// read, to print deltas from.
+    totals: HashMap<WindowId, (u64, u64, u64)>,
+}
+
+/// The idle trace's live line for one window, at `t` seconds: its textures,
+/// the uploads, copies of another window's texture and contended frames
+/// since `last` (the window's when it was last read), and its timings in
+/// µs.
+#[cfg(feature = "live-image-timings")]
+fn live_trace_line(
+    t: f64,
+    window: impl std::fmt::Debug,
+    stats: &teksilo_render::LiveTextureStats,
+    timings: &teksilo_render::LiveImageTimings,
+    last: (u64, u64, u64),
+) -> String {
+    let percentiles = |p: teksilo_render::Percentiles| {
+        format!(
+            "{{p50:{},p90:{},p99:{},max:{},n:{}}}",
+            p.p50, p.p90, p.p99, p.max, p.samples
+        )
+    };
+    let uploads = stats.uploads_full + stats.uploads_partial;
+    format!(
+        "teksilo_idle_trace_live t={t:.3} window={window:?} textures={} bytes={} uploads={} copies={} contended={} prepare_us={} lock_hold_us={} commit_to_upload_us={}",
+        stats.textures,
+        stats.bytes,
+        uploads.saturating_sub(last.0),
+        stats.sibling_copies.saturating_sub(last.1),
+        stats.contended.saturating_sub(last.2),
+        percentiles(timings.prepare),
+        percentiles(timings.lock_hold),
+        percentiles(timings.commit_to_upload),
+    )
 }
 
 impl IdleTrace {
     fn from_env() -> Option<Self> {
         match std::env::var("TEKSILO_IDLE_TRACE") {
-            Ok(value) if value != "0" && !value.is_empty() => Some(Self {
-                last_report: Instant::now(),
-                resume_time_reached: 0,
-                redraw_requested: 0,
-                rendered_frames: 0,
-                request_redraw_all: 0,
-                cursor_redraw_requests: 0,
-                mouse_input_redraw_requests: 0,
-                mouse_wheel_redraw_requests: 0,
-                keyboard_redraw_requests: 0,
-                resize_redraw_requests: 0,
-                frame_request_redraws: 0,
-                cross_window_redraws: 0,
-                idle_callbacks_run: 0,
-                control_flow_wait: 0,
-                control_flow_wait_until: 0,
-                timer_windows: 0,
-                animation_timers: 0,
-                tooltip_timers: 0,
-            }),
+            Ok(value) if value != "0" && !value.is_empty() => Some(Self::new()),
             _ => None,
+        }
+    }
+
+    fn new() -> Self {
+        Self {
+            started: Instant::now(),
+            last_report: Instant::now(),
+            hidden_redraws: 0,
+            ticks: 0,
+            resume_time_reached: 0,
+            redraw_requested: 0,
+            rendered_frames: 0,
+            request_redraw_all: 0,
+            cursor_redraw_requests: 0,
+            mouse_input_redraw_requests: 0,
+            mouse_wheel_redraw_requests: 0,
+            keyboard_redraw_requests: 0,
+            resize_redraw_requests: 0,
+            frame_request_redraws: 0,
+            cross_window_redraws: 0,
+            idle_callbacks_run: 0,
+            app_events: 0,
+            posted_draw_wakes: 0,
+            posted_layout_wakes: 0,
+            waker_wakes: 0,
+            waker_wakes_dropped: 0,
+            waker_totals: HashMap::new(),
+            control_flow_wait: 0,
+            control_flow_wait_until: 0,
+            gpu_reclaim_waits: 0,
+            timer_windows: 0,
+            animation_timers: 0,
+            tooltip_timers: 0,
+            #[cfg(feature = "live-image-timings")]
+            live: LiveTrace::default(),
         }
     }
 
@@ -475,11 +573,15 @@ impl IdleTrace {
         timer_windows: usize,
         animation_timers: usize,
         tooltip_timers: usize,
+        gpu_reclaim: bool,
     ) {
         if has_deadline {
             self.control_flow_wait_until += 1;
         } else {
             self.control_flow_wait += 1;
+        }
+        if gpu_reclaim {
+            self.gpu_reclaim_waits += 1;
         }
         self.timer_windows = timer_windows;
         self.animation_timers = animation_timers;
@@ -519,8 +621,22 @@ impl IdleTrace {
         self.maybe_report();
     }
 
-    fn note_rendered_frame(&mut self) {
+    fn note_rendered_frame(&mut self, window: WindowId) {
         self.rendered_frames += 1;
+        #[cfg(feature = "live-image-timings")]
+        self.live.rendered.insert(window);
+        #[cfg(not(feature = "live-image-timings"))]
+        let _ = window;
+        self.maybe_report();
+    }
+
+    fn note_hidden_redraw(&mut self) {
+        self.hidden_redraws += 1;
+        self.maybe_report();
+    }
+
+    fn note_tick(&mut self) {
+        self.ticks += 1;
         self.maybe_report();
     }
 
@@ -529,15 +645,46 @@ impl IdleTrace {
         self.maybe_report();
     }
 
+    fn note_app_event(&mut self) {
+        self.app_events += 1;
+        self.maybe_report();
+    }
+
+    fn note_posted_wake(&mut self, kind: teksilo_canvas::wake::WakeKind) {
+        match kind {
+            teksilo_canvas::wake::WakeKind::Draw => self.posted_draw_wakes += 1,
+            _ => self.posted_layout_wakes += 1,
+        }
+        self.maybe_report();
+    }
+
+    /// Fold in the wake counters of every open window, each against what
+    /// was last seen of that window: they are monotonic per window, and a
+    /// window that closed is forgotten without taking another's counts with
+    /// it.
+    fn note_wake_totals(&mut self, windows: impl Iterator<Item = (WindowId, u64, u64)>) {
+        let mut seen = HashMap::new();
+        for (id, wakes, dropped) in windows {
+            let (last_wakes, last_dropped) = self.waker_totals.get(&id).copied().unwrap_or((0, 0));
+            self.waker_wakes += wakes.saturating_sub(last_wakes);
+            self.waker_wakes_dropped += dropped.saturating_sub(last_dropped);
+            seen.insert(id, (wakes, dropped));
+        }
+        self.waker_totals = seen;
+    }
+
     fn maybe_report(&mut self) {
         if self.last_report.elapsed() < Duration::from_secs(1) {
             return;
         }
 
         eprintln!(
-            "teksilo_idle_trace redraw_requested={} rendered_frames={} resume_time_reached={} request_redraw_all={} cross_window_redraws={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{},frame_request:{}}} idle_callbacks={} control_flow={{wait:{},wait_until:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
+            "teksilo_idle_trace t={:.3} redraw_requested={} rendered_frames={} hidden_redraws={} ticks={} resume_time_reached={} request_redraw_all={} cross_window_redraws={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{},frame_request:{}}} idle_callbacks={} app_events={} posted_wakes={{draw:{},layout:{}}} waker_wakes={} waker_wakes_dropped={} control_flow={{wait:{},wait_until:{},gpu_reclaim:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
+            self.started.elapsed().as_secs_f64(),
             self.redraw_requested,
             self.rendered_frames,
+            self.hidden_redraws,
+            self.ticks,
             self.resume_time_reached,
             self.request_redraw_all,
             self.cross_window_redraws,
@@ -548,8 +695,14 @@ impl IdleTrace {
             self.resize_redraw_requests,
             self.frame_request_redraws,
             self.idle_callbacks_run,
+            self.app_events,
+            self.posted_draw_wakes,
+            self.posted_layout_wakes,
+            self.waker_wakes,
+            self.waker_wakes_dropped,
             self.control_flow_wait,
             self.control_flow_wait_until,
+            self.gpu_reclaim_waits,
             self.timer_windows,
             self.animation_timers,
             self.tooltip_timers,
@@ -559,6 +712,8 @@ impl IdleTrace {
         self.resume_time_reached = 0;
         self.redraw_requested = 0;
         self.rendered_frames = 0;
+        self.hidden_redraws = 0;
+        self.ticks = 0;
         self.request_redraw_all = 0;
         self.cross_window_redraws = 0;
         self.cursor_redraw_requests = 0;
@@ -568,8 +723,108 @@ impl IdleTrace {
         self.resize_redraw_requests = 0;
         self.frame_request_redraws = 0;
         self.idle_callbacks_run = 0;
+        self.app_events = 0;
+        self.posted_draw_wakes = 0;
+        self.posted_layout_wakes = 0;
+        self.waker_wakes = 0;
+        self.waker_wakes_dropped = 0;
         self.control_flow_wait = 0;
         self.control_flow_wait_until = 0;
+        self.gpu_reclaim_waits = 0;
+        #[cfg(feature = "live-image-timings")]
+        {
+            self.live.due = self.live.rendered.drain().collect();
+        }
+    }
+
+    /// Print the live line the last report owes each window it saw render:
+    /// the window's live-pass timings (each over its latest 1,024 samples,
+    /// in µs), its textures, and the uploads and contended frames since it
+    /// was last read. Only those windows' timings are read, and only once
+    /// per report. `windows` is every open window.
+    #[cfg(feature = "live-image-timings")]
+    fn report_live<'a>(
+        &mut self,
+        windows: impl Iterator<Item = (WindowId, &'a teksilo_platform::PlatformWindow)>,
+    ) {
+        if self.live.due.is_empty() {
+            return;
+        }
+        let due = std::mem::take(&mut self.live.due);
+        let t = self.started.elapsed().as_secs_f64();
+        let mut totals = HashMap::new();
+        for (id, window) in windows {
+            let last = self.live.totals.get(&id).copied();
+            if !due.contains(&id) {
+                if let Some(last) = last {
+                    totals.insert(id, last);
+                }
+                continue;
+            }
+            let stats = window.live_texture_stats();
+            totals.insert(
+                id,
+                (
+                    stats.uploads_full + stats.uploads_partial,
+                    stats.sibling_copies,
+                    stats.contended,
+                ),
+            );
+            if stats.textures == 0 {
+                continue;
+            }
+            let timings = window.live_texture_timings();
+            eprintln!(
+                "{}",
+                live_trace_line(t, id, &stats, &timings, last.unwrap_or_default())
+            );
+        }
+        self.live.totals = totals;
+    }
+}
+
+/// Ten a second is fast enough that a magnifier tracking a scroll never looks
+/// stuck, and slow enough that a flung list does not bury AT-SPI under a
+/// bounds-changed signal per node per frame.
+const MOVE_DELIVERY_INTERVAL: Duration = Duration::from_millis(100);
+
+/// What a frame does with the accessibility tree while an assistive
+/// technology is attached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum A11yDelivery {
+    /// Hand the adapter the tree.
+    Deliver,
+    /// Something is owed, but the throttle holds it back: ask for a frame
+    /// then, since nothing else may wake the loop.
+    HoldUntil(Instant),
+    /// The adapter already holds the tree as it is: delivering would hand it
+    /// a copy to compare node by node, and holding back would cost a frame.
+    Nothing,
+}
+
+/// Decide [`A11yDelivery`] for a frame. `owed`: the adapter lacks something
+/// (`WidgetTree::accessibility_delivery_owed`). `needs_full`: the adapter
+/// asked for the whole tree. `walk_changed`: the tree was walked since the
+/// last delivery. A walk, or the first delivery, goes at once; moves alone
+/// go at most every [`MOVE_DELIVERY_INTERVAL`].
+fn a11y_delivery(
+    owed: bool,
+    needs_full: bool,
+    walk_changed: bool,
+    delivered_at: Option<Instant>,
+    now: Instant,
+) -> A11yDelivery {
+    if needs_full {
+        return A11yDelivery::Deliver;
+    }
+    if !owed {
+        return A11yDelivery::Nothing;
+    }
+    match delivered_at {
+        Some(at) if !walk_changed && now.duration_since(at) < MOVE_DELIVERY_INTERVAL => {
+            A11yDelivery::HoldUntil(at + MOVE_DELIVERY_INTERVAL)
+        }
+        _ => A11yDelivery::Deliver,
     }
 }
 
@@ -602,7 +857,9 @@ struct TeksiloAppHandler {
     initial_created: bool,
     idle_budget: Duration,
     idle_trace: Option<IdleTrace>,
-    #[cfg(feature = "text")]
+    /// The GPU reclaim poll, [`teksilo_render::poll_gpu_reclaim`]: a field
+    /// so the loop test can make it report pending.
+    gpu_reclaim: fn() -> bool,
     typesetter: SharedTypesetter,
     /// Kept alive for the lifetime of the event loop so that the
     /// `notify::RecommendedWatcher` background thread keeps running.
@@ -647,7 +904,7 @@ impl TeksiloAppHandler {
         app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
         initial_window: WindowConfig,
         app_context_template: Option<std::rc::Rc<TreeAppContext>>,
-        #[cfg(feature = "text")] typesetter: SharedTypesetter,
+        typesetter: SharedTypesetter,
         i18n_watcher: Option<teksilo_i18n::FtlFileWatcher>,
         settings_watcher: Option<teksilo_settings::SettingsWatcher>,
         event_proxy: AppEventProxy,
@@ -666,10 +923,7 @@ impl TeksiloAppHandler {
             wm.set_app_context_template(template);
         }
 
-        #[cfg(feature = "text")]
-        {
-            wm.set_typesetter(typesetter.clone());
-        }
+        wm.set_typesetter(typesetter.clone());
 
         Self {
             wm,
@@ -679,7 +933,7 @@ impl TeksiloAppHandler {
             initial_created: false,
             idle_budget: Duration::from_millis(4),
             idle_trace: IdleTrace::from_env(),
-            #[cfg(feature = "text")]
+            gpu_reclaim: teksilo_render::poll_gpu_reclaim,
             typesetter,
             _i18n_watcher: i18n_watcher,
             _settings_watcher: settings_watcher,
@@ -806,6 +1060,64 @@ impl TeksiloAppHandler {
         }
     }
 
+    /// Run the non-visual frame of every window whose gate lets a pending
+    /// tick run now: a window that draws nothing (hidden, or its redraw
+    /// withheld), whose requests become these ticks since it gets no
+    /// `RedrawRequested` to run them in, and a window that draws but was
+    /// asked to bring state up to date without redrawing. See
+    /// [`crate::redraw_gate`].
+    ///
+    /// A tick first hands the window the accessibility actions waiting for
+    /// it, which would otherwise wait for a window event that does not come,
+    /// and ends like any event, with [`post_event`](Self::post_event), so
+    /// what the frame queued (a size-to-content resize, a close, a change
+    /// another window displays) is acted on now rather than at the next
+    /// unrelated event.
+    fn run_ticks(&mut self, event_loop: &ActiveEventLoop) {
+        let now = Instant::now();
+        let due: Vec<WindowId> = self
+            .wm
+            .windows_map()
+            .iter()
+            .filter(|(_, managed)| managed.redraw.take_tick(now))
+            .map(|(id, _)| *id)
+            .collect();
+        if due.is_empty() {
+            return;
+        }
+        for window_id in due {
+            self.drain_accessibility_actions(window_id, event_loop);
+            let Some(mut current) = self.wm.take_managed(window_id) else {
+                continue;
+            };
+            if let Some(trace) = &mut self.idle_trace {
+                trace.note_tick();
+            }
+            self.run_nonvisual_frame(&mut current, event_loop);
+            self.wm.reinsert_managed(window_id, current);
+        }
+        self.post_event(event_loop);
+    }
+
+    /// Report, once per stall, a focused window that has waited longer than
+    /// [`STALL_REPORT_AFTER`](crate::redraw_gate::STALL_REPORT_AFTER) for a
+    /// redraw it requested. An unfocused one is most likely a window its
+    /// compositor does not show, which is expected to wait; a focused one is
+    /// on screen, and it draws nothing until the redraw arrives.
+    #[cfg(debug_assertions)]
+    fn report_stalled_redraws(&self) {
+        let now = Instant::now();
+        for managed in self.wm.iter().filter(|managed| managed.focused) {
+            if let Some(waited) = managed.redraw.take_stall(now) {
+                eprintln!(
+                    "teksilo-app: focused window {:?} has waited {waited:?} for a redraw it \
+                     requested and draws nothing until it arrives",
+                    managed.teksilo_id
+                );
+            }
+        }
+    }
+
     fn update_control_flow(&mut self, event_loop: &ActiveEventLoop) {
         // Tick time-driven gesture recognizers (long-press) on every tree
         // before computing the next deadline. Without this, a long-press
@@ -828,7 +1140,7 @@ impl TeksiloAppHandler {
             if let Some(managed) = self.wm.get_by_winit_mut(winit_id)
                 && managed.tree.has_idle_work() != before
             {
-                managed.platform_window.request_redraw();
+                managed.request_redraw();
             }
         }
 
@@ -850,12 +1162,23 @@ impl TeksiloAppHandler {
             // so continuous animations pace through `WaitUntil` below
             // instead of forcing `ControlFlow::Poll` (which free-ran at
             // the display's refresh rate — 300 fps on a 300 Hz panel).
-            if let Some(deadline) = managed.tree.next_timer_deadline() {
+            // Held back for a window awaiting a redraw it requested or
+            // drawing nothing: see `crate::redraw_gate`.
+            if let Some(deadline) = managed.wake_deadline(now) {
                 earliest_deadline = Some(match earliest_deadline {
                     Some(current) => current.min(deadline),
                     None => deadline,
                 });
             }
+        }
+
+        // While nothing on screen can be seen, the session watch rereads the
+        // system's state now and then (`WindowManager::recheck_session`).
+        if let Some(recheck) = self.wm.session_deadline() {
+            earliest_deadline = Some(match earliest_deadline {
+                Some(current) => current.min(recheck),
+                None => recheck,
+            });
         }
 
         // The digitizer, whose packets arrive on a thread of its own and so
@@ -866,6 +1189,21 @@ impl TeksiloAppHandler {
             earliest_deadline = Some(match earliest_deadline {
                 Some(current) => current.min(pen),
                 None => pen,
+            });
+        }
+
+        // Textures a renderer dropped (a live picture left a window, a window
+        // closed) are freed once the GPU has finished the last submission
+        // that used them, at a device maintenance only a submission or a poll
+        // runs. A loop that draws nothing more submits nothing, so it polls
+        // for them instead, waking every `GPU_RECLAIM_POLL` until they are
+        // freed, normally within two frames. No frame is drawn for it.
+        let reclaim_pending = (self.gpu_reclaim)();
+        if reclaim_pending {
+            let reclaim = now + GPU_RECLAIM_POLL;
+            earliest_deadline = Some(match earliest_deadline {
+                Some(current) => current.min(reclaim),
+                None => reclaim,
             });
         }
 
@@ -886,12 +1224,28 @@ impl TeksiloAppHandler {
         }
 
         if let Some(trace) = &mut self.idle_trace {
+            trace.note_wake_totals(self.wm.iter().map(|managed| {
+                let stats = managed.platform_window.live_wake_stats();
+                (
+                    managed.platform_window.window().id(),
+                    stats.wakes,
+                    stats.dropped_hidden,
+                )
+            }));
             trace.note_control_flow(
                 earliest_deadline.is_some(),
                 timer_windows,
                 animation_timers,
                 tooltip_timers,
+                reclaim_pending,
             );
+            #[cfg(feature = "live-image-timings")]
+            trace.report_live(self.wm.iter().map(|managed| {
+                (
+                    managed.platform_window.window().id(),
+                    &managed.platform_window,
+                )
+            }));
         }
     }
 
@@ -900,7 +1254,7 @@ impl TeksiloAppHandler {
     /// The take-aside; the reading and the mapping are
     /// [`crate::input_loop::refresh_safe_area`].
     fn refresh_safe_area(managed: &mut crate::window_manager::ManagedWindow) {
-        let chrome = WindowChrome::new(&managed.platform_window, None);
+        let chrome = WindowChrome::new(&managed.platform_window, &managed.redraw, None);
         crate::input_loop::refresh_safe_area(&chrome, &mut managed.tree);
     }
 
@@ -923,7 +1277,7 @@ impl TeksiloAppHandler {
         self.osk_polled_at = Some(now);
         let screen = teksilo_platform::soft_keyboard::keyboard_screen_rect();
         for managed in self.wm.iter_mut() {
-            let chrome = WindowChrome::new(&managed.platform_window, None);
+            let chrome = WindowChrome::new(&managed.platform_window, &managed.redraw, None);
             crate::input_loop::refresh_occluded_band(&chrome, &mut managed.tree, screen);
         }
     }
@@ -1092,7 +1446,11 @@ impl TeksiloAppHandler {
                 current_handle,
                 current_arc,
             );
-            let mut chrome = WindowChrome::new(&current.platform_window, self.idle_trace.as_mut());
+            let mut chrome = WindowChrome::new(
+                &current.platform_window,
+                &current.redraw,
+                self.idle_trace.as_mut(),
+            );
             f(
                 &mut chrome,
                 &mut current.translation_state,
@@ -1247,7 +1605,7 @@ impl TeksiloAppHandler {
     /// area is reported separately (and idempotently) by the focused widget
     /// via `WindowOps::set_ime_cursor_area`.
     fn settle_ime(managed: &mut crate::window_manager::ManagedWindow) {
-        let mut chrome = WindowChrome::new(&managed.platform_window, None);
+        let mut chrome = WindowChrome::new(&managed.platform_window, &managed.redraw, None);
         crate::input_loop::settle_ime(
             &mut chrome,
             &mut managed.tree,
@@ -1336,6 +1694,40 @@ impl TeksiloAppHandler {
             return Ok(());
         }
 
+        // A live picture's stats: the tree answers for the source and its
+        // attachment, the window adds its renderer's textures and its wake
+        // counters.
+        if matches!(payload.op, AutomationOp::LiveImageStats { .. }) {
+            let crate::automation_bridge::AutomationPayload {
+                op,
+                settle,
+                reply_tx,
+                ..
+            } = payload;
+            let settle = crate::automation_bridge::clamp_live_settle(&settle);
+            let mut reply = None;
+            self.run_in_window(winit_id, event_loop, |tree, ops| {
+                reply = Some(teksilo_automation::execute(tree, ops, &op, &settle));
+            });
+            let reply = match (reply, self.wm.windows_map().get(&winit_id)) {
+                (Some(reply), Some(managed)) => {
+                    let wakes = managed.platform_window.live_wake_stats();
+                    teksilo_automation::with_window_stats(
+                        reply,
+                        Some(managed.platform_window.live_texture_stats()),
+                        Some(teksilo_automation::dto::LiveWakeStatsDto {
+                            wakes: wakes.wakes,
+                            wakes_dropped_hidden: wakes.dropped_hidden,
+                            window_hidden: wakes.hidden,
+                        }),
+                    )
+                }
+                _ => AutomationReply::err(codes::NOT_FOUND, "window vanished"),
+            };
+            let _ = reply_tx.send(reply);
+            return Ok(());
+        }
+
         // Everything else: a per-tree op with a real `WindowOps`.
         let crate::automation_bridge::AutomationPayload {
             op,
@@ -1351,7 +1743,7 @@ impl TeksiloAppHandler {
             let _ = reply_tx.send(reply);
         });
         if let Some(m) = self.wm.windows_map().get(&winit_id) {
-            m.platform_window.request_redraw();
+            m.request_redraw();
         }
         Ok(())
     }
@@ -1441,32 +1833,129 @@ impl TeksiloAppHandler {
             current.tree.theme().colors.surface_main.to_array(),
         );
         let frame = current.tree.render();
-        // The GPU readback inside `capture_offscreen` can `.expect()`-panic on
-        // device loss (compositor restart, driver crash, memory pressure).
-        // Catch it so the window is still reinserted (no zombie) and the app
-        // survives — a screenshot failure must not abort a live session.
+        let frame = self.sync_window_glyph_atlas(&mut current, frame, event_loop);
+        // A lost device fails the readback as a value. A panic anywhere in
+        // the render (a wgpu validation error goes to its panicking default
+        // handler) is caught too, so the window is still reinserted (no
+        // zombie) and the app survives: a screenshot failure must not abort a
+        // live session. A live picture's lock is released on unwind, and its
+        // texture cursor moves only after its writes, so the next frame plans
+        // its upload again.
         let captured = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             current
                 .platform_window
                 .capture_offscreen(&frame, clear, crop)
         }));
 
-        current.platform_window.request_redraw();
+        // The live pictures the image shows, from what the capture's render
+        // decided for each.
+        let live_images = match &captured {
+            Ok(Ok(shot)) => teksilo_automation::live_image_shots(
+                &current.tree,
+                &frame,
+                current.platform_window.renderer().live_image_decisions(),
+                scale,
+                shot.region,
+            ),
+            _ => Vec::new(),
+        };
+
+        current.request_redraw();
         self.wm.reinsert_managed(winit_id, current);
 
         let reply = match captured {
-            Ok((rgba, w, h)) if w != 0 && h != 0 => {
-                crate::automation_bridge::screenshot_reply(&rgba, w, h, scale, warnings)
+            Ok(Ok(shot)) if shot.width != 0 && shot.height != 0 => {
+                crate::automation_bridge::screenshot_reply(
+                    &shot.rgba,
+                    shot.width,
+                    shot.height,
+                    scale,
+                    warnings,
+                    live_images,
+                )
             }
-            Ok(_) => {
+            Ok(Ok(_)) => {
                 AutomationReply::err(codes::BAD_ARGUMENT, "crop region empty / outside window")
             }
+            Ok(Err(error)) => AutomationReply::err(
+                codes::GPU_READBACK_FAILED,
+                format!("offscreen capture failed: {error}"),
+            ),
             Err(_) => AutomationReply::err(
                 codes::GPU_READBACK_FAILED,
                 "offscreen capture failed (GPU device lost?)",
             ),
         };
         let _ = payload.reply_tx.send(reply);
+    }
+
+    /// Upload the glyph atlas `frame`'s text samples into `managed`'s
+    /// renderer, and return the frame to draw.
+    ///
+    /// When glyphs were evicted since the last upload, every retained paint
+    /// frame in every window may hold quads whose atlas UVs now point at
+    /// recycled slots, and `invalidate_cache` also kills the `touch_layout`
+    /// keep-alive for frames baked before the clear. So every window is
+    /// invalidated, not just this one (the others re-render at their own
+    /// redraw and pull the current atlas through the version comparison),
+    /// and this one is rendered again before the atlas is uploaded once
+    /// more. Shared by the redraw path and automation screenshots: both draw
+    /// through this window's renderer, and a capture that skipped the upload
+    /// drew any glyph first rasterised by its own render as a blank.
+    fn sync_window_glyph_atlas(
+        &mut self,
+        managed: &mut crate::window_manager::ManagedWindow,
+        frame: std::rc::Rc<teksilo_canvas::RenderFrame>,
+        event_loop: &ActiveEventLoop,
+    ) -> std::rc::Rc<teksilo_canvas::RenderFrame> {
+        let evicted = sync_glyph_atlas(
+            &self.typesetter,
+            managed.platform_window.renderer_mut(),
+            &mut managed.atlas_uploaded_version,
+        );
+        if !evicted {
+            return frame;
+        }
+        self.typesetter.bridge().borrow_mut().invalidate_cache();
+        managed.tree.invalidate_all_paints();
+        for other in self.wm.iter_mut() {
+            other.tree.invalidate_all_paints();
+            other.request_redraw();
+        }
+        // Re-render with a real ops sink so rebuild-triggered handlers on
+        // this recovery path can still open windows.
+        let current_id = managed.teksilo_id;
+        #[cfg(not(target_os = "macos"))]
+        let current_handle = managed
+            .platform_window
+            .window()
+            .window_handle()
+            .ok()
+            .map(|h| h.as_raw());
+        let current_arc = Some(managed.platform_window.window_arc());
+        let mut ops = crate::window_manager::WindowOpsImpl::new(
+            &mut self.wm,
+            event_loop,
+            current_id,
+            #[cfg(not(target_os = "macos"))]
+            current_handle,
+            current_arc,
+        );
+        let frame = managed.tree.render_with_ops(&mut ops);
+        let evicted_again = sync_glyph_atlas(
+            &self.typesetter,
+            managed.platform_window.renderer_mut(),
+            &mut managed.atlas_uploaded_version,
+        );
+        // The recovery re-render cannot legitimately evict again (the
+        // eviction scan's generation-cadence gate just reset), but
+        // atlas_info consumes the epoch delta, so a report here would be
+        // silently lost: check the assumption instead of assuming it.
+        debug_assert!(
+            !evicted_again,
+            "glyph eviction during eviction recovery — epoch delta would be lost"
+        );
+        frame
     }
 
     fn run_in_window(
@@ -2014,7 +2503,7 @@ impl TeksiloAppHandler {
         }
 
         // Repaint so hover feedback / drop results show promptly.
-        current.platform_window.request_redraw();
+        current.request_redraw();
         self.wm.reinsert_managed(winit_id, current);
         Ok(())
     }
@@ -2129,13 +2618,18 @@ impl TeksiloAppHandler {
         event: &WindowEvent,
         event_loop: &ActiveEventLoop,
     ) {
-        // Collect events while holding the `ManagedWindow` borrow;
-        // dispatch them below through `dispatch_in_window`, which
-        // needs the borrow to be released first.
-        let mut a11y_events: Vec<WidgetEvent> = Vec::new();
         if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
             managed.platform_window.process_accessibility_event(event);
+        }
+        self.drain_accessibility_actions(window_id, event_loop);
+    }
 
+    /// Dispatch the accessibility actions waiting for a window. Run on every
+    /// event of the window, on its non-visual ticks, and when an
+    /// accessibility handler wakes the loop for it.
+    fn drain_accessibility_actions(&mut self, window_id: WindowId, event_loop: &ActiveEventLoop) {
+        let mut a11y_events: Vec<WidgetEvent> = Vec::new();
+        if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
             let actions = managed.platform_window.drain_accessibility_actions();
             for req in actions {
                 // The adapter names nodes by the ids it was handed, which
@@ -2171,14 +2665,71 @@ impl TeksiloAppHandler {
         }
     }
 
-    fn handle_redraw_requested(&mut self, window_id: WindowId, event_loop: &ActiveEventLoop) {
-        // Pre-render: take the window out so we can construct a real
-        // WindowOpsImpl and pass it into layout + render. This lets
-        // rebuild-triggered handlers (data-driven state changes,
-        // delayed-overlay activation, drag-tick) open windows.
-        let Some(mut current) = self.wm.take_managed(window_id) else {
-            return;
-        };
+    /// A window's wake target posted a wake (see
+    /// `window_manager::wake_routes`).
+    ///
+    /// A state wake re-arms the target's coalescing *before* anything else,
+    /// so a wake made from then on posts again rather than merging into this
+    /// one, then dispatches the accessibility actions waiting for the window.
+    /// If the window draws and a widget it showed in its last frame has a
+    /// relayout or a pull requested off the UI thread pending, it asks for
+    /// a redraw: that frame takes it in and repaints, at once. Otherwise it
+    /// asks the redraw gate for a non-visual tick, rate-limited: what changed
+    /// is state nobody may see, and the tick ends in `post_event`, which
+    /// redraws the window if something visible changed after all. That keeps
+    /// geometry and accessibility current on a window whose redraw the
+    /// compositor withholds, which a redraw request does not reach, and
+    /// costs a window that draws no frame for content nobody sees.
+    ///
+    /// A draw wake (macOS, off the main thread) asks for a redraw unless the
+    /// window draws nothing, in which case one is owed for when it draws
+    /// again; it changes nothing the UI thread owns, so it ends without
+    /// `post_event`.
+    fn window_wake(&mut self, wake: WindowWake, event_loop: &ActiveEventLoop) {
+        use teksilo_canvas::wake::WakeKind;
+        if let Some(trace) = &mut self.idle_trace {
+            trace.note_posted_wake(wake.kind);
+        }
+        match wake.kind {
+            WakeKind::Draw => {
+                let Some(managed) = self.wm.get_by_winit_mut(wake.window) else {
+                    return;
+                };
+                managed.platform_window.take_posted_wake(WakeKind::Draw);
+                if !managed.platform_window.defer_redraw_until_shown() {
+                    managed.request_redraw();
+                }
+            }
+            _ => {
+                if let Some(managed) = self.wm.get_by_winit_mut(wake.window) {
+                    managed.platform_window.take_posted_wake(WakeKind::Layout);
+                }
+                self.drain_accessibility_actions(wake.window, event_loop);
+                if let Some(managed) = self.wm.get_by_winit_mut(wake.window) {
+                    if !managed.redraw.draws_nothing(Instant::now())
+                        && managed.tree.off_thread_needs_frame()
+                    {
+                        managed.request_redraw();
+                    } else {
+                        managed.redraw.request_tick();
+                    }
+                }
+                self.post_event(event_loop);
+            }
+        }
+    }
+
+    /// Everything a frame does except draw: idle callbacks, layout (which
+    /// runs the clocks and off-thread pre-passes), size-to-content,
+    /// accessibility sync and delivery, and the IME reconcile. A shown
+    /// window runs it before rendering; a hidden one runs only this, so its
+    /// app state, timers and accessibility tree stay current while it costs
+    /// no GPU or compositor time. See [`crate::redraw_gate`].
+    fn run_nonvisual_frame(
+        &mut self,
+        current: &mut crate::window_manager::ManagedWindow,
+        event_loop: &ActiveEventLoop,
+    ) {
         let current_id = current.teksilo_id;
         #[cfg(not(target_os = "macos"))]
         let current_handle = current
@@ -2188,10 +2739,8 @@ impl TeksiloAppHandler {
             .ok()
             .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
+        current.redraw.ran_frame(Instant::now());
 
-        if let Some(trace) = &mut self.idle_trace {
-            trace.note_redraw_requested();
-        }
         if current.tree.has_idle_work() {
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_idle_callbacks_run();
@@ -2210,7 +2759,7 @@ impl TeksiloAppHandler {
                 current_id,
                 #[cfg(not(target_os = "macos"))]
                 current_handle,
-                current_arc.clone(),
+                current_arc,
             );
             current.tree.layout_with_ops(proposal, &mut ops);
         }
@@ -2266,12 +2815,9 @@ impl TeksiloAppHandler {
         let delivered_at = current.a11y_delivered_at;
         let now = std::time::Instant::now();
         let needs_full = current.platform_window.take_accessibility_needs_full_tree();
-        // Ten a second is fast enough that a magnifier tracking a scroll
-        // never looks stuck, and slow enough that a flung list does not
-        // bury AT-SPI under a bounds-changed signal per node per frame.
-        const MOVE_DELIVERY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
-        let mut attached = false;
-        let mut delivered = false;
+        // What this frame did with the tree; `None` when no assistive
+        // technology is attached.
+        let mut delivery = None;
         {
             // Whatever reaches the adapter goes through the tree's delivery,
             // which hands a node that left the reader's tree and came back an
@@ -2284,43 +2830,78 @@ impl TeksiloAppHandler {
                     // Decided in here, not outside: the closure runs only
                     // when an assistive technology is attached, so a window
                     // nobody is reading neither builds nor throttles.
-                    attached = true;
-                    let due = needs_full
-                        || walk != delivered_walk
-                        || delivered_at
-                            .is_none_or(|at| now.duration_since(at) >= MOVE_DELIVERY_INTERVAL);
-                    due.then(|| {
-                        delivered = true;
-                        tree.borrow_mut().deliver_accessibility(window_focused)
-                    })
+                    let owed = tree.borrow().accessibility_delivery_owed(window_focused);
+                    let decided =
+                        a11y_delivery(owed, needs_full, walk != delivered_walk, delivered_at, now);
+                    delivery = Some(decided);
+                    (decided == A11yDelivery::Deliver)
+                        .then(|| tree.borrow_mut().deliver_accessibility(window_focused))
                 },
                 || tree.borrow_mut().deliver_accessibility(window_focused),
             );
         }
-        if delivered {
-            current.a11y_delivered_walk = walk;
-            current.a11y_delivered_at = Some(now);
-        } else if attached {
+        match delivery {
+            Some(A11yDelivery::Deliver) => {
+                current.a11y_delivered_walk = walk;
+                current.a11y_delivered_at = Some(now);
+            }
             // Held back by the throttle, and nothing else will wake the loop
             // once the scroll stops — so the last frame's moves would sit
             // undelivered. Ask for one frame at the end of the window.
-            //
-            // Gated on `attached`: with no assistive technology listening the
-            // closure never runs, and asking for a wake here would spin the
-            // event loop at full rate forever on every app nobody is reading.
-            let deadline = delivered_at
-                .map(|at| at + MOVE_DELIVERY_INTERVAL)
-                .unwrap_or(now);
-            current.tree.request_wake_at(deadline);
+            Some(A11yDelivery::HoldUntil(deadline)) => current.tree.request_wake_at(deadline),
+            // The adapter already holds this walk's content.
+            Some(A11yDelivery::Nothing) => current.a11y_delivered_walk = walk,
+            // No assistive technology listening: nothing is built, and
+            // nothing is owed a frame.
+            None => {}
         }
 
         // Catch-all IME reconcile: covers focus changes from any source
         // (access actions, programmatic focus, rebuild) that didn't go
         // through `dispatch_in_window`. Layout has settled, so the focused
         // node's descriptor is current. Cheap + deduped, safe every frame.
-        Self::settle_ime(&mut current);
+        Self::settle_ime(current);
+    }
 
-        let mut frame = {
+    fn handle_redraw_requested(&mut self, window_id: WindowId, event_loop: &ActiveEventLoop) {
+        // Pre-render: take the window out so we can construct a real
+        // WindowOpsImpl and pass it into layout + render. This lets
+        // rebuild-triggered handlers (data-driven state changes,
+        // delayed-overlay activation, drag-tick) open windows.
+        let Some(mut current) = self.wm.take_managed(window_id) else {
+            return;
+        };
+        // Whatever made this frame, the window no longer waits on a request.
+        current.redraw.delivered();
+        // X11 reports an iconify with no event of its own: ask winit, which
+        // is a round trip there, at most every so often while unfocused.
+        current.refresh_minimized(Instant::now());
+        current.sync_hidden_for_frame();
+        let current_id = current.teksilo_id;
+        #[cfg(not(target_os = "macos"))]
+        let current_handle = current
+            .platform_window
+            .window()
+            .window_handle()
+            .ok()
+            .map(|h| h.as_raw());
+        let current_arc = Some(current.platform_window.window_arc());
+
+        if let Some(trace) = &mut self.idle_trace {
+            trace.note_redraw_requested();
+        }
+        self.run_nonvisual_frame(&mut current, event_loop);
+        // A hidden window draws nothing past the one frame it owes on its way
+        // to hidden. Its state is current; its pixels wait for the reveal.
+        if current.redraw.is_hidden() && !current.redraw.take_transition_frame() {
+            if let Some(trace) = &mut self.idle_trace {
+                trace.note_hidden_redraw();
+            }
+            self.wm.reinsert_managed(window_id, current);
+            return;
+        }
+
+        let frame = {
             let mut ops = crate::window_manager::WindowOpsImpl::new(
                 &mut self.wm,
                 event_loop,
@@ -2333,82 +2914,7 @@ impl TeksiloAppHandler {
         };
         let managed = &mut current;
 
-        #[cfg(feature = "text")]
-        {
-            let atlas = self
-                .typesetter
-                .bridge()
-                .borrow_mut()
-                .atlas_info(managed.atlas_uploaded_version);
-            if atlas.version != managed.atlas_uploaded_version
-                && atlas.width > 0
-                && atlas.height > 0
-            {
-                managed.platform_window.renderer_mut().upload_atlas(
-                    atlas.width,
-                    atlas.height,
-                    &atlas.pixels,
-                );
-                managed.atlas_uploaded_version = atlas.version;
-            }
-
-            if atlas.glyphs_evicted {
-                // Glyphs were evicted since the previous atlas_info call
-                // (any path: snapshot scan, rich-text render scan, or
-                // scale-factor reset). Every retained paint frame in
-                // EVERY window may hold quads whose atlas UVs now point
-                // at recycled slots — and invalidate_cache() below clears
-                // the bridge's layout/glyph caches, which also kills the
-                // touch_layout keep-alive for frames baked before the
-                // clear. Invalidate all windows, not just the current
-                // one; the others re-render at their own requested
-                // redraw with fresh layouts and pull the current atlas
-                // pixels through the version comparison above.
-                self.typesetter.bridge().borrow_mut().invalidate_cache();
-                managed.tree.invalidate_all_paints();
-                for other in self.wm.iter_mut() {
-                    other.tree.invalidate_all_paints();
-                    other.platform_window.request_redraw();
-                }
-                // Re-render after atlas invalidation with a real ops
-                // sink so rebuild-triggered handlers on this recovery
-                // path can still open windows.
-                let mut ops = crate::window_manager::WindowOpsImpl::new(
-                    &mut self.wm,
-                    event_loop,
-                    current_id,
-                    #[cfg(not(target_os = "macos"))]
-                    current_handle,
-                    current_arc.clone(),
-                );
-                frame = managed.tree.render_with_ops(&mut ops);
-                let atlas2 = self
-                    .typesetter
-                    .bridge()
-                    .borrow_mut()
-                    .atlas_info(managed.atlas_uploaded_version);
-                // The recovery re-render cannot legitimately evict again
-                // (the eviction scan's generation-cadence gate just
-                // reset), but atlas_info consumes the epoch delta — a
-                // report here would be silently lost, so check the
-                // assumption instead of assuming it.
-                debug_assert!(
-                    !atlas2.glyphs_evicted,
-                    "glyph eviction during eviction recovery — epoch delta would be lost"
-                );
-                if atlas2.version != managed.atlas_uploaded_version
-                    && atlas2.width > 0
-                    && atlas2.height > 0
-                {
-                    managed.platform_window.renderer_mut().upload_atlas(
-                        atlas2.width,
-                        atlas2.height,
-                        &atlas2.pixels,
-                    );
-                    managed.atlas_uploaded_version = atlas2.version;
-                }
-            }
-        }
+        let frame = self.sync_window_glyph_atlas(managed, frame, event_loop);
 
         // The wgpu surface is Rgba8UnormSrgb: it expects linear-light color
         // values and applies sRGB encoding on write. Our Color stores sRGB-
@@ -2419,20 +2925,30 @@ impl TeksiloAppHandler {
         );
         match managed.platform_window.render_frame(&frame, clear) {
             teksilo_platform::FrameOutcome::Rendered => {
+                managed.redraw.rendered();
                 if let Some(trace) = &mut self.idle_trace {
-                    trace.note_rendered_frame();
+                    trace.note_rendered_frame(window_id);
                 }
             }
             teksilo_platform::FrameOutcome::Skipped => {
-                if !managed.occluded {
-                    managed.platform_window.request_redraw();
+                // A hidden window's skipped frame is not retried: it would
+                // block in acquire for nothing. Its reveal asks again. One the
+                // platform reports hidden only when asked (a macOS window
+                // AppKit never showed) is marked hidden here; any other is
+                // retried, at once the first time and then after a growing
+                // wait (see `crate::redraw_gate`).
+                let now = Instant::now();
+                if !managed.note_occlusion_after_skip(now)
+                    && managed.redraw.skipped(now) == crate::redraw_gate::SkippedRetry::Now
+                {
+                    managed.request_redraw();
                 }
                 self.wm.reinsert_managed(window_id, current);
                 return;
             }
             teksilo_platform::FrameOutcome::NeedsReconfigure => {
                 if managed.platform_window.reconfigure_surface() {
-                    managed.platform_window.request_redraw();
+                    managed.request_redraw();
                 } else {
                     event_loop.exit();
                 }
@@ -2450,7 +2966,7 @@ impl TeksiloAppHandler {
             teksilo_platform::FrameOutcome::Error(e) => {
                 eprintln!("teksilo-app: {e}, reconfiguring surface");
                 if managed.platform_window.reconfigure_surface() {
-                    managed.platform_window.request_redraw();
+                    managed.request_redraw();
                 } else {
                     event_loop.exit();
                 }
@@ -2567,6 +3083,10 @@ impl TeksiloAppHandler {
                     managed.state.set_size_from_os((logical_w, logical_h));
                     let placement = query_window_placement(managed.platform_window.window());
                     managed.state.set_placement_from_os(placement);
+                    // Windows reports a minimise as a resize to zero, and a
+                    // restore as a resize back.
+                    managed.minimized = placement.is_minimized();
+                    managed.sync_hidden();
                     // A resize is when the safe area changes: on the one
                     // desktop platform that has one, it is zero in a window
                     // and non-zero once the window covers the camera housing,
@@ -2575,7 +3095,7 @@ impl TeksiloAppHandler {
                     if let Some(trace) = &mut self.idle_trace {
                         trace.note_redraw_request("resize");
                     }
-                    managed.platform_window.request_redraw();
+                    managed.request_redraw();
                 }
             }
             WindowEvent::Moved(pos) => {
@@ -2584,6 +3104,9 @@ impl TeksiloAppHandler {
                     let lx = (pos.x as f64 / sf).round() as i32;
                     let ly = (pos.y as f64 / sf).round() as i32;
                     managed.state.set_position_from_os((lx, ly));
+                    // It may have moved to a display with another refresh
+                    // rate, at the same scale.
+                    managed.platform_window.track_display_refresh();
                 }
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
@@ -2591,6 +3114,7 @@ impl TeksiloAppHandler {
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.translation_state.set_scale_factor(scale_factor);
                     managed.platform_window.set_scale_factor(scale_factor);
+                    managed.platform_window.track_display_refresh();
                     managed.tree.set_device_scale_factor(scale_factor as f32);
                     // The safe area is reported in points; moving between
                     // displays can change both the scale and the housing.
@@ -2612,10 +3136,7 @@ impl TeksiloAppHandler {
                 {
                     handle.set_scale_factor(teksilo_id, scale_factor);
                 }
-                #[cfg(feature = "text")]
-                {
-                    self.typesetter.set_scale_factor(scale_factor as f32);
-                }
+                self.typesetter.set_scale_factor(scale_factor as f32);
             }
             WindowEvent::ModifiersChanged(mods) => {
                 // Capture state before the alt_down write so we can
@@ -2702,7 +3223,7 @@ impl TeksiloAppHandler {
                     if let Some(trace) = &mut self.idle_trace {
                         trace.note_redraw_request("keyboard");
                     }
-                    managed.platform_window.request_redraw();
+                    managed.request_redraw();
                 }
             }
             WindowEvent::Ime(ime) => {
@@ -2738,7 +3259,7 @@ impl TeksiloAppHandler {
                         if let Some(trace) = &mut self.idle_trace {
                             trace.note_redraw_request("ime");
                         }
-                        managed.platform_window.request_redraw();
+                        managed.request_redraw();
                     }
                 }
             }
@@ -2748,7 +3269,7 @@ impl TeksiloAppHandler {
             WindowEvent::ThemeChanged(winit_theme) => {
                 self.handle_theme_changed(winit_theme);
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-                    managed.platform_window.request_redraw();
+                    managed.request_redraw();
                 }
             }
             // Pause all looping animations on the unfocused window so it
@@ -2765,6 +3286,15 @@ impl TeksiloAppHandler {
                 let active = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.focused = focused;
                     managed.state.set_focused_from_os(focused);
+                    if focused {
+                        // A window that takes focus is on screen.
+                        managed.minimized = false;
+                        managed.sync_hidden();
+                    } else {
+                        // An X11 iconify sends only this: the next redraw
+                        // re-reads the placement without waiting.
+                        managed.minimized_probed_at = None;
+                    }
                     Some(managed.focused && !managed.occluded)
                 } else {
                     None
@@ -2786,7 +3316,7 @@ impl TeksiloAppHandler {
                     // desaturation, DimWhenInactive) reach a paint pass
                     // promptly — the OS does not reliably emit RedrawRequested
                     // on focus change across all platforms.
-                    managed.platform_window.request_redraw();
+                    managed.request_redraw();
                     if focused {
                         newly_focused = Some(managed.teksilo_id);
                     }
@@ -2811,13 +3341,24 @@ impl TeksiloAppHandler {
                     handle.activate_window(teksilo_id);
                 }
             }
-            // macOS-only in winit 0.30 (X11/Wayland/Windows never emit
-            // this). Handled for parity with Focused so a macOS app
-            // that is hidden behind another window — still focused —
-            // also parks its animations.
+            // Emitted on macOS (the window's occlusion state) and on X11
+            // (`VisibilityNotify` fully obscured), never on Wayland or
+            // Windows. Handled for parity with Focused so a window hidden
+            // behind another — still focused, on macOS — also parks its
+            // animations, and so a hidden window stops drawing.
             WindowEvent::Occluded(occluded) => {
                 let active = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.occluded = occluded;
+                    // winit's word replaces what asking the platform found.
+                    managed.occlusion_probed_at = None;
+                    // Both platforms that send this report a window visible
+                    // only when it is mapped and not miniaturised, and a
+                    // restore without focus sends neither `Focused(true)` nor
+                    // a `Resized` that would clear the flag.
+                    if !occluded {
+                        managed.minimized = false;
+                    }
+                    managed.sync_hidden();
                     Some(managed.focused && !managed.occluded)
                 } else {
                     None
@@ -2841,7 +3382,7 @@ impl TeksiloAppHandler {
                     // occlusion (`occluded`) the active-state flip must reach a
                     // paint pass so the caret hides / selection desaturates
                     // before the window is hidden behind another.
-                    managed.platform_window.request_redraw();
+                    managed.request_redraw();
                 }
             }
             WindowEvent::ActivationTokenDone { token, .. } => {
@@ -2892,6 +3433,9 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         // was never told about, and that backend is all a machine without a
         // Vulkan driver has. Idempotent, so a resume after suspend is a no-op.
         teksilo_platform::install_display_handle(event_loop.owned_display_handle());
+        // Before the first window, so that it is born knowing whether anything
+        // on screen can be seen. A no-op once watching.
+        self.wm.watch_session();
 
         if !self.initial_created
             && let Some(config) = self.initial_window.take()
@@ -2929,6 +3473,27 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
+        // Framework-private, so taken before any app handler or observer
+        // sees an event.
+        let event = match event {
+            AppEvent::External(payload) => match payload.downcast::<WindowWake>() {
+                Ok(wake) => {
+                    self.window_wake(*wake, event_loop);
+                    return;
+                }
+                Err(payload) => match payload.downcast::<SessionChanged>() {
+                    Ok(_) => {
+                        self.wm.apply_session(Instant::now());
+                        return;
+                    }
+                    Err(payload) => AppEvent::External(payload),
+                },
+            },
+            event => event,
+        };
+        if let Some(trace) = &mut self.idle_trace {
+            trace.note_app_event();
+        }
         if let Some(handler) = &mut self.app_event_handler {
             handler(&event);
         }
@@ -3142,18 +3707,13 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
                                     self.dispatch_in_window(winit_id, evt, event_loop);
                                 }
                             }
-                        } else if let Some(req) =
-                            payload.downcast_ref::<teksilo_core::RepaintWindowRequest>()
-                        {
-                            // Off-thread "repaint this window" — e.g. a
-                            // terminal's PTY-reader thread whose bytes changed a
-                            // widget's content outside the UI thread. A bare
-                            // redraw re-presents the cached frame, so mark the
-                            // window's tree paint-dirty; the unconditional
-                            // `request_redraw_all()` below then re-runs the
-                            // changed widget's `paint()`.
-                            let winit_id =
-                                self.wm.teksilo_to_winit_map().get(&req.window_id).copied();
+                        } else if let Some(window_id) = repaint_request_window(&*payload) {
+                            // The deprecated off-thread "repaint this window":
+                            // mark the window's tree paint-dirty; the
+                            // unconditional `request_redraw_all()` below then
+                            // re-runs the changed widget's `paint()`. Routing
+                            // is unchanged until it is removed.
+                            let winit_id = self.wm.teksilo_to_winit_map().get(&window_id).copied();
                             if let Some(winit_id) = winit_id
                                 && let Some(managed) = self.wm.get_by_winit_mut(winit_id)
                             {
@@ -3186,6 +3746,13 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         self.handle_window_event_inner(event_loop, window_id, event);
     }
 
+    /// winit asks for no redraw after this, and on X11 panics if one is
+    /// requested: every window's waker becomes a no-op, whoever still holds
+    /// one.
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.wm.disconnect_redraw_wakers();
+    }
+
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         // Drive any registered per-turn closure (the async executor poll when
         // `teksilo-async` is installed) before computing the next control
@@ -3203,10 +3770,71 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         self.pump_pen_sources(event_loop);
         self.refresh_occluded_band();
         self.process_pending(event_loop);
+        // A redraw becomes withheld with time alone, so the wake targets learn
+        // it here, before the ticks that serve a window drawing nothing.
+        let now = Instant::now();
+        self.wm.recheck_session(now);
+        for managed in self.wm.iter_mut() {
+            managed.probe_occlusion(now);
+        }
+        for managed in self.wm.iter() {
+            managed.sync_draws_nothing(now);
+        }
+        self.run_ticks(event_loop);
         self.maybe_exit(event_loop);
+        #[cfg(debug_assertions)]
+        self.report_stalled_redraws();
         self.update_control_flow(event_loop);
     }
 }
+
+/// The window a deprecated `RepaintWindowRequest` payload names, if it is
+/// one. A helper because an `else if let` condition cannot carry the
+/// `#[allow(deprecated)]` the downcast needs.
+#[allow(deprecated)]
+fn repaint_request_window(payload: &dyn std::any::Any) -> Option<TeksiloWindowId> {
+    payload
+        .downcast_ref::<teksilo_core::RepaintWindowRequest>()
+        .map(|request| request.window_id)
+}
+
+#[cfg(test)]
+mod repaint_request_tests {
+    use super::repaint_request_window;
+    use crate::window_config::TeksiloWindowId;
+
+    /// The deprecated payload is still routed to the window it names, and
+    /// nothing else is taken for it.
+    #[test]
+    #[allow(deprecated)]
+    fn a_repaint_window_request_names_its_window() {
+        let id = TeksiloWindowId::new(7);
+        let request = teksilo_core::RepaintWindowRequest { window_id: id };
+        assert_eq!(repaint_request_window(&request), Some(id));
+        assert_eq!(repaint_request_window(&"something else"), None);
+    }
+}
+
+/// Posted by a window's wake target, from any thread, through the routes
+/// `window_manager::wake_routes` builds: a state wake (content off the UI
+/// thread changed state layout reads, or an accessibility handler left
+/// something), or on macOS a draw wake made off the main thread. Private to
+/// the framework: taken before any app handler sees an event. See
+/// [`TeksiloAppHandler::window_wake`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct WindowWake {
+    pub(crate) window: WindowId,
+    pub(crate) kind: teksilo_canvas::wake::WakeKind,
+}
+
+/// Posted by the session watch, from any thread, each time it hears that
+/// whether anything on screen can be seen has changed (on macOS: the
+/// displays asleep or awake, the screen locked or unlocked, the session
+/// switched out or back). Private to the framework, like [`WindowWake`]; the
+/// loop answers with
+/// [`WindowManager::apply_session`](crate::window_manager::WindowManager::apply_session).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SessionChanged;
 
 /// Payload used by `TitleBarHostCallbacks::request_close` to route a
 /// host-initiated close back to the main event loop. The host's
@@ -3318,9 +3946,7 @@ pub struct TeksiloAppBuilder {
     theme: Theme,
     theme_mode: ThemeMode,
     pen_batching: teksilo_platform::PenBatching,
-    #[cfg(feature = "text")]
     typesetter: Option<SharedTypesetter>,
-    #[cfg(feature = "text")]
     font_registrars: Vec<Box<dyn teksilo_text::FontRegistrar>>,
     app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
     external_ctx_handler: Option<ExternalCtxHandler>,
@@ -3383,9 +4009,7 @@ impl TeksiloAppBuilder {
             theme: teksilo_core::presets::intui::light(),
             theme_mode: ThemeMode::Manual,
             pen_batching: teksilo_platform::PenBatching::default(),
-            #[cfg(feature = "text")]
             typesetter: None,
-            #[cfg(feature = "text")]
             font_registrars: Vec::new(),
             app_event_handler: None,
             external_ctx_handler: None,
@@ -3781,7 +4405,6 @@ impl TeksiloAppBuilder {
         self
     }
 
-    #[cfg(feature = "text")]
     pub fn typesetter(mut self, typesetter: SharedTypesetter) -> Self {
         self.typesetter = Some(typesetter);
         self
@@ -3800,7 +4423,6 @@ impl TeksiloAppBuilder {
     ///     .register_fonts(material3::font_registrar())
     ///     .run();
     /// ```
-    #[cfg(feature = "text")]
     pub fn register_fonts(mut self, registrar: impl teksilo_text::FontRegistrar + 'static) -> Self {
         self.font_registrars.push(Box::new(registrar));
         self
@@ -4032,29 +4654,23 @@ impl TeksiloAppBuilder {
 
         let mut tree = WidgetTree::new().with_theme(self.theme.clone());
 
-        #[cfg(feature = "text")]
-        let typesetter = {
-            let ts = self
-                .typesetter
-                .take()
-                .unwrap_or_else(SharedTypesetter::new_with_default_font);
-            // Install app/theme fonts before any text is shaped, so a
-            // theme's `typography.*.family` resolves instead of falling
-            // back to the bundled default.
-            for registrar in &self.font_registrars {
-                ts.apply_font_registrar(registrar.as_ref());
-            }
-            tree = tree.with_text_backend(ts.as_text_backend());
-            // Auto-register so rich-text widgets can reach the shared
-            // typesetter via `ctx.app_state::<SharedTypesetter>()` in
-            // headless tests too.
-            use std::any::TypeId;
-            self.app_state_registry
-                .insert(TypeId::of::<SharedTypesetter>(), Box::new(ts.clone()));
-            ts
-        };
-        #[cfg(not(feature = "text"))]
-        let _ = &mut self;
+        let typesetter = self
+            .typesetter
+            .take()
+            .unwrap_or_else(SharedTypesetter::new_with_default_font);
+        // Install app/theme fonts before any text is shaped, so a theme's
+        // `typography.*.family` resolves instead of falling back to the
+        // bundled default.
+        for registrar in &self.font_registrars {
+            typesetter.apply_font_registrar(registrar.as_ref());
+        }
+        tree = tree.with_text_backend(typesetter.as_text_backend());
+        // Auto-register so rich-text widgets can reach the shared typesetter
+        // via `ctx.app_state::<SharedTypesetter>()` in headless tests too.
+        self.app_state_registry.insert(
+            std::any::TypeId::of::<SharedTypesetter>(),
+            Box::new(typesetter),
+        );
 
         // Install the i18n manager (if any) and seed the tree with the
         // resolved initial locale and layout direction. Must happen before
@@ -4069,8 +4685,6 @@ impl TeksiloAppBuilder {
             let ctx = TreeAppContext::empty().with_app_state(self.app_state_registry);
             tree.set_app_context(std::rc::Rc::new(ctx));
         }
-        #[cfg(feature = "text")]
-        let _ = &typesetter;
 
         // Build the root from the `initial_window`'s builder if one was
         // provided. Headless apps without an `initial_window` run with an
@@ -4279,25 +4893,19 @@ impl TeksiloAppBuilder {
         // widgets (and anything else that needs direct typesetter
         // access) a reachable handle via `ctx.app_state::<SharedTypesetter>()`
         // without forcing the application author to wire it manually.
-        #[cfg(feature = "text")]
         let typesetter = self
             .typesetter
             .unwrap_or_else(SharedTypesetter::new_with_default_font);
 
-        #[cfg(feature = "text")]
         // Install app/theme fonts before any text is shaped.
         for registrar in &self.font_registrars {
             typesetter.apply_font_registrar(registrar.as_ref());
         }
 
-        #[cfg(feature = "text")]
-        {
-            use std::any::TypeId;
-            self.app_state_registry.insert(
-                TypeId::of::<SharedTypesetter>(),
-                Box::new(typesetter.clone()),
-            );
-        }
+        self.app_state_registry.insert(
+            std::any::TypeId::of::<SharedTypesetter>(),
+            Box::new(typesetter.clone()),
+        );
 
         // Auto-install a system clipboard handle so `RichTextEditor::editor`
         // (and any future clipboard-aware widget) can reach it via
@@ -4348,7 +4956,6 @@ impl TeksiloAppBuilder {
             self.app_event_handler,
             initial_config,
             app_context_template,
-            #[cfg(feature = "text")]
             typesetter,
             i18n_watcher,
             settings_watcher,
@@ -4367,6 +4974,12 @@ impl TeksiloAppBuilder {
         app.loop_tick_poll = self.loop_tick_poll;
 
         drive(event_loop, &mut app);
+        // `exiting` has disconnected every window's waker: winit calls it
+        // before its loop ends. Again here, idempotently, so that no window
+        // leaves `run_with` connected under a driver that never calls it;
+        // such a driver's windows are exposed from the end of its loop to
+        // this line.
+        app.wm.disconnect_redraw_wakers();
 
         // Flush any pending settings writes synchronously before the
         // process exits. The `DebouncedWriter` background threads also
@@ -4459,6 +5072,65 @@ impl HeadlessApp {
         }
         self.tree.set_locale(locale.to_string());
     }
+
+    /// Render the tree for an offscreen capture through `renderer`, with
+    /// the glyph atlas its text samples uploaded first.
+    ///
+    /// `Renderer::render` does not upload the atlas, so a capture that only
+    /// calls `tree.render()` draws its text blank. `atlas_version` is the
+    /// atlas version `renderer` last received: start it at 0 for a fresh
+    /// renderer, and keep it with that renderer across calls so an
+    /// unchanged atlas is not uploaded again. After an eviction the tree's
+    /// retained paints point at recycled atlas slots, so it is repainted
+    /// before the upload.
+    pub fn render_for_capture(
+        &mut self,
+        renderer: &mut teksilo_render::Renderer,
+        atlas_version: &mut u64,
+    ) -> Rc<teksilo_canvas::RenderFrame> {
+        let frame = self.tree.render();
+        let Some(typesetter) = self
+            .tree
+            .app_context()
+            .app_state::<SharedTypesetter>()
+            .cloned()
+        else {
+            return frame;
+        };
+        if sync_glyph_atlas(&typesetter, renderer, atlas_version) {
+            typesetter.bridge().borrow_mut().invalidate_cache();
+            self.tree.invalidate_all_paints();
+            drop(frame);
+            let frame = self.tree.render();
+            let evicted_again = sync_glyph_atlas(&typesetter, renderer, atlas_version);
+            debug_assert!(
+                !evicted_again,
+                "glyph eviction during eviction recovery — epoch delta would be lost"
+            );
+            return frame;
+        }
+        frame
+    }
+}
+
+/// Upload the typesetter's glyph atlas into `renderer` when it changed since
+/// `uploaded_version`, and report whether glyphs were evicted since the
+/// previous query. The caller owns the eviction recovery: what must be
+/// repainted depends on how many trees share the typesetter.
+pub(crate) fn sync_glyph_atlas(
+    typesetter: &SharedTypesetter,
+    renderer: &mut teksilo_render::Renderer,
+    uploaded_version: &mut u64,
+) -> bool {
+    let atlas = typesetter
+        .bridge()
+        .borrow_mut()
+        .atlas_info(*uploaded_version);
+    if atlas.version != *uploaded_version && atlas.width > 0 && atlas.height > 0 {
+        renderer.upload_atlas(atlas.width, atlas.height, &atlas.pixels);
+        *uploaded_version = atlas.version;
+    }
+    atlas.glyphs_evicted
 }
 
 #[cfg(test)]
@@ -5108,13 +5780,13 @@ mod tests {
     /// box: Alt+E opens no menu, and neither it nor F10 moves focus out of the
     /// box. A bar collapsed to its hamburger is the case that needs saying:
     /// its reveal floats the bar as an overlay *above* the box, where a menu
-    /// would be in front of the modal and free to act.
+    /// would be in front of the modal and free to act. macOS has no Alt+letter
+    /// mnemonics (the OS composes Option+letter first), so there only F10 is
+    /// checked.
     #[test]
     fn the_menu_bar_keys_do_nothing_behind_an_in_tree_message_box() {
         use crate::input_routing::apply_menubar_action;
-        use crate::input_routing::tests::{
-            alt_letter, menubar_answer, opened_trigger, tree_with_menu_bar,
-        };
+        use crate::input_routing::tests::{menubar_answer, tree_with_menu_bar};
         use teksilo_core::event::{Key, Modifiers};
         use teksilo_core::window::NoopWindowOps;
 
@@ -5133,10 +5805,16 @@ mod tests {
                 "precondition: focus went into the box"
             );
 
-            let open_edit = alt_letter(&tree, 'e');
-            let edit = opened_trigger(&open_edit);
             let focus_file = menubar_answer(&tree, Key::F10, Modifiers::NONE);
-            for action in [open_edit, focus_file] {
+            #[cfg(target_os = "macos")]
+            let actions = [focus_file];
+            #[cfg(not(target_os = "macos"))]
+            let (edit, actions) = {
+                use crate::input_routing::tests::{alt_letter, opened_trigger};
+                let open_edit = alt_letter(&tree, 'e');
+                (opened_trigger(&open_edit), [open_edit, focus_file])
+            };
+            for action in actions {
                 apply_menubar_action(&mut tree, &mut NoopWindowOps, action, proposal);
                 tree.layout(proposal);
                 tree.advance_time(std::time::Duration::from_secs(1));
@@ -5147,6 +5825,7 @@ mod tests {
                     "collapsed: {collapsed}, focus stays in the box"
                 );
             }
+            #[cfg(not(target_os = "macos"))]
             assert!(
                 !tree.accessibility_node(edit).is_expanded(),
                 "collapsed: {collapsed}, no menu opens over the box"
@@ -5851,5 +6530,102 @@ mod display_connection_tests {
     #[test]
     fn a_loop_that_could_not_be_built_stays_fatal() {
         assert!(!display_connection_lost(&EventLoopError::RecreationAttempt));
+    }
+}
+
+#[cfg(all(test, feature = "live-image-timings"))]
+mod live_trace_tests {
+    use super::*;
+
+    #[test]
+    fn the_live_line_prints_its_deltas_and_the_percentiles_in_microseconds() {
+        let mut stats = teksilo_render::LiveTextureStats::default();
+        (stats.textures, stats.bytes) = (1, 3_686_400);
+        (stats.uploads_full, stats.uploads_partial, stats.contended) = (2, 61, 3);
+        stats.sibling_copies = 5;
+        let mut timings = teksilo_render::LiveImageTimings::default();
+        let p = &mut timings.prepare;
+        (p.p50, p.p90, p.p99, p.max, p.samples) = (96, 150, 291, 410, 1024);
+        let p = &mut timings.lock_hold;
+        (p.p50, p.p90, p.p99, p.max, p.samples) = (95, 140, 296, 400, 2048);
+        assert_eq!(
+            live_trace_line(12.5, "main", &stats, &timings, (3, 4, 1)),
+            "teksilo_idle_trace_live t=12.500 window=\"main\" textures=1 bytes=3686400 \
+             uploads=60 copies=1 contended=2 \
+             prepare_us={p50:96,p90:150,p99:291,max:410,n:1024} \
+             lock_hold_us={p50:95,p90:140,p99:296,max:400,n:2048} \
+             commit_to_upload_us={p50:0,p90:0,p99:0,max:0,n:0}"
+        );
+    }
+
+    #[test]
+    fn a_report_owes_a_line_to_each_window_seen_rendering_since_the_last() {
+        let (a, b) = (WindowId::from(1), WindowId::from(2));
+        let mut trace = IdleTrace::new();
+        trace.note_rendered_frame(a);
+        trace.note_rendered_frame(a);
+        assert!(trace.live.due.is_empty(), "no report yet: nothing is owed");
+        trace.last_report = Instant::now() - Duration::from_secs(2);
+        trace.note_rendered_frame(b);
+        trace.live.due.sort_by_key(|id| u64::from(*id));
+        assert_eq!(trace.live.due, vec![a, b], "each window once");
+        assert!(trace.live.rendered.is_empty());
+
+        // The line is printed, and the debt paid, by `report_live`, which
+        // needs a window: the next report owes only what rendered since.
+        trace.live.due.clear();
+        trace.last_report = Instant::now() - Duration::from_secs(2);
+        trace.note_tick();
+        assert!(trace.live.due.is_empty(), "a tick renders nothing");
+    }
+}
+
+#[cfg(test)]
+mod a11y_delivery_tests {
+    use super::*;
+
+    const MS: Duration = Duration::from_millis(1);
+
+    #[test]
+    fn a_frame_owing_the_adapter_nothing_neither_delivers_nor_asks_for_a_frame() {
+        let t0 = Instant::now();
+        for walk_changed in [false, true] {
+            for since in [None, Some(t0), Some(t0 - 500 * MS)] {
+                assert_eq!(
+                    a11y_delivery(false, false, walk_changed, since, t0 + 10 * MS),
+                    A11yDelivery::Nothing,
+                    "walk changed {walk_changed}, last delivery {since:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn moves_go_ten_a_second_and_the_rest_at_once() {
+        let t0 = Instant::now();
+        assert_eq!(
+            a11y_delivery(true, false, false, Some(t0), t0 + 40 * MS),
+            A11yDelivery::HoldUntil(t0 + MOVE_DELIVERY_INTERVAL),
+            "a move within the interval waits for its end"
+        );
+        assert_eq!(
+            a11y_delivery(true, false, false, Some(t0), t0 + 100 * MS),
+            A11yDelivery::Deliver
+        );
+        assert_eq!(
+            a11y_delivery(true, false, true, Some(t0), t0 + 40 * MS),
+            A11yDelivery::Deliver,
+            "a walk is not throttled"
+        );
+        assert_eq!(
+            a11y_delivery(true, false, false, None, t0),
+            A11yDelivery::Deliver,
+            "nor is the first delivery"
+        );
+        assert_eq!(
+            a11y_delivery(false, true, false, Some(t0), t0 + MS),
+            A11yDelivery::Deliver,
+            "the adapter asked for the whole tree"
+        );
     }
 }

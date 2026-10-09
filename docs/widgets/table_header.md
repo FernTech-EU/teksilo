@@ -8,6 +8,34 @@ and `TreeTableView`, and a widget of its own for an
 application that lays out its own rows under columns: a section list with
 full-width group rows, an album card beside its tracks.
 
+## Public functions
+
+### `TableHeader`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(columns: Vec<ColumnSpec>)`](#tableheader-new) |
+| | **Builder methods** |
+| `Self` | [`widths(widths: Signal<HashMap<String, f32>>)`](#tableheader-widths) |
+| `Self` | [`sort(sort: Signal<Option<(String, SortDirection)>>)`](#tableheader-sort) |
+| `Self` | [`order(order: Signal<Vec<String>>)`](#tableheader-order) |
+| `Self` | [`pinning(pinning: Signal<HashMap<String, PinnedSide>>)`](#tableheader-pinning) |
+| `Self` | [`filters(filters: Signal<HashMap<String, String>>)`](#tableheader-filters) |
+| `Self` | [`scroll_x(scroll_x: Signal<f32>)`](#tableheader-scroll_x) |
+| `Self` | [`resize_policy(policy: ColumnResizePolicy)`](#tableheader-resize_policy) |
+| `Self` | [`stretch_last_column(on: bool)`](#tableheader-stretch_last_column) |
+| | **Methods** |
+| `&Signal<HashMap<String, f32>>` | [`widths_signal()`](#tableheader-widths_signal) |
+| `&Signal<Option<(String, SortDirection)>>` | [`sort_signal()`](#tableheader-sort_signal) |
+| `&Signal<Vec<String>>` | [`order_signal()`](#tableheader-order_signal) |
+| `&Signal<HashMap<String, PinnedSide>>` | [`pinning_signal()`](#tableheader-pinning_signal) |
+| `&Signal<HashMap<String, String>>` | [`filters_signal()`](#tableheader-filters_signal) |
+| `&Signal<f32>` | [`scroll_x_signal()`](#tableheader-scroll_x_signal) |
+| `&Signal<Vec<(String, f32)>>` | [`resolved_widths_signal()`](#tableheader-resolved_widths_signal) |
+
+## Detailed description
+
 Both views compose this widget, so there is one header implementation: the
 `HeaderCell`s (label, sort indicator, filter popover, the resize grip on
 each divider, the column-reorder drag, `Role::ColumnHeader` with its sort
@@ -15,7 +43,7 @@ direction and AccessKit `Increment` / `Decrement`), the strip that lays them
 out in pinned and scrolling bands and paints their separators, and the drop
 target that turns a reorder drag into a new column order.
 
-## State
+#### State
 
 The header's state is six signals — the width overrides, the sort, the
 column order, the pinning overrides, the filters and the horizontal scroll
@@ -35,7 +63,7 @@ takes its declared `ColumnWidth`. What the header actually laid each
 column out at is `resolved_widths_signal`,
 which is what rows of an application's own read to line their cells up.
 
-## Hosted
+#### Hosted
 
 Inside a view the header is *hosted* (`TableHeader::hosted`): the view
 resolves the widths and the display order (its body needs both before the
@@ -46,13 +74,11 @@ in-flight resize, hosted or not: it destroys the cells and the pointer
 capture with them (see `TableHeader::build`). A standalone header does
 all of that itself, within its own bounds, which it clips to.
 
-## Builder methods at a glance
-
-`widths`, `sort`, `order`, `pinning`, `filters`, `scroll_x`, `resize_policy`, `stretch_last_column`, `widths_signal`, `sort_signal`, `order_signal`, `pinning_signal`, `filters_signal`, `scroll_x_signal`, `resolved_widths_signal`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/table_view/table_header/index.html)
+
+<a id="tableheader"></a>
 
 ## `pub struct TableHeader`
 
@@ -88,10 +114,14 @@ pub struct TableHeader { /* fields */ }
 
 ### Methods
 
+<a id="tableheader-new"></a>
+
 #### `pub fn new(columns: Vec<ColumnSpec>) -> Self`
 
 A header over `columns`, in declaration order. Every piece of state it
 is not handed is its own.
+
+<a id="tableheader-widths"></a>
 
 #### `pub fn widths(mut self, widths: Signal<HashMap<String, f32>>) -> Self`
 
@@ -101,15 +131,21 @@ the resized column only. Each `Flex` column before it keeps its
 current width in this header, but not in the map, which other views
 may share at other widths.
 
+<a id="tableheader-sort"></a>
+
 #### `pub fn sort(mut self, sort: Signal<Option<(String, SortDirection)>>) -> Self`
 
 Adopt `sort` as the active sort. A click on a sortable column cycles it
 None → ascending → descending → None.
 
+<a id="tableheader-order"></a>
+
 #### `pub fn order(mut self, order: Signal<Vec<String>>) -> Self`
 
 Adopt `order` as the column order, a list of column ids; columns it
 does not name follow in declaration order. A reorder drop writes it.
+
+<a id="tableheader-pinning"></a>
 
 #### `pub fn pinning(mut self, pinning: Signal<HashMap<String, PinnedSide>>) -> Self`
 
@@ -119,20 +155,28 @@ declared pinned. A reorder drop writes it: an entry when the drop puts
 the column in a pane other than the one it declares, none when it
 puts it back.
 
+<a id="tableheader-filters"></a>
+
 #### `pub fn filters(mut self, filters: Signal<HashMap<String, String>>) -> Self`
 
 Adopt `filters` as the per-column filter text the filter popover of a
 `filterable` column edits.
+
+<a id="tableheader-scroll_x"></a>
 
 #### `pub fn scroll_x(mut self, scroll_x: Signal<f32>) -> Self`
 
 Follow `scroll_x`, the horizontal offset of the body under the header:
 the unpinned columns shift left by it, the pinned ones stay put.
 
+<a id="tableheader-resize_policy"></a>
+
 #### `pub fn resize_policy(mut self, policy: ColumnResizePolicy) -> Self`
 
 Whether a resize writes its width on every pointer move (`Live`, the
 default) or on release (`OnRelease`, with a guide line meanwhile).
+
+<a id="tableheader-stretch_last_column"></a>
 
 #### `pub fn stretch_last_column(mut self, on: bool) -> Self`
 
@@ -140,36 +184,50 @@ Let the last column in display order take the width the others leave
 — see `TableView::stretch_last_column`.
 Default off.
 
+<a id="tableheader-widths_signal"></a>
+
 #### `pub fn widths_signal(&self) -> &Signal<HashMap<String, f32>>`
 
 The width overrides — the signal `widths` adopted, or
 the header's own.
+
+<a id="tableheader-sort_signal"></a>
 
 #### `pub fn sort_signal(&self) -> &Signal<Option<(String, SortDirection)>>`
 
 The active sort — the signal `sort` adopted, or the
 header's own.
 
+<a id="tableheader-order_signal"></a>
+
 #### `pub fn order_signal(&self) -> &Signal<Vec<String>>`
 
 The column order — the signal `order` adopted, or the
 header's own.
+
+<a id="tableheader-pinning_signal"></a>
 
 #### `pub fn pinning_signal(&self) -> &Signal<HashMap<String, PinnedSide>>`
 
 The pinning overrides — the signal `pinning`
 adopted, or the header's own.
 
+<a id="tableheader-filters_signal"></a>
+
 #### `pub fn filters_signal(&self) -> &Signal<HashMap<String, String>>`
 
 The filters — the signal `filters` adopted, or the
 header's own.
+
+<a id="tableheader-scroll_x_signal"></a>
 
 #### `pub fn scroll_x_signal(&self) -> &Signal<f32>`
 
 The horizontal offset the header follows — the signal
 `scroll_x` adopted, or the header's own (which
 stays at 0).
+
+<a id="tableheader-resolved_widths_signal"></a>
 
 #### `pub fn resolved_widths_signal(&self) -> &Signal<Vec<(String, f32)>>`
 

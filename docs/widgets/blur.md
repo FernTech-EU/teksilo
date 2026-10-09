@@ -9,6 +9,20 @@
 to its child subtree, driven by a `Prop<f32>` radius (in logical
 pixels).
 
+## Public functions
+
+### `Blur`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(radius: impl Into<Prop<f32>>)`](#blur-new) |
+| | **Builder methods** |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#blur-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#blur-child_opt) |
+
+## Detailed description
+
 Built on `BuildContext::set_blur`, a per-node paint scope parallel
 to `set_opacity` and `set_transform`. The framework's render walker
 emits `BeginBlurredSubtree { bounds, radius }` before this widget's
@@ -36,13 +50,13 @@ ctx.animate().normal().standard().to_or_snap(&radius, 15.0);
 ctx.add(Blur::new(radius).child(content));
 ```
 
-## Layout semantics
+#### Layout semantics
 
 `Blur` does not change layout. The wrapped child reports its full
 natural size at all blur radii; only the visual paint output is
 affected.
 
-## Performance
+#### Performance
 
 Blur is the most expensive paint scope in the framework — every
 enabled blur scope drives N+M+1 small render passes per frame
@@ -59,13 +73,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Blur at Touch density](img/blur-touch.png)
 
-## Builder methods at a glance
-
-`child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/blur/index.html)
+
+<a id="blur"></a>
 
 ## `pub struct Blur`
 
@@ -78,15 +90,21 @@ pub struct Blur { /* fields */ }
 
 ### Methods
 
+<a id="blur-new"></a>
+
 #### `pub fn new(radius: impl Into<Prop<f32>>) -> Self`
 
 Build a blur wrapper bound to `radius` (in logical pixels).
 Accepts any `Prop<f32>` source — `f32`, `Signal<f32>`, or
 `Prop<f32>`. Sub-perceptual radii (< 0.5) are a no-op.
 
+<a id="blur-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Inline child widget (deferred insertion).
+
+<a id="blur-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

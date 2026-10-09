@@ -6,13 +6,25 @@
 `TouchTarget` — the last resort of the three hit-targeting mechanisms:
 the one that actually moves things.
 
-## Builder methods at a glance
+## Public functions
 
-`size`, `reserve_space`, `child`, `child_opt`
+### `TouchTarget`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#touchtarget-new) |
+| | **Builder methods** |
+| `Self` | [`size(dp: f32)`](#touchtarget-size) |
+| `Self` | [`reserve_space(reserve: bool)`](#touchtarget-reserve_space) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#touchtarget-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#touchtarget-child_opt) |
 
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/touch_target/index.html)
+
+<a id="touchtarget"></a>
 
 ## `pub struct TouchTarget`
 
@@ -71,24 +83,34 @@ pub struct TouchTarget { /* fields */ }
 
 ### Methods
 
+<a id="touchtarget-new"></a>
+
 #### `pub fn new() -> Self`
 
 A new wrapper at the density's own `target_size`. Attach content with
 `child` or `child`.
+
+<a id="touchtarget-size"></a>
 
 #### `pub fn size(mut self, dp: f32) -> Self`
 
 Override the target size, in dp. Defaults to the density's
 `InputTokens::target_size` (44 dp at Touch).
 
+<a id="touchtarget-reserve_space"></a>
+
 #### `pub fn reserve_space(mut self, reserve: bool) -> Self`
 
 Whether the slot takes the room it needs (`true`, the default) or widens
 only the hit area (`false`). See the type docs.
 
+<a id="touchtarget-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Wrap an inline widget.
+
+<a id="touchtarget-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

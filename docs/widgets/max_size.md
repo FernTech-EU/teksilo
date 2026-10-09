@@ -5,6 +5,24 @@
 
 MaxSize — a layout modifier that caps a child to a maximum width and/or height.
 
+## Public functions
+
+### `MaxSize`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(width: f32, height: f32)`](#maxsize-new) |
+| `Self` | [`width(width: f32)`](#maxsize-width) |
+| `Self` | [`height(height: f32)`](#maxsize-height) |
+| | **Builder methods** |
+| `Self` | [`max_width(state: impl Into<Prop<f32>>)`](#maxsize-max_width) |
+| `Self` | [`max_height(state: impl Into<Prop<f32>>)`](#maxsize-max_height) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#maxsize-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#maxsize-child_opt) |
+
+## Detailed description
+
 The child is proposed the lesser of the parent's proposal and the configured
 maximum on each axis; the reported size is then clamped again so a child that
 intrinsically overshoots the cap is always contained. Axes with no maximum set
@@ -25,13 +43,11 @@ let _w = MaxSize::width(240.0)
     .child(TextWidget::new(lit!("This text will not exceed 240 dp.")));
 ```
 
-## Builder methods at a glance
-
-`width`, `height`, `max_width`, `max_height`, `child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/max_size/index.html)
+
+<a id="maxsize"></a>
 
 ## `pub struct MaxSize`
 
@@ -45,29 +61,43 @@ pub struct MaxSize { /* fields */ }
 
 ### Methods
 
+<a id="maxsize-new"></a>
+
 #### `pub fn new(width: f32, height: f32) -> Self`
 
 Cap both axes: the child's width will not exceed `width` and its height will not exceed `height`.
+
+<a id="maxsize-width"></a>
 
 #### `pub fn width(width: f32) -> Self`
 
 Cap only the width axis; the height axis is unconstrained by this modifier.
 
+<a id="maxsize-height"></a>
+
 #### `pub fn height(height: f32) -> Self`
 
 Cap only the height axis; the width axis is unconstrained by this modifier.
+
+<a id="maxsize-max_width"></a>
 
 #### `pub fn max_width(mut self, state: impl Into<Prop<f32>>) -> Self`
 
 Bind max width to a reactive state.
 
+<a id="maxsize-max_height"></a>
+
 #### `pub fn max_height(mut self, state: impl Into<Prop<f32>>) -> Self`
 
 Bind max height to a reactive state.
 
+<a id="maxsize-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline child widget (deferred insertion).
+
+<a id="maxsize-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

@@ -81,8 +81,17 @@ native-menu = []
 # crate: it uses the `windows` bindings this crate already links.
 automation = ["dep:teksilo-automation"]
 
+# `PlatformWindow::live_texture_timings`: the renderer's histograms of its
+# live pass, in release builds too. Forwards teksilo-render's feature.
+live-image-timings = ["teksilo-render/live-image-timings"]
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
+# The main dispatch queue, for a draw wake made off the main thread with no
+# event-loop route to post through (`wake.rs`): handed over asynchronously,
+# since winit's own off-main redraw request waits for the main thread. The
+# same version winit and wgpu already resolve.
+dispatch2 = "0.3"
 objc2-app-kit = { version = "0.3", features = [
     "NSWorkspace",
     "NSAccessibility",
@@ -116,6 +125,25 @@ objc2-foundation = { version = "0.3", features = [
     "NSDictionary",
     "NSGeometry",
     "NSEnumerator",
+    # The session watch (`session.rs`): NSWorkspace's notifications, and the
+    # distributed ones a locked screen posts.
+    "NSNotification",
+    "NSDistributedNotificationCenter",
+] }
+# The session watch's reading of the display's sleep and the session's lock
+# and console flags. Both already resolve through objc2-app-kit.
+objc2-core-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "CFDictionary",
+    "CFNumber",
+    "CFString",
+] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = [
+    "std",
+    "libc",
+    "CGDirectDisplay",
+    "CGDisplayConfiguration",
+    "CGSession",
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -190,6 +218,9 @@ zbus = { version = "5.19", default-features = false, features = ["async-io"] }
 # The X keysym constants, to check `key_report`'s hand-written keysym table
 # against. Already in the tree through winit's xkbcommon.
 xkeysym = "0.2"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(teksilo_loom)'] }
 
 [package.metadata.docs.rs]
 all-features = true

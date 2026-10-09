@@ -5,6 +5,37 @@
 
 Selection model for `Scene` items.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`SceneSelectionMode`](#sceneselectionmode) — Selection-mode discriminator |
+| `struct` | [`SceneSelection`](#sceneselection) — Reactive selection state for a `Scene` |
+
+## Public functions
+
+### `SceneSelection`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(mode: SceneSelectionMode)`](#sceneselection-new) |
+| | **Methods** |
+| `SceneSelectionMode` | [`mode()`](#sceneselection-mode) |
+| `Signal<BTreeSet<ItemId>>` | [`selection_signal()`](#sceneselection-selection_signal) |
+| `bool` | [`is_selected(id: ItemId)`](#sceneselection-is_selected) |
+| `Vec<ItemId>` | [`selected()`](#sceneselection-selected) |
+| `usize` | [`count()`](#sceneselection-count) |
+|  | [`clear()`](#sceneselection-clear) |
+|  | [`select_one(id: ItemId)`](#sceneselection-select_one) |
+|  | [`toggle(id: ItemId)`](#sceneselection-toggle) |
+|  | [`replace(ids: impl IntoIterator<Item = ItemId>)`](#sceneselection-replace) |
+|  | [`extend(ids: impl IntoIterator<Item = ItemId>)`](#sceneselection-extend) |
+|  | [`commit_marquee(scene: &Scene, marquee_rect: Rect, additive: bool)`](#sceneselection-commit_marquee) |
+|  | [`commit_marquee_region(scene: &Scene, region: &SceneRegion, mode: ItemSelectionMode, view_scale: f32, additive: bool)`](#sceneselection-commit_marquee_region) |
+
+## Detailed description
+
 Mirrors the API of `teksilo_data::SelectionModel` but keyed by
 `ItemId` instead of `usize` — the natural address for scene
 entries. Click-to-select, Ctrl+click toggle, Shift+click range,
@@ -30,13 +61,11 @@ let stroke_color = selected.map(move |s| {
 });
 ```
 
-## Builder methods at a glance
-
-`mode`, `selection_signal`, `is_selected`, `selected`, `count`, `clear`, `select_one`, `toggle`, `replace`, `extend`, `commit_marquee`, `commit_marquee_region`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="sceneselectionmode"></a>
 
 ## `pub enum SceneSelectionMode`
 
@@ -52,6 +81,8 @@ pub enum SceneSelectionMode { /* variants */ }
 - **`Single`** — At most one item selected at a time.
 - **`Multi`** — Multiple items can be selected; Ctrl+click toggles, Shift+click extends a range from the anchor.
 
+<a id="sceneselection"></a>
+
 ## `pub struct SceneSelection`
 
 Reactive selection state for a `Scene`.
@@ -66,41 +97,59 @@ pub struct SceneSelection { /* fields */ }
 
 ### Methods
 
+<a id="sceneselection-new"></a>
+
 #### `pub fn new(mode: SceneSelectionMode) -> Self`
 
 New selection model with the given mode. Initially empty,
 no anchor.
 
+<a id="sceneselection-mode"></a>
+
 #### `pub fn mode(&self) -> SceneSelectionMode`
 
 The configured selection mode.
+
+<a id="sceneselection-selection_signal"></a>
 
 #### `pub fn selection_signal(&self) -> Signal<BTreeSet<ItemId>>`
 
 Live selection signal. Bind reactive consumers (item paint,
 status-bar item-count labels) to this.
 
+<a id="sceneselection-is_selected"></a>
+
 #### `pub fn is_selected(&self, id: ItemId) -> bool`
 
 Whether the given item id is currently selected.
+
+<a id="sceneselection-selected"></a>
 
 #### `pub fn selected(&self) -> Vec<ItemId>`
 
 Selected item ids in sorted order.
 
+<a id="sceneselection-count"></a>
+
 #### `pub fn count(&self) -> usize`
 
 Number of selected items.
+
+<a id="sceneselection-clear"></a>
 
 #### `pub fn clear(&self)`
 
 Clear the selection. The anchor is also cleared so a
 subsequent Shift+click extends from a fresh starting point.
 
+<a id="sceneselection-select_one"></a>
+
 #### `pub fn select_one(&self, id: ItemId)`
 
 Replace the selection with a single item; sets the anchor
 for subsequent range extension. No-op in `None` mode.
+
+<a id="sceneselection-toggle"></a>
 
 #### `pub fn toggle(&self, id: ItemId)`
 
@@ -110,6 +159,8 @@ toggle-off. No-op in `None` mode; in `Single` mode behaves
 like `select_one` if the item is currently unselected, or
 `clear` if it is.
 
+<a id="sceneselection-replace"></a>
+
 #### `pub fn replace(&self, ids: impl IntoIterator<Item = ItemId>)`
 
 Replace the selection with the given set of ids. Used by
@@ -117,11 +168,15 @@ marquee on commit. Anchor is cleared. No-op in `None`
 mode; in `Single` mode keeps at most one (the first id in
 `ids`).
 
+<a id="sceneselection-extend"></a>
+
 #### `pub fn extend(&self, ids: impl IntoIterator<Item = ItemId>)`
 
 Add `ids` to the existing selection (marquee with
 Ctrl-modifier — additive box-select). No-op in `None` mode;
 in `Single` mode reduces to `select_one(last)`.
+
+<a id="sceneselection-commit_marquee"></a>
 
 #### `pub fn commit_marquee(&self, scene: &Scene, marquee_rect: Rect, additive: bool)`
 
@@ -143,6 +198,8 @@ item it is tighter, because the shape test happens in the item's own
 frame rather than against its enlarged scene-space hull. Pass
 `ItemSelectionMode::IntersectsItemBoundingRect` to
 `commit_marquee_region` to get the old rule back.
+
+<a id="sceneselection-commit_marquee_region"></a>
 
 #### `pub fn commit_marquee_region( &self, scene: &Scene, region: &SceneRegion, mode: ItemSelectionMode, view_scale: f32, additive: bool, )`
 

@@ -21,7 +21,8 @@ fn inspect_pointer(ctx: &EventContext) {
 }
 ```
 
-`pointer_position()` is optional and uses window-logical coordinates.
+`pointer_position()` is optional and uses window-logical coordinates;
+`ctx.to_local(p)` converts a window-logical point into the handler's own space.
 `pointer()` provides the current pointer identity and axes. Outside pointer,
 scroll, gesture, or drag dispatch, the context uses fallback pointer information;
 do not interpret that fallback as a new physical sample.
@@ -34,7 +35,8 @@ do not interpret that fallback as a new physical sample.
 - Use `owns_pointer()` when handling moves during a captured interaction.
 - Handle `PointerCancel` as terminal: clear drag, pressed, and preview state.
 - Use `coalesced()` before the current sample when every stylus position matters.
-  These samples also use window-logical coordinates.
+  These samples also use window-logical coordinates; convert each with
+  `ctx.to_local`.
 - Use `scroll_source()` and `scroll_phase()` to distinguish wheel input,
   touch panning, and trackpad momentum.
 - Provide a press or keyboard route for controls otherwise exposed only on hover.

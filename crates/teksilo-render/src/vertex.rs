@@ -3,6 +3,7 @@
 
 use bytemuck::{Pod, Zeroable};
 
+use teksilo_canvas::live_image::LiveImageQuad;
 use teksilo_canvas::render_frame::PaintData;
 use teksilo_canvas::{DecorationRect, GlyphQuad, PathEntry, ShadowQuad, ShapeQuad, Transform2D};
 
@@ -38,6 +39,15 @@ pub fn srgb_to_linear_rgba(c: [f32; 4]) -> [f32; 4] {
 /// instead of using the texture as an alpha mask tinted by vertex color.
 pub const QUAD_FLAG_COLOR_GLYPH: u32 = 1;
 
+/// Per-vertex flag: ignore the texture's alpha, which holds no alpha (the
+/// fourth byte of an RGBX or BGRX live picture). Drawn opaque.
+pub const QUAD_FLAG_OPAQUE: u32 = 2;
+
+/// Per-vertex flag: the texture holds blue, green, red in its red, green and
+/// blue channels (a BGRA or BGRX live picture); swapped after sampling,
+/// which filtering and sRGB decoding commute with, channel by channel.
+pub const QUAD_FLAG_SWAP_RB: u32 = 4;
+
 /// Vertex for the textured quad pipeline (glyphs, images).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -72,6 +82,67 @@ const GLYPH_SNAP_SIZE_EPS: f32 = 1.0 / 16.0;
 fn apply_affine(p: [f32; 2], t: &Transform2D) -> [f32; 2] {
     let [a, b, c, d, tx, ty] = t.m;
     [a * p[0] + c * p[1] + tx, b * p[0] + d * p[1] + ty]
+}
+
+/// The four vertices of live picture `quad`, in device pixels: its `screen`
+/// (logical `[x, y, width, height]`) under `transform`, its corners sampling
+/// its `uv` (top-leading, top-trailing, bottom-trailing, bottom-leading) of
+/// a `texture`-sized texture. A quad that maps one texel to one device
+/// pixel, under a transform that neither rotates nor scales it, has its
+/// origin rounded to the pixel grid, so it samples texel centres exactly as
+/// glyphs do, unless its draw turned `pixel_snap` off; any other is placed
+/// where the transform puts it.
+pub(crate) fn live_quad_verts(
+    quad: &LiveImageQuad,
+    texture: (u32, u32),
+    scale_factor: f32,
+    transform: &Transform2D,
+    color: [f32; 4],
+    flags: u32,
+) -> [QuadVertex; 4] {
+    let (screen, uv) = (quad.screen, quad.uv);
+    let [x, y, w, h] = screen;
+    let (sx, sy, sw, sh) = (
+        x * scale_factor,
+        y * scale_factor,
+        w * scale_factor,
+        h * scale_factor,
+    );
+    let (tw, th) = (texture.0 as f32, texture.1 as f32);
+    // Texels the quad's top edge and leading edge cover.
+    let along = |from: [f32; 2], to: [f32; 2]| {
+        ((to[0] - from[0]) * tw).abs() + ((to[1] - from[1]) * th).abs()
+    };
+    let (across, down) = (along(uv[0], uv[1]), along(uv[0], uv[3]));
+    let [a, b, c, d, _, _] = transform.m;
+    let whole = |v: f32| (v - v.round()).abs() < GLYPH_SNAP_SIZE_EPS;
+    let one_to_one = quad.pixel_snap
+        && b.abs() < GLYPH_SNAP_AXIS_EPS
+        && c.abs() < GLYPH_SNAP_AXIS_EPS
+        && (a * sw - across).abs() < GLYPH_SNAP_SIZE_EPS
+        && (d * sh - down).abs() < GLYPH_SNAP_SIZE_EPS
+        && whole(across)
+        && whole(down);
+    let positions: [[f32; 2]; 4] = if one_to_one {
+        let [ox, oy] = apply_affine([sx, sy], transform);
+        let (ox, oy) = (ox.round(), oy.round());
+        let (cw, ch) = (across.round() * a.signum(), down.round() * d.signum());
+        [[ox, oy], [ox + cw, oy], [ox + cw, oy + ch], [ox, oy + ch]]
+    } else {
+        [
+            apply_affine([sx, sy], transform),
+            apply_affine([sx + sw, sy], transform),
+            apply_affine([sx + sw, sy + sh], transform),
+            apply_affine([sx, sy + sh], transform),
+        ]
+    };
+    std::array::from_fn(|i| QuadVertex {
+        position: positions[i],
+        tex_coord: uv[i],
+        color,
+        flags,
+        _pad: 0,
+    })
 }
 
 impl QuadVertex {

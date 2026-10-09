@@ -6,6 +6,20 @@
 `Collapse` — a wrapper widget that animates its child between
 hidden and natural size when an external `Signal<bool>` toggles.
 
+## Public functions
+
+### `Collapse`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(expanded: Signal<bool>)`](#collapse-new) |
+| | **Builder methods** |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#collapse-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#collapse-child_opt) |
+
+## Detailed description
+
 Drives a `progress: Signal<f32>` ∈ [0, 1] (0 = collapsed,
 1 = expanded) and reports its own size as `(natural_w, natural_h *
 progress)` while the child lays out at full natural size — the
@@ -25,13 +39,11 @@ expanded.set(true);  // animates open over `motion.duration_collapse`
 Honors `prefers-reduced-motion`: under reduced motion, progress
 snaps to its end value instead of tweening.
 
-## Builder methods at a glance
-
-`child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/collapse/index.html)
+
+<a id="collapse"></a>
 
 ## `pub struct Collapse`
 
@@ -44,15 +56,21 @@ pub struct Collapse { /* fields */ }
 
 ### Methods
 
+<a id="collapse-new"></a>
+
 #### `pub fn new(expanded: Signal<bool>) -> Self`
 
 Build a collapse wrapper bound to `expanded`. Initially
 collapsed iff `expanded.get()` is `false` at the first
 `build()`.
 
+<a id="collapse-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Inline child widget (deferred insertion).
+
+<a id="collapse-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

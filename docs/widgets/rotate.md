@@ -10,6 +10,21 @@ subtree, driven by an external `Prop<f32>` of radians. Layout-
 stable: the wrapper reports the child's natural size at all
 angles; only the visual content rotates within the slot.
 
+## Public functions
+
+### `Rotate`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(angle: impl Into<Prop<f32>>)`](#rotate-new) |
+| | **Builder methods** |
+| `Self` | [`origin(origin: ScaleOrigin)`](#rotate-origin) |
+| `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#rotate-child) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#rotate-child_opt) |
+
+## Detailed description
+
 ```ignore
 let angle = ctx.animated_signal(0.0);
 ctx.add(Rotate::new(angle.clone()).child(chevron));
@@ -28,7 +43,7 @@ faked by visibility-toggling two static chevron icons), spinning
 loaders not covered by `Spinner`, "shake your
 head no" rotation feedback, dial controls.
 
-## Reduced motion
+#### Reduced motion
 
 Rotate doesn't introduce motion — it just applies whatever the
 caller's angle signal currently holds. Reduced-motion handling
@@ -43,13 +58,11 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ![Rotate at Touch density](img/rotate-touch.png)
 
-## Builder methods at a glance
-
-`origin`, `child`, `child_opt`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/rotate/index.html)
+
+<a id="rotate"></a>
 
 ## `pub struct Rotate`
 
@@ -62,18 +75,26 @@ pub struct Rotate { /* fields */ }
 
 ### Methods
 
+<a id="rotate-new"></a>
+
 #### `pub fn new(angle: impl Into<Prop<f32>>) -> Self`
 
 Create a rotate wrapper bound to `angle` (radians); accepts a
 static `f32` or a reactive `Signal<f32>`. Default pivot: `Center`.
 
+<a id="rotate-origin"></a>
+
 #### `pub fn origin(mut self, origin: ScaleOrigin) -> Self`
 
 Pivot point for the rotation. Default `Center`.
 
+<a id="rotate-child"></a>
+
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Inline child widget (deferred insertion).
+
+<a id="rotate-child_opt"></a>
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

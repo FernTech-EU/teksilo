@@ -6,6 +6,211 @@
 The `Scene` data model — the owner of all items in a pannable/zoomable
 scene.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `enum` | [`ItemChange`](#itemchange) — A change to an item's state, fired through `Scene::item_change_signal` for every mutation |
+| `struct` | [`HandlerReplacement`](#handlerreplacement) — The two sides of a `Scene::set_item_handlers`, as they ride an `ItemChange::HandlersChanged` |
+| `struct` | [`ItemPayload`](#itempayload) — A `Delegated` heavyweight entry's type-erased payload, as it rides an `ItemChange::PayloadChanged` |
+| `enum` | [`AppearanceChange`](#appearancechange) — Which paint-only appearance slot changed, with both sides of the write |
+| `struct` | [`Placement`](#placement) — Where an item sits, as **one** property: logical parent, paint z, position in the parent frame, and local to parent transform |
+| `struct` | [`CascadeBudget`](#cascadebudget) — The runaway-detection budget for one scene's change fan-out — how much work **observers** may generate from one batch before the drain declares the cascade… |
+| `enum` | [`SceneLayer`](#scenelayer) — Which paint band a lightweight `SceneItem` sits in, relative to the heavyweight widget tier |
+| `enum` | [`SizePolicy`](#sizepolicy) — How an entry's `local_bounds` is decided each layout pass |
+| `enum` | [`PanAxes`](#panaxes) — Which axes a `SceneView` is allowed to pan along |
+| `struct` | [`SceneConstraints`](#sceneconstraints) — Reactive interaction-policy bundle owned by `Scene` |
+| `struct` | [`Scene`](#scene) — The data model behind a `SceneView`: a flat list of entries in a parent-relative scene-graph plus a `SpatialIndex` for rectangular queries |
+
+## Public functions
+
+### `Scene`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new()`](#scene-new) |
+| `Self` | [`with_index(index: Box<dyn SpatialIndex>)`](#scene-with_index) |
+| | **Methods** |
+| `ItemId` | [`add_widget<W: Widget + 'static>(widget: W, local_rect: Rect)`](#scene-add_widget) |
+| `ItemId` | [`add_item<I: SceneItem + 'static>(item: I, local_pos: Point)`](#scene-add_item) |
+| `ItemId` | [`add_item_dynamic<I: SceneItem + 'static>(item: I, local_pos: Point)`](#scene-add_item_dynamic) |
+| `bool` | [`refresh_dynamic_bounds()`](#scene-refresh_dynamic_bounds) |
+| `Signal<SceneChange>` | [`item_change_signal()`](#scene-item_change_signal) |
+| `Signal<u64>` | [`a11y_change_signal()`](#scene-a11y_change_signal) |
+| `CascadeBudget` | [`cascade_budget()`](#scene-cascade_budget) |
+|  | [`set_cascade_budget(budget: CascadeBudget)`](#scene-set_cascade_budget) |
+| `u32` | [`open_transaction_depth()`](#scene-open_transaction_depth) |
+| `Signal<crate::journal::TxnId>` | [`transaction_signal()`](#scene-transaction_signal) |
+| `u64` | [`mutation_version()`](#scene-mutation_version) |
+| `u64` | [`structural_version()`](#scene-structural_version) |
+| `Option<Point>` | [`local_pos(id: ItemId)`](#scene-local_pos) |
+|  | [`set_local_pos(id: ItemId, local_pos: Point)`](#scene-set_local_pos) |
+| `Option<Rect>` | [`local_bounds(id: ItemId)`](#scene-local_bounds) |
+|  | [`set_local_bounds(id: ItemId, local_bounds: Rect)`](#scene-set_local_bounds) |
+| `SizePolicy` | [`size_policy(id: ItemId)`](#scene-size_policy) |
+| `bool` | [`set_size_policy(id: ItemId, policy: SizePolicy)`](#scene-set_size_policy) |
+| `bool` | [`set_measured_size(id: ItemId, size: Size)`](#scene-set_measured_size) |
+| `Option<Transform2D>` | [`transform(id: ItemId)`](#scene-transform) |
+|  | [`set_transform(id: ItemId, transform: Transform2D)`](#scene-set_transform) |
+| `Transform2D` | [`scene_transform(id: ItemId)`](#scene-scene_transform) |
+| `Option<Point>` | [`scene_pos(id: ItemId)`](#scene-scene_pos) |
+| `Option<Rect>` | [`scene_rect(id: ItemId)`](#scene-scene_rect) |
+| `Option<Point>` | [`map_to_scene(id: ItemId, local_pt: Point)`](#scene-map_to_scene) |
+| `Option<Point>` | [`map_from_scene(id: ItemId, scene_pt: Point)`](#scene-map_from_scene) |
+| `Option<ItemFlags>` | [`flags(id: ItemId)`](#scene-flags) |
+|  | [`set_flags(id: ItemId, flags: ItemFlags)`](#scene-set_flags) |
+|  | [`set_flag(id: ItemId, flag: ItemFlags, on: bool)`](#scene-set_flag) |
+|  | [`set_visible(id: ItemId, visible: bool)`](#scene-set_visible) |
+| `bool` | [`is_effectively_visible(id: ItemId)`](#scene-is_effectively_visible) |
+| `Option<f32>` | [`opacity(id: ItemId)`](#scene-opacity) |
+|  | [`set_opacity(id: ItemId, opacity: f32)`](#scene-set_opacity) |
+|  | [`set_item_fill(id: ItemId, fill: impl Into<ColorProp>)`](#scene-set_item_fill) |
+|  | [`clear_item_fill(id: ItemId)`](#scene-clear_item_fill) |
+|  | [`set_item_stroke(id: ItemId, color: impl Into<ColorProp>, style: StrokeStyle)`](#scene-set_item_stroke) |
+|  | [`clear_item_stroke(id: ItemId)`](#scene-clear_item_stroke) |
+| `ItemId` | [`add_boxed_item(item: Box<dyn SceneItem>, local_pos: Point)`](#scene-add_boxed_item) |
+|  | [`set_item_handlers(id: ItemId, handlers: Option<SceneItemHandlerSet>)`](#scene-set_item_handlers) |
+| `Option<&mut SceneItemHandlerSet>` | [`handlers_mut(id: ItemId)`](#scene-handlers_mut) |
+| `Option<&SceneItemHandlerSet>` | [`handlers(id: ItemId)`](#scene-handlers) |
+| `f32` | [`effective_opacity(id: ItemId)`](#scene-effective_opacity) |
+|  | [`set_scene_rect(rect: Option<Rect>)`](#scene-set_scene_rect) |
+| `Option<Rect>` | [`scene_rect_extent()`](#scene-scene_rect_extent) |
+|  | [`pan_axes(axes: PanAxes)`](#scene-pan_axes) |
+| `PanAxes` | [`current_pan_axes()`](#scene-current_pan_axes) |
+|  | [`zoomable(on: bool)`](#scene-zoomable) |
+| `bool` | [`is_zoomable()`](#scene-is_zoomable) |
+|  | [`set_pan_bounds(bounds: Option<Rect>)`](#scene-set_pan_bounds) |
+| `Option<Rect>` | [`current_pan_bounds()`](#scene-current_pan_bounds) |
+|  | [`set_zoom_range(range: Option<std::ops::RangeInclusive<f32>>)`](#scene-set_zoom_range) |
+| `Option<std::ops::RangeInclusive<f32>>` | [`current_zoom_range()`](#scene-current_zoom_range) |
+| `Signal<PanAxes>` | [`pan_axes_signal()`](#scene-pan_axes_signal) |
+| `Signal<Option<Rect>>` | [`pan_bounds_signal()`](#scene-pan_bounds_signal) |
+| `Signal<Option<std::ops::RangeInclusive<f32>>>` | [`zoom_range_signal()`](#scene-zoom_range_signal) |
+| `Signal<bool>` | [`zoomable_signal()`](#scene-zoomable_signal) |
+| `&SceneConstraints` | [`constraints()`](#scene-constraints) |
+|  | [`set_z(id: ItemId, z: f32)`](#scene-set_z) |
+|  | [`bring_to_front(id: ItemId)`](#scene-bring_to_front) |
+|  | [`send_to_back(id: ItemId)`](#scene-send_to_back) |
+| `Option<f32>` | [`z(id: ItemId)`](#scene-z) |
+|  | [`set_layer(id: ItemId, layer: SceneLayer)`](#scene-set_layer) |
+| `Option<SceneLayer>` | [`layer(id: ItemId)`](#scene-layer) |
+|  | [`set_item_parent(child: ItemId, parent: Option<ItemId>)`](#scene-set_item_parent) |
+| `Option<ItemId>` | [`parent_of(id: ItemId)`](#scene-parent_of) |
+| `bool` | [`is_descendant_of(id: ItemId, ancestor: ItemId)`](#scene-is_descendant_of) |
+|  | [`collect_descendants(id: ItemId, out: &mut Vec<ItemId>)`](#scene-collect_descendants) |
+|  | [`set_geometry_constraint(f: impl Fn(&crate::constrain::ProposedChange<'_>) -> crate::constrain::ChangeVerdict + 'static)`](#scene-set_geometry_constraint) |
+|  | [`clear_geometry_constraint()`](#scene-clear_geometry_constraint) |
+| `bool` | [`has_geometry_constraint()`](#scene-has_geometry_constraint) |
+| `bool` | [`in_geometry_constraint()`](#scene-in_geometry_constraint) |
+| `Vec<ItemId>` | [`selection_roots(ids: &[ItemId])`](#scene-selection_roots) |
+| `Vec<ItemId>` | [`transformable_roots(ids: &[ItemId], op: crate::transform_session::TransformOp)`](#scene-transformable_roots) |
+| `Option<f32>` | [`scene_rotation(id: ItemId)`](#scene-scene_rotation) |
+| `Option<crate::transform_session::TransformFrame>` | [`transform_frame(roots: &[ItemId])`](#scene-transform_frame) |
+| `usize` | [`apply_transform_delta(roots: &[ItemId], delta: &crate::transform_session::TransformDelta)`](#scene-apply_transform_delta) |
+| `Option<&dyn SceneItem>` | [`item(id: ItemId)`](#scene-item) |
+| `Option<PaintKey>` | [`paint_key(id: ItemId)`](#scene-paint_key) |
+|  | [`remove(id: ItemId)`](#scene-remove) |
+| `Vec<RemovedItem>` | [`take(id: ItemId)`](#scene-take) |
+| `Result<ItemId, RestoreError>` | [`restore(salvage: RemovedItem)`](#scene-restore) |
+| `Result<Vec<ItemId>, RestoreError>` | [`restore_all(salvage: Vec<RemovedItem>)`](#scene-restore_all) |
+| `Result<Box<dyn SceneItem>, ReplaceRejected>` | [`replace_item(id: ItemId, item: Box<dyn SceneItem>)`](#scene-replace_item) |
+| `Option<Placement>` | [`placement(id: ItemId)`](#scene-placement) |
+|  | [`set_placement(id: ItemId, placement: Placement)`](#scene-set_placement) |
+|  | [`reparent_keeping_scene_pos(id: ItemId, parent: Option<ItemId>)`](#scene-reparent_keeping_scene_pos) |
+| `Option<f32>` | [`z_between(below: ItemId, above: ItemId)`](#scene-z_between) |
+|  | [`orphan(id: ItemId)`](#scene-orphan) |
+| `Vec<ItemId>` | [`items_in_rect(scene_rect: Rect)`](#scene-items_in_rect) |
+| `Vec<(Rect, teksilo_tokens::Color)>` | [`item_thumbnails()`](#scene-item_thumbnails) |
+| `Option<ItemShape>` | [`item_shape(id: ItemId)`](#scene-item_shape) |
+| `bool` | [`item_contains(id: ItemId, scene_pt: Point, view_scale: f32)`](#scene-item_contains) |
+| `Option<SceneRegion>` | [`item_region(id: ItemId)`](#scene-item_region) |
+| `Vec<ItemId>` | [`items_in_region(region: &SceneRegion, mode: ItemSelectionMode, view_scale: f32)`](#scene-items_in_region) |
+| `Option<ItemId>` | [`item_at(scene_pt: Point)`](#scene-item_at) |
+| `Option<ItemId>` | [`item_at_scaled(scene_pt: Point, view_scale: f32)`](#scene-item_at_scaled) |
+| `Option<ItemId>` | [`entry_at(scene_pt: Point, view_scale: f32)`](#scene-entry_at) |
+| `Vec<ItemId>` | [`items_at(scene_pt: Point)`](#scene-items_at) |
+| `Vec<ItemId>` | [`items_at_scaled(scene_pt: Point, view_scale: f32)`](#scene-items_at_scaled) |
+| `Option<ItemId>` | [`item_at_in_view(screen_pt: Point, view_transform: Transform2D)`](#scene-item_at_in_view) |
+| `bool` | [`is_hit_testable(id: ItemId)`](#scene-is_hit_testable) |
+| `Vec<ItemId>` | [`colliding_items(id: ItemId)`](#scene-colliding_items) |
+| `Vec<ItemId>` | [`colliding_items_with(id: ItemId, mode: ItemSelectionMode)`](#scene-colliding_items_with) |
+| `Vec<ItemId>` | [`items_along_path(path: &Path)`](#scene-items_along_path) |
+| `Vec<ItemId>` | [`items_along_path_with(path: &Path, stroke_width: f32, mode: ItemSelectionMode)`](#scene-items_along_path_with) |
+| `usize` | [`len()`](#scene-len) |
+| `bool` | [`is_empty()`](#scene-is_empty) |
+| `Vec<ItemId>` | [`ids()`](#scene-ids) |
+| `&dyn SpatialIndex` | [`index()`](#scene-index) |
+| `MagnetId` | [`add_magnet(item: ItemId, magnet: Magnet)`](#scene-add_magnet) |
+|  | [`remove_magnet(magnet: MagnetId)`](#scene-remove_magnet) |
+|  | [`clear_magnets(item: ItemId)`](#scene-clear_magnets) |
+|  | [`set_magnet_local_pos(magnet: MagnetId, local_pos: Point)`](#scene-set_magnet_local_pos) |
+|  | [`set_magnet_enabled(magnet: MagnetId, enabled: bool)`](#scene-set_magnet_enabled) |
+| `Vec<MagnetId>` | [`magnet_ids_of(item: ItemId)`](#scene-magnet_ids_of) |
+| `Option<ItemId>` | [`magnet_owner(magnet: MagnetId)`](#scene-magnet_owner) |
+| `bool` | [`magnet_enabled(magnet: MagnetId)`](#scene-magnet_enabled) |
+| `Option<Point>` | [`magnet_scene_pos(magnet: MagnetId)`](#scene-magnet_scene_pos) |
+| `Option<MagnetRef>` | [`magnet(magnet: MagnetId)`](#scene-magnet) |
+| `Option<MagnetSnap>` | [`compute_item_snap(dragged: ItemId, drag_delta: Vec2, capture_radius: f32, predicate: &dyn Fn(&MagnetRef, &MagnetRef) -> MagnetVerdict)`](#scene-compute_item_snap) |
+| `Option<(MagnetRef, Option<Rc<dyn std::any::Any>>)>` | [`compute_port_snap(source: MagnetId, cursor_scene: Point, capture_radius: f32, predicate: &dyn Fn(&MagnetRef, &MagnetRef) -> MagnetVerdict)`](#scene-compute_port_snap) |
+| `Option<MagnetId>` | [`nearest_magnet(scene_pt: Point, radius: f32)`](#scene-nearest_magnet) |
+| `A11yGroupId` | [`add_a11y_group(builder: A11yGroupBuilder)`](#scene-add_a11y_group) |
+|  | [`remove_a11y_group(id: A11yGroupId)`](#scene-remove_a11y_group) |
+| `Option<&A11yGroup>` | [`a11y_group(id: A11yGroupId)`](#scene-a11y_group) |
+|  | [`set_a11y_parent(child: A11yNode, parent: Option<A11yNode>)`](#scene-set_a11y_parent) |
+| `Option<A11yNode>` | [`a11y_parent_of(child: A11yNode)`](#scene-a11y_parent_of) |
+|  | [`add_a11y_relation(from: A11yNode, kind: A11yRelation, to: A11yNode)`](#scene-add_a11y_relation) |
+| `&[(A11yNode, A11yRelation, A11yNode)]` | [`a11y_relations()`](#scene-a11y_relations) |
+|  | [`set_a11y_live(node: A11yNode, live: accesskit::Live)`](#scene-set_a11y_live) |
+|  | [`set_a11y_landmark(node: A11yNode, role: accesskit::Role)`](#scene-set_a11y_landmark) |
+|  | [`set_a11y_categories(node: A11yNode, categories: &[A11yCategory])`](#scene-set_a11y_categories) |
+| `Option<&[A11yCategory]>` | [`a11y_categories_of(node: A11yNode)`](#scene-a11y_categories_of) |
+| `Option<accesskit::Live>` | [`a11y_live_of(node: A11yNode)`](#scene-a11y_live_of) |
+| `Option<accesskit::Role>` | [`a11y_landmark_of(node: A11yNode)`](#scene-a11y_landmark_of) |
+
+### `ItemChange`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `ItemId` | [`id()`](#itemchange-id) |
+| `bool` | [`is_edit()`](#itemchange-is_edit) |
+
+### `ItemPayload`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `&Rc<dyn std::any::Any>` | [`as_rc()`](#itempayload-as_rc) |
+| `Rc<dyn std::any::Any>` | [`into_rc()`](#itempayload-into_rc) |
+| `Option<Rc<T>>` | [`downcast<T: 'static>()`](#itempayload-downcast) |
+
+### `Placement`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(parent: Option<ItemId>, z: f32, local_pos: Point, transform: Transform2D)`](#placement-new) |
+
+### `CascadeBudget`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(total: u64)`](#cascadebudget-new) |
+
+### `SceneConstraints`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+| `Signal<PanAxes>` | [`pan_axes_signal()`](#sceneconstraints-pan_axes_signal) |
+| `Signal<Option<Rect>>` | [`pan_bounds_signal()`](#sceneconstraints-pan_bounds_signal) |
+| `Signal<Option<std::ops::RangeInclusive<f32>>>` | [`zoom_range_signal()`](#sceneconstraints-zoom_range_signal) |
+| `Signal<bool>` | [`zoomable_signal()`](#sceneconstraints-zoomable_signal) |
+
+## Detailed description
+
 `Scene` holds a flat list of entries in a parent-relative scene-graph, plus
 a pluggable `SpatialIndex` for rectangular queries. Items are positioned
 by `local_pos` (in their parent's coordinate frame, or scene-root if they
@@ -23,14 +228,14 @@ cheap). All mutations update the `SpatialIndex` in lockstep, so
 with `&self` mutators (the `ListModel` pattern) that lets multiple handlers
 and multiple `SceneView`s share one model.
 
-## When to use
+#### When to use
 
 Use `Scene` (via `SceneModel`) when you need a pannable/zoomable canvas —
 story corkboards, node-graph editors, mind maps, timeline views, CAD
 canvases, or simple spatial maps. Prefer a plain `ListView` or `TreeView`
 when the content is linear or tree-shaped without spatial relationships.
 
-## Example
+#### Example
 
 ```rust
 use teksilo_scene::{Scene, ItemChange, SceneLayer};
@@ -61,13 +266,11 @@ scene.set_local_pos(id, Point::new(100.0, 100.0));
 assert_eq!(scene.scene_pos(id), Some(Point::new(100.0, 100.0)));
 ```
 
-## Builder methods at a glance
-
-`with_index`, `add_widget`, `add_item`, `add_item_dynamic`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `cascade_budget`, `set_cascade_budget`, `open_transaction_depth`, `transaction_signal`, `mutation_version`, `structural_version`, `local_pos`, `set_local_pos`, `local_bounds`, `set_local_bounds`, `size_policy`, `set_size_policy`, `set_measured_size`, `transform`, `set_transform`, `scene_transform`, `scene_pos`, `scene_rect`, `map_to_scene`, `map_from_scene`, `flags`, `set_flags`, `set_flag`, `set_visible`, `is_effectively_visible`, `opacity`, `set_opacity`, `set_item_fill`, `clear_item_fill`, `set_item_stroke`, `clear_item_stroke`, `add_boxed_item`, `set_item_handlers`, `handlers_mut`, `handlers`, `effective_opacity`, `set_scene_rect`, `scene_rect_extent`, `pan_axes`, `current_pan_axes`, `zoomable`, `is_zoomable`, `set_pan_bounds`, `current_pan_bounds`, `set_zoom_range`, `current_zoom_range`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `constraints`, `set_z`, `bring_to_front`, `send_to_back`, `z`, `set_layer`, `layer`, `set_item_parent`, `parent_of`, `is_descendant_of`, `collect_descendants`, `set_geometry_constraint`, `clear_geometry_constraint`, `has_geometry_constraint`, `in_geometry_constraint`, `selection_roots`, `transformable_roots`, `scene_rotation`, `transform_frame`, `apply_transform_delta`, `item`, `paint_key`, `remove`, `take`, `restore`, `restore_all`, `replace_item`, `placement`, `set_placement`, `reparent_keeping_scene_pos`, `z_between`, `orphan`, `items_in_rect`, `item_thumbnails`, `item_shape`, `item_contains`, `item_region`, `items_in_region`, `item_at`, `item_at_scaled`, `entry_at`, `items_at`, `items_at_scaled`, `item_at_in_view`, `is_hit_testable`, `colliding_items`, `colliding_items_with`, `items_along_path`, `items_along_path_with`, `len`, `is_empty`, `ids`, `index`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_enabled`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `add_a11y_group`, `remove_a11y_group`, `a11y_group`, `set_a11y_parent`, `a11y_parent_of`, `add_a11y_relation`, `a11y_relations`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `a11y_categories_of`, `a11y_live_of`, `a11y_landmark_of`
-
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+<a id="itemchange"></a>
 
 ## `pub enum ItemChange`
 
@@ -129,6 +332,8 @@ pub enum ItemChange { /* variants */ }
 
 ### Methods
 
+<a id="itemchange-id"></a>
+
 #### `pub fn id(&self) -> ItemId`
 
 The item this change is about.
@@ -139,6 +344,8 @@ detector reads it too: it charges each delivery to the subject it is
 about, so it needs that subject without caring what kind of change it
 is. (Those per-subject counts name the culprit in the panic; the bound
 that trips is a flat total — see `CascadeBudget`.)
+
+<a id="itemchange-is_edit"></a>
 
 #### `pub fn is_edit(&self) -> bool`
 
@@ -162,6 +369,8 @@ transaction record has, which is what an app showing "N changes in this
 edit" needs: hiding a card is one change through
 `Scene::set_visible` and one through `Scene::set_flags`.
 
+<a id="handlerreplacement"></a>
+
 ## `pub struct HandlerReplacement`
 
 The two sides of a `Scene::set_item_handlers`, as they ride an
@@ -180,6 +389,8 @@ is why this could be carried and, until it was, simply was not.
 pub struct HandlerReplacement { /* fields */ }
 ```
 
+<a id="itempayload"></a>
+
 ## `pub struct ItemPayload`
 
 A `Delegated` heavyweight entry's type-erased payload, as it rides an
@@ -195,18 +406,26 @@ pub struct ItemPayload(Rc<dyn std::any::Any>);
 
 ### Methods
 
+<a id="itempayload-as_rc"></a>
+
 #### `pub fn as_rc(&self) -> &Rc<dyn std::any::Any>`
 
 The underlying handle, for a consumer that wants to downcast it itself.
+
+<a id="itempayload-into_rc"></a>
 
 #### `pub fn into_rc(self) -> Rc<dyn std::any::Any>`
 
 Consume the wrapper for the handle.
 
+<a id="itempayload-downcast"></a>
+
 #### `pub fn downcast<T: 'static>(&self) -> Option<Rc<T>>`
 
 Downcast to the concrete payload type the app stored, or `None` when it
 is something else.
+
+<a id="appearancechange"></a>
 
 ## `pub enum AppearanceChange`
 
@@ -228,6 +447,8 @@ pub enum AppearanceChange { /* variants */ }
 
 - **`Fill`** — `Scene::set_item_fill` / `Scene::clear_item_fill`. `None` on either side means "no fill".
 - **`Stroke`** — `Scene::set_item_stroke` / `Scene::clear_item_stroke`. `None` on either side means "no stroke".
+
+<a id="placement"></a>
 
 ## `pub struct Placement`
 
@@ -260,10 +481,14 @@ pub struct Placement { /* fields */ }
 
 ### Methods
 
+<a id="placement-new"></a>
+
 #### `pub fn new(parent: Option<ItemId>, z: f32, local_pos: Point, transform: Transform2D) -> Self`
 
 A placement stated field by field — the constructor
 [`#[non_exhaustive]`](Self) takes the place of a struct literal for.
+
+<a id="cascadebudget"></a>
 
 ## `pub struct CascadeBudget`
 
@@ -368,6 +593,8 @@ pub struct CascadeBudget { /* fields */ }
 
 ### Methods
 
+<a id="cascadebudget-new"></a>
+
 #### `pub fn new(total: u64) -> Self`
 
 A budget of `total` observer-generated deliveries per drain, clamped up
@@ -376,6 +603,8 @@ to the smallest usable value.
 The clamp is here rather than at the trip so that a nonsensical budget is
 rejected where it is written, instead of producing a panic whose numbers
 describe no cascade that happened.
+
+<a id="scenelayer"></a>
 
 ## `pub enum SceneLayer`
 
@@ -447,6 +676,8 @@ pub enum SceneLayer { /* variants */ }
 - **`Under`** — Painted under the heavyweight widget children (the default).
 - **`Interleaved`** — Painted **among** the heavyweight widget children, ordered against them by `z` — and against nothing else: still above every `Under` item and below every `Over` one, and on top of everything in a scene that has no heavyweight children. See the type docs for that and for what it costs.
 - **`Over`** — Painted over the heavyweight widget children.
+
+<a id="sizepolicy"></a>
 
 ## `pub enum SizePolicy`
 
@@ -538,6 +769,8 @@ pub enum SizePolicy { /* variants */ }
 - **`HeightForWidth`** — The model owns the width; the height is **measured from the widget** at that width on every pass that lays it out.  The right policy for text: a note's width is authored (you drag its edge) and its height follows the words. `scene_rect(id).height` becomes advisory for such an entry — it reports the last measured height, not the one `add_widget_item` was handed.
 - **`Intrinsic`** — Both axes are measured: the entry shrink-wraps its widget.  For content that knows its own size on both axes — a pinned label, a badge, a fixed-aspect thumbnail. The rect passed to `add_widget_item` supplies only the position.
 
+<a id="panaxes"></a>
+
 ## `pub enum PanAxes`
 
 Which axes a `SceneView` is allowed to pan
@@ -556,6 +789,8 @@ pub enum PanAxes { /* variants */ }
 - **`Horizontal`** — Pan only along X. Vertical scroll deltas pass through to ancestor scrollables.
 - **`Vertical`** — Pan only along Y. Horizontal scroll deltas pass through to ancestor scrollables.
 - **`Both`** — Default: pan freely in both axes.
+
+<a id="sceneconstraints"></a>
 
 ## `pub struct SceneConstraints`
 
@@ -583,24 +818,34 @@ pub struct SceneConstraints { /* fields */ }
 
 ### Methods
 
+<a id="sceneconstraints-pan_axes_signal"></a>
+
 #### `pub fn pan_axes_signal(&self) -> Signal<PanAxes>`
 
 Reactive pan-axes signal. Gesture handlers read live.
 
+<a id="sceneconstraints-pan_bounds_signal"></a>
+
 #### `pub fn pan_bounds_signal(&self) -> Signal<Option<Rect>>`
 
 Reactive pan-bounds signal. `None` = unconstrained.
+
+<a id="sceneconstraints-zoom_range_signal"></a>
 
 #### `pub fn zoom_range_signal(&self) -> Signal<Option<std::ops::RangeInclusive<f32>>>`
 
 Reactive zoom-range signal. `None` = unconstrained from
 the Scene side.
 
+<a id="sceneconstraints-zoomable_signal"></a>
+
 #### `pub fn zoomable_signal(&self) -> Signal<bool>`
 
 Reactive zoomable-on/off signal. Equivalent to a zero-width
 zoom_range — kept as a separate boolean for clarity and
 efficient short-circuit at gesture time.
+
+<a id="scene"></a>
 
 ## `pub struct Scene`
 
@@ -627,13 +872,19 @@ pub struct Scene { /* fields */ }
 
 ### Methods
 
+<a id="scene-new"></a>
+
 #### `pub fn new() -> Self`
 
 An empty scene with the default `GridHashIndex`.
 
+<a id="scene-with_index"></a>
+
 #### `pub fn with_index(index: Box<dyn SpatialIndex>) -> Self`
 
 An empty scene with a custom `SpatialIndex`.
+
+<a id="scene-add_widget"></a>
 
 #### `pub fn add_widget<W: Widget + 'static>(&mut self, widget: W, local_rect: Rect) -> ItemId`
 
@@ -643,12 +894,16 @@ Place a heavyweight `Widget` at `local_rect`'s origin, sized
 Returns the `ItemId` for later mutation. The widget is
 consumed at SceneView build time and added to the arena.
 
+<a id="scene-add_item"></a>
+
 #### `pub fn add_item<I: SceneItem + 'static>(&mut self, item: I, local_pos: Point) -> ItemId`
 
 Place a lightweight `SceneItem` at `local_pos`. The item's
 `local_bounds` and `initial_flags` are read once at insert
 time. The item is **not** added to the arena — it's painted
 directly from `SceneView::paint`.
+
+<a id="scene-add_item_dynamic"></a>
 
 #### `pub fn add_item_dynamic<I: SceneItem + 'static>( &mut self, item: I, local_pos: Point, ) -> ItemId`
 
@@ -666,6 +921,8 @@ the item reads in `local_bounds`. Static items pay an
 unnecessary per-rebuild bounds read otherwise; prefer
 `add_item` for the common case.
 
+<a id="scene-refresh_dynamic_bounds"></a>
+
 #### `pub fn refresh_dynamic_bounds(&mut self) -> bool`
 
 Re-read every dynamic item's current `local_bounds`, applying
@@ -679,6 +936,8 @@ Returns `true` if at least one dynamic entry's bounds changed this call.
 `SceneView` uses the `true → false` transition (an animation settling) as
 the one moment to walk the final animated bounds into the AccessKit tree,
 since it otherwise suppresses per-frame AT re-walks during the animation.
+
+<a id="scene-item_change_signal"></a>
 
 #### `pub fn item_change_signal(&self) -> Signal<SceneChange>`
 
@@ -729,6 +988,8 @@ itself inside an open write scope. They still fan out synchronously
 under the borrow: an observer on one of those four must not re-enter
 the `SceneModel`.
 
+<a id="scene-a11y_change_signal"></a>
+
 #### `pub fn a11y_change_signal(&self) -> Signal<u64>`
 
 Reactive notification for logical-AT-structure mutations
@@ -740,9 +1001,13 @@ these changes don't flow through `item_change_signal`
 because they aren't item geometry, and the AT tree is separate from the
 visual scene.
 
+<a id="scene-cascade_budget"></a>
+
 #### `pub fn cascade_budget(&self) -> CascadeBudget`
 
 The runaway-detection budget for this scene's change fan-out.
+
+<a id="scene-set_cascade_budget"></a>
 
 #### `pub fn set_cascade_budget(&self, budget: CascadeBudget)`
 
@@ -760,6 +1025,8 @@ Takes effect on the next drain — a budget raised from inside an observer
 does not enlarge the drain already running, which is why the budget is
 read once at its start.
 
+<a id="scene-open_transaction_depth"></a>
+
 #### `pub fn open_transaction_depth(&self) -> u32`
 
 How many transaction / write scopes are open on this scene.
@@ -769,11 +1036,15 @@ Zero between mutations. A non-zero value outside a mutator means a
 only correct within one synchronous scope — see
 `SceneModel::transaction`.
 
+<a id="scene-transaction_signal"></a>
+
 #### `pub fn transaction_signal(&self) -> Signal<crate::journal::TxnId>`
 
 Fires once per committed transaction, after the edit sink, with the
 scene unborrowed. See
 `SceneModel::transaction_signal`.
+
+<a id="scene-mutation_version"></a>
 
 #### `pub fn mutation_version(&self) -> u64`
 
@@ -786,6 +1057,8 @@ Includes the per-frame churn of
 gating an expensive rebuild on "did anything *meaningful* change" wants
 `structural_version` instead. The counter
 wraps; compare for equality, not ordering.
+
+<a id="scene-structural_version"></a>
 
 #### `pub fn structural_version(&self) -> u64`
 
@@ -811,9 +1084,13 @@ indistinguishable from churn. Folded into the baseline, an AT-structural
 change made there would never un-gate a re-walk, in that build or any
 later one. The counter wraps; compare for equality, not ordering.
 
+<a id="scene-local_pos"></a>
+
 #### `pub fn local_pos(&self, id: ItemId) -> Option<Point>`
 
 Read an item's `local_pos` (its anchor in parent coords).
+
+<a id="scene-set_local_pos"></a>
 
 #### `pub fn set_local_pos(&mut self, id: ItemId, local_pos: Point)`
 
@@ -822,9 +1099,13 @@ frame. Re-buckets the item *and* every descendant in the
 spatial index since the descendants' scene-AABBs shift along.
 No-op if the id is unknown.
 
+<a id="scene-local_bounds"></a>
+
 #### `pub fn local_bounds(&self, id: ItemId) -> Option<Rect>`
 
 Read an item's `local_bounds` (its AABB in local coords).
+
+<a id="scene-set_local_bounds"></a>
 
 #### `pub fn set_local_bounds(&mut self, id: ItemId, local_bounds: Rect)`
 
@@ -850,10 +1131,14 @@ the index once. An app driving this per frame — a resize handle, a
 layout pass — therefore goes quiet as soon as it stops moving, rather
 than emitting an endless series of nearly-identical changes.
 
+<a id="scene-size_policy"></a>
+
 #### `pub fn size_policy(&self, id: ItemId) -> SizePolicy`
 
 Which axes of this entry's `local_bounds` its widget decides.
 `SizePolicy::Fixed` for an unknown id, and for every lightweight item.
+
+<a id="scene-set_size_policy"></a>
 
 #### `pub fn set_size_policy(&mut self, id: ItemId, policy: SizePolicy) -> bool`
 
@@ -870,6 +1155,8 @@ bug in the view rather than a misuse of the model.
 Emits `ItemChange::SizePolicyChanged` when the value actually changes —
 an edit, carrying no geometry. The geometry it enables arrives separately
 as `ItemChange::MeasuredSizeChanged`, which is not an edit.
+
+<a id="scene-set_measured_size"></a>
 
 #### `pub fn set_measured_size(&mut self, id: ItemId, size: Size) -> bool`
 
@@ -899,25 +1186,35 @@ a history above the scene must see them.
 The `SizePolicy` machinery drives this from inside the view; an app
 measuring something the framework cannot measure calls it directly.
 
+<a id="scene-transform"></a>
+
 #### `pub fn transform(&self, id: ItemId) -> Option<Transform2D>`
 
 Read an item's local→parent transform (rotation/scale around
 the local origin). Identity by default.
+
+<a id="scene-set_transform"></a>
 
 #### `pub fn set_transform(&mut self, id: ItemId, transform: Transform2D)`
 
 Set an item's local→parent transform. Re-buckets the item's
 subtree in the spatial index. No-op if the id is unknown.
 
+<a id="scene-scene_transform"></a>
+
 #### `pub fn scene_transform(&self, id: ItemId) -> Transform2D`
 
 The composed local→scene transform for this item, walking up
 the parent chain. Identity for an item that doesn't exist.
 
+<a id="scene-scene_pos"></a>
+
 #### `pub fn scene_pos(&self, id: ItemId) -> Option<Point>`
 
 The item's anchor in scene coords (its local origin
 transformed through the parent chain).
+
+<a id="scene-scene_rect"></a>
 
 #### `pub fn scene_rect(&self, id: ItemId) -> Option<Rect>`
 
@@ -925,9 +1222,13 @@ The AABB enclosing the item's `local_bounds` after composing
 through the parent chain — i.e. the rectangle the spatial
 index buckets on. `None` if the id is unknown.
 
+<a id="scene-map_to_scene"></a>
+
 #### `pub fn map_to_scene(&self, id: ItemId, local_pt: Point) -> Option<Point>`
 
 Map a point in the item's local frame to scene coords.
+
+<a id="scene-map_from_scene"></a>
 
 #### `pub fn map_from_scene(&self, id: ItemId, scene_pt: Point) -> Option<Point>`
 
@@ -935,9 +1236,13 @@ Map a point in scene coords to the item's local frame.
 Returns `None` if the item is unknown or its scene transform
 is degenerate (zero scale).
 
+<a id="scene-flags"></a>
+
 #### `pub fn flags(&self, id: ItemId) -> Option<ItemFlags>`
 
 Read an item's `ItemFlags` bitset.
+
+<a id="scene-set_flags"></a>
 
 #### `pub fn set_flags(&mut self, id: ItemId, flags: ItemFlags)`
 
@@ -948,14 +1253,20 @@ same net change: the derived `ItemChange::VisibilityChanged` when
 `IS_VISIBLE` flipped, then the `ItemChange::FlagsChanged` that
 describes the mutation.
 
+<a id="scene-set_flag"></a>
+
 #### `pub fn set_flag(&mut self, id: ItemId, flag: ItemFlags, on: bool)`
 
 Set or clear a single flag on an item. No-op if unknown.
+
+<a id="scene-set_visible"></a>
 
 #### `pub fn set_visible(&mut self, id: ItemId, visible: bool)`
 
 Toggle the `ItemFlags::IS_VISIBLE` bit. Convenience for
 the common "hide this item" operation.
+
+<a id="scene-is_effectively_visible"></a>
 
 #### `pub fn is_effectively_visible(&self, id: ItemId) -> bool`
 
@@ -963,13 +1274,19 @@ Whether the item is visible AND every ancestor in its chain
 is visible. Returns `true` when nothing in the chain has
 `IS_VISIBLE` cleared. `false` for unknown ids.
 
+<a id="scene-opacity"></a>
+
 #### `pub fn opacity(&self, id: ItemId) -> Option<f32>`
 
 Read an item's local opacity multiplier (`1.0` by default).
 
+<a id="scene-set_opacity"></a>
+
 #### `pub fn set_opacity(&mut self, id: ItemId, opacity: f32)`
 
 Set an item's local opacity, clamped to `[0.0, 1.0]`.
+
+<a id="scene-set_item_fill"></a>
 
 #### `pub fn set_item_fill(&mut self, id: ItemId, fill: impl Into<ColorProp>)`
 
@@ -995,12 +1312,16 @@ time (`SceneItem::register_bindings`). So:
   structural change re-runs `register_bindings`). Deliberately *not*
   forced: a colour change must never cost a rebuild + AT re-walk.
 
+<a id="scene-clear_item_fill"></a>
+
 #### `pub fn clear_item_fill(&mut self, id: ItemId)`
 
 Clear a lightweight item's fill (Rect/Path/Group become fill-less),
 emitting `ItemChange::AppearanceChanged` (repaint-only). No-op for items
 whose fill can't be cleared (e.g. `TextItem`, which always has a
 foreground colour).
+
+<a id="scene-set_item_stroke"></a>
 
 #### `pub fn set_item_stroke(&mut self, id: ItemId, color: impl Into<ColorProp>, style: StrokeStyle)`
 
@@ -1009,11 +1330,15 @@ emitting `ItemChange::AppearanceChanged` (repaint-only). No-op for item
 kinds without a stroke slot (`TextItem` / `ImageItem`). See
 `set_item_fill` for the reactivity contract.
 
+<a id="scene-clear_item_stroke"></a>
+
 #### `pub fn clear_item_stroke(&mut self, id: ItemId)`
 
 Clear a lightweight item's stroke, emitting
 `ItemChange::AppearanceChanged` (repaint-only). No-op for item kinds
 without a stroke.
+
+<a id="scene-add_boxed_item"></a>
 
 #### `pub fn add_boxed_item(&mut self, item: Box<dyn SceneItem>, local_pos: Point) -> ItemId`
 
@@ -1021,6 +1346,8 @@ Insert an already-boxed lightweight item at `local_pos`, returning its
 id. The boxed-`dyn` counterpart of `add_item` — used by
 `SceneListAdapter` whose delegate yields
 `Box<dyn SceneItem>`.
+
+<a id="scene-set_item_handlers"></a>
 
 #### `pub fn set_item_handlers(&mut self, id: ItemId, handlers: Option<SceneItemHandlerSet>)`
 
@@ -1032,6 +1359,8 @@ consumer that caches handlers has no other way to learn of it, and a
 data layer inverting a transaction has no other way to put them back.
 This is the handler door that produces a reversible edit; see
 `handlers_mut` for the one that cannot.
+
+<a id="scene-handlers_mut"></a>
 
 #### `pub fn handlers_mut(&mut self, id: ItemId) -> Option<&mut SceneItemHandlerSet>`
 
@@ -1053,9 +1382,13 @@ neither. Make a handler change the history should be able to reverse
 through `set_item_handlers`, which knows both
 sides.
 
+<a id="scene-handlers"></a>
+
 #### `pub fn handlers(&self, id: ItemId) -> Option<&SceneItemHandlerSet>`
 
 Read-only access to an item's handler set, if one is set.
+
+<a id="scene-effective_opacity"></a>
 
 #### `pub fn effective_opacity(&self, id: ItemId) -> f32`
 
@@ -1064,12 +1397,16 @@ of every ancestor's opacity and this item's. `1.0` for an
 unknown id (so callers don't end up multiplying by a stale
 value).
 
+<a id="scene-set_scene_rect"></a>
+
 #### `pub fn set_scene_rect(&mut self, rect: Option<Rect>)`
 
 Declare the scene's logical extent. `None` (the default)
 means "auto-compute from items each query"; `Some(rect)`
 fixes the extent regardless of item placement. Used by
 `SceneView` for pan clamping and `fit_to_content`.
+
+<a id="scene-scene_rect_extent"></a>
 
 #### `pub fn scene_rect_extent(&self) -> Option<Rect>`
 
@@ -1078,24 +1415,34 @@ The resolved scene extent — user-declared via
 enclosing every item's scene rect. `None` when neither is
 available (the user didn't declare and the scene is empty).
 
+<a id="scene-pan_axes"></a>
+
 #### `pub fn pan_axes(&mut self, axes: PanAxes)`
 
 Set the axes the view may pan along. Default
 `PanAxes::Both`. Writes to the reactive signal; gesture
 closures pick the change up on the next event.
 
+<a id="scene-current_pan_axes"></a>
+
 #### `pub fn current_pan_axes(&self) -> PanAxes`
 
 The currently-declared pan axes. Live read of the signal.
+
+<a id="scene-zoomable"></a>
 
 #### `pub fn zoomable(&mut self, on: bool)`
 
 Set whether the view honors zoom gestures. Default `true`.
 Writes to the reactive signal.
 
+<a id="scene-is_zoomable"></a>
+
 #### `pub fn is_zoomable(&self) -> bool`
 
 Whether the scene currently allows zoom. Live read.
+
+<a id="scene-set_pan_bounds"></a>
 
 #### `pub fn set_pan_bounds(&mut self, bounds: Option<Rect>)`
 
@@ -1111,9 +1458,13 @@ Distinct from `set_scene_rect`:
 user can scroll to. A doc-style app typically sets both to
 the same rect.
 
+<a id="scene-current_pan_bounds"></a>
+
 #### `pub fn current_pan_bounds(&self) -> Option<Rect>`
 
 The currently-declared pan-bounds rect. Live read.
+
+<a id="scene-set_zoom_range"></a>
 
 #### `pub fn set_zoom_range(&mut self, range: Option<std::ops::RangeInclusive<f32>>)`
 
@@ -1126,30 +1477,44 @@ intersection of `Scene` + view-level override, so apps
 cannot loosen a `Scene`-declared range by setting a wider
 override on the view.
 
+<a id="scene-current_zoom_range"></a>
+
 #### `pub fn current_zoom_range(&self) -> Option<std::ops::RangeInclusive<f32>>`
 
 The currently-declared zoom range. Live read.
+
+<a id="scene-pan_axes_signal"></a>
 
 #### `pub fn pan_axes_signal(&self) -> Signal<PanAxes>`
 
 Reactive accessors for live observation.
 
+<a id="scene-pan_bounds_signal"></a>
+
 #### `pub fn pan_bounds_signal(&self) -> Signal<Option<Rect>>`
 
 Reactive pan-bounds signal.
+
+<a id="scene-zoom_range_signal"></a>
 
 #### `pub fn zoom_range_signal(&self) -> Signal<Option<std::ops::RangeInclusive<f32>>>`
 
 Reactive zoom-range signal.
 
+<a id="scene-zoomable_signal"></a>
+
 #### `pub fn zoomable_signal(&self) -> Signal<bool>`
 
 Reactive zoomable on/off signal.
+
+<a id="scene-constraints"></a>
 
 #### `pub fn constraints(&self) -> &SceneConstraints`
 
 Read-only view of the full constraint bundle. Useful when
 passing all four signals to a custom view implementation.
+
+<a id="scene-set_z"></a>
 
 #### `pub fn set_z(&mut self, id: ItemId, z: f32)`
 
@@ -1181,6 +1546,8 @@ it, emitting no `ItemChange::ZChanged` and leaving the order wrong
 with nothing to observe. One metric now, and it is the one `z_between`
 already used: two `z`s are the same iff they are the same float.
 
+<a id="scene-bring_to_front"></a>
+
 #### `pub fn bring_to_front(&mut self, id: ItemId)`
 
 Raise an entry above all current entries by giving it a z one
@@ -1188,15 +1555,21 @@ greater than the current maximum. The drag-to-front primitive —
 call it on drag-start so the grabbed card (and its text) renders
 over the others. Works for both tiers (see `set_z`).
 
+<a id="scene-send_to_back"></a>
+
 #### `pub fn send_to_back(&mut self, id: ItemId)`
 
 Lower an entry below all current entries by giving it a z one less
 than the current minimum. Works for both tiers (see
 `set_z`).
 
+<a id="scene-z"></a>
+
 #### `pub fn z(&self, id: ItemId) -> Option<f32>`
 
 Read an entry's z-order.
+
+<a id="scene-set_layer"></a>
 
 #### `pub fn set_layer(&mut self, id: ItemId, layer: SceneLayer)`
 
@@ -1205,9 +1578,13 @@ what each one means and what `Interleaved`
 costs. Within a band, `set_z` still orders items among
 themselves. No-op for unknown ids.
 
+<a id="scene-layer"></a>
+
 #### `pub fn layer(&self, id: ItemId) -> Option<SceneLayer>`
 
 Read an entry's paint band. `None` for unknown ids.
+
+<a id="scene-set_item_parent"></a>
 
 #### `pub fn set_item_parent(&mut self, child: ItemId, parent: Option<ItemId>)`
 
@@ -1224,13 +1601,19 @@ or a descendant of `child`, the call is a no-op (no parent
 change, no rebucket, no signal fire). Without this guard
 the downstream `rebucket_subtree` walk loops indefinitely.
 
+<a id="scene-parent_of"></a>
+
 #### `pub fn parent_of(&self, id: ItemId) -> Option<ItemId>`
 
 Parent of `id`, if any.
 
+<a id="scene-is_descendant_of"></a>
+
 #### `pub fn is_descendant_of(&self, id: ItemId, ancestor: ItemId) -> bool`
 
 Whether `id`'s ancestor chain contains `ancestor`.
+
+<a id="scene-collect_descendants"></a>
 
 #### `pub fn collect_descendants(&self, id: ItemId, out: &mut Vec<ItemId>)`
 
@@ -1241,6 +1624,8 @@ Costs the subtree, not the scene: the walk steps through the kept
 `SceneEntry::children` adjacency rather than rescanning every entry per
 visited node. A cycle in the parent graph is bounded by the visited set
 rather than looping forever.
+
+<a id="scene-set_geometry_constraint"></a>
 
 #### `pub fn set_geometry_constraint( &mut self, f: impl Fn(&crate::constrain::ProposedChange<'_>) -> crate::constrain::ChangeVerdict + 'static, )`
 
@@ -1270,13 +1655,19 @@ scene.set_geometry_constraint(|c| {
 assert!(scene.has_geometry_constraint());
 ```
 
+<a id="scene-clear_geometry_constraint"></a>
+
 #### `pub fn clear_geometry_constraint(&mut self)`
 
 Remove the geometry constraint. Gestures then apply their raw proposal.
 
+<a id="scene-has_geometry_constraint"></a>
+
 #### `pub fn has_geometry_constraint(&self) -> bool`
 
 Whether a geometry constraint is installed.
+
+<a id="scene-in_geometry_constraint"></a>
 
 #### `pub fn in_geometry_constraint(&self) -> bool`
 
@@ -1285,6 +1676,8 @@ Whether a geometry constraint is running **right now** on this thread.
 The probe `SceneModel::write_guard`
 uses to turn "a constraint tried to write the scene" into a diagnostic
 that names the hook.
+
+<a id="scene-selection_roots"></a>
 
 #### `pub fn selection_roots(&self, ids: &[ItemId]) -> Vec<ItemId>`
 
@@ -1312,6 +1705,8 @@ here is a frozen window on a large selection rather than a slow one.
 `tests/selection_roots_scaling_probe.rs`, pins it: 7.03 ms against
 36.3 µs for a 1 000-item selection, measured.
 
+<a id="scene-transformable_roots"></a>
+
 #### `pub fn transformable_roots( &self, ids: &[ItemId], op: crate::transform_session::TransformOp, ) -> Vec<ItemId>`
 
 The roots of `ids` that may take part in `op`.
@@ -1334,10 +1729,14 @@ door, in `apply_transform_delta`.
 The flag is checked **before** the descendant pruning, so a selected
 child of a selected-but-locked parent still takes part on its own.
 
+<a id="scene-scene_rotation"></a>
+
 #### `pub fn scene_rotation(&self, id: ItemId) -> Option<f32>`
 
 The item's own rotation in scene space, in radians — the angle of its
 composed `local → scene` basis. `None` for an unknown id.
+
+<a id="scene-transform_frame"></a>
 
 #### `pub fn transform_frame( &self, roots: &[ItemId], ) -> Option<crate::transform_session::TransformFrame>`
 
@@ -1349,6 +1748,8 @@ A **single** root's frame takes that item's own rotation, so resizing a
 rotated item happens along its own axes and is exact. A multi-item
 frame is axis-aligned, because the union of differently-rotated boxes
 has no well-defined angle — Konva does the same.
+
+<a id="scene-apply_transform_delta"></a>
 
 #### `pub fn apply_transform_delta( &mut self, roots: &[ItemId], delta: &crate::transform_session::TransformDelta, ) -> usize`
 
@@ -1384,10 +1785,14 @@ The transaction boundary is this call. One gesture is one call, so an
 app-level reversible-edit layer has exactly one thing to record — and
 this crate ships no history of its own.
 
+<a id="scene-item"></a>
+
 #### `pub fn item(&self, id: ItemId) -> Option<&dyn SceneItem>`
 
 Borrow a lightweight `SceneItem` by id. `None` for unknown
 ids and for heavyweight widget entries.
+
+<a id="scene-paint_key"></a>
 
 #### `pub fn paint_key(&self, id: ItemId) -> Option<PaintKey>`
 
@@ -1401,6 +1806,8 @@ arena's child walk paints it, between the `Under` and `Over` bands. An
 `Interleaved` item shares that rank, so it
 sorts against the cards by `z`. See `PaintKey` for the ordering and
 for the equal-`z` tie-break.
+
+<a id="scene-remove"></a>
 
 #### `pub fn remove(&mut self, id: ItemId)`
 
@@ -1427,7 +1834,11 @@ removed entry arrives as a
 `RemovedItem`, which `Scene::restore` puts back. With none, the
 salvage is dropped, which is what a removal has always done.
 
+<a id="scene-take"></a>
+
 #### `pub fn take(&mut self, id: ItemId) -> Vec<RemovedItem>`
+
+<a id="scene-restore"></a>
 
 #### `pub fn restore(&mut self, salvage: RemovedItem) -> Result<ItemId, RestoreError>`
 
@@ -1503,6 +1914,8 @@ already apply within one scene:
 The salvage is consumed either way, so a refused move does not leave a
 second copy behind — but it does drop the item, so check the `Result`.
 
+<a id="scene-restore_all"></a>
+
 #### `pub fn restore_all(&mut self, salvage: Vec<RemovedItem>) -> Result<Vec<ItemId>, RestoreError>`
 
 Restore a whole `Scene::take` result, roots first.
@@ -1519,6 +1932,8 @@ ends land in.
 Stops at the first failure and returns it; everything restored before it
 **stays restored**, because a rollback here would be the framework
 applying an inverse, which is the data layer's job.
+
+<a id="scene-replace_item"></a>
 
 #### `pub fn replace_item( &mut self, id: ItemId, item: Box<dyn SceneItem>, ) -> Result<Box<dyn SceneItem>, ReplaceRejected>`
 
@@ -1560,9 +1975,13 @@ Either way the `ReplaceRejected` hands the item **back**: a refused
 write must not eat a value the caller cannot clone and may have paid to
 build.
 
+<a id="scene-placement"></a>
+
 #### `pub fn placement(&self, id: ItemId) -> Option<Placement>`
 
 Where `id` sits, as one value. `None` for an unknown id.
+
+<a id="scene-set_placement"></a>
 
 #### `pub fn set_placement(&mut self, id: ItemId, placement: Placement)`
 
@@ -1576,6 +1995,8 @@ placement is unchanged, when `id` is unknown, and — as with
 The whole write is refused in that last case rather than applied with
 the old parent, because a partly-applied atomic write is the thing this
 door exists to prevent.
+
+<a id="scene-reparent_keeping_scene_pos"></a>
 
 #### `pub fn reparent_keeping_scene_pos(&mut self, id: ItemId, parent: Option<ItemId>)`
 
@@ -1598,6 +2019,8 @@ No-op for an unknown id, for a parent that is already the current one,
 for a cycle, and for a new parent whose scene transform is degenerate
 (a zero scale somewhere in its chain) — there is no frame under it to
 land in.
+
+<a id="scene-z_between"></a>
 
 #### `pub fn z_between(&self, below: ItemId, above: ItemId) -> Option<f32>`
 
@@ -1642,6 +2065,8 @@ assert!(scene.z(middle).unwrap() > 1.0 && scene.z(middle).unwrap() < 2.0);
 assert_eq!(scene.z_between(lower, lower), None);
 ```
 
+<a id="scene-orphan"></a>
+
 #### `pub fn orphan(&mut self, id: ItemId)`
 
 Promote `id`'s direct children to root-level (clear their
@@ -1660,6 +2085,8 @@ Apps wanting *visual* stability across the orphan call should
 first bake `id`'s `scene_transform` into each child's
 `local_pos` + `transform`; otherwise children visibly jump.
 
+<a id="scene-items_in_rect"></a>
+
 #### `pub fn items_in_rect(&self, scene_rect: Rect) -> Vec<ItemId>`
 
 All items whose scene-AABB intersects `scene_rect`.
@@ -1670,6 +2097,8 @@ goes through `scene_rect`, which itself
 dispatches via `entry_index` (an `HashMap<ItemId, usize>`),
 so the per-candidate cost is O(parent-chain-depth) — not
 O(N). Total query is O(visible × chain) instead of O(N).
+
+<a id="scene-item_thumbnails"></a>
 
 #### `pub fn item_thumbnails(&self) -> Vec<(Rect, teksilo_tokens::Color)>`
 
@@ -1684,6 +2113,8 @@ from `SceneItem::thumbnail_color` (its fill / stroke / a neutral grey);
 a heavyweight widget entry has no `SceneItem`, so it's shown in a neutral
 tint — a minimap that omitted the heavyweight tier would misrepresent a
 widget-heavy scene (cards, nodes), so both tiers are included.
+
+<a id="scene-item_shape"></a>
 
 #### `pub fn item_shape(&self, id: ItemId) -> Option<ItemShape>`
 
@@ -1701,6 +2132,8 @@ objects are cards.
 
 `None` for an unknown id.
 
+<a id="scene-item_contains"></a>
+
 #### `pub fn item_contains(&self, id: ItemId, scene_pt: Point, view_scale: f32) -> bool`
 
 Whether `id`'s shape contains `scene_pt`.
@@ -1709,6 +2142,8 @@ Works for both tiers (see `Scene::item_shape`). `view_scale` is the
 live view zoom, consulted only by a cosmetic stroke band; pass `1.0`
 when there is no view.
 
+<a id="scene-item_region"></a>
+
 #### `pub fn item_region(&self, id: ItemId) -> Option<SceneRegion>`
 
 The item's own shape re-published as a **scene**-space region — what a
@@ -1716,6 +2151,8 @@ collision query asks the rest of the scene about. `None` for an unknown
 id, a shape of `ItemShape::none`, or a screen-anchored
 (`IGNORES_TRANSFORMATIONS`)
 item, whose silhouette is not in scene space at all.
+
+<a id="scene-items_in_region"></a>
 
 #### `pub fn items_in_region( &self, region: &SceneRegion, mode: ItemSelectionMode, view_scale: f32, ) -> Vec<ItemId>`
 
@@ -1748,6 +2185,8 @@ region that arrives in *screen* space, which is what
 `Scene::item_at_in_view` does for a point; there is no region twin of
 it yet, so a marquee cannot select pinned chrome at all.
 
+<a id="scene-item_at"></a>
+
 #### `pub fn item_at(&self, scene_pt: Point) -> Option<ItemId>`
 
 Topmost **lightweight** item whose shape contains `scene_pt`, at unit
@@ -1776,6 +2215,8 @@ Hidden and disabled entries are excluded: this is a *hit* test, and
 `Scene::is_hit_testable`. For a pure geometry query that ignores flags,
 use `Scene::items_in_region` or `Scene::item_contains`.
 
+<a id="scene-item_at_scaled"></a>
+
 #### `pub fn item_at_scaled(&self, scene_pt: Point, view_scale: f32) -> Option<ItemId>`
 
 `Scene::item_at` at an explicit view zoom.
@@ -1784,6 +2225,8 @@ The zoom reaches exactly one thing: a **cosmetic** stroke band, whose
 width is in device pixels and therefore covers fewer scene units the
 further you zoom in. Passing the live scale is what makes this agree
 with `SceneView`'s own dispatch, which has always had it.
+
+<a id="scene-entry_at"></a>
 
 #### `pub fn entry_at(&self, scene_pt: Point, view_scale: f32) -> Option<ItemId>`
 
@@ -1802,14 +2245,20 @@ reached the view landed on something the view is holding.
 Screen-anchored entries are skipped for the same reason `item_at` skips
 them: a scene-space point cannot place them.
 
+<a id="scene-items_at"></a>
+
 #### `pub fn items_at(&self, scene_pt: Point) -> Vec<ItemId>`
 
 All lightweight items whose shape contains `scene_pt`, topmost-first by
 z. Same tier and `IGNORES_TRANSFORMATIONS` rules as `Scene::item_at`.
 
+<a id="scene-items_at_scaled"></a>
+
 #### `pub fn items_at_scaled(&self, scene_pt: Point, view_scale: f32) -> Vec<ItemId>`
 
 `Scene::items_at` at an explicit view zoom.
+
+<a id="scene-item_at_in_view"></a>
 
 #### `pub fn item_at_in_view(&self, screen_pt: Point, view_transform: Transform2D) -> Option<ItemId>`
 
@@ -1825,6 +2274,8 @@ coordinates, so it has no zoom to convert. This is the query to use
 when a scene may contain screen-pinned chrome; `Scene::item_at`
 deliberately declines to guess.
 
+<a id="scene-is_hit_testable"></a>
+
 #### `pub fn is_hit_testable(&self, id: ItemId) -> bool`
 
 Whether `id` takes part in pointer hit-testing — visible along its whole
@@ -1835,6 +2286,8 @@ is the one place the two flag contracts in `ItemFlags` are honoured:
 `IS_VISIBLE` ("neither painted nor hit-tested")
 and `IS_ENABLED` ("pass clicks through to items
 beneath"). `false` for unknown ids.
+
+<a id="scene-colliding_items"></a>
 
 #### `pub fn colliding_items(&self, id: ItemId) -> Vec<ItemId>`
 
@@ -1855,9 +2308,13 @@ Screen-anchored items neither collide nor are collided with — see
 `Scene::items_in_region`, which this is built on, and
 `Scene::item_region`, which declines to publish one for them.
 
+<a id="scene-colliding_items_with"></a>
+
 #### `pub fn colliding_items_with(&self, id: ItemId, mode: ItemSelectionMode) -> Vec<ItemId>`
 
 `Scene::colliding_items` under an explicit `ItemSelectionMode`.
+
+<a id="scene-items_along_path"></a>
 
 #### `pub fn items_along_path(&self, path: &Path) -> Vec<ItemId>`
 
@@ -1869,6 +2326,8 @@ when the path crosses it or encloses it. For a *connector* — a line
 with a width — pass that width to `Scene::items_along_path_with`, so
 the query asks about the band the user can see.
 
+<a id="scene-items_along_path_with"></a>
+
 #### `pub fn items_along_path_with( &self, path: &Path, stroke_width: f32, mode: ItemSelectionMode, ) -> Vec<ItemId>`
 
 `Scene::items_along_path` with an explicit stroke width and
@@ -1877,21 +2336,31 @@ the query asks about the band the user can see.
 `stroke_width` greater than zero makes the region the path's **band**
 rather than its interior: "what does this 4 dp connector touch?".
 
+<a id="scene-len"></a>
+
 #### `pub fn len(&self) -> usize`
 
 Number of entries in the scene.
+
+<a id="scene-is_empty"></a>
 
 #### `pub fn is_empty(&self) -> bool`
 
 Whether the scene is empty.
 
+<a id="scene-ids"></a>
+
 #### `pub fn ids(&self) -> Vec<ItemId>`
 
 All ids in insertion order.
 
+<a id="scene-index"></a>
+
 #### `pub fn index(&self) -> &dyn SpatialIndex`
 
 Borrow the spatial index (diagnostics / tests).
+
+<a id="scene-add_magnet"></a>
 
 #### `pub fn add_magnet(&mut self, item: ItemId, magnet: Magnet) -> MagnetId`
 
@@ -1907,18 +2376,26 @@ Bumps the AT-structure change counter (magnets are AT structure)
 so a `SceneView` with magnetism enabled re-walks its synthetic
 magnet nodes.
 
+<a id="scene-remove_magnet"></a>
+
 #### `pub fn remove_magnet(&mut self, magnet: MagnetId)`
 
 Remove a magnet by id. No-op if the id is unknown.
+
+<a id="scene-clear_magnets"></a>
 
 #### `pub fn clear_magnets(&mut self, item: ItemId)`
 
 Remove every magnet attached to `item`. No-op if none.
 
+<a id="scene-set_magnet_local_pos"></a>
+
 #### `pub fn set_magnet_local_pos(&mut self, magnet: MagnetId, local_pos: Point)`
 
 Move a magnet to a new position in its owning item's local
 frame. No-op if the id is unknown.
+
+<a id="scene-set_magnet_enabled"></a>
 
 #### `pub fn set_magnet_enabled(&mut self, magnet: MagnetId, enabled: bool)`
 
@@ -1926,19 +2403,27 @@ Enable or disable a magnet. Disabled magnets are skipped by
 broad-phase, feedback, the keyboard cycle, and AT emission.
 No-op if the id is unknown.
 
+<a id="scene-magnet_ids_of"></a>
+
 #### `pub fn magnet_ids_of(&self, item: ItemId) -> Vec<MagnetId>`
 
 The ids of every magnet attached to `item`, in insertion order
 (enabled and disabled alike). Empty if `item` is unknown or has
 no magnets.
 
+<a id="scene-magnet_owner"></a>
+
 #### `pub fn magnet_owner(&self, magnet: MagnetId) -> Option<ItemId>`
 
 The owning item of a magnet, or `None` if the id is unknown.
 
+<a id="scene-magnet_enabled"></a>
+
 #### `pub fn magnet_enabled(&self, magnet: MagnetId) -> bool`
 
 Whether a magnet is enabled. `false` for an unknown id.
+
+<a id="scene-magnet_scene_pos"></a>
 
 #### `pub fn magnet_scene_pos(&self, magnet: MagnetId) -> Option<Point>`
 
@@ -1946,11 +2431,15 @@ A magnet's position in scene coordinates (its local position
 projected through its owning item's `scene_transform`). `None`
 for an unknown id or a degenerate item transform.
 
+<a id="scene-magnet"></a>
+
 #### `pub fn magnet(&self, magnet: MagnetId) -> Option<MagnetRef>`
 
 Resolve a magnet to a borrow-free `MagnetRef` snapshot (id,
 owning item, role, payload clone, current scene position).
 `None` for an unknown id or a degenerate item transform.
+
+<a id="scene-compute_item_snap"></a>
 
 #### `pub fn compute_item_snap( &self, dragged: ItemId, drag_delta: Vec2, capture_radius: f32, predicate: &dyn Fn(&MagnetRef, &MagnetRef) -> MagnetVerdict, ) -> Option<MagnetSnap>`
 
@@ -1965,6 +2454,8 @@ runs the consumer `predicate` with no scene borrow held, so the
 predicate may inspect payloads freely. `snap_vector` added to
 `drag_delta` aligns the dragged magnet onto its target.
 
+<a id="scene-compute_port_snap"></a>
+
 #### `pub fn compute_port_snap( &self, source: MagnetId, cursor_scene: Point, capture_radius: f32, predicate: &dyn Fn(&MagnetRef, &MagnetRef) -> MagnetVerdict, ) -> Option<(MagnetRef, Option<Rc<dyn std::any::Any>>)>`
 
 Compute the best port-drag snap: a single `source` magnet is
@@ -1974,6 +2465,8 @@ Finds the nearest *accepting* target magnet within
 magnet. Returns the target `MagnetRef` and the accepting
 verdict's payload, or `None`.
 
+<a id="scene-nearest_magnet"></a>
+
 #### `pub fn nearest_magnet(&self, scene_pt: Point, radius: f32) -> Option<MagnetId>`
 
 The nearest enabled magnet to `scene_pt` within `radius` (scene
@@ -1981,11 +2474,15 @@ units), or `None`. Used by the view to start a port-drag from a
 grabbed magnet handle (the handle's grab area is a screen-pixel
 disc, converted to scene units by the caller).
 
+<a id="scene-add_a11y_group"></a>
+
 #### `pub fn add_a11y_group(&mut self, builder: A11yGroupBuilder) -> A11yGroupId`
 
 Declare a virtual AT group. The group has no visual
 counterpart — it exists so the AT walker can emit an AT node
 under which items / other groups / widgets can be reparented.
+
+<a id="scene-remove_a11y_group"></a>
 
 #### `pub fn remove_a11y_group(&mut self, id: A11yGroupId)`
 
@@ -1993,43 +2490,63 @@ Remove a logical group; orphaned references fall back to
 SceneView root. Relations / live / landmarks / categories
 targeting this group are cleaned up too.
 
+<a id="scene-a11y_group"></a>
+
 #### `pub fn a11y_group(&self, id: A11yGroupId) -> Option<&A11yGroup>`
 
 Borrow a logical group by id.
+
+<a id="scene-set_a11y_parent"></a>
 
 #### `pub fn set_a11y_parent(&mut self, child: A11yNode, parent: Option<A11yNode>)`
 
 Declare a logical-parent relationship for AT (independent of
 visual placement).
 
+<a id="scene-a11y_parent_of"></a>
+
 #### `pub fn a11y_parent_of(&self, child: A11yNode) -> Option<A11yNode>`
 
 The currently-declared logical parent of a node.
+
+<a id="scene-add_a11y_relation"></a>
 
 #### `pub fn add_a11y_relation(&mut self, from: A11yNode, kind: A11yRelation, to: A11yNode)`
 
 Declare an AT relationship between two nodes.
 
+<a id="scene-a11y_relations"></a>
+
 #### `pub fn a11y_relations(&self) -> &[(A11yNode, A11yRelation, A11yNode)]`
 
 All declared AT relations.
 
+<a id="scene-set_a11y_live"></a>
+
 #### `pub fn set_a11y_live(&mut self, node: A11yNode, live: accesskit::Live)`
 
 Mark a node as a live region. Pass `Live::Off` to clear.
+
+<a id="scene-set_a11y_landmark"></a>
 
 #### `pub fn set_a11y_landmark(&mut self, node: A11yNode, role: accesskit::Role)`
 
 Mark a node as a landmark by overriding its role. Pass
 `Role::Unknown` to clear.
 
+<a id="scene-set_a11y_categories"></a>
+
 #### `pub fn set_a11y_categories(&mut self, node: A11yNode, categories: &[A11yCategory])`
 
 Tag a node with rotor / quick-nav categories.
 
+<a id="scene-a11y_categories_of"></a>
+
 #### `pub fn a11y_categories_of(&self, node: A11yNode) -> Option<&[A11yCategory]>`
 
 Read declared categories for a node.
+
+<a id="scene-a11y_live_of"></a>
 
 #### `pub fn a11y_live_of(&self, node: A11yNode) -> Option<accesskit::Live>`
 
@@ -2040,6 +2557,8 @@ The read half of `set_a11y_live`, added because a
 consumer restoring a `RemovedItem` has to be able to check that the
 semantics came back — and because the other four decorations already
 had one.
+
+<a id="scene-a11y_landmark_of"></a>
 
 #### `pub fn a11y_landmark_of(&self, node: A11yNode) -> Option<accesskit::Role>`
 
