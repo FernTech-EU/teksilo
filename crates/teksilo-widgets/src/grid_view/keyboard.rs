@@ -445,17 +445,26 @@ pub(crate) fn build_grid_key_handler(
 /// Enter, and ⌘↓ on macOS: open or close tile `current`'s detail band, then
 /// run the application's activation, which sees the band as the key left it.
 ///
-/// Opening the band selects the tile, as the click before a double click
-/// does: opening a tile is acting on it. Closing it leaves the selection
-/// alone. A tile with nothing to disclose, or a grid with no band, follows
-/// the rule activation has without one: Enter selects the tile only when the
-/// application has no activation of its own.
+/// Opening the band selects the tile in a single selection, where the
+/// selected tile is the one being looked at, and only when the application
+/// has no activation of its own, which is the rule Enter follows without a
+/// band. A multiple selection is left alone: Ctrl+arrows move the cursor
+/// without touching it precisely so that a reader can look at a tile, and
+/// opening its band must not collapse the selection onto it. Closing the
+/// band leaves the selection alone. A tile with nothing to disclose, or a
+/// grid with no band, follows the rule activation has without one.
 fn activate_tile(cfg: &GridKeyConfig, current: usize, ctx: &mut EventContext) {
     use super::detail::Disclosure;
     cfg.focused_index.set(Some(current));
     let disclosure = cfg.detail.as_ref().map(|d| d.activate(current));
     let select = match disclosure {
-        Some(Disclosure::Opened) => true,
+        Some(Disclosure::Opened) => {
+            cfg.on_tile_activate.is_none()
+                && cfg
+                    .selection
+                    .as_ref()
+                    .is_some_and(|sel| sel.mode() == teksilo_data::SelectionMode::Single)
+        }
         Some(Disclosure::Closed) => false,
         Some(Disclosure::Nothing) | None => cfg.on_tile_activate.is_none(),
     };

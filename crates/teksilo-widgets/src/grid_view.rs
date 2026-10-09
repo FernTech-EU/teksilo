@@ -1196,8 +1196,10 @@ impl<T: 'static> GridView<T> {
     /// [`activate_on`](Self::activate_on), or Enter) opens it and scrolls it
     /// into view, and activating the open tile closes it;
     /// [`on_tile_activate`](Self::on_tile_activate) still fires. A tile with
-    /// nothing to disclose opens nothing. Enter also selects the tile whose
-    /// band it opens. Space on the open tile closes it. ↓ from the open tile
+    /// nothing to disclose opens nothing. In a single selection, Enter also
+    /// selects the tile whose band it opens, unless the application has an
+    /// activation of its own; a multiple selection is left as it is. Space on
+    /// the open tile closes it. ↓ from the open tile
     /// moves focus to the first focusable control in the band, scrolling it
     /// into view, and ↑ from there, when the control does not use it, returns
     /// to the tile. A band that closes with focus inside it hands focus back

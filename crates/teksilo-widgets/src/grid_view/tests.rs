@@ -3565,23 +3565,29 @@ fn space_selects_a_tile_with_nothing_to_disclose() {
     assert_eq!(a11y_node(&tree, tile).is_expanded(), Some(false));
 }
 
-/// Enter on a tile that opens a band selects it too: opening a tile is acting
-/// on it, as a double click is. Closing it leaves the selection alone.
+/// Enter on a tile that opens a band leaves a multiple selection as it is, and
+/// so does closing it.
 #[test]
-fn enter_selects_the_tile_it_opens() {
+fn enter_leaves_a_multiple_selection_alone_when_it_opens_a_band() {
     use teksilo_core::event::{Key, Modifiers};
     let selection = SelectionModel::new(SelectionMode::Multi);
     let sel = selection.clone();
     let (mut tree, id, _model, expanded) = band_grid(12, 400.0, 300.0, |g| g.selection(sel));
     tree.focus(id);
     press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    // Ctrl+→ moves the cursor without touching a multiple selection: the way
+    // to look at a tile without selecting it.
     press(&mut tree, Key::ArrowRight, Modifiers::CTRL);
     assert_eq!(selection.selected_indices(), vec![0]);
     assert_eq!(grid_focus(&tree, id), Some(1));
 
     press(&mut tree, Key::Enter, Modifiers::NONE);
     assert_eq!(expanded.get(), Some(1));
-    assert_eq!(selection.selected_indices(), vec![1], "the tile it opened");
+    assert_eq!(
+        selection.selected_indices(),
+        vec![0],
+        "opening a band does not collapse the selection onto its tile"
+    );
 
     selection.select_indices(vec![0, 1], false);
     press(&mut tree, Key::Enter, Modifiers::NONE);
@@ -3590,6 +3596,44 @@ fn enter_selects_the_tile_it_opens() {
         selection.selected_indices(),
         vec![0, 1],
         "closing selects nothing"
+    );
+}
+
+/// In a single selection, Enter selects the tile whose band it opens, as Enter
+/// selects a tile without a band; with an activation of its own, the
+/// application decides.
+#[test]
+fn enter_selects_the_tile_it_opens_in_a_single_selection() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use teksilo_core::event::{Key, Modifiers};
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let (mut tree, id, _model, expanded) = band_grid(12, 400.0, 300.0, |g| g.selection(sel));
+    tree.focus(id);
+    press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    selection.clear();
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    assert_eq!(expanded.get(), Some(0));
+    assert_eq!(selection.selected_indices(), vec![0], "the tile it opened");
+
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let activated = Rc::new(Cell::new(None));
+    let seen = activated.clone();
+    let (mut tree, id, _model, expanded) = band_grid(12, 400.0, 300.0, move |g| {
+        g.selection(sel)
+            .on_tile_activate(move |i, _ctx| seen.set(Some(i)))
+    });
+    tree.focus(id);
+    press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    selection.clear();
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    assert_eq!(expanded.get(), Some(0));
+    assert_eq!(activated.get(), Some(0), "the application's activation ran");
+    assert!(
+        selection.selected_indices().is_empty(),
+        "and selecting is the application's to do"
     );
 }
 

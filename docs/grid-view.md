@@ -154,7 +154,7 @@ together, and a selection the application sets moves the focus onto it. Matrix
 | Ctrl+Space | toggle the focused tile's selection |
 | PageUp / PageDown | ± a viewport of rows + scroll |
 | Space | close the open tile's detail band; else check the focused tile if it holds a checkbox, else toggle (`Multi`) / select (`Single`) |
-| Enter | with `.detail_row`, open the tile's detail band and select the tile, or close the open one; then `.on_tile_activate`. Without a band, or on a tile with nothing to disclose: `.on_tile_activate`, else select |
+| Enter | with `.detail_row`, open the tile's detail band (in a `Single` selection with no `.on_tile_activate`, also select the tile), or close the open one; then `.on_tile_activate`. Without a band, or on a tile with nothing to disclose: `.on_tile_activate`, else select |
 | ↓ on the open tile / ↑ in its band | into the band's first focusable control / back to the tile (see [Detail band](#detail-band)) |
 | Esc | clear focus |
 | Ctrl+A | select all (`Multi` mode only); Ctrl+Shift+A deselects |
@@ -279,8 +279,11 @@ keys are its positions, which say nothing about where an item went, so a
 `ListModel` closes the band on a reset whether it is given to `new`,
 `from_source` or `from_source_keyed`.
 
-**Keyboard.** Enter on a tile opens its band and selects the tile; Enter or
-Space on the open tile closes it, and leaves the selection alone. On a tile with
+**Keyboard.** Enter on a tile opens its band. In a `Single` selection with no
+`.on_tile_activate` it also selects the tile, as Enter does without a band; a
+`Multi` selection is left as it is, so Ctrl+arrows and Enter look at a tile
+without collapsing the selection onto it. Enter or Space on the open tile
+closes it, and leaves the selection alone. On a tile with
 nothing to disclose Enter and Space do what they do without a band. ↓ from the
 open tile moves focus to the first focusable control in the band, scrolled into
 view; ↑ there, when the control does not use it, returns focus to the grid with
