@@ -478,7 +478,7 @@ by crate for clarity, not because crates version independently.
 
 - **Breaking.** `AppEvent` is `#[non_exhaustive]`: a `match` on it outside
   teksilo-core needs a wildcard arm.
-- **Breaking (core):** `OverlayRequest` is `#[non_exhaustive]`. Build it with
+- **Breaking.** `OverlayRequest` is `#[non_exhaustive]`. Build it with
   `OverlayRequest::new(..)` and its builders; a struct literal no longer
   compiles outside `teksilo-core`. Its fields stay public.
 
@@ -497,22 +497,23 @@ by crate for clarity, not because crates version independently.
   `tracing-log`, `matchers`, `nu-ansi-term`, `sharded-slab`, `valuable`),
   which an audit of the lockfile sees; no ordinary build fetches or
   compiles them.
-- **Breaking (canvas):** `PendingImage::pixels` is an `ImagePixels`
+- **Breaking.** `PendingImage::pixels` is an `ImagePixels`
   (`Static(&'static [u8])` or `Shared(Arc<[u8]>)`), which dereferences to the
   bytes, instead of a `Cow<'static, [u8]>`.
 
 #### App
 
 - **A window nobody can see stops drawing.** A minimised window, or one
-  fully covered (reported on macOS and X11), renders one last frame and
-  then nothing until it is shown again, instead of rendering on every
-  redraw. On macOS so does every window while the displays sleep, the
-  screen is locked or another user's session has the console. On Wayland, frames are paced by the compositor's frame callbacks,
-  which it stops sending to a window it does not show: minimised, covered
-  or on another workspace. Such a window still runs its idle callbacks,
-  lays out and keeps its accessibility tree delivered, at most ten times a
-  second, and still answers a screen reader's actions, so app state,
-  animations that must finish and what a screen reader hears stay current.
+  fully covered (reported on macOS and X11), renders one last frame and then
+  nothing until it is shown again, instead of rendering on every redraw. On
+  macOS so does every window while the displays sleep, the screen is locked
+  or another user's session has the console. On Wayland, frames are paced by
+  the compositor's frame callbacks, which it stops sending to a window it
+  does not show: minimised, covered or on another workspace. Such a window
+  still runs its idle callbacks, lays out and keeps its accessibility tree
+  delivered, at most ten times a second, and still answers a screen reader's
+  actions, so app state, animations that must finish and what a screen
+  reader hears stay current.
 - A window woken to bring its state up to date, rather than its pixels (an
   accessibility client attaching or acting, content a widget takes in from
   another thread), lays out and delivers it without drawing, at most ten
