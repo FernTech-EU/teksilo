@@ -53,6 +53,10 @@ use super::layout::strategy::{TileRect, VisibleTileRange};
 /// nothing to disclose, and the band takes no space.
 pub(crate) type DetailBuilder<T> = Rc<dyn Fn(&TileContext<'_, T>) -> Option<Box<dyn Widget>>>;
 
+/// Whether a tile has a band, answered without building one
+/// (`GridView::detail_row_when`).
+pub(crate) type DetailWhen<T> = Rc<dyn Fn(&TileContext<'_, T>) -> bool>;
+
 /// The exact height of the band for a tile.
 pub(crate) type DetailHeightFn = Rc<dyn Fn(usize) -> f32>;
 
@@ -61,6 +65,10 @@ pub(crate) type DetailHeightFn = Rc<dyn Fn(usize) -> f32>;
 /// tile's item was resident when it was asked. A tile of a lazy source that
 /// has not loaded yet gets a placeholder and `false`.
 pub(crate) type BandContentFn = Rc<dyn Fn(usize) -> (Option<Box<dyn Widget>>, bool)>;
+
+/// [`DetailWhen`] for a tile, erased from the grid's item type: `None` while
+/// the tile's item is not resident, so nothing is known about it yet.
+pub(crate) type BandWhenFn = Rc<dyn Fn(usize) -> Option<bool>>;
 
 /// Below this, a band height is unchanged: measurements wobble in the last
 /// bits, and a wobble must not move the scroll offset.
@@ -113,6 +121,9 @@ pub(crate) struct DetailState {
     /// it reads the layout strategy in force. Activation asks it too, to
     /// learn whether a tile has anything to disclose.
     content: RefCell<Option<BandContentFn>>,
+    /// Which tiles have a band, when the application said
+    /// (`GridView::detail_row_when`); set beside `content`.
+    when: RefCell<Option<BandWhenFn>>,
     /// A tile a user has just opened: the next layout scrolls its row and its
     /// band into view.
     pub(crate) reveal: Cell<Option<usize>>,
@@ -147,6 +158,7 @@ impl DetailState {
             enterable: Cell::new(false),
             focus_within: Signal::new(false),
             content: RefCell::new(None),
+            when: RefCell::new(None),
             reveal: Cell::new(None),
             focus_return: Cell::new(None),
             version: Signal::new(0),
@@ -174,7 +186,26 @@ impl DetailState {
         *self.content.borrow_mut() = Some(content);
     }
 
+    /// Install the application's answer to which tiles have a band.
+    pub(crate) fn set_when(&self, when: BandWhenFn) {
+        *self.when.borrow_mut() = Some(when);
+    }
+
+    /// Whether `index` is a disclosure: everything is, unless
+    /// `GridView::detail_row_when` says otherwise of a tile whose item is
+    /// resident.
+    pub(crate) fn discloses(&self, index: usize) -> bool {
+        // Cloned out, so the application's predicate runs with no borrow held.
+        let when = self.when.borrow().clone();
+        when.and_then(|when| when(index)).unwrap_or(true)
+    }
+
+    /// The band's content for `index`, and whether its item was resident. A
+    /// tile that is not a disclosure has none, and its builder is not asked.
     fn content_for(&self, index: usize) -> (Option<Box<dyn Widget>>, bool) {
+        if !self.discloses(index) {
+            return (None, true);
+        }
         // Cloned out, so the application's builder runs with no borrow held.
         let content = self.content.borrow().clone();
         match content {
@@ -201,7 +232,9 @@ impl DetailState {
     /// twice for a band that opens: once here, once when the band is built.
     /// Asking it of every tile, to tell a reader which tiles are expandable,
     /// would build the content of every tile the grid realizes, which is why
-    /// every tile is offered as one (`TileA11y::accessibility`).
+    /// every tile is offered as one (`TileA11y::accessibility`) unless
+    /// `GridView::detail_row_when` answers for it, without a build. A tile it
+    /// answers `false` for is refused here before the builder is asked.
     pub(crate) fn expand(&self, index: usize) -> Disclosure {
         if self.expanded.get() == Some(index) {
             return Disclosure::Nothing;

@@ -73,6 +73,7 @@ Virtualized 2D tile grid bound to a `ListModel<T>` / `ListDataSource`.
 | `Self` | [`type_ahead_timeout(timeout: std::time::Duration)`](#gridview-type_ahead_timeout) |
 | `Self` | [`expanded_index(expanded: Signal<Option<usize>>)`](#gridview-expanded_index) |
 | `Self` | [`detail_row(f: impl Fn(&TileContext<'_, T>) -> Option<Box<dyn Widget>> + 'static)`](#gridview-detail_row) |
+| `Self` | [`detail_row_when(f: impl Fn(&TileContext<'_, T>) -> bool + 'static)`](#gridview-detail_row_when) |
 | `Self` | [`detail_row_height(f: impl Fn(usize) -> f32 + 'static)`](#gridview-detail_row_height) |
 | | **Methods** |
 | `&Signal<f32>` | [`scroll_y_signal()`](#gridview-scroll_y_signal) |
@@ -696,12 +697,36 @@ source loading other windows leaves it as it is.
 Accessibility: the band is a `Role::Group`, read after its tile's
 row, named after its tile's `tile_a11y_label`,
 or labelled by the tile, or, with the tile outside the realized
-window, "Details of item N" in the user's language. Every tile carries
-an `expanded` state, `Expand` / `Collapse` actions and, while open, a
-`controls` relation to the band; a tile with nothing to disclose is
-offered as expandable too, since knowing otherwise means building its
-band, and stays collapsed. The grid's row and column counts and the
-tiles' positions do not count the band.
+window, "Details of item N" in the user's language. A tile carries an
+`expanded` state, `Expand` / `Collapse` actions and, while open, a
+`controls` relation to the band. Without
+`detail_row_when` every tile does, one with
+nothing to disclose included, since knowing otherwise means building
+its band, and that one stays collapsed. The grid's row and column
+counts and the tiles' positions do not count the band.
+
+<a id="gridview-detail_row_when"></a>
+
+#### `pub fn detail_row_when(mut self, f: impl Fn(&TileContext<'_, T>) -> bool + 'static) -> Self`
+
+Which tiles have a detail band, answered without building one: `f`
+receives the tile's `TileContext`, as
+`detail_row` does, and returns `false` for a tile
+with nothing to disclose.
+
+Such a tile is not a disclosure. Assistive technology hears no
+expanded state on it and is offered no `Expand` or `Collapse`, which it
+would be otherwise. Activating it opens nothing, `detail_row` is not
+asked for it, and `expanded_index` naming it
+opens no band.
+
+`f` is asked as each tile is built: when it comes into the realized
+window, after a change to the data, and when its selectedness flips.
+Answer from the item, cheaply and with no side effects, and agree with
+`detail_row`: a tile `f` accepts and `detail_row` gives nothing for is
+offered as expandable, and opens nothing. A tile of a lazy source
+whose item has not arrived is offered until it does. Without
+`detail_row`, this does nothing.
 
 <a id="gridview-detail_row_height"></a>
 

@@ -13,6 +13,15 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Widgets
+
+- **`GridView::detail_row_when`** says which tiles have a detail band, from
+  the same `TileContext` `detail_row` receives. A tile it refuses is no longer
+  offered to a screen reader as expandable, and activating it opens nothing.
+  Without it, every tile is still offered as one.
+
 ### Fixed
 
 #### Widgets

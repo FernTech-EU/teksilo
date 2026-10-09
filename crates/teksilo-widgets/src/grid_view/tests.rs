@@ -3565,6 +3565,130 @@ fn space_selects_a_tile_with_nothing_to_disclose() {
     assert_eq!(a11y_node(&tree, tile).is_expanded(), Some(false));
 }
 
+/// Sends assistive technology's `action` to the tile at `index`.
+fn access_action(
+    tree: &mut WidgetTree,
+    grid: WidgetId,
+    action: teksilo_core::accesskit::Action,
+    index: usize,
+) {
+    let target = tile_at(tree, grid, index);
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+        action,
+        target: Some(target),
+        target_node: teksilo_core::accessibility::root_node_id(),
+        data: None,
+    });
+    settle(tree, 400.0, 300.0);
+}
+
+/// With `detail_row_when`, a tile with nothing to disclose is no disclosure:
+/// no expanded state, no `Expand`, and nothing asks its builder, an
+/// `expanded_index` naming it included. The other tiles are as before.
+#[test]
+fn detail_row_when_leaves_a_tile_with_nothing_to_disclose_undisclosed() {
+    use teksilo_core::accesskit::Action;
+    use teksilo_core::event::{Key, Modifiers};
+    let built = Rc::new(Cell::new(Vec::<usize>::new()));
+    let log = built.clone();
+    let (mut tree, id, _model, expanded) = band_grid(12, 400.0, 300.0, |g| {
+        g.detail_row(move |tc| {
+            log.set([log.take(), vec![tc.index]].concat());
+            if tc.index == 4 { None } else { band_content() }
+        })
+        .detail_row_when(|tc| tc.index != 4)
+    });
+
+    let none = a11y_node(&tree, tile_at(&tree, id, 4));
+    assert_eq!(none.is_expanded(), None, "no expanded state");
+    assert!(!none.supports_action(Action::Expand));
+    assert!(!none.supports_action(Action::Collapse));
+    let some = a11y_node(&tree, tile_at(&tree, id, 7));
+    assert_eq!(some.is_expanded(), Some(false));
+    assert!(some.supports_action(Action::Expand));
+    assert_eq!(built.take(), Vec::<usize>::new(), "no band was built");
+
+    access_action(&mut tree, id, Action::Expand, 4);
+    tree.focus(id);
+    the_grid(&tree, id).focused_index.set(Some(4));
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    expanded.set(Some(4));
+    settle(&mut tree, 400.0, 300.0);
+    let detail = the_grid(&tree, id)
+        .detail
+        .clone()
+        .expect("a band is in force");
+    assert!(!detail.is_open(4), "naming the tile opens nothing");
+    assert_eq!(
+        built.take(),
+        Vec::<usize>::new(),
+        "and asks its builder nothing"
+    );
+    assert_eq!(a11y_node(&tree, tile_at(&tree, id, 4)).is_expanded(), None);
+
+    expanded.set(None);
+    settle(&mut tree, 400.0, 300.0);
+    access_action(&mut tree, id, Action::Expand, 7);
+    assert_eq!(expanded.get(), Some(7));
+    assert_eq!(
+        a11y_node(&tree, tile_at(&tree, id, 7)).is_expanded(),
+        Some(true)
+    );
+}
+
+/// `detail_row_when` is asked again when the data changes, so a tile whose
+/// item gains something to disclose becomes a disclosure.
+#[test]
+fn detail_row_when_follows_a_change_to_the_item() {
+    let (mut tree, id, model, _expanded) = band_grid(12, 400.0, 300.0, |g| {
+        g.detail_row_when(|tc| tc.item % 2 == 0)
+    });
+    assert_eq!(a11y_node(&tree, tile_at(&tree, id, 1)).is_expanded(), None);
+    assert_eq!(
+        a11y_node(&tree, tile_at(&tree, id, 2)).is_expanded(),
+        Some(false)
+    );
+
+    model.set(1, 10);
+    settle(&mut tree, 400.0, 300.0);
+    assert_eq!(
+        a11y_node(&tree, tile_at(&tree, id, 1)).is_expanded(),
+        Some(false)
+    );
+}
+
+/// A tile of a lazy source whose item has not arrived is offered as a
+/// disclosure, `detail_row_when` having nothing to answer from, and is not
+/// once its item arrives and `detail_row_when` refuses it.
+#[test]
+fn detail_row_when_answers_for_a_lazy_tile_once_its_item_arrives() {
+    let source = Lazy::new(90);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        GridView::from_source(source.handle(), |_tc| {
+            Box::new(FixedLeaf(100.0, 50.0)) as Box<dyn Widget>
+        })
+        .tile_size(100.0, 50.0)
+        .detail_row(|_tc| band_content())
+        .detail_row_when(|tc| tc.index != 0),
+    );
+    settle(&mut tree, 400.0, 300.0);
+    assert_eq!(
+        a11y_node(&tree, tile_at(&tree, id, 0)).is_expanded(),
+        Some(false),
+        "not loaded: offered"
+    );
+
+    let asked = source.asked.borrow().clone();
+    source.load(asked);
+    settle(&mut tree, 400.0, 300.0);
+    assert_eq!(a11y_node(&tree, tile_at(&tree, id, 0)).is_expanded(), None);
+    assert_eq!(
+        a11y_node(&tree, tile_at(&tree, id, 1)).is_expanded(),
+        Some(false)
+    );
+}
+
 /// Enter on a tile that opens a band leaves a multiple selection as it is, and
 /// so does closing it.
 #[test]

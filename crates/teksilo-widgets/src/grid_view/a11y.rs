@@ -68,15 +68,19 @@ pub(crate) struct TileA11y {
     /// Concise per-item name (`GridView::tile_a11y_label`); `None` leaves the
     /// cell's name to its contents.
     name: Option<String>,
-    /// The detail band, when one is in force. Every tile then publishes
-    /// whether its band is open, read live: opening one changes the state of
-    /// two tiles and rebuilds neither.
+    /// The detail band, when one is in force. Every tile that is a
+    /// disclosure then publishes whether its band is open, read live: opening
+    /// one changes the state of two tiles and rebuilds neither.
     detail: Option<Rc<super::detail::DetailState>>,
     /// Rebuild trigger, bumped only when *this* tile's selectedness flips.
     version: Signal<u64>,
 
     // Build state.
     selected: bool,
+    /// Whether this tile is a disclosure (`DetailState::discloses`), asked
+    /// at each build: a change to the data rebuilds the tiles, and a window a
+    /// lazy source loads rebuilds the pane.
+    discloses: bool,
     child: Option<WidgetId>,
 }
 
@@ -100,6 +104,7 @@ impl TileA11y {
             detail,
             version: Signal::new(0),
             selected: false,
+            discloses: false,
             child: None,
         }
     }
@@ -133,6 +138,10 @@ impl Widget for TileA11y {
             .as_ref()
             .is_some_and(|s| s.is_selected(self.index));
         self.selected = selected;
+        self.discloses = self
+            .detail
+            .as_ref()
+            .is_some_and(|d| d.discloses(self.index));
 
         if let Some(ref selection) = self.selection {
             let watched = selection.clone();
@@ -195,11 +204,16 @@ impl Widget for TileA11y {
         // that (handled on the body pane, beside `Click`), and while open the
         // band it controls.
         //
-        // Every tile is offered as one, those with nothing to disclose
-        // included: knowing which have something means building the band's
-        // content for each tile realized, on every walk. `Expand` on such a
-        // tile opens nothing (`DetailState::expand`), so it stays collapsed.
-        if let Some(ref d) = self.detail {
+        // Without `GridView::detail_row_when` every tile is offered as one,
+        // those with nothing to disclose included: knowing which have
+        // something would mean building the band's content for each tile
+        // realized. `Expand` on such a tile opens nothing
+        // (`DetailState::expand`), so it stays collapsed. With it, a tile it
+        // refuses is no disclosure, carries no state and no actions, and can
+        // never be open: its band's content is refused before it is built.
+        if let Some(ref d) = self.detail
+            && self.discloses
+        {
             let open = d.is_open(self.index);
             builder.set_expanded(open);
             if open {

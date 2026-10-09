@@ -424,6 +424,8 @@ pub struct GridView<T: 'static> {
     /// application supplies none, so activation still opens and closes it.
     expanded: Signal<Option<usize>>,
     detail_row: Option<detail::DetailBuilder<T>>,
+    /// Which tiles have a band (`detail_row_when`); `None`: every tile may.
+    detail_row_when: Option<detail::DetailWhen<T>>,
     detail_row_height: Option<detail::DetailHeightFn>,
     /// Built on the first build when a band is in force, and kept: the
     /// layout, the tiles, the keys and the band share it across rebuilds.
@@ -569,6 +571,7 @@ impl<T: 'static> GridView<T> {
             enabled: Prop::Static(true),
             expanded: Signal::new(None),
             detail_row: None,
+            detail_row_when: None,
             detail_row_height: None,
             detail: None,
             detail_layout: None,
@@ -1231,17 +1234,41 @@ impl<T: 'static> GridView<T> {
     /// Accessibility: the band is a `Role::Group`, read after its tile's
     /// row, named after its tile's [`tile_a11y_label`](Self::tile_a11y_label),
     /// or labelled by the tile, or, with the tile outside the realized
-    /// window, "Details of item N" in the user's language. Every tile carries
-    /// an `expanded` state, `Expand` / `Collapse` actions and, while open, a
-    /// `controls` relation to the band; a tile with nothing to disclose is
-    /// offered as expandable too, since knowing otherwise means building its
-    /// band, and stays collapsed. The grid's row and column counts and the
-    /// tiles' positions do not count the band.
+    /// window, "Details of item N" in the user's language. A tile carries an
+    /// `expanded` state, `Expand` / `Collapse` actions and, while open, a
+    /// `controls` relation to the band. Without
+    /// [`detail_row_when`](Self::detail_row_when) every tile does, one with
+    /// nothing to disclose included, since knowing otherwise means building
+    /// its band, and that one stays collapsed. The grid's row and column
+    /// counts and the tiles' positions do not count the band.
     pub fn detail_row(
         mut self,
         f: impl Fn(&TileContext<'_, T>) -> Option<Box<dyn Widget>> + 'static,
     ) -> Self {
         self.detail_row = Some(Rc::new(f));
+        self
+    }
+
+    /// Which tiles have a detail band, answered without building one: `f`
+    /// receives the tile's [`TileContext`], as
+    /// [`detail_row`](Self::detail_row) does, and returns `false` for a tile
+    /// with nothing to disclose.
+    ///
+    /// Such a tile is not a disclosure. Assistive technology hears no
+    /// expanded state on it and is offered no `Expand` or `Collapse`, which it
+    /// would be otherwise. Activating it opens nothing, `detail_row` is not
+    /// asked for it, and [`expanded_index`](Self::expanded_index) naming it
+    /// opens no band.
+    ///
+    /// `f` is asked as each tile is built: when it comes into the realized
+    /// window, after a change to the data, and when its selectedness flips.
+    /// Answer from the item, cheaply and with no side effects, and agree with
+    /// `detail_row`: a tile `f` accepts and `detail_row` gives nothing for is
+    /// offered as expandable, and opens nothing. A tile of a lazy source
+    /// whose item has not arrived is offered until it does. Without
+    /// `detail_row`, this does nothing.
+    pub fn detail_row_when(mut self, f: impl Fn(&TileContext<'_, T>) -> bool + 'static) -> Self {
+        self.detail_row_when = Some(Rc::new(f));
         self
     }
 
@@ -1412,37 +1439,64 @@ fn follow_the_disclosed_tile(
     }
 }
 
-/// The detail band's content for a tile, as the band and activation ask for
-/// it: the application's builder over the tile's item and its
-/// [`TileContext`], or a placeholder for a tile of a lazy source whose item
-/// has not arrived.
+/// Hands `f` the [`TileContext`] of a tile, as the band's builder and
+/// [`GridView::detail_row_when`] receive it, and returns whether the tile's
+/// item was resident; `f` is not called when it was not.
+type TileContextReader<T> = Rc<dyn Fn(usize, &mut dyn FnMut(&TileContext<'_, T>)) -> bool>;
+
+/// The [`TileContextReader`] the detail band asks through.
 ///
 /// Reads the tile's row and column from the wrapped strategy rather than the
 /// band's wrapper, which holds the state this is kept in.
-fn band_content<T: 'static>(
-    builder: detail::DetailBuilder<T>,
+fn tile_context_reader<T: 'static>(
     read_item_fn: body_pane::ReadItemFn<T>,
-    row_state_fn: Rc<dyn Fn(usize) -> teksilo_data::RowState>,
     strategy: Rc<dyn GridLayoutStrategy>,
     viewport_width: Rc<Cell<f32>>,
     selection: Option<RowSelection>,
     focused_index: Signal<Option<usize>>,
-) -> detail::BandContentFn {
-    Rc::new(move |index| {
+) -> TileContextReader<T> {
+    Rc::new(move |index, f| {
         let (row, col) = strategy.tile_row_col(index, viewport_width.get());
         let is_selected = selection.as_ref().is_some_and(|s| s.is_selected(index));
         let is_focused = focused_index.get() == Some(index);
-        let mut content = None;
-        let resident = (read_item_fn)(index, &mut |item| {
-            content = builder(&TileContext {
+        (read_item_fn)(index, &mut |item| {
+            f(&TileContext {
                 index,
                 row,
                 col,
                 item,
                 is_selected,
                 is_focused,
-            });
-        });
+            })
+        })
+    })
+}
+
+/// Whether a tile has a band, as the tiles ask it: the application's
+/// [`GridView::detail_row_when`] over the tile's [`TileContext`], or `None`
+/// for a tile of a lazy source whose item has not arrived.
+fn band_when<T: 'static>(
+    when: detail::DetailWhen<T>,
+    read_tile: TileContextReader<T>,
+) -> detail::BandWhenFn {
+    Rc::new(move |index| {
+        let mut answer = false;
+        read_tile(index, &mut |tc| answer = when(tc)).then_some(answer)
+    })
+}
+
+/// The detail band's content for a tile, as the band and activation ask for
+/// it: the application's builder over the tile's item and its
+/// [`TileContext`], or a placeholder for a tile of a lazy source whose item
+/// has not arrived.
+fn band_content<T: 'static>(
+    builder: detail::DetailBuilder<T>,
+    read_tile: TileContextReader<T>,
+    row_state_fn: Rc<dyn Fn(usize) -> teksilo_data::RowState>,
+) -> detail::BandContentFn {
+    Rc::new(move |index| {
+        let mut content = None;
+        let resident = read_tile(index, &mut |tc| content = builder(tc));
         if resident {
             (content, true)
         } else {
@@ -1608,14 +1662,20 @@ impl<T: 'static> Widget for GridView<T> {
             );
             self.track_the_disclosed_tile(ctx, d);
             if let (Some(layout), Some(builder)) = (&self.detail_layout, &self.detail_row) {
-                d.set_content(band_content(
-                    builder.clone(),
+                let read_tile = tile_context_reader(
                     self.source.read_item_fn.clone(),
-                    self.source.dnd.row_state_fn.clone(),
                     layout.inner(),
                     self.viewport_width.clone(),
                     self.selection.clone(),
                     self.focused_index.clone(),
+                );
+                if let Some(when) = &self.detail_row_when {
+                    d.set_when(band_when(when.clone(), read_tile.clone()));
+                }
+                d.set_content(band_content(
+                    builder.clone(),
+                    read_tile,
+                    self.source.dnd.row_state_fn.clone(),
                 ));
             }
         }

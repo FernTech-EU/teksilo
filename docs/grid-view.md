@@ -231,6 +231,7 @@ let open = Signal::new(None::<usize>);
 GridView::from_source(albums, |tc| Box::new(album_tile(tc.item)))
     .expanded_index(open.clone())               // which tile is disclosed
     .detail_row(|tc| Some(Box::new(track_list(tc.item)) as Box<dyn Widget>))
+    .detail_row_when(|tc| !tc.item.tracks.is_empty()) // optional; which tiles have one
     .detail_row_height(|_index| 240.0)          // optional; measured otherwise
     .tile_a11y_label(|i| album_title(i))
 ```
@@ -241,6 +242,15 @@ GridView::from_source(albums, |tc| Box::new(album_tile(tc.item)))
   asked when a tile is activated, to learn whether the tile has anything to
   disclose, and the content it returns then is dropped: keep it cheap and free
   of side effects.
+- `.detail_row_when(|tc| -> bool)` says which tiles have a band without
+  building one, from the same `TileContext`. A tile it answers `false` for is
+  not a disclosure: no expanded state or `Expand` for assistive technology,
+  nothing opens on activation or on an `.expanded_index` naming it, and
+  `.detail_row` is not asked for it. It is asked as each tile is built (when
+  the tile is realized, after a change to the data, when its selectedness
+  flips), so answer from the item, cheaply, and agree with `.detail_row`. A
+  tile of a lazy source whose item has not arrived counts as having a band
+  until it arrives.
 - `.expanded_index(Signal<Option<usize>>)` is the disclosed tile. The grid
   writes it when a tile is activated (a click per `.activate_on`, or Enter):
   activating a tile opens its band and scrolls it into view, activating the
@@ -301,13 +311,13 @@ the band, and a press on the band starts no marquee.
 **Accessibility.** The band is a `Role::Group`, read right after its tile's
 row. It is named after its tile's `.tile_a11y_label`, labelled by the tile node
 without one, and named "Details of item N" (in the user's language) when the
-tile has scrolled out of the realized window and has no node to lend. Every
-tile publishes `expanded`, offers `Expand` or `Collapse` (which open and close
-the band for a screen reader, with no double click needed), and, while open, a
-`controls` relation to the band. A tile with nothing to disclose is offered as
-expandable too, because knowing otherwise means building its band's content for
-every tile the grid realizes; its `Expand` opens nothing and it stays
-collapsed. The grid's row and column counts and each tile's position in the set
+tile has scrolled out of the realized window and has no node to lend. A tile
+publishes `expanded`, offers `Expand` or `Collapse` (which open and close the
+band for a screen reader, with no double click needed), and, while open, a
+`controls` relation to the band. With `.detail_row_when`, only the tiles it
+accepts do. Without it every tile does, one with nothing to disclose included,
+because knowing otherwise means building its band's content for every tile the
+grid realizes; its `Expand` opens nothing and it stays collapsed. The grid's row and column counts and each tile's position in the set
 are unchanged. Opening, closing and moving the band replace no tile node; a
 scroll it causes (the reveal of a band a user opened) realizes tiles as any
 scroll does.
