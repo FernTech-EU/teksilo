@@ -4,10 +4,13 @@
 //! MinSize — a layout modifier that ensures a child reaches a minimum width and/or height.
 //!
 //! The child's reported size is clamped upward so it never falls below the
-//! configured minimum on each constrained axis. The minimum is also forwarded
-//! as part of the clamped proposal so that wrap-aware children (e.g. a
-//! multi-line `TextWidget`) measure against the constraint they will actually
-//! be placed into. Axes with no minimum set are passed through unchanged.
+//! configured minimum on each constrained axis. A bounded proposal below the
+//! minimum is raised to it before it is forwarded, so that wrap-aware children
+//! (e.g. a multi-line `TextWidget`) measure against the width they will
+//! actually be placed into. An unbounded axis stays unbounded: the child
+//! answers with its ideal size, and the minimum applies to that answer, as
+//! SwiftUI's `.frame(minWidth:)` does. Axes with no minimum set are passed
+//! through unchanged.
 //!
 //! `MinSize` propagates the child's `flex` and `shrink` weights so that a
 //! `Spacer` or `Expand` inside `MinSize` still participates in stack
@@ -158,20 +161,22 @@ impl Widget for MinSize {
         let min_w = self.min_width.as_ref().map(|r| r.get());
         let min_h = self.min_height.as_ref().map(|r| r.get());
 
-        // Clamp the proposal upward to the minimums before forwarding,
-        // so wrap-aware children (TextWidget, etc.) measure against the
-        // actual constraint they will be placed into. Mirrors MaxSize's
-        // approach of clamping the proposal before forwarding.
+        // Raise a bounded proposal to the minimum before forwarding, so
+        // wrap-aware children (TextWidget, etc.) measure against the width
+        // they will be placed into. An unbounded axis is forwarded unbounded:
+        // a minimum is a floor, not a size. Proposing the minimum there would
+        // make it a ceiling instead — a stack measures its children unbounded
+        // on its main axis, so a shrinkable label inside `MinSize` (a
+        // `Checkbox`'s, a `RadioButton`'s) was squeezed to its ellipsis in
+        // every `HStack`. The floor applies to the child's answer below.
         let clamped_proposal = SizeProposal {
             width: match (proposal.width, min_w) {
                 (Some(w), Some(min)) => Some(w.max(min)),
-                (None, Some(min)) => Some(min),
-                (w, None) => w,
+                (w, _) => w,
             },
             height: match (proposal.height, min_h) {
                 (Some(h), Some(min)) => Some(h.max(min)),
-                (None, Some(min)) => Some(min),
-                (h, None) => h,
+                (h, _) => h,
             },
         };
 
@@ -318,21 +323,17 @@ mod tests {
     }
 
     #[test]
-    fn child_receives_clamped_proposal() {
-        // A VStack with unspecified width queries the MinSize for its
-        // intrinsic size. MinSize (min_width=100) should forward 100px
-        // to the wrapping child (not leave width unspecified or too
-        // narrow), yielding the correct wrapped height.
+    fn a_narrow_proposal_is_raised_to_the_minimum_before_the_child_measures() {
+        // A VStack 60 px wide proposes 60 to the MinSize (min_width=100). The
+        // MinSize will be placed 100 wide, so the wrapping child must measure
+        // at 100, not 60: its height is then the height it is placed at.
         use crate::primitives::vstack::VStack;
 
         let mut tree = WidgetTree::new();
         let child = tree.add(WrappingLeaf);
         let min = tree.add(MinSize::width(100.0).child(child));
         let _stack = tree.add(VStack::new().child(min));
-        tree.layout(SizeProposal {
-            width: None,
-            height: None,
-        });
+        tree.layout(SizeProposal::exact(60.0, 200.0));
 
         let mb = tree.bounds(min);
         assert!(
@@ -349,10 +350,10 @@ mod tests {
     }
 
     #[test]
-    fn unspecified_proposal_gets_clamped_to_minimum() {
-        // When the parent proposes no width at all, MinSize should
-        // forward the minimum as the proposal so the child measures
-        // against the constraint it will actually be placed into.
+    fn an_unbounded_axis_stays_unbounded_for_the_child() {
+        // No width proposed: the child answers with its ideal width (one
+        // 120 px line), above the 80 px floor. Forwarding the floor as the
+        // proposal would wrap it at 80 — a minimum acting as a maximum.
         let mut tree = WidgetTree::new();
         let child = tree.add(WrappingLeaf);
         let min = tree.add(MinSize::width(80.0).child(child));
@@ -360,15 +361,59 @@ mod tests {
 
         let mb = tree.bounds(min);
         assert!(
-            (mb.width - 80.0).abs() < 0.01,
-            "width should be 80, got {}",
+            (mb.width - 120.0).abs() < 0.01,
+            "width should be 120, got {}",
             mb.width
         );
-        // At 80px width: ceil(120/80) = 2 lines → 40px
         assert!(
-            (mb.height - 40.0).abs() < 0.01,
-            "height should be 40 (2 lines at 80px), got {}",
+            (mb.height - 20.0).abs() < 0.01,
+            "height should be 20 (one line), got {}",
             mb.height
+        );
+    }
+
+    /// A single-line label: 120 px wanted, shrinkable down to a 12 px
+    /// ellipsis, answering a bounded proposal with what fits.
+    #[derive(Debug)]
+    struct ShrinkableLabel;
+    impl Widget for ShrinkableLabel {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            let w = proposal.width.unwrap_or(120.0).clamp(12.0, 120.0);
+            teksilo_core::widget::LayoutResponse::shrinkable(
+                Size::new(w, 20.0),
+                Size::new(12.0, 20.0),
+                1.0,
+            )
+        }
+    }
+
+    #[test]
+    fn a_shrinkable_child_keeps_its_wanted_width_on_a_stacks_main_axis() {
+        // An HStack measures its children unbounded on its main axis. Inside
+        // a 24 px MinSize, the label must still report its 120 px, not the
+        // 24 px floor squeezed down to its ellipsis.
+        use crate::primitives::hstack::HStack;
+
+        let mut tree = WidgetTree::new();
+        let label = tree.add(ShrinkableLabel);
+        let min = tree.add(MinSize::new(24.0, 24.0).child(label));
+        let _row = tree.add(HStack::new().child(min));
+        tree.layout(SizeProposal::exact(900.0, 100.0));
+
+        let mb = tree.bounds(min);
+        assert!(
+            (mb.width - 120.0).abs() < 0.01,
+            "width should be 120, got {}",
+            mb.width
+        );
+        assert!(
+            (tree.bounds(label).width - 120.0).abs() < 0.01,
+            "the label should be 120, got {}",
+            tree.bounds(label).width
         );
     }
 }

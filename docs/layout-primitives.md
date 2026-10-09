@@ -290,7 +290,7 @@ MinSize::height(36.0).child(row)
 MinSize::width(0.0).min_width(min_w_signal).child(text)
 ```
 
-The proposal forwarded to the child is **clamped upward** to the minimum. A wrapping `TextWidget` inside `MinSize::width(100)` measures against `width >= 100`, so its wrapped height reflects the minimum width, not the unconstrained natural width. Tested at [min_size.rs:320-350](../crates/teksilo-widgets/src/primitives/min_size.rs#L320-L350).
+A **bounded** proposal forwarded to the child is **clamped upward** to the minimum. A wrapping `TextWidget` inside `MinSize::width(100)` offered 60 measures against 100, the width it will be placed at, so its wrapped height is right. An **unbounded** axis is forwarded unbounded: the child answers with its ideal size, and the minimum applies to that answer, as SwiftUI's `.frame(minWidth:)` does. A minimum is a floor, never a size to measure at. Proposing it on an unbounded axis would make it a ceiling: an `HStack` measures its children unbounded on its main axis, so a `Checkbox` (whose row sits in a 24 dp `MinSize` hit area) would have its label squeezed to "…" in any row. Tested at [min_size.rs:325-418](../crates/teksilo-widgets/src/primitives/min_size.rs#L325-L418) and in [tests/labelled_controls_in_a_row.rs](../crates/teksilo-widgets/tests/labelled_controls_in_a_row.rs).
 
 ### 4.3 `MaxSize`
 

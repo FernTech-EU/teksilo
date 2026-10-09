@@ -6,10 +6,13 @@
 MinSize — a layout modifier that ensures a child reaches a minimum width and/or height.
 
 The child's reported size is clamped upward so it never falls below the
-configured minimum on each constrained axis. The minimum is also forwarded
-as part of the clamped proposal so that wrap-aware children (e.g. a
-multi-line `TextWidget`) measure against the constraint they will actually
-be placed into. Axes with no minimum set are passed through unchanged.
+configured minimum on each constrained axis. A bounded proposal below the
+minimum is raised to it before it is forwarded, so that wrap-aware children
+(e.g. a multi-line `TextWidget`) measure against the width they will
+actually be placed into. An unbounded axis stays unbounded: the child
+answers with its ideal size, and the minimum applies to that answer, as
+SwiftUI's `.frame(minWidth:)` does. Axes with no minimum set are passed
+through unchanged.
 
 `MinSize` propagates the child's `flex` and `shrink` weights so that a
 `Spacer` or `Expand` inside `MinSize` still participates in stack
