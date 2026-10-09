@@ -3461,12 +3461,12 @@ fn a_click_on_a_row_selects_its_item_and_a_click_on_a_header_selects_nothing() {
 }
 
 #[test]
-fn the_keys_step_over_headers_and_page_by_visual_distance() {
+fn the_keys_reveal_items_below_their_headers_and_page_by_visual_distance() {
     use teksilo_core::event::{Key, Modifiers};
     let selection = SelectionModel::new(teksilo_data::SelectionMode::Single);
     let sel = selection.clone();
     // Ten sections of ten: section s's header is at 210·s, its item k at
-    // 210·s + 10 + 20·k.
+    // 210·s + 10 + 20·k. Content 2100 in a 200 viewport.
     let (mut tree, lv, _model) =
         sectioned_list((0..100).collect(), FixedSections(vec![10; 10]), move |v| {
             v.selection(sel)
@@ -3474,31 +3474,29 @@ fn the_keys_step_over_headers_and_page_by_visual_distance() {
     let p = SizeProposal::exact(400.0, 200.0);
     tree.layout(p);
     tree.focus(lv);
+    let scroll = with_list_view::<usize, _>(&tree, lv, |v| v.scroll_y_signal().clone());
+    let press = |tree: &mut WidgetTree, key: Key| {
+        tree.press_key(key, Modifiers::NONE);
+        tree.layout(p);
+        (selection.selected_indices(), scroll.get())
+    };
 
+    // The step itself is index arithmetic; what the headers change is the
+    // scroll that follows it. Item 9 (190..210) is revealed at 10.
     selection.select(9);
-    tree.press_key(Key::ArrowDown, Modifiers::NONE);
     tree.layout(p);
-    assert_eq!(
-        selection.selected_indices(),
-        vec![10],
-        "past the header, to item 10"
-    );
-    tree.press_key(Key::ArrowUp, Modifiers::NONE);
-    tree.layout(p);
-    assert_eq!(selection.selected_indices(), vec![9]);
-
-    tree.press_key(Key::End, Modifiers::NONE);
-    tree.layout(p);
-    assert_eq!(selection.selected_indices(), vec![99]);
-    tree.press_key(Key::Home, Modifiers::NONE);
-    tree.layout(p);
-    assert_eq!(selection.selected_indices(), vec![0]);
+    assert_eq!(scroll.get(), 10.0);
+    // Item 10 is at 220..240, a header lower than the metrics alone put it
+    // (200..220, revealed at 20).
+    assert_eq!(press(&mut tree, Key::ArrowDown), (vec![10], 40.0));
+    assert_eq!(press(&mut tree, Key::ArrowUp), (vec![9], 40.0));
+    // Item 99 ends at 2100 with every header counted, not at 2000.
+    assert_eq!(press(&mut tree, Key::End), (vec![99], 1900.0));
+    assert_eq!(press(&mut tree, Key::Home), (vec![0], 0.0));
 
     // From item 0 (top 10) a page of 200 reaches y = 210: header S1, which
     // answers with the first item under it.
-    tree.press_key(Key::PageDown, Modifiers::NONE);
-    tree.layout(p);
-    assert_eq!(selection.selected_indices(), vec![10]);
+    assert_eq!(press(&mut tree, Key::PageDown), (vec![10], 40.0));
 }
 
 #[test]
@@ -3602,9 +3600,39 @@ fn rows_revealed_under_a_pinned_header_stop_below_it() {
     assert_eq!(scroll.get(), 310.0);
 }
 
-#[test]
-fn a_drop_on_a_header_inserts_at_the_top_of_its_section() {
+/// Drag the row at `from` to `to`, and return the insertion line's `y` as it
+/// was just before the release.
+fn drag_and_read_the_line(
+    tree: &mut WidgetTree,
+    lv: WidgetId,
+    from: Point,
+    to: Point,
+) -> Option<f32> {
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    // Past the 5 dp drag threshold.
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(from.x + 10.0, from.y)));
+    tree.dispatch_event(WidgetEvent::pointer_move(to));
+    let line = with_list_view::<usize, _>(tree, lv, |v| v.drop_feedback_signal().get());
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        to,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    line.map(|(y, _)| y)
+}
+
+/// The six values of a `[2, 3, 1]` list, in model order.
+fn six_values(model: &ListModel<usize>) -> Vec<usize> {
+    (0..6).filter_map(|i| model.with_item(i, |v| *v)).collect()
+}
+
+#[test]
+fn a_row_dragged_up_onto_a_header_lands_under_it_at_the_top_of_its_section() {
     let (mut tree, lv, model) = sectioned_list(
         vec![10, 20, 30, 40, 50, 60],
         FixedSections(vec![2, 3, 1]),
@@ -3615,44 +3643,191 @@ fn a_drop_on_a_header_inserts_at_the_top_of_its_section() {
     // Item 5 (y 130..150) dragged up onto header S1 (y 50..60). Without the
     // headers in the geometry, y = 55 would read as the lower half of item 2
     // and insert after it.
-    let from = Point::new(50.0, 140.0);
-    let over_s1 = Point::new(50.0, 55.0);
-    tree.dispatch_event(WidgetEvent::pointer_down(
-        from,
-        PointerButton::Primary,
-        Modifiers::NONE,
-    ));
-    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 140.0)));
-    tree.dispatch_event(WidgetEvent::pointer_move(over_s1));
-    let line = with_list_view::<usize, _>(&tree, lv, |v| v.drop_feedback_signal().get());
-    assert_eq!(
-        line.map(|(y, _)| y),
-        Some(60.0),
-        "the line sits under the header, above item 2"
+    let line = drag_and_read_the_line(
+        &mut tree,
+        lv,
+        Point::new(50.0, 140.0),
+        Point::new(50.0, 55.0),
     );
-    tree.dispatch_event(WidgetEvent::pointer_up(
-        over_s1,
-        PointerButton::Primary,
-        Modifiers::NONE,
-    ));
-    let values: Vec<usize> = (0..6).filter_map(|i| model.with_item(i, |v| *v)).collect();
-    assert_eq!(values, vec![10, 20, 60, 30, 40, 50]);
+    assert_eq!(line, Some(60.0), "under the header, above item 2");
+    // S0 keeps its two items, so 60 is the first of S1.
+    assert_eq!(six_values(&model), vec![10, 20, 60, 30, 40, 50]);
 }
 
 #[test]
-fn a_drop_below_the_last_row_of_a_section_lands_after_it() {
+fn a_row_dragged_down_onto_a_header_lands_above_it_at_the_end_of_the_section_before() {
     let (mut tree, lv, model) = sectioned_list(
         vec![10, 20, 30, 40, 50, 60],
         FixedSections(vec![2, 3, 1]),
         |v| v.reorderable(true),
     );
     tree.layout(SizeProposal::exact(400.0, 300.0));
-    let _ = lv;
+
+    // Item 0 dragged down onto header S1: the same boundary, 2. The source
+    // takes item 0 out before putting it back, and S0 keeps two items, so 10
+    // ends the section, above the header, and the line has to say so.
+    let line = drag_and_read_the_line(
+        &mut tree,
+        lv,
+        Point::new(50.0, 20.0),
+        Point::new(50.0, 55.0),
+    );
+    assert_eq!(line, Some(50.0), "above the header, under item 1");
+    assert_eq!(six_values(&model), vec![20, 10, 30, 40, 50, 60]);
+}
+
+#[test]
+fn a_row_dragged_up_below_a_sections_last_row_lands_under_the_next_header() {
+    let (mut tree, lv, model) = sectioned_list(
+        vec![10, 20, 30, 40, 50, 60],
+        FixedSections(vec![2, 3, 1]),
+        |v| v.reorderable(true),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Item 5 dropped on the lower half of item 1 (30..50), the last of S0:
+    // boundary 2 again, and from below, so 60 opens S1.
+    let line = drag_and_read_the_line(
+        &mut tree,
+        lv,
+        Point::new(50.0, 140.0),
+        Point::new(50.0, 45.0),
+    );
+    assert_eq!(line, Some(60.0), "under header S1, not under item 1");
+    assert_eq!(six_values(&model), vec![10, 20, 60, 30, 40, 50]);
+}
+
+#[test]
+fn a_row_dragged_down_below_a_sections_last_row_lands_after_it() {
+    let (mut tree, lv, model) = sectioned_list(
+        vec![10, 20, 30, 40, 50, 60],
+        FixedSections(vec![2, 3, 1]),
+        |v| v.reorderable(true),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Item 0 dropped on the lower half of item 4 (100..120), the last of S1.
-    drag_item(&mut tree, Point::new(50.0, 20.0), Point::new(50.0, 115.0));
-    let values: Vec<usize> = (0..6).filter_map(|i| model.with_item(i, |v| *v)).collect();
-    assert_eq!(values, vec![20, 30, 40, 50, 10, 60]);
+    let line = drag_and_read_the_line(
+        &mut tree,
+        lv,
+        Point::new(50.0, 20.0),
+        Point::new(50.0, 115.0),
+    );
+    assert_eq!(line, Some(120.0), "under item 4, above header S2");
+    assert_eq!(six_values(&model), vec![20, 30, 40, 50, 10, 60]);
+}
+
+/// The colour of the decoration drawn last over `point`: the one on top.
+fn topmost_colour_at(frame: &teksilo_canvas::RenderFrame, point: Point) -> Option<[f32; 4]> {
+    frame
+        .draw_order
+        .iter()
+        .rev()
+        .filter_map(|command| match command {
+            teksilo_canvas::DrawCommand::Decoration(i) => frame.decorations.get(*i),
+            _ => None,
+        })
+        .find(|d| {
+            let [x, y, w, h] = d.rect;
+            (x..x + w).contains(&point.x) && (y..y + h).contains(&point.y)
+        })
+        .map(|d| d.color)
+}
+
+#[test]
+fn a_drop_over_the_pinned_header_lands_at_the_top_of_its_section_under_a_visible_line() {
+    // Sections of ten, 20 dp rows and 40 dp headers, tall enough for the
+    // pointer to rest on the copy outside the 32 dp band where a drag
+    // scrolls the list: section s's header at 240·s, its item k at
+    // 240·s + 40 + 20·k. Scrolled to 340, S1's own header (240..280) is
+    // off the top and its copy covers 0..40, over items 13 and 14.
+    let model = ListModel::from_vec((0..100).collect::<Vec<usize>>());
+    let mut tree = WidgetTree::new();
+    let lv = tree.add(
+        ListView::new(model.clone(), |_i, _item, _sel| {
+            Box::new(FixedLeaf(100.0, 20.0))
+        })
+        .item_height(20.0)
+        .section_header_height(40.0)
+        .section_header_delegate(|_s, _t| Box::new(FixedLeaf(100.0, 40.0)))
+        .sections(FixedSections(vec![10; 10]))
+        .pinned_section_headers(true)
+        .reorderable(true),
+    );
+    let p = SizeProposal::exact(400.0, 200.0);
+    settle(&mut tree, p);
+    with_list_view::<usize, _>(&tree, lv, |v| v.scroll_y_signal().set(340.0));
+    settle(&mut tree, p);
+    let slot = tree.bounds(pinned_slot(&tree, lv));
+    assert_eq!((slot.y, slot.height), (0.0, 40.0), "S1 pinned");
+
+    // Item 15 (380..400, so 40..60 on screen) dragged up onto the copy.
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+    let over_copy = Point::new(50.0, 35.0);
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, 50.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 50.0)));
+    tree.dispatch_event(WidgetEvent::pointer_move(over_copy));
+    let line = with_list_view::<usize, _>(&tree, lv, |v| v.drop_feedback_signal().get());
+    assert_eq!(
+        line.map(|(y, _)| y),
+        Some(40.0),
+        "the top of S1 is under its header, which the copy stands for"
+    );
+
+    // The line straddles the copy's bottom edge, and is drawn over it.
+    tree.layout(p);
+    let scroll = with_list_view::<usize, _>(&tree, lv, |v| v.scroll_y_signal().get());
+    assert_eq!(scroll, 340.0, "the drag did not scroll the list");
+    let frame = tree.render();
+    let accent = BorderRole::Accent.resolve(&tree.theme().colors).to_array();
+    assert_eq!(
+        topmost_colour_at(&frame, Point::new(50.0, 39.5)),
+        Some(accent),
+        "the pinned copy must not hide the line"
+    );
+
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        over_copy,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    let values: Vec<usize> = (8..12).filter_map(|i| model.with_item(i, |v| *v)).collect();
+    assert_eq!(
+        values,
+        vec![8, 9, 15, 10],
+        "15 opens S1, not the middle of it"
+    );
+}
+
+#[test]
+fn the_pinned_header_does_not_cover_the_container_focus_ring() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, lv, _model) =
+        sectioned_list((0..100).collect(), FixedSections(vec![10; 10]), |v| {
+            v.pinned_section_headers(true)
+        });
+    let p = SizeProposal::exact(400.0, 200.0);
+    settle(&mut tree, p);
+    with_list_view::<usize, _>(&tree, lv, |v| v.scroll_y_signal().set(300.0));
+    settle(&mut tree, p);
+    assert!(
+        tree.bounds(pinned_slot(&tree, lv)).height > 0.0,
+        "S1 pinned"
+    );
+
+    // Keyboard focus and nothing selected: the container ring.
+    tree.focus(lv);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    assert_eq!(tree.focused(), Some(lv));
+    tree.layout(p);
+    let frame = tree.render();
+    let ring = BorderRole::Focused.resolve(&tree.theme().colors).to_array();
+    // Its top edge, 1 dp in, runs through the copy.
+    assert_eq!(topmost_colour_at(&frame, Point::new(50.0, 1.0)), Some(ring));
 }
 
 /// Every option and heading the platform sees, in reading order, through
@@ -3758,20 +3933,106 @@ fn the_pinned_copy_is_not_a_second_heading() {
         .count();
     assert_eq!(s1_headings, 1, "one heading for S1, the in-flow one");
 
-    // The in-flow header's label is exposed; the copy's is not.
+    // Neither label is exposed: the copy is hidden whole, and the in-flow
+    // heading is named by the title its label paints.
     let exposed = exposed_nodes(&update);
     let (_, s1) = header_rows(&tree, lv)
         .into_iter()
         .find(|(title, _)| title == "S1")
         .expect("S1's own header is realized");
+    assert!(exposed.contains(&widget_id_to_node_id(s1)));
     let in_flow_label = tree.children(s1)[0];
-    assert!(exposed.contains(&widget_id_to_node_id(in_flow_label)));
+    assert!(
+        !exposed.contains(&widget_id_to_node_id(in_flow_label)),
+        "a label under a heading of the same name is read twice"
+    );
     let copy_label = tree.children(slot)[0];
     assert!(!exposed.contains(&widget_id_to_node_id(slot)));
     assert!(
         !exposed.contains(&widget_id_to_node_id(copy_label)),
         "the pinned copy's label would be read a second time"
     );
+}
+
+#[test]
+fn the_section_of_the_rows_deep_in_a_long_section_is_still_a_heading_before_them() {
+    // Sections of fifty, scrolled to item 40 (10 + 40·20 = 810): S0's header
+    // is 800 dp above the viewport, and the realized rows start at item 35,
+    // five rows above it. Their heading must still be in the tree, read
+    // before them, with or without a pinned copy over the top.
+    for pinned in [false, true] {
+        let (mut tree, lv, _model) =
+            sectioned_list((0..100).collect(), FixedSections(vec![50, 50]), |v| {
+                v.pinned_section_headers(pinned)
+            });
+        let p = SizeProposal::exact(400.0, 100.0);
+        settle(&mut tree, p);
+        with_list_view::<usize, _>(&tree, lv, |v| v.scroll_y_signal().set(810.0));
+        settle(&mut tree, p);
+
+        let read = read_list(&tree.sync_accessibility());
+        assert_eq!(
+            read.first().map(String::as_str),
+            Some("heading S0"),
+            "pinned {pinned}: {read:?}"
+        );
+        assert_eq!(
+            read.get(1).map(String::as_str),
+            Some("option 36"),
+            "{read:?}"
+        );
+        assert_eq!(
+            read.iter()
+                .filter(|line| line.starts_with("heading"))
+                .count(),
+            1,
+            "pinned {pinned}: S0 once, S1 too far below to be realized"
+        );
+    }
+}
+
+#[test]
+fn tab_reaches_the_controls_of_the_headers_on_screen() {
+    // Each header carries a focusable control; the rows carry none. Sections
+    // `[2, 3, 1]` in an 80 dp viewport: S0 (0..10) and S1 (50..60) on
+    // screen, S2 (120..130) realized below it.
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let model = ListModel::from_vec((0..6).collect::<Vec<usize>>());
+    let mut tree = WidgetTree::new();
+    let lv = tree.add(
+        ListView::new(model, |_i, _item, _sel| Box::new(FixedLeaf(100.0, 20.0)))
+            .item_height(20.0)
+            .section_header_height(10.0)
+            .section_header_delegate(|_s, _t| Box::new(FixedLeaf(100.0, 10.0).focusable(true)))
+            .sections(FixedSections(vec![2, 3, 1]))
+            .pinned_section_headers(true),
+    );
+    let p = SizeProposal::exact(400.0, 80.0);
+    settle(&mut tree, p);
+    let control = |tree: &WidgetTree, title: &str| {
+        let (_, header) = header_rows(tree, lv)
+            .into_iter()
+            .find(|(t, _)| t == title)
+            .unwrap_or_else(|| panic!("{title} is realized"));
+        tree.children(header)[0]
+    };
+    let stops = |tree: &WidgetTree| tree.tab_stops_within(lv);
+    assert_eq!(
+        stops(&tree),
+        vec![lv, control(&tree, "S0"), control(&tree, "S1")],
+        "the list, then the headers in view, top to bottom"
+    );
+
+    // Scrolled to 55, S1's own header (50..60) is half off the top, under
+    // its pinned copy. Tab reaches neither: the copy is a picture of the
+    // header, and the header is hidden behind it. S2 (65..75) is on screen.
+    with_list_view::<usize, _>(&tree, lv, |v| v.scroll_y_signal().set(55.0));
+    settle(&mut tree, p);
+    assert!(
+        tree.bounds(pinned_slot(&tree, lv)).height > 0.0,
+        "S1 pinned"
+    );
+    assert_eq!(stops(&tree), vec![lv, control(&tree, "S2")]);
 }
 
 #[test]
@@ -3799,16 +4060,62 @@ fn the_pinned_header_follows_the_scroll_and_is_pushed_up_by_the_next() {
     settle(&mut tree, p);
     assert_eq!((pinned(&tree).y, pinned(&tree).height), (-5.0, 10.0));
 
-    // Past S1's header, S1 is pinned in its place. The slot is rebuilt for
-    // S1 a frame after the scroll that made it current; for that frame it
-    // is hidden rather than showing S0's title over S1's rows.
+    // Past S1's header, S1 is pinned in its place, in the very frame that
+    // scrolled there: the slot is rebuilt for S1 before that frame is laid
+    // out, rather than spending it hidden.
     scroll.set(150.0);
     tree.layout(p);
-    assert_eq!(pinned_built(&tree, lv), Some(0));
-    assert_eq!(pinned(&tree).height, 0.0);
-    settle(&mut tree, p);
     assert_eq!(pinned_built(&tree, lv), Some(1));
     assert_eq!((pinned(&tree).y, pinned(&tree).height), (0.0, 10.0));
+
+    // And back up into S0, from the middle of S1.
+    scroll.set(60.0);
+    tree.layout(p);
+    assert_eq!(pinned_built(&tree, lv), Some(0));
+    assert_eq!((pinned(&tree).y, pinned(&tree).height), (0.0, 10.0));
+}
+
+#[test]
+fn an_offset_written_during_layout_hides_the_copy_rather_than_mistitle_it() {
+    // The slot can only be rebuilt between frames. An offset that changes
+    // inside a layout pass, here the clamp after the content shrank, picks
+    // its section too late for that pass, and the copy stays hidden for it
+    // rather than show the previous section's title.
+    let model = ListModel::from_vec((0..15).collect::<Vec<usize>>());
+    let mut tree = WidgetTree::new();
+    let lv = tree.add(
+        ListView::new(model.clone(), |_i, _item, _sel| {
+            Box::new(FixedLeaf(100.0, 20.0))
+        })
+        .item_height(20.0)
+        .section_header_height(10.0)
+        .section_header_delegate(|_s, _t| Box::new(FixedLeaf(100.0, 10.0)))
+        .sections(FixedSections(vec![5, 5, 5]))
+        .pinned_section_headers(true),
+    );
+    let p = SizeProposal::exact(400.0, 100.0);
+    settle(&mut tree, p);
+    // Content 330, max scroll 230: deep in S2 (header at 220).
+    with_list_view::<usize, _>(&tree, lv, |v| v.scroll_y_signal().set(230.0));
+    settle(&mut tree, p);
+    assert_eq!(pinned_built(&tree, lv), Some(2));
+
+    // S2's five items gone, its header left empty after the rows: content
+    // 230, max 130, which is in S1.
+    for _ in 0..5 {
+        model.remove(10);
+    }
+    tree.layout(p);
+    let scroll = with_list_view::<usize, _>(&tree, lv, |v| v.scroll_y_signal().get());
+    assert_eq!(scroll, 130.0);
+    let pinned = tree.bounds(pinned_slot(&tree, lv));
+    assert!(
+        pinned_built(&tree, lv) == Some(1) || pinned.height == 0.0,
+        "S2's copy shown over S1's rows"
+    );
+    settle(&mut tree, p);
+    assert_eq!(pinned_built(&tree, lv), Some(1));
+    assert_eq!(tree.bounds(pinned_slot(&tree, lv)).height, 10.0);
 }
 
 #[test]
@@ -3825,6 +4132,16 @@ fn a_run_of_empty_sections_is_realized_as_it_scrolls_into_view() {
     settle(&mut tree, p);
     assert_eq!(header_top(&tree, lv, "S140"), Some(0.0));
     assert_eq!(header_top(&tree, lv, "S149"), Some(90.0));
+
+    // And only those near it. The five items stay realized as the rows'
+    // buffer, so S0 is built with them, but S1..S133 lie between them and
+    // the viewport and are not. That leaves the ten on screen, those within
+    // five headers' height of it (1450..1650, S134's bottom touching its
+    // top), and S0.
+    let titles: Vec<String> = header_rows(&tree, lv).into_iter().map(|(t, _)| t).collect();
+    let mut expected = vec!["S0".to_string()];
+    expected.extend((134..155).map(|s| format!("S{s}")));
+    assert_eq!(titles, expected);
 }
 
 #[test]
@@ -3966,12 +4283,26 @@ fn measured_heights_survive_a_regrouping() {
     };
     assert_eq!(tops(&tree), vec![10.0, 40.0, 80.0]);
 
-    // Appending a new section keeps the measured rows where they were.
+    // Appending a new section keeps the measured rows where they were. Read
+    // from the geometry before the next layout pass, which would measure
+    // every realized row again and so put them back even if the regrouping
+    // had thrown their heights away.
     model.push(21);
+    let spans: Vec<(f32, f32)> = with_list_view::<usize, _>(&tree, lv, |v| {
+        (0..4).map(|i| v.geometry().item_span(i, 4)).collect()
+    });
+    assert_eq!(
+        &spans[..3],
+        &[(10.0, 30.0), (40.0, 30.0), (80.0, 30.0)],
+        "measured prefix kept"
+    );
+    assert_eq!(
+        spans[3],
+        (120.0, 50.0),
+        "the new row sits under its new header, at the estimate until measured"
+    );
     tree.layout(p);
-    let after = tops(&tree);
-    assert_eq!(&after[..3], &[10.0, 40.0, 80.0], "measured prefix kept");
-    assert_eq!(after[3], 120.0, "the new row sits under its new header");
+    assert_eq!(tops(&tree), vec![10.0, 40.0, 80.0, 120.0]);
 }
 
 #[test]

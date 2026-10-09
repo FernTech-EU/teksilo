@@ -145,6 +145,25 @@ pub(crate) struct PinnedPlacement {
     pub(crate) offset: f32,
 }
 
+/// The pinned copy as the root last placed it on screen: the section it
+/// shows, and its top and bottom in viewport coordinates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PinnedShown {
+    pub(crate) section: usize,
+    pub(crate) top: f32,
+    pub(crate) bottom: f32,
+}
+
+/// The section headers a build realizes.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct HeadersToRealize {
+    /// Every header to build, ascending.
+    pub(crate) sections: Vec<usize>,
+    /// The part of `sections` around the viewport, which a scroll has to
+    /// leave before a missing header can come into view.
+    pub(crate) near_viewport: Range<usize>,
+}
+
 /// Every geometric question a `ListView` asks: the item rows from the shared
 /// [`RowMetrics`], with the section headers between them when there are any.
 ///
@@ -250,32 +269,60 @@ impl ListGeometry {
         self.dispatch(len, |_| Vec::new(), |s| s.firsts.to_vec())
     }
 
-    /// The headers to realize beside the realized items `[start, end)`: those
-    /// between them, and those in the viewport.
+    /// The headers to realize beside the realized items `[start, end)`.
+    ///
+    /// Two sets: the header of every section a realized item belongs to,
+    /// however far above the viewport it is, and the headers within `buffer`
+    /// header heights of the viewport. The first keeps every row a screen
+    /// reader can reach under a heading naming its section, deep in a long
+    /// section too. The second is the rows' buffer, applied to the headers a
+    /// run of empty sections scrolls through. Nothing between the two is
+    /// built: that stretch can hold any number of empty sections, and building
+    /// it would make hundreds of headers where ten are on screen.
     pub(crate) fn headers_to_realize(
         &self,
         items: (usize, usize),
         scroll: f32,
         viewport: f32,
         len: usize,
-    ) -> Range<usize> {
+        buffer: usize,
+    ) -> HeadersToRealize {
         self.dispatch(
             len,
-            |_| 0..0,
+            |_| HeadersToRealize::default(),
             |s| {
                 let top = scroll.max(0.0);
-                let bottom = top + viewport;
+                let pad = buffer as f32 * s.header;
+                let near_viewport = s.headers_between(top - pad, top + viewport + pad);
                 let (start, end) = items;
-                let (from, to) = if start < end {
-                    let first = s.item_top(start);
-                    let last = s.item_top(end - 1) + s.m.row_height(end - 1);
-                    (first.min(top), last.max(bottom))
-                } else {
-                    (top, bottom)
-                };
-                s.headers_between(from, to)
+                let mut sections: Vec<usize> = Vec::new();
+                for index in start..end.min(s.len) {
+                    let section = s.section_of(index);
+                    if sections.last() != Some(&section) {
+                        sections.push(section);
+                    }
+                }
+                sections.extend(near_viewport.clone());
+                sections.sort_unstable();
+                sections.dedup();
+                HeadersToRealize {
+                    sections,
+                    near_viewport,
+                }
             },
         )
+    }
+
+    /// The section whose in-flow header the pinned copy covers at `scroll`;
+    /// `None` without pinning, or while that header is still in place.
+    pub(crate) fn covered_by_pinned_header(&self, scroll: f32, len: usize) -> Option<usize> {
+        let pinned = self.sections.as_ref().is_some_and(|layer| layer.pinned);
+        if !pinned {
+            return None;
+        }
+        self.pinned_header(scroll, len)
+            .filter(|placement| placement.visible)
+            .map(|placement| placement.section)
     }
 
     /// The headers that intersect the viewport.
@@ -313,17 +360,30 @@ impl ListGeometry {
         self.dispatch(len, |m| m.row_top(index), |s| s.reveal_top(index))
     }
 
-    /// The drop insertion point for content `y`: the boundary index in
-    /// `0..=len`, and the content `y` of the line that shows it.
-    pub(crate) fn insertion(&self, y: f32, len: usize) -> (usize, f32) {
+    /// The drop insertion point for a pointer at viewport `y`: the boundary
+    /// index in `0..=len`, and the viewport `y` of the line that shows it.
+    ///
+    /// `dragged` are the rows of this list being moved, empty for rows coming
+    /// from elsewhere; with sections, they decide on which side of a header
+    /// the line goes (see [`Sectioned::insertion_line`]). `pinned` is the
+    /// pinned copy as it is on screen: a pointer over it is over its
+    /// section's header, and a line it would cover is moved to its edge.
+    pub(crate) fn drop_at(
+        &self,
+        y: f32,
+        scroll: f32,
+        len: usize,
+        dragged: &[usize],
+        pinned: Option<PinnedShown>,
+    ) -> (usize, f32) {
         self.dispatch(
             len,
             |m| {
                 m.resize(len);
-                let index = m.insertion_index(y);
-                (index, m.row_top(index))
+                let index = m.insertion_index(y + scroll);
+                (index, m.row_top(index) - scroll)
             },
-            |s| s.insertion(y),
+            |s| s.drop_at(y, scroll, dragged, pinned),
         )
     }
 
@@ -594,29 +654,87 @@ impl Sectioned<'_> {
         }
     }
 
-    fn insertion(&mut self, y: f32) -> (usize, f32) {
+    /// The boundary a drop at content `y` inserts at. A header is the
+    /// boundary before its section's first item.
+    fn insertion_index(&mut self, y: f32) -> usize {
         match self.hit(y) {
-            // Dropped on a header: at the top of its section, which is where
-            // the line is drawn, under the header.
-            Hit::Header(section) => (self.firsts[section], self.header_top(section) + self.header),
+            Hit::Header(section) => self.firsts[section],
             Hit::Item(index) => {
                 let top = self.item_top(index);
                 let height = self.m.row_height(index);
                 // The threshold form `RowMetrics::insertion_index` uses: the
                 // row plus its trailing gap, the midpoint snapping forward.
                 if y - top < (height + self.spacing) * 0.5 {
-                    return (index, top);
-                }
-                let next = index + 1;
-                if next < self.len && self.section_of(next) == self.section_of(index) {
-                    (next, self.item_top(next))
+                    index
                 } else {
-                    // After the last row of a section: under that row, not
-                    // under the next header.
-                    (next, top + height)
+                    index + 1
                 }
             }
         }
+    }
+
+    /// The content `y` of the line for boundary `b`: where the dropped rows
+    /// will be drawn once the source has moved them.
+    ///
+    /// Inside a section, that is the top of item `b`. Between two sections the
+    /// boundary is one index and two places on screen, above the header and
+    /// under it, and the provider, not the view, decides which section the
+    /// rows join. The line assumes its counts survive the move, as they do for
+    /// [`grouping_sections`](crate::grouping_sections) and for any provider
+    /// that does not read the items. The rows then land from position `b`
+    /// minus the dragged rows above `b`, which the source takes out first:
+    /// rows dragged down from above the boundary close the section before the
+    /// header, and rows dragged up from below it, or dropped from another
+    /// view, open the section after it. A provider that groups by the items'
+    /// content puts a moved item in the section of its own key wherever it is
+    /// dropped, and the view cannot know where that is.
+    fn insertion_line(&mut self, b: usize, dragged: &[usize]) -> f32 {
+        // The sections whose first item is `b` have their headers in the gap.
+        let starting = self.firsts.partition_point(|&first| first < b)
+            ..self.firsts.partition_point(|&first| first <= b);
+        if starting.is_empty() && b < self.len {
+            return self.item_top(b);
+        }
+        // Past the last row with no header after it, or closing the section
+        // above the header. `b > 0` either way: section 0 starts at 0, and a
+        // row dragged from above `b` is a row before it.
+        if starting.is_empty() || dragged.iter().any(|&row| row < b) {
+            let last = b - 1;
+            return self.item_top(last) + self.m.row_height(last);
+        }
+        // Under the last of those headers: an item at `b` belongs to the last
+        // section starting at or before it, past any empty one.
+        self.header_top(starting.end - 1) + self.header
+    }
+
+    fn drop_at(
+        &mut self,
+        y: f32,
+        scroll: f32,
+        dragged: &[usize],
+        pinned: Option<PinnedShown>,
+    ) -> (usize, f32) {
+        let pinned = pinned.filter(|p| p.section < self.firsts.len());
+        let b = match pinned {
+            // The copy stands for its section's header, wherever the
+            // in-flow header has scrolled to.
+            Some(p) if (p.top..p.bottom).contains(&y) => self.firsts[p.section],
+            _ => self.insertion_index(y + scroll),
+        };
+        let line = self.insertion_line(b, dragged);
+        let Some(p) = pinned else {
+            return (b, line - scroll);
+        };
+        // The copy hides whatever is under it, and its own section's header
+        // has scrolled away above it: a line before that header is drawn at
+        // the copy's top edge, and a line the copy would cover at its bottom
+        // edge, under it.
+        let shown = if line <= self.header_top(p.section) {
+            p.top
+        } else {
+            (line - scroll).max(p.bottom)
+        };
+        (b, shown)
     }
 
     /// The offset in metrics space that has the same rows strictly above it
@@ -740,15 +858,19 @@ impl Widget for SectionHeaderRow {
 /// Hidden from assistive technology, subtree included: the in-flow header is
 /// the section's heading, and a second node with the same name would be read
 /// twice, at a place in the reading order where the section does not begin.
+/// The in-flow header is there to read: the body pane realizes the header of
+/// every section a realized row belongs to, however far above it has
+/// scrolled.
 pub(crate) struct PinnedSectionHeader {
-    /// The section to show, written by the root's `place_children`.
+    /// The section to show, written by the root's scroll observer and its
+    /// `place_children`.
     pub(crate) section: Signal<Option<usize>>,
     /// Bumped on every model change, which may retitle the section shown.
     pub(crate) refresh: Signal<u64>,
     /// The section this slot last built. The root shows the slot only while
-    /// it matches the current section: a change of section lands one frame
-    /// after the scroll that caused it, and for that frame the slot would
-    /// show the previous section's title.
+    /// it matches the current section: a section decided during layout (an
+    /// offset the layout pass itself wrote) is built a frame later, and for
+    /// that frame the slot would show the previous section's title.
     pub(crate) built: Rc<Cell<Option<usize>>>,
     pub(crate) factory: HeaderFactory,
     pub(crate) table: Rc<SectionTable>,
@@ -778,7 +900,10 @@ impl Widget for PinnedSectionHeader {
         self.built.set(section);
         self.child = section.map(|s| {
             let id = ctx.add_boxed((self.factory)(s));
-            // A copy, not a stop: the listbox stays one Tab stop.
+            // A picture of the header, not a second set of its controls.
+            // Focus could not be announced here, in a subtree hidden from
+            // assistive technology; the in-flow header's controls are the
+            // Tab stops, once it is back in view.
             ctx.set_tab_stop(id, false);
             id
         });
@@ -948,15 +1073,87 @@ mod tests {
     }
 
     #[test]
-    fn a_drop_on_a_header_lands_at_the_top_of_its_section() {
+    fn the_line_at_a_section_boundary_is_where_the_moved_rows_land() {
         let g = uniform(vec![2, 3, 1]);
-        assert_eq!(g.insertion(55.0, 6), (2, 60.0));
-        // The lower half of a section's last row: after it, under it.
-        assert_eq!(g.insertion(45.0, 6), (2, 50.0));
-        // The upper half of a row: before it.
-        assert_eq!(g.insertion(85.0, 6), (3, 80.0));
-        // Past the end.
-        assert_eq!(g.insertion(500.0, 6).0, 6);
+        let drop = |y: f32, dragged: &[usize]| g.drop_at(y, 0.0, 6, dragged, None);
+        // Header S1 and the lower half of item 1 are the same boundary, 2.
+        // Item 5 dragged up to it becomes the first of S1: under the header.
+        assert_eq!(drop(55.0, &[5]), (2, 60.0));
+        assert_eq!(drop(45.0, &[5]), (2, 60.0));
+        // Item 0 dragged down to it becomes the last of S0, since S0 keeps
+        // its two items: above the header, under item 1.
+        assert_eq!(drop(55.0, &[0]), (2, 50.0));
+        assert_eq!(drop(45.0, &[0]), (2, 50.0));
+        // A row from another view, which removes nothing, takes position 2.
+        assert_eq!(drop(45.0, &[]), (2, 60.0));
+        // Inside a section the line is the next row's top, either way.
+        assert_eq!(drop(85.0, &[0]), (3, 80.0));
+        assert_eq!(drop(85.0, &[5]), (3, 80.0));
+        // Past the end, after the last row.
+        assert_eq!(drop(500.0, &[0]), (6, 150.0));
+    }
+
+    #[test]
+    fn a_line_under_a_run_of_empty_sections_goes_under_the_last_of_them() {
+        // `[1, 0, 0, 1]`: header 0, item 0, headers 1 to 3, item 1. The
+        // boundary 1 has three headers in it; an item landing at 1 belongs
+        // to section 3, the last that starts there.
+        let g = uniform(vec![1, 0, 0, 1]);
+        assert_eq!(g.header_top(3, 2), Some(50.0));
+        assert_eq!(g.drop_at(35.0, 0.0, 2, &[], None), (1, 60.0));
+        assert_eq!(g.drop_at(35.0, 0.0, 2, &[0], None), (1, 30.0));
+    }
+
+    #[test]
+    fn a_pointer_over_the_pinned_copy_is_over_its_sections_header() {
+        // Sections of ten; scrolled to 295, S1's header (210..220) is off the
+        // top and its copy covers 0..10. Item 14 (300..320) shows at 5..25,
+        // the upper half of it under the copy.
+        let g = uniform(vec![10; 10]);
+        let shown = Some(PinnedShown {
+            section: 1,
+            top: 0.0,
+            bottom: 10.0,
+        });
+        let drop = |y: f32, dragged: &[usize]| g.drop_at(y, 295.0, 100, dragged, shown);
+        // Over the copy: boundary 10, the top of S1, with the line under the
+        // copy rather than under the header scrolled away above it.
+        assert_eq!(drop(5.0, &[15]), (10, 10.0));
+        // Dragged down from S0 it closes S0, above S1's header: drawn at the
+        // copy's top edge, the nearest the viewport has.
+        assert_eq!(drop(5.0, &[3]), (10, 0.0));
+        // Just under the copy, in the upper half of item 14: before it, at a
+        // gap the copy hides, so the line moves down to the copy's bottom.
+        assert_eq!(drop(12.0, &[50]), (14, 10.0));
+        // Without the copy, the pointer at 5 is over item 14 itself.
+        assert_eq!(g.drop_at(5.0, 295.0, 100, &[15], None), (14, 5.0));
+    }
+
+    #[test]
+    fn only_the_headers_near_the_viewport_and_of_the_realized_rows_are_realized() {
+        // Five items, then two hundred empty sections: header s ≥ 1 at
+        // 100 + 10·s. Scrolled to 1500 the viewport holds S140..S149, and the
+        // realized items 0..5 sit in S0.
+        let mut counts = vec![5];
+        counts.extend(std::iter::repeat_n(0, 200));
+        let g = uniform(counts);
+        let realized = g.headers_to_realize((0, 5), 1500.0, 100.0, 5, 2);
+        // Two headers' height of buffer each side of the viewport (S137's
+        // bottom touches the buffer's top), and S0; none of S1..S136.
+        assert_eq!(realized.near_viewport, 137..152);
+        let mut expected = vec![0];
+        expected.extend(137..152);
+        assert_eq!(realized.sections, expected);
+    }
+
+    #[test]
+    fn the_header_of_a_long_sections_realized_rows_is_realized_however_far_above() {
+        // One section of 100: its header is 1000 dp above a viewport at item
+        // 50, and it is still the heading the realized rows are read under.
+        let g = uniform(vec![100]);
+        let realized = g.headers_to_realize((45, 60), 1010.0, 200.0, 100, 5);
+        assert_eq!(realized.sections, vec![0]);
+        assert!(realized.near_viewport.is_empty());
     }
 
     #[test]

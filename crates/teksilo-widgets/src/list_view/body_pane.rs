@@ -146,6 +146,9 @@ pub(crate) struct ListBodyPane<T: 'static> {
     pub(crate) child_roots: Vec<WidgetId>,
     /// What each of [`Self::child_roots`] is, positionally aligned with it.
     pub(crate) child_kinds: Vec<PaneChild>,
+    /// Each realized header's Tab-stop state, which `place_children` keeps
+    /// in step with whether the header is on screen.
+    pub(crate) header_tab_stops: Vec<(usize, Signal<bool>)>,
     /// Shared mirror of [`Self::item_entries`], published at the end of each
     /// build so the `ListView` root — and anything the app hands the handle to
     /// — can resolve a model index back to the realized row's wrapper id. The
@@ -169,15 +172,49 @@ impl<T: 'static> ListBodyPane<T> {
         )
     }
 
-    /// Build the header row of `section`, out of the Tab order like a row.
-    fn build_header(&self, ctx: &mut BuildContext, section: usize) -> Option<WidgetId> {
+    /// Build the header row of `section`.
+    ///
+    /// A control in it is a Tab stop while the header is on screen, unlike a
+    /// control in a row. The rows' controls are kept out because there is a
+    /// keyboard route to them through the list's own cursor, and a header has
+    /// none: the cursor steps over it. Only while on screen, so that Tab
+    /// reaches what the user can see and nothing the virtualization keeps
+    /// realized out of view (a header far above, in a long section).
+    fn build_header(
+        &self,
+        ctx: &mut BuildContext,
+        section: usize,
+    ) -> Option<(WidgetId, Signal<bool>)> {
         let factory = self.header_factory.as_ref()?;
         let title = self.geometry.section_table()?.title(section);
         let inner = ctx.add_boxed(factory(section));
         let header =
             ctx.add(SectionHeaderRow::new(inner, title).presentational(self.presentational));
-        ctx.set_tab_stop(header, false);
-        Some(header)
+        let on_screen = Signal::new(self.header_on_screen(section));
+        ctx.set_tab_stop(header, on_screen.clone());
+        Some((header, on_screen))
+    }
+
+    /// Append a built header to the children, in display order.
+    fn push_header(&mut self, section: usize, (header, on_screen): (WidgetId, Signal<bool>)) {
+        self.child_roots.push(header);
+        self.child_kinds.push(PaneChild::Header(section));
+        self.header_tab_stops.push((section, on_screen));
+    }
+
+    /// Whether `section`'s header shows in the viewport: inside it, and not
+    /// under the pinned copy, which stands in for it.
+    fn header_on_screen(&self, section: usize) -> bool {
+        let count = self.source.len();
+        let scroll = self.scroll_y.get().max(0.0);
+        let Some(top) = self.geometry.header_top(section, count) else {
+            return false;
+        };
+        let top = top - scroll;
+        let bottom = top + self.geometry.header_height();
+        bottom > 0.0
+            && top < self.viewport_height.get()
+            && self.geometry.covered_by_pinned_header(scroll, count) != Some(section)
     }
 }
 
@@ -266,22 +303,25 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         self.item_entries.clear();
         self.child_roots.clear();
         self.child_kinds.clear();
-        // The headers between the realized rows and in the viewport, each
-        // emitted just before the first row of its section.
+        self.header_tab_stops.clear();
+        // The headers of the realized rows' sections and those near the
+        // viewport, each emitted just before the first row of its section.
         let count = self.source.len();
         let headers = self.geometry.headers_to_realize(
             (start, end),
             self.scroll_y.get(),
             self.viewport_height.get(),
             count,
+            BUFFER_ITEMS,
         );
-        self.prev_built_headers.set((headers.start, headers.end));
-        let section_firsts = if headers.is_empty() {
+        self.prev_built_headers
+            .set((headers.near_viewport.start, headers.near_viewport.end));
+        let section_firsts = if headers.sections.is_empty() {
             Vec::new()
         } else {
             self.geometry.section_firsts(count)
         };
-        let mut pending_headers = headers.peekable();
+        let mut pending_headers = headers.sections.into_iter().peekable();
         // Lazy: nudge the source to load the realized window, and fetch more
         // as the viewport nears the end (append-only sources). This lives in
         // the pane, not the root, because the pane is what decides the
@@ -291,7 +331,7 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         if (self.source.dnd.can_fetch_more_fn)() && end + BUFFER_ITEMS >= self.source.len() {
             (self.source.dnd.fetch_more_fn)();
         }
-        let selection = &self.row_selection;
+        let selection = self.row_selection.clone();
         let is_drag_source = self.export.is_drag_source(self.reorderable);
         let model_id = self.model_id;
         let root_id = self.root_id;
@@ -305,8 +345,7 @@ impl<T: 'static> Widget for ListBodyPane<T> {
             {
                 pending_headers.next();
                 if let Some(header) = self.build_header(ctx, section) {
-                    self.child_roots.push(header);
-                    self.child_kinds.push(PaneChild::Header(section));
+                    self.push_header(section, header);
                 }
             }
 
@@ -656,8 +695,7 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         // viewport holding headers and no row at all.
         for section in pending_headers {
             if let Some(header) = self.build_header(ctx, section) {
-                self.child_roots.push(header);
-                self.child_kinds.push(PaneChild::Header(section));
+                self.push_header(section, header);
             }
         }
         ctx.end_view_focus();
@@ -778,6 +816,15 @@ impl<T: 'static> Widget for ListBodyPane<T> {
             };
             child.origin = Point::new(bounds.x, bounds.y + top - scroll_y);
             child.size = Size::new(bounds.width, height);
+        }
+
+        // Kept current for the next Tab press. Written only on a change:
+        // every write repaints the header through the tab-stop binding.
+        for (section, on_screen) in &self.header_tab_stops {
+            let now = self.header_on_screen(*section);
+            if on_screen.get() != now {
+                on_screen.set(now);
+            }
         }
     }
 

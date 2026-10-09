@@ -668,12 +668,23 @@ impl<T: 'static> Widget for ListView<T> {
             let feedback_for_hover = self.drop_feedback.clone();
             let width_for_hover = self.placed_content_width.clone();
             let export_for_hover = self.export.clone();
+            let pinned_for_hover = self.pinned_shown.clone();
             handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
                 let scroll = scroll_for_hover.get().max(0.0);
-                let content_y = position.y + scroll;
                 let len = (len_for_hover)();
-                let (ins, line_y) = geometry_for_hover.insertion(content_y, len);
-                let insertion_y = line_y - scroll;
+                // This list's own rows, being moved: with sections they decide
+                // which side of a header they land on.
+                let dragged: &[usize] = payload
+                    .get_typed::<RowDragData<T>>()
+                    .filter(|rd| rd.source == my_view_id)
+                    .map_or(&[], |rd| rd.rows.as_slice());
+                let (ins, insertion_y) = geometry_for_hover.drop_at(
+                    position.y,
+                    scroll,
+                    len,
+                    dragged,
+                    pinned_for_hover.get(),
+                );
                 let line_width = width_for_hover.get();
                 // Ask the source whether a drop here is allowed; paint the
                 // insertion line only when it is. A foreign exported row is
@@ -704,12 +715,14 @@ impl<T: 'static> Widget for ListView<T> {
             let geometry_for_drop = self.geometry();
             let export_for_drop = self.export.clone();
             let reorderable_for_drop = self.reorderable;
+            let pinned_for_drop = self.pinned_shown.clone();
 
             handlers = handlers.on_drop(move |mut payload, position, ctx| {
                 let scroll = scroll_for_drop.get().max(0.0);
-                let content_y = position.y + scroll;
                 let len = (len_for_drop)();
-                let (ins, _) = geometry_for_drop.insertion(content_y, len);
+                // The index does not depend on the dragged rows, only the line.
+                let (ins, _) =
+                    geometry_for_drop.drop_at(position.y, scroll, len, &[], pinned_for_drop.get());
                 let is_same_view = payload
                     .get_typed::<RowDragData<T>>()
                     .is_some_and(|rd| rd.source == drop_view_id);
@@ -799,6 +812,7 @@ impl<T: 'static> Widget for ListView<T> {
             item_entries: Vec::new(),
             child_roots: Vec::new(),
             child_kinds: Vec::new(),
+            header_tab_stops: Vec::new(),
             presentational: self.presentational,
         };
         self.body_pane_id = Some(ctx.add(pane));
@@ -821,6 +835,23 @@ impl<T: 'static> Widget for ListView<T> {
                 len_fn: self.source.len_fn.clone(),
                 child: None,
             }));
+            // The section is decided as the scroll moves, not only when the
+            // root is next placed: a scroll set by input, an animation or
+            // `scroll_to_index` lands before the frame's rebuilds, so the slot
+            // is rebuilt for the new section in the frame that shows it, and
+            // never spends a frame hidden while it catches up.
+            // `place_children` decides it again, for the offsets written
+            // during layout (the clamp, a measurement's anchor).
+            let geometry = self.geometry();
+            let len = self.source.len_fn.clone();
+            let pinned_section = self.pinned_section.clone();
+            let handle = self.scroll_y.observe(move |y| {
+                let section = geometry.pinned_header(*y, len()).map(|p| p.section);
+                if pinned_section.get() != section {
+                    pinned_section.set(section);
+                }
+            });
+            ctx.own_handle(handle);
         }
 
         // --- Create scrollbar ---
@@ -922,10 +953,12 @@ impl<T: 'static> Widget for ListView<T> {
         self.clamp_scroll();
 
         // The pinned header: the current section is decided from the clamped
-        // offset, and handed to the slot when it changed. The slot rebuilds
-        // next frame, so until it has, it is not shown — rather than show the
-        // previous section's title over this one's rows.
-        let pinned_offset = self.pinned_header_id.and_then(|_| {
+        // offset, and handed to the slot when it changed. The scroll observer
+        // in `build` has normally done so already. When it has not (an offset
+        // written during layout) the slot rebuilds next frame, and until it
+        // has, it is not shown, rather than show the previous section's title
+        // over this one's rows.
+        let pinned_shown = self.pinned_header_id.and_then(|_| {
             let placement = self
                 .geometry()
                 .pinned_header(self.scroll_y.get(), self.source.len());
@@ -934,9 +967,15 @@ impl<T: 'static> Widget for ListView<T> {
                 self.pinned_section.set(section);
             }
             let placement = placement?;
-            (placement.visible && self.pinned_built.get() == Some(placement.section))
-                .then_some(placement.offset)
+            (placement.visible && self.pinned_built.get() == Some(placement.section)).then_some(
+                sections::PinnedShown {
+                    section: placement.section,
+                    top: placement.offset,
+                    bottom: placement.offset + self.section_header_height,
+                },
+            )
         });
+        self.pinned_shown.set(pinned_shown);
 
         // The body pane fills the content column and positions its own rows;
         // the pinned header lies over its top; the scrollbar sits alongside.
@@ -945,9 +984,9 @@ impl<T: 'static> Widget for ListView<T> {
                 child.origin = bounds.origin();
                 child.size = Size::new(content_width, bounds.height);
             } else if Some(child.id) == self.pinned_header_id {
-                match pinned_offset {
-                    Some(offset) => {
-                        child.origin = Point::new(bounds.x, bounds.y + offset);
+                match pinned_shown {
+                    Some(shown) => {
+                        child.origin = Point::new(bounds.x, bounds.y + shown.top);
                         child.size = Size::new(content_width, self.section_header_height);
                     }
                     None => {
@@ -968,7 +1007,18 @@ impl<T: 'static> Widget for ListView<T> {
         }
     }
 
-    fn paint(
+    fn wants_post_paint(&self) -> bool {
+        true
+    }
+
+    /// The insertion line and the container focus ring, drawn over the
+    /// children.
+    ///
+    /// Not in `paint`, which runs before them: the pinned section header is
+    /// an opaque child over the top of the viewport, and would cover the top
+    /// edge of the ring and a line drawn along or under it. A row that paints
+    /// its own background covers a line the same way.
+    fn post_paint(
         &self,
         bounds: Rect,
         canvas: &mut teksilo_canvas::Canvas,
@@ -986,18 +1036,18 @@ impl<T: 'static> Widget for ListView<T> {
                 .map(|s| s.insertion())
                 .unwrap_or_default();
             let color = recipe.role.resolve(&ctx.theme.colors);
-            let line_y = bounds.y + y;
-            let line_x = bounds.x;
             let half = recipe.thickness * 0.5;
-            // Own paint isn't covered by `clips_children` — clip so an
-            // insertion line at the after-last boundary can't bleed
-            // past the widget's bottom edge.
-            canvas.set_clip(bounds);
+            // Kept whole inside the viewport rather than clipped at its
+            // edge: a line at the first or the after-last boundary, or along
+            // the top edge of the pinned header, would lose half its
+            // thickness.
+            let line_y = (bounds.y + y)
+                .min(bounds.y + bounds.height - half)
+                .max(bounds.y + half);
             canvas.fill_rect(
-                Rect::new(line_x, line_y - half, width, recipe.thickness),
+                Rect::new(bounds.x, line_y - half, width, recipe.thickness),
                 color,
             );
-            canvas.clear_clip();
         }
 
         // Container focus ring — keyboard focus landed but nothing is selected,

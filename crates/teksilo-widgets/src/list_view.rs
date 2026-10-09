@@ -34,8 +34,10 @@
 //!
 //! A header is not an item. Selection, activation, type-ahead, keyboard
 //! navigation, `scroll_to_index` and drag and drop all speak indices into the
-//! model, and the keys step over the headers. A drop on a header lands at the
-//! top of its section.
+//! model, and the keys step over the headers. A drop on a header, or on the
+//! pinned copy of one, inserts at the boundary before its section's first
+//! item; the insertion line shows on which side of the header the dropped
+//! rows land (see [`sections`](ListView::sections)).
 //!
 //! ## Pan to scroll
 //!
@@ -69,10 +71,13 @@
 //! walking up from it, unlike ARIA's per-item `aria-setsize`.
 //!
 //! A section header is a `Role::Heading` named by its section's title, placed
-//! just before the section's first row in the reading order. It is not an
-//! option, so it takes no position in the set and the rows keep theirs in the
-//! whole model. The pinned copy of a header is hidden from assistive
-//! technology, which reads the in-flow header instead.
+//! just before the section's first realized row in the reading order. It is
+//! not an option, so it takes no position in the set and the rows keep theirs
+//! in the whole model. A header stays realized as long as any row of its
+//! section is, however far above the viewport it has scrolled, so the rows a
+//! screen reader can reach are always read under a heading naming their
+//! section. The pinned copy of a header is hidden from assistive technology,
+//! which reads that in-flow header instead.
 //!
 //! The container is the focusable node and rows deliberately are not. The
 //! container names the cursor's row as its active descendant, which is the row
@@ -82,7 +87,9 @@
 //! moves the cursor onto it. The row subtree is kept out of the Tab order, so a
 //! control the delegate puts in a row (the checkbox `StandardListItem` embeds,
 //! most often) never becomes a Tab stop of its own. Such a control publishes a
-//! keyboard toggle instead, which `Space` runs. Full
+//! keyboard toggle instead, which `Space` runs. A control in a section header
+//! has no cursor to be reached through, so it is a Tab stop while its header
+//! is on screen. Full
 //! keyboard navigation: arrows, Home, End, PageUp, PageDown (each moving the
 //! selection; in a multiple selection, Ctrl on an arrow or the accelerator on
 //! the others moves only the cursor), Shift for a range and Ctrl+Shift for an
@@ -341,6 +348,11 @@ pub struct ListView<T: 'static> {
     /// The section the pinned slot last built; see
     /// [`sections::PinnedSectionHeader::built`].
     pinned_built: Rc<Cell<Option<usize>>>,
+    /// Where `place_children` last put the pinned copy on screen, `None`
+    /// while it is hidden. A drop resolves against it, since a pointer over
+    /// the copy is over what the user sees there and not over the rows
+    /// under it.
+    pinned_shown: Rc<Cell<Option<sections::PinnedShown>>>,
     pinned_header_id: Option<WidgetId>,
     /// Section headers the body pane realized in its latest build, so its
     /// scroll observer can tell when one it lacks comes into view.
@@ -474,6 +486,7 @@ impl<T: 'static> ListView<T> {
             pinned_section: Signal::new(None),
             pinned_refresh: Signal::new(0),
             pinned_built: Rc::new(Cell::new(None)),
+            pinned_shown: Rc::new(Cell::new(None)),
             pinned_header_id: None,
             pane_built_headers: Rc::new(Cell::new((0, 0))),
         }
@@ -578,6 +591,20 @@ impl<T: 'static> ListView<T> {
     /// index into the model, and the arrow keys step from item to item over
     /// the headers.
     ///
+    /// A drop on a header inserts at the boundary before its section's first
+    /// item, as a drop on the lower half of the row above the header does:
+    /// one index, two places on screen. Which section the dropped rows join is
+    /// the provider's decision, made when it next counts. The insertion line
+    /// assumes the counts survive the drop, as they do for
+    /// `grouping_sections` and for any provider that does not read the items.
+    /// Rows of this list dragged down from above the boundary then close the
+    /// section before the header, since the source takes them out before
+    /// putting them back, and the line is drawn above it. Rows dragged up from
+    /// below, and rows dropped from another view, open the section after it,
+    /// and the line is drawn under the header. A provider that groups by the
+    /// items' content puts a moved item in the section of its own key
+    /// wherever it is dropped, which the line cannot show.
+    ///
     /// The view reads the provider's counts again after every change the
     /// model reports, so a provider that derives them from the live model
     /// follows inserts, removals and resets. `grouping_sections` groups the
@@ -639,8 +666,19 @@ impl<T: 'static> ListView<T> {
     /// [`GridView::section_header_delegate`](crate::GridView::section_header_delegate).
     ///
     /// Whatever it builds, the row is published to assistive technology as a
-    /// heading named by the title. A control inside it stays clickable but is
-    /// no Tab stop: the list is one, as it is for a control inside a row.
+    /// heading named by the title, so a text label in it that repeats the
+    /// title should be hidden
+    /// ([`TextWidget::a11y_hidden`](crate::primitives::TextWidget::a11y_hidden))
+    /// or it is read twice; the default header hides its own.
+    ///
+    /// A control inside it is a Tab stop while the header is on screen. A
+    /// control in a row is not, because the list's cursor reaches it (`Space`
+    /// runs its keyboard toggle), and the cursor steps over headers. Tab then
+    /// goes from the list to the controls of the headers in view, top to
+    /// bottom. The [pinned copy](Self::pinned_section_headers) is a picture
+    /// of the header and takes no Tab stop, and neither does the header it
+    /// covers; arrowing to the section's first item brings that header back
+    /// into view.
     pub fn section_header_delegate(
         mut self,
         f: impl Fn(usize, &str) -> Box<dyn Widget> + 'static,
@@ -664,7 +702,9 @@ impl<T: 'static> ListView<T> {
     /// [`scroll_to_index`](Self::scroll_to_index) stop below it.
     ///
     /// The pinned copy is drawn on an opaque surface and is hidden from
-    /// assistive technology, which reads the section's own header instead.
+    /// assistive technology, which reads the section's own header instead. A
+    /// drop on it is a drop on that header, and a control in it takes no Tab
+    /// stop (see [`section_header_delegate`](Self::section_header_delegate)).
     pub fn pinned_section_headers(mut self, enabled: bool) -> Self {
         self.pinned_section_headers = enabled;
         self
@@ -686,6 +726,10 @@ impl<T: 'static> ListView<T> {
 
     /// The header-widget factory shared by the body pane and the pinned slot:
     /// the application's delegate, or the title as plain text.
+    ///
+    /// The plain text is hidden from assistive technology: the heading it
+    /// sits in is already named by the same title, and a label under it would
+    /// be read a second time.
     fn header_factory(&self) -> Option<sections::HeaderFactory> {
         let table = self.sections.clone()?;
         let delegate = self.section_header_delegate.clone();
@@ -693,9 +737,9 @@ impl<T: 'static> ListView<T> {
             let title = table.title(section);
             match &delegate {
                 Some(delegate) => delegate(section, &title),
-                None => Box::new(crate::primitives::TextWidget::new(teksilo_i18n::lit!(
-                    title
-                ))) as Box<dyn Widget>,
+                None => Box::new(
+                    crate::primitives::TextWidget::new(teksilo_i18n::lit!(title)).a11y_hidden(),
+                ) as Box<dyn Widget>,
             }
         }))
     }

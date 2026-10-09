@@ -51,6 +51,14 @@ first item under it. An item revealed by a key brings its section's header
 into view when it is the first item of the section, and stops below the pinned
 header when `.pinned_section_headers(true)` is set.
 
+Since the cursor never lands on a header, a control in one (a "play all"
+button, say) cannot be reached the way a row's checkbox is, through `Space` on
+the cursor's row. It is a Tab stop instead, while its header is on screen:
+`Tab` goes from the list to the controls of the headers in view, top to
+bottom. The pinned copy takes no Tab stop, and neither does the header it
+covers; moving the cursor to the section's first item brings that header back
+into view.
+
 A `TreeTableView` full-width row (`.full_width_row(..)`) is one cell across
 every column. The cursor keeps its column on it, so stepping on to an ordinary
 row lands back in that column, but a horizontal move, `Home` and `End` leave
