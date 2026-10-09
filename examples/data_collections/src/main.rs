@@ -11,6 +11,8 @@
 //! - **Auto Feed** — message-feed ListView under `auto_item_height`:
 //!   rows self-measure (1–4 content lines each), scroll anchoring
 //!   keeps content steady as estimates are corrected
+//! - **Sections** — a song list grouped by artist (`ListView::sections`),
+//!   each artist's header pinned at the top while its songs scroll by
 //! - **TreeView** — hierarchical tree with expand/collapse, drag
 //!   reparenting, and auto-measured rows (branches carry a subtitle
 //!   line; measured heights above a toggle survive expand/collapse)
@@ -43,9 +45,9 @@ use teksilo::data::{
 };
 use teksilo::prelude::*;
 use teksilo::widgets::{
-    Button, ButtonVariant, Card, Expand, HStack, ListView, Padding, Panel, Repeater, Spacer,
-    StandardListItem, StandardTreeItem, TabId, TabInfo, TabWidget, TextWidget, Toolbar, TreeView,
-    VStack,
+    Button, ButtonVariant, Card, Expand, GridSectionProvider, HStack, ListView, Padding, Panel,
+    Repeater, Spacer, StandardListItem, StandardTreeItem, TabId, TabInfo, TabWidget, TextWidget,
+    Toolbar, TreeView, VStack,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
@@ -54,6 +56,110 @@ fn dark_mode_toolbar() -> impl Widget {
             .child(Spacer::new())
             .child(teksilo::widgets::ThemeSwitcher::new()),
     )
+}
+
+// ---------------------------------------------------------------------------
+// A music library, for the sections tab
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+struct Song {
+    artist: &'static str,
+    album: &'static str,
+    title: String,
+    seconds: u32,
+}
+
+/// Fictional artists and their albums, in library order.
+const ARTISTS: &[(&str, &[&str])] = &[
+    ("Aurora Lane", &["Northbound", "Paper Lanterns"]),
+    ("Basalt", &["Cold Iron", "Strata", "Fault Lines"]),
+    ("Cinder & Ash", &["Embers"]),
+    ("Delta Nine", &["Signal", "Noise"]),
+    (
+        "Echo Valley",
+        &["Long Way Down", "Morning Fog", "Driftwood"],
+    ),
+    ("Fernwood", &["Understory"]),
+    ("Glass Harbor", &["Tidewater", "Lighthouse"]),
+    ("Hollow Pines", &["Resin", "Clearing", "Needles"]),
+];
+
+fn library() -> Vec<Song> {
+    let mut songs = Vec::new();
+    for (a, (artist, albums)) in ARTISTS.iter().enumerate() {
+        for (b, album) in albums.iter().enumerate() {
+            for t in 0..(4 + (a + b) % 4) {
+                songs.push(Song {
+                    artist,
+                    album,
+                    title: format!("{album}, track {}", t + 1),
+                    seconds: 150 + ((a * 37 + b * 23 + t * 41) % 180) as u32,
+                });
+            }
+        }
+    }
+    songs
+}
+
+fn duration(seconds: u32) -> String {
+    format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+/// One section per run of songs by the same artist, read from the live model
+/// each time it is asked, so adding a song regroups the list.
+struct ByArtist(ListModel<Song>);
+
+impl ByArtist {
+    /// `(artist, first song, song count)` per run.
+    fn runs(&self) -> Vec<(&'static str, usize, usize)> {
+        let mut runs: Vec<(&'static str, usize, usize)> = Vec::new();
+        for i in 0..self.0.len() {
+            let Some(artist) = self.0.with_item(i, |s| s.artist) else {
+                continue;
+            };
+            match runs.last_mut() {
+                Some((last, _, count)) if *last == artist => *count += 1,
+                _ => runs.push((artist, i, 1)),
+            }
+        }
+        runs
+    }
+
+    /// `(songs, albums, total seconds)` for one section.
+    fn summary(&self, section: usize) -> (usize, usize, u32) {
+        let Some(&(_, first, count)) = self.runs().get(section) else {
+            return (0, 0, 0);
+        };
+        let mut albums: Vec<&'static str> = Vec::new();
+        let mut seconds = 0;
+        for i in first..first + count {
+            if let Some((album, s)) = self.0.with_item(i, |s| (s.album, s.seconds)) {
+                if !albums.contains(&album) {
+                    albums.push(album);
+                }
+                seconds += s;
+            }
+        }
+        (count, albums.len(), seconds)
+    }
+}
+
+impl GridSectionProvider for ByArtist {
+    fn section_count(&self) -> usize {
+        self.runs().len()
+    }
+    fn items_in_section(&self, section: usize) -> usize {
+        self.runs().get(section).map_or(0, |run| run.2)
+    }
+    fn section_title(&self, section: usize) -> String {
+        self.runs()
+            .get(section)
+            .map_or_else(String::new, |run| run.0.to_string())
+    }
+    fn section_counts(&self) -> Vec<usize> {
+        self.runs().into_iter().map(|run| run.2).collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -66,15 +172,18 @@ struct Root {
     tags: ListModel<String>,
     list_items: ListModel<String>,
     feed_items: ListModel<String>,
+    songs: ListModel<Song>,
     tree_model: TreeModel<String>,
     list_selection: SelectionModel,
     feed_selection: SelectionModel,
+    songs_selection: SelectionModel,
     tree_selection: SelectionModel,
     list_checks: CheckedModel,
     tree_checks: TreeCheckedModel<String>,
     tag_counter: Rc<Cell<usize>>,
     list_counter: Rc<Cell<usize>>,
     feed_counter: Rc<Cell<usize>>,
+    song_counter: Rc<Cell<usize>>,
     tree_counter: Rc<Cell<usize>>,
 }
 
@@ -110,15 +219,18 @@ impl Root {
             tags,
             list_items,
             feed_items,
+            songs: ListModel::from_vec(library()),
             tree_model,
             list_selection: SelectionModel::new(SelectionMode::Multi),
             feed_selection: SelectionModel::new(SelectionMode::Single),
+            songs_selection: SelectionModel::new(SelectionMode::Multi),
             tree_selection: SelectionModel::new(SelectionMode::Single),
             list_checks: CheckedModel::new(),
             tree_checks,
             tag_counter: Rc::new(Cell::new(5)),
             list_counter: Rc::new(Cell::new(201)),
             feed_counter: Rc::new(Cell::new(301)),
+            song_counter: Rc::new(Cell::new(1)),
             tree_counter: Rc::new(Cell::new(1)),
         }
     }
@@ -356,6 +468,105 @@ impl Root {
             )
     }
 
+    // ---- Tab: Sections ----
+
+    fn build_sections_tab(&self, theme: &Theme) -> impl Widget + 'static {
+        let songs = self.songs.clone();
+        let songs_add = self.songs.clone();
+        let selection = self.songs_selection.clone();
+        let counter = self.song_counter.clone();
+        // The header delegate reads the same live grouping the view does, to
+        // count each artist's songs and albums.
+        let stats = ByArtist(self.songs.clone());
+
+        VStack::new()
+            .spacing(0.0)
+            .child(
+                Padding::uniform(16.0).child(
+                    VStack::new()
+                        .spacing(12.0)
+                        .child(
+                            TextWidget::new(lit!("Sections (ListView::sections)"))
+                                .style(theme.typography.body_bold.clone())
+                                .color(theme.colors.text_primary),
+                        )
+                        .child(
+                            TextWidget::new(lit!(
+                                "Songs grouped by artist, one header per artist. \
+                                 The current artist's header stays pinned at the \
+                                 top and the next one pushes it out. The arrow \
+                                 keys step over the headers. The grouping is read \
+                                 from the live model: an added song joins its \
+                                 artist, and a song dragged among another \
+                                 artist's songs starts a group of its own."
+                            ))
+                            .style(theme.typography.body.clone())
+                            .color(theme.colors.text_primary),
+                        )
+                        .child(
+                            Button::new(lit!("+ Add a song by the first artist"))
+                                .variant(ButtonVariant::Filled)
+                                .on_activate_fn(move |_ctx| {
+                                    let n = counter.get();
+                                    counter.set(n + 1);
+                                    let artist = songs_add
+                                        .with_item(0, |s| s.artist)
+                                        .unwrap_or(ARTISTS[0].0);
+                                    songs_add.insert(
+                                        0,
+                                        Song {
+                                            artist,
+                                            album: "Singles",
+                                            title: format!("New song {n}"),
+                                            seconds: 180 + (n as u32 * 17) % 120,
+                                        },
+                                    );
+                                }),
+                        ),
+                ),
+            )
+            .child(
+                ListView::new(songs, move |_index, song, selected| {
+                    Box::new(
+                        StandardListItem::new(lit!(song.title.clone()))
+                            .subtitle(lit!(song.album.to_string()))
+                            .selected(selected)
+                            .trailing_slot(
+                                TextWidget::new(lit!(duration(song.seconds)))
+                                    .color(TextRole::Secondary),
+                            ),
+                    )
+                })
+                .auto_item_height(52.0)
+                .selection(selection)
+                .reorderable(true)
+                .sections(ByArtist(self.songs.clone()))
+                .section_header_height(36.0)
+                .section_header_delegate(move |section, title| {
+                    let (count, albums, seconds) = stats.summary(section);
+                    let plural = if count == 1 { "song" } else { "songs" };
+                    Box::new(
+                        Padding::symmetric(8.0, 12.0).child(
+                            HStack::new()
+                                .spacing(8.0)
+                                .child(
+                                    TextWidget::new(lit!(title.to_string()))
+                                        .style(TextStyleRole::BodyBold),
+                                )
+                                .child(
+                                    TextWidget::new(lit!(format!(
+                                        "· {count} {plural} | {albums} albums | {}",
+                                        duration(seconds)
+                                    )))
+                                    .color(TextRole::Secondary),
+                                ),
+                        ),
+                    )
+                })
+                .pinned_section_headers(true),
+            )
+    }
+
     // ---- Tab 4: TreeView ----
 
     fn build_treeview_tab(&self, theme: &Theme) -> impl Widget + 'static {
@@ -457,6 +668,7 @@ impl Widget for Root {
         let repeater_tab = self.build_repeater_tab(&theme);
         let listview_tab = self.build_listview_tab(&theme);
         let feed_tab = self.build_feed_tab(&theme);
+        let sections_tab = self.build_sections_tab(&theme);
         let treeview_tab = self.build_treeview_tab(&theme);
 
         let root = ctx.add(
@@ -465,6 +677,7 @@ impl Widget for Root {
                     .static_tab(TabInfo::new().title(lit!("Repeater")), repeater_tab)
                     .static_tab(TabInfo::new().title(lit!("ListView")), listview_tab)
                     .static_tab(TabInfo::new().title(lit!("Auto Feed")), feed_tab)
+                    .static_tab(TabInfo::new().title(lit!("Sections")), sections_tab)
                     .static_tab(TabInfo::new().title(lit!("TreeView")), treeview_tab),
             ),
         );

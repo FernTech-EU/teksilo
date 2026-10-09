@@ -5,10 +5,10 @@
 //!
 //! Splitting this out of `ListView`'s root widget is a deliberate
 //! architectural choice, and the same one `TableView`, `TreeTableView` and
-//! `GridView` already made: `ListView` owns exactly two direct children —
-//! this pane and the scrollbar. Rebuilds triggered by scroll-buffer exits,
-//! data changes or selection changes target the pane only, *never* the
-//! `ListView` root.
+//! `GridView` already made: `ListView`'s direct children are this pane, the
+//! scrollbar and, when asked for, the pinned section header. Rebuilds
+//! triggered by scroll-buffer exits, data changes or selection changes target
+//! the pane only, *never* the `ListView` root.
 //!
 //! Why it matters: while the user drags the scrollbar thumb, the framework
 //! holds an implicit pointer capture on the scrollbar widget for the whole
@@ -44,14 +44,23 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_data::{DragEligibility, RowState};
 
 use super::BUFFER_ITEMS;
-use crate::common::row_metrics::SharedRowMetrics;
+use super::sections::{HeaderFactory, ListGeometry, SectionHeaderRow};
 use crate::data_views::{RowSelection, ViewId, default_placeholder};
 use crate::list_source::ListSource;
 
+/// What one of the pane's children is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PaneChild {
+    /// The row of this model index.
+    Row(usize),
+    /// The header of this section.
+    Header(usize),
+}
+
 /// The row-virtualization pane. Owns the realized row widgets and their
-/// per-row selection / activation / drag handlers. Sized to fill the rect the
-/// root allocates it; lays each row at `row_top(index) - scroll_y` in
-/// pane-local coordinates.
+/// per-row selection / activation / drag handlers, and the section headers
+/// between them. Sized to fill the rect the root allocates it; lays each row
+/// at its content top minus `scroll_y` in pane-local coordinates.
 pub(crate) struct ListBodyPane<T: 'static> {
     /// The erased data source — the same handle the root holds, so the pane
     /// reads rows, anchors and the DnD/lazy protocol without the root having
@@ -60,10 +69,13 @@ pub(crate) struct ListBodyPane<T: 'static> {
     pub(crate) delegate: Rc<dyn Fn(usize, &T, bool) -> Box<dyn Widget>>,
     pub(crate) row_tooltips: crate::data_views::RowTooltips<T>,
 
-    /// Row geometry shared with the `ListView` root (one handle, two holders
-    /// — the root drives scrollbar totals, paint and keyboard, the pane
-    /// drives realization, placement and measurement).
-    pub(crate) metrics: SharedRowMetrics,
+    /// Row and header geometry shared with the `ListView` root (one set of
+    /// handles, two holders — the root drives scrollbar totals, paint and
+    /// keyboard, the pane drives realization, placement and measurement).
+    pub(crate) geometry: ListGeometry,
+    /// Builds a section's header widget; `None` when the view has no
+    /// sections.
+    pub(crate) header_factory: Option<HeaderFactory>,
     pub(crate) row_selection: Option<RowSelection>,
     /// Keyboard cursor, shared with the root's key handler — the per-row
     /// pointer handler moves it so arrows step from the clicked row.
@@ -115,11 +127,15 @@ pub(crate) struct ListBodyPane<T: 'static> {
     /// Buffered row range materialized by the latest build.
     pub(crate) prev_built_start: Rc<Cell<usize>>,
     pub(crate) prev_built_end: Rc<Cell<usize>>,
+    /// Section headers materialized by the latest build.
+    pub(crate) prev_built_headers: Rc<Cell<(usize, usize)>>,
 
     // Build state
     pub(crate) item_entries: Vec<(usize, WidgetId)>,
-    /// The ids this pane actually hands the arena as its children, positionally
-    /// aligned with [`Self::item_entries`].
+    /// The ids this pane actually hands the arena as its children, in
+    /// display order: each section header just before the first row of its
+    /// section. That order is the reading order assistive technology walks,
+    /// so a heading is read before the rows it names.
     ///
     /// A row that is a drag source is wrapped in a
     /// [`DragSurface`](crate::data_views::DragSurface), so its layout child is
@@ -127,7 +143,9 @@ pub(crate) struct ListBodyPane<T: 'static> {
     /// the row node. `item_entries` (and so `row_map`) stays on the row node,
     /// which is the one carrying the accessibility properties and the
     /// keyboard-toggle target.
-    pub(crate) row_roots: Vec<WidgetId>,
+    pub(crate) child_roots: Vec<WidgetId>,
+    /// What each of [`Self::child_roots`] is, positionally aligned with it.
+    pub(crate) child_kinds: Vec<PaneChild>,
     /// Shared mirror of [`Self::item_entries`], published at the end of each
     /// build so the `ListView` root — and anything the app hands the handle to
     /// — can resolve a model index back to the realized row's wrapper id. The
@@ -143,12 +161,23 @@ pub(crate) struct ListBodyPane<T: 'static> {
 
 impl<T: 'static> ListBodyPane<T> {
     fn visible_range(&self) -> (usize, usize) {
-        self.metrics.borrow_mut().visible_range(
+        self.geometry.visible_range(
             self.scroll_y.get(),
             self.viewport_height.get(),
             self.source.len(),
             BUFFER_ITEMS,
         )
+    }
+
+    /// Build the header row of `section`, out of the Tab order like a row.
+    fn build_header(&self, ctx: &mut BuildContext, section: usize) -> Option<WidgetId> {
+        let factory = self.header_factory.as_ref()?;
+        let title = self.geometry.section_table()?.title(section);
+        let inner = ctx.add_boxed(factory(section));
+        let header =
+            ctx.add(SectionHeaderRow::new(inner, title).presentational(self.presentational));
+        ctx.set_tab_stop(header, false);
+        Some(header)
     }
 }
 
@@ -196,12 +225,19 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         let scroll_handle = self.scroll_y.observe({
             let pbs = self.prev_built_start.clone();
             let pbe = self.prev_built_end.clone();
-            let metrics = self.metrics.clone();
+            let pbh = self.prev_built_headers.clone();
+            let geometry = self.geometry.clone();
             move |y| {
                 let count = (len_for_scroll)();
-                let (visible_start, visible_end) =
-                    metrics.borrow_mut().visible_range(*y, vp_h.get(), count, 0);
-                if visible_start < pbs.get() || visible_end > pbe.get() {
+                let (visible_start, visible_end) = geometry.visible_range(*y, vp_h.get(), count, 0);
+                // Headers are realized with the rows around them, so leaving
+                // the realized rows covers them too — except where there are
+                // no rows to leave: a run of empty sections.
+                let headers = geometry.visible_headers(*y, vp_h.get(), count);
+                let (built_from, built_to) = pbh.get();
+                let header_missing =
+                    !headers.is_empty() && (headers.start < built_from || headers.end > built_to);
+                if visible_start < pbs.get() || visible_end > pbe.get() || header_missing {
                     let new_start = visible_start.saturating_sub(BUFFER_ITEMS);
                     // Clamp to `count`: build realizes a `min(end, count)`
                     // window, so an unclamped `pbe` past the end would leave
@@ -228,7 +264,24 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         // --- Create visible item widgets ---
         let (start, end) = self.visible_range();
         self.item_entries.clear();
-        self.row_roots.clear();
+        self.child_roots.clear();
+        self.child_kinds.clear();
+        // The headers between the realized rows and in the viewport, each
+        // emitted just before the first row of its section.
+        let count = self.source.len();
+        let headers = self.geometry.headers_to_realize(
+            (start, end),
+            self.scroll_y.get(),
+            self.viewport_height.get(),
+            count,
+        );
+        self.prev_built_headers.set((headers.start, headers.end));
+        let section_firsts = if headers.is_empty() {
+            Vec::new()
+        } else {
+            self.geometry.section_firsts(count)
+        };
+        let mut pending_headers = headers.peekable();
         // Lazy: nudge the source to load the realized window, and fetch more
         // as the viewport nears the end (append-only sources). This lives in
         // the pane, not the root, because the pane is what decides the
@@ -247,6 +300,16 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         // focusable node), not this pane — see `root_id`'s docs.
         ctx.begin_view_focus_for(root_id);
         for i in start..end {
+            while let Some(&section) = pending_headers.peek()
+                && section_firsts[section] <= i
+            {
+                pending_headers.next();
+                if let Some(header) = self.build_header(ctx, section) {
+                    self.child_roots.push(header);
+                    self.child_kinds.push(PaneChild::Header(section));
+                }
+            }
+
             // Has this row anything to show? The wrapper builds the row widget
             // itself, so the answer is needed before the wrapper exists.
             // `read_item_fn` is the cheap probe: it reports presence without
@@ -426,7 +489,7 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                     let sel_a11y = self.row_selection.clone();
                     let anchor_a11y = self.source.anchor(i);
                     let fi_a11y = self.focused_index.clone();
-                    let metrics_a11y = self.metrics.clone();
+                    let geometry_a11y = self.geometry.clone();
                     let scroll_a11y = self.scroll_y.clone();
                     let vh_a11y = self.viewport_height.clone();
                     let len_a11y = self.source.len_fn.clone();
@@ -456,10 +519,12 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                                     let viewport = vh_a11y.get();
                                     let scroll = scroll_a11y.get();
                                     let new_scroll = {
-                                        let mut m = metrics_a11y.borrow_mut();
-                                        let total = m.total_height((len_a11y)());
+                                        let count = (len_a11y)();
+                                        let total = geometry_a11y.total_height(count);
                                         let max = (total - viewport).max(0.0);
-                                        m.scroll_for_ensure_visible(row, scroll, viewport, max)
+                                        geometry_a11y.scroll_for_ensure_visible(
+                                            row, scroll, viewport, max, count,
+                                        )
                                     };
                                     if (new_scroll - scroll).abs() > f32::EPSILON {
                                         scroll_a11y.set(new_scroll);
@@ -525,7 +590,7 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                     let drag_self_id = root_id;
                     let delegate_for_preview = self.delegate.clone();
                     let with_item_for_preview = self.source.with_item_fn.clone();
-                    let metrics_for_preview = self.metrics.clone();
+                    let metrics_for_preview = self.geometry.metrics().clone();
                     let width_for_preview = self.placed_content_width.clone();
                     let drag_gate = self.source.dnd.drag_fn.clone();
                     // Export capture: the dragged set is selection-aware; the
@@ -583,7 +648,16 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                 }
 
                 self.item_entries.push((i, child_id));
-                self.row_roots.push(row_root);
+                self.child_roots.push(row_root);
+                self.child_kinds.push(PaneChild::Row(i));
+            }
+        }
+        // Headers past the last realized row: trailing empty sections, or a
+        // viewport holding headers and no row at all.
+        for section in pending_headers {
+            if let Some(header) = self.build_header(ctx, section) {
+                self.child_roots.push(header);
+                self.child_kinds.push(PaneChild::Header(section));
             }
         }
         ctx.end_view_focus();
@@ -591,7 +665,7 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         // Publish the realized (index → wrapper id) map for the root's a11y.
         *self.row_map.borrow_mut() = self.item_entries.clone();
 
-        self.row_roots.clone()
+        self.child_roots.clone()
     }
 
     fn layout_response(
@@ -622,8 +696,7 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         // permanent rebuild loop (`common::viewport`).
         crate::common::viewport::record_viewport_height(&self.viewport_height, bounds.height);
 
-        let item_count = self.item_entries.len();
-        if item_count == 0 {
+        if self.child_kinds.is_empty() {
             return;
         }
         let count = self.source.len();
@@ -631,23 +704,22 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         // Auto-measure pass: measure every realized row at the pane width
         // (height-for-width), feed the heights back, and apply the
         // scroll-anchor delta so content above the viewport stays put.
-        // Measurements are collected with NO metrics borrow held.
-        if self.metrics.borrow().needs_measure() {
-            let pre_total = self.metrics.borrow_mut().total_height(count);
-            let mut measured = Vec::with_capacity(item_count);
-            for (idx, child) in children.iter().enumerate() {
-                if idx < item_count
+        // Measurements are collected with NO metrics borrow held. Headers
+        // are not measured: they are exactly `section_header_height` tall.
+        if self.geometry.metrics().borrow().needs_measure() {
+            let pre_total = self.geometry.total_height(count);
+            let mut measured = Vec::with_capacity(self.item_entries.len());
+            for (child, kind) in children.iter().zip(&self.child_kinds) {
+                if let PaneChild::Row(model_index) = *kind
                     && let Some(size) =
                         ctx.child_size(child.id, SizeProposal::with_width(bounds.width))
                 {
-                    let (model_index, _) = self.item_entries[idx];
                     measured.push((model_index, size.height));
                 }
             }
             let anchor = self
-                .metrics
-                .borrow_mut()
-                .observe_measured(&measured, self.scroll_y.get());
+                .geometry
+                .observe_measured(&measured, self.scroll_y.get(), count);
             if anchor.abs() > 0.01 {
                 // Safe from place_children: the dirty flag is set but the
                 // binding flush already ran this pass — lands next frame.
@@ -659,13 +731,22 @@ impl<T: 'static> Widget for ListBodyPane<T> {
             // shorter than the estimate leave a gap at the bottom
             // otherwise). Request a pane rebuild for next frame; the 0.01
             // measurement epsilon guarantees convergence.
-            let (vs, ve) = self.metrics.borrow_mut().visible_range(
+            let (vs, ve) = self.geometry.visible_range(
                 self.scroll_y.get(),
                 self.viewport_height.get(),
                 count,
                 0,
             );
-            if vs < self.prev_built_start.get() || ve > self.prev_built_end.get() {
+            let headers = self.geometry.visible_headers(
+                self.scroll_y.get(),
+                self.viewport_height.get(),
+                count,
+            );
+            let (built_from, built_to) = self.prev_built_headers.get();
+            let header_missing =
+                !headers.is_empty() && (headers.start < built_from || headers.end > built_to);
+            if vs < self.prev_built_start.get() || ve > self.prev_built_end.get() || header_missing
+            {
                 self.prev_built_start.set(vs.saturating_sub(BUFFER_ITEMS));
                 self.prev_built_end.set((ve + BUFFER_ITEMS).min(count));
                 self.version.set(self.version.get() + 1);
@@ -678,24 +759,25 @@ impl<T: 'static> Widget for ListBodyPane<T> {
             // estimated total stays unreachable forever. Terminates: a
             // re-measure of settled rows yields zero deltas (sub-pixel
             // epsilon), leaving the total fixed.
-            let post_total = self.metrics.borrow_mut().total_height(count);
+            let post_total = self.geometry.total_height(count);
             if (post_total - pre_total).abs() > 0.01 {
                 self.total_refresh.set(self.total_refresh.get() + 1);
             }
         }
 
         let scroll_y = self.scroll_y.get();
-        for (idx, child) in children.iter_mut().enumerate() {
-            if idx < item_count {
-                let (model_index, _) = self.item_entries[idx];
-                let (top, height) = {
-                    let mut m = self.metrics.borrow_mut();
-                    (m.row_top(model_index), m.row_height(model_index))
-                };
-                let y = bounds.y + top - scroll_y;
-                child.origin = Point::new(bounds.x, y);
-                child.size = Size::new(bounds.width, height);
-            }
+        for (child, kind) in children.iter_mut().zip(&self.child_kinds) {
+            let (top, height) = match *kind {
+                PaneChild::Row(model_index) => self.geometry.item_span(model_index, count),
+                PaneChild::Header(section) => {
+                    let Some(top) = self.geometry.header_top(section, count) else {
+                        continue;
+                    };
+                    (top, self.geometry.header_height())
+                }
+            };
+            child.origin = Point::new(bounds.x, bounds.y + top - scroll_y);
+            child.size = Size::new(bounds.width, height);
         }
     }
 
@@ -714,7 +796,7 @@ impl<T: 'static> Widget for ListBodyPane<T> {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.row_roots.clone()
+        self.child_roots.clone()
     }
 
     fn clips_children(&self) -> bool {

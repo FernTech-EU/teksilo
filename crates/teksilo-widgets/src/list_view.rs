@@ -17,6 +17,26 @@
 //! height-for-width measurement with scroll anchoring so content above the
 //! viewport stays put while estimates converge).
 //!
+//! ## Sections
+//!
+//! [`sections`](ListView::sections) groups the items under full-width header
+//! rows (a song list grouped by artist, a log grouped by day) from the same
+//! provider [`GridView`](crate::GridView) takes, and
+//! [`grouping_sections`](crate::grouping_sections) builds one from runs of
+//! equal keys. The headers belong to the scrolled content: they are
+//! virtualized with the rows, counted in the scroll extent, and laid out in all
+//! three height modes, while being exactly
+//! [`section_header_height`](ListView::section_header_height) tall themselves
+//! (28 dp by default, as in `GridView`).
+//! [`pinned_section_headers`](ListView::pinned_section_headers) keeps the
+//! header of the section at the top of the viewport pinned there, until the
+//! next section's header pushes it out.
+//!
+//! A header is not an item. Selection, activation, type-ahead, keyboard
+//! navigation, `scroll_to_index` and drag and drop all speak indices into the
+//! model, and the keys step over the headers. A drop on a header lands at the
+//! top of its section.
+//!
 //! ## Pan to scroll
 //!
 //! The view installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior),
@@ -47,6 +67,12 @@
 //! says "row 147 of 200" rather than counting the realized window. The count
 //! sits on the container because AccessKit resolves an item's set size by
 //! walking up from it, unlike ARIA's per-item `aria-setsize`.
+//!
+//! A section header is a `Role::Heading` named by its section's title, placed
+//! just before the section's first row in the reading order. It is not an
+//! option, so it takes no position in the set and the rows keep theirs in the
+//! whole model. The pinned copy of a header is hidden from assistive
+//! technology, which reads the in-flow header instead.
 //!
 //! The container is the focusable node and rows deliberately are not. The
 //! container names the cursor's row as its active descendant, which is the row
@@ -113,12 +139,14 @@ use crate::common::list_nav;
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::scroll::OverscrollBehavior;
 use crate::data_views::{DragTransferMode, RowDragData, ViewId, ViewKind, flat_insertion_target};
+use crate::grid_view::sections::SectionProvider;
 use crate::list_source::ListSource;
 use crate::scroll_area::ScrollBarMode;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 use teksilo_core::styles::density::dp;
 
 mod body_pane;
+mod sections;
 mod widget_impl;
 
 /// Default number of extra items to create above and below the viewport.
@@ -295,6 +323,28 @@ pub struct ListView<T: 'static> {
     /// view greys out and stops accepting focus / selection / keyboard
     /// input (arena-gated).
     enabled: Prop<bool>,
+
+    /// The section grouping set by [`sections`](Self::sections). `None` keeps
+    /// the list flat, and every geometric query then answers from `metrics`
+    /// alone, exactly as before sections existed.
+    sections: Option<Rc<sections::SectionTable>>,
+    #[allow(clippy::type_complexity)]
+    section_header_delegate: Option<Rc<dyn Fn(usize, &str) -> Box<dyn Widget>>>,
+    section_header_height: f32,
+    pinned_section_headers: bool,
+    /// The section the pinned slot shows, written by `place_children` from
+    /// the scroll offset.
+    pinned_section: Signal<Option<usize>>,
+    /// Bumped by the data observer so the pinned slot rebuilds when a model
+    /// change retitles the section it shows.
+    pinned_refresh: Signal<u64>,
+    /// The section the pinned slot last built; see
+    /// [`sections::PinnedSectionHeader::built`].
+    pinned_built: Rc<Cell<Option<usize>>>,
+    pinned_header_id: Option<WidgetId>,
+    /// Section headers the body pane realized in its latest build, so its
+    /// scroll observer can tell when one it lacks comes into view.
+    pane_built_headers: Rc<Cell<(usize, usize)>>,
 }
 
 impl<T: 'static> ListView<T> {
@@ -417,6 +467,15 @@ impl<T: 'static> ListView<T> {
             viewport_bounds: Rc::new(Cell::new(Rect::ZERO)),
             scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
             enabled: Prop::Static(true),
+            sections: None,
+            section_header_delegate: None,
+            section_header_height: sections::DEFAULT_SECTION_HEADER_HEIGHT,
+            pinned_section_headers: false,
+            pinned_section: Signal::new(None),
+            pinned_refresh: Signal::new(0),
+            pinned_built: Rc::new(Cell::new(None)),
+            pinned_header_id: None,
+            pane_built_headers: Rc::new(Cell::new((0, 0))),
         }
     }
 
@@ -496,11 +555,149 @@ impl<T: 'static> ListView<T> {
         self
     }
 
-    /// Set spacing between items (default 0.0).
+    /// Set spacing between items (default 0.0). With
+    /// [`sections`](Self::sections) it also separates a section's last item
+    /// from the next header; a header sits directly on its first item.
     pub fn spacing(mut self, spacing: f32) -> Self {
         self.spacing = spacing;
         self.remake_metrics();
         self
+    }
+
+    /// Group the items into sections, with a full-width header row above each
+    /// one. Takes the same provider as [`GridView::sections`](crate::GridView::sections):
+    /// [`grouping_sections`](crate::grouping_sections) partitions runs of
+    /// equal keys, or implement [`GridSectionProvider`](crate::GridSectionProvider)
+    /// yourself.
+    ///
+    /// Headers are rows of the scrolled content: they are virtualized with the
+    /// items, counted in the scroll extent, and compose with all three
+    /// row-height modes. They are not items. Every index the view takes or
+    /// reports — selection, [`on_activate`](Self::on_activate), type-ahead,
+    /// [`scroll_to_index`](Self::scroll_to_index), drag and drop — is still an
+    /// index into the model, and the arrow keys step from item to item over
+    /// the headers.
+    ///
+    /// The view reads the provider's counts again after every change the
+    /// model reports, so a provider that derives them from the live model
+    /// follows inserts, removals and resets. `grouping_sections` groups the
+    /// model as it is when called; for a model that changes, derive the counts
+    /// on demand instead:
+    ///
+    /// ```rust
+    /// # use teksilo_widgets::{GridSectionProvider, ListView};
+    /// # use teksilo_widgets::primitives::TextWidget;
+    /// # use teksilo_data::ListModel;
+    /// # use teksilo_i18n::lit;
+    /// struct Song { artist: String, title: String }
+    ///
+    /// /// Runs of songs by the same artist, read from the model each time.
+    /// struct ByArtist(ListModel<Song>);
+    ///
+    /// impl ByArtist {
+    ///     fn runs(&self) -> Vec<(String, usize)> {
+    ///         let mut runs: Vec<(String, usize)> = Vec::new();
+    ///         for i in 0..self.0.len() {
+    ///             let artist = self.0.with_item(i, |s| s.artist.clone()).unwrap_or_default();
+    ///             match runs.last_mut() {
+    ///                 Some((last, count)) if *last == artist => *count += 1,
+    ///                 _ => runs.push((artist, 1)),
+    ///             }
+    ///         }
+    ///         runs
+    ///     }
+    /// }
+    ///
+    /// impl GridSectionProvider for ByArtist {
+    ///     fn section_count(&self) -> usize { self.runs().len() }
+    ///     fn items_in_section(&self, s: usize) -> usize { self.runs()[s].1 }
+    ///     fn section_title(&self, s: usize) -> String { self.runs()[s].0.clone() }
+    ///     fn section_counts(&self) -> Vec<usize> {
+    ///         self.runs().into_iter().map(|(_, count)| count).collect()
+    ///     }
+    /// }
+    ///
+    /// let songs = ListModel::from_vec(vec![
+    ///     Song { artist: "Ada".into(), title: "One".into() },
+    ///     Song { artist: "Ada".into(), title: "Two".into() },
+    ///     Song { artist: "Bea".into(), title: "Three".into() },
+    /// ]);
+    /// let _list = ListView::new(songs.clone(), |_i, song, _selected| {
+    ///     Box::new(TextWidget::new(lit!(&song.title)))
+    /// })
+    /// .sections(ByArtist(songs))
+    /// .pinned_section_headers(true);
+    /// ```
+    pub fn sections<P: SectionProvider>(mut self, provider: P) -> Self {
+        self.sections = Some(Rc::new(sections::SectionTable::new(provider)));
+        self
+    }
+
+    /// Build each section's header row from `(section_index, title)`, the
+    /// title being the provider's. Without it a header is the title as plain
+    /// text. The same signature as
+    /// [`GridView::section_header_delegate`](crate::GridView::section_header_delegate).
+    ///
+    /// Whatever it builds, the row is published to assistive technology as a
+    /// heading named by the title. A control inside it stays clickable but is
+    /// no Tab stop: the list is one, as it is for a control inside a row.
+    pub fn section_header_delegate(
+        mut self,
+        f: impl Fn(usize, &str) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        self.section_header_delegate = Some(Rc::new(f));
+        self
+    }
+
+    /// Height of each section header row (default 28, as in `GridView`).
+    /// Headers are not measured, in any row-height mode: the delegate's
+    /// widget is given exactly this height.
+    pub fn section_header_height(mut self, height: f32) -> Self {
+        self.section_header_height = height.max(0.0);
+        self
+    }
+
+    /// Keep the header of the section holding the top of the viewport pinned
+    /// there while its rows scroll beneath it; the next section's header
+    /// pushes it up as it arrives. Rows revealed by the keyboard, by
+    /// [`ensure_index_visible`](Self::ensure_index_visible) and by
+    /// [`scroll_to_index`](Self::scroll_to_index) stop below it.
+    ///
+    /// The pinned copy is drawn on an opaque surface and is hidden from
+    /// assistive technology, which reads the section's own header instead.
+    pub fn pinned_section_headers(mut self, enabled: bool) -> Self {
+        self.pinned_section_headers = enabled;
+        self
+    }
+
+    /// The geometry every query of the view goes through: the row metrics,
+    /// with the section headers between the rows when there are any.
+    fn geometry(&self) -> sections::ListGeometry {
+        sections::ListGeometry::new(
+            self.metrics.clone(),
+            self.sections.as_ref().map(|table| sections::SectionLayer {
+                table: table.clone(),
+                header_height: self.section_header_height,
+                spacing: self.spacing,
+                pinned: self.pinned_section_headers,
+            }),
+        )
+    }
+
+    /// The header-widget factory shared by the body pane and the pinned slot:
+    /// the application's delegate, or the title as plain text.
+    fn header_factory(&self) -> Option<sections::HeaderFactory> {
+        let table = self.sections.clone()?;
+        let delegate = self.section_header_delegate.clone();
+        Some(Rc::new(move |section| {
+            let title = table.title(section);
+            match &delegate {
+                Some(delegate) => delegate(section, &title),
+                None => Box::new(crate::primitives::TextWidget::new(teksilo_i18n::lit!(
+                    title
+                ))) as Box<dyn Widget>,
+            }
+        }))
     }
 
     /// Set the index-based selection model (positions). For identity-based
@@ -581,7 +778,8 @@ impl<T: 'static> ListView<T> {
     /// `with_widget_mut::<ListView<_>>` cannot reach the widget either, since
     /// this type overrides `as_any` and not `as_any_mut`.
     fn reveal_current_row_on_focus(&self, ctx: &mut teksilo_core::build_context::BuildContext) {
-        let metrics = self.metrics.clone();
+        let geometry = self.geometry();
+        let len = self.source.len_fn.clone();
         let scroll_y = self.scroll_y.clone();
         let viewport_height = self.viewport_height.clone();
         let max_scroll_y = self.max_scroll_y.clone();
@@ -597,11 +795,12 @@ impl<T: 'static> ListView<T> {
                 return;
             };
             let current = scroll_y.get();
-            let target = metrics.borrow_mut().scroll_for_ensure_visible(
+            let target = geometry.scroll_for_ensure_visible(
                 index,
                 current,
                 viewport_height.get(),
                 max_scroll_y.get(),
+                len(),
             );
             if (target - current).abs() > f32::EPSILON {
                 scroll_y.set(target);
@@ -903,27 +1102,17 @@ impl<T: 'static> ListView<T> {
         self
     }
 
-    /// Total content height (all items + spacing).
+    /// Total content height (all items + spacing, and the section headers).
     fn total_content_height(&self) -> f32 {
-        self.metrics.borrow_mut().total_height(self.source.len())
+        self.geometry().total_height(self.source.len())
     }
 
-    /// Compute the visible range of model indices for the current scroll and viewport.
-    fn visible_range(&self) -> (usize, usize) {
-        self.metrics.borrow_mut().visible_range(
-            self.scroll_y.get(),
-            self.viewport_height.get(),
-            self.source.len(),
-            BUFFER_ITEMS,
-        )
-    }
-
-    /// The root's children, in the one order `build`, `children` and
-    /// `place_children` all rely on: body pane first, scrollbar second.
-    /// The pane is always mounted (an empty list realizes zero rows inside
-    /// it), so the scrollbar's index only shifts with `show_scrollbar`.
+    /// The root's children, in paint order: the body pane, the pinned section
+    /// header over it, the scrollbar over both. The pane is always mounted
+    /// (an empty list realizes zero rows inside it); the pinned header exists
+    /// only with [`pinned_section_headers`](Self::pinned_section_headers).
     fn child_ids(&self) -> Vec<WidgetId> {
-        [self.body_pane_id, self.scrollbar_id]
+        [self.body_pane_id, self.pinned_header_id, self.scrollbar_id]
             .into_iter()
             .flatten()
             .collect()
@@ -973,21 +1162,30 @@ impl<T: 'static> ListView<T> {
     /// viewport. Clamped to the valid scroll range. Safe to call before
     /// the ListView has been laid out — the clamp will kick in on the
     /// first layout pass.
+    ///
+    /// With [`sections`](Self::sections), the first item of a section brings
+    /// its header to the top with it, and with
+    /// [`pinned_section_headers`](Self::pinned_section_headers) every item
+    /// stops below the pinned header.
     pub fn scroll_to_index(&self, index: usize) {
-        let target = self.metrics.borrow_mut().row_top(index);
+        let target = self
+            .geometry()
+            .scroll_to_index_target(index, self.source.len());
         let max = self.max_scroll_y.get();
         self.scroll_y.set(target.clamp(0.0, max));
     }
 
     /// Scroll the minimum distance needed to bring the given model
-    /// index fully into the viewport. No-op if already visible.
+    /// index fully into view. No-op if already visible. Sections are
+    /// honoured as in [`scroll_to_index`](Self::scroll_to_index).
     pub fn ensure_index_visible(&self, index: usize) {
         let scroll = self.scroll_y.get();
-        let new_scroll = self.metrics.borrow_mut().scroll_for_ensure_visible(
+        let new_scroll = self.geometry().scroll_for_ensure_visible(
             index,
             scroll,
             self.viewport_height.get(),
             self.max_scroll_y.get(),
+            self.source.len(),
         );
         if (new_scroll - scroll).abs() > f32::EPSILON {
             self.scroll_y.set(new_scroll);

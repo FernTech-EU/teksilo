@@ -44,6 +44,13 @@ as `Linear`.
 ¹ In a multiple selection. A single selection moves with the cursor on every
 navigation key; see the next section.
 
+A `ListView` grouped with `.sections(..)` keeps this table unchanged. Its
+section headers are not items, so every chord moves between items and steps
+over the headers, and a page key whose distance ends on a header lands on the
+first item under it. An item revealed by a key brings its section's header
+into view when it is the first item of the section, and stops below the pinned
+header when `.pinned_section_headers(true)` is set.
+
 ### The modifier rules, stated once
 
 **In a multiple selection, `Ctrl` (⌘ on macOS) on a navigation key never

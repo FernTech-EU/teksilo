@@ -8,12 +8,13 @@
 use super::*;
 impl<T: 'static> Widget for ListView<T> {
     fn build(&mut self, ctx: &mut teksilo_core::build_context::BuildContext) -> Vec<WidgetId> {
-        // The root builds exactly two children — the body pane and the
-        // scrollbar — and neither depends on the data, the selection or the
-        // scroll offset. So it declares no `Rebuild`-level binding at all:
-        // row realization is the pane's job (see `body_pane`'s module docs
-        // for why that separation is load-bearing and not just tidy), and
-        // what the root still owns resolves at `Relayout` / `RepaintOnly`.
+        // The root builds two children — the body pane and the scrollbar —
+        // plus the pinned section header when one is asked for, and none of
+        // them depends on the data, the selection or the scroll offset. So
+        // it declares no `Rebuild`-level binding at all: row realization is
+        // the pane's job (see `body_pane`'s module docs for why that
+        // separation is load-bearing and not just tidy), and what the root
+        // still owns resolves at `Relayout` / `RepaintOnly`.
         let self_id = ctx.self_id();
         ctx.enabled_when(self_id, self.enabled.clone());
 
@@ -91,10 +92,12 @@ impl<T: 'static> Widget for ListView<T> {
         // the root (the content total, hence the thumb, changed).
         let pane_version_for_data = self.pane_version.clone();
         let layout_refresh_for_data = self.layout_refresh.clone();
+        let pinned_refresh_for_data = self.pinned_refresh.clone();
         let data_ver = Rc::new(Cell::new(0_u64));
         let data_handle = (self.source.observe_fn)(Box::new({
             let dv = data_ver.clone();
             let metrics = self.metrics.clone();
+            let sections = self.sections.clone();
             let len_fn = self.source.len_fn.clone();
             let first_changed = self.source.first_changed_fn.clone();
             let row_sel = self.row_selection.clone();
@@ -118,6 +121,14 @@ impl<T: 'static> Widget for ListView<T> {
                 metrics
                     .borrow_mut()
                     .apply_divergence(divergence, (len_fn)());
+                // The provider's counts follow the model, so they are read
+                // again — lazily, on the next geometric query, by which time
+                // a provider observing the same model has caught up too.
+                // The metrics stay item-indexed, so the measured prefix
+                // above survives a regrouping untouched.
+                if let Some(ref sections) = sections {
+                    sections.invalidate();
+                }
                 // Keep selection in step: index-shift (index model) or prune
                 // orphaned keys (keyed model).
                 if let Some(ref rs) = row_sel {
@@ -136,6 +147,9 @@ impl<T: 'static> Widget for ListView<T> {
                 dv.set(next);
                 pane_version_for_data.set(next);
                 layout_refresh_for_data.set(next);
+                if sections.is_some() {
+                    pinned_refresh_for_data.set(next);
+                }
             }
         }));
         ctx.own_handle(data_handle);
@@ -226,7 +240,8 @@ impl<T: 'static> Widget for ListView<T> {
                 });
                 let sel = self.row_selection.clone();
                 let fi = self.focused_index.clone();
-                let metrics = self.metrics.clone();
+                let geometry = self.geometry();
+                let len = self.source.len_fn.clone();
                 let scroll = self.scroll_y.clone();
                 let vh = self.viewport_height.clone();
                 let vb = self.viewport_bounds.clone();
@@ -245,22 +260,18 @@ impl<T: 'static> Widget for ListView<T> {
                         // Reveal the moved row (own viewport first, then chain
                         // to any enclosing scroll area).
                         let current = scroll.get();
-                        let new_scroll = metrics.borrow_mut().scroll_for_ensure_visible(
+                        let count = len();
+                        let new_scroll = geometry.scroll_for_ensure_visible(
                             dest,
                             current,
                             vh.get(),
                             max.get(),
+                            count,
                         );
                         if (new_scroll - current).abs() > f32::EPSILON {
                             scroll.set(new_scroll);
                         }
-                        crate::common::row_metrics::chase_row_into_outer_view(
-                            ctx,
-                            &metrics,
-                            vb.get(),
-                            dest,
-                            new_scroll,
-                        );
+                        geometry.chase_into_outer_view(ctx, vb.get(), dest, new_scroll, count);
                         ctx.announce(utterance);
                     },
                 ) as crate::common::ordered_move::MoveRow
@@ -274,7 +285,7 @@ impl<T: 'static> Widget for ListView<T> {
             let fi = self.focused_index.clone();
             let reorder_key = reorder_perform.clone();
             let scroll_for_nav = self.scroll_y.clone();
-            let metrics_for_nav = self.metrics.clone();
+            let geometry_for_nav = self.geometry();
             let max_for_nav = self.max_scroll_y.clone();
             let vh_for_nav = self.viewport_height.clone();
             let vb_for_nav = self.viewport_bounds.clone();
@@ -375,22 +386,22 @@ impl<T: 'static> Widget for ListView<T> {
                                 sel.select(idx);
                             }
                             let scroll = scroll_for_nav.get();
-                            let new_scroll =
-                                metrics_for_nav.borrow_mut().scroll_for_ensure_visible(
-                                    idx,
-                                    scroll,
-                                    vh_for_nav.get(),
-                                    max_for_nav.get(),
-                                );
+                            let new_scroll = geometry_for_nav.scroll_for_ensure_visible(
+                                idx,
+                                scroll,
+                                vh_for_nav.get(),
+                                max_for_nav.get(),
+                                count,
+                            );
                             if (new_scroll - scroll).abs() > f32::EPSILON {
                                 scroll_for_nav.set(new_scroll);
                             }
-                            crate::common::row_metrics::chase_row_into_outer_view(
+                            geometry_for_nav.chase_into_outer_view(
                                 ctx,
-                                &metrics_for_nav,
                                 vb_for_nav.get(),
                                 idx,
                                 new_scroll,
+                                count,
                             );
                             return teksilo_core::event::EventResponse::Handled;
                         }
@@ -463,17 +474,12 @@ impl<T: 'static> Widget for ListView<T> {
                             // fixed row count; the ensure-visible below then
                             // scrolls to follow.
                             list_nav::NavMove::Page { down } => {
-                                let vh = vh_for_nav.get();
-                                let r = {
-                                    let mut m = metrics_for_nav.borrow_mut();
-                                    m.resize(count);
-                                    let target = if down {
-                                        m.row_top(current) + vh
-                                    } else {
-                                        (m.row_top(current) - vh).max(0.0)
-                                    };
-                                    m.row_at(target)
-                                };
+                                let r = geometry_for_nav.page_target(
+                                    current,
+                                    down,
+                                    vh_for_nav.get(),
+                                    count,
+                                );
                                 // Guarantee progress even when one row is
                                 // taller than the whole viewport.
                                 if r == current && down {
@@ -625,21 +631,22 @@ impl<T: 'static> Widget for ListView<T> {
                         // Scroll into view — the ListView's own viewport first,
                         // then chain to any enclosing scroll area.
                         let scroll = scroll_for_nav.get();
-                        let new_scroll = metrics_for_nav.borrow_mut().scroll_for_ensure_visible(
+                        let new_scroll = geometry_for_nav.scroll_for_ensure_visible(
                             idx,
                             scroll,
                             vh_for_nav.get(),
                             max_for_nav.get(),
+                            count,
                         );
                         if (new_scroll - scroll).abs() > f32::EPSILON {
                             scroll_for_nav.set(new_scroll);
                         }
-                        crate::common::row_metrics::chase_row_into_outer_view(
+                        geometry_for_nav.chase_into_outer_view(
                             ctx,
-                            &metrics_for_nav,
                             vb_for_nav.get(),
                             idx,
                             new_scroll,
+                            count,
                         );
                         return teksilo_core::event::EventResponse::Handled;
                     }
@@ -652,7 +659,7 @@ impl<T: 'static> Widget for ListView<T> {
         // foreign rows. The source's `can_accept` decides per-hover whether the
         // drop is allowed (and a forbidden verdict shows no insertion line). ---
         if self.export.is_drop_target(self.reorderable) {
-            let metrics_for_hover = self.metrics.clone();
+            let geometry_for_hover = self.geometry();
             let scroll_for_hover = self.scroll_y.clone();
             let len_for_hover = self.source.len_fn.clone();
             let can_accept_for_hover = self.source.dnd.can_accept_fn.clone();
@@ -665,12 +672,8 @@ impl<T: 'static> Widget for ListView<T> {
                 let scroll = scroll_for_hover.get().max(0.0);
                 let content_y = position.y + scroll;
                 let len = (len_for_hover)();
-                let (insertion_y, ins) = {
-                    let mut m = metrics_for_hover.borrow_mut();
-                    m.resize(len);
-                    let ins = m.insertion_index(content_y);
-                    (m.row_top(ins) - scroll, ins)
-                };
+                let (ins, line_y) = geometry_for_hover.insertion(content_y, len);
+                let insertion_y = line_y - scroll;
                 let line_width = width_for_hover.get();
                 // Ask the source whether a drop here is allowed; paint the
                 // insertion line only when it is. A foreign exported row is
@@ -698,7 +701,7 @@ impl<T: 'static> Widget for ListView<T> {
             let accept_drop_for_drop = self.source.dnd.accept_drop_fn.clone();
             let drop_view_id = self.model_id;
             let scroll_for_drop = self.scroll_y.clone();
-            let metrics_for_drop = self.metrics.clone();
+            let geometry_for_drop = self.geometry();
             let export_for_drop = self.export.clone();
             let reorderable_for_drop = self.reorderable;
 
@@ -706,11 +709,7 @@ impl<T: 'static> Widget for ListView<T> {
                 let scroll = scroll_for_drop.get().max(0.0);
                 let content_y = position.y + scroll;
                 let len = (len_for_drop)();
-                let ins = {
-                    let mut m = metrics_for_drop.borrow_mut();
-                    m.resize(len);
-                    m.insertion_index(content_y)
-                };
+                let (ins, _) = geometry_for_drop.insertion(content_y, len);
                 let is_same_view = payload
                     .get_typed::<RowDragData<T>>()
                     .is_some_and(|rd| rd.source == drop_view_id);
@@ -777,7 +776,8 @@ impl<T: 'static> Widget for ListView<T> {
             source: self.source.clone(),
             delegate: self.delegate.clone(),
             row_tooltips: self.row_tooltips.clone(),
-            metrics: self.metrics.clone(),
+            geometry: self.geometry(),
+            header_factory: self.header_factory(),
             row_selection: self.row_selection.clone(),
             focused_index: self.focused_index.clone(),
             row_map: self.row_map.clone(),
@@ -795,11 +795,33 @@ impl<T: 'static> Widget for ListView<T> {
             total_refresh: self.layout_refresh.clone(),
             prev_built_start: self.pane_built_start.clone(),
             prev_built_end: self.pane_built_end.clone(),
+            prev_built_headers: self.pane_built_headers.clone(),
             item_entries: Vec::new(),
-            row_roots: Vec::new(),
+            child_roots: Vec::new(),
+            child_kinds: Vec::new(),
             presentational: self.presentational,
         };
         self.body_pane_id = Some(ctx.add(pane));
+
+        // --- Pinned section header ---
+        // Built whenever pinning is asked for, even while the provider has no
+        // section: the slot then holds nothing, and fills in once a model
+        // change gives it one. The root never rebuilds on a data change, so a
+        // slot skipped here could never appear later.
+        self.pinned_header_id = None;
+        if self.pinned_section_headers
+            && let (Some(table), Some(factory)) = (self.sections.clone(), self.header_factory())
+        {
+            self.pinned_header_id = Some(ctx.add(sections::PinnedSectionHeader {
+                section: self.pinned_section.clone(),
+                refresh: self.pinned_refresh.clone(),
+                built: self.pinned_built.clone(),
+                factory,
+                table,
+                len_fn: self.source.len_fn.clone(),
+                child: None,
+            }));
+        }
 
         // --- Create scrollbar ---
         // Skipped when the caller opted out via `show_scrollbar(false)`
@@ -899,27 +921,49 @@ impl<T: 'static> Widget for ListView<T> {
         self.viewport_ratio_y.set(ratio);
         self.clamp_scroll();
 
-        // Two children in a fixed order (see `child_ids`): the body pane
-        // fills the content column and positions its own rows; the scrollbar
-        // sits alongside it.
-        let mut next = 0;
-        if self.body_pane_id.is_some() {
-            if let Some(child) = children.get_mut(next) {
+        // The pinned header: the current section is decided from the clamped
+        // offset, and handed to the slot when it changed. The slot rebuilds
+        // next frame, so until it has, it is not shown — rather than show the
+        // previous section's title over this one's rows.
+        let pinned_offset = self.pinned_header_id.and_then(|_| {
+            let placement = self
+                .geometry()
+                .pinned_header(self.scroll_y.get(), self.source.len());
+            let section = placement.map(|p| p.section);
+            if self.pinned_section.get() != section {
+                self.pinned_section.set(section);
+            }
+            let placement = placement?;
+            (placement.visible && self.pinned_built.get() == Some(placement.section))
+                .then_some(placement.offset)
+        });
+
+        // The body pane fills the content column and positions its own rows;
+        // the pinned header lies over its top; the scrollbar sits alongside.
+        for child in children.iter_mut() {
+            if Some(child.id) == self.body_pane_id {
                 child.origin = bounds.origin();
                 child.size = Size::new(content_width, bounds.height);
-            }
-            next += 1;
-        }
-        if self.scrollbar_id.is_some()
-            && let Some(sb_child) = children.get_mut(next)
-        {
-            if needs_internal_scrollbar {
-                sb_child.origin =
-                    Point::new(bounds.x + bounds.width - SCROLLBAR_THICKNESS, bounds.y);
-                sb_child.size = Size::new(SCROLLBAR_THICKNESS, bounds.height);
-            } else {
-                sb_child.origin = bounds.origin();
-                sb_child.size = Size::ZERO;
+            } else if Some(child.id) == self.pinned_header_id {
+                match pinned_offset {
+                    Some(offset) => {
+                        child.origin = Point::new(bounds.x, bounds.y + offset);
+                        child.size = Size::new(content_width, self.section_header_height);
+                    }
+                    None => {
+                        child.origin = bounds.origin();
+                        child.size = Size::ZERO;
+                    }
+                }
+            } else if Some(child.id) == self.scrollbar_id {
+                if needs_internal_scrollbar {
+                    child.origin =
+                        Point::new(bounds.x + bounds.width - SCROLLBAR_THICKNESS, bounds.y);
+                    child.size = Size::new(SCROLLBAR_THICKNESS, bounds.height);
+                } else {
+                    child.origin = bounds.origin();
+                    child.size = Size::ZERO;
+                }
             }
         }
     }
