@@ -57,7 +57,7 @@ use teksilo_canvas::{Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
-use teksilo_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::{
     CursorIcon, EventContext, LayoutContext, PendingChild, Widget, WidgetPlacement,

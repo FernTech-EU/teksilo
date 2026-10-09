@@ -1635,16 +1635,12 @@ fn a_handler_can_re_place_an_overlay_it_only_knows_by_content() {
 }
 
 fn band_request(content: WidgetId, placement: OverlayPlacement) -> crate::overlay::OverlayRequest {
-    crate::overlay::OverlayRequest {
-        content_id: content,
-        anchor: content,
+    crate::overlay::OverlayRequest::new(
+        content,
+        content,
         placement,
-        dismiss: crate::overlay::DismissBehavior::Manual,
-        layer: crate::overlay::OverlayLayer::InTree,
-        parent_overlay: None,
-        on_dismiss: None,
-        fade_duration: None,
-    }
+        crate::overlay::DismissBehavior::Manual,
+    )
 }
 
 /// Build a tree whose only interactive widget runs `act` on a tap, tap it once,

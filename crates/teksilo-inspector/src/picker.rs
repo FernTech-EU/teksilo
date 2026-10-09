@@ -10,7 +10,7 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
-use teksilo_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
@@ -255,14 +255,14 @@ fn show_chain_menu(
     state.pick_menu_anchor.set(None);
     ctx.activate(menu_id);
     let state_for_dismiss = state.clone();
-    ctx.show_overlay(OverlayRequest {
-        content_id: menu_id,
-        anchor: overlay_anchor,
-        placement: OverlayPlacement::AtPointer(point),
-        dismiss: DismissBehavior::EscapeOrClickOutside,
-        layer: OverlayLayer::InTree,
-        parent_overlay: None,
-        on_dismiss: Some(std::rc::Rc::new(move |_, _| {
+    ctx.show_overlay(
+        OverlayRequest::new(
+            menu_id,
+            overlay_anchor,
+            OverlayPlacement::AtPointer(point),
+            DismissBehavior::EscapeOrClickOutside,
+        )
+        .on_dismiss(std::rc::Rc::new(move |_, _| {
             // Click-outside / Escape: discard the chain and exit
             // picker mode. The Pick toolbar button can re-enter
             // the picker.
@@ -271,6 +271,5 @@ fn show_chain_menu(
                 state_for_dismiss.picker_mode.set(false);
             }
         })),
-        fade_duration: None,
-    });
+    );
 }

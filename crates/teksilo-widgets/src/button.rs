@@ -1446,9 +1446,7 @@ mod tests {
         Rc<Cell<u32>>,                     // target activations
         Rc<Cell<u32>>,                     // trigger activations
     ) {
-        use teksilo_core::overlay::{
-            DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
-        };
+        use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
 
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let target_fired = Rc::new(Cell::new(0_u32));
@@ -1469,16 +1467,12 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
-        tree.show_overlay(OverlayRequest {
-            content_id: content,
-            anchor: trigger,
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::EscapeOrClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(OverlayRequest::new(
+            content,
+            trigger,
+            OverlayPlacement::Below,
+            DismissBehavior::EscapeOrClickOutside,
+        ));
         // Second layout positions the overlay content below the trigger.
         tree.layout(SizeProposal::exact(400.0, 200.0));
 

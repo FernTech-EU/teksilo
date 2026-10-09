@@ -65,7 +65,7 @@ use teksilo_core::accesskit::HasPopup;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, WidgetEvent};
 use teksilo_core::overlay::{
-    DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
+    DismissBehavior, OverlayDismissCallback, OverlayPlacement, OverlayRequest,
 };
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{PopoverStyle, PopoverStyleConfig, PopoverVariant, SharedPopoverStyle};
@@ -800,16 +800,13 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                     // moves into it — both happen in this same drain.
                     ctx_evt.materialize_now(content_id);
                     ctx_evt.activate(content_id);
-                    let mut req = OverlayRequest {
+                    let mut req = OverlayRequest::new(
                         content_id,
-                        anchor: self_ref,
-                        placement: placement.clone(),
-                        dismiss: dismiss_behavior.clone(),
-                        layer: OverlayLayer::InTree,
-                        parent_overlay: None,
-                        on_dismiss: Some(dismiss_cb.clone()),
-                        fade_duration: None,
-                    };
+                        self_ref,
+                        placement.clone(),
+                        dismiss_behavior.clone(),
+                    )
+                    .on_dismiss(dismiss_cb.clone());
                     if let Some(d) = fade_duration {
                         req = req.with_fade(d);
                     }

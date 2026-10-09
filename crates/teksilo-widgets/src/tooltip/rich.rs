@@ -53,7 +53,7 @@ use teksilo_i18n::lit;
 use teksilo_canvas::{Canvas, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::{LayoutContext, PaintContext, Widget};
 use teksilo_core::widget_builder::HandlerSet;
@@ -592,27 +592,23 @@ fn make_link_click_handler(
         if let Some(key) = TooltipRegistry::parse_url(url) {
             if let Some(&content_id) = nested.get(key) {
                 ctx.activate(content_id);
-                ctx.show_overlay(OverlayRequest {
+                // Leaving `parent_overlay` unset is intentional and correct: the handler
+                // can't know its own overlay id, so the dispatch
+                // layer injects the real parent
+                // (`overlay_ancestor_for_widget(source_widget)` in
+                // pointer_router.rs). That links this nested
+                // tooltip to the one it was opened from, so
+                // dismissing the parent cascade-closes it
+                // (`OverlayManager::dismiss_immediate` BFS). Same
+                // mechanism MenuItem submenus rely on.
+                ctx.show_overlay(OverlayRequest::new(
                     content_id,
-                    anchor: anchor_id,
-                    placement: OverlayPlacement::NearAnchor {
+                    anchor_id,
+                    OverlayPlacement::NearAnchor {
                         offset: teksilo_canvas::Vec2 { x: 0.0, y: 8.0 },
                     },
-                    dismiss: DismissBehavior::EscapeOrClickOutside,
-                    layer: OverlayLayer::InTree,
-                    // `None` is intentional and correct: the handler
-                    // can't know its own overlay id, so the dispatch
-                    // layer injects the real parent
-                    // (`overlay_ancestor_for_widget(source_widget)` in
-                    // pointer_router.rs). That links this nested
-                    // tooltip to the one it was opened from, so
-                    // dismissing the parent cascade-closes it
-                    // (`OverlayManager::dismiss_immediate` BFS). Same
-                    // mechanism MenuItem submenus rely on.
-                    parent_overlay: None,
-                    on_dismiss: None,
-                    fade_duration: None,
-                });
+                    DismissBehavior::EscapeOrClickOutside,
+                ));
             }
             return;
         }

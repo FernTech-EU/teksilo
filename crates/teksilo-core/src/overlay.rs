@@ -1985,26 +1985,24 @@ mod tests {
         let mut mgr = OverlayManager::new();
         let cb_a: OverlayDismissCallback = Rc::new(|_, _| {});
         let cb_b: OverlayDismissCallback = Rc::new(|_, _| {});
-        mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::ClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: Some(cb_a),
-            fade_duration: None,
-        });
-        mgr.show(OverlayRequest {
-            content_id: fake_id(11),
-            anchor: fake_id(2),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::ClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: Some(cb_b),
-            fade_duration: None,
-        });
+        mgr.show(
+            OverlayRequest::new(
+                fake_id(10),
+                fake_id(1),
+                OverlayPlacement::Below,
+                DismissBehavior::ClickOutside,
+            )
+            .on_dismiss(cb_a),
+        );
+        mgr.show(
+            OverlayRequest::new(
+                fake_id(11),
+                fake_id(2),
+                OverlayPlacement::Below,
+                DismissBehavior::ClickOutside,
+            )
+            .on_dismiss(cb_b),
+        );
         let dismissed = mgr.dismiss_all();
         assert_eq!(dismissed.len(), 2);
         assert!(mgr.is_empty());
@@ -2030,16 +2028,12 @@ mod tests {
     #[test]
     fn show_and_dismiss() {
         let mut mgr = OverlayManager::new();
-        let id = mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::ClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let id = mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::ClickOutside,
+        ));
         assert_eq!(mgr.len(), 1);
 
         mgr.dismiss(id);
@@ -2049,26 +2043,21 @@ mod tests {
     #[test]
     fn cascade_dismissal() {
         let mut mgr = OverlayManager::new();
-        let parent = mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::ClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
-        let _child = mgr.show(OverlayRequest {
-            content_id: fake_id(11),
-            anchor: fake_id(10),
-            placement: OverlayPlacement::TrailingEdge,
-            dismiss: DismissBehavior::ClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: Some(parent),
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let parent = mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::ClickOutside,
+        ));
+        let _child = mgr.show(
+            OverlayRequest::new(
+                fake_id(11),
+                fake_id(10),
+                OverlayPlacement::TrailingEdge,
+                DismissBehavior::ClickOutside,
+            )
+            .parent_overlay(parent),
+        );
         assert_eq!(mgr.len(), 2);
 
         // Dismissing parent cascades to child
@@ -2084,29 +2073,24 @@ mod tests {
         // drops it rather than growing the stack forever — and must not
         // panic, since this is reachable by real user clicking.
         let mut mgr = OverlayManager::new();
-        let mut parent = mgr.show(OverlayRequest {
-            content_id: fake_id(100),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let mut parent = mgr.show(OverlayRequest::new(
+            fake_id(100),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::Manual,
+        ));
         // Root is depth 0; fill the chain so MAX overlays exist, the
         // deepest at depth MAX-1.
         for i in 1..MAX_OVERLAY_NESTING_DEPTH {
-            parent = mgr.show(OverlayRequest {
-                content_id: fake_id(100 + i as u64),
-                anchor: fake_id(1),
-                placement: OverlayPlacement::Below,
-                dismiss: DismissBehavior::Manual,
-                layer: OverlayLayer::InTree,
-                parent_overlay: Some(parent),
-                on_dismiss: None,
-                fade_duration: None,
-            });
+            parent = mgr.show(
+                OverlayRequest::new(
+                    fake_id(100 + i as u64),
+                    fake_id(1),
+                    OverlayPlacement::Below,
+                    DismissBehavior::Manual,
+                )
+                .parent_overlay(parent),
+            );
         }
         assert_eq!(
             mgr.len(),
@@ -2115,16 +2099,15 @@ mod tests {
         );
 
         // The next child would nest at depth == MAX → dropped.
-        let dropped = mgr.show(OverlayRequest {
-            content_id: fake_id(999),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: Some(parent),
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let dropped = mgr.show(
+            OverlayRequest::new(
+                fake_id(999),
+                fake_id(1),
+                OverlayPlacement::Below,
+                DismissBehavior::Manual,
+            )
+            .parent_overlay(parent),
+        );
         assert_eq!(
             mgr.len(),
             MAX_OVERLAY_NESTING_DEPTH,
@@ -2139,26 +2122,18 @@ mod tests {
     #[test]
     fn dismiss_top() {
         let mut mgr = OverlayManager::new();
-        let _a = mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
-        let b = mgr.show(OverlayRequest {
-            content_id: fake_id(11),
-            anchor: fake_id(2),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let _a = mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::Manual,
+        ));
+        let b = mgr.show(OverlayRequest::new(
+            fake_id(11),
+            fake_id(2),
+            OverlayPlacement::Below,
+            DismissBehavior::Manual,
+        ));
 
         let dismissed = mgr.dismiss_top();
         assert_eq!(dismissed.map(|(id, _, _)| id), Some(b));
@@ -2168,16 +2143,12 @@ mod tests {
     #[test]
     fn click_outside_dismisses() {
         let mut mgr = OverlayManager::new();
-        mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::ClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::ClickOutside,
+        ));
 
         // Set overlay bounds
         let id = mgr.active_ids()[0];
@@ -2198,16 +2169,12 @@ mod tests {
     fn click_outside_returns_focus_restore() {
         let mut mgr = OverlayManager::new();
         let trigger = fake_id(99);
-        mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::ClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::ClickOutside,
+        ));
         let id = mgr.active_ids()[0];
         mgr.set_content_bounds(id, Size::new(100.0, 50.0));
         mgr.set_top_focus_restore(trigger);
@@ -2227,28 +2194,20 @@ mod tests {
         let mut mgr = OverlayManager::new();
         let pre_overlay_focus = fake_id(99);
         let inside_a = fake_id(50);
-        let a = mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::ClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let a = mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::ClickOutside,
+        ));
         mgr.set_content_bounds(a, Size::new(100.0, 50.0));
         mgr.set_top_focus_restore(pre_overlay_focus);
-        let b = mgr.show(OverlayRequest {
-            content_id: fake_id(11),
-            anchor: fake_id(2),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::ClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let b = mgr.show(OverlayRequest::new(
+            fake_id(11),
+            fake_id(2),
+            OverlayPlacement::Below,
+            DismissBehavior::ClickOutside,
+        ));
         mgr.set_content_bounds(b, Size::new(100.0, 50.0));
         mgr.set_top_focus_restore(inside_a);
 
@@ -2259,16 +2218,12 @@ mod tests {
     #[test]
     fn manual_dismiss_ignores_click_outside() {
         let mut mgr = OverlayManager::new();
-        mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::Manual,
+        ));
 
         let (dismissed, _, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
         assert!(dismissed.is_empty());
@@ -2278,16 +2233,12 @@ mod tests {
     #[test]
     fn escape_dismisses_escape_or_click_outside() {
         let mut mgr = OverlayManager::new();
-        let id = mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::EscapeOrClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let id = mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::EscapeOrClickOutside,
+        ));
 
         let dismissed = mgr.try_dismiss_top_on_escape();
         assert_eq!(dismissed.map(|(oid, _, _)| oid), Some(id));
@@ -2297,16 +2248,12 @@ mod tests {
     #[test]
     fn escape_dismisses_escape_key_only() {
         let mut mgr = OverlayManager::new();
-        let id = mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::EscapeKey,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let id = mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::EscapeKey,
+        ));
 
         // Escape should dismiss
         let dismissed = mgr.try_dismiss_top_on_escape();
@@ -2317,16 +2264,12 @@ mod tests {
     #[test]
     fn escape_does_not_dismiss_click_outside_only() {
         let mut mgr = OverlayManager::new();
-        mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::ClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::ClickOutside,
+        ));
 
         assert!(mgr.try_dismiss_top_on_escape().is_none());
         assert_eq!(mgr.len(), 1);
@@ -2335,16 +2278,12 @@ mod tests {
     #[test]
     fn escape_does_not_dismiss_manual() {
         let mut mgr = OverlayManager::new();
-        mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::Manual,
+        ));
 
         assert!(mgr.try_dismiss_top_on_escape().is_none());
         assert_eq!(mgr.len(), 1);
@@ -2353,16 +2292,12 @@ mod tests {
     #[test]
     fn click_outside_dismisses_escape_or_click_outside() {
         let mut mgr = OverlayManager::new();
-        mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::EscapeOrClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::EscapeOrClickOutside,
+        ));
 
         let id = mgr.active_ids()[0];
         mgr.set_content_bounds(id, Size::new(100.0, 50.0));
@@ -2382,30 +2317,22 @@ mod tests {
         let click_anchor = fake_id(1);
         let hover_anchor = fake_id(2);
 
-        let click_overlay = mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: click_anchor,
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::EscapeOrClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let click_overlay = mgr.show(OverlayRequest::new(
+            fake_id(10),
+            click_anchor,
+            OverlayPlacement::Below,
+            DismissBehavior::EscapeOrClickOutside,
+        ));
         mgr.set_content_bounds(click_overlay, Size::new(100.0, 50.0));
 
-        let hover_overlay = mgr.show(OverlayRequest {
-            content_id: fake_id(11),
-            anchor: hover_anchor,
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::PointerLeave {
+        let hover_overlay = mgr.show(OverlayRequest::new(
+            fake_id(11),
+            hover_anchor,
+            OverlayPlacement::Below,
+            DismissBehavior::PointerLeave {
                 delay: std::time::Duration::from_millis(150),
             },
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        ));
         mgr.set_content_bounds(hover_overlay, Size::new(100.0, 50.0));
 
         let (dismissed, _focus, toggle_anchors) =
@@ -2421,16 +2348,12 @@ mod tests {
     #[test]
     fn click_outside_does_not_dismiss_escape_key_only() {
         let mut mgr = OverlayManager::new();
-        mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::EscapeKey,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::EscapeKey,
+        ));
 
         let (dismissed, _, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
         assert!(dismissed.is_empty());
@@ -2452,28 +2375,20 @@ mod tests {
         // bottom and *overflows* below it (y∈[620,760]).
         fn build() -> (OverlayManager, OverlayId, OverlayId) {
             let mut mgr = OverlayManager::new();
-            let modal = mgr.show(OverlayRequest {
-                content_id: fake_id(10),
-                anchor: fake_id(1),
-                placement: OverlayPlacement::Centered,
-                dismiss: DismissBehavior::EscapeOrClickOutside,
-                layer: OverlayLayer::InTree,
-                parent_overlay: None,
-                on_dismiss: None,
-                fade_duration: None,
-            });
+            let modal = mgr.show(OverlayRequest::new(
+                fake_id(10),
+                fake_id(1),
+                OverlayPlacement::Centered,
+                DismissBehavior::EscapeOrClickOutside,
+            ));
             set_bounds(&mut mgr, modal, Rect::new(300.0, 60.0, 600.0, 680.0));
-            let tooltip = mgr.show(OverlayRequest {
-                content_id: fake_id(11),
-                anchor: fake_id(2),
-                placement: OverlayPlacement::Below,
+            let tooltip = mgr.show(OverlayRequest::new(
+                fake_id(11),
+                fake_id(2),
+                OverlayPlacement::Below,
                 // A promoted sticky rich tooltip: EscapeOrClickOutside.
-                dismiss: DismissBehavior::EscapeOrClickOutside,
-                layer: OverlayLayer::InTree,
-                parent_overlay: None,
-                on_dismiss: None,
-                fade_duration: None,
-            });
+                DismissBehavior::EscapeOrClickOutside,
+            ));
             set_bounds(&mut mgr, tooltip, Rect::new(400.0, 620.0, 200.0, 140.0));
             (mgr, modal, tooltip)
         }
@@ -2511,26 +2426,18 @@ mod tests {
     #[test]
     fn active_content_ids() {
         let mut mgr = OverlayManager::new();
-        mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
-        mgr.show(OverlayRequest {
-            content_id: fake_id(20),
-            anchor: fake_id(2),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::Manual,
+        ));
+        mgr.show(OverlayRequest::new(
+            fake_id(20),
+            fake_id(2),
+            OverlayPlacement::Below,
+            DismissBehavior::Manual,
+        ));
 
         let ids = mgr.active_content_ids();
         assert_eq!(ids.len(), 2);
@@ -2541,26 +2448,18 @@ mod tests {
     #[test]
     fn hit_test_topmost_first() {
         let mut mgr = OverlayManager::new();
-        let a = mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
-        let b = mgr.show(OverlayRequest {
-            content_id: fake_id(11),
-            anchor: fake_id(2),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let a = mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Below,
+            DismissBehavior::Manual,
+        ));
+        let b = mgr.show(OverlayRequest::new(
+            fake_id(11),
+            fake_id(2),
+            OverlayPlacement::Below,
+            DismissBehavior::Manual,
+        ));
 
         // Both overlays at origin with same bounds
         mgr.set_content_bounds(a, Size::new(100.0, 50.0));
@@ -2579,16 +2478,15 @@ mod tests {
         // widget underneath and outside-click dismissal of lower overlays
         // isn't suppressed by the ghost.
         let mut mgr = OverlayManager::new();
-        let id = mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::ClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: Some(Duration::from_millis(150)),
-        });
+        let id = mgr.show(
+            OverlayRequest::new(
+                fake_id(10),
+                fake_id(1),
+                OverlayPlacement::Below,
+                DismissBehavior::ClickOutside,
+            )
+            .with_fade(Duration::from_millis(150)),
+        );
         mgr.set_content_bounds(id, Size::new(100.0, 50.0));
         let point = Point::new(50.0, 25.0);
 
@@ -2620,16 +2518,12 @@ mod tests {
     fn pause_auto_dismiss_removes_overlay_from_deadline_set() {
         let mut mgr = OverlayManager::new();
         let id = mgr.show_for(
-            OverlayRequest {
-                content_id: fake_id(10),
-                anchor: fake_id(1),
-                placement: OverlayPlacement::Centered,
-                dismiss: DismissBehavior::Manual,
-                layer: OverlayLayer::InTree,
-                parent_overlay: None,
-                on_dismiss: None,
-                fade_duration: None,
-            },
+            OverlayRequest::new(
+                fake_id(10),
+                fake_id(1),
+                OverlayPlacement::Centered,
+                DismissBehavior::Manual,
+            ),
             Duration::from_secs(10),
         );
         assert!(mgr.next_auto_dismiss_deadline().is_some());
@@ -2651,16 +2545,12 @@ mod tests {
     fn pause_then_resume_restores_remaining_time() {
         let mut mgr = OverlayManager::new();
         let id = mgr.show_for(
-            OverlayRequest {
-                content_id: fake_id(11),
-                anchor: fake_id(1),
-                placement: OverlayPlacement::Centered,
-                dismiss: DismissBehavior::Manual,
-                layer: OverlayLayer::InTree,
-                parent_overlay: None,
-                on_dismiss: None,
-                fade_duration: None,
-            },
+            OverlayRequest::new(
+                fake_id(11),
+                fake_id(1),
+                OverlayPlacement::Centered,
+                DismissBehavior::Manual,
+            ),
             Duration::from_secs(10),
         );
 
@@ -2688,16 +2578,12 @@ mod tests {
     fn pause_is_idempotent() {
         let mut mgr = OverlayManager::new();
         let id = mgr.show_for(
-            OverlayRequest {
-                content_id: fake_id(12),
-                anchor: fake_id(1),
-                placement: OverlayPlacement::Centered,
-                dismiss: DismissBehavior::Manual,
-                layer: OverlayLayer::InTree,
-                parent_overlay: None,
-                on_dismiss: None,
-                fade_duration: None,
-            },
+            OverlayRequest::new(
+                fake_id(12),
+                fake_id(1),
+                OverlayPlacement::Centered,
+                DismissBehavior::Manual,
+            ),
             Duration::from_secs(10),
         );
         mgr.pause_auto_dismiss(id);
@@ -2714,16 +2600,12 @@ mod tests {
     fn resume_on_unpaused_is_noop() {
         let mut mgr = OverlayManager::new();
         let id = mgr.show_for(
-            OverlayRequest {
-                content_id: fake_id(13),
-                anchor: fake_id(1),
-                placement: OverlayPlacement::Centered,
-                dismiss: DismissBehavior::Manual,
-                layer: OverlayLayer::InTree,
-                parent_overlay: None,
-                on_dismiss: None,
-                fade_duration: None,
-            },
+            OverlayRequest::new(
+                fake_id(13),
+                fake_id(1),
+                OverlayPlacement::Centered,
+                DismissBehavior::Manual,
+            ),
             Duration::from_secs(10),
         );
         let before = mgr.stack[0].auto_dismiss_after;
@@ -2735,16 +2617,12 @@ mod tests {
     #[test]
     fn pause_on_persistent_overlay_is_noop() {
         let mut mgr = OverlayManager::new();
-        let id = mgr.show(OverlayRequest {
-            content_id: fake_id(14),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Centered,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let id = mgr.show(OverlayRequest::new(
+            fake_id(14),
+            fake_id(1),
+            OverlayPlacement::Centered,
+            DismissBehavior::Manual,
+        ));
         // No auto_dismiss_after — pause should be a no-op.
         mgr.pause_auto_dismiss(id);
         assert!(!mgr.is_auto_dismiss_paused(id));
@@ -2770,16 +2648,12 @@ mod tests {
         band: OverlayBand,
     ) -> OverlayId {
         let id = mgr.show_in_band(
-            OverlayRequest {
-                content_id: fake_id(content),
-                anchor: fake_id(content + 100),
-                placement: OverlayPlacement::Centered,
+            OverlayRequest::new(
+                fake_id(content),
+                fake_id(content + 100),
+                OverlayPlacement::Centered,
                 dismiss,
-                layer: OverlayLayer::InTree,
-                parent_overlay: None,
-                on_dismiss: None,
-                fade_duration: None,
-            },
+            ),
             band,
         );
         if let Some(overlay) = mgr.stack.iter_mut().find(|o| o.id == id) {

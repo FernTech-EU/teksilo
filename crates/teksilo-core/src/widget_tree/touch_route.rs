@@ -1314,18 +1314,14 @@ mod tests {
         let _root = tree.add(InsetWidget::new(100.0).set_child(trigger));
         let content = tree.add(SizedWidget(teksilo_canvas::Size::new(80.0, 60.0)));
         tree.layout(SizeProposal::exact(WINDOW.0, WINDOW.1));
-        tree.show_overlay(crate::overlay::OverlayRequest {
-            content_id: content,
-            anchor: trigger,
-            placement: crate::overlay::OverlayPlacement::AtPointer(Point::new(300.0, 200.0)),
-            dismiss: crate::overlay::DismissBehavior::PointerLeave {
+        tree.show_overlay(crate::overlay::OverlayRequest::new(
+            content,
+            trigger,
+            crate::overlay::OverlayPlacement::AtPointer(Point::new(300.0, 200.0)),
+            crate::overlay::DismissBehavior::PointerLeave {
                 delay: std::time::Duration::from_millis(150),
             },
-            layer: crate::overlay::OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        ));
         tree.layout(SizeProposal::exact(WINDOW.0, WINDOW.1));
 
         assert_eq!(tree.active_overlays().len(), 1);

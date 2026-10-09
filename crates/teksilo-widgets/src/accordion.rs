@@ -1403,9 +1403,7 @@ mod tests {
         use crate::primitives::{Expand, FixedSize, Padding, TextWidget, VStack};
         use crate::scroll_area::ScrollArea;
         use std::time::Duration;
-        use teksilo_core::overlay::{
-            DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
-        };
+        use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
 
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new()
@@ -1437,16 +1435,12 @@ mod tests {
             ));
         tree.set_dormant(dialog);
         tree.activate(dialog);
-        tree.show_overlay(OverlayRequest {
-            content_id: dialog,
-            anchor: source,
-            placement: OverlayPlacement::Centered,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(OverlayRequest::new(
+            dialog,
+            source,
+            OverlayPlacement::Centered,
+            DismissBehavior::Manual,
+        ));
         tree.layout(window);
         let _ = tree.render();
 

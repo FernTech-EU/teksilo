@@ -36,9 +36,7 @@ use accesskit_consumer::{FilterResult, NodeRef, Tree, TreeChangeHandler, common_
 use teksilo_canvas::SizeProposal;
 
 use crate::accessibility::widget_id_to_node_id;
-use crate::overlay::{
-    DismissBehavior, OverlayBand, OverlayId, OverlayLayer, OverlayPlacement, OverlayRequest,
-};
+use crate::overlay::{DismissBehavior, OverlayBand, OverlayId, OverlayPlacement, OverlayRequest};
 use crate::test_widgets::{FillWidget, StackWidget};
 use crate::widget_builder::WidgetBuilder;
 use crate::widget_id::WidgetId;
@@ -58,16 +56,7 @@ fn control(tree: &mut WidgetTree, name: &str, pressed: &Rc<Cell<u32>>) -> Widget
 }
 
 fn overlay(content_id: WidgetId, anchor: WidgetId, placement: OverlayPlacement) -> OverlayRequest {
-    OverlayRequest {
-        content_id,
-        anchor,
-        placement,
-        dismiss: DismissBehavior::Manual,
-        layer: OverlayLayer::InTree,
-        parent_overlay: None,
-        on_dismiss: None,
-        fade_duration: None,
-    }
+    OverlayRequest::new(content_id, anchor, placement, DismissBehavior::Manual)
 }
 
 /// A page with two controls, and a modal to put over it.

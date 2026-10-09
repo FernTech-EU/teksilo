@@ -1168,16 +1168,12 @@ mod tests {
         let mut tree = WidgetTree::new();
         let anchor = tree.add(FillWidget::new());
         let content = tree.add(Sized(200.0, content_height));
-        let id = tree.show_overlay(crate::overlay::OverlayRequest {
-            content_id: content,
+        let id = tree.show_overlay(crate::overlay::OverlayRequest::new(
+            content,
             anchor,
-            placement: crate::overlay::OverlayPlacement::Centered,
-            dismiss: crate::overlay::DismissBehavior::Manual,
-            layer: crate::overlay::OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+            crate::overlay::OverlayPlacement::Centered,
+            crate::overlay::DismissBehavior::Manual,
+        ));
         (tree, id)
     }
 

@@ -72,7 +72,7 @@ use teksilo_canvas::{Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
-use teksilo_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
 use teksilo_core::shortcut::KeyStroke;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::{MenuItemStyleConfig, SharedMenuItemStyle};

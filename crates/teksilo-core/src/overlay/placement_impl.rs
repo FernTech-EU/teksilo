@@ -496,16 +496,12 @@ mod tests {
     #[test]
     fn centered_placement_uses_viewport_center() {
         let mut mgr = OverlayManager::new();
-        let id = mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::Centered,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let id = mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::Centered,
+            DismissBehavior::Manual,
+        ));
 
         mgr.set_content_bounds(id, Size::new(240.0, 120.0));
         mgr.position_overlays(
@@ -527,16 +523,12 @@ mod tests {
     #[test]
     fn bottom_center_placement_uses_viewport_bottom_margin() {
         let mut mgr = OverlayManager::new();
-        let id = mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::BottomCenter,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let id = mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::BottomCenter,
+            DismissBehavior::Manual,
+        ));
 
         mgr.set_content_bounds(id, Size::new(240.0, 64.0));
         mgr.position_overlays(
@@ -563,16 +555,12 @@ mod tests {
         margin: Vec2,
         size: Size,
     ) -> OverlayId {
-        let id = mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
-            placement: OverlayPlacement::ViewportCorner { corner, margin },
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let id = mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::ViewportCorner { corner, margin },
+            DismissBehavior::Manual,
+        ));
         mgr.set_content_bounds(id, size);
         id
     }
@@ -727,18 +715,14 @@ mod tests {
         let anchor = Rect::new(600.0, 100.0, 100.0, 20.0);
         let resolved_x = |dir: LayoutDirection| {
             let mut mgr = OverlayManager::new();
-            let id = mgr.show(OverlayRequest {
-                content_id: fake_id(10),
-                anchor: fake_id(1),
-                placement: OverlayPlacement::NearAnchor {
+            let id = mgr.show(OverlayRequest::new(
+                fake_id(10),
+                fake_id(1),
+                OverlayPlacement::NearAnchor {
                     offset: Vec2::new(0.0, 8.0),
                 },
-                dismiss: DismissBehavior::Manual,
-                layer: OverlayLayer::InTree,
-                parent_overlay: None,
-                on_dismiss: None,
-                fade_duration: None,
-            });
+                DismissBehavior::Manual,
+            ));
             mgr.set_content_bounds(id, Size::new(200.0, 50.0));
             mgr.position_overlays(|_| Some(anchor), (800.0, 600.0), dir);
             overlay_bounds(&mgr, id).x
@@ -774,16 +758,12 @@ mod tests {
         direction: LayoutDirection,
     ) -> Rect {
         let mut mgr = OverlayManager::new();
-        let id = mgr.show(OverlayRequest {
-            content_id: fake_id(10),
-            anchor: fake_id(1),
+        let id = mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
             placement,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+            DismissBehavior::Manual,
+        ));
         mgr.set_content_bounds(id, size);
         mgr.position_overlays(|_| Some(anchor), viewport, direction);
         overlay_bounds(&mgr, id)

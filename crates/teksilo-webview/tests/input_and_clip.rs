@@ -348,7 +348,7 @@ fn last_bounds(records: &MemoryWebViewRecords, id: WebViewId) -> Option<Rect> {
 /// popover or a modal dialog over a web view is both visible and operable.
 #[test]
 fn an_overlay_standing_over_the_page_hides_the_engine_subview() {
-    use teksilo_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+    use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
 
     let (registry, records) = memory_registry();
     let mut tree = tree_with_registry(registry);
@@ -367,16 +367,12 @@ fn an_overlay_standing_over_the_page_hides_the_engine_subview() {
     );
 
     tree.activate(panel);
-    let overlay = tree.show_overlay(OverlayRequest {
-        content_id: panel,
+    let overlay = tree.show_overlay(OverlayRequest::new(
+        panel,
         anchor,
-        placement: OverlayPlacement::Centered,
-        dismiss: DismissBehavior::EscapeOrClickOutside,
-        layer: OverlayLayer::InTree,
-        parent_overlay: None,
-        on_dismiss: None,
-        fade_duration: None,
-    });
+        OverlayPlacement::Centered,
+        DismissBehavior::EscapeOrClickOutside,
+    ));
     layout(&mut tree);
     let _ = tree.render();
     assert_eq!(

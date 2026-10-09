@@ -777,16 +777,12 @@ fn candidates_are_restricted_to_the_topmost_overlay_layer() {
     // Shown BEFORE the first layout: `layout` early-returns on a clean tree
     // with an unchanged proposal, so an overlay pushed between two identical
     // layout calls would never be positioned.
-    tree.show_overlay(crate::overlay::OverlayRequest {
-        content_id: panel,
+    tree.show_overlay(crate::overlay::OverlayRequest::new(
+        panel,
         anchor,
-        placement: crate::overlay::OverlayPlacement::Below,
-        dismiss: crate::overlay::DismissBehavior::Manual,
-        layer: crate::overlay::OverlayLayer::InTree,
-        parent_overlay: None,
-        on_dismiss: None,
-        fade_duration: None,
-    });
+        crate::overlay::OverlayPlacement::Below,
+        crate::overlay::DismissBehavior::Manual,
+    ));
     tree.layout(SizeProposal::exact(200.0, 200.0));
 
     let panel_bounds = tree.bounds(panel);

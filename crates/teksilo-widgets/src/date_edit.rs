@@ -96,7 +96,7 @@ use teksilo_core::accesskit::{Action, HasPopup, Role};
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::overlay::{
-    DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
+    DismissBehavior, OverlayDismissCallback, OverlayPlacement, OverlayRequest,
 };
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
@@ -776,16 +776,15 @@ impl Widget for DateEdit {
                         // below is measured against it and focus moves into it.
                         ctx_evt.materialize_now(calendar_id);
                         ctx_evt.activate(calendar_id);
-                        ctx_evt.show_overlay(OverlayRequest {
-                            content_id: calendar_id,
-                            anchor: self_ref,
-                            placement: placement.clone(),
-                            dismiss: DismissBehavior::EscapeOrClickOutside,
-                            layer: OverlayLayer::InTree,
-                            parent_overlay: None,
-                            on_dismiss: Some(dismiss_cb.clone()),
-                            fade_duration: None,
-                        });
+                        ctx_evt.show_overlay(
+                            OverlayRequest::new(
+                                calendar_id,
+                                self_ref,
+                                placement.clone(),
+                                DismissBehavior::EscapeOrClickOutside,
+                            )
+                            .on_dismiss(dismiss_cb.clone()),
+                        );
                         // Move focus into the calendar so arrow keys
                         // navigate cells immediately — standard date-
                         // picker UX (macOS Calendar, JetBrains, etc.).

@@ -40,8 +40,7 @@ use teksilo_canvas::{Point, Rect};
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::EventResponse;
 use teksilo_core::overlay::{
-    DismissBehavior, OverlayBand, OverlayLayer, OverlayPlacement, OverlayRequest,
-    SelectionHandleKind,
+    DismissBehavior, OverlayBand, OverlayPlacement, OverlayRequest, SelectionHandleKind,
 };
 use teksilo_core::pointer::{PointerId, PointerInfo};
 use teksilo_core::signal::Signal;
@@ -435,19 +434,16 @@ impl EditorTouch {
             // keeps the editor underneath taking presses — hence no
             // re-placement per publish either.
             ctx.show_overlay_in_band(
-                OverlayRequest {
-                    content_id: layer,
+                OverlayRequest::new(
+                    layer,
                     anchor,
-                    placement: OverlayPlacement::FullViewport,
+                    OverlayPlacement::FullViewport,
                     // The band is exempt from outside-press dismissal — every
                     // caret-moving tap is outside a handle — so the lifetime is
                     // the controller's published state.
-                    dismiss: DismissBehavior::Manual,
-                    layer: OverlayLayer::InTree,
-                    parent_overlay: None,
-                    on_dismiss: Some(self.on_overlay_dismissed(DismissedOverlay::Layer)),
-                    fade_duration: None,
-                },
+                    DismissBehavior::Manual,
+                )
+                .on_dismiss(self.on_overlay_dismissed(DismissedOverlay::Layer)),
                 OverlayBand::TextAffordance,
             );
         }
@@ -469,10 +465,10 @@ impl EditorTouch {
             return;
         };
         ctx.show_overlay_in_band(
-            OverlayRequest {
-                content_id: toolbar_id,
+            OverlayRequest::new(
+                toolbar_id,
                 anchor,
-                placement: request.placement(),
+                request.placement(),
                 // **Not** `ClickOutside`. A direct pointer's outside press is
                 // *armed* rather than dismissed: both the down and the up are
                 // withheld from the tree, on the grounds that a finger covers
@@ -481,12 +477,9 @@ impl EditorTouch {
                 // would be spent closing the menu, so every gesture would need
                 // doing twice. `EscapeKey` is skipped by that rule entirely,
                 // and the host owns every other way down.
-                dismiss: DismissBehavior::EscapeKey,
-                layer: OverlayLayer::InTree,
-                parent_overlay: None,
-                on_dismiss: Some(self.on_overlay_dismissed(DismissedOverlay::Toolbar)),
-                fade_duration: None,
-            },
+                DismissBehavior::EscapeKey,
+            )
+            .on_dismiss(self.on_overlay_dismissed(DismissedOverlay::Toolbar)),
             OverlayBand::Standard,
         );
         // Showing content that is already up is a no-op, so the selection

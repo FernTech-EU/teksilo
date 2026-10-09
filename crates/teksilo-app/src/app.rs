@@ -13,7 +13,7 @@ use teksilo_core::event_source::{
     AppEventPoster, EventSource, EventSourceAdapter, SubscriptionId, TreeAppContext,
 };
 use teksilo_core::modal::{ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest};
-use teksilo_core::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+use teksilo_core::{DismissBehavior, OverlayPlacement, OverlayRequest};
 use teksilo_core::{WidgetId, WidgetTree};
 use teksilo_i18n::{I18nConfig, I18nManager, LanguageIdentifier};
 use teksilo_platform::event_translation;
@@ -209,16 +209,12 @@ fn present_in_tree_modal_request(
             .dismiss_target(dismiss_target.clone())
             .click_to_dismiss(click_to_dismiss),
     );
-    let scrim_overlay = tree.show_overlay(OverlayRequest {
-        content_id: scrim_id,
-        anchor: source_widget,
-        placement: OverlayPlacement::FullViewport,
-        dismiss: DismissBehavior::Manual,
-        layer: OverlayLayer::InTree,
-        parent_overlay: None,
-        on_dismiss: None,
-        fade_duration: None,
-    });
+    let scrim_overlay = tree.show_overlay(OverlayRequest::new(
+        scrim_id,
+        source_widget,
+        OverlayPlacement::FullViewport,
+        DismissBehavior::Manual,
+    ));
 
     tree.activate(content_id);
     // Wrap the caller's `on_dismiss` so the framework also restores the
@@ -250,16 +246,14 @@ fn present_in_tree_modal_request(
     // trapped in (and positioned relative to) the transient menu overlay instead
     // of centering on the window. `Centered` already ignores the anchor; keeping
     // `parent_overlay: None` makes it center on the viewport.
-    let modal_overlay = tree.show_overlay(OverlayRequest {
+    let mut request = OverlayRequest::new(
         content_id,
-        anchor: source_widget,
-        placement: OverlayPlacement::Centered,
+        source_widget,
+        OverlayPlacement::Centered,
         dismiss,
-        layer: OverlayLayer::InTree,
-        parent_overlay: None,
-        on_dismiss,
-        fade_duration: None,
-    });
+    );
+    request.on_dismiss = on_dismiss;
+    let modal_overlay = tree.show_overlay(request);
     // The modal is now the topmost overlay; record where focus should
     // return when it dismisses. Mirrors `show_overlay_from_source`'s
     // capture-then-set-top pattern. The `is_active` guard on the restore

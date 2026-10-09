@@ -48,8 +48,7 @@ use std::rc::Rc;
 
 use teksilo_canvas::{Point, Rect};
 use teksilo_core::overlay::{
-    DismissBehavior, OverlayBand, OverlayLayer, OverlayPlacement, OverlayRequest,
-    SelectionHandleKind,
+    DismissBehavior, OverlayBand, OverlayPlacement, OverlayRequest, SelectionHandleKind,
 };
 use teksilo_core::signal::Signal;
 use teksilo_core::text_touch::{
@@ -523,19 +522,16 @@ impl FieldTouch {
             // [`AffordanceHost`] do. Hence no `update_overlay_placement_by_content`
             // per publish either: the viewport does not move when a handle does.
             ctx.show_overlay_in_band(
-                OverlayRequest {
-                    content_id: layer,
+                OverlayRequest::new(
+                    layer,
                     anchor,
-                    placement: OverlayPlacement::FullViewport,
+                    OverlayPlacement::FullViewport,
                     // The band is exempt from outside-press dismissal — every
                     // caret-moving tap is outside a handle — so the lifetime is
                     // the controller's published state, above.
-                    dismiss: DismissBehavior::Manual,
-                    layer: OverlayLayer::InTree,
-                    parent_overlay: None,
-                    on_dismiss: Some(self.on_overlay_dismissed(DismissedOverlay::Layer)),
-                    fade_duration: None,
-                },
+                    DismissBehavior::Manual,
+                )
+                .on_dismiss(self.on_overlay_dismissed(DismissedOverlay::Layer)),
                 OverlayBand::TextAffordance,
             );
         }
@@ -557,10 +553,10 @@ impl FieldTouch {
             return;
         };
         ctx.show_overlay_in_band(
-            OverlayRequest {
-                content_id: toolbar_id,
+            OverlayRequest::new(
+                toolbar_id,
                 anchor,
-                placement: request.placement(),
+                request.placement(),
                 // **Not** `ClickOutside`. A direct pointer's outside press is
                 // *armed* rather than dismissed (`arm_outside_press_dismissal`):
                 // both the down and the up are withheld from the tree, on the
@@ -571,12 +567,9 @@ impl FieldTouch {
                 // rule entirely, and the host owns every other way down:
                 // the press that places a caret, a keystroke, a handle drag,
                 // focus loss, window deactivation, a content change.
-                dismiss: DismissBehavior::EscapeKey,
-                layer: OverlayLayer::InTree,
-                parent_overlay: None,
-                on_dismiss: Some(self.on_overlay_dismissed(DismissedOverlay::Toolbar)),
-                fade_duration: None,
-            },
+                DismissBehavior::EscapeKey,
+            )
+            .on_dismiss(self.on_overlay_dismissed(DismissedOverlay::Toolbar)),
             OverlayBand::Standard,
         );
         // Showing content that is already up is a no-op, so the selection

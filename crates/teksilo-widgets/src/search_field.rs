@@ -63,7 +63,7 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::overlay::{
-    DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
+    DismissBehavior, OverlayDismissCallback, OverlayPlacement, OverlayRequest,
 };
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::{PopoverStyleConfig, PopoverVariant};
@@ -518,32 +518,31 @@ impl Widget for SearchField {
                 // would wake a node whose subtree does not exist yet.
                 ctx.materialize_now(panel_id);
                 ctx.activate(panel_id);
-                ctx.show_overlay(OverlayRequest {
-                    content_id: panel_id,
-                    anchor: self_id,
-                    // `NearAnchor` (rather than `BelowPreferred`)
-                    // because the popover should size to the widest
-                    // suggestion, not to the field's width. `BelowPreferred`
-                    // exists for combo-box dropdowns that must be at
-                    // least as wide as their trigger — it does
-                    // `content_size.width.max(anchor.width)` in
-                    // overlay.rs's `position_overlays`. `NearAnchor`
-                    // keeps the same below/above flip behavior, the
-                    // same horizontal viewport clamp, but takes the
-                    // content's intrinsic width as-is. The
-                    // `SuggestionPanel` already reports max
-                    // (label_width + row_padding) + panel_padding as
-                    // its natural width, so the popover ends up
-                    // exactly the size of the widest item.
-                    placement: OverlayPlacement::NearAnchor {
-                        offset: teksilo_canvas::Vec2::ZERO,
-                    },
-                    dismiss: DismissBehavior::EscapeOrClickOutside,
-                    layer: OverlayLayer::InTree,
-                    parent_overlay: None,
-                    on_dismiss: Some(dismiss_callback.clone()),
-                    fade_duration: None,
-                });
+                ctx.show_overlay(
+                    OverlayRequest::new(
+                        panel_id,
+                        self_id,
+                        // `NearAnchor` (rather than `BelowPreferred`)
+                        // because the popover should size to the widest
+                        // suggestion, not to the field's width. `BelowPreferred`
+                        // exists for combo-box dropdowns that must be at
+                        // least as wide as their trigger — it does
+                        // `content_size.width.max(anchor.width)` in
+                        // overlay.rs's `position_overlays`. `NearAnchor`
+                        // keeps the same below/above flip behavior, the
+                        // same horizontal viewport clamp, but takes the
+                        // content's intrinsic width as-is. The
+                        // `SuggestionPanel` already reports max
+                        // (label_width + row_padding) + panel_padding as
+                        // its natural width, so the popover ends up
+                        // exactly the size of the widest item.
+                        OverlayPlacement::NearAnchor {
+                            offset: teksilo_canvas::Vec2::ZERO,
+                        },
+                        DismissBehavior::EscapeOrClickOutside,
+                    )
+                    .on_dismiss(dismiss_callback.clone()),
+                );
             })
         };
 

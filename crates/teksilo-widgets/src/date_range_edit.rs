@@ -82,7 +82,7 @@ use teksilo_core::accesskit::{Action, Role};
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::overlay::{
-    DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
+    DismissBehavior, OverlayDismissCallback, OverlayPlacement, OverlayRequest,
 };
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
@@ -528,16 +528,15 @@ impl Widget for DateRangeEdit {
                     // below is measured against it and focus moves into it.
                     ctx_evt.materialize_now(cal_id);
                     ctx_evt.activate(cal_id);
-                    ctx_evt.show_overlay(OverlayRequest {
-                        content_id: cal_id,
-                        anchor: self_ref,
-                        placement: OverlayPlacement::BelowPreferred,
-                        dismiss: DismissBehavior::EscapeOrClickOutside,
-                        layer: OverlayLayer::InTree,
-                        parent_overlay: None,
-                        on_dismiss: Some(dismiss_cb.clone()),
-                        fade_duration: None,
-                    });
+                    ctx_evt.show_overlay(
+                        OverlayRequest::new(
+                            cal_id,
+                            self_ref,
+                            OverlayPlacement::BelowPreferred,
+                            DismissBehavior::EscapeOrClickOutside,
+                        )
+                        .on_dismiss(dismiss_cb.clone()),
+                    );
                     ctx_evt.request_focus(cal_id);
                 }
             });

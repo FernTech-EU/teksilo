@@ -909,16 +909,12 @@ mod tests {
         press(&mut tree, Point::new(20.0, 50.0));
 
         let modal_content = tree.add(FillWidget::new());
-        tree.show_overlay(crate::overlay::OverlayRequest {
-            content_id: modal_content,
-            anchor: id,
-            placement: crate::overlay::OverlayPlacement::Centered,
-            dismiss: crate::overlay::DismissBehavior::Manual,
-            layer: crate::overlay::OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(crate::overlay::OverlayRequest::new(
+            modal_content,
+            id,
+            crate::overlay::OverlayPlacement::Centered,
+            crate::overlay::DismissBehavior::Manual,
+        ));
 
         assert_eq!(*log.borrow(), vec![(id, CancelReason::ModalOpened)]);
         assert_eq!(tree.captured_by(PointerId::MOUSE), None);
@@ -935,16 +931,12 @@ mod tests {
         press(&mut tree, Point::new(20.0, 50.0));
 
         let popover = tree.add(FillWidget::new());
-        tree.show_overlay(crate::overlay::OverlayRequest {
-            content_id: popover,
-            anchor: id,
-            placement: crate::overlay::OverlayPlacement::Below,
-            dismiss: crate::overlay::DismissBehavior::Manual,
-            layer: crate::overlay::OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(crate::overlay::OverlayRequest::new(
+            popover,
+            id,
+            crate::overlay::OverlayPlacement::Below,
+            crate::overlay::DismissBehavior::Manual,
+        ));
 
         assert!(log.borrow().is_empty(), "a popover is not a modal");
         assert_eq!(tree.captured_by(PointerId::MOUSE), Some(id));
@@ -1056,16 +1048,12 @@ mod tests {
         slot.set(Some(content));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
-        let overlay = tree.show_overlay(crate::overlay::OverlayRequest {
-            content_id: content,
+        let overlay = tree.show_overlay(crate::overlay::OverlayRequest::new(
+            content,
             anchor,
-            placement: crate::overlay::OverlayPlacement::Below,
-            dismiss: crate::overlay::DismissBehavior::Manual,
-            layer: crate::overlay::OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+            crate::overlay::OverlayPlacement::Below,
+            crate::overlay::DismissBehavior::Manual,
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         // The press lands on the overlay's own content, which grips the
@@ -1126,16 +1114,12 @@ mod tests {
             item_slot.set(Some(item));
             tree.layout(SizeProposal::exact(200.0, 100.0));
 
-            let overlay = tree.show_overlay(crate::overlay::OverlayRequest {
-                content_id: item,
+            let overlay = tree.show_overlay(crate::overlay::OverlayRequest::new(
+                item,
                 anchor,
-                placement: crate::overlay::OverlayPlacement::Below,
-                dismiss: crate::overlay::DismissBehavior::Manual,
-                layer: crate::overlay::OverlayLayer::InTree,
-                parent_overlay: None,
-                on_dismiss: None,
-                fade_duration: None,
-            });
+                crate::overlay::OverlayPlacement::Below,
+                crate::overlay::DismissBehavior::Manual,
+            ));
             overlay_slot.set(Some(overlay));
             tree.layout(SizeProposal::exact(200.0, 100.0));
             let at = tree.bounds(item).center();

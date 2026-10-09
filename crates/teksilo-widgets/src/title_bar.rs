@@ -1369,9 +1369,7 @@ mod tests {
         // unrelated dead-zoned control happened to sit beneath). Any
         // interactive overlay must carve its caption overlap out of the
         // published regions.
-        use teksilo_core::overlay::{
-            DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
-        };
+        use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
 
         let host = Rc::new(TestHost::default());
         let (mut tree, bar) = build_realistic_tree(host.clone(), |b| b);
@@ -1380,16 +1378,12 @@ mod tests {
         // 40 dp title bar strip, its bottom half hangs below into the
         // client area.
         let content = tree.add(FixedSize::new().width(200.0).height(60.0));
-        tree.show_overlay(OverlayRequest {
-            content_id: content,
-            anchor: bar,
-            placement: OverlayPlacement::AtPointer(Point::new(100.0, 20.0)),
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(OverlayRequest::new(
+            content,
+            bar,
+            OverlayPlacement::AtPointer(Point::new(100.0, 20.0)),
+            DismissBehavior::Manual,
+        ));
         paint_once(&mut tree);
 
         let regions = host.last_regions.borrow();
@@ -1420,24 +1414,18 @@ mod tests {
         // entirely below the title bar must NOT punch a hole — its rect
         // never overlaps the published regions, and a spurious hole would
         // eat the caption's drag under it.
-        use teksilo_core::overlay::{
-            DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
-        };
+        use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
 
         let host = Rc::new(TestHost::default());
         let (mut tree, bar) = build_realistic_tree(host.clone(), |b| b);
 
         let content = tree.add(FixedSize::new().width(200.0).height(60.0));
-        tree.show_overlay(OverlayRequest {
-            content_id: content,
-            anchor: bar,
-            placement: OverlayPlacement::AtPointer(Point::new(100.0, 300.0)),
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(OverlayRequest::new(
+            content,
+            bar,
+            OverlayPlacement::AtPointer(Point::new(100.0, 300.0)),
+            DismissBehavior::Manual,
+        ));
         paint_once(&mut tree);
 
         let regions = host.last_regions.borrow();

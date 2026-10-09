@@ -305,7 +305,7 @@ impl WidgetTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+    use crate::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
     use crate::test_widgets::FillWidget;
     use crate::widget_builder::WidgetBuilder;
     use crate::{ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest};
@@ -477,16 +477,12 @@ mod tests {
         }));
         tree.layout(SizeProposal::exact(320.0, 200.0));
 
-        tree.show_overlay(OverlayRequest {
-            content_id: modal_content,
-            anchor: trigger,
-            placement: OverlayPlacement::Centered,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(OverlayRequest::new(
+            modal_content,
+            trigger,
+            OverlayPlacement::Centered,
+            DismissBehavior::Manual,
+        ));
         tree.layout(SizeProposal::exact(320.0, 200.0));
 
         assert_eq!(tree.active_overlays().len(), 1);

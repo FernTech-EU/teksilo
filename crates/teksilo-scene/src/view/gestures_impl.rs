@@ -236,28 +236,23 @@ impl SceneView {
                                 // time this view shows one.
                                 tooltip_shown.set(true);
                                 ctx.materialize_now(tooltip_content_id);
-                                ctx.show_overlay_after(
-                                    teksilo_core::overlay::OverlayRequest {
-                                        content_id: tooltip_content_id,
-                                        anchor: tooltip_anchor_id,
-                                        // Drop the tooltip just below-right
-                                        // of the cursor so it doesn't sit
-                                        // under the pointer.
-                                        placement:
-                                            teksilo_core::overlay::OverlayPlacement::AtPointer(
-                                                Point::new(position.x + 12.0, position.y + 16.0),
-                                            ),
-                                        // Manual: every dismiss path (item
-                                        // change, pointer-down, pointer-leave)
-                                        // is driven explicitly below.
-                                        dismiss: teksilo_core::overlay::DismissBehavior::Manual,
-                                        layer: teksilo_core::overlay::OverlayLayer::InTree,
-                                        parent_overlay: None,
-                                        on_dismiss: None,
-                                        fade_duration: tooltip_fade,
-                                    },
-                                    tooltip_delay,
+                                let mut request = teksilo_core::overlay::OverlayRequest::new(
+                                    tooltip_content_id,
+                                    tooltip_anchor_id,
+                                    // Drop the tooltip just below-right
+                                    // of the cursor so it doesn't sit
+                                    // under the pointer.
+                                    teksilo_core::overlay::OverlayPlacement::AtPointer(Point::new(
+                                        position.x + 12.0,
+                                        position.y + 16.0,
+                                    )),
+                                    // Manual: every dismiss path (item
+                                    // change, pointer-down, pointer-leave)
+                                    // is driven explicitly below.
+                                    teksilo_core::overlay::DismissBehavior::Manual,
                                 );
+                                request.fade_duration = tooltip_fade;
+                                ctx.show_overlay_after(request, tooltip_delay);
                             } else {
                                 // Moved onto an item with no tooltip (or onto
                                 // empty space): cancel any pending show.
@@ -484,19 +479,18 @@ impl SceneView {
                             tooltip_text.set(ls.resolve_now());
                             tooltip_shown.set(true);
                             ctx.materialize_now(tooltip_content_id);
+                            let mut request = teksilo_core::overlay::OverlayRequest::new(
+                                tooltip_content_id,
+                                tooltip_anchor_id,
+                                teksilo_core::overlay::OverlayPlacement::AtPointer(Point::new(
+                                    position.x + 12.0,
+                                    position.y + 16.0,
+                                )),
+                                teksilo_core::overlay::DismissBehavior::Manual,
+                            );
+                            request.fade_duration = tooltip_fade;
                             ctx.show_overlay_after(
-                                teksilo_core::overlay::OverlayRequest {
-                                    content_id: tooltip_content_id,
-                                    anchor: tooltip_anchor_id,
-                                    placement: teksilo_core::overlay::OverlayPlacement::AtPointer(
-                                        Point::new(position.x + 12.0, position.y + 16.0),
-                                    ),
-                                    dismiss: teksilo_core::overlay::DismissBehavior::Manual,
-                                    layer: teksilo_core::overlay::OverlayLayer::InTree,
-                                    parent_overlay: None,
-                                    on_dismiss: None,
-                                    fade_duration: tooltip_fade,
-                                },
+                                request,
                                 // The wait is the pointer's own long-press
                                 // duration, read from its gesture profile rather
                                 // than being a second number the scene invents.

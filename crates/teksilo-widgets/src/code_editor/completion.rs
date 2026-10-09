@@ -47,7 +47,7 @@ use teksilo_core::Signal;
 use teksilo_core::accesskit::Role;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::overlay::{
-    DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
+    DismissBehavior, OverlayDismissCallback, OverlayPlacement, OverlayRequest,
 };
 use teksilo_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget};
 use teksilo_core::widget_builder::WidgetBuilder;
@@ -602,16 +602,15 @@ fn open_or_update(state: &SharedState, ctx: &mut EventContext, anchor: Point) {
             }
         })
     };
-    ctx.show_overlay(OverlayRequest {
-        content_id: panel_id,
-        anchor: self_id,
-        placement: OverlayPlacement::AtPointer(anchor),
-        dismiss: DismissBehavior::ClickOutside,
-        layer: OverlayLayer::InTree,
-        parent_overlay: None,
-        on_dismiss: Some(on_dismiss),
-        fade_duration: None,
-    });
+    ctx.show_overlay(
+        OverlayRequest::new(
+            panel_id,
+            self_id,
+            OverlayPlacement::AtPointer(anchor),
+            DismissBehavior::ClickOutside,
+        )
+        .on_dismiss(on_dismiss),
+    );
     ctx.request_frame();
 }
 

@@ -49,8 +49,7 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::environment::LayoutDirection;
 use teksilo_core::event::{EventResponse, WidgetEvent};
 use teksilo_core::overlay::{
-    DismissBehavior, OverlayBand, OverlayLayer, OverlayPlacement, OverlayRequest,
-    SelectionHandleKind,
+    DismissBehavior, OverlayBand, OverlayPlacement, OverlayRequest, SelectionHandleKind,
 };
 use teksilo_core::styles::density::dp;
 use teksilo_core::styles::{
@@ -391,24 +390,20 @@ impl TerminalTouch {
             return;
         };
         ctx.show_overlay_in_band(
-            OverlayRequest {
-                content_id: layer,
+            OverlayRequest::new(
+                layer,
                 anchor,
                 // `FullViewport`, the placement the affordance band was written
                 // for: the layer positions each handle in window coordinates, so
                 // the overlay only has to *contain* them for the hit-test walk
                 // to descend — and it never has to be re-placed as a handle
                 // moves.
-                placement: OverlayPlacement::FullViewport,
+                OverlayPlacement::FullViewport,
                 // The band is exempt from outside-press dismissal (every cell a
                 // press lands on is "outside" a handle), so the lifetime is the
                 // controller's published state.
-                dismiss: DismissBehavior::Manual,
-                layer: OverlayLayer::InTree,
-                parent_overlay: None,
-                on_dismiss: None,
-                fade_duration: None,
-            },
+                DismissBehavior::Manual,
+            ),
             OverlayBand::TextAffordance,
         );
     }

@@ -1431,16 +1431,13 @@ impl WidgetTree {
         // `OverlayPlacement::at_pointer_for` rather than at each call site.
         let placement =
             crate::overlay::OverlayPlacement::at_pointer_for(position, &self.current_input.pointer);
-        self.overlay_manager.show(crate::overlay::OverlayRequest {
-            content_id,
-            anchor: owner_id,
-            placement,
-            dismiss: crate::overlay::DismissBehavior::EscapeOrClickOutside,
-            layer: crate::overlay::OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        self.overlay_manager
+            .show(crate::overlay::OverlayRequest::new(
+                content_id,
+                owner_id,
+                placement,
+                crate::overlay::DismissBehavior::EscapeOrClickOutside,
+            ));
         if let Some(focus_id) = prev_focus {
             self.overlay_manager.set_top_focus_restore(focus_id);
         }
@@ -3170,18 +3167,14 @@ impl WidgetTree {
                 // `arena.insert` stops at the root node, leaves build
                 // un-fired, and the overlay renders an empty widget.
                 let content_id = self.add_boxed(preview);
-                let overlay_id = self.overlay_manager.show(crate::overlay::OverlayRequest {
-                    content_id,
-                    anchor: source_widget,
-                    placement: crate::overlay::OverlayPlacement::AtPointer(
-                        teksilo_canvas::Point::ZERO,
-                    ),
-                    dismiss: crate::overlay::DismissBehavior::Manual,
-                    layer: crate::overlay::OverlayLayer::InTree,
-                    parent_overlay: None,
-                    on_dismiss: None,
-                    fade_duration: None,
-                });
+                let overlay_id = self
+                    .overlay_manager
+                    .show(crate::overlay::OverlayRequest::new(
+                        content_id,
+                        source_widget,
+                        crate::overlay::OverlayPlacement::AtPointer(teksilo_canvas::Point::ZERO),
+                        crate::overlay::DismissBehavior::Manual,
+                    ));
                 // Force the next layout pass to run `position_overlays`
                 // and `set_content_bounds` — otherwise the preview sits
                 // at its initial (0, 0) placement forever.
@@ -6831,7 +6824,7 @@ mod tests {
         // open its context menu WITHOUT tearing down the modal. `show_context_menu_for`
         // used to `dismiss_all()`, which closed the very overlay hosting the editor.
         use crate::event::{Modifiers, PointerButton, WidgetEvent};
-        use crate::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+        use crate::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
         use crate::test_widgets::{FillWidget, StackWidget};
 
         let mut tree = WidgetTree::new();
@@ -6845,16 +6838,12 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
-        let modal = tree.overlay_manager.show(OverlayRequest {
-            content_id: modal_content,
-            anchor: modal_content,
-            placement: OverlayPlacement::Centered,
-            dismiss: DismissBehavior::EscapeKey,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let modal = tree.overlay_manager.show(OverlayRequest::new(
+            modal_content,
+            modal_content,
+            OverlayPlacement::Centered,
+            DismissBehavior::EscapeKey,
+        ));
         // Give the overlay real bounds so the right-click hit-tests inside it.
         tree.overlay_manager
             .stack
@@ -8143,7 +8132,7 @@ mod overlay_release_dismissal_tests {
 
     use crate::WidgetId;
     use crate::event::{Modifiers, PointerButton, WidgetEvent};
-    use crate::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+    use crate::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
     use crate::pointer::{
         BackendDeviceKey, EventTime, PointerId, PointerIdAllocator, PointerInfo, PointerPhase,
         PointerSample,
@@ -8244,16 +8233,12 @@ mod overlay_release_dismissal_tests {
             children: vec![page, trigger],
         });
         let menu = tree.add(Panel(Size::new(200.0, 200.0)));
-        tree.show_overlay(OverlayRequest {
-            content_id: menu,
-            anchor: trigger,
-            placement: OverlayPlacement::AtPointer(Point::new(100.0, 100.0)),
-            dismiss: DismissBehavior::ClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(OverlayRequest::new(
+            menu,
+            trigger,
+            OverlayPlacement::AtPointer(Point::new(100.0, 100.0)),
+            DismissBehavior::ClickOutside,
+        ));
         tree.layout(SizeProposal::exact(800.0, 600.0));
         assert_eq!(tree.active_overlays().len(), 1, "the menu is open");
         (tree, page, taps)
@@ -8537,7 +8522,7 @@ mod pass_through_overlay_tests {
     use teksilo_canvas::{Point, Rect, SizeProposal};
 
     use crate::WidgetId;
-    use crate::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+    use crate::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
     use crate::test_widgets::FillWidget;
     use crate::widget::{LayoutContext, LayoutResponse, Widget};
     use crate::widget_builder::WidgetBuilder;
@@ -8605,16 +8590,12 @@ mod pass_through_overlay_tests {
             RootFlag::PassThrough => tree.add(layer.event_pass_through(true)),
             RootFlag::HitTransparent => tree.add(layer.hit_transparent(true)),
         };
-        tree.show_overlay(OverlayRequest {
-            content_id: layer,
-            anchor: field,
-            placement: OverlayPlacement::FullViewport,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(OverlayRequest::new(
+            layer,
+            field,
+            OverlayPlacement::FullViewport,
+            DismissBehavior::Manual,
+        ));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         assert_eq!(tree.active_overlays().len(), 1, "the layer is up");
         (tree, field, handle)
@@ -8665,16 +8646,12 @@ mod pass_through_overlay_tests {
                     crate::event::EventResponse::Ignored
                 }),
         );
-        tree.show_overlay(OverlayRequest {
-            content_id: layer,
-            anchor: field,
-            placement: OverlayPlacement::FullViewport,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(OverlayRequest::new(
+            layer,
+            field,
+            OverlayPlacement::FullViewport,
+            DismissBehavior::Manual,
+        ));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         tree.pointer_down_button(Point::new(15.0, 15.0), crate::event::PointerButton::Primary);

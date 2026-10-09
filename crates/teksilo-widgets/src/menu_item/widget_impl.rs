@@ -543,16 +543,15 @@ impl Widget for MenuItem {
                     ctx.materialize_now(sub_id);
                     ctx.activate(sub_id);
                     open.set(true);
-                    ctx.show_overlay(OverlayRequest {
-                        content_id: sub_id,
-                        anchor: self_id,
-                        placement: OverlayPlacement::TrailingEdge,
-                        dismiss: SubmenuOpenRoute::KeyboardOrAt.dismiss(),
-                        layer: OverlayLayer::InTree,
-                        parent_overlay: None,
-                        on_dismiss: Some(dismiss.clone()),
-                        fade_duration: None,
-                    });
+                    ctx.show_overlay(
+                        OverlayRequest::new(
+                            sub_id,
+                            self_id,
+                            OverlayPlacement::TrailingEdge,
+                            SubmenuOpenRoute::KeyboardOrAt.dismiss(),
+                        )
+                        .on_dismiss(dismiss.clone()),
+                    );
                     ctx.request_focus(sub_id);
                 }
             })
@@ -609,16 +608,15 @@ impl Widget for MenuItem {
                         ctx.materialize_now(sub_id);
                         ctx.activate(sub_id);
                         open_for_tap.set(true);
-                        ctx.show_overlay(OverlayRequest {
-                            content_id: sub_id,
-                            anchor: self_id,
-                            placement: OverlayPlacement::TrailingEdge,
-                            dismiss: SubmenuOpenRoute::Tap(ctx.pointer_kind()).dismiss(),
-                            layer: OverlayLayer::InTree,
-                            parent_overlay: None,
-                            on_dismiss: Some(dismiss_for_tap.clone()),
-                            fade_duration: None,
-                        });
+                        ctx.show_overlay(
+                            OverlayRequest::new(
+                                sub_id,
+                                self_id,
+                                OverlayPlacement::TrailingEdge,
+                                SubmenuOpenRoute::Tap(ctx.pointer_kind()).dismiss(),
+                            )
+                            .on_dismiss(dismiss_for_tap.clone()),
+                        );
                         ctx.request_focus(sub_id);
                     }
                 })
@@ -639,16 +637,13 @@ impl Widget for MenuItem {
                             // take that submenu down with it. See
                             // `show_overlay_after_replacing_siblings`.
                             ctx.show_overlay_after_replacing_siblings(
-                                OverlayRequest {
-                                    content_id: sub_id,
-                                    anchor: self_id,
-                                    placement: OverlayPlacement::TrailingEdge,
-                                    dismiss: SubmenuOpenRoute::Hover.dismiss(),
-                                    layer: OverlayLayer::InTree,
-                                    parent_overlay: None,
-                                    on_dismiss: Some(dismiss_for_hover.clone()),
-                                    fade_duration: None,
-                                },
+                                OverlayRequest::new(
+                                    sub_id,
+                                    self_id,
+                                    OverlayPlacement::TrailingEdge,
+                                    SubmenuOpenRoute::Hover.dismiss(),
+                                )
+                                .on_dismiss(dismiss_for_hover.clone()),
                                 open_delay,
                                 sub_id,
                             );
@@ -808,16 +803,15 @@ impl Widget for MenuItem {
                             ctx.materialize_now(sub_id);
                             ctx.activate(sub_id);
                             open_for_key.set(true);
-                            ctx.show_overlay(OverlayRequest {
-                                content_id: sub_id,
-                                anchor: self_id,
-                                placement: OverlayPlacement::TrailingEdge,
-                                dismiss: SubmenuOpenRoute::KeyboardOrAt.dismiss(),
-                                layer: OverlayLayer::InTree,
-                                parent_overlay: None,
-                                on_dismiss: Some(dismiss_for_key.clone()),
-                                fade_duration: None,
-                            });
+                            ctx.show_overlay(
+                                OverlayRequest::new(
+                                    sub_id,
+                                    self_id,
+                                    OverlayPlacement::TrailingEdge,
+                                    SubmenuOpenRoute::KeyboardOrAt.dismiss(),
+                                )
+                                .on_dismiss(dismiss_for_key.clone()),
+                            );
                             ctx.request_focus(sub_id);
                         }
                         interaction.set(MenuItemState::Pressed);
@@ -834,16 +828,15 @@ impl Widget for MenuItem {
                             ctx.materialize_now(sub_id);
                             ctx.activate(sub_id);
                             open_for_key.set(true);
-                            ctx.show_overlay(OverlayRequest {
-                                content_id: sub_id,
-                                anchor: self_id,
-                                placement: OverlayPlacement::TrailingEdge,
-                                dismiss: SubmenuOpenRoute::KeyboardOrAt.dismiss(),
-                                layer: OverlayLayer::InTree,
-                                parent_overlay: None,
-                                on_dismiss: Some(dismiss_for_key.clone()),
-                                fade_duration: None,
-                            });
+                            ctx.show_overlay(
+                                OverlayRequest::new(
+                                    sub_id,
+                                    self_id,
+                                    OverlayPlacement::TrailingEdge,
+                                    SubmenuOpenRoute::KeyboardOrAt.dismiss(),
+                                )
+                                .on_dismiss(dismiss_for_key.clone()),
+                            );
                             ctx.request_focus(sub_id);
                             EventResponse::Handled
                         } else {

@@ -277,7 +277,7 @@ impl Widget for TooltipWidget {
 mod tests {
     use super::*;
     use teksilo_canvas::SizeProposal;
-    use teksilo_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+    use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
     use teksilo_core::widget_tree::WidgetTree;
 
     /// A long single-word-free string that would run far past the cap if the
@@ -379,20 +379,19 @@ mod tests {
         tree.set_dormant(tip);
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
-        tree.show_overlay(OverlayRequest {
-            content_id: tip,
-            anchor,
-            placement: OverlayPlacement::NearAnchor {
-                offset: teksilo_canvas::Vec2::new(0.0, 8.0),
-            },
-            dismiss: DismissBehavior::PointerLeave {
-                delay: std::time::Duration::from_millis(100),
-            },
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: Some(std::time::Duration::from_millis(120)),
-        });
+        tree.show_overlay(
+            OverlayRequest::new(
+                tip,
+                anchor,
+                OverlayPlacement::NearAnchor {
+                    offset: teksilo_canvas::Vec2::new(0.0, 8.0),
+                },
+                DismissBehavior::PointerLeave {
+                    delay: std::time::Duration::from_millis(100),
+                },
+            )
+            .with_fade(std::time::Duration::from_millis(120)),
+        );
         tree.layout(SizeProposal::exact(800.0, 600.0));
         let frame = tree.render();
         assert!(

@@ -11,7 +11,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use teksilo_core::overlay::{
-    DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
+    DismissBehavior, OverlayDismissCallback, OverlayPlacement, OverlayRequest,
 };
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::EventContext;
@@ -131,16 +131,15 @@ impl MenuContext {
         // `open_index` first — that is the signal the deferred host reveals on.
         ctx.materialize_now(content_id);
         ctx.activate(content_id);
-        ctx.show_overlay(OverlayRequest {
-            content_id,
-            anchor: trigger_id,
-            placement: OverlayPlacement::BelowPreferred,
-            dismiss: DismissBehavior::EscapeOrClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: Some(on_dismiss),
-            fade_duration: None,
-        });
+        ctx.show_overlay(
+            OverlayRequest::new(
+                content_id,
+                trigger_id,
+                OverlayPlacement::BelowPreferred,
+                DismissBehavior::EscapeOrClickOutside,
+            )
+            .on_dismiss(on_dismiss),
+        );
         // Focus the inner MenuList (not the host) so it receives key events
         // first. ArrowLeft/Escape bubble from MenuList → host for cross-menu nav.
         ctx.request_focus(focus_id);

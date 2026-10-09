@@ -3435,9 +3435,7 @@ mod tests {
 
     #[test]
     fn a_press_on_the_readout_still_closes_a_popover_it_is_outside_of() {
-        use teksilo_core::overlay::{
-            DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
-        };
+        use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
 
         let mut tree = readout_tree();
         let above = tree.add(FixedSize::new().height(40.0));
@@ -3453,16 +3451,12 @@ mod tests {
         // Below its trigger, which is below the slider: nowhere near the
         // bubble, which goes above the slider.
         let panel = tree.add(FixedSize::new().width(120.0).height(30.0));
-        tree.show_overlay(OverlayRequest {
-            content_id: panel,
-            anchor: trigger,
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::ClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(OverlayRequest::new(
+            panel,
+            trigger,
+            OverlayPlacement::Below,
+            DismissBehavior::ClickOutside,
+        ));
         tree.layout(window());
         // Raised after the popover, so it sits above it on the stack.
         tree.focus(s);

@@ -54,7 +54,7 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
-use teksilo_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::{SharedSplitButtonStyle, SplitButtonStyle, SplitButtonStyleConfig};
 use teksilo_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
@@ -815,16 +815,15 @@ impl Widget for SplitButton {
                     ctx.activate(menu_id);
                     menu_open.set(true);
                     let on_dismiss_open = menu_open.clone();
-                    ctx.show_overlay(OverlayRequest {
-                        content_id: menu_id,
-                        anchor: self_id,
-                        placement: OverlayPlacement::BelowPreferred,
-                        dismiss: DismissBehavior::EscapeOrClickOutside,
-                        layer: OverlayLayer::InTree,
-                        parent_overlay: None,
-                        on_dismiss: Some(Rc::new(move |_, _| on_dismiss_open.set(false))),
-                        fade_duration: None,
-                    });
+                    ctx.show_overlay(
+                        OverlayRequest::new(
+                            menu_id,
+                            self_id,
+                            OverlayPlacement::BelowPreferred,
+                            DismissBehavior::EscapeOrClickOutside,
+                        )
+                        .on_dismiss(Rc::new(move |_, _| on_dismiss_open.set(false))),
+                    );
                     // The MenuList owns the keyboard-navigation handler
                     // (ArrowUp/ArrowDown/Enter/Escape) and that handler
                     // only fires when the MenuList is focused. Hand focus
@@ -946,16 +945,15 @@ impl Widget for SplitButton {
                             ctx.activate(menu_id);
                             menu_open_for_key.set(true);
                             let on_dismiss_key = menu_open_for_key.clone();
-                            ctx.show_overlay(OverlayRequest {
-                                content_id: menu_id,
-                                anchor: self_id,
-                                placement: OverlayPlacement::BelowPreferred,
-                                dismiss: DismissBehavior::EscapeOrClickOutside,
-                                layer: OverlayLayer::InTree,
-                                parent_overlay: None,
-                                on_dismiss: Some(Rc::new(move |_, _| on_dismiss_key.set(false))),
-                                fade_duration: None,
-                            });
+                            ctx.show_overlay(
+                                OverlayRequest::new(
+                                    menu_id,
+                                    self_id,
+                                    OverlayPlacement::BelowPreferred,
+                                    DismissBehavior::EscapeOrClickOutside,
+                                )
+                                .on_dismiss(Rc::new(move |_, _| on_dismiss_key.set(false))),
+                            );
                             ctx.request_focus(menu_id);
                             EventResponse::Handled
                         }

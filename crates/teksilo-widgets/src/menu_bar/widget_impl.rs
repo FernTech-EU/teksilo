@@ -225,16 +225,13 @@ impl Widget for MenuBar {
                         let revealed = revealed.clone();
                         Rc::new(move |_, _| revealed.set(false))
                     };
-                    let request = OverlayRequest {
-                        content_id: bar_id,
+                    let request = OverlayRequest::new(
+                        bar_id,
                         anchor,
-                        placement: OverlayPlacement::TrailingEdge,
-                        dismiss: DismissBehavior::EscapeOrClickOutside,
-                        layer: OverlayLayer::InTree,
-                        parent_overlay: None,
-                        on_dismiss: Some(on_dismiss),
-                        fade_duration: None,
-                    };
+                        OverlayPlacement::TrailingEdge,
+                        DismissBehavior::EscapeOrClickOutside,
+                    )
+                    .on_dismiss(on_dismiss);
                     if reduced_motion {
                         // No tween: show fully unrolled; dismissal is immediate.
                         reveal_progress.set(1.0);

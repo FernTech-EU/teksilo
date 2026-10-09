@@ -2242,16 +2242,12 @@ mod tests_scope {
         let content = tree.add(StackWidget::new().child(m1).child(m2));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
-        tree.show_overlay(crate::overlay::OverlayRequest {
-            content_id: content,
-            anchor: outside1,
-            placement: crate::overlay::OverlayPlacement::Centered,
-            dismiss: crate::overlay::DismissBehavior::Manual,
-            layer: crate::overlay::OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(crate::overlay::OverlayRequest::new(
+            content,
+            outside1,
+            crate::overlay::OverlayPlacement::Centered,
+            crate::overlay::DismissBehavior::Manual,
+        ));
 
         for _ in 0..6 {
             tab(&mut tree);
@@ -2275,7 +2271,7 @@ mod tests_focus_out_dismissal {
     //! `ComboBox` behaviour is pinned over in `teksilo-widgets`.
 
     use super::*;
-    use crate::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+    use crate::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
     use crate::test_widgets::{FillWidget, StackWidget};
 
     fn tab(tree: &mut WidgetTree) {
@@ -2289,16 +2285,14 @@ mod tests_focus_out_dismissal {
         anchor: WidgetId,
         parent: Option<crate::overlay::OverlayId>,
     ) -> crate::overlay::OverlayId {
-        tree.show_overlay(OverlayRequest {
-            content_id: content,
+        let mut request = OverlayRequest::new(
+            content,
             anchor,
-            placement: OverlayPlacement::Below,
-            dismiss: DismissBehavior::EscapeOrClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: parent,
-            on_dismiss: None,
-            fade_duration: None,
-        })
+            OverlayPlacement::Below,
+            DismissBehavior::EscapeOrClickOutside,
+        );
+        request.parent_overlay = parent;
+        tree.show_overlay(request)
     }
 
     #[test]
@@ -2330,16 +2324,12 @@ mod tests_focus_out_dismissal {
         let m1 = tree.add(FillWidget::new().focusable());
         let content = tree.add(StackWidget::new().child(m1));
         tree.layout(SizeProposal::exact(200.0, 100.0));
-        tree.show_overlay(OverlayRequest {
-            content_id: content,
-            anchor: outside,
-            placement: OverlayPlacement::Centered,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(OverlayRequest::new(
+            content,
+            outside,
+            OverlayPlacement::Centered,
+            DismissBehavior::Manual,
+        ));
 
         tree.focus(m1);
         // Force focus out programmatically. Tab could not do this, and an
@@ -2367,26 +2357,18 @@ mod tests_focus_out_dismissal {
         let content = tree.add(StackWidget::new().child(m1).child(m2));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
-        tree.show_overlay(OverlayRequest {
-            content_id: scrim,
-            anchor: opener,
-            placement: OverlayPlacement::FullViewport,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
-        tree.show_overlay(OverlayRequest {
-            content_id: content,
-            anchor: opener,
-            placement: OverlayPlacement::Centered,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(OverlayRequest::new(
+            scrim,
+            opener,
+            OverlayPlacement::FullViewport,
+            DismissBehavior::Manual,
+        ));
+        tree.show_overlay(OverlayRequest::new(
+            content,
+            opener,
+            OverlayPlacement::Centered,
+            DismissBehavior::Manual,
+        ));
 
         tree.focus(opener);
         tree.focus(m1);
@@ -2493,16 +2475,12 @@ mod tests_focus_out_dismissal {
         let panel = tree.add(StackWidget::new());
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
-        tree.show_overlay(OverlayRequest {
-            content_id: modal_content,
-            anchor: opener,
-            placement: OverlayPlacement::Centered,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(OverlayRequest::new(
+            modal_content,
+            opener,
+            OverlayPlacement::Centered,
+            DismissBehavior::Manual,
+        ));
         // The dropdown, anchored to a trigger that sits *within* the modal.
         show_anchored(&mut tree, panel, trigger, None);
 
@@ -2541,16 +2519,12 @@ mod tests_focus_out_dismissal {
         let elsewhere = tree.add(FillWidget::new().focusable());
         let snack = tree.add(StackWidget::new());
         tree.layout(SizeProposal::exact(200.0, 100.0));
-        tree.show_overlay(OverlayRequest {
-            content_id: snack,
-            anchor: trigger,
-            placement: OverlayPlacement::BottomCenter,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        tree.show_overlay(OverlayRequest::new(
+            snack,
+            trigger,
+            OverlayPlacement::BottomCenter,
+            DismissBehavior::Manual,
+        ));
 
         tree.focus(trigger);
         tab(&mut tree);
@@ -2579,16 +2553,12 @@ mod tests_focus_out_dismissal {
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         // A centered modal is unconditionally a host surface.
-        let host = tree.show_overlay(OverlayRequest {
-            content_id: modal_content,
-            anchor: opener,
-            placement: OverlayPlacement::Centered,
-            dismiss: DismissBehavior::Manual,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+        let host = tree.show_overlay(OverlayRequest::new(
+            modal_content,
+            opener,
+            OverlayPlacement::Centered,
+            DismissBehavior::Manual,
+        ));
         show_anchored(&mut tree, menu_content, modal_item, Some(host));
 
         tree.focus(menu_item);

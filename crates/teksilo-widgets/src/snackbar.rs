@@ -49,7 +49,7 @@ use std::time::Duration;
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
 use teksilo_core::signal::Prop;
 use teksilo_core::styles::{SharedSnackbarStyle, SnackbarStyleConfig};
 use teksilo_core::widget::{LayoutContext, PendingChild, Widget, WidgetPlacement};
@@ -76,16 +76,9 @@ fn present_snackbar(
     shown.set(true);
     ctx.materialize_now(content_id);
     ctx.activate(content_id);
-    let request = OverlayRequest {
-        content_id,
-        anchor,
-        placement: OverlayPlacement::BottomCenter,
-        dismiss,
-        layer: OverlayLayer::InTree,
-        parent_overlay: None,
-        on_dismiss: None,
-        fade_duration,
-    };
+    let mut request =
+        OverlayRequest::new(content_id, anchor, OverlayPlacement::BottomCenter, dismiss);
+    request.fade_duration = fade_duration;
     if let Some(duration) = auto_dismiss_after {
         ctx.show_overlay_for(request, duration);
     } else {

@@ -234,15 +234,13 @@ The reference for this offscreen-render pattern is [`png_export.rs`](../crates/t
 For overlays, **`OverlayRequest::with_fade(duration)`** is the recommended path for tooltip / popover / snackbar fade-in / fade-out. The framework wires opacity internally, caller specifies just the duration:
 
 ```rust
-tree.show_overlay(OverlayRequest {
-    content_id, anchor, placement, dismiss,
-    layer: OverlayLayer::InTree,
-    parent_overlay: None, on_dismiss: None,
-    fade_duration: Some(theme.motion.duration_fast),
-});
+tree.show_overlay(
+    OverlayRequest::new(content_id, anchor, placement, dismiss)
+        .with_fade(theme.motion.duration_fast),
+);
 ```
 
-When `fade_duration` is `Some`, `WidgetTree` creates an animated `Signal<f32>`, applies it as an opacity scope on the content (via `set_opacity`, same primitive `Fade` uses), kicks off the 0→1 tween at show time, and on dismiss reverses to 0 then defers the actual stack removal by `duration` so the tween plays out before the content goes dormant. The `OverlayManager` tracks fade-out state on a dual sim/real clock so headless tests can use `tree.advance_time(...)` to drive deterministic dismissal.
+When a fade duration is set, `WidgetTree` creates an animated `Signal<f32>`, applies it as an opacity scope on the content (via `set_opacity`, same primitive `Fade` uses), kicks off the 0→1 tween at show time, and on dismiss reverses to 0 then defers the actual stack removal by `duration` so the tween plays out before the content goes dormant. The `OverlayManager` tracks fade-out state on a dual sim/real clock so headless tests can use `tree.advance_time(...)` to drive deterministic dismissal.
 
 ## 6. When NOT to use the animation system
 

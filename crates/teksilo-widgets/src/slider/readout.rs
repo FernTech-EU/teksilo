@@ -35,7 +35,7 @@ use teksilo_canvas::Rect;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::environment::LayoutDirection;
 use teksilo_core::overlay::{
-    DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
+    DismissBehavior, OverlayDismissCallback, OverlayPlacement, OverlayRequest,
 };
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::EventContext;
@@ -162,24 +162,23 @@ impl Readout {
         } else {
             LayoutDirection::LeftToRight
         };
-        ctx.show_overlay(OverlayRequest {
-            content_id: self.content,
-            anchor: self.anchor,
-            placement: self.follow()(self.inputs.bounds.get(), direction),
-            // Escape, because content shown on hover or focus has to be
-            // dismissible without moving either (WCAG 2.2 SC 1.4.13), and
-            // nothing else: a press must not close it, since a press is how a
-            // drag starts. The overlay being inert, Escape takes it down without
-            // being spent on it, the way it takes down a plain tooltip.
-            dismiss: DismissBehavior::EscapeKey,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: Some(self.on_dismiss()),
-            // No fade: the readout is due the moment a drag starts, and a
-            // fade-out keeps the content on the stack, where the next show
-            // would find it and decline to raise it again.
-            fade_duration: None,
-        });
+        // No fade: the readout is due the moment a drag starts, and a
+        // fade-out keeps the content on the stack, where the next show
+        // would find it and decline to raise it again.
+        ctx.show_overlay(
+            OverlayRequest::new(
+                self.content,
+                self.anchor,
+                self.follow()(self.inputs.bounds.get(), direction),
+                // Escape, because content shown on hover or focus has to be
+                // dismissible without moving either (WCAG 2.2 SC 1.4.13), and
+                // nothing else: a press must not close it, since a press is how a
+                // drag starts. The overlay being inert, Escape takes it down without
+                // being spent on it, the way it takes down a plain tooltip.
+                DismissBehavior::EscapeKey,
+            )
+            .on_dismiss(self.on_dismiss()),
+        );
         ctx.track_overlay_placement_by_content(self.content, self.follow());
     }
 

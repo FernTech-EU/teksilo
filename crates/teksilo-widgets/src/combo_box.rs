@@ -77,7 +77,7 @@ use teksilo_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::overlay::{
-    DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
+    DismissBehavior, OverlayDismissCallback, OverlayPlacement, OverlayRequest,
 };
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::{ComboBoxStyle, ComboBoxStyleConfig, SharedComboBoxStyle};
@@ -915,16 +915,15 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                 // below is measured against it and before focus moves into it.
                 ctx.materialize_now(dropdown_id);
                 ctx.activate(dropdown_id);
-                ctx.show_overlay(OverlayRequest {
-                    content_id: dropdown_id,
-                    anchor: self_id,
-                    placement: OverlayPlacement::BelowPreferred,
-                    dismiss: DismissBehavior::EscapeOrClickOutside,
-                    layer: OverlayLayer::InTree,
-                    parent_overlay: None,
-                    on_dismiss: Some(dismiss_callback.clone()),
-                    fade_duration: None,
-                });
+                ctx.show_overlay(
+                    OverlayRequest::new(
+                        dropdown_id,
+                        self_id,
+                        OverlayPlacement::BelowPreferred,
+                        DismissBehavior::EscapeOrClickOutside,
+                    )
+                    .on_dismiss(dismiss_callback.clone()),
+                );
                 // Searchable mode: land focus in the search field so
                 // the user can start typing immediately after opening.
                 //
