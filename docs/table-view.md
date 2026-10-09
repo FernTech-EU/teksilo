@@ -282,10 +282,13 @@ contract:
 - **Ids a view does not declare are ignored when read and kept when
   written.** A width, a filter or an order entry for a column the view lacks
   changes nothing in it; a column with no width entry takes its declared
-  `ColumnWidth`. A reorder drop moves the view's own columns within the list
-  and leaves the other entries where they were, and a resize or a filter edit
-  only touches its own key, so views with different column sets can share one
-  map.
+  `ColumnWidth`. A reorder drop moves the dragged column and leaves every
+  other entry where it was, and a resize or a filter edit only touches its
+  own key, so views with different column sets can share one map. The `Flex`
+  columns before a resized one keep their widths in the view the resize was
+  made in, and only there (see [Column resize](#column-resize)); a sort on a
+  column a view lacks leaves its rows unsorted, so a `TreeTableView` still
+  reorders them.
 - **No feedback loop.** A view answers a change by relaying out or
   rebuilding, never by writing back, so two views bound to the same signals
   settle after one pass.
@@ -479,9 +482,20 @@ views' knobs of the same name.
 each column out at, after the overrides, the declared widths, the `Flex` share
 and the min / max clamps, is `resolved_widths_signal()`: a
 `Signal<Vec<(String, f32)>>` of `(column id, width)` per displayed column, in
-display order, written after each layout of the header and only when it
-changed. Leading-pinned columns come first and stay put under `scroll_x`;
-trailing-pinned ones come last. On its own the header resolves its widths
+display order, written when the header is placed in a layout pass and only
+when it changed. Leading-pinned columns come first and stay put under
+`scroll_x`; trailing-pinned ones come last.
+
+Rows follow it **one layout pass late**, unless they read it in their own
+`place_children` and are laid out after the header (below it in the same
+stack). Only the header's bounds settle the widths, so a row that sizes itself
+from them in `layout_response`, a `FixedSize` bound to a width derived from the
+signal for instance, has already been measured when they are written, and is
+relaid out on the next pass. During a live resize drag such a row trails the
+header by a frame, and a headless test needs a second `layout()` before it
+lines up.
+
+On its own the header resolves its widths
 against its own bounds, clips its cells to them, takes `HEADER_HEIGHT` when its
 parent leaves the height free, and paints the `ColumnResizePolicy::OnRelease`
 guide line within the strip only.
@@ -493,8 +507,10 @@ under it as a table or a grid.
 
 Inside a view the header is *hosted*: the view resolves the widths and the
 display order (its body needs both before the header is placed), rebuilds the
-header along with itself, keeps the resize-drag state across those rebuilds,
-and paints the `OnRelease` guide across its rows.
+header along with itself, holds the resize-drag state, which a relayout keeps,
+and paints the `OnRelease` guide across its rows. A rebuild abandons a resize
+in flight, hosted or not: it re-creates the header cells, and the pointer
+capture the drag depends on goes with them.
 
 ---
 
@@ -795,15 +811,28 @@ columns after it absorb the difference (once none of them can, the pane
 overflows into horizontal scroll). That is NSTableView's and `QHeaderView`'s
 behaviour, and it needs one thing from the write: a `Flex` column that
 precedes the resized one and has no override yet is **frozen at its current
-width** in the same `column_widths_signal` update. Otherwise the solver would
-share the resized column's delta among *every* flex column, the preceding
-ones included, so the column's leading edge would slide the other way and the
-divider would track the pointer at a fraction of its speed (or not at all,
-with all the remaining flex weight ahead of it). The frozen widths are the
-ones already on screen, so nothing jumps; they simply stop flexing on later
-window resizes, exactly as a column the user sized by hand does. Apps that
-persist `column_widths_signal` will therefore see entries for those columns
-too.
+width** in the same update. Otherwise the solver would share the resized
+column's delta among *every* flex column, the preceding ones included, so the
+column's leading edge would slide the other way and the divider would track
+the pointer at a fraction of its speed (or not at all, with all the remaining
+flex weight ahead of it). The frozen widths are the ones already on screen, so
+nothing jumps; they simply stop flexing on later window resizes, exactly as a
+column the user sized by hand does.
+
+Where the frozen widths go depends on whose map it is:
+
+- **The view's own** `column_widths_signal`: into it, with the resized
+  column. Apps that persist it will therefore see entries for those columns
+  too, and a restored layout matches the one the user left.
+- **An adopted map** (`bind_column_widths`, `TableHeader::widths`): into the
+  view, and the map gets the resized column alone. An adopted map may be
+  shared by a view of another width, where the frozen columns have other
+  widths; written into the map, they would stop flexing there too and leave
+  it a gap or an overflow. The view keeps its frozen widths until the map's
+  entries for its columns change from anywhere else (a reset, a setter,
+  another view resizing a column the two share), and is laid out from the map
+  alone again from then on. A persisted adopted map restores the widths the
+  user set; the flex columns flex again.
 
 The committed width is clamped to the column's `[min_width, max_width]`
 **before** it is written, so `column_widths_signal`, the handle apps read
@@ -836,10 +865,14 @@ drag emits `ColumnReorderDragData { col_id, source_table_id }`. The
 header strip is the drop target; dropping inside the leading-pinned
 pane re-pins the column to `Leading`, dropping inside the
 trailing-pinned pane re-pins to `Trailing`, otherwise the column joins
-the unpinned middle stream. A pane exists only while a column is pinned
-to it, so with nothing pinned a drop at either end of the strip is a
-plain move to the first or last slot. Inter-table drops are rejected by
-`source_table_id` mismatch.
+the unpinned middle stream, a column declared `.pinned(..)` included (its
+`column_pinning_signal` entry is then `PinnedSide::None`; a drop back
+into the pane it declares removes the entry). Only the dragged column
+moves in `column_order_signal`; every other entry, including those of
+columns the view lacks, stays where it was. A pane exists only while a
+column is pinned to it, so with nothing pinned a drop at either end of
+the strip is a plain move to the first or last slot. Inter-table drops
+are rejected by `source_table_id` mismatch.
 
 ### Row reorder
 
@@ -869,9 +902,10 @@ same `accept_drop` / `reorder_within`.
 the tree source with the **cycle guard**, `tree_apply_reorder` refuses
 to drop a node into its own subtree, and handles the
 insertion-vs-reparent (`Before`/`After` sibling vs `Into` child) index
-math. Reorder is suppressed while a sort is active (a sorted projection
-has no stable insertion target). `Alt`+`Arrow` keyboard reorder is
-likewise routed through the source.
+math. Reorder is suppressed while the view is sorted by one of its own
+columns (a sorted projection has no stable insertion target); a shared
+`bind_sort` naming a column the view lacks does not count. `Alt`+`Arrow`
+keyboard reorder is likewise routed through the source.
 
 ---
 

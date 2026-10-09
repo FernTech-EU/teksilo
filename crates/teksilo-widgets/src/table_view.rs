@@ -41,9 +41,14 @@
 //!   increment) or an imperative setter (`set_sort`, `set_column_widths`, …).
 //! - **Ids the table does not declare are ignored when read and kept when
 //!   written.** A width, a filter or an order entry for a column this table
-//!   lacks changes nothing here, and a reorder in this table moves its own
-//!   columns without dropping the other entries. A column with no width
-//!   entry takes its declared [`ColumnWidth`].
+//!   lacks changes nothing here, and a reorder in this table moves the
+//!   dragged column and leaves every other entry where it was. A column with
+//!   no width entry takes its declared [`ColumnWidth`].
+//! - **A resize writes one width into an adopted map.** The `Flex` columns
+//!   before the grip keep their widths, so the divider follows the pointer,
+//!   but in this table only: the widths they had here are not the widths
+//!   they have in a view of another size sharing the map. A table on its own
+//!   map writes them into it, so the map it persists matches what it shows.
 //! - **No feedback loop.** A view reacts to a change by relaying out or
 //!   rebuilding, never by writing back, so two views bound to the same signals
 //!   follow each other's edits and settle after one pass.
@@ -321,6 +326,10 @@ pub struct TableView<T: 'static> {
     scroller: Rc<RefCell<KineticScroller>>,
     sort_signal: Signal<Option<(String, SortDirection)>>,
     column_widths_signal: Signal<HashMap<String, f32>>,
+    /// `Some` once `bind_column_widths` adopted the width map: the widths a
+    /// resize freezes stay here, in this view, rather than in a map other
+    /// views may share (see `header::commit_resize`).
+    column_widths_frozen: Option<header::SharedFrozenWidths>,
     /// Column ids in display order. Empty means "use declaration order".
     column_order_signal: Signal<Vec<String>>,
     /// Per-id override for `Column::pinned`. Missing keys mean "use the
@@ -632,6 +641,7 @@ impl<T: 'static> TableView<T> {
             scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
             sort_signal: Signal::new(None),
             column_widths_signal: Signal::new(HashMap::new()),
+            column_widths_frozen: None,
             column_order_signal: Signal::new(Vec::new()),
             column_pinning_signal: Signal::new(HashMap::new()),
             focused_cell: Signal::new(None),
@@ -1090,11 +1100,14 @@ impl<T: 'static> TableView<T> {
     /// [`set_column_width`](Self::set_column_width) write it, and a write from
     /// anywhere else resizes the columns. A column with no entry takes its
     /// declared [`ColumnWidth`]; an entry for a column the table lacks is
-    /// ignored. [`column_widths_signal`](Self::column_widths_signal) returns it.
+    /// ignored. A resize writes the resized column's entry alone; the `Flex`
+    /// columns before it keep their widths in this table, not in the map.
+    /// [`column_widths_signal`](Self::column_widths_signal) returns it.
     ///
     /// See the module docs, "Column state an application owns".
     pub fn bind_column_widths(mut self, widths: Signal<HashMap<String, f32>>) -> Self {
         self.column_widths_signal = widths;
+        self.column_widths_frozen = Some(Rc::default());
         self
     }
 
@@ -1176,10 +1189,10 @@ impl<T: 'static> TableView<T> {
     }
 
     /// Map of column id → user-overridden width. The table writes entries
-    /// only for a resize: the resized column's, and one for each `Flex`
-    /// column before it, frozen at the width it had. Missing keys mean "use
-    /// the declared width policy". The signal adopted by
-    /// [`bind_column_widths`](Self::bind_column_widths), if any.
+    /// only for a resize: the resized column's, and — when the map is its
+    /// own — one for each `Flex` column before it, frozen at the width it
+    /// had. Missing keys mean "use the declared width policy". The signal
+    /// adopted by [`bind_column_widths`](Self::bind_column_widths), if any.
     pub fn column_widths_signal(&self) -> &Signal<HashMap<String, f32>> {
         &self.column_widths_signal
     }
@@ -1195,9 +1208,10 @@ impl<T: 'static> TableView<T> {
         &self.column_order_signal
     }
 
-    /// Per-id pinning override map. A key here pins the column to that
-    /// side; missing keys fall back to the declared `Column::pinned`.
-    /// Updated when the user drags a column across a pane boundary.
+    /// Per-id pinning override map. A key here puts the column on that side,
+    /// [`PinnedSide::None`] unpinning a column declared pinned; missing keys
+    /// fall back to the declared `Column::pinned`. Updated when the user
+    /// drags a column across a pane boundary.
     pub fn column_pinning_signal(&self) -> &Signal<HashMap<String, PinnedSide>> {
         &self.column_pinning_signal
     }

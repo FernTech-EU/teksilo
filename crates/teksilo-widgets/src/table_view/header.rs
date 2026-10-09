@@ -217,6 +217,9 @@ pub(crate) struct HeaderCellSpec {
     pub table_id: usize,
     pub sort_signal: Signal<Option<(String, SortDirection)>>,
     pub column_widths_signal: Signal<HashMap<String, f32>>,
+    /// `Some` when `column_widths_signal` is adopted: where a resize keeps
+    /// the widths it freezes instead (see [`commit_resize`]).
+    pub frozen_widths: Option<SharedFrozenWidths>,
     pub column_widths: SharedColumnWidths,
     pub filters_signal: Signal<HashMap<String, String>>,
 }
@@ -257,6 +260,8 @@ pub(crate) struct HeaderCell {
     current_sort: Option<SortDirection>,
     sort_signal: Signal<Option<(String, SortDirection)>>,
     column_widths_signal: Signal<HashMap<String, f32>>,
+    /// See [`HeaderCellSpec::frozen_widths`].
+    frozen_widths: Option<SharedFrozenWidths>,
     /// Live resolved widths, shared with the row layout. Read at
     /// PointerDown to record the starting width of whichever column the
     /// grabbed divider belongs to.
@@ -340,6 +345,7 @@ impl HeaderCell {
             current_sort: spec.current_sort,
             sort_signal: spec.sort_signal,
             column_widths_signal: spec.column_widths_signal,
+            frozen_widths: spec.frozen_widths,
             column_widths: spec.column_widths,
             width_index,
             pane_boundaries: spec.pane_boundaries,
@@ -551,6 +557,7 @@ impl Widget for HeaderCell {
         // (PointerUp).
         let sort_signal = self.sort_signal.clone();
         let widths_signal = self.column_widths_signal.clone();
+        let frozen_widths = self.frozen_widths.clone();
         let widths_handle = self.column_widths.clone();
         let resize_state = self.resize_state.clone();
         let resize_target = self.resize_target.clone();
@@ -716,6 +723,7 @@ impl Widget for HeaderCell {
                                 ColumnResizePolicy::Live => {
                                     commit_resize(
                                         &widths_signal,
+                                        frozen_widths.as_ref(),
                                         &widths_handle,
                                         &resize_columns,
                                         state.target_index,
@@ -914,6 +922,7 @@ impl Widget for HeaderCell {
                                     );
                                     commit_resize(
                                         &widths_signal,
+                                        frozen_widths.as_ref(),
                                         &widths_handle,
                                         &resize_columns,
                                         state.target_index,
@@ -986,6 +995,7 @@ impl Widget for HeaderCell {
                 let resize_columns = self.resize_columns.clone();
                 let widths_handle = self.column_widths.clone();
                 let widths_signal = self.column_widths_signal.clone();
+                let frozen_widths = self.frozen_widths.clone();
                 move |action, _ctx| {
                     use teksilo_core::accesskit::Action;
                     if !matches!(action, Action::Increment | Action::Decrement) {
@@ -1013,6 +1023,7 @@ impl Widget for HeaderCell {
                     let next = clamp_width(current + step, info.min_width, info.max_width);
                     commit_resize(
                         &widths_signal,
+                        frozen_widths.as_ref(),
                         &widths_handle,
                         &resize_columns,
                         width_index,
@@ -1155,53 +1166,133 @@ impl Widget for HeaderCell {
 
 /// Commit a user resize of the column at display slot `target` to `new_w`.
 ///
-/// Writes the target's override and, in the **same** signal update, freezes
-/// every un-overridden `Flex` column that *precedes* it in display order at
-/// its current resolved width. Without that, the solver shares the leftover
-/// the resize consumed (or freed) among every flex column — the ones before
-/// the target included — so the target's leading edge slides the other way
-/// and the grabbed divider tracks the pointer at a fraction of its speed
-/// (`1 − p/m`, for `p` of the `m` remaining flex weights ahead of it), or
-/// not at all once every remaining flex column is ahead of it. What the user
-/// then sees is the dividers on the far side of the grip sweeping *against*
-/// the mouse while the grabbed one barely moves.
+/// Writes the target's override and, in the **same** update, freezes every
+/// un-overridden `Flex` column that *precedes* it in display order at its
+/// current resolved width. Without that, the solver shares the leftover the
+/// resize consumed (or freed) among every flex column — the ones before the
+/// target included — so the target's leading edge slides the other way and
+/// the grabbed divider tracks the pointer at a fraction of its speed
+/// (`1 − p/m`, for `p` of the `m` remaining flex weights ahead of it), or not
+/// at all once every remaining flex column is ahead of it. What the user then
+/// sees is the dividers on the far side of the grip sweeping *against* the
+/// mouse while the grabbed one barely moves.
 ///
 /// Every desktop table keeps the columns before a dragged divider where they
 /// are and reflows only the ones after it (NSTableView's column autoresizing,
 /// `QHeaderView`'s interactive sections with a stretch-last). Freezing the
-/// preceding flex columns is what makes that hold here, and it records
-/// exactly what is on screen at that moment, so the persisted
-/// `column_widths_signal` keeps matching the picture. Columns *after* the
+/// preceding flex columns is what makes that hold here. Columns *after* the
 /// target are left alone on purpose: they are the ones meant to absorb the
 /// change, and once none of them can, the pane overflows into horizontal
 /// scroll rather than moving the divider away from the pointer.
+///
+/// Where the freezes go depends on whose map `signal` is:
+///
+/// - The view's own (`frozen` is `None`): into the map, with the target. It
+///   then records exactly what is on screen, so a persisted
+///   `column_widths_signal` keeps matching the picture.
+/// - An adopted one (`frozen` is `Some`): into `frozen`, which only this view
+///   reads, and the map gets the target alone. An adopted map may be shared
+///   by views of other widths, and a width frozen here is not the width the
+///   column has there: written into the map, it would stop that view's flex
+///   column flexing too, and leave it a gap or an overflow nobody asked for.
 ///
 /// The frozen values come from the widths `place_children` last resolved —
 /// already clamped to each column's `[min, max]` — so re-resolving them as
 /// overrides changes nothing visible.
 fn commit_resize(
     signal: &Signal<HashMap<String, f32>>,
+    frozen: Option<&SharedFrozenWidths>,
     resolved: &SharedColumnWidths,
     columns: &ColumnResizeTable,
     target: usize,
     new_w: f32,
 ) {
     let mut m = signal.get();
+    let own = || columns.iter().map(|c| c.id.as_str());
+    let mut kept = frozen.map(|f| f.borrow_mut());
+    if let Some(kept) = kept.as_mut()
+        && !kept.hold(&m, own())
+    {
+        // The view has been laid out from the map alone since it changed, so
+        // what is on screen is what to freeze from.
+        kept.frozen.clear();
+    }
     {
         let widths = resolved.borrow();
         for (slot, info) in columns.iter().enumerate().take(target) {
-            if info.flex
-                && !m.contains_key(&info.id)
-                && let Some(&w) = widths.get(slot)
-            {
-                m.insert(info.id.clone(), w);
+            let Some(&w) = widths.get(slot) else {
+                continue;
+            };
+            if !info.flex || m.contains_key(&info.id) {
+                continue;
+            }
+            match kept.as_mut() {
+                Some(kept) => {
+                    kept.frozen.entry(info.id.clone()).or_insert(w);
+                }
+                None => {
+                    m.insert(info.id.clone(), w);
+                }
             }
         }
     }
     if let Some(info) = columns.get(target) {
         m.insert(info.id.clone(), new_w);
     }
+    if let Some(kept) = kept.as_mut() {
+        kept.written = own()
+            .filter_map(|id| m.get(id).map(|&w| (id.to_string(), w)))
+            .collect();
+    }
+    // Released before the write, which notifies observers synchronously.
+    drop(kept);
     signal.set(m);
+}
+
+/// The widths a resize froze in a view whose width map is adopted, kept out
+/// of that map — see [`commit_resize`].
+#[derive(Debug, Default)]
+pub(crate) struct FrozenWidths {
+    /// Column id → the width it was frozen at.
+    frozen: HashMap<String, f32>,
+    /// This view's own entries in the map just after its last resize.
+    written: HashMap<String, f32>,
+}
+
+/// One view's [`FrozenWidths`], shared by its header cells and its layout.
+pub(crate) type SharedFrozenWidths = Rc<RefCell<FrozenWidths>>;
+
+impl FrozenWidths {
+    /// Whether the freezes still apply: the map gives the view's columns
+    /// (`own`) exactly what its last resize left there. Any other write to
+    /// one of them (a reset, a setter, another view resizing a column the two
+    /// share) puts the view back on the map alone. A write to a column the
+    /// view lacks does not.
+    fn hold<'a>(&self, map: &HashMap<String, f32>, mut own: impl Iterator<Item = &'a str>) -> bool {
+        own.all(|id| map.get(id) == self.written.get(id))
+    }
+}
+
+/// The width overrides a view resolves its columns from: `map`, plus the
+/// widths `frozen` holds for it while they still apply. An entry in `map`
+/// wins over a frozen one.
+pub(crate) fn width_overrides<'a>(
+    map: HashMap<String, f32>,
+    frozen: Option<&SharedFrozenWidths>,
+    own: impl Iterator<Item = &'a str>,
+) -> HashMap<String, f32> {
+    let Some(frozen) = frozen else {
+        return map;
+    };
+    let frozen = frozen.borrow();
+    if frozen.frozen.is_empty() || !frozen.hold(&map, own) {
+        return map;
+    }
+    let mut out = map;
+    for (id, &w) in &frozen.frozen {
+        out.entry(id.clone()).or_insert(w);
+    }
+    out
 }
 
 /// Tiny chevron drawn as a triangle path.

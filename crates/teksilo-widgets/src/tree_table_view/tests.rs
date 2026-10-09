@@ -5059,6 +5059,154 @@ mod adopted_state {
             vec!["Size".to_string(), "Name".to_string()]
         );
     }
+
+    #[test]
+    fn a_sort_on_a_column_the_tree_table_lacks_leaves_its_rows_reorderable() {
+        // A shared sort names a column only another view has: this view's
+        // rows are in model order, so moving one is meaningful. A sort on
+        // one of its own columns still refuses the move.
+        use teksilo_core::event::Key;
+        let sort: Signal<Sort> = Signal::new(Some(("album".to_string(), SortDirection::Ascending)));
+        let proxy = SortFilterTreeModel::new(sample_tree())
+            .with_comparator("name", |a: &&'static str, b: &&'static str| a.cmp(b));
+        proxy.collapse_all(); // roots only: docs@0, src@1
+        let docs = proxy.tree().root(0);
+        let src = proxy.tree().root(1);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col().sortable(true))
+                .reorderable(true)
+                .row_height(20.0)
+                .bind_sort(sort.clone()),
+        );
+        relayout(&mut tree, 400.0, 300.0);
+        let roots = || (proxy.tree().root(0), proxy.tree().root(1));
+
+        // A drag of docs onto the bottom third of src → After src.
+        let h = cp::HEADER_HEIGHT;
+        drag(
+            &mut tree,
+            Point::new(40.0, h + 10.0),
+            Point::new(40.0, h + 38.0),
+        );
+        relayout(&mut tree, 400.0, 300.0);
+        assert_eq!(roots(), (src, docs), "the drag moves the row");
+
+        // The keyboard moves it back.
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(1, 0);
+        }
+        tree.focus(id);
+        tree.press_key(Key::ArrowUp, Modifiers::ALT);
+        relayout(&mut tree, 400.0, 300.0);
+        assert_eq!(roots(), (docs, src), "the chord moves the row");
+
+        // A sort on the view's own column refuses both.
+        sort.set(Some(("name".to_string(), SortDirection::Descending)));
+        relayout(&mut tree, 400.0, 300.0);
+        let model_order = (proxy.tree().root(0), proxy.tree().root(1));
+        tree.press_key(Key::ArrowDown, Modifiers::ALT);
+        drag(
+            &mut tree,
+            Point::new(40.0, h + 10.0),
+            Point::new(40.0, h + 38.0),
+        );
+        assert_eq!(roots(), model_order, "sorted by its own column: no move");
+    }
+
+    #[test]
+    fn a_filter_written_from_outside_reaches_the_tree_tables_header() {
+        // The filter popover's text and the funnel's tint are read when the
+        // header is built: a filter set elsewhere must rebuild it.
+        let filters = Signal::new(HashMap::<String, String>::new());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(
+            TreeTableView::from_projection(SortFilterTreeModel::new(sample_tree()))
+                .add_column(name_col().filterable(true))
+                .row_height(20.0)
+                .bind_filters(filters.clone()),
+        );
+        relayout(&mut tree, 400.0, 300.0);
+        filters.set(HashMap::from([("name".to_string(), "src".to_string())]));
+        relayout(&mut tree, 400.0, 300.0);
+
+        let trigger = tree.find_by_label("Filter").expect("trigger present");
+        tree.click(trigger);
+        relayout(&mut tree, 400.0, 300.0);
+        let mut walker: Vec<WidgetId> = tree.overlay_manager().active_content_ids();
+        let mut field = None;
+        while let Some(n) = walker.pop() {
+            if tree.accessibility_node(n).role() == Role::TextInput {
+                field = Some(n);
+                break;
+            }
+            walker.extend(tree.children(n));
+        }
+        let field = field.expect("the filter popover hosts a text field");
+        let snapshot = tree.accessibility_tree_snapshot();
+        let node_id = teksilo_core::accessibility::widget_id_to_node_id(field);
+        let value = snapshot
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == node_id)
+            .and_then(|(_, node)| node.value().map(str::to_string));
+        assert_eq!(
+            value.as_deref(),
+            Some("src"),
+            "the popover opens on the filter the signal holds"
+        );
+    }
+
+    #[test]
+    fn a_resize_writes_only_its_own_column_into_an_adopted_width_map() {
+        // `name` Flex | `size` Fixed(60) | `kind` Flex at 400 px: widening
+        // `size` keeps `name`, the flex column before the grip, at 170 — in
+        // this view. The adopted map, which another view may read, holds
+        // `size` alone.
+        let kind_col = Column::<&str>::new("kind", lit!("Kind"), |_row, _: &CellContext| {
+            Box::new(crate::primitives::TextWidget::new(lit!("k")))
+        })
+        .width(ColumnWidth::Flex(1.0));
+        let widths = Signal::new(HashMap::<String, f32>::new());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(SortFilterTreeModel::new(sample_tree()))
+                .add_column(name_col())
+                .add_column(size_col())
+                .add_column(kind_col)
+                .row_height(20.0)
+                .show_internal_scrollbars(false)
+                .bind_column_widths(widths.clone()),
+        );
+        relayout(&mut tree, 400.0, 200.0);
+        let y = cp::HEADER_HEIGHT * 0.5;
+        let down_x = 230.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(down_x, y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(down_x + 30.0, y)));
+        relayout(&mut tree, 400.0, 200.0);
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(down_x + 30.0, y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        relayout(&mut tree, 400.0, 200.0);
+        assert_eq!(widths.get(), HashMap::from([("size".to_string(), 90.0)]));
+        assert_eq!(
+            header_layout(&tree, id),
+            vec![
+                ("Name".to_string(), 170.0),
+                ("Size".to_string(), 90.0),
+                ("Kind".to_string(), 140.0),
+            ]
+        );
+    }
 }
 
 // ── Full-width rows and pinned ancestors ─────────────────────────────

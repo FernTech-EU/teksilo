@@ -138,7 +138,7 @@ use crate::table_view::body::SharedColumnWidths;
 use crate::table_view::column::{
     CellContext, Column, ColumnResizePolicy, EditTriggers, GridLines, PinnedSide, TabTraversal,
 };
-use crate::table_view::header::ResizeStateHandle;
+use crate::table_view::header::{ResizeStateHandle, SharedFrozenWidths, width_overrides};
 use crate::table_view::imperative;
 use crate::table_view::keyboard;
 use crate::table_view::layout;
@@ -307,6 +307,9 @@ pub struct TreeTableView<T: 'static> {
     scroller: Rc<RefCell<KineticScroller>>,
     sort_signal: Signal<Option<(String, SortDirection)>>,
     column_widths_signal: Signal<HashMap<String, f32>>,
+    /// `Some` once `bind_column_widths` adopted the width map — see the
+    /// field of the same name on `TableView`.
+    column_widths_frozen: Option<SharedFrozenWidths>,
     column_order_signal: Signal<Vec<String>>,
     column_pinning_signal: Signal<HashMap<String, PinnedSide>>,
     filters_signal: Signal<HashMap<String, String>>,
@@ -357,8 +360,9 @@ pub struct TreeTableView<T: 'static> {
 
     /// Enable drag-to-reorder of rows (pointer drag + Alt+Arrow). The move
     /// reparents/reorders nodes in the underlying `TreeModel`, cycle-guarded.
-    /// Suppressed while a sort is active (the visible order then differs from
-    /// the tree order, so a manual reorder would be meaningless).
+    /// Suppressed while the view is sorted by one of its own columns (the
+    /// visible order then differs from the tree order, so a manual reorder
+    /// would be meaningless). A shared sort on a column it lacks leaves it on.
     reorderable: bool,
     /// Active row-drop insertion indicator `(body_local_y, width)`. Set by
     /// `on_drag_hover`, cleared on leave / drop, read by `paint`.
@@ -578,6 +582,7 @@ impl<T: 'static> TreeTableView<T> {
             scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
             sort_signal: Signal::new(None),
             column_widths_signal: Signal::new(HashMap::new()),
+            column_widths_frozen: None,
             column_order_signal: Signal::new(Vec::new()),
             column_pinning_signal: Signal::new(HashMap::new()),
             filters_signal: Signal::new(HashMap::new()),
@@ -708,8 +713,10 @@ impl<T: 'static> TreeTableView<T> {
     /// `TreeModel` (top third of a row = Before, middle = Into / make-child,
     /// bottom = After). The move is cycle-guarded — dropping a node onto
     /// itself or into its own subtree is refused (no insertion line). Reorder
-    /// is **suppressed while a sort is active**: with the visible order driven
-    /// by the sort, a manual reorder would have no visible effect.
+    /// is **suppressed while the view is sorted** by one of its own columns:
+    /// with the visible order driven by the sort, a manual reorder would have
+    /// no visible effect. A sort a shared [`bind_sort`](Self::bind_sort)
+    /// holds for a column this view lacks does not count.
     pub fn reorderable(mut self, enabled: bool) -> Self {
         self.reorderable = enabled;
         self
@@ -1196,10 +1203,13 @@ impl<T: 'static> TreeTableView<T> {
     /// signal of its own: a resize drag and
     /// [`set_column_width`](Self::set_column_width) write it, and a write from
     /// anywhere else resizes the columns. A column with no entry takes its
-    /// declared width; an entry for a column the view lacks is ignored.
+    /// declared width; an entry for a column the view lacks is ignored. A
+    /// resize writes the resized column's entry alone; the `Flex` columns
+    /// before it keep their widths in this view, not in the map.
     /// [`column_widths_signal`](Self::column_widths_signal) returns it.
     pub fn bind_column_widths(mut self, widths: Signal<HashMap<String, f32>>) -> Self {
         self.column_widths_signal = widths;
+        self.column_widths_frozen = Some(Rc::default());
         self
     }
 
@@ -1298,10 +1308,11 @@ impl<T: 'static> TreeTableView<T> {
     }
 
     /// User-resized column widths in logical pixels, keyed by column id. The
-    /// view writes entries only for a resize: the resized column's, and one
-    /// for each `Flex` column before it, frozen at the width it had. A
-    /// missing key means the declared width. The signal adopted by
-    /// [`bind_column_widths`](Self::bind_column_widths), if any.
+    /// view writes entries only for a resize: the resized column's, and —
+    /// when the map is its own — one for each `Flex` column before it, frozen
+    /// at the width it had. A missing key means the declared width. The
+    /// signal adopted by [`bind_column_widths`](Self::bind_column_widths), if
+    /// any.
     pub fn column_widths_signal(&self) -> &Signal<HashMap<String, f32>> {
         &self.column_widths_signal
     }

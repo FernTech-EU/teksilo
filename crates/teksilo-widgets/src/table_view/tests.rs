@@ -6167,25 +6167,209 @@ mod adopted_state {
         assert!(Signal::same(table_ref(&tree, table).sort_signal(), &sort));
     }
 
+    /// `(label, width)` of each header cell, left to right.
+    fn header_layout(tree: &WidgetTree, table: WidgetId) -> Vec<(String, f32)> {
+        let mut cells = header_row_cells(tree, table);
+        cells.sort_by(|&a, &b| tree.bounds(a).x.total_cmp(&tree.bounds(b).x));
+        cells
+            .into_iter()
+            .map(|c| {
+                let info = tree.accessibility_node(c);
+                let name = info.name().unwrap_or_default().to_string();
+                (name, tree.bounds(c).width)
+            })
+            .collect()
+    }
+
+    fn labels(layout: Vec<(String, f32)>) -> Vec<String> {
+        layout.into_iter().map(|(label, _)| label).collect()
+    }
+
+    fn fixed_col(id: &'static str) -> Column<Row> {
+        Column::<Row>::new(id, lit!(id), |row, _: &CellContext| {
+            Box::new(TextWidget::new(lit!(row.name.clone())))
+        })
+        .width(ColumnWidth::Fixed(100.0))
+    }
+
     #[test]
-    fn a_reorder_keeps_the_entries_for_columns_it_does_not_have_in_place() {
-        use crate::table_view::table_header::merge_reordered;
+    fn a_reorder_in_one_view_does_not_move_the_columns_of_another() {
+        // Two views over overlapping column sets share one order. Each drag
+        // moves the dragged column and nothing else: a drag of `d`, which
+        // `a`'s view does not have, must leave that view as it was.
+        let order = Signal::new(Vec::<String>::new());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let mut view = |ids: [&'static str; 3]| {
+            let mut table = TableView::new(rows(1))
+                .row_height(20.0)
+                .show_internal_scrollbars(false)
+                .bind_column_order(order.clone());
+            for id in ids {
+                table = table.add_column(fixed_col(id));
+            }
+            let id = tree.add(table);
+            (
+                id,
+                tree.add(FixedSize::new().width(400.0).height(100.0).child(id)),
+            )
+        };
+        let (a, a_box) = view(["a", "b", "c"]);
+        let (b, b_box) = view(["b", "c", "d"]);
+        let _root = tree.add(VStack::new().child(a_box).child(b_box));
+        relayout(&mut tree, 400.0, 200.0);
+        let a_y = tree.bounds(a).y + cp::HEADER_HEIGHT * 0.5;
+        let b_y = tree.bounds(b).y + cp::HEADER_HEIGHT * 0.5;
+
+        // In the first view, `c` (x 200..300) to the front.
+        drag(&mut tree, Point::new(250.0, a_y), Point::new(5.0, a_y));
+        relayout(&mut tree, 400.0, 200.0);
+        assert_eq!(labels(header_layout(&tree, a)), vec!["c", "a", "b"]);
+        assert_eq!(labels(header_layout(&tree, b)), vec!["c", "b", "d"]);
+
+        // In the second, `d` (x 200..300) to the front.
+        drag(&mut tree, Point::new(250.0, b_y), Point::new(5.0, b_y));
+        relayout(&mut tree, 400.0, 200.0);
+        assert_eq!(labels(header_layout(&tree, b)), vec!["d", "c", "b"]);
+        assert_eq!(
+            labels(header_layout(&tree, a)),
+            vec!["c", "a", "b"],
+            "moving a column the first view lacks changes nothing in it; order {:?}",
+            order.get()
+        );
+    }
+
+    #[test]
+    fn a_resize_writes_only_its_own_column_into_an_adopted_width_map() {
+        // Two views of different widths share the width map. Resizing
+        // `artist` in the narrow one keeps `name`, the flex column before the
+        // grip, where it was there — and nowhere else: the wide view's
+        // `name` still takes what is left.
+        let flex = |id: &'static str| {
+            Column::<Row>::new(id, lit!(id), |row, _: &CellContext| {
+                Box::new(TextWidget::new(lit!(row.name.clone())))
+            })
+            .width(ColumnWidth::Flex(1.0))
+        };
+        let widths = Signal::new(HashMap::<String, f32>::new());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let mut view = |w: f32| {
+            let id = tree.add(
+                TableView::new(rows(1))
+                    .add_column(flex("name"))
+                    .add_column(flex("artist"))
+                    .add_column(fixed_col("length").width(ColumnWidth::Fixed(60.0)))
+                    .row_height(20.0)
+                    .show_internal_scrollbars(false)
+                    .bind_column_widths(widths.clone()),
+            );
+            (
+                id,
+                tree.add(FixedSize::new().width(w).height(100.0).child(id)),
+            )
+        };
+        let (narrow, narrow_box) = view(400.0);
+        let (wide, wide_box) = view(800.0);
+        let _root = tree.add(VStack::new().child(narrow_box).child(wide_box));
+        relayout(&mut tree, 800.0, 200.0);
+        let widths_of = |tree: &WidgetTree, id| {
+            header_layout(tree, id)
+                .into_iter()
+                .map(|(_, w)| w)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(widths_of(&tree, narrow), vec![170.0, 170.0, 60.0]);
+
+        // Widen `artist` (x 170..340) by 40 from its trailing grip.
+        let y = tree.bounds(narrow).y + cp::HEADER_HEIGHT * 0.5;
+        let grip = 340.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(grip, y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(grip + 40.0, y)));
+        relayout(&mut tree, 800.0, 200.0);
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(grip + 40.0, y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        relayout(&mut tree, 800.0, 200.0);
+
+        assert_eq!(
+            widths.get(),
+            HashMap::from([("artist".to_string(), 210.0)]),
+            "a shared map holds the column the user resized, and only it"
+        );
+        assert_eq!(
+            widths_of(&tree, narrow),
+            vec![170.0, 210.0, 60.0],
+            "the view resized in keeps the column before the grip where it was"
+        );
+        assert_eq!(
+            widths_of(&tree, wide),
+            vec![530.0, 210.0, 60.0],
+            "the other view's flex column takes what is left"
+        );
+
+        // A reset from outside is the declared layout again, in both.
+        widths.set(HashMap::new());
+        relayout(&mut tree, 800.0, 200.0);
+        assert_eq!(widths_of(&tree, narrow), vec![170.0, 170.0, 60.0]);
+        assert_eq!(widths_of(&tree, wide), vec![370.0, 370.0, 60.0]);
+    }
+
+    #[test]
+    fn a_reorder_moves_the_dragged_column_and_keeps_every_other_entry_in_place() {
+        use crate::table_view::PinnedSide::{self, Leading, None as Unpinned};
+        use crate::table_view::table_header::move_dropped_column;
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
-        let own = s(&["a", "b", "c"]);
-        // Foreign ids keep their slots; own slots take the new order.
+        let shown = |v: &[(&str, PinnedSide)]| {
+            v.iter()
+                .map(|(id, side)| (id.to_string(), *side))
+                .collect::<Vec<_>>()
+        };
+        // `c` dropped before `a`: it lands right before `a`, and the ids the
+        // header lacks stay where they were.
         assert_eq!(
-            merge_reordered(&s(&["x", "a", "y", "b", "c"]), &own, s(&["c", "a", "b"])),
-            s(&["x", "c", "y", "a", "b"])
+            move_dropped_column(
+                &s(&["x", "a", "y", "b", "c"]),
+                &shown(&[("c", Unpinned), ("a", Unpinned), ("b", Unpinned)]),
+                "c",
+            ),
+            s(&["x", "c", "a", "y", "b"])
         );
-        // Own columns the list never named go at the end, in the new order.
+        // A column that did not move is not carried past an id this header
+        // lacks: `b` stays ahead of `x`, so a view showing `b` and `x` keeps
+        // its order.
         assert_eq!(
-            merge_reordered(&s(&["b", "x"]), &own, s(&["c", "b", "a"])),
-            s(&["c", "x", "b", "a"])
+            move_dropped_column(
+                &s(&["b", "x", "c"]),
+                &shown(&[("c", Unpinned), ("b", Unpinned)]),
+                "c",
+            ),
+            s(&["c", "b", "x"])
         );
-        // An empty list (declared order) becomes the new order.
+        // Columns the list never named are appended first, in their current
+        // order; dropped last, `a` goes right after the column before it.
         assert_eq!(
-            merge_reordered(&[], &own, s(&["b", "a", "c"])),
-            s(&["b", "a", "c"])
+            move_dropped_column(
+                &s(&["x"]),
+                &shown(&[("b", Unpinned), ("c", Unpinned), ("a", Unpinned)]),
+                "a",
+            ),
+            s(&["x", "b", "c", "a"])
+        );
+        // The neighbour that counts is the one in the dragged column's pane:
+        // `c`, pinned at the end of the leading pane, goes after `l`, not
+        // before `a`, the next column on screen.
+        assert_eq!(
+            move_dropped_column(
+                &s(&["a", "l", "c"]),
+                &shown(&[("l", Leading), ("c", Leading), ("a", Unpinned)]),
+                "c",
+            ),
+            s(&["a", "l", "c"])
         );
     }
 }
@@ -6413,6 +6597,85 @@ mod standalone_header {
         );
     }
 
+    /// A row that lines a cell up in `place_children`, reading the header's
+    /// published widths when it is placed.
+    #[derive(Debug)]
+    struct PlacedRow {
+        resolved: Signal<Vec<(String, f32)>>,
+        first_width: std::rc::Rc<std::cell::Cell<f32>>,
+    }
+
+    impl teksilo_core::widget::Widget for PlacedRow {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &teksilo_core::widget::LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            proposal.resolve(0.0, 20.0).into()
+        }
+
+        fn place_children(
+            &self,
+            _bounds: teksilo_canvas::Rect,
+            _proposal: SizeProposal,
+            _children: &mut [teksilo_core::widget::WidgetPlacement],
+            _ctx: &teksilo_core::widget::LayoutContext,
+        ) {
+            let w = self.resolved.get().first().map_or(0.0, |(_, w)| *w);
+            self.first_width.set(w);
+        }
+    }
+
+    #[test]
+    fn rows_below_the_header_follow_its_widths_a_pass_late_unless_read_when_placed() {
+        // What `resolved_widths_signal`'s docs promise, both halves: written
+        // when the header is placed, it reaches a row's `place_children` in
+        // the same pass, and a row measured from it on the next one.
+        let widths = Signal::new(HashMap::<String, f32>::new());
+        let header = TableHeader::new(vec![
+            fixed("title", 150.0),
+            ColumnSpec::new("artist", lit!("artist")),
+            fixed("length", 100.0),
+        ])
+        .widths(widths.clone());
+        let resolved = header.resolved_widths_signal().clone();
+        let first = resolved.map(|v| v.first().map_or(0.0, |(_, w)| *w));
+        let placed_width = std::rc::Rc::new(std::cell::Cell::new(0.0));
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let header = tree.add(header);
+        let measured = tree.add(
+            FixedSize::new()
+                .width(first)
+                .height(20.0)
+                .child(TextWidget::new(lit!(""))),
+        );
+        let placed = tree.add(PlacedRow {
+            resolved: resolved.clone(),
+            first_width: placed_width.clone(),
+        });
+        let _root = tree.add(VStack::new().child(header).child(measured).child(placed));
+        let layout = |tree: &mut WidgetTree| {
+            tree.layout(SizeProposal {
+                width: Some(400.0),
+                height: Some(300.0),
+            })
+        };
+        layout(&mut tree);
+        layout(&mut tree);
+        assert_eq!(tree.bounds(measured).width, 150.0);
+
+        widths.set(HashMap::from([("title".to_string(), 180.0)]));
+        layout(&mut tree);
+        assert_eq!(placed_width.get(), 180.0, "read when placed: this pass");
+        assert_eq!(
+            tree.bounds(measured).width,
+            150.0,
+            "measured from the widths: still the last pass's"
+        );
+        layout(&mut tree);
+        assert_eq!(tree.bounds(measured).width, 180.0, "…and this one's next");
+    }
+
     #[test]
     fn dragging_a_header_cell_writes_the_adopted_order() {
         let order = Signal::new(Vec::<String>::new());
@@ -6439,6 +6702,55 @@ mod standalone_header {
                 ("artist".to_string(), 250.0),
             ]
         );
+    }
+
+    #[test]
+    fn dragging_a_column_declared_pinned_into_the_scrolling_pane_unpins_it() {
+        // `a` is declared leading-pinned. A drop between `b` and `c` must
+        // unpin it, not merely rewrite the order behind a pinning that keeps
+        // it in front; a drop back into the leading pane restores the
+        // declaration, so the override goes.
+        let pinning = Signal::new(HashMap::<String, PinnedSide>::new());
+        let header = TableHeader::new(vec![
+            fixed("a", 100.0).pinned(PinnedSide::Leading),
+            fixed("b", 100.0),
+            fixed("c", 100.0),
+        ])
+        .pinning(pinning.clone());
+        let (mut tree, id) = mount(header, 400.0);
+        let order = |tree: &WidgetTree| {
+            cells(tree, id)
+                .into_iter()
+                .map(|(label, _, _)| label)
+                .collect::<Vec<_>>()
+        };
+
+        let y = cp::HEADER_HEIGHT * 0.5;
+        // Midpoints 50, 150, 250: x 190 is the slot before `c`.
+        drag(&mut tree, Point::new(50.0, y), Point::new(190.0, y));
+        relayout(&mut tree, 400.0);
+        assert_eq!(order(&tree), vec!["b", "a", "c"]);
+        assert_eq!(
+            pinning.get(),
+            HashMap::from([("a".to_string(), PinnedSide::None)])
+        );
+
+        // Clearing the map pins `a` again, as declared.
+        pinning.set(HashMap::new());
+        relayout(&mut tree, 400.0);
+        assert_eq!(order(&tree), vec!["a", "b", "c"]);
+        // `b` (x 100..200) into the leading pane, after `a`, is pinned there.
+        drag(&mut tree, Point::new(150.0, y), Point::new(95.0, y));
+        relayout(&mut tree, 400.0);
+        assert_eq!(
+            pinning.get(),
+            HashMap::from([("b".to_string(), PinnedSide::Leading)])
+        );
+        // A drop of `a` inside the leading pane is the side it declares, so
+        // it needs no entry.
+        drag(&mut tree, Point::new(50.0, y), Point::new(5.0, y));
+        relayout(&mut tree, 400.0);
+        assert!(!pinning.get().contains_key("a"), "{:?}", pinning.get());
     }
 
     #[test]

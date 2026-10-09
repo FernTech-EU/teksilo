@@ -199,6 +199,15 @@ impl<T: 'static> Widget for TreeTableView<T> {
             pv.set(next);
             v_for_pin.set(next);
         });
+        // Each header cell reads its funnel tint and its popover's text at
+        // build, so a filter written anywhere else needs a rebuild to show.
+        let v_for_filter = version.clone();
+        let fv = Rc::new(Cell::new(0_u64));
+        ctx.effect(&self.filters_signal, move |_| {
+            let next = fv.get() + 1;
+            fv.set(next);
+            v_for_filter.set(next);
+        });
         // Selection / focus / editing effects live on the TreeBodyPane
         // (they only affect row content) — rebuilding the pane instead
         // of the root keeps those rebuilds out of the scrollbar's
@@ -330,6 +339,15 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // `common::ordered_move`. Suppressed while sorted, because a sorted view
         // is not showing the model's order and moving a row in it would say
         // nothing about where the row went.
+        //
+        // Sorted *by one of its own columns*: a shared `bind_sort` may name a
+        // column only another view has, which leaves this view's rows in model
+        // order, and an id the view does not declare is ignored when read.
+        let sorted_here: Rc<dyn Fn() -> bool> = {
+            let sort = self.sort_signal.clone();
+            let own: Vec<String> = self.columns.iter().map(|c| c.spec.id.clone()).collect();
+            Rc::new(move || sort.get().is_some_and(|(id, _)| own.contains(&id)))
+        };
         let (reorder_perform, reparent_perform) = if self.reorderable {
             let follow: Rc<dyn Fn(usize)> = {
                 let focused = self.focused_cell.clone();
@@ -354,12 +372,12 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 let source = self.source.clone();
                 let follow = follow.clone();
                 let name_of = name_of.clone();
-                let sort = self.sort_signal.clone();
+                let sorted = sorted_here.clone();
                 Rc::new(
                     move |mv: crate::common::ordered_move::OrderedMove,
                           flat: usize,
                           ctx: &mut EventContext| {
-                        if sort.get().is_some() {
+                        if sorted() {
                             return;
                         }
                         let name = (name_of)(flat);
@@ -379,12 +397,12 @@ impl<T: 'static> Widget for TreeTableView<T> {
             let reparent = {
                 let source = self.source.clone();
                 let follow = follow.clone();
-                let sort = self.sort_signal.clone();
+                let sorted = sorted_here.clone();
                 Rc::new(
                     move |mv: crate::common::ordered_move::TreeMove,
                           flat: usize,
                           ctx: &mut EventContext| {
-                        if sort.get().is_some() {
+                        if sorted() {
                             return;
                         }
                         let name = (name_of)(flat);
@@ -526,7 +544,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
             let scroll_for_hover = self.scroll_y.clone();
             let header_h_for_hover = header_h;
             let feedback_for_hover = self.drop_feedback.clone();
-            let sort_for_hover = self.sort_signal.clone();
+            let sorted_for_hover = sorted_here.clone();
             let reorderable_hover = self.reorderable;
             let export_for_hover = self.export.clone();
             let has_foreign_hook_hover = self.on_foreign_drop.is_some();
@@ -553,8 +571,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 }
                 let rd = payload.get_typed::<RowDragData<T>>();
                 let is_same_view = rd.is_some_and(|r| r.source == my_model_id);
-                let reorder_ok =
-                    is_same_view && reorderable_hover && sort_for_hover.get().is_none();
+                let reorder_ok = is_same_view && reorderable_hover && !sorted_for_hover();
                 // The typed `accept_foreign_rows`/`on_rows_received` path can
                 // only consume an EXPORT payload (items present); the raw
                 // `on_foreign_drop` hook takes any foreign payload.
@@ -645,7 +662,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
             let scroll_for_drop = self.scroll_y.clone();
             let header_h_for_drop = header_h;
             let feedback_for_drop = self.drop_feedback.clone();
-            let sort_for_drop = self.sort_signal.clone();
+            let sorted_for_drop = sorted_here.clone();
             let reorderable_drop = self.reorderable;
             let on_foreign_for_drop = self.on_foreign_drop.clone();
             let proxy_for_foreign_hook = self.proxy.clone();
@@ -685,7 +702,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 let is_same_view = payload
                     .get_typed::<RowDragData<T>>()
                     .is_some_and(|rd| rd.source == drop_model_id);
-                if is_same_view && (!reorderable_drop || sort_for_drop.get().is_some()) {
+                if is_same_view && (!reorderable_drop || sorted_for_drop()) {
                     return false;
                 }
                 // The source applies the move (cycle-guarded, undo-aware for an
@@ -793,6 +810,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     resize_state: self.resize_state.clone(),
                     resize_target: self.resize_target.clone(),
                     resize_preview_x: self.resize_preview_x.clone(),
+                    frozen_widths: self.column_widths_frozen.clone(),
                 });
             self.header_row_id = Some(ctx.add(header));
         }
@@ -1022,7 +1040,11 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // reorder-drop handler's RTL mirror (see `TableView::place_children`).
         self.header_strip_width.set(body_width);
 
-        let overrides = self.column_widths_signal.get();
+        let overrides = width_overrides(
+            self.column_widths_signal.get(),
+            self.column_widths_frozen.as_ref(),
+            self.columns.iter().map(|c| c.spec.id.as_str()),
+        );
         let display = self.display_indices.borrow().clone();
         let widths = layout::ColumnSolver::resolve_in_order(
             &self.columns,

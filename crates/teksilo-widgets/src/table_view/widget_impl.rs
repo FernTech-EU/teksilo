@@ -718,6 +718,7 @@ impl<T: 'static> Widget for TableView<T> {
                     resize_state: self.resize_state.clone(),
                     resize_target: self.resize_target.clone(),
                     resize_preview_x: self.resize_preview_x.clone(),
+                    frozen_widths: self.column_widths_frozen.clone(),
                 });
             self.header_row_id = Some(ctx.add(header));
         }
@@ -948,7 +949,11 @@ impl<T: 'static> Widget for TableView<T> {
 
         // Resolve column widths in display order, honoring any
         // user-resize overrides from `column_widths_signal`.
-        let overrides = self.column_widths_signal.get();
+        let overrides = header::width_overrides(
+            self.column_widths_signal.get(),
+            self.column_widths_frozen.as_ref(),
+            self.columns.iter().map(|c| c.spec.id.as_str()),
+        );
         let display = self.display_indices.borrow().clone();
         let widths = layout::ColumnSolver::resolve_in_order(
             &self.columns,

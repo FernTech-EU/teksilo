@@ -38,9 +38,11 @@
 //! Inside a view the header is *hosted* (`TableHeader::hosted`): the view
 //! resolves the widths and the display order (its body needs both before the
 //! header is placed), paints the `OnRelease` resize guide across the whole
-//! table, rebuilds the header whenever its state changes, and keeps the drag
-//! state across those rebuilds. A standalone header does all of that itself,
-//! within its own bounds, which it clips to.
+//! table, rebuilds the header whenever its state changes, and holds the
+//! resize-drag state, which a relayout keeps. A rebuild abandons an
+//! in-flight resize, hosted or not: it destroys the cells and the pointer
+//! capture with them (see `TableHeader::build`). A standalone header does
+//! all of that itself, within its own bounds, which it clips to.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -61,6 +63,7 @@ use super::body::{RowBand, SharedColumnWidths, has_pinning};
 use super::column::{ColumnResizePolicy, ColumnSpec, ColumnWidth, PinnedSide};
 use super::header::{
     ColumnResizeInfo, ColumnResizeTable, HeaderCell, HeaderCellSpec, ResizeStateHandle,
+    SharedFrozenWidths, width_overrides,
 };
 use super::imperative;
 use super::layout::{self, ColumnSolver, band_rects, insertion_slot_at_x};
@@ -97,6 +100,10 @@ pub(crate) struct HeaderLink {
     pub resize_state: ResizeStateHandle,
     pub resize_target: Signal<Option<usize>>,
     pub resize_preview_x: Signal<Option<f32>>,
+    /// `Some` when the width map is adopted: the widths a resize freezes stay
+    /// here rather than in the map, which other views may share. See
+    /// `commit_resize` in the header cell module.
+    pub frozen_widths: Option<SharedFrozenWidths>,
 }
 
 impl HeaderLink {
@@ -110,6 +117,7 @@ impl HeaderLink {
             resize_state: Rc::new(RefCell::new(None)),
             resize_target: Signal::new(None),
             resize_preview_x: Signal::new(None),
+            frozen_widths: None,
         }
     }
 }
@@ -187,12 +195,17 @@ impl TableHeader {
         }
     }
 
-    /// Adopt `widths` as the map of column id → width override. A resize drag
-    /// writes the resized column, and freezes each `Flex` column before it at
-    /// its current width; a column with no entry takes its declared
-    /// [`ColumnWidth`].
+    /// Adopt `widths` as the map of column id → width override; a column
+    /// with no entry takes its declared [`ColumnWidth`]. A resize drag writes
+    /// the resized column only. Each `Flex` column before it keeps its
+    /// current width in this header, but not in the map, which other views
+    /// may share at other widths.
     pub fn widths(mut self, widths: Signal<HashMap<String, f32>>) -> Self {
         self.widths = widths;
+        // A hosting view hands over its own, adopted or not.
+        if !self.hosted {
+            self.link.frozen_widths = Some(Rc::default());
+        }
         self
     }
 
@@ -211,8 +224,10 @@ impl TableHeader {
     }
 
     /// Adopt `pinning` as the per-column pinning overrides, which win over
-    /// each [`ColumnSpec::pinned`]. A reorder drop into a pinned pane writes
-    /// it.
+    /// each [`ColumnSpec::pinned`]; [`PinnedSide::None`] unpins a column
+    /// declared pinned. A reorder drop writes it: an entry when the drop puts
+    /// the column in a pane other than the one it declares, none when it
+    /// puts it back.
     pub fn pinning(mut self, pinning: Signal<HashMap<String, PinnedSide>>) -> Self {
         self.pinning = pinning;
         self
@@ -295,10 +310,19 @@ impl TableHeader {
     /// `(column id, width)` for each displayed column, in display order: the
     /// widths the header laid its cells out at, after the overrides, the
     /// declared widths, the `Flex` share and the min / max clamps. Written
-    /// after each layout of the header, and only when it changed; bind a row's
-    /// layout to it to line the row's cells up with the columns. Leading-pinned
-    /// columns come first and do not move with `scroll_x`, nor do the
-    /// trailing-pinned ones at the end.
+    /// when the header is placed in a layout pass, and only when it changed;
+    /// bind a row's layout to it to line the row's cells up with the columns.
+    /// Leading-pinned columns come first and do not move with `scroll_x`, nor
+    /// do the trailing-pinned ones at the end.
+    ///
+    /// **Rows follow it one layout pass late**, unless they read it in their
+    /// own `place_children` and are laid out after the header (below it in
+    /// the same stack): only the header's bounds settle the widths, and a row
+    /// that sizes itself from them in `layout_response` (a `FixedSize` bound
+    /// to a width derived from this, say) has been measured by then, so it is
+    /// relaid out on the next pass. During a live resize drag such a row
+    /// trails the header by a frame, and a headless test needs a second
+    /// `layout()` before it lines up.
     ///
     /// Published by a standalone header only; a view hosting the header lays
     /// its rows out from the same widths directly.
@@ -320,12 +344,17 @@ impl TableHeader {
     }
 
     fn resolve_widths(&self, available: f32) -> Vec<f32> {
+        let overrides = width_overrides(
+            self.widths.get(),
+            self.link.frozen_widths.as_ref(),
+            self.columns.iter().map(|c| c.id.as_str()),
+        );
         ColumnSolver::resolve_in_order(
             &self.columns,
             &self.link.display_indices.borrow(),
             available,
             cp::MIN_COLUMN_WIDTH_DEFAULT,
-            &self.widths.get(),
+            &overrides,
             self.stretch_last_column,
         )
     }
@@ -339,6 +368,7 @@ impl TableHeader {
         let pinning = self.pinning.clone();
         let scroll_x = self.scroll_x.clone();
         let ids: Vec<String> = self.columns.iter().map(|c| c.id.clone()).collect();
+        let declared_pinning: Vec<PinnedSide> = self.columns.iter().map(|c| c.pinned).collect();
         let table_id = self.link.table_id;
 
         HandlerSet::new()
@@ -408,32 +438,52 @@ impl TableHeader {
                     PinnedSide::None
                 };
 
-                // Update the pinning override (recorded only when it deviates
-                // from None, which is the framework default).
+                // The pinning override: an entry when the drop puts the column
+                // on a side other than the one it declares — `None` included,
+                // or a column declared pinned could never be dragged out of its
+                // pane — and none when it puts it back on its own.
+                let Some(col_idx) = ids.iter().position(|id| id == &drag.col_id) else {
+                    return false;
+                };
                 let mut pin_map = pinning.get();
-                match new_pinning {
-                    PinnedSide::None => {
-                        pin_map.remove(&drag.col_id);
-                    }
-                    other => {
-                        pin_map.insert(drag.col_id.clone(), other);
-                    }
+                if new_pinning == declared_pinning[col_idx] {
+                    pin_map.remove(&drag.col_id);
+                } else {
+                    pin_map.insert(drag.col_id.clone(), new_pinning);
                 }
                 pinning.set(pin_map);
 
-                // Rebuild the column-order list to reflect the drop.
-                let mut new_order: Vec<String> = display.iter().map(|&i| ids[i].clone()).collect();
-                let from_pos = new_order.iter().position(|id| id == &drag.col_id);
+                // This header's columns in their new display order, each with
+                // the pane it now sits in.
+                let pane_at = |slot: usize| {
+                    if slot < panes.leading_count {
+                        PinnedSide::Leading
+                    } else if slot < panes.middle_end {
+                        PinnedSide::None
+                    } else {
+                        PinnedSide::Trailing
+                    }
+                };
+                let mut new_display: Vec<(String, PinnedSide)> = display
+                    .iter()
+                    .enumerate()
+                    .map(|(slot, &i)| (ids[i].clone(), pane_at(slot)))
+                    .collect();
+                let from_pos = new_display.iter().position(|(id, _)| id == &drag.col_id);
                 if let Some(from) = from_pos {
-                    let item = new_order.remove(from);
+                    let (item, _) = new_display.remove(from);
                     let to = if from < insertion_display_idx {
                         insertion_display_idx.saturating_sub(1)
                     } else {
                         insertion_display_idx
                     };
-                    let to = to.min(new_order.len());
-                    new_order.insert(to, item);
-                    order.set(merge_reordered(&order.get(), &ids, new_order));
+                    let to = to.min(new_display.len());
+                    new_display.insert(to, (item, new_pinning));
+                    order.set(move_dropped_column(
+                        &order.get(),
+                        &new_display,
+                        &drag.col_id,
+                    ));
                 }
                 true
             })
@@ -591,6 +641,7 @@ impl Widget for TableHeader {
                     table_id: self.link.table_id,
                     sort_signal: self.sort.clone(),
                     column_widths_signal: self.widths.clone(),
+                    frozen_widths: self.link.frozen_widths.clone(),
                     column_widths: self.link.widths.clone(),
                     filters_signal: self.filters.clone(),
                 }))
@@ -878,31 +929,52 @@ fn draw_band_separators(
     }
 }
 
-/// Write `reordered` — this header's own columns, in their new order — back
-/// over `existing`, the order signal's current list, which may also name
-/// columns this header does not have.
+/// Write the drop of `dragged` into `existing`, the order signal's current
+/// list, which may also name columns this header does not have.
 ///
-/// An order signal several views share (`bind_column_order`) carries every
-/// view's columns, so replacing it with the dropped-on view's own list would
-/// throw the other views' arrangement away. Instead every slot that held one
-/// of the `own` columns takes the next column of `reordered`, the other ids stay
-/// where they were, and own columns the list did not mention yet go at the end.
-/// The own columns then read in `reordered`'s order, which is all
-/// `display_order` looks at.
-pub(crate) fn merge_reordered(
+/// `display` is this header's columns in their display order after the drop,
+/// each with the pane it sits in then. `display_order` sorts each pane by the
+/// columns' positions in the list (the ones the list does not name follow, in
+/// declaration order), so the list only has to put `dragged` right before the
+/// next column of its pane, or right after the previous one.
+///
+/// Only `dragged` moves. An order several views share (`bind_column_order`)
+/// carries every view's columns; re-slotting this header's whole set instead
+/// would move the columns another view shares past ids that view lacks, and
+/// reorder it though nothing it shows was dragged. Own columns the list does
+/// not name yet are appended first, in their current order, so the list
+/// reads as this header's whole order afterwards.
+pub(crate) fn move_dropped_column(
     existing: &[String],
-    own: &[String],
-    reordered: Vec<String>,
+    display: &[(String, PinnedSide)],
+    dragged: &str,
 ) -> Vec<String> {
-    let mut next = reordered.into_iter();
-    let mut out = Vec::with_capacity(existing.len() + own.len());
-    for id in existing {
-        if own.contains(id) {
-            out.extend(next.next());
-        } else {
+    let mut out = existing.to_vec();
+    for (id, _) in display {
+        if !out.contains(id) {
             out.push(id.clone());
         }
     }
-    out.extend(next);
+    let Some(was) = out.iter().position(|id| id == dragged) else {
+        return out;
+    };
+    out.remove(was);
+    let Some(at) = display.iter().position(|(id, _)| id == dragged) else {
+        out.insert(was, dragged.to_string());
+        return out;
+    };
+    let pane = display[at].1;
+    let next = display[at + 1..].iter().find(|(_, side)| *side == pane);
+    let prev = display[..at].iter().rev().find(|(_, side)| *side == pane);
+    let slot = |id: &String| out.iter().position(|o| o == id);
+    let to = match (next, prev) {
+        (Some((next, _)), _) => slot(next),
+        (None, Some((prev, _))) => slot(prev).map(|i| i + 1),
+        // Alone in its pane: where it sits among other panes' columns
+        // changes nothing.
+        (None, None) => None,
+    }
+    .unwrap_or(was);
+    out.insert(to, dragged.to_string());
     out
 }
