@@ -7,7 +7,8 @@
 //! a depth level; one designated column (the *tree column*, defaulting to the first)
 //! shows a twist (chevron) and an indent gutter that toggles the row's children.
 //! Backed by a [`SortFilterTreeModel<T>`] so sort, filter, and expand state compose
-//! without extra bookkeeping. Shares the header, column, keyboard, and selection
+//! without extra bookkeeping. Shares the header (a hosted
+//! [`TableHeader`]), column, keyboard, and selection
 //! modules with `TableView`.
 //!
 //! Rows live in a `TreeBodyPane` — a sibling of the scrollbar — so buffer-exit /
@@ -110,15 +111,13 @@ use crate::table_view::body::SharedColumnWidths;
 use crate::table_view::column::{
     Column, ColumnResizePolicy, EditTriggers, GridLines, PinnedSide, TabTraversal,
 };
-use crate::table_view::header::{
-    ColumnResizeInfo, ColumnResizeTable, HeaderCell, HeaderCellSpec, HeaderRow, ResizeStateHandle,
-    attach_header_reorder_handlers,
-};
+use crate::table_view::header::ResizeStateHandle;
 use crate::table_view::imperative;
 use crate::table_view::keyboard;
 use crate::table_view::layout;
 use crate::table_view::row_navigator::RowNavigator;
 use crate::table_view::selection::{CellSelectionModel, TableSelectionMode};
+use crate::table_view::{HeaderLink, TableHeader};
 use crate::tree_source::TreeSource;
 use teksilo_data::{DropResponse, TreeDataSource};
 
@@ -456,9 +455,7 @@ impl<T: 'static> TreeTableView<T> {
     }
 
     fn assemble(source: Rc<TreeSource<T>>, proxy: Option<SortFilterTreeModel<T>>) -> Self {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
-        let table_id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let table_id = crate::table_view::next_header_id();
         Self {
             source,
             proxy,
@@ -1445,7 +1442,7 @@ impl<T: 'static> TreeTableView<T> {
     fn tree_column_decl_index(&self) -> usize {
         if let Some(ref id) = self.tree_column_id {
             for (i, col) in self.columns.iter().enumerate() {
-                if &col.id == id {
+                if &col.spec.id == id {
                     return i;
                 }
             }
@@ -1453,50 +1450,17 @@ impl<T: 'static> TreeTableView<T> {
         0
     }
 
+    /// Display order as indices into `self.columns` — see
+    /// [`layout::display_order`], shared with `TableView`.
     fn display_order(&self) -> Vec<usize> {
-        let order_signal = self.column_order_signal.get();
-        let mut order_map: HashMap<&str, usize> = HashMap::new();
-        for (i, id) in order_signal.iter().enumerate() {
-            order_map.insert(id.as_str(), i);
-        }
-        let mut leading: Vec<usize> = Vec::new();
-        let mut middle: Vec<usize> = Vec::new();
-        let mut trailing: Vec<usize> = Vec::new();
-        for (i, col) in self.columns.iter().enumerate() {
-            let pinning = self
-                .column_pinning_signal
-                .get()
-                .get(&col.id)
-                .copied()
-                .unwrap_or(col.pinned);
-            match pinning {
-                PinnedSide::Leading => leading.push(i),
-                PinnedSide::None => middle.push(i),
-                PinnedSide::Trailing => trailing.push(i),
-            }
-        }
-        const FALLBACK_BASE: usize = usize::MAX / 2;
-        let cols = &self.columns;
-        let key_for = |i: usize| {
-            order_map
-                .get(cols[i].id.as_str())
-                .copied()
-                .unwrap_or(FALLBACK_BASE + i)
-        };
-        leading.sort_by_key(|&i| key_for(i));
-        middle.sort_by_key(|&i| key_for(i));
-        trailing.sort_by_key(|&i| key_for(i));
-        let mut out = Vec::with_capacity(leading.len() + middle.len() + trailing.len());
-        out.extend(leading);
-        let leading_count = out.len();
-        out.extend(middle);
-        let middle_end = out.len();
-        out.extend(trailing);
+        let (out, boundaries) = layout::display_order(
+            &self.columns,
+            &self.column_order_signal.get(),
+            &self.column_pinning_signal.get(),
+        );
         // Stash the boundaries so paint / place_children / the keyboard
-        // handler's ensure-column-visible can read them — mirrors
-        // `TableView::display_order`.
-        *self.pane_boundaries.borrow_mut() =
-            crate::table_view::PaneBoundaries::new(leading_count, middle_end);
+        // handler's ensure-column-visible can read them.
+        *self.pane_boundaries.borrow_mut() = boundaries;
         out
     }
 

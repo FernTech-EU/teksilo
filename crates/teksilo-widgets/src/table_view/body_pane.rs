@@ -291,7 +291,7 @@ impl<T: 'static> Widget for BodyPane<T> {
         let display_col_ids: Rc<Vec<String>> = Rc::new(
             display_indices
                 .iter()
-                .map(|&i| columns[i].id.clone())
+                .map(|&i| columns[i].spec.id.clone())
                 .collect(),
         );
         let editing_state = self.editing_cell.get();
@@ -343,7 +343,7 @@ impl<T: 'static> Widget for BodyPane<T> {
                 let is_focused = self.focused_cell.get() == Some((row_idx, display_pos));
                 let cell_ctx = CellContext {
                     row_index: row_idx,
-                    col_id: col.id.clone(),
+                    col_id: col.spec.id.clone(),
                     col_index: display_pos,
                     is_selected,
                     is_focused,
@@ -486,7 +486,7 @@ impl<T: 'static> Widget for BodyPane<T> {
                         &self.editing_cell,
                         &row_anchor,
                         display_pos,
-                        &col.id,
+                        &col.spec.id,
                     ) {
                         ctx.apply_handlers(cell_id, edit_handlers);
                     }
@@ -725,7 +725,7 @@ impl<T: 'static> Widget for BodyPane<T> {
                                             let col = &columns_for_preview[col_idx];
                                             let cell_ctx = CellContext {
                                                 row_index: drag_row,
-                                                col_id: col.id.clone(),
+                                                col_id: col.spec.id.clone(),
                                                 col_index: display_pos,
                                                 is_selected: false,
                                                 is_focused: false,

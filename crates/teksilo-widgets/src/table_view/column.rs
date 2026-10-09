@@ -7,6 +7,11 @@
 //! and shares it with its body subtree. The cell delegate is `Rc`-erased so a
 //! `Column<T>` is cheap to clone for any internal pane that needs its own
 //! copy.
+//!
+//! The part of a column the header needs — id, title, widths, the gestures it
+//! allows, pinning — is a [`ColumnSpec`], which carries no row type. A
+//! `Column<T>` holds one beside its cell delegate; a
+//! [`TableHeader`](crate::TableHeader) takes them on their own.
 
 use std::rc::Rc;
 
@@ -233,9 +238,19 @@ pub struct ColumnContext {
     pub is_hovered: bool,
 }
 
-/// Single column declaration. Column ids must be **stable, unique strings**
-/// — they're the persistence key for sort, filter, width, and ordering.
-pub struct Column<T: 'static> {
+/// What a column is to its header: id, title, width policy and the user
+/// gestures it allows — every part of a [`Column`] except how its cells are
+/// built.
+///
+/// [`TableHeader`](crate::TableHeader) takes a list of these, which is what
+/// lets an application put the table header over rows it lays out itself.
+/// A [`Column<T>`] carries one too and forwards its builders to it, so the
+/// two declare a column with the same calls and the same defaults.
+///
+/// The id must be a **stable, unique string**: it is the key the sort, the
+/// filters, the width map and the column order use.
+#[derive(Debug, Clone)]
+pub struct ColumnSpec {
     pub(crate) id: String,
     pub(crate) header_label: LocalizedString,
     pub(crate) width: ColumnWidth,
@@ -246,10 +261,118 @@ pub struct Column<T: 'static> {
     pub(crate) reorderable: bool,
     pub(crate) sortable: bool,
     pub(crate) filterable: bool,
+    pub(crate) pinned: PinnedSide,
+}
+
+impl ColumnSpec {
+    /// A column with a stable id and a localized title. Defaults: a
+    /// `Flex(1.0)` width, resizable, reorderable, neither sortable nor
+    /// filterable, unpinned.
+    pub fn new(id: impl Into<String>, title: impl Into<LocalizedString>) -> Self {
+        Self {
+            id: id.into(),
+            header_label: title.into(),
+            width: ColumnWidth::default(),
+            min_width: None,
+            max_width: None,
+            alignment: Alignment::default(),
+            resizable: true,
+            reorderable: true,
+            sortable: false,
+            filterable: false,
+            pinned: PinnedSide::None,
+        }
+    }
+
+    /// How the column's width is resolved. Default `Flex(1.0)`.
+    pub fn width(mut self, w: ColumnWidth) -> Self {
+        self.width = w;
+        self
+    }
+
+    /// The narrowest the column resolves or resizes to. Default: the table
+    /// style's `MIN_COLUMN_WIDTH_DEFAULT`.
+    pub fn min_width(mut self, px: f32) -> Self {
+        self.min_width = Some(px);
+        self
+    }
+
+    /// The widest the column resolves or resizes to. Default: unbounded.
+    pub fn max_width(mut self, px: f32) -> Self {
+        self.max_width = Some(px);
+        self
+    }
+
+    /// Horizontal alignment of the column's content. Default `Leading`.
+    pub fn alignment(mut self, a: Alignment) -> Self {
+        self.alignment = a;
+        self
+    }
+
+    /// Whether the header's divider grip resizes the column. Default `true`.
+    pub fn resizable(mut self, b: bool) -> Self {
+        self.resizable = b;
+        self
+    }
+
+    /// Whether the header cell can be dragged to reorder the column.
+    /// Default `true`.
+    pub fn reorderable(mut self, b: bool) -> Self {
+        self.reorderable = b;
+        self
+    }
+
+    /// Whether a click on the header cycles the sort. Default `false`.
+    pub fn sortable(mut self, b: bool) -> Self {
+        self.sortable = b;
+        self
+    }
+
+    /// Whether the header offers the filter popover. Default `false`.
+    pub fn filterable(mut self, b: bool) -> Self {
+        self.filterable = b;
+        self
+    }
+
+    /// Which side, if any, the column is pinned to. Default `None`.
+    pub fn pinned(mut self, side: PinnedSide) -> Self {
+        self.pinned = side;
+        self
+    }
+
+    /// Stable column id.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+/// Read access to a column's [`ColumnSpec`], whether the column is a bare
+/// spec (a [`TableHeader`](crate::TableHeader)'s) or a full [`Column<T>`] —
+/// so the width solver and the display order are written once for both.
+pub(crate) trait HasColumnSpec {
+    fn column_spec(&self) -> &ColumnSpec;
+}
+
+impl HasColumnSpec for ColumnSpec {
+    fn column_spec(&self) -> &ColumnSpec {
+        self
+    }
+}
+
+impl<T: 'static> HasColumnSpec for Column<T> {
+    fn column_spec(&self) -> &ColumnSpec {
+        &self.spec
+    }
+}
+
+/// Single column declaration. Column ids must be **stable, unique strings**
+/// — they're the persistence key for sort, filter, width, and ordering.
+pub struct Column<T: 'static> {
+    /// Everything the header needs; see [`ColumnSpec`].
+    pub(crate) spec: ColumnSpec,
     pub(crate) editable: bool,
     /// Per-column override of the view's [`EditTriggers`]; `None` inherits.
     pub(crate) edit_triggers: Option<EditTriggers>,
-    pub(crate) pinned: PinnedSide,
     pub(crate) truncation: TruncationPolicy,
     pub(crate) cell: Rc<dyn Fn(&T, &CellContext) -> Box<dyn Widget>>,
     pub(crate) header_override: Option<Rc<dyn Fn(&ColumnContext) -> Box<dyn Widget>>>,
@@ -265,19 +388,9 @@ impl<T: 'static> Column<T> {
         cell: impl Fn(&T, &CellContext) -> Box<dyn Widget> + 'static,
     ) -> Self {
         Self {
-            id: id.into(),
-            header_label: header.into(),
-            width: ColumnWidth::default(),
-            min_width: None,
-            max_width: None,
-            alignment: Alignment::default(),
-            resizable: true,
-            reorderable: true,
-            sortable: false,
-            filterable: false,
+            spec: ColumnSpec::new(id, header),
             editable: false,
             edit_triggers: None,
-            pinned: PinnedSide::None,
             truncation: TruncationPolicy::default(),
             cell: Rc::new(cell),
             header_override: None,
@@ -285,42 +398,42 @@ impl<T: 'static> Column<T> {
     }
 
     pub fn width(mut self, w: ColumnWidth) -> Self {
-        self.width = w;
+        self.spec = self.spec.width(w);
         self
     }
 
     pub fn min_width(mut self, px: f32) -> Self {
-        self.min_width = Some(px);
+        self.spec = self.spec.min_width(px);
         self
     }
 
     pub fn max_width(mut self, px: f32) -> Self {
-        self.max_width = Some(px);
+        self.spec = self.spec.max_width(px);
         self
     }
 
     pub fn alignment(mut self, a: Alignment) -> Self {
-        self.alignment = a;
+        self.spec = self.spec.alignment(a);
         self
     }
 
     pub fn resizable(mut self, b: bool) -> Self {
-        self.resizable = b;
+        self.spec = self.spec.resizable(b);
         self
     }
 
     pub fn reorderable(mut self, b: bool) -> Self {
-        self.reorderable = b;
+        self.spec = self.spec.reorderable(b);
         self
     }
 
     pub fn sortable(mut self, b: bool) -> Self {
-        self.sortable = b;
+        self.spec = self.spec.sortable(b);
         self
     }
 
     pub fn filterable(mut self, b: bool) -> Self {
-        self.filterable = b;
+        self.spec = self.spec.filterable(b);
         self
     }
 
@@ -359,7 +472,7 @@ impl<T: 'static> Column<T> {
     }
 
     pub fn pinned(mut self, side: PinnedSide) -> Self {
-        self.pinned = side;
+        self.spec = self.spec.pinned(side);
         self
     }
 
@@ -382,26 +495,16 @@ impl<T: 'static> Column<T> {
     /// Stable column id (the persistence key for sort, filter, width,
     /// and ordering signals).
     pub fn id(&self) -> &str {
-        &self.id
+        &self.spec.id
     }
 }
 
 impl<T: 'static> Clone for Column<T> {
     fn clone(&self) -> Self {
         Self {
-            id: self.id.clone(),
-            header_label: self.header_label.clone(),
-            width: self.width,
-            min_width: self.min_width,
-            max_width: self.max_width,
-            alignment: self.alignment,
-            resizable: self.resizable,
-            reorderable: self.reorderable,
-            sortable: self.sortable,
-            filterable: self.filterable,
+            spec: self.spec.clone(),
             editable: self.editable,
             edit_triggers: self.edit_triggers,
-            pinned: self.pinned,
             truncation: self.truncation,
             cell: self.cell.clone(),
             header_override: self.header_override.clone(),
@@ -412,10 +515,10 @@ impl<T: 'static> Clone for Column<T> {
 impl<T: 'static> std::fmt::Debug for Column<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Column")
-            .field("id", &self.id)
-            .field("width", &self.width)
-            .field("alignment", &self.alignment)
-            .field("pinned", &self.pinned)
+            .field("id", &self.spec.id)
+            .field("width", &self.spec.width)
+            .field("alignment", &self.spec.alignment)
+            .field("pinned", &self.spec.pinned)
             .finish()
     }
 }

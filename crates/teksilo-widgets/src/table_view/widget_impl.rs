@@ -63,33 +63,13 @@ impl<T: 'static> Widget for TableView<T> {
         );
 
         // `OnRelease` resize guide line — paint-only, nothing moves until the
-        // button comes up.
+        // button comes up. (The header abandons a drag whose window goes
+        // inactive; see `TableHeader::build`.)
         self.resize_preview_x.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
         );
-
-        // A resize drag that loses the window never gets its PointerUp: the
-        // user Alt-Tabs (or a native dialog steals focus) with the button
-        // down, releases it over another window, and the OS delivers the Up
-        // nowhere. Abandon the gesture on deactivation, or the state outlives
-        // it and the next bare PointerMove drags the column with no button
-        // held. Nothing is committed — an interrupted drag leaves the column
-        // wherever the last delivered move put it, which is what the user last
-        // saw.
-        {
-            let resize_state = self.resize_state.clone();
-            let resize_target = self.resize_target.clone();
-            let resize_preview_x = self.resize_preview_x.clone();
-            ctx.effect(&ctx.window_active_signal(), move |active| {
-                if !*active && resize_state.borrow().is_some() {
-                    *resize_state.borrow_mut() = None;
-                    resize_target.set(None);
-                    resize_preview_x.set(None);
-                }
-            });
-        }
 
         // Column order + pinning: changes require a rebuild because the
         // header cells and row cells must be re-emitted in the new order
@@ -277,10 +257,10 @@ impl<T: 'static> Widget for TableView<T> {
                 let old_to_new: Vec<Option<usize>> = old_display
                     .iter()
                     .map(|&decl_idx| {
-                        let id = &self.columns[decl_idx].id;
+                        let id = &self.columns[decl_idx].spec.id;
                         display_indices_now
                             .iter()
-                            .position(|&new_decl_idx| self.columns[new_decl_idx].id == *id)
+                            .position(|&new_decl_idx| self.columns[new_decl_idx].spec.id == *id)
                     })
                     .collect();
                 drop(old_display);
@@ -358,7 +338,7 @@ impl<T: 'static> Widget for TableView<T> {
         // reference. Snapshotted at build; rebuilds re-issue this.
         let column_ids_in_display_order: Vec<String> = display_indices_now
             .iter()
-            .map(|&i| self.columns[i].id.clone())
+            .map(|&i| self.columns[i].spec.id.clone())
             .collect();
         let display_col_to_id: Rc<dyn Fn(usize) -> Option<String>> = {
             let ids = column_ids_in_display_order;
@@ -601,7 +581,7 @@ impl<T: 'static> Widget for TableView<T> {
         // Row-level drop target: registered only when this table can
         // reorder its own rows or accept foreign ones (mirrors ListView).
         // Column reorder lives entirely on the header strip
-        // (`attach_header_reorder_handlers`) and is untouched by this gate.
+        // (`TableHeader`'s own drop target) and is untouched by this gate.
         if self.export.is_drop_target(self.reorderable) {
             handlers = handlers
                 .on_drag_hover(move |payload, position, _ctx| {
@@ -715,117 +695,31 @@ impl<T: 'static> Widget for TableView<T> {
         // the header / body loops.
         let display_indices = display_indices_now;
 
-        // Header strip: build first so it sits above the body in the
-        // child order (place_children iterates in this order).
+        // Header strip: a hosted `TableHeader`. The table resolves the widths
+        // and the display order the header reads — the body needs both before
+        // the header is placed — paints the `OnRelease` resize guide across
+        // the rows, and rebuilds the header with itself.
         if self.show_header {
-            // A rebuild destroys (and re-creates) every header cell, which
-            // drops the pointer capture an in-flight resize depends on. Clear
-            // the shared drag state with it: a `ResizeState` that outlived its
-            // anchor would otherwise let the next bare PointerMove over the
-            // same column resize it with no button held.
-            *self.resize_state.borrow_mut() = None;
-            self.resize_target.set(None);
-            self.resize_preview_x.set(None);
-
-            let boundaries = *self.pane_boundaries.borrow();
-            // A stretched last column has no size of its own to drag: its
-            // trailing grip (and the AT step actions behind the same flag)
-            // is off. The grip on its *leading* edge still resizes its
-            // predecessor.
-            let stretched_slot = self
-                .stretch_last_column
-                .then(|| display_indices.len().saturating_sub(1));
-            let resize_columns: header::ColumnResizeTable = Rc::new(
-                display_indices
-                    .iter()
-                    .enumerate()
-                    .map(|(slot, &i)| {
-                        let c = &self.columns[i];
-                        header::ColumnResizeInfo {
-                            id: c.id.clone(),
-                            min_width: c.min_width.unwrap_or(cp::MIN_COLUMN_WIDTH_DEFAULT),
-                            max_width: c.max_width,
-                            resizable: c.resizable && stretched_slot != Some(slot),
-                            flex: matches!(c.width, ColumnWidth::Flex(_)),
-                        }
-                    })
-                    .collect(),
-            );
-            let mut cell_ids: Vec<WidgetId> = Vec::with_capacity(display_indices.len());
-            let active_sort = self.sort_signal.get();
-            let cell_padding_horizontal =
-                crate::styles::recipe_table_style::resolve_table_style(ctx)
-                    .cell_padding_horizontal(&ctx.theme().input);
-            for (display_pos, &col_idx) in display_indices.iter().enumerate() {
-                let col = &self.columns[col_idx];
-                let current_sort = active_sort
-                    .as_ref()
-                    .and_then(|(id, dir)| if id == &col.id { Some(*dir) } else { None });
-                // Filter zone width: indicator glyph + a small horizontal
-                // padding for tap tolerance. Mirrors the layout of the
-                // HStack inside HeaderCell::build — including its gutter,
-                // which comes from the active `TableStyle` rather than from
-                // `cp::CELL_PADDING_HORIZONTAL`, so the padding the cell
-                // applies and the zone the press handler measures cannot name
-                // different cells.
-                //
-                // At every shipped gutter this is currently inert:
-                // `header_cell_zones` hands the figure to `partition_targets`
-                // with a floor of `target_size`, and 12 + 8 (IntUI) and
-                // 12 + 12 (Fluent) are both under the 24 dp Compact floor, so
-                // the solved zone is 24 either way. It stops being inert the
-                // moment a preset's gutter takes the sum past the floor, which
-                // is exactly when the two numbers disagreeing would show.
-                let filter_zone_width = cp::FILTER_INDICATOR_SIZE + cell_padding_horizontal;
-                let cell = header::HeaderCell::new(header::HeaderCellSpec {
-                    col_id: col.id.clone(),
-                    label: col.header_label.resolve_now(),
-                    col_index_1based: display_pos + 1,
-                    sortable: col.sortable,
-                    reorderable: col.reorderable,
-                    filterable: col.filterable,
-                    resize_grip: cp::RESIZE_HANDLE_WIDTH,
-                    filter_zone_width,
-                    current_sort,
-                    width_index: display_pos,
-                    pane_boundaries: boundaries,
-                    resize_columns: resize_columns.clone(),
-                    resize_policy: self.column_resize_policy,
+            let header = TableHeader::new(self.columns.iter().map(|c| c.spec.clone()).collect())
+                .widths(self.column_widths_signal.clone())
+                .sort(self.sort_signal.clone())
+                .order(self.column_order_signal.clone())
+                .pinning(self.column_pinning_signal.clone())
+                .filters(self.filters_signal.clone())
+                .scroll_x(self.scroll_x.clone())
+                .resize_policy(self.column_resize_policy)
+                .stretch_last_column(self.stretch_last_column)
+                .hosted(HeaderLink {
+                    table_id: self.table_id,
+                    widths: self.column_widths.clone(),
+                    display_indices: self.display_indices.clone(),
+                    pane_boundaries: self.pane_boundaries.clone(),
+                    strip_width: self.header_strip_width.clone(),
                     resize_state: self.resize_state.clone(),
                     resize_target: self.resize_target.clone(),
                     resize_preview_x: self.resize_preview_x.clone(),
-                    table_id: self.table_id,
-                    sort_signal: self.sort_signal.clone(),
-                    column_widths_signal: self.column_widths_signal.clone(),
-                    column_widths: self.column_widths.clone(),
-                    filters_signal: self.filters_signal.clone(),
                 });
-                cell_ids.push(ctx.add(cell));
-            }
-            let header_row = header::HeaderRow::new(
-                cell_ids,
-                self.column_widths.clone(),
-                cp::GRID_LINE_THICKNESS,
-                *self.pane_boundaries.borrow(),
-                self.scroll_x.clone(),
-                self.column_widths_signal.clone(),
-            );
-            // Wire reorder drag-target handlers on the header strip.
-            let header_row_id = ctx.add(header_row);
-            header::attach_header_reorder_handlers(
-                ctx,
-                header_row_id,
-                self.table_id,
-                self.column_widths.clone(),
-                self.display_indices.clone(),
-                self.pane_boundaries.clone(),
-                self.column_order_signal.clone(),
-                self.column_pinning_signal.clone(),
-                self.columns.iter().map(|c| c.id.clone()).collect(),
-                self.header_strip_width.clone(),
-                self.scroll_x.clone(),
-            );
-            self.header_row_id = Some(header_row_id);
+            self.header_row_id = Some(ctx.add(header));
         }
 
         let row_count = (self.len_fn)();
@@ -903,7 +797,7 @@ impl<T: 'static> Widget for TableView<T> {
                 &Rc::new(
                     display_indices
                         .iter()
-                        .map(|&i| self.columns[i].id.clone())
+                        .map(|&i| self.columns[i].spec.id.clone())
                         .collect::<Vec<_>>(),
                 ),
             ) {

@@ -3450,7 +3450,7 @@ fn keyed_selection_survives_collapse() {
 
 // ── Horizontal scroll ───────────────────────────────────────────────
 //
-// TreeTableView reuses TableView's `body::BodyRow` / `header::HeaderRow`
+// TreeTableView reuses TableView's `body::BodyRow` / `TableHeader`
 // / `layout::` pane machinery wholesale, so these mirror the TableView
 // suite (`table_view::tests`) at reduced breadth: enough to confirm the
 // shared plumbing threads through this widget's own `build()` /
@@ -3777,8 +3777,8 @@ fn tt_ensure_col_visible_follows_focus_in_both_directions() {
 // drag past a 5px threshold (`table_view::header`); the drop-target
 // half — hover feedback, insertion-slot math, pane classification,
 // `column_order_signal`/`column_pinning_signal` writes — is
-// `header::attach_header_reorder_handlers`, shared verbatim with
-// `TableView` (moved there by this commit, not duplicated). These
+// `TableHeader`'s own drop target, shared verbatim with
+// `TableView` (one header implementation, not two). These
 // tests drive the mechanism end-to-end through real pointer events
 // (`drag`, defined above for row reorder — the header strip is just
 // another drop target) rather than the imperative
@@ -3886,7 +3886,7 @@ fn header_drag_reorders_column_before_an_earlier_sibling() {
 
 #[test]
 fn header_drag_to_the_leading_edge_pins_only_into_an_existing_leading_pane() {
-    // The pane classification in `attach_header_reorder_handlers` is the
+    // The pane classification in `TableHeader`'s drop target is the
     // exact same code TableView's header shares. A pane exists only while
     // a column is pinned to it: with nothing pinned, a drop at the very
     // leading edge is a plain move to the first slot — it used to pin the

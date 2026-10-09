@@ -429,7 +429,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               strip.",
     },
     AllowedViolation {
-        path: "HeaderRow > HeaderCell",
+        path: "TableHeader > HeaderCell",
         measured: &[PinnedGeometry {
             densities: ALL_DENSITIES,
             themes: ALL_THEMES,

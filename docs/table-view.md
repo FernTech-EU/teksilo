@@ -12,7 +12,9 @@ Two tabular widgets for Teksilo: a flat
 (`from_source` / `from_source_keyed`).
 They share the same column model, header strip, drag/resize/reorder,
 filter popover, keyboard map, and accessibility wrappers; only the body
-pane differs.
+pane differs. The header strip is a widget of its own,
+[`TableHeader`](#the-header-on-its-own-tableheader), which also works over
+rows an application lays out itself.
 
 This page is the reference for the public surface and the design
 contracts you can rely on.
@@ -428,6 +430,74 @@ column to sort on.
 
 ---
 
+## The header on its own: `TableHeader`
+
+Both views draw their column header with
+[`TableHeader`](../crates/teksilo-widgets/src/table_view/table_header.rs), and
+an application can use it by itself, over rows it lays out itself: a section
+list whose group rows span every column, an album card beside its tracks. It
+has the same resize grips, sort cycle, drag-reorder, pinned panes, filter
+popover and `Role::ColumnHeader` nodes as the views, because the views'
+header *is* this widget.
+
+```rust
+let widths = Signal::new(HashMap::new());
+let sort   = Signal::new(None);
+let order  = Signal::new(Vec::new());
+let scroll = Signal::new(0.0_f32);   // the horizontal offset of the rows below
+
+let header = TableHeader::new(vec![
+    ColumnSpec::new("title", lit!("Title")).sortable(true),
+    ColumnSpec::new("length", lit!("Length"))
+        .width(ColumnWidth::Fixed(80.0))
+        .sortable(true),
+])
+.widths(widths.clone())
+.sort(sort.clone())
+.order(order.clone())
+.scroll_x(scroll.clone());
+// What each column was laid out at: line the rows' cells up with this.
+let columns = header.resolved_widths_signal().clone();
+```
+
+A column is a [`ColumnSpec`](../crates/teksilo-widgets/src/table_view/column.rs):
+a `Column<T>` without its cell delegate. It has the same builders and defaults
+for the id, title, `width` / `min_width` / `max_width`, `alignment`,
+`sortable`, `filterable`, `resizable`, `reorderable` and `pinned`, and a
+`Column<T>` carries one and forwards those builders to it.
+
+**State.** `widths`, `sort`, `order` and `scroll_x`, plus `pinning` and
+`filters`, adopt application signals under the same contract as the views'
+`bind_*` builders ([above](#adopting-signals-the-application-owns)). A signal
+the header is not handed is its own, read back with `widths_signal()`,
+`sort_signal()`, `order_signal()`, `pinning_signal()`, `filters_signal()` or
+`scroll_x_signal()`. Give a `TableView` the same signals and the header and the
+table follow each other. `resize_policy` and `stretch_last_column` are the
+views' knobs of the same name.
+
+**Layout.** The width map holds overrides, not the layout. What the header laid
+each column out at, after the overrides, the declared widths, the `Flex` share
+and the min / max clamps, is `resolved_widths_signal()`: a
+`Signal<Vec<(String, f32)>>` of `(column id, width)` per displayed column, in
+display order, written after each layout of the header and only when it
+changed. Leading-pinned columns come first and stay put under `scroll_x`;
+trailing-pinned ones come last. On its own the header resolves its widths
+against its own bounds, clips its cells to them, takes `HEADER_HEIGHT` when its
+parent leaves the height free, and paints the `ColumnResizePolicy::OnRelease`
+guide line within the strip only.
+
+**Accessibility.** The strip is the `Role::Row` with row index 1 and its cells
+are the `Role::ColumnHeader` nodes described [below](#accessibility). It does
+not announce a table: place it inside the container that announces the rows
+under it as a table or a grid.
+
+Inside a view the header is *hosted*: the view resolves the widths and the
+display order (its body needs both before the header is placed), rebuilds the
+header along with itself, keeps the resize-drag state across those rebuilds,
+and paints the `OnRelease` guide across its rows.
+
+---
+
 ## The filter popover
 
 When `Column::filterable(true)`, the header cell paints a small funnel
@@ -775,7 +845,9 @@ on `TableView` and `TreeTableView`, tree expand/collapse via twist +
 (`Role::Grid` when selectable) accessibility with row indices and sort direction,
 sort / width / order / filter state adopted from application signals
 (`bind_sort`, `bind_column_widths`, `bind_column_order`, `bind_filters`) and
-shared between views.
+shared between views, and the column header as a widget of its own
+(`TableHeader` over `ColumnSpec`s, with `resolved_widths_signal`) for rows an
+application lays out itself.
 
 **Intentionally not shipped:**
 

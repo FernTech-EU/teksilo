@@ -265,8 +265,8 @@ pub use tab_widget::{
 };
 pub use table_view::{
     Alignment as TableAlignment, CellContext, CellSelectionModel, Column, ColumnContext,
-    ColumnResizePolicy, ColumnWidth, EditTriggers, GridLines, PinnedSide, SortDirection,
-    TabTraversal, TableSelectionMode, TableView, TruncationPolicy,
+    ColumnResizePolicy, ColumnSpec, ColumnWidth, EditTriggers, GridLines, PinnedSide,
+    SortDirection, TabTraversal, TableHeader, TableSelectionMode, TableView, TruncationPolicy,
 };
 pub use teksilo_tokens::Orientation;
 pub use text_input::{TextInput, ValidationState};

@@ -571,7 +571,7 @@ fn clear_sort_returns_to_unsorted() {
 #[test]
 fn header_row_carries_role_row_with_index_one() {
     let (tree, table, _) = build_table(3);
-    // Find the header row (the BodyRow / HeaderRow whose first cell
+    // Find the header row (the BodyRow / TableHeader whose first cell
     // carries Role::ColumnHeader).
     let mut q = vec![table];
     let mut found = false;
@@ -5848,7 +5848,7 @@ mod adopted_state {
     }
 
     /// The width each body column is laid out at, left to right.
-    fn body_widths(tree: &WidgetTree, table: WidgetId) -> Vec<f32> {
+    pub(super) fn body_widths(tree: &WidgetTree, table: WidgetId) -> Vec<f32> {
         let mut cells = body_row_cells(tree, table);
         cells.sort_by(|&a, &b| tree.bounds(a).x.total_cmp(&tree.bounds(b).x));
         cells.into_iter().map(|c| tree.bounds(c).width).collect()
@@ -5867,7 +5867,7 @@ mod adopted_state {
             .unwrap_or_else(|| panic!("no column header labelled {label:?}"))
     }
 
-    fn click(tree: &mut WidgetTree, at: Point) {
+    pub(super) fn click(tree: &mut WidgetTree, at: Point) {
         tree.pointer_down_button(at, PointerButton::Primary);
         tree.pointer_up_button(at, PointerButton::Primary);
     }
@@ -5875,7 +5875,7 @@ mod adopted_state {
     /// A pointer drag in even steps, like a real pointer: a header arms its
     /// reorder on the first move past the threshold, so that move has to land
     /// while the pointer is still over the pressed cell.
-    fn drag(tree: &mut WidgetTree, from: Point, to: Point) {
+    pub(super) fn drag(tree: &mut WidgetTree, from: Point, to: Point) {
         tree.dispatch_event(WidgetEvent::pointer_down(
             from,
             PointerButton::Primary,
@@ -6169,7 +6169,7 @@ mod adopted_state {
 
     #[test]
     fn a_reorder_keeps_the_entries_for_columns_it_does_not_have_in_place() {
-        use crate::table_view::header::merge_reordered;
+        use crate::table_view::table_header::merge_reordered;
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         let own = s(&["a", "b", "c"]);
         // Foreign ids keep their slots; own slots take the new order.
@@ -6186,6 +6186,371 @@ mod adopted_state {
         assert_eq!(
             merge_reordered(&[], &own, s(&["b", "a", "c"])),
             s(&["b", "a", "c"])
+        );
+    }
+}
+
+// ── `TableHeader` on its own ───────────────────────────────────────────────
+//
+// The header both views compose, mounted with no view around it — the shape
+// an application takes when it lays its own rows out under the columns. It
+// resolves its widths against its own bounds, publishes them, rebuilds on its
+// state and is its reorder drag's drop target, all of which a hosting view
+// otherwise does for it.
+
+mod standalone_header {
+    use super::adopted_state::{body_widths, click, drag};
+    use super::*;
+    use crate::primitives::{FixedSize, VStack};
+    use crate::styles::recipe_table_style as cp;
+    use crate::table_view::{ColumnSpec, PinnedSide, TableHeader};
+    use std::collections::HashMap;
+    use teksilo_canvas::Point;
+    use teksilo_core::accesskit::SortDirection as AtSort;
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    type Sort = Option<(String, SortDirection)>;
+
+    fn fixed(id: &'static str, w: f32) -> ColumnSpec {
+        ColumnSpec::new(id, lit!(id)).width(ColumnWidth::Fixed(w))
+    }
+
+    fn mount(header: TableHeader, width: f32) -> (WidgetTree, WidgetId) {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(header);
+        relayout(&mut tree, width);
+        (tree, id)
+    }
+
+    fn relayout(tree: &mut WidgetTree, width: f32) {
+        tree.layout(SizeProposal {
+            width: Some(width),
+            height: Some(cp::HEADER_HEIGHT),
+        });
+    }
+
+    fn header_ref(tree: &WidgetTree, id: WidgetId) -> &TableHeader {
+        tree.widget_as_any(id)
+            .and_then(|any| any.downcast_ref::<TableHeader>())
+            .expect("a TableHeader")
+    }
+
+    /// `(label, x, width)` of each header cell, left to right.
+    fn cells(tree: &WidgetTree, header: WidgetId) -> Vec<(String, f32, f32)> {
+        let mut ids = flatten_through_bands(tree, tree.children(header));
+        ids.sort_by(|&a, &b| tree.bounds(a).x.total_cmp(&tree.bounds(b).x));
+        ids.into_iter()
+            .map(|c| {
+                let info = tree.accessibility_node(c);
+                let b = tree.bounds(c);
+                (info.name().unwrap_or_default().to_string(), b.x, b.width)
+            })
+            .collect()
+    }
+
+    /// `(label, sort, column index)` of each `Role::ColumnHeader` node the
+    /// header publishes, in column-index order.
+    fn announced(tree: &WidgetTree, header: WidgetId) -> Vec<(String, Option<AtSort>, usize)> {
+        let snapshot = tree.accessibility_tree_snapshot();
+        let mut out: Vec<_> = flatten_through_bands(tree, tree.children(header))
+            .into_iter()
+            .filter_map(|cell| {
+                let node_id = teksilo_core::accessibility::widget_id_to_node_id(cell);
+                let (_, node) = snapshot.nodes.iter().find(|(id, _)| *id == node_id)?;
+                (node.role() == Role::ColumnHeader).then(|| {
+                    (
+                        node.label().unwrap_or_default().to_string(),
+                        node.sort_direction(),
+                        node.column_index()
+                            .expect("a column header has a column index"),
+                    )
+                })
+            })
+            .collect();
+        out.sort_by_key(|(_, _, index)| *index);
+        out
+    }
+
+    #[test]
+    fn a_standalone_header_announces_a_row_of_column_headers_with_their_sort() {
+        let sort: Signal<Sort> = Signal::new(None);
+        let header = TableHeader::new(vec![
+            fixed("title", 150.0).sortable(true),
+            fixed("artist", 150.0).sortable(true),
+            fixed("length", 100.0),
+        ])
+        .sort(sort.clone());
+        let (mut tree, id) = mount(header, 400.0);
+
+        assert_eq!(tree.accessibility_node(id).role(), Role::Row);
+        assert_eq!(
+            announced(&tree, id),
+            vec![
+                ("title".to_string(), None, 0),
+                ("artist".to_string(), None, 1),
+                ("length".to_string(), None, 2),
+            ]
+        );
+
+        // A sort written from outside reaches the announced state.
+        sort.set(Some(("artist".to_string(), SortDirection::Descending)));
+        relayout(&mut tree, 400.0);
+        assert_eq!(
+            announced(&tree, id)[1],
+            ("artist".to_string(), Some(AtSort::Descending), 1)
+        );
+        assert_eq!(announced(&tree, id)[0].1, None);
+    }
+
+    #[test]
+    fn a_standalone_header_takes_the_header_height_in_a_stack() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let header = tree.add(TableHeader::new(vec![fixed("a", 100.0), fixed("b", 100.0)]));
+        let below = tree.add(
+            FixedSize::new()
+                .height(100.0)
+                .child(TextWidget::new(lit!(""))),
+        );
+        let _root = tree.add(VStack::new().child(header).child(below));
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(300.0),
+        });
+        assert_eq!(tree.bounds(header).height, cp::HEADER_HEIGHT);
+        assert_eq!(
+            cells(&tree, header)
+                .into_iter()
+                .map(|(_, _, w)| w)
+                .collect::<Vec<_>>(),
+            vec![100.0, 100.0]
+        );
+    }
+
+    #[test]
+    fn a_click_on_a_sortable_header_cycles_the_headers_own_sort() {
+        // No `.sort(..)`: the header owns the signal, and the getter hands it
+        // out.
+        let header = TableHeader::new(vec![
+            fixed("title", 200.0).sortable(true),
+            fixed("length", 200.0),
+        ]);
+        let sort = header.sort_signal().clone();
+        let (mut tree, id) = mount(header, 400.0);
+        assert!(Signal::same(header_ref(&tree, id).sort_signal(), &sort));
+
+        let title = Point::new(100.0, cp::HEADER_HEIGHT * 0.5);
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            click(&mut tree, title);
+            relayout(&mut tree, 400.0);
+            seen.push(sort.get());
+        }
+        assert_eq!(
+            seen,
+            vec![
+                Some(("title".to_string(), SortDirection::Ascending)),
+                Some(("title".to_string(), SortDirection::Descending)),
+                None,
+            ]
+        );
+        // A column that is not sortable does not sort.
+        click(&mut tree, Point::new(300.0, cp::HEADER_HEIGHT * 0.5));
+        assert_eq!(sort.get(), None);
+    }
+
+    #[test]
+    fn a_resize_drag_writes_the_adopted_widths_and_republishes_the_layout() {
+        let widths = Signal::new(HashMap::<String, f32>::new());
+        let header = TableHeader::new(vec![
+            fixed("title", 150.0),
+            ColumnSpec::new("artist", lit!("artist")),
+            fixed("length", 100.0),
+        ])
+        .widths(widths.clone());
+        let resolved = header.resolved_widths_signal().clone();
+        let (mut tree, id) = mount(header, 400.0);
+        let layout = |v: &[(&str, f32)]| {
+            v.iter()
+                .map(|(id, w)| (id.to_string(), *w))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            resolved.get(),
+            layout(&[("title", 150.0), ("artist", 150.0), ("length", 100.0)]),
+            "the `Flex` column takes what the fixed ones leave"
+        );
+
+        let y = cp::HEADER_HEIGHT * 0.5;
+        let grip = 150.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(grip, y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(grip + 30.0, y)));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(grip + 30.0, y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        relayout(&mut tree, 400.0);
+
+        assert_eq!(
+            widths.get(),
+            HashMap::from([("title".to_string(), 180.0)]),
+            "the map holds the override, not the layout"
+        );
+        assert_eq!(
+            resolved.get(),
+            layout(&[("title", 180.0), ("artist", 120.0), ("length", 100.0)])
+        );
+        assert_eq!(
+            cells(&tree, id)
+                .into_iter()
+                .map(|(_, x, w)| (x, w))
+                .collect::<Vec<_>>(),
+            vec![(0.0, 180.0), (180.0, 120.0), (300.0, 100.0)]
+        );
+    }
+
+    #[test]
+    fn dragging_a_header_cell_writes_the_adopted_order() {
+        let order = Signal::new(Vec::<String>::new());
+        let header = TableHeader::new(vec![
+            fixed("title", 150.0),
+            fixed("artist", 150.0),
+            fixed("length", 100.0),
+        ])
+        .order(order.clone());
+        let (mut tree, id) = mount(header, 400.0);
+
+        let y = cp::HEADER_HEIGHT * 0.5;
+        drag(&mut tree, Point::new(350.0, y), Point::new(5.0, y));
+        relayout(&mut tree, 400.0);
+        assert_eq!(order.get(), vec!["length", "title", "artist"]);
+        assert_eq!(
+            cells(&tree, id)
+                .into_iter()
+                .map(|(label, x, _)| (label, x))
+                .collect::<Vec<_>>(),
+            vec![
+                ("length".to_string(), 0.0),
+                ("title".to_string(), 100.0),
+                ("artist".to_string(), 250.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn scroll_x_shifts_the_unpinned_cells_and_leaves_the_pinned_ones() {
+        let scroll_x = Signal::new(0.0_f32);
+        let header = TableHeader::new(vec![
+            fixed("a", 200.0),
+            fixed("b", 200.0),
+            fixed("c", 200.0),
+        ])
+        .scroll_x(scroll_x.clone());
+        let (mut tree, id) = mount(header, 400.0);
+        scroll_x.set(100.0);
+        relayout(&mut tree, 400.0);
+        assert_eq!(
+            cells(&tree, id)
+                .into_iter()
+                .map(|(_, x, _)| x)
+                .collect::<Vec<_>>(),
+            vec![-100.0, 100.0, 300.0]
+        );
+
+        // With `a` pinned leading it stays put and only `b` and `c` scroll.
+        let scroll_x = Signal::new(0.0_f32);
+        let header = TableHeader::new(vec![
+            fixed("a", 200.0).pinned(PinnedSide::Leading),
+            fixed("b", 200.0),
+            fixed("c", 200.0),
+        ])
+        .scroll_x(scroll_x.clone());
+        let (mut tree, id) = mount(header, 400.0);
+        scroll_x.set(100.0);
+        relayout(&mut tree, 400.0);
+        assert_eq!(
+            cells(&tree, id)
+                .into_iter()
+                .map(|(label, x, _)| (label, x))
+                .collect::<Vec<_>>(),
+            vec![
+                ("a".to_string(), 0.0),
+                ("b".to_string(), 100.0),
+                ("c".to_string(), 300.0),
+            ]
+        );
+        // The scrolled-off part of `b` is the pinned column's, so the band
+        // clips it rather than painting `b` under `a`.
+        assert!(
+            tree.children(id).len() > 1,
+            "pinning splits the strip into bands"
+        );
+    }
+
+    #[test]
+    fn a_header_over_a_table_bound_to_the_same_signals_drives_its_columns() {
+        // The headerless table stands in for rows an application lays out
+        // under the header itself; sharing the signals is the whole wiring.
+        let widths = Signal::new(HashMap::<String, f32>::new());
+        let sort: Signal<Sort> = Signal::new(None);
+        let header = TableHeader::new(vec![
+            fixed("id", 60.0).sortable(true),
+            ColumnSpec::new("name", lit!("name")).sortable(true),
+        ])
+        .widths(widths.clone())
+        .sort(sort.clone());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let header = tree.add(header);
+        let table = tree.add(
+            TableView::new(rows(3))
+                .add_column(id_col().sortable(true))
+                .add_column(name_col().sortable(true))
+                .row_height(20.0)
+                .show_header(false)
+                .show_internal_scrollbars(false)
+                .bind_column_widths(widths.clone())
+                .bind_sort(sort.clone()),
+        );
+        let table_box = tree.add(FixedSize::new().width(400.0).height(200.0).child(table));
+        let _root = tree.add(VStack::new().child(header).child(table_box));
+        let layout = |tree: &mut WidgetTree| {
+            tree.layout(SizeProposal {
+                width: Some(400.0),
+                height: Some(400.0),
+            })
+        };
+        layout(&mut tree);
+
+        let y = cp::HEADER_HEIGHT * 0.5;
+        let grip = 60.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(grip, y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(grip + 40.0, y)));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(grip + 40.0, y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        layout(&mut tree);
+        assert_eq!(body_widths(&tree, table), vec![100.0, 300.0]);
+
+        // The other way: the table's own setter shows on the header.
+        {
+            let any = tree.widget_as_any(table).unwrap();
+            let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+            tv.set_sort(Some("name"), SortDirection::Ascending);
+        }
+        layout(&mut tree);
+        assert_eq!(
+            announced(&tree, header)[1],
+            ("name".to_string(), Some(AtSort::Ascending), 1)
         );
     }
 }

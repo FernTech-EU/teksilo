@@ -176,7 +176,7 @@ pub(crate) fn resolve_edit_target<T: 'static>(
     if row >= row_count {
         return None;
     }
-    let decl_index = columns.iter().position(|c| c.id == col_id)?;
+    let decl_index = columns.iter().position(|c| c.spec.id == col_id)?;
     let display_pos = display_indices.iter().position(|&i| i == decl_index)?;
     Some((row, display_pos))
 }

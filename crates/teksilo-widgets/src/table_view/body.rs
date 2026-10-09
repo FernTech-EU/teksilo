@@ -52,9 +52,9 @@ use super::layout::band_rects;
 pub(crate) type SharedColumnWidths = Rc<RefCell<Vec<f32>>>;
 
 /// Whether `PaneBoundaries` actually pins anything — the trigger for the
-/// per-row band split. Shared between `BodyRow` and `HeaderRow` so the two
+/// per-row band split. Shared between `BodyRow` and `TableHeader` so the two
 /// never disagree on when to switch shapes.
-fn has_pinning(boundaries: PaneBoundaries, cell_count: usize) -> bool {
+pub(super) fn has_pinning(boundaries: PaneBoundaries, cell_count: usize) -> bool {
     boundaries.leading_count > 0 || boundaries.middle_end < cell_count
 }
 
@@ -326,7 +326,7 @@ impl Widget for RowBand {
         proposal: SizeProposal,
         _ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
-        // Never queried for sizing purposes — `BodyRow`/`HeaderRow` compute
+        // Never queried for sizing purposes — `BodyRow`/`TableHeader` compute
         // each band's rect themselves (`layout::band_rects`) and assign it
         // directly in their own `place_children`, the same way `RowBand`
         // assigns its own children's rects below. Row height in

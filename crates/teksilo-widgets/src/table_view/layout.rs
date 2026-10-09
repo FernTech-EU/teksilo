@@ -34,7 +34,7 @@ use std::collections::HashMap;
 use teksilo_canvas::Rect;
 
 use super::PaneBoundaries;
-use super::column::{Column, ColumnWidth};
+use super::column::{ColumnSpec, ColumnWidth, HasColumnSpec, PinnedSide};
 
 /// Stateless solver — pure function in struct form so the call site reads
 /// clearly and so future caching can hang off `&mut self` without breaking
@@ -44,8 +44,8 @@ pub(crate) struct ColumnSolver;
 impl ColumnSolver {
     /// Test-only convenience: resolve in declaration order.
     #[cfg(test)]
-    pub(crate) fn resolve<T: 'static>(
-        columns: &[Column<T>],
+    pub(crate) fn resolve<C: HasColumnSpec>(
+        columns: &[C],
         available_width: f32,
         min_width_default: f32,
         overrides: &HashMap<String, f32>,
@@ -63,8 +63,8 @@ impl ColumnSolver {
 
     /// Test-only convenience: [`Self::resolve`] with `stretch_last` on.
     #[cfg(test)]
-    pub(crate) fn resolve_stretch_last<T: 'static>(
-        columns: &[Column<T>],
+    pub(crate) fn resolve_stretch_last<C: HasColumnSpec>(
+        columns: &[C],
         available_width: f32,
         min_width_default: f32,
         overrides: &HashMap<String, f32>,
@@ -87,8 +87,8 @@ impl ColumnSolver {
     /// `stretch_last` is pass 4 of the module docs: the last display slot
     /// absorbs any width the other passes leave unclaimed, and its own
     /// override is ignored.
-    pub(crate) fn resolve_in_order<T: 'static>(
-        columns: &[Column<T>],
+    pub(crate) fn resolve_in_order<C: HasColumnSpec>(
+        columns: &[C],
         display_order: &[usize],
         available_width: f32,
         min_width_default: f32,
@@ -106,7 +106,7 @@ impl ColumnSolver {
         // The stretched column's override is ignored: the stretch would
         // undo a smaller one on the next pass and a larger one would only
         // push the pane into overflow, so neither can mean anything.
-        let override_of = |slot: usize, col: &Column<T>| -> Option<f32> {
+        let override_of = |slot: usize, col: &ColumnSpec| -> Option<f32> {
             if stretch_last && slot == last_slot {
                 None
             } else {
@@ -117,7 +117,7 @@ impl ColumnSolver {
         // Pass 1 + 2: Fixed, Auto, and any signal-overridden columns
         // resolve to concrete widths.
         for (slot, &col_idx) in display_order.iter().enumerate() {
-            let col = &columns[col_idx];
+            let col = columns[col_idx].column_spec();
             let floor = col.min_width.unwrap_or(min_width_default);
             if let Some(override_w) = override_of(slot, col) {
                 let clamped = clamp(override_w, floor, col.max_width);
@@ -161,7 +161,7 @@ impl ColumnSolver {
                 .iter()
                 .enumerate()
                 .filter_map(|(slot, &col_idx)| {
-                    let col = &columns[col_idx];
+                    let col = columns[col_idx].column_spec();
                     if override_of(slot, col).is_some() {
                         return None;
                     }
@@ -231,7 +231,7 @@ impl ColumnSolver {
         if stretch_last {
             let gap = available_width - widths.iter().sum::<f32>();
             if gap > 0.0 {
-                let col = &columns[display_order[last_slot]];
+                let col = columns[display_order[last_slot]].column_spec();
                 let floor = col.min_width.unwrap_or(min_width_default);
                 widths[last_slot] = clamp(widths[last_slot] + gap, floor, col.max_width);
             }
@@ -263,6 +263,59 @@ fn clamp(value: f32, min: f32, max: Option<f32>) -> f32 {
     value.max(min).min(m)
 }
 
+/// The order columns are displayed in, as indices into `columns`, and the pane
+/// partition that order produces.
+///
+/// Columns are grouped by effective pinning — `pinning`'s entry for the id,
+/// else the declared [`PinnedSide`] — Leading first, then unpinned, then
+/// Trailing. Within a group they follow `order`; columns `order` does not name
+/// come after the ones it does, in declaration order. An id in `order` or
+/// `pinning` that names no column changes nothing.
+///
+/// One function for `TableView`, `TreeTableView` and `TableHeader`, so a view
+/// and the header it composes cannot disagree about where a column is.
+pub(crate) fn display_order<C: HasColumnSpec>(
+    columns: &[C],
+    order: &[String],
+    pinning: &HashMap<String, PinnedSide>,
+) -> (Vec<usize>, PaneBoundaries) {
+    let position: HashMap<&str, usize> = order
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.as_str(), i))
+        .collect();
+    let mut leading: Vec<usize> = Vec::new();
+    let mut middle: Vec<usize> = Vec::new();
+    let mut trailing: Vec<usize> = Vec::new();
+    for (i, col) in columns.iter().enumerate() {
+        let spec = col.column_spec();
+        match pinning.get(&spec.id).copied().unwrap_or(spec.pinned) {
+            PinnedSide::Leading => leading.push(i),
+            PinnedSide::None => middle.push(i),
+            PinnedSide::Trailing => trailing.push(i),
+        }
+    }
+    // Explicit positions sort first; a column the list does not name keys on
+    // its declaration index past a huge base, so it sorts after all of them.
+    const FALLBACK_BASE: usize = usize::MAX / 2;
+    let key = |i: usize| {
+        position
+            .get(columns[i].column_spec().id.as_str())
+            .copied()
+            .unwrap_or(FALLBACK_BASE + i)
+    };
+    leading.sort_by_key(|&i| key(i));
+    middle.sort_by_key(|&i| key(i));
+    trailing.sort_by_key(|&i| key(i));
+    let mut out = Vec::with_capacity(columns.len());
+    out.extend(leading);
+    let leading_count = out.len();
+    out.extend(middle);
+    let middle_end = out.len();
+    out.extend(trailing);
+    (out, PaneBoundaries::new(leading_count, middle_end))
+}
+
 // ── Horizontal scroll / pane geometry ───────────────────────────────────────
 //
 // A row's (or the header's) `body_width`-wide band splits into up to three
@@ -273,14 +326,14 @@ fn clamp(value: f32, min: f32, max: Option<f32>) -> f32 {
 // works in **logical** (reading-order) offsets — 0 is always the band's own
 // leading edge — so a single physical mirror step at the call site (`rtl ?
 // band_width - offset - width : offset`, the same convention `BodyRow` /
-// `HeaderRow` already use for their flat, unpinned cumulative walk) handles
+// `TableHeader` already use for their flat, unpinned cumulative walk) handles
 // RTL for pinned AND scrolled content alike; nothing here needs its own RTL
 // branch.
 
 /// Sum of the resolved widths in `widths[range]`, defensively clamped to the
 /// slice length (a display-order / widths-vector length mismatch is a
 /// pre-existing tolerated edge case elsewhere in this module — see
-/// `BodyRow`/`HeaderRow`'s `fallback_w`).
+/// `BodyRow`/`TableHeader`'s `fallback_w`).
 fn sum_range(widths: &[f32], range: std::ops::Range<usize>) -> f32 {
     let start = range.start.min(widths.len());
     let end = range.end.min(widths.len()).max(start);
@@ -322,7 +375,7 @@ pub(crate) fn max_scroll_x(band_width: f32, widths: &[f32], boundaries: PaneBoun
 
 /// Physical rects for the Leading / Middle / Trailing bands within a header
 /// or body row's own `bounds` — the geometry `BodyRow::place_children` /
-/// `HeaderRow::place_children` hand to their `RowBand` children, and that
+/// `TableHeader::place_children` hand to their `RowBand` children, and that
 /// `TableView`/`TreeTableView`'s own `paint()` re-derives to clip
 /// pane-crossing root-painted decorations (vertical grid lines, the cell
 /// focus ring) to the pane the target column actually belongs to.

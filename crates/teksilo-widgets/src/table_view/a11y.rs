@@ -325,7 +325,7 @@ pub(crate) struct ColumnHeaderA11y {
     sort: Option<SortDirection>,
 }
 
-#[allow(dead_code)] // wired up by HeaderRow
+#[allow(dead_code)] // not wired: `HeaderCell` publishes its own node
 impl ColumnHeaderA11y {
     pub(crate) fn new(
         child: WidgetId,

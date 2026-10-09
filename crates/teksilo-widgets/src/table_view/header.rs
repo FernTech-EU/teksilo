@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Sticky header strip + per-column header cells.
+//! Per-column header cells.
 //!
 //! `HeaderCell` lays out as
 //! `Padding → HStack { TextWidget(label), Spacer, SortIndicator? }` and
 //! handles click-to-sort plus drag-to-resize on the grip that straddles
 //! *either* of the two column dividers it touches (see the type's docs).
-//! `HeaderRow` lays its cells horizontally using the same shared
-//! `column_widths` handle that body rows consume — so a resize commits
-//! in one place and reflows everywhere — and paints the column separators
-//! that make those grips findable.
+//! [`TableHeader`](super::table_header::TableHeader) lays the cells out
+//! horizontally using the same shared `column_widths` handle that body rows
+//! consume — so a resize commits in one place and reflows everywhere — and
+//! paints the column separators that make those grips findable.
 //!
 //! Supports sort, resize, reuse across pinned panes, per-column filter
-//! popovers, and column-reorder drag.
+//! popovers, and the start of a column-reorder drag (the strip is its drop
+//! target).
 //!
 //! ## Touch and pen
 //!
@@ -40,7 +41,6 @@ use teksilo_i18n::lit;
 
 use teksilo_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
-use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::drag_payload::DragPayload;
@@ -55,7 +55,7 @@ use teksilo_core::widget::{
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_data::SortDirection;
-use teksilo_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
+use teksilo_tokens::{TextRole, TextStyleRole};
 
 /// Convert the data-layer `SortDirection` (teksilo-data) to the
 /// styles-layer one (teksilo-core::styles). They share the same shape
@@ -72,11 +72,10 @@ use crate::primitives::{HStack, Padding, Spacer, TextWidget};
 
 use super::ColumnReorderDragData;
 use super::PaneBoundaries;
-use super::body::{RowBand, SharedColumnWidths};
-use super::column::{ColumnResizePolicy, PinnedSide};
+use super::body::SharedColumnWidths;
+use super::column::ColumnResizePolicy;
 use super::filter::FilterIndicator;
 use super::filter::FilterPopoverContent;
-use super::layout::{band_rects, insertion_slot_at_x};
 use crate::overlay_trigger::OverlayTrigger;
 use crate::popover_widget::PopoverWidget;
 use teksilo_core::overlay::OverlayPlacement;
@@ -127,50 +126,6 @@ fn pane_of(slot: usize, b: PaneBoundaries) -> u8 {
         1
     } else {
         2
-    }
-}
-
-/// Draw one pane band's internal column separators inside the header strip.
-///
-/// Deliberately *not* [`super::draw_pane_dividers`], which scissors each band:
-/// `HeaderRow` paints inside the table's own `clips_children` scope, and
-/// `Canvas::clear_clip` resets the scissor outright rather than popping a
-/// stack — so borrowing that helper here would drop the table's clip for every
-/// header cell painted afterwards (the walker emits the enclosing `SetClip`
-/// before the children, not around each one). Separators are `line_w` wide, so
-/// range-testing each against the band is equivalent to scissoring it, and
-/// leaves the clip state untouched.
-fn draw_band_separators(
-    canvas: &mut Canvas,
-    rect: Rect,
-    slice: &[f32],
-    scroll: f32,
-    rtl: bool,
-    color: teksilo_tokens::Color,
-    line_w: f32,
-) {
-    if slice.len() < 2 || rect.width <= 0.0 {
-        return;
-    }
-    let mut emit = |x: f32| {
-        if x >= rect.x && x + line_w <= rect.right() {
-            canvas.fill_rect(Rect::new(x, rect.y, line_w, rect.height), color);
-        }
-    };
-    // Same walk (and same which-side-of-the-boundary convention) as the body's
-    // vertical grid lines, so header and body seams land on the same x.
-    if rtl {
-        let mut x = rect.right() + scroll;
-        for &w in &slice[..slice.len() - 1] {
-            x -= w;
-            emit(x);
-        }
-    } else {
-        let mut x = rect.x - scroll;
-        for &w in &slice[..slice.len() - 1] {
-            x += w;
-            emit(x - line_w);
-        }
     }
 }
 
@@ -330,7 +285,7 @@ pub(crate) struct HeaderCell {
     /// This cell's placed width, written by `place_children`. The grip test
     /// runs against the geometry actually on screen rather than against the
     /// shared widths vector, so the two can never disagree (they do when the
-    /// vector is shorter than the cell list and `HeaderRow` falls back to an
+    /// vector is shorter than the cell list and `TableHeader` falls back to an
     /// even split).
     cell_window_w: Rc<Cell<f32>>,
     /// The partition floor and reading direction, so `target_regions` — which
@@ -1159,7 +1114,7 @@ impl Widget for HeaderCell {
 
     // No `paint()` — the cell's visual chrome is composed via
     // `TableStyle::make_header_cell`, layered behind the label inside
-    // a `ZStack`. The outer `HeaderRow` paints the shared `Raised`
+    // a `ZStack`. The outer `TableHeader` paints the shared `Raised`
     // background for the whole strip, so a transparent cell default
     // (`SurfaceRole::Transparent`) lets the row chrome show through
     // while hover / resize overlays come from the composed body.
@@ -1302,439 +1257,4 @@ impl Widget for SortIndicator {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_hidden();
     }
-}
-
-/// Header strip — `Role::Row` (row index 1), N HeaderCell widgets laid
-/// out horizontally using the same shared widths handle as body rows.
-///
-/// Splits into pane bands under column pinning, exactly like `BodyRow` — see
-/// that type's module docs for the full rationale (this is the header-side
-/// half of the same mechanism, sharing `RowBand`).
-#[derive(Debug)]
-pub(crate) struct HeaderRow {
-    cells: Vec<WidgetId>,
-    widths: SharedColumnWidths,
-    divider_width: f32,
-    pane_boundaries: PaneBoundaries,
-    scroll_x: Signal<f32>,
-    /// The user-resize overrides the table resolves `widths` from. Bound at
-    /// `RepaintOnly` (see `build`): the strip's own bounds don't change when
-    /// a column does, so without it the walker would replay the cached
-    /// paint and leave every separator where it was.
-    column_widths_signal: Signal<HashMap<String, f32>>,
-
-    // Build state.
-    bands: Option<[Option<WidgetId>; 3]>,
-}
-
-impl HeaderRow {
-    pub(crate) fn new(
-        cells: Vec<WidgetId>,
-        widths: SharedColumnWidths,
-        divider_width: f32,
-        pane_boundaries: PaneBoundaries,
-        scroll_x: Signal<f32>,
-        column_widths_signal: Signal<HashMap<String, f32>>,
-    ) -> Self {
-        Self {
-            cells,
-            widths,
-            divider_width,
-            pane_boundaries,
-            scroll_x,
-            column_widths_signal,
-            bands: None,
-        }
-    }
-
-    fn has_pinning(&self) -> bool {
-        self.pane_boundaries.leading_count > 0 || self.pane_boundaries.middle_end < self.cells.len()
-    }
-}
-
-impl Widget for HeaderRow {
-    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // `paint` draws the column separators from `widths` and `scroll_x`,
-        // but the strip spans the table, so neither a column resize nor a
-        // horizontal scroll changes *its* bounds — and the render walker
-        // replays a clean node's cached paint. The table root re-lays out on
-        // both (its own `Relayout` bindings) and the cells move with their
-        // new bounds; only the separators would stay behind. Repaint-only:
-        // geometry is the root's business, this node just redraws.
-        self.column_widths_signal.bind_to(
-            ctx.self_id(),
-            ctx.binding_registry(),
-            BindingLevel::RepaintOnly,
-        );
-        self.scroll_x.bind_to(
-            ctx.self_id(),
-            ctx.binding_registry(),
-            BindingLevel::RepaintOnly,
-        );
-        if !self.has_pinning() {
-            return Vec::new();
-        }
-        let b = self.pane_boundaries;
-        let leading_end = b.leading_count.min(self.cells.len());
-        let middle_end = b.middle_end.min(self.cells.len()).max(leading_end);
-        let leading: Vec<WidgetId> = self.cells[..leading_end].to_vec();
-        let middle: Vec<WidgetId> = self.cells[leading_end..middle_end].to_vec();
-        let trailing: Vec<WidgetId> = self.cells[middle_end..].to_vec();
-
-        let mut bands: [Option<WidgetId>; 3] = [None, None, None];
-        if !leading.is_empty() {
-            bands[0] = Some(ctx.add(RowBand::new(leading, self.widths.clone(), 0)));
-        }
-        if !middle.is_empty() {
-            bands[1] = Some(
-                ctx.add(
-                    RowBand::new(middle, self.widths.clone(), leading_end)
-                        .scrollable(self.scroll_x.clone()),
-                ),
-            );
-        }
-        if !trailing.is_empty() {
-            bands[2] = Some(ctx.add(RowBand::new(trailing, self.widths.clone(), middle_end)));
-        }
-        let out: Vec<WidgetId> = bands.iter().copied().flatten().collect();
-        self.bands = Some(bands);
-        out
-    }
-
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        _ctx: &LayoutContext,
-    ) -> teksilo_core::widget::LayoutResponse {
-        let width = proposal
-            .width
-            .unwrap_or_else(|| self.widths.borrow().iter().sum());
-        let height = proposal.height.unwrap_or(32.0);
-        Size::new(width, height).into()
-    }
-
-    fn place_children(
-        &self,
-        bounds: Rect,
-        _proposal: SizeProposal,
-        children: &mut [WidgetPlacement],
-        ctx: &LayoutContext,
-    ) {
-        if let Some(bands) = self.bands {
-            let widths = self.widths.borrow();
-            let rtl = ctx.is_rtl();
-            let (leading_rect, middle_rect, trailing_rect) =
-                band_rects(bounds, &widths, self.pane_boundaries, rtl);
-            let rects = [leading_rect, middle_rect, trailing_rect];
-            let mut next = 0;
-            for (band, rect) in bands.iter().zip(rects.iter()) {
-                if band.is_some() {
-                    if let Some(child) = children.get_mut(next) {
-                        child.origin = rect.origin();
-                        child.size = rect.size();
-                    }
-                    next += 1;
-                }
-            }
-            return;
-        }
-
-        let widths = self.widths.borrow();
-        let total_children = children.len();
-        let fallback_w = if total_children == 0 {
-            0.0
-        } else {
-            bounds.width / total_children as f32
-        };
-        let scroll = self.scroll_x.get();
-        // Mirror the body: preserve display order, reverse physical x in RTL.
-        if ctx.is_rtl() {
-            let mut x = bounds.right() + scroll;
-            for (i, child) in children.iter_mut().enumerate() {
-                let w = widths.get(i).copied().unwrap_or(fallback_w);
-                x -= w;
-                child.origin = Point::new(x, bounds.y);
-                child.size = Size::new(w, bounds.height);
-            }
-        } else {
-            let mut x = bounds.x - scroll;
-            for (i, child) in children.iter_mut().enumerate() {
-                let w = widths.get(i).copied().unwrap_or(fallback_w);
-                child.origin = Point::new(x, bounds.y);
-                child.size = Size::new(w, bounds.height);
-                x += w;
-            }
-        }
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let bg = SurfaceRole::Raised.resolve(&ctx.theme.colors);
-        canvas.fill_rect(bounds, bg);
-
-        let line = BorderRole::DividerStrong.resolve(&ctx.theme.colors);
-        let dw = self.divider_width.max(1.0);
-        canvas.fill_rect(
-            Rect::new(bounds.x, bounds.y + bounds.height - dw, bounds.width, dw),
-            line,
-        );
-
-        // Column separators. Unlike the body's vertical grid lines these are
-        // NOT gated on `GridLines` — in the header the separator *is* the
-        // resize affordance (it is the only thing showing where the grip is),
-        // so a table with `GridLines::None`/`Horizontal` — the default, and
-        // what both shipped demos use — would otherwise ask the user to grab
-        // an invisible divider. Every desktop table (QHeaderView, GtkTreeView,
-        // NSTableHeaderView) draws them unconditionally for the same reason.
-        let widths = self.widths.borrow();
-        if widths.len() > 1 {
-            let rtl =
-                ctx.layout_direction == teksilo_core::environment::LayoutDirection::RightToLeft;
-            let sep = BorderRole::Divider.resolve(&ctx.theme.colors);
-            let (leading_rect, middle_rect, trailing_rect) =
-                band_rects(bounds, &widths, self.pane_boundaries, rtl);
-            let b = self.pane_boundaries;
-            let leading_end = b.leading_count.min(widths.len());
-            let middle_end = b.middle_end.min(widths.len()).max(leading_end);
-            // Within-pane dividers (the Middle pane's are scroll-shifted and
-            // bounded to its viewport, exactly like the body's).
-            draw_band_separators(
-                canvas,
-                leading_rect,
-                &widths[..leading_end],
-                0.0,
-                rtl,
-                sep,
-                dw,
-            );
-            draw_band_separators(
-                canvas,
-                middle_rect,
-                &widths[leading_end..middle_end],
-                self.scroll_x.get(),
-                rtl,
-                sep,
-                dw,
-            );
-            draw_band_separators(
-                canvas,
-                trailing_rect,
-                &widths[middle_end..],
-                0.0,
-                rtl,
-                sep,
-                dw,
-            );
-            // Pane seams — the boundary between the last pinned column and
-            // the scrolling region. `draw_pane_dividers` only draws a band's
-            // *internal* boundaries, so these two would otherwise be the only
-            // column edges in the strip with no line.
-            let mut seam = |x: f32| {
-                canvas.fill_rect(Rect::new(x, bounds.y, dw, bounds.height), sep);
-            };
-            if leading_end > 0 {
-                seam(if rtl {
-                    leading_rect.x
-                } else {
-                    leading_rect.right() - dw
-                });
-            }
-            if middle_end < widths.len() {
-                seam(if rtl {
-                    trailing_rect.right() - dw
-                } else {
-                    trailing_rect.x
-                });
-            }
-        }
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(teksilo_core::accesskit::Role::Row);
-        builder.set_row_index(1);
-    }
-
-    fn children(&self) -> Vec<WidgetId> {
-        match self.bands {
-            Some(bands) => bands.iter().copied().flatten().collect(),
-            None => self.cells.clone(),
-        }
-    }
-}
-
-// ── Reorder drag-target plumbing ───────────────────────────────────────────
-
-/// Attach `on_drag_hover` and `on_drop` to a header strip so reorder drags
-/// from any cell of *this* table/tree-table can be classified into a pane
-/// (Leading / None / Trailing) and an insertion index.
-///
-/// Shared by `TableView` and `TreeTableView` — both build the header out of
-/// the same `HeaderCell`/`HeaderRow` pair and carry an identically-shaped
-/// bundle of order/pinning/geometry state, so the drop-target half lives
-/// here once rather than twice. `source_table_id` is each view's own
-/// `table_id` (a `TableView` and a `TreeTableView` mint theirs from separate
-/// counters, so the values can collide across the two widget kinds — this
-/// is fine, since the collision only matters if a `ColumnReorderDragData`
-/// somehow reached a header of the wrong *kind*, which the header cell's
-/// `col_id` domain already prevents in practice; a same-kind, different-id
-/// pairing is what this guard exists to reject).
-///
-/// Inter-table drops are rejected by matching `source_table_id`.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn attach_header_reorder_handlers(
-    ctx: &mut BuildContext,
-    header_row_id: WidgetId,
-    source_table_id: usize,
-    column_widths: Rc<RefCell<Vec<f32>>>,
-    display_indices: Rc<RefCell<Vec<usize>>>,
-    pane_boundaries: Rc<RefCell<PaneBoundaries>>,
-    column_order_signal: Signal<Vec<String>>,
-    column_pinning_signal: Signal<HashMap<String, PinnedSide>>,
-    column_ids: Vec<String>,
-    header_strip_width: Rc<Cell<f32>>,
-    scroll_x: Signal<f32>,
-) {
-    let widths_for_drop = column_widths.clone();
-    let display_for_drop = display_indices.clone();
-    let panes_for_drop = pane_boundaries.clone();
-    let order_for_drop = column_order_signal.clone();
-    let pinning_for_drop = column_pinning_signal.clone();
-    let ids_for_drop = column_ids;
-    let strip_width_for_drop = header_strip_width;
-    let scroll_x_for_drop = scroll_x;
-
-    ctx.apply_handlers(
-        header_row_id,
-        HandlerSet::new()
-            .on_drag_hover(|payload, _position, _ctx| {
-                if payload.has_typed::<ColumnReorderDragData>() {
-                    teksilo_core::DropFeedback::HighlightRect {
-                        rect: teksilo_canvas::Rect::ZERO,
-                        color: teksilo_tokens::Color::TRANSPARENT,
-                    }
-                } else {
-                    teksilo_core::DropFeedback::NoFeedback
-                }
-            })
-            .on_drop(move |mut payload, position, ctx| {
-                let drag = match payload.take_typed::<ColumnReorderDragData>() {
-                    Some(d) => d,
-                    None => return false,
-                };
-                if drag.source_table_id != source_table_id {
-                    return false;
-                }
-                let widths = widths_for_drop.borrow().clone();
-                let display = display_for_drop.borrow().clone();
-                let panes = *panes_for_drop.borrow();
-                let total = display.len();
-                if total == 0 {
-                    return false;
-                }
-
-                // `position` is local to the header strip (origin at its
-                // physical-left edge). Under RTL the columns are placed in
-                // display order from the strip's right edge leftward, so
-                // mirror the drop x against the strip width before running
-                // the left-to-right scan. (A drop in any non-content dead
-                // space then maps past the last column → append, matching
-                // LTR's trailing-end behaviour.)
-                let drop_x = if ctx.is_rtl() {
-                    strip_width_for_drop.get() - position.x
-                } else {
-                    position.x
-                };
-
-                // Compute insertion index in display order: find the
-                // first column whose midpoint exceeds the (mirrored) x —
-                // pane- and scroll-aware, so a drop under a nonzero
-                // `scroll_x` resolves against the columns actually under
-                // the pointer, not their unscrolled positions.
-                let insertion_display_idx = insertion_slot_at_x(
-                    &widths,
-                    panes,
-                    scroll_x_for_drop.get(),
-                    strip_width_for_drop.get(),
-                    drop_x,
-                );
-
-                // Classify the drop position into a pane. A pane only exists
-                // while a column is pinned to it: with nothing pinned the
-                // leading pane is empty and the middle pane ends at the strip's
-                // end, so a drop at either end of the strip is a plain move to
-                // the first / last slot, not a pin — without the guards it
-                // would pin the column to a pane the user never saw.
-                let new_pinning = if panes.leading_count > 0
-                    && insertion_display_idx <= panes.leading_count
-                {
-                    PinnedSide::Leading
-                } else if panes.middle_end < total && insertion_display_idx >= panes.middle_end {
-                    PinnedSide::Trailing
-                } else {
-                    PinnedSide::None
-                };
-
-                // Update pinning override (record only when it deviates
-                // from None, which is the framework default).
-                let mut pin_map = pinning_for_drop.get();
-                match new_pinning {
-                    PinnedSide::None => {
-                        pin_map.remove(&drag.col_id);
-                    }
-                    other => {
-                        pin_map.insert(drag.col_id.clone(), other);
-                    }
-                }
-                pinning_for_drop.set(pin_map);
-
-                // Rebuild the column-order list to reflect the drop.
-                let mut new_order: Vec<String> =
-                    display.iter().map(|&i| ids_for_drop[i].clone()).collect();
-                let from_pos = new_order.iter().position(|id| id == &drag.col_id);
-                if let Some(from) = from_pos {
-                    let item = new_order.remove(from);
-                    let to = if from < insertion_display_idx {
-                        insertion_display_idx.saturating_sub(1)
-                    } else {
-                        insertion_display_idx
-                    };
-                    let to = to.min(new_order.len());
-                    new_order.insert(to, item);
-                    order_for_drop.set(merge_reordered(
-                        &order_for_drop.get(),
-                        &ids_for_drop,
-                        new_order,
-                    ));
-                }
-                true
-            }),
-    );
-}
-
-/// Write `reordered` — this header's own columns, in their new order — back
-/// over `existing`, the order signal's current list, which may also name
-/// columns this header does not have.
-///
-/// An order signal several views share (`bind_column_order`) carries every
-/// view's columns, so replacing it with the dropped-on view's own list would
-/// throw the other views' arrangement away. Instead every slot that held one
-/// of the `own` columns takes the next column of `reordered`, the other ids stay
-/// where they were, and own columns the list did not mention yet go at the end.
-/// The own columns then read in `reordered`'s order, which is all
-/// `display_order` looks at.
-pub(crate) fn merge_reordered(
-    existing: &[String],
-    own: &[String],
-    reordered: Vec<String>,
-) -> Vec<String> {
-    let mut next = reordered.into_iter();
-    let mut out = Vec::with_capacity(existing.len() + own.len());
-    for id in existing {
-        if own.contains(id) {
-            out.extend(next.next());
-        } else {
-            out.push(id.clone());
-        }
-    }
-    out.extend(next);
-    out
 }

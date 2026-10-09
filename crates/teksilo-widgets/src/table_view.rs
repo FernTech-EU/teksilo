@@ -16,6 +16,11 @@
 //! auto-measured (`auto_row_height` — rows grow to their tallest cell,
 //! height-for-width). See docs/table-view.md "Row heights".
 //!
+//! The header strip is a [`TableHeader`] over the columns'
+//! [`ColumnSpec`]s, which this view and [`TreeTableView`](crate::TreeTableView)
+//! both compose and which works on its own over rows an application lays out
+//! itself.
+//!
 //! ## Column state an application owns
 //!
 //! The sort, the column widths, the column order and the filters live in four
@@ -96,6 +101,7 @@ pub mod keyboard;
 pub mod layout;
 pub mod row_navigator;
 pub mod selection;
+pub mod table_header;
 mod widget_impl;
 
 #[cfg(test)]
@@ -137,10 +143,12 @@ use crate::scroll_area::ScrollBarMode;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 
 pub use self::column::{
-    Alignment, CellContext, Column, ColumnContext, ColumnResizePolicy, ColumnWidth, EditTriggers,
-    GridLines, PinnedSide, TabTraversal, TruncationPolicy,
+    Alignment, CellContext, Column, ColumnContext, ColumnResizePolicy, ColumnSpec, ColumnWidth,
+    EditTriggers, GridLines, PinnedSide, TabTraversal, TruncationPolicy,
 };
 pub use self::selection::{CellSelectionModel, TableSelectionMode};
+pub use self::table_header::TableHeader;
+pub(crate) use self::table_header::{HeaderLink, next_header_id};
 pub use teksilo_data::SortDirection;
 
 const BUFFER_ROWS: usize = 5;
@@ -171,8 +179,8 @@ impl PaneBoundaries {
 #[derive(Debug, Clone)]
 pub(crate) struct ColumnReorderDragData {
     pub col_id: String,
-    /// Stable id of the source TableView, so dropping into a sibling
-    /// table is rejected by the on_drop matcher.
+    /// Stable id of the source header (`next_header_id`), so dropping into
+    /// a sibling table's header is rejected by the on_drop matcher.
     pub source_table_id: usize,
 }
 
@@ -453,8 +461,9 @@ pub struct TableView<T: 'static> {
     resize_preview_x: Signal<Option<f32>>,
 
     /// Stable id used by the column-reorder drag payload to disambiguate
-    /// inter-table drops. Unrelated to row DnD — a wholly separate
-    /// mechanism (`ColumnReorderDragData` + header handlers).
+    /// inter-table drops — drawn from the counter every header shares
+    /// (`next_header_id`). Unrelated to row DnD — a wholly separate
+    /// mechanism (`ColumnReorderDragData` + the header's drop target).
     table_id: usize,
 
     /// Stable, kind-tagged ID for this TableView instance's **row** DnD
@@ -585,9 +594,7 @@ impl<T: 'static> TableView<T> {
         dnd: DndLazy,
         anchor_fn: Rc<dyn Fn(usize) -> crate::data_views::RowAnchor>,
     ) -> Self {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
-        let table_id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let table_id = next_header_id();
         Self {
             len_fn,
             with_item_fn,
@@ -1339,61 +1346,20 @@ impl<T: 'static> TableView<T> {
         imperative::set_column_pinning(&self.column_pinning_signal, col_id, side);
     }
 
-    /// Effective pinning for a column — `column_pinning_signal` wins
-    /// over the declared `Column::pinned`.
-    fn effective_pinning(&self, col: &Column<T>) -> PinnedSide {
-        self.column_pinning_signal
-            .get()
-            .get(&col.id)
-            .copied()
-            .unwrap_or(col.pinned)
-    }
-
     /// Compute the visible column display order: a flat list of indices
     /// into `self.columns`. Columns are partitioned by effective
     /// pinning (Leading first, then None, then Trailing); within each
     /// pane they appear in `column_order_signal` order, with any
     /// columns missing from the signal appended in declaration order.
+    /// See [`layout::display_order`].
     fn display_order(&self) -> Vec<usize> {
-        let order_signal = self.column_order_signal.get();
-        let mut order_map: HashMap<&str, usize> = HashMap::new();
-        for (i, id) in order_signal.iter().enumerate() {
-            order_map.insert(id.as_str(), i);
-        }
-        let mut leading: Vec<usize> = Vec::new();
-        let mut middle: Vec<usize> = Vec::new();
-        let mut trailing: Vec<usize> = Vec::new();
-        for (i, col) in self.columns.iter().enumerate() {
-            match self.effective_pinning(col) {
-                PinnedSide::Leading => leading.push(i),
-                PinnedSide::None => middle.push(i),
-                PinnedSide::Trailing => trailing.push(i),
-            }
-        }
-        // Sort key: explicit `column_order_signal` positions win (low
-        // values); columns missing from the signal fall back to their
-        // declaration index, offset by a huge constant so they always
-        // sort after any explicitly-ordered column.
-        const FALLBACK_BASE: usize = usize::MAX / 2;
-        let sort_pane = |bucket: &mut Vec<usize>, cols: &[Column<T>]| {
-            bucket.sort_by_key(|&i| {
-                order_map
-                    .get(cols[i].id.as_str())
-                    .copied()
-                    .unwrap_or(FALLBACK_BASE + i)
-            });
-        };
-        sort_pane(&mut leading, &self.columns);
-        sort_pane(&mut middle, &self.columns);
-        sort_pane(&mut trailing, &self.columns);
-        let mut out = Vec::with_capacity(leading.len() + middle.len() + trailing.len());
-        out.extend(leading);
-        let leading_count = out.len();
-        out.extend(middle);
-        let middle_end = out.len();
-        out.extend(trailing);
+        let (out, boundaries) = layout::display_order(
+            &self.columns,
+            &self.column_order_signal.get(),
+            &self.column_pinning_signal.get(),
+        );
         // Stash the boundaries so paint / drop-zone math can read them.
-        *self.pane_boundaries.borrow_mut() = PaneBoundaries::new(leading_count, middle_end);
+        *self.pane_boundaries.borrow_mut() = boundaries;
         out
     }
 
@@ -1561,6 +1527,6 @@ pub(crate) fn draw_pane_dividers(
     canvas.clear_clip();
 }
 
-// Reorder drag-target plumbing (hover + drop on the header strip) lives in
-// `header::attach_header_reorder_handlers` — shared with `TreeTableView`,
-// which builds its header out of the same `HeaderCell`/`HeaderRow` pair.
+// The header strip — its cells, their resize / sort / reorder gestures and the
+// reorder drop target — is `TableHeader` (`table_header.rs`), which this view
+// and `TreeTableView` both compose.

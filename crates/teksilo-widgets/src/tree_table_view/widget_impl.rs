@@ -48,28 +48,13 @@ impl<T: 'static> Widget for TreeTableView<T> {
             BindingLevel::Relayout,
         );
         // `OnRelease` resize guide line — paint-only, nothing moves until the
-        // button comes up.
+        // button comes up. (The header abandons a drag whose window goes
+        // inactive; see `TableHeader::build`.)
         self.resize_preview_x.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
         );
-
-        // Abandon an in-flight resize when the window goes inactive — see
-        // `TableView::build` for why the missing PointerUp would otherwise
-        // leave the column dragging with no button held.
-        {
-            let resize_state = self.resize_state.clone();
-            let resize_target = self.resize_target.clone();
-            let resize_preview_x = self.resize_preview_x.clone();
-            ctx.effect(&ctx.window_active_signal(), move |active| {
-                if !*active && resize_state.borrow().is_some() {
-                    *resize_state.borrow_mut() = None;
-                    resize_target.set(None);
-                    resize_preview_x.set(None);
-                }
-            });
-        }
         self.focused_cell.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
@@ -234,10 +219,10 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 let old_to_new: Vec<Option<usize>> = old_display
                     .iter()
                     .map(|&decl_idx| {
-                        let id = &self.columns[decl_idx].id;
+                        let id = &self.columns[decl_idx].spec.id;
                         display_indices
                             .iter()
-                            .position(|&new_decl_idx| self.columns[new_decl_idx].id == *id)
+                            .position(|&new_decl_idx| self.columns[new_decl_idx].spec.id == *id)
                     })
                     .collect();
                 drop(old_display);
@@ -261,7 +246,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
 
         let column_ids_in_display_order: Vec<String> = display_indices
             .iter()
-            .map(|&i| self.columns[i].id.clone())
+            .map(|&i| self.columns[i].spec.id.clone())
             .collect();
         let display_col_to_id: Rc<dyn Fn(usize) -> Option<String>> = {
             let ids = column_ids_in_display_order;
@@ -540,7 +525,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
             let bounds_for_hover = self.body_bounds.clone();
             handlers = handlers.on_drag_hover(move |payload, position, ctx| {
                 // Column reorder is handled by the header strip
-                // (`attach_header_reorder_handlers`); only row-level drops
+                // (`TableHeader`'s own drop target); only row-level drops
                 // get an insertion/into affordance here. Without this bail,
                 // a `ColumnReorderDragData` dragged past the header into the
                 // body would fall through to `on_foreign_drop` (which
@@ -774,108 +759,33 @@ impl<T: 'static> Widget for TreeTableView<T> {
         self.h_scrollbar_id = None;
         self.empty_id = None;
 
-        // Header strip.
+        // Header strip: a hosted `TableHeader`, exactly as `TableView` hosts
+        // it. The tree column reorders like any other column and carries no
+        // special case here: `tree_display_pos` (re-resolved from
+        // `display_indices` on every rebuild — see above) is what makes the
+        // indent/twist gutter and Left/Right expand-collapse follow it wherever
+        // a drop lands, including into the leading- or trailing-pinned pane.
         if self.show_header {
-            // See `TableView::build`: a rebuild drops the pointer capture an
-            // in-flight resize rides on, so the shared drag state must go with
-            // it or a later bare PointerMove would resize with no button held.
-            *self.resize_state.borrow_mut() = None;
-            self.resize_target.set(None);
-            self.resize_preview_x.set(None);
-
-            let boundaries = *self.pane_boundaries.borrow();
-            // A stretched last column has no size of its own to drag — see
-            // `TableView::build`.
-            let stretched_slot = self
-                .stretch_last_column
-                .then(|| display_indices.len().saturating_sub(1));
-            let resize_columns: ColumnResizeTable = Rc::new(
-                display_indices
-                    .iter()
-                    .enumerate()
-                    .map(|(slot, &i)| {
-                        let c = &self.columns[i];
-                        ColumnResizeInfo {
-                            id: c.id.clone(),
-                            min_width: c.min_width.unwrap_or(cp::MIN_COLUMN_WIDTH_DEFAULT),
-                            max_width: c.max_width,
-                            resizable: c.resizable && stretched_slot != Some(slot),
-                            flex: matches!(c.width, crate::ColumnWidth::Flex(_)),
-                        }
-                    })
-                    .collect(),
-            );
-            let mut cell_ids: Vec<WidgetId> = Vec::with_capacity(display_indices.len());
-            let active_sort = self.sort_signal.get();
-            let cell_padding_horizontal =
-                crate::styles::recipe_table_style::resolve_table_style(ctx)
-                    .cell_padding_horizontal(&ctx.theme().input);
-            for (display_pos, &col_idx) in display_indices.iter().enumerate() {
-                let col = &self.columns[col_idx];
-                let current_sort = active_sort
-                    .as_ref()
-                    .and_then(|(id, dir)| if id == &col.id { Some(*dir) } else { None });
-                // The gutter half comes from the active `TableStyle`, matching
-                // what `HeaderCell::build` actually pads by — see the twin in
-                // `table_view/widget_impl.rs`.
-                let filter_zone_width = cp::FILTER_INDICATOR_SIZE + cell_padding_horizontal;
-                let cell = HeaderCell::new(HeaderCellSpec {
-                    col_id: col.id.clone(),
-                    label: col.header_label.resolve_now(),
-                    col_index_1based: display_pos + 1,
-                    sortable: col.sortable,
-                    reorderable: col.reorderable,
-                    filterable: col.filterable,
-                    resize_grip: cp::RESIZE_HANDLE_WIDTH,
-                    filter_zone_width,
-                    current_sort,
-                    width_index: display_pos,
-                    pane_boundaries: boundaries,
-                    resize_columns: resize_columns.clone(),
-                    resize_policy: self.column_resize_policy,
+            let header = TableHeader::new(self.columns.iter().map(|c| c.spec.clone()).collect())
+                .widths(self.column_widths_signal.clone())
+                .sort(self.sort_signal.clone())
+                .order(self.column_order_signal.clone())
+                .pinning(self.column_pinning_signal.clone())
+                .filters(self.filters_signal.clone())
+                .scroll_x(self.scroll_x.clone())
+                .resize_policy(self.column_resize_policy)
+                .stretch_last_column(self.stretch_last_column)
+                .hosted(HeaderLink {
+                    table_id: self.table_id,
+                    widths: self.column_widths.clone(),
+                    display_indices: self.display_indices.clone(),
+                    pane_boundaries: self.pane_boundaries.clone(),
+                    strip_width: self.header_strip_width.clone(),
                     resize_state: self.resize_state.clone(),
                     resize_target: self.resize_target.clone(),
                     resize_preview_x: self.resize_preview_x.clone(),
-                    table_id: self.table_id,
-                    sort_signal: self.sort_signal.clone(),
-                    column_widths_signal: self.column_widths_signal.clone(),
-                    column_widths: self.column_widths.clone(),
-                    filters_signal: self.filters_signal.clone(),
                 });
-                cell_ids.push(ctx.add(cell));
-            }
-            let header_row = HeaderRow::new(
-                cell_ids,
-                self.column_widths.clone(),
-                cp::GRID_LINE_THICKNESS,
-                *self.pane_boundaries.borrow(),
-                self.scroll_x.clone(),
-                self.column_widths_signal.clone(),
-            );
-            // Wire reorder drag-target handlers on the header strip — the
-            // shared drop-target half of the mechanism `HeaderCell` already
-            // escalates a press into (see `table_view::header`). The tree
-            // column reorders like any other column: it carries no special
-            // case here, since `tree_display_pos` (re-resolved from
-            // `display_indices` on every rebuild — see below) is what makes
-            // the indent/twist gutter and Left/Right expand-collapse follow
-            // it wherever the drop lands, including into the leading- or
-            // trailing-pinned pane.
-            let header_row_id = ctx.add(header_row);
-            attach_header_reorder_handlers(
-                ctx,
-                header_row_id,
-                self.table_id,
-                self.column_widths.clone(),
-                self.display_indices.clone(),
-                self.pane_boundaries.clone(),
-                self.column_order_signal.clone(),
-                self.column_pinning_signal.clone(),
-                self.columns.iter().map(|c| c.id.clone()).collect(),
-                self.header_strip_width.clone(),
-                self.scroll_x.clone(),
-            );
-            self.header_row_id = Some(header_row_id);
+            self.header_row_id = Some(ctx.add(header));
         }
 
         // Body rows live in a TreeBodyPane — a sibling of the
@@ -946,7 +856,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 &Rc::new(
                     display_indices
                         .iter()
-                        .map(|&i| self.columns[i].id.clone())
+                        .map(|&i| self.columns[i].spec.id.clone())
                         .collect::<Vec<_>>(),
                 ),
             ) {
