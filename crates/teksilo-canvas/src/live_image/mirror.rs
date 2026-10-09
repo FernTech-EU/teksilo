@@ -327,6 +327,13 @@ impl LiveImageMirror {
         self.pass.set_park_budget(bytes);
     }
 
+    /// The display's refresh interval, which bounds how long a presented
+    /// frame waits for a producer holding the lock.
+    #[doc(hidden)]
+    pub fn set_refresh_interval(&mut self, refresh: std::time::Duration) {
+        self.pass.set_refresh_interval(refresh);
+    }
+
     /// A mirror on the same device as this one, as a second window on one
     /// GPU: what its texture lacks and this one's holds, it copies from this
     /// one's rather than upload, and the other way round. Both render on one

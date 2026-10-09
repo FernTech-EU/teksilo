@@ -232,6 +232,10 @@ fn two_busy_frames_in_a_row_make_the_third_wait_for_the_lock() {
     let (source, writer) = live(4, 4);
     let (_, consumer) = widget(&source);
     let mut mirror = LiveImageMirror::new();
+    // The third frame's wait is bounded by about one refresh, and a loaded
+    // runner can stretch the producer's 5 ms hold past 60 Hz's: a long
+    // refresh leaves the release as the only thing that ends the wait.
+    mirror.set_refresh_interval(Duration::from_secs(5));
     mirror.consume(&frame(&[&consumer]));
     let committed = Arc::new(std::sync::Barrier::new(2));
     let (go, done) = (
