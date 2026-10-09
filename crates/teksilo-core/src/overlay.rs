@@ -290,6 +290,11 @@ pub enum OverlayLayer {
 }
 
 /// A request to show an overlay.
+///
+/// Built with [`new`](Self::new), which takes what every overlay has to
+/// decide, and the builder methods for the rest. The fields stay public, so a
+/// request can still be adjusted after it is built: that is how a value that
+/// is already an `Option` is set, since the builders take the bare value.
 pub struct OverlayRequest {
     /// The root widget of the overlay content.
     pub content_id: WidgetId,
@@ -314,21 +319,98 @@ pub struct OverlayRequest {
     /// pipeline — no `Fade` widget required from the caller), tweens
     /// the opacity from 0 → 1 over `duration`, and on dismiss
     /// reverses the tween and defers the actual stack removal by
-    /// `duration`. Construct with [`OverlayRequest::with_fade`] when
-    /// the struct-literal idiom isn't ergonomic.
+    /// `duration`. Set with [`OverlayRequest::with_fade`].
     pub fade_duration: Option<Duration>,
 }
 
 impl OverlayRequest {
+    /// A request to show `content_id` at `placement` relative to `anchor`,
+    /// taken down the way `dismiss` says.
+    ///
+    /// `dismiss` is an argument rather than a default because no one value
+    /// suits most overlays, and the likeliest default is the worst one to
+    /// inherit unawares: a [`Manual`](DismissBehavior::Manual) overlay that
+    /// takes input is opaque to Escape, for itself and for every overlay
+    /// beneath it (see [`OverlayManager::try_dismiss_top_on_escape`]).
+    ///
+    /// Everything else starts at the value nearly every overlay uses:
+    ///
+    /// - [`layer`](Self::layer()): [`OverlayLayer::InTree`].
+    /// - [`parent_overlay`](Self::parent_overlay()): `None`, a top-level
+    ///   overlay.
+    /// - [`on_dismiss`](Self::on_dismiss()): `None`.
+    /// - [`with_fade`](Self::with_fade): `None`, so the overlay appears and
+    ///   goes without a fade.
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use teksilo_core::WidgetId;
+    /// use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
+    /// # let (popup, trigger) = (WidgetId::default(), WidgetId::default());
+    ///
+    /// let request = OverlayRequest::new(
+    ///     popup,
+    ///     trigger,
+    ///     OverlayPlacement::BelowPreferred,
+    ///     DismissBehavior::EscapeOrClickOutside,
+    /// )
+    /// .with_fade(Duration::from_millis(150));
+    /// assert_eq!(request.fade_duration, Some(Duration::from_millis(150)));
+    /// ```
+    pub fn new(
+        content_id: WidgetId,
+        anchor: WidgetId,
+        placement: OverlayPlacement,
+        dismiss: DismissBehavior,
+    ) -> Self {
+        Self {
+            content_id,
+            anchor,
+            placement,
+            dismiss,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        }
+    }
+
+    /// Render the overlay on `layer`. Default: [`OverlayLayer::InTree`].
+    pub fn layer(mut self, layer: OverlayLayer) -> Self {
+        self.layer = layer;
+        self
+    }
+
+    /// Nest the overlay under `parent`, so that dismissing `parent` takes this
+    /// one down with it, the way a menu takes its submenu. Default: `None`, a
+    /// top-level overlay.
+    ///
+    /// A parent that is already an `Option` is assigned to the
+    /// [`parent_overlay`](field@Self::parent_overlay) field instead.
+    pub fn parent_overlay(mut self, parent: OverlayId) -> Self {
+        self.parent_overlay = Some(parent);
+        self
+    }
+
+    /// Run `callback` when the overlay is dismissed, whatever the path.
+    /// Default: `None`.
+    ///
+    /// It takes the shared [`OverlayDismissCallback`] rather than a closure
+    /// because an anchor usually installs one callback on every route that
+    /// opens its overlay; a one-off closure is wrapped in `Rc::new`.
+    pub fn on_dismiss(mut self, callback: OverlayDismissCallback) -> Self {
+        self.on_dismiss = Some(callback);
+        self
+    }
+
     /// Attach a fade-in / fade-out animation to this request.
     /// `duration` controls both directions. The framework wires
     /// everything internally — caller does not create a `Fade`
-    /// widget or manage a signal:
+    /// widget or manage a signal. Default: no fade.
     ///
-    /// ```text
-    /// let req = OverlayRequest { content_id, anchor, ... }
-    ///     .with_fade(theme.motion.duration_fast);
-    /// ```
+    /// A duration that is already an `Option` (no fade under reduced motion,
+    /// say) is assigned to the [`fade_duration`](Self::fade_duration) field
+    /// instead.
     pub fn with_fade(mut self, duration: Duration) -> Self {
         self.fade_duration = Some(duration);
         self
@@ -1842,6 +1924,47 @@ mod tests {
 
     pub(super) fn fake_id(n: u64) -> WidgetId {
         KeyData::from_ffi(n).into()
+    }
+
+    #[test]
+    fn a_new_request_takes_the_documented_defaults_and_each_builder_sets_its_field() {
+        let request = OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::TrailingEdge,
+            DismissBehavior::EscapeKey,
+        );
+        assert_eq!(request.content_id, fake_id(10));
+        assert_eq!(request.anchor, fake_id(1));
+        assert!(matches!(request.placement, OverlayPlacement::TrailingEdge));
+        assert!(matches!(request.dismiss, DismissBehavior::EscapeKey));
+        assert_eq!(request.layer, OverlayLayer::InTree);
+        assert_eq!(request.parent_overlay, None);
+        assert!(request.on_dismiss.is_none());
+        assert_eq!(request.fade_duration, None);
+
+        let callback: OverlayDismissCallback = Rc::new(|_, _| {});
+        let request = request.layer(OverlayLayer::NativePopup);
+        assert_eq!(request.layer, OverlayLayer::NativePopup);
+        let request = request.parent_overlay(OverlayId::new(7));
+        assert_eq!(request.parent_overlay, Some(OverlayId::new(7)));
+        let request = request.on_dismiss(callback.clone());
+        assert!(
+            request
+                .on_dismiss
+                .as_ref()
+                .is_some_and(|installed| Rc::ptr_eq(installed, &callback)),
+        );
+        let request = request.with_fade(Duration::from_millis(150));
+        assert_eq!(request.fade_duration, Some(Duration::from_millis(150)));
+
+        // No builder reaches past its own field.
+        assert_eq!(request.content_id, fake_id(10));
+        assert_eq!(request.anchor, fake_id(1));
+        assert!(matches!(request.placement, OverlayPlacement::TrailingEdge));
+        assert!(matches!(request.dismiss, DismissBehavior::EscapeKey));
+        assert_eq!(request.layer, OverlayLayer::NativePopup);
+        assert_eq!(request.parent_overlay, Some(OverlayId::new(7)));
     }
 
     #[test]
