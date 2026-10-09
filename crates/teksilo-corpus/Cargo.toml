@@ -85,6 +85,22 @@ thiserror = { workspace = true }
 # anything the release publishes), and the telemetry lint (it belongs to one
 # example crate, which is `publish = false`).
 [package.metadata.release]
+# The application guide tells an app which version to pin, and it ships three
+# times: as the docs.rs page of the umbrella crate, in the skill, and in
+# cargo-teksilo's embedded copy of the skill. Each release rewrites the pin in
+# all three, so the guide never tells an app to depend on an older release
+# than the one it ships with.
+#
+# They run here and not from the umbrella crate's manifest, beside the
+# CHANGELOG replacements, because the corpus indexes `app_guide.md`: this crate
+# is released before the umbrella, and a replacement made after the hook below
+# regenerates the corpus would leave the release's corpus quoting the previous
+# pin. Paths are relative to THIS manifest's directory.
+pre-release-replacements = [
+  { file = "../teksilo/src/app_guide.md", search = 'teksilo = (\{ version = )?"=[0-9]+\.[0-9]+\.[0-9]+"', replace = 'teksilo = ${1}"={{version}}"', exactly = 2 },
+  { file = "../../.claude/skills/teksilo/reference/teksilo_app_guide.md", search = 'teksilo = (\{ version = )?"=[0-9]+\.[0-9]+\.[0-9]+"', replace = 'teksilo = ${1}"={{version}}"', exactly = 2 },
+  { file = "../cargo-teksilo/embedded/skill/reference/teksilo_app_guide.md", search = 'teksilo = (\{ version = )?"=[0-9]+\.[0-9]+\.[0-9]+"', replace = 'teksilo = ${1}"={{version}}"', exactly = 2 },
+]
 pre-release-hook = [
     "sh",
     "-c",
