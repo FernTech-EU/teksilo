@@ -103,7 +103,7 @@ Claude receives the full skill. Other agents receive rules or a managed region
 in `AGENTS.md`; text outside managed regions is preserved. Differing generated
 content requires `--force`. Run `model fetch` to download the search encoder;
 initialization and search never download it. Search uses BM25 until cached.
-`status` reports the project; `agent list --user` inspects user instructions.
+`status` reports the project, and lists the user-scope instructions, flagging a copy that differs from this release's; `agent list --user` inspects them per agent.
 `status --json` and `search --json` provide structured output.
 
 Three things to know when changing it:
@@ -126,7 +126,9 @@ Three things to know when changing it:
 - **Three payloads are embedded and CI guards their identity**:
   `embedded/extract_widget_api.py` against `tools/`, `embedded/skill/` against
   `.claude/skills/teksilo/`, and `embedded/probe/` (whose `tools.py` is
-  generated from `TOOL_CATALOG` and conformance-tested). `build.rs` declares
+  generated from `TOOL_CATALOG` and conformance-tested). A fourth guard keeps
+  `crates/teksilo/src/app_guide.md` (docs.rs and the corpus) identical to the
+  skill's `reference/teksilo_app_guide.md`. `build.rs` declares
   every embedded file so `include_dir!` actually rebuilds — without it cargo
   reports "0 crates compiled" after a real change and ships a stale payload.
 - **`semantic` is default-on but must stay optional.** It pulls `fastembed` →

@@ -637,6 +637,18 @@ jobs:
             exit 1
           }
 
+      # The umbrella crate's docs.rs page and the corpus `cargo teksilo` searches
+      # read crates/teksilo/src/app_guide.md; an agent reads the skill's copy.
+      # They had drifted, so an agent that read the skill first got other
+      # advice than the tool it is told to trust.
+      - name: Embedded-copy identity — application guide
+        if: matrix.name == 'debug'
+        run: |
+          diff -q .claude/skills/teksilo/reference/teksilo_app_guide.md crates/teksilo/src/app_guide.md || {
+            echo "::error::crates/teksilo/src/app_guide.md has drifted from .claude/skills/teksilo/reference/teksilo_app_guide.md — fix with: cp .claude/skills/teksilo/reference/teksilo_app_guide.md crates/teksilo/src/app_guide.md"
+            exit 1
+          }
+
       # Stdlib-only unit tests for the probe harness's Python library — no
       # display and no running app needed. The three curated examples that DO
       # drive a real app live in test-automation (Linux only, which already

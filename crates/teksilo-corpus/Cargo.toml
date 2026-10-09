@@ -100,6 +100,15 @@ pre-release-replacements = [
   { file = "../teksilo/src/app_guide.md", search = 'teksilo = (\{ version = )?"=[0-9]+\.[0-9]+\.[0-9]+"', replace = 'teksilo = ${1}"={{version}}"', exactly = 2 },
   { file = "../../.claude/skills/teksilo/reference/teksilo_app_guide.md", search = 'teksilo = (\{ version = )?"=[0-9]+\.[0-9]+\.[0-9]+"', replace = 'teksilo = ${1}"={{version}}"', exactly = 2 },
   { file = "../cargo-teksilo/embedded/skill/reference/teksilo_app_guide.md", search = 'teksilo = (\{ version = )?"=[0-9]+\.[0-9]+\.[0-9]+"', replace = 'teksilo = ${1}"={{version}}"', exactly = 2 },
+  # The skill's files say which release they ship with, so an agent reading an
+  # installed copy can tell it was installed for another release than the app
+  # resolves. The guide needs no stamp: its pin above is one.
+  { file = "../../.claude/skills/teksilo/SKILL.md", search = 'This copy ships with teksilo \*\*[0-9]+\.[0-9]+\.[0-9]+\*\*', replace = 'This copy ships with teksilo **{{version}}**', exactly = 1 },
+  { file = "../../.claude/skills/teksilo/reference/automation.md", search = 'This copy ships with teksilo \*\*[0-9]+\.[0-9]+\.[0-9]+\*\*', replace = 'This copy ships with teksilo **{{version}}**', exactly = 1 },
+  { file = "../../.claude/skills/teksilo/reference/teksu.md", search = 'This copy ships with teksilo \*\*[0-9]+\.[0-9]+\.[0-9]+\*\*', replace = 'This copy ships with teksilo **{{version}}**', exactly = 1 },
+  { file = "../cargo-teksilo/embedded/skill/SKILL.md", search = 'This copy ships with teksilo \*\*[0-9]+\.[0-9]+\.[0-9]+\*\*', replace = 'This copy ships with teksilo **{{version}}**', exactly = 1 },
+  { file = "../cargo-teksilo/embedded/skill/reference/automation.md", search = 'This copy ships with teksilo \*\*[0-9]+\.[0-9]+\.[0-9]+\*\*', replace = 'This copy ships with teksilo **{{version}}**', exactly = 1 },
+  { file = "../cargo-teksilo/embedded/skill/reference/teksu.md", search = 'This copy ships with teksilo \*\*[0-9]+\.[0-9]+\.[0-9]+\*\*', replace = 'This copy ships with teksilo **{{version}}**', exactly = 1 },
 ]
 pre-release-hook = [
     "sh",

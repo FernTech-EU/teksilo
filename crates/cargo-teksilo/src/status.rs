@@ -64,6 +64,12 @@ pub fn report(dir: &Path) {
         .as_ref()
         .map(|r| agent_data(r, false))
         .unwrap_or_default();
+    // A copy under the home directory is read in every project, so one that an
+    // earlier release installed goes on advising every app on the machine, and
+    // the project rows above cannot show it.
+    let user_rows = setup::home_dir()
+        .map(|home| agent_data(&home, true))
+        .unwrap_or_default();
     let model = if vectors::encoder_cache_dir().is_none() {
         "unavailable"
     } else if vectors::encoder_is_cached() {
@@ -79,7 +85,7 @@ pub fn report(dir: &Path) {
     if crate::output::json() {
         println!(
             "{}",
-            serde_json::json!({"tool_version":guard::TOOL_VERSION,"project":root,"teksilo_version":version,"compatible":compatible,"resolution_error":error,"agents":rows,"model":model,"python":python,"probe_version":probe})
+            serde_json::json!({"tool_version":guard::TOOL_VERSION,"project":root,"teksilo_version":version,"compatible":compatible,"resolution_error":error,"agents":rows,"user_agents":user_rows,"model":model,"python":python,"probe_version":probe})
         );
         return;
     }
@@ -122,6 +128,15 @@ pub fn report(dir: &Path) {
             installed.join(", ")
         }
     );
+    let (user, differing) = user_summary(&user_rows);
+    println!("User     {user}");
+    for agent in differing {
+        crate::output::note(format!(
+            "help: the {agent} instructions under your home directory differ from \
+             this release's; `cargo teksilo agent install {agent} --user --force` \
+             replaces them, local edits included"
+        ));
+    }
     if crate::output::verbose() {
         if let Some(error) = error {
             eprintln!("Resolution: {error}");
@@ -133,6 +148,38 @@ pub fn report(dir: &Path) {
             eprintln!("Python: {}", path.display());
         }
     }
+}
+
+/// The report's `User` line, and the agents whose user-scope copy differs from
+/// the one this release installs.
+///
+/// A differing copy is listed rather than left out, as the project line does,
+/// because at user scope it is the likelier case: nothing refreshes it when an
+/// app moves to a newer release.
+fn user_summary(rows: &[serde_json::Value]) -> (String, Vec<&str>) {
+    let mut paths = std::collections::BTreeSet::new();
+    let mut shown = Vec::new();
+    let mut differing = Vec::new();
+    for row in rows {
+        let (Some(agent), Some(state)) = (row["agent"].as_str(), row["state"].as_str()) else {
+            continue;
+        };
+        if !matches!(state, "installed" | "modified") || !paths.insert(row["path"].as_str()) {
+            continue;
+        }
+        if state == "modified" {
+            shown.push(format!("{agent} (differs from {})", guard::TOOL_VERSION));
+            differing.push(agent);
+        } else {
+            shown.push(agent.to_string());
+        }
+    }
+    let line = if shown.is_empty() {
+        "none".to_string()
+    } else {
+        shown.join(", ")
+    };
+    (line, differing)
 }
 
 #[cfg(test)]
@@ -156,6 +203,36 @@ mod tests {
             after.iter().find(|r| r["agent"] == "cursor").unwrap()["state"],
             "missing"
         );
+    }
+    #[test]
+    fn a_user_scope_copy_that_differs_from_this_release_is_flagged() {
+        let home = tempfile::tempdir().unwrap();
+        // Only Claude's row: the other two user agents follow `VIBE_HOME` and
+        // `XDG_CONFIG_HOME`, which a test cannot keep out of the temp home.
+        let claude = || {
+            let mut rows = agent_data(home.path(), true);
+            rows.retain(|r| r["agent"] == "claude");
+            rows
+        };
+        assert_eq!(user_summary(&claude()).0, "none");
+
+        let target = setup::selected_targets(home.path(), &[setup::Agent::Claude], true)
+            .unwrap()
+            .remove(0);
+        setup::apply(&target).unwrap();
+        let rows = claude();
+        let (line, differing) = user_summary(&rows);
+        assert_eq!(line, "claude");
+        assert!(differing.is_empty());
+
+        std::fs::write(target.path.join("SKILL.md"), "an earlier release's skill").unwrap();
+        let rows = claude();
+        let (line, differing) = user_summary(&rows);
+        assert_eq!(
+            line,
+            format!("claude (differs from {})", guard::TOOL_VERSION)
+        );
+        assert_eq!(differing, ["claude"]);
     }
     #[test]
     fn user_status_exposes_unsupported_targets() {

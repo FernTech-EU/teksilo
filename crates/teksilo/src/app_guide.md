@@ -434,13 +434,17 @@ Available on `EventContext`, `BuildContext` and `WidgetTree`. Takes
 `LocalizedString`, because an announcement is an *event*, not a label, and
 re-resolving it on a later language switch would re-speak it.
 
-**Do not build your own live region for this.** The framework owns two reserved
-AT nodes and cycles them in and out of the filtered tree, which is the only
-mechanism all three platforms agree announces: the AT-SPI adapter emits
-`ObjectEvent::Announcement` from `add_node` and nowhere else, so on Linux
-*editing a live region's label announces nothing at all*, while on Windows and
-macOS a repeated message needs the label to have changed. Two hand-rolled live
-regions inside this framework shipped mute for exactly this reason.
+**Do not build your own live region for this.** The framework speaks each
+message from a node the tree has never had, which is the one mechanism all
+three platforms agree announces, repeats included, and keeps that node in the
+tree for a few seconds so a screen reader can still ask it for its role when it
+handles the event. A hand-rolled live region gets one of these wrong: on Linux
+a node shown again after it was hidden is one Orca holds for dead and drops, a
+node taken away on the next frame is gone before Orca asks, and on Windows and
+macOS a repeated message needs its label to have changed. Two hand-rolled live
+regions inside this framework shipped mute, and the framework's own announcer
+lost every message after the first of a session on Orca until it worked this
+way.
 
 **Do not pair it with a toast on the same path.** `Toast` is already a correct
 live region — a node that appears — so calling both says everything twice, and

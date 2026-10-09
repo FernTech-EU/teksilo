@@ -21,8 +21,18 @@ ask about the DSL, read `reference/teksu.md` first.
 2. **Live API extraction** — `cargo teksilo symbol <Name>`, `cargo doc`, or
    docs.rs, all read from the version the app actually pins.
 3. **The bundled reference prose** — the files under `reference/`. A *map*, not
-   the territory: verified against teksilo **0.12.1**, and it MAY lag the version
-   this app pins. Never let it override the compiler or live extraction.
+   the territory. This copy ships with teksilo **0.15.1**; a section that names
+   an older version was last verified against that one, and any of it MAY lag
+   the version this app pins. Never let it override the compiler or live
+   extraction.
+
+If the version this app resolves (`cargo teksilo status`, or `Cargo.lock`) is
+not the one this copy ships with, the skill was installed for another release.
+Say so, and refresh it before relying on the prose: `cargo install
+cargo-teksilo --version <the app's teksilo version>`, then `cargo teksilo agent
+install claude --force` (add `--user` for a copy under the home directory).
+`cargo teksilo status` flags a user-scope copy that differs from the installed
+tool's.
 
 ## The tool: `cargo teksilo`
 
