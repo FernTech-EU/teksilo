@@ -549,6 +549,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
             let export_for_hover = self.export.clone();
             let has_foreign_hook_hover = self.on_foreign_drop.is_some();
             let bounds_for_hover = self.body_bounds.clone();
+            let pinned_for_hover = (self.pinned_layout.clone(), self.pinned_built.clone());
             handlers = handlers.on_drag_hover(move |payload, position, ctx| {
                 // Column reorder is handled by the header strip
                 // (`TableHeader`'s own drop target); only row-level drops
@@ -582,24 +583,23 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     feedback_for_hover.set(None);
                     return teksilo_core::DropFeedback::NoFeedback;
                 }
-                let scroll = scroll_for_hover.get().max(0.0);
-                let content_y = position.y - header_h_for_hover + scroll;
-                let (insertion_top, row_idx, row_top, row_h) = {
-                    let mut m = metrics_for_hover.borrow_mut();
-                    m.resize(count);
-                    let ins = m.insertion_index(content_y);
-                    let r = m.row_at(content_y);
-                    (m.row_top(ins), r, m.row_top(r), m.row_height(r))
-                };
+                let y = position.y - header_h_for_hover;
+                let spot = DropSpot::at(
+                    &metrics_for_hover,
+                    &pinned_for_hover,
+                    count,
+                    scroll_for_hover.get().max(0.0),
+                    y,
+                );
+                let row_idx = spot.row;
                 // Before / Into / After from the y within the row. The bands
                 // are plain thirds for a cursor and widen at the edges for a
                 // finger — `common::drop_bands` owns the rule, and the hover
                 // affordance and the drop itself both read it, so the line the
                 // user sees cannot promise a position the drop does not take.
-                let y_in_row = content_y - row_top;
                 let drop_pos = crate::common::drop_bands::drop_position_in_row(
-                    y_in_row,
-                    row_h,
+                    y - spot.top,
+                    spot.height,
                     ctx.pointer_kind(),
                 );
                 // The source owns the structural verdict — including the cycle
@@ -631,19 +631,18 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     (DropPosition::Before, 0)
                 };
                 if effective == DropPosition::Into {
-                    let top = row_top - scroll;
                     feedback_for_hover.set(Some(DropViz::Rect {
-                        top,
-                        height: row_h,
+                        top: spot.top,
+                        height: spot.height,
                         width: viz_width,
                         depth,
                     }));
                     teksilo_core::DropFeedback::HighlightRect {
-                        rect: Rect::new(0.0, top, viz_width, row_h),
+                        rect: Rect::new(0.0, spot.top, viz_width, spot.height),
                         color: drop_into_tint(),
                     }
                 } else {
-                    let insertion_y = insertion_top - scroll;
+                    let insertion_y = spot.insertion_y;
                     feedback_for_hover.set(Some(DropViz::Line {
                         y: insertion_y,
                         width: viz_width,
@@ -667,6 +666,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
             let on_foreign_for_drop = self.on_foreign_drop.clone();
             let proxy_for_foreign_hook = self.proxy.clone();
             let export_for_drop = self.export.clone();
+            let pinned_for_drop = (self.pinned_layout.clone(), self.pinned_built.clone());
             handlers = handlers.on_drop(move |mut payload, position, ctx| {
                 feedback_for_drop.set(None);
                 // See the matching bail in `on_drag_hover` above — a column
@@ -679,24 +679,23 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 if count == 0 {
                     return false;
                 }
-                let scroll = scroll_for_drop.get().max(0.0);
-                let content_y = position.y - header_h_for_drop + scroll;
-                let (flat_idx, row_top, row_h, ins) = {
-                    let mut m = metrics_for_drop.borrow_mut();
-                    m.resize(count);
-                    let idx = m.row_at(content_y);
-                    let ins = m.insertion_index(content_y);
-                    (idx, m.row_top(idx), m.row_height(idx), ins)
-                };
+                let y = position.y - header_h_for_drop;
+                let spot = DropSpot::at(
+                    &metrics_for_drop,
+                    &pinned_for_drop,
+                    count,
+                    scroll_for_drop.get().max(0.0),
+                    y,
+                );
+                let (flat_idx, ins) = (spot.row, spot.insertion);
                 // Before / Into / After from the y within the row. The bands
                 // are plain thirds for a cursor and widen at the edges for a
                 // finger — `common::drop_bands` owns the rule, and the hover
                 // affordance and the drop itself both read it, so the line the
                 // user sees cannot promise a position the drop does not take.
-                let y_in_row = content_y - row_top;
                 let drop_pos = crate::common::drop_bands::drop_position_in_row(
-                    y_in_row,
-                    row_h,
+                    y - spot.top,
+                    spot.height,
                     ctx.pointer_kind(),
                 );
                 let is_same_view = payload
@@ -1118,15 +1117,14 @@ impl<T: 'static> Widget for TreeTableView<T> {
             if self.pinned_rows.get() != rows {
                 self.pinned_rows.set(rows);
             }
-            let extent = {
-                let built = self.pinned_built.borrow();
-                lines
-                    .iter()
-                    .enumerate()
-                    .filter(|(k, line)| built.get(*k) == Some(&line.row))
-                    .map(|(_, line)| line.top + line.height)
-                    .fold(0.0_f32, f32::max)
-            };
+            // As tall as the lines that show and no taller: a band of the
+            // stack with no line in it would take the presses meant for the
+            // rows it covers.
+            let shown = pinned::shown_lines(&lines, &self.pinned_built.borrow());
+            let extent = lines[..shown]
+                .iter()
+                .map(|line| line.top + line.height)
+                .fold(0.0_f32, f32::max);
             *self.pinned_layout.borrow_mut() = lines;
             extent.min(body_height)
         } else {
@@ -1435,94 +1433,6 @@ impl<T: 'static> Widget for TreeTableView<T> {
             }
         }
 
-        // Row-drop insertion indicator (source-accepted positions only — a
-        // forbidden hover clears the signal). `y` is stored body-local.
-        //
-        // Both affordances are indented to the level the dropped row lands at,
-        // measured from the **tree column's** own leading edge rather than the
-        // body's: `.tree_column()` and a user column-reorder can move the
-        // twist/indent gutter off the leading slot, and an indent measured from
-        // the wrong origin points at nothing. The per-level step is this view's
-        // `effective_indent()` — the very value its indent gutter renders with
-        // — not the container recipe's, which describes `StandardTreeItem`.
-        let drop_indent_origin = |depth: usize| -> f32 {
-            let step = self.effective_indent();
-            let tree_decl = self.tree_column_decl_index();
-            let tree_slot = self
-                .display_indices
-                .borrow()
-                .iter()
-                .position(|&i| i == tree_decl)
-                .unwrap_or(0);
-            let col_x = layout::column_logical_x(
-                &widths,
-                boundaries,
-                scroll_x,
-                body_width_for_paint,
-                tree_slot,
-            )
-            .unwrap_or(0.0);
-            (col_x + depth as f32 * step).clamp(0.0, body_width_for_paint)
-        };
-        match self.drop_feedback.get() {
-            Some(DropViz::Line { y, depth, .. }) => {
-                let recipe = ctx
-                    .theme
-                    .style_slots
-                    .list_container
-                    .as_ref()
-                    .map(|s| s.insertion())
-                    .unwrap_or_default();
-                let line_color = recipe.role.resolve(colors);
-                let thickness = recipe.thickness;
-                let line_y = body_origin_y + y - thickness * 0.5;
-                let indent = drop_indent_origin(depth);
-                // RTL mirrors the row, so the indent eats into the *right* edge
-                // and the line still runs away from the row's leading side.
-                let x = if rtl {
-                    content_left
-                } else {
-                    content_left + indent
-                };
-                canvas.fill_rect(
-                    Rect::new(x, line_y, body_width_for_paint - indent, thickness),
-                    line_color,
-                );
-            }
-            // "Drop into this container" — a box round the target row, inset on
-            // every side so its horizontal edges can never be mistaken for the
-            // Before / After line. Same affordance `TreeView` paints for an
-            // `Into` verdict; see `ListDropIntoRecipe`.
-            Some(DropViz::Rect {
-                top, height, depth, ..
-            }) => {
-                let into = ctx
-                    .theme
-                    .style_slots
-                    .list_container
-                    .as_ref()
-                    .map(|s| s.drop_into())
-                    .unwrap_or_default();
-                let color = into.role.resolve(colors);
-                let indent = drop_indent_origin(depth);
-                let x = if rtl {
-                    content_left
-                } else {
-                    content_left + indent
-                };
-                let rect = Rect::new(
-                    x + into.inset,
-                    body_origin_y + top + into.inset,
-                    (body_width_for_paint - indent - into.inset * 2.0).max(0.0),
-                    (height - into.inset * 2.0).max(0.0),
-                );
-                let radius = teksilo_tokens::CornerRadius::uniform(into.corner_radius);
-                canvas.fill_rounded_rect(rect, radius, color.with_alpha(into.fill_alpha));
-                canvas.stroke_rounded_rect(rect, radius, color, into.thickness);
-            }
-            None => {}
-        }
-
         canvas.clear_clip();
 
         // Container focus ring — keyboard focus on the view but no current cell
@@ -1553,6 +1463,15 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 BorderRole::Focused.resolve(colors),
             );
         }
+    }
+
+    fn wants_post_paint(&self) -> bool {
+        true
+    }
+
+    /// The row-drop indicator, over the rows and the pinned stack alike.
+    fn post_paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        self.paint_drop_feedback(bounds, canvas, ctx);
     }
 
     /// The context-menu key opens the *current row's* menu, not the view's.
@@ -1675,10 +1594,137 @@ impl<T: 'static> Widget for TreeTableView<T> {
 }
 
 impl<T: 'static> TreeTableView<T> {
+    /// The row-drop indicator, drawn over the children: a pinned line is an
+    /// opaque surface over the rows, and a drop on it is marked on it.
+    fn paint_drop_feedback(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        if self.drop_feedback.get().is_none() {
+            return;
+        }
+        let colors = &ctx.theme.colors;
+        let header_h = self.effective_header_height();
+        let body_origin_y = bounds.y + header_h;
+        let body_height = (bounds.height - header_h).max(0.0);
+        let widths = self.column_widths.borrow();
+        let body_width = widths.iter().sum::<f32>();
+        let body_width_for_paint = if body_width > 0.0 {
+            body_width.min(bounds.width)
+        } else {
+            bounds.width
+        };
+        let rtl = ctx.layout_direction == teksilo_core::environment::LayoutDirection::RightToLeft;
+        let content_left = if rtl {
+            bounds.x + bounds.width - body_width_for_paint
+        } else {
+            bounds.x
+        };
+        let boundaries = *self.pane_boundaries.borrow();
+        let scroll_x = self.scroll_x.get();
+        canvas.set_clip(Rect::new(
+            content_left,
+            body_origin_y,
+            body_width_for_paint,
+            body_height,
+        ));
+
+        // Row-drop insertion indicator (source-accepted positions only — a
+        // forbidden hover clears the signal). `y` is stored body-local.
+        //
+        // Both affordances are indented to the level the dropped row lands at,
+        // measured from the **tree column's** own leading edge rather than the
+        // body's: `.tree_column()` and a user column-reorder can move the
+        // twist/indent gutter off the leading slot, and an indent measured from
+        // the wrong origin points at nothing. The per-level step is this view's
+        // `effective_indent()` — the very value its indent gutter renders with
+        // — not the container recipe's, which describes `StandardTreeItem`.
+        let drop_indent_origin = |depth: usize| -> f32 {
+            let step = self.effective_indent();
+            let tree_decl = self.tree_column_decl_index();
+            let tree_slot = self
+                .display_indices
+                .borrow()
+                .iter()
+                .position(|&i| i == tree_decl)
+                .unwrap_or(0);
+            let col_x = layout::column_logical_x(
+                &widths,
+                boundaries,
+                scroll_x,
+                body_width_for_paint,
+                tree_slot,
+            )
+            .unwrap_or(0.0);
+            (col_x + depth as f32 * step).clamp(0.0, body_width_for_paint)
+        };
+        match self.drop_feedback.get() {
+            Some(DropViz::Line { y, depth, .. }) => {
+                let recipe = ctx
+                    .theme
+                    .style_slots
+                    .list_container
+                    .as_ref()
+                    .map(|s| s.insertion())
+                    .unwrap_or_default();
+                let line_color = recipe.role.resolve(colors);
+                let thickness = recipe.thickness;
+                let line_y = body_origin_y + y - thickness * 0.5;
+                let indent = drop_indent_origin(depth);
+                // RTL mirrors the row, so the indent eats into the *right* edge
+                // and the line still runs away from the row's leading side.
+                let x = if rtl {
+                    content_left
+                } else {
+                    content_left + indent
+                };
+                canvas.fill_rect(
+                    Rect::new(x, line_y, body_width_for_paint - indent, thickness),
+                    line_color,
+                );
+            }
+            // "Drop into this container" — a box round the target row, inset on
+            // every side so its horizontal edges can never be mistaken for the
+            // Before / After line. Same affordance `TreeView` paints for an
+            // `Into` verdict; see `ListDropIntoRecipe`.
+            Some(DropViz::Rect {
+                top, height, depth, ..
+            }) => {
+                let into = ctx
+                    .theme
+                    .style_slots
+                    .list_container
+                    .as_ref()
+                    .map(|s| s.drop_into())
+                    .unwrap_or_default();
+                let color = into.role.resolve(colors);
+                let indent = drop_indent_origin(depth);
+                let x = if rtl {
+                    content_left
+                } else {
+                    content_left + indent
+                };
+                let rect = Rect::new(
+                    x + into.inset,
+                    body_origin_y + top + into.inset,
+                    (body_width_for_paint - indent - into.inset * 2.0).max(0.0),
+                    (height - into.inset * 2.0).max(0.0),
+                );
+                let radius = teksilo_tokens::CornerRadius::uniform(into.corner_radius);
+                canvas.fill_rounded_rect(rect, radius, color.with_alpha(into.fill_alpha));
+                canvas.stroke_rounded_rect(rect, radius, color, into.thickness);
+            }
+            None => {}
+        }
+
+        canvas.clear_clip();
+    }
+
     /// Mount the stack of pinned ancestor copies, and what a press on one of
-    /// them does: what a plain click on the real row would — the selection
-    /// and the cursor land on it, the cursor keeping its column — and the row
-    /// comes back into view right under its own pinned ancestors.
+    /// them does: what a plain click on the real row would. An open cell edit
+    /// ends on the press, as a press on any other cell ends it; the selection
+    /// and the cursor land on the row, the cursor keeping its column; the row
+    /// is activated when the view activates on a single click; and it comes
+    /// back into view right under its own pinned ancestors. A double click on
+    /// a copy does not activate the row: the first press has already scrolled
+    /// it back into place, out from under the second.
     fn add_pinned_stack(
         &self,
         ctx: &mut BuildContext,
@@ -1696,7 +1742,11 @@ impl<T: 'static> TreeTableView<T> {
             let scroll_y = self.scroll_y.clone();
             let max_scroll_y = self.max_scroll_y.clone();
             let viewport = self.viewport_height.clone();
-            Rc::new(move |row, _ctx| {
+            let activate = match self.activate_on {
+                crate::data_views::ActivateOn::SingleClick => self.on_row_activate.clone(),
+                crate::data_views::ActivateOn::DoubleClick => None,
+            };
+            Rc::new(move |row, ctx| {
                 let col = focused.get().map_or(0, |(_row, col)| col);
                 match mode {
                     TableSelectionMode::SingleRow | TableSelectionMode::MultiRow => {
@@ -1717,8 +1767,27 @@ impl<T: 'static> TreeTableView<T> {
                 if (target - scroll).abs() > f32::EPSILON {
                     scroll_y.set(target);
                 }
+                if let Some(activate) = &activate {
+                    activate(row, ctx);
+                }
             })
         };
+        // The dismissal a press on a real cell makes (`cell_edit_dismiss_handler`):
+        // a copy draws no editor, so a press on it is never one into the edit.
+        let end_edit = self.on_cell_edit_dismissed.clone().map(|dismissed| {
+            let editing = self.editing_cell.clone();
+            let col_ids: Vec<String> = display_indices
+                .iter()
+                .map(|&i| self.columns[i].spec.id.clone())
+                .collect();
+            Rc::new(move |ctx: &mut EventContext| {
+                if let Some((row, col)) = editing.get()
+                    && let Some(col_id) = col_ids.get(col)
+                {
+                    dismissed(row, col_id, ctx);
+                }
+            }) as Rc<dyn Fn(&mut EventContext)>
+        });
         ctx.add(pinned::PinnedStack {
             rows: self.pinned_rows.clone(),
             built: self.pinned_built.clone(),
@@ -1736,7 +1805,12 @@ impl<T: 'static> TreeTableView<T> {
                 full_width,
             },
             on_pick,
+            end_edit,
+            scroll_y: self.scroll_y.clone(),
+            total_refresh: self.pane_total_refresh.clone(),
+            pane_rows: (self.pane_built_start.clone(), self.pane_built_end.clone()),
             lines: Vec::new(),
+            copy_ids: Vec::new(),
         })
     }
 }
@@ -1753,6 +1827,60 @@ fn stroke_ring(canvas: &mut Canvas, rect: Rect, stroke: f32, color: teksilo_toke
     canvas.fill_rect(Rect::new(x, y + h - stroke, w, stroke), color);
     canvas.fill_rect(Rect::new(x, y, stroke, h), color);
     canvas.fill_rect(Rect::new(x + w - stroke, y, stroke, h), color);
+}
+
+/// The row a drag points at and where it shows, all relative to the top of
+/// the rows' viewport.
+///
+/// A pinned line answers for the row it shows: it covers the rows scrolled
+/// under it, and a drop on it means the ancestor drawn there, not a row the
+/// user cannot see.
+#[derive(Debug, Clone, Copy)]
+struct DropSpot {
+    row: usize,
+    top: f32,
+    height: f32,
+    /// The flat insertion index for a drop here, and its boundary's `y`.
+    insertion: usize,
+    insertion_y: f32,
+}
+
+impl DropSpot {
+    fn at(
+        metrics: &SharedRowMetrics,
+        (lines, built): &(Rc<RefCell<Vec<pinned::StackLine>>>, Rc<RefCell<Vec<usize>>>),
+        count: usize,
+        scroll: f32,
+        y: f32,
+    ) -> Self {
+        if let Some(line) = pinned::line_at(&lines.borrow(), &built.borrow(), y) {
+            // The midpoint rule `RowMetrics::insertion_index` applies to a row.
+            let before = y - line.top < line.height * 0.5;
+            return Self {
+                row: line.row,
+                top: line.top,
+                height: line.height,
+                insertion: if before { line.row } else { line.row + 1 },
+                insertion_y: if before {
+                    line.top
+                } else {
+                    line.top + line.height
+                },
+            };
+        }
+        let content_y = y + scroll;
+        let mut m = metrics.borrow_mut();
+        m.resize(count);
+        let insertion = m.insertion_index(content_y);
+        let row = m.row_at(content_y);
+        Self {
+            row,
+            top: m.row_top(row) - scroll,
+            height: m.row_height(row),
+            insertion,
+            insertion_y: m.row_top(insertion) - scroll,
+        }
+    }
 }
 
 /// The spans of `[top, bottom)` that none of `bands` covers, top to bottom.

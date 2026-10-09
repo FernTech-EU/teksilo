@@ -61,9 +61,10 @@ into view.
 
 A `TreeTableView` full-width row (`.full_width_row(..)`) is one cell across
 every column. The cursor keeps its column on it, so stepping on to an ordinary
-row lands back in that column, but a horizontal move, `Home` and `End` leave
-it where it is, `Tab` passes it in one press, the expand and collapse arrows
-act on it from any column, and no column of it opens an editor. With
+row lands back in that column, but `Home` and `End` leave it where it is,
+`Tab` passes it in one press, the expand and collapse arrows act on it from
+any column as on the tree column (← on a collapsed band moves up to its
+parent), and no column of it opens an editor. With
 `.pinned_ancestors(depth)`, a row revealed by a key stops below the ancestors
 pinned over it.
 

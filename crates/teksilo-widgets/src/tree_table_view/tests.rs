@@ -5417,7 +5417,11 @@ mod full_width_and_pinned {
         assert!(band.iter().all(|&c| c == band[0]), "one cell: {band:?}");
         let row = tree.bounds(row_of(&tree, id, 1));
         let cell = tree.bounds(band[0]);
-        assert_eq!((cell.x, cell.width), (row.x, row.width), "across the row");
+        assert_eq!(
+            (cell.x, cell.width),
+            (row.x, 360.0),
+            "across the columns, from the row's leading edge"
+        );
         assert_eq!(
             labels_under(&mut tree, band[0]),
             vec!["group #A1".to_string()],
@@ -6063,10 +6067,8 @@ mod full_width_and_pinned {
             // Line → its copy, which holds one band rather than three cells.
             let copy = tree.children(*line)[0];
             assert_eq!(tree.children(copy).len(), 1, "{name}: one band");
-            assert_eq!(
-                tree.bounds(tree.children(copy)[0]).width,
-                tree.bounds(*line).width
-            );
+            // Across the columns, as the real band is.
+            assert_eq!(tree.bounds(tree.children(copy)[0]).width, 360.0);
             assert_eq!(labels_under(&mut tree, copy), vec![name.to_string()]);
         }
         // A copy of a plain row is three cells.
@@ -6157,5 +6159,345 @@ mod full_width_and_pinned {
         settle(&mut tree, W, VIEW_H);
         assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0)]);
         assert_eq!(line_text(&mut tree), "#y0");
+    }
+
+    /// The node of the row named `name`, wherever it is now.
+    fn node_named(proxy: &SortFilterTreeModel<String>, name: &str) -> teksilo_data::NodeId {
+        (0..proxy.visible_count())
+            .filter_map(|i| proxy.visible_node_id(i))
+            .find(|&node| proxy.tree().with_item(node, |s| s == name) == Some(true))
+            .unwrap_or_else(|| panic!("{name} is visible"))
+    }
+
+    #[test]
+    fn a_drop_over_a_pinned_line_lands_on_the_row_it_shows() {
+        let proxy = library(5);
+        let (mut tree, id) = mount(pinned_view(&proxy, 2).reorderable(true), W, VIEW_H);
+        scroll_to(&mut tree, id, 30.0);
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0), (1, 20.0, 20.0)]);
+
+        // A1-4 (content 100..120, the rows' 70..90) into the middle of the
+        // artist's line. Under that line is A1-1, whose top third would
+        // have put the song in the album it is already in.
+        drag(
+            &mut tree,
+            Point::new(60.0, H + 80.0),
+            Point::new(60.0, H + 10.0),
+        );
+        let song = node_named(&proxy, "A1-4");
+        assert_eq!(
+            proxy.tree().parent(song),
+            Some(proxy.tree().root(0)),
+            "the song went into #A, the row the line shows"
+        );
+    }
+
+    #[test]
+    fn the_drop_indicator_over_a_pinned_line_is_drawn_over_it() {
+        use teksilo_canvas::{DrawCommand, ShapeKind};
+        let proxy = library(5);
+        let (mut tree, id) = mount(pinned_view(&proxy, 2).reorderable(true), W, VIEW_H);
+        scroll_to(&mut tree, id, 30.0);
+        let artist_line = tree.children(stack_of(&tree, id))[1];
+
+        // Hold a drag of A1-4 over the middle of the artist's line: Into #A.
+        let start = Point::new(60.0, H + 80.0);
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            start,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(72.0, start.y)));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(72.0, H + 10.0)));
+        let frame = tree.render();
+        let line = tree.bounds(artist_line);
+        let surface = frame
+            .draw_order
+            .iter()
+            .position(|c| match c {
+                DrawCommand::Decoration(i) => {
+                    let [x, y, w, h] = frame.decorations[*i].rect;
+                    (x - line.x).abs() < 0.5
+                        && (y - line.y).abs() < 0.5
+                        && (w - line.width).abs() < 0.5
+                        && (h - line.height).abs() < 0.5
+                }
+                _ => false,
+            })
+            .expect("the artist's line paints its surface");
+        let recipe = teksilo_core::styles::ListDropIntoRecipe::default();
+        let indicator = frame
+            .draw_order
+            .iter()
+            .position(|c| match c {
+                DrawCommand::Shape(i) => {
+                    let s = &frame.shapes[*i];
+                    s.shape == ShapeKind::RoundedRect
+                        && s.corner_radii[0] > 0.0
+                        && (s.screen[1] - (line.y + recipe.inset)).abs() < 0.5
+                        && (s.screen[3] - (line.height - recipe.inset * 2.0)).abs() < 0.5
+                }
+                _ => false,
+            })
+            .expect("an Into box round the artist's line");
+        assert!(
+            indicator > surface,
+            "the box is drawn after the line it marks ({indicator} vs {surface})"
+        );
+    }
+
+    #[test]
+    fn a_press_on_a_pinned_line_ends_an_open_edit() {
+        let proxy = library(5);
+        let dismissed = Rc::new(std::cell::RefCell::new(None));
+        let record = dismissed.clone();
+        let columns = library_columns().into_iter().map(|c| {
+            if c.spec.id == "time" {
+                c.editable(true)
+            } else {
+                c
+            }
+        });
+        let view = TreeTableView::from_projection(proxy.clone())
+            .columns(columns)
+            .row_height(20.0)
+            .pinned_ancestors(2)
+            .on_cell_edit_dismissed(move |row, col, _ctx| {
+                *record.borrow_mut() = Some((row, col.to_string()));
+            });
+        let (mut tree, id) = mount(view, W, VIEW_H);
+        scroll_to(&mut tree, id, 30.0);
+        with_view(&tree, id, |v| v.begin_edit(4, "time"));
+        settle(&mut tree, W, VIEW_H);
+
+        let artist_line = tree.children(stack_of(&tree, id))[1];
+        tree.click(artist_line);
+        assert_eq!(
+            dismissed.borrow().clone(),
+            Some((4, "time".to_string())),
+            "a press on a copy ends the edit, as a press on any other cell does"
+        );
+    }
+
+    #[test]
+    fn a_press_on_a_pinned_line_activates_its_row_when_a_single_click_does() {
+        let proxy = library(5);
+        let activated = Rc::new(Cell::new(None));
+        let act = activated.clone();
+        let (mut tree, id) = mount(
+            pinned_view(&proxy, 2)
+                .activate_on(crate::data_views::ActivateOn::SingleClick)
+                .on_row_activate(move |row, _ctx| act.set(Some(row))),
+            W,
+            VIEW_H,
+        );
+        scroll_to(&mut tree, id, 70.0);
+        let album_line = tree.children(stack_of(&tree, id))[0];
+        tree.click(album_line);
+        assert_eq!(activated.get(), Some(1), "#A1, as a click on its row would");
+    }
+
+    #[test]
+    fn pinned_lines_take_the_measured_height_of_ancestors_never_laid_out() {
+        // Mounted scrolled deep into #A1's 40 songs: #A and #A1 are never
+        // realized, so only their copies can measure them.
+        let proxy = library(40);
+        let view = TreeTableView::from_projection(proxy.clone())
+            .columns(library_columns())
+            .full_width_row(|row: &String| is_group(row))
+            .full_width_row_delegate(|row, _ctx| leaf(34.0, format!("group {row}")))
+            .auto_row_height(50.0)
+            .pinned_ancestors(2);
+        view.scroll_y_signal().set(1000.0);
+        let (mut tree, id) = mount(view, W, VIEW_H);
+        settle(&mut tree, W, VIEW_H);
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 34.0), (1, 34.0, 34.0)]);
+    }
+
+    /// A tall root A over three rows, then a short root B with an open
+    /// branch B1 under it — heights by row: 40, then 20 throughout.
+    ///
+    /// ```text
+    ///  0 A    0..40     4 B    100..120
+    ///  1 a1  40..60     5 B1   120..140
+    ///  2 a2  60..80     6..9 b 140..220
+    ///  3 a3  80..100
+    /// ```
+    fn tall_and_short() -> SortFilterTreeModel<String> {
+        let t = TreeModel::new();
+        let a = t.insert_root(0, "A".to_string());
+        for i in 0..3 {
+            t.insert_child(a, i, format!("a{}", i + 1));
+        }
+        let b = t.insert_root(1, "B".to_string());
+        let b1 = t.insert_child(b, 0, "B1".to_string());
+        for i in 0..4 {
+            t.insert_child(b1, i, format!("b{}", i + 1));
+        }
+        let proxy = SortFilterTreeModel::new(t);
+        proxy.expand_all();
+        proxy
+    }
+
+    #[test]
+    fn every_pinned_line_is_a_descendant_of_the_one_above() {
+        let proxy = tall_and_short();
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let view = TreeTableView::from_projection(proxy.clone())
+            .columns(library_columns())
+            .row_height_fn(|i| if i == 0 { 40.0 } else { 20.0 })
+            .selection_mode(TableSelectionMode::SingleRow)
+            .selection(selection.clone())
+            .pinned_ancestors(2);
+        let (mut tree, id) = mount(view, W, VIEW_H);
+        // B's top at 15: it pushes A up by 25, and under A's unpushed bottom
+        // (40) lies B1 — not a descendant of A.
+        scroll_to(&mut tree, id, 85.0);
+        assert_eq!(pinned(&tree, id), vec![(0, -25.0, 40.0)]);
+
+        // B, uncovered at 15..35, takes a click.
+        let at = Point::new(60.0, H + 25.0);
+        tree.pointer_down_button(at, PointerButton::Primary);
+        tree.pointer_up_button(at, PointerButton::Primary);
+        assert_eq!(selection.selected_indices(), vec![4]);
+    }
+
+    #[test]
+    fn a_band_spans_the_columns_like_its_decorations() {
+        // 360 dp of columns in a 400 dp view: the band, the selection band and
+        // the focus ring all stop where the columns do.
+        let proxy = library(5);
+        let (tree, id) = mount(grouped(&proxy), 400.0, 400.0);
+        let row = tree.bounds(row_of(&tree, id, 1));
+        let band = tree.bounds(cells_of(&tree, id, 1)[0]);
+        assert_eq!((band.x, band.width), (row.x, 360.0));
+
+        // Under RTL the columns, and the band, run from the right edge.
+        let proxy = library(5);
+        let (mut tree, id) = mount(grouped(&proxy), 400.0, 400.0);
+        tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+        settle(&mut tree, 400.0, 400.0);
+        let row = tree.bounds(row_of(&tree, id, 1));
+        let band = tree.bounds(cells_of(&tree, id, 1)[0]);
+        assert_eq!((band.right(), band.width), (row.right(), 360.0));
+    }
+
+    #[test]
+    fn under_rtl_a_bands_content_ends_where_the_tree_column_does() {
+        // The tree column second: under RTL it spans 280..120 from the left
+        // edge of a 400 dp row, so the band's chrome ends 160 dp in from the
+        // right, flush with the songs' tree-column cells.
+        let proxy = library(5);
+        let (mut tree, id) = mount(grouped(&proxy).tree_column("artist"), 400.0, 400.0);
+        tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+        settle(&mut tree, 400.0, 400.0);
+        let song_tree_cell = tree.bounds(cells_of(&tree, id, 2)[1]);
+        let band_cell = cells_of(&tree, id, 1)[0];
+        let inset = tree.children(band_cell)[0];
+        let chrome = tree.bounds(tree.children(inset)[0]);
+        let row = tree.bounds(row_of(&tree, id, 1));
+        assert_eq!(song_tree_cell.right(), row.right() - 160.0);
+        assert_eq!(chrome.right(), song_tree_cell.right());
+    }
+
+    #[test]
+    fn on_screen_the_column_dividers_stop_at_every_band() {
+        let proxy = library(5);
+        let (mut tree, _id) = mount(
+            grouped(&proxy).grid_lines(GridLines::Vertical),
+            400.0,
+            400.0,
+        );
+        let frame = tree.render();
+        // The column boundaries at 160 and 280.
+        let dividers: Vec<[f32; 4]> = frame
+            .decorations
+            .iter()
+            .map(|d| d.rect)
+            .filter(|[x, y, w, h]| {
+                *w <= 1.5
+                    && *h > 0.5
+                    && *y >= H - 0.5
+                    && ((x - 160.0).abs() < 2.0 || (x - 280.0).abs() < 2.0)
+            })
+            .collect();
+        assert!(!dividers.is_empty(), "the songs have column dividers");
+        // The bands, by the rows' top: #A, #A1, #A2, #B.
+        for band in [0.0_f32, 20.0, 140.0, 260.0] {
+            let (top, bottom) = (H + band, H + band + 20.0);
+            for [_, y, _, h] in &dividers {
+                assert!(
+                    *y + *h <= top + 0.5 || *y >= bottom - 0.5,
+                    "a divider at {y}..{} crosses the band at {top}..{bottom}",
+                    y + h
+                );
+            }
+        }
+        // …and they do run beside the songs: A1-1..A1-5 at 40..140.
+        assert!(
+            dividers
+                .iter()
+                .any(|[_, y, _, h]| *y <= H + 40.5 && *y + *h >= H + 139.5),
+            "{dividers:?}"
+        );
+    }
+
+    #[test]
+    fn taking_focus_and_scroll_into_view_reveal_below_the_pinned_stack() {
+        // At 30 the stack covers the top 40 dp, and the second song (content
+        // 60..80) sits half under it: both reveals clear it, at 20.
+        let proxy = library(5);
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let (mut tree, id) = mount(
+            pinned_view(&proxy, 2)
+                .selection_mode(TableSelectionMode::SingleRow)
+                .selection(selection.clone()),
+            W,
+            VIEW_H,
+        );
+        let scroll = with_view(&tree, id, |v| v.scroll_y_signal().clone());
+        scroll_to(&mut tree, id, 30.0);
+        selection.select(3);
+        settle(&mut tree, W, VIEW_H);
+        assert_eq!(scroll.get(), 30.0, "selecting does not scroll");
+        tree.focus(id);
+        settle(&mut tree, W, VIEW_H);
+        assert_eq!(scroll.get(), 20.0, "taking focus reveals the current row");
+
+        // The row's own ScrollIntoView, in a view that never takes focus.
+        let proxy = library(5);
+        let (mut tree, id) = mount(pinned_view(&proxy, 2), W, VIEW_H);
+        let scroll = with_view(&tree, id, |v| v.scroll_y_signal().clone());
+        scroll_to(&mut tree, id, 30.0);
+        let row = row_of(&tree, id, 3);
+        let mut ops = teksilo_core::window::NoopWindowOps;
+        assert!(tree.dispatch_access_action(
+            widget_id_to_node_id(row),
+            teksilo_core::accesskit::Action::ScrollIntoView,
+            None,
+            &mut ops,
+        ));
+        settle(&mut tree, W, VIEW_H);
+        assert_eq!(scroll.get(), 20.0, "ScrollIntoView stops below the stack");
+    }
+
+    #[test]
+    fn left_on_a_collapsed_band_moves_to_its_parent() {
+        let proxy = library(5);
+        let (mut tree, id) = mount(grouped(&proxy), 400.0, 600.0);
+        tree.focus(id);
+        let focused = with_view(&tree, id, |v| v.focused_cell_signal().clone());
+        // The album band, from the time column.
+        focused.set(Some((1, 2)));
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        settle(&mut tree, 400.0, 600.0);
+        assert_eq!(proxy.visible_count(), 21, "the first ← collapses #A1");
+        assert_eq!(focused.get(), Some((1, 2)));
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        assert_eq!(
+            focused.get(),
+            Some((0, 2)),
+            "the second goes up to #A, keeping the column"
+        );
     }
 }

@@ -78,9 +78,10 @@ pub(crate) trait RowNavigator {
 
     /// Tree-only — whether the row is one cell across every column (a
     /// `TreeTableView` full-width row). The cursor's column is kept on such a
-    /// row but means nothing there: a horizontal move stays on it, the
-    /// expand/collapse arrows act whatever the column, and no column of it
-    /// opens an editor.
+    /// row but means nothing there: Home and End stay on it, the
+    /// expand/collapse arrows act as on the tree column whatever the column
+    /// (← on a row with nothing to collapse moves up to its parent), and no
+    /// column of it opens an editor.
     fn spans_all_columns(&self, _row: usize) -> bool {
         false
     }

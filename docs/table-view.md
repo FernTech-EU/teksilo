@@ -704,22 +704,25 @@ The row stays a row of the tree:
 - its indent and chevron are drawn in the band, where the tree column draws
   them; the chevron toggles it, and ArrowLeft / ArrowRight collapse and
   expand it whatever column the cursor is in;
-- in cell navigation it is **one cell**: ArrowLeft / ArrowRight that do not
-  collapse or expand it, and Home / End, leave the cursor where it is; Tab
-  and Shift+Tab pass it in one press; no column of it opens an editor (F2,
-  typing, `begin_edit` all do nothing on it). The cursor keeps the column it
-  arrived with, so ArrowDown onto an ordinary row lands back in that column.
+- in cell navigation it is **one cell**: ArrowLeft / ArrowRight act as on
+  the tree column, so ArrowLeft on a collapsed band moves up to its parent
+  as on any row; Home / End leave the cursor where it is; Tab and Shift+Tab
+  pass it in one press; no column of it opens an editor (F2, typing,
+  `begin_edit` all do nothing on it). The cursor keeps the column it arrived
+  with, so ArrowDown onto an ordinary row lands back in that column.
 
-**Horizontal scroll.** The band stays in the viewport while the columns
-scroll sideways, so a group row stays readable. Its chevron sits where the
-tree column's does with the columns unscrolled: in line with the rows around
-it while the tree column is the first column (the default) or a pinned one.
+**Width and horizontal scroll.** The band is as wide as the columns together,
+or the row when they are wider, starting at the row's leading edge. It stays
+in the viewport while the columns scroll sideways, so a group row stays
+readable. Its chevron sits where the tree column's does with the columns
+unscrolled: in line with the rows around it while the tree column is the
+first column (the default) or a pinned one.
 
 **Row height** follows the view's mode like any row's: the uniform height,
 the `row_height_fn` callback, or under `auto_row_height` the band measured at
-the row's full width. Column dividers (`GridLines::Vertical`) stop at a band
-rather than crossing it; the alternating tint, the selection band and the
-horizontal grid lines run across it as across any row. The focus ring
+its width. Column dividers (`GridLines::Vertical`) stop at a band rather than
+crossing it; the alternating tint, the selection band and the horizontal grid
+lines run across it as across any row, to the same width. The focus ring
 surrounds the whole band.
 
 ### Pinned ancestors
@@ -736,10 +739,19 @@ the "sticky scroll" of code editors. `0`, the default, pins nothing.
   `SurfaceRole::Raised` surface. It shows the row's content, not its
   selection or focus (its delegates are told neither), and its chevron is a
   picture. A copy is rebuilt a frame after the scroll that changes the row it
-  stands for, and is hidden until then rather than showing the previous row.
-- A press on a pinned row selects the real row, puts the cursor on it (the
-  cursor keeps its column), and scrolls it back into view right under its own
-  pinned ancestors. A press never reaches a control drawn inside the copy.
+  stands for, and is hidden until then rather than showing the previous row;
+  a line under a hidden one is hidden too.
+- Under `auto_row_height` the copy measures its row, as the row measures
+  itself once laid out. An ancestor the view scrolled past without laying it
+  out (a jump into the middle of a long group) takes its measured height a
+  frame after it is pinned; a reveal made before then counts it at the
+  estimate.
+- A press on a pinned row does what a plain click on the real row would: it
+  ends an open cell edit (`on_cell_edit_dismissed`), selects the row and
+  puts the cursor on it (the cursor keeps its column), activates it under
+  `ActivateOn::SingleClick`, and scrolls it back into view right under its
+  own pinned ancestors. A double click on a copy does not activate the row,
+  and a press never reaches a control drawn inside the copy.
 - Every reveal the view makes stops below the ancestors that would be pinned
   over the row: the keyboard moving the cursor, `ensure_row_visible`,
   `scroll_to_row` (which aligns the row under its ancestors rather than to
@@ -752,8 +764,10 @@ the "sticky scroll" of code editors. `0`, the default, pins nothing.
   a collapse, an insert or a re-source above or inside it shows on the next
   frame.
 
-A drop over a pinned row lands on the real row underneath it, not on the
-ancestor the copy shows.
+A drop over a pinned row lands on the row it shows, in its top, middle or
+bottom third like a drop on the row itself, and the insertion line or box is
+drawn over the copy. The rows scrolled under the stack take no drop until
+they come out from under it.
 
 ---
 

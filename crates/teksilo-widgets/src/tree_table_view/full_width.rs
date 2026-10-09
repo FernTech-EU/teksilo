@@ -12,12 +12,15 @@
 //! cells; the keyboard learns of it through
 //! [`RowNavigator::spans_all_columns`](crate::table_view::row_navigator::RowNavigator::spans_all_columns).
 //!
-//! **The band stays in the viewport.** It is laid across the body's width and
-//! ignores the horizontal scroll, so a group row stays readable while the
-//! columns beside it scroll. Its chevron sits where the tree column's would
-//! with the columns unscrolled: under the twist of the rows around it while
-//! the tree column is the first one (the default) or pinned, and a column
-//! scroll away from it otherwise.
+//! **The band spans the columns, and stays in the viewport.** It is as wide as
+//! the columns together, or the row when they are wider, from the row's
+//! leading edge: beside columns narrower than the view it ends where the
+//! row's selection band, alternating tint and focus ring end, rather than
+//! running on past them. It ignores the horizontal scroll, so
+//! a group row stays readable while the columns beside it scroll. Its chevron
+//! sits where the tree column's would with the columns unscrolled: under the
+//! twist of the rows around it while the tree column is the first one (the
+//! default) or pinned, and a column scroll away from it otherwise.
 
 use std::rc::Rc;
 
@@ -54,7 +57,7 @@ impl<T: 'static> Clone for FullWidthRows<T> {
     }
 }
 
-/// A full-width row: one cell, laid across the whole row.
+/// A full-width row: one cell, laid across the columns (see the module docs).
 ///
 /// Publishes no node of its own, like a `TreeTableView` `BodyRow`: the
 /// `TreeRowA11y` around it carries the row.
@@ -62,13 +65,30 @@ impl<T: 'static> Clone for FullWidthRows<T> {
 pub(crate) struct FullWidthRow {
     cell: WidgetId,
     /// `Some(h)` in the uniform and callback modes; `None` measures the band
-    /// at the row's width (auto-measure mode).
+    /// at its own width (auto-measure mode).
     row_height: Option<f32>,
+    /// The resolved column widths, which the band spans.
+    widths: SharedColumnWidths,
 }
 
 impl FullWidthRow {
-    pub(crate) fn new(cell: WidgetId, row_height: Option<f32>) -> Self {
-        Self { cell, row_height }
+    pub(crate) fn new(cell: WidgetId, row_height: Option<f32>, widths: SharedColumnWidths) -> Self {
+        Self {
+            cell,
+            row_height,
+            widths,
+        }
+    }
+
+    /// The band's width in a row `row_width` wide: the columns', capped by
+    /// the row's.
+    fn band_width(&self, row_width: f32) -> f32 {
+        let columns: f32 = self.widths.borrow().iter().sum();
+        if columns > 0.0 {
+            columns.min(row_width)
+        } else {
+            row_width
+        }
     }
 }
 
@@ -80,7 +100,7 @@ impl Widget for FullWidthRow {
     ) -> teksilo_core::widget::LayoutResponse {
         let measured = || {
             let at_width = SizeProposal {
-                width: proposal.width,
+                width: proposal.width.map(|w| self.band_width(w)),
                 height: None,
             };
             ctx.child_size(self.cell, at_width)
@@ -100,11 +120,18 @@ impl Widget for FullWidthRow {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
+        let width = self.band_width(bounds.width);
+        // From the leading edge, which is the right one under RTL.
+        let x = if ctx.is_rtl() {
+            bounds.right() - width
+        } else {
+            bounds.x
+        };
         for child in children.iter_mut() {
-            child.origin = bounds.origin();
-            child.size = bounds.size();
+            child.origin = Point::new(x, bounds.y);
+            child.size = Size::new(width, bounds.height);
         }
     }
 

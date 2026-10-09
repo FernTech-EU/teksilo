@@ -867,19 +867,23 @@ impl<T: 'static> TreeTableView<T> {
     ///
     /// The row stays a row of the tree in every other respect: it selects,
     /// activates, drags, takes drops and answers type-ahead as any row does,
-    /// its chevron (indent and twist) sits in the band, and ←/→ collapse and
-    /// expand it. In cell navigation the band is one cell: a horizontal move
-    /// stays on it, Tab passes it as one stop, and no column of it opens an
-    /// editor. The cursor keeps the column it arrived with, so stepping on to
-    /// an ordinary row lands back in that column.
+    /// its chevron (indent and twist) sits in the band, and ←/→ act on it as
+    /// on the tree column from any column: they collapse and expand it, and ←
+    /// on a collapsed band moves up to its parent. In cell navigation the band
+    /// is one cell: Home and End stay on it, Tab passes it as one stop, and no
+    /// column of it opens an editor. The cursor keeps the column it arrived
+    /// with, so stepping on to an ordinary row lands back in that column.
     ///
-    /// The band stays in the viewport while the columns scroll sideways, so a
-    /// group row stays readable; its chevron sits where the tree column's does
-    /// with the columns unscrolled. Its height comes from the view's height
-    /// mode like any row's: the uniform height, the
+    /// The band is as wide as the columns together, or the row when they are
+    /// wider, so beside columns narrower than the view it ends where a row's
+    /// selection band, alternating tint and focus ring do. It stays in the
+    /// viewport while the columns
+    /// scroll sideways, so a group row stays readable; its chevron sits where
+    /// the tree column's does with the columns unscrolled. Its height comes
+    /// from the view's height mode like any row's: the uniform height, the
     /// [`row_height_fn`](Self::row_height_fn) callback, or, under
-    /// [`auto_row_height`](Self::auto_row_height), the band measured at the
-    /// row's full width.
+    /// [`auto_row_height`](Self::auto_row_height), the band measured at its
+    /// width.
     ///
     /// To assistive technology the row is unchanged (`Role::Row` with its
     /// level, expanded state and position) and holds one `Role::Cell`
@@ -919,11 +923,19 @@ impl<T: 'static> TreeTableView<T> {
     /// not an ancestor of. It is a copy, drawn with the real row's cells (its
     /// band, for a [`full_width_row`](Self::full_width_row)) at the real row's
     /// height, on the header's surface. The copy shows the row's content, not
-    /// its selection or its focus, and its chevron is a picture.
+    /// its selection or its focus, and its chevron is a picture. Under
+    /// [`auto_row_height`](Self::auto_row_height) the copy measures the row,
+    /// as the row does once laid out: an ancestor the view scrolled past
+    /// without laying it out takes its height a frame after it is pinned, and
+    /// a reveal made before then counts it at the estimate.
     ///
-    /// A press on a pinned row selects the real row, puts the cursor on it and
-    /// scrolls it back into view, right under its own pinned ancestors. A
-    /// press never reaches a control drawn inside the copy.
+    /// A press on a pinned row does what a plain click on the real row would:
+    /// it ends an open cell edit, selects the row and puts the cursor on it,
+    /// activates it under [`ActivateOn::SingleClick`](crate::data_views::ActivateOn::SingleClick),
+    /// and scrolls it back into view, right under its own pinned ancestors. A
+    /// double click on a copy does not activate it, and a press never reaches
+    /// a control drawn inside the copy. A drop on a pinned row lands on the
+    /// row it shows, and its indicator is drawn over the copy.
     ///
     /// Every reveal the view makes (the keyboard moving the cursor,
     /// [`ensure_row_visible`](Self::ensure_row_visible),

@@ -684,7 +684,11 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 Some(self.row_metrics.borrow_mut().row_height(flat_idx))
             };
             let row_inner_id = match band {
-                Some(band) => ctx.add(FullWidthRow::new(band, row_height)),
+                Some(band) => ctx.add(FullWidthRow::new(
+                    band,
+                    row_height,
+                    self.column_widths.clone(),
+                )),
                 None => ctx.add(
                     BodyRow::new(
                         cell_ids,

@@ -17,7 +17,10 @@
 //!   this one's;
 //! - the copies are pictures: hidden from assistive technology (the real
 //!   rows stay where they are in the tree), out of the Tab order, and a press
-//!   lands on the line as a whole, never on a control drawn inside it.
+//!   lands on the line as a whole, never on a control drawn inside it;
+//! - a line stands for its row: a press acts on the row, a drop over the line
+//!   lands on it ([`line_at`]), and under `auto_row_height` the copy measures
+//!   it when the body pane has not.
 //!
 //! ## Which rows, and where
 //!
@@ -26,9 +29,12 @@
 //! found, and its ancestor at depth `k` is the row pinned there — the row
 //! itself when it is an open branch whose top has scrolled under the line. A
 //! row shallower than `k`, or a depth-`k` row sitting exactly in its slot,
-//! ends the stack. A line is looked for under the *unpushed* lines above it,
-//! so once a subtree has ended above that height the row found there is
-//! shallower, and the stack ends: every line is a descendant of the one above.
+//! ends the stack. A line is looked for under the lines above it *as shown*,
+//! pushed up or not: a pushed line's bottom is where the row that pushed it
+//! begins, a row at the pushed line's depth or shallower, so the stack ends
+//! there. Probing under the unpushed bottom instead would look past that row
+//! when it is shorter than the line, into its own subtree. Every line is
+//! checked to hang from the one above, and is a descendant of it.
 //!
 //! [`reveal_inset`] answers the other way round: how much of the top a row's
 //! own ancestors cover when it is the first row below them. Every reveal the
@@ -36,13 +42,14 @@
 //! the ScrollIntoView action, a click on a pinned line — stops that far below
 //! the top, so a copy never covers the row the cursor is on.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use teksilo_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
@@ -145,7 +152,8 @@ pub(crate) fn stack_at(
     }
     let total = metrics.total_height(count);
     let scroll = scroll.max(0.0);
-    // The bottom of the lines found so far, unpushed.
+    // The bottom of the lines found so far, as shown: a pushed line's bottom
+    // is where the row that pushed it begins.
     let mut slot = 0.0_f32;
     for k in 0..limit {
         let y = scroll + slot;
@@ -172,6 +180,13 @@ pub(crate) fn stack_at(
                 None => break,
             }
         };
+        // Read from the flattening rather than trusted from the probe: a
+        // line hangs from the one above it, or the stack ends.
+        if let Some(above) = lines.last().map(|line: &StackLine| line.row)
+            && ancestor_at(outline, row, k, k - 1) != Some(above)
+        {
+            break;
+        }
         let height = metrics.row_height(row);
         // The first row after `row`'s subtree pushes the line up as it
         // arrives under it. Only the rows the line's own extent reaches can
@@ -193,9 +208,30 @@ pub(crate) fn stack_at(
             next += 1;
         }
         lines.push(StackLine { row, top, height });
-        slot += height;
+        slot = top + height;
     }
     lines
+}
+
+/// How many of `lines` show, from the top: a line shows while its copy was
+/// built for the row named for it, and a line below one that does not show
+/// does not either — it hangs from a row with no copy yet, and placed on its
+/// own it would leave a band of the stack with nothing in it.
+pub(crate) fn shown_lines(lines: &[StackLine], built: &[usize]) -> usize {
+    lines
+        .iter()
+        .zip(built)
+        .take_while(|(line, row)| line.row == **row)
+        .count()
+}
+
+/// The line showing at `y`, relative to the top of the rows, if any: the
+/// outermost one there, which paints over a deeper line pushed under it.
+pub(crate) fn line_at(lines: &[StackLine], built: &[usize], y: f32) -> Option<StackLine> {
+    lines[..shown_lines(lines, built)]
+        .iter()
+        .find(|line| y >= line.top && y < line.top + line.height)
+        .copied()
 }
 
 /// How much of the top of the viewport `row`'s ancestors cover when `row` is
@@ -328,10 +364,16 @@ impl<T: 'static> RowCopies<T> {
     /// A copy shows the row's content, not its state: its delegates are told
     /// the row is neither selected nor focused, as no selection band or focus
     /// ring is drawn behind it either. Its height is the real row's, as the
-    /// metrics hold it, so a copy lines up with the row it stands for.
+    /// metrics hold it, so a copy lines up with the row it stands for — and
+    /// under `auto_row_height` the copy measures itself, as a realized row
+    /// does, because an ancestor the view jumped past was never laid out and
+    /// the metrics hold only its estimate (see [`PinnedStack::place_children`]).
     fn build(&self, ctx: &mut BuildContext, row: usize) -> Option<WidgetId> {
         let meta = self.source.meta(row)?;
-        let height = self.row_metrics.borrow_mut().row_height(row);
+        let height = {
+            let mut metrics = self.row_metrics.borrow_mut();
+            (!metrics.needs_measure()).then(|| metrics.row_height(row))
+        };
         let tree_col = self.display_indices.get(self.tree_display_pos).copied();
         let context = |col_id: String, col_index: usize, is_tree_column: bool| CellContext {
             row_index: row,
@@ -372,7 +414,7 @@ impl<T: 'static> RowCopies<T> {
                 self.pane_boundaries,
                 self.tree_display_pos,
             ));
-            return Some(ctx.add(FullWidthRow::new(band, Some(height))));
+            return Some(ctx.add(FullWidthRow::new(band, height, self.column_widths.clone())));
         }
 
         let mut cells = Vec::with_capacity(self.display_indices.len());
@@ -404,7 +446,7 @@ impl<T: 'static> RowCopies<T> {
                     cells,
                     row + 2,
                     false,
-                    Some(height),
+                    height,
                     self.column_widths.clone(),
                     self.pane_boundaries,
                     self.scroll_x.clone(),
@@ -435,8 +477,62 @@ pub(crate) struct PinnedStack<T: 'static> {
     pub(crate) copies: RowCopies<T>,
     /// What a press on a line does with its row: select it and reveal it.
     pub(crate) on_pick: Rc<dyn Fn(usize, &mut EventContext)>,
+    /// Ends the open cell edit, when the view has an owner to tell: a press on
+    /// a line is a press away from the edited cell, which no copy draws.
+    pub(crate) end_edit: Option<Rc<dyn Fn(&mut EventContext)>>,
+    /// The view's vertical offset, which a measured copy may correct as a
+    /// measured row does: an ancestor's real row is above the viewport.
+    pub(crate) scroll_y: Signal<f32>,
+    /// Bumped when a measured copy changed the content height, so the root
+    /// re-places itself (the body pane's own `total_refresh`).
+    pub(crate) total_refresh: Signal<u64>,
+    /// The rows the body pane realized, `[start, end)`. It measures those
+    /// itself, and a copy of one is not measured a second time.
+    pub(crate) pane_rows: (Rc<Cell<usize>>, Rc<Cell<usize>>),
     /// The line widgets, outermost first.
     pub(crate) lines: Vec<WidgetId>,
+    /// The copy inside each line, in the same order.
+    pub(crate) copy_ids: Vec<WidgetId>,
+}
+
+impl<T: 'static> PinnedStack<T> {
+    /// See [`place_children`](Widget::place_children).
+    fn measure_copies(&self, width: f32, ctx: &LayoutContext) {
+        let built = self.built.borrow();
+        // Only while the copies are the rows the root names this pass: an
+        // index they were built for may name another row after a model change.
+        if self.rows.get() != *built {
+            return;
+        }
+        let realized = self.pane_rows.0.get()..self.pane_rows.1.get();
+        let measured: Vec<(usize, f32)> = built
+            .iter()
+            .zip(&self.copy_ids)
+            .filter(|(row, _)| !realized.contains(*row))
+            .filter_map(|(&row, &copy)| {
+                ctx.child_size(copy, SizeProposal::with_width(width))
+                    .map(|size| (row, size.height))
+            })
+            .collect();
+        if measured.is_empty() {
+            return;
+        }
+        let count = self.copies.source.visible_count();
+        let (anchor, total_changed) = {
+            let mut metrics = self.copies.row_metrics.borrow_mut();
+            metrics.resize(count);
+            let before = metrics.total_height(count);
+            let anchor = metrics.observe_measured(&measured, self.scroll_y.get());
+            (anchor, (metrics.total_height(count) - before).abs() > 0.01)
+        };
+        // Lands next frame, as the body pane's correction does.
+        if anchor.abs() > 0.01 {
+            self.scroll_y.set((self.scroll_y.get() + anchor).max(0.0));
+        }
+        if total_changed {
+            self.total_refresh.set(self.total_refresh.get() + 1);
+        }
+    }
 }
 
 impl<T: 'static> std::fmt::Debug for PinnedStack<T> {
@@ -452,6 +548,7 @@ impl<T: 'static> Widget for PinnedStack<T> {
         self.rows
             .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
         self.lines.clear();
+        self.copy_ids.clear();
         let mut built = Vec::new();
         // Re-checked rather than trusted: the rows were named before whatever
         // rebuilt the view, and a model change may have taken some away.
@@ -469,16 +566,30 @@ impl<T: 'static> Widget for PinnedStack<T> {
             // Anchored: rows above may come and go before the press lands.
             let anchor = self.copies.source.anchor(row);
             let pick = self.on_pick.clone();
-            ctx.apply_handlers(
-                line,
-                HandlerSet::new().on_tap(move |_tap, ctx| {
-                    if let Some(index) = anchor.index() {
-                        pick(index, ctx);
+            let mut handlers = HandlerSet::new().on_tap(move |_tap, ctx| {
+                if let Some(index) = anchor.index() {
+                    pick(index, ctx);
+                }
+            });
+            // On the press, as a press on a real cell ends it, and before the
+            // tap selects: the line's tap is what makes the root read this
+            // press as claimed, and skip its own dismissal.
+            if let Some(end_edit) = self.end_edit.clone() {
+                handlers = handlers.on_pointer_event(move |event, ctx| {
+                    if let WidgetEvent::PointerDown {
+                        button: PointerButton::Primary,
+                        ..
+                    } = event
+                    {
+                        end_edit(ctx);
                     }
-                }),
-            );
+                    EventResponse::Ignored
+                });
+            }
+            ctx.apply_handlers(line, handlers);
             built.push(row);
             self.lines.push(line);
+            self.copy_ids.push(copy);
         }
         *self.built.borrow_mut() = built;
         self.children()
@@ -492,20 +603,27 @@ impl<T: 'static> Widget for PinnedStack<T> {
         proposal.resolve(0.0, 0.0).into()
     }
 
+    /// Places the lines the root's [`stack_at`] found, and — under
+    /// `auto_row_height` — measures the copies of rows the body pane has not
+    /// realized, feeding their heights to the metrics the way the pane feeds
+    /// a realized row's. The lines take the measured heights on the next pass.
     fn place_children(
         &self,
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
+        if bounds.width > 0.0 && self.copies.row_metrics.borrow().needs_measure() {
+            self.measure_copies(bounds.width, ctx);
+        }
         let layout = self.layout.borrow();
-        let built = self.built.borrow();
+        let shown = shown_lines(&layout, &self.built.borrow());
         let n = children.len();
         // Children run deepest first (see `children`), lines outermost first.
         for (i, child) in children.iter_mut().enumerate() {
             let k = n - 1 - i;
-            match layout.get(k).filter(|line| built.get(k) == Some(&line.row)) {
+            match layout.get(k).filter(|_| k < shown) {
                 Some(line) => {
                     child.origin = Point::new(bounds.x, bounds.y + line.top);
                     child.size = Size::new(bounds.width, line.height);
