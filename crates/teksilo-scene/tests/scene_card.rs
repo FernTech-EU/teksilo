@@ -1072,9 +1072,86 @@ fn the_cards_edit_action_is_advertised_and_not_merely_listed() {
             .iter()
             .map(|a| a.id)
             .collect::<Vec<_>>(),
-        vec![0],
-        "and index 0 is what `Action::CustomAction` routes to"
+        vec![1000],
+        "one Edit action, numbered clear of an application's own, which are \
+         numbered from 0"
     );
+}
+
+/// **The Edit action edits, and an application's own action beside it does
+/// not.**
+///
+/// An application's `.access_custom_action(..)` entries are published after
+/// the card's and numbered from 0, and the dispatcher hands the one
+/// `CustomAction(id)` to the card and to them alike. So the card must answer
+/// only its own id: at 0 it shared the id of the application's first action,
+/// and invoking that action put the card into editing.
+#[test]
+fn the_edit_action_edits_and_an_applications_action_does_not() {
+    use teksilo_core::window::NoopWindowOps;
+
+    let invoked = Rc::new(std::cell::Cell::new(0_u32));
+    let count = invoked.clone();
+    let model = SceneModel::new();
+    model.add_widget_item(0u32, CARD);
+    let mode = Signal::new(CardMode::Idle);
+    let m = model.clone();
+    let md = mode.clone();
+    let view = SceneView::with_model(model).delegate_typed::<u32>(move |_w, id| {
+        let count = count.clone();
+        Box::new(
+            SceneCard::new(m.clone(), id)
+                .mode(md.clone())
+                .label(lit!("Note"))
+                .header(TextWidget::new(lit!("Title")))
+                .body(TextWidget::new(lit!("Body")))
+                .access_custom_action(lit!("Pin"), move |_ctx| count.set(count.get() + 1)),
+        ) as Box<dyn Widget>
+    });
+    let mut tree = WidgetTree::new().with_text_backend(Rc::new(RefCell::new(
+        teksilo_canvas::MockTextBackend::new(),
+    )));
+    tree.add(view);
+    tree.layout(VIEWPORT);
+    let _ = tree.render();
+
+    let update = tree.sync_accessibility();
+    let (group_id, group) = update
+        .nodes
+        .iter()
+        .find(|(_, n)| n.role() == accesskit::Role::Group && n.label() == Some("Note"))
+        .map(|(id, n)| (*id, n.clone()))
+        .expect("the card's group");
+    let ids: Vec<i32> = group.custom_actions().iter().map(|a| a.id).collect();
+    assert_eq!(
+        ids,
+        vec![1000, 0],
+        "the card's action, then the application's"
+    );
+
+    let mut ops = NoopWindowOps;
+    tree.dispatch_access_action(
+        group_id,
+        accesskit::Action::CustomAction,
+        Some(accesskit::ActionData::CustomAction(0)),
+        &mut ops,
+    );
+    assert_eq!(invoked.get(), 1, "the application's action ran");
+    assert_eq!(
+        mode.get(),
+        CardMode::Idle,
+        "and the card did not start editing for it"
+    );
+
+    tree.dispatch_access_action(
+        group_id,
+        accesskit::Action::CustomAction,
+        Some(accesskit::ActionData::CustomAction(1000)),
+        &mut ops,
+    );
+    tree.layout(VIEWPORT);
+    assert_eq!(mode.get(), CardMode::Editing, "the Edit action edits");
+    assert_eq!(invoked.get(), 1, "without running the application's action");
 }
 
 /// **A double-click puts the caret in the note — including in the body shape

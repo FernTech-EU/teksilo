@@ -177,6 +177,15 @@ use crate::scene_model::SceneModel;
 use crate::selection::SceneSelection;
 use crate::transform_session::{TransformDelta, TransformFrame, TransformSource};
 
+/// AccessKit custom-action id of the card's Edit action.
+///
+/// Away from the low numbers: an application's own `.access_custom_action(..)`
+/// entries are numbered from 0 by position and published beside the card's, and
+/// the dispatcher hands one `CustomAction(id)` to the card and to those entries
+/// alike, so at 0 an application's first action would both share the card's id
+/// and put the card into editing.
+const EDIT_ACTION_ID: i32 = 1000;
+
 /// What a [`SceneCard`] is doing.
 ///
 /// Three states rather than a `bool`, because `Selected` and `Editing` differ
@@ -1014,14 +1023,14 @@ impl Widget for SceneCard {
         }
         {
             let this = self.handle();
-            handlers = handlers.on_access_action(move |action, ctx| {
-                use accesskit::Action;
-                match action {
-                    Action::Focus => {
+            handlers = handlers.on_access_action_request(move |action, _node, data, ctx| {
+                use accesskit::{Action, ActionData};
+                match (action, data) {
+                    (Action::Focus, _) => {
                         this.select(ctx);
                         EventResponse::Handled
                     }
-                    Action::CustomAction => {
+                    (Action::CustomAction, Some(ActionData::CustomAction(EDIT_ACTION_ID))) => {
                         this.activate(ctx);
                         EventResponse::Handled
                     }
@@ -1087,14 +1096,13 @@ impl Widget for SceneCard {
         }
         builder.set_selected(self.mode.get().is_selected());
         builder.add_action(accesskit::Action::Focus);
-        // The non-pointer twin of the double-click. One custom action, index 0,
-        // which is what `Action::CustomAction` routes to — and the action
-        // itself is advertised by
+        // The non-pointer twin of the double-click. One custom action, at
+        // `EDIT_ACTION_ID` — and the action itself is advertised by
         // [`AccessNodeBuilder::set_custom_actions`](teksilo_core::accessibility::AccessNodeBuilder::set_custom_actions),
         // which owns that half so no caller can publish a list an adapter will
         // never report. See its docs for why the list alone is decoration.
         builder.set_custom_actions(vec![accesskit::CustomAction {
-            id: 0,
+            id: EDIT_ACTION_ID,
             description: self.activate_label.get(),
         }]);
     }
