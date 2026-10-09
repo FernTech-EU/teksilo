@@ -5060,3 +5060,954 @@ mod adopted_state {
         );
     }
 }
+
+// ── Full-width rows and pinned ancestors ─────────────────────────────
+
+mod full_width_and_pinned {
+    use super::*;
+    use std::cell::Cell;
+    use teksilo_canvas::Point;
+    use teksilo_core::event::{Key, Modifiers, PointerButton, WidgetEvent};
+    use teksilo_core::widget_builder::WidgetBuilder;
+    use teksilo_data::{SelectionMode, SelectionModel};
+
+    const H: f32 = cp::HEADER_HEIGHT;
+
+    /// A music library: two artists of two albums of `songs` songs each,
+    /// every branch expanded. Artists and albums are the group rows, named
+    /// with a leading `#`. For `songs == 5`, by flat index:
+    ///
+    /// ```text
+    ///  0 #A    7 #A2        13 #B    20 #B2
+    ///  1 #A1   8..12 songs  14 #B1   21..25 songs
+    ///  2..6 songs           15..19 songs
+    /// ```
+    fn library(songs: usize) -> SortFilterTreeModel<String> {
+        let t = TreeModel::new();
+        for (a, artist) in ["A", "B"].into_iter().enumerate() {
+            let artist_id = t.insert_root(a, format!("#{artist}"));
+            for album in 0..2 {
+                let album_id = t.insert_child(artist_id, album, format!("#{artist}{}", album + 1));
+                for song in 0..songs {
+                    t.insert_child(
+                        album_id,
+                        song,
+                        format!("{artist}{}-{}", album + 1, song + 1),
+                    );
+                }
+            }
+        }
+        let proxy = SortFilterTreeModel::new(t);
+        proxy.expand_all();
+        proxy
+    }
+
+    fn is_group(row: &str) -> bool {
+        row.starts_with('#')
+    }
+
+    /// A leaf of a fixed height announcing `text` as a label, so a test can
+    /// find it and every height mode measures the same thing.
+    #[derive(Debug)]
+    struct Leaf {
+        height: f32,
+        text: String,
+    }
+
+    impl Widget for Leaf {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            Size::new(proposal.width.unwrap_or(80.0), self.height).into()
+        }
+
+        fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+            builder.set_role(Role::Label);
+            builder.set_value(self.text.clone());
+        }
+    }
+
+    fn leaf(height: f32, text: impl Into<String>) -> Box<dyn Widget> {
+        Box::new(Leaf {
+            height,
+            text: text.into(),
+        })
+    }
+
+    /// Title (the tree column), artist, time — 360 dp of fixed columns.
+    fn library_columns() -> Vec<Column<String>> {
+        vec![
+            Column::<String>::new("title", lit!("Title"), |row: &String, _: &CellContext| {
+                leaf(20.0, row.clone())
+            })
+            .width(ColumnWidth::Fixed(160.0)),
+            Column::<String>::new(
+                "artist",
+                lit!("Artist"),
+                |_row: &String, _: &CellContext| leaf(20.0, "artist"),
+            )
+            .width(ColumnWidth::Fixed(120.0)),
+            Column::<String>::new("time", lit!("Time"), |_row: &String, _: &CellContext| {
+                leaf(20.0, "3:00")
+            })
+            .width(ColumnWidth::Fixed(80.0)),
+        ]
+    }
+
+    /// The library with its `#` rows drawn full width, each band a label
+    /// reading "group #…".
+    fn grouped(proxy: &SortFilterTreeModel<String>) -> TreeTableView<String> {
+        TreeTableView::from_projection(proxy.clone())
+            .columns(library_columns())
+            .full_width_row(|row: &String| is_group(row))
+            .full_width_row_delegate(|row, _ctx| leaf(20.0, format!("group {row}")))
+            .row_height(20.0)
+    }
+
+    fn mount(view: TreeTableView<String>, width: f32, height: f32) -> (WidgetTree, WidgetId) {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(view);
+        settle(&mut tree, width, height);
+        (tree, id)
+    }
+
+    /// Enough passes for a change named in one layout (a pinned row, a
+    /// measured height) to be rebuilt and placed by the next.
+    fn settle(tree: &mut WidgetTree, width: f32, height: f32) {
+        for _ in 0..4 {
+            tree.layout(SizeProposal::exact(width, height));
+        }
+    }
+
+    fn with_view<R>(
+        tree: &WidgetTree,
+        id: WidgetId,
+        f: impl FnOnce(&TreeTableView<String>) -> R,
+    ) -> R {
+        let any = tree.widget_as_any(id).expect("the view is mounted");
+        f(any
+            .downcast_ref::<TreeTableView<String>>()
+            .expect("a TreeTableView<String>"))
+    }
+
+    /// The `Role::Row` widget realized for the visible row `flat`.
+    fn row_of(tree: &WidgetTree, id: WidgetId, flat: usize) -> WidgetId {
+        with_view(tree, id, |v| {
+            v.row_map
+                .borrow()
+                .iter()
+                .find(|(i, _)| *i == flat)
+                .map(|(_, row)| *row)
+                .unwrap_or_else(|| panic!("row {flat} is realized"))
+        })
+    }
+
+    /// The cell widget behind each display column of the visible row `flat`.
+    fn cells_of(tree: &WidgetTree, id: WidgetId, flat: usize) -> Vec<WidgetId> {
+        with_view(tree, id, |v| {
+            let mut cells: Vec<(usize, WidgetId)> = v
+                .cell_map
+                .borrow()
+                .iter()
+                .filter(|((row, _), _)| *row == flat)
+                .map(|((_, col), cell)| (*col, *cell))
+                .collect();
+            cells.sort_by_key(|(col, _)| *col);
+            cells.into_iter().map(|(_, cell)| cell).collect()
+        })
+    }
+
+    /// Every descendant of `root` (itself included), depth first.
+    fn descendants(tree: &WidgetTree, root: WidgetId) -> Vec<WidgetId> {
+        let mut out = Vec::new();
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            out.push(id);
+            stack.extend(tree.children(id).into_iter().rev());
+        }
+        out
+    }
+
+    /// The label values under `root`, in tree order.
+    fn labels_under(tree: &mut WidgetTree, root: WidgetId) -> Vec<String> {
+        let update = tree.sync_accessibility();
+        descendants(tree, root)
+            .into_iter()
+            .filter_map(|id| {
+                let nid = widget_id_to_node_id(id);
+                update
+                    .nodes
+                    .iter()
+                    .find(|(n, _)| *n == nid)
+                    .filter(|(_, node)| node.role() == Role::Label)
+                    .and_then(|(_, node)| node.value().map(str::to_string))
+            })
+            .collect()
+    }
+
+    fn visible_names(proxy: &SortFilterTreeModel<String>) -> Vec<String> {
+        (0..proxy.visible_count())
+            .map(|i| {
+                let node = proxy.visible_node_id(i).unwrap();
+                proxy.tree().with_item(node, |s| s.clone()).unwrap()
+            })
+            .collect()
+    }
+
+    // ── Full-width rows ──
+
+    #[test]
+    fn a_full_width_row_is_one_cell_across_every_column() {
+        let proxy = library(5);
+        let (mut tree, id) = mount(grouped(&proxy), 400.0, 400.0);
+
+        // The album row: one cell standing for all three columns.
+        let band = cells_of(&tree, id, 1);
+        assert_eq!(band.len(), 3, "the band answers for every column");
+        assert!(band.iter().all(|&c| c == band[0]), "one cell: {band:?}");
+        let row = tree.bounds(row_of(&tree, id, 1));
+        let cell = tree.bounds(band[0]);
+        assert_eq!((cell.x, cell.width), (row.x, row.width), "across the row");
+        assert_eq!(
+            labels_under(&mut tree, band[0]),
+            vec!["group #A1".to_string()],
+            "the band is the delegate's content, and only it"
+        );
+
+        // A song row keeps a cell per column.
+        let song = cells_of(&tree, id, 2);
+        assert_eq!(song.len(), 3);
+        assert!(song[0] != song[1] && song[1] != song[2]);
+        let widths: Vec<f32> = song.iter().map(|&c| tree.bounds(c).width).collect();
+        assert_eq!(widths, vec![160.0, 120.0, 80.0]);
+    }
+
+    #[test]
+    fn without_a_delegate_the_band_shows_the_tree_columns_cell() {
+        let proxy = library(5);
+        let view = TreeTableView::from_projection(proxy.clone())
+            .columns(library_columns())
+            .full_width_row(|row: &String| is_group(row))
+            .row_height(20.0);
+        let (mut tree, id) = mount(view, 400.0, 400.0);
+        let band = cells_of(&tree, id, 0);
+        assert!(band.iter().all(|&c| c == band[0]));
+        assert_eq!(labels_under(&mut tree, band[0]), vec!["#A".to_string()]);
+    }
+
+    #[test]
+    fn full_width_rows_take_their_height_from_every_height_mode() {
+        const GROUPS: [usize; 6] = [0, 1, 7, 13, 14, 20];
+        let modes: [(&str, fn(TreeTableView<String>) -> TreeTableView<String>); 3] = [
+            ("uniform", |v| v.row_height(20.0)),
+            ("callback", |v| {
+                v.row_height_fn(|i| if GROUPS.contains(&i) { 30.0 } else { 20.0 })
+            }),
+            // Estimated far off, so the measured heights have to land.
+            ("auto", |v| v.auto_row_height(50.0)),
+        ];
+        for (mode, configure) in modes {
+            let proxy = library(5);
+            let view = configure(
+                TreeTableView::from_projection(proxy.clone())
+                    .columns(library_columns())
+                    .full_width_row(|row: &String| is_group(row))
+                    // Taller than the song cells, so measuring shows.
+                    .full_width_row_delegate(|row, _ctx| leaf(34.0, format!("group {row}"))),
+            );
+            let (tree, id) = mount(view, 400.0, 600.0);
+            let expected = |flat: usize| match mode {
+                "callback" if GROUPS.contains(&flat) => 30.0,
+                "auto" if GROUPS.contains(&flat) => 34.0,
+                _ => 20.0,
+            };
+            for flat in 0..9 {
+                let height = tree.bounds(row_of(&tree, id, flat)).height;
+                assert_eq!(height, expected(flat), "{mode}: row {flat}");
+            }
+            // And the rows stack on those heights.
+            let tops: Vec<f32> = (0..3)
+                .map(|flat| tree.bounds(row_of(&tree, id, flat)).y - H)
+                .collect();
+            assert_eq!(
+                tops,
+                vec![0.0, expected(0), expected(0) + expected(1)],
+                "{mode}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_band_stays_in_the_viewport_while_the_columns_scroll() {
+        // 360 dp of columns in a 250 dp view: the columns scroll sideways.
+        let proxy = library(5);
+        let (mut tree, id) = mount(grouped(&proxy), 250.0, 400.0);
+        let scroll_x = with_view(&tree, id, |v| v.scroll_x_signal().clone());
+        assert!(with_view(&tree, id, |v| v.max_scroll_x_signal().get()) > 50.0);
+        let band_before = tree.bounds(cells_of(&tree, id, 1)[0]);
+        let song_before = tree.bounds(cells_of(&tree, id, 2)[0]);
+
+        scroll_x.set(50.0);
+        settle(&mut tree, 250.0, 400.0);
+        let band_after = tree.bounds(cells_of(&tree, id, 1)[0]);
+        let song_after = tree.bounds(cells_of(&tree, id, 2)[0]);
+        assert_eq!(song_after.x, song_before.x - 50.0, "the columns scrolled");
+        assert_eq!(band_after, band_before, "the band did not");
+    }
+
+    /// The chevron of a row: the first child of the `HStack` the tree
+    /// chrome builds, found under `cell`.
+    fn twist_under(tree: &WidgetTree, cell: WidgetId) -> WidgetId {
+        // Cell → [band inset →] padding → stack → [twist, content].
+        let mut at = cell;
+        loop {
+            let kids = tree.children(at);
+            if kids.len() == 2 {
+                return kids[0];
+            }
+            assert_eq!(kids.len(), 1, "a single path down to the chevron");
+            at = kids[0];
+        }
+    }
+
+    #[test]
+    fn a_bands_chevron_sits_where_the_tree_column_puts_it() {
+        // The tree column second: its chevrons start 160 dp in.
+        let proxy = library(5);
+        let (tree, id) = mount(
+            grouped(&proxy).tree_column("artist").indent_per_level(16.0),
+            400.0,
+            400.0,
+        );
+        // A song (depth 2) and its album's band (depth 1).
+        let song_twist = tree.bounds(twist_under(&tree, cells_of(&tree, id, 2)[1]));
+        let band_twist = tree.bounds(twist_under(&tree, cells_of(&tree, id, 1)[0]));
+        let row_x = tree.bounds(row_of(&tree, id, 1)).x;
+        assert_eq!(song_twist.x - row_x, 160.0 + 2.0 * 16.0);
+        assert_eq!(band_twist.x - row_x, 160.0 + 16.0, "one level shallower");
+    }
+
+    #[test]
+    fn a_band_expands_and_collapses_from_the_arrows_in_any_column_and_its_chevron() {
+        let proxy = library(5);
+        let (mut tree, id) = mount(grouped(&proxy), 400.0, 600.0);
+        tree.focus(id);
+        // The cursor on the album band, in the time column.
+        with_view(&tree, id, |v| v.set_focused_cell(1, 2));
+        assert_eq!(proxy.visible_count(), 26);
+
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        settle(&mut tree, 400.0, 600.0);
+        assert_eq!(
+            proxy.visible_count(),
+            21,
+            "← collapsed #A1 from the time column"
+        );
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        settle(&mut tree, 400.0, 600.0);
+        assert_eq!(proxy.visible_count(), 26, "→ expanded it again");
+
+        let twist = twist_under(&tree, cells_of(&tree, id, 1)[0]);
+        tree.click(twist);
+        settle(&mut tree, 400.0, 600.0);
+        assert_eq!(proxy.visible_count(), 21, "the chevron collapsed it");
+    }
+
+    #[test]
+    fn in_cell_navigation_a_band_is_one_cell_that_keeps_the_cursors_column() {
+        let proxy = library(5);
+        let requested = Rc::new(Cell::new(0));
+        let req = requested.clone();
+        let cells = CellSelectionModel::new(TableSelectionMode::SingleCell);
+        // The time column edits, so only the band can be what refuses it.
+        let columns = library_columns().into_iter().map(|c| {
+            if c.spec.id == "time" {
+                c.editable(true)
+            } else {
+                c
+            }
+        });
+        let (mut tree, id) = mount(
+            TreeTableView::from_projection(proxy.clone())
+                .columns(columns)
+                .full_width_row(|row: &String| is_group(row))
+                .full_width_row_delegate(|row, _ctx| leaf(20.0, format!("group {row}")))
+                .row_height(20.0)
+                .selection_mode(TableSelectionMode::SingleCell)
+                .cell_selection(cells)
+                .on_cell_edit_request(move |_row, _col, _ctx| req.set(req.get() + 1)),
+            400.0,
+            600.0,
+        );
+        tree.focus(id);
+        let focused = with_view(&tree, id, |v| v.focused_cell_signal().clone());
+        // A song's artist cell, then up onto its album's band.
+        focused.set(Some((2, 1)));
+        tree.press_key(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(focused.get(), Some((1, 1)), "the column rides along");
+
+        // Sideways, and to the row's ends: nowhere to go.
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!(focused.get(), Some((1, 1)), "→ on an open band stays");
+        tree.press_key(Key::Home, Modifiers::NONE);
+        assert_eq!(focused.get(), Some((1, 1)), "Home stays");
+        tree.press_key(Key::End, Modifiers::NONE);
+        assert_eq!(focused.get(), Some((1, 1)), "End stays");
+        assert_eq!(proxy.visible_count(), 26, "and nothing collapsed");
+
+        // One stop for Tab, in both directions.
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(focused.get(), Some((2, 0)), "Tab leaves the band");
+        tree.press_key(Key::Tab, Modifiers::SHIFT);
+        assert_eq!(focused.get(), Some((1, 2)), "Shift+Tab lands on it");
+        tree.press_key(Key::Tab, Modifiers::SHIFT);
+        assert_eq!(focused.get(), Some((0, 2)), "and leaves it in one press");
+
+        // No editor in a band, by F2 or by typing.
+        tree.press_key(Key::F2, Modifiers::NONE);
+        tree.press_key(Key::Character('x'), Modifiers::NONE);
+        assert_eq!(requested.get(), 0);
+        assert_eq!(
+            with_view(&tree, id, |v| v.editing_cell_signal().get()),
+            None
+        );
+
+        // Back down to a song, in the column the cursor carried in.
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(focused.get(), Some((2, 2)));
+        tree.press_key(Key::F2, Modifiers::NONE);
+        assert_eq!(requested.get(), 1, "a song's cell still edits");
+    }
+
+    #[test]
+    fn begin_edit_on_a_band_is_a_no_op() {
+        let proxy = library(5);
+        let (tree, id) = mount(grouped(&proxy), 400.0, 400.0);
+        with_view(&tree, id, |v| v.begin_edit(1, "time"));
+        assert_eq!(
+            with_view(&tree, id, |v| v.editing_cell_signal().get()),
+            None
+        );
+        with_view(&tree, id, |v| v.begin_edit(2, "time"));
+        assert_eq!(
+            with_view(&tree, id, |v| v.editing_cell_signal().get()),
+            Some((2, 2))
+        );
+    }
+
+    #[test]
+    fn a_band_selects_activates_and_answers_type_ahead() {
+        let proxy = library(5);
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let activated = Rc::new(Cell::new(None));
+        let act = activated.clone();
+        let (mut tree, id) = mount(
+            grouped(&proxy)
+                .selection_mode(TableSelectionMode::SingleRow)
+                .selection(selection.clone())
+                .type_ahead_label(|row: &String| row.trim_start_matches('#').to_string())
+                .on_row_activate(move |row, _ctx| act.set(Some(row))),
+            400.0,
+            600.0,
+        );
+        tree.focus(id);
+
+        // A click on the artist band selects it.
+        tree.click(cells_of(&tree, id, 13)[0]);
+        assert_eq!(selection.selected_indices(), vec![13]);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(activated.get(), Some(13), "Enter activates it");
+
+        // Type-ahead lands on a band as on any row.
+        selection.select(0);
+        with_view(&tree, id, |v| v.set_focused_cell(0, 0));
+        tree.press_key(Key::B, Modifiers::NONE);
+        assert_eq!(selection.selected_indices(), vec![13], "'b' → #B");
+    }
+
+    #[test]
+    fn a_band_is_dragged_and_takes_drops_like_any_row() {
+        let proxy = library(2);
+        // 0 #A  1 #A1  2,3  4 #A2  5,6  7 #B ...
+        let (mut tree, _id) = mount(grouped(&proxy).reorderable(true), 400.0, 600.0);
+        // Artist B's band onto the top third of artist A's: before it.
+        drag(
+            &mut tree,
+            Point::new(60.0, H + 7.0 * 20.0 + 10.0),
+            Point::new(60.0, H + 3.0),
+        );
+        let roots: Vec<String> = (0..2)
+            .map(|i| {
+                proxy
+                    .tree()
+                    .with_item(proxy.tree().root(i), |s| s.clone())
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(roots, vec!["#B".to_string(), "#A".to_string()]);
+    }
+
+    #[test]
+    fn a_band_is_one_cell_spanning_every_column_to_assistive_technology() {
+        for (mode, cell_role) in [
+            (TableSelectionMode::MultiRow, Role::Cell),
+            (TableSelectionMode::SingleCell, Role::GridCell),
+        ] {
+            let proxy = library(5);
+            let mut view = grouped(&proxy).selection_mode(mode);
+            if mode.is_cell_mode() {
+                view = view.cell_selection(CellSelectionModel::new(mode));
+            }
+            let (mut tree, id) = mount(view, 400.0, 400.0);
+            let update = tree.sync_accessibility();
+            let consumer = accesskit_consumer::Tree::new(update.clone(), false);
+            let state = consumer.state();
+            let node = |flat: usize| {
+                let wanted = widget_id_to_node_id(row_of(&tree, id, flat));
+                let mut stack = vec![state.root()];
+                while let Some(n) = stack.pop() {
+                    if n.locate().0 == wanted {
+                        return n;
+                    }
+                    stack.extend(n.filtered_children(accesskit_consumer::common_filter));
+                }
+                panic!("row {flat} is exposed");
+            };
+
+            let row = node(1);
+            assert_eq!(row.role(), Role::Row);
+            assert_eq!(row.data().level(), Some(1), "the second level, zero-based");
+            assert_eq!(row.data().is_expanded(), Some(true));
+            assert_eq!(row.data().position_in_set(), Some(0), "the first album");
+
+            let cells: Vec<_> = row
+                .filtered_children(accesskit_consumer::common_filter)
+                .collect();
+            assert_eq!(cells.len(), 1, "{mode:?}: one cell, not one per column");
+            let cell = &cells[0];
+            assert_eq!(cell.role(), cell_role, "{mode:?}");
+            assert_eq!(cell.data().column_index(), Some(0));
+            assert_eq!(
+                cell.data().column_span(),
+                Some(3),
+                "{mode:?}: spans all three"
+            );
+            assert_eq!(cell.data().level(), Some(1));
+            assert_eq!(cell.data().is_expanded(), Some(true));
+            let mut content = Vec::new();
+            let mut stack = vec![*cell];
+            while let Some(n) = stack.pop() {
+                if let Some(value) = n.value() {
+                    content.push(value.to_string());
+                }
+                stack.extend(n.filtered_children(accesskit_consumer::common_filter));
+            }
+            assert_eq!(
+                content,
+                vec!["group #A1".to_string()],
+                "{mode:?}: its content is the delegate's"
+            );
+
+            // A song row is untouched: a cell per column, none spanning.
+            let song_cells: Vec<_> = node(2)
+                .filtered_children(accesskit_consumer::common_filter)
+                .collect();
+            assert_eq!(song_cells.len(), 3);
+            assert!(song_cells.iter().all(|c| c.data().column_span().is_none()));
+        }
+    }
+
+    #[test]
+    fn column_dividers_run_between_bands() {
+        use super::super::widget_impl::spans_between;
+        // A body 0..100 with bands at 20..40 and 60..80.
+        assert_eq!(
+            spans_between(0.0, 100.0, &[(20.0, 20.0), (60.0, 20.0)]),
+            vec![(0.0, 20.0), (40.0, 60.0), (80.0, 100.0)]
+        );
+        // No band: the whole body, as before there were any.
+        assert_eq!(spans_between(0.0, 100.0, &[]), vec![(0.0, 100.0)]);
+        // A band at the very top, and one running past the bottom.
+        assert_eq!(
+            spans_between(0.0, 100.0, &[(-5.0, 20.0), (90.0, 20.0)]),
+            vec![(15.0, 90.0)]
+        );
+    }
+
+    // ── Pinned ancestors ──
+
+    /// A 100 dp body (five 20 dp rows) under the header.
+    fn pinned_view(proxy: &SortFilterTreeModel<String>, depth: usize) -> TreeTableView<String> {
+        TreeTableView::from_projection(proxy.clone())
+            .columns(library_columns())
+            .row_height(20.0)
+            .pinned_ancestors(depth)
+    }
+
+    const W: f32 = 400.0;
+    const VIEW_H: f32 = H + 100.0;
+
+    fn stack_of(tree: &WidgetTree, id: WidgetId) -> WidgetId {
+        with_view(tree, id, |v| v.pinned_stack_id.expect("the view pins"))
+    }
+
+    /// The rows the stack shows, outermost first, with each line's top and
+    /// height relative to the top of the rows.
+    fn pinned(tree: &WidgetTree, id: WidgetId) -> Vec<(usize, f32, f32)> {
+        let stack = stack_of(tree, id);
+        let built = with_view(tree, id, |v| v.pinned_built.borrow().clone());
+        // The stack's children run deepest first.
+        let lines: Vec<WidgetId> = tree.children(stack).into_iter().rev().collect();
+        assert_eq!(lines.len(), built.len());
+        built
+            .into_iter()
+            .zip(lines)
+            .filter_map(|(row, line)| {
+                let b = tree.bounds(line);
+                (b.height > 0.0).then_some((row, b.y - H, b.height))
+            })
+            .collect()
+    }
+
+    fn scroll_to(tree: &mut WidgetTree, id: WidgetId, y: f32) {
+        with_view(tree, id, |v| v.scroll_y_signal().set(y));
+        settle(tree, W, VIEW_H);
+    }
+
+    #[test]
+    fn the_ancestors_of_the_first_visible_row_stay_pinned() {
+        let proxy = library(5);
+        let (mut tree, id) = mount(pinned_view(&proxy, 2), W, VIEW_H);
+        assert!(pinned(&tree, id).is_empty(), "at the top, #A is in place");
+
+        // Into #A1's songs: the artist, then the album.
+        scroll_to(&mut tree, id, 30.0);
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0), (1, 20.0, 20.0)]);
+
+        // One level only, when asked for one.
+        let proxy = library(5);
+        let (mut tree, id) = mount(pinned_view(&proxy, 1), W, VIEW_H);
+        scroll_to(&mut tree, id, 30.0);
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0)]);
+    }
+
+    #[test]
+    fn a_pinned_ancestor_is_pushed_up_by_the_next_row_at_its_level() {
+        let proxy = library(5);
+        let (mut tree, id) = mount(pinned_view(&proxy, 2), W, VIEW_H);
+
+        // #A2 (content 140) is 10 dp under #A1's line: #A1 is pushed up 10,
+        // under #A, which stays.
+        scroll_to(&mut tree, id, 110.0);
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0), (1, 10.0, 20.0)]);
+
+        // Past it, #A2 takes the album's line.
+        scroll_to(&mut tree, id, 125.0);
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0), (7, 20.0, 20.0)]);
+
+        // #B (content 260) reaching the artist's line pushes it up too, and
+        // the album's line, out of #B's way, is gone.
+        scroll_to(&mut tree, id, 250.0);
+        assert_eq!(pinned(&tree, id), vec![(0, -10.0, 20.0)]);
+
+        // And once #B is at the top, it is in place: nothing pinned.
+        scroll_to(&mut tree, id, 260.0);
+        assert!(pinned(&tree, id).is_empty());
+    }
+
+    #[test]
+    fn a_pinned_line_stays_hidden_until_it_is_rebuilt_for_its_row() {
+        let proxy = library(5);
+        let (mut tree, id) = mount(pinned_view(&proxy, 2), W, VIEW_H);
+        scroll_to(&mut tree, id, 30.0);
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0), (1, 20.0, 20.0)]);
+
+        // The album changes from #A1 to #A2 with this scroll. The copy is
+        // rebuilt a frame later; for that frame the line is hidden rather
+        // than showing #A1 over #A2's songs. #A, unchanged, stays.
+        with_view(&tree, id, |v| v.scroll_y_signal().set(150.0));
+        tree.layout(SizeProposal::exact(W, VIEW_H));
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0)]);
+        settle(&mut tree, W, VIEW_H);
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0), (7, 20.0, 20.0)]);
+    }
+
+    /// The ids of every node a platform adapter exposes.
+    fn exposed_nodes(
+        update: &teksilo_core::accesskit::TreeUpdate,
+    ) -> std::collections::HashSet<teksilo_core::accesskit::NodeId> {
+        let consumer = accesskit_consumer::Tree::new(update.clone(), false);
+        let state = consumer.state();
+        let mut out = std::collections::HashSet::new();
+        let mut stack = vec![state.root()];
+        while let Some(node) = stack.pop() {
+            out.insert(node.locate().0);
+            stack.extend(node.filtered_children(accesskit_consumer::common_filter));
+        }
+        out
+    }
+
+    #[test]
+    fn pinned_copies_are_hidden_from_assistive_technology_and_take_no_tab_stop() {
+        let proxy = library(5);
+        let (mut tree, id) = mount(pinned_view(&proxy, 2), W, VIEW_H);
+        scroll_to(&mut tree, id, 30.0);
+        let stack = stack_of(&tree, id);
+        assert_eq!(pinned(&tree, id).len(), 2);
+
+        let update = tree.sync_accessibility();
+        let exposed = exposed_nodes(&update);
+        for node in descendants(&tree, stack) {
+            assert!(
+                !exposed.contains(&widget_id_to_node_id(node)),
+                "a copy repeats a row the tree already has"
+            );
+        }
+        // The real rows under the copies stay in the tree: #A1 (content
+        // 20..40) and its first song (40..60) are both under the stack.
+        for flat in [1, 2] {
+            assert!(
+                exposed.contains(&widget_id_to_node_id(row_of(&tree, id, flat))),
+                "row {flat} is still exposed"
+            );
+        }
+        // One Tab stop: the view, as without pinning.
+        assert_eq!(tree.tab_stops_within(id), vec![id]);
+    }
+
+    #[test]
+    fn a_press_on_a_pinned_line_selects_its_row_and_brings_it_back() {
+        let proxy = library(5);
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let (mut tree, id) = mount(
+            pinned_view(&proxy, 2)
+                .selection_mode(TableSelectionMode::SingleRow)
+                .selection(selection.clone()),
+            W,
+            VIEW_H,
+        );
+        scroll_to(&mut tree, id, 70.0);
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0), (1, 20.0, 20.0)]);
+
+        // The album's line.
+        let lines = tree.children(stack_of(&tree, id));
+        tree.click(lines[0]);
+        assert_eq!(selection.selected_indices(), vec![1], "#A1 is selected");
+        assert_eq!(
+            with_view(&tree, id, |v| v.focused_cell_signal().get()).map(|(r, _)| r),
+            Some(1),
+            "and holds the cursor"
+        );
+        // Back where it belongs, right under #A, which is then in place too.
+        assert_eq!(with_view(&tree, id, |v| v.scroll_y_signal().get()), 0.0);
+        settle(&mut tree, W, VIEW_H);
+        assert!(pinned(&tree, id).is_empty());
+    }
+
+    #[test]
+    fn a_press_on_a_pinned_line_never_reaches_a_control_drawn_in_it() {
+        let proxy = library(5);
+        let taps = Rc::new(Cell::new(0));
+        let tapped = taps.clone();
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let view = TreeTableView::from_projection(proxy.clone())
+            .add_column(
+                Column::<String>::new("title", lit!("Title"), |row: &String, _: &CellContext| {
+                    leaf(20.0, row.clone())
+                })
+                .width(ColumnWidth::Fixed(200.0)),
+            )
+            .add_column(
+                Column::<String>::new("tap", lit!("Tap"), move |_row: &String, _: &CellContext| {
+                    let tapped = tapped.clone();
+                    Box::new(
+                        Leaf {
+                            height: 20.0,
+                            text: "tap".into(),
+                        }
+                        .on_tap(move |_tap, _ctx| tapped.set(tapped.get() + 1)),
+                    ) as Box<dyn Widget>
+                })
+                .width(ColumnWidth::Fixed(100.0)),
+            )
+            .selection_mode(TableSelectionMode::SingleRow)
+            .selection(selection.clone())
+            .row_height(20.0)
+            .pinned_ancestors(2);
+        let (mut tree, id) = mount(view, W, VIEW_H);
+        scroll_to(&mut tree, id, 70.0);
+        assert_eq!(pinned(&tree, id).len(), 2);
+
+        // The control column of the artist's line (the rows' top + 10).
+        let at = Point::new(250.0, H + 10.0);
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        assert_eq!(taps.get(), 0, "the copy's control is a picture");
+        assert_eq!(selection.selected_indices(), vec![0], "the press meant #A");
+
+        // The same control on a real row does answer.
+        settle(&mut tree, W, VIEW_H);
+        tree.click(cells_of(&tree, id, 3)[1]);
+        assert_eq!(taps.get(), 1);
+    }
+
+    #[test]
+    fn a_revealed_row_stops_below_the_pinned_stack() {
+        let proxy = library(5);
+        let (mut tree, id) = mount(pinned_view(&proxy, 2), W, VIEW_H);
+        let scroll = with_view(&tree, id, |v| v.scroll_y_signal().clone());
+
+        // At 30 the stack covers the top 40 dp; the second song (content
+        // 60..80) sits half under it. Revealing it moves up to clear it.
+        scroll_to(&mut tree, id, 30.0);
+        with_view(&tree, id, |v| v.ensure_row_visible(3));
+        assert_eq!(scroll.get(), 20.0, "60 − the two ancestors' 40");
+        // Without pinning, the same row counts as visible already.
+        let control = library(5);
+        let (mut plain, plain_id) = mount(pinned_view(&control, 0), W, VIEW_H);
+        with_view(&plain, plain_id, |v| v.scroll_y_signal().set(30.0));
+        settle(&mut plain, W, VIEW_H);
+        with_view(&plain, plain_id, |v| v.ensure_row_visible(3));
+        assert_eq!(
+            with_view(&plain, plain_id, |v| v.scroll_y_signal().get()),
+            30.0
+        );
+
+        // `scroll_to_row` aligns to the bottom of the row's own ancestors:
+        // A2-2 (content 180) under #A and #A2.
+        with_view(&tree, id, |v| v.scroll_to_row(9));
+        assert_eq!(scroll.get(), 140.0);
+        settle(&mut tree, W, VIEW_H);
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0), (7, 20.0, 20.0)]);
+
+        // The keyboard: from A1-3 (content 80) up to A1-2 (60), which at 30
+        // is under the stack — the view follows to keep the cursor clear.
+        scroll_to(&mut tree, id, 30.0);
+        tree.focus(id);
+        with_view(&tree, id, |v| v.set_focused_cell(4, 0));
+        tree.press_key(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(scroll.get(), 20.0);
+    }
+
+    #[test]
+    fn a_pinned_full_width_ancestor_is_drawn_as_its_band() {
+        let proxy = library(5);
+        let (mut tree, id) = mount(grouped(&proxy).pinned_ancestors(2), W, VIEW_H);
+        scroll_to(&mut tree, id, 30.0);
+        assert_eq!(pinned(&tree, id).len(), 2);
+        let lines: Vec<WidgetId> = tree
+            .children(stack_of(&tree, id))
+            .into_iter()
+            .rev()
+            .collect();
+        for (line, name) in lines.iter().zip(["group #A", "group #A1"]) {
+            // Line → its copy, which holds one band rather than three cells.
+            let copy = tree.children(*line)[0];
+            assert_eq!(tree.children(copy).len(), 1, "{name}: one band");
+            assert_eq!(
+                tree.bounds(tree.children(copy)[0]).width,
+                tree.bounds(*line).width
+            );
+            assert_eq!(labels_under(&mut tree, copy), vec![name.to_string()]);
+        }
+        // A copy of a plain row is three cells.
+        let plain = library(5);
+        let (mut tree, id) = mount(pinned_view(&plain, 2), W, VIEW_H);
+        scroll_to(&mut tree, id, 30.0);
+        let line = tree.children(stack_of(&tree, id))[1];
+        assert_eq!(tree.children(tree.children(line)[0]).len(), 3);
+    }
+
+    #[test]
+    fn the_pinned_stack_follows_expand_collapse_inserts_and_removals() {
+        let proxy = library(5);
+        let (mut tree, id) = mount(pinned_view(&proxy, 2), W, VIEW_H);
+        scroll_to(&mut tree, id, 30.0);
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0), (1, 20.0, 20.0)]);
+
+        // Collapsing #A1 brings #A2 (now content 40) under the album's line.
+        let a1 = proxy.visible_node_id(1).unwrap();
+        proxy.collapse(a1);
+        settle(&mut tree, W, VIEW_H);
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0), (2, 20.0, 20.0)]);
+
+        // Expanded again, and a new artist inserted before A: every row moves
+        // down one, and the stack follows its rows, not their old indices.
+        proxy.expand(a1);
+        let inserted = proxy.tree().insert_root(0, "#0".to_string());
+        settle(&mut tree, W, VIEW_H);
+        assert_eq!(visible_names(&proxy)[..3], ["#0", "#A", "#A1"]);
+        assert_eq!(pinned(&tree, id), vec![(1, 0.0, 20.0), (2, 20.0, 20.0)]);
+        let lines: Vec<WidgetId> = tree
+            .children(stack_of(&tree, id))
+            .into_iter()
+            .rev()
+            .collect();
+        assert_eq!(labels_under(&mut tree, lines[0])[0], "#A");
+
+        // Removed again: the rows move back up, and so does the stack.
+        proxy.tree().remove(inserted);
+        settle(&mut tree, W, VIEW_H);
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0), (1, 20.0, 20.0)]);
+    }
+
+    #[test]
+    fn the_pinned_stack_follows_a_re_source() {
+        use std::cell::RefCell;
+        use teksilo_data::{TreeDataSlice, TreeRow};
+        // Two groups of eight, under names a re-source changes.
+        let names = |prefix: &str| -> Vec<(u64, String, usize)> {
+            let mut out = Vec::new();
+            for g in 0..2u64 {
+                out.push((g * 100, format!("#{prefix}{g}"), 0));
+                for s in 1..=8u64 {
+                    out.push((g * 100 + s, format!("{prefix}{g}-{s}"), 1));
+                }
+            }
+            out
+        };
+        let rows = Rc::new(RefCell::new(names("x")));
+        let slice = TreeDataSlice::<u64, String>::new();
+        {
+            let rows = rows.clone();
+            slice.set_source(move || {
+                rows.borrow()
+                    .iter()
+                    .map(|(k, name, depth)| TreeRow::new(*k, name.clone(), *depth))
+                    .collect()
+            });
+        }
+        slice.reload();
+        slice.set_all_expanded(true);
+        let view = TreeTableView::from_source(slice.clone())
+            .columns(library_columns())
+            .row_height(20.0)
+            .pinned_ancestors(1);
+        let (mut tree, id) = mount(view, W, VIEW_H);
+        scroll_to(&mut tree, id, 50.0);
+        let line_text = |tree: &mut WidgetTree| {
+            let line = tree.children(stack_of(tree, id))[0];
+            labels_under(tree, line)[0].clone()
+        };
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0)]);
+        assert_eq!(line_text(&mut tree), "#x0");
+
+        // The same shape under new names: the copy is rebuilt from them.
+        *rows.borrow_mut() = names("y");
+        slice.reload();
+        settle(&mut tree, W, VIEW_H);
+        assert_eq!(pinned(&tree, id), vec![(0, 0.0, 20.0)]);
+        assert_eq!(line_text(&mut tree), "#y0");
+    }
+}

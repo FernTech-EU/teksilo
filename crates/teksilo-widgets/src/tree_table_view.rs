@@ -43,10 +43,35 @@
 //! [`KeyedTreeCheckedModel`](teksilo_data::KeyedTreeCheckedModel) instead — it
 //! survives a full re-source, which a `NodeId`-keyed set cannot.
 //!
+//! **Group rows that span the table, and the group kept in sight.** A tree
+//! whose upper levels are groups — songs under albums under artists — draws
+//! those rows as one band across every column with
+//! [`full_width_row`](TreeTableView::full_width_row) and
+//! [`full_width_row_delegate`](TreeTableView::full_width_row_delegate), and
+//! keeps the groups being scrolled through pinned under the header with
+//! [`pinned_ancestors`](TreeTableView::pinned_ancestors):
+//!
+//! ```ignore
+//! let view = TreeTableView::from_projection(proxy)
+//!     .columns(columns)
+//!     .full_width_row(|row: &Row| !row.is_song())
+//!     .full_width_row_delegate(|row, _cx: &CellContext| {
+//!         Box::new(TextWidget::new(lit!(row.summary()))) as Box<dyn Widget>
+//!     })
+//!     .pinned_ancestors(2); // the artist, then the album
+//! ```
+//!
+//! A band is still a row of the tree — it selects, drags, expands from its
+//! chevron and answers type-ahead — and one cell to the keyboard and to
+//! assistive technology. The pinned rows are copies, pushed up as the next
+//! group arrives, hidden from assistive technology, and every reveal stops
+//! below them. The two builders say the rest.
+//!
 //! ## Accessibility
 //!
 //! Root emits `Role::TreeGrid`; rows carry `set_level` + `set_expanded`.
-//! ArrowLeft / ArrowRight on the tree column collapse / expand.
+//! ArrowLeft / ArrowRight on the tree column collapse / expand. A full-width
+//! row holds one cell, spanning every column.
 //!
 //! ```ignore
 //! // Column delegates capture closures — use ignore.
@@ -71,6 +96,8 @@
 //! the hand asked for.
 
 mod body_pane;
+mod full_width;
+mod pinned;
 mod widget_impl;
 
 use std::cell::{Cell, RefCell};
@@ -109,7 +136,7 @@ use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 use crate::table_view::ColumnReorderDragData;
 use crate::table_view::body::SharedColumnWidths;
 use crate::table_view::column::{
-    Column, ColumnResizePolicy, EditTriggers, GridLines, PinnedSide, TabTraversal,
+    CellContext, Column, ColumnResizePolicy, EditTriggers, GridLines, PinnedSide, TabTraversal,
 };
 use crate::table_view::header::ResizeStateHandle;
 use crate::table_view::imperative;
@@ -132,11 +159,29 @@ const SCROLLBAR_THICKNESS: f32 = 12.0;
 /// own `Key`.
 pub(crate) struct TreeNavigator<T: 'static> {
     source: Rc<TreeSource<T>>,
+    /// Which rows are full-width ones, when the view has any.
+    full_width: Option<Rc<dyn Fn(usize) -> bool>>,
+    /// The reveal below the pinned ancestors, while the view pins any.
+    pinned: Option<pinned::PinnedReveal>,
 }
 
 impl<T: 'static> TreeNavigator<T> {
     pub(crate) fn new(source: Rc<TreeSource<T>>) -> Self {
-        Self { source }
+        Self {
+            source,
+            full_width: None,
+            pinned: None,
+        }
+    }
+
+    pub(crate) fn with_full_width(mut self, at: Option<Rc<dyn Fn(usize) -> bool>>) -> Self {
+        self.full_width = at;
+        self
+    }
+
+    pub(crate) fn with_pinned(mut self, reveal: Option<pinned::PinnedReveal>) -> Self {
+        self.pinned = reveal;
+        self
     }
 }
 
@@ -165,6 +210,22 @@ impl<T: 'static> RowNavigator for TreeNavigator<T> {
 
     fn toggle_expanded(&self, row: usize) {
         self.source.toggle_at(row);
+    }
+
+    fn spans_all_columns(&self, row: usize) -> bool {
+        self.full_width.as_ref().is_some_and(|at| at(row))
+    }
+
+    fn reveal_scroll(
+        &self,
+        row: usize,
+        scroll: f32,
+        viewport: f32,
+        max_scroll: f32,
+    ) -> Option<f32> {
+        self.pinned
+            .as_ref()
+            .map(|pinned| pinned.scroll_for(row, scroll, viewport, max_scroll))
     }
 }
 
@@ -389,6 +450,26 @@ pub struct TreeTableView<T: 'static> {
     /// time; a disabled view greys out and stops accepting focus /
     /// selection / keyboard input (arena-gated).
     enabled: Prop<bool>,
+
+    /// Which items are drawn as one band across every column — see
+    /// [`full_width_row`](Self::full_width_row).
+    #[allow(clippy::type_complexity)]
+    full_width_row: Option<Rc<dyn Fn(&T) -> bool>>,
+    /// What draws that band — see
+    /// [`full_width_row_delegate`](Self::full_width_row_delegate).
+    full_width_delegate: Option<full_width::BandDelegate<T>>,
+    /// How many levels of ancestors stay pinned under the header; `0` pins
+    /// none. See [`pinned_ancestors`](Self::pinned_ancestors).
+    pinned_ancestors: usize,
+    /// The rows the pinned stack copies, outermost first, written by
+    /// `place_children` and bound `Rebuild` on the stack. Owned here so it
+    /// survives the root's rebuilds, as `ListView::pinned_section` does.
+    pinned_rows: Signal<Vec<usize>>,
+    /// The rows the stack last built. See `pinned::PinnedStack::built`.
+    pinned_built: Rc<RefCell<Vec<usize>>>,
+    /// Where each line of the stack goes this frame, from `place_children`.
+    pinned_layout: Rc<RefCell<Vec<pinned::StackLine>>>,
+    pinned_stack_id: Option<WidgetId>,
 }
 
 impl<T: 'static> TreeTableView<T> {
@@ -537,6 +618,13 @@ impl<T: 'static> TreeTableView<T> {
             export: crate::data_views::RowExport::default(),
             on_foreign_drop: None,
             enabled: Prop::Static(true),
+            full_width_row: None,
+            full_width_delegate: None,
+            pinned_ancestors: 0,
+            pinned_rows: Signal::new(Vec::new()),
+            pinned_built: Rc::new(RefCell::new(Vec::new())),
+            pinned_layout: Rc::new(RefCell::new(Vec::new())),
+            pinned_stack_id: None,
         }
     }
 
@@ -756,6 +844,93 @@ impl<T: 'static> TreeTableView<T> {
     /// comes from the active `TableStyle`).
     pub fn indent_per_level(mut self, px: f32) -> Self {
         self.indent_per_level = Some(px);
+        self
+    }
+
+    /// Draw the rows whose item satisfies `is_full_width` as **one cell across
+    /// every column** instead of a cell per column: a group row ("an artist ·
+    /// 12 songs | 3 albums | 52:10") over rows that fill the columns. What the
+    /// band shows comes from
+    /// [`full_width_row_delegate`](Self::full_width_row_delegate); without one
+    /// it shows the tree column's own cell, laid across the row.
+    ///
+    /// Asked of the item, like the cell delegates; a row whose item is still
+    /// loading is never full-width. The predicate is read on every build and
+    /// on every key press, so keep it to a field test.
+    ///
+    /// The row stays a row of the tree in every other respect: it selects,
+    /// activates, drags, takes drops and answers type-ahead as any row does,
+    /// its chevron (indent and twist) sits in the band, and ←/→ collapse and
+    /// expand it. In cell navigation the band is one cell: a horizontal move
+    /// stays on it, Tab passes it as one stop, and no column of it opens an
+    /// editor. The cursor keeps the column it arrived with, so stepping on to
+    /// an ordinary row lands back in that column.
+    ///
+    /// The band stays in the viewport while the columns scroll sideways, so a
+    /// group row stays readable; its chevron sits where the tree column's does
+    /// with the columns unscrolled. Its height comes from the view's height
+    /// mode like any row's: the uniform height, the
+    /// [`row_height_fn`](Self::row_height_fn) callback, or, under
+    /// [`auto_row_height`](Self::auto_row_height), the band measured at the
+    /// row's full width.
+    ///
+    /// To assistive technology the row is unchanged (`Role::Row` with its
+    /// level, expanded state and position) and holds one `Role::Cell`
+    /// (`Role::GridCell` in the cell modes) at column 1, with a column span of
+    /// every column and the band as its content.
+    pub fn full_width_row(mut self, is_full_width: impl Fn(&T) -> bool + 'static) -> Self {
+        self.full_width_row = Some(Rc::new(is_full_width));
+        self
+    }
+
+    /// Build the band of a [`full_width_row`](Self::full_width_row) from its
+    /// item, as a [`Column`]'s delegate builds a cell. The context describes
+    /// the band as the tree column, whose chevron it carries: `col_id` and
+    /// `col_index` are the tree column's and `is_tree_column` is `true`;
+    /// `is_focused` holds while the cursor is on the row, in any column, and
+    /// `is_selected` while the row is selected (in a cell mode, while any of
+    /// its cells is). The indent and the chevron are drawn before the
+    /// delegate's widget, as in the tree column.
+    ///
+    /// Does nothing without [`full_width_row`](Self::full_width_row), which
+    /// says which rows get it.
+    pub fn full_width_row_delegate(
+        mut self,
+        delegate: impl Fn(&T, &CellContext) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        self.full_width_delegate = Some(Rc::new(delegate));
+        self
+    }
+
+    /// Keep the ancestor rows of the first visible row pinned under the
+    /// header while the view scrolls, outermost first and at most `depth`
+    /// levels of them: the "sticky scroll" of code editors, the artist and
+    /// then the album over the songs. `0` (the default) pins nothing.
+    ///
+    /// A pinned row is pushed up by the next row at its level as that row
+    /// arrives, as a pinned section header is, so it never covers a row it is
+    /// not an ancestor of. It is a copy, drawn with the real row's cells (its
+    /// band, for a [`full_width_row`](Self::full_width_row)) at the real row's
+    /// height, on the header's surface. The copy shows the row's content, not
+    /// its selection or its focus, and its chevron is a picture.
+    ///
+    /// A press on a pinned row selects the real row, puts the cursor on it and
+    /// scrolls it back into view, right under its own pinned ancestors. A
+    /// press never reaches a control drawn inside the copy.
+    ///
+    /// Every reveal the view makes (the keyboard moving the cursor,
+    /// [`ensure_row_visible`](Self::ensure_row_visible),
+    /// [`scroll_to_row`](Self::scroll_to_row), taking focus, the
+    /// ScrollIntoView action) stops below the ancestors that would be pinned
+    /// over the row, so a copy never covers the row the cursor is on.
+    ///
+    /// The copies are hidden from assistive technology and are not focusable;
+    /// the real rows stay where they are in the tree, scrolled under the
+    /// copies like any row off the top. The stack is re-derived on every
+    /// layout, so an expand, a collapse, an insert or a re-source above or
+    /// inside it shows on the next frame.
+    pub fn pinned_ancestors(mut self, depth: usize) -> Self {
+        self.pinned_ancestors = depth;
         self
     }
 
@@ -1252,24 +1427,76 @@ impl<T: 'static> TreeTableView<T> {
 
     /// Scroll so that `row` is aligned to the top of the viewport. A no-op
     /// before the first layout pass.
+    ///
+    /// With [`pinned_ancestors`](Self::pinned_ancestors), the top it is
+    /// aligned to is the bottom of its own pinned ancestors.
     pub fn scroll_to_row(&self, row: usize) {
         if !self.laid_out.get() {
             return;
         }
-        imperative::scroll_to_row(row, &self.row_metrics, &self.scroll_y, &self.max_scroll_y);
+        match self.pinned_reveal() {
+            Some(pinned) => {
+                if let Some(target) = pinned.top_for(row) {
+                    self.scroll_y
+                        .set(target.clamp(0.0, self.max_scroll_y.get()));
+                }
+            }
+            None => imperative::scroll_to_row(
+                row,
+                &self.row_metrics,
+                &self.scroll_y,
+                &self.max_scroll_y,
+            ),
+        }
     }
 
     /// Scroll the minimum distance needed to make `row` visible. A no-op
     /// before the first layout pass, when the viewport height is not yet known.
+    ///
+    /// With [`pinned_ancestors`](Self::pinned_ancestors), "visible" means
+    /// below the ancestors that would be pinned over it.
     pub fn ensure_row_visible(&self, row: usize) {
-        imperative::ensure_row_visible(
+        Self::reveal_row(
             row,
+            self.pinned_reveal().as_ref(),
             &self.row_metrics,
             &self.scroll_y,
             &self.max_scroll_y,
             self.viewport_height.get(),
             self.laid_out.get(),
         );
+    }
+
+    /// The one reveal every path shares: below the pinned ancestors when
+    /// there are any, the plain row arithmetic otherwise.
+    fn reveal_row(
+        row: usize,
+        pinned: Option<&pinned::PinnedReveal>,
+        row_metrics: &SharedRowMetrics,
+        scroll_y: &Signal<f32>,
+        max_scroll_y: &Signal<f32>,
+        viewport_height: f32,
+        laid_out: bool,
+    ) {
+        let Some(pinned) = pinned else {
+            imperative::ensure_row_visible(
+                row,
+                row_metrics,
+                scroll_y,
+                max_scroll_y,
+                viewport_height,
+                laid_out,
+            );
+            return;
+        };
+        if !laid_out {
+            return;
+        }
+        let scroll = scroll_y.get();
+        let new_scroll = pinned.scroll_for(row, scroll, viewport_height, max_scroll_y.get());
+        if (new_scroll - scroll).abs() > f32::EPSILON {
+            scroll_y.set(new_scroll);
+        }
     }
 
     /// Scroll the row the keyboard cursor sits on into view when this view
@@ -1323,6 +1550,7 @@ impl<T: 'static> TreeTableView<T> {
         let max_scroll_y = self.max_scroll_y.clone();
         let viewport_height = self.viewport_height.clone();
         let laid_out = self.laid_out.clone();
+        let pinned = self.pinned_reveal();
 
         ctx.effect(&self.view_focused, move |focused| {
             if !*focused {
@@ -1335,8 +1563,9 @@ impl<T: 'static> TreeTableView<T> {
             }) else {
                 return;
             };
-            imperative::ensure_row_visible(
+            Self::reveal_row(
                 row,
+                pinned.as_ref(),
                 &row_metrics,
                 &scroll_y,
                 &max_scroll_y,
@@ -1393,7 +1622,13 @@ impl<T: 'static> TreeTableView<T> {
     /// so a pre-mount call finds it empty; the order is recomputed on demand
     /// in that case rather than resolving against nothing and no-opping for a
     /// third, undocumented reason.
+    ///
+    /// A [`full_width_row`](Self::full_width_row) has no cell of any column
+    /// to edit, so a row that is one is a no-op too.
     pub fn begin_edit(&self, row: usize, col_id: &str) {
+        if self.full_width_rows().is_some_and(|fw| (fw.at)(row)) {
+            return;
+        }
         let cached = self.display_indices.borrow();
         let recomputed;
         let display: &[usize] = if cached.is_empty() {
@@ -1423,6 +1658,38 @@ impl<T: 'static> TreeTableView<T> {
 
     fn effective_row_height(&self) -> f32 {
         self.row_height.unwrap_or(cp::ROW_HEIGHT)
+    }
+
+    /// The full-width rows and the delegate that draws them, or `None` when
+    /// the view has none. The delegate falls back to the tree column's cell.
+    fn full_width_rows(&self) -> Option<full_width::FullWidthRows<T>> {
+        let is_full_width = self.full_width_row.clone()?;
+        let delegate = match &self.full_width_delegate {
+            Some(delegate) => delegate.clone(),
+            None => self
+                .columns
+                .get(self.tree_column_decl_index())?
+                .cell
+                .clone(),
+        };
+        let source = self.source.clone();
+        Some(full_width::FullWidthRows {
+            at: Rc::new(move |row| {
+                let mut hit = false;
+                (source.read_item_fn)(row, &mut |item| hit = is_full_width(item));
+                hit
+            }),
+            delegate,
+        })
+    }
+
+    /// The reveal below the pinned ancestors, while the view pins any.
+    fn pinned_reveal(&self) -> Option<pinned::PinnedReveal> {
+        pinned::PinnedReveal::new(
+            self.source.clone(),
+            self.row_metrics.clone(),
+            self.pinned_ancestors,
+        )
     }
 
     fn effective_header_height(&self) -> f32 {

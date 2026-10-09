@@ -32,7 +32,7 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
 use teksilo_core::signal::Signal;
-use teksilo_core::widget::{LayoutContext, Widget, WidgetPlacement};
+use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_data::{DragEligibility, RowState};
@@ -46,7 +46,10 @@ use crate::table_view::body::{BodyRow, SharedColumnWidths};
 use crate::table_view::body_pane::{CellRowPreview, cell_edit_dismiss_handler, cell_edit_handlers};
 use crate::table_view::column::{CellContext, Column};
 use crate::table_view::selection::{CellSelectionModel, TableSelectionMode};
-use crate::tree_source::TreeSource;
+use crate::tree_source::{TreeRowMeta, TreeSource};
+
+use super::full_width::{BandInset, FullWidthRow, FullWidthRows};
+use super::pinned::PinnedReveal;
 
 const BUFFER_ROWS: usize = 5;
 
@@ -73,6 +76,11 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     /// Display position of the tree column (indent + twist host).
     pub(crate) tree_display_pos: usize,
     pub(crate) indent_per_level: f32,
+    /// The rows drawn as one band across every column, and their delegate.
+    pub(crate) full_width: Option<FullWidthRows<T>>,
+    /// The reveal below the pinned ancestors, while the view pins any — read
+    /// by the rows' ScrollIntoView action.
+    pub(crate) pinned_reveal: Option<PinnedReveal>,
 
     /// Row geometry shared with the `TreeTableView` root (the root drives
     /// scrollbar totals / paint / keyboard, the pane drives
@@ -167,6 +175,74 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     pub(crate) cell_map: Rc<RefCell<Vec<((usize, usize), WidgetId)>>>,
 }
 
+/// The chevron's click on a realized row: toggles whichever row the anchor
+/// still resolves to, and nothing once that row is gone.
+fn twist_toggle<T: 'static>(
+    source: &Rc<TreeSource<T>>,
+    anchor: &crate::data_views::RowAnchor,
+) -> Box<dyn Fn(&mut EventContext)> {
+    let source = source.clone();
+    let anchor = anchor.clone();
+    Box::new(move |_ctx| {
+        if let Some(i) = anchor.index() {
+            source.toggle_at(i);
+        }
+    })
+}
+
+/// The tree column's chrome around a cell's content: the indent for `depth`,
+/// then the chevron, then the content, clipped to whatever width it is given.
+///
+/// Shared by the tree column's cells, full-width bands and the pinned copies,
+/// so the chevron sits at the same place in all three. `on_toggle` is the
+/// chevron's click; `None` leaves it a picture (a pinned copy).
+pub(super) fn tree_chrome(
+    ctx: &mut BuildContext,
+    inner_id: WidgetId,
+    depth: usize,
+    indent_per_level: f32,
+    has_children: bool,
+    is_expanded: bool,
+    on_toggle: Option<Box<dyn Fn(&mut EventContext)>>,
+) -> WidgetId {
+    let indent_px = depth as f32 * indent_per_level;
+    // The click is wired only on a branch. A leaf's chevron paints nothing
+    // and `toggle_at` on a leaf changes nothing, but an `on_click` still makes
+    // the node a *pointer target* — a 12 dp one, invisible, doing nothing, and
+    // below the 24 dp floor at every density. `TwistArrow::hit_outset` already
+    // returns zero for a leaf ("a widened node that then ignores the press is
+    // a hole punched in the row behind it"), so the node could never grow
+    // either. `StandardTreeItem` has always guarded it this way.
+    let mut twist_widget = TwistArrow::new(cp::TREE_TWIST_SIZE, has_children, is_expanded);
+    if has_children && let Some(toggle) = on_toggle {
+        twist_widget = twist_widget.on_click(move |ctx| toggle(ctx));
+    }
+    let twist = ctx.add(twist_widget);
+    // Build inside-out so each `ctx.add` happens outside the mutable borrow
+    // chain.
+    let twist_and_label = HStack::new()
+        .spacing(cp::TREE_TWIST_LABEL_GAP)
+        .child(twist)
+        .child(inner_id);
+    let twist_label_id = ctx.add(twist_and_label);
+    // Clip the indent + twist to the column. Both are rigid (a fixed indent
+    // per level, a fixed-size chevron), so a tree column dragged narrower than
+    // `depth * indent + twist + gap` cannot shrink to fit and would otherwise
+    // draw the chevron — and the whole label after it — on top of the next
+    // column. Cropping at the column edge is what Explorer / Finder / VS Code
+    // do, and it keeps the resize grip free to shrink the column all the way
+    // to its floor.
+    //
+    // Deliberately narrower than `TruncationPolicy`, which is about the
+    // *delegate's* content: `TruncationPolicy::None` documents that a cell may
+    // draw past its column edge, and that still holds — only this chrome
+    // wrapper clips.
+    let indent_id =
+        ctx.add(Padding::new(0.0_f32, 0.0_f32, 0.0_f32, indent_px).child(twist_label_id));
+    ctx.apply_handlers(indent_id, HandlerSet::new().clips_children(true));
+    indent_id
+}
+
 impl<T: 'static> TreeBodyPane<T> {
     fn visible_range(&self) -> (usize, usize) {
         self.row_metrics.borrow_mut().visible_range(
@@ -175,6 +251,91 @@ impl<T: 'static> TreeBodyPane<T> {
             self.source.visible_count(),
             BUFFER_ROWS,
         )
+    }
+
+    /// A full-width row's one cell: the delegate's content behind the tree
+    /// column's chrome, laid across the row, published as a cell spanning
+    /// every column. `None` when the row's item cannot be read.
+    ///
+    /// The delegate is told it is the tree column — it carries the chevron —
+    /// and is selected when the row is, or in a cell mode when any of the
+    /// row's cells is, every one of them being this cell.
+    #[allow(clippy::too_many_arguments)]
+    fn build_band(
+        &self,
+        ctx: &mut BuildContext,
+        full_width: &FullWidthRows<T>,
+        flat_idx: usize,
+        entry: TreeRowMeta,
+        row_anchor: &crate::data_views::RowAnchor,
+        display_indices: &[usize],
+        display_col_ids: &Rc<Vec<String>>,
+    ) -> Option<WidgetId> {
+        let tree_col = display_indices.get(self.tree_display_pos).copied()?;
+        let col_count = display_indices.len();
+        let selected = match (self.selection_mode, &self.selection, &self.cell_selection) {
+            (TableSelectionMode::SingleRow | TableSelectionMode::MultiRow, Some(s), _) => {
+                s.is_selected(flat_idx)
+            }
+            (TableSelectionMode::SingleCell | TableSelectionMode::MultiCell, _, Some(cs)) => {
+                (0..col_count).any(|c| cs.is_selected(flat_idx, c))
+            }
+            _ => false,
+        };
+        let cell_ctx = CellContext {
+            row_index: flat_idx,
+            col_id: self.columns[tree_col].spec.id.clone(),
+            col_index: self.tree_display_pos,
+            is_selected: selected,
+            is_focused: self
+                .focused_cell
+                .get()
+                .is_some_and(|(row, _col)| row == flat_idx),
+            is_hovered: false,
+            is_editing: false,
+            depth: Some(entry.depth),
+            is_tree_column: true,
+        };
+        let content = self.source.with_row(flat_idx, &|item, _meta| {
+            (full_width.delegate)(item, &cell_ctx)
+        })?;
+        let content = ctx.add_boxed(content);
+        let chrome = tree_chrome(
+            ctx,
+            content,
+            entry.depth,
+            self.indent_per_level,
+            entry.has_children,
+            entry.is_expanded,
+            Some(twist_toggle(&self.source, row_anchor)),
+        );
+        let band = ctx.add(BandInset::new(
+            chrome,
+            self.column_widths.clone(),
+            self.pane_boundaries,
+            self.tree_display_pos,
+        ));
+        // Level and expand state mirrored as on the tree column's cell (see
+        // `CellA11y::with_level`): this cell is the one the AT cursor is on.
+        let cell = ctx.add(
+            CellA11y::new(band, flat_idx + 2, 1, selected)
+                .with_grid_cell_role(self.selection_mode.is_cell_mode())
+                .with_level(Some(entry.depth + 1))
+                .with_expanded(entry.has_children.then_some(entry.is_expanded))
+                .with_column_span(Some(col_count)),
+        );
+        // No editor opens here, but a press here still ends one open
+        // elsewhere.
+        if let Some(handlers) = cell_edit_dismiss_handler(
+            &self.on_cell_edit_dismissed,
+            &self.editing_cell,
+            display_col_ids,
+            row_anchor,
+            self.tree_display_pos,
+        ) {
+            ctx.apply_handlers(cell, handlers);
+        }
+        Some(cell)
     }
 }
 
@@ -334,8 +495,45 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 _ => false,
             };
 
+            // A full-width row is one cell across every column: the band,
+            // standing in for every column of the row in `cell_map`, so the
+            // cursor finds it whatever column it carries. A loading row has no
+            // item to ask, so it is never one.
+            let full_width = self
+                .full_width
+                .as_ref()
+                .filter(|fw| !loading && (fw.at)(flat_idx))
+                .cloned();
+            let band = match (&full_width, entry) {
+                (Some(fw), Some(entry)) => {
+                    match self.build_band(
+                        ctx,
+                        fw,
+                        flat_idx,
+                        entry,
+                        &row_anchor,
+                        &display_indices,
+                        &display_col_ids,
+                    ) {
+                        Some(band) => Some(band),
+                        // Not resident after all (a race between `meta` and
+                        // the item read): no row rather than an empty one.
+                        None => continue,
+                    }
+                }
+                _ => None,
+            };
             let mut cell_ids: Vec<WidgetId> = Vec::with_capacity(display_indices.len());
-            for (display_pos, &col_idx) in display_indices.iter().enumerate() {
+            if let Some(band) = band {
+                cell_entries.extend((0..display_indices.len()).map(|c| ((flat_idx, c), band)));
+                cell_ids.push(band);
+            }
+            let columns_to_build: &[usize] = if band.is_some() {
+                &[]
+            } else {
+                &display_indices
+            };
+            for (display_pos, &col_idx) in columns_to_build.iter().enumerate() {
                 let col = &columns[col_idx];
                 let is_tree_column = display_pos == tree_display_pos;
                 let is_selected = match (selection_mode, &selection, &cell_selection) {
@@ -406,56 +604,15 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 // isn't knowable yet (a placeholder twist would be a
                 // guess, not information).
                 let leading_id = if is_tree_column && !loading {
-                    let indent_px = depth as f32 * indent_per_level;
-                    let source_for_twist = source.clone();
-                    let twist_anchor = row_anchor.clone();
-                    // The click is wired only on a branch. A leaf's chevron
-                    // paints nothing and `toggle_at` on a leaf changes nothing,
-                    // but an `on_click` still makes the node a *pointer target*
-                    // — a 12 dp one, invisible, doing nothing, and below the
-                    // 24 dp floor at every density. `TwistArrow::hit_outset`
-                    // already returns zero for a leaf ("a widened node that
-                    // then ignores the press is a hole punched in the row
-                    // behind it"), so the node could never grow either.
-                    // `StandardTreeItem` has always guarded it this way.
-                    let mut twist_widget =
-                        TwistArrow::new(cp::TREE_TWIST_SIZE, has_children, is_expanded);
-                    if has_children {
-                        twist_widget = twist_widget.on_click(move |_ctx| {
-                            if let Some(i) = twist_anchor.index() {
-                                source_for_twist.toggle_at(i);
-                            }
-                        });
-                    }
-                    let twist = ctx.add(twist_widget);
-                    // Build inside-out so each `ctx.add` happens
-                    // outside the mutable borrow chain.
-                    let twist_and_label = HStack::new()
-                        .spacing(cp::TREE_TWIST_LABEL_GAP)
-                        .child(twist)
-                        .child(inner_id);
-                    let twist_label_id = ctx.add(twist_and_label);
-                    // Clip the indent + twist to the column. Both are rigid
-                    // (a fixed indent per level, a fixed-size chevron), so a
-                    // tree column dragged narrower than `depth * indent +
-                    // twist + gap` cannot shrink to fit and would otherwise
-                    // draw the chevron — and the whole label after it — on top
-                    // of the next column. Cropping at the column edge is what
-                    // Explorer / Finder / VS Code do, and it keeps the resize
-                    // grip free to shrink the column all the way to its floor.
-                    //
-                    // Deliberately narrower than `TruncationPolicy`, which is
-                    // about the *delegate's* content: `TruncationPolicy::None`
-                    // documents that a cell may draw past its column edge, and
-                    // that still holds — only this chrome wrapper clips.
-                    let indent_id = ctx.add(
-                        Padding::new(0.0_f32, 0.0_f32, 0.0_f32, indent_px).child(twist_label_id),
-                    );
-                    ctx.apply_handlers(
-                        indent_id,
-                        teksilo_core::widget_builder::HandlerSet::new().clips_children(true),
-                    );
-                    indent_id
+                    tree_chrome(
+                        ctx,
+                        inner_id,
+                        depth,
+                        indent_per_level,
+                        has_children,
+                        is_expanded,
+                        Some(twist_toggle(&source, &row_anchor)),
+                    )
                 } else {
                     inner_id
                 };
@@ -526,17 +683,21 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             } else {
                 Some(self.row_metrics.borrow_mut().row_height(flat_idx))
             };
-            let row_widget = BodyRow::new(
-                cell_ids,
-                flat_idx + 2,
-                row_selected,
-                row_height,
-                self.column_widths.clone(),
-                self.pane_boundaries,
-                self.scroll_x.clone(),
-            )
-            .a11y_hidden();
-            let row_inner_id = ctx.add(row_widget);
+            let row_inner_id = match band {
+                Some(band) => ctx.add(FullWidthRow::new(band, row_height)),
+                None => ctx.add(
+                    BodyRow::new(
+                        cell_ids,
+                        flat_idx + 2,
+                        row_selected,
+                        row_height,
+                        self.column_widths.clone(),
+                        self.pane_boundaries,
+                        self.scroll_x.clone(),
+                    )
+                    .a11y_hidden(),
+                ),
+            };
 
             // A grid is *one* Tab stop — the cell cursor is the navigation, and
             // a control the delegate put in a cell (a checkbox column, most
@@ -587,16 +748,23 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 let metrics = self.row_metrics.clone();
                 let scroll = self.scroll_y.clone();
                 let viewport = self.viewport_height.clone();
+                let pinned = self.pinned_reveal.clone();
                 let with_scroll = row_a11y.access_action(Action::ScrollIntoView, {
                     let count = self.source.clone();
                     move |_ctx| {
                         let vh = viewport.get();
                         let cur = scroll.get();
-                        let new = {
+                        let max = {
                             let mut m = metrics.borrow_mut();
                             let total = m.total_height(count.visible_count());
-                            let max = (total - vh).max(0.0);
-                            m.scroll_for_ensure_visible(flat_idx, cur, vh, max)
+                            (total - vh).max(0.0)
+                        };
+                        // Below the pinned ancestors, when there are any.
+                        let new = match &pinned {
+                            Some(pinned) => pinned.scroll_for(flat_idx, cur, vh, max),
+                            None => metrics
+                                .borrow_mut()
+                                .scroll_for_ensure_visible(flat_idx, cur, vh, max),
                         };
                         if (new - cur).abs() > f32::EPSILON {
                             scroll.set(new);
@@ -788,6 +956,11 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 let widths_for_preview = self.column_widths.clone();
                 let metrics_for_preview = self.row_metrics.clone();
                 let tree_pos_for_preview = tree_display_pos;
+                // A full-width row is picked up as what it shows: its band.
+                let band_for_preview = full_width
+                    .as_ref()
+                    .filter(|_| band.is_some())
+                    .map(|fw| fw.delegate.clone());
                 let sel_for_drag = selection.clone();
                 let export_for_drag = self.export.clone();
                 let source_for_drag = source.clone();
@@ -839,9 +1012,12 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                             // is dropped in the floating preview — it reads as
                             // the row's content picked up, even when a
                             // multi-row selection is being dragged).
-                            let widths = widths_for_preview.borrow().clone();
+                            let mut widths = widths_for_preview.borrow().clone();
                             let h = metrics_for_preview.borrow_mut().row_height(preview_flat);
                             let total_w = widths.iter().sum::<f32>().max(120.0);
+                            if band_for_preview.is_some() {
+                                widths = vec![total_w];
+                            }
                             let mut cells: Vec<Box<dyn Widget>> = Vec::new();
                             // Both halves must come from the same row: if the meta
                             // is missing the row is not really resident, so build no
@@ -851,6 +1027,24 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                                 let Some(e) = preview_meta else {
                                     return;
                                 };
+                                if let Some(ref band) = band_for_preview {
+                                    let band_ctx = CellContext {
+                                        row_index: preview_flat,
+                                        col_id: display_for_preview
+                                            .get(tree_pos_for_preview)
+                                            .map(|&i| columns_for_preview[i].spec.id.clone())
+                                            .unwrap_or_default(),
+                                        col_index: tree_pos_for_preview,
+                                        is_selected: false,
+                                        is_focused: false,
+                                        is_hovered: false,
+                                        is_editing: false,
+                                        depth: Some(e.depth),
+                                        is_tree_column: true,
+                                    };
+                                    cells = vec![band(item, &band_ctx)];
+                                    return;
+                                }
                                 cells = {
                                     display_for_preview
                                         .iter()

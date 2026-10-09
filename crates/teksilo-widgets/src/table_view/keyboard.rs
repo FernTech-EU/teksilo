@@ -161,12 +161,18 @@ pub(crate) fn build_key_handler(
         // build-time capture would go stale).
         let rtl = ctx.is_rtl();
 
+        // A row that is one cell across every column (`TreeTableView`'s
+        // full-width rows). The cursor keeps its column on it, so a move back
+        // down to an ordinary row lands where it left, but every column of it
+        // is the same cell — and that cell carries the chevron.
+        let spans = cfg.navigator.spans_all_columns(row);
+
         // Tree-aware collapse / expand (flat impls are no-ops, so this is
         // safe to evaluate eagerly). The keys follow the visual chevron:
         // under LTR the collapsed chevron points right (ArrowRight
         // expands, ArrowLeft collapses); under RTL it points left, so the
         // two arrows swap.
-        let on_tree_column = col == cfg.tree_column_display_pos;
+        let on_tree_column = col == cfg.tree_column_display_pos || spans;
         let is_collapse_key = if rtl {
             matches!(key, Key::ArrowRight)
         } else {
@@ -306,6 +312,13 @@ pub(crate) fn build_key_handler(
         }
 
         let viewport_h = cfg.viewport_height.get();
+        // A row spanning every column draws none of the columns' cells, so it
+        // has no editor for any of them to open.
+        let edit_triggers = if spans {
+            EditTriggers::NONE
+        } else {
+            (cfg.display_col_triggers)(col)
+        };
         // A table whose cells are the navigable unit reads Home as the start
         // of the row; one that selects whole rows has no cell cursor for that
         // to mean anything against, so its Home is the first row — which is
@@ -332,6 +345,9 @@ pub(crate) fn build_key_handler(
                 None => cfg.navigator.first_row().map(|r| (r, col)),
                 Some(_) => cfg.navigator.next_row(row).map(|r| (r, col)),
             },
+            // A row spanning every column has no cell beside the cursor: the
+            // move stays on it, as it does at the edge column of any row.
+            Key::ArrowLeft | Key::ArrowRight if cursor.is_some() && spans => None,
             // Visual-left moves to a higher display index under RTL
             // (columns run right-to-left), so the two arrows swap their
             // index delta. The clamps stay tied to the physical edge each
@@ -374,6 +390,11 @@ pub(crate) fn build_key_handler(
                     return EventResponse::Ignored;
                 };
                 match chord.movement {
+                    // On a row spanning every column, its first cell and its
+                    // last are the one the cursor is on.
+                    list_nav::NavMove::RowFirst | list_nav::NavMove::RowLast if spans => {
+                        Some((row, col))
+                    }
                     list_nav::NavMove::RowFirst => Some((row, 0)),
                     list_nav::NavMove::RowLast => Some((row, cfg.col_count - 1)),
                     // Where the accelerator lands depends on which ARIA
@@ -436,9 +457,11 @@ pub(crate) fn build_key_handler(
             // too — ⌘⇥ belongs to the application switcher and never reaches an
             // app at all.
             Key::Tab if modifiers.ctrl() => return EventResponse::Ignored,
+            // A row spanning every column is one stop: Tab leaves it for the
+            // next row, Shift+Tab for the previous one.
             Key::Tab => {
                 if modifiers.shift() {
-                    if col > 0 {
+                    if col > 0 && !spans {
                         Some((row, col - 1))
                     } else if let Some(prev) = cfg.navigator.prev_row(row) {
                         Some((prev, cfg.col_count - 1))
@@ -448,7 +471,7 @@ pub(crate) fn build_key_handler(
                         Some((row, col))
                     }
                 } else {
-                    if col + 1 < cfg.col_count {
+                    if col + 1 < cfg.col_count && !spans {
                         Some((row, col + 1))
                     } else if let Some(next) = cfg.navigator.next_row(row) {
                         Some((next, 0))
@@ -524,7 +547,7 @@ pub(crate) fn build_key_handler(
                 }
                 return EventResponse::Handled;
             }
-            Key::F2 if (cfg.display_col_triggers)(col).contains(EditTriggers::F2) => {
+            Key::F2 if edit_triggers.contains(EditTriggers::F2) => {
                 if let Some(col_id) = (cfg.display_col_to_id)(col) {
                     cfg.editing_cell.set(Some((row, col)));
                     if let Some(ref f) = cfg.on_cell_edit_request {
@@ -542,7 +565,7 @@ pub(crate) fn build_key_handler(
             // don't enter edit mode (which would set `editing_cell`
             // without any actual editor in the cell to receive focus
             // and follow-up keystrokes).
-            k if (cfg.display_col_triggers)(col).contains(EditTriggers::ANY_KEY)
+            k if edit_triggers.contains(EditTriggers::ANY_KEY)
                 && !modifiers.ctrl()
                 && !modifiers.alt()
                 && !modifiers.super_key()
@@ -680,7 +703,15 @@ fn ensure_row_visible(
     ctx: &mut EventContext,
 ) {
     let scroll = cfg.scroll_y.get();
-    let new_scroll = {
+    // Asked first, and with no metrics borrow held: a navigator that covers
+    // part of the viewport reads the same metrics to say how much.
+    let covered = cfg.navigator.reveal_scroll(
+        row,
+        scroll,
+        cfg.viewport_height.get(),
+        cfg.max_scroll_y.get(),
+    );
+    let new_scroll = covered.unwrap_or_else(|| {
         let mut m = cfg.row_metrics.borrow_mut();
         m.resize(row_count);
         m.scroll_for_ensure_visible(
@@ -689,7 +720,7 @@ fn ensure_row_visible(
             cfg.viewport_height.get(),
             cfg.max_scroll_y.get(),
         )
-    };
+    });
     if (new_scroll - scroll).abs() > f32::EPSILON {
         cfg.scroll_y.set(new_scroll);
     }

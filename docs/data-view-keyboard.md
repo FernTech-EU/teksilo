@@ -51,6 +51,14 @@ first item under it. An item revealed by a key brings its section's header
 into view when it is the first item of the section, and stops below the pinned
 header when `.pinned_section_headers(true)` is set.
 
+A `TreeTableView` full-width row (`.full_width_row(..)`) is one cell across
+every column. The cursor keeps its column on it, so stepping on to an ordinary
+row lands back in that column, but a horizontal move, `Home` and `End` leave
+it where it is, `Tab` passes it in one press, the expand and collapse arrows
+act on it from any column, and no column of it opens an editor. With
+`.pinned_ancestors(depth)`, a row revealed by a key stops below the ancestors
+pinned over it.
+
 ### The modifier rules, stated once
 
 **In a multiple selection, `Ctrl` (⌘ on macOS) on a navigation key never

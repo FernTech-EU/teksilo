@@ -269,7 +269,15 @@ impl<T: 'static> Widget for TreeTableView<T> {
             })
         };
 
-        let navigator: Rc<dyn RowNavigator> = Rc::new(TreeNavigator::new(self.source.clone()));
+        // Resolved once per build and shared by the navigator, the body pane
+        // and the pinned copies, so the three agree on which rows are bands.
+        let full_width = self.full_width_rows();
+        let pinned_reveal = self.pinned_reveal();
+        let navigator: Rc<dyn RowNavigator> = Rc::new(
+            TreeNavigator::new(self.source.clone())
+                .with_full_width(full_width.as_ref().map(|fw| fw.at.clone()))
+                .with_pinned(pinned_reveal.clone()),
+        );
         // Type-ahead resolver: read the visible row's item text through the
         // projection (`None` if the flat index isn't currently visible).
         let type_ahead_label: Option<Rc<dyn Fn(usize) -> Option<String>>> =
@@ -758,6 +766,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
         self.scrollbar_id = None;
         self.h_scrollbar_id = None;
         self.empty_id = None;
+        self.pinned_stack_id = None;
 
         // Header strip: a hosted `TableHeader`, exactly as `TableView` hosts
         // it. The tree column reorders like any other column and carries no
@@ -818,6 +827,8 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 scroll_x: self.scroll_x.clone(),
                 tree_display_pos,
                 indent_per_level,
+                full_width: full_width.clone(),
+                pinned_reveal: pinned_reveal.clone(),
                 row_metrics: self.row_metrics.clone(),
                 selection_mode: self.selection_mode,
                 selection: self.row_selection.clone(),
@@ -847,6 +858,16 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 cell_map: self.cell_map.clone(),
             };
             self.body_pane_id = Some(ctx.add(pane));
+            if let Some(ref pinned_reveal) = pinned_reveal {
+                self.pinned_stack_id = Some(self.add_pinned_stack(
+                    ctx,
+                    &display_indices,
+                    tree_display_pos,
+                    indent_per_level,
+                    full_width.clone(),
+                    pinned_reveal.clone(),
+                ));
+            }
             // An open cell editor also ends on a press that lands on no cell at
             // all — the empty band under the last row. Mounted here rather than
             // on the pane because the pane is not the hit target there.
@@ -905,6 +926,11 @@ impl<T: 'static> Widget for TreeTableView<T> {
             children.push(id);
         }
         if let Some(id) = self.empty_id {
+            children.push(id);
+        }
+        // Over the rows, under the scroll bars (an overlay bar stays on top
+        // of it) and the header (a line pushed up slides under it).
+        if let Some(id) = self.pinned_stack_id {
             children.push(id);
         }
         if let Some(id) = self.scrollbar_id {
@@ -1053,6 +1079,38 @@ impl<T: 'static> Widget for TreeTableView<T> {
         self.body_bounds
             .set(Rect::new(band_left, body_origin_y, body_width, body_height));
 
+        // The pinned stack, from the clamped offset. The rows it names are
+        // handed to it when they changed, and it rebuilds next frame; until
+        // then a line it has not built for its row is not shown.
+        let pinned_extent = if self.pinned_stack_id.is_some() {
+            let lines = {
+                let mut metrics = self.row_metrics.borrow_mut();
+                pinned::stack_at(
+                    &*self.source,
+                    &mut metrics,
+                    self.scroll_y.get(),
+                    self.pinned_ancestors,
+                )
+            };
+            let rows: Vec<usize> = lines.iter().map(|line| line.row).collect();
+            if self.pinned_rows.get() != rows {
+                self.pinned_rows.set(rows);
+            }
+            let extent = {
+                let built = self.pinned_built.borrow();
+                lines
+                    .iter()
+                    .enumerate()
+                    .filter(|(k, line)| built.get(*k) == Some(&line.row))
+                    .map(|(_, line)| line.top + line.height)
+                    .fold(0.0_f32, f32::max)
+            };
+            *self.pinned_layout.borrow_mut() = lines;
+            extent.min(body_height)
+        } else {
+            0.0
+        };
+
         let mut next = 0;
 
         // Body pane fills the body region; it positions its rows
@@ -1070,6 +1128,20 @@ impl<T: 'static> Widget for TreeTableView<T> {
             if let Some(child) = children.get_mut(next) {
                 child.origin = Point::new(band_left, body_origin_y);
                 child.size = Size::new(body_width, body_height);
+            }
+            next += 1;
+        }
+
+        // The pinned stack over the top of the rows, as tall as the lines it
+        // shows; it places and clips them itself.
+        if self.pinned_stack_id.is_some() {
+            if let Some(child) = children.get_mut(next) {
+                child.origin = Point::new(band_left, body_origin_y);
+                child.size = if pinned_extent > 0.0 {
+                    Size::new(body_width, pinned_extent)
+                } else {
+                    Size::ZERO
+                };
             }
             next += 1;
         }
@@ -1221,41 +1293,84 @@ impl<T: 'static> Widget for TreeTableView<T> {
         let (leading_rect, middle_rect, trailing_rect) =
             layout::band_rects(content_bounds, &widths, boundaries, rtl);
 
+        // A full-width row is one cell, so no column divider crosses it: the
+        // dividers run in the spans between those rows.
+        let full_width = self.full_width_rows();
+        let bands: Vec<(f32, f32)> = match &full_width {
+            Some(fw) => {
+                let mut m = self.row_metrics.borrow_mut();
+                (first_visible..last_visible)
+                    .filter(|&row| (fw.at)(row))
+                    .map(|row| (body_origin_y + m.row_top(row) - scroll_y, m.row_height(row)))
+                    .collect()
+            }
+            None => Vec::new(),
+        };
+        let is_band_row = |row: usize| full_width.as_ref().is_some_and(|fw| (fw.at)(row));
+
         if matches!(self.grid_lines, GridLines::Vertical | GridLines::Both) {
             let leading_end = boundaries.leading_count.min(widths.len());
             let middle_end = boundaries.middle_end.min(widths.len()).max(leading_end);
-            crate::table_view::draw_pane_dividers(
-                canvas,
-                leading_rect,
-                &widths[..leading_end],
-                0.0,
-                rtl,
-                line_color,
-                line_w,
-            );
-            crate::table_view::draw_pane_dividers(
-                canvas,
-                middle_rect,
-                &widths[leading_end..middle_end],
-                scroll_x,
-                rtl,
-                line_color,
-                line_w,
-            );
-            crate::table_view::draw_pane_dividers(
-                canvas,
-                trailing_rect,
-                &widths[middle_end..],
-                0.0,
-                rtl,
-                line_color,
-                line_w,
-            );
+            for (span_top, span_bottom) in
+                spans_between(body_origin_y, body_origin_y + body_height, &bands)
+            {
+                let in_span =
+                    |pane: Rect| Rect::new(pane.x, span_top, pane.width, span_bottom - span_top);
+                crate::table_view::draw_pane_dividers(
+                    canvas,
+                    in_span(leading_rect),
+                    &widths[..leading_end],
+                    0.0,
+                    rtl,
+                    line_color,
+                    line_w,
+                );
+                crate::table_view::draw_pane_dividers(
+                    canvas,
+                    in_span(middle_rect),
+                    &widths[leading_end..middle_end],
+                    scroll_x,
+                    rtl,
+                    line_color,
+                    line_w,
+                );
+                crate::table_view::draw_pane_dividers(
+                    canvas,
+                    in_span(trailing_rect),
+                    &widths[middle_end..],
+                    0.0,
+                    rtl,
+                    line_color,
+                    line_w,
+                );
+            }
         }
 
         // Focus ring — keyboard-only (`:focus-visible`) and only while the
-        // view holds focus, so a mouse click never leaves a ring.
+        // view holds focus, so a mouse click never leaves a ring. A full-width
+        // row is one cell, ringed whole whatever column the cursor carries.
         if self.view_focused.get()
+            && self.focus_visible.get()
+            && let Some((focus_row, _)) = self.focused_cell.get()
+            && is_band_row(focus_row)
+        {
+            let (focus_top, focus_h) = {
+                let mut m = self.row_metrics.borrow_mut();
+                (m.row_top(focus_row), m.row_height(focus_row))
+            };
+            let y = body_origin_y + focus_top - scroll_y;
+            if y + focus_h >= body_origin_y && y <= body_origin_y + body_height {
+                canvas.set_clip(content_bounds);
+                let inset = cp::FOCUS_RING_INSET;
+                let stroke = cp::GRID_LINE_THICKNESS.max(1.5);
+                let ring_color = BorderRole::Focused.resolve(colors);
+                let (rx, ry) = (content_left + inset, y + inset);
+                let rw = (body_width_for_paint - inset * 2.0).max(0.0);
+                let rh = (focus_h - inset * 2.0).max(0.0);
+                stroke_ring(canvas, Rect::new(rx, ry, rw, rh), stroke, ring_color);
+                canvas.clear_clip();
+            }
+        } else if self.view_focused.get()
             && self.focus_visible.get()
             && let Some((focus_row, focus_col)) = self.focused_cell.get()
             && focus_col < widths.len()
@@ -1293,10 +1408,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 let ry = y + inset;
                 let rw = (cell_w - inset * 2.0).max(0.0);
                 let rh = (focus_h - inset * 2.0).max(0.0);
-                canvas.fill_rect(Rect::new(rx, ry, rw, stroke), ring_color);
-                canvas.fill_rect(Rect::new(rx, ry + rh - stroke, rw, stroke), ring_color);
-                canvas.fill_rect(Rect::new(rx, ry, stroke, rh), ring_color);
-                canvas.fill_rect(Rect::new(rx + rw - stroke, ry, stroke, rh), ring_color);
+                stroke_ring(canvas, Rect::new(rx, ry, rw, rh), stroke, ring_color);
                 canvas.clear_clip();
             }
         }
@@ -1502,6 +1614,9 @@ impl<T: 'static> Widget for TreeTableView<T> {
         if let Some(id) = self.empty_id {
             out.push(id);
         }
+        if let Some(id) = self.pinned_stack_id {
+            out.push(id);
+        }
         if let Some(id) = self.scrollbar_id {
             out.push(id);
         }
@@ -1522,6 +1637,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
             self.header_row_id,
             self.body_pane_id,
             self.empty_id,
+            self.pinned_stack_id,
             self.scrollbar_id,
             self.h_scrollbar_id,
         ]
@@ -1534,4 +1650,102 @@ impl<T: 'static> Widget for TreeTableView<T> {
     fn clips_children(&self) -> bool {
         true
     }
+}
+
+impl<T: 'static> TreeTableView<T> {
+    /// Mount the stack of pinned ancestor copies, and what a press on one of
+    /// them does: what a plain click on the real row would — the selection
+    /// and the cursor land on it, the cursor keeping its column — and the row
+    /// comes back into view right under its own pinned ancestors.
+    fn add_pinned_stack(
+        &self,
+        ctx: &mut BuildContext,
+        display_indices: &[usize],
+        tree_display_pos: usize,
+        indent_per_level: f32,
+        full_width: Option<full_width::FullWidthRows<T>>,
+        reveal: pinned::PinnedReveal,
+    ) -> WidgetId {
+        let on_pick: Rc<dyn Fn(usize, &mut EventContext)> = {
+            let selection = self.row_selection.clone();
+            let cells = self.cell_selection.clone();
+            let mode = self.selection_mode;
+            let focused = self.focused_cell.clone();
+            let scroll_y = self.scroll_y.clone();
+            let max_scroll_y = self.max_scroll_y.clone();
+            let viewport = self.viewport_height.clone();
+            Rc::new(move |row, _ctx| {
+                let col = focused.get().map_or(0, |(_row, col)| col);
+                match mode {
+                    TableSelectionMode::SingleRow | TableSelectionMode::MultiRow => {
+                        if let Some(s) = &selection {
+                            s.select(row);
+                        }
+                    }
+                    TableSelectionMode::SingleCell | TableSelectionMode::MultiCell => {
+                        if let Some(cs) = &cells {
+                            cs.select(row, col);
+                        }
+                    }
+                    TableSelectionMode::None => {}
+                }
+                focused.set(Some((row, col)));
+                let scroll = scroll_y.get();
+                let target = reveal.scroll_for(row, scroll, viewport.get(), max_scroll_y.get());
+                if (target - scroll).abs() > f32::EPSILON {
+                    scroll_y.set(target);
+                }
+            })
+        };
+        ctx.add(pinned::PinnedStack {
+            rows: self.pinned_rows.clone(),
+            built: self.pinned_built.clone(),
+            layout: self.pinned_layout.clone(),
+            copies: pinned::RowCopies {
+                source: self.source.clone(),
+                columns: self.columns.clone(),
+                display_indices: display_indices.to_vec(),
+                column_widths: self.column_widths.clone(),
+                pane_boundaries: *self.pane_boundaries.borrow(),
+                scroll_x: self.scroll_x.clone(),
+                tree_display_pos,
+                indent_per_level,
+                row_metrics: self.row_metrics.clone(),
+                full_width,
+            },
+            on_pick,
+            lines: Vec::new(),
+        })
+    }
+}
+
+/// The cell focus ring: four `stroke`-wide edges just inside `rect`.
+fn stroke_ring(canvas: &mut Canvas, rect: Rect, stroke: f32, color: teksilo_tokens::Color) {
+    let Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    } = rect;
+    canvas.fill_rect(Rect::new(x, y, w, stroke), color);
+    canvas.fill_rect(Rect::new(x, y + h - stroke, w, stroke), color);
+    canvas.fill_rect(Rect::new(x, y, stroke, h), color);
+    canvas.fill_rect(Rect::new(x + w - stroke, y, stroke, h), color);
+}
+
+/// The spans of `[top, bottom)` that none of `bands` covers, top to bottom.
+/// `bands` are `(y, height)`, in row order.
+pub(super) fn spans_between(top: f32, bottom: f32, bands: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    let mut spans = Vec::with_capacity(bands.len() + 1);
+    let mut from = top;
+    for &(y, height) in bands {
+        if y > from {
+            spans.push((from, y.min(bottom)));
+        }
+        from = from.max(y + height);
+    }
+    if bottom > from {
+        spans.push((from, bottom));
+    }
+    spans
 }

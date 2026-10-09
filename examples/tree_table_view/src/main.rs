@@ -19,6 +19,13 @@
 //!   invalidation), so the view doesn't jump.
 //! - `Role::TreeGrid` accessibility with per-row level + expanded.
 //! - ArrowLeft / ArrowRight on the tree column collapse / expand.
+//! - **Folders as full-width rows** (`full_width_row` +
+//!   `full_width_row_delegate`): one band across every column, naming the
+//!   folder and how many entries it holds.
+//! - **Pinned ancestors** (`pinned_ancestors(2)`): scroll through `assets` or
+//!   `src/util` and the folders above stay pinned under the header, pushed up
+//!   as the next folder arrives. A click on a pinned folder takes you back
+//!   to it.
 
 use teksilo::data::{
     SelectionMode, SelectionModel, SortDirection, SortFilterTreeModel, TreeFilterMode, TreeModel,
@@ -45,15 +52,18 @@ struct FsNode {
     /// Optional multi-line description — rows carrying one measure
     /// taller under `auto_row_height`.
     desc: &'static str,
+    /// How many entries a folder holds, for its full-width row.
+    entries: usize,
 }
 
 impl FsNode {
-    fn folder(name: impl Into<String>) -> Self {
+    fn folder(name: impl Into<String>, entries: usize) -> Self {
         Self {
             name: name.into(),
             size: 0,
             kind: "folder",
             desc: "",
+            entries,
         }
     }
     fn file(name: impl Into<String>, size: u64, kind: &'static str) -> Self {
@@ -62,7 +72,11 @@ impl FsNode {
             size,
             kind,
             desc: "",
+            entries: 0,
         }
+    }
+    fn is_folder(&self) -> bool {
+        self.kind == "folder"
     }
     fn described(mut self, desc: &'static str) -> Self {
         self.desc = desc;
@@ -72,7 +86,7 @@ impl FsNode {
 
 fn build_tree() -> TreeModel<FsNode> {
     let t = TreeModel::new();
-    let docs = t.insert_root(0, FsNode::folder("docs"));
+    let docs = t.insert_root(0, FsNode::folder("docs", 3));
     t.insert_child(
         docs,
         0,
@@ -80,7 +94,7 @@ fn build_tree() -> TreeModel<FsNode> {
             .described("Project overview.\nStart here before anything else."),
     );
     t.insert_child(docs, 1, FsNode::file("guide.md", 12_876, "markdown"));
-    let plans = t.insert_child(docs, 2, FsNode::folder("plans"));
+    let plans = t.insert_child(docs, 2, FsNode::folder("plans", 2));
     t.insert_child(
         plans,
         0,
@@ -89,14 +103,14 @@ fn build_tree() -> TreeModel<FsNode> {
     );
     t.insert_child(plans, 1, FsNode::file("phase-8.md", 5_432, "markdown"));
 
-    let src = t.insert_root(1, FsNode::folder("src"));
+    let src = t.insert_root(1, FsNode::folder("src", 3));
     t.insert_child(
         src,
         0,
         FsNode::file("main.rs", 1_024, "rust").described("Binary entry point."),
     );
     t.insert_child(src, 1, FsNode::file("lib.rs", 2_048, "rust"));
-    let util = t.insert_child(src, 2, FsNode::folder("util"));
+    let util = t.insert_child(src, 2, FsNode::folder("util", 2));
     t.insert_child(
         util,
         0,
@@ -104,8 +118,20 @@ fn build_tree() -> TreeModel<FsNode> {
     );
     t.insert_child(util, 1, FsNode::file("parse.rs", 1_536, "rust"));
 
-    t.insert_root(2, FsNode::file("Cargo.toml", 768, "toml"));
-    t.insert_root(3, FsNode::file("README", 256, "text"));
+    // Enough files to scroll through, so the pinned folder rows show.
+    const ICONS: usize = 24;
+    let assets = t.insert_root(2, FsNode::folder("assets", ICONS));
+    for i in 0..ICONS {
+        let size = 2_048 + i as u64 * 97;
+        t.insert_child(
+            assets,
+            i,
+            FsNode::file(format!("icon-{i:02}.png"), size, "image"),
+        );
+    }
+
+    t.insert_root(3, FsNode::file("Cargo.toml", 768, "toml"));
+    t.insert_root(4, FsNode::file("README", 256, "text"));
     t
 }
 
@@ -186,7 +212,27 @@ fn main() {
                         .grid_lines(GridLines::Horizontal)
                         .selection_mode(TableSelectionMode::MultiRow)
                         .selection(selection.clone())
-                        .tree_column("name");
+                        .tree_column("name")
+                        // A folder is one band across the table: its name,
+                        // then how many entries it holds.
+                        .full_width_row(FsNode::is_folder)
+                        .full_width_row_delegate(|row, _: &CellContext| {
+                            Box::new(
+                                HStack::new()
+                                    .spacing(8.0)
+                                    .child(
+                                        TextWidget::new(lit!(row.name.clone()))
+                                            .style(TextStyleRole::BodyBold),
+                                    )
+                                    .child(
+                                        TextWidget::new(lit!(format!("{} entries", row.entries)))
+                                            .color(TextRole::Secondary),
+                                    ),
+                            )
+                        })
+                        // The folders above the first visible row stay in
+                        // sight, two levels deep.
+                        .pinned_ancestors(2);
 
                     // Wire the proxy to the table's signals.
                     proxy_for_table.sort_signal(table.sort_signal().clone());

@@ -56,6 +56,9 @@ pub(crate) struct CellA11y {
     /// branch, `None` on a leaf and on every cell that is not the tree
     /// column's. See `with_expanded`.
     expanded: Option<bool>,
+    /// How many columns the cell covers, when it covers more than its own.
+    /// See `with_column_span`.
+    column_span: Option<usize>,
 }
 
 impl CellA11y {
@@ -75,6 +78,7 @@ impl CellA11y {
             name: None,
             level_1based: None,
             expanded: None,
+            column_span: None,
         }
     }
 
@@ -155,6 +159,20 @@ impl CellA11y {
         self.expanded = expanded;
         self
     }
+
+    /// Announce that the cell covers `span` columns (`aria-colspan`), from its
+    /// own column index on. `TreeTableView`'s full-width rows are one cell
+    /// across every column and say so here.
+    ///
+    /// Published, not yet heard: none of the adapters this workspace pins
+    /// (`accesskit_windows` 0.35, `accesskit_macos` 0.27,
+    /// `accesskit_atspi_common` 0.21) reads `column_span`. It is the property
+    /// AccessKit defines for exactly this, on the node it belongs to, so an
+    /// adapter that learns it needs nothing more from here.
+    pub(crate) fn with_column_span(mut self, span: Option<usize>) -> Self {
+        self.column_span = span;
+        self
+    }
 }
 
 impl Widget for CellA11y {
@@ -205,6 +223,9 @@ impl Widget for CellA11y {
         // plain `bool`.
         if let Some(expanded) = self.expanded {
             builder.set_expanded(expanded);
+        }
+        if let Some(span) = self.column_span {
+            builder.set_column_span(span);
         }
     }
 

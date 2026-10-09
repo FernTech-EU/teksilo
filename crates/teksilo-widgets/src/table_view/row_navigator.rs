@@ -75,6 +75,29 @@ pub(crate) trait RowNavigator {
     }
 
     fn toggle_expanded(&self, _row: usize) {}
+
+    /// Tree-only — whether the row is one cell across every column (a
+    /// `TreeTableView` full-width row). The cursor's column is kept on such a
+    /// row but means nothing there: a horizontal move stays on it, the
+    /// expand/collapse arrows act whatever the column, and no column of it
+    /// opens an editor.
+    fn spans_all_columns(&self, _row: usize) -> bool {
+        false
+    }
+
+    /// The scroll offset that reveals `row`, for a view that covers the top of
+    /// its own viewport and so cannot use the plain row arithmetic; `None`
+    /// (the default) for one that covers nothing. `TreeTableView` answers it
+    /// while it pins ancestor rows there.
+    fn reveal_scroll(
+        &self,
+        _row: usize,
+        _scroll: f32,
+        _viewport: f32,
+        _max_scroll: f32,
+    ) -> Option<f32> {
+        None
+    }
 }
 
 /// Trivial navigator over a length-providing closure. Used by

@@ -641,11 +641,103 @@ clear behaviour).
 | ArrowLeft on tree column    | collapse the row when expanded, else move to its parent (TreeTableView)                   |
 | `*` / `+` / `-`             | expand the whole subtree / expand one level / collapse (TreeTableView)                    |
 | ArrowRight on tree column   | expand the row when collapsed and has children (TreeTableView)                            |
+| On a full-width row         | ArrowLeft / ArrowRight act as on the tree column, from any column; it is one cell to Home / End and Tab, and opens no editor (TreeTableView, see [Group rows](#group-rows-and-pinned-ancestors-treetableview)) |
 
 The same handler powers both widgets via the
 [`RowNavigator`](../crates/teksilo-widgets/src/table_view/row_navigator.rs)
 trait, `FlatNavigator` for `TableView`, `TreeNavigator` for
 `TreeTableView`.
+
+---
+
+## Group rows and pinned ancestors (`TreeTableView`)
+
+A tree whose upper levels are groups, songs under albums under artists,
+reads best when the group rows span the whole table ("an artist · 12 songs |
+3 albums | 52:10") and the group being scrolled through stays in sight.
+Two builders do that:
+
+```rust
+let library = TreeTableView::from_projection(proxy.clone())
+    .add_column(title_col)        // the tree column
+    .add_column(album_col)
+    .add_column(time_col)
+    .full_width_row(|row: &Row| !row.is_song())
+    .full_width_row_delegate(|row, _cx| {
+        Box::new(TextWidget::new(lit!(row.summary())))
+    })
+    .pinned_ancestors(2);         // the artist, then the album
+```
+
+### Full-width rows
+
+`full_width_row(|item| -> bool)` picks the rows drawn as **one cell across
+every column**; `full_width_row_delegate(|item, &CellContext| -> Box<dyn Widget>)`
+builds that cell, the band, the way a column delegate builds a cell. Without a
+delegate the band shows the tree column's own cell, laid across the row. The
+band's `CellContext` describes it as the tree column: `col_id` and
+`col_index` are the tree column's, `is_tree_column` is `true`, `is_focused`
+holds while the cursor is on the row in any column, and `is_selected` while
+the row is selected (in a cell mode, while any of its cells is). A row whose
+item is still loading is never full-width.
+
+The row stays a row of the tree:
+
+- it selects, activates (Enter, the click `activate_on` names), drags,
+  takes drops and answers type-ahead as any row does;
+- its indent and chevron are drawn in the band, where the tree column draws
+  them; the chevron toggles it, and ArrowLeft / ArrowRight collapse and
+  expand it whatever column the cursor is in;
+- in cell navigation it is **one cell**: ArrowLeft / ArrowRight that do not
+  collapse or expand it, and Home / End, leave the cursor where it is; Tab
+  and Shift+Tab pass it in one press; no column of it opens an editor (F2,
+  typing, `begin_edit` all do nothing on it). The cursor keeps the column it
+  arrived with, so ArrowDown onto an ordinary row lands back in that column.
+
+**Horizontal scroll.** The band stays in the viewport while the columns
+scroll sideways, so a group row stays readable. Its chevron sits where the
+tree column's does with the columns unscrolled: in line with the rows around
+it while the tree column is the first column (the default) or a pinned one.
+
+**Row height** follows the view's mode like any row's: the uniform height,
+the `row_height_fn` callback, or under `auto_row_height` the band measured at
+the row's full width. Column dividers (`GridLines::Vertical`) stop at a band
+rather than crossing it; the alternating tint, the selection band and the
+horizontal grid lines run across it as across any row. The focus ring
+surrounds the whole band.
+
+### Pinned ancestors
+
+`pinned_ancestors(depth)` keeps the ancestor rows of the first visible row
+pinned under the header, outermost first and at most `depth` levels of them,
+the "sticky scroll" of code editors. `0`, the default, pins nothing.
+
+- A pinned row is pushed up by the next row at its level as that row arrives,
+  as `ListView`'s pinned section header is, so it never covers a row it is
+  not an ancestor of. A deeper pinned row slides under the one above it.
+- A pinned row is a **copy**: the real row's cells, or its band for a
+  full-width row, at the real row's height, on the header's
+  `SurfaceRole::Raised` surface. It shows the row's content, not its
+  selection or focus (its delegates are told neither), and its chevron is a
+  picture. A copy is rebuilt a frame after the scroll that changes the row it
+  stands for, and is hidden until then rather than showing the previous row.
+- A press on a pinned row selects the real row, puts the cursor on it (the
+  cursor keeps its column), and scrolls it back into view right under its own
+  pinned ancestors. A press never reaches a control drawn inside the copy.
+- Every reveal the view makes stops below the ancestors that would be pinned
+  over the row: the keyboard moving the cursor, `ensure_row_visible`,
+  `scroll_to_row` (which aligns the row under its ancestors rather than to
+  the very top), taking focus, and the rows' ScrollIntoView action. So a copy
+  never covers the row the cursor is on.
+- The copies are hidden from assistive technology and take no Tab stop; the
+  real rows stay where they are in the tree, scrolled under the copies like
+  any row above the viewport.
+- The stack is re-derived on every layout from the flattening, so an expand,
+  a collapse, an insert or a re-source above or inside it shows on the next
+  frame.
+
+A drop over a pinned row lands on the real row underneath it, not on the
+ancestor the copy shows.
 
 ---
 
@@ -798,6 +890,14 @@ likewise routed through the source.
 - Each body cell: `Role::Cell` (`Role::GridCell` in the cell-selection
   modes, where the cell is the selectable unit) with `row_index` and
   `column_index`, plus `selected` reflecting the current selection.
+- A `TreeTableView` full-width row keeps its row node (level, expanded,
+  position) and holds **one** cell: column index 1 with a `column_span` of
+  every displayed column, the band as its content, and the level and
+  expanded state the tree column's cell would carry. No AccessKit adapter in
+  this workspace reads `column_span` yet; it is the property AccessKit
+  defines for this, on the node it belongs to.
+- Pinned ancestor rows are copies, hidden from assistive technology with
+  their whole subtree; the real rows stay where they are in the tree.
 - The filter popover's trigger inherits the popover's `set_expanded`
   state and is named `"Filter"`, locating it via screen-reader search
   is the same as locating any popover button.
@@ -845,15 +945,17 @@ on `TableView` and `TreeTableView`, tree expand/collapse via twist +
 (`Role::Grid` when selectable) accessibility with row indices and sort direction,
 sort / width / order / filter state adopted from application signals
 (`bind_sort`, `bind_column_widths`, `bind_column_order`, `bind_filters`) and
-shared between views, and the column header as a widget of its own
+shared between views, the column header as a widget of its own
 (`TableHeader` over `ColumnSpec`s, with `resolved_widths_signal`) for rows an
-application lays out itself.
+application lays out itself, and on `TreeTableView` full-width group rows
+(`full_width_row` + `full_width_row_delegate`) and pinned ancestor rows
+(`pinned_ancestors`).
 
 **Intentionally not shipped:**
 
-- spreadsheet-style cell merging at the layout level (cells expose
-  AccessKit `row_span`/`column_span` for screen readers; the layout
-  doesn't merge),
+- spreadsheet-style cell merging at the layout level (the one cell that
+  spans columns is a `TreeTableView` full-width row's band, which spans all
+  of them),
 - formula evaluation / computed cells,
 - multi-row column-group headers,
 - footer / summary rows (compose a `StatusBar` below the table),
@@ -878,5 +980,7 @@ not bugs.
   filterable name/email/role columns.
 - `cargo run -p tree-table-view`, mock filesystem
   [`TreeTableView`](../examples/tree_table_view/src/main.rs) with
-  `KeepAncestors` filtering, twist-arrow expand/collapse, and the same
-  drag-resize / drag-reorder behaviour as the flat table.
+  `KeepAncestors` filtering, twist-arrow expand/collapse, folders drawn as
+  full-width rows, the folders above the first visible row pinned under the
+  header, and the same drag-resize / drag-reorder behaviour as the flat
+  table.
