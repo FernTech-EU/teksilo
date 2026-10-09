@@ -314,6 +314,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Alapértelmezett érték visszaállítása
+
 # A gazdag buboréksúgó „továbbiak” lenyitójának felirata (a részletes
 # törzsszöveget felfedő harmonika címe egy rögzített, gazdag buboréksúgóban).
 tooltip-more = Továbbiak

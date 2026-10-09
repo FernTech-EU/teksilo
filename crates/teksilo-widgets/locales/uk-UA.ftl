@@ -315,6 +315,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Скинути до типового значення
+
 # Напис «докладніше» для розкриття розширеної підказки (заголовок акордеона,
 # що відкриває докладний текст у закріпленій розширеній підказці).
 tooltip-more = Докладніше

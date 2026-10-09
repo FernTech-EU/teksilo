@@ -317,6 +317,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Επαναφορά στην προεπιλεγμένη τιμή
+
 # Ετικέτα «περισσότερα» για την ανάπτυξη των εμπλουτισμένων επεξηγήσεων
 # (ο τίτλος του πτυσσόμενου τμήματος που αποκαλύπτει το εκτενές κείμενο).
 tooltip-more = Περισσότερα

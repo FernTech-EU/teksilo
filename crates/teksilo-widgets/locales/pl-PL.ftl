@@ -314,6 +314,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Przywróć wartość domyślną
+
 # Etykieta „więcej” w rozwinięciu bogatej podpowiedzi (tytuł akordeonu
 # odsłaniający rozbudowaną treść w przypiętej podpowiedzi).
 tooltip-more = Więcej

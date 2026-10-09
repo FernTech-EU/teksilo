@@ -801,6 +801,8 @@ impl WidgetCatalog for Slider {
             .f32_step("step", "Step (0 = continuous)", 0.0, 0.0, 0.5, 0.05)
             .bool_("enabled", "Enabled", true)
             .opt_text("label", "Label", None)
+            .bool_("value_tooltip", "Value readout", false)
+            .bool_("default_value", "Double-click resets to 0.5", false)
     }
     fn variants() -> Vec<PreviewVariant> {
         vec![
@@ -836,6 +838,12 @@ impl WidgetCatalog for Slider {
         }
         if let Some(label) = label {
             s = s.label(lit!(label));
+        }
+        if knobs.bool_("value_tooltip").get() {
+            s = s.value_tooltip(|v| lit!(format!("{:.0} %", v * 100.0)));
+        }
+        if knobs.bool_("default_value").get() {
+            s = s.default_value(0.5);
         }
         // Vertical sliders need a fixed height to be visible.
         let widget: Box<dyn Widget> = if matches!(orient, Orientation::Vertical) {

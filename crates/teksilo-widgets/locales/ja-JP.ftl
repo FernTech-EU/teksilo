@@ -316,6 +316,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = 既定値に戻す
+
 # リッチツールチップの「詳細」開示ラベル（固定表示されたリッチツールチップ内で
 # 詳細本文を表示するアコーディオンのタイトル）。
 tooltip-more = 詳細

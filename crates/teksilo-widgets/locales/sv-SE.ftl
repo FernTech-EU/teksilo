@@ -314,6 +314,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Återställ till standardvärde
+
 # Etiketten ”mer” i rika verktygstips (accordion-titeln som visar den
 # utförliga texten i ett fastnålat rikt verktygstips).
 tooltip-more = Mer

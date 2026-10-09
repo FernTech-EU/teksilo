@@ -314,6 +314,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Rétablir la valeur par défaut
+
 # Étiquette « plus » du repli des infobulles riches (le titre de l'accordéon
 # révélant le corps détaillé dans une infobulle riche épinglée).
 tooltip-more = Plus

@@ -322,6 +322,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Ripristina il valore predefinito
+
 # Etichetta «altro» della sezione a scomparsa delle descrizioni comando
 # avanzate (il titolo della fisarmonica che rivela il corpo esteso di una
 # descrizione comando fissata).

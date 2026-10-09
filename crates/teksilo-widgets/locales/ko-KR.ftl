@@ -312,6 +312,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = 기본값으로 재설정
+
 # 서식 있는 도구 설명의 "더 보기" 펼치기 레이블(고정된 도구 설명 안에서
 # 긴 본문을 드러내는 아코디언 제목).
 tooltip-more = 더 보기

@@ -179,6 +179,17 @@ unaffected (`LocalizedString` and `RichTooltipSource` are both `Clone`).
 stored as data and rendered by `toast/surface.rs`; the multi-flavor
 setters don't apply to it.
 
+**Outside the matrix:** `Slider::value_tooltip(format)` is a live value
+readout, not a fourth tier, and it neither clears nor is cleared by the three
+setters above. It is up at once on hover, keyboard focus and drag rather than
+after a dwell, survives the press that starts a drag, follows the thumb, and is
+an overlay the slider raises itself with the tooltip chrome
+(`TooltipWidget`) as its surface, so none of the machinery on this page (dwell,
+reshow, sticky promotion, the description path) applies to it. A slider can
+carry both: the hint keeps its delay, its place under the slider and its
+accessible description, and the readout's text is the slider's accessible
+value. See the `Slider` module documentation.
+
 ### Tooltips and a control's own overlay
 
 A control that opens an overlay (the `ComboBox` dropdown, a `Popover`, a

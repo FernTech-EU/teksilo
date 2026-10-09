@@ -314,6 +314,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Varsayılan değere sıfırla
+
 # Zengin araç ipucundaki “daha fazla” açma etiketi (sabitlenmiş zengin araç
 # ipucunun uzun gövdesini açan akordiyon başlığı).
 tooltip-more = Daha fazla

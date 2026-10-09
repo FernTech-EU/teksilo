@@ -325,6 +325,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Restablecer el valor predeterminado
+
 # Etiqueta «más» del desplegable de las descripciones emergentes
 # enriquecidas (el título del acordeón que revela el cuerpo detallado de
 # una descripción emergente enriquecida fijada).

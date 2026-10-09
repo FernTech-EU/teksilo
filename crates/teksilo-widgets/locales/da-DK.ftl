@@ -314,6 +314,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Nulstil til standardværdi
+
 # »Mere«-udfoldningen i rige værktøjstip (accordion-titlen, der viser den
 # lange brødtekst i et fastgjort rigt værktøjstip).
 tooltip-more = Mere

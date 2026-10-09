@@ -316,6 +316,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = إعادة التعيين إلى القيمة الافتراضية
+
 # تسمية «المزيد» في التلميحات الغنية (عنوان الأكورديون الذي يكشف النص
 # المطوّل داخل تلميح غني مثبّت).
 tooltip-more = المزيد

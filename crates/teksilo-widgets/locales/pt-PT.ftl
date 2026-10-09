@@ -322,6 +322,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Repor o valor predefinido
+
 # Etiqueta «mais» das dicas ricas (o título do acordeão que revela o corpo
 # detalhado numa dica rica fixada).
 tooltip-more = Mais

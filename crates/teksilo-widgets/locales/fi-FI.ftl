@@ -316,6 +316,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Palauta oletusarvo
+
 # Rikkaan työkaluvihjeen ”lisää”-otsikko (haitarin otsikko, joka paljastaa
 # pitkän tekstiosan kiinnitetyssä työkaluvihjeessä).
 tooltip-more = Lisätietoja

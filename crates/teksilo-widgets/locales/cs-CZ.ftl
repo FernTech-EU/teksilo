@@ -316,6 +316,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Obnovit výchozí hodnotu
+
 # Popisek „více“ v rozbalovací části bohatých popisků (titulek harmoniky,
 # která odhalí podrobný text v připnutém bohatém popisku).
 tooltip-more = Více

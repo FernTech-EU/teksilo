@@ -44,6 +44,33 @@
 //! let _w = Slider::new(volume, 0.0, 1.0).step(0.05);
 //! ```
 //!
+//! ## Value readout and reset
+//!
+//! [`value_tooltip`](Slider::value_tooltip) shows the value as text beside the
+//! thumb — "-3.0 dB" on an equalizer band — while the pointer is over the
+//! slider, while a drag is moving it, and while it has keyboard focus. It is up
+//! at once rather than after a hover delay, follows the thumb, and changes as
+//! the value does. The same text becomes the slider's accessible value, beside
+//! the number, so a reader that speaks a value's text says "-3.0 dB" rather
+//! than "-3".
+//!
+//! [`default_value`](Slider::default_value) adds a way back: a double-click on
+//! the slider, or the "Reset to default" accessibility action, puts the value
+//! back to the default, as a user change, so [`on_change`](Slider::on_change)
+//! reports it.
+//!
+//! ```rust
+//! # use teksilo_core::signal::Signal;
+//! # use teksilo_i18n::lit;
+//! # use teksilo_widgets::Slider;
+//! let gain = Signal::new(0.0_f32);
+//! let _band = Slider::new(gain, -12.0, 12.0)
+//!     .step(0.5)
+//!     .label(lit!("Low shelf"))
+//!     .value_tooltip(|db| lit!(format!("{db:+.1} dB")))
+//!     .default_value(0.0);
+//! ```
+//!
 //! ## Touch and pen
 //!
 //! A slider is a **continuous manipulator**: the value it produces *is* the
@@ -77,7 +104,7 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
 use teksilo_core::focus::FocusOrigin;
-use teksilo_core::gesture::DragPhase;
+use teksilo_core::gesture::{DragPhase, TapStreak};
 use teksilo_core::pointer::touch_action::TouchAction;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::{
@@ -90,6 +117,10 @@ use teksilo_tokens::Orientation;
 
 use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
 
+mod readout;
+
+use readout::{Readout, ReadoutInputs, ValueFormat};
+
 // Re-export the variant enum at module top so callers can write
 // `Slider::new(...).variant(SliderVariant::Discrete)` without a deeper
 // import path.
@@ -101,6 +132,16 @@ use teksilo_i18n::LocalizedString;
 pub const SLIDER_PART_BODY: u16 = 0;
 /// [`Widget::target_regions`] part id for the knob.
 pub const SLIDER_PART_THUMB: u16 = 1;
+
+/// AccessKit custom-action id of "Reset to default", advertised when a
+/// [`default_value`](Slider::default_value) is set.
+///
+/// Fixed, so an assistive client's recorded id keeps meaning the same thing,
+/// and away from the low numbers: an application's own
+/// `.access_custom_action(..)` entries are numbered from 0 by position, and the
+/// dispatcher hands one `CustomAction(id)` to the widget and to those entries
+/// alike.
+const RESET_ACTION_ID: i32 = 1000;
 
 /// A draggable value selector bound to a `Signal<f32>` in a continuous
 /// or discrete range. Visual chrome is fully delegated to a
@@ -145,6 +186,10 @@ pub struct Slider {
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     /// Optional composite tooltip body (arbitrary widget tree).
     composite_tooltip_content: Option<Box<dyn Widget>>,
+    /// Formats the value for the live readout and the accessible value text.
+    value_format: Option<ValueFormat>,
+    /// The value the reset gesture and the reset action put back.
+    default_value: Option<f32>,
 }
 
 impl Slider {
@@ -174,18 +219,17 @@ impl Slider {
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
+            value_format: None,
+            default_value: None,
         }
     }
 
     /// Run `f` for every value this control produces under the **user's**
-    /// Set the discrete step size for keyboard arrows and accessibility
-    /// Increment/Decrement actions. When unset, defaults to 1 % of the
-    /// range.
-    /// Run `f` for every value this control produces under the **user's**
     /// hand, with an `EventContext`, so it can do what a bare `Signal` write
     /// cannot (`ctx.send_intent(...)`, opening a window). Fires for a track
-    /// click, for each step of a drag, for the arrows, and for an assistive
-    /// technology's `Increment` / `Decrement` / `SetValue`.
+    /// click, for each step of a drag, for the arrows, for an assistive
+    /// technology's `Increment` / `Decrement` / `SetValue`, and for a reset to
+    /// the [`default_value`](Self::default_value).
     ///
     /// **A drag fires this repeatedly** — once per value it actually produces,
     /// not once per pointer sample, since a write that changes nothing reports
@@ -204,6 +248,9 @@ impl Slider {
         self
     }
 
+    /// Set the discrete step size for keyboard arrows and accessibility
+    /// Increment/Decrement actions. When unset, defaults to 1 % of the
+    /// range.
     pub fn step(mut self, step: f32) -> Self {
         self.step = Some(step);
         self
@@ -288,7 +335,9 @@ impl Slider {
     /// Mutually exclusive with [`rich_tooltip`](Self::rich_tooltip),
     /// [`rich_tooltip_content`](Self::rich_tooltip_content), and
     /// [`composite_tooltip`](Self::composite_tooltip) — the last setter
-    /// wins and clears the others.
+    /// wins and clears the others. Independent of
+    /// [`value_tooltip`](Self::value_tooltip), which neither replaces nor is
+    /// replaced by any of them.
     pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
@@ -323,6 +372,56 @@ impl Slider {
         self.composite_tooltip_content = Some(Box::new(content));
         self.tooltip_text = None;
         self.rich_tooltip_source = None;
+        self
+    }
+
+    /// Show the value as text by the thumb, formatted by `format`, while the
+    /// slider is hovered, dragged, or focused from the keyboard.
+    ///
+    /// Unlike a [`tooltip`](Self::tooltip), the readout is up at once, with no
+    /// hover delay; a press does not close it, so it stays up through a drag;
+    /// and it moves with the thumb and changes as the value does, without a
+    /// rebuild. It sits above a horizontal slider's thumb, or below it near
+    /// the top of the window, and beside a vertical slider, on the
+    /// inline-start side when there is room, so it covers neither the thumb
+    /// nor the track. Escape hides it until the next hover, drag or key. It
+    /// is placed by the interactions that move the thumb: a value the
+    /// application writes while it is up changes its text at once and its
+    /// place at the next of them.
+    ///
+    /// The text is also the slider's accessible value, published beside the
+    /// number: UI Automation and macOS carry it, so a reader there says
+    /// "-3.0 dB" rather than "-3". AT-SPI carries the number alone, so Orca
+    /// keeps reading the number.
+    ///
+    /// `format` receives the value the bound signal holds, on every change to
+    /// it. It returns a [`LocalizedString`], so a `tr!(..)` message
+    /// re-resolves on a locale change and `lit!(..)` serves text that is not
+    /// translated.
+    ///
+    /// A [`tooltip`](Self::tooltip), rich or composite tooltip set beside it
+    /// keeps its hover delay, its place under the slider and the accessible
+    /// description it gives, and both show; to name the control in the
+    /// readout instead, say so in `format`.
+    pub fn value_tooltip(mut self, format: impl Fn(f32) -> LocalizedString + 'static) -> Self {
+        self.value_format = Some(Rc::new(format));
+        self
+    }
+
+    /// Let the user put the value back to `value`: with a double-click on the
+    /// slider, or with the "Reset to default" accessibility action, which this
+    /// also advertises.
+    ///
+    /// The reset is a user change, written through the same path as a drag or
+    /// an arrow key, so [`on_change`](Self::on_change) reports it unless the
+    /// value was already there. It is clamped to the range and not snapped to
+    /// the [`step`](Self::step): a default between two steps lands where it
+    /// was asked to. A double-click's first click jumps the value to where it
+    /// landed, as every click on the track does, so `on_change` reports that
+    /// value and then the default. A disabled slider ignores both the
+    /// double-click and the action.
+    pub fn default_value(mut self, value: f32) -> Self {
+        self.default_value = Some(value);
         self
     }
 }
@@ -450,6 +549,50 @@ impl Widget for Slider {
             }
         };
 
+        // The value readout, when one is configured, and the one call every
+        // handler below ends with: it raises, moves or takes down the readout
+        // after whatever the handler changed. A no-op on a slider without one.
+        let readout = self.value_format.clone().map(|format| {
+            Readout::mount(
+                ctx,
+                ReadoutInputs {
+                    value: value.clone(),
+                    min,
+                    max,
+                    orientation,
+                    thumb_diameter: thumb_radius * 2.0,
+                    bounds: cached_bounds.clone(),
+                    hovered: hovered.clone(),
+                    dragging: dragging.clone(),
+                    focused: focused.clone(),
+                },
+                format,
+                effective_enabled.clone(),
+            )
+        });
+        let sync_readout = move |ctx: &mut teksilo_core::widget::EventContext| {
+            if let Some(readout) = &readout {
+                readout.sync(ctx);
+            }
+        };
+
+        // The reset `default_value` asks for, written and reported like any
+        // other user change. `None` when no default is set, and then neither a
+        // double-click nor the reset action does anything of its own.
+        let reset_to_default = self.default_value.map(|default| {
+            let value = value.clone();
+            let report = report.clone();
+            let sync_readout = sync_readout.clone();
+            move |ctx: &mut teksilo_core::widget::EventContext| {
+                let before = value.get();
+                value.set(default.clamp(min, max));
+                report(before, ctx);
+                sync_readout(ctx);
+            }
+        });
+        // The clicks in a row the track has taken, for the double-click.
+        let taps = Rc::new(Cell::new(TapStreak::EMPTY));
+
         let adjust_by_step = {
             let value = value.clone();
             move |positive: bool, page: bool| {
@@ -548,46 +691,101 @@ impl Widget for Slider {
             let set_value = set_value_from_position.clone();
             let value_before = value.clone();
             let report = report.clone();
-            handlers = handlers.on_drag(move |phase, ctx| match phase {
-                DragPhase::Started {
-                    position,
-                    button: PointerButton::Primary,
-                    ..
-                } => {
-                    dragging.set(true);
-                    let before = value_before.get();
-                    set_value(position.x, position.y, ctx.is_rtl());
-                    report(before, ctx);
+            let sync_readout = sync_readout.clone();
+            let taps = taps.clone();
+            handlers = handlers.on_drag(move |phase, ctx| {
+                match phase {
+                    DragPhase::Started {
+                        position,
+                        button: PointerButton::Primary,
+                        ..
+                    } => {
+                        // A drag between two clicks makes them two clicks, not
+                        // a double-click: the tap streak's own rule.
+                        taps.set(TapStreak::EMPTY);
+                        dragging.set(true);
+                        let before = value_before.get();
+                        set_value(position.x, position.y, ctx.is_rtl());
+                        report(before, ctx);
+                    }
+                    DragPhase::Moved { position, .. } if dragging.get() => {
+                        let before = value_before.get();
+                        set_value(position.x, position.y, ctx.is_rtl());
+                        report(before, ctx);
+                    }
+                    DragPhase::Ended { .. } | DragPhase::Cancelled { .. } => {
+                        dragging.set(false);
+                    }
+                    _ => return,
                 }
-                DragPhase::Moved { position, .. } if dragging.get() => {
-                    let before = value_before.get();
-                    set_value(position.x, position.y, ctx.is_rtl());
-                    report(before, ctx);
-                }
-                DragPhase::Ended { .. } => {
-                    dragging.set(false);
-                }
-                _ => {}
+                sync_readout(ctx);
             });
         }
 
-        // Track click — jump the value to the click position.
+        // A cancelled press is over too, with no `Ended` to say so (a modal
+        // opening, the window losing focus). Left set, `dragging` kept the
+        // pressed look, and now a readout, on for good.
+        {
+            let dragging = dragging.clone();
+            let sync_readout = sync_readout.clone();
+            handlers = handlers.on_pointer_cancel(move |_pointer, _reason, ctx| {
+                dragging.set(false);
+                sync_readout(ctx);
+            });
+        }
+
+        // Track click — jump the value to the click position — and, with a
+        // `default_value`, the double-click that resets it.
+        //
+        // The double-click is counted here, on the node's own tap streak,
+        // rather than with `on_double_tap`: a multi-tap recognizer on a node
+        // takes the single-tap one off it (`WidgetTree::ensure_gesture_arena`),
+        // and the click that jumps the value with it. `TapStreak` is the
+        // framework's own continuation rule (same button, within the profile's
+        // multi-tap interval and slop), so the two cannot disagree on what a
+        // double-click is. Its second click resets instead of jumping; the
+        // first has already jumped, as any click does.
         {
             let set_value = set_value_from_position.clone();
             let value_before = value.clone();
             let report = report.clone();
+            let sync_readout = sync_readout.clone();
+            let reset = reset_to_default.clone();
+            let taps = taps.clone();
+            // The profile the recognizers would read, as the theme stands at
+            // build time; the thumb radius above is read the same way.
+            let input = ctx.theme().input;
             handlers = handlers.on_tap(move |event, ctx| {
+                if let Some(ref reset) = reset {
+                    // The streak measures from where each click was pressed;
+                    // a tap's release is within its slop of that.
+                    let mut streak = taps.get();
+                    let count = streak.advance(
+                        event.pointer.time,
+                        input.profile(event.pointer.kind),
+                        event.position,
+                        event.button,
+                    );
+                    taps.set(streak);
+                    if count == 2 {
+                        reset(ctx);
+                        return;
+                    }
+                }
                 let before = value_before.get();
                 set_value(event.position.x, event.position.y, ctx.is_rtl());
                 report(before, ctx);
+                sync_readout(ctx);
             });
         }
 
         // Hover handler
         {
             let hovered = hovered.clone();
-            handlers = handlers.on_hover(move |entered, _ctx| {
+            let sync_readout = sync_readout.clone();
+            handlers = handlers.on_hover(move |entered, ctx| {
                 hovered.set(entered);
+                sync_readout(ctx);
             });
         }
 
@@ -597,6 +795,7 @@ impl Widget for Slider {
             let adjust = adjust_by_step.clone();
             let value = value.clone();
             let report = report.clone();
+            let sync_readout = sync_readout.clone();
             handlers = handlers.on_key(move |event, ctx| {
                 let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
                     return EventResponse::Ignored;
@@ -606,24 +805,31 @@ impl Widget for Slider {
                 // flip needs no rebuild. Mirroring any one of the three alone
                 // would leave the `Left` key and a leftward drag moving the
                 // thumb in opposite directions.
-                let Some(mv) = range_nav::range_move(
+                let response = match range_nav::range_move(
                     *key,
                     *modifiers,
                     RangeKind::Scalar,
                     RangeAxis::Both,
                     ctx.is_rtl(),
-                ) else {
-                    return EventResponse::Ignored;
+                ) {
+                    Some(mv) => {
+                        let before = value.get();
+                        match mv {
+                            RangeMove::Step { increase } => adjust(increase, false),
+                            RangeMove::Page { increase } => adjust(increase, true),
+                            RangeMove::ToMin => value.set(min),
+                            RangeMove::ToMax => value.set(max),
+                        }
+                        report(before, ctx);
+                        EventResponse::Handled
+                    }
+                    None => EventResponse::Ignored,
                 };
-                let before = value.get();
-                match mv {
-                    RangeMove::Step { increase } => adjust(increase, false),
-                    RangeMove::Page { increase } => adjust(increase, true),
-                    RangeMove::ToMin => value.set(min),
-                    RangeMove::ToMax => value.set(max),
-                }
-                report(before, ctx);
-                EventResponse::Handled
+                // After a key the slider does not take as well: any key makes
+                // the focus keyboard focus, which the readout follows as the
+                // focus ring does.
+                sync_readout(ctx);
+                response
             });
         }
 
@@ -633,8 +839,10 @@ impl Widget for Slider {
         // key reveals the ring.
         {
             let focused = focused.clone();
-            handlers = handlers.on_focus(move |gained, _ctx| {
+            let sync_readout = sync_readout.clone();
+            handlers = handlers.on_focus(move |gained, ctx| {
                 focused.set(gained);
+                sync_readout(ctx);
             });
         }
 
@@ -654,8 +862,18 @@ impl Widget for Slider {
             let set_snapped = set_value_snapped.clone();
             let value_before = value.clone();
             let report = report.clone();
+            let reset = reset_to_default.clone();
+            let sync_readout = sync_readout.clone();
             handlers = handlers.on_access_action_request(move |action, _node, data, ctx| {
                 use teksilo_core::accesskit::{Action, ActionData};
+                // "Reset to default", which reports for itself.
+                if action == Action::CustomAction
+                    && matches!(data, Some(ActionData::CustomAction(RESET_ACTION_ID)))
+                    && let Some(ref reset) = reset
+                {
+                    reset(ctx);
+                    return EventResponse::Handled;
+                }
                 let before = value_before.get();
                 let outcome = match (action, data) {
                     (Action::Increment, _) => {
@@ -689,6 +907,7 @@ impl Widget for Slider {
                 };
                 if outcome == EventResponse::Handled {
                     report(before, ctx);
+                    sync_readout(ctx);
                 }
                 outcome
             });
@@ -760,32 +979,14 @@ impl Widget for Slider {
         if diameter <= 0.0 || !diameter.is_finite() {
             return regions;
         }
-        let radius = diameter * 0.5;
-        let range = self.max - self.min;
-        let t = if range.abs() < f32::EPSILON {
-            0.0
-        } else {
-            ((self.value.get() - self.min) / range).clamp(0.0, 1.0)
-        };
-        let (cx, cy) = match self.orientation {
-            Orientation::Horizontal => {
-                let usable = (bounds.width - diameter).max(0.0);
-                let t = if self.cached_rtl.get() { 1.0 - t } else { t };
-                (
-                    bounds.x + radius + usable * t,
-                    bounds.y + bounds.height * 0.5,
-                )
-            }
-            Orientation::Vertical => {
-                let usable = (bounds.height - diameter).max(0.0);
-                (
-                    bounds.x + bounds.width * 0.5,
-                    bounds.y + radius + usable * t,
-                )
-            }
-        };
         regions.push(TargetRegion::grab(
-            Rect::new(cx - radius, cy - radius, diameter, diameter),
+            thumb_rect(
+                bounds,
+                fraction(self.value.get(), self.min, self.max),
+                diameter,
+                self.orientation,
+                self.cached_rtl.get(),
+            ),
             SLIDER_PART_THUMB,
         ));
         regions
@@ -819,7 +1020,60 @@ impl Widget for Slider {
         // VoiceOver's value entry reachable at all.
         builder.add_action(teksilo_core::accesskit::Action::SetValue);
         builder.add_action(teksilo_core::accesskit::Action::Focus);
+        // The readout's text, beside the number: the string a reader that
+        // speaks a value's text says, and the one the sighted user sees.
+        if let Some(ref format) = self.value_format {
+            builder.set_value(format(self.value.get()).resolve_now());
+        }
+        if self.default_value.is_some() {
+            builder.add_action(teksilo_core::accesskit::Action::CustomAction);
+            builder.set_custom_actions(vec![teksilo_core::accesskit::CustomAction {
+                id: RESET_ACTION_ID,
+                description: teksilo_i18n::tr_widget!(slider_reset_to_default()).resolve_now(),
+            }]);
+        }
     }
+}
+
+/// Where `value` sits in `min..=max`, from 0 at `min` to 1 at `max`, clamped.
+/// 0 for a range too narrow to divide by.
+fn fraction(value: f32, min: f32, max: f32) -> f32 {
+    let range = max - min;
+    if range.abs() < f32::EPSILON {
+        0.0
+    } else {
+        ((value - min) / range).clamp(0.0, 1.0)
+    }
+}
+
+/// The knob's square at fraction `t` of the range, inside `bounds`, as the
+/// default style paints it: the centre travels the length less one diameter,
+/// a horizontal slider's minimum is at the leading edge (the right one under
+/// RTL), and a vertical slider's is at the bottom.
+///
+/// One answer for [`Slider::target_regions`] and the value readout, so the
+/// grab region reported and the thumb the readout clears are the thumb that
+/// was painted.
+fn thumb_rect(bounds: Rect, t: f32, diameter: f32, orientation: Orientation, rtl: bool) -> Rect {
+    let radius = diameter * 0.5;
+    let (cx, cy) = match orientation {
+        Orientation::Horizontal => {
+            let usable = (bounds.width - diameter).max(0.0);
+            let t = if rtl { 1.0 - t } else { t };
+            (
+                bounds.x + radius + usable * t,
+                bounds.y + bounds.height * 0.5,
+            )
+        }
+        Orientation::Vertical => {
+            let usable = (bounds.height - diameter).max(0.0);
+            (
+                bounds.x + bounds.width * 0.5,
+                bounds.y + radius + usable * (1.0 - t),
+            )
+        }
+    };
+    Rect::new(cx - radius, cy - radius, diameter, diameter)
 }
 
 /// The `f64` a platform is handed for one of the slider's `f32`s: the one
@@ -2236,5 +2490,672 @@ mod tests {
                 region.role,
             );
         }
+    }
+
+    /// A vertical slider reports its knob where the body paints it: its
+    /// minimum is at the **bottom**.
+    ///
+    /// The report ran the other way, from the top, while the paint and the
+    /// pointer mapping both put the maximum at the top, so a quarter-value
+    /// knob was reported three quarters of the way down.
+    #[test]
+    fn a_vertical_slider_reports_its_knob_where_it_paints_it() {
+        use crate::styles::recipe_slider_style::SLIDER_THUMB_DIAMETER;
+
+        let theme = teksilo_core::presets::intui::light();
+        let accent = theme.colors.accent.to_array();
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let s = tree
+            .add(Slider::new(Signal::new(25.0_f32), 0.0, 100.0).orientation(Orientation::Vertical));
+        tree.layout(SizeProposal::exact(60.0, 200.0));
+        let painted = tree
+            .render()
+            .shapes
+            .iter()
+            .find(|q| {
+                q.color == accent
+                    && (q.screen[2] - SLIDER_THUMB_DIAMETER).abs() < 0.01
+                    && (q.screen[3] - SLIDER_THUMB_DIAMETER).abs() < 0.01
+            })
+            .map(|q| q.screen[1] + q.screen[3] * 0.5)
+            .expect("the body paints a knob");
+        let reported = tree
+            .widget_target_regions(s)
+            .into_iter()
+            .find(|r| r.part == SLIDER_PART_THUMB)
+            .expect("the slider reports its knob")
+            .rect
+            .center()
+            .y;
+        let bounds = tree.bounds(s);
+        assert!(
+            painted > bounds.center().y,
+            "a quarter-value knob is painted in the lower half ({painted})"
+        );
+        assert!(
+            (reported - painted).abs() < 0.51,
+            "the knob is reported at y {reported} and painted at y {painted}",
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // The value readout and the reset to a default
+    // -----------------------------------------------------------------
+
+    use crate::primitives::{FixedSize, HStack, VStack};
+    use std::cell::RefCell;
+    use teksilo_i18n::lit;
+
+    /// The readout an equalizer band shows: the gain in decibels, signed.
+    fn db(gain: f32) -> LocalizedString {
+        lit!(format!("{gain:+.1} dB"))
+    }
+
+    /// The window every readout test runs in.
+    fn window() -> SizeProposal {
+        SizeProposal::exact(400.0, 300.0)
+    }
+
+    /// A tree with real-looking text metrics, so a readout has a size to
+    /// place.
+    fn readout_tree() -> WidgetTree {
+        WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light())
+            .with_text_backend(Rc::new(
+                RefCell::new(teksilo_canvas::MockTextBackend::new()),
+            ))
+    }
+
+    /// `slider`, full width, 100 dp below the top of the window, with room
+    /// above it for the readout and below it to take the pointer to.
+    fn horizontal_scene(slider: Slider) -> (WidgetTree, WidgetId) {
+        let mut tree = readout_tree();
+        let s = tree.add(slider);
+        let _column = tree.add(
+            VStack::new()
+                .child(FixedSize::new().height(100.0))
+                .child(s)
+                .child(FixedSize::new().height(100.0)),
+        );
+        tree.layout(window());
+        (tree, s)
+    }
+
+    /// Somewhere in the window the slider is not.
+    fn away() -> Point {
+        Point::new(200.0, 280.0)
+    }
+
+    /// The readout up over the slider, as its text and where it sits, or
+    /// `None` while none is.
+    ///
+    /// The surface is the tooltip module's `TooltipWidget`, which keeps its
+    /// text private; its `Debug` is the one place the text can be read from
+    /// here.
+    fn readout(tree: &WidgetTree) -> Option<(String, Rect)> {
+        let overlays = tree.overlay_manager();
+        overlays
+            .active_content_ids()
+            .into_iter()
+            .find_map(|content| {
+                let debug = tree.widget_debug_string(content)?;
+                let text = debug
+                    .split("TooltipWidget { text: \"")
+                    .nth(1)?
+                    .split('"')
+                    .next()?
+                    .to_owned();
+                let bounds = tree.overlay_content_bounds(overlays.find_by_content(content)?)?;
+                Some((text, bounds))
+            })
+    }
+
+    /// The knob's rect, as the slider reports it.
+    fn knob(tree: &WidgetTree, s: WidgetId) -> Rect {
+        tree.widget_target_regions(s)
+            .into_iter()
+            .find(|r| r.part == SLIDER_PART_THUMB)
+            .expect("the slider reports its knob")
+            .rect
+    }
+
+    /// The slider's raw AccessKit node, read through `f`.
+    fn at_node<R>(
+        tree: &mut WidgetTree,
+        s: WidgetId,
+        f: impl FnOnce(&teksilo_core::accesskit::Node) -> R,
+    ) -> R {
+        let update = tree.sync_accessibility();
+        let nid = teksilo_core::accessibility::widget_id_to_node_id(s);
+        let node = &update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == nid)
+            .expect("the slider publishes an AT node")
+            .1;
+        f(node)
+    }
+
+    /// Two primary clicks at `at`, back to back.
+    fn double_click(tree: &mut WidgetTree, at: Point) {
+        tree.pointer_move(at);
+        for _ in 0..2 {
+            tree.pointer_down_button(at, PointerButton::Primary);
+            tree.pointer_up_button(at, PointerButton::Primary);
+        }
+    }
+
+    #[test]
+    fn the_readout_is_up_at_once_while_the_pointer_is_over_the_slider() {
+        let (mut tree, s) =
+            horizontal_scene(Slider::new(Signal::new(-3.0_f32), -12.0, 12.0).value_tooltip(db));
+        assert_eq!(
+            readout(&tree),
+            None,
+            "nothing is up before the pointer comes"
+        );
+
+        tree.pointer_move(tree.bounds(s).center());
+        tree.layout(window());
+        let (text, _) = readout(&tree).expect("up with no hover delay");
+        assert_eq!(text, "-3.0 dB");
+        // The slider's own node carries the text as its value, so the surface
+        // must not carry it a second time.
+        let listener = crate::common::heard_test::Listener::attach(&mut tree);
+        assert!(
+            !listener.finds(teksilo_core::accesskit::Role::Tooltip, "-3.0 dB"),
+            "the readout is hidden from assistive technology",
+        );
+
+        tree.pointer_move(away());
+        tree.layout(window());
+        assert_eq!(readout(&tree), None, "and gone when the pointer leaves");
+    }
+
+    #[test]
+    fn the_readout_follows_the_value_through_a_drag() {
+        let value = Signal::new(0.0_f32);
+        let (mut tree, s) = horizontal_scene(
+            Slider::new(value.clone(), -12.0, 12.0)
+                .step(0.5)
+                .value_tooltip(db),
+        );
+        let bounds = tree.bounds(s);
+        let start = knob(&tree, s).center();
+        tree.pointer_move(start);
+        tree.pointer_down_button(start, PointerButton::Primary);
+        tree.layout(window());
+        let surface = tree.overlay_manager().active_content_ids();
+
+        // Past the drag slop, then along the track, with the pointer taken off
+        // the slider altogether: a drag carries on there, and so must the
+        // readout.
+        let mut last_x = f32::MIN;
+        for dx in [10.0, 60.0, 120.0] {
+            tree.pointer_move(Point::new(start.x + dx, bounds.bottom() + 40.0));
+            tree.layout(window());
+            let (text, rect) = readout(&tree).expect("up for the whole drag");
+            assert_eq!(
+                text,
+                db(value.get()).resolve_now(),
+                "the value as it stands"
+            );
+            let thumb = knob(&tree, s);
+            assert!(
+                (rect.center().x - thumb.center().x).abs() < 0.51,
+                "centred on the thumb: {rect:?} over {thumb:?}",
+            );
+            assert!(rect.bottom() <= bounds.y, "above the slider: {rect:?}");
+            assert!(rect.center().x >= last_x, "moving with the thumb");
+            last_x = rect.center().x;
+        }
+        assert!(
+            value.get() > 5.0,
+            "the drag moved the value: {}",
+            value.get()
+        );
+        assert_eq!(
+            tree.overlay_manager().active_content_ids(),
+            surface,
+            "one surface, re-placed and re-worded, not a new one per value",
+        );
+
+        // The slider holds the hover while the drag holds the pointer; the
+        // first motion after the release gives it back.
+        let off = Point::new(start.x + 120.0, bounds.bottom() + 40.0);
+        tree.pointer_up_button(off, PointerButton::Primary);
+        tree.pointer_move(off);
+        tree.layout(window());
+        assert_eq!(
+            readout(&tree),
+            None,
+            "the drag is over and the pointer is not on the slider"
+        );
+    }
+
+    #[test]
+    fn the_readout_follows_the_arrows_under_keyboard_focus() {
+        let value = Signal::new(0.0_f32);
+        let mut tree = readout_tree();
+        let s = tree.add(
+            Slider::new(value.clone(), -12.0, 12.0)
+                .step(1.0)
+                .value_tooltip(db),
+        );
+        let next = tree.add(crate::button::Button::new(lit!("Next")));
+        let _column = tree.add(
+            VStack::new()
+                .child(FixedSize::new().height(100.0))
+                .child(s)
+                .child(next),
+        );
+        tree.layout(window());
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(s));
+        tree.layout(window());
+        let (text, mut at) = readout(&tree).expect("keyboard focus raises the readout");
+        assert_eq!(text, "+0.0 dB");
+
+        for said in ["+1.0 dB", "+2.0 dB"] {
+            tree.press_key(Key::ArrowRight, Modifiers::NONE);
+            tree.layout(window());
+            let (text, rect) = readout(&tree).expect("still up");
+            assert_eq!(text, said);
+            assert!(
+                rect.center().x > at.center().x,
+                "it moved with the thumb: {rect:?} after {at:?}",
+            );
+            at = rect;
+        }
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(next));
+        tree.layout(window());
+        assert_eq!(readout(&tree), None, "focus leaving takes it down");
+    }
+
+    #[test]
+    fn a_clicked_slider_shows_its_readout_again_on_the_first_key() {
+        // A click focuses the slider without making it keyboard focus, so the
+        // readout goes with the pointer, as the focus ring stays hidden, and
+        // comes back with the key that adjusts the value.
+        let value = Signal::new(0.0_f32);
+        let (mut tree, s) = horizontal_scene(
+            Slider::new(value.clone(), -12.0, 12.0)
+                .step(1.0)
+                .value_tooltip(db),
+        );
+        let thumb = knob(&tree, s).center();
+        tree.pointer_move(thumb);
+        tree.pointer_down_button(thumb, PointerButton::Primary);
+        tree.pointer_up_button(thumb, PointerButton::Primary);
+        tree.pointer_move(away());
+        tree.layout(window());
+        assert_eq!(tree.focused(), Some(s), "the click focused the slider");
+        assert_eq!(readout(&tree), None, "but not from the keyboard");
+
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        tree.layout(window());
+        assert_eq!(
+            readout(&tree).map(|(text, _)| text).as_deref(),
+            Some("+1.0 dB")
+        );
+    }
+
+    #[test]
+    fn escape_takes_the_readout_down_until_the_next_key() {
+        // Content shown on focus has to be dismissible without moving focus
+        // (WCAG 2.2 SC 1.4.13).
+        let mut tree = readout_tree();
+        let s = tree.add(
+            Slider::new(Signal::new(0.0_f32), -12.0, 12.0)
+                .step(1.0)
+                .value_tooltip(db),
+        );
+        tree.layout(window());
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        tree.layout(window());
+        assert!(readout(&tree).is_some());
+
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        tree.layout(window());
+        assert_eq!(readout(&tree), None, "Escape dismisses it");
+        assert_eq!(tree.focused(), Some(s), "and leaves focus where it was");
+
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        tree.layout(window());
+        assert!(readout(&tree).is_some(), "the next key brings it back");
+    }
+
+    #[test]
+    fn a_horizontal_readout_goes_below_the_thumb_against_the_top_of_the_window() {
+        let mut tree = readout_tree();
+        let s = tree.add(Slider::new(Signal::new(0.0_f32), -12.0, 12.0).value_tooltip(db));
+        let _column = tree.add(VStack::new().child(s).child(FixedSize::new().height(200.0)));
+        tree.layout(window());
+        let bounds = tree.bounds(s);
+        assert!(bounds.y < 1.0, "the slider is at the top: {bounds:?}");
+
+        tree.pointer_move(bounds.center());
+        tree.layout(window());
+        let (_, rect) = readout(&tree).expect("up");
+        assert!(
+            rect.y >= bounds.bottom(),
+            "no room above, so below the slider: {rect:?} under {bounds:?}",
+        );
+    }
+
+    #[test]
+    fn a_vertical_readout_sits_beside_the_slider_and_rides_its_thumb() {
+        let value = Signal::new(0.0_f32);
+        let mut tree = readout_tree();
+        let s = tree.add(
+            Slider::new(value.clone(), -12.0, 12.0)
+                .step(1.0)
+                .orientation(Orientation::Vertical)
+                .value_tooltip(db),
+        );
+        let _row = tree.add(
+            HStack::new()
+                .child(FixedSize::new().width(150.0))
+                .child(FixedSize::new().height(200.0).child(s)),
+        );
+        tree.layout(window());
+        let bounds = tree.bounds(s);
+
+        tree.pointer_move(knob(&tree, s).center());
+        tree.layout(window());
+        let (_, low) = readout(&tree).expect("up");
+        assert!(
+            low.right() <= bounds.x,
+            "on the inline-start side, clear of the slider: {low:?} beside {bounds:?}",
+        );
+        let thumb = knob(&tree, s);
+        assert!(
+            low.y < thumb.bottom() + 8.0 && low.bottom() > thumb.y,
+            "level with the thumb rather than somewhere along the track: {low:?} by {thumb:?}",
+        );
+
+        // The pointer is still on the slider; the key moves the value under it.
+        tree.focus(s);
+        tree.press_key(Key::ArrowUp, Modifiers::NONE);
+        tree.layout(window());
+        let (_, high) = readout(&tree).expect("still up");
+        assert!(
+            high.y < low.y,
+            "a higher value raises the thumb, and the readout with it: {high:?} after {low:?}",
+        );
+    }
+
+    #[test]
+    fn the_readout_text_is_the_accessible_value() {
+        use crate::common::heard_test::{Heard, Listener};
+
+        let value = Signal::new(-3.0_f32);
+        let mut tree = WidgetTree::new();
+        let s = tree.add(
+            Slider::new(value.clone(), -12.0, 12.0)
+                .step(0.5)
+                .label(lit!("Low shelf"))
+                .value_tooltip(db),
+        );
+        let p = SizeProposal::exact(200.0, 60.0);
+        tree.layout(p);
+        assert_eq!(
+            at_node(&mut tree, s, |n| (
+                n.value().map(str::to_owned),
+                n.numeric_value()
+            )),
+            (Some("-3.0 dB".to_owned()), Some(-3.0)),
+            "the text beside the number",
+        );
+
+        tree.focus(s);
+        tree.layout(p);
+        let mut listener = Listener::attach(&mut tree);
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        tree.layout(p);
+        assert_eq!(
+            listener.heard(&mut tree),
+            vec![Heard::FocusValue("-2.5 dB".to_owned())],
+        );
+    }
+
+    #[test]
+    fn a_double_click_resets_to_the_default_and_reports_it() {
+        let value = Signal::new(6.0_f32);
+        let seen: Rc<RefCell<Vec<f32>>> = Rc::default();
+        let sink = seen.clone();
+        let (mut tree, s) = horizontal_scene(
+            Slider::new(value.clone(), -12.0, 12.0)
+                .default_value(0.0)
+                .on_change(move |now, _ctx| sink.borrow_mut().push(now)),
+        );
+        let bounds = tree.bounds(s);
+        double_click(
+            &mut tree,
+            Point::new(bounds.x + bounds.width * 0.8, bounds.center().y),
+        );
+
+        assert_eq!(value.get(), 0.0, "the double-click put the default back");
+        let seen = seen.borrow().clone();
+        assert_eq!(
+            seen.len(),
+            2,
+            "the first click's jump, then the reset: {seen:?}"
+        );
+        assert_eq!(seen.last(), Some(&0.0), "the reset is reported, and last");
+
+        // Nothing is left pressed or dragging behind it.
+        tree.assert_no_leaked_pointer_state();
+        tree.pointer_move(Point::new(bounds.x + 20.0, bounds.center().y));
+        assert_eq!(
+            value.get(),
+            0.0,
+            "a later move with no button down moves nothing"
+        );
+    }
+
+    #[test]
+    fn the_reset_action_resets_and_reports() {
+        use teksilo_core::accesskit::{Action, ActionData};
+
+        let value = Signal::new(6.0_f32);
+        let seen: Rc<RefCell<Vec<f32>>> = Rc::default();
+        let sink = seen.clone();
+        let mut tree = WidgetTree::new();
+        let s = tree.add(
+            Slider::new(value.clone(), -12.0, 12.0)
+                .default_value(0.0)
+                .on_change(move |now, _ctx| sink.borrow_mut().push(now)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+
+        let (advertised, offered) = at_node(&mut tree, s, |n| {
+            (
+                n.supports_action(Action::CustomAction),
+                n.custom_actions()
+                    .iter()
+                    .map(|a| (a.id, a.description.clone()))
+                    .collect::<Vec<_>>(),
+            )
+        });
+        assert!(
+            advertised,
+            "the custom action is reachable only when advertised"
+        );
+        assert_eq!(
+            offered,
+            vec![(RESET_ACTION_ID, "Reset to default".to_owned())]
+        );
+
+        assert!(access(
+            &mut tree,
+            s,
+            Action::CustomAction,
+            Some(ActionData::CustomAction(RESET_ACTION_ID)),
+        ));
+        assert_eq!(value.get(), 0.0);
+        assert_eq!(*seen.borrow(), vec![0.0], "reported as a user change");
+    }
+
+    #[test]
+    fn the_reset_action_is_named_in_the_users_language() {
+        // From the widget catalogue, and resolved at each walk, so a locale
+        // switch renames it.
+        use crate::common::locale_switch_test::speaking;
+
+        let (manager, mut tree) = speaking("en-US");
+        let s = tree.add(Slider::new(Signal::new(6.0_f32), -12.0, 12.0).default_value(0.0));
+        let p = SizeProposal::exact(200.0, 60.0);
+        tree.layout(p);
+        let name = |tree: &mut WidgetTree| {
+            at_node(tree, s, |n| {
+                n.custom_actions()
+                    .iter()
+                    .find(|a| a.id == RESET_ACTION_ID)
+                    .map(|a| a.description.clone())
+            })
+        };
+        assert_eq!(name(&mut tree).as_deref(), Some("Reset to default"));
+
+        manager.set_locale("fr-FR".parse().unwrap());
+        tree.set_locale("fr-FR".to_string());
+        tree.layout(p);
+        assert_eq!(
+            name(&mut tree).as_deref(),
+            Some("Rétablir la valeur par défaut")
+        );
+        teksilo_i18n::thread_local::clear();
+    }
+
+    #[test]
+    fn a_disabled_slider_neither_resets_nor_shows_a_readout() {
+        use teksilo_core::accesskit::{Action, ActionData};
+
+        let value = Signal::new(6.0_f32);
+        let seen: Rc<RefCell<Vec<f32>>> = Rc::default();
+        let sink = seen.clone();
+        let (mut tree, s) = horizontal_scene(
+            Slider::new(value.clone(), -12.0, 12.0)
+                .enabled(false)
+                .default_value(0.0)
+                .value_tooltip(db)
+                .on_change(move |now, _ctx| sink.borrow_mut().push(now)),
+        );
+        let bounds = tree.bounds(s);
+
+        tree.pointer_move(bounds.center());
+        tree.layout(window());
+        assert_eq!(readout(&tree), None, "no readout over a disabled slider");
+
+        double_click(
+            &mut tree,
+            Point::new(bounds.x + bounds.width * 0.8, bounds.center().y),
+        );
+        let _ = access(
+            &mut tree,
+            s,
+            Action::CustomAction,
+            Some(ActionData::CustomAction(RESET_ACTION_ID)),
+        );
+        assert_eq!(
+            value.get(),
+            6.0,
+            "neither the double-click nor the action reset it"
+        );
+        assert!(seen.borrow().is_empty(), "and nothing was reported");
+    }
+
+    #[test]
+    fn disabling_a_slider_under_the_pointer_takes_its_readout_down() {
+        // No slider handler runs when the application disables it, so this is
+        // the surface's own gate at work.
+        let enabled = Signal::new(true);
+        let (mut tree, s) = horizontal_scene(
+            Slider::new(Signal::new(0.0_f32), -12.0, 12.0)
+                .enabled(enabled.clone())
+                .value_tooltip(db),
+        );
+        tree.pointer_move(tree.bounds(s).center());
+        tree.layout(window());
+        assert!(readout(&tree).is_some());
+
+        enabled.set(false);
+        tree.layout(window());
+        tree.layout(window());
+        assert_eq!(readout(&tree), None, "disabled under the pointer");
+        assert!(
+            tree.active_overlays().is_empty(),
+            "with no overlay left behind"
+        );
+
+        enabled.set(true);
+        tree.layout(window());
+        assert!(
+            tree.active_overlays().is_empty(),
+            "re-enabling raises nothing until the next hover, drag or key",
+        );
+    }
+
+    #[test]
+    fn a_cancelled_touch_drag_leaves_no_readout() {
+        // A contact never hovers, so the drag alone held the readout up.
+        let value = Signal::new(0.0_f32);
+        let (mut tree, s) =
+            horizontal_scene(Slider::new(value.clone(), -12.0, 12.0).value_tooltip(db));
+        let start = knob(&tree, s).center();
+        let finger = tree.new_contact();
+        tree.touch_down(finger, start);
+        for dx in [30.0, 60.0] {
+            tree.touch_move(finger, Point::new(start.x + dx, start.y));
+        }
+        tree.layout(window());
+        assert!(
+            readout(&tree).is_some(),
+            "a finger's drag shows the readout"
+        );
+
+        tree.touch_cancel(finger, Point::new(start.x + 60.0, start.y));
+        tree.layout(window());
+        assert_eq!(readout(&tree), None, "and a cancel ends the drag");
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    #[test]
+    fn a_slider_without_a_readout_or_a_default_is_as_it_was() {
+        let value = Signal::new(50.0_f32);
+        let (mut tree, s) = horizontal_scene(Slider::new(value.clone(), 0.0, 100.0));
+        let bounds = tree.bounds(s);
+
+        tree.pointer_move(bounds.center());
+        tree.focus(s);
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        tree.layout(window());
+        assert!(
+            tree.active_overlays().is_empty(),
+            "no overlay on hover or key"
+        );
+        let (text, custom) = at_node(&mut tree, s, |n| {
+            (
+                n.value().map(str::to_owned),
+                n.supports_action(teksilo_core::accesskit::Action::CustomAction),
+            )
+        });
+        assert_eq!(text, None, "no value text: a reader hears the number");
+        assert!(!custom, "and no reset action");
+
+        // A double-click is two clicks on the track, and the value stays where
+        // they landed.
+        double_click(
+            &mut tree,
+            Point::new(bounds.x + bounds.width * 0.75, bounds.center().y),
+        );
+        assert!(
+            (value.get() - 75.0).abs() < 2.0,
+            "two clicks at three quarters leave the value there: {}",
+            value.get()
+        );
     }
 }

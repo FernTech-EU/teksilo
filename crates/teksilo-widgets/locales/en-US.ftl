@@ -342,6 +342,11 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+# Slider: the assistive-technology action that puts the value back to the
+# default the application declared, as a double-click on the slider does.
+# See `Slider::default_value` in crates/teksilo-widgets/src/slider.rs.
+slider-reset-to-default = Reset to default
+
 # Rich tooltip "more" disclosure label (the Accordion title revealing the
 # long-form body inside a sticky rich tooltip).
 tooltip-more = More

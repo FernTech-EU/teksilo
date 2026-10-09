@@ -317,6 +317,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Tilbakestill til standardverdi
+
 # «Mer»-etiketten i rike verktøytips (tittelen på trekkspillet som viser
 # den lange teksten i et festet, rikt verktøytips).
 tooltip-more = Mer

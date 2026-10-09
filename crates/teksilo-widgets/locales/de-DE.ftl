@@ -315,6 +315,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Auf Standardwert zurücksetzen
+
 # Beschriftung „Mehr“ der Aufklappzeile in erweiterten QuickInfos (der
 # Akkordeontitel, der den ausführlichen Text einer angehefteten
 # erweiterten QuickInfo einblendet).

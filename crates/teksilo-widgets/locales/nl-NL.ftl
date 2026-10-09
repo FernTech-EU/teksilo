@@ -322,6 +322,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Standaardwaarde herstellen
+
 # Label "meer" van de uitklap in rijke knopinfo (de accordeontitel die de
 # uitgebreide tekst in een vastgezette rijke knopinfo laat zien).
 tooltip-more = Meer

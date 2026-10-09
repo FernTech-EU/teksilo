@@ -315,6 +315,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = Resetează la valoarea implicită
+
 # Eticheta „mai multe” a secțiunii pliante dintr-un sfat ecran îmbogățit
 # (titlul acordeonului care dezvăluie corpul detaliat).
 tooltip-more = Mai multe

@@ -314,6 +314,8 @@ hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
 
+slider-reset-to-default = איפוס לערך ברירת המחדל
+
 # תווית ה"עוד" של עצת המסך המורחבת (כותרת האקורדיון שחושפת את הגוף
 # המלא בתוך עצת מסך מוצמדת).
 tooltip-more = עוד
