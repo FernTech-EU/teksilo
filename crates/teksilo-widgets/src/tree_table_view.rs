@@ -999,6 +999,58 @@ impl<T: 'static> TreeTableView<T> {
         self
     }
 
+    // ── Adopted column state ──────────────────────────────────────────
+    //
+    // The same contract as `TableView`'s `bind_*` builders: see
+    // "Column state an application owns" in `table_view`'s module docs.
+
+    /// Use `sort` as this view's sort state instead of a signal of its own:
+    /// header clicks and [`set_sort`](Self::set_sort) write it, a write from
+    /// anywhere else updates the header, and
+    /// [`sort_signal`](Self::sort_signal) returns it. Bind the same signal to
+    /// the [`SortFilterTreeModel`] to re-sort the rows; one signal shared by
+    /// both is what lets a projection keep its preset comparators while the
+    /// header drives it.
+    ///
+    /// The view writes nothing into it until the user sorts; see
+    /// [`TableView`](crate::TableView)'s module docs, "Column state an
+    /// application owns".
+    pub fn bind_sort(mut self, sort: Signal<Option<(String, SortDirection)>>) -> Self {
+        self.sort_signal = sort;
+        self
+    }
+
+    /// Use `widths` as this view's map of column id → width instead of a
+    /// signal of its own: a resize drag and
+    /// [`set_column_width`](Self::set_column_width) write it, and a write from
+    /// anywhere else resizes the columns. A column with no entry takes its
+    /// declared width; an entry for a column the view lacks is ignored.
+    /// [`column_widths_signal`](Self::column_widths_signal) returns it.
+    pub fn bind_column_widths(mut self, widths: Signal<HashMap<String, f32>>) -> Self {
+        self.column_widths_signal = widths;
+        self
+    }
+
+    /// Use `order` as this view's column order instead of a signal of its
+    /// own: a reorder drop and [`set_column_order`](Self::set_column_order)
+    /// write it, and a write from anywhere else reorders the columns. Ids the
+    /// view lacks are skipped when it lays out and kept in place when it
+    /// writes. [`column_order_signal`](Self::column_order_signal) returns it.
+    pub fn bind_column_order(mut self, order: Signal<Vec<String>>) -> Self {
+        self.column_order_signal = order;
+        self
+    }
+
+    /// Use `filters` as this view's per-column filter text instead of a
+    /// signal of its own: the filter popover and
+    /// [`set_filter`](Self::set_filter) write it, and
+    /// [`filters_signal`](Self::filters_signal) returns it. Bind the same
+    /// signal to the [`SortFilterTreeModel`] to filter the rows.
+    pub fn bind_filters(mut self, filters: Signal<HashMap<String, String>>) -> Self {
+        self.filters_signal = filters;
+        self
+    }
+
     // ── Reactive signals ──────────────────────────────────────────────
 
     /// Current vertical scroll offset in logical pixels.
@@ -1047,7 +1099,9 @@ impl<T: 'static> TreeTableView<T> {
     ///
     /// The binding is deliberately not automatic: a projection may already
     /// carry preset comparators, predicates, and a filter mode, and adopting
-    /// the view's empty signal at construction would clobber them.
+    /// the view's empty signal at construction would clobber them. To share
+    /// one signal between the two from the start, hand it to
+    /// [`bind_sort`](Self::bind_sort); this returns the adopted signal then.
     pub fn sort_signal(&self) -> &Signal<Option<(String, SortDirection)>> {
         &self.sort_signal
     }
@@ -1065,16 +1119,23 @@ impl<T: 'static> TreeTableView<T> {
     ///     });
     /// proxy.filters_signal(view.filters_signal().clone());
     /// ```
+    ///
+    /// The signal adopted by [`bind_filters`](Self::bind_filters), if any.
     pub fn filters_signal(&self) -> &Signal<HashMap<String, String>> {
         &self.filters_signal
     }
 
-    /// Current column widths in logical pixels, keyed by column id.
+    /// User-resized column widths in logical pixels, keyed by column id. The
+    /// view writes entries only for a resize: the resized column's, and one
+    /// for each `Flex` column before it, frozen at the width it had. A
+    /// missing key means the declared width. The signal adopted by
+    /// [`bind_column_widths`](Self::bind_column_widths), if any.
     pub fn column_widths_signal(&self) -> &Signal<HashMap<String, f32>> {
         &self.column_widths_signal
     }
 
-    /// Current column display order as a list of column ids.
+    /// Current column display order as a list of column ids. The signal
+    /// adopted by [`bind_column_order`](Self::bind_column_order), if any.
     pub fn column_order_signal(&self) -> &Signal<Vec<String>> {
         &self.column_order_signal
     }

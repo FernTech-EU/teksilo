@@ -5780,3 +5780,412 @@ fn stretch_last_column_fills_the_gap_follows_the_display_order_and_has_no_grip_o
         "after the reorder the new last column stretches"
     );
 }
+
+// ── Adopted column state (`bind_*`) ────────────────────────────────────────
+//
+// An application's own signals as the table's sort, widths, order and filters.
+// The contract is "Column state an application owns" in the module docs: the
+// table writes nothing into an adopted signal unprompted, reads past ids it
+// does not declare, and keeps them when it writes.
+
+mod adopted_state {
+    use super::*;
+    use crate::primitives::{FixedSize, VStack};
+    use crate::styles::recipe_table_style as cp;
+    use std::collections::HashMap;
+    use teksilo_canvas::Point;
+    use teksilo_core::accesskit::SortDirection as AtSort;
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+    use teksilo_data::SortFilterListModel;
+
+    type Sort = Option<(String, SortDirection)>;
+
+    fn table_ref(tree: &WidgetTree, id: WidgetId) -> &TableView<Row> {
+        tree.widget_as_any(id)
+            .and_then(|any| any.downcast_ref::<TableView<Row>>())
+            .expect("a TableView<Row>")
+    }
+
+    fn relayout(tree: &mut WidgetTree, w: f32, h: f32) {
+        tree.layout(SizeProposal {
+            width: Some(w),
+            height: Some(h),
+        });
+    }
+
+    /// The body rows top to bottom, each as its cells' text left to right.
+    fn body_texts(tree: &WidgetTree, table: WidgetId) -> Vec<Vec<String>> {
+        fn text(tree: &WidgetTree, id: WidgetId) -> String {
+            let info = tree.accessibility_node(id);
+            if info.role() == Role::Label {
+                return info.name().unwrap_or_default().to_string();
+            }
+            tree.children(id)
+                .into_iter()
+                .map(|c| text(tree, c))
+                .find(|s| !s.is_empty())
+                .unwrap_or_default()
+        }
+        let mut rows: Vec<(f32, Vec<String>)> = Vec::new();
+        let mut walker = vec![table];
+        while let Some(id) = walker.pop() {
+            if tree.accessibility_node(id).role() == Role::Row {
+                let mut cells = flatten_through_bands(tree, tree.children(id));
+                if cells
+                    .iter()
+                    .any(|&c| tree.accessibility_node(c).role() == Role::Cell)
+                {
+                    cells.sort_by(|&a, &b| tree.bounds(a).x.total_cmp(&tree.bounds(b).x));
+                    let texts = cells.into_iter().map(|c| text(tree, c)).collect();
+                    rows.push((tree.bounds(id).y, texts));
+                    continue;
+                }
+            }
+            walker.extend(tree.children(id));
+        }
+        rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+        rows.into_iter().map(|(_, texts)| texts).collect()
+    }
+
+    /// The width each body column is laid out at, left to right.
+    fn body_widths(tree: &WidgetTree, table: WidgetId) -> Vec<f32> {
+        let mut cells = body_row_cells(tree, table);
+        cells.sort_by(|&a, &b| tree.bounds(a).x.total_cmp(&tree.bounds(b).x));
+        cells.into_iter().map(|c| tree.bounds(c).width).collect()
+    }
+
+    /// The sort direction the header labelled `label` announces.
+    fn header_sort(tree: &WidgetTree, table: WidgetId, label: &str) -> Option<AtSort> {
+        let snapshot = tree.accessibility_tree_snapshot();
+        header_row_cells(tree, table)
+            .into_iter()
+            .find_map(|cell| {
+                let node_id = teksilo_core::accessibility::widget_id_to_node_id(cell);
+                let (_, node) = snapshot.nodes.iter().find(|(id, _)| *id == node_id)?;
+                (node.label() == Some(label)).then(|| node.sort_direction())
+            })
+            .unwrap_or_else(|| panic!("no column header labelled {label:?}"))
+    }
+
+    fn click(tree: &mut WidgetTree, at: Point) {
+        tree.pointer_down_button(at, PointerButton::Primary);
+        tree.pointer_up_button(at, PointerButton::Primary);
+    }
+
+    /// A pointer drag in even steps, like a real pointer: a header arms its
+    /// reorder on the first move past the threshold, so that move has to land
+    /// while the pointer is still over the pressed cell.
+    fn drag(tree: &mut WidgetTree, from: Point, to: Point) {
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            from,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        for i in 1..=20 {
+            let t = i as f32 / 20.0;
+            tree.dispatch_event(WidgetEvent::pointer_move(Point::new(
+                from.x + (to.x - from.x) * t,
+                from.y + (to.y - from.y) * t,
+            )));
+        }
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            to,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+    }
+
+    #[test]
+    fn the_getters_return_the_adopted_signals() {
+        let sort: Signal<Sort> = Signal::new(None);
+        let widths = Signal::new(HashMap::<String, f32>::new());
+        let order = Signal::new(Vec::<String>::new());
+        let filters = Signal::new(HashMap::<String, String>::new());
+        let table = TableView::new(rows(3))
+            .add_column(id_col())
+            .bind_sort(sort.clone())
+            .bind_column_widths(widths.clone())
+            .bind_column_order(order.clone())
+            .bind_filters(filters.clone());
+        assert!(Signal::same(table.sort_signal(), &sort));
+        assert!(Signal::same(table.column_widths_signal(), &widths));
+        assert!(Signal::same(table.column_order_signal(), &order));
+        assert!(Signal::same(table.filters_signal(), &filters));
+    }
+
+    #[test]
+    fn writing_an_adopted_width_or_order_from_outside_resizes_and_reorders_the_columns() {
+        let widths = Signal::new(HashMap::<String, f32>::new());
+        let order = Signal::new(Vec::<String>::new());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let table = tree.add(
+            TableView::new(rows(3))
+                .add_column(id_col())
+                .add_column(name_col())
+                .row_height(20.0)
+                .show_internal_scrollbars(false)
+                .bind_column_widths(widths.clone())
+                .bind_column_order(order.clone()),
+        );
+        relayout(&mut tree, 400.0, 200.0);
+        assert_eq!(body_widths(&tree, table), vec![60.0, 340.0]);
+
+        widths.set(HashMap::from([("id".to_string(), 120.0)]));
+        relayout(&mut tree, 400.0, 200.0);
+        assert_eq!(
+            body_widths(&tree, table),
+            vec![120.0, 280.0],
+            "a width written straight to the adopted map resizes the column"
+        );
+
+        order.set(vec!["name".to_string(), "id".to_string()]);
+        relayout(&mut tree, 400.0, 200.0);
+        assert_eq!(
+            body_texts(&tree, table)[0],
+            vec!["row 0".to_string(), "0".to_string()],
+            "an order written straight to the adopted list reorders the columns"
+        );
+    }
+
+    #[test]
+    fn writing_an_adopted_sort_or_filter_from_outside_resorts_and_refilters_the_rows() {
+        let sort: Signal<Sort> = Signal::new(None);
+        let filters = Signal::new(HashMap::<String, String>::new());
+        let proxy = SortFilterListModel::new(rows(12))
+            .with_comparator("id", |a: &Row, b: &Row| a.id.cmp(&b.id))
+            .with_predicate("name", |needle| {
+                let needle = needle.to_string();
+                Box::new(move |r: &Row| r.name.ends_with(&needle))
+            });
+        // The application's one signal drives both the projection and the
+        // header — the reason to adopt it rather than mirror it.
+        proxy.sort_signal(sort.clone());
+        proxy.filters_signal(filters.clone());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let table = tree.add(
+            TableView::from_source(proxy)
+                .add_column(id_col().sortable(true))
+                .add_column(name_col().filterable(true))
+                .row_height(20.0)
+                .bind_sort(sort.clone())
+                .bind_filters(filters.clone()),
+        );
+        relayout(&mut tree, 400.0, 400.0);
+        assert_eq!(header_sort(&tree, table, "ID"), None);
+        assert_eq!(body_texts(&tree, table)[0][0], "0");
+
+        sort.set(Some(("id".to_string(), SortDirection::Descending)));
+        relayout(&mut tree, 400.0, 400.0);
+        assert_eq!(
+            header_sort(&tree, table, "ID"),
+            Some(AtSort::Descending),
+            "the header follows a sort written from outside"
+        );
+        assert_eq!(body_texts(&tree, table)[0][0], "11", "and the rows re-sort");
+
+        filters.set(HashMap::from([("name".to_string(), "1".to_string())]));
+        relayout(&mut tree, 400.0, 400.0);
+        let ids: Vec<String> = body_texts(&tree, table)
+            .into_iter()
+            .map(|r| r[0].clone())
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["11", "1"],
+            "a filter written from outside refilters"
+        );
+    }
+
+    #[test]
+    fn two_tables_bound_to_the_same_signals_follow_each_others_edits() {
+        let sort: Signal<Sort> = Signal::new(None);
+        let widths = Signal::new(HashMap::<String, f32>::new());
+        let order = Signal::new(Vec::<String>::new());
+        let filters = Signal::new(HashMap::<String, String>::new());
+        let make = || {
+            TableView::new(rows(3))
+                .add_column(id_col().sortable(true))
+                .add_column(name_col().sortable(true))
+                .row_height(20.0)
+                .show_internal_scrollbars(false)
+                .bind_sort(sort.clone())
+                .bind_column_widths(widths.clone())
+                .bind_column_order(order.clone())
+                .bind_filters(filters.clone())
+        };
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let a = tree.add(make());
+        let a_box = tree.add(FixedSize::new().width(400.0).height(200.0).child(a));
+        let b = tree.add(make());
+        let b_box = tree.add(FixedSize::new().width(400.0).height(200.0).child(b));
+        let _root = tree.add(VStack::new().child(a_box).child(b_box));
+        relayout(&mut tree, 400.0, 400.0);
+        let header_y = tree.bounds(a).y + cp::HEADER_HEIGHT * 0.5;
+
+        // A resize drag on `a`'s `id` grip (its trailing edge at x 60).
+        let grip = 60.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(grip, header_y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(grip + 30.0, header_y)));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(grip + 30.0, header_y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        relayout(&mut tree, 400.0, 400.0);
+        assert_eq!(widths.get().get("id"), Some(&90.0));
+        assert_eq!(
+            body_widths(&tree, b),
+            vec![90.0, 310.0],
+            "b follows a's resize"
+        );
+
+        // A click on `a`'s `Name` header sorts both.
+        click(&mut tree, Point::new(200.0, header_y));
+        relayout(&mut tree, 400.0, 400.0);
+        assert_eq!(
+            sort.get(),
+            Some(("name".to_string(), SortDirection::Ascending))
+        );
+        assert_eq!(header_sort(&tree, b, "Name"), Some(AtSort::Ascending));
+
+        // Dragging `a`'s `Name` header to the front reorders both.
+        drag(
+            &mut tree,
+            Point::new(200.0, header_y),
+            Point::new(5.0, header_y),
+        );
+        relayout(&mut tree, 400.0, 400.0);
+        assert_eq!(order.get(), vec!["name".to_string(), "id".to_string()]);
+        assert_eq!(
+            body_texts(&tree, b)[0],
+            vec!["row 0".to_string(), "0".to_string()]
+        );
+
+        // Neither table wrote anything of its own while following the other:
+        // every value is the one an edit put there.
+        assert_eq!(widths.get().len(), 1, "only the resized column has a width");
+        assert!(filters.get().is_empty());
+    }
+
+    #[test]
+    fn ids_the_table_does_not_declare_are_ignored_when_read_and_kept_when_written() {
+        let sort: Signal<Sort> = Signal::new(Some(("ghost".to_string(), SortDirection::Ascending)));
+        let widths = Signal::new(HashMap::from([("ghost".to_string(), 500.0)]));
+        let order = Signal::new(vec![
+            "ghost".to_string(),
+            "name".to_string(),
+            "id".to_string(),
+        ]);
+        let filters = Signal::new(HashMap::from([("ghost".to_string(), "x".to_string())]));
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let table = tree.add(
+            TableView::new(rows(3))
+                .add_column(id_col().sortable(true))
+                .add_column(name_col().filterable(true))
+                .row_height(20.0)
+                .show_internal_scrollbars(false)
+                .bind_sort(sort.clone())
+                .bind_column_widths(widths.clone())
+                .bind_column_order(order.clone())
+                .bind_filters(filters.clone()),
+        );
+        relayout(&mut tree, 400.0, 200.0);
+        // `name` (Flex) leads, `id` keeps its declared 60: no width of its own.
+        assert_eq!(body_widths(&tree, table), vec![340.0, 60.0]);
+        assert_eq!(header_sort(&tree, table, "ID"), None);
+        assert_eq!(header_sort(&tree, table, "Name"), None);
+
+        // Drag `id` (x 340..400) to the front: the table's own two columns
+        // trade places and the entry it does not have stays where it was.
+        let header_y = cp::HEADER_HEIGHT * 0.5;
+        drag(
+            &mut tree,
+            Point::new(370.0, header_y),
+            Point::new(5.0, header_y),
+        );
+        relayout(&mut tree, 400.0, 200.0);
+        assert_eq!(
+            order.get(),
+            vec!["ghost".to_string(), "id".to_string(), "name".to_string()]
+        );
+        assert_eq!(
+            body_texts(&tree, table)[0],
+            vec!["0".to_string(), "row 0".to_string()]
+        );
+        assert_eq!(widths.get().get("ghost"), Some(&500.0));
+        assert_eq!(filters.get().get("ghost").map(String::as_str), Some("x"));
+
+        // A click on a real column replaces a sort on a missing one.
+        click(&mut tree, Point::new(30.0, header_y));
+        assert_eq!(
+            sort.get(),
+            Some(("id".to_string(), SortDirection::Ascending))
+        );
+    }
+
+    #[test]
+    fn adopting_a_signal_keeps_the_values_the_application_put_there() {
+        let sort: Signal<Sort> = Signal::new(Some(("name".to_string(), SortDirection::Descending)));
+        let widths = Signal::new(HashMap::from([("id".to_string(), 120.0)]));
+        let order = Signal::new(vec!["name".to_string(), "id".to_string()]);
+        let filters = Signal::new(HashMap::from([("name".to_string(), "row".to_string())]));
+        let (sort_0, widths_0, order_0, filters_0) =
+            (sort.get(), widths.get(), order.get(), filters.get());
+
+        let model = rows(3);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let table = tree.add(
+            TableView::new(model.clone())
+                .add_column(id_col().sortable(true))
+                .add_column(name_col().sortable(true).filterable(true))
+                .row_height(20.0)
+                .show_internal_scrollbars(false)
+                .bind_sort(sort.clone())
+                .bind_column_widths(widths.clone())
+                .bind_column_order(order.clone())
+                .bind_filters(filters.clone()),
+        );
+        relayout(&mut tree, 400.0, 200.0);
+        // A data change rebuilds the table: still nothing written.
+        model.push(Row {
+            id: 3,
+            name: "row 3".into(),
+        });
+        relayout(&mut tree, 400.0, 200.0);
+
+        assert_eq!(sort.get(), sort_0);
+        assert_eq!(widths.get(), widths_0);
+        assert_eq!(order.get(), order_0);
+        assert_eq!(filters.get(), filters_0);
+        // …and what the table shows is what the signals held.
+        assert_eq!(body_widths(&tree, table), vec![280.0, 120.0]);
+        assert_eq!(header_sort(&tree, table, "Name"), Some(AtSort::Descending));
+        assert!(Signal::same(table_ref(&tree, table).sort_signal(), &sort));
+    }
+
+    #[test]
+    fn a_reorder_keeps_the_entries_for_columns_it_does_not_have_in_place() {
+        use crate::table_view::header::merge_reordered;
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let own = s(&["a", "b", "c"]);
+        // Foreign ids keep their slots; own slots take the new order.
+        assert_eq!(
+            merge_reordered(&s(&["x", "a", "y", "b", "c"]), &own, s(&["c", "a", "b"])),
+            s(&["x", "c", "y", "a", "b"])
+        );
+        // Own columns the list never named go at the end, in the new order.
+        assert_eq!(
+            merge_reordered(&s(&["b", "x"]), &own, s(&["c", "b", "a"])),
+            s(&["c", "x", "b", "a"])
+        );
+        // An empty list (declared order) becomes the new order.
+        assert_eq!(
+            merge_reordered(&[], &own, s(&["b", "a", "c"])),
+            s(&["b", "a", "c"])
+        );
+    }
+}

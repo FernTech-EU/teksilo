@@ -241,10 +241,73 @@ rebuild when only the focus ring moves, etc.).
 | [`column_pinning_signal`](../crates/teksilo-widgets/src/table_view.rs)     | `Signal<HashMap<String, PinnedSide>>`         | drag across pane boundary, `set_column_pinning`           | `SettingsFile<T>` |
 | [`focused_cell_signal`](../crates/teksilo-widgets/src/table_view.rs)       | `Signal<Option<(usize, usize)>>`              | keyboard nav, `set_focused_cell`, `clear_focused_cell`, a selection change in a single-selection table | (transient)     |
 
+### Adopting signals the application owns
+
+By default a view creates its sort, width, order and filter signals itself.
+Hand it signals the application already holds and it adopts them instead, so
+several views (a library shown four ways), or a view-model, share one state
+without mirroring it through observers:
+
+```rust
+let sort    = Signal::new(None);
+let widths  = Signal::new(HashMap::new());
+let order   = Signal::new(Vec::new());
+let filters = Signal::new(HashMap::new());
+
+let table = TableView::from_source(proxy.clone())
+    .add_column(name_col)
+    .add_column(size_col)
+    .bind_sort(sort.clone())
+    .bind_column_widths(widths.clone())
+    .bind_column_order(order.clone())
+    .bind_filters(filters.clone());
+// The projection reads the same two signals the header writes.
+proxy.sort_signal(sort.clone());
+proxy.filters_signal(filters.clone());
+// A second view built with the same four `bind_*` calls follows every edit.
+```
+
+`TreeTableView` has the same four builders, and the getters
+(`sort_signal()`, `column_widths_signal()`, …) return the adopted signal. The
+contract:
+
+- **Adopting writes nothing.** A view never seeds an adopted signal: not when
+  it is built, mounted, laid out or rebuilt. What the signal holds is what the
+  view shows, and an empty map, an empty list or `None` means the declared
+  defaults. The view writes only for a user gesture (a header click, a resize
+  drag, a reorder drop, the filter popover, an AccessKit increment) or an
+  imperative setter (`set_sort`, `set_column_widths`, …).
+- **Ids a view does not declare are ignored when read and kept when
+  written.** A width, a filter or an order entry for a column the view lacks
+  changes nothing in it; a column with no width entry takes its declared
+  `ColumnWidth`. A reorder drop moves the view's own columns within the list
+  and leaves the other entries where they were, and a resize or a filter edit
+  only touches its own key, so views with different column sets can share one
+  map.
+- **No feedback loop.** A view answers a change by relaying out or
+  rebuilding, never by writing back, so two views bound to the same signals
+  settle after one pass.
+- **Bind before any imperative setter.** A setter called earlier in the
+  builder chain wrote the view's own signal, which the bind then replaces.
+
+There is no `bind_` builder for the pinning map: a reorder drop that crosses a
+pane seam pins the column in the view it was dropped on only.
+
 ### Persistence
 
-Use [`teksilo-settings`](settings.md) to round-trip the layout. A typical
-shape:
+Use [`teksilo-settings`](settings.md) to round-trip the layout. A
+`SettingsStore` key whose type matches a view's signal can be adopted
+directly, with nothing to keep in sync:
+
+```rust
+const TABLE_ORDER: SettingsKey<Vec<String>> = SettingsKey::new("table.order", Vec::new);
+
+let table = table.bind_column_order(ctx.settings().signal_for(&TABLE_ORDER));
+```
+
+State that is not one signal of the view's type (the sort encoded as a
+string, or a map held in a `SettingsFile<T>`), and a view that keeps its own
+signals, need a round trip instead. A typical shape, shown for the order:
 
 ```rust
 const TABLE_SORT:  SettingsKey<String>      = SettingsKey::new("table.sort", String::new);
@@ -709,7 +772,10 @@ ctrl semantics, full keyboard nav with focus ring, edit hooks via
 `editing_cell_signal` + `on_cell_edit_request`, row drag-drop reorder
 on `TableView` and `TreeTableView`, tree expand/collapse via twist +
 `ArrowLeft/Right`, tree filter modes, `Role::Table` / `TreeGrid`
-(`Role::Grid` when selectable) accessibility with row indices and sort direction.
+(`Role::Grid` when selectable) accessibility with row indices and sort direction,
+sort / width / order / filter state adopted from application signals
+(`bind_sort`, `bind_column_widths`, `bind_column_order`, `bind_filters`) and
+shared between views.
 
 **Intentionally not shipped:**
 

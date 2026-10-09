@@ -1699,9 +1699,42 @@ pub(crate) fn attach_header_reorder_handlers(
                     };
                     let to = to.min(new_order.len());
                     new_order.insert(to, item);
-                    order_for_drop.set(new_order);
+                    order_for_drop.set(merge_reordered(
+                        &order_for_drop.get(),
+                        &ids_for_drop,
+                        new_order,
+                    ));
                 }
                 true
             }),
     );
+}
+
+/// Write `reordered` — this header's own columns, in their new order — back
+/// over `existing`, the order signal's current list, which may also name
+/// columns this header does not have.
+///
+/// An order signal several views share (`bind_column_order`) carries every
+/// view's columns, so replacing it with the dropped-on view's own list would
+/// throw the other views' arrangement away. Instead every slot that held one
+/// of the `own` columns takes the next column of `reordered`, the other ids stay
+/// where they were, and own columns the list did not mention yet go at the end.
+/// The own columns then read in `reordered`'s order, which is all
+/// `display_order` looks at.
+pub(crate) fn merge_reordered(
+    existing: &[String],
+    own: &[String],
+    reordered: Vec<String>,
+) -> Vec<String> {
+    let mut next = reordered.into_iter();
+    let mut out = Vec::with_capacity(existing.len() + own.len());
+    for id in existing {
+        if own.contains(id) {
+            out.extend(next.next());
+        } else {
+            out.push(id.clone());
+        }
+    }
+    out.extend(next);
+    out
 }

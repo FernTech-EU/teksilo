@@ -16,6 +16,35 @@
 //! auto-measured (`auto_row_height` — rows grow to their tallest cell,
 //! height-for-width). See docs/table-view.md "Row heights".
 //!
+//! ## Column state an application owns
+//!
+//! The sort, the column widths, the column order and the filters live in four
+//! signals the table publishes (`sort_signal()`, `column_widths_signal()`,
+//! `column_order_signal()`, `filters_signal()`). By default the table creates
+//! them. [`bind_sort`](TableView::bind_sort),
+//! [`bind_column_widths`](TableView::bind_column_widths),
+//! [`bind_column_order`](TableView::bind_column_order) and
+//! [`bind_filters`](TableView::bind_filters) make the table adopt signals the
+//! application already holds instead, so several views, or a view-model, share
+//! one state without mirroring it.
+//!
+//! - **Adopting writes nothing.** The table never seeds an adopted signal: not
+//!   when it is built, mounted, laid out or rebuilt. What the signal holds is
+//!   what the table shows; an empty map, an empty list or `None` means the
+//!   declared defaults. The table writes only for a user gesture (a header
+//!   click, a resize drag, a reorder drop, the filter popover, an AccessKit
+//!   increment) or an imperative setter (`set_sort`, `set_column_widths`, …).
+//! - **Ids the table does not declare are ignored when read and kept when
+//!   written.** A width, a filter or an order entry for a column this table
+//!   lacks changes nothing here, and a reorder in this table moves its own
+//!   columns without dropping the other entries. A column with no width
+//!   entry takes its declared [`ColumnWidth`].
+//! - **No feedback loop.** A view reacts to a change by relaying out or
+//!   rebuilding, never by writing back, so two views bound to the same signals
+//!   follow each other's edits and settle after one pass.
+//! - **Bind before any imperative setter.** A setter called earlier in the
+//!   builder chain wrote the table's own signal, which the bind replaces.
+//!
 //! ```ignore
 //! use teksilo_data::ListModel;
 //! use teksilo_widgets::table_view::{Column, ColumnWidth, TableView};
@@ -1033,6 +1062,60 @@ impl<T: 'static> TableView<T> {
         self
     }
 
+    // ── Adopted column state ───────────────────────────────────────────
+
+    /// Use `sort` as this table's sort state instead of a signal of its own:
+    /// header clicks and [`set_sort`](Self::set_sort) write it, and a write
+    /// from anywhere else updates the header. [`sort_signal`](Self::sort_signal)
+    /// returns it. Bind the same signal to a
+    /// [`SortFilterListModel`](teksilo_data::SortFilterListModel) to re-sort
+    /// the rows.
+    ///
+    /// The table writes nothing into it until the user sorts; see the module
+    /// docs, "Column state an application owns", for the full contract.
+    pub fn bind_sort(mut self, sort: Signal<Option<(String, SortDirection)>>) -> Self {
+        self.sort_signal = sort;
+        self
+    }
+
+    /// Use `widths` as this table's map of column id → width instead of a
+    /// signal of its own: a resize drag and
+    /// [`set_column_width`](Self::set_column_width) write it, and a write from
+    /// anywhere else resizes the columns. A column with no entry takes its
+    /// declared [`ColumnWidth`]; an entry for a column the table lacks is
+    /// ignored. [`column_widths_signal`](Self::column_widths_signal) returns it.
+    ///
+    /// See the module docs, "Column state an application owns".
+    pub fn bind_column_widths(mut self, widths: Signal<HashMap<String, f32>>) -> Self {
+        self.column_widths_signal = widths;
+        self
+    }
+
+    /// Use `order` as this table's column order instead of a signal of its
+    /// own: a reorder drop and [`set_column_order`](Self::set_column_order)
+    /// write it, and a write from anywhere else reorders the columns. Ids the
+    /// table lacks are skipped when it lays out and kept in place when it
+    /// writes. [`column_order_signal`](Self::column_order_signal) returns it.
+    ///
+    /// See the module docs, "Column state an application owns".
+    pub fn bind_column_order(mut self, order: Signal<Vec<String>>) -> Self {
+        self.column_order_signal = order;
+        self
+    }
+
+    /// Use `filters` as this table's per-column filter text instead of a
+    /// signal of its own: the filter popover and
+    /// [`set_filter`](Self::set_filter) write it.
+    /// [`filters_signal`](Self::filters_signal) returns it. Bind the same
+    /// signal to a [`SortFilterListModel`](teksilo_data::SortFilterListModel)
+    /// to filter the rows.
+    ///
+    /// See the module docs, "Column state an application owns".
+    pub fn bind_filters(mut self, filters: Signal<HashMap<String, String>>) -> Self {
+        self.filters_signal = filters;
+        self
+    }
+
     // ── Public reactive signals ────────────────────────────────────────
 
     /// Current vertical scroll offset in logical pixels.
@@ -1071,7 +1154,8 @@ impl<T: 'static> TableView<T> {
 
     /// Active sort: `Some((col_id, dir))` or `None` when unsorted.
     /// Mutated by header clicks (cycle: None → Asc → Desc → None) and by
-    /// [`set_sort`](Self::set_sort) / [`clear_sort`](Self::clear_sort).
+    /// [`set_sort`](Self::set_sort) / [`clear_sort`](Self::clear_sort). The
+    /// signal adopted by [`bind_sort`](Self::bind_sort), if any.
     /// Bind a [`SortFilterListModel`](teksilo_data::SortFilterListModel) to
     /// drive a re-sort of the underlying data:
     ///
@@ -1084,9 +1168,11 @@ impl<T: 'static> TableView<T> {
         &self.sort_signal
     }
 
-    /// Map of column id → user-overridden width. A column id appears in
-    /// this map only after the user resizes that column; missing keys
-    /// mean "use the declared width policy".
+    /// Map of column id → user-overridden width. The table writes entries
+    /// only for a resize: the resized column's, and one for each `Flex`
+    /// column before it, frozen at the width it had. Missing keys mean "use
+    /// the declared width policy". The signal adopted by
+    /// [`bind_column_widths`](Self::bind_column_widths), if any.
     pub fn column_widths_signal(&self) -> &Signal<HashMap<String, f32>> {
         &self.column_widths_signal
     }
@@ -1096,7 +1182,8 @@ impl<T: 'static> TableView<T> {
     /// [`set_column_order`](Self::set_column_order). When empty, the
     /// declared order applies. Pinned-side groups (Leading / None /
     /// Trailing) are *always* honored — the entries inside this signal
-    /// only re-sort within each group.
+    /// only re-sort within each group. The signal adopted by
+    /// [`bind_column_order`](Self::bind_column_order), if any.
     pub fn column_order_signal(&self) -> &Signal<Vec<String>> {
         &self.column_order_signal
     }
@@ -1175,6 +1262,7 @@ impl<T: 'static> TableView<T> {
     /// Per-column filter text. Updated by filter affordances in
     /// header cells and by
     /// [`set_filter`](Self::set_filter) / [`clear_filters`](Self::clear_filters).
+    /// The signal adopted by [`bind_filters`](Self::bind_filters), if any.
     /// Bind a `SortFilterListModel<T>` to drive the upstream data:
     ///
     /// ```ignore

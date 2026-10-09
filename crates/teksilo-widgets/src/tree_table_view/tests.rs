@@ -4878,3 +4878,185 @@ fn only_a_branch_rows_chevron_is_a_pointer_target() {
         );
     }
 }
+
+// ── Adopted column state (`bind_*`) ─────────────────────────────────
+//
+// The `TableView` contract ("Column state an application owns" in its module
+// docs), held by the tree table too — and across the two kinds of view, which
+// is the shape an application with several views of one library takes.
+
+mod adopted_state {
+    use super::*;
+    use crate::TableView;
+    use crate::primitives::{FixedSize, VStack};
+    use teksilo_canvas::Point;
+    use teksilo_core::accesskit::SortDirection as AtSort;
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+    use teksilo_data::ListModel;
+
+    type Sort = Option<(String, SortDirection)>;
+
+    fn relayout(tree: &mut WidgetTree, w: f32, h: f32) {
+        tree.layout(SizeProposal {
+            width: Some(w),
+            height: Some(h),
+        });
+    }
+
+    /// `(label, width)` of each header cell, left to right.
+    fn header_layout(tree: &WidgetTree, root: WidgetId) -> Vec<(String, f32)> {
+        let mut cells = tt_header_row_cells(tree, root);
+        cells.sort_by(|&a, &b| tree.bounds(a).x.total_cmp(&tree.bounds(b).x));
+        cells
+            .into_iter()
+            .map(|c| {
+                let info = tree.accessibility_node(c);
+                let name = info.name().unwrap_or_default().to_string();
+                (name, tree.bounds(c).width)
+            })
+            .collect()
+    }
+
+    /// The sort direction the header labelled `label` announces.
+    fn header_sort(tree: &WidgetTree, root: WidgetId, label: &str) -> Option<AtSort> {
+        let snapshot = tree.accessibility_tree_snapshot();
+        tt_header_row_cells(tree, root)
+            .into_iter()
+            .find_map(|cell| {
+                let node_id = teksilo_core::accessibility::widget_id_to_node_id(cell);
+                let (_, node) = snapshot.nodes.iter().find(|(id, _)| *id == node_id)?;
+                (node.label() == Some(label)).then(|| node.sort_direction())
+            })
+            .unwrap_or_else(|| panic!("no column header labelled {label:?}"))
+    }
+
+    #[test]
+    fn a_tree_table_adopts_the_signals_and_writes_none_of_them_unprompted() {
+        let sort: Signal<Sort> = Signal::new(Some(("size".to_string(), SortDirection::Descending)));
+        let widths = Signal::new(HashMap::from([("size".to_string(), 100.0)]));
+        let order = Signal::new(vec!["size".to_string(), "name".to_string()]);
+        let filters = Signal::new(HashMap::from([("name".to_string(), "o".to_string())]));
+        let held = (sort.get(), widths.get(), order.get(), filters.get());
+
+        let view = TreeTableView::from_projection(SortFilterTreeModel::new(sample_tree()))
+            .add_column(name_col().sortable(true).filterable(true))
+            .add_column(size_col().sortable(true))
+            .row_height(20.0)
+            .show_internal_scrollbars(false)
+            .bind_sort(sort.clone())
+            .bind_column_widths(widths.clone())
+            .bind_column_order(order.clone())
+            .bind_filters(filters.clone());
+        assert!(Signal::same(view.sort_signal(), &sort));
+        assert!(Signal::same(view.column_widths_signal(), &widths));
+        assert!(Signal::same(view.column_order_signal(), &order));
+        assert!(Signal::same(view.filters_signal(), &filters));
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(view);
+        relayout(&mut tree, 400.0, 200.0);
+        assert_eq!(
+            (sort.get(), widths.get(), order.get(), filters.get()),
+            held,
+            "mounting and laying out write nothing into an adopted signal"
+        );
+        assert_eq!(
+            header_layout(&tree, id),
+            vec![("Size".to_string(), 100.0), ("Name".to_string(), 300.0)]
+        );
+        assert_eq!(header_sort(&tree, id, "Size"), Some(AtSort::Descending));
+
+        // Writes from outside reach the view.
+        widths.set(HashMap::from([("size".to_string(), 80.0)]));
+        order.set(vec!["name".to_string(), "size".to_string()]);
+        sort.set(Some(("name".to_string(), SortDirection::Ascending)));
+        relayout(&mut tree, 400.0, 200.0);
+        assert_eq!(
+            header_layout(&tree, id),
+            vec![("Name".to_string(), 320.0), ("Size".to_string(), 80.0)]
+        );
+        assert_eq!(header_sort(&tree, id, "Name"), Some(AtSort::Ascending));
+        assert_eq!(header_sort(&tree, id, "Size"), None);
+    }
+
+    #[test]
+    fn a_tree_table_and_a_table_bound_to_the_same_signals_follow_each_other() {
+        let sort: Signal<Sort> = Signal::new(None);
+        let widths = Signal::new(HashMap::<String, f32>::new());
+        let order = Signal::new(Vec::<String>::new());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let tt = tree.add(
+            TreeTableView::from_projection(SortFilterTreeModel::new(sample_tree()))
+                .add_column(name_col().sortable(true))
+                .add_column(size_col().sortable(true))
+                .row_height(20.0)
+                .show_internal_scrollbars(false)
+                .bind_sort(sort.clone())
+                .bind_column_widths(widths.clone())
+                .bind_column_order(order.clone()),
+        );
+        let tt_box = tree.add(FixedSize::new().width(400.0).height(200.0).child(tt));
+        let table = tree.add(
+            TableView::new(ListModel::from_vec(vec!["one", "two"]))
+                .add_column(name_col().sortable(true))
+                .add_column(size_col().sortable(true))
+                .row_height(20.0)
+                .show_internal_scrollbars(false)
+                .bind_sort(sort.clone())
+                .bind_column_widths(widths.clone())
+                .bind_column_order(order.clone()),
+        );
+        let table_box = tree.add(FixedSize::new().width(400.0).height(200.0).child(table));
+        let _root = tree.add(VStack::new().child(tt_box).child(table_box));
+        relayout(&mut tree, 400.0, 400.0);
+        let tt_y = tree.bounds(tt).y + cp::HEADER_HEIGHT * 0.5;
+        let table_y = tree.bounds(table).y + cp::HEADER_HEIGHT * 0.5;
+
+        // Narrow the tree table's `Name` (x 0..340) by 40 from its grip.
+        let grip = 340.0 - cp::RESIZE_HANDLE_WIDTH * 0.5;
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(grip, tt_y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(grip - 40.0, tt_y)));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(grip - 40.0, tt_y),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        relayout(&mut tree, 400.0, 400.0);
+        assert_eq!(widths.get(), HashMap::from([("name".to_string(), 300.0)]));
+        assert_eq!(
+            header_layout(&tree, table),
+            vec![("Name".to_string(), 300.0), ("Size".to_string(), 60.0)],
+            "the table follows the tree table's resize"
+        );
+
+        // A click on the table's `Size` header sorts the tree table too.
+        let size_at = Point::new(330.0, table_y);
+        tree.pointer_down_button(size_at, PointerButton::Primary);
+        tree.pointer_up_button(size_at, PointerButton::Primary);
+        relayout(&mut tree, 400.0, 400.0);
+        assert_eq!(
+            sort.get(),
+            Some(("size".to_string(), SortDirection::Ascending))
+        );
+        assert_eq!(header_sort(&tree, tt, "Size"), Some(AtSort::Ascending));
+
+        // And a reorder written by either is the other's order.
+        {
+            let any = tree.widget_as_any(table).unwrap();
+            let tv = any.downcast_ref::<TableView<&'static str>>().unwrap();
+            tv.set_column_order(vec!["size".to_string(), "name".to_string()]);
+        }
+        relayout(&mut tree, 400.0, 400.0);
+        assert_eq!(
+            header_layout(&tree, tt)
+                .into_iter()
+                .map(|(label, _)| label)
+                .collect::<Vec<_>>(),
+            vec!["Size".to_string(), "Name".to_string()]
+        );
+    }
+}
