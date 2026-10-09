@@ -56,6 +56,10 @@ pub fn report(dir: &Path) {
         .as_ref()
         .and_then(|r| r.as_ref().ok())
         .map(|r| r.version.as_str());
+    let enabled_by = resolution
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .and_then(|r| r.enabled_by.as_deref());
     let error = resolution
         .as_ref()
         .and_then(|r| r.as_ref().err())
@@ -85,7 +89,7 @@ pub fn report(dir: &Path) {
     if crate::output::json() {
         println!(
             "{}",
-            serde_json::json!({"tool_version":guard::TOOL_VERSION,"project":root,"teksilo_version":version,"compatible":compatible,"resolution_error":error,"agents":rows,"user_agents":user_rows,"model":model,"python":python,"probe_version":probe})
+            serde_json::json!({"tool_version":guard::TOOL_VERSION,"project":root,"teksilo_version":version,"teksilo_enabled_by":enabled_by,"compatible":compatible,"resolution_error":error,"agents":rows,"user_agents":user_rows,"model":model,"python":python,"probe_version":probe})
         );
         return;
     }
@@ -96,8 +100,9 @@ pub fn report(dir: &Path) {
             .unwrap_or_else(|| "none".into())
     );
     println!(
-        "Teksilo  {}{}",
+        "Teksilo  {}{}{}",
         version.unwrap_or("unknown"),
+        enabled_by.map(optional_suffix).unwrap_or_default(),
         if compatible == Some(false) {
             " (incompatible)"
         } else {
@@ -147,6 +152,22 @@ pub fn report(dir: &Path) {
         if let Some(path) = python {
             eprintln!("Python: {}", path.display());
         }
+    }
+}
+
+/// How the `Teksilo` line says that the app's default features leave teksilo
+/// off, so that "0.15.1" is not read as what a plain `cargo build` links.
+fn optional_suffix(features: &[String]) -> String {
+    match features {
+        [] => " (optional)".into(),
+        [one] => format!(" (optional, feature `{one}`)"),
+        many => format!(
+            " (optional, features {})",
+            many.iter()
+                .map(|f| format!("`{f}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
     }
 }
 

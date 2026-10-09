@@ -143,6 +143,33 @@ fn structured_queries_are_payload_only_and_status_is_read_only() {
     assert!(String::from_utf8_lossy(&result.stdout).contains("cargo teksilo agent install"));
 }
 #[test]
+fn a_teksilo_behind_a_feature_is_still_found() {
+    let teksilo = project();
+    let app = tempfile::tempdir().unwrap();
+    std::fs::create_dir(app.path().join("src")).unwrap();
+    std::fs::write(app.path().join("src/main.rs"), "fn main() {}").unwrap();
+    std::fs::write(
+        app.path().join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n\
+             [dependencies]\nteksilo = {{ path = {:?}, optional = true }}\n\
+             [features]\nui = [\"dep:teksilo\"]\n",
+            teksilo.path()
+        ),
+    )
+    .unwrap();
+    let result = run(
+        app.path(),
+        &["search", "scroll", "--json", "--quiet", "--limit", "1"],
+    );
+    ok(&result);
+    let result = run(app.path(), &["status", "--json"]);
+    ok(&result);
+    let data: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(data["teksilo_version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(data["teksilo_enabled_by"], serde_json::json!(["ui"]));
+}
+#[test]
 fn obsolete_commands_are_removed_and_version_is_available() {
     let root = project();
     for args in [

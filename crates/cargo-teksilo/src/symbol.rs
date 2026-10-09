@@ -259,6 +259,7 @@ mod tests {
         Resolution {
             crates: map,
             version: "0.12.1".into(),
+            enabled_by: None,
         }
     }
 
@@ -279,6 +280,7 @@ mod tests {
         let resolution = Resolution {
             crates: [(c.name.clone(), c)].into_iter().collect(),
             version: guard::TOOL_VERSION.into(),
+            enabled_by: None,
         };
         let stage = tempfile::tempdir().unwrap();
         let tool = stage_monorepo(stage.path(), &resolution).unwrap();

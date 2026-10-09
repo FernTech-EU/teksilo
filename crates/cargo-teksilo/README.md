@@ -35,6 +35,10 @@ cargo teksilo status --json
 cargo teksilo --version
 ```
 
+An application that keeps teksilo behind a Cargo feature needs nothing extra:
+when its default features leave teksilo out, the commands resolve with every
+feature enabled, and `status` names the feature that turns teksilo on.
+
 `init` installs the probe harness and agent instructions. Without `--agent`, it
 uses existing configuration to detect targets. Explicit targets create their
 required directories, even when no marker exists. Use `-y` to skip confirmation.

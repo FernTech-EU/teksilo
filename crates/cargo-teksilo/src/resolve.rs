@@ -58,6 +58,12 @@ pub struct Resolution {
     pub crates: BTreeMap<String, ResolvedCrate>,
     /// The framework version this app resolved.
     pub version: String,
+    /// `Some` when teksilo is an optional dependency that the app's default
+    /// features leave off, holding the app's own features that turn it on.
+    ///
+    /// The list can be empty: teksilo may come in through an optional
+    /// dependency of a dependency, which no feature of the app names directly.
+    pub enabled_by: Option<Vec<String>>,
 }
 
 impl Resolution {
@@ -99,8 +105,8 @@ pub enum ResolveError {
     Spawn(#[from] std::io::Error),
 
     #[error(
-        "`teksilo` is not in this app's dependency tree.\n\
-         Add it with `cargo add teksilo`, or run this from the app's directory."
+        "`teksilo` is not in this app's dependency graph, even with every feature enabled.\n\
+         Add it with `cargo add teksilo`, or run this from inside the app's crate or workspace."
     )]
     NotADependency,
 
@@ -118,8 +124,7 @@ pub enum ResolveError {
 /// `dir` is normally the current directory; it is a parameter so tests can
 /// point at a fixture app without changing the process's working directory.
 pub fn resolve(dir: &Path) -> Result<Resolution, ResolveError> {
-    let metadata = run_cargo_metadata(dir, false)?;
-    resolution_from_metadata(&metadata)
+    resolve_features(dir, false)
 }
 
 /// [`resolve`], guaranteed not to write.
@@ -135,15 +140,45 @@ pub fn resolve(dir: &Path) -> Result<Resolution, ResolveError> {
 /// with no lockfile therefore gets an honest "unknown" instead of a lockfile
 /// it did not ask for.
 pub fn resolve_locked(dir: &Path) -> Result<Resolution, ResolveError> {
-    let metadata = run_cargo_metadata(dir, true)?;
-    resolution_from_metadata(&metadata)
+    resolve_features(dir, true)
 }
 
-fn run_cargo_metadata(dir: &Path, locked: bool) -> Result<serde_json::Value, ResolveError> {
+/// Resolve with the default features, then with all of them if teksilo is
+/// missing.
+///
+/// `cargo metadata` resolves the graph for the default features, so an app
+/// that keeps teksilo behind a feature — the usual way to grow a second UI
+/// beside an existing one — has no teksilo in that graph, and every command
+/// would refuse with "not a dependency". `--all-features` brings it back without
+/// changing the version: the lockfile pins versions for every feature at
+/// once. It is the fallback, not the first call, because the default
+/// features are what the app builds: an app that chooses between two
+/// teksilos through mutually exclusive features resolves to one only that
+/// way, where all features together would be ambiguous.
+fn resolve_features(dir: &Path, locked: bool) -> Result<Resolution, ResolveError> {
+    let metadata = run_cargo_metadata(dir, locked, false)?;
+    match resolution_from_metadata(&metadata) {
+        Err(ResolveError::NotADependency) => {}
+        resolved => return resolved,
+    }
+    let metadata = run_cargo_metadata(dir, locked, true)?;
+    let mut resolution = resolution_from_metadata(&metadata)?;
+    resolution.enabled_by = Some(enabling_features(&metadata));
+    Ok(resolution)
+}
+
+fn run_cargo_metadata(
+    dir: &Path,
+    locked: bool,
+    all_features: bool,
+) -> Result<serde_json::Value, ResolveError> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let mut args = vec!["metadata", "--format-version", "1", "--quiet"];
     if locked {
         args.push("--locked");
+    }
+    if all_features {
+        args.push("--all-features");
     }
     let out = Command::new(cargo).args(&args).current_dir(dir).output()?;
     if !out.status.success() {
@@ -152,6 +187,59 @@ fn run_cargo_metadata(dir: &Path, locked: bool) -> Result<serde_json::Value, Res
         ));
     }
     Ok(serde_json::from_slice(&out.stdout)?)
+}
+
+/// The features of the selected app that turn on an optional teksilo
+/// dependency of its own, sorted.
+///
+/// Read from the metadata's `features` table rather than from the manifest:
+/// cargo has already turned an implicit optional-dependency feature into an
+/// explicit `"teksilo": ["dep:teksilo"]` entry there, and resolved renames.
+/// A weak `teksilo?/feature` enables nothing on its own and is not counted.
+fn enabling_features(meta: &serde_json::Value) -> Vec<String> {
+    let roots: Vec<&str> = match meta["resolve"]["root"].as_str() {
+        Some(root) => vec![root],
+        None => meta["workspace_members"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str())
+            .collect(),
+    };
+    let mut features = BTreeSet::new();
+    for pkg in meta["packages"].as_array().into_iter().flatten() {
+        if !pkg["id"].as_str().is_some_and(|id| roots.contains(&id)) {
+            continue;
+        }
+        let optional: Vec<&str> = pkg["dependencies"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|dep| dep["optional"].as_bool() == Some(true))
+            .filter(|dep| dep["name"].as_str().is_some_and(is_teksilo_package))
+            .filter_map(|dep| dep["rename"].as_str().or(dep["name"].as_str()))
+            .collect();
+        for (feature, enables) in pkg["features"].as_object().into_iter().flatten() {
+            let turns_on = |value: &str| {
+                optional.iter().any(|dep| {
+                    value.strip_prefix("dep:") == Some(*dep)
+                        || value
+                            .strip_prefix(*dep)
+                            .is_some_and(|rest| rest.starts_with('/'))
+                })
+            };
+            if enables
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str())
+                .any(turns_on)
+            {
+                features.insert(feature.clone());
+            }
+        }
+    }
+    features.into_iter().collect()
 }
 
 /// The pure half: metadata JSON in, resolution out.
@@ -241,7 +329,11 @@ pub fn resolution_from_metadata(meta: &serde_json::Value) -> Result<Resolution, 
     }
 
     let version = framework_version(&crates).ok_or(ResolveError::NotADependency)?;
-    Ok(Resolution { crates, version })
+    Ok(Resolution {
+        crates,
+        version,
+        enabled_by: None,
+    })
 }
 
 /// The two external siblings whose types a consumer reaches through teksilo.
@@ -360,6 +452,36 @@ mod tests {
     }
 
     #[test]
+    fn enabling_features_name_what_turns_an_optional_teksilo_on() {
+        let meta = serde_json::json!({
+            "packages": [
+                {"id": "app", "name": "app",
+                 "dependencies": [
+                     {"name": "teksilo", "rename": null, "optional": true},
+                     {"name": "teksilo-data", "rename": "data", "optional": true},
+                     {"name": "teksilo-core", "rename": null, "optional": false},
+                     {"name": "serde", "rename": null, "optional": true}
+                 ],
+                 "features": {
+                     "default": ["iced"],
+                     "ui": ["dep:teksilo"],
+                     "teksilo": ["dep:teksilo"],
+                     "models": ["data/serde"],
+                     "weak": ["teksilo?/inspector"],
+                     "core-extra": ["teksilo-core/inspector"],
+                     "ser": ["dep:serde"]
+                 }},
+                {"id": "other", "name": "other",
+                 "dependencies": [{"name": "teksilo", "rename": null, "optional": true}],
+                 "features": {"elsewhere": ["dep:teksilo"]}}
+            ],
+            "workspace_members": ["app", "other"],
+            "resolve": {"root": "app", "nodes": []}
+        });
+        assert_eq!(enabling_features(&meta), ["models", "teksilo", "ui"]);
+    }
+
+    #[test]
     fn external_sibling_alone_is_not_a_framework_dependency() {
         let m = meta(serde_json::json!([pkg(
             "text-document",
@@ -474,6 +596,7 @@ mod tests {
         let r = Resolution {
             crates,
             version: "0.12.1".into(),
+            enabled_by: None,
         };
 
         // crates/ exists but tools/ does not yet: not a usable checkout.
@@ -503,6 +626,7 @@ mod tests {
         let r = Resolution {
             crates,
             version: "0.12.1".into(),
+            enabled_by: None,
         };
         assert_eq!(r.checkout_root(), None);
     }

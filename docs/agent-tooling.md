@@ -58,6 +58,10 @@ Search paths refer to the bundled corpus. Read them with `show`, even when
 those files are absent from your application. `show --list` lists the corpus.
 `symbol` requires Python 3; other commands do not.
 
+An application that keeps teksilo behind a Cargo feature needs nothing extra:
+when its default features leave teksilo out, the commands resolve with every
+feature enabled, and `status` names the feature that turns teksilo on.
+
 `status` reports the resolved app version and installed tooling without
 changing the lockfile. `--verbose` adds paths and diagnostics. `--quiet`
 suppresses informational output while preserving results and errors.
