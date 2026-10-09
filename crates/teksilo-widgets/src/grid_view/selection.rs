@@ -26,7 +26,6 @@ use teksilo_canvas::{Point, Rect};
 use teksilo_core::gesture::DragPhase;
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::EventContext;
-use teksilo_data::SelectionModel;
 
 use super::layout::GridLayoutStrategy;
 
@@ -95,7 +94,7 @@ pub(crate) fn marquee_auto_scroll_step(
 /// Captured state for the marquee drag handler.
 pub(crate) struct MarqueeConfig {
     pub(crate) marquee: Signal<Option<MarqueeState>>,
-    pub(crate) selection: SelectionModel,
+    pub(crate) selection: crate::data_views::RowSelection,
     pub(crate) strategy: Rc<dyn GridLayoutStrategy>,
     pub(crate) scroll_y: Signal<f32>,
     pub(crate) viewport_width: Rc<Cell<f32>>,

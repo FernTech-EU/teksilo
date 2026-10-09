@@ -27,7 +27,7 @@ use teksilo_core::signal::Signal;
 use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_data::{DragEligibility, RowState, SelectionModel};
+use teksilo_data::{DragEligibility, RowState};
 
 use super::TileContext;
 use super::a11y::{TileA11y, TileBody};
@@ -75,7 +75,7 @@ pub(crate) struct GridBodyPane<T: 'static> {
     pub(crate) column_count: Signal<usize>,
 
     pub(crate) scroll_y: Signal<f32>,
-    pub(crate) selection: Option<SelectionModel>,
+    pub(crate) selection: Option<RowSelection>,
     /// Says the new count when a click or an assistive click on a tile
     /// changes how many are selected. See `selection_count`.
     pub(crate) count_voice: Option<super::selection_count::SelectionCountVoice>,
@@ -273,13 +273,8 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         if (self.can_fetch_more_fn)() && end + FETCH_BUFFER_TILES >= total {
             (self.fetch_more_fn)();
         }
-        // Built ONCE per pane build (not per tile) and cheaply `Clone`d
-        // per-tile below — the facade's `Rc<dyn Fn>` closures would be
-        // real allocations if constructed inside the realize loop.
-        let sel_facade = self
-            .selection
-            .as_ref()
-            .map(|s| RowSelection::from_index(s.clone()));
+        // Cloned per tile below: a shallow `Rc` bump of the facade's closures.
+        let sel_facade = self.selection.clone();
 
         ctx.begin_view_focus_for(self.scope_owner);
         for i in start..end {

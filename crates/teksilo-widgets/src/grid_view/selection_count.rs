@@ -24,7 +24,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use teksilo_core::widget::EventContext;
-use teksilo_data::SelectionModel;
+
+use crate::data_views::RowSelection;
 
 /// How many tiles are selected, in the user's language: "1 élément
 /// sélectionné", "3 items selected", "No item selected".
@@ -45,12 +46,12 @@ pub(crate) fn selection_count_words(count: usize) -> String {
 /// same count. Only the outermost call counts.
 #[derive(Clone)]
 pub(crate) struct SelectionCountVoice {
-    selection: SelectionModel,
+    selection: RowSelection,
     counting: Rc<Cell<bool>>,
 }
 
 impl SelectionCountVoice {
-    pub(crate) fn new(selection: SelectionModel) -> Self {
+    pub(crate) fn new(selection: RowSelection) -> Self {
         Self {
             selection,
             counting: Rc::new(Cell::new(false)),

@@ -401,6 +401,11 @@ pub(crate) struct RowSelection {
     /// container-focus-ring gate — paint runs every frame and only needs to
     /// know "is anything selected", not the set itself.
     has_selection_fn: Rc<dyn Fn() -> bool>,
+    /// How many items are selected, keys this view does not show included.
+    count_fn: Rc<dyn Fn() -> usize>,
+    /// Replace the selection with these indices, or union them in when
+    /// `additive` — a rubber band.
+    select_indices_fn: Rc<dyn Fn(Vec<usize>, bool)>,
     clear_fn: Rc<dyn Fn()>,
     observe_fn: Rc<dyn Fn(Box<dyn Fn()>) -> ObserverHandle>,
     on_change_fn: Rc<dyn Fn(&DataChange)>,
@@ -447,6 +452,14 @@ impl RowSelection {
             select_all_fn: Rc::new(move |count| s_all.select_all(count)),
             selected_indices_fn: Rc::new(move || s_idx.selected_indices()),
             has_selection_fn: Rc::new(move || s_has.count() > 0),
+            count_fn: {
+                let s = sel.clone();
+                Rc::new(move || s.count())
+            },
+            select_indices_fn: {
+                let s = sel.clone();
+                Rc::new(move |indices, additive| s.select_indices(indices, additive))
+            },
             clear_fn: Rc::new(move || s_clr.clear()),
             observe_fn: Rc::new(move |cb| s_obs.selection_signal().observe(move |_| cb())),
             on_change_fn: Rc::new(move |change| match change {
@@ -575,6 +588,16 @@ impl RowSelection {
                 let k = keyed.clone();
                 Rc::new(move || k.count() > 0)
             },
+            count_fn: {
+                let k = keyed.clone();
+                Rc::new(move || k.count())
+            },
+            select_indices_fn: {
+                let (k, ka) = (keyed.clone(), key_at.clone());
+                Rc::new(move |indices: Vec<usize>, additive| {
+                    k.select_keys(indices.into_iter().filter_map(|i| ka(i)), additive)
+                })
+            },
             clear_fn: {
                 let k = keyed.clone();
                 Rc::new(move || k.clear())
@@ -634,6 +657,17 @@ impl RowSelection {
     /// O(visible), for both the index and keyed backings.
     pub(crate) fn has_selection(&self) -> bool {
         (self.has_selection_fn)()
+    }
+    /// How many items are selected. A keyed selection counts its keys, so a
+    /// key another view of the same model shows, and this one does not, is
+    /// counted too.
+    pub(crate) fn count(&self) -> usize {
+        (self.count_fn)()
+    }
+    /// Replace the selection with `indices`, or add them to it when
+    /// `additive`. The keyed backing selects the keys at those indices.
+    pub(crate) fn select_indices(&self, indices: Vec<usize>, additive: bool) {
+        (self.select_indices_fn)(indices, additive)
     }
     pub(crate) fn clear(&self) {
         (self.clear_fn)()

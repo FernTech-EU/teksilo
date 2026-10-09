@@ -100,6 +100,38 @@ selects tiles outside the realized window. `.on_selection_changed(|set|)` fires
 on every change (interactive or programmatic). `.marquee_selection(false)`
 disables marquee.
 
+### Keyed selection
+
+A `SelectionModel` holds positions, so sorting an album grid by artist or year,
+or narrowing a filter, leaves it on whatever tiles moved into those positions.
+Build the grid with `from_source_keyed` instead and the selection is held by the
+source's key:
+
+```rust
+let albums = SortFilterListModel::new(model).with_comparator("year", by_year);
+let selected = KeyedSelectionModel::<usize>::new(SelectionMode::Multi);
+
+GridView::from_source_keyed(albums.clone(), selected.clone(), |tc| {
+    Box::new(album_tile(tc.item, tc.is_selected))
+})
+```
+
+The contract is `ListView::from_source_keyed`'s:
+
+- the selection stays on its items through a reorder, a filter and a lazy
+  source's sliding window (a tile that is not loaded is selected by its key, and
+  is shown selected when it loads);
+- clicks, Ctrl/⌘-clicks, Shift-clicks, the keyboard and the marquee all write
+  keys;
+- an item the source no longer shows, removed or filtered out, leaves the
+  selection;
+- `.on_selection_changed(|set|)` still receives positions: those the selected
+  keys have when the selection changes. A sort moves them without changing the
+  selection, so it does not fire.
+
+In a `Single` selection the keyboard cursor stays on the selected tile through
+a sort. Selecting still rebuilds no tile node: each tile watches its own state.
+
 ## Keyboard navigation
 
 Focus (the *current* item) is tracked separately from selection and shown by a

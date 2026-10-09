@@ -10,7 +10,6 @@
 //! single / multi selection with 2D keyboard navigation, and is fully
 //! accessible (`Role::Grid` → `Role::GridCell`).
 //!
-//! The layout is pluggable via `GridLayoutStrategy`;
 //! The layout is pluggable via `GridLayoutStrategy`: the stock
 //! [`UniformGrid`] gives fixed tile size / fixed column count /
 //! adaptive min-width grids, [`VariableRowGrid`] sizes each row to its
@@ -26,6 +25,16 @@
 //! .spacing(8.0)
 //! .selection(selection_model)
 //! ```
+//!
+//! ## Selection by position or by key
+//!
+//! [`GridView::selection`] takes a [`SelectionModel`], which holds positions.
+//! A grid that is sorted or filtered under its selection, or fed by a lazy
+//! source, is built with [`GridView::from_source_keyed`] instead: a
+//! [`KeyedSelectionModel`] holds the source's keys, so the selection stays on
+//! the same items when they move. Both reach the grid through the facade the
+//! other data views use (`data_views::RowSelection`), which turns each click,
+//! key and rubber band into an index or a key.
 //!
 //! ## Pan to scroll
 //!
@@ -106,14 +115,17 @@ use teksilo_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement}
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_data::{
-    DataChange, DropPosition, DropResponse, ListModel, SelectionMode, SelectionModel,
+    DataChange, DropPosition, DropResponse, ItemKey, KeyedSelectionModel, ListModel, SelectionMode,
+    SelectionModel,
 };
 use teksilo_tokens::{OverscrollStyle, SurfaceRole};
 
 use std::time::Duration;
 
 use crate::common::scroll::OverscrollBehavior;
-use crate::data_views::{DragTransferMode, RowDragData, ViewId, ViewKind, flat_insertion_target};
+use crate::data_views::{
+    DragTransferMode, RowDragData, RowSelection, ViewId, ViewKind, flat_insertion_target,
+};
 use crate::list_source::ListSource;
 use crate::primitives::TextWidget;
 use crate::scroll_area::ScrollBarMode;
@@ -237,7 +249,12 @@ pub struct GridView<T: 'static> {
     strategy: Option<Rc<dyn GridLayoutStrategy>>,
 
     // Selection / focus
-    selection: Option<SelectionModel>,
+    /// The index-based [`SelectionModel`] or a [`KeyedSelectionModel`] behind
+    /// the facade every data view reads its selection through. Clicks, keys,
+    /// the marquee and the tiles all work in indices; the keyed backing turns
+    /// them into keys, so the selection follows its items through a sort, a
+    /// filter or a window slide.
+    selection: Option<RowSelection>,
     #[allow(clippy::type_complexity)]
     on_selection_changed: Option<Rc<dyn Fn(&BTreeSet<usize>)>>,
     focused_index: Signal<Option<usize>>,
@@ -398,6 +415,53 @@ impl<T: 'static> GridView<T> {
         delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static,
     ) -> Self {
         Self::create(ListSource::from_data_source(source), delegate)
+    }
+
+    /// Create a grid backed by any `ListDataSource` with **keyed** selection.
+    ///
+    /// The `KeyedSelectionModel<S::Key>` holds the selected items by the
+    /// source's key, not by position, so a selection survives the grid being
+    /// sorted (by artist, by year), narrowed by a filter, or a lazy source
+    /// sliding its loaded window: it stays on the same items. Clicks,
+    /// Ctrl/⌘-clicks, Shift-clicks, the keyboard and the rubber band all write
+    /// keys. An item the source no longer shows (removed, or filtered out
+    /// here) leaves the selection, as in [`ListView`](crate::ListView).
+    ///
+    /// [`on_selection_changed`](Self::on_selection_changed) still reports
+    /// indices: the positions the selected keys have when the selection
+    /// changes. A sort moves them without changing the selection, so it does
+    /// not fire. The view stays `GridView<T>`; the index↔key mapping is
+    /// captured from the concrete source here. Mutually exclusive with
+    /// [`selection`](Self::selection) (the last one set wins).
+    pub fn from_source_keyed<S: teksilo_data::ListDataSource<Item = T>>(
+        source: S,
+        keyed: KeyedSelectionModel<S::Key>,
+        delegate: impl Fn(&TileContext<'_, T>) -> Box<dyn Widget> + 'static,
+    ) -> Self
+    where
+        S::Key: ItemKey,
+    {
+        let s = Rc::new(source);
+        let key_at = {
+            let s = s.clone();
+            Rc::new(move |i| s.key_at(i)) as Rc<dyn Fn(usize) -> Option<S::Key>>
+        };
+        let len = {
+            let s = s.clone();
+            Rc::new(move || s.len()) as Rc<dyn Fn() -> usize>
+        };
+        // Existence for the prune after a removal: the keys of the index space
+        // the grid shows, which a lazy source knows before its items load.
+        // The same scan `ListView::from_source_keyed` makes.
+        let contains = {
+            let s = s.clone();
+            Rc::new(move |k: &S::Key| (0..s.len()).any(|i| s.key_at(i).as_ref() == Some(k)))
+                as Rc<dyn Fn(&S::Key) -> bool>
+        };
+        let selection = RowSelection::from_keyed(keyed, key_at, len, contains);
+        let mut view = Self::create(ListSource::from_data_source_rc(s), delegate);
+        view.selection = Some(selection);
+        view
     }
 
     fn create(
@@ -582,14 +646,18 @@ impl<T: 'static> GridView<T> {
 
     // ── Selection ───────────────────────────────────────────────────────
 
-    /// Set the selection model (modes `None` / `Single` / `Multi`).
+    /// Set the index-based selection model (modes `None` / `Single` /
+    /// `Multi`). It holds positions: for a selection that stays on its items
+    /// through a sort or a filter, build the grid with
+    /// [`from_source_keyed`](Self::from_source_keyed) instead.
     pub fn selection(mut self, sel: SelectionModel) -> Self {
-        self.selection = Some(sel);
+        self.selection = Some(RowSelection::from_index(sel));
         self
     }
 
     /// Called whenever the selection set changes — including programmatic
-    /// changes — with the new set of selected indices.
+    /// changes — with the new set of selected indices. For a keyed selection
+    /// these are the positions its keys have at that moment.
     pub fn on_selection_changed(mut self, f: impl Fn(&BTreeSet<usize>) + 'static) -> Self {
         self.on_selection_changed = Some(Rc::new(f));
         self
@@ -716,14 +784,10 @@ impl<T: 'static> GridView<T> {
         }
         let focused_index = self.focused_index.clone();
         let live = selection.clone();
-        ctx.effect(&selection.selection_signal(), move |_| {
-            if let Some(cursor) = focused_index.get()
-                && !live.is_selected(cursor)
-                && let Some(&tile) = live.selected_indices().first()
-            {
-                focused_index.set(Some(tile));
-            }
+        let handle = selection.observe_for_rebuild(move || {
+            put_the_cursor_on_the_selection(&focused_index, &live);
         });
+        ctx.own_handle(handle);
     }
 
     /// Scroll the tile the keyboard is on into view when this grid takes
@@ -1113,6 +1177,25 @@ impl<T: 'static> std::fmt::Debug for GridView<T> {
     }
 }
 
+/// In a single selection, move a cursor that is off the selection onto the
+/// selected tile. A grid with no cursor, or a selection on no tile this grid
+/// shows, leaves the cursor where it is. See
+/// `GridView::follow_the_selection_in_single_mode`.
+fn put_the_cursor_on_the_selection(
+    focused_index: &Signal<Option<usize>>,
+    selection: &RowSelection,
+) {
+    if selection.mode() != SelectionMode::Single {
+        return;
+    }
+    if let Some(cursor) = focused_index.get()
+        && !selection.is_selected(cursor)
+        && let Some(&tile) = selection.selected_indices().first()
+    {
+        focused_index.set(Some(tile));
+    }
+}
+
 /// The scroll offset that brings tile `index` into view per `anchor`, or
 /// `None` when the offset already satisfies it.
 ///
@@ -1173,13 +1256,20 @@ impl<T: 'static> Widget for GridView<T> {
         );
         ctx.register_animated_signal(&self.scroll_y);
 
-        // Re-walk container a11y when selection / focus changes.
+        // Re-walk container a11y when selection / focus changes, and repaint
+        // the overlay's container ring. Never a rebuild: each tile watches
+        // its own selectedness (`TileA11y`). A counter rather than the model's
+        // own signal, because the facade hides which of the two models it is.
+        let selection_changed = ctx.signal(0_u64);
         if let Some(ref sel) = self.selection {
-            sel.selection_signal().bind_to(
+            selection_changed.bind_to(
                 ctx.self_id(),
                 ctx.binding_registry(),
                 BindingLevel::AccessibilityOnly,
             );
+            let changed = selection_changed.clone();
+            let handle = sel.observe_for_rebuild(move || changed.set(changed.get() + 1));
+            ctx.own_handle(handle);
         }
         self.focused_index.bind_to(
             ctx.self_id(),
@@ -1213,6 +1303,7 @@ impl<T: 'static> Widget for GridView<T> {
                 // selection the selection's own observer puts the cursor on
                 // the selected tile (`follow_the_selection_in_single_mode`),
                 // and a cursor shifted after that would move twice.
+                let had_cursor = focused_obs.get().is_some();
                 if let Some(current) = focused_obs.get() {
                     focused_obs.set(teksilo_data::data_change::adjust_single_index_for_change(
                         current, change,
@@ -1222,22 +1313,13 @@ impl<T: 'static> Widget for GridView<T> {
                     DataChange::ItemsInserted { range } => {
                         strategy_obs.invalidate_rows(range.start..usize::MAX);
                         strategy_obs.resize((len_fn)());
-                        if let Some(ref s) = selection_obs {
-                            s.adjust_for_insert(range.start, range.end - range.start);
-                        }
                     }
                     DataChange::ItemsRemoved { range } => {
                         strategy_obs.invalidate_rows(range.start..usize::MAX);
                         strategy_obs.resize((len_fn)());
-                        if let Some(ref s) = selection_obs {
-                            s.adjust_for_remove(range.start, range.end - range.start);
-                        }
                     }
-                    DataChange::ItemsMoved { from, to, count } => {
+                    DataChange::ItemsMoved { .. } => {
                         strategy_obs.invalidate_rows(0..usize::MAX);
-                        if let Some(ref s) = selection_obs {
-                            s.adjust_for_move(*from, *to, *count);
-                        }
                     }
                     DataChange::ItemUpdated { index } => {
                         strategy_obs.invalidate_rows(*index..index + 1);
@@ -1248,10 +1330,25 @@ impl<T: 'static> Widget for GridView<T> {
                     DataChange::Reset => {
                         strategy_obs.invalidate_rows(0..usize::MAX);
                         strategy_obs.resize(0);
-                        if let Some(ref s) = selection_obs {
-                            s.clear();
-                        }
                         scroll_reset.set(0.0);
+                    }
+                }
+                // Index-shift (index model: insert / remove / move, cleared
+                // on a reset) or prune the keys that left the source (keyed
+                // model, which needs nothing else to follow its items).
+                if let Some(ref s) = selection_obs {
+                    s.on_data_change(change);
+                    // A keyed selection follows its tile through a sort
+                    // without being written, so no selection observer hears
+                    // it, while the sort's reset has dropped the cursor. In a
+                    // single selection the cursor goes back onto the tile, or
+                    // the grid would name no tile as its active descendant.
+                    if had_cursor
+                        && focused_obs.get().is_none()
+                        && s.mode() == SelectionMode::Single
+                        && let Some(&tile) = s.selected_indices().first()
+                    {
+                        focused_obs.set(Some(tile));
                     }
                 }
                 let next = counter.get() + 1;
@@ -1266,7 +1363,12 @@ impl<T: 'static> Widget for GridView<T> {
         // an EventContext, so the callback receives only the selection set.
         if let (Some(sel), Some(cb)) = (&self.selection, &self.on_selection_changed) {
             let cb = cb.clone();
-            ctx.effect(&sel.selection_signal(), move |set| cb(set));
+            let live = sel.clone();
+            let handle = sel.observe_for_rebuild(move || {
+                let set: BTreeSet<usize> = live.selected_indices().into_iter().collect();
+                cb(&set);
+            });
+            ctx.own_handle(handle);
         }
 
         // Rebuild when the loading flag toggles (shows/hides the overlay).
@@ -1721,6 +1823,7 @@ impl<T: 'static> Widget for GridView<T> {
                 view_focused: ctx.view_focus_active(),
                 focus_visible: ctx.focus_visible(),
                 selection: self.selection.clone(),
+                selection_changed: selection_changed.clone(),
                 scroll_y: self.scroll_y.clone(),
                 strategy: strategy.clone(),
                 viewport_width: self.viewport_width.clone(),
@@ -2050,7 +2153,9 @@ struct GridOverlay {
     /// The grid's selection, for the **container focus ring**: when the grid is
     /// keyboard-focused but has no current tile *and* nothing is selected, no
     /// tile chrome marks the focus, so the whole grid outlines itself instead.
-    selection: Option<SelectionModel>,
+    selection: Option<RowSelection>,
+    /// Bumped on every selection change; repaints the container ring.
+    selection_changed: Signal<u64>,
     scroll_y: Signal<f32>,
     strategy: Rc<dyn GridLayoutStrategy>,
     viewport_width: Rc<Cell<f32>>,
@@ -2147,13 +2252,11 @@ impl Widget for GridOverlay {
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
         );
-        if let Some(ref sel) = self.selection {
-            sel.selection_signal().bind_to(
-                ctx.self_id(),
-                ctx.binding_registry(),
-                BindingLevel::RepaintOnly,
-            );
-        }
+        self.selection_changed.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
         self.marquee.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
@@ -2220,7 +2323,7 @@ impl Widget for GridOverlay {
             // No current tile. If nothing is selected either, no tile chrome
             // marks the focus — outline the whole grid so a Tab-focused empty
             // grid still shows where focus landed (mirrors TreeView / ListView).
-            let empty = self.selection.as_ref().is_none_or(|s| s.count() == 0);
+            let empty = self.selection.as_ref().is_none_or(|s| !s.has_selection());
             if empty {
                 let inset = 1.0_f32;
                 let rect = Rect::new(

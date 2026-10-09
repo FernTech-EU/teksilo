@@ -18,7 +18,6 @@ use std::time::Duration;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::EventContext;
-use teksilo_data::SelectionModel;
 
 use super::layout::{GridLayoutStrategy, ScrollAnchor};
 use crate::common::list_nav;
@@ -41,7 +40,7 @@ pub(crate) struct GridKeyConfig {
     pub(crate) len_fn: Rc<dyn Fn() -> usize>,
     pub(crate) col_count: Signal<usize>,
     pub(crate) focused_index: Signal<Option<usize>>,
-    pub(crate) selection: Option<SelectionModel>,
+    pub(crate) selection: Option<crate::data_views::RowSelection>,
     /// Says the new count when Space changes how many tiles are selected.
     /// Space reaches the selection through `row_space_activate`, which runs
     /// after this handler has returned, outside the voice the grid puts

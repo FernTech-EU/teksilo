@@ -2339,3 +2339,378 @@ fn space_checks_the_focused_tile_and_leaves_the_selection_alone() {
     assert_eq!(selection.selected_indices(), Vec::<usize>::new());
     assert!(checked.get(), "the check is untouched");
 }
+
+// ── Keyed selection ─────────────────────────────────────────────────────────
+
+/// Nine tiles numbered 0 to 8 behind a `SortFilterListModel`, which keys each
+/// item by its position in the model underneath, so here a tile's key is its
+/// number. The proxy sorts on "n" and, while the "even" filter is set, keeps
+/// the even numbers only. Three columns of 100x50 tiles fit 400 dp, so the
+/// nine tiles are three rows, all realized.
+fn keyed_grid(
+    mode: SelectionMode,
+) -> (
+    WidgetTree,
+    WidgetId,
+    teksilo_data::SortFilterListModel<usize>,
+    teksilo_data::KeyedSelectionModel<usize>,
+) {
+    let proxy = teksilo_data::SortFilterListModel::new(ListModel::from_vec((0..9).collect()))
+        .with_comparator("n", |a: &usize, b: &usize| a.cmp(b))
+        .with_predicate("even", |_text| Box::new(|n: &usize| n.is_multiple_of(2)));
+    let keyed = teksilo_data::KeyedSelectionModel::<usize>::new(mode);
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::from_source_keyed(proxy.clone(), keyed.clone(), |_tc| {
+            Box::new(FixedLeaf(100.0, 50.0))
+        })
+        .tile_size(100.0, 50.0),
+    );
+    // Twice: the first pass settles the column count, which rebuilds the
+    // tiles once.
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    (tree, id, proxy, keyed)
+}
+
+/// The realized tile at flat `index`, from the map the body pane writes.
+fn tile_at(tree: &WidgetTree, grid: WidgetId, index: usize) -> WidgetId {
+    tree.widget_as_any(grid)
+        .and_then(|any| any.downcast_ref::<GridView<usize>>())
+        .and_then(|g| {
+            g.tile_map
+                .borrow()
+                .iter()
+                .find(|(i, _)| *i == index)
+                .map(|(_, id)| *id)
+        })
+        .unwrap_or_else(|| panic!("tile {index} is realized"))
+}
+
+/// A primary click on the realized tile at `index`, with `modifiers` held.
+fn click_with(
+    tree: &mut WidgetTree,
+    grid: WidgetId,
+    index: usize,
+    modifiers: teksilo_core::event::Modifiers,
+) {
+    use teksilo_core::event::{PointerButton, WidgetEvent};
+    let center = tree.bounds(tile_at(tree, grid, index)).center();
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        center,
+        PointerButton::Primary,
+        modifiers,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        center,
+        PointerButton::Primary,
+        modifiers,
+    ));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+}
+
+/// The flat index of every tile the accessibility tree marks selected.
+/// `position_in_set` reads 0-based in a snapshot; see
+/// `focus_reveal_tests::selected_positions`.
+fn selected_tiles(tree: &WidgetTree) -> Vec<usize> {
+    let mut out: Vec<usize> = tree
+        .accessibility_tree_snapshot()
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.role() == teksilo_core::accesskit::Role::GridCell)
+        .filter(|(_, node)| node.is_selected() == Some(true))
+        .filter_map(|(_, node)| node.position_in_set())
+        .collect();
+    out.sort_unstable();
+    out
+}
+
+fn sorted_keys(keyed: &teksilo_data::KeyedSelectionModel<usize>) -> Vec<usize> {
+    let mut keys = keyed.selected_keys();
+    keys.sort_unstable();
+    keys
+}
+
+/// Sorting the grid moves a selected tile, and the selection goes with it:
+/// tile 1 is the eighth tile once the grid counts down, and it is the one
+/// still selected, on screen and to a screen reader.
+#[test]
+fn a_keyed_selection_follows_its_tile_through_a_sort() {
+    use teksilo_data::SortDirection;
+    let (mut tree, id, proxy, keyed) = keyed_grid(SelectionMode::Multi);
+    tree.click(tile_at(&tree, id, 1));
+    assert_eq!(
+        sorted_keys(&keyed),
+        vec![1],
+        "a click stores the tile's key"
+    );
+
+    proxy.set_sort(Some("n"), SortDirection::Descending);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sorted_keys(&keyed), vec![1]);
+    assert_eq!(
+        selected_tiles(&tree),
+        vec![7],
+        "8, 7, … 1, 0: tile 1 sorts to position 7, and is the tile marked selected"
+    );
+}
+
+/// Narrowing the filter keeps the selected tiles that are still shown,
+/// wherever they land, and drops the one it hides: the contract
+/// `ListView::from_source_keyed` keeps.
+#[test]
+fn a_keyed_selection_follows_its_tiles_through_a_filter() {
+    use teksilo_core::event::Modifiers;
+    let (mut tree, id, proxy, keyed) = keyed_grid(SelectionMode::Multi);
+    tree.click(tile_at(&tree, id, 2));
+    click_with(&mut tree, id, 3, Modifiers::COMMAND);
+    assert_eq!(sorted_keys(&keyed), vec![2, 3]);
+
+    proxy.set_filter("even", "on");
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(
+        sorted_keys(&keyed),
+        vec![2],
+        "3 is filtered out and leaves the selection; 2 stays"
+    );
+    assert_eq!(
+        selected_tiles(&tree),
+        vec![1],
+        "0, 2, 4, 6, 8: tile 2 is now second"
+    );
+}
+
+/// Clicks with ⌘/Ctrl and Shift held, and a rubber band, all write keys,
+/// read off the tiles' current positions: after a sort, position and key no
+/// longer agree, so an index written by mistake would select other tiles.
+#[test]
+fn modifier_clicks_and_the_rubber_band_write_keys() {
+    use teksilo_canvas::Point;
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+    use teksilo_data::SortDirection;
+    let (mut tree, id, proxy, keyed) = keyed_grid(SelectionMode::Multi);
+    proxy.set_sort(Some("n"), SortDirection::Descending);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Positions 0..=8 now hold tiles 8..=0.
+    tree.click(tile_at(&tree, id, 0));
+    click_with(&mut tree, id, 2, Modifiers::COMMAND);
+    assert_eq!(sorted_keys(&keyed), vec![6, 8]);
+    click_with(&mut tree, id, 4, Modifiers::SHIFT);
+    assert_eq!(
+        sorted_keys(&keyed),
+        vec![4, 5, 6, 8],
+        "Shift extends from the last ⌘-click (position 2, tile 6) to position 4 (tile 4)"
+    );
+
+    // A band over the second row (positions 3..=5, tiles 5, 4, 3), pressed on
+    // the background right of the third column.
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(360.0, 70.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(360.0, 76.0)));
+    let end = Point::new(40.0, 90.0);
+    tree.dispatch_event(WidgetEvent::pointer_move(end));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        end,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sorted_keys(&keyed), vec![3, 4, 5]);
+    assert_eq!(selected_tiles(&tree), vec![3, 4, 5]);
+}
+
+/// The selection is reported as positions, read when it changes. A sort moves
+/// the selected tile without changing the selection, so it reports nothing.
+#[test]
+fn a_keyed_grid_reports_its_selection_as_positions() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use teksilo_data::SortDirection;
+    let proxy = teksilo_data::SortFilterListModel::new(ListModel::from_vec((0..9).collect()))
+        .with_comparator("n", |a: &usize, b: &usize| a.cmp(b));
+    proxy.set_sort(Some("n"), SortDirection::Descending);
+    let keyed = teksilo_data::KeyedSelectionModel::<usize>::new(SelectionMode::Multi);
+    let reported: Rc<RefCell<Vec<Vec<usize>>>> = Rc::new(RefCell::new(Vec::new()));
+    let sink = reported.clone();
+    let mut tree = WidgetTree::new();
+    let _id = tree.add(
+        GridView::from_source_keyed(proxy.clone(), keyed.clone(), |_tc| {
+            Box::new(FixedLeaf(100.0, 50.0))
+        })
+        .tile_size(100.0, 50.0)
+        .on_selection_changed(move |set| sink.borrow_mut().push(set.iter().copied().collect())),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    keyed.select(6);
+    assert_eq!(*reported.borrow(), vec![vec![2]], "tile 6 is at position 2");
+
+    proxy.set_sort(Some("n"), SortDirection::Ascending);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(
+        reported.borrow().len(),
+        1,
+        "a sort does not change the selection"
+    );
+}
+
+/// In a single selection the grid's cursor is the selected tile, and stays
+/// it through a sort. The sort is a reset, which drops the cursor; the
+/// selection has not changed, so nothing that watches it puts the cursor
+/// back, and the grid would name no tile as its active descendant.
+#[test]
+fn a_keyed_single_selection_keeps_the_cursor_on_its_tile_through_a_sort() {
+    use teksilo_data::SortDirection;
+    let (mut tree, id, proxy, keyed) = keyed_grid(SelectionMode::Single);
+    tree.focus(id);
+    tree.click(tile_at(&tree, id, 1));
+    assert_eq!(grid_focus(&tree, id), Some(1));
+
+    proxy.set_sort(Some("n"), SortDirection::Descending);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(sorted_keys(&keyed), vec![1]);
+    assert_eq!(
+        grid_focus(&tree, id),
+        Some(7),
+        "the cursor goes with tile 1"
+    );
+
+    let snapshot = tree.accessibility_tree_snapshot();
+    let active = snapshot
+        .nodes
+        .iter()
+        .find(|(_, node)| node.role() == teksilo_core::accesskit::Role::Grid)
+        .and_then(|(_, node)| node.active_descendant())
+        .expect("the grid names an active descendant");
+    let position = snapshot
+        .nodes
+        .iter()
+        .find(|(node_id, _)| *node_id == active)
+        .and_then(|(_, node)| node.position_in_set());
+    assert_eq!(position, Some(7));
+}
+
+/// A lazy source knows its keys before its items. A selected tile scrolled
+/// out of the loaded window keeps its place in the selection, a Shift range
+/// across tiles that are not loaded selects their keys, and the tile is
+/// shown selected again when its row loads back in.
+#[test]
+fn a_keyed_selection_survives_a_sliding_window() {
+    use std::cell::RefCell;
+    use std::ops::Range;
+    use std::rc::Rc;
+    use teksilo_core::ObserverHandle;
+    use teksilo_core::event::Modifiers;
+    use teksilo_data::{KeyedSelectionModel, ListDataSource, RowState};
+
+    /// Sixty items keyed `1000 + index`, of which only the window the grid
+    /// last asked for is loaded.
+    struct Windowed {
+        loaded: Rc<RefCell<Range<usize>>>,
+    }
+    impl ListDataSource for Windowed {
+        type Item = usize;
+        type Key = u64;
+        fn len(&self) -> usize {
+            60
+        }
+        fn with_item<R>(&self, i: usize, f: impl FnOnce(&usize) -> R) -> Option<R> {
+            self.loaded.borrow().contains(&i).then(|| f(&i))
+        }
+        fn key_at(&self, i: usize) -> Option<u64> {
+            (i < 60).then_some(1000 + i as u64)
+        }
+        fn index_of(&self, key: &u64) -> Option<usize> {
+            let i = key.checked_sub(1000)? as usize;
+            (i < 60).then_some(i)
+        }
+        fn row_state(&self, i: usize) -> RowState {
+            if self.loaded.borrow().contains(&i) {
+                RowState::Ready
+            } else {
+                RowState::Loading
+            }
+        }
+        fn request_window(&self, range: Range<usize>) {
+            *self.loaded.borrow_mut() = range;
+        }
+        fn observe_changes(
+            &self,
+            _f: impl Fn(&teksilo_data::DataChange) + 'static,
+        ) -> ObserverHandle {
+            ObserverHandle::new(Rc::new(()) as Rc<dyn std::any::Any>, 0, Rc::new(|_| {}))
+        }
+    }
+
+    let loaded = Rc::new(RefCell::new(0..0));
+    let keyed = KeyedSelectionModel::<u64>::new(SelectionMode::Multi);
+    let mut tree = WidgetTree::new();
+    let grid = GridView::from_source_keyed(
+        Windowed {
+            loaded: loaded.clone(),
+        },
+        keyed.clone(),
+        |_tc| Box::new(FixedLeaf(100.0, 50.0)),
+    )
+    .tile_size(100.0, 50.0);
+    let scroll = grid.scroll_y_signal().clone();
+    let max_scroll = grid.max_scroll_y_signal().clone();
+    let id = tree.add(grid);
+    let p = SizeProposal::exact(400.0, 300.0);
+    tree.layout(p);
+    tree.click(tile_at(&tree, id, 2));
+    assert_eq!(keyed.selected_keys(), vec![1002]);
+
+    scroll.set(max_scroll.get());
+    tree.layout(p);
+    tree.layout(p);
+    assert!(
+        !loaded.borrow().contains(&2),
+        "the window has slid past tile 2, which is the case this is about"
+    );
+    click_with(&mut tree, id, 59, Modifiers::SHIFT);
+    assert_eq!(keyed.count(), 58, "1002 through 1059");
+    assert!(
+        keyed.is_selected(&1010),
+        "a tile that is not loaded is selected by its key"
+    );
+
+    scroll.set(0.0);
+    tree.layout(p);
+    tree.layout(p);
+    assert!(loaded.borrow().contains(&2));
+    let shown = selected_tiles(&tree);
+    assert!(
+        shown.contains(&2) && !shown.contains(&1),
+        "tile 2 is selected again once it is loaded, got {shown:?}"
+    );
+}
+
+/// A keyed selection changes a tile's state in place, as an index selection
+/// does: no tile node is replaced, and only the tile it selects draws again.
+#[test]
+fn a_keyed_selection_change_rebuilds_only_the_tile_it_flips() {
+    let (mut tree, id, _proxy, keyed) = keyed_grid(SelectionMode::Multi);
+    let contents = |tree: &WidgetTree| -> Vec<Vec<WidgetId>> {
+        tiles(tree, id)
+            .into_iter()
+            .map(|tile| tree.children(tile))
+            .collect()
+    };
+    let nodes = tiles(&tree, id);
+    let before = contents(&tree);
+
+    keyed.select(4);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(tiles(&tree, id), nodes, "every tile keeps its node");
+    let after = contents(&tree);
+    assert_ne!(after[4], before[4], "tile 4 is drawn again");
+    assert_eq!(after[..4], before[..4]);
+    assert_eq!(after[5..], before[5..], "and no other tile is");
+    assert_eq!(selected_tiles(&tree), vec![4]);
+}
