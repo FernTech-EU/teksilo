@@ -108,6 +108,13 @@ pub struct EventContext<'ops> {
     /// without this an affordance follows nothing.
     pub(crate) overlay_placement_updates:
         Vec<(crate::widget_id::WidgetId, crate::overlay::OverlayPlacement)>,
+    /// Placement functions for overlays named by their content root, re-run
+    /// against the anchor on every layout pass. See
+    /// [`track_overlay_placement_by_content`](EventContext::track_overlay_placement_by_content).
+    pub(crate) overlay_placement_sources: Vec<(
+        crate::widget_id::WidgetId,
+        crate::overlay::OverlayPlacementSource,
+    )>,
     /// Overlay ids whose `auto_dismiss_after` timer should be paused
     /// or resumed after the handler returns (`true` = pause, `false`
     /// = resume). Drained by `WidgetTree::collect_from_ctx` against
@@ -511,6 +518,7 @@ impl<'ops> EventContext<'ops> {
             overlay_content_dismissals: Vec::new(),
             overlay_band_requests: Vec::new(),
             overlay_placement_updates: Vec::new(),
+            overlay_placement_sources: Vec::new(),
             overlay_pause_requests: Vec::new(),
             dismiss_scope: None,
             pointer_capture: None,
@@ -1563,6 +1571,35 @@ impl<'ops> EventContext<'ops> {
         placement: crate::overlay::OverlayPlacement,
     ) {
         self.overlay_placement_updates.push((content_id, placement));
+    }
+
+    /// Keep the currently-shown overlay whose content root is `content_id`
+    /// placed by `placement`, re-run on every layout pass for as long as that
+    /// overlay is up.
+    ///
+    /// `placement` receives the anchor's bounds, in window coordinates, as the
+    /// pass placing the overlay laid the anchor out, and the layout direction.
+    /// It is for an overlay that hangs off a *part* of its anchor that no
+    /// [`OverlayPlacement`](crate::overlay::OverlayPlacement) names — a
+    /// slider's thumb — and so is shown with a rectangle the handler computed:
+    /// [`update_overlay_placement_by_content`](Self::update_overlay_placement_by_content)
+    /// moves such an overlay only when a handler runs, and a scroll, a resize
+    /// or a reflow moves the anchor with no handler running at all.
+    ///
+    /// Applied after the shows of the same dispatch, like a placement update.
+    /// A no-op when no overlay is showing that content; a later call replaces
+    /// the function.
+    pub fn track_overlay_placement_by_content(
+        &mut self,
+        content_id: crate::widget_id::WidgetId,
+        placement: impl Fn(
+            teksilo_canvas::Rect,
+            crate::environment::LayoutDirection,
+        ) -> crate::overlay::OverlayPlacement
+        + 'static,
+    ) {
+        self.overlay_placement_sources
+            .push((content_id, std::rc::Rc::new(placement)));
     }
 
     /// Show an overlay whose reveal/dismiss is animated by a

@@ -622,6 +622,9 @@ impl WidgetTree {
         } = &event
         {
             self.tooltip_escape_pressed();
+            // The same rule for every overlay nothing can be done in: it goes,
+            // and the key goes on. See `inert_overlays_escape_pressed`.
+            self.inert_overlays_escape_pressed(&mut *ops);
         }
 
         if let WidgetEvent::KeyDown {
@@ -2887,12 +2890,20 @@ impl WidgetTree {
                 continue;
             }
             let current_focus = self.focused;
+            // Read before the request moves into the manager.
+            let inert = self.overlay_content_is_inert(req.content_id);
             self.overlay_manager.show(req);
             // Overlay show changes the AT tree shape — mirror the
             // `WidgetTree::show_overlay` path. The dismissal sibling
             // (`dismiss_overlay_with_ops`) already flips this.
             self.a11y_dirty = true;
-            if let Some(focus_id) = current_focus {
+            // An inert overlay takes no focus, so it has none to give back: a
+            // restore target recorded here would hand focus, when the overlay
+            // went, to whatever held it when the overlay appeared, however
+            // long ago and wherever focus has been since.
+            if let Some(focus_id) = current_focus
+                && !inert
+            {
                 self.overlay_manager.set_top_focus_restore(focus_id);
             }
         }
@@ -2920,6 +2931,12 @@ impl WidgetTree {
         for (content_id, placement) in ctx.overlay_placement_updates {
             if let Some(overlay_id) = self.overlay_manager.find_by_content(content_id) {
                 self.overlay_manager.update_placement(overlay_id, placement);
+            }
+        }
+        for (content_id, source) in ctx.overlay_placement_sources {
+            if let Some(overlay_id) = self.overlay_manager.find_by_content(content_id) {
+                self.overlay_manager
+                    .set_placement_source(overlay_id, source);
             }
         }
         for (mut req, duration) in ctx.timed_overlay_requests {

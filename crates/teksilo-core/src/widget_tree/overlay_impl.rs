@@ -888,7 +888,7 @@ impl WidgetTree {
 
     /// Whether an overlay is one that keyboard focus leaving it should close.
     ///
-    /// Three exclusions, all structural rather than declared:
+    /// Four exclusions, all structural rather than declared:
     ///
     /// * Anything **not positioned at its anchor** (see
     ///   [`Self::overlay_is_anchor_positioned`]). That covers the modal — the
@@ -909,6 +909,11 @@ impl WidgetTree {
     ///   focus rests on its *anchor*, which is the normal state of a
     ///   focus-promoted tip. Judging it by content alone would kill it the
     ///   moment it appeared.
+    /// * An **inert** overlay (see [`Self::overlay_content_is_inert`]) — a value
+    ///   readout over a slider, say. Nothing in it can hold focus or be worked
+    ///   from the keyboard, so it is not a disclosure focus can walk out of,
+    ///   and the widget that raised it decides when it goes, as a tooltip's
+    ///   machinery does for a tip.
     ///
     /// Note what is *not* consulted: [`DismissBehavior`](crate::overlay::DismissBehavior).
     /// That enum picks which of Escape / click-outside / hover-out apply, which
@@ -928,6 +933,9 @@ impl WidgetTree {
             return false;
         }
         if overlay.is_dismissing() {
+            return false;
+        }
+        if self.overlay_content_is_inert(overlay.content_id) {
             return false;
         }
         !self
@@ -1622,6 +1630,59 @@ impl WidgetTree {
         // No position — the same "every non-sticky tip goes" case as a window
         // deactivation. A key press has nowhere to be "inside".
         self.tooltip_pointer_press(None);
+    }
+
+    /// Whether the overlay content rooted at `content_id` takes no input at
+    /// all: its root is both `hit_transparent` (nothing in the subtree is a
+    /// target) and `event_pass_through` (what it does not claim belongs to
+    /// whatever is behind it). See [`ActiveOverlay::inert`](crate::overlay::ActiveOverlay::inert).
+    ///
+    /// Either flag alone keeps its own meaning: a pass-through root still has
+    /// targets among its children, and a merely hit-transparent one is a hole
+    /// in the hit test that nothing behind it is asked about.
+    pub(super) fn overlay_content_is_inert(&self, content_id: WidgetId) -> bool {
+        self.arena
+            .get(content_id)
+            .is_some_and(|node| node.hit_transparent && node.event_pass_through)
+    }
+
+    /// Mirror every overlay's inertness from its content root onto the stack,
+    /// where the manager's pointer queries read it.
+    pub(super) fn refresh_overlay_inertness(&mut self) {
+        let flags: Vec<(crate::overlay::OverlayId, bool)> = self
+            .overlay_manager
+            .stack
+            .iter()
+            .map(|overlay| {
+                (
+                    overlay.id,
+                    self.overlay_content_is_inert(overlay.content_id),
+                )
+            })
+            .collect();
+        for (id, inert) in flags {
+            self.overlay_manager.set_inert(id, inert);
+        }
+    }
+
+    /// Retire every inert overlay Escape may close, without consuming the key
+    /// and without moving focus.
+    ///
+    /// [`tooltip_escape_pressed`](Self::tooltip_escape_pressed)'s rule for
+    /// what is not a registered tooltip: a value readout raised by a hovered
+    /// control is up while the user types in a field elsewhere, and an Escape
+    /// spent on it is an Escape the field never sees. Content shown on hover or
+    /// focus still has to be dismissible without moving either (WCAG 2.2 SC
+    /// 1.4.13), and this is what dismisses it. Runs ahead of the stack's own
+    /// Escape walk, which steps over inert overlays.
+    pub(super) fn inert_overlays_escape_pressed(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        // Shown since the last layout, perhaps: the flag is mirrored there.
+        self.refresh_overlay_inertness();
+        let dismissed = self.overlay_manager.dismiss_inert_on_escape();
+        if !dismissed.is_empty() {
+            self.dormant_dismissed_content(&dismissed, &mut *ops);
+            self.a11y_dirty = true;
+        }
     }
 
     /// Retire hover tooltips when the window stops being active.
@@ -3773,5 +3834,180 @@ mod tests {
             !tree.is_visible(content),
             "and is reaped once the tween's own window has passed"
         );
+    }
+
+    // -----------------------------------------------------------------
+    // Inert overlays
+    // -----------------------------------------------------------------
+
+    /// A leaf of a fixed size, so an overlay showing it has bounds to hit.
+    #[derive(Debug)]
+    struct Block(f32, f32);
+
+    impl Widget for Block {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            teksilo_canvas::Size::new(self.0, self.1).into()
+        }
+    }
+
+    /// A 100 x 60 panel at (20, 20), and above it on the stack a 60 x 40
+    /// overlay at `inert_at` whose content takes no input. Returns the tree,
+    /// the panel's content and the inert content.
+    fn panel_and_an_inert_overlay(
+        panel_dismiss: crate::overlay::DismissBehavior,
+        inert_dismiss: crate::overlay::DismissBehavior,
+        inert_at: Point,
+    ) -> (WidgetTree, WidgetId, WidgetId) {
+        use crate::widget_builder::WidgetBuilder;
+
+        let mut tree = WidgetTree::new();
+        let panel = tree.add(Block(100.0, 60.0));
+        let inert = tree.add(
+            Block(60.0, 40.0)
+                .hit_transparent(true)
+                .event_pass_through(true),
+        );
+        // Added last, so a walk of the arena's roots, back to front, reaches
+        // the window before either overlay's content: only the stack can say
+        // the panel is above it.
+        let beneath = tree.add(FillWidget::new());
+        for (content, at, dismiss) in [
+            (panel, Point::new(20.0, 20.0), panel_dismiss),
+            (inert, inert_at, inert_dismiss),
+        ] {
+            tree.show_overlay(crate::overlay::OverlayRequest {
+                content_id: content,
+                anchor: beneath,
+                placement: crate::overlay::OverlayPlacement::AtPointer(at),
+                dismiss,
+                layer: crate::overlay::OverlayLayer::InTree,
+                parent_overlay: None,
+                on_dismiss: None,
+                fade_duration: None,
+            });
+        }
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        (tree, panel, inert)
+    }
+
+    #[test]
+    fn an_inert_overlay_hands_the_point_to_the_overlay_beneath_it() {
+        let (tree, panel, inert) = panel_and_an_inert_overlay(
+            crate::overlay::DismissBehavior::Manual,
+            crate::overlay::DismissBehavior::EscapeKey,
+            Point::new(30.0, 30.0),
+        );
+        let at = Point::new(40.0, 40.0);
+        let over = tree.overlay_manager.find_by_content(inert).unwrap();
+        assert!(
+            tree.overlay_content_bounds(over).unwrap().contains(at),
+            "fixture: the inert overlay covers the point"
+        );
+        assert_eq!(
+            tree.hit_test(at),
+            Some(panel),
+            "the panel under it takes the point, not the window under both"
+        );
+    }
+
+    #[test]
+    fn a_press_on_an_inert_overlay_is_outside_the_overlays_it_is_outside_of() {
+        let (mut tree, panel, inert) = panel_and_an_inert_overlay(
+            crate::overlay::DismissBehavior::ClickOutside,
+            crate::overlay::DismissBehavior::EscapeKey,
+            Point::new(200.0, 100.0),
+        );
+        let at = Point::new(220.0, 110.0);
+        let over = tree.overlay_manager.find_by_content(inert).unwrap();
+        assert!(
+            tree.overlay_content_bounds(over).unwrap().contains(at),
+            "fixture: the press lands on the inert overlay"
+        );
+        tree.pointer_down_button(at, crate::event::PointerButton::Primary);
+        assert_eq!(
+            tree.overlay_manager.find_by_content(panel),
+            None,
+            "the press was outside the panel, whatever floats over that spot",
+        );
+    }
+
+    #[test]
+    fn an_inert_overlay_is_not_an_interactive_rect() {
+        // What a title bar carves out of the OS caption: a press there must
+        // drag the window, bubble or not.
+        let (tree, panel, _inert) = panel_and_an_inert_overlay(
+            crate::overlay::DismissBehavior::Manual,
+            crate::overlay::DismissBehavior::EscapeKey,
+            Point::new(200.0, 100.0),
+        );
+        let panel_bounds = tree
+            .overlay_content_bounds(tree.overlay_manager.find_by_content(panel).unwrap())
+            .unwrap();
+        assert_eq!(tree.overlay_manager.interactive_rects(), vec![panel_bounds]);
+    }
+
+    #[test]
+    fn escape_steps_over_an_inert_overlay_to_the_one_beneath() {
+        // A `Manual` overlay stops the Escape walk, but an inert one, even a
+        // `Manual` one, owns no key: nothing in it can be what the user meant.
+        let (mut tree, panel, inert) = panel_and_an_inert_overlay(
+            crate::overlay::DismissBehavior::EscapeKey,
+            crate::overlay::DismissBehavior::Manual,
+            Point::new(200.0, 100.0),
+        );
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        assert_eq!(
+            tree.overlay_manager.find_by_content(panel),
+            None,
+            "the panel beneath took the Escape"
+        );
+        assert!(
+            tree.overlay_manager.find_by_content(inert).is_some(),
+            "and the inert one, which Escape may not close, is still up"
+        );
+    }
+
+    #[test]
+    fn an_inert_overlay_records_no_focus_to_give_back() {
+        use crate::widget_builder::WidgetBuilder;
+
+        let mut tree = WidgetTree::new();
+        let field = tree.add(FillWidget::new().focusable());
+        let inert = tree.add(
+            Block(60.0, 40.0)
+                .hit_transparent(true)
+                .event_pass_through(true),
+        );
+        let ordinary = tree.add(Block(60.0, 40.0));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.focus(field);
+        let mut noop = crate::window::NoopWindowOps;
+        for content in [inert, ordinary] {
+            tree.run_with_event_context(&mut noop, |ctx| {
+                ctx.show_overlay(crate::overlay::OverlayRequest {
+                    content_id: content,
+                    anchor: field,
+                    placement: crate::overlay::OverlayPlacement::AtPointer(Point::new(20.0, 20.0)),
+                    dismiss: crate::overlay::DismissBehavior::EscapeKey,
+                    layer: crate::overlay::OverlayLayer::InTree,
+                    parent_overlay: None,
+                    on_dismiss: None,
+                    fade_duration: None,
+                });
+            });
+        }
+        let restore = |content: WidgetId| {
+            tree.overlay_manager
+                .stack
+                .iter()
+                .find(|o| o.content_id == content)
+                .and_then(|o| o.focus_restore)
+        };
+        assert_eq!(restore(ordinary), Some(field), "an ordinary one does");
+        assert_eq!(restore(inert), None, "an inert one took no focus");
     }
 }

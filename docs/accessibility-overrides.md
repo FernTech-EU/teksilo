@@ -293,6 +293,8 @@ my_message
 
 Each entry is assigned a stable `i32` id in declaration order. AT triggers a custom action via `WidgetEvent::AccessAction { action: Action::CustomAction, data: Some(ActionData::CustomAction(idx)), .. }` and the dispatcher routes by `idx` into `access_overrides.custom_actions`.
 
+The entries are **appended** to whatever custom actions the widget publishes itself, so a `Slider` given `.access_custom_action(..)` still offers its own "Reset to default". The dispatcher hands one `CustomAction(id)` to the widget's own handler and to the override entry at that index alike, which is why a widget that publishes custom actions numbers them clear of the low ids the overrides take (`Slider` uses 1000).
+
 ---
 
 ## Shortcuts
@@ -407,7 +409,7 @@ For each widget the AT walker visits, the sequence is:
     6. Numeric: `numeric_value`, `min`, `max`, `step`.
     7. Action suppression: `removed_actions` (call `remove_action`).
     8. Action advertisement: `actions` (call `add_action`).
-    9. Custom actions: write `Vec<accesskit::CustomAction>` with sequential ids, and advertise `Action::CustomAction`.
+    9. Custom actions: append `Vec<accesskit::CustomAction>` with sequential ids to the widget's own, and advertise `Action::CustomAction`.
     10. **`customize`** closure runs last with full `inner_mut()` access.
 3. **Walker post-processing**:
     1. Resolve `access_shortcut_id` against `ShortcutRegistry` (this needs tree access, so it lives outside `apply()`).

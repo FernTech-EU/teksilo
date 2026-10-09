@@ -7,8 +7,8 @@
 //! for a dwell, opens below its anchor, closes on the first press and never
 //! moves; a readout has to be up the moment a pointer arrives, a drag starts or
 //! a key lands, stay up for the whole drag, and ride the thumb. So the readout
-//! is not a tooltip entry but an overlay the slider raises and places itself,
-//! from the same handlers that move the value. Its surface is still a
+//! is not a tooltip entry but an overlay the slider raises itself, from the
+//! same handlers that move the value. Its surface is still a
 //! [`TooltipWidget`], so a theme's tooltip chrome reaches it.
 //!
 //! Showing needs an `EventContext` and happens in those handlers. Hiding does
@@ -17,12 +17,23 @@
 //! while no slider handler runs (the slider disabled under the pointer, parked
 //! in a hidden `Switcher` branch, keyboard modality ended by a press elsewhere)
 //! parks the surface, and the tree retires an overlay whose content is dormant.
+//! Placing does not need one either: the overlay re-derives its placement from
+//! the slider's bounds on every layout pass, so a scroll, a resize or a reflow
+//! that moves the slider moves the readout with it.
+//!
+//! The surface takes no input at all. Its root is `hit_transparent` and
+//! `event_pass_through`, which makes the overlay *inert* to the tree: a press
+//! or a hover over the bubble belongs to whatever is under it, a press there is
+//! outside every overlay it is outside of, Escape retires it without being
+//! spent on it, and it neither records a focus to give back nor closes when
+//! focus leaves the slider. The slider alone decides when it goes.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use teksilo_canvas::Rect;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::environment::LayoutDirection;
 use teksilo_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
@@ -45,7 +56,9 @@ pub(super) struct ReadoutInputs {
     pub(super) max: f32,
     pub(super) orientation: Orientation,
     pub(super) thumb_diameter: f32,
-    /// The slider's bounds, as its `place_children` last saw them.
+    /// The slider's bounds, as its `place_children` last saw them. Only the
+    /// placement the overlay is first shown with reads them; every layout pass
+    /// after that hands the overlay the bounds it has just given the slider.
     pub(super) bounds: Rc<Cell<Rect>>,
     pub(super) hovered: Signal<bool>,
     pub(super) dragging: Signal<bool>,
@@ -94,8 +107,13 @@ impl Readout {
                 // The slider's own node carries the same text as its value, so
                 // a reader reaching this one too would hear it twice.
                 .access_hidden(true)
-                // A press or a hover over the bubble belongs to whatever is
-                // under it, not to a surface that only reports.
+                // Both, on the root: `hit_transparent` takes the frame and the
+                // text inside it out of the hit test, which `event_pass_through`
+                // alone does not (the tree asks children first), and
+                // `event_pass_through` hands the point on to whatever is
+                // beneath. Together they make the overlay inert; see the module
+                // docs for what the tree does with that.
+                .hit_transparent(true)
                 .event_pass_through(true),
         );
         ctx.set_dormant(content);
@@ -117,13 +135,12 @@ impl Readout {
         })
     }
 
-    /// Bring the overlay in line with what the slider is doing: raise it, move
-    /// it to where the thumb now is, or take it down.
+    /// Bring the overlay in line with what the slider is doing: raise it or
+    /// take it down.
     ///
-    /// Every handler that changes a reason to show the readout, or moves the
-    /// thumb under it, ends with this call. A value written by the application
-    /// while the readout is up changes its text at once and its position at
-    /// the next of those.
+    /// Every handler that changes a reason to show the readout ends with this
+    /// call. Where the overlay goes is not decided here: once it is up it
+    /// follows the thumb on its own, see [`Self::follow`].
     pub(super) fn sync(&self, ctx: &mut EventContext) {
         if !self.live.get() {
             if self.shown.get() {
@@ -132,9 +149,7 @@ impl Readout {
             }
             return;
         }
-        let placement = self.placement(ctx.is_rtl());
         if self.shown.get() {
-            ctx.update_overlay_placement_by_content(self.content, placement);
             return;
         }
         self.shown.set(true);
@@ -142,15 +157,20 @@ impl Readout {
         // overlay requests, and an overlay whose content is still dormant at
         // the next layout is retired as orphaned.
         ctx.activate(self.content);
+        let direction = if ctx.is_rtl() {
+            LayoutDirection::RightToLeft
+        } else {
+            LayoutDirection::LeftToRight
+        };
         ctx.show_overlay(OverlayRequest {
             content_id: self.content,
             anchor: self.anchor,
-            placement,
+            placement: self.follow()(self.inputs.bounds.get(), direction),
             // Escape, because content shown on hover or focus has to be
             // dismissible without moving either (WCAG 2.2 SC 1.4.13), and
             // nothing else: a press must not close it, since a press is how a
-            // drag starts. Not `Manual`, which stops the Escape scan, so that
-            // Escape would never reach a dialog the slider sits in.
+            // drag starts. The overlay being inert, Escape takes it down without
+            // being spent on it, the way it takes down a plain tooltip.
             dismiss: DismissBehavior::EscapeKey,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
@@ -160,6 +180,7 @@ impl Readout {
             // would find it and decline to raise it again.
             fade_duration: None,
         });
+        ctx.track_overlay_placement_by_content(self.content, self.follow());
     }
 
     /// Clears `shown` whichever way the overlay went: Escape, a parent overlay
@@ -173,8 +194,14 @@ impl Readout {
         })
     }
 
-    /// Clear of the thumb and of the track: above a horizontal slider's thumb,
-    /// beside a vertical one's.
+    /// Where the readout goes for a slider at a given rectangle: clear of the
+    /// thumb and of the track, above a horizontal slider's thumb, beside a
+    /// vertical one's.
+    ///
+    /// Re-run by the tree on every layout pass with the bounds that pass gave
+    /// the slider, and with the value as it stands, so the readout rides the
+    /// thumb through a drag, a key, a value the application writes, a scroll
+    /// and a resize alike.
     ///
     /// Both rectangles run across the whole cross axis of the slider at the
     /// thumb, so the readout clears whatever the style draws beside the track
@@ -187,32 +214,33 @@ impl Readout {
     /// from the reader's own, or on the other side when that one has no room,
     /// just below the strip the thumb occupies (above it near the bottom of
     /// the window), and never over that strip.
-    fn placement(&self, rtl: bool) -> OverlayPlacement {
+    fn follow(&self) -> impl Fn(Rect, LayoutDirection) -> OverlayPlacement + 'static {
         let ReadoutInputs {
             ref value,
             min,
             max,
             orientation,
             thumb_diameter,
-            ref bounds,
             ..
         } = self.inputs;
-        let bounds = bounds.get();
-        let thumb = super::thumb_rect(
-            bounds,
-            super::fraction(value.get(), min, max),
-            thumb_diameter,
-            orientation,
-            rtl,
-        );
-        match orientation {
-            Orientation::Horizontal => OverlayPlacement::AboveSelection {
-                selection: Rect::new(thumb.x, bounds.y, thumb.width, bounds.height),
-            },
-            Orientation::Vertical => OverlayPlacement::AtPointerAvoiding {
-                point: thumb.center(),
-                avoid: Rect::new(bounds.x, thumb.y, bounds.width, thumb.height),
-            },
+        let value = value.clone();
+        move |bounds, direction| {
+            let thumb = super::thumb_rect(
+                bounds,
+                super::fraction(value.get(), min, max),
+                thumb_diameter,
+                orientation,
+                matches!(direction, LayoutDirection::RightToLeft),
+            );
+            match orientation {
+                Orientation::Horizontal => OverlayPlacement::AboveSelection {
+                    selection: Rect::new(thumb.x, bounds.y, thumb.width, bounds.height),
+                },
+                Orientation::Vertical => OverlayPlacement::AtPointerAvoiding {
+                    point: thumb.center(),
+                    avoid: Rect::new(bounds.x, thumb.y, bounds.width, thumb.height),
+                },
+            }
         }
     }
 }

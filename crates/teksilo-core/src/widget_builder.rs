@@ -308,15 +308,22 @@ impl AccessibilityOverrides {
             b.add_action(*action);
         }
         if !self.custom_actions.is_empty() {
-            let custom: Vec<accesskit::CustomAction> = self
-                .custom_actions
-                .iter()
-                .enumerate()
-                .map(|(i, (label, _))| accesskit::CustomAction {
-                    id: i as i32,
-                    description: label.get(),
-                })
-                .collect();
+            // Appended after the widget's own, which is the list rule every
+            // other override list follows: replacing it took a slider's "Reset
+            // to default" away the moment an application added an action of
+            // its own. The override entries keep their positional ids, which is
+            // what the dispatcher routes them by, so a widget publishing
+            // actions of its own numbers them clear of the low ones.
+            let mut custom: Vec<accesskit::CustomAction> = b.inner_mut().custom_actions().to_vec();
+            custom.extend(
+                self.custom_actions
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (label, _))| accesskit::CustomAction {
+                        id: i as i32,
+                        description: label.get(),
+                    }),
+            );
             b.set_custom_actions(custom);
             // A node's custom actions are only reachable when it also
             // advertises `Action::CustomAction`: an adapter reports the list

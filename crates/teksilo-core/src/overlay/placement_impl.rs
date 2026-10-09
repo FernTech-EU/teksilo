@@ -263,7 +263,14 @@ impl OverlayManager {
         let area = viewport.usable(layout_direction);
         let rtl = matches!(layout_direction, LayoutDirection::RightToLeft);
         for overlay in &mut self.stack {
-            let anchor = match anchor_bounds_fn(overlay.anchor) {
+            let anchor_bounds = anchor_bounds_fn(overlay.anchor);
+            // Before anything reads the placement, so a tracked overlay is
+            // placed from where its anchor is *now*. An anchor that is gone
+            // leaves the last placement it produced.
+            if let (Some(source), Some(anchor)) = (&overlay.placement_source, anchor_bounds) {
+                overlay.placement = source(anchor, layout_direction);
+            }
+            let anchor = match anchor_bounds {
                 Some(a) => a,
                 None => {
                     // Anchor destroyed. Anchor-independent placements must still

@@ -2690,6 +2690,90 @@ mod tests {
         assert!(second.get(), "second should fire (index 1)");
     }
 
+    /// A widget that offers a custom action of its own, under an id clear of
+    /// the low numbers the override entries take by position.
+    #[derive(Debug)]
+    struct OwnCustomActionWidget;
+
+    const OWN_CUSTOM_ACTION_ID: i32 = 1000;
+
+    impl Widget for OwnCustomActionWidget {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+            builder.set_role(accesskit::Role::Slider);
+            builder.set_custom_actions(vec![accesskit::CustomAction {
+                id: OWN_CUSTOM_ACTION_ID,
+                description: "Reset to default".to_owned(),
+            }]);
+        }
+    }
+
+    // Test 24b
+    #[test]
+    fn access_custom_action_appends_to_the_widgets_own() {
+        use crate::signal::Signal;
+        let own = Signal::new(0_u32);
+        let added = Signal::new(0_u32);
+        let own_sink = own.clone();
+        let added_sink = added.clone();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            OwnCustomActionWidget
+                .access_custom_action_literal("Pin", move |_| added_sink.set(added_sink.get() + 1))
+                .on_access_action_request(move |action, _node, data, _ctx| {
+                    if action == Action::CustomAction
+                        && data == Some(accesskit::ActionData::CustomAction(OWN_CUSTOM_ACTION_ID))
+                    {
+                        own_sink.set(own_sink.get() + 1);
+                        return crate::event::EventResponse::Handled;
+                    }
+                    crate::event::EventResponse::Ignored
+                }),
+        );
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        let offered: Vec<(i32, &str)> = node
+            .custom_actions()
+            .iter()
+            .map(|a| (a.id, a.description.as_str()))
+            .collect();
+        assert_eq!(
+            offered,
+            vec![(OWN_CUSTOM_ACTION_ID, "Reset to default"), (0, "Pin")],
+            "the application's action joins the widget's rather than replacing it",
+        );
+        assert!(node.supports_action(Action::CustomAction));
+
+        let invoke = |tree: &mut WidgetTree, custom: i32| {
+            tree.dispatch_event(crate::event::WidgetEvent::AccessAction {
+                action: Action::CustomAction,
+                target: Some(id),
+                target_node: crate::accessibility::widget_id_to_node_id(id),
+                data: Some(accesskit::ActionData::CustomAction(custom)),
+            });
+        };
+        invoke(&mut tree, 0);
+        assert_eq!(
+            (own.get(), added.get()),
+            (0, 1),
+            "index 0 is the override's"
+        );
+        invoke(&mut tree, OWN_CUSTOM_ACTION_ID);
+        assert_eq!(
+            (own.get(), added.get()),
+            (1, 1),
+            "and the widget's id is still the widget's"
+        );
+    }
+
     // Test 25
     #[test]
     fn access_action_layered_with_on_access_action() {

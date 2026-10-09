@@ -95,6 +95,15 @@ pub enum DismissReason {
 /// is restored to the trigger.
 pub type OverlayDismissCallback = Rc<dyn Fn(DismissReason, &mut crate::widget::EventContext)>;
 
+/// Where an overlay goes, as a function of its anchor's bounds (in window
+/// coordinates, as the layout pass that is placing the overlay left them) and
+/// the layout direction.
+///
+/// Installed with
+/// [`EventContext::track_overlay_placement_by_content`](crate::widget::EventContext::track_overlay_placement_by_content),
+/// for an overlay that hangs off a part of its anchor no placement names.
+pub type OverlayPlacementSource = Rc<dyn Fn(Rect, LayoutDirection) -> OverlayPlacement>;
+
 /// Unique identifier for an active overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OverlayId(u64);
@@ -427,6 +436,23 @@ pub(crate) struct ActiveOverlay {
     /// manual) defer the actual removal until the fade-out tween
     /// completes.
     pub fade: Option<OverlayFadeState>,
+    /// The content takes no input at all: its root is both `hit_transparent`
+    /// and `event_pass_through`. Such an overlay is skipped by every question
+    /// the manager answers about the pointer — [`hit_test`](OverlayManager::hit_test),
+    /// outside-press dismissal, [`interactive_rects`](OverlayManager::interactive_rects)
+    /// — so a press or a hover over it belongs to what is beneath it, an
+    /// overlay included, and a press there is outside every overlay it is
+    /// outside of.
+    ///
+    /// Mirrored from the arena by the tree on every layout pass, which is also
+    /// the first point at which the overlay has bounds to be hit at (until
+    /// then it is `false` and cannot be hit anyway), and again before an
+    /// Escape is handled.
+    pub inert: bool,
+    /// Re-derives [`placement`](Self::placement) from the anchor's bounds on
+    /// every [`position_overlays`](OverlayManager::position_overlays). See
+    /// [`EventContext::track_overlay_placement_by_content`](crate::widget::EventContext::track_overlay_placement_by_content).
+    pub placement_source: Option<OverlayPlacementSource>,
 }
 
 impl ActiveOverlay {
@@ -475,6 +501,8 @@ impl std::fmt::Debug for ActiveOverlay {
                 &self.on_dismiss.as_ref().map(|_| "<callback>"),
             )
             .field("fading", &self.fade.is_some())
+            .field("inert", &self.inert)
+            .field("tracks_placement", &self.placement_source.is_some())
             .finish()
     }
 }
@@ -649,6 +677,8 @@ impl OverlayManager {
             shown_at_sim: now,
             on_dismiss: request.on_dismiss,
             fade: None,
+            inert: false,
+            placement_source: None,
         };
         // Sorted insert, not a push: an overlay goes above everything in a
         // lower band and below everything in a higher one, so a selection
@@ -941,6 +971,22 @@ impl OverlayManager {
         }
     }
 
+    /// Re-derive an existing overlay's placement from its anchor on every
+    /// positioning pass, for as long as it is up.
+    pub(crate) fn set_placement_source(&mut self, id: OverlayId, source: OverlayPlacementSource) {
+        if let Some(overlay) = self.stack.iter_mut().find(|o| o.id == id) {
+            overlay.placement_source = Some(source);
+        }
+    }
+
+    /// Record whether an overlay's content takes any input. See
+    /// [`ActiveOverlay::inert`].
+    pub(crate) fn set_inert(&mut self, id: OverlayId, inert: bool) {
+        if let Some(overlay) = self.stack.iter_mut().find(|o| o.id == id) {
+            overlay.inert = inert;
+        }
+    }
+
     /// Update the parent-overlay link of an existing overlay. Used by the
     /// modal-presentation pipeline to retroactively attach the dialog
     /// scrim (pushed first, below the modal in the stack) to the modal
@@ -1165,7 +1211,11 @@ impl OverlayManager {
     ///   was swallowed, not forwarded to the menu underneath.
     ///
     /// `Manual` overlays still block the scan: they are modal-ish by
-    /// construction and own the keystroke.
+    /// construction and own the keystroke. An *inert* one — content that takes
+    /// no input at all, its root both `hit_transparent` and
+    /// `event_pass_through` — owns nothing and is stepped over; the tree
+    /// retires the inert overlays Escape may close beforehand, without
+    /// spending the key.
     pub fn try_dismiss_top_on_escape(
         &mut self,
     ) -> Option<(OverlayId, Vec<WidgetId>, Option<WidgetId>)> {
@@ -1177,7 +1227,7 @@ impl OverlayManager {
             // finishes, but it is on its way out and no longer owns the
             // keystroke — targeting it again would spend an Escape on a corpse
             // and leave whatever is underneath unreachable.
-            .filter(|o| !o.is_dismissing())
+            .filter(|o| !o.is_dismissing() && !o.inert)
             .find_map(|o| match o.dismiss {
                 DismissBehavior::EscapeKey
                 | DismissBehavior::EscapeOrClickOutside
@@ -1193,6 +1243,34 @@ impl OverlayManager {
             .and_then(|o| o.focus_restore);
         let content_ids = self.dismiss_because(target, DismissReason::Escape);
         Some((target, content_ids, focus_restore))
+    }
+
+    /// Dismiss every [inert](ActiveOverlay::inert) overlay Escape may close,
+    /// returning the content ids that went.
+    ///
+    /// The plain tooltip's rule, for overlays that are not tooltip entries: an
+    /// overlay nothing can be done in is never what an Escape is *for*, so it
+    /// goes and the key carries on to the field, menu or dialog the user meant
+    /// it for. No focus is restored: nothing in such an overlay took any.
+    pub(crate) fn dismiss_inert_on_escape(&mut self) -> Vec<WidgetId> {
+        let targets: Vec<OverlayId> = self
+            .stack
+            .iter()
+            .filter(|o| o.inert && !o.is_dismissing())
+            .filter(|o| {
+                matches!(
+                    o.dismiss,
+                    DismissBehavior::EscapeKey
+                        | DismissBehavior::EscapeOrClickOutside
+                        | DismissBehavior::PointerLeave { .. }
+                )
+            })
+            .map(|o| o.id)
+            .collect();
+        targets
+            .into_iter()
+            .flat_map(|id| self.dismiss_because(id, DismissReason::Escape))
+            .collect()
     }
 
     /// Set the focus_restore target for the topmost overlay.
@@ -1346,9 +1424,10 @@ impl OverlayManager {
         self.stack
             .iter()
             .filter(|o| {
-                o.fade
-                    .as_ref()
-                    .is_none_or(|f| f.dismissing_started_real.is_none())
+                !o.inert
+                    && o.fade
+                        .as_ref()
+                        .is_none_or(|f| f.dismissing_started_real.is_none())
             })
             .map(|o| o.bounds)
             .filter(|r| r.width > 0.0 && r.height > 0.0)
@@ -1371,13 +1450,18 @@ impl OverlayManager {
     /// removes it; treating it as hittable would route clicks into the
     /// vanishing content (and suppress outside-click dismissal of the
     /// overlays beneath it) for the whole fade duration.
+    ///
+    /// An *inert* overlay — its content root both `hit_transparent` and
+    /// `event_pass_through` — is skipped for the same reason, permanently:
+    /// nothing in it takes the point, so the point is asked of whatever is
+    /// beneath it, the next overlay down included.
     pub fn hit_test(&self, point: Point) -> Option<OverlayId> {
         for overlay in self.stack.iter().rev() {
             let fading_out = overlay
                 .fade
                 .as_ref()
                 .is_some_and(|f| f.dismissing_started_real.is_some());
-            if !fading_out && overlay.bounds.contains(point) {
+            if !fading_out && !overlay.inert && overlay.bounds.contains(point) {
                 return Some(overlay.id);
             }
         }
@@ -1460,13 +1544,16 @@ impl OverlayManager {
         // short-circuit that returned as soon as the press hit *any* overlay:
         // once a modal — or its full-viewport scrim — was open, that guard
         // made *no* click-outside overlay dismissable at all.
+        // An inert overlay is not somewhere a press can land "inside": the
+        // press belongs to what is beneath it, so an overlay under it is
+        // outside the press exactly when it would be with the inert one gone.
         let index_at = |p: Point| {
             self.stack.iter().enumerate().rev().find_map(|(i, o)| {
                 let fading_out = o
                     .fade
                     .as_ref()
                     .is_some_and(|f| f.dismissing_started_real.is_some());
-                (!fading_out && o.bounds.contains(p)).then_some(i)
+                (!fading_out && !o.inert && o.bounds.contains(p)).then_some(i)
             })
         };
         // The press's own floor, raised by every contact already working inside
