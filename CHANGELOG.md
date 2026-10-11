@@ -43,6 +43,13 @@ by crate for clarity, not because crates version independently.
 - **`symbol` shows what each enum variant carries**: `KeyDown { key: Key,
   modifiers: Modifiers, text: Option<String> }`, `Fraction (f32)`. The JSON
   variants gain the same `shape`.
+- **`symbol` finds methods and free functions.** A name that is not a type
+  answers with its owner instead of "unknown type": `symbol
+  subscribe_frame_tick` shows the method on `BuildContext` and says to look
+  up `BuildContext` for the rest; `symbol spawn_blocking` shows the free
+  function in teksilo-async. A trait's method comes first (`on_tap` is
+  `WidgetBuilder`'s). `Type::method` narrows to one owner, and a name with
+  many owners (`new`) lists the `Type::name` forms to pick from.
 
 #### Documentation
 

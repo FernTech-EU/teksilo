@@ -1813,6 +1813,121 @@ def _resolve_across_crates(
     return None, current_key, reg
 
 
+@dataclass
+class MemberMatch:
+    """A method, associated item or free function found by name."""
+    crate_key: str
+    file: Path
+    cfg: list[str]
+    owner: "Item | None"  # the type or trait it belongs to; None for a free fn
+    member: Item
+
+
+# More owners than this and a lookup lists `Type::name` candidates instead of
+# printing every one: `new` alone has hundreds.
+MEMBER_MATCH_LIMIT = 8
+
+
+def _find_members(query: str) -> "tuple[str, list[MemberMatch]]":
+    """Every public method, associated const/type or free function named like
+    `query`, across every queryable crate.
+
+    `query` may be `name`, `name()` or `Type::name`; the last keeps only the
+    members of types (or traits) called `Type`. Returns the bare name and the
+    matches, the crates in `CRATE_SPECS` order.
+
+    A type lookup that misses lands here before it reports "unknown type": an
+    agent asks for `subscribe_frame_tick` or `spawn_blocking` far more often
+    than it knows which of 30 crates' types carries it, and "unknown type"
+    reads exactly like "does not exist". Only files whose text defines the
+    name are parsed, so the miss path stays fast.
+    """
+    owner_name = None
+    name = query.strip()
+    if name.endswith("()"):
+        name = name[:-2]
+    if "::" in name:
+        owner_name, name = name.rsplit("::", 1)
+        owner_name = owner_name.rsplit("::", 1)[-1]
+    if not re.fullmatch(r"[A-Za-z_]\w*", name):
+        return name, []
+    defines = re.compile(rf"\b(?:fn|const|type|static)\s+{re.escape(name)}\b")
+    matches: list[MemberMatch] = []
+    seen: set[tuple[str, str, str]] = set()
+    for key in CRATE_SPECS:
+        try:
+            reg = _registry_for(key)
+        except Exception:
+            continue
+        for fp in reg.files:
+            try:
+                if not defines.search(fp.read_text(encoding="utf-8")):
+                    continue
+            except OSError:
+                continue
+            cfg = reg.cfg_by_file.get(fp.resolve(), [])
+            pf = parse_file(fp, fp.stem, cfg)
+            for it in pf.items:
+                if it.hidden:
+                    continue
+                if it.kind == "fn" and it.name == name and owner_name is None:
+                    found = [(None, it)]
+                else:
+                    found = [
+                        (it, m) for m in it.methods
+                        if m.name == name and not m.hidden
+                        and (owner_name is None or it.name == owner_name)
+                    ]
+                for owner, member in found:
+                    dedup = (key, owner.name if owner else "", member.signature)
+                    if dedup in seen:
+                        continue
+                    seen.add(dedup)
+                    matches.append(MemberMatch(key, fp, cfg, owner, member))
+    # A trait first: `on_tap` is a `WidgetBuilder` method on every widget,
+    # and the few types with an inherent `on_tap` of their own are the
+    # exceptions. The sort is stable, so the crate order holds otherwise.
+    matches.sort(key=lambda m: not (m.owner is not None and m.owner.kind == "trait"))
+    return name, matches
+
+
+def _member_page(name: str, match: MemberMatch) -> ParsedFile:
+    """A one-member page in the shape the formatters already render: the
+    owner reduced to this member, and a header saying where the rest is."""
+    crate = CRATE_SPECS[match.crate_key].crate
+    if match.owner is None:
+        header = (
+            f"`{name}` is a free function in `{crate}` (`--crate {match.crate_key}`), "
+            f"module `{match.file.stem}`."
+        )
+        return ParsedFile(match.file.stem, match.file, header, match.cfg, [match.member])
+    owner = match.owner
+    what = "trait" if owner.kind == "trait" else "type"
+    header = (
+        f"`{name}` is a member of the {what} `{owner.name}` in `{crate}` "
+        f"(`--crate {match.crate_key}`), not a type. Look up `{owner.name}` "
+        f"for the rest of it."
+    )
+    reduced = Item(
+        kind="external", name=owner.name, signature="", doc="",
+        cfg=owner.cfg, methods=[match.member],
+    )
+    return ParsedFile(match.file.stem, match.file, header, match.cfg, [reduced])
+
+
+def _member_candidates(name: str, matches: "list[MemberMatch]") -> str:
+    """The `Type::name` forms that narrow a lookup with too many owners."""
+    forms = []
+    for m in matches:
+        form = f"{m.owner.name}::{name}" if m.owner else f"{name} (free fn, {m.file.stem})"
+        tagged = f"{form} (--crate {m.crate_key})"
+        if tagged not in forms:
+            forms.append(tagged)
+    shown = forms[:20]
+    more = f", and {len(forms) - len(shown)} more" if len(forms) > len(shown) else ""
+    return ", ".join(shown) + more
+
+
 # ----------------------------------------------------------------------------
 # Formatters
 # ----------------------------------------------------------------------------
@@ -3166,12 +3281,41 @@ pub enum Event {
         assert data[0]["restricted_fields"] is True
 
 
+def _test_member_lookup() -> None:
+    """A method or free-function name answers with its owner, not "unknown
+    type"."""
+    bare, found = _find_members("subscribe_frame_tick()")
+    assert bare == "subscribe_frame_tick", bare
+    owners = {m.owner.name for m in found if m.owner}
+    assert "BuildContext" in owners, owners
+
+    _, found = _find_members("BuildContext::subscribe_frame_tick")
+    assert [m.owner.name for m in found if m.owner] == ["BuildContext"], found
+    page = format_markdown(_member_page("subscribe_frame_tick", found[0]))
+    assert "Look up `BuildContext` for the rest of it." in page, page[:400]
+    assert "pub fn subscribe_frame_tick(" in page, page[:400]
+
+    _, found = _find_members("on_tap")
+    assert found and found[0].owner is not None and found[0].owner.name == "WidgetBuilder", (
+        "the trait every widget gets on_tap from must come first"
+    )
+
+    _, found = _find_members("spawn_blocking")
+    assert any(m.owner is None and m.crate_key == "async" for m in found), found
+
+    _, found = _find_members("new")
+    assert len(found) > MEMBER_MATCH_LIMIT, len(found)
+    _, found = _find_members("res!")
+    assert found == [], found
+
+
 def run_self_tests() -> int:
     """Smoke tests for the catalog generator (`--test`). stdlib-only, runs
     against the live source tree."""
     import tempfile
 
     _test_fields_and_variant_shapes()
+    _test_member_lookup()
     _test_prune()
     _test_density_images()
     _test_summary_scope()
@@ -3550,6 +3694,8 @@ def main(argv: list[str]) -> int:
         return cmd_md_dir(reg, args.md_dir, args.api_base, _api_dir())
 
     file_cfg: dict[Path, list[str]] = {}
+    # Names that are methods or free functions rather than types.
+    member_pages: list[ParsedFile] = []
     if args.all:
         target_files = list(reg.files)
         for fp in target_files:
@@ -3558,9 +3704,25 @@ def main(argv: list[str]) -> int:
         target_files = []
         seen: set[Path] = set()
         for name in args.widgets:
-            fp, used_key, used_reg = _resolve_across_crates(reg, args.crate, name)
+            fp, used_key, used_reg = (
+                _resolve_across_crates(reg, args.crate, name)
+                if "::" not in name
+                else (None, args.crate, reg)
+            )
             if fp is None:
-                hints = _cross_crate_hints(name, args.crate)
+                bare, members = _find_members(name)
+                if 0 < len(members) <= MEMBER_MATCH_LIMIT:
+                    member_pages.extend(_member_page(bare, m) for m in members)
+                    continue
+                if members:
+                    print(
+                        f"error: '{bare}' is not a type, and {len(members)} types, "
+                        f"traits or modules define it. Name one: "
+                        f"{_member_candidates(bare, members)}.",
+                        file=sys.stderr,
+                    )
+                    return 2
+                hints = _cross_crate_hints(name.rsplit("::", 1)[-1], args.crate)
                 hint_str = (
                     f" Did you mean: {', '.join(hints)}?" if hints else ""
                 )
@@ -3608,6 +3770,7 @@ def main(argv: list[str]) -> int:
     for fp in target_files:
         pf = parse_file(fp, fp.stem, file_cfg.get(fp, []))
         parsed.append(pf)
+    parsed.extend(member_pages)
 
     if args.format == "json":
         rendered = format_json(parsed) + "\n"
