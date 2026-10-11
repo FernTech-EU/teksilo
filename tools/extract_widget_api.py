@@ -1813,6 +1813,198 @@ def _resolve_across_crates(
     return None, current_key, reg
 
 
+# Proc-macro crates. CRATE_SPECS leaves them out, because their public
+# surface is invocation syntax rather than types; the macro index below is
+# what reads them.
+PROC_MACRO_CRATES = (
+    "teksilo-resources",
+    "teksilo-macros",
+    "teksilo-i18n-macros",
+    "teksilo-telemetry-codegen",
+)
+
+_MACRO_RULES = re.compile(r"^\s*macro_rules!\s*([A-Za-z_]\w*)")
+_PROC_FN = re.compile(r"^\s*pub\s+fn\s+([A-Za-z_]\w*)")
+
+
+@dataclass
+class MacroMatch:
+    crate: str
+    file: Path
+    item: Item
+    # The crate's `//!` doc, for a proc macro whose own doc defers to it.
+    crate_doc: str
+
+
+def _macro_arms(raw: list[str], cleaned: list[str], open_line: int, open_col: int) -> list[str]:
+    """The matchers of a `macro_rules!` body, one line each: `(base = $base:literal, ...)`."""
+    close_line, close_col = find_matching_brace(cleaned, open_line, open_col)
+    text_raw: list[str] = []
+    text_cln: list[str] = []
+    for li in range(open_line, close_line + 1):
+        lo = open_col + 1 if li == open_line else 0
+        hi = close_col if li == close_line else len(cleaned[li])
+        text_raw.append(raw[li][lo:hi])
+        text_cln.append(cleaned[li][lo:hi])
+    body_raw, body = "\n".join(text_raw), "\n".join(text_cln)
+    arms: list[str] = []
+    depth = 0
+    start = None
+    i = 0
+    while i < len(body):
+        c = body[i]
+        if c in "([{":
+            if depth == 0 and start is None:
+                start = i
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+            if depth == 0 and start is not None and body[i + 1:].lstrip().startswith("=>"):
+                arm = re.sub(r"\s+", " ", body_raw[start:i + 1]).strip()
+                arm = re.sub(r"([(\[{]) ", r"\1", re.sub(r" ([)\]}])", r"\1", arm))
+                # `(@one ...)` arms are the macro's own recursion helpers,
+                # not a form a caller writes.
+                if not re.match(r"[(\[{]\s*@", arm):
+                    arms.append(arm)
+                start = None
+                # Skip the arm's expansion: past `=>` to its closing bracket.
+                j = body.index("=>", i) + 2
+                while j < len(body) and body[j] not in "([{":
+                    j += 1
+                d = 0
+                while j < len(body):
+                    if body[j] in "([{":
+                        d += 1
+                    elif body[j] in ")]}":
+                        d -= 1
+                        if d == 0:
+                            break
+                    j += 1
+                i = j
+        i += 1
+    return arms
+
+
+def _scan_macros(path: Path, crate: str, want: str) -> list[MacroMatch]:
+    """The exported macros of one file named `want`."""
+    raw = path.read_text(encoding="utf-8").splitlines()
+    cleaned = preprocess(raw)
+    found: list[MacroMatch] = []
+    doc: list[str] = []
+    attrs: list[str] = []
+    i = 0
+    while i < len(raw):
+        line = raw[i]
+        m = DOC_OUTER.match(line)
+        if m:
+            doc.append(_doc_text(m))
+            i += 1
+            continue
+        if ATTR_PREFIX.match(line):
+            attr, end = consume_attribute(raw, cleaned, i)
+            attrs.append(attr)
+            i = end + 1
+            continue
+        joined = " ".join(attrs)
+        mr = _MACRO_RULES.match(line)
+        pf = _PROC_FN.match(line)
+        name = sig = None
+        if mr and "macro_export" in joined:
+            name = mr.group(1)
+            col = cleaned[i].find("{", mr.end())
+            arms = _macro_arms(raw, cleaned, i, col) if col >= 0 else []
+            sig = "\n".join(f"{name}!{arm}" for arm in arms) or f"{name}!(...)"
+        elif pf and re.search(r"#\[\s*proc_macro_derive\s*\(\s*(\w+)", joined):
+            name = re.search(r"#\[\s*proc_macro_derive\s*\(\s*(\w+)", joined).group(1)
+            sig = f"#[derive({name})]"
+        elif pf and re.search(r"#\[\s*proc_macro_attribute\b", joined):
+            name = pf.group(1)
+            sig = f"#[{name}(...)]"
+        elif pf and re.search(r"#\[\s*proc_macro\s*\]", joined):
+            name = pf.group(1)
+            sig = f"{name}!(...)"
+        if name is not None and name == want and not _is_hidden(attrs):
+            found.append(MacroMatch(crate, path, Item(
+                kind="macro", name=name, signature=sig,
+                doc="\n".join(doc).rstrip(), cfg=_extract_cfgs(attrs),
+            ), ""))
+        doc = []
+        attrs = []
+        i += 1
+    return found
+
+
+def _find_macros(query: str) -> "tuple[str, list[MacroMatch]]":
+    """Every exported macro named like `query` (`res`, `res!`, `#[derive(IntentKind)]`):
+    the proc macros of `PROC_MACRO_CRATES` and the `#[macro_export]`
+    `macro_rules!` of every queryable crate, `lib.rs` included.
+
+    The type index cannot see either: proc-macro crates are not in
+    `CRATE_SPECS`, and `#[macro_export]` macros mostly live in `lib.rs`, which
+    the type index treats as an aggregator. `res!` and `compile_in_locales!`,
+    the two macros the skill sends an app to for icons and locales, answered
+    "unknown type" until this existed.
+    """
+    name = query.strip()
+    m = re.fullmatch(r"#\[\s*derive\s*\(\s*(\w+)\s*\)\s*\]", name)
+    if m:
+        name = m.group(1)
+    name = name.rstrip("!").removesuffix("()").rstrip("!")
+    if not re.fullmatch(r"[A-Za-z_]\w*", name):
+        return name, []
+    dirs: list[tuple[str, Path]] = [(c, REPO_ROOT / "crates" / c / "src") for c in PROC_MACRO_CRATES]
+    dirs += [(spec.crate, spec.src) for spec in CRATE_SPECS.values()]
+    mentions = re.compile(rf"\b{re.escape(name)}\b")
+    found: list[MacroMatch] = []
+    seen: set[Path] = set()
+    for crate, src in dirs:
+        if not src.is_dir() or src.resolve() in seen:
+            continue
+        seen.add(src.resolve())
+        for path in sorted(src.rglob("*.rs")):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if "macro" not in text or not mentions.search(text):
+                continue
+            for hit in _scan_macros(path, crate, name):
+                if crate in PROC_MACRO_CRATES and path.name == "lib.rs":
+                    hit.crate_doc = _crate_doc(raw_text=text)
+                found.append(hit)
+    return name, found
+
+
+def _crate_doc(raw_text: str) -> str:
+    """A file's leading `//!` block."""
+    out: list[str] = []
+    started = False
+    for line in raw_text.splitlines():
+        m = DOC_INNER.match(line)
+        if m:
+            out.append(_doc_text(m))
+            started = True
+        elif started and line.strip():
+            break
+        elif started:
+            out.append("")
+    return "\n".join(out).strip()
+
+
+def _macro_page(match: MacroMatch) -> ParsedFile:
+    """A one-macro page: a line saying which crate, the crate doc where the
+    macro's own doc defers to it, then the macro."""
+    kind = {
+        True: "a derive macro",
+    }.get(match.item.signature.startswith("#[derive"), None)
+    if kind is None:
+        kind = "a procedural macro" if match.crate in PROC_MACRO_CRATES else "a `macro_rules!` macro"
+    header = f"`{match.item.name}` is {kind} in `{match.crate}`."
+    if match.crate_doc:
+        header += "\n\n" + match.crate_doc
+    return ParsedFile(match.file.stem, match.file, header, match.item.cfg, [match.item])
+
+
 @dataclass
 class MemberMatch:
     """A method, associated item or free function found by name."""
@@ -2070,6 +2262,9 @@ def _emit_items_md(
             out.append(f"## `pub const {it.name}`{flags_str}")
         elif it.kind == "fn":
             out.append(f"## `pub fn {it.name}(...)`{flags_str}")
+        elif it.kind == "macro":
+            shown = it.signature if it.signature.startswith("#[") else f"{it.name}!"
+            out.append(f"## `{shown}`{flags_str}")
         out.append("")
 
         if it.doc:
@@ -2090,6 +2285,8 @@ def _emit_items_md(
             out.append(f"{it.signature} {{ /* variants */ }}")
             out.append("```")
             out.append("")
+        elif it.kind == "macro":
+            out.extend(["```rust", it.signature, "```", ""])
         elif it.kind in ("type", "const", "fn"):
             out.append("```rust")
             sig = it.signature
@@ -3309,6 +3506,27 @@ def _test_member_lookup() -> None:
     assert found == [], found
 
 
+def _test_macro_lookup() -> None:
+    """Exported macros answer: proc macros, derives and `macro_rules!`."""
+    _, found = _find_macros("res!")
+    assert [(m.crate, m.item.signature) for m in found] == [("teksilo-resources", "res!(...)")], found
+    page = format_markdown(_macro_page(found[0]))
+    assert "`res` is a procedural macro in `teksilo-resources`." in page, page[:300]
+    assert "res!(pub " in page, "the crate-level usage doc should follow the header"
+
+    _, found = _find_macros("compile_in_locales")
+    assert len(found) == 1 and found[0].crate == "teksilo-i18n", found
+    sig = found[0].item.signature
+    assert sig.startswith("compile_in_locales!(base = $base:literal"), sig
+    assert "@one" not in sig, "a recursion helper arm is not a caller's form"
+
+    _, found = _find_macros("#[derive(IntentKind)]")
+    assert [m.item.signature for m in found] == ["#[derive(IntentKind)]"], found
+
+    _, found = _find_macros("item_a11y_builders")
+    assert found == [], "a #[doc(hidden)] macro must stay hidden"
+
+
 def run_self_tests() -> int:
     """Smoke tests for the catalog generator (`--test`). stdlib-only, runs
     against the live source tree."""
@@ -3316,6 +3534,7 @@ def run_self_tests() -> int:
 
     _test_fields_and_variant_shapes()
     _test_member_lookup()
+    _test_macro_lookup()
     _test_prune()
     _test_density_images()
     _test_summary_scope()
@@ -3710,6 +3929,10 @@ def main(argv: list[str]) -> int:
                 else (None, args.crate, reg)
             )
             if fp is None:
+                _, macros = _find_macros(name)
+                if macros:
+                    member_pages.extend(_macro_page(m) for m in macros)
+                    continue
                 bare, members = _find_members(name)
                 if 0 < len(members) <= MEMBER_MATCH_LIMIT:
                     member_pages.extend(_member_page(bare, m) for m in members)
@@ -3727,7 +3950,8 @@ def main(argv: list[str]) -> int:
                     f" Did you mean: {', '.join(hints)}?" if hints else ""
                 )
                 print(
-                    f"error: unknown type '{name}' in any teksilo crate."
+                    f"error: no type, module, method, function or macro named "
+                    f"'{name}' in any teksilo crate."
                     f"{hint_str}",
                     file=sys.stderr,
                 )

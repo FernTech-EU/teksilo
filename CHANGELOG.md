@@ -50,6 +50,10 @@ by crate for clarity, not because crates version independently.
   function in teksilo-async. A trait's method comes first (`on_tap` is
   `WidgetBuilder`'s). `Type::method` narrows to one owner, and a name with
   many owners (`new`) lists the `Type::name` forms to pick from.
+- **`symbol` finds macros**: the procedural macros (`res!`, `tr!`,
+  `teksu!`, `#[derive(IntentKind)]`) with their crate's usage doc, and every
+  `#[macro_export]` macro (`compile_in_locales!`, `lit!`) with the forms it
+  accepts. They answered "unknown type" before.
 
 #### Documentation
 
