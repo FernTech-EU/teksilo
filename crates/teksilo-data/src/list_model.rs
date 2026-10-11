@@ -325,19 +325,36 @@ impl<T: PartialEq + 'static> ListModel<T> {
     /// (`RowSelection::from_index`) — `reconcile_by_key` is how a caller
     /// avoids that.
     ///
-    /// Emits, in this order, coalescing contiguous runs into a single event
-    /// each:
-    /// - [`DataChange::ItemsRemoved`] for keys present in the old list but
-    ///   absent from `new_items`;
-    /// - [`DataChange::ItemsMoved`] (single-row blocks) to re-order the
-    ///   surviving rows into `new_items`'s relative order — skipped
-    ///   entirely for rows already in the right place, so an append-only or
-    ///   remove-only reload emits **no** moves at all;
-    /// - [`DataChange::ItemsInserted`] for keys present in `new_items` but
-    ///   not in the old list;
-    /// - [`DataChange::ItemUpdated`] for a row whose key is unchanged but
-    ///   whose content differs (`T: PartialEq`) — the row's stored value is
-    ///   replaced with the incoming one.
+    /// # Change order
+    ///
+    /// The changes are emitted in two stages, coalescing contiguous runs into
+    /// a single event each:
+    ///
+    /// 1. **Removals first.** One [`DataChange::ItemsRemoved`] per contiguous
+    ///    run of keys present in the old list but absent from `new_items`,
+    ///    emitted back to front so every range is still valid, in the old
+    ///    indices, at the moment it is removed.
+    /// 2. **One left-to-right walk over the target order.** Each surviving
+    ///    row is handled when the walk reaches it: a [`DataChange::ItemsMoved`]
+    ///    (a single-row block) if it is not yet in its target slot — skipped
+    ///    for rows already in place, so an append-only or remove-only reload
+    ///    emits **no** moves — then a [`DataChange::ItemUpdated`] if its
+    ///    content differs (`T: PartialEq`; the stored value is replaced with
+    ///    the incoming one). Brand-new keys are buffered and flushed as one
+    ///    [`DataChange::ItemsInserted`] run just before the next survivor, or
+    ///    at the end of the walk.
+    ///
+    /// So after the removals, moves, updates and inserts are **interleaved in
+    /// walk order**, not grouped by kind: reconciling `[(1,"a"),(2,"b")]`
+    /// into `[(1,"a"),(2,"B"),(3,"c")]` emits `ItemUpdated { index: 1 }` and
+    /// then `ItemsInserted { range: 2..3 }`.
+    ///
+    /// Every change's indices are valid against the list **as it stands
+    /// after the previous change** (a sequential index space), not against
+    /// the list before `reconcile_by_key` or after it. A consumer that
+    /// applies the changes one at a time, in the order delivered, stays
+    /// correct; one that batches them by kind (all removals, then all moves,
+    /// …) or replays them out of order does not.
     ///
     /// If `new_items` is identical (same keys, same order, same content, by
     /// `PartialEq`) to the current contents, **no** change is emitted and no
@@ -1253,6 +1270,54 @@ mod tests {
         assert!(
             !entries.iter().any(|c| matches!(c, DataChange::Reset)),
             "{entries:?}"
+        );
+    }
+
+    #[test]
+    fn reconcile_emits_in_walk_order_with_sequential_indices() {
+        // Update then insert, interleaved in walk order (not grouped by kind).
+        let model = ListModel::from_vec(vec![row(1, "a"), row(2, "b")]);
+        let (log, _h) = record_changes(&model);
+        model.reconcile_by_key(vec![row(1, "a"), row(2, "B"), row(3, "c")], key);
+        assert_eq!(
+            *log.borrow(),
+            vec![
+                DataChange::ItemUpdated { index: 1 },
+                DataChange::ItemsInserted { range: 2..3 },
+            ]
+        );
+
+        // Remove first (old indices), then per survivor: move, update, with a
+        // pending insert flushed ahead of the next survivor.
+        // old [1,2,3,4] -> new [4, 9(new), 2*, 1]
+        let model = ListModel::from_vec(vec![row(1, "a"), row(2, "b"), row(3, "c"), row(4, "d")]);
+        let (log, _h) = record_changes(&model);
+        model.reconcile_by_key(
+            vec![row(4, "d"), row(9, "n"), row(2, "B"), row(1, "a")],
+            key,
+        );
+        assert_eq!(ids(&model), vec![4, 9, 2, 1]);
+        assert_eq!(
+            *log.borrow(),
+            vec![
+                // 3 leaves: [1,2,4]
+                DataChange::ItemsRemoved { range: 2..3 },
+                // 4 walks to slot 0: [4,1,2]
+                DataChange::ItemsMoved {
+                    from: 2,
+                    to: 0,
+                    count: 1
+                },
+                // 9 is flushed before the next survivor: [4,9,1,2]
+                DataChange::ItemsInserted { range: 1..2 },
+                // 2 walks to slot 2: [4,9,2,1]
+                DataChange::ItemsMoved {
+                    from: 3,
+                    to: 2,
+                    count: 1
+                },
+                DataChange::ItemUpdated { index: 2 },
+            ]
         );
     }
 
