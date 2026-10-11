@@ -109,7 +109,7 @@ pub fn check(app_version: &str) -> Verdict {
 }
 
 /// `1.2.3` / `1.2.3-rc.1` → `(1, 2, 3)`. `None` if it is not a semver triple.
-fn semver_parts(v: &str) -> Option<(u64, u64, u64)> {
+pub(crate) fn semver_parts(v: &str) -> Option<(u64, u64, u64)> {
     let core = v.split(['-', '+']).next()?;
     let mut it = core.split('.');
     let major = it.next()?.parse().ok()?;

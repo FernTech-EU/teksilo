@@ -84,10 +84,14 @@ pub fn report(dir: &Path) {
         .as_ref()
         .and_then(|r| crate::probe::recorded_provenance(r));
     let compatible = version.map(|v| guard::check(v).may_answer());
+    // Only an app's own release says which server it needs; without one, the
+    // release this tool was built for is the best guess there is.
+    let expected = version.unwrap_or(guard::TOOL_VERSION);
+    let server = crate::automation::inspect_path(expected);
     if crate::output::json() {
         println!(
             "{}",
-            serde_json::json!({"tool_version":guard::TOOL_VERSION,"project":root,"teksilo_version":version,"teksilo_enabled_by":enabled_by,"compatible":compatible,"resolution_error":error,"agents":rows,"user_agents":user_rows,"model":model,"python":python,"probe_version":probe})
+            serde_json::json!({"tool_version":guard::TOOL_VERSION,"project":root,"teksilo_version":version,"teksilo_enabled_by":enabled_by,"compatible":compatible,"resolution_error":error,"agents":rows,"user_agents":user_rows,"model":model,"python":python,"probe_version":probe,"automation_server":server.json(expected)})
         );
         return;
     }
@@ -131,6 +135,10 @@ pub fn report(dir: &Path) {
             "missing"
         }
     );
+    println!("MCP      {}", server.line());
+    if let Some(help) = server.help() {
+        crate::output::note(help);
+    }
     let mut paths = std::collections::BTreeSet::new();
     let installed: Vec<_> = rows
         .iter()

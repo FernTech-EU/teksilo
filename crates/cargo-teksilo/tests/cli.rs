@@ -189,6 +189,36 @@ fn status_says_why_it_has_no_version() {
     let expected = format!("Teksilo  {}\n", env!("CARGO_PKG_VERSION"));
     assert!(String::from_utf8_lossy(&result.stdout).contains(&expected));
 }
+#[cfg(unix)]
+#[test]
+fn status_reports_the_automation_server_ahead_on_the_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = project();
+    let bin = tempfile::tempdir().unwrap();
+    let server = bin.path().join("teksilo-automation-mcp");
+    std::fs::write(&server, "#!/bin/sh\necho 'teksilo-automation-mcp 0.1.0'\n").unwrap();
+    std::fs::set_permissions(&server, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = std::env::join_paths(
+        std::iter::once(bin.path().to_path_buf())
+            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_cargo-teksilo"))
+        .args(["teksilo", "status", "--json"])
+        .current_dir(root.path())
+        .env("PATH", &path)
+        .env("CARGO_NET_OFFLINE", "true")
+        .output()
+        .unwrap();
+    ok(&result);
+    let data: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(data["automation_server"]["state"], "mismatch");
+    assert_eq!(data["automation_server"]["version"], "0.1.0");
+    assert_eq!(
+        data["automation_server"]["expected"],
+        env!("CARGO_PKG_VERSION")
+    );
+}
 #[test]
 fn quiet_still_says_which_release_answered() {
     let root = project();

@@ -207,7 +207,7 @@ fn is_python3(python: &Path) -> bool {
 }
 
 /// Minimal PATH search — avoids a dependency for one well-defined job.
-fn which(name: &str) -> Option<PathBuf> {
+pub(crate) fn which(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     let exts: Vec<String> = if cfg!(windows) {
         std::env::var("PATHEXT")
