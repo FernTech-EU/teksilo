@@ -1014,6 +1014,14 @@ tree.layout(SizeProposal::exact(400.0, 300.0));
 assert!((tree.bounds(id).width - expected).abs() < 0.01);
 ```
 
+**A tree root is laid out at the whole proposal, whatever its own size.** On each axis the
+proposal gives, the root's bounds are that proposal, `FixedSize` included: a 30×30 widget
+added as a root and laid out with `SizeProposal::exact(100.0, 100.0)` reports 100×100, so a
+test that asserts its own size fails. To test a widget at its own size, either propose
+nothing on that axis (`tree.layout(SizeProposal::unspecified())`, where the root takes the
+widget's own size) or add it as a child of a stack (`tree.add(HStack::new().child(id))`)
+and assert on the child's bounds, which are its own size.
+
 Test helpers (not in the prelude): `WidgetTree` and `LayoutContext::for_testing(&theme)`
 live under `teksilo::core`; `MockTextBackend::new()` (fixed 8px char width) lives under
 `teksilo::canvas`.

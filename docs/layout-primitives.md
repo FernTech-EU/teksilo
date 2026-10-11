@@ -712,6 +712,8 @@ Three things to remember:
 
 For testing, [crates/teksilo-core/src/test_widgets.rs](../crates/teksilo-core/src/test_widgets.rs) ships `FillWidget` and `StackWidget` (pub(crate)); for end-to-end layout tests use `WidgetTree` directly with `tree.layout(SizeProposal::exact(w, h))` and assert `tree.bounds(id)`.
 
+**A widget added as a tree root is laid out at the whole proposal, whatever its own size.** On each axis the proposal gives, the root's bounds are that proposal, `FixedSize` included: a 30×30 widget added with `tree.add(..)` and laid out with `SizeProposal::exact(100.0, 100.0)` reports 100×100 (`layout_widget_recursive` in [crates/teksilo-core/src/widget_tree/layout_impl.rs](../crates/teksilo-core/src/widget_tree/layout_impl.rs) takes `proposal.width.unwrap_or(desired.width)`). To test a widget at its own size, propose nothing on that axis (`tree.layout(SizeProposal::unspecified())`, or `with_width` / `with_height` to pin one axis), or add it as a child of a stack (`tree.add(HStack::new().child(id))`) and assert on the child's bounds.
+
 ---
 
 ## 10. References
