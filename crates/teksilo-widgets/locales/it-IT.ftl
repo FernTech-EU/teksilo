@@ -429,3 +429,11 @@ code-editor-tab-escape-hint = Tab aumenta il rientro. { $next } passa al control
 
 shortcut-settings-uncategorized = Generale
 shortcut-category-edit = Modifica
+shortcut-format-bold = Grassetto
+shortcut-format-italic = Corsivo
+shortcut-format-underline = Sottolineato
+shortcut-format-insert-paragraph = Inserisci paragrafo
+shortcut-code-toggle-comment = Attiva/disattiva commento
+shortcut-code-duplicate = Duplica
+shortcut-category-format = Formato
+shortcut-category-code = Codice

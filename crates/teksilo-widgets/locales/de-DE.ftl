@@ -412,3 +412,11 @@ code-editor-tab-escape-hint = Tab rückt ein. { $next } wechselt zum nächsten S
 
 shortcut-settings-uncategorized = Allgemein
 shortcut-category-edit = Bearbeiten
+shortcut-format-bold = Fett
+shortcut-format-italic = Kursiv
+shortcut-format-underline = Unterstrichen
+shortcut-format-insert-paragraph = Absatz einfügen
+shortcut-code-toggle-comment = Kommentar umschalten
+shortcut-code-duplicate = Duplizieren
+shortcut-category-format = Format
+shortcut-category-code = Code

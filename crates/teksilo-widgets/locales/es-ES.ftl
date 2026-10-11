@@ -425,3 +425,11 @@ code-editor-tab-escape-hint = Tab aplica sangría. { $next } pasa al control sig
 
 shortcut-settings-uncategorized = General
 shortcut-category-edit = Edición
+shortcut-format-bold = Negrita
+shortcut-format-italic = Cursiva
+shortcut-format-underline = Subrayado
+shortcut-format-insert-paragraph = Insertar párrafo
+shortcut-code-toggle-comment = Alternar comentario
+shortcut-code-duplicate = Duplicar
+shortcut-category-format = Formato
+shortcut-category-code = Código

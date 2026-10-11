@@ -151,6 +151,7 @@
 - [FixedSize](widgets/fixed_size.md)
 - [FocusScope](widgets/focus_scope.md)
 - [FontPicker](widgets/font_picker.md)
+- [FormatShortcut](widgets/editor_shortcuts.md)
 - [FormLayout](widgets/form_layout.md)
 - [Grid](widgets/grid.md)
 - [GridView](widgets/grid_view.md)

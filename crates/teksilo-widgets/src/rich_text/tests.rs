@@ -720,6 +720,75 @@ fn editor_undo_redo_round_trip_restores_can_undo_signal() {
 }
 
 #[test]
+fn format_shortcuts_exist_while_an_editable_editor_does() {
+    use crate::editor_shortcuts::FormatShortcut;
+    let declared = |tree: &WidgetTree| {
+        FormatShortcut::ALL
+            .iter()
+            .filter(|c| tree.shortcut_registry().get_default(c.id()).is_some())
+            .count()
+    };
+    let mut tree = WidgetTree::new();
+    assert_eq!(declared(&tree), 0, "no editor, no Bold to rebind");
+
+    let viewer = tree.add(RichTextEditor::read_only(TextDocument::new()));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(declared(&tree), 0, "a viewer has nothing to format");
+
+    let first = tree.add(RichTextEditor::editor(TextDocument::new()));
+    let second = tree.add(RichTextEditor::editor(TextDocument::new()));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(declared(&tree), FormatShortcut::ALL.len());
+
+    // The last editor built goes first: a single-owner registration would
+    // follow it out, though the first editor still runs bold.
+    tree.destroy_subtree_for_testing(second);
+    assert_eq!(
+        declared(&tree),
+        FormatShortcut::ALL.len(),
+        "the first holds them"
+    );
+    tree.destroy_subtree_for_testing(first);
+    assert_eq!(declared(&tree), 0, "gone with the last editor");
+    tree.destroy_subtree_for_testing(viewer);
+}
+
+#[test]
+fn bold_follows_a_rebind_of_format_bold() {
+    use crate::editor_shortcuts::FormatShortcut;
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_core::shortcut::KeyStroke;
+    let doc = TextDocument::new();
+    doc.set_plain_text("text").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let state = editor.state_handle();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    let bold_at_1 = |state: &crate::rich_text::SharedState| {
+        let probe = state.borrow().document.cursor();
+        probe.set_position(1, teksilo_text::text_document::MoveMode::MoveAnchor);
+        probe.char_format().unwrap_or_default().font_bold == Some(true)
+    };
+
+    tree.shortcut_registry_mut().rebind_primary(
+        FormatShortcut::Bold.id(),
+        Some(KeyStroke::new(Key::G, Modifiers::COMMAND)),
+    );
+    press_key(&mut tree, Key::A, Modifiers::COMMAND);
+    press_key(&mut tree, Key::B, Modifiers::COMMAND);
+    assert!(!bold_at_1(&state), "the replaced chord does not bold");
+    assert_eq!(
+        state.borrow().document.to_plain_text().unwrap_or_default(),
+        "text",
+        "nor does it type"
+    );
+    press_key(&mut tree, Key::G, Modifiers::COMMAND);
+    assert!(bold_at_1(&state), "the new chord bolds");
+}
+
+#[test]
 fn editor_bold_toggle_applies_to_selection() {
     // `TextCursor::merge_char_format` operates on the selection range
     // `[anchor, position]`. With no selection the range is empty and

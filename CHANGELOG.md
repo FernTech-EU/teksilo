@@ -23,8 +23,19 @@ by crate for clarity, not because crates version independently.
   category. `ShortcutSettings` lists them under Edit, named in the
   application's language, so a user can rebind them or give them a second
   chord. `StandardEdit` is in the prelude.
+- `BuildContext::register_shortcut_shared` and
+  `ShortcutRegistry::register_shared` register a global shortcut that several
+  widgets declare together. It stays registered while any of them lives.
 
 #### Widgets
+
+- **Rebindable editor shortcuts.** `RichTextEditor` declares `format.bold`,
+  `format.italic`, `format.underline` and `format.insert_paragraph`
+  (`FormatShortcut`), and `CodeEditor` declares `code.toggle_comment` and
+  `code.duplicate` (`CodeShortcut`), on their usual chords. They are listed in
+  `ShortcutSettings` under Format and Code while an editable editor exists. A
+  read-only viewer declares none. Toggle comment also answers `Ctrl+Shift+/`,
+  for the layouts that type `/` with Shift.
 
 - `localize_standard_shortcuts` names the standard edit shortcuts of a
   registry in the active language. `teksilo-app` calls it for every window.
@@ -78,7 +89,9 @@ by crate for clarity, not because crates version independently.
 - **Behaviour change:** an application shortcut on `Ctrl+Z`, `Ctrl+Y`,
   `Ctrl+X`, `Ctrl+C`, `Ctrl+V`, `Ctrl+A`, `Ctrl+Shift+Z` or `Ctrl+Shift+V`
   now shares its chord with a standard edit shortcut. Handle the `edit.*`
-  intent with an `Action` instead.
+  intent with an `Action` instead. The same holds for `Ctrl+B`, `Ctrl+I`,
+  `Ctrl+U` and `Ctrl+Enter` while a `RichTextEditor` exists, and `Ctrl+/` and
+  `Ctrl+D` while a `CodeEditor` does.
 
 #### Widgets
 
@@ -89,10 +102,14 @@ by crate for clarity, not because crates version independently.
   fixed chords. A command a widget declines (Cut or Paste in a read-only
   field, a command its filter refuses) reaches an application's `Action` for
   the same intent.
+- **Behaviour change:** bold, italic, underline and the forced paragraph
+  insert in `RichTextEditor`, and comment and duplicate in `CodeEditor`,
+  follow the `format.*` and `code.*` bindings instead of fixed chords.
 - The context menus of those editors show the bound chord.
 - A `TableView` or `TreeTableView` without a multi selection mode no longer
   takes `Ctrl+A`.
-- `CommandPalette` does not list the standard edit commands.
+- `CommandPalette` does not list the standard edit commands, nor the
+  `format.*` and `code.*` ones.
 
 ### Fixed
 

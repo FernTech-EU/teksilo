@@ -414,3 +414,11 @@ code-editor-tab-escape-hint = Tab wstawia wcięcie. { $next } przechodzi do nast
 
 shortcut-settings-uncategorized = Ogólne
 shortcut-category-edit = Edycja
+shortcut-format-bold = Pogrubienie
+shortcut-format-italic = Kursywa
+shortcut-format-underline = Podkreślenie
+shortcut-format-insert-paragraph = Wstaw akapit
+shortcut-code-toggle-comment = Przełącz komentarz
+shortcut-code-duplicate = Duplikuj
+shortcut-category-format = Formatowanie
+shortcut-category-code = Kod

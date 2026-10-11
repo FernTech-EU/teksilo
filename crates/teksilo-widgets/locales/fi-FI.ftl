@@ -412,3 +412,11 @@ code-editor-tab-escape-hint = Sarkain sisentää. { $next } siirtyy seuraavaan o
 
 shortcut-settings-uncategorized = Yleiset
 shortcut-category-edit = Muokkaa
+shortcut-format-bold = Lihavointi
+shortcut-format-italic = Kursivointi
+shortcut-format-underline = Alleviivaus
+shortcut-format-insert-paragraph = Lisää kappale
+shortcut-code-toggle-comment = Vaihda kommentointi
+shortcut-code-duplicate = Monista
+shortcut-category-format = Muotoilu
+shortcut-category-code = Koodi

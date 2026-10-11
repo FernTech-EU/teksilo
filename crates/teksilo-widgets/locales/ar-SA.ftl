@@ -423,3 +423,11 @@ code-editor-tab-escape-hint = يضيف مفتاح Tab مسافة بادئة. ي�
 
 shortcut-settings-uncategorized = عام
 shortcut-category-edit = تحرير
+shortcut-format-bold = غامق
+shortcut-format-italic = مائل
+shortcut-format-underline = تسطير
+shortcut-format-insert-paragraph = إدراج فقرة
+shortcut-code-toggle-comment = تبديل التعليق
+shortcut-code-duplicate = تكرار
+shortcut-category-format = تنسيق
+shortcut-category-code = الشيفرة

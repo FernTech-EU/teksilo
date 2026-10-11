@@ -413,3 +413,11 @@ code-editor-tab-escape-hint = Το Tab προσθέτει εσοχή. Το { $ne
 
 shortcut-settings-uncategorized = Γενικά
 shortcut-category-edit = Επεξεργασία
+shortcut-format-bold = Έντονα
+shortcut-format-italic = Πλάγια
+shortcut-format-underline = Υπογράμμιση
+shortcut-format-insert-paragraph = Εισαγωγή παραγράφου
+shortcut-code-toggle-comment = Εναλλαγή σχολίου
+shortcut-code-duplicate = Διπλασιασμός
+shortcut-category-format = Μορφοποίηση
+shortcut-category-code = Κώδικας

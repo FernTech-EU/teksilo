@@ -415,3 +415,11 @@ code-editor-tab-escape-hint = Tab odsazuje. { $next } přejde na další ovláda
 
 shortcut-settings-uncategorized = Obecné
 shortcut-category-edit = Úpravy
+shortcut-format-bold = Tučné
+shortcut-format-italic = Kurzíva
+shortcut-format-underline = Podtržení
+shortcut-format-insert-paragraph = Vložit odstavec
+shortcut-code-toggle-comment = Přepnout komentář
+shortcut-code-duplicate = Duplikovat
+shortcut-category-format = Formát
+shortcut-category-code = Kód

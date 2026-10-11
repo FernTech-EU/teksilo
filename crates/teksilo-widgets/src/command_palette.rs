@@ -29,10 +29,12 @@
 //! ```
 //!
 //! The standard edit commands every tree registers ([`StandardEdit`]: cut,
-//! copy, paste, undo, redo, select all) are left out. They act on the widget
-//! that holds the focus, and the palette has taken it, so a row for one would
-//! run nothing. An application whose own undo should be searchable registers
-//! it as a command of its own.
+//! copy, paste, undo, redo, select all) are left out, and so are the editors'
+//! own ([`FormatShortcut`](crate::editor_shortcuts::FormatShortcut),
+//! [`CodeShortcut`](crate::editor_shortcuts::CodeShortcut)). They act on the
+//! widget that holds the focus, and the palette has taken it, so a row for one
+//! would run nothing. An application whose own undo should be searchable
+//! registers it as a command of its own.
 //!
 //! # Presenting it
 //!
@@ -453,10 +455,10 @@ impl CommandPalette {
                 intent: eff.shortcut.intent_name(),
             })
             .filter(|cmd| self.show_disabled || cmd.enabled)
-            // Cut, copy, undo and the rest act on the widget that holds the
-            // focus, which the palette has just taken: run from here they
+            // Cut, copy, undo, bold and the rest act on the widget that holds
+            // the focus, which the palette has just taken: run from here they
             // would reach no editor.
-            .filter(|cmd| StandardEdit::from_id(cmd.id).is_none())
+            .filter(|cmd| !acts_on_the_focused_editor(cmd.id))
             .filter(|cmd| self.include.as_ref().is_none_or(|f| f(cmd)))
             .filter_map(|cmd| Some((fuzzy_score(&needle, &cmd.haystack())?, cmd)))
             .collect();
@@ -466,6 +468,14 @@ impl CommandPalette {
         scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
         scored.into_iter().map(|(_, cmd)| cmd).collect()
     }
+}
+
+/// Whether `id` is a command that runs on the focused editor: a standard edit
+/// command, or one of the editors' own.
+fn acts_on_the_focused_editor(id: &str) -> bool {
+    StandardEdit::from_id(id).is_some()
+        || crate::editor_shortcuts::FormatShortcut::from_id(id).is_some()
+        || crate::editor_shortcuts::CodeShortcut::from_id(id).is_some()
 }
 
 impl std::fmt::Debug for CommandPalette {

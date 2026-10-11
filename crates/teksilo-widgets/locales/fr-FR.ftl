@@ -406,3 +406,11 @@ code-editor-tab-escape-hint = Tab indente. { $next } passe au contrôle suivant,
 
 shortcut-settings-uncategorized = Général
 shortcut-category-edit = Édition
+shortcut-format-bold = Gras
+shortcut-format-italic = Italique
+shortcut-format-underline = Souligné
+shortcut-format-insert-paragraph = Insérer un paragraphe
+shortcut-code-toggle-comment = Commenter/décommenter
+shortcut-code-duplicate = Dupliquer
+shortcut-category-format = Format
+shortcut-category-code = Code

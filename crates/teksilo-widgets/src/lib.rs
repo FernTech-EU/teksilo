@@ -47,6 +47,7 @@ pub mod date_range_edit;
 pub mod date_time_edit;
 pub mod dialog;
 pub mod docking;
+pub mod editor_shortcuts;
 pub use data_views::{ActivateOn, DragTransferMode, RowDragData, ViewId};
 pub(crate) mod drag_preview;
 pub mod drop_target;
@@ -149,6 +150,7 @@ pub use command_link_button::CommandLinkButton;
 pub use command_palette::{CommandPalette, PaletteCommand};
 pub use common::scroll::OverscrollBehavior;
 pub use common::standard_edit::localize_standard_shortcuts;
+pub use editor_shortcuts::{CodeShortcut, FormatShortcut};
 // `WidthPolicy` rides along because it is a configuration knob the caller
 // names at the call site (`.width_policy(WidthPolicy::Fill)`), shared by
 // `DateEdit` / `TimeEdit` / `DateRangeEdit` / `DateTimeEdit`. `spin_box`

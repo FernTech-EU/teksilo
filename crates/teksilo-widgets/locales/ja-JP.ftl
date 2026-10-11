@@ -413,3 +413,11 @@ code-editor-tab-escape-hint = Tab キーでインデントします。{ $next } 
 
 shortcut-settings-uncategorized = 一般
 shortcut-category-edit = 編集
+shortcut-format-bold = 太字
+shortcut-format-italic = 斜体
+shortcut-format-underline = 下線
+shortcut-format-insert-paragraph = 段落を挿入
+shortcut-code-toggle-comment = コメントの切り替え
+shortcut-code-duplicate = 複製
+shortcut-category-format = 書式
+shortcut-category-code = コード

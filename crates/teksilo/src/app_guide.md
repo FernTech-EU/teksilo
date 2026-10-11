@@ -340,6 +340,11 @@ impl Widget for Root {
   `register_action_global`). A focused text widget's action answers first; yours runs when
   focus is elsewhere. A shortcut whose intent no action handles leaves its key to the
   focused widget.
+- While an editable `RichTextEditor` exists the tree also binds `format.bold` / `italic` /
+  `underline` / `insert_paragraph` (`FormatShortcut`), and `CodeEditor` binds
+  `code.toggle_comment` / `code.duplicate` (`CodeShortcut`). Same rule: don't bind Ctrl+B or
+  Ctrl+D globally next to one; handle the intent. A command several of your own widgets run
+  is declared with `ctx.register_shortcut_shared(..)`, which keeps it while any of them lives.
 
 ## Theming
 

@@ -788,6 +788,36 @@ same: register an `Action` for the `edit.*` id rather than match the
 chord. A widget that still matches `Ctrl+C` keeps copying on it after the
 user has moved Copy elsewhere.
 
+### Editor shortcuts: format and code commands
+
+The editors' own commands work the same way, with one difference: they
+exist only while an editor that runs them does.
+
+| Command | Id | Default chord | Declared by |
+|---|---|---|---|
+| Bold | `format.bold` | `Ctrl+B` | `RichTextEditor` |
+| Italic | `format.italic` | `Ctrl+I` | `RichTextEditor` |
+| Underline | `format.underline` | `Ctrl+U` | `RichTextEditor` |
+| Insert Paragraph | `format.insert_paragraph` | `Ctrl+Enter` | `RichTextEditor` |
+| Toggle Comment | `code.toggle_comment` | `Ctrl+/` and `Ctrl+Shift+/` | `CodeEditor` |
+| Duplicate | `code.duplicate` | `Ctrl+D` | `CodeEditor` |
+
+The ids are on
+[`FormatShortcut` and `CodeShortcut`](../crates/teksilo-widgets/src/editor_shortcuts.rs).
+`Ctrl+Shift+/` is there for the layouts that type `/` with Shift (AZERTY,
+German): the chord arrives with Shift held. Each editable editor declares its
+set with `BuildContext::register_shortcut_shared`, so `ShortcutSettings`
+lists Bold under Format only in an application that has a rich-text editor,
+and a read-only viewer declares nothing.
+
+A shared registration is one global entry with several owners. The editors
+cannot use `register_shortcut_global`: an owned id belongs to one widget and
+goes with it, so destroying one editor would take Bold from every other.
+`register_shortcut_shared` keeps the entry while any owner lives, the last one
+to go removes it, and the user's binding waits in the registry for the next
+editor, as every override does. Use it for any command several instances of a
+widget run, each from an `Action` of its own.
+
 ### Routing an application's own undo
 
 An application that wants **one** Undo command (one chord, one menu row)

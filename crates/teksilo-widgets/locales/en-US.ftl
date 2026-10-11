@@ -469,3 +469,13 @@ shortcut-settings-uncategorized = General
 # The group holding the standard edit shortcuts every window registers
 # (cut, copy, paste, undo, redo, select all), named from the menu-* rows.
 shortcut-category-edit = Edit
+# The editors' own shortcuts, listed while such an editor exists:
+# RichTextEditor's format.* and CodeEditor's code.* commands.
+shortcut-format-bold = Bold
+shortcut-format-italic = Italic
+shortcut-format-underline = Underline
+shortcut-format-insert-paragraph = Insert Paragraph
+shortcut-code-toggle-comment = Toggle Comment
+shortcut-code-duplicate = Duplicate
+shortcut-category-format = Format
+shortcut-category-code = Code

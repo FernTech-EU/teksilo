@@ -407,3 +407,11 @@ code-editor-tab-escape-hint = Tab 키는 들여쓰기합니다. { $next } 키는
 
 shortcut-settings-uncategorized = 일반
 shortcut-category-edit = 편집
+shortcut-format-bold = 굵게
+shortcut-format-italic = 기울임꼴
+shortcut-format-underline = 밑줄
+shortcut-format-insert-paragraph = 단락 삽입
+shortcut-code-toggle-comment = 주석 전환
+shortcut-code-duplicate = 복제
+shortcut-category-format = 서식
+shortcut-category-code = 코드

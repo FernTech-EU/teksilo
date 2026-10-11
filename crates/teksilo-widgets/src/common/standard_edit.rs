@@ -41,10 +41,23 @@ pub(crate) fn register_standard_edit_actions(
 pub(crate) fn register_standard_edit_action(
     ctx: &mut BuildContext,
     command: StandardEdit,
+    run: impl FnMut(&mut EventContext) -> bool + 'static,
+) {
+    register_command_action(ctx, command.id(), run);
+}
+
+/// Register, on the widget being built, the action for the command `id`
+/// names: the standard edit commands, and the editors' own
+/// [`FormatShortcut`](crate::editor_shortcuts::FormatShortcut) and
+/// [`CodeShortcut`](crate::editor_shortcuts::CodeShortcut). A command `run`
+/// declines is passed on, as for [`register_standard_edit_actions`].
+pub(crate) fn register_command_action(
+    ctx: &mut BuildContext,
+    id: &'static str,
     mut run: impl FnMut(&mut EventContext) -> bool + 'static,
 ) {
     ctx.register_action(
-        Action::new(command.id()).on_invoke_with_response(move |_intent, ctx| {
+        Action::new(id).on_invoke_with_response(move |_intent, ctx| {
             if run(ctx) {
                 IntentResponse::Handled
             } else {

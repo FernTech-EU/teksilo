@@ -695,6 +695,10 @@ pub struct ShortcutRegistry {
     /// when a shortcut is re-registered by a different owner (rare,
     /// but the indices must stay consistent).
     owner_by_id: HashMap<&'static str, WidgetId>,
+    /// The owners of each [shared](ShortcutRegistry::register_shared)
+    /// registration. The default stays while any of them lives; each is also
+    /// listed in `by_owner`, and none in `owner_by_id`.
+    shared_owners: HashMap<&'static str, Vec<WidgetId>>,
     version: Signal<u64>,
     /// Per-id reactive resolved *primary* keystroke, created lazily the
     /// first time a widget asks to observe an id (see
@@ -732,6 +736,7 @@ impl ShortcutRegistry {
             overrides: HashMap::new(),
             by_owner: HashMap::new(),
             owner_by_id: HashMap::new(),
+            shared_owners: HashMap::new(),
             version: Signal::new(0),
             resolved: HashMap::new(),
         }
@@ -781,6 +786,7 @@ impl ShortcutRegistry {
         // registration reassigns ownership away. Drop the old owner
         // index entry so `unregister_all_for_owner` stays accurate.
         self.detach_owner_index(id);
+        self.detach_shared(id);
         self.bump_version();
         self.refresh_resolved(id);
         previous
@@ -795,8 +801,42 @@ impl ShortcutRegistry {
         let id = shortcut.id;
         let previous = self.defaults.insert(id, shortcut);
         self.detach_owner_index(id);
+        self.detach_shared(id);
         self.by_owner.entry(owner).or_default().push(id);
         self.owner_by_id.insert(id, owner);
+        self.bump_version();
+        self.refresh_resolved(id);
+        previous
+    }
+
+    /// Upsert a shortcut default that several widgets declare together, adding
+    /// `owner` to the widgets keeping it. The default stays registered while
+    /// any of them lives, and goes with the last.
+    ///
+    /// For a command more than one instance of a widget implements, such as
+    /// the bold of every rich-text editor: one id in the registry, so one row
+    /// in a settings UI and one user binding, however many editors exist.
+    /// [`register_owned`](Self::register_owned) cannot express that, since an
+    /// owned id is removed with its one owner, and the next editor to be
+    /// destroyed would take the shortcut from those still alive.
+    ///
+    /// The last declaration wins, as with every upsert. User overrides are
+    /// preserved. An id registered owned or anonymously becomes shared, and
+    /// [`register`](Self::register) or `register_owned` on a shared id makes
+    /// it single-owner again. [`owner_of`](Self::owner_of) answers `None` for
+    /// a shared id.
+    pub fn register_shared(&mut self, shortcut: Shortcut, owner: WidgetId) -> Option<Shortcut> {
+        let id = shortcut.id;
+        let previous = self.defaults.insert(id, shortcut);
+        self.detach_owner_index(id);
+        let owners = self.shared_owners.entry(id).or_default();
+        if !owners.contains(&owner) {
+            owners.push(owner);
+        }
+        let ids = self.by_owner.entry(owner).or_default();
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
         self.bump_version();
         self.refresh_resolved(id);
         previous
@@ -809,6 +849,7 @@ impl ShortcutRegistry {
         let removed = self.defaults.remove(id);
         if removed.is_some() {
             self.detach_owner_index(id);
+            self.detach_shared(id);
             self.bump_version();
             self.refresh_resolved(id);
         }
@@ -825,6 +866,14 @@ impl ShortcutRegistry {
         };
         let mut any = false;
         for id in ids {
+            // A shared default outlives this owner while another holds it.
+            if let Some(owners) = self.shared_owners.get_mut(id) {
+                owners.retain(|o| *o != owner);
+                if !owners.is_empty() {
+                    continue;
+                }
+                self.shared_owners.remove(id);
+            }
             if self.defaults.remove(id).is_some() {
                 any = true;
             }
@@ -1131,6 +1180,22 @@ impl ShortcutRegistry {
         let ids: Vec<&'static str> = self.resolved.keys().copied().collect();
         for id in ids {
             self.refresh_resolved(id);
+        }
+    }
+
+    /// Forget that `id` is shared, and remove it from every owner's list.
+    /// Idempotent, like `detach_owner_index`.
+    fn detach_shared(&mut self, id: &str) {
+        let Some(owners) = self.shared_owners.remove(id) else {
+            return;
+        };
+        for owner in owners {
+            if let Some(ids) = self.by_owner.get_mut(&owner) {
+                ids.retain(|entry| *entry != id);
+                if ids.is_empty() {
+                    self.by_owner.remove(&owner);
+                }
+            }
         }
     }
 
@@ -1476,6 +1541,70 @@ mod tests {
 
         reg.unregister_all_for_owner(editor);
         assert!(reg.get_default("foo").is_some());
+    }
+
+    #[test]
+    fn a_shared_default_lives_until_its_last_owner_goes() {
+        use slotmap::KeyData;
+        let first: WidgetId = KeyData::from_ffi(21).into();
+        let second: WidgetId = KeyData::from_ffi(22).into();
+        let bold = || {
+            Shortcut::new("format.bold")
+                .primary(KeyStroke::ctrl(Key::B))
+                .build()
+        };
+
+        let mut reg = ShortcutRegistry::new();
+        reg.register_shared(bold(), first);
+        reg.register_shared(bold(), second);
+        // A rebuild re-declares: the same owner twice is still one owner.
+        reg.register_shared(bold(), first);
+        assert_eq!(reg.len(), 1, "one id, however many editors declare it");
+        assert_eq!(reg.owner_of("format.bold"), None);
+        reg.rebind_secondary("format.bold", Some(KeyStroke::ctrl(Key::G)));
+
+        reg.unregister_all_for_owner(first);
+        assert!(
+            reg.get_default("format.bold").is_some(),
+            "the second editor still holds it"
+        );
+        reg.unregister_all_for_owner(first);
+        assert!(reg.get_default("format.bold").is_some(), "idempotent");
+
+        reg.unregister_all_for_owner(second);
+        assert!(
+            reg.get_default("format.bold").is_none(),
+            "gone with the last"
+        );
+        assert!(
+            reg.override_for("format.bold").is_some(),
+            "the user's binding waits for the next editor"
+        );
+        reg.register_shared(bold(), first);
+        assert_eq!(
+            reg.effective("format.bold").unwrap().secondary,
+            Some(KeyStroke::ctrl(Key::G))
+        );
+    }
+
+    #[test]
+    fn registering_a_shared_id_owned_hands_it_to_its_one_owner() {
+        use slotmap::KeyData;
+        let editor: WidgetId = KeyData::from_ffi(31).into();
+        let app: WidgetId = KeyData::from_ffi(32).into();
+
+        let mut reg = ShortcutRegistry::new();
+        reg.register_shared(Shortcut::new("format.bold").build(), editor);
+        reg.register_owned(Shortcut::new("format.bold").build(), app);
+        assert_eq!(reg.owner_of("format.bold"), Some(app));
+
+        reg.unregister_all_for_owner(editor);
+        assert!(
+            reg.get_default("format.bold").is_some(),
+            "the editor no longer holds it"
+        );
+        reg.unregister_all_for_owner(app);
+        assert!(reg.get_default("format.bold").is_none());
     }
 
     #[test]

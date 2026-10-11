@@ -408,3 +408,11 @@ code-editor-tab-escape-hint = Sekme girinti ekler. { $next } sonraki denetime, {
 
 shortcut-settings-uncategorized = Genel
 shortcut-category-edit = Düzenle
+shortcut-format-bold = Kalın
+shortcut-format-italic = İtalik
+shortcut-format-underline = Altı çizili
+shortcut-format-insert-paragraph = Paragraf ekle
+shortcut-code-toggle-comment = Yorumu aç/kapat
+shortcut-code-duplicate = Çoğalt
+shortcut-category-format = Biçim
+shortcut-category-code = Kod

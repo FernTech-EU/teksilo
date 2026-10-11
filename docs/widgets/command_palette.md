@@ -58,10 +58,12 @@ ctx.register_shortcut_global(
 ```
 
 The standard edit commands every tree registers (`StandardEdit`: cut,
-copy, paste, undo, redo, select all) are left out. They act on the widget
-that holds the focus, and the palette has taken it, so a row for one would
-run nothing. An application whose own undo should be searchable registers
-it as a command of its own.
+copy, paste, undo, redo, select all) are left out, and so are the editors'
+own (`FormatShortcut`,
+`CodeShortcut`). They act on the
+widget that holds the focus, and the palette has taken it, so a row for one
+would run nothing. An application whose own undo should be searchable
+registers it as a command of its own.
 
 ### Presenting it
 
@@ -112,6 +114,8 @@ runs the highlighted command; Escape dismisses.
 
 ## `pub struct PaletteCommand`
 
+**Import:** `use teksilo::widgets::PaletteCommand;`
+
 One command as the palette sees it.
 
 A read-only projection of a registered shortcut, handed to
@@ -139,6 +143,8 @@ pub struct PaletteCommand { /* fields */ }
 <a id="commandpalette"></a>
 
 ## `pub struct CommandPalette`
+
+**Import:** `use teksilo::widgets::CommandPalette;`
 
 Type-to-run access to every registered command. See the `module docs`.
 

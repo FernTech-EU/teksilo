@@ -1149,6 +1149,23 @@ impl<'a> BuildContext<'a> {
             .register_owned(shortcut, id);
     }
 
+    /// Register a global [`Shortcut`](crate::shortcut::Shortcut) that every
+    /// instance of a widget declares together, with the widget being built
+    /// among its owners. It stays registered while any of them lives. See
+    /// [`ShortcutRegistry::register_shared`](crate::shortcut::ShortcutRegistry::register_shared).
+    ///
+    /// For a command each instance runs from an
+    /// [`Action`](crate::action::Action) of its own, the way
+    /// `RichTextEditor` runs bold: one binding for the user to change, and the
+    /// focused instance, the start of the intent's walk, answers it.
+    pub fn register_shortcut_shared(&mut self, mut shortcut: crate::shortcut::Shortcut) {
+        let id = self.self_id();
+        shortcut.scope = crate::shortcut::ShortcutScope::Global;
+        self.tree
+            .shortcut_registry_mut()
+            .register_shared(shortcut, id);
+    }
+
     /// Pre-declare shortcuts on behalf of a not-yet-mounted child
     /// (e.g. a `Switcher` walking its `Pending` slots' static
     /// declarations before they're inserted). Each shortcut is owned

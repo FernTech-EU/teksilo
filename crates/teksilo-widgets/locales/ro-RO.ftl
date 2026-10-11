@@ -422,3 +422,11 @@ code-editor-tab-escape-hint = Tab indentează. { $next } trece la controlul urm�
 
 shortcut-settings-uncategorized = Generale
 shortcut-category-edit = Editare
+shortcut-format-bold = Aldin
+shortcut-format-italic = Cursiv
+shortcut-format-underline = Subliniat
+shortcut-format-insert-paragraph = Inserează paragraf
+shortcut-code-toggle-comment = Comută comentariul
+shortcut-code-duplicate = Duplică
+shortcut-category-format = Formatare
+shortcut-category-code = Cod

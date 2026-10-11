@@ -26,6 +26,8 @@
 
 use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
 use teksilo_core::shortcut::{KeyStroke, StandardEdit};
+
+use crate::editor_shortcuts::CodeShortcut;
 use teksilo_core::widget::EventContext;
 use teksilo_i18n::tr_widget;
 use teksilo_text::text_document::{MoveMode, MoveOperation, SelectionType};
@@ -182,14 +184,8 @@ pub(super) fn handle_key(
                 semantics::dedent(&mut st);
                 KeyAction::ClearPreferredX
             }
-            Key::Character('/') if ctrl && filter.accepts(CodeCommand::ToggleLineComment) => {
-                semantics::toggle_line_comment(&mut st);
-                KeyAction::ClearPreferredX
-            }
-            Key::D if ctrl && !shift && filter.accepts(CodeCommand::DuplicateSelection) => {
-                semantics::duplicate(&mut st);
-                KeyAction::ClearPreferredX
-            }
+            // Comment and duplicate are the `code.*` actions
+            // (`run_code_shortcut`), not keys, so the user can rebind them.
 
             // Select-all, the clipboard and undo / redo are not keys here:
             // they arrive as the `edit.*` actions `run_standard_edit` serves,
@@ -419,6 +415,33 @@ pub(super) fn run_standard_edit(
     true
 }
 
+/// Run one of the editor's own [`CodeShortcut`] commands, as its `code.*`
+/// action does. Returns whether it ran: a command the filter rejects (both,
+/// in a read-only viewer) is declined and passed on.
+pub(super) fn run_code_shortcut(
+    state: &SharedState,
+    command: CodeShortcut,
+    ctx: &mut EventContext,
+) -> bool {
+    {
+        let mut st = state.borrow_mut();
+        let filter = st.policy.command_filter;
+        match command {
+            CodeShortcut::ToggleComment if filter.accepts(CodeCommand::ToggleLineComment) => {
+                semantics::toggle_line_comment(&mut st);
+            }
+            CodeShortcut::Duplicate if filter.accepts(CodeCommand::DuplicateSelection) => {
+                semantics::duplicate(&mut st);
+            }
+            _ => return false,
+        }
+    }
+    finish_key_action(state, ctx, KeyAction::ClearPreferredX);
+    // Both changed the document, so an open completion popup re-evaluates.
+    completion::react(state, ctx, Trigger::Edited);
+    true
+}
+
 /// The shared tail of a handled key or command: what `action` says about the
 /// sticky column, then the caret-moved epilogue.
 fn finish_key_action(
@@ -454,9 +477,9 @@ pub(super) fn tab_escape_hint() -> String {
 /// How a handled key should drive completion, or `None` for keys that never do
 /// (Enter/Tab when the popup is closed).
 ///
-/// Ctrl-chords are **not** ignored: Ctrl+D / Ctrl+/ / add-caret all changed
-/// the document or selection (as did the `edit.*` commands, which
-/// [`run_standard_edit`] re-evaluates itself), so an open popup
+/// Ctrl-chords are **not** ignored: add-caret changes the selection (as do
+/// the `edit.*` and `code.*` commands, which [`run_standard_edit`] and
+/// [`run_code_shortcut`] re-evaluate themselves), so an open popup
 /// must re-evaluate against the new state (and dismiss) — otherwise a following
 /// Enter would accept a stale suggestion against the wrong range. Ctrl+Space is
 /// handled earlier and never reaches here.

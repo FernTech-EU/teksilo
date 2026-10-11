@@ -4092,6 +4092,26 @@ impl Widget for RichTextEditor {
             );
         }
 
+        // Bold, italic, underline and the forced paragraph insert: shared
+        // `format.*` shortcuts, declared while an editable editor exists, and
+        // an action per command here.
+        if !self.state.borrow().policy.is_read_only() {
+            for command in crate::editor_shortcuts::FormatShortcut::ALL {
+                ctx.register_shortcut_shared(command.shortcut());
+            }
+        }
+        for command in crate::editor_shortcuts::FormatShortcut::ALL {
+            let state = self.state.clone();
+            let touch = self.touch.clone();
+            crate::common::standard_edit::register_command_action(ctx, command.id(), move |ctx| {
+                let ran = self::keyboard::run_format_shortcut(&state, command, ctx);
+                if ran {
+                    touch.refresh(ctx, touch_mount::ToolbarIntent::Hide);
+                }
+                ran
+            });
+        }
+
         // The touch-selection overlays: the affordance layer (handles + lens)
         // and the selection toolbar, both detached content owned by this build.
         // Inert until a finger raises them.

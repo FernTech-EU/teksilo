@@ -175,6 +175,7 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 
 - [ActivateOn](data_views.md) — Shared substrate for the data views' source-owned drag-and-drop + lazy loading
 - [CodeEditorHandle](code_editor.md) — Multi-line plain-text and code editing surfaces
+- [FormatShortcut](editor_shortcuts.md) — The editors' own rebindable commands: bold and the rest of `RichTextEditor`'s formatting (`FormatShortcut`), comment and…
 - [NotificationEntry](notification.md) — Persistent notification archive — the storage and data-model layer backing `NotificationLog`, `NotificationCenterButton`, and `NotificationLogDialog`
 - [PopoverSurface](popover_surface.md) — `PopoverSurface` — the themed panel a popover's content sits in
 - [TreeRowMeta](tree_source.md) — Type-erased data source adapter for `TreeView`

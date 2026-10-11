@@ -422,3 +422,11 @@ code-editor-tab-escape-hint = Tab rykker inn. { $next } går til neste kontroll,
 
 shortcut-settings-uncategorized = Generelt
 shortcut-category-edit = Rediger
+shortcut-format-bold = Fet
+shortcut-format-italic = Kursiv
+shortcut-format-underline = Understreket
+shortcut-format-insert-paragraph = Sett inn avsnitt
+shortcut-code-toggle-comment = Slå kommentar av/på
+shortcut-code-duplicate = Dupliser
+shortcut-category-format = Format
+shortcut-category-code = Kode

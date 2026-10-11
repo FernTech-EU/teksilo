@@ -417,3 +417,11 @@ code-editor-tab-escape-hint = Tab добавляет отступ. { $next } п�
 
 shortcut-settings-uncategorized = Общие
 shortcut-category-edit = Правка
+shortcut-format-bold = Полужирный
+shortcut-format-italic = Курсив
+shortcut-format-underline = Подчёркнутый
+shortcut-format-insert-paragraph = Вставить абзац
+shortcut-code-toggle-comment = Закомментировать/раскомментировать
+shortcut-code-duplicate = Дублировать
+shortcut-category-format = Формат
+shortcut-category-code = Код

@@ -410,3 +410,11 @@ code-editor-tab-escape-hint = A Tab behúz. A { $next } a következő vezérlőr
 
 shortcut-settings-uncategorized = Általános
 shortcut-category-edit = Szerkesztés
+shortcut-format-bold = Félkövér
+shortcut-format-italic = Dőlt
+shortcut-format-underline = Aláhúzott
+shortcut-format-insert-paragraph = Bekezdés beszúrása
+shortcut-code-toggle-comment = Megjegyzés be/ki
+shortcut-code-duplicate = Kettőzés
+shortcut-category-format = Formátum
+shortcut-category-code = Kód

@@ -2154,6 +2154,40 @@ fn select_all_follows_a_rebind_of_edit_select_all() {
     );
 }
 
+/// Duplicate is the `code.duplicate` shortcut: rebinding it moves it here,
+/// and the old chord stops duplicating.
+#[test]
+fn duplicate_follows_a_rebind_of_code_duplicate() {
+    use crate::editor_shortcuts::CodeShortcut;
+    use teksilo_core::shortcut::KeyStroke;
+    let (mut tree, st, _reader) = tabbed_into(CodeEditor::new(doc("x")));
+    set_caret(&st, 0);
+    tree.shortcut_registry_mut().rebind_primary(
+        CodeShortcut::Duplicate.id(),
+        Some(KeyStroke::new(Key::J, Modifiers::COMMAND)),
+    );
+    tree.press_key(Key::D, Modifiers::COMMAND);
+    assert_eq!(
+        text_of(&st),
+        "x",
+        "the replaced chord neither duplicates nor types"
+    );
+    tree.press_key(Key::J, Modifiers::COMMAND);
+    assert_eq!(text_of(&st), "x\nx", "the new chord duplicates");
+}
+
+/// On a layout that types `/` with Shift (AZERTY, German) the chord arrives
+/// with Shift held, which the secondary default covers.
+#[test]
+fn a_shifted_slash_toggles_the_comment() {
+    let (mut tree, st, _reader) = tabbed_into(CodeEditor::new(doc("foo")).line_comment("//"));
+    set_caret(&st, 0);
+    tree.press_key(Key::Character('/'), Modifiers::COMMAND | Modifiers::SHIFT);
+    assert_eq!(text_of(&st), "// foo");
+    tree.press_key(Key::Character('/'), Modifiers::COMMAND);
+    assert_eq!(text_of(&st), "foo", "and the unshifted chord too");
+}
+
 /// The way out does not cost the editor its Tab: Tab still indents and
 /// Shift+Tab still dedents, with focus staying where it is.
 #[test]

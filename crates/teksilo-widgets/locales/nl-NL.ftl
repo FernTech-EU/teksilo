@@ -416,3 +416,11 @@ code-editor-tab-escape-hint = Tab springt in. { $next } gaat naar het volgende b
 
 shortcut-settings-uncategorized = Algemeen
 shortcut-category-edit = Bewerken
+shortcut-format-bold = Vet
+shortcut-format-italic = Cursief
+shortcut-format-underline = Onderstrepen
+shortcut-format-insert-paragraph = Alinea invoegen
+shortcut-code-toggle-comment = Commentaar in-/uitschakelen
+shortcut-code-duplicate = Dupliceren
+shortcut-category-format = Opmaak
+shortcut-category-code = Code

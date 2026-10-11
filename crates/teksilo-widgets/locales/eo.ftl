@@ -374,3 +374,11 @@ code-editor-tab-escape-hint = Tab enŝovas. { $next } movas al la sekva regilo, 
 
 shortcut-settings-uncategorized = Ĝeneralaj
 shortcut-category-edit = Redakti
+shortcut-format-bold = Grasa
+shortcut-format-italic = Kursiva
+shortcut-format-underline = Substrekita
+shortcut-format-insert-paragraph = Enmeti alineon
+shortcut-code-toggle-comment = Baskuligi komenton
+shortcut-code-duplicate = Duobligi
+shortcut-category-format = Formato
+shortcut-category-code = Kodo

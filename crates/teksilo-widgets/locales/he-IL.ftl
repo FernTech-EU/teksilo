@@ -411,3 +411,11 @@ code-editor-tab-escape-hint = Tab מוסיף הזחה. { $next } עובר לפק
 
 shortcut-settings-uncategorized = כללי
 shortcut-category-edit = עריכה
+shortcut-format-bold = מודגש
+shortcut-format-italic = נטוי
+shortcut-format-underline = קו תחתון
+shortcut-format-insert-paragraph = הוספת פסקה
+shortcut-code-toggle-comment = החלפת הערה
+shortcut-code-duplicate = שכפול
+shortcut-category-format = עיצוב
+shortcut-category-code = קוד

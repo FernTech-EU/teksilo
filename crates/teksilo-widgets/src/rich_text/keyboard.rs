@@ -5,17 +5,19 @@
 //!
 //! This module owns the full `KeyDown` / `ImeComposition` / `ImeCommit` dispatch: navigation
 //! (arrows, Home/End, PageUp/Down), editing (Backspace, Delete, Enter,
-//! `Ctrl+Backspace` / `Ctrl+Delete` for word‑level deletion), format
-//! toggles (`Ctrl+B` / `Ctrl+I` / `Ctrl+U`). Undo / redo, the clipboard
-//! and select-all (with its table‑aware escalation ladder) are not keys:
-//! they come through the rebindable `edit.*` shortcuts and
-//! [`run_standard_edit`].
+//! `Ctrl+Backspace` / `Ctrl+Delete` for word‑level deletion). Undo / redo,
+//! the clipboard and select-all (with its table‑aware escalation ladder) are
+//! not keys: they come through the rebindable `edit.*` shortcuts and
+//! [`run_standard_edit`]. Neither are bold, italic, underline and the forced
+//! paragraph insert: the `format.*` shortcuts and [`run_format_shortcut`].
 //!
 //! All functions take `&SharedState` so they can be called from inside
 //! `HandlerSet` closures without borrowing the widget struct.
 
 use teksilo_core::event::{EventResponse, Key, ScrollMotion, WidgetEvent};
 use teksilo_core::shortcut::StandardEdit;
+
+use crate::editor_shortcuts::FormatShortcut;
 use teksilo_core::widget::EventContext;
 use teksilo_text::text_document::{
     BlockFormat, ListFormat, MoveMode, MoveOperation, SelectionType, TableCellRef, TextFormat,
@@ -361,14 +363,9 @@ pub(super) fn handle_key(
                 }
                 KeyAction::ClearPreferredX
             }
-            Key::Enter if ctrl && filter.accepts(EditCommandKind::InsertBlockForced) => {
-                // Ctrl+Enter: always insert a new block, bypassing
-                // table-cell navigation. Matches the godot reference's
-                // forced-block-insert branch.
-                collapse_selection_before_insert(&st);
-                let _ = st.cursor.insert_block();
-                KeyAction::ClearPreferredX
-            }
+            // The forced paragraph insert (Ctrl+Enter) is not a key here:
+            // it is the `format.insert_paragraph` action
+            // (`run_format_shortcut`), so the user can rebind it.
             Key::Enter if !ctrl && filter.accepts(EditCommandKind::InsertBlock) => {
                 // Enter (without Ctrl) inside a table cell: move to
                 // the cell in the same column one row down, or (on
@@ -488,18 +485,8 @@ pub(super) fn handle_key(
                 }
                 KeyAction::ClearPreferredX
             }
-            Key::B if ctrl && filter.accepts(EditCommandKind::ToggleBold) => {
-                toggle_char_format(&mut st, FormatBit::Bold);
-                KeyAction::ClearPreferredX
-            }
-            Key::I if ctrl && filter.accepts(EditCommandKind::ToggleItalic) => {
-                toggle_char_format(&mut st, FormatBit::Italic);
-                KeyAction::ClearPreferredX
-            }
-            Key::U if ctrl && filter.accepts(EditCommandKind::ToggleUnderline) => {
-                toggle_char_format(&mut st, FormatBit::Underline);
-                KeyAction::ClearPreferredX
-            }
+            // Bold, italic and underline are the `format.*` actions
+            // (`run_format_shortcut`), not keys.
             _ => {
                 // Printable character fallback: winit populates
                 // `KeyDown::text` with the character produced by the
@@ -597,6 +584,46 @@ pub(super) fn run_standard_edit(
             }
             _ => return false,
         }
+    };
+    finish_key_action(state, ctx, action);
+    true
+}
+
+/// Run one of the editor's own [`FormatShortcut`] commands, as its `format.*`
+/// action does. Returns whether it ran: a command the filter refuses is
+/// declined and passed on, as in [`run_standard_edit`].
+pub(super) fn run_format_shortcut(
+    state: &SharedState,
+    command: FormatShortcut,
+    ctx: &mut EventContext,
+) -> bool {
+    let action = {
+        let mut st = state.borrow_mut();
+        // Not select-all, so the select-all ladder starts again at level 1.
+        st.select_all_level = 0;
+        st.select_all_anchor_cell = None;
+        let filter = st.policy.command_filter;
+        match command {
+            FormatShortcut::Bold if filter.accepts(EditCommandKind::ToggleBold) => {
+                toggle_char_format(&mut st, FormatBit::Bold);
+            }
+            FormatShortcut::Italic if filter.accepts(EditCommandKind::ToggleItalic) => {
+                toggle_char_format(&mut st, FormatBit::Italic);
+            }
+            FormatShortcut::Underline if filter.accepts(EditCommandKind::ToggleUnderline) => {
+                toggle_char_format(&mut st, FormatBit::Underline);
+            }
+            FormatShortcut::InsertParagraph
+                if filter.accepts(EditCommandKind::InsertBlockForced) =>
+            {
+                // Always a new block, bypassing table-cell navigation.
+                // Matches the godot reference's forced-block-insert branch.
+                collapse_selection_before_insert(&st);
+                let _ = st.cursor.insert_block();
+            }
+            _ => return false,
+        }
+        KeyAction::ClearPreferredX
     };
     finish_key_action(state, ctx, action);
     true
