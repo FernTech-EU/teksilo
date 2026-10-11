@@ -445,16 +445,11 @@ impl MenuItem {
 
     /// Bind the trailing shortcut label to a registered
     /// [`Shortcut`](teksilo_core::shortcut::Shortcut) by its stable id.
-    /// Bind the trailing shortcut label to a registered
-    /// [`Shortcut`](teksilo_core::shortcut::Shortcut) by its stable id.
     /// The effective primary keystroke is bound *reactively*, via a
     /// per-id signal, so a rebind performed through
     /// [`ShortcutRegistry`](teksilo_core::shortcut::ShortcutRegistry)
     /// refreshes the chord in place — the item itself is never rebuilt
     /// for shortcut changes.
-    ///
-    /// A manual [`shortcut_label`](Self::shortcut_label) takes
-    /// precedence when both are set.
     ///
     /// A manual [`shortcut_label`](Self::shortcut_label) takes
     /// precedence when both are set.
