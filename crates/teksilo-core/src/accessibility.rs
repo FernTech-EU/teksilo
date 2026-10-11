@@ -949,6 +949,28 @@ impl AccessNodeBuilder {
         self.toggled
     }
 
+    /// The node's numeric value (`Node::numeric_value`), as set by the widget
+    /// or an `access_numeric_value` override.
+    pub fn numeric_value(&self) -> Option<f64> {
+        self.inner.numeric_value()
+    }
+
+    /// The node's numeric lower bound (`Node::min_numeric_value`).
+    pub fn min_numeric_value(&self) -> Option<f64> {
+        self.inner.min_numeric_value()
+    }
+
+    /// The node's numeric upper bound (`Node::max_numeric_value`).
+    pub fn max_numeric_value(&self) -> Option<f64> {
+        self.inner.max_numeric_value()
+    }
+
+    /// The node's custom actions, in declaration order (the widget's own
+    /// first, then the application's `access_custom_action` entries).
+    pub fn custom_actions(&self) -> &[accesskit::CustomAction] {
+        self.inner.custom_actions()
+    }
+
     pub fn expanded(&self) -> Option<bool> {
         self.expanded
     }
@@ -2039,6 +2061,11 @@ pub struct AccessibilityInfo {
     selected: Option<bool>,
     disabled: bool,
     hidden: bool,
+    value: Option<String>,
+    numeric_value: Option<f64>,
+    min_numeric_value: Option<f64>,
+    max_numeric_value: Option<f64>,
+    custom_actions: Vec<String>,
 }
 
 impl AccessibilityInfo {
@@ -2052,7 +2079,35 @@ impl AccessibilityInfo {
             selected: None,
             disabled: false,
             hidden: false,
+            value: None,
+            numeric_value: None,
+            min_numeric_value: None,
+            max_numeric_value: None,
+            custom_actions: Vec::new(),
         }
+    }
+
+    pub fn with_value(mut self, value: impl Into<String>) -> Self {
+        self.value = Some(value.into());
+        self
+    }
+
+    pub fn with_numeric_value(mut self, value: f64) -> Self {
+        self.numeric_value = Some(value);
+        self
+    }
+
+    /// Set the numeric range; either bound may be absent.
+    pub fn with_numeric_range(mut self, min: Option<f64>, max: Option<f64>) -> Self {
+        self.min_numeric_value = min;
+        self.max_numeric_value = max;
+        self
+    }
+
+    /// Set the custom-action labels, in declaration order.
+    pub fn with_custom_actions(mut self, labels: Vec<String>) -> Self {
+        self.custom_actions = labels;
+        self
     }
 
     pub fn with_toggled(mut self, toggled: bool) -> Self {
@@ -2110,6 +2165,32 @@ impl AccessibilityInfo {
 
     pub fn is_hidden(&self) -> bool {
         self.hidden
+    }
+
+    /// The node's value text (`Node::value`), if it has one.
+    pub fn value(&self) -> Option<&str> {
+        self.value.as_deref()
+    }
+
+    /// The node's numeric value (a slider's position, a spin box's number).
+    pub fn numeric_value(&self) -> Option<f64> {
+        self.numeric_value
+    }
+
+    /// The lower bound of the numeric range, if the node declares one.
+    pub fn min_numeric_value(&self) -> Option<f64> {
+        self.min_numeric_value
+    }
+
+    /// The upper bound of the numeric range, if the node declares one.
+    pub fn max_numeric_value(&self) -> Option<f64> {
+        self.max_numeric_value
+    }
+
+    /// The labels of the node's custom actions, in declaration order (the
+    /// widget's own first, then any `access_custom_action` overrides).
+    pub fn custom_actions(&self) -> &[String] {
+        &self.custom_actions
     }
 }
 

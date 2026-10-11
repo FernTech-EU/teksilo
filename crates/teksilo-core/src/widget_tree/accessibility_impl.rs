@@ -524,7 +524,20 @@ impl WidgetTree {
         if builder.is_hidden() {
             info = info.with_hidden(true);
         }
-        info
+        if let Some(value) = builder.value() {
+            info = info.with_value(value);
+        }
+        if let Some(v) = builder.numeric_value() {
+            info = info.with_numeric_value(v);
+        }
+        info = info.with_numeric_range(builder.min_numeric_value(), builder.max_numeric_value());
+        info.with_custom_actions(
+            builder
+                .custom_actions()
+                .iter()
+                .map(|a| a.description.clone())
+                .collect(),
+        )
     }
 
     pub fn find_by_role(&self, role: accesskit::Role) -> Option<WidgetId> {
