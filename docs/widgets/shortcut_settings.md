@@ -5,8 +5,8 @@
 
 ![ShortcutSettings preview](img/shortcut_settings.png)
 
-ShortcutSettings — user-facing widget for browsing and rebinding
-application shortcuts.
+ShortcutSettings: the user-facing panel for browsing and rebinding an
+application's shortcuts.
 
 ## Public types
 
@@ -25,42 +25,78 @@ application shortcuts.
 | `Self` | [`new()`](#shortcutsettings-new) |
 | | **Builder methods** |
 | `Self` | [`with_filter(filter: Signal<String>)`](#shortcutsettings-with_filter) |
+| `Self` | [`modified_only(signal: Signal<bool>)`](#shortcutsettings-modified_only) |
+| `Self` | [`toolbar(show: bool)`](#shortcutsettings-toolbar) |
 | `Self` | [`confirm_conflicts(yes: bool)`](#shortcutsettings-confirm_conflicts) |
 | `Self` | [`on_conflict(f: impl Fn(&ShortcutConflict) + 'static)`](#shortcutsettings-on_conflict) |
 
 ## Detailed description
 
-Reads every shortcut registered in the tree's
-`ShortcutRegistry` and
-renders one row per entry, grouped by category, with both primary
-and secondary keystrokes independently rebindable. Supports:
+It lists every shortcut in the tree's
+`ShortcutRegistry`, grouped
+by category, one row per command:
 
-- **Rebind** (primary or secondary) via one-shot key capture.
-- **Unbind** a slot explicitly (sets the override to `None`), or
-  press `Delete` / `Backspace` during capture.
-- **Reset** clears the user override entirely, restoring the
-  declared defaults. Disabled when no override exists.
-- **Conflict auto-resolution**: rebinding to a keystroke already
-  bound elsewhere silently unbinds the conflicting shortcut so
-  there's always exactly one binding per chord.
-- **Escape** during capture cancels without committing.
-- **Platform-aware keystroke labels** via `format_keystroke`.
+```text
+ [ Search commands or keys         ] [⌨]  [ ] Modified only  [Reset all…]
 
-The widget owns the currently-armed `CaptureHandle`; dropping
-the widget cancels the capture, so navigating away mid-rebind
-cannot leak a stray rebind onto the next keystroke pressed
-somewhere else in the app.
+ File
+    New project                 [Ctrl] [N]          +
+    Open…                       [Ctrl] [O]          +
+  ● Save                        [Ctrl] [Shift] [S]  [Ctrl] [S]   ↺
+ Format
+    Bold                        ( Press keys… )     +
+       Press the new shortcut. Esc cancels, Del removes it.
+```
+
+- **The chord is the control.** Each chord is drawn as key caps; click
+  it (or focus it and press Enter or Space) to record a new one. The
+  first column is the shortcut, the second its alternative (`+` adds
+  one). Delete or Backspace on a focused chord removes it.
+- **Recording** shows "Press keys…" in a field the width of its column,
+  so the list never reflows. Escape or Tab cancels; Delete or Backspace
+  removes the chord; leaving the field cancels too. A key that cannot be
+  a shortcut is refused with the reason, and recording goes on: a
+  printable key needs Ctrl, Alt or ⌘ (Shift alone types a capital), and
+  chords the system keeps (Alt+F4, Alt+Tab, ⌘Tab, ⌘Space, …) and
+  Ctrl+Tab (the way out of a control that keeps Tab) are reserved.
+- **Conflicts are confirmed.** A chord another command already uses
+  is not taken from it until the user presses "Reassign" on the line
+  that appears under the row. `confirm_conflicts(false)` reassigns at
+  once instead; either way `on_conflict` is told.
+- **Changed rows are marked** with a dot and get a reset button, which
+  puts that command's declared defaults back. "Reset all…" in the
+  toolbar does it for every command, after a confirmation.
+- **Search** matches a command's name, its group, its description and
+  the text of its chords ("ctrl+s" finds Save). The keyboard button
+  next to the field finds by chord instead: press it, press the keys,
+  and the list shows the commands that use exactly that chord.
+  "Modified only" narrows the list to the commands the user changed.
+
+Commands are sorted by name within a group and groups by their title,
+both in the interface language. Every visible string comes from the
+framework's locale bundles.
+
+**Keyboard.** The list is one Tab stop. The arrow keys move between rows
+and between a row's chord, alternative and reset button; Home and End go
+to the first and last row. Every control carries its command in its
+accessible name ("Save: Ctrl+S"), its description and whether the user
+changed it in its description, and the group titles are headings.
+
+The widget owns the armed key capture. Dropping the widget cancels it,
+so navigating away mid-recording cannot rebind the next key pressed
+somewhere else.
+
+The list grows with its content and does not scroll; place the widget
+in a `ScrollArea` when there are more shortcuts than fit.
 
 ```ignore
 // Inside a settings Dialog build():
-let filter = ctx.signal(String::new());
 ctx.add(
     ShortcutSettings::new()
-        .with_filter(filter)
-        .confirm_conflicts(true)
-        .on_conflict(|c| println!("displaced: {}", c.displaced_name)),
+        .on_conflict(|c| println!("{} loses its shortcut", c.displaced_name)),
 );
 ```
+
 
 ## Density
 
@@ -83,8 +119,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 Describes a rebind that collides with an existing binding.
 
 Passed to the `ShortcutSettings::on_conflict` callback so the app
-can surface a toast ("Save lost its Ctrl+S binding"); also used
-internally to drive the optional inline confirm prompt.
+can surface a toast ("Save lost its Ctrl+S binding").
 
 ```rust
 pub struct ShortcutConflict { /* fields */ }
@@ -92,7 +127,7 @@ pub struct ShortcutConflict { /* fields */ }
 
 ### Fields
 
-- **`displaced_id`**: `String` — Id of the shortcut that currently owns the chord and will be unbound if the rebind proceeds.
+- **`displaced_id`**: `String` — Id of the shortcut that currently owns the chord and loses it if the rebind goes ahead.
 - **`displaced_name`**: `String` — Display name of that shortcut (its registry `name`).
 - **`keystroke`**: `KeyStroke` — The chord being assigned to the new target.
 
@@ -104,10 +139,7 @@ pub struct ShortcutConflict { /* fields */ }
 
 A settings panel for browsing and rebinding application shortcuts.
 
-Reads every `Shortcut` in the tree's `ShortcutRegistry`, groups rows
-by category, and renders primary + secondary keystroke slots with
-Rebind and Reset controls. See the module-level docs for the
-full feature list.
+See the module documentation for what it shows and how it behaves.
 
 ```rust
 pub struct ShortcutSettings { /* fields */ }
@@ -119,41 +151,57 @@ pub struct ShortcutSettings { /* fields */ }
 
 #### `pub fn new() -> Self`
 
-Create a settings panel that lists every shortcut currently
-registered in the tree's `ShortcutRegistry`, without a filter.
+A panel listing every shortcut registered in the tree's
+`ShortcutRegistry`, with its toolbar, asking before it takes a chord
+from another command.
 
 <a id="shortcutsettings-with_filter"></a>
 
 #### `pub fn with_filter(mut self, filter: Signal<String>) -> Self`
 
-Bind the visible row set to a filter signal. The widget
-shows only shortcuts whose `name`, `id`, or `category`
-contains the filter text (case-insensitive). Empty string =
-show everything.
+Bind the search text to `filter`. The toolbar's search field edits
+this signal, and anything else may write it too: a command palette
+handing a query over, an app's own search box when the toolbar is
+off. The list shows the shortcuts whose name, group, description or
+chord contains the text (case-insensitive); an empty string shows
+everything.
 
-Apps typically drive this from a `TextInput` elsewhere in
-their settings UI; keeping the filter external keeps this
-widget's own surface minimal rather than embedding a search box.
+<a id="shortcutsettings-modified_only"></a>
+
+#### `pub fn modified_only(mut self, signal: Signal<bool>) -> Self`
+
+Bind "Modified only" to `signal`: while it is `true` the list shows
+only the shortcuts the user changed. The toolbar's checkbox edits
+the same signal.
+
+<a id="shortcutsettings-toolbar"></a>
+
+#### `pub fn toolbar(mut self, show: bool) -> Self`
+
+Show the toolbar (search field, find by keys, "Modified only",
+"Reset all…"). On by default. Turn it off when the surrounding UI
+already has a search field, and drive the list through
+`with_filter` and
+`modified_only`.
 
 <a id="shortcutsettings-confirm_conflicts"></a>
 
 #### `pub fn confirm_conflicts(mut self, yes: bool) -> Self`
 
-Require explicit confirmation before a rebind unbinds a
-conflicting shortcut. Off by default — the chord is reassigned
-immediately (the historical behavior). When on, a colliding
-rebind shows an inline "already assigned to X — Reassign /
-Cancel" prompt on the row, and the registry is left untouched
-until the user confirms.
+Ask before a rebind takes a chord from another shortcut. On by
+default: the colliding rebind shows "{chord} is already used by
+{command}" under the row with Reassign and Cancel, and nothing
+changes until the user answers. With `false` the other shortcut
+loses the chord at once, and a screen reader is told which one.
 
 <a id="shortcutsettings-on_conflict"></a>
 
 #### `pub fn on_conflict(mut self, f: impl Fn(&ShortcutConflict) + 'static) -> Self`
 
 Register a callback fired whenever a rebind collides with an
-existing binding — **regardless** of `confirm_conflicts`. The
+existing binding, **regardless** of `confirm_conflicts`. The
 callback receives the displaced shortcut's id, name, and the
-chord, so the app can surface a toast ("Save lost its Ctrl+S
-binding"). It fires before the displaced binding is removed (in
-confirm mode, before the user has confirmed).
+chord, so the app can surface a toast. It fires before the
+displaced binding is removed (when asking first, before the user
+has answered).
 

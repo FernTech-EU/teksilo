@@ -548,6 +548,8 @@ pub struct BuiltInIcons { /* fields */ }
 - **`eye_off`**: `fn() -> IconWidget`
 - **`menu`**: `fn() -> IconWidget`
 - **`more`**: `fn() -> IconWidget`
+- **`reset`**: `fn() -> IconWidget` — Counter-clockwise arrow: put a value back to its default.
+- **`keyboard`**: `fn() -> IconWidget` — A keyboard: type or record keys.
 
 ### Methods
 

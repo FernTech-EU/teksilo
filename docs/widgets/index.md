@@ -167,7 +167,7 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 
 - [LanguageSwitcher](language_switcher.md) — LanguageSwitcher — a drop-in UI-language picker for settings screens
 - [PrivacySettings](privacy_settings.md) — PrivacySettings — a user-facing panel for telemetry consent management
-- [ShortcutSettings](shortcut_settings.md) — ShortcutSettings — user-facing widget for browsing and rebinding application shortcuts
+- [ShortcutSettings](shortcut_settings.md) — ShortcutSettings: the user-facing panel for browsing and rebinding an application's shortcuts
 - [TextScaleControl](text_scale_control.md) — `TextScaleControl` — the settings control that grows all text in the app
 - [ThemeSwitcher](theme_switcher.md) — ThemeSwitcher — a drop-in app-theme picker for settings screens & toolbars
 
