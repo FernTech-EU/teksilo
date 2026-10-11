@@ -26,6 +26,13 @@
 //! ([`ScrollArea::rubber_band`]); a nested area that banded at its own end could
 //! never hand the gesture to the container around it.
 //!
+//! ## Wheel and hover
+//!
+//! Shift held over a vertical wheel scrolls the area horizontally when it has
+//! horizontal range ([`ScrollArea::shift_wheel_scrolls_horizontally`], on by
+//! default). Overlay bars can be shown for as long as the pointer is over the
+//! area ([`ScrollArea::reveal_bars_on_hover`], off by default).
+//!
 //! ## Accessibility
 //!
 //! Reports `Role::ScrollView` with per-axis `scroll_y` / `scroll_x` position
@@ -62,7 +69,9 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{Easing, OverscrollStyle, RevealPolicy};
 
 use crate::common::scroll::OverscrollBehavior;
-use crate::common::scrollable::{ScrollableAxes, ScrollableBehavior};
+use crate::common::scrollable::{
+    ScrollableAxes, ScrollableBehavior, handle_scroll_event, shift_wheel_remap,
+};
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 
 /// How the scroll bar is presented relative to the viewport content.
@@ -216,6 +225,12 @@ pub struct ScrollArea {
     /// Raised while a finger's pan is in flight, so an overlay bar shows what
     /// is moving. Read by both `ScrollBar` children.
     scrollbar_reveal: Signal<bool>,
+    /// Whether Shift held over a vertical-only wheel scrolls sideways. See
+    /// [`Self::shift_wheel_scrolls_horizontally`].
+    shift_wheel_horizontal: bool,
+    /// Whether the overlay bars are shown while the pointer is over the area.
+    /// See [`Self::reveal_bars_on_hover`].
+    reveal_bars_on_hover: bool,
 }
 
 impl Default for ScrollArea {
@@ -274,6 +289,8 @@ impl ScrollArea {
             overscroll: Signal::new(Vec2::ZERO),
             rubber_band: false,
             scrollbar_reveal: Signal::new(false),
+            shift_wheel_horizontal: true,
+            reveal_bars_on_hover: false,
         }
     }
 
@@ -382,6 +399,35 @@ impl ScrollArea {
     /// Similar to Qt's `QScrollArea::setWidgetResizable(true)`.
     pub fn widget_resizable(mut self, resizable: bool) -> Self {
         self.widget_resizable = resizable;
+        self
+    }
+
+    /// Whether Shift held over a vertical wheel scrolls the area sideways
+    /// (default `true`) — the Windows and GTK convention, and the one
+    /// `TabBar` and the table views already follow.
+    ///
+    /// The remap applies only to a wheel notch or trackpad delta with no
+    /// horizontal component of its own, and only while the area can actually
+    /// scroll horizontally: a vertical-only area keeps scrolling vertically
+    /// with Shift held, and a real horizontal delta (macOS sends one itself)
+    /// is never rewritten. A finger's pan is never remapped. Turn it off for
+    /// an area whose content binds Shift+wheel to something else.
+    pub fn shift_wheel_scrolls_horizontally(mut self, enabled: bool) -> Self {
+        self.shift_wheel_horizontal = enabled;
+        self
+    }
+
+    /// Show the scroll bars while the pointer is over the area (default
+    /// `false`), and hide them again when it leaves.
+    ///
+    /// Overlay and thin bars are otherwise revealed only by proximity to the
+    /// bar itself, or by a finger's pan. With this on, a bar appears as soon as
+    /// the mouse (or a hovering pen) enters the area, through the same reveal
+    /// a touch pan raises, so the style renders it exactly as it does for a
+    /// pan; a contact never produces hover, so touch is unchanged. Ignored for
+    /// [`ScrollBarMode::Permanent`], whose bar is always there.
+    pub fn reveal_bars_on_hover(mut self, enabled: bool) -> Self {
+        self.reveal_bars_on_hover = enabled;
         self
     }
 
@@ -722,6 +768,45 @@ impl Widget for ScrollArea {
 
         let mut handlers = HandlerSet::new().clips_children(true);
 
+        // Hover reveal: the bars show while the pointer is over the area or
+        // anything in it. `hover_within` covers every strict descendant (the
+        // content and the bars), `on_hover` the area's own surface; the two
+        // fold into `hover_reveal`, which `reveal` follows. A pan in flight
+        // (`pan_active`) and a density that always reveals (`reveal_at_rest`)
+        // keep the bar up when the pointer leaves, so neither can be undone
+        // by hover.
+        let hover_reveal = Signal::new(false);
+        let pan_active = Rc::new(Cell::new(false));
+        let reveal_at_rest = ctx.theme().input.reveal == RevealPolicy::Always;
+        if self.reveal_bars_on_hover && self.scroll_bar_style != ScrollBarMode::Permanent {
+            let inside = Signal::new(false);
+            let own = Signal::new(false);
+            for source in [&inside, &own] {
+                let (inside, own, hover_reveal) =
+                    (inside.clone(), own.clone(), hover_reveal.clone());
+                ctx.effect(source, move |_| {
+                    let want = inside.get() || own.get();
+                    if hover_reveal.get() != want {
+                        hover_reveal.set(want);
+                    }
+                });
+            }
+            {
+                let reveal = self.scrollbar_reveal.clone();
+                let pan_active = pan_active.clone();
+                ctx.effect(&hover_reveal, move |hovered| {
+                    let want = *hovered || pan_active.get() || reveal_at_rest;
+                    if reveal.get() != want {
+                        reveal.set(want);
+                    }
+                });
+            }
+            let own_for_hover = own.clone();
+            handlers = handlers
+                .hover_within(inside)
+                .on_hover(move |entered, _ctx| own_for_hover.set(entered));
+        }
+
         // Everything that scrolls this area arrives as `WidgetEvent::Scroll`,
         // so there is one handler and no `on_pan`: a wheel notch
         // (`ScrollDelta::Lines`), a trackpad stream (`ScrollDelta::Pixels`), a
@@ -757,7 +842,11 @@ impl Widget for ScrollArea {
             // density whose `RevealPolicy` is `Always` the resting state is
             // "shown", so this only ever adds a reveal, never takes one away.
             let reveal = self.scrollbar_reveal.clone();
-            let reveal_at_rest = ctx.theme().input.reveal == RevealPolicy::Always;
+            // Hover is a second reason to reveal, so the two share one writer
+            // each (this arm for the pan, an effect for the pointer) and each
+            // reads the other's last word instead of overwriting it.
+            let hover_reveal = hover_reveal.clone();
+            let pan_active = pan_active.clone();
 
             let own_arm = move |event: &WidgetEvent,
                                 ctx: &mut teksilo_core::widget::EventContext|
@@ -773,7 +862,8 @@ impl Widget for ScrollArea {
                                     | ScrollPhase::MomentumEnded
                                     | ScrollPhase::Cancelled
                             );
-                            let want = in_flight || reveal_at_rest;
+                            pan_active.set(in_flight);
+                            let want = in_flight || reveal_at_rest || hover_reveal.get();
                             if reveal.get() != want {
                                 reveal.set(want);
                             }
@@ -893,6 +983,7 @@ impl Widget for ScrollArea {
                 max_y: self.max_scroll_y.clone(),
                 overscroll: self.overscroll.clone(),
             };
+            let remap_axes = axes.clone();
             let behavior = ScrollableBehavior::new(axes)
                 .with_scroller(self.scroller.clone())
                 // Both axes: a claim on an axis this area cannot currently
@@ -906,8 +997,37 @@ impl Widget for ScrollArea {
                 .smooth_duration(smooth_scroll_duration)
                 .line_height(line_height)
                 .reduced_motion(ctx.prefers_reduced_motion())
-                .physics(ctx.theme().input.scroll_physics)
-                .before(own_arm);
+                .physics(ctx.theme().input.scroll_physics);
+            // Shift+wheel is a delta rewrite, which the shared handler cannot
+            // express, so the `before` arm builds the rewritten event and hands
+            // it to that same handler — the arithmetic stays written once. Only
+            // while there is horizontal range to move: on a vertical-only area
+            // the notch is left alone and scrolls vertically as it came. Once
+            // remapped the event is consumed here, so a notch the area cannot
+            // absorb (already at the end) chains outward as the boundary answer
+            // rather than falling through to scroll y.
+            let shift_remap = self.shift_wheel_horizontal;
+            let scroller = behavior.scroller();
+            let options = behavior.options();
+            let max_x = self.max_scroll_x.clone();
+            let behavior = behavior.before(move |event, ctx| {
+                if let Some(response) = own_arm(event, ctx) {
+                    return Some(response);
+                }
+                if shift_remap
+                    && max_x.get() > 0.0
+                    && let Some(remapped) = shift_wheel_remap(event, ctx)
+                {
+                    return Some(handle_scroll_event(
+                        &remapped,
+                        &remap_axes,
+                        &scroller,
+                        &options,
+                        ctx,
+                    ));
+                }
+                None
+            });
             handlers = behavior.install(handlers);
         }
 
@@ -1341,7 +1461,7 @@ impl Widget for ScrollArea {
 mod tests {
     use super::*;
     use teksilo_canvas::SizeProposal;
-    use teksilo_core::event::ScrollDelta;
+    use teksilo_core::event::{Modifiers, ScrollDelta};
     use teksilo_core::widget::LayoutContext;
     use teksilo_core::widget_tree::WidgetTree;
 
@@ -3086,6 +3206,131 @@ mod tests {
             120.0,
             "a later restore_scroll_y(0.0) must disarm the earlier pending offset"
         );
+    }
+
+    // --- Shift+wheel ---
+
+    /// Two-axis area (400 x 500 content in a 200 x 100 viewport) or, with
+    /// `wide = false`, a vertical-only one (150 x 500, narrower than the
+    /// viewport less the permanent bar), the knob at `knob`.
+    fn shift_wheel_area(wide: bool, knob: Option<bool>) -> (WidgetTree, WidgetId) {
+        let mut tree = WidgetTree::new();
+        let mut area = ScrollArea::new()
+            .child(WideLeaf::new(if wide { 400.0 } else { 150.0 }, 500.0))
+            .scroll_bar_style(ScrollBarMode::Permanent)
+            .scroll_bar_thickness(12.0)
+            .smooth_scrolling(false);
+        if let Some(on) = knob {
+            area = area.shift_wheel_scrolls_horizontally(on);
+        }
+        let id = tree.add(area);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.pointer_move(Point::new(50.0, 50.0));
+        (tree, id)
+    }
+
+    fn offsets(tree: &WidgetTree, id: WidgetId) -> (f32, f32) {
+        let any = tree.widget_as_any(id).unwrap();
+        let area = any.downcast_ref::<ScrollArea>().unwrap();
+        (area.scroll_x_signal().get(), area.scroll_y_signal().get())
+    }
+
+    fn wheel(tree: &mut WidgetTree, x: f32, y: f32, modifiers: Modifiers) {
+        tree.dispatch_event(WidgetEvent::scroll(ScrollDelta::Lines { x, y }, modifiers));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+    }
+
+    #[test]
+    fn shift_wheel_scrolls_x_on_a_two_axis_area() {
+        let (mut tree, id) = shift_wheel_area(true, None);
+        wheel(&mut tree, 0.0, 3.0, Modifiers::SHIFT);
+        let (x, y) = offsets(&tree, id);
+        assert!(x > 0.0, "Shift+vertical wheel must scroll x, got {x}");
+        assert_eq!(y, 0.0, "and must not also scroll y");
+    }
+
+    #[test]
+    fn shift_wheel_is_ignored_on_a_vertical_only_area() {
+        let (mut tree, id) = shift_wheel_area(false, None);
+        wheel(&mut tree, 0.0, 3.0, Modifiers::SHIFT);
+        let (x, y) = offsets(&tree, id);
+        assert_eq!(x, 0.0);
+        assert!(
+            y > 0.0,
+            "no horizontal range: Shift+wheel keeps scrolling y"
+        );
+    }
+
+    #[test]
+    fn shift_wheel_with_the_knob_off_scrolls_y() {
+        let (mut tree, id) = shift_wheel_area(true, Some(false));
+        wheel(&mut tree, 0.0, 3.0, Modifiers::SHIFT);
+        let (x, y) = offsets(&tree, id);
+        assert_eq!(x, 0.0);
+        assert!(y > 0.0, "knob off: Shift+wheel scrolls y, got {y}");
+    }
+
+    #[test]
+    fn a_real_horizontal_delta_passes_through_shift() {
+        let (mut tree, id) = shift_wheel_area(true, None);
+        // A trackpad's own two-axis stream: the x the user moved is kept and
+        // the y is not rewritten onto it.
+        wheel(&mut tree, 2.0, 3.0, Modifiers::SHIFT);
+        let (x, y) = offsets(&tree, id);
+        assert!(x > 0.0, "the horizontal delta lands on x, got {x}");
+        assert!(y > 0.0, "the vertical delta is not thrown away, got {y}");
+    }
+
+    #[test]
+    fn a_plain_wheel_still_scrolls_y_on_a_two_axis_area() {
+        let (mut tree, id) = shift_wheel_area(true, None);
+        wheel(&mut tree, 0.0, 3.0, Modifiers::NONE);
+        let (x, y) = offsets(&tree, id);
+        assert_eq!(x, 0.0);
+        assert!(y > 0.0);
+    }
+
+    // --- hover reveal ---
+
+    fn hover_area(on: bool, mode: ScrollBarMode) -> (WidgetTree, Signal<bool>) {
+        let mut tree = WidgetTree::new();
+        let area = ScrollArea::new()
+            .child(WideLeaf::new(400.0, 500.0))
+            .scroll_bar_style(mode)
+            .reveal_bars_on_hover(on);
+        let reveal = area.scrollbar_reveal.clone();
+        tree.add(area);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        (tree, reveal)
+    }
+
+    #[test]
+    fn hovering_the_area_raises_the_reveal_and_leaving_lowers_it() {
+        let (mut tree, reveal) = hover_area(true, ScrollBarMode::Overlay);
+        assert!(!reveal.get(), "nothing is hovered yet");
+
+        tree.pointer_move(Point::new(50.0, 50.0));
+        assert!(
+            reveal.get(),
+            "the pointer over the content reveals the bars"
+        );
+
+        tree.pointer_move(Point::new(500.0, 500.0));
+        assert!(!reveal.get(), "leaving the area hides them again");
+    }
+
+    #[test]
+    fn hover_does_not_reveal_unless_asked() {
+        let (mut tree, reveal) = hover_area(false, ScrollBarMode::Overlay);
+        tree.pointer_move(Point::new(50.0, 50.0));
+        assert!(!reveal.get());
+    }
+
+    #[test]
+    fn hover_reveal_leaves_a_permanent_bar_alone() {
+        let (mut tree, reveal) = hover_area(true, ScrollBarMode::Permanent);
+        tree.pointer_move(Point::new(50.0, 50.0));
+        assert!(!reveal.get());
     }
 }
 

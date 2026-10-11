@@ -417,9 +417,25 @@ adopting `ScrollableBehavior` in a custom surface, lives in
 (when a press commits, reorder vs. scroll, the column-header strip) are in
 [`data-view-touch.md`](data-view-touch.md).
 
-Shift+wheel is **not** remapped to horizontal by `ScrollArea`. The two table
-views opt into `shift_wheel_remap` explicitly, because a horizontally scrollable
-grid is the case where it is unambiguously right.
+Shift+wheel scrolls a `ScrollArea` **horizontally** by default (the Windows and
+GTK convention, the same as `TabBar` and the two table views). The remap is
+`shift_wheel_remap`, and it is deliberately narrow: it rewrites only a wheel or
+trackpad delta that has no horizontal component of its own, so macOS, which sends
+horizontal deltas itself, is unaffected, and a finger's pan is never remapped. It
+applies only while the area can actually scroll horizontally, so a vertical-only
+area keeps scrolling vertically with Shift held, and a notch the area cannot
+absorb (already at the end) chains to the container around it instead of
+scrolling y. `.shift_wheel_scrolls_horizontally(false)` turns it off for content
+that binds Shift+wheel itself.
+
+**Revealing the bars on hover.** An overlay or thin bar is normally shown by
+proximity to the bar, or by a pan. `.reveal_bars_on_hover(true)` (default off)
+also shows both bars while the mouse or a hovering pen is over the area, through
+the same reveal signal the pan raises, so the style draws them exactly as for a
+pan; a contact produces no hover, so touch behaviour is unchanged. A pan in
+flight, or a density that always reveals, keeps the bars up when the pointer
+leaves. There is no delay: the reveal follows hover enter and leave directly, and
+any fade belongs to the `ScrollBarStyle`. Ignored in `ScrollBarMode::Permanent`.
 
 ## 7. Accessibility
 
