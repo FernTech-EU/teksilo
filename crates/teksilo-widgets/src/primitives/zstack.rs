@@ -19,6 +19,12 @@
 //! full ZStack area; children with fixed intrinsic sizes are positioned by
 //! alignment.
 //!
+//! Every layer is offered the stack's full size, so a widget that answers
+//! `proposal.resolve(0.0, 0.0)` fills the whole stack. Being on top, it takes
+//! every press over the stack even with no handler, which is correct
+//! occlusion. An invisible helper layer (a frame-tick driver, say) should be
+//! `.hit_transparent(true)` or answer `Size::ZERO`.
+//!
 //! Propagates shrink weight and minimum size when any child opts in, so
 //! wrapping a shrinkable single-line label in a `ZStack` stays shrinkable.
 //!
@@ -86,7 +92,7 @@ impl ZStack {
     }
 
     /// Conditionally add a child. No-op if None.
-    pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
+    pub fn child_opt(mut self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
         if let Some(w) = widget {
             self.pending
                 .push(teksilo_core::IntoTeksiChild::into_pending(w));

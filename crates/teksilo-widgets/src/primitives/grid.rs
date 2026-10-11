@@ -122,7 +122,7 @@ impl Grid {
 
     /// Append an optional inline child; a `None` value is a no-op, keeping
     /// subsequent children at their original cell positions.
-    pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
+    pub fn child_opt(mut self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
         if let Some(w) = widget {
             self.pending
                 .push(teksilo_core::IntoTeksiChild::into_pending(w));

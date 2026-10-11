@@ -85,7 +85,7 @@ impl Wrap {
     }
 
     /// Conditionally add a child. No-op if `None`.
-    pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
+    pub fn child_opt(mut self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
         if let Some(w) = widget {
             self.pending
                 .push(teksilo_core::IntoTeksiChild::into_pending(w));
