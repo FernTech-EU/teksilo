@@ -58,7 +58,6 @@ notifications-bucket-this-week = هذا الأسبوع
 notifications-bucket-earlier = أقدم
 notifications-archive-replay-disabled = (لم يعد متاحًا)
 a11y-shortcut-settings-name = إعدادات الاختصارات
-a11y-shortcut-settings-capture-hint = اضغط أي مفتاح. Delete للمسح. Esc للإلغاء.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
@@ -422,6 +421,48 @@ grid-view-detail-name = تفاصيل العنصر { $position }
 code-editor-tab-escape-hint = يضيف مفتاح Tab مسافة بادئة. ينقل { $next } إلى عنصر التحكم التالي، و{ $previous } إلى السابق.
 
 shortcut-settings-uncategorized = عام
+shortcut-settings-search-placeholder = البحث عن الأوامر أو المفاتيح
+shortcut-settings-search-label = البحث في الاختصارات
+shortcut-settings-find-by-keys = البحث بالمفاتيح
+shortcut-settings-find-hint = اضغط المفاتيح التي تبحث عنها. يوقف { $escape } البحث.
+shortcut-settings-modified-only = المعدّلة فقط
+shortcut-settings-reset-all = إعادة تعيين الكل…
+shortcut-settings-reset-all-prompt = هل تريد إعادة كل الاختصارات إلى الإعدادات الافتراضية؟
+shortcut-settings-reset-all-confirm = إعادة تعيين الكل
+shortcut-settings-cancel = إلغاء
+shortcut-settings-reassign = إعادة التعيين
+shortcut-settings-reset = إعادة إلى الافتراضي
+shortcut-settings-add-alternative = إضافة اختصار بديل
+shortcut-settings-not-set = غير محدد
+shortcut-settings-recording = اضغط المفاتيح…
+shortcut-settings-recording-hint = اضغط الاختصار الجديد. يلغي { $escape }، ويزيله { $delete }.
+shortcut-settings-conflict = { $chord } مستخدم بالفعل في { $command }.
+shortcut-settings-needs-modifier = يحتاج { $chord } إلى مفتاح تعديل: أضف { $first } أو { $second }.
+shortcut-settings-reserved = { $chord } محجوز ولا يمكن تعيينه.
+shortcut-settings-unusable = لا يمكن استخدام { $chord } اختصارًا.
+shortcut-settings-empty = لا توجد اختصارات لعرضها.
+shortcut-settings-no-match = لا يوجد اختصار يطابق «{ $query }».
+shortcut-settings-no-chord-match = لا يوجد اختصار يستخدم { $chord }.
+shortcut-settings-none-modified = لم يُغيَّر أي اختصار.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: بلا اختصار
+a11y-shortcut-settings-alternative = { $command }، بديل: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: إضافة اختصار بديل
+a11y-shortcut-settings-reset = إعادة { $command } إلى الافتراضي
+a11y-shortcut-settings-recording = جارٍ تسجيل اختصار لـ { $command }
+a11y-shortcut-settings-modified = مُغيَّر عن الافتراضي.
+a11y-shortcut-settings-removed-from = أُزيل { $chord } من { $command }.
+a11y-shortcut-settings-reset-all-done = عادت كل الاختصارات إلى الإعدادات الافتراضية.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] لا يوجد اختصار يستخدم { $chord }.
+        [zero] لا يوجد اختصار يستخدم { $chord }.
+        [one] اختصار واحد يستخدم { $chord }.
+        [two] اختصاران يستخدمان { $chord }.
+        [few] { $count } اختصارات تستخدم { $chord }.
+        [many] { $count } اختصارًا يستخدم { $chord }.
+       *[other] { $count } اختصار يستخدم { $chord }.
+    }
 shortcut-category-edit = تحرير
 shortcut-format-bold = غامق
 shortcut-format-italic = مائل

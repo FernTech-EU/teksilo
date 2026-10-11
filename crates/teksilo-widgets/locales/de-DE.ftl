@@ -60,7 +60,6 @@ notifications-bucket-this-week = Diese Woche
 notifications-bucket-earlier = Früher
 notifications-archive-replay-disabled = (nicht mehr verfügbar)
 a11y-shortcut-settings-name = Einstellungen für Tastenkombinationen
-a11y-shortcut-settings-capture-hint = Beliebige Taste drücken. Entf zum Löschen. Esc zum Abbrechen.
 keystroke-modifier-ctrl = Strg
 keystroke-modifier-shift = Umschalt
 keystroke-modifier-alt = Alt
@@ -411,6 +410,44 @@ grid-view-detail-name = Details zu Element { $position }
 code-editor-tab-escape-hint = Tab rückt ein. { $next } wechselt zum nächsten Steuerelement, { $previous } zum vorherigen.
 
 shortcut-settings-uncategorized = Allgemein
+shortcut-settings-search-placeholder = Befehle oder Tasten suchen
+shortcut-settings-search-label = Tastenkombinationen suchen
+shortcut-settings-find-by-keys = Nach Tasten suchen
+shortcut-settings-find-hint = Drücken Sie die gesuchten Tasten. { $escape } beendet.
+shortcut-settings-modified-only = Nur geänderte
+shortcut-settings-reset-all = Alle zurücksetzen…
+shortcut-settings-reset-all-prompt = Alle Tastenkombinationen auf den Standard zurücksetzen?
+shortcut-settings-reset-all-confirm = Alle zurücksetzen
+shortcut-settings-cancel = Abbrechen
+shortcut-settings-reassign = Neu zuweisen
+shortcut-settings-reset = Auf Standard zurücksetzen
+shortcut-settings-add-alternative = Alternative Tastenkombination hinzufügen
+shortcut-settings-not-set = Nicht festgelegt
+shortcut-settings-recording = Tasten drücken…
+shortcut-settings-recording-hint = Drücken Sie die neue Tastenkombination. { $escape } bricht ab, { $delete } entfernt sie.
+shortcut-settings-conflict = { $chord } wird bereits von { $command } verwendet.
+shortcut-settings-needs-modifier = { $chord } braucht eine Zusatztaste: Fügen Sie { $first } oder { $second } hinzu.
+shortcut-settings-reserved = { $chord } ist reserviert und kann nicht zugewiesen werden.
+shortcut-settings-unusable = { $chord } kann nicht als Tastenkombination verwendet werden.
+shortcut-settings-empty = Keine Tastenkombinationen vorhanden.
+shortcut-settings-no-match = Keine Tastenkombination passt zu „{ $query }“.
+shortcut-settings-no-chord-match = Keine Tastenkombination verwendet { $chord }.
+shortcut-settings-none-modified = Es wurde keine Tastenkombination geändert.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: keine Tastenkombination
+a11y-shortcut-settings-alternative = { $command }, Alternative: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: alternative Tastenkombination hinzufügen
+a11y-shortcut-settings-reset = { $command } auf Standard zurücksetzen
+a11y-shortcut-settings-recording = Tastenkombination für { $command } wird aufgenommen
+a11y-shortcut-settings-modified = Gegenüber dem Standard geändert.
+a11y-shortcut-settings-removed-from = { $chord } von { $command } entfernt.
+a11y-shortcut-settings-reset-all-done = Alle Tastenkombinationen sind wieder auf dem Standard.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Keine Tastenkombination verwendet { $chord }.
+        [one] Eine Tastenkombination verwendet { $chord }.
+       *[other] { $count } Tastenkombinationen verwenden { $chord }.
+    }
 shortcut-category-edit = Bearbeiten
 shortcut-format-bold = Fett
 shortcut-format-italic = Kursiv

@@ -59,7 +59,6 @@ notifications-bucket-this-week = Denne uge
 notifications-bucket-earlier = Tidligere
 notifications-archive-replay-disabled = (ikke længere tilgængelig)
 a11y-shortcut-settings-name = Indstillinger for tastaturgenveje
-a11y-shortcut-settings-capture-hint = Tryk på en vilkårlig tast. Delete rydder. Esc annullerer.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Skift
 keystroke-modifier-alt = Alt
@@ -405,6 +404,44 @@ grid-view-detail-name = Detaljer for element { $position }
 code-editor-tab-escape-hint = Tab indrykker. { $next } flytter til næste kontrolelement, { $previous } til det forrige.
 
 shortcut-settings-uncategorized = Generelt
+shortcut-settings-search-placeholder = Søg efter kommandoer eller taster
+shortcut-settings-search-label = Søg i tastaturgenveje
+shortcut-settings-find-by-keys = Søg efter taster
+shortcut-settings-find-hint = Tryk på de taster, du leder efter. { $escape } stopper.
+shortcut-settings-modified-only = Kun ændrede
+shortcut-settings-reset-all = Nulstil alle…
+shortcut-settings-reset-all-prompt = Nulstil alle tastaturgenveje til standard?
+shortcut-settings-reset-all-confirm = Nulstil alle
+shortcut-settings-cancel = Annuller
+shortcut-settings-reassign = Tildel igen
+shortcut-settings-reset = Nulstil til standard
+shortcut-settings-add-alternative = Tilføj en alternativ tastaturgenvej
+shortcut-settings-not-set = Ikke angivet
+shortcut-settings-recording = Tryk på taster…
+shortcut-settings-recording-hint = Tryk på den nye tastaturgenvej. { $escape } annullerer, { $delete } fjerner den.
+shortcut-settings-conflict = { $chord } bruges allerede af { $command }.
+shortcut-settings-needs-modifier = { $chord } skal have en ændringstast: tilføj { $first } eller { $second }.
+shortcut-settings-reserved = { $chord } er reserveret og kan ikke tildeles.
+shortcut-settings-unusable = { $chord } kan ikke bruges som tastaturgenvej.
+shortcut-settings-empty = Ingen tastaturgenveje at vise.
+shortcut-settings-no-match = Ingen tastaturgenvej matcher “{ $query }”.
+shortcut-settings-no-chord-match = Ingen tastaturgenvej bruger { $chord }.
+shortcut-settings-none-modified = Ingen tastaturgenvej er blevet ændret.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: ingen tastaturgenvej
+a11y-shortcut-settings-alternative = { $command }, alternativ: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: tilføj en alternativ tastaturgenvej
+a11y-shortcut-settings-reset = Nulstil { $command } til standard
+a11y-shortcut-settings-recording = Optager en tastaturgenvej til { $command }
+a11y-shortcut-settings-modified = Ændret i forhold til standard.
+a11y-shortcut-settings-removed-from = { $chord } fjernet fra { $command }.
+a11y-shortcut-settings-reset-all-done = Alle tastaturgenveje er tilbage på standard.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Ingen tastaturgenvej bruger { $chord }.
+        [one] Én tastaturgenvej bruger { $chord }.
+       *[other] { $count } tastaturgenveje bruger { $chord }.
+    }
 shortcut-category-edit = Rediger
 shortcut-format-bold = Fed
 shortcut-format-italic = Kursiv

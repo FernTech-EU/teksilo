@@ -58,7 +58,6 @@ notifications-bucket-this-week = Tällä viikolla
 notifications-bucket-earlier = Aiemmin
 notifications-archive-replay-disabled = (ei enää käytettävissä)
 a11y-shortcut-settings-name = Pikanäppäinasetukset
-a11y-shortcut-settings-capture-hint = Paina mitä tahansa näppäintä. Del tyhjentää. Esc peruuttaa.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Vaihto
 keystroke-modifier-alt = Alt
@@ -411,6 +410,44 @@ grid-view-detail-name = Kohteen { $position } tiedot
 code-editor-tab-escape-hint = Sarkain sisentää. { $next } siirtyy seuraavaan ohjausobjektiin, { $previous } edelliseen.
 
 shortcut-settings-uncategorized = Yleiset
+shortcut-settings-search-placeholder = Hae komentoja tai näppäimiä
+shortcut-settings-search-label = Hae pikanäppäimiä
+shortcut-settings-find-by-keys = Hae näppäimillä
+shortcut-settings-find-hint = Paina etsittäviä näppäimiä. { $escape } lopettaa.
+shortcut-settings-modified-only = Vain muutetut
+shortcut-settings-reset-all = Palauta kaikki…
+shortcut-settings-reset-all-prompt = Palautetaanko kaikki pikanäppäimet oletuksiin?
+shortcut-settings-reset-all-confirm = Palauta kaikki
+shortcut-settings-cancel = Peruuta
+shortcut-settings-reassign = Määritä uudelleen
+shortcut-settings-reset = Palauta oletus
+shortcut-settings-add-alternative = Lisää vaihtoehtoinen pikanäppäin
+shortcut-settings-not-set = Ei asetettu
+shortcut-settings-recording = Paina näppäimiä…
+shortcut-settings-recording-hint = Paina uutta pikanäppäintä. { $escape } peruuttaa, { $delete } poistaa sen.
+shortcut-settings-conflict = { $chord } on jo komennon { $command } käytössä.
+shortcut-settings-needs-modifier = { $chord } tarvitsee muokkausnäppäimen: lisää { $first } tai { $second }.
+shortcut-settings-reserved = { $chord } on varattu, eikä sitä voi määrittää.
+shortcut-settings-unusable = { $chord } ei kelpaa pikanäppäimeksi.
+shortcut-settings-empty = Ei näytettäviä pikanäppäimiä.
+shortcut-settings-no-match = Mikään pikanäppäin ei vastaa hakua ”{ $query }”.
+shortcut-settings-no-chord-match = Mikään pikanäppäin ei käytä yhdistelmää { $chord }.
+shortcut-settings-none-modified = Pikanäppäimiä ei ole muutettu.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: ei pikanäppäintä
+a11y-shortcut-settings-alternative = { $command }, vaihtoehto: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: lisää vaihtoehtoinen pikanäppäin
+a11y-shortcut-settings-reset = Palauta komennon { $command } oletus
+a11y-shortcut-settings-recording = Tallennetaan pikanäppäintä komennolle { $command }
+a11y-shortcut-settings-modified = Muutettu oletuksesta.
+a11y-shortcut-settings-removed-from = { $chord } poistettu komennolta { $command }.
+a11y-shortcut-settings-reset-all-done = Kaikki pikanäppäimet on palautettu oletuksiin.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Mikään pikanäppäin ei käytä yhdistelmää { $chord }.
+        [one] Yksi pikanäppäin käyttää yhdistelmää { $chord }.
+       *[other] { $count } pikanäppäintä käyttää yhdistelmää { $chord }.
+    }
 shortcut-category-edit = Muokkaa
 shortcut-format-bold = Lihavointi
 shortcut-format-italic = Kursivointi

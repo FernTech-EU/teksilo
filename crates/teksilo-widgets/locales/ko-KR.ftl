@@ -57,7 +57,6 @@ notifications-bucket-this-week = 이번 주
 notifications-bucket-earlier = 이전
 notifications-archive-replay-disabled = (더 이상 사용할 수 없음)
 a11y-shortcut-settings-name = 바로 가기 키 설정
-a11y-shortcut-settings-capture-hint = 아무 키나 누르세요. 지우려면 Delete, 취소하려면 Esc를 누르세요.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
@@ -406,6 +405,43 @@ grid-view-detail-name = 항목 { $position } 세부 정보
 code-editor-tab-escape-hint = Tab 키는 들여쓰기합니다. { $next } 키는 다음 컨트롤로, { $previous } 키는 이전 컨트롤로 이동합니다.
 
 shortcut-settings-uncategorized = 일반
+shortcut-settings-search-placeholder = 명령 또는 키 검색
+shortcut-settings-search-label = 바로 가기 키 검색
+shortcut-settings-find-by-keys = 키로 찾기
+shortcut-settings-find-hint = 찾을 키를 누르세요. { $escape } 키로 끝냅니다.
+shortcut-settings-modified-only = 변경한 항목만
+shortcut-settings-reset-all = 모두 재설정…
+shortcut-settings-reset-all-prompt = 모든 바로 가기 키를 기본값으로 되돌릴까요?
+shortcut-settings-reset-all-confirm = 모두 재설정
+shortcut-settings-cancel = 취소
+shortcut-settings-reassign = 다시 할당
+shortcut-settings-reset = 기본값으로 재설정
+shortcut-settings-add-alternative = 대체 바로 가기 키 추가
+shortcut-settings-not-set = 설정 안 됨
+shortcut-settings-recording = 키를 누르세요…
+shortcut-settings-recording-hint = 새 바로 가기 키를 누르세요. { $escape } 키는 취소, { $delete } 키는 삭제합니다.
+shortcut-settings-conflict = { $chord }은(는) 이미 { $command }에서 사용 중입니다.
+shortcut-settings-needs-modifier = { $chord }에는 보조 키가 필요합니다. { $first } 또는 { $second }을(를) 추가하세요.
+shortcut-settings-reserved = { $chord }은(는) 예약되어 있어 할당할 수 없습니다.
+shortcut-settings-unusable = { $chord }은(는) 바로 가기 키로 사용할 수 없습니다.
+shortcut-settings-empty = 표시할 바로 가기 키가 없습니다.
+shortcut-settings-no-match = “{ $query }”와(과) 일치하는 바로 가기 키가 없습니다.
+shortcut-settings-no-chord-match = { $chord }을(를) 사용하는 바로 가기 키가 없습니다.
+shortcut-settings-none-modified = 변경된 바로 가기 키가 없습니다.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: 바로 가기 키 없음
+a11y-shortcut-settings-alternative = { $command }, 대체: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: 대체 바로 가기 키 추가
+a11y-shortcut-settings-reset = { $command }을(를) 기본값으로 재설정
+a11y-shortcut-settings-recording = { $command }의 바로 가기 키를 기록하는 중
+a11y-shortcut-settings-modified = 기본값에서 변경되었습니다.
+a11y-shortcut-settings-removed-from = { $command }에서 { $chord }을(를) 제거했습니다.
+a11y-shortcut-settings-reset-all-done = 모든 바로 가기 키가 기본값으로 돌아갔습니다.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] { $chord }을(를) 사용하는 바로 가기 키가 없습니다.
+       *[other] { $chord }을(를) 사용하는 바로 가기 키가 { $count }개 있습니다.
+    }
 shortcut-category-edit = 편집
 shortcut-format-bold = 굵게
 shortcut-format-italic = 기울임꼴

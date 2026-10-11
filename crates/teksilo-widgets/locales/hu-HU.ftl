@@ -59,7 +59,6 @@ notifications-bucket-this-week = Ezen a héten
 notifications-bucket-earlier = Korábbi
 notifications-archive-replay-disabled = (már nem érhető el)
 a11y-shortcut-settings-name = Gyorsbillentyűk beállításai
-a11y-shortcut-settings-capture-hint = Nyomjon meg egy billentyűt. Del a törléshez, Esc a megszakításhoz.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
@@ -409,6 +408,44 @@ grid-view-detail-name = { $position }. elem részletei
 code-editor-tab-escape-hint = A Tab behúz. A { $next } a következő vezérlőre lép, a { $previous } az előzőre.
 
 shortcut-settings-uncategorized = Általános
+shortcut-settings-search-placeholder = Parancsok vagy billentyűk keresése
+shortcut-settings-search-label = Gyorsbillentyűk keresése
+shortcut-settings-find-by-keys = Keresés billentyűkkel
+shortcut-settings-find-hint = Nyomja le a keresett billentyűket. A { $escape } befejezi.
+shortcut-settings-modified-only = Csak a módosítottak
+shortcut-settings-reset-all = Összes visszaállítása…
+shortcut-settings-reset-all-prompt = Visszaállítja az összes gyorsbillentyűt az alapértelmezettre?
+shortcut-settings-reset-all-confirm = Összes visszaállítása
+shortcut-settings-cancel = Mégse
+shortcut-settings-reassign = Újra hozzárendelés
+shortcut-settings-reset = Alapértelmezett visszaállítása
+shortcut-settings-add-alternative = Másodlagos gyorsbillentyű hozzáadása
+shortcut-settings-not-set = Nincs megadva
+shortcut-settings-recording = Nyomjon le billentyűket…
+shortcut-settings-recording-hint = Nyomja le az új gyorsbillentyűt. A { $escape } megszakítja, a { $delete } eltávolítja.
+shortcut-settings-conflict = A(z) { $chord } billentyűt már a(z) { $command } használja.
+shortcut-settings-needs-modifier = A(z) { $chord } módosítóbillentyűt igényel: adja hozzá a(z) { $first } vagy { $second } billentyűt.
+shortcut-settings-reserved = A(z) { $chord } foglalt, nem rendelhető hozzá.
+shortcut-settings-unusable = A(z) { $chord } nem használható gyorsbillentyűként.
+shortcut-settings-empty = Nincs megjeleníthető gyorsbillentyű.
+shortcut-settings-no-match = Egy gyorsbillentyű sem felel meg ennek: „{ $query }”.
+shortcut-settings-no-chord-match = Egy gyorsbillentyű sem használja ezt: { $chord }.
+shortcut-settings-none-modified = Egy gyorsbillentyű sem módosult.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: nincs gyorsbillentyű
+a11y-shortcut-settings-alternative = { $command }, másodlagos: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: másodlagos gyorsbillentyű hozzáadása
+a11y-shortcut-settings-reset = { $command } visszaállítása az alapértelmezettre
+a11y-shortcut-settings-recording = Gyorsbillentyű rögzítése ehhez: { $command }
+a11y-shortcut-settings-modified = Eltér az alapértelmezettől.
+a11y-shortcut-settings-removed-from = { $chord } eltávolítva innen: { $command }.
+a11y-shortcut-settings-reset-all-done = Minden gyorsbillentyű visszakapta az alapértelmezett értékét.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Egy gyorsbillentyű sem használja ezt: { $chord }.
+        [one] Egy gyorsbillentyű használja ezt: { $chord }.
+       *[other] { $count } gyorsbillentyű használja ezt: { $chord }.
+    }
 shortcut-category-edit = Szerkesztés
 shortcut-format-bold = Félkövér
 shortcut-format-italic = Dőlt

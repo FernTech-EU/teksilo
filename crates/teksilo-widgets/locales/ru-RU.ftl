@@ -59,7 +59,6 @@ notifications-bucket-this-week = На этой неделе
 notifications-bucket-earlier = Ранее
 notifications-archive-replay-disabled = (больше недоступно)
 a11y-shortcut-settings-name = Настройка сочетаний клавиш
-a11y-shortcut-settings-capture-hint = Нажмите любую клавишу. Del — очистить. Esc — отмена.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
@@ -416,6 +415,46 @@ grid-view-detail-name = Сведения об элементе { $position }
 code-editor-tab-escape-hint = Tab добавляет отступ. { $next } переходит к следующему элементу управления, { $previous } к предыдущему.
 
 shortcut-settings-uncategorized = Общие
+shortcut-settings-search-placeholder = Поиск команд или клавиш
+shortcut-settings-search-label = Поиск сочетаний клавиш
+shortcut-settings-find-by-keys = Найти по клавишам
+shortcut-settings-find-hint = Нажмите искомые клавиши. { $escape } завершает поиск.
+shortcut-settings-modified-only = Только изменённые
+shortcut-settings-reset-all = Сбросить все…
+shortcut-settings-reset-all-prompt = Вернуть все сочетания клавиш к значениям по умолчанию?
+shortcut-settings-reset-all-confirm = Сбросить все
+shortcut-settings-cancel = Отмена
+shortcut-settings-reassign = Переназначить
+shortcut-settings-reset = Вернуть по умолчанию
+shortcut-settings-add-alternative = Добавить альтернативное сочетание
+shortcut-settings-not-set = Не задано
+shortcut-settings-recording = Нажмите клавиши…
+shortcut-settings-recording-hint = Нажмите новое сочетание. { $escape } отменяет, { $delete } удаляет его.
+shortcut-settings-conflict = { $chord } уже используется командой «{ $command }».
+shortcut-settings-needs-modifier = { $chord } требует клавишу-модификатор: добавьте { $first } или { $second }.
+shortcut-settings-reserved = { $chord } зарезервировано и не может быть назначено.
+shortcut-settings-unusable = { $chord } нельзя использовать как сочетание клавиш.
+shortcut-settings-empty = Нет сочетаний клавиш для показа.
+shortcut-settings-no-match = Нет сочетаний, подходящих под «{ $query }».
+shortcut-settings-no-chord-match = Ни одно сочетание не использует { $chord }.
+shortcut-settings-none-modified = Ни одно сочетание не изменено.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: нет сочетания
+a11y-shortcut-settings-alternative = { $command }, альтернативное: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: добавить альтернативное сочетание
+a11y-shortcut-settings-reset = Вернуть «{ $command }» к значению по умолчанию
+a11y-shortcut-settings-recording = Запись сочетания для «{ $command }»
+a11y-shortcut-settings-modified = Изменено относительно значения по умолчанию.
+a11y-shortcut-settings-removed-from = { $chord } удалено у команды «{ $command }».
+a11y-shortcut-settings-reset-all-done = Все сочетания клавиш возвращены к значениям по умолчанию.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Ни одна команда не использует { $chord }.
+        [one] { $count } команда использует { $chord }.
+        [few] { $count } команды используют { $chord }.
+        [many] { $count } команд используют { $chord }.
+       *[other] { $count } команды используют { $chord }.
+    }
 shortcut-category-edit = Правка
 shortcut-format-bold = Полужирный
 shortcut-format-italic = Курсив

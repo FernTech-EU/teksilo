@@ -59,7 +59,6 @@ notifications-bucket-this-week = Denna vecka
 notifications-bucket-earlier = Tidigare
 notifications-archive-replay-disabled = (inte längre tillgänglig)
 a11y-shortcut-settings-name = Inställningar för kortkommandon
-a11y-shortcut-settings-capture-hint = Tryck på valfri tangent. Delete rensar. Esc avbryter.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Skift
 keystroke-modifier-alt = Alt
@@ -407,6 +406,44 @@ grid-view-detail-name = Detaljer för objekt { $position }
 code-editor-tab-escape-hint = Tabb drar in. { $next } går till nästa kontroll, { $previous } till föregående.
 
 shortcut-settings-uncategorized = Allmänt
+shortcut-settings-search-placeholder = Sök efter kommandon eller tangenter
+shortcut-settings-search-label = Sök kortkommandon
+shortcut-settings-find-by-keys = Sök efter tangenter
+shortcut-settings-find-hint = Tryck på tangenterna du letar efter. { $escape } avslutar.
+shortcut-settings-modified-only = Bara ändrade
+shortcut-settings-reset-all = Återställ alla…
+shortcut-settings-reset-all-prompt = Vill du återställa alla kortkommandon till standard?
+shortcut-settings-reset-all-confirm = Återställ alla
+shortcut-settings-cancel = Avbryt
+shortcut-settings-reassign = Tilldela om
+shortcut-settings-reset = Återställ till standard
+shortcut-settings-add-alternative = Lägg till ett alternativt kortkommando
+shortcut-settings-not-set = Inte angivet
+shortcut-settings-recording = Tryck på tangenter…
+shortcut-settings-recording-hint = Tryck på det nya kortkommandot. { $escape } avbryter, { $delete } tar bort det.
+shortcut-settings-conflict = { $chord } används redan av { $command }.
+shortcut-settings-needs-modifier = { $chord } behöver en modifierartangent: lägg till { $first } eller { $second }.
+shortcut-settings-reserved = { $chord } är reserverat och kan inte tilldelas.
+shortcut-settings-unusable = { $chord } kan inte användas som kortkommando.
+shortcut-settings-empty = Inga kortkommandon att visa.
+shortcut-settings-no-match = Inget kortkommando matchar ”{ $query }”.
+shortcut-settings-no-chord-match = Inget kortkommando använder { $chord }.
+shortcut-settings-none-modified = Inget kortkommando har ändrats.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: inget kortkommando
+a11y-shortcut-settings-alternative = { $command }, alternativ: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: lägg till ett alternativt kortkommando
+a11y-shortcut-settings-reset = Återställ { $command } till standard
+a11y-shortcut-settings-recording = Spelar in ett kortkommando för { $command }
+a11y-shortcut-settings-modified = Ändrat från standard.
+a11y-shortcut-settings-removed-from = { $chord } togs bort från { $command }.
+a11y-shortcut-settings-reset-all-done = Alla kortkommandon är tillbaka på standard.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Inget kortkommando använder { $chord }.
+        [one] Ett kortkommando använder { $chord }.
+       *[other] { $count } kortkommandon använder { $chord }.
+    }
 shortcut-category-edit = Redigera
 shortcut-format-bold = Fet
 shortcut-format-italic = Kursiv

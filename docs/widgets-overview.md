@@ -302,7 +302,7 @@ Wrappers that animate a child subtree without the caller managing scheduler stat
 
 Pre-built UI for common app-level concerns.
 
-- [ShortcutSettings](../crates/teksilo-widgets/src/shortcut_settings.rs), full keyboard-shortcut rebind UI (Rebind / Reset / conflict auto-unbind / key capture). See [shortcut-intent-action.md](shortcut-intent-action.md).
+- [ShortcutSettings](../crates/teksilo-widgets/src/shortcut_settings.rs), full keyboard-shortcut rebind UI: chords drawn as key caps that record a new chord when clicked, search by name or by keys, confirmation before a chord moves from another command, per-row and global reset, one Tab stop with arrow-key navigation. See [shortcut-intent-action.md](shortcut-intent-action.md).
 - [PrivacySettings](../crates/teksilo-widgets/src/privacy_settings.rs) **(`telemetry` feature)**, consent toggles for telemetry adapters; ties into the [telemetry.md](telemetry.md) consent gate.
 - [TextScaleControl](../crates/teksilo-widgets/src/text_scale_control.rs), a specialized `SpinBox` (80 %–200 %) for the global "grow all text" accessibility setting; binds the persisted `TEXT_SCALE_KEY`, applies app-wide on edit. See [text-scale.md](text-scale.md).
 - [ThemeSwitcher](../crates/teksilo-widgets/src/theme_switcher.rs), drop-in app-theme picker for settings screens & toolbars (native / OS-follow themes, persistence); applies app-wide on select.

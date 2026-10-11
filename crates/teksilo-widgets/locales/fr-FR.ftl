@@ -59,7 +59,6 @@ notifications-bucket-this-week = Cette semaine
 notifications-bucket-earlier = Plus ancien
 notifications-archive-replay-disabled = (action désactivée)
 a11y-shortcut-settings-name = Paramètres des raccourcis
-a11y-shortcut-settings-capture-hint = Appuyez sur une touche. Suppr pour effacer. Échap pour annuler.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Maj
 keystroke-modifier-alt = Alt
@@ -405,6 +404,44 @@ grid-view-detail-name = Détails de l'élément { $position }
 code-editor-tab-escape-hint = Tab indente. { $next } passe au contrôle suivant, { $previous } au précédent.
 
 shortcut-settings-uncategorized = Général
+shortcut-settings-search-placeholder = Rechercher une commande ou des touches
+shortcut-settings-search-label = Rechercher des raccourcis
+shortcut-settings-find-by-keys = Rechercher par touches
+shortcut-settings-find-hint = Appuyez sur les touches à rechercher. { $escape } arrête.
+shortcut-settings-modified-only = Modifiés uniquement
+shortcut-settings-reset-all = Tout réinitialiser…
+shortcut-settings-reset-all-prompt = Rétablir tous les raccourcis par défaut ?
+shortcut-settings-reset-all-confirm = Tout réinitialiser
+shortcut-settings-cancel = Annuler
+shortcut-settings-reassign = Réattribuer
+shortcut-settings-reset = Rétablir par défaut
+shortcut-settings-add-alternative = Ajouter un raccourci secondaire
+shortcut-settings-not-set = Aucun
+shortcut-settings-recording = Appuyez sur les touches…
+shortcut-settings-recording-hint = Appuyez sur le nouveau raccourci. { $escape } annule, { $delete } le supprime.
+shortcut-settings-conflict = { $chord } est déjà utilisé par { $command }.
+shortcut-settings-needs-modifier = { $chord } demande un modificateur : ajoutez { $first } ou { $second }.
+shortcut-settings-reserved = { $chord } est réservé et ne peut pas être attribué.
+shortcut-settings-unusable = { $chord } ne peut pas servir de raccourci.
+shortcut-settings-empty = Aucun raccourci à afficher.
+shortcut-settings-no-match = Aucun raccourci ne correspond à « { $query } ».
+shortcut-settings-no-chord-match = Aucun raccourci n'utilise { $chord }.
+shortcut-settings-none-modified = Aucun raccourci n'a été modifié.
+a11y-shortcut-settings-primary = { $command } : { $chord }
+a11y-shortcut-settings-primary-unset = { $command } : aucun raccourci
+a11y-shortcut-settings-alternative = { $command }, secondaire : { $chord }
+a11y-shortcut-settings-add-alternative = { $command } : ajouter un raccourci secondaire
+a11y-shortcut-settings-reset = Rétablir { $command } par défaut
+a11y-shortcut-settings-recording = Enregistrement d'un raccourci pour { $command }
+a11y-shortcut-settings-modified = Modifié par rapport à la valeur par défaut.
+a11y-shortcut-settings-removed-from = { $chord } retiré de { $command }.
+a11y-shortcut-settings-reset-all-done = Tous les raccourcis sont revenus à leur valeur par défaut.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Aucun raccourci n'utilise { $chord }.
+        [one] Un raccourci utilise { $chord }.
+       *[other] { $count } raccourcis utilisent { $chord }.
+    }
 shortcut-category-edit = Édition
 shortcut-format-bold = Gras
 shortcut-format-italic = Italique

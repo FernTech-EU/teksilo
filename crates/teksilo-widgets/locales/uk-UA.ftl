@@ -59,7 +59,6 @@ notifications-bucket-this-week = Цього тижня
 notifications-bucket-earlier = Раніше
 notifications-archive-replay-disabled = (більше недоступно)
 a11y-shortcut-settings-name = Параметри сполучень клавіш
-a11y-shortcut-settings-capture-hint = Натисніть будь-яку клавішу. Delete — очистити. Esc — скасувати.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
@@ -413,6 +412,46 @@ grid-view-detail-name = Відомості про елемент { $position }
 code-editor-tab-escape-hint = Tab додає відступ. { $next } переходить до наступного елемента керування, { $previous } до попереднього.
 
 shortcut-settings-uncategorized = Загальні
+shortcut-settings-search-placeholder = Пошук команд або клавіш
+shortcut-settings-search-label = Пошук сполучень клавіш
+shortcut-settings-find-by-keys = Знайти за клавішами
+shortcut-settings-find-hint = Натисніть клавіші, які шукаєте. { $escape } завершує пошук.
+shortcut-settings-modified-only = Лише змінені
+shortcut-settings-reset-all = Скинути все…
+shortcut-settings-reset-all-prompt = Повернути всі сполучення клавіш до типових?
+shortcut-settings-reset-all-confirm = Скинути все
+shortcut-settings-cancel = Скасувати
+shortcut-settings-reassign = Перепризначити
+shortcut-settings-reset = Повернути типове
+shortcut-settings-add-alternative = Додати альтернативне сполучення
+shortcut-settings-not-set = Не задано
+shortcut-settings-recording = Натисніть клавіші…
+shortcut-settings-recording-hint = Натисніть нове сполучення. { $escape } скасовує, { $delete } вилучає його.
+shortcut-settings-conflict = { $chord } уже використовує команда «{ $command }».
+shortcut-settings-needs-modifier = { $chord } потребує клавіші-модифікатора: додайте { $first } або { $second }.
+shortcut-settings-reserved = { $chord } зарезервовано, його не можна призначити.
+shortcut-settings-unusable = { $chord } не можна використати як сполучення клавіш.
+shortcut-settings-empty = Немає сполучень клавіш для показу.
+shortcut-settings-no-match = Немає сполучень, що відповідають «{ $query }».
+shortcut-settings-no-chord-match = Жодне сполучення не використовує { $chord }.
+shortcut-settings-none-modified = Жодне сполучення не змінено.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: немає сполучення
+a11y-shortcut-settings-alternative = { $command }, альтернативне: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: додати альтернативне сполучення
+a11y-shortcut-settings-reset = Повернути типове сполучення для «{ $command }»
+a11y-shortcut-settings-recording = Запис сполучення для «{ $command }»
+a11y-shortcut-settings-modified = Змінено відносно типового.
+a11y-shortcut-settings-removed-from = { $chord } вилучено з команди «{ $command }».
+a11y-shortcut-settings-reset-all-done = Усі сполучення клавіш повернуто до типових.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Жодна команда не використовує { $chord }.
+        [one] { $count } команда використовує { $chord }.
+        [few] { $count } команди використовують { $chord }.
+        [many] { $count } команд використовують { $chord }.
+       *[other] { $count } команди використовують { $chord }.
+    }
 shortcut-category-edit = Редагування
 shortcut-format-bold = Жирний
 shortcut-format-italic = Курсив

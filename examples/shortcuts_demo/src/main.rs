@@ -11,7 +11,8 @@
 //!   `MenuItem::for_shortcut(id)` — rebinds in the settings panel
 //!   refresh the labels live.
 //! - A **button with a rich tooltip** bound to the same shortcut.
-//! - A **ShortcutSettings panel** with Rebind / Reset controls.
+//! - A **ShortcutSettings panel**: click a chord to record a new one,
+//!   confirm before taking a chord from another command, reset a row.
 //! - A typed `AppIntent` enum with **unit, tuple, and struct**
 //!   variants. `#[derive(IntentKind)]` generates the bridge to the
 //!   runtime `Intent` — whole variants (including fields) round-trip
@@ -379,8 +380,9 @@ impl Widget for Root {
                     .child(settings_heading)
                     .child(
                         TextWidget::new(lit!(
-                            "Click Rebind, press a chord. Esc cancels, Del/Backspace unbinds. \
-                             Conflicts auto-resolve."
+                            "Click a chord and press the new one. Esc cancels, \
+                             Del/Backspace removes it. A chord another command uses \
+                             asks before it moves."
                         ))
                         .color(theme.colors.text_secondary),
                     )

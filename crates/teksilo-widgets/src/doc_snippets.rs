@@ -1023,7 +1023,7 @@ fn panel_scene(title: &'static str, lines: &'static [&'static str]) -> impl Widg
 
 doc_snippet!(
     "crates/teksilo-widgets/src/shortcut_settings.rs",
-    size = (460.0, 200.0),
+    size = (720.0, 500.0),
     { Box::new(SeededShortcutSettings::default()) }
 );
 
@@ -1043,14 +1043,35 @@ impl Widget for SeededShortcutSettings {
     ) -> Vec<teksilo_core::widget_id::WidgetId> {
         use teksilo_core::event::Key;
         use teksilo_core::shortcut::{KeyStroke, Shortcut};
+        // The application's own group, beside the Edit group every tree
+        // registers; the same commands as the gallery screenshot the
+        // compact picture is cropped from, so both pictures show one subject.
         for (id, name, stroke) in [
             ("app.new", "New project", KeyStroke::ctrl(Key::N)),
-            ("app.open", "Open…", KeyStroke::ctrl(Key::O)),
+            ("app.open", "Open project", KeyStroke::ctrl(Key::O)),
             ("app.save", "Save", KeyStroke::ctrl(Key::S)),
-            ("app.find", "Find in project", KeyStroke::ctrl(Key::F)),
+            ("app.save_as", "Save as…", KeyStroke::ctrl_shift(Key::S)),
         ] {
-            ctx.register_shortcut_global(Shortcut::new(id).name(name).primary(stroke).build());
+            ctx.register_shortcut_global(
+                Shortcut::new(id)
+                    .name(name)
+                    .category("Application")
+                    .primary(stroke)
+                    .build(),
+            );
         }
+        ctx.register_shortcut_global(
+            Shortcut::new("app.find")
+                .name("Find in project")
+                .category("Application")
+                .description("Search across every document in the project")
+                .primary(KeyStroke::ctrl_shift(Key::F))
+                .secondary(KeyStroke::new(
+                    Key::F3,
+                    teksilo_core::event::Modifiers::NONE,
+                ))
+                .build(),
+        );
         let id = ctx.add(crate::ShortcutSettings::new());
         self.child = Some(id);
         vec![id]

@@ -59,7 +59,6 @@ notifications-bucket-this-week = Denne uken
 notifications-bucket-earlier = Tidligere
 notifications-archive-replay-disabled = (ikke lenger tilgjengelig)
 a11y-shortcut-settings-name = Innstillinger for hurtigtaster
-a11y-shortcut-settings-capture-hint = Trykk en tast. Delete for å tømme. Esc for å avbryte.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Skift
 keystroke-modifier-alt = Alt
@@ -421,6 +420,44 @@ grid-view-detail-name = Detaljer for element { $position }
 code-editor-tab-escape-hint = Tab rykker inn. { $next } går til neste kontroll, { $previous } til forrige.
 
 shortcut-settings-uncategorized = Generelt
+shortcut-settings-search-placeholder = Søk etter kommandoer eller taster
+shortcut-settings-search-label = Søk i hurtigtaster
+shortcut-settings-find-by-keys = Søk etter taster
+shortcut-settings-find-hint = Trykk på tastene du leter etter. { $escape } stopper.
+shortcut-settings-modified-only = Bare endrede
+shortcut-settings-reset-all = Tilbakestill alle…
+shortcut-settings-reset-all-prompt = Vil du tilbakestille alle hurtigtaster til standard?
+shortcut-settings-reset-all-confirm = Tilbakestill alle
+shortcut-settings-cancel = Avbryt
+shortcut-settings-reassign = Tildel på nytt
+shortcut-settings-reset = Tilbakestill til standard
+shortcut-settings-add-alternative = Legg til en alternativ hurtigtast
+shortcut-settings-not-set = Ikke angitt
+shortcut-settings-recording = Trykk på taster…
+shortcut-settings-recording-hint = Trykk på den nye hurtigtasten. { $escape } avbryter, { $delete } fjerner den.
+shortcut-settings-conflict = { $chord } brukes allerede av { $command }.
+shortcut-settings-needs-modifier = { $chord } trenger en modifikatortast: legg til { $first } eller { $second }.
+shortcut-settings-reserved = { $chord } er reservert og kan ikke tildeles.
+shortcut-settings-unusable = { $chord } kan ikke brukes som hurtigtast.
+shortcut-settings-empty = Ingen hurtigtaster å vise.
+shortcut-settings-no-match = Ingen hurtigtast samsvarer med «{ $query }».
+shortcut-settings-no-chord-match = Ingen hurtigtast bruker { $chord }.
+shortcut-settings-none-modified = Ingen hurtigtast er endret.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: ingen hurtigtast
+a11y-shortcut-settings-alternative = { $command }, alternativ: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: legg til en alternativ hurtigtast
+a11y-shortcut-settings-reset = Tilbakestill { $command } til standard
+a11y-shortcut-settings-recording = Tar opp en hurtigtast for { $command }
+a11y-shortcut-settings-modified = Endret fra standard.
+a11y-shortcut-settings-removed-from = { $chord } fjernet fra { $command }.
+a11y-shortcut-settings-reset-all-done = Alle hurtigtaster er tilbake til standard.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Ingen hurtigtast bruker { $chord }.
+        [one] Én hurtigtast bruker { $chord }.
+       *[other] { $count } hurtigtaster bruker { $chord }.
+    }
 shortcut-category-edit = Rediger
 shortcut-format-bold = Fet
 shortcut-format-italic = Kursiv

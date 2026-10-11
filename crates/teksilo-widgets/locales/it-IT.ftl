@@ -59,7 +59,6 @@ notifications-bucket-this-week = Questa settimana
 notifications-bucket-earlier = Meno recenti
 notifications-archive-replay-disabled = (non più disponibile)
 a11y-shortcut-settings-name = Impostazioni delle scelte rapide
-a11y-shortcut-settings-capture-hint = Premi un tasto qualsiasi. Canc per cancellare. Esc per annullare.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Maiusc
 keystroke-modifier-alt = Alt
@@ -428,6 +427,44 @@ grid-view-detail-name = Dettagli dell'elemento { $position }
 code-editor-tab-escape-hint = Tab aumenta il rientro. { $next } passa al controllo successivo, { $previous } a quello precedente.
 
 shortcut-settings-uncategorized = Generale
+shortcut-settings-search-placeholder = Cerca comandi o tasti
+shortcut-settings-search-label = Cerca scelte rapide
+shortcut-settings-find-by-keys = Cerca per tasti
+shortcut-settings-find-hint = Premi i tasti da cercare. { $escape } interrompe.
+shortcut-settings-modified-only = Solo modificate
+shortcut-settings-reset-all = Ripristina tutto…
+shortcut-settings-reset-all-prompt = Ripristinare tutte le scelte rapide ai valori predefiniti?
+shortcut-settings-reset-all-confirm = Ripristina tutto
+shortcut-settings-cancel = Annulla
+shortcut-settings-reassign = Riassegna
+shortcut-settings-reset = Ripristina predefinita
+shortcut-settings-add-alternative = Aggiungi una scelta rapida alternativa
+shortcut-settings-not-set = Non impostata
+shortcut-settings-recording = Premi i tasti…
+shortcut-settings-recording-hint = Premi la nuova scelta rapida. { $escape } annulla, { $delete } la rimuove.
+shortcut-settings-conflict = { $chord } è già usata da { $command }.
+shortcut-settings-needs-modifier = { $chord } richiede un modificatore: aggiungi { $first } o { $second }.
+shortcut-settings-reserved = { $chord } è riservata e non può essere assegnata.
+shortcut-settings-unusable = { $chord } non può essere usata come scelta rapida.
+shortcut-settings-empty = Nessuna scelta rapida da mostrare.
+shortcut-settings-no-match = Nessuna scelta rapida corrisponde a «{ $query }».
+shortcut-settings-no-chord-match = Nessuna scelta rapida usa { $chord }.
+shortcut-settings-none-modified = Nessuna scelta rapida è stata modificata.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: nessuna scelta rapida
+a11y-shortcut-settings-alternative = { $command }, alternativa: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: aggiungi una scelta rapida alternativa
+a11y-shortcut-settings-reset = Ripristina { $command } al valore predefinito
+a11y-shortcut-settings-recording = Registrazione di una scelta rapida per { $command }
+a11y-shortcut-settings-modified = Modificata rispetto al valore predefinito.
+a11y-shortcut-settings-removed-from = { $chord } rimossa da { $command }.
+a11y-shortcut-settings-reset-all-done = Tutte le scelte rapide sono tornate ai valori predefiniti.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Nessuna scelta rapida usa { $chord }.
+        [one] Una scelta rapida usa { $chord }.
+       *[other] { $count } scelte rapide usano { $chord }.
+    }
 shortcut-category-edit = Modifica
 shortcut-format-bold = Grassetto
 shortcut-format-italic = Corsivo

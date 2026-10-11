@@ -1,83 +1,115 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! ShortcutSettings — user-facing widget for browsing and rebinding
-//! application shortcuts.
+//! ShortcutSettings: the user-facing panel for browsing and rebinding an
+//! application's shortcuts.
 //!
-//! Reads every shortcut registered in the tree's
-//! [`ShortcutRegistry`](teksilo_core::shortcut::ShortcutRegistry) and
-//! renders one row per entry, grouped by category, with both primary
-//! and secondary keystrokes independently rebindable. Supports:
+//! It lists every shortcut in the tree's
+//! [`ShortcutRegistry`](teksilo_core::shortcut::ShortcutRegistry), grouped
+//! by category, one row per command:
 //!
-//! - **Rebind** (primary or secondary) via one-shot key capture.
-//! - **Unbind** a slot explicitly (sets the override to `None`), or
-//!   press `Delete` / `Backspace` during capture.
-//! - **Reset** clears the user override entirely, restoring the
-//!   declared defaults. Disabled when no override exists.
-//! - **Conflict auto-resolution**: rebinding to a keystroke already
-//!   bound elsewhere silently unbinds the conflicting shortcut so
-//!   there's always exactly one binding per chord.
-//! - **Escape** during capture cancels without committing.
-//! - **Platform-aware keystroke labels** via [`format_keystroke`].
+//! ```text
+//!  [ Search commands or keys         ] [⌨]  [ ] Modified only  [Reset all…]
 //!
-//! The widget owns the currently-armed [`CaptureHandle`]; dropping
-//! the widget cancels the capture, so navigating away mid-rebind
-//! cannot leak a stray rebind onto the next keystroke pressed
-//! somewhere else in the app.
+//!  File
+//!     New project                 [Ctrl] [N]          +
+//!     Open…                       [Ctrl] [O]          +
+//!   ● Save                        [Ctrl] [Shift] [S]  [Ctrl] [S]   ↺
+//!  Format
+//!     Bold                        ( Press keys… )     +
+//!        Press the new shortcut. Esc cancels, Del removes it.
+//! ```
+//!
+//! - **The chord is the control.** Each chord is drawn as key caps; click
+//!   it (or focus it and press Enter or Space) to record a new one. The
+//!   first column is the shortcut, the second its alternative (`+` adds
+//!   one). Delete or Backspace on a focused chord removes it.
+//! - **Recording** shows "Press keys…" in a field the width of its column,
+//!   so the list never reflows. Escape or Tab cancels; Delete or Backspace
+//!   removes the chord; leaving the field cancels too. A key that cannot be
+//!   a shortcut is refused with the reason, and recording goes on: a
+//!   printable key needs Ctrl, Alt or ⌘ (Shift alone types a capital), and
+//!   chords the system keeps (Alt+F4, Alt+Tab, ⌘Tab, ⌘Space, …) and
+//!   Ctrl+Tab (the way out of a control that keeps Tab) are reserved.
+//! - **Conflicts are confirmed.** A chord another command already uses
+//!   is not taken from it until the user presses "Reassign" on the line
+//!   that appears under the row. [`confirm_conflicts(false)`] reassigns at
+//!   once instead; either way [`on_conflict`] is told.
+//! - **Changed rows are marked** with a dot and get a reset button, which
+//!   puts that command's declared defaults back. "Reset all…" in the
+//!   toolbar does it for every command, after a confirmation.
+//! - **Search** matches a command's name, its group, its description and
+//!   the text of its chords ("ctrl+s" finds Save). The keyboard button
+//!   next to the field finds by chord instead: press it, press the keys,
+//!   and the list shows the commands that use exactly that chord.
+//!   "Modified only" narrows the list to the commands the user changed.
+//!
+//! Commands are sorted by name within a group and groups by their title,
+//! both in the interface language. Every visible string comes from the
+//! framework's locale bundles.
+//!
+//! **Keyboard.** The list is one Tab stop. The arrow keys move between rows
+//! and between a row's chord, alternative and reset button; Home and End go
+//! to the first and last row. Every control carries its command in its
+//! accessible name ("Save: Ctrl+S"), its description and whether the user
+//! changed it in its description, and the group titles are headings.
+//!
+//! The widget owns the armed key capture. Dropping the widget cancels it,
+//! so navigating away mid-recording cannot rebind the next key pressed
+//! somewhere else.
+//!
+//! The list grows with its content and does not scroll; place the widget
+//! in a `ScrollArea` when there are more shortcuts than fit.
 //!
 //! ```ignore
 //! // Inside a settings Dialog build():
-//! let filter = ctx.signal(String::new());
 //! ctx.add(
 //!     ShortcutSettings::new()
-//!         .with_filter(filter)
-//!         .confirm_conflicts(true)
-//!         .on_conflict(|c| println!("displaced: {}", c.displaced_name)),
+//!         .on_conflict(|c| println!("{} loses its shortcut", c.displaced_name)),
 //! );
 //! ```
+//!
+//! [`confirm_conflicts(false)`]: ShortcutSettings::confirm_conflicts
+//! [`on_conflict`]: ShortcutSettings::on_conflict
 
-use std::cell::RefCell;
+mod controls;
+mod state;
+mod table;
+#[cfg(test)]
+mod tests;
+
 use std::rc::Rc;
-use teksilo_i18n::{lit, tr_widget};
 
-use teksilo_canvas::{Rect, Size, SizeProposal};
+use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
-use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::{Key, Modifiers};
-use teksilo_core::shortcut::{CaptureHandle, KeyStroke};
+use teksilo_core::shortcut::KeyStroke;
 use teksilo_core::signal::Signal;
-use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
+use teksilo_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
+use teksilo_i18n::tr_widget;
 
+use self::state::{FocusKey, Shared, start_finding};
+use self::table::ShortcutTable;
 use crate::button::Button;
-use crate::keystroke_format::format_keystroke;
-use crate::primitives::{HStack, Spacer, TextWidget, VStack};
-use teksilo_tokens::{TextRole, TextStyleRole};
+use crate::checkbox::Checkbox;
+use crate::icon_button::{BuiltInIcons, IconButton};
+use crate::primitives::{FixedSize, HStack, Shrinkable, Spacer, VStack};
+use crate::search_field::SearchField;
 
-/// Which keystroke slot a capture/rebind targets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SlotKind {
-    Primary,
-    Secondary,
-}
-
-/// Composite key identifying a pending capture: shortcut id + slot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CaptureTarget {
-    id: &'static str,
-    slot: SlotKind,
-}
+/// The search field's width in the toolbar.
+const SEARCH_WIDTH: f32 = 320.0;
+/// The narrowest the search field gets on a narrow panel.
+const SEARCH_MIN_WIDTH: f32 = 160.0;
 
 /// Describes a rebind that collides with an existing binding.
 ///
 /// Passed to the [`ShortcutSettings::on_conflict`] callback so the app
-/// can surface a toast ("Save lost its Ctrl+S binding"); also used
-/// internally to drive the optional inline confirm prompt.
+/// can surface a toast ("Save lost its Ctrl+S binding").
 #[derive(Debug, Clone)]
 pub struct ShortcutConflict {
-    /// Id of the shortcut that currently owns the chord and will be
-    /// unbound if the rebind proceeds.
+    /// Id of the shortcut that currently owns the chord and loses it if the
+    /// rebind goes ahead.
     pub displaced_id: String,
     /// Display name of that shortcut (its registry `name`).
     pub displaced_name: String,
@@ -85,48 +117,16 @@ pub struct ShortcutConflict {
     pub keystroke: KeyStroke,
 }
 
-/// A rebind held back pending user confirmation (confirm mode only).
-#[derive(Debug, Clone)]
-struct PendingRebind {
-    target_id: &'static str,
-    slot: SlotKind,
-    ks: KeyStroke,
-    conflict_id: String,
-    conflict_slot: Option<SlotKind>,
-    conflict_name: String,
-}
-
 /// A settings panel for browsing and rebinding application shortcuts.
 ///
-/// Reads every `Shortcut` in the tree's `ShortcutRegistry`, groups rows
-/// by category, and renders primary + secondary keystroke slots with
-/// Rebind and Reset controls. See the module-level docs for the
-/// full feature list.
+/// See the module documentation for what it shows and how it behaves.
 pub struct ShortcutSettings {
-    /// Target of the current capture (`None` when idle). Drives the
-    /// "Press any key…" hint on the correct row + slot.
-    capturing: Signal<Option<CaptureTarget>>,
-    /// Live capture handle — dropped on widget destruction (or
-    /// replaced on the next rebind) to cancel the capture. Shared
-    /// with button closures via `Rc` so they can store the handle
-    /// returned by `ctx.begin_key_capture(...)`.
-    active_handle: Rc<RefCell<Option<CaptureHandle>>>,
-    /// Optional filter signal. When bound, rows are included only
-    /// when the substring matches (case-insensitive) the shortcut's
-    /// `name`, `id`, or `category`. Apps drive this from whatever
-    /// input they want — a text field, a chip bar, a command palette.
-    /// When `None`, every registered shortcut is shown.
     filter: Option<Signal<String>>,
-    /// When `true`, a rebind that collides with an existing binding
-    /// surfaces an inline confirm prompt instead of silently unbinding
-    /// the other shortcut. Off by default (immediate reassignment).
+    modified_only: Option<Signal<bool>>,
+    toolbar: bool,
     confirm_conflicts: bool,
-    /// Fired whenever a rebind collides with an existing binding,
-    /// regardless of `confirm_conflicts`. Lets apps show a toast.
     on_conflict: Option<Rc<dyn Fn(&ShortcutConflict)>>,
-    /// Holds a rebind awaiting confirmation (confirm mode). Drives the
-    /// inline "already assigned to X — Reassign / Cancel" prompt.
-    pending: Signal<Option<PendingRebind>>,
+    shared: Option<Rc<Shared>>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -137,55 +137,127 @@ impl Default for ShortcutSettings {
 }
 
 impl ShortcutSettings {
-    /// Create a settings panel that lists every shortcut currently
-    /// registered in the tree's `ShortcutRegistry`, without a filter.
+    /// A panel listing every shortcut registered in the tree's
+    /// `ShortcutRegistry`, with its toolbar, asking before it takes a chord
+    /// from another command.
     pub fn new() -> Self {
         Self {
-            capturing: Signal::new(None),
-            active_handle: Rc::new(RefCell::new(None)),
             filter: None,
-            confirm_conflicts: false,
+            modified_only: None,
+            toolbar: true,
+            confirm_conflicts: true,
             on_conflict: None,
-            pending: Signal::new(None),
+            shared: None,
             root_child_id: None,
         }
     }
 
-    /// Bind the visible row set to a filter signal. The widget
-    /// shows only shortcuts whose `name`, `id`, or `category`
-    /// contains the filter text (case-insensitive). Empty string =
-    /// show everything.
-    ///
-    /// Apps typically drive this from a `TextInput` elsewhere in
-    /// their settings UI; keeping the filter external keeps this
-    /// widget's own surface minimal rather than embedding a search box.
+    /// Bind the search text to `filter`. The toolbar's search field edits
+    /// this signal, and anything else may write it too: a command palette
+    /// handing a query over, an app's own search box when the toolbar is
+    /// off. The list shows the shortcuts whose name, group, description or
+    /// chord contains the text (case-insensitive); an empty string shows
+    /// everything.
     pub fn with_filter(mut self, filter: Signal<String>) -> Self {
         self.filter = Some(filter);
         self
     }
 
-    /// Require explicit confirmation before a rebind unbinds a
-    /// conflicting shortcut. Off by default — the chord is reassigned
-    /// immediately (the historical behavior). When on, a colliding
-    /// rebind shows an inline "already assigned to X — Reassign /
-    /// Cancel" prompt on the row, and the registry is left untouched
-    /// until the user confirms.
+    /// Bind "Modified only" to `signal`: while it is `true` the list shows
+    /// only the shortcuts the user changed. The toolbar's checkbox edits
+    /// the same signal.
+    pub fn modified_only(mut self, signal: Signal<bool>) -> Self {
+        self.modified_only = Some(signal);
+        self
+    }
+
+    /// Show the toolbar (search field, find by keys, "Modified only",
+    /// "Reset all…"). On by default. Turn it off when the surrounding UI
+    /// already has a search field, and drive the list through
+    /// [`with_filter`](Self::with_filter) and
+    /// [`modified_only`](Self::modified_only).
+    pub fn toolbar(mut self, show: bool) -> Self {
+        self.toolbar = show;
+        self
+    }
+
+    /// Ask before a rebind takes a chord from another shortcut. On by
+    /// default: the colliding rebind shows "{chord} is already used by
+    /// {command}" under the row with Reassign and Cancel, and nothing
+    /// changes until the user answers. With `false` the other shortcut
+    /// loses the chord at once, and a screen reader is told which one.
     pub fn confirm_conflicts(mut self, yes: bool) -> Self {
         self.confirm_conflicts = yes;
         self
     }
 
     /// Register a callback fired whenever a rebind collides with an
-    /// existing binding — **regardless** of [`confirm_conflicts`]. The
+    /// existing binding, **regardless** of [`confirm_conflicts`]. The
     /// callback receives the displaced shortcut's id, name, and the
-    /// chord, so the app can surface a toast ("Save lost its Ctrl+S
-    /// binding"). It fires before the displaced binding is removed (in
-    /// confirm mode, before the user has confirmed).
+    /// chord, so the app can surface a toast. It fires before the
+    /// displaced binding is removed (when asking first, before the user
+    /// has answered).
     ///
     /// [`confirm_conflicts`]: Self::confirm_conflicts
     pub fn on_conflict(mut self, f: impl Fn(&ShortcutConflict) + 'static) -> Self {
         self.on_conflict = Some(Rc::new(f));
         self
+    }
+
+    fn toolbar_row(&self, ctx: &mut BuildContext, shared: &Rc<Shared>) -> WidgetId {
+        let search = ctx.add(
+            SearchField::new(shared.filter.clone())
+                .placeholder(tr_widget!(shortcut_settings_search_placeholder()))
+                .label(tr_widget!(shortcut_settings_search_label())),
+        );
+        shared.search_field.set(Some(search));
+
+        let find = {
+            let shared = shared.clone();
+            IconButton::new((BuiltInIcons::global().keyboard)())
+                .toggle(shared.finding.clone())
+                .tooltip(tr_widget!(shortcut_settings_find_by_keys()))
+                .on_activate_fn(move |ctx: &mut EventContext| {
+                    // The toggle has already flipped `finding`; put it back
+                    // and let `start_finding` decide from the state it saw.
+                    shared.finding.set(!shared.finding.get());
+                    start_finding(&shared, ctx);
+                })
+        };
+
+        let modified_only = Checkbox::new(shared.modified_only.clone())
+            .label(tr_widget!(shortcut_settings_modified_only()));
+
+        let reset_all = {
+            let shared = shared.clone();
+            Button::new(tr_widget!(shortcut_settings_reset_all()))
+                .enabled(shared.has_overrides.clone())
+                .on_activate_fn(move |_ctx: &mut EventContext| {
+                    shared.cancel_capture();
+                    shared.focus.set(Some(FocusKey::ResetAllCancel));
+                    shared.confirm_reset_all.set(true);
+                })
+        };
+        let reset_all = ctx.add(reset_all);
+        shared.reset_all_button.set(Some(reset_all));
+
+        // The field has a width of its own rather than the toolbar's: the
+        // list under it stops where its last column ends, and a field running
+        // on to the far edge would leave the toolbar's controls stranded
+        // there, away from the rows they act on. It gives way on a narrow
+        // panel before anything else does.
+        let search = Shrinkable::new()
+            .min_width(SEARCH_MIN_WIDTH)
+            .child(FixedSize::new().width(SEARCH_WIDTH).child(search));
+        ctx.add(
+            HStack::new()
+                .spacing(8.0)
+                .child(search)
+                .child(find)
+                .child(modified_only)
+                .child(reset_all)
+                .child(Spacer::new()),
+        )
     }
 }
 
@@ -197,161 +269,32 @@ impl std::fmt::Debug for ShortcutSettings {
 
 impl Widget for ShortcutSettings {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // Rebuild on any registry change (register, rebind, clear).
-        ctx.shortcut_version().bind_to(
-            ctx.self_id(),
-            ctx.binding_registry(),
-            BindingLevel::Rebuild,
-        );
-        // Rebuild when capture state changes — the "Press…" hint
-        // jumps between rows.
-        self.capturing
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
-        // Rebuild when a conflict is queued / resolved — the inline
-        // confirm prompt appears and disappears on a row.
-        self.pending
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
-        // Rebuild when the filter signal changes.
-        if let Some(filter) = &self.filter {
-            filter.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        let shared = Rc::new(Shared::new(
+            self.filter
+                .clone()
+                .unwrap_or_else(|| Signal::new(String::new())),
+            self.modified_only
+                .clone()
+                .unwrap_or_else(|| Signal::new(false)),
+            self.confirm_conflicts,
+            self.on_conflict.clone(),
+        ));
+        // A rebuild replaces the state, and dropping the old one drops any
+        // capture it had armed.
+        self.shared = Some(shared.clone());
+
+        let mut column = VStack::new().spacing(12.0);
+        if self.toolbar {
+            column = column.child(self.toolbar_row(ctx, &shared));
         }
-
-        let filter_needle = self
-            .filter
-            .as_ref()
-            .map(|f| f.get().trim().to_lowercase())
-            .unwrap_or_default();
-        let matches_filter = |data: &ShortcutRowData| -> bool {
-            if filter_needle.is_empty() {
-                return true;
-            }
-            let hay_lower = |s: &str| s.to_lowercase();
-            hay_lower(&data.name).contains(&filter_needle)
-                || hay_lower(data.id).contains(&filter_needle)
-                || data
-                    .category_text
-                    .as_deref()
-                    .is_some_and(|c| hay_lower(c).contains(&filter_needle))
-        };
-
-        let mut rows: Vec<ShortcutRowData> = ctx
-            .shortcut_registry()
-            .iter_effective()
-            .map(|eff| ShortcutRowData {
-                id: eff.shortcut.id,
-                name: eff.shortcut.name.get(),
-                primary: eff.primary,
-                secondary: eff.secondary,
-                enabled: eff.enabled,
-                category: eff.shortcut.category,
-                category_text: eff.shortcut.category_text(),
-                has_override: ctx
-                    .shortcut_registry()
-                    .override_for(eff.shortcut.id)
-                    .is_some(),
-            })
-            .filter(matches_filter)
-            .collect();
-        // Stable order: category then id.
-        rows.sort_by(|a, b| a.category.cmp(&b.category).then(a.id.cmp(b.id)));
-
-        let capturing = self.capturing.get();
-        let pending = self.pending.get();
-        let mut column = VStack::new().spacing(4.0);
-
-        let mut last_category: Option<Option<&'static str>> = None;
-        for row in rows {
-            if last_category != Some(row.category) {
-                column = column.child(category_header(row.category_text.clone()));
-                last_category = Some(row.category);
-            }
-            let row_id = self.build_row(ctx, &row, capturing, pending.as_ref());
-            column = column.child(row_id);
-        }
-
+        column = column.child(ShortcutTable::new(shared));
         let root = ctx.add(column);
         self.root_child_id = Some(root);
         vec![root]
     }
 
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> teksilo_core::widget::LayoutResponse {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.root_child_id
-            .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
-            .into()
-    }
-
-    fn place_children(
-        &self,
-        bounds: Rect,
-        _proposal: SizeProposal,
-        children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
-    ) {
-        for child in children.iter_mut() {
-            child.origin = teksilo_canvas::Point::new(bounds.x, bounds.y);
-            child.size = Size::new(bounds.width, bounds.height);
-        }
-    }
-
-    fn children(&self) -> Vec<WidgetId> {
-        self.root_child_id.into_iter().collect()
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(teksilo_core::accesskit::Role::Group);
-        builder.set_name(
-            teksilo_i18n::tr_widget!(a11y_shortcut_settings_name())
-                .resolve_now()
-                .as_str(),
-        );
-    }
-}
-
-/// A thin wrapper used only by the row currently in key-capture mode.
-/// Emits `Role::Status` + `Live::Polite` so assistive tech announces
-/// the "Press any key…" hint the moment the capture row appears, and
-/// re-announces when the hint text changes (e.g. capture cancels).
-/// This sits in place of a plain `TextWidget` inside `slot_widget`.
-#[derive(Debug)]
-struct LiveStatusText {
-    text: String,
-    role: TextRole,
-    child_id: Option<WidgetId>,
-}
-
-impl LiveStatusText {
-    fn new(text: impl Into<String>, role: TextRole) -> Self {
-        Self {
-            text: text.into(),
-            role,
-            child_id: None,
-        }
-    }
-}
-
-impl Widget for LiveStatusText {
-    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let id = ctx.add(
-            TextWidget::new(lit!(&self.text))
-                .color(self.role)
-                .single_line()
-                .a11y_hidden(),
-        );
-        self.child_id = Some(id);
-        vec![id]
-    }
-
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> teksilo_core::widget::LayoutResponse {
-        self.child_id
             .and_then(|id| ctx.child_size(id, proposal))
             .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
             .into()
@@ -370,595 +313,24 @@ impl Widget for LiveStatusText {
         }
     }
 
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(teksilo_core::accesskit::Role::Status);
-        builder.set_name(self.text.as_str());
-        builder.set_live(teksilo_core::accesskit::Live::Polite);
-    }
-
     fn children(&self) -> Vec<WidgetId> {
-        self.child_id.into_iter().collect()
-    }
-}
-
-struct ShortcutRowData {
-    id: &'static str,
-    name: String,
-    primary: Option<KeyStroke>,
-    secondary: Option<KeyStroke>,
-    enabled: bool,
-    /// The grouping key: rows are ordered and grouped by it, so the grouping
-    /// does not change with the language.
-    category: Option<&'static str>,
-    /// What the group's header says (see `Shortcut::category_text`).
-    category_text: Option<String>,
-    has_override: bool,
-}
-
-/// A group's header. Shortcuts that declared no category share one group,
-/// named by the widget catalogue so it reads in the interface language.
-fn category_header(category: Option<String>) -> impl Widget + 'static {
-    let label = match category {
-        Some(text) => lit!(text),
-        None => tr_widget!(shortcut_settings_uncategorized()),
-    };
-    TextWidget::new(label)
-        .style(TextStyleRole::BodyBold)
-        .color(TextRole::Primary)
-        .single_line()
-}
-
-impl ShortcutSettings {
-    fn build_row(
-        &self,
-        ctx: &mut BuildContext,
-        row: &ShortcutRowData,
-        capturing: Option<CaptureTarget>,
-        pending: Option<&PendingRebind>,
-    ) -> WidgetId {
-        let id = row.id;
-        // The label and keystroke text use `TextRole::Primary`
-        // unconditionally; the leaves consult
-        // `PaintContext::effective_enabled` and substitute
-        // `TextRole::Disabled` on their own when the arena says the
-        // row is disabled (either via the registry-driven flag below
-        // or via an ancestor's `enabled_when`).
-        let name_widget = TextWidget::new(lit!(&row.name))
-            .color(TextRole::Primary)
-            .single_line();
-
-        let primary_slot = self.slot_widget(id, SlotKind::Primary, row.primary, capturing, pending);
-        let secondary_slot =
-            self.slot_widget(id, SlotKind::Secondary, row.secondary, capturing, pending);
-
-        let reset_button = Button::new(lit!("Reset"))
-            .enabled(row.has_override)
-            .on_activate_fn(move |ctx: &mut EventContext| {
-                ctx.clear_shortcut_override(id);
-            });
-
-        let row_widget = HStack::new()
-            .spacing(8.0)
-            .child(name_widget)
-            .child(Spacer::new())
-            .child(primary_slot)
-            .child(secondary_slot)
-            .child(reset_button);
-        let row_id = ctx.add(row_widget);
-        // Bridge the registry-driven per-shortcut enabled flag into
-        // the arena. The arena is then the single source of truth:
-        // descendants AND with this node, the leaves auto-substitute
-        // `TextRole::Disabled`, the Reset Button's tap handler is
-        // gated, and the framework a11y walker emits `set_disabled`
-        // on every descendant. An ancestor's `enabled_when` (e.g. a
-        // disabled settings dialog) cascades correctly.
-        if !row.enabled {
-            ctx.enabled_when(row_id, false);
-        }
-        row_id
+        self.root_child_id.into_iter().collect()
     }
 
-    fn slot_widget(
-        &self,
-        id: &'static str,
-        slot: SlotKind,
-        keystroke: Option<KeyStroke>,
-        capturing: Option<CaptureTarget>,
-        pending: Option<&PendingRebind>,
-    ) -> impl Widget + 'static {
-        let is_capturing_here = capturing == Some(CaptureTarget { id, slot });
-        // Confirm mode: a rebind on this slot is awaiting the user's OK.
-        let pending_here = pending
-            .filter(|p| p.target_id == id && p.slot == slot)
-            .cloned();
-        let keystroke_text = if is_capturing_here {
-            teksilo_i18n::tr_widget!(a11y_shortcut_settings_capture_hint()).resolve_now()
-        } else {
-            keystroke
-                .map(format_keystroke)
-                .unwrap_or_else(|| "—".to_string())
-        };
-
-        let slot_label = match slot {
-            SlotKind::Primary => "Rebind",
-            SlotKind::Secondary => "Rebind 2nd",
-        };
-
-        let confirm = self.confirm_conflicts;
-        let on_conflict = self.on_conflict.clone();
-        let pending_signal = self.pending.clone();
-        let rebind_button = {
-            let capturing_signal = self.capturing.clone();
-            let handle_cell = self.active_handle.clone();
-            let pending_for_cb = pending_signal.clone();
-            Button::new(lit!(slot_label)).on_activate_fn(move |ctx: &mut EventContext| {
-                let target = CaptureTarget { id, slot };
-                capturing_signal.set(Some(target));
-                let cap_for_cb = capturing_signal.clone();
-                let on_conflict = on_conflict.clone();
-                let pending_for_cb = pending_for_cb.clone();
-                let handle = ctx.begin_key_capture(move |ks, reg, _cap_ctx| {
-                    handle_capture_event(
-                        ks,
-                        reg,
-                        id,
-                        slot,
-                        confirm,
-                        on_conflict.as_ref(),
-                        &pending_for_cb,
-                    );
-                    cap_for_cb.set(None);
-                });
-                // Replacing any prior handle drops it — cancelling a
-                // stale capture from a previous click in the same
-                // session.
-                *handle_cell.borrow_mut() = Some(handle);
-            })
-        };
-
-        // While capturing, the hint cell is a `Role::Status` +
-        // `Live::Polite` wrapper so screen readers announce
-        // "Press any key…" the moment the user hits Rebind. Static
-        // bindings stay as plain labels — their content is announced
-        // on focus, not as a live change.
-        //
-        // The keystroke label uses `TextRole::Primary`
-        // unconditionally; the surrounding row's `enabled_when`
-        // forwarding bridges the registry-driven enabled flag into
-        // the arena, and the leaf substitutes `TextRole::Disabled`
-        // via `PaintContext::effective_enabled` when the row is off.
-        let row = HStack::new().spacing(4.0);
-        let row = if is_capturing_here {
-            row.child(LiveStatusText::new(keystroke_text, TextRole::Accent))
-        } else {
-            row.child(
-                TextWidget::new(lit!(&keystroke_text))
-                    .color(TextRole::Primary)
-                    .single_line(),
-            )
-        };
-
-        // Confirm prompt takes over the slot's trailing controls while a
-        // conflicting rebind is queued: announce the collision and offer
-        // Reassign / Cancel instead of a fresh Rebind.
-        let Some(p) = pending_here else {
-            return row.child(rebind_button);
-        };
-
-        let warning = format!(
-            "{} is assigned to {}",
-            format_keystroke(p.ks),
-            p.conflict_name
-        );
-        let reassign = {
-            let pending_signal = pending_signal.clone();
-            let p = p.clone();
-            Button::new(lit!("Reassign")).on_activate_fn(move |ctx: &mut EventContext| {
-                // Unbind the conflicting slot, then claim the chord.
-                match p.conflict_slot {
-                    Some(SlotKind::Primary) => {
-                        ctx.rebind_shortcut_primary(p.conflict_id.clone(), None)
-                    }
-                    Some(SlotKind::Secondary) => {
-                        ctx.rebind_shortcut_secondary(p.conflict_id.clone(), None)
-                    }
-                    None => {}
-                }
-                match p.slot {
-                    SlotKind::Primary => ctx.rebind_shortcut_primary(p.target_id, Some(p.ks)),
-                    SlotKind::Secondary => ctx.rebind_shortcut_secondary(p.target_id, Some(p.ks)),
-                }
-                pending_signal.set(None);
-            })
-        };
-        let cancel = {
-            let pending_signal = pending_signal.clone();
-            Button::new(lit!("Cancel")).on_activate_fn(move |_ctx: &mut EventContext| {
-                pending_signal.set(None);
-            })
-        };
-        row.child(LiveStatusText::new(warning, TextRole::Accent))
-            .child(reassign)
-            .child(cancel)
-    }
-}
-
-/// Apply the intent of a captured chord to the registry: bare Escape
-/// cancels, bare Delete/Backspace unbinds, everything else rebinds.
-///
-/// On a chord that collides with another shortcut, the `on_conflict`
-/// callback fires (if set). Then, if `confirm` is `false`, the
-/// conflicting shortcut is unbound and the rebind applied immediately
-/// (the historical behavior); if `confirm` is `true`, nothing is
-/// mutated — the rebind is parked in `pending` and an inline
-/// Reassign / Cancel prompt is surfaced for the user to confirm.
-fn handle_capture_event(
-    ks: KeyStroke,
-    reg: &mut teksilo_core::shortcut::ShortcutRegistry,
-    id: &'static str,
-    slot: SlotKind,
-    confirm: bool,
-    on_conflict: Option<&Rc<dyn Fn(&ShortcutConflict)>>,
-    pending: &Signal<Option<PendingRebind>>,
-) {
-    if ks.key == Key::Escape && ks.modifiers == Modifiers::NONE {
-        return; // cancel
-    }
-    if matches!(ks.key, Key::Delete | Key::Backspace) && ks.modifiers == Modifiers::NONE {
-        match slot {
-            SlotKind::Primary => reg.rebind_primary(id, None),
-            SlotKind::Secondary => reg.rebind_secondary(id, None),
-        }
-        return;
-    }
-    // Detect a collision (a different shortcut already owning the chord).
-    // Resolve to an owned id immediately so the immutable borrow of `reg`
-    // ends before any mutation below.
-    let cid = reg.find_conflict(ks, Some(id)).map(|c| c.to_string());
-    if let Some(cid) = cid {
-        let conflict_slot = reg.effective(&cid).and_then(|eff| {
-            if eff.primary == Some(ks) {
-                Some(SlotKind::Primary)
-            } else if eff.secondary == Some(ks) {
-                Some(SlotKind::Secondary)
-            } else {
-                None
-            }
-        });
-        let conflict_name = reg
-            .iter_effective()
-            .find(|e| e.shortcut.id == cid)
-            .map(|e| e.shortcut.name.get())
-            .unwrap_or_else(|| cid.clone());
-
-        if let Some(cb) = on_conflict {
-            cb(&ShortcutConflict {
-                displaced_id: cid.clone(),
-                displaced_name: conflict_name.clone(),
-                keystroke: ks,
-            });
-        }
-
-        if confirm {
-            // Defer everything: park the rebind for explicit confirmation.
-            pending.set(Some(PendingRebind {
-                target_id: id,
-                slot,
-                ks,
-                conflict_id: cid,
-                conflict_slot,
-                conflict_name,
-            }));
-            return;
-        }
-
-        // Immediate mode: auto-unbind the conflicting shortcut so there's
-        // always exactly one effective binding per chord.
-        match conflict_slot {
-            Some(SlotKind::Primary) => reg.rebind_primary(cid, None),
-            Some(SlotKind::Secondary) => reg.rebind_secondary(cid, None),
-            None => {}
-        }
-    }
-    match slot {
-        SlotKind::Primary => reg.rebind_primary(id, Some(ks)),
-        SlotKind::Secondary => reg.rebind_secondary(id, Some(ks)),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use teksilo_core::shortcut::{Shortcut, ShortcutRegistry};
-    use teksilo_core::widget_tree::WidgetTree;
-
-    /// Immediate-mode capture (no confirm, no callback) — the historical
-    /// behavior most tests exercise.
-    fn apply_capture(reg: &mut ShortcutRegistry, ks: KeyStroke, id: &'static str, slot: SlotKind) {
-        handle_capture_event(ks, reg, id, slot, false, None, &Signal::new(None));
-    }
-
-    #[test]
-    fn shortcut_settings_builds_a_row_per_registered_shortcut() {
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        tree.shortcut_registry_mut().register(
-            Shortcut::new("app.save")
-                .name("Save")
-                .primary(KeyStroke::command(Key::S))
-                .build(),
-        );
-        tree.shortcut_registry_mut().register(
-            Shortcut::new("app.open")
-                .name("Open")
-                .primary(KeyStroke::command(Key::O))
-                .build(),
-        );
-        let settings = tree.add(ShortcutSettings::new());
-        tree.layout(SizeProposal::exact(900.0, 600.0));
-        let b = tree.bounds(settings);
-        assert!(b.width > 0.0 && b.height > 0.0);
-    }
-
-    #[test]
-    fn delete_during_capture_unbinds_primary_slot() {
-        let mut reg = teksilo_core::shortcut::ShortcutRegistry::new();
-        reg.register(
-            Shortcut::new("app.save")
-                .primary(KeyStroke::command(Key::S))
-                .build(),
-        );
-        // Delete with no modifiers during capture → primary = None.
-        apply_capture(
-            &mut reg,
-            KeyStroke::new(Key::Delete, Modifiers::NONE),
-            "app.save",
-            SlotKind::Primary,
-        );
-        assert_eq!(reg.effective("app.save").unwrap().primary, None);
-    }
-
-    #[test]
-    fn escape_during_capture_is_cancel_not_rebind() {
-        let mut reg = teksilo_core::shortcut::ShortcutRegistry::new();
-        reg.register(
-            Shortcut::new("app.save")
-                .primary(KeyStroke::command(Key::S))
-                .build(),
-        );
-        apply_capture(
-            &mut reg,
-            KeyStroke::new(Key::Escape, Modifiers::NONE),
-            "app.save",
-            SlotKind::Primary,
-        );
-        // Still the default — escape must not mutate anything.
-        assert_eq!(
-            reg.effective("app.save").unwrap().primary,
-            Some(KeyStroke::command(Key::S))
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(teksilo_core::accesskit::Role::Group);
+        builder.set_name(
+            tr_widget!(a11y_shortcut_settings_name())
+                .resolve_now()
+                .as_str(),
         );
     }
 
-    #[test]
-    fn rebind_auto_unbinds_conflicting_shortcut() {
-        let mut reg = teksilo_core::shortcut::ShortcutRegistry::new();
-        reg.register(
-            Shortcut::new("app.save")
-                .primary(KeyStroke::command(Key::S))
-                .build(),
-        );
-        reg.register(
-            Shortcut::new("app.sync")
-                .primary(KeyStroke::command(Key::K))
-                .build(),
-        );
-        // User rebinds app.sync to Ctrl+S (which app.save owns).
-        apply_capture(
-            &mut reg,
-            KeyStroke::command(Key::S),
-            "app.sync",
-            SlotKind::Primary,
-        );
-        assert_eq!(
-            reg.effective("app.sync").unwrap().primary,
-            Some(KeyStroke::command(Key::S)),
-            "sync takes the new chord"
-        );
-        assert_eq!(
-            reg.effective("app.save").unwrap().primary,
-            None,
-            "save is auto-unbound on conflict"
-        );
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
     }
 
-    #[test]
-    fn rebind_auto_unbinds_conflict_on_secondary_slot() {
-        let mut reg = teksilo_core::shortcut::ShortcutRegistry::new();
-        reg.register(
-            Shortcut::new("edit.undo")
-                .primary(KeyStroke::command(Key::Z))
-                .secondary(KeyStroke::alt(Key::Backspace))
-                .build(),
-        );
-        reg.register(Shortcut::new("edit.redo").build());
-        // User rebinds edit.redo.primary to Alt+Backspace — undo's
-        // secondary slot currently owns that chord.
-        apply_capture(
-            &mut reg,
-            KeyStroke::alt(Key::Backspace),
-            "edit.redo",
-            SlotKind::Primary,
-        );
-        assert_eq!(
-            reg.effective("edit.redo").unwrap().primary,
-            Some(KeyStroke::alt(Key::Backspace))
-        );
-        let undo = reg.effective("edit.undo").unwrap();
-        assert_eq!(undo.primary, Some(KeyStroke::command(Key::Z)));
-        assert_eq!(
-            undo.secondary, None,
-            "the conflicting secondary slot is the one auto-unbound"
-        );
-    }
-
-    #[test]
-    fn confirm_mode_defers_the_rebind_and_parks_a_pending_conflict() {
-        let mut reg = ShortcutRegistry::new();
-        reg.register(
-            Shortcut::new("app.save")
-                .name("Save")
-                .primary(KeyStroke::command(Key::S))
-                .build(),
-        );
-        reg.register(
-            Shortcut::new("app.sync")
-                .primary(KeyStroke::command(Key::K))
-                .build(),
-        );
-        let pending: Signal<Option<PendingRebind>> = Signal::new(None);
-        // Confirm mode: rebinding app.sync to Ctrl+S must NOT mutate the
-        // registry; it parks a pending conflict instead.
-        handle_capture_event(
-            KeyStroke::command(Key::S),
-            &mut reg,
-            "app.sync",
-            SlotKind::Primary,
-            true,
-            None,
-            &pending,
-        );
-        assert_eq!(
-            reg.effective("app.save").unwrap().primary,
-            Some(KeyStroke::command(Key::S)),
-            "save keeps its binding until the user confirms"
-        );
-        assert_eq!(
-            reg.effective("app.sync").unwrap().primary,
-            Some(KeyStroke::command(Key::K)),
-            "sync is unchanged until the user confirms"
-        );
-        let p = pending.get().expect("a pending rebind is parked");
-        assert_eq!(p.target_id, "app.sync");
-        assert_eq!(p.conflict_id, "app.save");
-        assert_eq!(p.conflict_slot, Some(SlotKind::Primary));
-        assert_eq!(p.conflict_name, "Save");
-    }
-
-    #[test]
-    fn on_conflict_callback_fires_with_displaced_shortcut() {
-        let mut reg = ShortcutRegistry::new();
-        reg.register(
-            Shortcut::new("app.save")
-                .name("Save")
-                .primary(KeyStroke::command(Key::S))
-                .build(),
-        );
-        reg.register(
-            Shortcut::new("app.sync")
-                .primary(KeyStroke::command(Key::K))
-                .build(),
-        );
-        let seen: Rc<RefCell<Option<ShortcutConflict>>> = Rc::new(RefCell::new(None));
-        let cb_seen = seen.clone();
-        let cb: Rc<dyn Fn(&ShortcutConflict)> =
-            Rc::new(move |c: &ShortcutConflict| *cb_seen.borrow_mut() = Some(c.clone()));
-        let pending: Signal<Option<PendingRebind>> = Signal::new(None);
-        // Immediate mode (confirm = false): callback still fires.
-        handle_capture_event(
-            KeyStroke::command(Key::S),
-            &mut reg,
-            "app.sync",
-            SlotKind::Primary,
-            false,
-            Some(&cb),
-            &pending,
-        );
-        let c = seen.borrow().clone().expect("callback fired");
-        assert_eq!(c.displaced_id, "app.save");
-        assert_eq!(c.displaced_name, "Save");
-        assert_eq!(c.keystroke, KeyStroke::command(Key::S));
-        // And the immediate rebind still happened.
-        assert_eq!(reg.effective("app.save").unwrap().primary, None);
-        assert_eq!(
-            reg.effective("app.sync").unwrap().primary,
-            Some(KeyStroke::command(Key::S))
-        );
-    }
-
-    #[test]
-    fn filter_narrows_visible_rows_by_name_or_category() {
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        tree.shortcut_registry_mut().register(
-            Shortcut::new("app.save")
-                .name("Save")
-                .category("File")
-                .primary(KeyStroke::command(Key::S))
-                .build(),
-        );
-        tree.shortcut_registry_mut().register(
-            Shortcut::new("edit.bold")
-                .name("Bold")
-                .category("Format")
-                .primary(KeyStroke::command(Key::B))
-                .build(),
-        );
-        tree.shortcut_registry_mut().register(
-            Shortcut::new("edit.italic")
-                .name("Italic")
-                .category("Format")
-                .primary(KeyStroke::command(Key::I))
-                .build(),
-        );
-
-        let filter = Signal::new(String::from("format"));
-        let settings = tree.add(ShortcutSettings::new().with_filter(filter.clone()));
-        tree.layout(SizeProposal::exact(900.0, 600.0));
-
-        // With filter = "format", only Format-category rows
-        // (edit.bold, edit.italic) should appear, plus one header.
-        // Snapshot the size before changing the filter; a non-zero
-        // bounds proves some rows rendered.
-        let before = tree.bounds(settings);
-        assert!(before.height > 0.0);
-
-        // Widen to match all three — widget should grow.
-        filter.set(String::new());
-        tree.layout(SizeProposal::exact(900.0, 600.0));
-        let after = tree.bounds(settings);
-        assert!(
-            after.height >= before.height,
-            "clearing filter must not shrink the widget (got {} → {})",
-            before.height,
-            after.height
-        );
-    }
-
-    #[test]
-    fn rebind_through_capture_mode_updates_registry() {
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        tree.shortcut_registry_mut().register(
-            Shortcut::new("app.save")
-                .name("Save")
-                .primary(KeyStroke::command(Key::S))
-                .build(),
-        );
-        let _settings = tree.add(ShortcutSettings::new());
-        tree.layout(SizeProposal::exact(900.0, 600.0));
-
-        let _h = tree.begin_key_capture(|ks, reg, _ctx| {
-            reg.rebind_primary("app.save", Some(ks));
-        });
-        // Keep the capture handle alive across the key press — dropping it
-        // cancels the capture — then drop it explicitly, before the assert.
-        let h = _h;
-        tree.press_key(Key::B, Modifiers::COMMAND | Modifiers::SHIFT);
-        drop(h);
-
-        assert_eq!(
-            tree.shortcut_registry()
-                .effective("app.save")
-                .unwrap()
-                .primary,
-            Some(KeyStroke::command_shift(Key::B))
-        );
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 }

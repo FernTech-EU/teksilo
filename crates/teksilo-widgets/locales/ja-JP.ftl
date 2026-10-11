@@ -59,7 +59,6 @@ notifications-bucket-this-week = 今週
 notifications-bucket-earlier = それ以前
 notifications-archive-replay-disabled = （現在は利用できません）
 a11y-shortcut-settings-name = ショートカットの設定
-a11y-shortcut-settings-capture-hint = 任意のキーを押してください。Delete でクリア、Esc でキャンセルします。
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
@@ -412,6 +411,43 @@ grid-view-detail-name = 項目 { $position } の詳細
 code-editor-tab-escape-hint = Tab キーでインデントします。{ $next } で次のコントロールへ、{ $previous } で前のコントロールへ移動します。
 
 shortcut-settings-uncategorized = 一般
+shortcut-settings-search-placeholder = コマンドまたはキーを検索
+shortcut-settings-search-label = ショートカットを検索
+shortcut-settings-find-by-keys = キーで検索
+shortcut-settings-find-hint = 検索するキーを押してください。{ $escape } で終了します。
+shortcut-settings-modified-only = 変更済みのみ
+shortcut-settings-reset-all = すべてリセット…
+shortcut-settings-reset-all-prompt = すべてのショートカットを既定に戻しますか?
+shortcut-settings-reset-all-confirm = すべてリセット
+shortcut-settings-cancel = キャンセル
+shortcut-settings-reassign = 割り当て直す
+shortcut-settings-reset = 既定に戻す
+shortcut-settings-add-alternative = 代替ショートカットを追加
+shortcut-settings-not-set = 未設定
+shortcut-settings-recording = キーを押してください…
+shortcut-settings-recording-hint = 新しいショートカットを押してください。{ $escape } でキャンセル、{ $delete } で削除します。
+shortcut-settings-conflict = { $chord } は既に { $command } で使用されています。
+shortcut-settings-needs-modifier = { $chord } には修飾キーが必要です。{ $first } または { $second } を加えてください。
+shortcut-settings-reserved = { $chord } は予約済みのため割り当てられません。
+shortcut-settings-unusable = { $chord } はショートカットとして使用できません。
+shortcut-settings-empty = 表示するショートカットはありません。
+shortcut-settings-no-match = 「{ $query }」に一致するショートカットはありません。
+shortcut-settings-no-chord-match = { $chord } を使用するショートカットはありません。
+shortcut-settings-none-modified = 変更されたショートカットはありません。
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: ショートカットなし
+a11y-shortcut-settings-alternative = { $command }、代替: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: 代替ショートカットを追加
+a11y-shortcut-settings-reset = { $command } を既定に戻す
+a11y-shortcut-settings-recording = { $command } のショートカットを記録中
+a11y-shortcut-settings-modified = 既定から変更されています。
+a11y-shortcut-settings-removed-from = { $command } から { $chord } を削除しました。
+a11y-shortcut-settings-reset-all-done = すべてのショートカットが既定に戻りました。
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] { $chord } を使用するショートカットはありません。
+       *[other] { $chord } を使用するショートカットは { $count } 件です。
+    }
 shortcut-category-edit = 編集
 shortcut-format-bold = 太字
 shortcut-format-italic = 斜体

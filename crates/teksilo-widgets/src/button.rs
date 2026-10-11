@@ -370,6 +370,23 @@ pub(crate) fn build_interaction_handlers(
     on_activate: Rc<dyn Fn(&mut EventContext)>,
     focusable: bool,
 ) -> HandlerSet {
+    build_interaction_handlers_with_focus(ctx, interaction, on_activate, focusable, None)
+}
+
+/// [`build_interaction_handlers`], plus a callback told of every focus
+/// change after the family's own focus bookkeeping has run.
+///
+/// The handler set has one `on_focus` slot, so a control that needs to
+/// observe its focus (to remember which control held it across a rebuild,
+/// say) cannot attach a second handler: it would replace this one and the
+/// focus ring would stop following focus.
+pub(crate) fn build_interaction_handlers_with_focus(
+    ctx: &mut BuildContext,
+    interaction: Signal<InteractionState>,
+    on_activate: Rc<dyn Fn(&mut EventContext)>,
+    focusable: bool,
+    on_focus: Option<Rc<dyn Fn(bool, &mut EventContext)>>,
+) -> HandlerSet {
     let act_tap = on_activate.clone();
     let act_key = on_activate.clone();
     let act_access = on_activate;
@@ -441,13 +458,16 @@ pub(crate) fn build_interaction_handlers(
         })
         .on_focus({
             let interaction = interaction.clone();
-            move |gained: bool, _ctx: &mut EventContext| {
+            move |gained: bool, ctx: &mut EventContext| {
                 if gained {
                     if interaction.get() == InteractionState::Idle {
                         interaction.set(InteractionState::Focused);
                     }
                 } else {
                     interaction.set(InteractionState::Idle);
+                }
+                if let Some(observer) = &on_focus {
+                    observer(gained, ctx);
                 }
             }
         })

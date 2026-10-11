@@ -59,7 +59,6 @@ notifications-bucket-this-week = Deze week
 notifications-bucket-earlier = Eerder
 notifications-archive-replay-disabled = (niet meer beschikbaar)
 a11y-shortcut-settings-name = Sneltoetsinstellingen
-a11y-shortcut-settings-capture-hint = Druk op een toets. Del om te wissen. Esc om te annuleren.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
@@ -415,6 +414,44 @@ grid-view-detail-name = Details van item { $position }
 code-editor-tab-escape-hint = Tab springt in. { $next } gaat naar het volgende besturingselement, { $previous } naar het vorige.
 
 shortcut-settings-uncategorized = Algemeen
+shortcut-settings-search-placeholder = Opdrachten of toetsen zoeken
+shortcut-settings-search-label = Sneltoetsen zoeken
+shortcut-settings-find-by-keys = Zoeken op toetsen
+shortcut-settings-find-hint = Druk op de toetsen die je zoekt. { $escape } stopt.
+shortcut-settings-modified-only = Alleen gewijzigd
+shortcut-settings-reset-all = Alles herstellen…
+shortcut-settings-reset-all-prompt = Alle sneltoetsen terugzetten naar de standaard?
+shortcut-settings-reset-all-confirm = Alles herstellen
+shortcut-settings-cancel = Annuleren
+shortcut-settings-reassign = Opnieuw toewijzen
+shortcut-settings-reset = Standaard herstellen
+shortcut-settings-add-alternative = Alternatieve sneltoets toevoegen
+shortcut-settings-not-set = Niet ingesteld
+shortcut-settings-recording = Druk op toetsen…
+shortcut-settings-recording-hint = Druk op de nieuwe sneltoets. { $escape } annuleert, { $delete } verwijdert hem.
+shortcut-settings-conflict = { $chord } wordt al gebruikt door { $command }.
+shortcut-settings-needs-modifier = { $chord } heeft een modificatietoets nodig: voeg { $first } of { $second } toe.
+shortcut-settings-reserved = { $chord } is gereserveerd en kan niet worden toegewezen.
+shortcut-settings-unusable = { $chord } kan niet als sneltoets worden gebruikt.
+shortcut-settings-empty = Geen sneltoetsen om te tonen.
+shortcut-settings-no-match = Geen sneltoets komt overeen met ‘{ $query }’.
+shortcut-settings-no-chord-match = Geen sneltoets gebruikt { $chord }.
+shortcut-settings-none-modified = Er is geen sneltoets gewijzigd.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: geen sneltoets
+a11y-shortcut-settings-alternative = { $command }, alternatief: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: alternatieve sneltoets toevoegen
+a11y-shortcut-settings-reset = { $command } terugzetten naar de standaard
+a11y-shortcut-settings-recording = Sneltoets opnemen voor { $command }
+a11y-shortcut-settings-modified = Gewijzigd ten opzichte van de standaard.
+a11y-shortcut-settings-removed-from = { $chord } verwijderd van { $command }.
+a11y-shortcut-settings-reset-all-done = Alle sneltoetsen staan weer op de standaard.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Geen sneltoets gebruikt { $chord }.
+        [one] Eén sneltoets gebruikt { $chord }.
+       *[other] { $count } sneltoetsen gebruiken { $chord }.
+    }
 shortcut-category-edit = Bewerken
 shortcut-format-bold = Vet
 shortcut-format-italic = Cursief

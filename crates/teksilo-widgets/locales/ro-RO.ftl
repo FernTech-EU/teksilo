@@ -59,7 +59,6 @@ notifications-bucket-this-week = Săptămâna aceasta
 notifications-bucket-earlier = Mai devreme
 notifications-archive-replay-disabled = (nu mai este disponibilă)
 a11y-shortcut-settings-name = Setări pentru comenzi rapide
-a11y-shortcut-settings-capture-hint = Apăsați orice tastă. Delete pentru golire. Escape pentru anulare.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
@@ -421,6 +420,45 @@ grid-view-detail-name = Detaliile elementului { $position }
 code-editor-tab-escape-hint = Tab indentează. { $next } trece la controlul următor, { $previous } la cel anterior.
 
 shortcut-settings-uncategorized = Generale
+shortcut-settings-search-placeholder = Caută comenzi sau taste
+shortcut-settings-search-label = Caută comenzi rapide
+shortcut-settings-find-by-keys = Caută după taste
+shortcut-settings-find-hint = Apăsați tastele căutate. { $escape } oprește căutarea.
+shortcut-settings-modified-only = Doar cele modificate
+shortcut-settings-reset-all = Resetează tot…
+shortcut-settings-reset-all-prompt = Resetați toate comenzile rapide la valorile implicite?
+shortcut-settings-reset-all-confirm = Resetează tot
+shortcut-settings-cancel = Anulare
+shortcut-settings-reassign = Reatribuie
+shortcut-settings-reset = Resetează la implicit
+shortcut-settings-add-alternative = Adaugă o comandă rapidă alternativă
+shortcut-settings-not-set = Nesetată
+shortcut-settings-recording = Apăsați tastele…
+shortcut-settings-recording-hint = Apăsați noua comandă rapidă. { $escape } anulează, { $delete } o elimină.
+shortcut-settings-conflict = { $chord } este deja folosită de { $command }.
+shortcut-settings-needs-modifier = { $chord } are nevoie de o tastă modificatoare: adăugați { $first } sau { $second }.
+shortcut-settings-reserved = { $chord } este rezervată și nu poate fi atribuită.
+shortcut-settings-unusable = { $chord } nu poate fi folosită drept comandă rapidă.
+shortcut-settings-empty = Nicio comandă rapidă de afișat.
+shortcut-settings-no-match = Nicio comandă rapidă nu corespunde cu „{ $query }”.
+shortcut-settings-no-chord-match = Nicio comandă rapidă nu folosește { $chord }.
+shortcut-settings-none-modified = Nicio comandă rapidă nu a fost modificată.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: nicio comandă rapidă
+a11y-shortcut-settings-alternative = { $command }, alternativă: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: adaugă o comandă rapidă alternativă
+a11y-shortcut-settings-reset = Resetează { $command } la valoarea implicită
+a11y-shortcut-settings-recording = Se înregistrează o comandă rapidă pentru { $command }
+a11y-shortcut-settings-modified = Modificată față de valoarea implicită.
+a11y-shortcut-settings-removed-from = { $chord } eliminată de la { $command }.
+a11y-shortcut-settings-reset-all-done = Toate comenzile rapide au revenit la valorile implicite.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Nicio comandă rapidă nu folosește { $chord }.
+        [one] O comandă rapidă folosește { $chord }.
+        [few] { $count } comenzi rapide folosesc { $chord }.
+       *[other] { $count } de comenzi rapide folosesc { $chord }.
+    }
 shortcut-category-edit = Editare
 shortcut-format-bold = Aldin
 shortcut-format-italic = Cursiv

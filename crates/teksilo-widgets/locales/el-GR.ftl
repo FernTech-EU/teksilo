@@ -60,7 +60,6 @@ notifications-bucket-this-week = Αυτήν την εβδομάδα
 notifications-bucket-earlier = Παλαιότερα
 notifications-archive-replay-disabled = (δεν είναι πλέον διαθέσιμο)
 a11y-shortcut-settings-name = Ρυθμίσεις συντομεύσεων
-a11y-shortcut-settings-capture-hint = Πατήστε ένα πλήκτρο. Delete για απαλοιφή. Escape για ακύρωση.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
@@ -412,6 +411,44 @@ grid-view-detail-name = Λεπτομέρειες στοιχείου { $position 
 code-editor-tab-escape-hint = Το Tab προσθέτει εσοχή. Το { $next } μεταβαίνει στο επόμενο στοιχείο ελέγχου, το { $previous } στο προηγούμενο.
 
 shortcut-settings-uncategorized = Γενικά
+shortcut-settings-search-placeholder = Αναζήτηση εντολών ή πλήκτρων
+shortcut-settings-search-label = Αναζήτηση συντομεύσεων
+shortcut-settings-find-by-keys = Εύρεση με πλήκτρα
+shortcut-settings-find-hint = Πατήστε τα πλήκτρα που αναζητάτε. Το { $escape } σταματά.
+shortcut-settings-modified-only = Μόνο τροποποιημένες
+shortcut-settings-reset-all = Επαναφορά όλων…
+shortcut-settings-reset-all-prompt = Επαναφορά όλων των συντομεύσεων στις προεπιλογές;
+shortcut-settings-reset-all-confirm = Επαναφορά όλων
+shortcut-settings-cancel = Άκυρο
+shortcut-settings-reassign = Εκ νέου ανάθεση
+shortcut-settings-reset = Επαναφορά προεπιλογής
+shortcut-settings-add-alternative = Προσθήκη εναλλακτικής συντόμευσης
+shortcut-settings-not-set = Δεν έχει οριστεί
+shortcut-settings-recording = Πατήστε πλήκτρα…
+shortcut-settings-recording-hint = Πατήστε τη νέα συντόμευση. Το { $escape } ακυρώνει, το { $delete } την αφαιρεί.
+shortcut-settings-conflict = Η { $chord } χρησιμοποιείται ήδη από την εντολή { $command }.
+shortcut-settings-needs-modifier = Η { $chord } χρειάζεται πλήκτρο τροποποίησης: προσθέστε { $first } ή { $second }.
+shortcut-settings-reserved = Η { $chord } είναι δεσμευμένη και δεν μπορεί να ανατεθεί.
+shortcut-settings-unusable = Η { $chord } δεν μπορεί να χρησιμοποιηθεί ως συντόμευση.
+shortcut-settings-empty = Δεν υπάρχουν συντομεύσεις για εμφάνιση.
+shortcut-settings-no-match = Καμία συντόμευση δεν ταιριάζει με «{ $query }».
+shortcut-settings-no-chord-match = Καμία συντόμευση δεν χρησιμοποιεί το { $chord }.
+shortcut-settings-none-modified = Καμία συντόμευση δεν έχει αλλάξει.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: χωρίς συντόμευση
+a11y-shortcut-settings-alternative = { $command }, εναλλακτική: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: προσθήκη εναλλακτικής συντόμευσης
+a11y-shortcut-settings-reset = Επαναφορά της εντολής { $command } στην προεπιλογή
+a11y-shortcut-settings-recording = Καταγραφή συντόμευσης για την εντολή { $command }
+a11y-shortcut-settings-modified = Διαφέρει από την προεπιλογή.
+a11y-shortcut-settings-removed-from = Η { $chord } αφαιρέθηκε από την εντολή { $command }.
+a11y-shortcut-settings-reset-all-done = Όλες οι συντομεύσεις επανήλθαν στις προεπιλογές.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Καμία συντόμευση δεν χρησιμοποιεί το { $chord }.
+        [one] Μία συντόμευση χρησιμοποιεί το { $chord }.
+       *[other] { $count } συντομεύσεις χρησιμοποιούν το { $chord }.
+    }
 shortcut-category-edit = Επεξεργασία
 shortcut-format-bold = Έντονα
 shortcut-format-italic = Πλάγια

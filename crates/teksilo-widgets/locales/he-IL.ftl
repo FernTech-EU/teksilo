@@ -58,7 +58,6 @@ notifications-bucket-this-week = השבוע
 notifications-bucket-earlier = מוקדם יותר
 notifications-archive-replay-disabled = (לא זמין עוד)
 a11y-shortcut-settings-name = הגדרות מקשי קיצור
-a11y-shortcut-settings-capture-hint = יש להקיש על מקש כלשהו. Delete לניקוי. Esc לביטול.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
@@ -410,6 +409,46 @@ grid-view-detail-name = פרטי פריט { $position }
 code-editor-tab-escape-hint = Tab מוסיף הזחה. { $next } עובר לפקד הבא, { $previous } לפקד הקודם.
 
 shortcut-settings-uncategorized = כללי
+shortcut-settings-search-placeholder = חיפוש פקודות או מקשים
+shortcut-settings-search-label = חיפוש מקשי קיצור
+shortcut-settings-find-by-keys = חיפוש לפי מקשים
+shortcut-settings-find-hint = יש ללחוץ על המקשים לחיפוש. { $escape } מפסיק.
+shortcut-settings-modified-only = רק ששונו
+shortcut-settings-reset-all = איפוס הכול…
+shortcut-settings-reset-all-prompt = לאפס את כל מקשי הקיצור לברירת המחדל?
+shortcut-settings-reset-all-confirm = איפוס הכול
+shortcut-settings-cancel = ביטול
+shortcut-settings-reassign = הקצאה מחדש
+shortcut-settings-reset = איפוס לברירת המחדל
+shortcut-settings-add-alternative = הוספת מקש קיצור חלופי
+shortcut-settings-not-set = לא הוגדר
+shortcut-settings-recording = יש ללחוץ על מקשים…
+shortcut-settings-recording-hint = יש ללחוץ על מקש הקיצור החדש. { $escape } מבטל, { $delete } מסיר אותו.
+shortcut-settings-conflict = { $chord } כבר בשימוש על ידי { $command }.
+shortcut-settings-needs-modifier = { $chord } דורש מקש צירוף: יש להוסיף { $first } או { $second }.
+shortcut-settings-reserved = { $chord } שמור ואי אפשר להקצות אותו.
+shortcut-settings-unusable = אי אפשר להשתמש ב־{ $chord } כמקש קיצור.
+shortcut-settings-empty = אין מקשי קיצור להצגה.
+shortcut-settings-no-match = אין מקש קיצור שמתאים ל“{ $query }”.
+shortcut-settings-no-chord-match = אין מקש קיצור שמשתמש ב־{ $chord }.
+shortcut-settings-none-modified = לא שונה אף מקש קיצור.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: אין מקש קיצור
+a11y-shortcut-settings-alternative = { $command }, חלופי: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: הוספת מקש קיצור חלופי
+a11y-shortcut-settings-reset = איפוס { $command } לברירת המחדל
+a11y-shortcut-settings-recording = מקליטים מקש קיצור עבור { $command }
+a11y-shortcut-settings-modified = שונה מברירת המחדל.
+a11y-shortcut-settings-removed-from = { $chord } הוסר מ־{ $command }.
+a11y-shortcut-settings-reset-all-done = כל מקשי הקיצור חזרו לברירת המחדל.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] אין מקש קיצור שמשתמש ב־{ $chord }.
+        [one] מקש קיצור אחד משתמש ב־{ $chord }.
+        [two] שני מקשי קיצור משתמשים ב־{ $chord }.
+        [many] { $count } מקשי קיצור משתמשים ב־{ $chord }.
+       *[other] { $count } מקשי קיצור משתמשים ב־{ $chord }.
+    }
 shortcut-category-edit = עריכה
 shortcut-format-bold = מודגש
 shortcut-format-italic = נטוי

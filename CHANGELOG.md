@@ -39,6 +39,12 @@ by crate for clarity, not because crates version independently.
 
 - `localize_standard_shortcuts` names the standard edit shortcuts of a
   registry in the active language. `teksilo-app` calls it for every window.
+- `ShortcutSettings` has a toolbar: a search field, "Find by keys" (press a
+  chord to list the commands that use it), "Modified only" and "Reset all…".
+  `ShortcutSettings::toolbar(false)` hides it; `modified_only(signal)` binds
+  the "Modified only" state.
+- `keystroke_parts` returns the label of each key of a chord, one per key cap.
+- `BuiltInIcons` has `reset` and `keyboard` icons.
 - **`GridView::detail_row_when`** says which tiles have a detail band, from
   the same `TileContext` `detail_row` receives. A tile it refuses is no longer
   offered to a screen reader as expandable, and activating it opens nothing.
@@ -110,6 +116,23 @@ by crate for clarity, not because crates version independently.
   takes `Ctrl+A`.
 - `CommandPalette` does not list the standard edit commands, nor the
   `format.*` and `code.*` ones.
+- **Behaviour change:** `ShortcutSettings` is redesigned. Chords are drawn as
+  key caps and are the controls: clicking one, or Enter on it, records a new
+  chord in place, and the `+` beside it adds an alternative. The Rebind,
+  Rebind 2nd and Reset buttons are gone; a changed row is marked with a dot
+  and gets its own reset button.
+- **Behaviour change:** `ShortcutSettings` asks before it takes a chord from
+  another command (`confirm_conflicts` is on by default).
+- `ShortcutSettings` refuses a chord without Ctrl, Alt or ⌘ (except function
+  keys), and the chords the system or the framework keeps (Ctrl+Tab, Alt+F4,
+  Alt+Tab, ⌘Tab, ⌘Space and others), and says why.
+- `ShortcutSettings` is one Tab stop; the arrow keys, Home and End move
+  between its rows and columns. Each control's accessible name says the
+  command and its chord, and the group titles are headings.
+- `ShortcutSettings` sorts commands by name and groups by title, in the
+  interface language, translates all its text, and searches the text of the
+  chords instead of the internal ids. A shortcut that is currently disabled
+  can still be rebound.
 
 ### Fixed
 

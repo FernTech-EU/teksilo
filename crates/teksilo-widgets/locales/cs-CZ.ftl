@@ -59,7 +59,6 @@ notifications-bucket-this-week = Tento týden
 notifications-bucket-earlier = Starší
 notifications-archive-replay-disabled = (již není k dispozici)
 a11y-shortcut-settings-name = Nastavení klávesových zkratek
-a11y-shortcut-settings-capture-hint = Stiskněte libovolnou klávesu. Del pro vymazání. Esc pro zrušení.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
@@ -414,6 +413,46 @@ grid-view-detail-name = Podrobnosti položky { $position }
 code-editor-tab-escape-hint = Tab odsazuje. { $next } přejde na další ovládací prvek, { $previous } na předchozí.
 
 shortcut-settings-uncategorized = Obecné
+shortcut-settings-search-placeholder = Hledat příkazy nebo klávesy
+shortcut-settings-search-label = Hledat klávesové zkratky
+shortcut-settings-find-by-keys = Hledat podle kláves
+shortcut-settings-find-hint = Stiskněte hledané klávesy. { $escape } hledání ukončí.
+shortcut-settings-modified-only = Jen změněné
+shortcut-settings-reset-all = Obnovit vše…
+shortcut-settings-reset-all-prompt = Obnovit všechny klávesové zkratky na výchozí?
+shortcut-settings-reset-all-confirm = Obnovit vše
+shortcut-settings-cancel = Zrušit
+shortcut-settings-reassign = Přiřadit znovu
+shortcut-settings-reset = Obnovit výchozí
+shortcut-settings-add-alternative = Přidat alternativní zkratku
+shortcut-settings-not-set = Nenastaveno
+shortcut-settings-recording = Stiskněte klávesy…
+shortcut-settings-recording-hint = Stiskněte novou zkratku. { $escape } zruší, { $delete } ji odstraní.
+shortcut-settings-conflict = { $chord } už používá { $command }.
+shortcut-settings-needs-modifier = { $chord } potřebuje modifikátor: přidejte { $first } nebo { $second }.
+shortcut-settings-reserved = { $chord } je vyhrazená a nelze ji přiřadit.
+shortcut-settings-unusable = { $chord } nelze použít jako zkratku.
+shortcut-settings-empty = Žádné zkratky k zobrazení.
+shortcut-settings-no-match = Hledání „{ $query }“ neodpovídá žádná zkratka.
+shortcut-settings-no-chord-match = { $chord } nepoužívá žádná zkratka.
+shortcut-settings-none-modified = Žádná zkratka nebyla změněna.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: bez zkratky
+a11y-shortcut-settings-alternative = { $command }, alternativní: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: přidat alternativní zkratku
+a11y-shortcut-settings-reset = Obnovit výchozí zkratku pro { $command }
+a11y-shortcut-settings-recording = Nahrává se zkratka pro { $command }
+a11y-shortcut-settings-modified = Změněno oproti výchozímu nastavení.
+a11y-shortcut-settings-removed-from = { $chord } odebrána z { $command }.
+a11y-shortcut-settings-reset-all-done = Všechny zkratky jsou opět výchozí.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] { $chord } nepoužívá žádná zkratka.
+        [one] { $chord } používá jedna zkratka.
+        [few] { $chord } používají { $count } zkratky.
+        [many] { $chord } používá { $count } zkratky.
+       *[other] { $chord } používá { $count } zkratek.
+    }
 shortcut-category-edit = Úpravy
 shortcut-format-bold = Tučné
 shortcut-format-italic = Kurzíva

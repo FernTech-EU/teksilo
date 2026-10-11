@@ -61,7 +61,6 @@ notifications-bucket-this-week = Esta semana
 notifications-bucket-earlier = Anteriores
 notifications-archive-replay-disabled = (ya no está disponible)
 a11y-shortcut-settings-name = Configuración de atajos de teclado
-a11y-shortcut-settings-capture-hint = Pulse cualquier tecla. Supr para borrar. Esc para cancelar.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Mayús
 keystroke-modifier-alt = Alt
@@ -424,6 +423,44 @@ grid-view-detail-name = Detalles del elemento { $position }
 code-editor-tab-escape-hint = Tab aplica sangría. { $next } pasa al control siguiente y { $previous }, al anterior.
 
 shortcut-settings-uncategorized = General
+shortcut-settings-search-placeholder = Buscar comandos o teclas
+shortcut-settings-search-label = Buscar atajos
+shortcut-settings-find-by-keys = Buscar por teclas
+shortcut-settings-find-hint = Pulsa las teclas que buscas. { $escape } termina.
+shortcut-settings-modified-only = Solo modificados
+shortcut-settings-reset-all = Restablecer todo…
+shortcut-settings-reset-all-prompt = ¿Restablecer todos los atajos a sus valores predeterminados?
+shortcut-settings-reset-all-confirm = Restablecer todo
+shortcut-settings-cancel = Cancelar
+shortcut-settings-reassign = Reasignar
+shortcut-settings-reset = Restablecer valor predeterminado
+shortcut-settings-add-alternative = Añadir un atajo alternativo
+shortcut-settings-not-set = Sin asignar
+shortcut-settings-recording = Pulsa las teclas…
+shortcut-settings-recording-hint = Pulsa el nuevo atajo. { $escape } cancela, { $delete } lo quita.
+shortcut-settings-conflict = { $chord } ya lo usa { $command }.
+shortcut-settings-needs-modifier = { $chord } necesita un modificador: añade { $first } o { $second }.
+shortcut-settings-reserved = { $chord } está reservado y no se puede asignar.
+shortcut-settings-unusable = { $chord } no se puede usar como atajo.
+shortcut-settings-empty = No hay atajos que mostrar.
+shortcut-settings-no-match = Ningún atajo coincide con «{ $query }».
+shortcut-settings-no-chord-match = Ningún atajo usa { $chord }.
+shortcut-settings-none-modified = No se ha cambiado ningún atajo.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: sin atajo
+a11y-shortcut-settings-alternative = { $command }, alternativo: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: añadir un atajo alternativo
+a11y-shortcut-settings-reset = Restablecer { $command } a su valor predeterminado
+a11y-shortcut-settings-recording = Grabando un atajo para { $command }
+a11y-shortcut-settings-modified = Cambiado respecto al valor predeterminado.
+a11y-shortcut-settings-removed-from = { $chord } quitado de { $command }.
+a11y-shortcut-settings-reset-all-done = Todos los atajos han vuelto a sus valores predeterminados.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Ningún atajo usa { $chord }.
+        [one] Un atajo usa { $chord }.
+       *[other] { $count } atajos usan { $chord }.
+    }
 shortcut-category-edit = Edición
 shortcut-format-bold = Negrita
 shortcut-format-italic = Cursiva

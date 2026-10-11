@@ -943,6 +943,10 @@ pub struct BuiltInIcons {
     pub eye_off: fn() -> IconWidget,
     pub menu: fn() -> IconWidget,
     pub more: fn() -> IconWidget,
+    /// Counter-clockwise arrow: put a value back to its default.
+    pub reset: fn() -> IconWidget,
+    /// A keyboard: type or record keys.
+    pub keyboard: fn() -> IconWidget,
 }
 
 static GLOBAL_ICONS: OnceLock<BuiltInIcons> = OnceLock::new();
@@ -962,6 +966,8 @@ impl BuiltInIcons {
             eye_off: default_eye_off_icon,
             menu: default_menu_icon,
             more: default_more_icon,
+            reset: default_reset_icon,
+            keyboard: default_keyboard_icon,
         }
     }
 
@@ -1041,6 +1047,14 @@ fn default_clear_icon() -> IconWidget {
 
 fn default_add_icon() -> IconWidget {
     IconWidget::from_svg(include_str!("../resources/icons/builtin-add.svg"))
+}
+
+fn default_reset_icon() -> IconWidget {
+    IconWidget::from_svg(include_str!("../resources/icons/builtin-reset.svg"))
+}
+
+fn default_keyboard_icon() -> IconWidget {
+    IconWidget::from_svg(include_str!("../resources/icons/builtin-keyboard.svg"))
 }
 
 fn default_bell_icon() -> IconWidget {

@@ -58,7 +58,6 @@ notifications-bucket-this-week = W tym tygodniu
 notifications-bucket-earlier = Wcześniej
 notifications-archive-replay-disabled = (niedostępne)
 a11y-shortcut-settings-name = Ustawienia skrótów klawiszowych
-a11y-shortcut-settings-capture-hint = Naciśnij dowolny klawisz. Del, aby wyczyścić. Esc, aby anulować.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
@@ -413,6 +412,46 @@ grid-view-detail-name = Szczegóły elementu { $position }
 code-editor-tab-escape-hint = Tab wstawia wcięcie. { $next } przechodzi do następnej kontrolki, { $previous } do poprzedniej.
 
 shortcut-settings-uncategorized = Ogólne
+shortcut-settings-search-placeholder = Szukaj poleceń lub klawiszy
+shortcut-settings-search-label = Szukaj skrótów
+shortcut-settings-find-by-keys = Szukaj według klawiszy
+shortcut-settings-find-hint = Naciśnij szukane klawisze. { $escape } kończy.
+shortcut-settings-modified-only = Tylko zmienione
+shortcut-settings-reset-all = Przywróć wszystkie…
+shortcut-settings-reset-all-prompt = Przywrócić domyślne ustawienia wszystkich skrótów?
+shortcut-settings-reset-all-confirm = Przywróć wszystkie
+shortcut-settings-cancel = Anuluj
+shortcut-settings-reassign = Przypisz ponownie
+shortcut-settings-reset = Przywróć domyślny
+shortcut-settings-add-alternative = Dodaj skrót alternatywny
+shortcut-settings-not-set = Nie ustawiono
+shortcut-settings-recording = Naciśnij klawisze…
+shortcut-settings-recording-hint = Naciśnij nowy skrót. { $escape } anuluje, { $delete } go usuwa.
+shortcut-settings-conflict = { $chord } jest już używany przez { $command }.
+shortcut-settings-needs-modifier = { $chord } wymaga modyfikatora: dodaj { $first } lub { $second }.
+shortcut-settings-reserved = { $chord } jest zarezerwowany i nie można go przypisać.
+shortcut-settings-unusable = { $chord } nie może być skrótem.
+shortcut-settings-empty = Brak skrótów do wyświetlenia.
+shortcut-settings-no-match = Żaden skrót nie pasuje do „{ $query }”.
+shortcut-settings-no-chord-match = Żaden skrót nie używa { $chord }.
+shortcut-settings-none-modified = Nie zmieniono żadnego skrótu.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: brak skrótu
+a11y-shortcut-settings-alternative = { $command }, alternatywny: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: dodaj skrót alternatywny
+a11y-shortcut-settings-reset = Przywróć domyślny skrót dla { $command }
+a11y-shortcut-settings-recording = Nagrywanie skrótu dla { $command }
+a11y-shortcut-settings-modified = Zmieniony względem domyślnego.
+a11y-shortcut-settings-removed-from = Usunięto { $chord } z { $command }.
+a11y-shortcut-settings-reset-all-done = Wszystkie skróty mają znów wartości domyślne.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Żaden skrót nie używa { $chord }.
+        [one] Jeden skrót używa { $chord }.
+        [few] { $count } skróty używają { $chord }.
+        [many] { $count } skrótów używa { $chord }.
+       *[other] { $count } skrótu używa { $chord }.
+    }
 shortcut-category-edit = Edycja
 shortcut-format-bold = Pogrubienie
 shortcut-format-italic = Kursywa

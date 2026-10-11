@@ -59,7 +59,6 @@ notifications-bucket-this-week = Bu hafta
 notifications-bucket-earlier = Daha eski
 notifications-archive-replay-disabled = (artık kullanılamıyor)
 a11y-shortcut-settings-name = Kısayol ayarları
-a11y-shortcut-settings-capture-hint = Bir tuşa basın. Temizlemek için Del, iptal için Esc.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
@@ -407,6 +406,44 @@ grid-view-detail-name = { $position }. öğenin ayrıntıları
 code-editor-tab-escape-hint = Sekme girinti ekler. { $next } sonraki denetime, { $previous } önceki denetime geçer.
 
 shortcut-settings-uncategorized = Genel
+shortcut-settings-search-placeholder = Komut veya tuş ara
+shortcut-settings-search-label = Kısayollarda ara
+shortcut-settings-find-by-keys = Tuşlarla bul
+shortcut-settings-find-hint = Aradığınız tuşlara basın. { $escape } durdurur.
+shortcut-settings-modified-only = Yalnızca değiştirilenler
+shortcut-settings-reset-all = Tümünü sıfırla…
+shortcut-settings-reset-all-prompt = Tüm kısayollar varsayılana sıfırlansın mı?
+shortcut-settings-reset-all-confirm = Tümünü sıfırla
+shortcut-settings-cancel = İptal
+shortcut-settings-reassign = Yeniden ata
+shortcut-settings-reset = Varsayılana sıfırla
+shortcut-settings-add-alternative = Alternatif kısayol ekle
+shortcut-settings-not-set = Ayarlanmadı
+shortcut-settings-recording = Tuşlara basın…
+shortcut-settings-recording-hint = Yeni kısayola basın. { $escape } iptal eder, { $delete } kısayolu kaldırır.
+shortcut-settings-conflict = { $chord } zaten { $command } tarafından kullanılıyor.
+shortcut-settings-needs-modifier = { $chord } için bir değiştirici tuş gerekir: { $first } veya { $second } ekleyin.
+shortcut-settings-reserved = { $chord } ayrılmış, atanamaz.
+shortcut-settings-unusable = { $chord } kısayol olarak kullanılamaz.
+shortcut-settings-empty = Gösterilecek kısayol yok.
+shortcut-settings-no-match = “{ $query }” ile eşleşen kısayol yok.
+shortcut-settings-no-chord-match = { $chord } kullanan kısayol yok.
+shortcut-settings-none-modified = Hiçbir kısayol değiştirilmedi.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: kısayol yok
+a11y-shortcut-settings-alternative = { $command }, alternatif: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: alternatif kısayol ekle
+a11y-shortcut-settings-reset = { $command } kısayolunu varsayılana sıfırla
+a11y-shortcut-settings-recording = { $command } için kısayol kaydediliyor
+a11y-shortcut-settings-modified = Varsayılandan farklı.
+a11y-shortcut-settings-removed-from = { $chord }, { $command } komutundan kaldırıldı.
+a11y-shortcut-settings-reset-all-done = Tüm kısayollar varsayılana döndü.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] { $chord } kullanan kısayol yok.
+        [one] { $chord } kısayolunu bir komut kullanıyor.
+       *[other] { $chord } kısayolunu { $count } komut kullanıyor.
+    }
 shortcut-category-edit = Düzenle
 shortcut-format-bold = Kalın
 shortcut-format-italic = İtalik

@@ -48,7 +48,6 @@ notifications-bucket-this-week = Ĉi-semajne
 notifications-bucket-earlier = Antaŭe
 notifications-archive-replay-disabled = (ne plu disponebla)
 a11y-shortcut-settings-name = Agordoj de klavkombinoj
-a11y-shortcut-settings-capture-hint = Premu ajnan klavon. Forigklavo por viŝi. Eskapklavo por nuligi.
 keystroke-modifier-ctrl = Stir
 keystroke-modifier-shift = Maj
 keystroke-modifier-alt = Alt
@@ -373,6 +372,44 @@ grid-view-detail-name = Detaloj de ero { $position }
 code-editor-tab-escape-hint = Tab enŝovas. { $next } movas al la sekva regilo, { $previous } al la antaŭa.
 
 shortcut-settings-uncategorized = Ĝeneralaj
+shortcut-settings-search-placeholder = Serĉi komandojn aŭ klavojn
+shortcut-settings-search-label = Serĉi klavkombinojn
+shortcut-settings-find-by-keys = Trovi per klavoj
+shortcut-settings-find-hint = Premu la serĉatajn klavojn. { $escape } ĉesigas.
+shortcut-settings-modified-only = Nur ŝanĝitaj
+shortcut-settings-reset-all = Restarigi ĉiujn…
+shortcut-settings-reset-all-prompt = Ĉu restarigi ĉiujn klavkombinojn al la defaŭltoj?
+shortcut-settings-reset-all-confirm = Restarigi ĉiujn
+shortcut-settings-cancel = Nuligi
+shortcut-settings-reassign = Reasigni
+shortcut-settings-reset = Restarigi defaŭlton
+shortcut-settings-add-alternative = Aldoni alternativan klavkombinon
+shortcut-settings-not-set = Ne agordita
+shortcut-settings-recording = Premu klavojn…
+shortcut-settings-recording-hint = Premu la novan klavkombinon. { $escape } nuligas, { $delete } forigas ĝin.
+shortcut-settings-conflict = { $chord } jam estas uzata de { $command }.
+shortcut-settings-needs-modifier = { $chord } bezonas modifilan klavon: aldonu { $first } aŭ { $second }.
+shortcut-settings-reserved = { $chord } estas rezervita kaj ne asigneblas.
+shortcut-settings-unusable = { $chord } ne uzeblas kiel klavkombino.
+shortcut-settings-empty = Neniu klavkombino montrebla.
+shortcut-settings-no-match = Neniu klavkombino kongruas kun “{ $query }”.
+shortcut-settings-no-chord-match = Neniu klavkombino uzas { $chord }.
+shortcut-settings-none-modified = Neniu klavkombino estis ŝanĝita.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: neniu klavkombino
+a11y-shortcut-settings-alternative = { $command }, alternativa: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: aldoni alternativan klavkombinon
+a11y-shortcut-settings-reset = Restarigi { $command } al la defaŭlto
+a11y-shortcut-settings-recording = Registrado de klavkombino por { $command }
+a11y-shortcut-settings-modified = Ŝanĝita kompare kun la defaŭlto.
+a11y-shortcut-settings-removed-from = { $chord } forigita de { $command }.
+a11y-shortcut-settings-reset-all-done = Ĉiuj klavkombinoj revenis al la defaŭltoj.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] Neniu klavkombino uzas { $chord }.
+        [one] Unu klavkombino uzas { $chord }.
+       *[other] { $count } klavkombinoj uzas { $chord }.
+    }
 shortcut-category-edit = Redakti
 shortcut-format-bold = Grasa
 shortcut-format-italic = Kursiva

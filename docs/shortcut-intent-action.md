@@ -418,7 +418,9 @@ Use `ShortcutRegistry::find_conflict(keystroke, excluding_id)` before
 rebinding if you want the "exactly one effective binding per chord"
 invariant; that is what the pre-built
 [`ShortcutSettings`](../crates/teksilo-widgets/src/shortcut_settings.rs)
-widget does in its capture-event handler.
+widget does when it records a chord. By default it asks first: the
+row shows "Ctrl+S is already used by Save" with Reassign and Cancel,
+and nothing changes until the user answers.
 
 ---
 
@@ -443,7 +445,10 @@ is still alive) creates a fresh slot; the old slot is already orphaned
 so dropping the old handle cancels only the old slot, no race with
 the newer capture. The pre-built
 [`ShortcutSettings`](../crates/teksilo-widgets/src/shortcut_settings.rs)
-widget packages this flow (Rebind buttons, conflict resolution, reset).
+widget packages this flow: each chord is a control that records a new
+chord when activated, refuses keys that cannot be shortcuts (a bare
+letter, Shift plus a letter, reserved chords such as Ctrl+Tab), asks
+before taking a chord from another command, and resets a changed row.
 
 ---
 

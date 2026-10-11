@@ -72,7 +72,6 @@ notifications-bucket-this-week = This week
 notifications-bucket-earlier = Earlier
 notifications-archive-replay-disabled = (no longer available)
 a11y-shortcut-settings-name = Shortcut settings
-a11y-shortcut-settings-capture-hint = Press any key. Delete to clear. Escape to cancel.
 keystroke-modifier-ctrl = Ctrl
 keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
@@ -466,6 +465,49 @@ code-editor-tab-escape-hint = Tab indents. { $next } moves to the next control, 
 # ShortcutSettings: the header of the group holding every shortcut that
 # declared no category. See crates/teksilo-widgets/src/shortcut_settings.rs.
 shortcut-settings-uncategorized = General
+# ShortcutSettings: toolbar, rows, prompts and what a screen reader
+# hears. { $chord } is a key combination as the platform writes it
+# ("Ctrl+S", "⌘S"), { $command } a command's name, { $escape } and
+# { $delete } the names of those keys, { $first } and { $second } the
+# two modifier keys a shortcut usually starts with ("Ctrl", "Alt").
+shortcut-settings-search-placeholder = Search commands or keys
+shortcut-settings-search-label = Search shortcuts
+shortcut-settings-find-by-keys = Find by keys
+shortcut-settings-find-hint = Press the keys to look for. { $escape } stops.
+shortcut-settings-modified-only = Modified only
+shortcut-settings-reset-all = Reset all…
+shortcut-settings-reset-all-prompt = Reset every shortcut to its default?
+shortcut-settings-reset-all-confirm = Reset all
+shortcut-settings-cancel = Cancel
+shortcut-settings-reassign = Reassign
+shortcut-settings-reset = Reset to default
+shortcut-settings-add-alternative = Add an alternative shortcut
+shortcut-settings-not-set = Not set
+shortcut-settings-recording = Press keys…
+shortcut-settings-recording-hint = Press the new shortcut. { $escape } cancels, { $delete } removes it.
+shortcut-settings-conflict = { $chord } is already used by { $command }.
+shortcut-settings-needs-modifier = { $chord } needs a modifier: add { $first } or { $second }.
+shortcut-settings-reserved = { $chord } is reserved and can't be assigned.
+shortcut-settings-unusable = { $chord } can't be used as a shortcut.
+shortcut-settings-empty = No shortcuts to show.
+shortcut-settings-no-match = No shortcut matches “{ $query }”.
+shortcut-settings-no-chord-match = No shortcut uses { $chord }.
+shortcut-settings-none-modified = No shortcut has been changed.
+a11y-shortcut-settings-primary = { $command }: { $chord }
+a11y-shortcut-settings-primary-unset = { $command }: no shortcut
+a11y-shortcut-settings-alternative = { $command }, alternative: { $chord }
+a11y-shortcut-settings-add-alternative = { $command }: add an alternative shortcut
+a11y-shortcut-settings-reset = Reset { $command } to its default
+a11y-shortcut-settings-recording = Recording a shortcut for { $command }
+a11y-shortcut-settings-modified = Changed from the default.
+a11y-shortcut-settings-removed-from = { $chord } removed from { $command }.
+a11y-shortcut-settings-reset-all-done = All shortcuts are back to their defaults.
+a11y-shortcut-settings-find-result =
+    { $count ->
+        [0] No shortcut uses { $chord }.
+        [one] One shortcut uses { $chord }.
+       *[other] { $count } shortcuts use { $chord }.
+    }
 # The group holding the standard edit shortcuts every window registers
 # (cut, copy, paste, undo, redo, select all), named from the menu-* rows.
 shortcut-category-edit = Edit
