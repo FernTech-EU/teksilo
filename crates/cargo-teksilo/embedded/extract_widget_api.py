@@ -618,6 +618,16 @@ class Item:
     # A struct with fields outside `fields` (private, `pub(crate)`, hidden).
     restricted_fields: bool = False
     methods: list["Item"] = field(default_factory=list)
+    # A builder setter's default, as a source expression, when `new()` / `Default`
+    # initialises the field it assigns with a literal or a plain path (see
+    # `_apply_defaults`); empty otherwise.
+    default: str = ""
+    # Working data for `default`, never printed: the field a setter assigns
+    # from its one argument, and the field initialisers a type's `new()` and
+    # `impl Default` give (`None` when the body is not a plain struct literal).
+    assigns: str = ""
+    ctor_body: "tuple[str, str] | None" = None
+    default_inits: "dict[str, str] | None" = None
 
 
 @dataclass
@@ -894,6 +904,269 @@ def consume_impl_header(
 
 
 # ----------------------------------------------------------------------------
+# Builder defaults — what `new()` / `Default` put in a field a setter assigns
+#
+# `HStack::new()` starts with `spacing: Prop::Static(0.0)`, and the setter's
+# own doc rarely says so. A default is printed only where it can be read off
+# the source with no judgement: the setter is `self.f = <its argument>`, and
+# the constructor's struct literal gives `f` a literal or a plain path. Any
+# computed value (a call, the theme, a closure) leaves the setter without one.
+# ----------------------------------------------------------------------------
+
+
+def _slice_lines(lines: list[str], l0: int, c0: int, l1: int, c1: int) -> str:
+    if l0 == l1:
+        return lines[l0][c0:c1]
+    return "\n".join([lines[l0][c0:]] + lines[l0 + 1 : l1] + [lines[l1][:c1]])
+
+
+def _fn_body(raw: list[str], cleaned: list[str], i: int) -> "tuple[str, str] | None":
+    """The text between a `fn`'s braces, starting at line `i`, as `(cleaned,
+    raw)` of equal length; `None` for a declaration without a body."""
+    paren = 0
+    started = False
+    for li in range(i, len(cleaned)):
+        for col, c in enumerate(cleaned[li]):
+            if c == "(":
+                paren += 1
+                started = True
+            elif c == ")":
+                paren -= 1
+            elif paren == 0 and started and c == ";":
+                return None
+            elif paren == 0 and started and c == "{":
+                cl, cc = find_matching_brace(cleaned, li, col)
+                return (
+                    _slice_lines(cleaned, li, col + 1, cl, cc),
+                    _slice_lines(raw, li, col + 1, cl, cc),
+                )
+    return None
+
+
+def _split_top(text: str) -> "list[tuple[int, int]]":
+    """Spans of `text` between the commas that sit outside any bracket."""
+    spans: list[tuple[int, int]] = []
+    depth = 0
+    start = 0
+    for i, c in enumerate(text):
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == "," and depth == 0:
+            spans.append((start, i))
+            start = i + 1
+    spans.append((start, len(text)))
+    return spans
+
+
+def _unwrap_call(text: str, names: "tuple[str, ...]") -> "tuple[str, str] | None":
+    """`Some(x)` -> `("Some", "x")` when the call spans all of `text`."""
+    m = re.match(r"(" + "|".join(re.escape(n) for n in names) + r")\s*\(", text)
+    if not m:
+        return None
+    depth = 0
+    for i in range(m.end() - 1, len(text)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return (m.group(1), text[m.end() : i]) if i == len(text) - 1 else None
+    return None
+
+
+_NUMBER_RE = re.compile(r"-?\d[\d_]*(?:\.\d[\d_]*)?(?:[eE]-?\d+)?(?:f32|f64|[iu](?:8|16|32|64|128|size))?")
+_PATH_RE = re.compile(r"[A-Za-z_]\w*(?:::[A-Za-z_]\w*)+")
+_EMPTY_COLLECTION_RE = re.compile(
+    r"(?:String|Vec|HashMap|HashSet|BTreeMap|BTreeSet|VecDeque)::new\(\)"
+)
+
+
+def _literal_default(expr: str) -> "str | None":
+    """`expr` normalised, when it is a literal or a plain path; `None` for
+    anything computed. `Some(..)`, `Prop::Static(..)` (dropped: a caller passes
+    the bare value) and tuples are looked through, nothing else."""
+    expr = " ".join(expr.split())
+    if "//" in expr or "/*" in expr or not expr:
+        return None
+    if (
+        _NUMBER_RE.fullmatch(expr)
+        or expr in ("true", "false", "None", "()")
+        or re.fullmatch(r'"[^"\\]*"', expr)
+        or _EMPTY_COLLECTION_RE.fullmatch(expr)
+        or re.fullmatch(r"[A-Z][A-Z0-9_]+", expr)
+    ):
+        return expr
+    if _PATH_RE.fullmatch(expr):
+        return expr if expr.rsplit("::", 1)[-1][:1].isupper() else None
+    call = _unwrap_call(expr, ("Some", "Prop::Static"))
+    if call:
+        inner = _literal_default(call[1])
+        if inner is None:
+            return None
+        # A caller passes the bare value to a `Prop` setter, so that is the
+        # default worth printing.
+        return inner if call[0] == "Prop::Static" else f"{call[0]}({inner})"
+    if expr.startswith("(") and expr.endswith(")"):
+        parts = [expr[1:-1][a:b] for a, b in _split_top(expr[1:-1])]
+        if len(parts) > 1 and parts[-1].strip() == "":
+            parts.pop()
+        if len(parts) > 1:
+            inner = [_literal_default(p) for p in parts]
+            if all(x is not None for x in inner):
+                return "(" + ", ".join(inner) + ")"  # type: ignore[arg-type]
+    return None
+
+
+_MASK_COMMENT_RE = re.compile(r"//[/!]?[ ]*")
+
+
+def _struct_literal_inits(
+    body_c: str, body_r: str
+) -> "tuple[dict[str, str], bool] | None":
+    """The `field: literal` pairs of a body that is exactly one struct
+    literal, `Self { .. }` or `Type { .. }`, and whether it ends `..rest`.
+    Fields given anything but a literal or a plain path are left out. `None`
+    when the body is anything else: a `let` first, a call, a mutation."""
+    c = _MASK_COMMENT_RE.sub(lambda m: " " * len(m.group()), body_c)
+    lo, hi = len(c) - len(c.lstrip()), len(c.rstrip())
+    m = re.match(r"(?:Self|[A-Z]\w*)\s*\{", c[lo:hi])
+    if not m:
+        return None
+    open_i = lo + m.end() - 1
+    depth = 0
+    close_i = -1
+    for i in range(open_i, hi):
+        if c[i] == "{":
+            depth += 1
+        elif c[i] == "}":
+            depth -= 1
+            if depth == 0:
+                close_i = i
+                break
+    if close_i != hi - 1:
+        return None
+    inner = c[open_i + 1 : close_i]
+    inits: dict[str, str] = {}
+    rest = False
+    for a, b in _split_top(inner):
+        part = inner[a:b]
+        if not part.strip():
+            continue
+        if part.strip().startswith(".."):
+            rest = True
+            continue
+        fm = re.match(r"\s*(\w+)\s*:(?!:)", part)
+        if not fm:
+            continue
+        base = open_i + 1
+        value = body_r[base + a + fm.end() : base + b]
+        lit = _literal_default(value)
+        if lit is not None:
+            inits[fm.group(1)] = lit
+        else:
+            inits.setdefault(fm.group(1), "")  # set, but to something computed
+    return inits, rest
+
+
+def _delegates_to_default(body_c: str) -> bool:
+    return re.fullmatch(r"\s*(?:Self|Default)::default\(\)\s*", body_c) is not None
+
+
+def _constructor_inits(
+    body_c: str, body_r: str, default_inits: "dict[str, str] | None"
+) -> "dict[str, str] | None":
+    """What a `new()` body initialises, or `None` when it cannot be read."""
+    if _delegates_to_default(body_c):
+        return default_inits
+    lit = _struct_literal_inits(body_c, body_r)
+    if lit is None:
+        return None
+    inits, rest = lit
+    if rest:
+        if default_inits is None:
+            return None
+        return {**default_inits, **inits}
+    return inits
+
+
+_SETTER_BODY_RE = re.compile(r"\s*self\.(\w+)\s*=\s*([^;]+);\s*self\s*", re.S)
+_ARG_WRAPPERS = ("Some", "Prop::Static", "Prop::from", "Into::into", "String::from")
+_ARG_SUFFIXES = (".into()", ".to_string()", ".to_owned()", ".clone()", ".into_owned()")
+
+
+def _setter_field(sig: str, body_c: str) -> str:
+    """The field a builder setter assigns from its one argument, or `""`.
+
+    Only `fn f(mut self, x: T) -> Self { self.field = x; self }`, where the
+    right-hand side is the argument through `.into()`, `Some(..)` or
+    `Prop::Static(..)` and nothing else: a setter that negates, combines or
+    picks a constant would make the field's initial value say the wrong thing
+    about the setter's argument.
+    """
+    parts = _split_fn_signature(sig)
+    if parts is None or parts[2] != "Self":
+        return ""
+    params = parts[1]
+    spans = [params[a:b].strip() for a, b in _split_top(params)]
+    if spans and spans[-1] == "":
+        spans.pop()
+    if len(spans) != 2 or not re.fullmatch(r"(?:mut\s+)?self", spans[0]):
+        return ""
+    pm = re.match(r"(?:mut\s+)?(\w+)\s*:", spans[1])
+    m = _SETTER_BODY_RE.fullmatch(body_c)
+    if not pm or not m:
+        return ""
+    arg = pm.group(1)
+    rhs = " ".join(m.group(2).split())
+    for _ in range(6):
+        if rhs == arg:
+            return m.group(1)
+        call = _unwrap_call(rhs, _ARG_WRAPPERS)
+        if call:
+            rhs = call[1].strip()
+            continue
+        for suffix in _ARG_SUFFIXES:
+            if rhs.endswith(suffix):
+                rhs = rhs[: -len(suffix)].strip()
+                break
+        else:
+            return ""
+    return ""
+
+
+def _apply_defaults(items: list[Item]) -> None:
+    """Fill `Item.default` of every setter whose field `new()` or
+    `Default` initialises with a literal or a plain path, unless the setter's
+    own doc already says something about a default."""
+    for it in items:
+        if not it.methods:
+            continue
+        news = [m for m in it.methods if m.name == "new" and m.kind == "fn"]
+        # Two `new`s are two impl blocks of one generic type, with no way to
+        # say which one a reader calls.
+        if len(news) > 1:
+            continue
+        inits: "dict[str, str] | None" = it.default_inits
+        if news:
+            body = news[0].ctor_body
+            inits = (
+                _constructor_inits(body[0], body[1], it.default_inits)
+                if body
+                else None
+            )
+        if not inits:
+            continue
+        for m in it.methods:
+            if m.kind != "fn" or not m.assigns or m.default:
+                continue
+            value = inits.get(m.assigns, "")
+            if value and "default" not in m.doc.lower():
+                m.default = value
+
+
+# ----------------------------------------------------------------------------
 # impl block analysis
 # ----------------------------------------------------------------------------
 
@@ -1145,16 +1418,22 @@ def _parse_impl_body(
             sig, end_line, had_body = consume_fn_signature(raw, cleaned, i)
             if trait:
                 sig += " { /* default implementation */ }" if had_body else ";"
-            methods.append(
-                Item(
-                    kind="fn",
-                    name=name,
-                    signature=sig.strip(),
-                    doc="\n".join(doc_buf).rstrip(),
-                    hidden=_is_hidden(attr_buf),
-                    cfg=_extract_cfgs(attr_buf),
-                )
+            method = Item(
+                kind="fn",
+                name=name,
+                signature=sig.strip(),
+                doc="\n".join(doc_buf).rstrip(),
+                hidden=_is_hidden(attr_buf),
+                cfg=_extract_cfgs(attr_buf),
             )
+            if had_body and not trait:
+                body = _fn_body(raw, cleaned, i)
+                if body is not None:
+                    if name == "new":
+                        method.ctor_body = body
+                    else:
+                        method.assigns = _setter_field(sig, body[0])
+            methods.append(method)
             clear()
             i = end_line + 1
             continue
@@ -1238,6 +1517,9 @@ def parse_file(path: Path, module_name: str, cfg: list[str]) -> ParsedFile:
 
     items: list[Item] = []
     item_by_name: dict[str, Item] = {}
+    # `impl Default for X` may come before `struct X`, so these are attached
+    # once every item exists.
+    default_inits_by_type: dict[str, dict[str, str]] = {}
 
     doc_buf: list[str] = []
     attr_buf: list[str] = []
@@ -1306,7 +1588,22 @@ def parse_file(path: Path, module_name: str, cfg: list[str]) -> ParsedFile:
             close_line, _ = find_matching_brace(cleaned, open_line, open_col)
 
             if is_trait_impl(header):
-                # Skip the whole block — internal plumbing.
+                # Skip the whole block — internal plumbing — but read what
+                # `impl Default for X` puts in each field, for the defaults
+                # of X's setters.
+                dm = re.match(
+                    r"impl\b.*?(?<![\w:])(?:(?:std|core)::default::)?Default\s+for\s+([A-Za-z_]\w*)\b",
+                    _normalize_impl_header(header).strip(),
+                    re.S,
+                )
+                if dm:
+                    for li in range(open_line + 1, close_line):
+                        if re.match(r"\s*fn\s+default\s*\(", cleaned[li]):
+                            body = _fn_body(raw, cleaned, li)
+                            lit = _struct_literal_inits(*body) if body else None
+                            if lit is not None and not lit[1]:
+                                default_inits_by_type[dm.group(1)] = lit[0]
+                            break
                 clear()
                 i = close_line + 1
                 continue
@@ -1450,6 +1747,9 @@ def parse_file(path: Path, module_name: str, cfg: list[str]) -> ParsedFile:
         for it in items
         if it.kind != "external" or it.methods
     ]
+    for it in items:
+        it.default_inits = default_inits_by_type.get(it.name)
+    _apply_defaults(items)
     return ParsedFile(
         module_name=module_name,
         file_path=path,
@@ -2106,6 +2406,78 @@ def _member_page(name: str, match: MemberMatch) -> ParsedFile:
         cfg=owner.cfg, methods=[match.member],
     )
     return ParsedFile(match.file.stem, match.file, header, match.cfg, [reduced])
+
+
+@dataclass
+class VariantMatch:
+    """An enum variant found by name."""
+    crate_key: str
+    file: Path
+    cfg: list[str]
+    enum: Item
+    variant: EnumVariant
+
+
+def _find_variants(query: str) -> "tuple[str, list[VariantMatch]]":
+    """Every public enum with a variant named like `query`, across every
+    queryable crate. `query` may be `Variant` or `Enum::Variant`; the last
+    keeps only that enum.
+
+    This is the last fallback of a name lookup, after types, macros and
+    methods: `FixedColumnCount` is a variant of `GridSizing`, and an agent
+    that read it in a signature or a doc has no reason to know which enum
+    carries it. Only files with a line that starts with the name are parsed.
+    """
+    enum_name = None
+    name = query.strip()
+    if "::" in name:
+        enum_name, name = name.rsplit("::", 1)
+        enum_name = enum_name.rsplit("::", 1)[-1]
+    if not re.fullmatch(r"[A-Za-z_]\w*", name):
+        return name, []
+    defines = re.compile(rf"^\s*{re.escape(name)}\b", re.M)
+    matches: list[VariantMatch] = []
+    seen: set[tuple[str, str]] = set()
+    for key in CRATE_SPECS:
+        try:
+            reg = _registry_for(key)
+        except Exception:
+            continue
+        for fp in reg.files:
+            try:
+                if not defines.search(fp.read_text(encoding="utf-8")):
+                    continue
+            except OSError:
+                continue
+            cfg = reg.cfg_by_file.get(fp.resolve(), [])
+            for it in parse_file(fp, fp.stem, cfg).items:
+                if it.kind != "enum" or it.hidden:
+                    continue
+                if enum_name is not None and it.name != enum_name:
+                    continue
+                for v in it.variants:
+                    if v.name == name and (key, it.name) not in seen:
+                        seen.add((key, it.name))
+                        matches.append(VariantMatch(key, fp, cfg, it, v))
+    return name, matches
+
+
+def _variant_page(name: str, match: VariantMatch) -> ParsedFile:
+    """The enum a variant belongs to, under a header saying so."""
+    crate = CRATE_SPECS[match.crate_key].crate
+    header = (
+        f"`{name}` is a variant of `{match.enum.name}` in `{crate}` "
+        f"(`--crate {match.crate_key}`), not a type."
+    )
+    return ParsedFile(match.file.stem, match.file, header, match.cfg, [match.enum])
+
+
+def _variant_candidates(matches: "list[VariantMatch]") -> str:
+    shown = [
+        f"{m.enum.name}::{m.variant.name} (--crate {m.crate_key})" for m in matches[:20]
+    ]
+    more = f", and {len(matches) - len(shown)} more" if len(matches) > len(shown) else ""
+    return ", ".join(shown) + more
 
 
 def _member_candidates(name: str, matches: "list[MemberMatch]") -> str:
@@ -3011,7 +3383,8 @@ def _emit_methods_md(
         # …, impl Widget + 'static)`) would leave the span unclosed and break the
         # heading's rendering.
         sig = " ".join(m.signature.split())
-        out.append(f"#### `{sig}`{flags_str}")
+        default_str = f" (default: `{m.default}`)" if m.default else ""
+        out.append(f"#### `{sig}`{flags_str}{default_str}")
         out.append("")
         if m.doc:
             out.append(m.doc.rstrip())
@@ -3076,7 +3449,8 @@ def format_text(pf: ParsedFile) -> str:
                 if m.cfg:
                     flags.append(_fmt_cfg(m.cfg))
                 fs = f" [{'; '.join(flags)}]" if flags else ""
-                out.append(f"    • {m.signature.strip()}{fs}")
+                default_str = f"  (default: {m.default})" if m.default else ""
+                out.append(f"    • {m.signature.strip()}{fs}{default_str}")
                 if m.doc:
                     out.append(_indent(m.doc, "      "))
         out.append("")
@@ -3109,6 +3483,7 @@ def format_json(pfs: list[ParsedFile]) -> str:
             "variants": [v.__dict__ for v in it.variants],
             "fields": [f.__dict__ for f in it.fields],
             "restricted_fields": it.restricted_fields,
+            "default": it.default or None,
             "methods": [item_to_dict(m) for m in it.methods],
             # Public paths, best first; null for a member or a hidden item.
             "imports": imports_of(path, it) if path is not None else None,
@@ -4210,6 +4585,193 @@ def _test_macro_lookup() -> None:
     assert found == [], "a #[doc(hidden)] macro must stay hidden"
 
 
+def _test_variant_lookup() -> None:
+    """A variant name answers with its enum, after types, macros and methods."""
+    bare, found = _find_variants("FixedColumnCount")
+    assert bare == "FixedColumnCount", bare
+    assert [(m.enum.name, m.crate_key) for m in found] == [("GridSizing", "widgets")], found
+    page = format_markdown(_variant_page(bare, found[0]))
+    assert "`FixedColumnCount` is a variant of `GridSizing`" in page, page[:400]
+    assert "### Variants" in page and "- **`Adaptive`**" in page, "the whole enum follows"
+
+    _, found = _find_variants("GridSizing::FixedColumnCount")
+    assert [m.enum.name for m in found] == ["GridSizing"], found
+    _, found = _find_variants("NotTheEnum::FixedColumnCount")
+    assert found == [], found
+    _, found = _find_variants("NoSuchVariantAnywhere")
+    assert found == [], found
+
+    # End to end: the name reaches the variant lookup through `main`.
+    import contextlib
+    import io
+
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        assert main(["FixedColumnCount"]) == 0
+    assert "is a variant of `GridSizing`" in out.getvalue()
+
+
+def _test_builder_defaults() -> None:
+    """A setter shows the literal `new()` / `Default` gave its field, and
+    nothing that had to be computed, guessed or negated."""
+    import tempfile
+
+    src = """
+pub struct Row {
+    spacing: Prop<f32>,
+    align: VAlignment,
+    pad: Option<f32>,
+    label: String,
+    hidden: bool,
+    themed: f32,
+    tall: bool,
+    documented: f32,
+    tail: u8,
+    pair: (f32, f32),
+}
+
+impl Row {
+    /// New.
+    pub fn new() -> Self {
+        Self {
+            spacing: Prop::Static(0.0), // the gap
+            align: VAlignment::Center,
+            pad: None,
+            label: String::new(),
+            hidden: false,
+            // a comment line between fields
+            themed: Theme::current().spacing,
+            tall: true,
+            documented: 2.0,
+            tail: 3,
+            pair: (1.0, -2.5),
+        }
+    }
+
+    pub fn spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self {
+        self.spacing = spacing.into();
+        self
+    }
+    pub fn align(mut self, align: VAlignment) -> Self {
+        self.align = align;
+        self
+    }
+    pub fn pad(mut self, pad: f32) -> Self {
+        self.pad = Some(pad);
+        self
+    }
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = label.into();
+        self
+    }
+    pub fn hidden(mut self, hidden: bool) -> Self {
+        self.hidden = hidden;
+        self
+    }
+    pub fn themed(mut self, themed: f32) -> Self {
+        self.themed = themed;
+        self
+    }
+    /// Negated: the argument says the opposite of the field.
+    pub fn short(mut self, short: bool) -> Self {
+        self.tall = !short;
+        self
+    }
+    /// Spacing around the row. Default 2 dp.
+    pub fn documented(mut self, documented: f32) -> Self {
+        self.documented = documented;
+        self
+    }
+    pub fn tail(mut self, tail: u8) -> Self {
+        self.tail = tail;
+        self.hidden = true;
+        self
+    }
+    pub fn pair(mut self, pair: (f32, f32)) -> Self {
+        self.pair = pair;
+        self
+    }
+}
+
+pub struct Cell { gap: f32, wide: bool, deep: f32 }
+
+impl Default for Cell {
+    fn default() -> Self {
+        Self { gap: 4.0, wide: false, deep: Theme::deep() }
+    }
+}
+
+impl Cell {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn gap(mut self, gap: f32) -> Self { self.gap = gap; self }
+    pub fn wide(mut self, wide: bool) -> Self { self.wide = wide; self }
+    pub fn deep(mut self, deep: f32) -> Self { self.deep = deep; self }
+}
+
+pub struct Rest { a: f32, b: f32 }
+
+impl Default for Rest {
+    fn default() -> Self { Self { a: 1.0, b: 2.0 } }
+}
+
+impl Rest {
+    pub fn new() -> Self {
+        Self { b: 9.0, ..Default::default() }
+    }
+    pub fn a(mut self, a: f32) -> Self { self.a = a; self }
+    pub fn b(mut self, b: f32) -> Self { self.b = b; self }
+}
+
+pub struct Built { n: f32 }
+
+impl Built {
+    pub fn new() -> Self {
+        let mut me = Self { n: 1.0 };
+        me.n += 1.0;
+        me
+    }
+    pub fn n(mut self, n: f32) -> Self { self.n = n; self }
+}
+"""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "row.rs"
+        path.write_text(src, encoding="utf-8")
+        pf = parse_file(path, "row", [])
+        text = format_text(pf)
+        md = format_markdown(pf)
+    got = {
+        it.name: {m.name: m.default for m in it.methods if m.default}
+        for it in pf.items
+    }
+    assert got["Row"] == {
+        "spacing": "0.0",
+        "align": "VAlignment::Center",
+        "pad": "None",
+        "label": "String::new()",
+        "hidden": "false",
+        "pair": "(1.0, -2.5)",
+    }, got["Row"]
+    # `Default::default()` is read through, and an explicit field wins over
+    # the `..Default::default()` it sits beside.
+    assert got["Cell"] == {"gap": "4.0", "wide": "false"}, got["Cell"]
+    assert got["Rest"] == {"a": "1.0", "b": "9.0"}, got["Rest"]
+    assert "Built" not in got or got["Built"] == {}, got["Built"]
+
+    assert "pub fn spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self  (default: 0.0)" in text, text
+    assert "(default: `VAlignment::Center`)" in md, md
+    assert "documented" in md and "(default: `2.0`)" not in md
+
+    # The real thing: the example this was written for.
+    real = parse_file(SPEC.src / "primitives" / "hstack.rs", "hstack", [])
+    hstack = next(it for it in real.items if it.name == "HStack")
+    assert {m.name: m.default for m in hstack.methods if m.default} == {
+        "spacing": "0.0",
+        "alignment": "VAlignment::Center",
+    }
+
+
 def _test_import_paths() -> None:
     """Import paths: the `use` tree parser, then paths through the live tree
     (each checked once with `cargo check` when this was written)."""
@@ -4259,6 +4821,8 @@ def run_self_tests() -> int:
     _test_fields_and_variant_shapes()
     _test_member_lookup()
     _test_macro_lookup()
+    _test_variant_lookup()
+    _test_builder_defaults()
     _test_import_paths()
     _test_prune()
     _test_density_images()
@@ -4670,12 +5234,24 @@ def main(argv: list[str]) -> int:
                         file=sys.stderr,
                     )
                     return 2
+                variant, variants = _find_variants(name)
+                if 0 < len(variants) <= MEMBER_MATCH_LIMIT:
+                    member_pages.extend(_variant_page(variant, m) for m in variants)
+                    continue
+                if variants:
+                    print(
+                        f"error: '{variant}' is not a type, and {len(variants)} "
+                        f"enums have a variant of that name. Name one: "
+                        f"{_variant_candidates(variants)}.",
+                        file=sys.stderr,
+                    )
+                    return 2
                 hints = _cross_crate_hints(name.rsplit("::", 1)[-1], args.crate)
                 hint_str = (
                     f" Did you mean: {', '.join(hints)}?" if hints else ""
                 )
                 print(
-                    f"error: no type, module, method, function or macro named "
+                    f"error: no type, module, method, function, enum variant or macro named "
                     f"'{name}' in any teksilo crate."
                     f"{hint_str}",
                     file=sys.stderr,
