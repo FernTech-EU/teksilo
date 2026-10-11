@@ -357,6 +357,8 @@ menu-copy = Copy
 menu-paste = Paste
 menu-paste-unformatted = Paste Unformatted
 menu-select-all = Select All
+menu-undo = Undo
+menu-redo = Redo
 menu-toggle-blockquote = Toggle blockquote
 menu-remove-blockquote = Remove blockquote
 
@@ -464,3 +466,6 @@ code-editor-tab-escape-hint = Tab indents. { $next } moves to the next control, 
 # ShortcutSettings: the header of the group holding every shortcut that
 # declared no category. See crates/teksilo-widgets/src/shortcut_settings.rs.
 shortcut-settings-uncategorized = General
+# The group holding the standard edit shortcuts every window registers
+# (cut, copy, paste, undo, redo, select all), named from the menu-* rows.
+shortcut-category-edit = Edit

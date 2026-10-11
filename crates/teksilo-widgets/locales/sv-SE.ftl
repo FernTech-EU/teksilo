@@ -326,6 +326,8 @@ menu-copy = Kopiera
 menu-paste = Klistra in
 menu-paste-unformatted = Klistra in oformaterat
 menu-select-all = Markera allt
+menu-undo = Ångra
+menu-redo = Gör om
 menu-toggle-blockquote = Växla blockcitat
 menu-remove-blockquote = Ta bort blockcitat
 
@@ -405,3 +407,4 @@ grid-view-detail-name = Detaljer för objekt { $position }
 code-editor-tab-escape-hint = Tabb drar in. { $next } går till nästa kontroll, { $previous } till föregående.
 
 shortcut-settings-uncategorized = Allmänt
+shortcut-category-edit = Redigera

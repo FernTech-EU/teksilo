@@ -326,6 +326,8 @@ menu-copy = Másolás
 menu-paste = Beillesztés
 menu-paste-unformatted = Beillesztés formázás nélkül
 menu-select-all = Összes kijelölése
+menu-undo = Visszavonás
+menu-redo = Mégis
 menu-toggle-blockquote = Idézetblokk be- és kikapcsolása
 menu-remove-blockquote = Idézetblokk eltávolítása
 
@@ -407,3 +409,4 @@ grid-view-detail-name = { $position }. elem részletei
 code-editor-tab-escape-hint = A Tab behúz. A { $next } a következő vezérlőre lép, a { $previous } az előzőre.
 
 shortcut-settings-uncategorized = Általános
+shortcut-category-edit = Szerkesztés

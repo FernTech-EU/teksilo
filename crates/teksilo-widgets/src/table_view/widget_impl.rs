@@ -498,6 +498,15 @@ impl<T: 'static> Widget for TableView<T> {
 
         // The reorder chord wraps the shared key handler; every other key falls
         // through to the shared navigator (cell/row movement, edit, etc.).
+        // Select all comes through the rebindable `edit.select_all`.
+        {
+            let cfg = key_cfg.clone();
+            crate::common::standard_edit::register_standard_edit_action(
+                ctx,
+                teksilo_core::shortcut::StandardEdit::SelectAll,
+                move |_ctx| keyboard::run_select_all(&cfg),
+            );
+        }
         let mut shared_key = keyboard::build_key_handler(key_cfg);
         let reorder_key = reorder_perform.clone();
         let focused_kbd = self.focused_cell.clone();

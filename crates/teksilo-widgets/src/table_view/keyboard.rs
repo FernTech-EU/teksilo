@@ -607,12 +607,13 @@ pub(crate) fn build_key_handler(
                 }
                 return EventResponse::Ignored;
             }
-            // Select all — Ctrl+A, ⌘A on macOS; Ctrl+Shift+A deselects (GTK's
-            // chord, unspent by every other toolkit).
-            // `Ignored` outside the multi modes, so the chord reaches the
-            // application rather than being swallowed by a table that has
-            // nothing to deselect — the shape `ListView`, `TreeView` and
-            // `GridView` already use for the same pair.
+            // Ctrl+Shift+A deselects (GTK's chord, unspent by every other
+            // toolkit). `Ignored` outside the multi modes, so the chord
+            // reaches the application rather than being swallowed by a table
+            // that has nothing to deselect — the shape `ListView`, `TreeView`
+            // and `GridView` already use for the same pair. Select all is the
+            // `edit.select_all` action (`run_select_all`), so a plain Ctrl+A
+            // only gets here when it is not bound to it.
             Key::A if modifiers.command() && modifiers.shift() => {
                 if !cfg.selection_mode.is_multi() {
                     return EventResponse::Ignored;
@@ -620,10 +621,7 @@ pub(crate) fn build_key_handler(
                 clear_selection(&cfg);
                 return EventResponse::Handled;
             }
-            Key::A if modifiers.command() => {
-                select_all(&cfg, row_count);
-                return EventResponse::Handled;
-            }
+            Key::A if modifiers.command() => return EventResponse::Ignored,
             Key::Escape => {
                 if cfg.editing_cell.get().is_some() {
                     cfg.editing_cell.set(None);
@@ -959,6 +957,18 @@ fn clear_selection(cfg: &KeyHandlerConfig) {
         }
         _ => {}
     }
+}
+
+/// Select all for a table, as its `edit.select_all` action runs it. Declined
+/// for an empty table and outside the multi modes, so the command reaches the
+/// application.
+pub(crate) fn run_select_all(cfg: &KeyHandlerConfig) -> bool {
+    let row_count = cfg.navigator.row_count();
+    if row_count == 0 || cfg.col_count == 0 || !cfg.selection_mode.is_multi() {
+        return false;
+    }
+    select_all(cfg, row_count);
+    true
 }
 
 fn select_all(cfg: &KeyHandlerConfig, row_count: usize) {

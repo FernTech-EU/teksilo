@@ -2122,6 +2122,38 @@ fn ctrl_shift_tab_leaves_the_editor_backwards_and_dedents_nothing() {
     );
 }
 
+/// Select-all is the `edit.select_all` shortcut, not a chord the editor
+/// matches itself: rebinding it in the registry moves it here, and the old
+/// chord stops selecting.
+#[test]
+fn select_all_follows_a_rebind_of_edit_select_all() {
+    use teksilo_core::shortcut::{KeyStroke, StandardEdit};
+    let (mut tree, st, _reader) = tabbed_into(CodeEditor::new(doc("fn main() {}")));
+    set_caret(&st, 0);
+    tree.press_key(Key::A, Modifiers::COMMAND);
+    assert!(
+        st.borrow().cursor.has_selection(),
+        "Ctrl+A selects everything"
+    );
+
+    set_caret(&st, 0);
+    tree.shortcut_registry_mut().rebind_primary(
+        StandardEdit::SelectAll.id(),
+        Some(KeyStroke::new(Key::Q, Modifiers::COMMAND)),
+    );
+    tree.press_key(Key::A, Modifiers::COMMAND);
+    assert!(
+        !st.borrow().cursor.has_selection(),
+        "the replaced chord selects nothing"
+    );
+    assert_eq!(text_of(&st), "fn main() {}", "nor does it type an `a`");
+    tree.press_key(Key::Q, Modifiers::COMMAND);
+    assert!(
+        st.borrow().cursor.has_selection(),
+        "the new chord selects everything"
+    );
+}
+
 /// The way out does not cost the editor its Tab: Tab still indents and
 /// Shift+Tab still dedents, with focus staying where it is.
 #[test]

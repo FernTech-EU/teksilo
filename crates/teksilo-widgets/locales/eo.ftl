@@ -309,6 +309,8 @@ menu-copy = Kopii
 menu-paste = Alglui
 menu-paste-unformatted = Alglui sen formatado
 menu-select-all = Elekti ĉion
+menu-undo = Malfari
+menu-redo = Refari
 menu-toggle-blockquote = Ŝalti blokcitaĵon
 menu-remove-blockquote = Forigi blokcitaĵon
 
@@ -371,3 +373,4 @@ grid-view-detail-name = Detaloj de ero { $position }
 code-editor-tab-escape-hint = Tab enŝovas. { $next } movas al la sekva regilo, { $previous } al la antaŭa.
 
 shortcut-settings-uncategorized = Ĝeneralaj
+shortcut-category-edit = Redakti

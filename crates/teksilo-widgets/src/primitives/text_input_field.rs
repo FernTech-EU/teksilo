@@ -69,8 +69,8 @@ use teksilo_core::accessibility::text_runs::{
     RetainedText, TextRunEmission, TextRunSource, push_text_runs,
 };
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::{EventResponse, Key};
-use teksilo_core::shortcut::KeyStroke;
+use teksilo_core::event::EventResponse;
+use teksilo_core::shortcut::StandardEdit;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
@@ -82,7 +82,6 @@ use teksilo_text::{CursorAffinity, CursorDisplay, RichTextEngine, SharedTypesett
 use teksilo_tokens::{InputTokens, TextStyle};
 
 use crate::button::InteractionState;
-use crate::keystroke_format::format_keystroke;
 use crate::menu_item::MenuItem;
 use crate::menu_list::{MenuList, MenuSeparator};
 use crate::rich_text::paint::{PaintParams, paint_frame};
@@ -1099,7 +1098,7 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
 pub(crate) fn menu_row_cut(state: &SharedState) -> MenuItem {
     let state = state.clone();
     MenuItem::new(tr_widget!(menu_cut()))
-        .shortcut_label(format_keystroke(KeyStroke::command(Key::X)))
+        .for_shortcut(StandardEdit::Cut.id())
         .on_activate_fn(move |ctx| {
             {
                 let mut st = state.borrow_mut();
@@ -1113,7 +1112,7 @@ pub(crate) fn menu_row_cut(state: &SharedState) -> MenuItem {
 pub(crate) fn menu_row_copy(state: &SharedState) -> MenuItem {
     let state = state.clone();
     MenuItem::new(tr_widget!(menu_copy()))
-        .shortcut_label(format_keystroke(KeyStroke::command(Key::C)))
+        .for_shortcut(StandardEdit::Copy.id())
         .on_activate_fn(move |ctx| {
             let mut st = state.borrow_mut();
             keyboard::clipboard_copy(&mut st, ctx);
@@ -1123,7 +1122,7 @@ pub(crate) fn menu_row_copy(state: &SharedState) -> MenuItem {
 pub(crate) fn menu_row_paste(state: &SharedState) -> MenuItem {
     let state = state.clone();
     MenuItem::new(tr_widget!(menu_paste()))
-        .shortcut_label(format_keystroke(KeyStroke::command(Key::V)))
+        .for_shortcut(StandardEdit::Paste.id())
         .on_activate_fn(move |ctx| {
             {
                 let mut st = state.borrow_mut();
@@ -1137,7 +1136,7 @@ pub(crate) fn menu_row_paste(state: &SharedState) -> MenuItem {
 pub(crate) fn menu_row_select_all(state: &SharedState) -> MenuItem {
     let state = state.clone();
     MenuItem::new(tr_widget!(menu_select_all()))
-        .shortcut_label(format_keystroke(KeyStroke::command(Key::A)))
+        .for_shortcut(StandardEdit::SelectAll.id())
         .on_activate_fn(move |ctx| {
             {
                 let st = state.borrow();
@@ -1400,6 +1399,12 @@ mod key_text_bubbling_tests;
 /// as a screen reader reads the field, through the platform adapter.
 #[cfg(test)]
 mod context_menu_tests;
+
+/// **Clipboard, undo and select-all follow the user's bindings**: they come
+/// through the rebindable `edit.*` shortcuts, not a chord table of the field's
+/// own.
+#[cfg(test)]
+mod standard_edit_tests;
 
 /// A live handle on a [`TextInputField`] — its text-editing commands, for a
 /// caller outside the widget.

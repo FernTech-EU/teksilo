@@ -145,8 +145,8 @@ pub mod prelude {
         Intent, IntentKind, IntentResponse, IntoTeksiChild, IntoTeksiCondition, Key, KeyStroke,
         LayoutContext, LayoutResponse, ModalCloseBehavior, ModalPresentation, Modifiers,
         OverscrollBehavior, PaintContext, PointerButton, Politeness, Prop, Shortcut,
-        ShortcutRegistry, ShortcutScope, Signal, TapEvent, TeksiBranch, TeksiBranch3, TeksiBranch4,
-        TraversalScopePolicy, Widget, WidgetBuilder, WidgetEvent, WidgetId,
+        ShortcutRegistry, ShortcutScope, Signal, StandardEdit, TapEvent, TeksiBranch, TeksiBranch3,
+        TeksiBranch4, TraversalScopePolicy, Widget, WidgetBuilder, WidgetEvent, WidgetId,
     };
 
     // Window-active appearance: the opt-in per-widget dim wrapper. The

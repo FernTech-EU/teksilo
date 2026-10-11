@@ -6,10 +6,14 @@
 //! # Why the framework has to answer this
 //!
 //! An application that wants **one** Undo command — one chord, one menu row,
-//! routed to whatever the writer is actually editing — has to register that
-//! chord globally, because shortcuts resolve before any widget sees the raw key.
-//! The moment it does, it has taken `Ctrl+Z` away from every text widget in the
-//! tree, and it owes each of them an answer.
+//! routed to whatever the writer is actually editing — handles the
+//! [`edit.undo`](crate::shortcut::StandardEdit::Undo) intent. From the chord,
+//! the walk starts at the focused widget, so a text widget's own action
+//! answers before the application's. Two routes do not pass through the
+//! widget at all, and there the application owes it an answer: a menu row or
+//! a toolbar button, whose intent starts in the chrome, and a widget that
+//! refused its history (a forward-only writing mode), which passes the intent
+//! on rather than letting it reach the application's own history.
 //!
 //! It cannot produce one by itself. It can recognise the surfaces it built and
 //! kept a handle on, and it is blind to the rest: a rename box in a table cell,

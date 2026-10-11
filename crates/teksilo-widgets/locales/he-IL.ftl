@@ -326,6 +326,8 @@ menu-copy = העתקה
 menu-paste = הדבקה
 menu-paste-unformatted = הדבקה ללא עיצוב
 menu-select-all = בחירת הכול
+menu-undo = ביטול
+menu-redo = ביצוע חוזר
 menu-toggle-blockquote = סימון כציטוט
 menu-remove-blockquote = הסרת הציטוט
 
@@ -408,3 +410,4 @@ grid-view-detail-name = פרטי פריט { $position }
 code-editor-tab-escape-hint = Tab מוסיף הזחה. { $next } עובר לפקד הבא, { $previous } לפקד הקודם.
 
 shortcut-settings-uncategorized = כללי
+shortcut-category-edit = עריכה

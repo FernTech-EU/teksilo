@@ -327,6 +327,8 @@ menu-copy = Копіювати
 menu-paste = Вставити
 menu-paste-unformatted = Вставити без форматування
 menu-select-all = Виділити все
+menu-undo = Скасувати
+menu-redo = Повторити
 menu-toggle-blockquote = Перемкнути цитату
 menu-remove-blockquote = Видалити цитату
 
@@ -411,3 +413,4 @@ grid-view-detail-name = Відомості про елемент { $position }
 code-editor-tab-escape-hint = Tab додає відступ. { $next } переходить до наступного елемента керування, { $previous } до попереднього.
 
 shortcut-settings-uncategorized = Загальні
+shortcut-category-edit = Редагування

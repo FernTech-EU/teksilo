@@ -277,6 +277,30 @@ impl<T: 'static> Widget for ListView<T> {
                 ) as crate::common::ordered_move::MoveRow
             });
 
+        // --- Select all, through the rebindable `edit.select_all` ---
+        // Multi selection only; a no-op for Single / None, matching every
+        // list control.
+        {
+            let len = self.source.len_fn.clone();
+            let sel = self.row_selection.clone();
+            crate::common::standard_edit::register_standard_edit_action(
+                ctx,
+                teksilo_core::shortcut::StandardEdit::SelectAll,
+                move |_ctx| {
+                    let count = (len)();
+                    match sel {
+                        Some(ref sel)
+                            if count > 0 && sel.mode() == teksilo_data::SelectionMode::Multi =>
+                        {
+                            sel.select_all(count);
+                            true
+                        }
+                        _ => false,
+                    }
+                },
+            );
+        }
+
         // --- Keyboard navigation + Alt+Arrow reorder ---
         {
             let len_for_key = self.source.len_fn.clone();
@@ -308,21 +332,19 @@ impl<T: 'static> Widget for ListView<T> {
                         return teksilo_core::event::EventResponse::Ignored;
                     }
 
-                    // Select all — Ctrl+A, ⌘A on macOS (Multi selection only;
-                    // a no-op for Single / None, matching every list control).
-                    // With Shift it deselects instead: GTK is the only toolkit
-                    // that *mandates* Ctrl+Shift+A, but the ARIA listbox and
-                    // tree patterns both sanction an unselect-all, Windows and
-                    // Qt simply have none, and adding it takes nothing away.
+                    // Deselect all — Ctrl+Shift+A, ⇧⌘A on macOS (Multi
+                    // selection only). GTK is the only toolkit that
+                    // *mandates* it, but the ARIA listbox and tree patterns
+                    // both sanction an unselect-all, Windows and Qt simply
+                    // have none, and adding it takes nothing away. Select all
+                    // is the `edit.select_all` action registered below, so a
+                    // plain Ctrl+A only gets here when it is not bound to it.
                     if modifiers.command() && matches!(key, Key::A) {
-                        if let Some(ref sel) = sel_for_key
+                        if modifiers.shift()
+                            && let Some(ref sel) = sel_for_key
                             && sel.mode() == teksilo_data::SelectionMode::Multi
                         {
-                            if modifiers.shift() {
-                                sel.clear();
-                            } else {
-                                sel.select_all(count);
-                            }
+                            sel.clear();
                             return teksilo_core::event::EventResponse::Handled;
                         }
                         return teksilo_core::event::EventResponse::Ignored;

@@ -4677,6 +4677,7 @@ impl TeksiloAppBuilder {
         // the root builder runs so that any `tr!` calls inside `build()`
         // resolve against the correct locale on first build.
         let i18n_manager = self.i18n.as_ref().map(|cfg| install_i18n(&mut tree, cfg));
+        teksilo_widgets::localize_standard_shortcuts(tree.shortcut_registry_mut());
 
         // Install the app-state registry (if any) before running the root
         // builder so that widgets' `build()` methods can call

@@ -20,7 +20,17 @@
 //! handlers along the way. When several bindings share a chord, the one
 //! whose scope covers the current focus is selected first, so a `Scoped`
 //! binding outside the focused subtree never shadows an applicable
-//! `Global` one.
+//! `Global` one. An intent that no `Action` handles leaves the key to the
+//! focused widget, which receives it as a plain `KeyDown`.
+//!
+//! Every widget tree registers the [`StandardEdit`] shortcuts (cut, copy,
+//! paste, undo, redo, select all) at creation, so editors' clipboard and
+//! history chords are rebindable like any other.
+
+mod standard;
+
+pub(crate) use standard::register_standard_shortcuts;
+pub use standard::{STANDARD_EDIT_CATEGORY, StandardEdit};
 
 use crate::event::{Key, Modifiers};
 use crate::intent::Intent;

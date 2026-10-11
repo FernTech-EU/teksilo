@@ -1366,6 +1366,30 @@ fn ctrl_shift_a_deselects_everything() {
 }
 
 #[test]
+fn select_all_follows_a_rebind_and_deselect_all_stays_on_its_chord() {
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_core::shortcut::{KeyStroke, StandardEdit};
+    let (mut tree, selection, _scroll, p) = keyboard_fixture(teksilo_data::SelectionMode::Multi);
+    tree.shortcut_registry_mut().rebind_primary(
+        StandardEdit::SelectAll.id(),
+        Some(KeyStroke::new(Key::Q, Modifiers::COMMAND)),
+    );
+
+    tree.press_key(Key::A, Modifiers::COMMAND);
+    tree.layout(p);
+    assert_eq!(selection.count(), 0, "the replaced chord selects nothing");
+
+    tree.press_key(Key::Q, Modifiers::COMMAND);
+    tree.layout(p);
+    assert_eq!(selection.count(), 100, "the new chord selects every row");
+
+    // Deselect-all is not a standard edit command; it keeps its chord.
+    tree.press_key(Key::A, Modifiers::COMMAND | Modifiers::SHIFT);
+    tree.layout(p);
+    assert_eq!(selection.count(), 0);
+}
+
+#[test]
 fn page_down_up_moves_selection_by_viewport() {
     use teksilo_core::event::{Key, Modifiers};
     use teksilo_data::{SelectionMode, SelectionModel};

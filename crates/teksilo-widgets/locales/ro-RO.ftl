@@ -328,6 +328,8 @@ menu-copy = Copiere
 menu-paste = Lipire
 menu-paste-unformatted = Lipire fără formatare
 menu-select-all = Selectare totală
+menu-undo = Anulează
+menu-redo = Refă
 menu-toggle-blockquote = Comutare citat
 menu-remove-blockquote = Eliminare citat
 
@@ -419,3 +421,4 @@ grid-view-detail-name = Detaliile elementului { $position }
 code-editor-tab-escape-hint = Tab indentează. { $next } trece la controlul următor, { $previous } la cel anterior.
 
 shortcut-settings-uncategorized = Generale
+shortcut-category-edit = Editare

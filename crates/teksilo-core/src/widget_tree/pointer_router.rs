@@ -776,13 +776,30 @@ impl WidgetTree {
                             .invoke_on_activate(id, keystroke, &mut act_ctx)
                     {
                         self.collect_from_ctx(act_ctx, anchor_id);
+                        // Intents `on_activate` sent through its ctx go
+                        // first, as they did when everything shared one
+                        // queue.
+                        self.drain_pending_intents(&mut *ops);
                         // Tag shortcut origin so analytics can
                         // distinguish keyboard-driven activations from
                         // button / menu / programmatic ones.
                         let intent = intent.with_source(crate::telemetry::IntentSource::Shortcut);
-                        self.enqueue_intent(anchor_id, intent, propagate_when_disabled);
+                        let consumed = self.dispatch_intent(
+                            anchor_id,
+                            intent,
+                            propagate_when_disabled,
+                            &mut *ops,
+                        );
                         self.drain_pending_intents(&mut *ops);
-                        return;
+                        if consumed {
+                            return;
+                        }
+                        // No action took the intent: the key is the focused
+                        // widget's after all, delivered below as if no
+                        // shortcut had matched. The standard edit shortcuts
+                        // depend on this — Ctrl+C is bound in every tree, and
+                        // a widget that copies from its own `on_key` must
+                        // still see it.
                     }
                 }
                 // Chosen candidate had no anchor after all (e.g. a Global
@@ -5073,6 +5090,108 @@ mod tests {
         let (action, on_key) = run(false);
         assert!(action, "without capture the shortcut must fire");
         assert!(!on_key, "without capture the widget must not see the key");
+    }
+
+    /// A focused widget that records every `KeyDown` it is handed.
+    fn key_recorder(
+        tree: &mut WidgetTree,
+    ) -> (WidgetId, std::rc::Rc<std::cell::RefCell<Vec<Key>>>) {
+        let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let log = seen.clone();
+        let widget = tree.add(FillWidget::new().focusable().on_key(move |event, _ctx| {
+            if let WidgetEvent::KeyDown { key, .. } = event {
+                log.borrow_mut().push(*key);
+            }
+            EventResponse::Ignored
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(widget);
+        (widget, seen)
+    }
+
+    #[test]
+    fn a_shortcut_no_action_takes_leaves_its_key_to_the_focused_widget() {
+        use crate::action::Action;
+        use crate::intent::IntentResponse;
+        use crate::shortcut::{KeyStroke, Shortcut};
+
+        let mut tree = WidgetTree::new();
+        let (widget, seen) = key_recorder(&mut tree);
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::command(Key::S))
+                .build(),
+        );
+
+        // Nothing handles `app.save`.
+        tree.press_key(Key::S, Modifiers::COMMAND);
+        assert_eq!(
+            *seen.borrow(),
+            vec![Key::S],
+            "an unhandled intent must not eat the key"
+        );
+
+        // An action that runs and passes the intent on has not consumed it.
+        tree.push_action(
+            widget,
+            Action::new("app.save").on_invoke_with_response(|_i, _c| IntentResponse::Propagated),
+        );
+        tree.press_key(Key::S, Modifiers::COMMAND);
+        assert_eq!(
+            seen.borrow().len(),
+            2,
+            "a propagated intent must leave the key too"
+        );
+
+        // Deleting the fall-through makes both of the above go red; this is
+        // the control: a consuming action still takes the key.
+        let mut tree = WidgetTree::new();
+        let (widget, seen) = key_recorder(&mut tree);
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::command(Key::S))
+                .build(),
+        );
+        tree.push_action(widget, Action::new("app.save").on_invoke(|_i, _c| {}));
+        tree.press_key(Key::S, Modifiers::COMMAND);
+        assert!(
+            seen.borrow().is_empty(),
+            "a handled shortcut consumes its key"
+        );
+    }
+
+    #[test]
+    fn standard_edit_chords_follow_a_rebind() {
+        use crate::action::Action;
+        use crate::shortcut::{KeyStroke, StandardEdit};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let mut tree = WidgetTree::new();
+        let (widget, seen) = key_recorder(&mut tree);
+        let copies = Rc::new(Cell::new(0));
+        let count = copies.clone();
+        tree.push_action(
+            widget,
+            Action::new(StandardEdit::Copy.id())
+                .on_invoke(move |_i, _c| count.set(count.get() + 1)),
+        );
+
+        // Registered by `WidgetTree::new`, with no help from the app.
+        tree.press_key(Key::C, Modifiers::COMMAND);
+        assert_eq!(copies.get(), 1, "Ctrl+C reaches the edit.copy action");
+        assert!(seen.borrow().is_empty());
+
+        // Move Copy elsewhere: the old chord no longer copies (it reaches the
+        // widget as a plain key), the new one does.
+        let elsewhere = KeyStroke::new(Key::Character('à'), Modifiers::CTRL);
+        tree.shortcut_registry_mut()
+            .rebind_primary(StandardEdit::Copy.id(), Some(elsewhere));
+        tree.press_key(Key::C, Modifiers::COMMAND);
+        assert_eq!(copies.get(), 1, "the replaced chord must not copy");
+        assert_eq!(*seen.borrow(), vec![Key::C]);
+        tree.press_key(Key::Character('à'), Modifiers::CTRL);
+        assert_eq!(copies.get(), 2, "the new chord copies");
     }
 
     #[test]

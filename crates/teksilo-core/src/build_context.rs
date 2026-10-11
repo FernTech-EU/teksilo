@@ -1061,12 +1061,12 @@ impl<'a> BuildContext<'a> {
 
     /// Declare that the widget being built **edits text**.
     ///
-    /// Every text widget should call this. It is what lets an application take
-    /// a text chord — `Ctrl+Z`, `Ctrl+C` — for itself without silently breaking
-    /// the widget it took it from: the host asks
+    /// Every text widget should call this. It is what lets an application run
+    /// an edit command — Undo, Copy — from a menu or a toolbar on whatever the
+    /// caret is in: the host asks
     /// [`focused_text_surface`](crate::widget_tree::WidgetTree::focused_text_surface)
-    /// and either drives this surface or steps aside so the widget keeps its own
-    /// keys. See [`crate::text_surface`] for the whole argument.
+    /// and either drives this surface or runs its own command. See
+    /// [`crate::text_surface`] for the whole argument.
     ///
     /// Owned by the registering widget and torn down on its rebuild or destroy,
     /// like [`register_action_global`](Self::register_action_global). Calling it

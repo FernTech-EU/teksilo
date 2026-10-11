@@ -28,6 +28,12 @@
 //! );
 //! ```
 //!
+//! The standard edit commands every tree registers ([`StandardEdit`]: cut,
+//! copy, paste, undo, redo, select all) are left out. They act on the widget
+//! that holds the focus, and the palette has taken it, so a row for one would
+//! run nothing. An application whose own undo should be searchable registers
+//! it as a command of its own.
+//!
 //! # Presenting it
 //!
 //! [`CommandPalette::present`] shows it centered, dismissed by Escape or a click
@@ -81,7 +87,7 @@ use teksilo_core::color_prop::ColorProp;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::intent::Intent;
 use teksilo_core::modal::{ModalCloseBehavior, ModalPresentation, ModalRequest};
-use teksilo_core::shortcut::KeyStroke;
+use teksilo_core::shortcut::{KeyStroke, StandardEdit};
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::WidgetBuilder;
@@ -447,6 +453,10 @@ impl CommandPalette {
                 intent: eff.shortcut.intent_name(),
             })
             .filter(|cmd| self.show_disabled || cmd.enabled)
+            // Cut, copy, undo and the rest act on the widget that holds the
+            // focus, which the palette has just taken: run from here they
+            // would reach no editor.
+            .filter(|cmd| StandardEdit::from_id(cmd.id).is_none())
             .filter(|cmd| self.include.as_ref().is_none_or(|f| f(cmd)))
             .filter_map(|cmd| Some((fuzzy_score(&needle, &cmd.haystack())?, cmd)))
             .collect();

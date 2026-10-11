@@ -6,15 +6,16 @@
 //! This module owns the full `KeyDown` / `ImeComposition` / `ImeCommit` dispatch: navigation
 //! (arrows, Home/End, PageUp/Down), editing (Backspace, Delete, Enter,
 //! `Ctrl+Backspace` / `Ctrl+Delete` for word‑level deletion), format
-//! toggles (`Ctrl+B` / `Ctrl+I` / `Ctrl+U`), undo/redo
-//! (`Ctrl+Z` / `Ctrl+Y` / `Ctrl+Shift+Z`), clipboard commands
-//! (`Ctrl+C` / `Ctrl+X` / `Ctrl+V`), and `Ctrl+A` with the table‑aware
-//! escalation ladder.
+//! toggles (`Ctrl+B` / `Ctrl+I` / `Ctrl+U`). Undo / redo, the clipboard
+//! and select-all (with its table‑aware escalation ladder) are not keys:
+//! they come through the rebindable `edit.*` shortcuts and
+//! [`run_standard_edit`].
 //!
 //! All functions take `&SharedState` so they can be called from inside
 //! `HandlerSet` closures without borrowing the widget struct.
 
 use teksilo_core::event::{EventResponse, Key, ScrollMotion, WidgetEvent};
+use teksilo_core::shortcut::StandardEdit;
 use teksilo_core::widget::EventContext;
 use teksilo_text::text_document::{
     BlockFormat, ListFormat, MoveMode, MoveOperation, SelectionType, TableCellRef, TextFormat,
@@ -162,16 +163,13 @@ pub(super) fn handle_key(
     // `state.cursor` directly through a short-lived borrow and drop
     // the state before calling `sync_cursor_signals` so the signal
     // observers see the post-move value.
-    // Ctrl+A is the only key that preserves `select_all_level`; every
-    // other key resets it so a follow-up Ctrl+A starts at level 1.
-    // Matches the godot reference's own `select_all_level` reset.
-    let is_select_all = matches!(key, Key::A) && ctrl;
+    // Every key resets `select_all_level`, so the next select-all starts at
+    // level 1 — matching the godot reference's own reset. Select-all itself
+    // is not a key here (see `run_standard_edit`), so nothing is exempt.
     let action: KeyAction = {
         let mut st = state.borrow_mut();
-        if !is_select_all {
-            st.select_all_level = 0;
-            st.select_all_anchor_cell = None;
-        }
+        st.select_all_level = 0;
+        st.select_all_anchor_cell = None;
         let filter = st.policy.command_filter;
         match key {
             Key::ArrowLeft if filter.accepts(EditCommandKind::MoveLeft) => {
@@ -279,35 +277,9 @@ pub(super) fn handle_key(
                     KeyAction::LineEdgeMotion
                 }
             }
-            Key::A if ctrl && filter.accepts(EditCommandKind::SelectAll) => {
-                apply_select_all_ladder(&mut st);
-                // Horizontal motion is invalidated regardless.
-                st.preferred_x = None;
-                // KeepPreferredX skips the preferred_x reset in
-                // post-processing — we already nulled it inline, and
-                // crucially we must not clobber the `select_all_level`
-                // which was just incremented.
-                KeyAction::KeepPreferredX
-            }
-            Key::C if ctrl && filter.accepts(EditCommandKind::Copy) => {
-                clipboard::copy(&mut st, ctx);
-                KeyAction::ClearPreferredX
-            }
-            Key::X if ctrl && filter.accepts(EditCommandKind::Cut) => {
-                clipboard::cut(&mut st, ctx);
-                KeyAction::ClearPreferredX
-            }
-            Key::V if ctrl && shift && filter.accepts(EditCommandKind::PasteUnformatted) => {
-                // Ctrl+Shift+V (⌘⇧V on macOS) — paste as plain text.
-                // Matched before the plain Ctrl+V arm so the shift
-                // modifier isn't absorbed by the regular paste.
-                clipboard::paste_unformatted(&mut st, ctx);
-                KeyAction::ClearPreferredX
-            }
-            Key::V if ctrl && !shift && filter.accepts(EditCommandKind::Paste) => {
-                clipboard::paste(&mut st, ctx);
-                KeyAction::ClearPreferredX
-            }
+            // Select-all, the clipboard and undo / redo are not keys here:
+            // they arrive as the `edit.*` actions `run_standard_edit` serves,
+            // so the user can rebind them.
             // --- Editor-preset mutating commands ---
             Key::Backspace if filter.accepts(EditCommandKind::DeletePrev) => {
                 if text_nav::deletes_word(*modifiers) {
@@ -528,18 +500,6 @@ pub(super) fn handle_key(
                 toggle_char_format(&mut st, FormatBit::Underline);
                 KeyAction::ClearPreferredX
             }
-            Key::Z if ctrl && !shift && filter.accepts(EditCommandKind::Undo) => {
-                let _ = st.document.undo();
-                KeyAction::ClearPreferredX
-            }
-            Key::Y if ctrl && filter.accepts(EditCommandKind::Redo) => {
-                let _ = st.document.redo();
-                KeyAction::ClearPreferredX
-            }
-            Key::Z if ctrl && shift && filter.accepts(EditCommandKind::Redo) => {
-                let _ = st.document.redo();
-                KeyAction::ClearPreferredX
-            }
             _ => {
                 // Printable character fallback: winit populates
                 // `KeyDown::text` with the character produced by the
@@ -576,6 +536,79 @@ pub(super) fn handle_key(
         }
     };
 
+    finish_key_action(state, ctx, action)
+}
+
+/// Run one of the standard edit commands, as its `edit.*` action does.
+///
+/// Returns whether it ran. A command the editor's
+/// [`CommandFilter`](crate::common::editor_runtime::CommandFilter) refuses is declined, which
+/// passes the intent on to an ancestor's action and then to the plain key —
+/// an application that must not route a refused Undo elsewhere asks the
+/// focused text surface's `history_frozen` in its own action.
+pub(super) fn run_standard_edit(
+    state: &SharedState,
+    command: StandardEdit,
+    ctx: &mut EventContext,
+) -> bool {
+    let action = {
+        let mut st = state.borrow_mut();
+        // Select-all is the one command that keeps climbing its ladder;
+        // anything else in between starts it again at level 1.
+        if command != StandardEdit::SelectAll {
+            st.select_all_level = 0;
+            st.select_all_anchor_cell = None;
+        }
+        let filter = st.policy.command_filter;
+        match command {
+            StandardEdit::SelectAll if filter.accepts(EditCommandKind::SelectAll) => {
+                apply_select_all_ladder(&mut st);
+                // Horizontal motion is invalidated regardless.
+                st.preferred_x = None;
+                // KeepPreferredX skips the preferred_x reset in
+                // post-processing — we already nulled it inline, and
+                // crucially we must not clobber the `select_all_level`
+                // which was just incremented.
+                KeyAction::KeepPreferredX
+            }
+            StandardEdit::Copy if filter.accepts(EditCommandKind::Copy) => {
+                clipboard::copy(&mut st, ctx);
+                KeyAction::ClearPreferredX
+            }
+            StandardEdit::Cut if filter.accepts(EditCommandKind::Cut) => {
+                clipboard::cut(&mut st, ctx);
+                KeyAction::ClearPreferredX
+            }
+            StandardEdit::Paste if filter.accepts(EditCommandKind::Paste) => {
+                clipboard::paste(&mut st, ctx);
+                KeyAction::ClearPreferredX
+            }
+            StandardEdit::PastePlain if filter.accepts(EditCommandKind::PasteUnformatted) => {
+                clipboard::paste_unformatted(&mut st, ctx);
+                KeyAction::ClearPreferredX
+            }
+            StandardEdit::Undo if filter.accepts(EditCommandKind::Undo) => {
+                let _ = st.document.undo();
+                KeyAction::ClearPreferredX
+            }
+            StandardEdit::Redo if filter.accepts(EditCommandKind::Redo) => {
+                let _ = st.document.redo();
+                KeyAction::ClearPreferredX
+            }
+            _ => return false,
+        }
+    };
+    finish_key_action(state, ctx, action);
+    true
+}
+
+/// The shared tail of a handled key or command: what `action` says about the
+/// sticky column and the caret's affinity, then the caret-moved epilogue.
+fn finish_key_action(
+    state: &SharedState,
+    ctx: &mut EventContext,
+    action: KeyAction,
+) -> EventResponse {
     match action {
         KeyAction::Unhandled => EventResponse::Ignored,
         KeyAction::ClearPreferredX => {

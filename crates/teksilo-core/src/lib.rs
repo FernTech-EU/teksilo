@@ -127,6 +127,7 @@ pub use raw_handle::ParentHandle;
 pub use shortcut::{
     CaptureHandle, EffectiveShortcut, KeyCaptureCallback, KeyStroke, KeyStrokeOverride, Shortcut,
     ShortcutBuilder, ShortcutOnActivate, ShortcutRegistry, ShortcutScope, SlotOverride,
+    StandardEdit,
 };
 pub use signal::{ObserverHandle, Prop, Signal, SignalAccessError};
 pub use styles::{Theme, ThemeAppearance, ThemeExtensions, ThemeId};

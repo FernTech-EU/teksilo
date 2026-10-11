@@ -25,7 +25,7 @@
 //!   stacked at column 0, and the next keystroke types every character twice.
 
 use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
-use teksilo_core::shortcut::KeyStroke;
+use teksilo_core::shortcut::{KeyStroke, StandardEdit};
 use teksilo_core::widget::EventContext;
 use teksilo_i18n::tr_widget;
 use teksilo_text::text_document::{MoveMode, MoveOperation, SelectionType};
@@ -191,23 +191,9 @@ pub(super) fn handle_key(
                 KeyAction::ClearPreferredX
             }
 
-            // --- Clipboard ---
-            //
-            // Copy is not a mutation, so a read-only viewer's filter accepts it
-            // (and rejects Cut / Paste). With no selection, Copy and Cut act on
-            // the whole current line — the desktop convention.
-            Key::C if ctrl && filter.accepts(CodeCommand::Copy) => {
-                clipboard::copy(&st, ctx);
-                KeyAction::ClearPreferredX
-            }
-            Key::X if ctrl && filter.accepts(CodeCommand::Cut) => {
-                clipboard::cut(&mut st, ctx);
-                KeyAction::ClearPreferredX
-            }
-            Key::V if ctrl && filter.accepts(CodeCommand::Paste) => {
-                clipboard::paste(&mut st, ctx);
-                KeyAction::ClearPreferredX
-            }
+            // Select-all, the clipboard and undo / redo are not keys here:
+            // they arrive as the `edit.*` actions `run_standard_edit` serves,
+            // so the user can rebind them.
 
             // --- Horizontal ---
             // The motion comes from `common::text_nav`, not from a bare "is
@@ -289,15 +275,6 @@ pub(super) fn handle_key(
                 KeyAction::ClearPreferredX
             }
 
-            // --- Selection ---
-            Key::A if ctrl && filter.accepts(CodeCommand::SelectAll) => {
-                // No escalation ladder: that is a rich-text affordance for
-                // climbing out of a table cell, and there are no cells here.
-                st.clear_extra_carets();
-                st.cursor.select(SelectionType::Document);
-                KeyAction::ClearPreferredX
-            }
-
             // --- Carets ---
             Key::Escape => {
                 // Only claim Escape when there is something to collapse;
@@ -338,25 +315,6 @@ pub(super) fn handle_key(
                 KeyAction::ClearPreferredX
             }
 
-            // --- History ---
-            Key::Z if ctrl && !shift && filter.accepts(CodeCommand::Undo) => {
-                // Undoing text under several carets would leave them pointing
-                // at offsets the undone edit invented; collapse first.
-                st.clear_extra_carets();
-                let _ = st.document.undo();
-                KeyAction::ClearPreferredX
-            }
-            Key::Y if ctrl && filter.accepts(CodeCommand::Redo) => {
-                st.clear_extra_carets();
-                let _ = st.document.redo();
-                KeyAction::ClearPreferredX
-            }
-            Key::Z if ctrl && shift && filter.accepts(CodeCommand::Redo) => {
-                st.clear_extra_carets();
-                let _ = st.document.redo();
-                KeyAction::ClearPreferredX
-            }
-
             // --- Printable input ---
             _ => {
                 if ctrl {
@@ -392,14 +350,7 @@ pub(super) fn handle_key(
         }
     };
 
-    let response = match action {
-        KeyAction::Unhandled => EventResponse::Ignored,
-        KeyAction::ClearPreferredX => {
-            state.borrow_mut().preferred_x = None;
-            caret_moved(state, ctx)
-        }
-        KeyAction::KeepPreferredX => caret_moved(state, ctx),
-    };
+    let response = finish_key_action(state, ctx, action);
 
     // Re-evaluate completion after a handled edit or move. `react` is a no-op
     // without a provider, and only *typing* (or Ctrl+Space, handled above) opens
@@ -411,6 +362,78 @@ pub(super) fn handle_key(
     }
 
     response
+}
+
+/// Run one of the standard edit commands, as its `edit.*` action does.
+///
+/// Returns whether it ran: a command the policy's filter rejects (Cut, Paste,
+/// Undo and Redo in a read-only viewer) is declined, which passes the intent
+/// on to an ancestor's action and then to the plain key.
+pub(super) fn run_standard_edit(
+    state: &SharedState,
+    command: StandardEdit,
+    ctx: &mut EventContext,
+) -> bool {
+    {
+        let mut st = state.borrow_mut();
+        let filter = st.policy.command_filter;
+        match command {
+            StandardEdit::SelectAll if filter.accepts(CodeCommand::SelectAll) => {
+                // No escalation ladder: that is a rich-text affordance for
+                // climbing out of a table cell, and there are no cells here.
+                st.clear_extra_carets();
+                st.cursor.select(SelectionType::Document);
+            }
+            // Copy is not a mutation, so a read-only viewer's filter accepts
+            // it (and rejects Cut / Paste). With no selection, Copy and Cut
+            // act on the whole current line — the desktop convention.
+            StandardEdit::Copy if filter.accepts(CodeCommand::Copy) => {
+                clipboard::copy(&st, ctx);
+            }
+            StandardEdit::Cut if filter.accepts(CodeCommand::Cut) => {
+                clipboard::cut(&mut st, ctx);
+            }
+            // Code has no formatting to strip.
+            StandardEdit::Paste | StandardEdit::PastePlain
+                if filter.accepts(CodeCommand::Paste) =>
+            {
+                clipboard::paste(&mut st, ctx);
+            }
+            StandardEdit::Undo if filter.accepts(CodeCommand::Undo) => {
+                // Undoing text under several carets would leave them pointing
+                // at offsets the undone edit invented; collapse first.
+                st.clear_extra_carets();
+                let _ = st.document.undo();
+            }
+            StandardEdit::Redo if filter.accepts(CodeCommand::Redo) => {
+                st.clear_extra_carets();
+                let _ = st.document.redo();
+            }
+            _ => return false,
+        }
+    }
+    finish_key_action(state, ctx, KeyAction::ClearPreferredX);
+    // Every one of these changed the document or the selection, so an open
+    // completion popup re-evaluates (and dismisses) as after any edit.
+    completion::react(state, ctx, Trigger::Edited);
+    true
+}
+
+/// The shared tail of a handled key or command: what `action` says about the
+/// sticky column, then the caret-moved epilogue.
+fn finish_key_action(
+    state: &SharedState,
+    ctx: &mut EventContext,
+    action: KeyAction,
+) -> EventResponse {
+    match action {
+        KeyAction::Unhandled => EventResponse::Ignored,
+        KeyAction::ClearPreferredX => {
+            state.borrow_mut().preferred_x = None;
+            caret_moved(state, ctx)
+        }
+        KeyAction::KeepPreferredX => caret_moved(state, ctx),
+    }
 }
 
 /// What a reader is told about leaving an editor that takes Tab: the two
@@ -431,8 +454,9 @@ pub(super) fn tab_escape_hint() -> String {
 /// How a handled key should drive completion, or `None` for keys that never do
 /// (Enter/Tab when the popup is closed).
 ///
-/// Ctrl-chords are **not** ignored: Ctrl+A / Ctrl+Z / Ctrl+X / Ctrl+V / Ctrl+D /
-/// Ctrl+/ / add-caret all changed the document or selection, so an open popup
+/// Ctrl-chords are **not** ignored: Ctrl+D / Ctrl+/ / add-caret all changed
+/// the document or selection (as did the `edit.*` commands, which
+/// [`run_standard_edit`] re-evaluates itself), so an open popup
 /// must re-evaluate against the new state (and dismiss) — otherwise a following
 /// Enter would accept a stale suggestion against the wrong range. Ctrl+Space is
 /// handled earlier and never reaches here.

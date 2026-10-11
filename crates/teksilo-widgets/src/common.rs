@@ -30,6 +30,7 @@ pub(crate) mod row_metrics;
 pub(crate) mod row_offsets;
 pub(crate) mod scroll;
 pub mod scrollable;
+pub(crate) mod standard_edit;
 pub(crate) mod text_nav;
 pub(crate) mod text_scroll;
 #[cfg(test)]

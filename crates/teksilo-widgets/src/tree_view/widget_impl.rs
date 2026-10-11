@@ -463,6 +463,30 @@ impl<T: 'static> Widget for TreeView<T> {
             (None, None)
         };
 
+        // --- Select all visible rows, through the rebindable
+        // `edit.select_all` (Multi only) ---
+        {
+            let source = self.source.clone();
+            let sel = self.row_selection.clone();
+            crate::common::standard_edit::register_standard_edit_action(
+                ctx,
+                teksilo_core::shortcut::StandardEdit::SelectAll,
+                move |_ctx| {
+                    let visible_count = source.visible_count();
+                    match sel {
+                        Some(ref sel)
+                            if visible_count > 0
+                                && sel.mode() == teksilo_data::SelectionMode::Multi =>
+                        {
+                            sel.select_all(visible_count);
+                            true
+                        }
+                        _ => false,
+                    }
+                },
+            );
+        }
+
         // --- Keyboard navigation + expand/collapse + Alt+Arrow reorder ---
         {
             let source = self.source.clone();
@@ -537,18 +561,16 @@ impl<T: 'static> Widget for TreeView<T> {
                         new_scroll
                     };
 
-                    // Select all visible rows — Ctrl+A, ⌘A on macOS (Multi only);
-                    // with Shift, deselect instead (GTK's Ctrl+Shift+A, which
-                    // no other toolkit spends on anything else).
+                    // Deselect all — GTK's Ctrl+Shift+A, which no other
+                    // toolkit spends on anything else (Multi only). Select all
+                    // is the `edit.select_all` action registered below, so a
+                    // plain Ctrl+A only gets here when it is not bound to it.
                     if modifiers.command() && matches!(key, Key::A) {
-                        if let Some(ref sel) = sel_for_key
+                        if modifiers.shift()
+                            && let Some(ref sel) = sel_for_key
                             && sel.mode() == teksilo_data::SelectionMode::Multi
                         {
-                            if modifiers.shift() {
-                                sel.clear();
-                            } else {
-                                sel.select_all(visible_count);
-                            }
+                            sel.clear();
                             return teksilo_core::event::EventResponse::Handled;
                         }
                         return teksilo_core::event::EventResponse::Ignored;

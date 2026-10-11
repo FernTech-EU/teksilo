@@ -606,6 +606,9 @@ impl WindowManager {
     fn new_window_tree(&self, theme: Theme) -> WidgetTree {
         let mut tree = WidgetTree::new().with_theme(theme);
         tree.set_records_announcements(self.records_announcements);
+        // The standard edit shortcuts arrive with English names; the settings
+        // UI shows them in the user's language.
+        teksilo_widgets::localize_standard_shortcuts(tree.shortcut_registry_mut());
         tree
     }
 

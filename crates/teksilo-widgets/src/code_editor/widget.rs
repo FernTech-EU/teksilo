@@ -729,6 +729,25 @@ impl Widget for CodeEditor {
 
         ctx.apply_self_handlers(handlers);
 
+        // Select-all, the clipboard and undo / redo come through the
+        // rebindable `edit.*` shortcuts, not as keys.
+        {
+            let state = self.state.clone();
+            let touch = self.touch.clone();
+            crate::common::standard_edit::register_standard_edit_actions(
+                ctx,
+                move |command, ctx| {
+                    let ran = super::keyboard::run_standard_edit(&state, command, ctx);
+                    if ran {
+                        // As after a key: the published handles point at
+                        // where the text used to be.
+                        touch.refresh(ctx, ToolbarIntent::Hide);
+                    }
+                    ran
+                },
+            );
+        }
+
         // The touch-selection overlays: the affordance layer (handles + lens)
         // and the selection toolbar, both detached content owned by this build.
         // Inert until a finger raises them.

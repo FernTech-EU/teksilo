@@ -35,6 +35,7 @@ use std::sync::{Arc, Mutex};
 
 use teksilo_core::Signal;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
+use teksilo_core::shortcut::StandardEdit;
 use teksilo_core::widget::EventContext;
 use teksilo_text::text_document::{MoveMode, SelectionType};
 use teksilo_tokens::Color;
@@ -611,9 +612,9 @@ fn at_bottom(st: &CodeEditorState) -> bool {
 
 /// Read-only keyboard for a log view: the keys *scroll*, they do not drive an
 /// invisible caret (which would scroll to a target outside the shaped window,
-/// where its geometry is unknown). Select-all and copy work because they need no
-/// geometry — copy reads the document by character range, correct across any
-/// range whether shaped or not.
+/// where its geometry is unknown). Select-all and copy ([`run_log_standard_edit`])
+/// work because they need no geometry — copy reads the document by character
+/// range, correct across any range whether shaped or not.
 pub(crate) fn handle_log_key(
     state: &SharedState,
     event: &WidgetEvent,
@@ -627,13 +628,11 @@ pub(crate) fn handle_log_key(
 
     enum Act {
         Scroll,
-        SelectAll,
-        Copy,
         None,
     }
 
     let act = {
-        let mut st = state.borrow_mut();
+        let st = state.borrow();
         let row_h = current_row_height(&st).max(1.0);
         // A page keeps one row of context, matching a scrollbar page.
         let page = (st.viewport_height - row_h).max(row_h);
@@ -683,12 +682,9 @@ pub(crate) fn handle_log_key(
                 st.scroll_x.set_if_changed((cx + step_x).min(max_x));
                 Act::Scroll
             }
-            Key::A if ctrl => {
-                st.clear_extra_carets();
-                st.cursor.select(SelectionType::Document);
-                Act::SelectAll
-            }
-            Key::C if ctrl => Act::Copy,
+            // Select-all and copy are not keys here: they arrive as the
+            // `edit.*` actions `run_log_standard_edit` serves, so the user
+            // can rebind them.
             _ => Act::None,
         }
     };
@@ -698,15 +694,32 @@ pub(crate) fn handle_log_key(
             ctx.request_frame();
             EventResponse::Handled
         }
-        Act::SelectAll => {
+        Act::None => EventResponse::Ignored,
+    }
+}
+
+/// Select-all and copy for a log view, as their `edit.*` actions run them.
+/// Every other standard edit command is declined: a log is read-only.
+pub(crate) fn run_log_standard_edit(
+    state: &SharedState,
+    command: StandardEdit,
+    ctx: &mut EventContext,
+) -> bool {
+    match command {
+        StandardEdit::SelectAll => {
+            {
+                let mut st = state.borrow_mut();
+                st.clear_extra_carets();
+                st.cursor.select(SelectionType::Document);
+            }
             super::sync_cursor_signals(state);
             ctx.request_frame();
-            EventResponse::Handled
+            true
         }
-        Act::Copy => {
+        StandardEdit::Copy => {
             super::clipboard::copy(&state.borrow(), ctx);
-            EventResponse::Handled
+            true
         }
-        Act::None => EventResponse::Ignored,
+        _ => false,
     }
 }

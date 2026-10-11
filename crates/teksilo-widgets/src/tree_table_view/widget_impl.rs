@@ -427,6 +427,15 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // through to the navigator (cell/row movement, expand/collapse, edit) —
         // including `⌥→` / `⌥←` on macOS, which the reparent decoder declines
         // there because they already expand a whole subtree.
+        // Select all comes through the rebindable `edit.select_all`.
+        {
+            let cfg = key_cfg.clone();
+            crate::common::standard_edit::register_standard_edit_action(
+                ctx,
+                teksilo_core::shortcut::StandardEdit::SelectAll,
+                move |_ctx| keyboard::run_select_all(&cfg),
+            );
+        }
         let mut shared_key = keyboard::build_key_handler(key_cfg);
         let reorder_key = reorder_perform.clone();
         let reparent_key = reparent_perform.clone();

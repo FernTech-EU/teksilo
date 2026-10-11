@@ -36,11 +36,9 @@
 
 use teksilo_i18n::tr_widget;
 
-use teksilo_core::event::Key;
-use teksilo_core::shortcut::KeyStroke;
+use teksilo_core::shortcut::StandardEdit;
 use teksilo_core::widget::Widget;
 
-use crate::keystroke_format::format_keystroke;
 use crate::menu_item::MenuItem;
 use crate::menu_list::MenuList;
 
@@ -55,7 +53,7 @@ use crate::common::editor_runtime::PolicyBundle;
 fn row_cut(state: &SharedState) -> MenuItem {
     let state = state.clone();
     MenuItem::new(tr_widget!(menu_cut()))
-        .shortcut_label(format_keystroke(KeyStroke::command(Key::X)))
+        .for_shortcut(StandardEdit::Cut.id())
         .on_activate_fn(move |ctx| {
             {
                 let mut st = state.borrow_mut();
@@ -71,7 +69,7 @@ fn row_cut(state: &SharedState) -> MenuItem {
 fn row_copy(state: &SharedState) -> MenuItem {
     let state = state.clone();
     MenuItem::new(tr_widget!(menu_copy()))
-        .shortcut_label(format_keystroke(KeyStroke::command(Key::C)))
+        .for_shortcut(StandardEdit::Copy.id())
         .on_activate_fn(move |ctx| {
             super::clipboard::copy(&state.borrow(), ctx);
         })
@@ -81,7 +79,7 @@ fn row_copy(state: &SharedState) -> MenuItem {
 fn row_paste(state: &SharedState) -> MenuItem {
     let state = state.clone();
     MenuItem::new(tr_widget!(menu_paste()))
-        .shortcut_label(format_keystroke(KeyStroke::command(Key::V)))
+        .for_shortcut(StandardEdit::Paste.id())
         .on_activate_fn(move |ctx| {
             {
                 let mut st = state.borrow_mut();
@@ -97,7 +95,7 @@ fn row_paste(state: &SharedState) -> MenuItem {
 fn row_select_all(state: &SharedState) -> MenuItem {
     let state = state.clone();
     MenuItem::new(tr_widget!(menu_select_all()))
-        .shortcut_label(format_keystroke(KeyStroke::command(Key::A)))
+        .for_shortcut(StandardEdit::SelectAll.id())
         .on_activate_fn(move |ctx| {
             {
                 let mut st = state.borrow_mut();

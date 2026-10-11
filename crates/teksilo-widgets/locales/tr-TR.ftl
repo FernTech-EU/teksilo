@@ -326,6 +326,8 @@ menu-copy = Kopyala
 menu-paste = Yapıştır
 menu-paste-unformatted = Biçimlendirmeden Yapıştır
 menu-select-all = Tümünü Seç
+menu-undo = Geri al
+menu-redo = Yinele
 menu-toggle-blockquote = Alıntıyı aç/kapat
 menu-remove-blockquote = Alıntıyı kaldır
 
@@ -405,3 +407,4 @@ grid-view-detail-name = { $position }. öğenin ayrıntıları
 code-editor-tab-escape-hint = Sekme girinti ekler. { $next } sonraki denetime, { $previous } önceki denetime geçer.
 
 shortcut-settings-uncategorized = Genel
+shortcut-category-edit = Düzenle

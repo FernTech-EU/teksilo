@@ -329,6 +329,8 @@ menu-copy = Kopier
 menu-paste = Lim inn
 menu-paste-unformatted = Lim inn uformatert
 menu-select-all = Merk alt
+menu-undo = Angre
+menu-redo = Gjør om
 menu-toggle-blockquote = Slå sitatblokk på/av
 menu-remove-blockquote = Fjern sitatblokk
 
@@ -419,3 +421,4 @@ grid-view-detail-name = Detaljer for element { $position }
 code-editor-tab-escape-hint = Tab rykker inn. { $next } går til neste kontroll, { $previous } til forrige.
 
 shortcut-settings-uncategorized = Generelt
+shortcut-category-edit = Rediger

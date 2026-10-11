@@ -26,7 +26,7 @@ use accesskit_consumer::{
 };
 use teksilo_canvas::SizeProposal;
 use teksilo_core::accesskit::Role;
-use teksilo_core::event::Modifiers;
+use teksilo_core::event::{Key, Modifiers};
 use teksilo_core::widget_tree::WidgetTree;
 
 /// One event on the AT-SPI bus.

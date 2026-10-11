@@ -329,6 +329,8 @@ menu-copy = Αντιγραφή
 menu-paste = Επικόλληση
 menu-paste-unformatted = Επικόλληση χωρίς μορφοποίηση
 menu-select-all = Επιλογή όλων
+menu-undo = Αναίρεση
+menu-redo = Επανάληψη
 menu-toggle-blockquote = Εναλλαγή παράθεσης
 menu-remove-blockquote = Αφαίρεση παράθεσης
 
@@ -410,3 +412,4 @@ grid-view-detail-name = Λεπτομέρειες στοιχείου { $position 
 code-editor-tab-escape-hint = Το Tab προσθέτει εσοχή. Το { $next } μεταβαίνει στο επόμενο στοιχείο ελέγχου, το { $previous } στο προηγούμενο.
 
 shortcut-settings-uncategorized = Γενικά
+shortcut-category-edit = Επεξεργασία

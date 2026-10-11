@@ -977,7 +977,11 @@ impl WidgetTree {
             last_proposal: SizeProposal::exact(800.0, 600.0),
             pending_modal_requests: Vec::new(),
             pending_modal_dismissal: false,
-            shortcut_registry: crate::shortcut::ShortcutRegistry::new(),
+            shortcut_registry: {
+                let mut registry = crate::shortcut::ShortcutRegistry::new();
+                crate::shortcut::register_standard_shortcuts(&mut registry);
+                registry
+            },
             pending_intents: Vec::new(),
             global_actions: Vec::new(),
             text_surfaces: crate::text_surface::TextSurfaces::new(focused_signal.clone()),
@@ -3653,13 +3657,17 @@ impl WidgetTree {
     /// the walk continue. A disabled action with
     /// `propagate_when_disabled == false` consumes the intent at that
     /// level without invoking a handler.
+    ///
+    /// Returns whether the intent was consumed: `false` when the walk and the
+    /// window-global fallback both ran out, which is what lets a shortcut's
+    /// key reach the focused widget after all.
     pub(crate) fn dispatch_intent(
         &mut self,
         source: WidgetId,
         intent: crate::intent::Intent,
         propagate_when_disabled: bool,
         ops: &mut dyn crate::window::WindowOps,
-    ) {
+    ) -> bool {
         // Telemetry tap. Single insertion point catches every intent
         // — shortcut-driven, programmatic via `send_intent`, etc. —
         // because every dispatch funnels through here. A no-op when
@@ -3704,7 +3712,7 @@ impl WidgetTree {
                 if propagate_when_disabled {
                     continue;
                 }
-                return;
+                return true;
             }
 
             let mut ctx = self.make_event_context(&mut *ops);
@@ -3715,7 +3723,7 @@ impl WidgetTree {
             self.collect_from_ctx(ctx, id);
 
             match response {
-                crate::intent::IntentResponse::Handled => return,
+                crate::intent::IntentResponse::Handled => return true,
                 crate::intent::IntentResponse::Propagated => continue,
             }
         }
@@ -3742,13 +3750,14 @@ impl WidgetTree {
             self.global_actions.insert(i, (owner, action));
             self.collect_from_ctx(ctx, owner);
             match response {
-                crate::intent::IntentResponse::Handled => return,
+                crate::intent::IntentResponse::Handled => return true,
                 crate::intent::IntentResponse::Propagated => {
                     i += 1;
                     continue;
                 }
             }
         }
+        false
     }
 
     /// Register a window-global [`Action`](crate::action::Action) owned by

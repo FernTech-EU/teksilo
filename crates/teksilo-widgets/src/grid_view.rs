@@ -1988,6 +1988,28 @@ impl<T: 'static> Widget for GridView<T> {
                 None => self.on_tile_activate.clone(),
             };
 
+        // Select all comes through the rebindable `edit.select_all`, inside
+        // the same count voice as the keys.
+        {
+            let len = self.source.len_fn.clone();
+            let selection = self.selection.clone();
+            let detail = detail.clone();
+            let voice = count_voice.clone();
+            crate::common::standard_edit::register_standard_edit_action(
+                ctx,
+                teksilo_core::shortcut::StandardEdit::SelectAll,
+                move |ctx| {
+                    let run = |_ctx: &mut teksilo_core::widget::EventContext| {
+                        keyboard::run_select_all((len)(), selection.as_ref(), detail.as_deref())
+                    };
+                    match &voice {
+                        Some(voice) => voice.around(ctx, run),
+                        None => run(ctx),
+                    }
+                },
+            );
+        }
+
         let mut on_key = build_grid_key_handler(GridKeyConfig {
             len_fn: self.source.len_fn.clone(),
             col_count: self.column_count.clone(),

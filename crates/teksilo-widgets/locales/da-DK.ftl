@@ -326,6 +326,8 @@ menu-copy = Kopiér
 menu-paste = Sæt ind
 menu-paste-unformatted = Sæt ind uden formatering
 menu-select-all = Markér alt
+menu-undo = Fortryd
+menu-redo = Annuller fortryd
 menu-toggle-blockquote = Slå blokcitat til/fra
 menu-remove-blockquote = Fjern blokcitat
 
@@ -403,3 +405,4 @@ grid-view-detail-name = Detaljer for element { $position }
 code-editor-tab-escape-hint = Tab indrykker. { $next } flytter til næste kontrolelement, { $previous } til det forrige.
 
 shortcut-settings-uncategorized = Generelt
+shortcut-category-edit = Rediger

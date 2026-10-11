@@ -327,6 +327,8 @@ menu-copy = Kopiuj
 menu-paste = Wklej
 menu-paste-unformatted = Wklej bez formatowania
 menu-select-all = Zaznacz wszystko
+menu-undo = Cofnij
+menu-redo = Ponów
 menu-toggle-blockquote = Przełącz cytat blokowy
 menu-remove-blockquote = Usuń cytat blokowy
 
@@ -411,3 +413,4 @@ grid-view-detail-name = Szczegóły elementu { $position }
 code-editor-tab-escape-hint = Tab wstawia wcięcie. { $next } przechodzi do następnej kontrolki, { $previous } do poprzedniej.
 
 shortcut-settings-uncategorized = Ogólne
+shortcut-category-edit = Edycja

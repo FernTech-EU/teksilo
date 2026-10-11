@@ -481,6 +481,16 @@ impl Widget for LogView {
 
         ctx.apply_self_handlers(handlers);
 
+        // Select-all and copy come through the rebindable `edit.*` shortcuts,
+        // not as keys.
+        {
+            let state = self.state.clone();
+            crate::common::standard_edit::register_standard_edit_actions(
+                ctx,
+                move |command, ctx| log_stream::run_log_standard_edit(&state, command, ctx),
+            );
+        }
+
         // The touch-selection overlays: the affordance layer (handles + lens)
         // and the selection toolbar, both detached content owned by this build.
         // Inert until a finger raises them.

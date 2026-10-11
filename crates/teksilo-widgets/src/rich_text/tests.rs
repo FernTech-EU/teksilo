@@ -8641,6 +8641,46 @@ fn forward_only_ime_composition_does_not_eat_a_selection() {
 }
 
 #[test]
+fn undo_follows_a_rebind_of_edit_undo() {
+    // Undo is the `edit.undo` shortcut, not a chord the editor matches itself:
+    // moving it in the registry moves it here.
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_core::shortcut::{KeyStroke, StandardEdit};
+    let doc = TextDocument::new();
+    doc.set_plain_text("start").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+    let mut tree = WidgetTree::new();
+    let _ = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    handle.select_range(5, 5);
+    press_char(&mut tree, '!');
+    tick_past_debounce(&mut tree);
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "start!");
+
+    // Bépo types `à` at QWERTY's Z position.
+    let undo_here = KeyStroke::new(Key::Character('à'), Modifiers::CTRL);
+    tree.shortcut_registry_mut()
+        .rebind_primary(StandardEdit::Undo.id(), Some(undo_here));
+    press_key(&mut tree, Key::Z, Modifiers::COMMAND);
+    tick_past_debounce(&mut tree);
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "start!",
+        "the replaced chord no longer undoes"
+    );
+    press_key(&mut tree, Key::Character('à'), Modifiers::CTRL);
+    tick_past_debounce(&mut tree);
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "start",
+        "the new chord does"
+    );
+}
+
+#[test]
 fn forward_only_undo_is_blocked_but_history_survives_the_mode() {
     // Blocking Ctrl+Z must not *discard* history: everything written during a
     // forward-only session is undoable again the moment the mode ends.

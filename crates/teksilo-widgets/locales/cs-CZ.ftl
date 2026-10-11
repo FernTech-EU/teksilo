@@ -328,6 +328,8 @@ menu-copy = Kopírovat
 menu-paste = Vložit
 menu-paste-unformatted = Vložit bez formátování
 menu-select-all = Vybrat vše
+menu-undo = Zpět
+menu-redo = Znovu
 menu-toggle-blockquote = Přepnout citaci
 menu-remove-blockquote = Odebrat citaci
 
@@ -412,3 +414,4 @@ grid-view-detail-name = Podrobnosti položky { $position }
 code-editor-tab-escape-hint = Tab odsazuje. { $next } přejde na další ovládací prvek, { $previous } na předchozí.
 
 shortcut-settings-uncategorized = Obecné
+shortcut-category-edit = Úpravy

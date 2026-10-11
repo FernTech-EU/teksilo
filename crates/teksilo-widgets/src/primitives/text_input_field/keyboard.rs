@@ -8,6 +8,7 @@
 //! fires the on_submit command instead of inserting a newline.
 
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
+use teksilo_core::shortcut::StandardEdit;
 use teksilo_core::widget::EventContext;
 use teksilo_platform::clipboard::ClipboardHandle;
 use teksilo_text::CursorAffinity;
@@ -126,25 +127,9 @@ pub(crate) fn handle_key(
                 true
             }
 
-            // ── Select all ──────────────────────────────────────────
-            Key::A if ctrl => {
-                st.cursor.select(SelectionType::Document);
-                true
-            }
-
-            // ── Clipboard ───────────────────────────────────────────
-            Key::C if ctrl => {
-                clipboard_copy(&mut st, ctx);
-                true
-            }
-            Key::X if ctrl && !read_only => {
-                clipboard_cut(&mut st, ctx);
-                true
-            }
-            Key::V if ctrl && !read_only => {
-                clipboard_paste(&mut st, ctx);
-                true
-            }
+            // Select all, the clipboard and undo / redo are not keys here:
+            // they arrive as the `edit.*` actions `run_standard_edit` serves,
+            // so the user can rebind them.
 
             // ── Editing (gated on !read_only) ───────────────────────
             Key::Backspace if !read_only => {
@@ -173,20 +158,6 @@ pub(crate) fn handle_key(
                 } else {
                     let _ = st.cursor.delete_char();
                 }
-                true
-            }
-
-            // ── Undo / Redo ─────────────────────────────────────────
-            Key::Z if ctrl && !shift && !read_only => {
-                let _ = st.document.undo();
-                true
-            }
-            Key::Y if ctrl && !read_only => {
-                let _ = st.document.redo();
-                true
-            }
-            Key::Z if ctrl && shift && !read_only => {
-                let _ = st.document.redo();
                 true
             }
 
@@ -299,6 +270,40 @@ pub(crate) fn handle_key(
     } else {
         EventResponse::Ignored
     }
+}
+
+/// Run one of the standard edit commands for the field, as its `edit.*`
+/// action does. Returns whether the command ran: a read-only field declines
+/// every command that would change its text, which passes the intent on.
+pub(crate) fn run_standard_edit(
+    state: &SharedState,
+    command: StandardEdit,
+    ctx: &mut EventContext,
+) -> bool {
+    {
+        let mut st = state.borrow_mut();
+        let read_only = st.read_only;
+        match command {
+            StandardEdit::SelectAll => st.cursor.select(SelectionType::Document),
+            StandardEdit::Copy => clipboard_copy(&mut st, ctx),
+            StandardEdit::Cut if !read_only => clipboard_cut(&mut st, ctx),
+            // A plain field has no formatting to strip.
+            StandardEdit::Paste | StandardEdit::PastePlain if !read_only => {
+                clipboard_paste(&mut st, ctx)
+            }
+            StandardEdit::Undo if !read_only => {
+                let _ = st.document.undo();
+            }
+            StandardEdit::Redo if !read_only => {
+                let _ = st.document.redo();
+            }
+            _ => return false,
+        }
+    }
+    sync_cursor_signals(state);
+    report_ime_cursor_area(state, ctx);
+    ctx.request_frame();
+    true
 }
 
 /// Apply an `ImeComposition` event. Removes the previous preedit range (if

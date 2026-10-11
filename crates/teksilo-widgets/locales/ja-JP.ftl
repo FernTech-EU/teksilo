@@ -328,6 +328,8 @@ menu-copy = コピー
 menu-paste = 貼り付け
 menu-paste-unformatted = 書式なしで貼り付け
 menu-select-all = すべて選択
+menu-undo = 元に戻す
+menu-redo = やり直し
 menu-toggle-blockquote = 引用ブロックの切り替え
 menu-remove-blockquote = 引用ブロックを解除
 
@@ -410,3 +412,4 @@ grid-view-detail-name = 項目 { $position } の詳細
 code-editor-tab-escape-hint = Tab キーでインデントします。{ $next } で次のコントロールへ、{ $previous } で前のコントロールへ移動します。
 
 shortcut-settings-uncategorized = 一般
+shortcut-category-edit = 編集

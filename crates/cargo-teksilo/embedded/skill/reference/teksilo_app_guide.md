@@ -333,6 +333,13 @@ impl Widget for Root {
   reference in place (e.g. `if let Some(AppIntent::Open(path)) = …` binds `path: &String`).
 - `ShortcutSettings::new()` is a pre-built rebind UI widget; menu labels/tooltips use
   `MenuItem::for_shortcut("id")` / `TooltipContent::for_shortcut("id")` to re-render on rebinds.
+- Every tree already binds undo, redo, cut, copy, paste, paste-plain and select-all as
+  rebindable shortcuts (`StandardEdit`: `edit.undo`, `edit.copy`, …), and the text widgets
+  and data views run them through their own actions. Don't register `Ctrl+Z`/`Ctrl+C`
+  yourself: handle the app's own undo with `Action::new(StandardEdit::Undo.id())` (e.g.
+  `register_action_global`). A focused text widget's action answers first; yours runs when
+  focus is elsewhere. A shortcut whose intent no action handles leaves its key to the
+  focused widget.
 
 ## Theming
 

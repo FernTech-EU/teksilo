@@ -724,10 +724,12 @@ A KeyDown event flows through three stages, in this order:
    **every** enabled shortcut bound to the chord; the dispatcher then
    picks the one whose scope applies to the current focus (see
    [Same-chord precedence](#same-chord-precedence) above). If an
-   applicable shortcut is found, its intent is activated and the key
-   event is consumed. If no candidate applies, every match is a
-   `Scoped` binding outside the focused subtree, the event falls
-   through to stage 2.
+   applicable shortcut is found, its intent is dispatched, and the key
+   event is consumed **if an action handled the intent**. When nothing
+   did (no action matched, or every one returned `Propagated`), the
+   event falls through to stage 2 as if no shortcut had matched. So
+   does an event for which no candidate applies (every match is a
+   `Scoped` binding outside the focused subtree).
 2. **Ancestor key preview.** If no shortcut matched, the framework
    walks the focused widget's strict ancestors root → parent-of-target,
    firing `on_key_preview` on each. Returning `EventResponse::Handled`
@@ -750,37 +752,84 @@ in the registry: a messenger composer claiming Enter that nobody
 registered as a shortcut, a list view consuming arrow keys that no
 ancestor declared.
 
-### Taking a text chord: `Ctrl+Z`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, `Ctrl+A`
+### Standard edit shortcuts: cut, copy, paste, undo, redo, select all
 
-The same rule has a sharp edge worth naming, because an application that
-wants **one** Undo command, one chord, one menu row, routed to whatever
-the user is actually editing, has to register `Ctrl+Z` globally, and the
-moment it does it has taken that key away from every text widget in the
-tree. `RichTextEditor`, `TextInputField` and `CodeEditor` all handle those
-chords in stage 3, so a global shortcut silently wins over all of them.
+Every widget tree registers seven global shortcuts at creation, one per
+[`StandardEdit`](../crates/teksilo-core/src/shortcut/standard.rs) command.
+The id is also the intent name:
 
-Do not try to answer that from the application's own knowledge. It can
-recognise the surfaces it built and kept a handle on, and it is blind to
-the rest, a rename box in a table cell, a search field, an input inside a
-dialog it did not write. Guessing gets it exactly backwards: `Ctrl+Z` in
-the widget it forgot undoes something else entirely, which is worse than
-not shipping the feature. A hand-maintained list of text widgets is
-correct the day it is written and silently wrong the first time someone
-adds one.
+| Command | Id | Default chord |
+|---|---|---|
+| Undo | `edit.undo` | `Ctrl+Z` |
+| Redo | `edit.redo` | `Ctrl+Shift+Z` and `Ctrl+Y` (`Ctrl+Y` first on Windows) |
+| Cut | `edit.cut` | `Ctrl+X` |
+| Copy | `edit.copy` | `Ctrl+C` |
+| Paste | `edit.paste` | `Ctrl+V` |
+| Paste Unformatted | `edit.paste_plain` | `Ctrl+Shift+V` |
+| Select All | `edit.select_all` | `Ctrl+A` |
 
-Ask the framework instead. Every text widget calls
+`Ctrl` is ⌘ on macOS, as for every declared chord. They sit in the `edit`
+category, so `ShortcutSettings` lists them under Edit, in the user's
+language (`teksilo-app` names them in every window it opens), and a user
+can rebind them or give them a second chord like any other shortcut.
+
+The text widgets (`TextInputField` and everything built on it,
+`RichTextEditor`, `CodeEditor`, `LogView`) and the select-all of the data
+views (`ListView`, `TreeView`, `TableView`, `TreeTableView`, `GridView`)
+do not match these chords in `on_key`. Each registers an action per command
+on its own node, so the focused widget, the start of the walk, runs the
+command. A widget that declines one (Cut in a read-only field, a command
+its filter refuses, select-all in a single-selection list) returns
+`Propagated`: the intent goes on up the walk, and if nothing takes it the
+key reaches the focused widget as a plain `KeyDown`.
+
+A widget of your own that copies, pastes or selects all should do the
+same: register an `Action` for the `edit.*` id rather than match the
+chord. A widget that still matches `Ctrl+C` keeps copying on it after the
+user has moved Copy elsewhere.
+
+### Routing an application's own undo
+
+An application that wants **one** Undo command (one chord, one menu row)
+handles `edit.undo`; it does not register `Ctrl+Z` itself, which would
+conflict with the standard shortcut:
+
+```rust
+ctx.register_action_global(Action::new(StandardEdit::Undo.id()).on_invoke(|_, _| {
+    app_undo();
+}));
+```
+
+The order of the walk does the routing. With a text widget focused, its own
+action is reached first and undoes its text; with focus anywhere else, the
+walk ends at the application's action. A rename box in a table cell, a
+search field, an input inside a dialog the application did not write: each
+undoes itself, without the application knowing it exists.
+
+Two cases still need the application to ask which widget holds the caret:
+
+- **Menus and toolbars.** A menu row's intent starts its walk in the menu's
+  overlay, which never passes through the editor, so it reaches only the
+  global action.
+- **A refused history.** An editor whose filter refuses Undo (a
+  forward-only writing mode, a read-only review pass) declines it, and the
+  intent then reaches the application's action. Routing it to the
+  application's own history there would defeat the mode.
+
+Every text widget calls
 [`BuildContext::register_text_surface`](../crates/teksilo-core/src/build_context.rs),
-so the tree can answer completely:
+so the tree answers both completely:
 
 ```rust
 // Once, during build, the handle shares the tree's focus signal, so it
 // stays live and can be read from a frame tick.
 let surfaces = ctx.text_surfaces();
 
-// Later, wherever the routing decision is made:
+// In the global edit.undo action:
 match surfaces.focused() {
-    Some(surface) => surface.undo(),   // drive the caret's own widget
-    None          => app_undo(),       // no text surface: the app's own history
+    Some(surface) if surface.history_frozen() => {} // refused: do nothing
+    Some(surface) => surface.undo(),                // drive the caret's own widget
+    None => app_undo(),                             // no text surface: the app's own history
 }
 ```
 
@@ -790,15 +839,9 @@ whichever widget holds the focus, whatever kind it is. Registrations are
 owned by the registering widget and torn down on its rebuild or destroy,
 exactly like `register_action_global`.
 
-Pair it with `enabled_when`. A disabled shortcut is treated as *not
-registered*, so the keystroke falls through to the focused widget's own
-handling, which is what you want whenever the router has nothing to
-offer. Between the two, the application only ever intercepts a text chord
-when it knows what it is doing.
-
 A custom text widget should call `register_text_surface` too. Failing to
 is not a compile error and will not be noticed until an application
-routes one of these chords and your widget quietly loses it.
+routes one of these commands from a menu and your widget quietly loses it.
 
 ---
 

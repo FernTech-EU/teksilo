@@ -3583,13 +3583,11 @@ impl Widget for RichTextEditor {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Tell the framework this widget edits text.
         //
-        // What it buys: an application may take `Ctrl+Z`, `Ctrl+C` and friends
-        // for itself — a single Undo command over the whole app has to — and
-        // registered shortcuts resolve before any widget sees the raw key. This
-        // is how the host can tell that the caret is *here*, and either drive
-        // this surface or step aside so it keeps its own keys. Without it, an
-        // application that routes those chords silently breaks every text
-        // widget it does not personally know about. See
+        // What it buys: an application running Undo or Copy from a menu or a
+        // toolbar — an intent whose walk never passes through this widget —
+        // can tell that the caret is *here*, and drive this surface rather
+        // than its own history. Without it, such an application silently
+        // breaks every text widget it does not personally know about. See
         // `teksilo_core::text_surface`.
         ctx.register_text_surface(std::rc::Rc::new(self.handle()));
         // Engine swap: replace the private fallback with one sharing
@@ -4074,6 +4072,25 @@ impl Widget for RichTextEditor {
         }
 
         ctx.apply_self_handlers(handlers);
+
+        // Select-all, the clipboard and undo / redo come through the
+        // rebindable `edit.*` shortcuts, not as keys.
+        {
+            let state = self.state.clone();
+            let touch = self.touch.clone();
+            crate::common::standard_edit::register_standard_edit_actions(
+                ctx,
+                move |command, ctx| {
+                    let ran = self::keyboard::run_standard_edit(&state, command, ctx);
+                    if ran {
+                        // As after a key: the published handles point at
+                        // where the text used to be.
+                        touch.refresh(ctx, touch_mount::ToolbarIntent::Hide);
+                    }
+                    ran
+                },
+            );
+        }
 
         // The touch-selection overlays: the affordance layer (handles + lens)
         // and the selection toolbar, both detached content owned by this build.

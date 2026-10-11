@@ -96,6 +96,26 @@ pub(crate) struct GridKeyConfig {
     pub(crate) type_ahead_label: Option<Rc<dyn Fn(usize) -> Option<String>>>,
 }
 
+/// Select all tiles, as the grid's `edit.select_all` action runs it. Declined
+/// without a `Multi` selection, for an empty grid, and while focus is inside
+/// the detail band: a command its content did not use is not about the tiles.
+pub(crate) fn run_select_all(
+    len: usize,
+    selection: Option<&crate::data_views::RowSelection>,
+    detail: Option<&super::detail::DetailState>,
+) -> bool {
+    if detail.is_some_and(|d| d.focus_within.get()) {
+        return false;
+    }
+    match selection {
+        Some(sel) if len > 0 && sel.mode() == teksilo_data::SelectionMode::Multi => {
+            sel.select_all(len);
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Build the `on_key` closure for a `GridView`.
 pub(crate) fn build_grid_key_handler(
     cfg: GridKeyConfig,
@@ -139,19 +159,18 @@ pub(crate) fn build_grid_key_handler(
         // The edge-and-page family, resolved once in `common::list_nav`.
         let nav = list_nav::nav_chord(*key, *modifiers, list_nav::ViewKind::TileGrid);
 
-        // Select-all — Ctrl+A, ⌘A on macOS, and Ctrl+Shift+A to deselect.
-        // Gated on `Multi` like `ListView` and `TreeView`: "select all" has no
-        // reading for a control that holds at most one tile, and this handler
-        // used to claim the chord even with no selection model at all.
+        // Ctrl+Shift+A deselects. Gated on `Multi` like `ListView` and
+        // `TreeView`: "select all" has no reading for a control that holds at
+        // most one tile, and this handler used to claim the chord even with no
+        // selection model at all. Select all is the `edit.select_all` action
+        // (`run_select_all`), so a plain Ctrl+A only gets here when it is not
+        // bound to it.
         if modifiers.command() && *key == Key::A {
-            if let Some(ref sel) = cfg.selection
+            if modifiers.shift()
+                && let Some(ref sel) = cfg.selection
                 && sel.mode() == teksilo_data::SelectionMode::Multi
             {
-                if modifiers.shift() {
-                    sel.clear();
-                } else {
-                    sel.select_all(n);
-                }
+                sel.clear();
                 return EventResponse::Handled;
             }
             return EventResponse::Ignored;

@@ -328,6 +328,8 @@ menu-copy = نسخ
 menu-paste = لصق
 menu-paste-unformatted = لصق بدون تنسيق
 menu-select-all = تحديد الكل
+menu-undo = تراجع
+menu-redo = إعادة
 menu-toggle-blockquote = تبديل الاقتباس
 menu-remove-blockquote = إزالة الاقتباس
 
@@ -420,3 +422,4 @@ grid-view-detail-name = تفاصيل العنصر { $position }
 code-editor-tab-escape-hint = يضيف مفتاح Tab مسافة بادئة. ينقل { $next } إلى عنصر التحكم التالي، و{ $previous } إلى السابق.
 
 shortcut-settings-uncategorized = عام
+shortcut-category-edit = تحرير

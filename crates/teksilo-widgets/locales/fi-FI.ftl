@@ -329,6 +329,8 @@ menu-copy = Kopioi
 menu-paste = Liitä
 menu-paste-unformatted = Liitä muotoilemattomana
 menu-select-all = Valitse kaikki
+menu-undo = Kumoa
+menu-redo = Tee uudelleen
 menu-toggle-blockquote = Lisää lainauslohko
 menu-remove-blockquote = Poista lainauslohko
 
@@ -409,3 +411,4 @@ grid-view-detail-name = Kohteen { $position } tiedot
 code-editor-tab-escape-hint = Sarkain sisentää. { $next } siirtyy seuraavaan ohjausobjektiin, { $previous } edelliseen.
 
 shortcut-settings-uncategorized = Yleiset
+shortcut-category-edit = Muokkaa

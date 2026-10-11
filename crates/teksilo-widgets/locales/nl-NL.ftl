@@ -334,6 +334,8 @@ menu-copy = Kopiëren
 menu-paste = Plakken
 menu-paste-unformatted = Plakken zonder opmaak
 menu-select-all = Alles selecteren
+menu-undo = Ongedaan maken
+menu-redo = Opnieuw
 menu-toggle-blockquote = Blokcitaat in- of uitschakelen
 menu-remove-blockquote = Blokcitaat verwijderen
 
@@ -413,3 +415,4 @@ grid-view-detail-name = Details van item { $position }
 code-editor-tab-escape-hint = Tab springt in. { $next } gaat naar het volgende besturingselement, { $previous } naar het vorige.
 
 shortcut-settings-uncategorized = Algemeen
+shortcut-category-edit = Bewerken

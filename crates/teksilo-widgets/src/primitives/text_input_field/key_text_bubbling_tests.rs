@@ -4,7 +4,7 @@ use super::*;
 use std::cell::Cell;
 use teksilo_canvas::{Point, SizeProposal};
 use teksilo_core::WidgetBuilder;
-use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+use teksilo_core::event::{Key, Modifiers, PointerButton, WidgetEvent};
 use teksilo_core::signal::Signal;
 use teksilo_core::widget_tree::WidgetTree;
 

@@ -148,6 +148,7 @@ pub use combo_box::ComboBox;
 pub use command_link_button::CommandLinkButton;
 pub use command_palette::{CommandPalette, PaletteCommand};
 pub use common::scroll::OverscrollBehavior;
+pub use common::standard_edit::localize_standard_shortcuts;
 // `WidthPolicy` rides along because it is a configuration knob the caller
 // names at the call site (`.width_policy(WidthPolicy::Fill)`), shared by
 // `DateEdit` / `TimeEdit` / `DateRangeEdit` / `DateTimeEdit`. `spin_box`

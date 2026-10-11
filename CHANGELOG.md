@@ -15,12 +15,49 @@ by crate for clarity, not because crates version independently.
 
 ### Added
 
+#### Core
+
+- **Rebindable edit shortcuts.** Every widget tree registers `edit.undo`,
+  `edit.redo`, `edit.cut`, `edit.copy`, `edit.paste`, `edit.paste_plain` and
+  `edit.select_all` (`StandardEdit`) on their usual chords, in an `edit`
+  category. `ShortcutSettings` lists them under Edit, named in the
+  application's language, so a user can rebind them or give them a second
+  chord. `StandardEdit` is in the prelude.
+
 #### Widgets
 
+- `localize_standard_shortcuts` names the standard edit shortcuts of a
+  registry in the active language. `teksilo-app` calls it for every window.
 - **`GridView::detail_row_when`** says which tiles have a detail band, from
   the same `TileContext` `detail_row` receives. A tile it refuses is no longer
   offered to a screen reader as expandable, and activating it opens nothing.
   Without it, every tile is still offered as one.
+
+### Changed
+
+#### Core
+
+- **Behaviour change:** a shortcut whose intent no `Action` handles no longer
+  consumes its key: the focused widget receives it as a plain `KeyDown`. An
+  intent every action passed on with `Propagated` counts as not handled.
+- **Behaviour change:** an application shortcut on `Ctrl+Z`, `Ctrl+Y`,
+  `Ctrl+X`, `Ctrl+C`, `Ctrl+V`, `Ctrl+A`, `Ctrl+Shift+Z` or `Ctrl+Shift+V`
+  now shares its chord with a standard edit shortcut. Handle the `edit.*`
+  intent with an `Action` instead.
+
+#### Widgets
+
+- **Behaviour change:** undo, redo, the clipboard and select-all in
+  `TextInput` and the fields built on it, `RichTextEditor`, `CodeEditor` and
+  `LogView`, and select-all in `ListView`, `TreeView`, `TableView`,
+  `TreeTableView` and `GridView`, follow the `edit.*` bindings instead of
+  fixed chords. A command a widget declines (Cut or Paste in a read-only
+  field, a command its filter refuses) reaches an application's `Action` for
+  the same intent.
+- The context menus of those editors show the bound chord.
+- A `TableView` or `TreeTableView` without a multi selection mode no longer
+  takes `Ctrl+A`.
+- `CommandPalette` does not list the standard edit commands.
 
 ### Fixed
 

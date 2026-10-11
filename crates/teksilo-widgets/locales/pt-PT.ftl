@@ -334,6 +334,8 @@ menu-copy = Copiar
 menu-paste = Colar
 menu-paste-unformatted = Colar sem formatação
 menu-select-all = Selecionar tudo
+menu-undo = Anular
+menu-redo = Refazer
 menu-toggle-blockquote = Alternar citação
 menu-remove-blockquote = Remover citação
 
@@ -420,3 +422,4 @@ grid-view-detail-name = Detalhes do item { $position }
 code-editor-tab-escape-hint = Tab aplica avanço. { $next } passa para o controlo seguinte e { $previous } para o anterior.
 
 shortcut-settings-uncategorized = Geral
+shortcut-category-edit = Editar

@@ -324,6 +324,8 @@ menu-copy = 복사
 menu-paste = 붙여넣기
 menu-paste-unformatted = 서식 없이 붙여넣기
 menu-select-all = 모두 선택
+menu-undo = 실행 취소
+menu-redo = 다시 실행
 menu-toggle-blockquote = 인용 블록 전환
 menu-remove-blockquote = 인용 블록 제거
 
@@ -404,3 +406,4 @@ grid-view-detail-name = 항목 { $position } 세부 정보
 code-editor-tab-escape-hint = Tab 키는 들여쓰기합니다. { $next } 키는 다음 컨트롤로, { $previous } 키는 이전 컨트롤로 이동합니다.
 
 shortcut-settings-uncategorized = 일반
+shortcut-category-edit = 편집

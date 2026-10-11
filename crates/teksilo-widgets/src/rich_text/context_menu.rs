@@ -61,13 +61,11 @@
 
 use teksilo_i18n::tr_widget;
 
-use teksilo_core::event::Key;
 use teksilo_core::intent::Intent;
-use teksilo_core::shortcut::KeyStroke;
+use teksilo_core::shortcut::StandardEdit;
 use teksilo_core::widget::Widget;
 use teksilo_core::widget_builder::ContextMenuTrigger;
 
-use crate::keystroke_format::format_keystroke;
 use crate::menu_item::MenuItem;
 use crate::menu_list::MenuList;
 
@@ -182,7 +180,7 @@ fn build_menu(state: SharedState) -> MenuList {
         let state_for_pu = state.clone();
         list = list.item(
             MenuItem::new(tr_widget!(menu_paste_unformatted()))
-                .shortcut_label(format_keystroke(KeyStroke::command_shift(Key::V)))
+                .for_shortcut(StandardEdit::PastePlain.id())
                 .on_activate_fn(move |evt_ctx| {
                     let mut st = state_for_pu.borrow_mut();
                     rt_clipboard::paste_unformatted(&mut st, evt_ctx);
@@ -251,7 +249,7 @@ fn build_menu(state: SharedState) -> MenuList {
 fn row_cut(state: &SharedState) -> MenuItem {
     let state = state.clone();
     MenuItem::new(tr_widget!(menu_cut()))
-        .shortcut_label(format_keystroke(KeyStroke::command(Key::X)))
+        .for_shortcut(StandardEdit::Cut.id())
         .on_activate_fn(move |evt_ctx| {
             let mut st = state.borrow_mut();
             rt_clipboard::cut(&mut st, evt_ctx);
@@ -266,7 +264,7 @@ fn row_cut(state: &SharedState) -> MenuItem {
 fn row_copy(state: &SharedState) -> MenuItem {
     let state = state.clone();
     MenuItem::new(tr_widget!(menu_copy()))
-        .shortcut_label(format_keystroke(KeyStroke::command(Key::C)))
+        .for_shortcut(StandardEdit::Copy.id())
         .on_activate_fn(move |evt_ctx| {
             let mut st = state.borrow_mut();
             rt_clipboard::copy(&mut st, evt_ctx);
@@ -279,7 +277,7 @@ fn row_copy(state: &SharedState) -> MenuItem {
 fn row_paste(state: &SharedState) -> MenuItem {
     let state = state.clone();
     MenuItem::new(tr_widget!(menu_paste()))
-        .shortcut_label(format_keystroke(KeyStroke::command(Key::V)))
+        .for_shortcut(StandardEdit::Paste.id())
         .on_activate_fn(move |evt_ctx| {
             let mut st = state.borrow_mut();
             rt_clipboard::paste(&mut st, evt_ctx);
@@ -294,7 +292,7 @@ fn row_paste(state: &SharedState) -> MenuItem {
 fn row_select_all(state: &SharedState) -> MenuItem {
     let state = state.clone();
     MenuItem::new(tr_widget!(menu_select_all()))
-        .shortcut_label(format_keystroke(KeyStroke::command(Key::A)))
+        .for_shortcut(StandardEdit::SelectAll.id())
         .on_activate_fn(move |evt_ctx| {
             {
                 let mut st = state.borrow_mut();
