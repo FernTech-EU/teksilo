@@ -26,6 +26,27 @@
 //! .selection(selection_model)
 //! ```
 //!
+//! ## Column bounds and alignment
+//!
+//! [`GridView::min_columns`] and [`GridView::max_columns`] bound the column
+//! count that [`GridSizing::Fixed`] and [`GridSizing::Adaptive`] derive from the
+//! width ([`GridSizing::FixedColumnCount`] ignores both). A floor the width
+//! cannot afford **narrows** the tiles to share it, never overflowing
+//! horizontally; the tile height stays the sizing's. [`GridView::column_alignment`]
+//! places a block of columns narrower than the content at the leading edge (the
+//! default), the centre or the trailing edge, swapping sides in a right-to-left
+//! layout. Section headers and the detail band keep spanning the content width;
+//! tiles, the rubber band, the insertion bar and the focus ring follow the
+//! offset. An album grid of fixed 182 dp cards, two to ten columns, centred:
+//!
+//! ```ignore
+//! GridView::new(albums, |tc| album_card(tc))
+//!     .sizing(GridSizing::Fixed { width: 182.0, height: 230.0 })
+//!     .min_columns(2)
+//!     .max_columns(10)
+//!     .column_alignment(HAlignment::Center)
+//! ```
+//!
 //! ## Selection by position or by key
 //!
 //! [`GridView::selection`] takes a [`SelectionModel`], which holds positions.
@@ -136,7 +157,7 @@ use teksilo_data::{
     DataChange, DropPosition, DropResponse, ItemKey, KeyedSelectionModel, ListModel, SelectionMode,
     SelectionModel,
 };
-use teksilo_tokens::{OverscrollStyle, SurfaceRole};
+use teksilo_tokens::{HAlignment, OverscrollStyle, SurfaceRole};
 
 use std::time::Duration;
 
@@ -261,6 +282,8 @@ pub struct GridView<T: 'static> {
     col_gap: f32,
     row_gap: f32,
     inset: EdgeInsets,
+    /// Column-count bounds and leftover alignment, handed to the strategy.
+    column_options: layout::columns::ColumnOptions,
     strategy_kind: StrategyKind,
     /// Exact per-item natural height (the variable-height fast-path).
     #[allow(clippy::type_complexity)]
@@ -515,6 +538,7 @@ impl<T: 'static> GridView<T> {
             col_gap: 8.0,
             row_gap: 8.0,
             inset: EdgeInsets::ZERO,
+            column_options: layout::columns::ColumnOptions::default(),
             strategy_kind: StrategyKind::Uniform,
             exact_item_height: None,
             strategy: None,
@@ -687,6 +711,52 @@ impl<T: 'static> GridView<T> {
         self
     }
 
+    // ── Column bounds & alignment ───────────────────────────────────────
+
+    /// Never fewer than `count` columns (at least 1).
+    ///
+    /// Bounds the count a [`GridSizing::Fixed`] or [`GridSizing::Adaptive`]
+    /// derives from the width; ignored by [`GridSizing::FixedColumnCount`],
+    /// whose count is already the answer. When the width cannot afford
+    /// `count` columns of the sizing's width, the tiles **narrow** to share
+    /// the width — the grid never overflows horizontally. The tile height is
+    /// kept as the sizing gives it (a card gets narrower, not shorter), so a
+    /// tile that must hold its aspect ratio sizes its own content from the
+    /// width it is handed. If `min_columns` exceeds
+    /// [`max_columns`](Self::max_columns), the maximum wins.
+    pub fn min_columns(mut self, count: usize) -> Self {
+        self.column_options.min_columns = Some(count.max(1));
+        self
+    }
+
+    /// Never more than `count` columns (at least 1), however wide the viewport.
+    ///
+    /// Bounds the count a [`GridSizing::Fixed`] or [`GridSizing::Adaptive`]
+    /// derives from the width; ignored by [`GridSizing::FixedColumnCount`].
+    /// Under `Fixed` the tiles keep their width and the leftover is placed by
+    /// [`column_alignment`](Self::column_alignment); under `Adaptive` they
+    /// stretch to share the width of the capped count, up to `max_width`.
+    pub fn max_columns(mut self, count: usize) -> Self {
+        self.column_options.max_columns = Some(count.max(1));
+        self
+    }
+
+    /// Where the block of columns sits in the viewport when it is narrower
+    /// than the content: [`HAlignment::Leading`] (the default, the tiles
+    /// against the leading inset, leftover trailing), `Center` or
+    /// `Trailing`. Leading and trailing swap in a right-to-left layout. Only
+    /// the columns move: a section header and a [`detail_row`](Self::detail_row)
+    /// band span the content width. The order of the columns within the
+    /// block is the same in both directions.
+    ///
+    /// Only a layout that leaves width over has anything to place: a
+    /// [`GridSizing::Fixed`] grid, an `Adaptive` one with `max_width`, or any
+    /// grid capped by [`max_columns`](Self::max_columns).
+    pub fn column_alignment(mut self, alignment: HAlignment) -> Self {
+        self.column_options.alignment = alignment;
+        self
+    }
+
     // ── Selection ───────────────────────────────────────────────────────
 
     /// Set the index-based selection model (modes `None` / `Single` /
@@ -701,6 +771,11 @@ impl<T: 'static> GridView<T> {
     /// Called whenever the selection set changes — including programmatic
     /// changes — with the new set of selected indices. For a keyed selection
     /// these are the positions its keys have at that moment.
+    ///
+    /// Because it also fires for programmatic changes, it carries no input
+    /// modifiers and no [`EventContext`](teksilo_core::widget::EventContext);
+    /// for the modifiers held at the moment of input, use
+    /// [`on_tile_activate`](Self::on_tile_activate), which receives one.
     pub fn on_selection_changed(mut self, f: impl Fn(&BTreeSet<usize>) + 'static) -> Self {
         self.on_selection_changed = Some(Rc::new(f));
         self
@@ -1309,39 +1384,48 @@ impl<T: 'static> GridView<T> {
             return s.clone();
         }
         // Sections override the strategy kind (uniform tiles + headers).
+        let sizing = self.sizing;
+        let options = self.column_options;
         let inner: Rc<dyn GridLayoutStrategy> = if let Some(ref data) = self.section_data {
-            Rc::new(SectionedGrid::new(
-                self.sizing,
-                self.col_gap,
-                self.row_gap,
-                self.inset,
-                self.header_height,
-                data.counts_fn.clone(),
-            ))
+            Rc::new(
+                SectionedGrid::new(
+                    self.sizing,
+                    self.col_gap,
+                    self.row_gap,
+                    self.inset,
+                    self.header_height,
+                    data.counts_fn.clone(),
+                )
+                .with_columns(sizing, options),
+            )
         } else {
             match self.strategy_kind {
-                StrategyKind::Uniform => Rc::new(UniformGrid::new(
-                    self.sizing,
-                    self.col_gap,
-                    self.row_gap,
-                    self.inset,
-                )),
-                StrategyKind::VariableRow { estimated } => Rc::new(VariableRowGrid::new(
-                    self.sizing,
-                    self.col_gap,
-                    self.row_gap,
-                    self.inset,
-                    estimated,
-                    self.exact_item_height.clone(),
-                )),
-                StrategyKind::Waterfall { estimated } => Rc::new(VirtualizedMasonry::new(
-                    self.sizing,
-                    self.col_gap,
-                    self.row_gap,
-                    self.inset,
-                    estimated,
-                    self.exact_item_height.clone(),
-                )),
+                StrategyKind::Uniform => Rc::new(
+                    UniformGrid::new(self.sizing, self.col_gap, self.row_gap, self.inset)
+                        .with_columns(sizing, options),
+                ),
+                StrategyKind::VariableRow { estimated } => Rc::new(
+                    VariableRowGrid::new(
+                        self.sizing,
+                        self.col_gap,
+                        self.row_gap,
+                        self.inset,
+                        estimated,
+                        self.exact_item_height.clone(),
+                    )
+                    .with_columns(sizing, options),
+                ),
+                StrategyKind::Waterfall { estimated } => Rc::new(
+                    VirtualizedMasonry::new(
+                        self.sizing,
+                        self.col_gap,
+                        self.row_gap,
+                        self.inset,
+                        estimated,
+                        self.exact_item_height.clone(),
+                    )
+                    .with_columns(sizing, options),
+                ),
             }
         };
         let s: Rc<dyn GridLayoutStrategy> = match self.ensure_detail() {
@@ -2505,6 +2589,10 @@ impl<T: 'static> Widget for GridView<T> {
         let Some(ref strategy) = self.strategy else {
             return;
         };
+        // Leading and trailing in `column_alignment` resolve against the
+        // direction of this pass; every position read below and by the pane
+        // (and, after layout, by paint, the marquee and the keys) follows.
+        strategy.set_rtl(ctx.is_rtl());
         let len = self.source.len();
         let vp_h = bounds.height;
         // The rubber band's resistance is a fraction of the viewport. This

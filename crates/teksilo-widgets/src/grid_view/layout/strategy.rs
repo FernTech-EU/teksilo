@@ -109,6 +109,12 @@ pub(crate) trait GridLayoutStrategy: std::fmt::Debug + 'static {
     /// be `< column_count(viewport_width)`.
     fn column_x(&self, col: usize, viewport_width: f32) -> (f32, f32);
 
+    /// Tell the strategy which way the layout runs, so that
+    /// `GridView::column_alignment`'s leading and trailing resolve to the
+    /// right side. Called every layout pass before any geometry is read; the
+    /// default is for a strategy that places nothing by alignment.
+    fn set_rtl(&self, _rtl: bool) {}
+
     /// Total scrollable content height for `item_count` items. May be an
     /// estimate for variable-height strategies before every row has been
     /// measured. Drives `max_scroll_y` and the scrollbar thumb ratio.

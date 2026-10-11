@@ -9,12 +9,12 @@
 //! per-section header offsets. Section item counts are read from a closure
 //! each sync so the layout follows data changes.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use teksilo_canvas::{EdgeInsets, Point};
 
-use super::columns::{ColumnGeometry, column_at, geometry_for};
+use super::columns::{ColumnGeometry, ColumnOptions, column_at, geometry_for, with_options};
 use super::strategy::{BUFFER_ROWS, GridLayoutStrategy, GridSizing, TileRect, VisibleTileRange};
 
 /// Computed geometry for one section.
@@ -38,7 +38,7 @@ struct SectionLayout {
 
 /// A uniform grid grouped into sections with fixed-height headers.
 pub struct SectionedGrid {
-    columns: ColumnGeometry,
+    columns: Cell<ColumnGeometry>,
     tile_height: f32,
     row_gap: f32,
     header_height: f32,
@@ -56,6 +56,14 @@ impl std::fmt::Debug for SectionedGrid {
 }
 
 impl SectionedGrid {
+    /// Apply the column-count bounds and the leftover alignment; `sizing` is
+    /// the one this strategy was built from.
+    pub(crate) fn with_columns(self, sizing: GridSizing, options: ColumnOptions) -> Self {
+        self.columns
+            .set(with_options(self.columns.get(), sizing, options));
+        self
+    }
+
     pub(crate) fn new(
         sizing: GridSizing,
         col_gap: f32,
@@ -65,7 +73,7 @@ impl SectionedGrid {
         counts_fn: Rc<dyn Fn() -> Vec<usize>>,
     ) -> Self {
         Self {
-            columns: geometry_for(sizing, col_gap, inset),
+            columns: Cell::new(geometry_for(sizing, col_gap, inset)),
             tile_height: sizing.tile_height().max(0.0),
             row_gap: row_gap.max(0.0),
             header_height: header_height.max(0.0),
@@ -85,7 +93,7 @@ impl SectionedGrid {
 
     /// Recompute the section layout if the column count or counts changed.
     fn sync(&self, viewport_width: f32) {
-        let cols = self.columns.column_count(viewport_width).max(1);
+        let cols = self.columns.get().column_count(viewport_width).max(1);
         let counts = (self.counts_fn)();
         {
             let c = self.cache.borrow();
@@ -148,12 +156,16 @@ impl SectionedGrid {
 }
 
 impl GridLayoutStrategy for SectionedGrid {
+    fn set_rtl(&self, rtl: bool) {
+        self.columns.set(self.columns.get().with_rtl(rtl));
+    }
+
     fn column_count(&self, viewport_width: f32) -> usize {
-        self.columns.column_count(viewport_width)
+        self.columns.get().column_count(viewport_width)
     }
 
     fn column_x(&self, col: usize, viewport_width: f32) -> (f32, f32) {
-        self.columns.column_x(col, viewport_width)
+        self.columns.get().column_x(col, viewport_width)
     }
 
     fn total_content_height(&self, _item_count: usize, viewport_width: f32) -> f32 {
@@ -224,7 +236,7 @@ impl GridLayoutStrategy for SectionedGrid {
         let local = index.saturating_sub(g.first_flat);
         let row = local / cols;
         let col = local % cols;
-        let (x, width) = self.columns.column_x(col, viewport_width);
+        let (x, width) = self.columns.get().column_x(col, viewport_width);
         let y = g.band_top + row as f32 * self.row_step();
         TileRect {
             x,
@@ -271,7 +283,7 @@ impl GridLayoutStrategy for SectionedGrid {
         if row >= g.rows || rel_y - row as f32 * self.row_step() > self.tile_height {
             return None; // past the section's last row, or a row-gap within it
         }
-        let col = column_at(&self.columns, content_point.x, viewport_width)?;
+        let col = column_at(&self.columns.get(), content_point.x, viewport_width)?;
         let local = row * cols + col;
         if local >= g.count {
             return None;

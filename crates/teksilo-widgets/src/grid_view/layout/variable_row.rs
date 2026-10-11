@@ -24,7 +24,7 @@ use std::rc::Rc;
 
 use teksilo_canvas::{EdgeInsets, Point};
 
-use super::columns::{ColumnGeometry, column_at, geometry_for};
+use super::columns::{ColumnGeometry, ColumnOptions, column_at, geometry_for, with_options};
 use super::offsets::PrefixSumOffsets;
 use super::strategy::{BUFFER_ROWS, GridLayoutStrategy, GridSizing, TileRect, VisibleTileRange};
 
@@ -32,7 +32,7 @@ type ExactHeightFn = Rc<dyn Fn(usize) -> f32>;
 
 /// A grid whose rows are each sized to their tallest tile.
 pub struct VariableRowGrid {
-    columns: ColumnGeometry,
+    columns: Cell<ColumnGeometry>,
     row_gap: f32,
     estimated: f32,
     /// Optional exact per-item natural height. When present, rows are seeded
@@ -57,6 +57,14 @@ impl std::fmt::Debug for VariableRowGrid {
 }
 
 impl VariableRowGrid {
+    /// Apply the column-count bounds and the leftover alignment; `sizing` is
+    /// the one this strategy was built from.
+    pub(crate) fn with_columns(self, sizing: GridSizing, options: ColumnOptions) -> Self {
+        self.columns
+            .set(with_options(self.columns.get(), sizing, options));
+        self
+    }
+
     pub(crate) fn new(
         sizing: GridSizing,
         col_gap: f32,
@@ -71,7 +79,7 @@ impl VariableRowGrid {
             sizing.tile_height().max(1.0)
         };
         Self {
-            columns: geometry_for(sizing, col_gap, inset),
+            columns: Cell::new(geometry_for(sizing, col_gap, inset)),
             row_gap: row_gap.max(0.0),
             estimated,
             exact_height,
@@ -113,7 +121,7 @@ impl VariableRowGrid {
     /// fully reseeds (rows regroup); an item-count change resizes in place,
     /// preserving prior measurements.
     fn sync(&self, viewport_width: f32) {
-        let cols = self.columns.column_count(viewport_width).max(1);
+        let cols = self.columns.get().column_count(viewport_width).max(1);
         let n = self.item_count.get();
         let rows = n.div_ceil(cols);
 
@@ -129,12 +137,16 @@ impl VariableRowGrid {
 }
 
 impl GridLayoutStrategy for VariableRowGrid {
+    fn set_rtl(&self, rtl: bool) {
+        self.columns.set(self.columns.get().with_rtl(rtl));
+    }
+
     fn column_count(&self, viewport_width: f32) -> usize {
-        self.columns.column_count(viewport_width)
+        self.columns.get().column_count(viewport_width)
     }
 
     fn column_x(&self, col: usize, viewport_width: f32) -> (f32, f32) {
-        self.columns.column_x(col, viewport_width)
+        self.columns.get().column_x(col, viewport_width)
     }
 
     fn total_content_height(&self, item_count: usize, viewport_width: f32) -> f32 {
@@ -171,7 +183,7 @@ impl GridLayoutStrategy for VariableRowGrid {
         let cols = self.stored_cols.get().max(1);
         let row = index / cols;
         let col = index % cols;
-        let (x, width) = self.columns.column_x(col, viewport_width);
+        let (x, width) = self.columns.get().column_x(col, viewport_width);
         let mut off = self.offsets.borrow_mut();
         let y = off.row_top(row);
         let height = off.row_height(row);
@@ -279,7 +291,7 @@ impl GridLayoutStrategy for VariableRowGrid {
         if content_point.y < row_top || content_point.y > row_top + row_h {
             return None;
         }
-        let col = column_at(&self.columns, content_point.x, viewport_width)?;
+        let col = column_at(&self.columns.get(), content_point.x, viewport_width)?;
         let idx = row * cols + col;
         (idx < item_count).then_some(idx)
     }

@@ -4063,3 +4063,318 @@ fn a_window_load_keeps_the_band_and_the_keyed_selection() {
         "the band was built again, with its button"
     );
 }
+
+// ── Column-count bounds and leftover alignment ───────────────────────────
+
+/// A grid of `count` 100x50 tiles, 8 dp gaps (a 108 dp pitch), configured by
+/// `configure`, laid out at `width` x `height`.
+fn bounded_grid(
+    count: usize,
+    width: f32,
+    height: f32,
+    configure: impl FnOnce(GridView<usize>) -> GridView<usize>,
+) -> (WidgetTree, WidgetId) {
+    let model = ListModel::from_vec((0..count).collect());
+    let mut tree = WidgetTree::new();
+    let id = tree.add(configure(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0))).tile_size(100.0, 50.0),
+    ));
+    settle(&mut tree, width, height);
+    (tree, id)
+}
+
+fn tile_rect_of(tree: &WidgetTree, grid: WidgetId, index: usize) -> Rect {
+    tree.bounds(tile_at(tree, grid, index))
+}
+
+/// The columns the first row holds: tiles sharing tile 0's `y`.
+fn columns_in_first_row(tree: &WidgetTree, grid: WidgetId, count: usize) -> usize {
+    let y0 = tile_rect_of(tree, grid, 0).y;
+    (0..count)
+        .take_while(|i| (tile_rect_of(tree, grid, *i).y - y0).abs() < 0.01)
+        .count()
+}
+
+#[test]
+fn max_columns_caps_the_columns_a_wide_viewport_derives() {
+    // 2000 dp fits 18 columns of 108; the cap keeps 10, and the tiles do not
+    // stretch into the leftover.
+    let (tree, id) = bounded_grid(60, 2000.0, 5000.0, |g| g.max_columns(10));
+    assert_eq!(columns_in_first_row(&tree, id, 60), 10);
+    assert_close(
+        tile_rect_of(&tree, id, 0).width,
+        100.0,
+        "tiles keep their width",
+    );
+    assert_close(tile_rect_of(&tree, id, 9).x, 972.0, "tile 9 at 9 * 108");
+    assert_close(tile_rect_of(&tree, id, 10).y, 58.0, "tile 10 wraps");
+}
+
+#[test]
+fn min_columns_floors_the_columns_and_narrows_the_tiles_instead_of_overflowing() {
+    // 150 dp fits one 100 dp tile; the floor asks for two, which can only
+    // share 142 dp (150 less one 8 dp gap): 71 dp each, height untouched.
+    let (tree, id) = bounded_grid(20, 150.0, 5000.0, |g| g.min_columns(2));
+    assert_eq!(columns_in_first_row(&tree, id, 20), 2);
+    let (a, b) = (tile_rect_of(&tree, id, 0), tile_rect_of(&tree, id, 1));
+    assert_close(a.width, 71.0, "tile 0 narrows");
+    assert_close(b.width, 71.0, "tile 1 narrows");
+    assert_close(b.x, 79.0, "tile 1 at 71 + 8");
+    assert_close(a.height, 50.0, "the tile height is the sizing's");
+    assert!(b.x + b.width <= 150.01, "no horizontal overflow");
+}
+
+#[test]
+fn a_floor_the_width_affords_leaves_the_tiles_their_width() {
+    let (tree, id) = bounded_grid(20, 400.0, 5000.0, |g| g.min_columns(2));
+    assert_eq!(columns_in_first_row(&tree, id, 20), 3);
+    assert_close(tile_rect_of(&tree, id, 0).width, 100.0, "full width");
+}
+
+#[test]
+fn the_album_grid_clamps_between_two_and_ten_at_a_fixed_pitch() {
+    let album = |g: GridView<usize>| g.min_columns(2).max_columns(10);
+    for (width, expected) in [
+        (150.0, 2),
+        (230.0, 2),
+        (330.0, 3),
+        (700.0, 6),
+        (1090.0, 10),
+        (3000.0, 10),
+    ] {
+        let (tree, id) = bounded_grid(60, width, 5000.0, album);
+        assert_eq!(
+            columns_in_first_row(&tree, id, 60),
+            expected,
+            "columns at {width} dp"
+        );
+    }
+}
+
+#[test]
+fn bounds_cap_an_adaptive_grid_and_keep_its_stretching() {
+    let model = ListModel::from_vec((0..40usize).collect());
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(10.0, 50.0)))
+            .sizing(GridSizing::Adaptive {
+                min_width: 100.0,
+                max_width: None,
+                height: 50.0,
+            })
+            .spacing(0.0)
+            .max_columns(4),
+    );
+    settle(&mut tree, 1000.0, 5000.0);
+    assert_eq!(columns_in_first_row(&tree, id, 40), 4);
+    assert_close(
+        tile_rect_of(&tree, id, 0).width,
+        250.0,
+        "share of the capped count",
+    );
+}
+
+#[test]
+fn a_fixed_column_count_ignores_both_bounds() {
+    let model = ListModel::from_vec((0..40usize).collect());
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(10.0, 40.0)))
+            .column_count(4, 40.0)
+            .min_columns(6)
+            .max_columns(2),
+    );
+    settle(&mut tree, 400.0, 300.0);
+    assert_eq!(columns_in_first_row(&tree, id, 40), 4);
+}
+
+#[test]
+fn a_minimum_above_the_maximum_loses_to_it() {
+    let (tree, id) = bounded_grid(40, 1000.0, 5000.0, |g| g.min_columns(8).max_columns(3));
+    assert_eq!(columns_in_first_row(&tree, id, 40), 3);
+}
+
+#[test]
+fn centred_columns_sit_half_the_leftover_from_the_leading_edge() {
+    // 450 dp fits four columns: 4 * 100 + 3 * 8 = 424 used, 26 left over.
+    let (tree, id) = bounded_grid(12, 450.0, 300.0, |g| g.column_alignment(HAlignment::Center));
+    assert_close(
+        tile_rect_of(&tree, id, 0).x,
+        13.0,
+        "tile 0 at (450 - 424) / 2",
+    );
+    assert_close(tile_rect_of(&tree, id, 1).x, 121.0, "tile 1 a pitch on");
+    assert_close(tile_rect_of(&tree, id, 4).x, 13.0, "the next row too");
+}
+
+#[test]
+fn trailing_columns_end_at_the_trailing_edge() {
+    let (tree, id) = bounded_grid(12, 450.0, 300.0, |g| {
+        g.column_alignment(HAlignment::Trailing)
+    });
+    assert_close(tile_rect_of(&tree, id, 0).x, 26.0, "tile 0");
+    let last = tile_rect_of(&tree, id, 3);
+    assert_close(last.x + last.width, 450.0, "tile 3 ends at the edge");
+}
+
+#[test]
+fn leading_and_trailing_swap_in_a_right_to_left_layout() {
+    use teksilo_core::environment::LayoutDirection;
+    let rtl = |alignment| {
+        let model = ListModel::from_vec((0..12usize).collect());
+        let mut tree = WidgetTree::new();
+        tree.set_layout_direction(LayoutDirection::RightToLeft);
+        let id = tree.add(
+            GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+                .tile_size(100.0, 50.0)
+                .column_alignment(alignment),
+        );
+        settle(&mut tree, 450.0, 300.0);
+        tile_rect_of(&tree, id, 0).x
+    };
+    assert_close(rtl(HAlignment::Leading), 26.0, "leading is the right edge");
+    assert_close(rtl(HAlignment::Trailing), 0.0, "trailing is the left edge");
+    assert_close(rtl(HAlignment::Center), 13.0, "centre is symmetric");
+}
+
+#[test]
+fn the_default_alignment_and_bounds_leave_the_layout_as_it_was() {
+    let (plain, id) = bounded_grid(12, 450.0, 300.0, |g| g);
+    let (explicit, eid) = bounded_grid(12, 450.0, 300.0, |g| {
+        g.column_alignment(HAlignment::Leading)
+    });
+    for i in 0..12 {
+        let (a, b) = (tile_rect_of(&plain, id, i), tile_rect_of(&explicit, eid, i));
+        assert_eq!((a.x, a.y, a.width), (b.x, b.y, b.width), "tile {i}");
+    }
+    assert_close(tile_rect_of(&plain, id, 0).x, 0.0, "tile 0 at the edge");
+    assert_close(tile_rect_of(&plain, id, 1).x, 108.0, "tile 1 a pitch on");
+}
+
+#[test]
+fn a_marquee_selects_the_tiles_under_it_when_the_columns_are_offset() {
+    use teksilo_canvas::Point;
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+    let model = ListModel::from_vec((0..12usize).collect());
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let mut tree = WidgetTree::new();
+    tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .column_alignment(HAlignment::Center)
+            .selection(selection.clone()),
+    );
+    settle(&mut tree, 450.0, 400.0);
+
+    // Tile 0 spans x 13..113 and tile 1 121..221. A press at x = 5 is the
+    // background; a band to x = 120 reaches tile 0 and stops short of tile 1
+    // (unshifted, tile 1 would start at 108 and be swept too).
+    let from = Point::new(5.0, 10.0);
+    let to = Point::new(120.0, 60.0);
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(5.0, 20.0)));
+    tree.dispatch_event(WidgetEvent::pointer_move(to));
+    tree.layout(SizeProposal::exact(450.0, 400.0));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        to,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    settle(&mut tree, 450.0, 400.0);
+    assert_eq!(selection.selected_indices(), vec![0, 4]);
+}
+
+#[test]
+fn every_strategy_follows_the_offset_in_hit_testing_and_the_insertion_bar() {
+    use super::layout::columns::ColumnOptions;
+    let sizing = GridSizing::Fixed {
+        width: 100.0,
+        height: 50.0,
+    };
+    let options = ColumnOptions {
+        alignment: HAlignment::Center,
+        ..ColumnOptions::default()
+    };
+    let inset = EdgeInsets::ZERO;
+    let sectioned: Rc<dyn Fn() -> Vec<usize>> = Rc::new(|| vec![8]);
+    let strategies: Vec<(&str, Box<dyn GridLayoutStrategy>)> = vec![
+        (
+            "uniform",
+            Box::new(UniformGrid::new(sizing, 8.0, 8.0, inset).with_columns(sizing, options)),
+        ),
+        (
+            "variable rows",
+            Box::new(
+                VariableRowGrid::new(sizing, 8.0, 8.0, inset, 50.0, None)
+                    .with_columns(sizing, options),
+            ),
+        ),
+        (
+            "waterfall",
+            Box::new(
+                VirtualizedMasonry::new(sizing, 8.0, 8.0, inset, 50.0, None)
+                    .with_columns(sizing, options),
+            ),
+        ),
+        (
+            "sectioned",
+            Box::new(
+                SectionedGrid::new(sizing, 8.0, 8.0, inset, 20.0, sectioned)
+                    .with_columns(sizing, options),
+            ),
+        ),
+    ];
+    // 450 dp: four columns, 26 dp left over, so the block starts at 13.
+    for (name, strategy) in &strategies {
+        strategy.resize(8);
+        // A waterfall places its items when it is first asked for a width.
+        strategy.total_content_height(8, 450.0);
+        let first = strategy.tile_rect(0, 450.0);
+        assert_close(first.x, 13.0, name);
+        let centre = teksilo_canvas::Point::new(first.x + 50.0, first.y + 25.0);
+        assert_eq!(strategy.index_at_point(centre, 8, 450.0), Some(0), "{name}");
+        let bare = teksilo_canvas::Point::new(5.0, first.y + 25.0);
+        assert_eq!(strategy.index_at_point(bare, 8, 450.0), None, "{name}");
+        let band = Rect::new(0.0, first.y, 120.0, 20.0);
+        assert_eq!(
+            strategy.hit_indices_in_rect(band, 8, 450.0),
+            vec![0],
+            "{name}"
+        );
+        let (bar_x, _) = insertion_bar_geometry(strategy.as_ref(), 1, 8, 450.0).unwrap();
+        assert_close(bar_x, 121.0, name);
+    }
+}
+
+#[test]
+fn section_headers_and_the_detail_band_still_span_the_content_width() {
+    use super::layout::columns::ColumnOptions;
+    let sizing = GridSizing::Fixed {
+        width: 100.0,
+        height: 50.0,
+    };
+    let options = ColumnOptions {
+        alignment: HAlignment::Center,
+        ..ColumnOptions::default()
+    };
+    let counts: Rc<dyn Fn() -> Vec<usize>> = Rc::new(|| vec![8]);
+    let grid = SectionedGrid::new(sizing, 8.0, 8.0, EdgeInsets::ZERO, 20.0, counts)
+        .with_columns(sizing, options);
+    let header = grid.header_rect(0, 450.0).unwrap();
+    assert_close(header.x, 0.0, "the header starts at the inset");
+    assert_close(header.width, 450.0, "and spans the content");
+
+    let (mut tree, id, _model, expanded) =
+        band_grid(12, 400.0, 500.0, |g| g.column_alignment(HAlignment::Center));
+    expanded.set(Some(0));
+    settle(&mut tree, 400.0, 500.0);
+    // Three columns: 316 dp used, 84 left over, so tiles start at 42.
+    assert_close(tile_rect_of(&tree, id, 0).x, 42.0, "tile 0 is offset");
+    let band = tree.bounds(band_of(&tree, id));
+    assert_close(band.x, 0.0, "the band starts at the inset");
+    assert_close(band.width, 400.0, "and spans the viewport");
+}

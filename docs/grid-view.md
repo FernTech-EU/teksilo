@@ -46,6 +46,36 @@ A pluggable `GridLayoutStrategy` drives virtualization; three ship:
 Sugar: `.tile_size(w, h)`, `.column_count(n, h)`. Spacing: `.column_spacing`,
 `.row_spacing`, `.spacing` (both), `.content_inset(EdgeInsets)`.
 
+**Column bounds and alignment.** `.min_columns(n)` and `.max_columns(n)` bound
+the count `Fixed` and `Adaptive` derive from the width; `FixedColumnCount`
+ignores both (its count is the answer). When `min_columns` asks for more
+columns than a `Fixed` width affords, the tiles **narrow** to share the width
+(never horizontal overflow); the tile **height** stays what the sizing says, so
+a tile that must hold an aspect ratio sizes its own content from the width it
+is handed. If the minimum exceeds the maximum, the maximum wins. Without a
+`min_columns`, a `Fixed` tile keeps its width even in a viewport narrower than
+one tile.
+
+A block of columns narrower than the content (a `Fixed` width, an `Adaptive`
+`max_width`, a `max_columns` cap) is placed by `.column_alignment(HAlignment)`:
+`Leading` (the default: tiles against the leading inset, leftover trailing),
+`Center`, or `Trailing`. Leading and trailing swap in a right-to-left layout;
+the order of the columns within the block is the same in both directions. Only
+the columns move: a section header and a [detail band](#detail-band) span the
+content width, and the marquee, drag-reorder insertion bar, focus ring and
+accessibility bounds all follow the offset.
+
+An album grid of fixed 182 dp cards at a fixed pitch, two to ten columns, the
+leftover split on both sides rather than stretched into the cards:
+
+```ignore
+GridView::new(albums, |tc| album_card(tc))
+    .sizing(GridSizing::Fixed { width: 182.0, height: 230.0 })
+    .min_columns(2)
+    .max_columns(10)
+    .column_alignment(HAlignment::Center)
+```
+
 **Reactive sizing.** `.sizing(...)` accepts `impl Into<Prop<GridSizing>>`, so it
 takes a plain `GridSizing` **or** a `Signal<GridSizing>`. A bound signal is
 observed at `BindingLevel::Rebuild`: changing it rebuilds the cached layout
@@ -97,7 +127,9 @@ rule for any other caller. `Multi` mode adds **rubber-band marquee**, a
 drag on the empty background sweeps a rectangle and selects every intersecting
 tile (Ctrl/Shift at drag-start = additive). The hit-test is geometric, so it
 selects tiles outside the realized window. `.on_selection_changed(|set|)` fires
-on every change (interactive or programmatic). `.marquee_selection(false)`
+on every change (interactive or programmatic), so it carries no input modifiers;
+`.on_tile_activate`, which receives an `EventContext`, is the callback for
+modifiers at the moment of input. `.marquee_selection(false)`
 disables marquee.
 
 ### Keyed selection

@@ -11,6 +11,7 @@
 //! This module is only the `GridSizing`-shaped door onto it.
 
 use teksilo_canvas::EdgeInsets;
+use teksilo_tokens::HAlignment;
 
 use super::strategy::GridSizing;
 pub(crate) use crate::common::column_geometry::ColumnGeometry;
@@ -33,10 +34,50 @@ impl From<GridSizing> for WidthPolicy {
     }
 }
 
+/// The column-count bounds and the leftover alignment a grid layers over its
+/// [`GridSizing`]. The default is no bound and leading alignment, which is the
+/// grid as it was before either existed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ColumnOptions {
+    /// Floor on the derived column count (`GridView::min_columns`).
+    pub(crate) min_columns: Option<usize>,
+    /// Cap on the derived column count (`GridView::max_columns`).
+    pub(crate) max_columns: Option<usize>,
+    /// Where the block of columns sits in the viewport (`GridView::column_alignment`).
+    pub(crate) alignment: HAlignment,
+}
+
+impl Default for ColumnOptions {
+    fn default() -> Self {
+        Self {
+            min_columns: None,
+            max_columns: None,
+            alignment: HAlignment::Leading,
+        }
+    }
+}
+
 /// Build a [`ColumnGeometry`] from a [`GridSizing`]. The grid strategies'
 /// entry point; equivalent to `ColumnGeometry::from_policy(sizing.into(), ..)`.
 pub(crate) fn geometry_for(sizing: GridSizing, col_gap: f32, inset: EdgeInsets) -> ColumnGeometry {
     ColumnGeometry::from_policy(sizing.into(), col_gap, inset)
+}
+
+/// `geometry` with `options` applied. A [`GridSizing::FixedColumnCount`] takes
+/// the bounds as no-ops — its count is the answer — but not the alignment,
+/// which only matters when the columns leave width over.
+pub(crate) fn with_options(
+    geometry: ColumnGeometry,
+    sizing: GridSizing,
+    options: ColumnOptions,
+) -> ColumnGeometry {
+    let geometry = geometry.with_alignment(options.alignment);
+    match sizing {
+        GridSizing::FixedColumnCount { .. } => geometry,
+        GridSizing::Fixed { .. } | GridSizing::Adaptive { .. } => geometry
+            .with_min_columns(options.min_columns)
+            .with_max_columns(options.max_columns),
+    }
 }
 
 /// The column index containing content-space `x`, or `None` when `x` falls

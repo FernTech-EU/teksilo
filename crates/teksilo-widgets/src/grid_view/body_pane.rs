@@ -740,6 +740,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         self.viewport_origin
             .set(Some(teksilo_canvas::Point::new(bounds.x, bounds.y)));
 
+        self.strategy.set_rtl(ctx.is_rtl());
         let scroll_y = self.scroll_y.get();
         let vp_w = bounds.width;
         let measures = self.strategy.measures_tiles();

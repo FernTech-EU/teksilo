@@ -25,6 +25,7 @@
 //! at the call site.
 
 use teksilo_canvas::EdgeInsets;
+use teksilo_tokens::HAlignment;
 
 /// How a column's width is determined.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -47,6 +48,9 @@ pub(crate) struct ColumnGeometry {
     col_gap: f32,
     inset: EdgeInsets,
     max_columns: Option<usize>,
+    min_columns: Option<usize>,
+    align: HAlignment,
+    rtl: bool,
 }
 
 impl ColumnGeometry {
@@ -60,6 +64,9 @@ impl ColumnGeometry {
             col_gap: col_gap.max(0.0),
             inset,
             max_columns: None,
+            min_columns: None,
+            align: HAlignment::Leading,
+            rtl: false,
         }
     }
 
@@ -79,6 +86,36 @@ impl ColumnGeometry {
         self
     }
 
+    /// Floor the column count, however narrow the viewport gets.
+    ///
+    /// Under [`WidthPolicy::Fixed`] a floor the width cannot afford makes the
+    /// columns **shrink** to share the width between the floored count — a
+    /// fixed-width column never overflows the viewport once a floor is set.
+    /// Where a floor and a [`with_max_columns`](Self::with_max_columns) cap
+    /// disagree, the cap wins. Without a floor, [`WidthPolicy::Fixed`] keeps
+    /// its width whatever the viewport.
+    pub(crate) fn with_min_columns(mut self, min: Option<usize>) -> Self {
+        self.min_columns = min.map(|m| m.max(1));
+        self
+    }
+
+    /// Where the block of columns sits when it is narrower than the content
+    /// width (a [`WidthPolicy::Fixed`] width, an `Adaptive` `max`, a column
+    /// cap). `rtl` swaps leading and trailing, exactly as
+    /// [`HAlignment::resolve`] does. The default, leading in a left-to-right
+    /// layout, puts the block against the leading inset.
+    pub(crate) fn with_alignment(mut self, align: HAlignment) -> Self {
+        self.align = align;
+        self
+    }
+
+    /// The layout direction [`with_alignment`](Self::with_alignment) resolves
+    /// leading and trailing against.
+    pub(crate) fn with_rtl(mut self, rtl: bool) -> Self {
+        self.rtl = rtl;
+        self
+    }
+
     /// Usable content width inside the leading/trailing insets.
     pub(crate) fn available_width(&self, viewport_width: f32) -> f32 {
         (viewport_width - self.inset.horizontal()).max(0.0)
@@ -93,7 +130,7 @@ impl ColumnGeometry {
             WidthPolicy::Fixed(w) | WidthPolicy::Adaptive { min: w, .. } => {
                 let avail = self.available_width(viewport_width);
                 if w <= 0.0 {
-                    return 1;
+                    return self.bounded(1);
                 }
                 // `floor((avail + gap) / (w + gap))` — the CSS auto-fill count.
                 // Adding one gap to the numerator accounts for there being one
@@ -108,21 +145,32 @@ impl ColumnGeometry {
                 n.max(1) as usize
             }
         };
+        self.bounded(fit)
+    }
+
+    /// `fit` raised to the floor, then cut to the cap, never below 1.
+    fn bounded(&self, fit: usize) -> usize {
+        let fit = fit.max(self.min_columns.unwrap_or(1));
         match self.max_columns {
             Some(max) => fit.min(max).max(1),
-            None => fit,
+            None => fit.max(1),
         }
     }
 
     /// The width every column takes at `viewport_width`. Columns stretch to
     /// an even share of the leftover under [`WidthPolicy::Count`] and
     /// [`WidthPolicy::Adaptive`] (clamped by the latter's `max`);
-    /// [`WidthPolicy::Fixed`] never stretches.
+    /// [`WidthPolicy::Fixed`] never stretches, but it does shrink when a
+    /// [`with_min_columns`](Self::with_min_columns) floor forces more columns
+    /// than fit.
     pub(crate) fn column_width(&self, viewport_width: f32) -> f32 {
         let cols = self.column_count(viewport_width).max(1);
         let avail = self.available_width(viewport_width);
         let stretched = (avail - self.col_gap * (cols as f32 - 1.0)) / cols as f32;
         match self.policy {
+            // Never wider than the share, once a floor on the count may have
+            // forced more columns than the width affords.
+            WidthPolicy::Fixed(w) if self.min_columns.is_some() => w.min(stretched),
             WidthPolicy::Fixed(w) => w,
             WidthPolicy::Count(_) => stretched,
             WidthPolicy::Adaptive { max, .. } => match max {
@@ -134,11 +182,25 @@ impl ColumnGeometry {
     }
 
     /// The `(x, width)` of column `col` at `viewport_width`, in logical pixels
-    /// relative to the container's leading edge.
+    /// relative to the container's leading edge. Includes the offset
+    /// [`with_alignment`](Self::with_alignment) puts on the whole block.
     pub(crate) fn column_x(&self, col: usize, viewport_width: f32) -> (f32, f32) {
         let col_w = self.column_width(viewport_width);
-        let x = self.inset.leading + col as f32 * (col_w + self.col_gap);
+        let x = self.inset.leading
+            + self.block_offset(viewport_width)
+            + col as f32 * (col_w + self.col_gap);
         (x, col_w)
+    }
+
+    /// How far the block of columns sits from the leading inset: zero when it
+    /// fills the content width, otherwise the share of the leftover the
+    /// alignment asks for. Never negative, so a block wider than the content
+    /// (a single fixed column in a narrow viewport) stays at the inset.
+    pub(crate) fn block_offset(&self, viewport_width: f32) -> f32 {
+        let avail = self.available_width(viewport_width);
+        self.align
+            .resolve(self.used_width(viewport_width), avail, self.rtl)
+            .max(0.0)
     }
 
     /// Total width actually consumed by the columns plus their gaps, i.e. the
@@ -321,6 +383,67 @@ mod tests {
     fn fixed_count_floors_at_one() {
         let g = ColumnGeometry::from_policy(WidthPolicy::Count(0), 0.0, EdgeInsets::ZERO);
         assert_eq!(g.column_count(1000.0), 1);
+    }
+
+    fn fixed(w: f32, gap: f32) -> ColumnGeometry {
+        ColumnGeometry::from_policy(WidthPolicy::Fixed(w), gap, EdgeInsets::ZERO)
+    }
+
+    #[test]
+    fn min_columns_raises_the_count_and_shrinks_fixed_columns_to_fit() {
+        let g = fixed(100.0, 10.0).with_min_columns(Some(3));
+        // 150 fits one column; the floor forces three that share 150 - 20.
+        assert_eq!(g.column_count(150.0), 3);
+        assert!((g.column_width(150.0) - 130.0 / 3.0).abs() < 0.01);
+        assert!((g.used_width(150.0) - 150.0).abs() < 0.01, "no overflow");
+        // Room for the floor: the width is the policy's again.
+        assert!((g.column_width(1000.0) - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn without_a_floor_a_fixed_column_keeps_its_width_in_a_narrow_viewport() {
+        assert!((fixed(100.0, 0.0).column_width(40.0) - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn the_cap_beats_the_floor() {
+        let g = fixed(100.0, 0.0)
+            .with_min_columns(Some(5))
+            .with_max_columns(Some(2));
+        assert_eq!(g.column_count(1000.0), 2);
+    }
+
+    #[test]
+    fn alignment_offsets_the_block_by_its_share_of_the_leftover() {
+        // 4 columns of 100 in 450: 50 left over.
+        let at = |a, rtl| {
+            fixed(100.0, 0.0)
+                .with_alignment(a)
+                .with_rtl(rtl)
+                .column_x(0, 450.0)
+                .0
+        };
+        assert!((at(HAlignment::Leading, false) - 0.0).abs() < 0.01);
+        assert!((at(HAlignment::Center, false) - 25.0).abs() < 0.01);
+        assert!((at(HAlignment::Trailing, false) - 50.0).abs() < 0.01);
+        assert!((at(HAlignment::Leading, true) - 50.0).abs() < 0.01);
+        assert!((at(HAlignment::Trailing, true) - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn alignment_is_measured_inside_the_insets_and_never_goes_negative() {
+        let inset = EdgeInsets {
+            leading: 10.0,
+            trailing: 20.0,
+            top: 0.0,
+            bottom: 0.0,
+        };
+        let g = ColumnGeometry::from_policy(WidthPolicy::Fixed(100.0), 0.0, inset)
+            .with_alignment(HAlignment::Center);
+        // 450 - 30 = 420 available, 4 columns = 400 used: offset 10 + 10.
+        assert!((g.column_x(0, 450.0).0 - 20.0).abs() < 0.01);
+        // One 100 column in 60: wider than the content, stays at the inset.
+        assert!((g.column_x(0, 90.0).0 - 10.0).abs() < 0.01);
     }
 
     #[test]

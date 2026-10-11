@@ -477,6 +477,10 @@ impl DetailRowStrategy {
 }
 
 impl GridLayoutStrategy for DetailRowStrategy {
+    fn set_rtl(&self, rtl: bool) {
+        self.inner.set_rtl(rtl);
+    }
+
     fn column_count(&self, viewport_width: f32) -> usize {
         self.inner.column_count(viewport_width)
     }

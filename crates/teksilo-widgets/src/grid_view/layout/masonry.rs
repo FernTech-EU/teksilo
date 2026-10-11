@@ -14,12 +14,12 @@
 //! waterfall does **not** scroll-anchor on late measurement (items reflow
 //! across columns); a good estimate keeps the typical top-down scroll smooth.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use teksilo_canvas::EdgeInsets;
 
-use super::columns::{ColumnGeometry, geometry_for};
+use super::columns::{ColumnGeometry, ColumnOptions, geometry_for, with_options};
 use super::strategy::{BUFFER_ROWS, GridLayoutStrategy, GridSizing, TileRect, VisibleTileRange};
 
 type ExactHeightFn = Rc<dyn Fn(usize) -> f32>;
@@ -130,7 +130,7 @@ impl Placement {
 
 /// A virtualized waterfall grid.
 pub struct VirtualizedMasonry {
-    columns: ColumnGeometry,
+    columns: Cell<ColumnGeometry>,
     exact_height: Option<ExactHeightFn>,
     placement: RefCell<Placement>,
     estimated: f32,
@@ -146,6 +146,14 @@ impl std::fmt::Debug for VirtualizedMasonry {
 }
 
 impl VirtualizedMasonry {
+    /// Apply the column-count bounds and the leftover alignment; `sizing` is
+    /// the one this strategy was built from.
+    pub(crate) fn with_columns(self, sizing: GridSizing, options: ColumnOptions) -> Self {
+        self.columns
+            .set(with_options(self.columns.get(), sizing, options));
+        self
+    }
+
     pub(crate) fn new(
         sizing: GridSizing,
         col_gap: f32,
@@ -160,7 +168,7 @@ impl VirtualizedMasonry {
             sizing.tile_height().max(1.0)
         };
         Self {
-            columns: geometry_for(sizing, col_gap, inset),
+            columns: Cell::new(geometry_for(sizing, col_gap, inset)),
             exact_height,
             placement: RefCell::new(Placement::new(
                 estimated,
@@ -186,7 +194,7 @@ impl VirtualizedMasonry {
 
     /// Keep the placement's item count / column count in sync.
     fn sync(&self, item_count: usize, viewport_width: f32) {
-        let cols = self.columns.column_count(viewport_width).max(1);
+        let cols = self.columns.get().column_count(viewport_width).max(1);
         {
             let mut p = self.placement.borrow_mut();
             p.set_count(item_count);
@@ -200,6 +208,10 @@ impl VirtualizedMasonry {
 }
 
 impl GridLayoutStrategy for VirtualizedMasonry {
+    fn set_rtl(&self, rtl: bool) {
+        self.columns.set(self.columns.get().with_rtl(rtl));
+    }
+
     // `index_at_point` intentionally keeps the trait's O(n) `tile_rect` scan
     // default: unlike the row-major strategies, item order here isn't
     // visually monotonic in `y` (each item drops into the currently-
@@ -208,11 +220,11 @@ impl GridLayoutStrategy for VirtualizedMasonry {
     // waterfall gallery holds (see the module doc comment).
 
     fn column_count(&self, viewport_width: f32) -> usize {
-        self.columns.column_count(viewport_width)
+        self.columns.get().column_count(viewport_width)
     }
 
     fn column_x(&self, col: usize, viewport_width: f32) -> (f32, f32) {
-        self.columns.column_x(col, viewport_width)
+        self.columns.get().column_x(col, viewport_width)
     }
 
     fn total_content_height(&self, item_count: usize, viewport_width: f32) -> f32 {
@@ -263,7 +275,7 @@ impl GridLayoutStrategy for VirtualizedMasonry {
         self.placement.borrow_mut().rebuild();
         let p = self.placement.borrow();
         let col = p.col_of.get(index).copied().unwrap_or(0);
-        let (x, width) = self.columns.column_x(col, viewport_width);
+        let (x, width) = self.columns.get().column_x(col, viewport_width);
         let y = p.top_of.get(index).copied().unwrap_or(0.0);
         let height = p.heights.get(index).copied().unwrap_or(self.estimated);
         TileRect {
