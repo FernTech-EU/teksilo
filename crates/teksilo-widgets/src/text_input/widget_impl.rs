@@ -26,18 +26,33 @@ impl Widget for TextInput {
         // The inner field owns the bound text signal, the document,
         // engine, caret, clipboard, context menu — everything
         // interactive. The composite just styles it.
-        let inner_height =
-            (field_dims::TEXT_FIELD_HEIGHT - 2.0 * field_dims::TEXT_FIELD_BORDER_WIDTH).max(0.0);
-        let text_area_height =
-            (inner_height - 2.0 * field_dims::TEXT_FIELD_PADDING_VERTICAL).max(0.0);
+        //
+        // Both heights come from one resolution, so the text area and the
+        // frame cannot disagree: see `field_dims::TextFieldHeights`.
+        let heights = field_dims::TextFieldHeights::resolve(
+            self.min_height,
+            self.text_style.is_some(),
+            &ctx.theme().input,
+        );
 
         let mut field = TextInputField::new(self.text.clone()).share_handle(&self.field_handle);
         field = field
             .enabled(self.enabled.clone())
             .read_only(self.read_only)
             .placeholder(self.placeholder.clone())
-            .text_height(text_area_height)
             .interaction_signal(interaction.clone());
+        if let Some(text_height) = heights.text_area {
+            field = field.text_height(text_height);
+        }
+        if let Some(style) = self.text_style.clone() {
+            field = field.text_style(style);
+        }
+        if let Some(alignment) = self.text_alignment {
+            field = field.text_alignment(alignment);
+        }
+        if let Some(color) = self.text_color.clone() {
+            field = field.text_color(color);
+        }
         if let Some(max) = self.max_length {
             field = field.max_length(max);
         }
@@ -143,7 +158,11 @@ impl Widget for TextInput {
             // `single_line()` the placeholder defaults to Wrap, which
             // can report extra vertical leading space.
             let ph = TextWidget::new(self.placeholder.clone())
-                .style(TextStyleRole::Body)
+                .style(
+                    self.text_style
+                        .clone()
+                        .unwrap_or(TextStyleProp::Role(TextStyleRole::Body)),
+                )
                 .color(TextRole::Secondary)
                 .single_line()
                 .a11y_hidden();
@@ -162,7 +181,11 @@ impl Widget for TextInput {
             let ph_id = ctx.add(
                 Expand::new()
                     .respect_intrinsic()
-                    .align_child(Alignment::CENTER_LEADING)
+                    .align_child(match self.text_alignment {
+                        None | Some(HAlignment::Leading) => Alignment::CENTER_LEADING,
+                        Some(HAlignment::Center) => Alignment::CENTER,
+                        Some(HAlignment::Trailing) => Alignment::CENTER_TRAILING,
+                    })
                     .child(ph),
             );
             let visible = text_signal_for_vis.map(|t| t.is_empty());
@@ -290,17 +313,12 @@ impl Widget for TextInput {
             is_disabled,
             validation: validation_level,
             variant: self.variant,
+            min_height: heights.style_min_height,
         };
         let chrome_id = style.make_body(&cfg, ctx);
 
         let min_w = self.min_width.unwrap_or(65.0);
-        let frame_id = ctx.add(
-            MinSize::new(
-                min_w,
-                crate::styles::TextInputRecipe::for_tokens(&ctx.theme().input).height,
-            )
-            .child(chrome_id),
-        );
+        let frame_id = ctx.add(MinSize::new(min_w, heights.min_height).child(chrome_id));
 
         // ── Inline validation strip ────────────────────────────────
         // Maps `Signal<ValidationState>` to the `Signal<ValidationFeedback>`

@@ -49,6 +49,16 @@ pub struct TextInputStyleConfig {
     pub is_disabled: Signal<bool>,
     pub validation: Signal<TextInputValidationLevel>,
     pub variant: TextInputVariant,
+    /// The minimum height the widget resolved for the field, in logical
+    /// pixels, when it differs from the style's own: an app's explicit
+    /// `TextInput::min_height`, or the density's target size when a text
+    /// style sizes the field from its line. `None` — the default — leaves the
+    /// style its own control height.
+    ///
+    /// A style that floors its chrome with a minimum height should use this in
+    /// its place when it is set; one that ignores it keeps its own floor, and
+    /// the field can then be no shorter than that.
+    pub min_height: Option<f32>,
 }
 
 pub trait TextInputStyle: 'static {

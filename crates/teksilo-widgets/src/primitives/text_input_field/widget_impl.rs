@@ -66,7 +66,11 @@ impl Widget for TextInputField {
             // and 12h time fields clipped the AM/PM letters.
             let mut widest = worst_case_template(m);
             widest.push('M');
-            let style = &theme_snapshot.typography.body;
+            let style = match &self.text_style {
+                Some(prop) => prop.resolve(&theme_snapshot.typography),
+                None => theme_snapshot.typography.body.clone(),
+            };
+            let style = &style;
             let measured = measure_width_px(ctx, &widest, style);
             let slack = style.size;
             self.natural_width = measured + slack;
@@ -169,6 +173,34 @@ impl Widget for TextInputField {
             focus_signal: self.focus_signal.clone(),
         });
         self.state = Some(shared_state.clone());
+        {
+            let mut st = shared_state.borrow_mut();
+            st.text_alignment = self.text_alignment;
+            st.text_style = self
+                .text_style
+                .as_ref()
+                .map(|prop| prop.resolve(&theme_snapshot.typography));
+        }
+        // A role follows the theme: a theme that ships another size or family
+        // for it re-shapes the text. The theme change relayouts every node, so
+        // the field's height follows too.
+        if let Some(prop @ TextStyleProp::Role(_)) = self.text_style.clone() {
+            let state = shared_state.clone();
+            let theme_signal = ctx.theme_signal();
+            ctx.effect(&theme_signal, move |theme| {
+                let resolved = prop.resolve(&theme.typography);
+                let mut st = state.borrow_mut();
+                if st.text_style.as_ref() != Some(&resolved) {
+                    st.text_style = Some(resolved);
+                    st.needs_full_layout = true;
+                    // Re-derived from the new size at the next paint.
+                    st.applied_font_scale = f32::NAN;
+                    if !st.suffix.is_empty() {
+                        st.relayout_suffix_engine();
+                    }
+                }
+            });
+        }
         // Late-populate the slot so `caret_setter()` closures captured
         // before build can now reach the inner state. Idempotent on
         // rebuild — overwrites the slot with the freshly created
@@ -340,6 +372,14 @@ impl Widget for TextInputField {
             engine.set_wrap_mode(teksilo_text::WrapMode::None);
             st.engine = engine;
             st.needs_full_layout = true;
+            // A text style's size is honoured as a scale from the size the
+            // shared service shapes at by default.
+            st.engine_base_size = shared
+                .bridge()
+                .borrow()
+                .service()
+                .font_registry()
+                .default_size_px();
         }
 
         // Apply theme colors to the (possibly freshly swapped-in) engine.
@@ -394,7 +434,7 @@ impl Widget for TextInputField {
         // of the field. When the suffix is bound to a signal, a
         // reactive effect below re-lays the engine out each time
         // the signal fires.
-        let text_area_height = self.text_height.unwrap_or(DEFAULT_TEXT_HEIGHT).max(1.0);
+        let text_area_height = self.base_text_height().max(1.0);
         let needs_suffix_engine = matches!(self.suffix, Prop::Bound(_)) || {
             let st = self.state().borrow();
             !st.suffix.is_empty()
@@ -403,7 +443,7 @@ impl Widget for TextInputField {
             let mut suffix_engine = if let Some(shared) = ctx.app_state::<SharedTypesetter>() {
                 RichTextEngine::from_shared(shared.clone())
             } else {
-                RichTextEngine::private_default()
+                state::private_engine()
             };
             suffix_engine.set_wrap_mode(teksilo_text::WrapMode::None);
             {
@@ -439,6 +479,17 @@ impl Widget for TextInputField {
             ctx.effect(signal, move |new_text| {
                 relayout_suffix(&state_for_effect, new_text);
             });
+        }
+
+        // A colour bound to a signal — a focus-driven role, say — repaints the
+        // field when it changes. A role follows the theme without a binding:
+        // a theme change already repaints every node.
+        if let Some(color) = &self.text_color {
+            color.register_if_bound(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                teksilo_core::binding::BindingLevel::RepaintOnly,
+            );
         }
 
         // Bind caret_visible for repaint.
@@ -924,7 +975,7 @@ impl Widget for TextInputField {
             .width
             .unwrap_or(self.natural_width * scale)
             .max(0.0);
-        let h = (self.text_height.unwrap_or(DEFAULT_TEXT_HEIGHT) * scale).max(0.0);
+        let h = (self.base_text_height() * scale).max(0.0);
         Size::new(w, h).into()
     }
 
@@ -946,7 +997,7 @@ impl Widget for TextInputField {
         if let Some(backend) = ctx.text_backend {
             self.retain_text_geometry(
                 bounds,
-                &ctx.theme.typography.body,
+                &self.measured_style(&ctx.theme.typography, ctx.text_scale),
                 backend,
                 base_text_direction(ctx.layout_direction),
             );
@@ -979,10 +1030,19 @@ impl Widget for TextInputField {
         // `Signal::observe` panics on derived signals. Cheap — the engine
         // stores the colour and the render-frame builder reads it, so there
         // is no relayout and no reshaping.
-        let text_color = if ctx.effective_enabled {
-            ctx.theme.colors.text_primary
-        } else {
-            ctx.theme.colors.text_disabled
+        //
+        // An app colour (`text_color`) is resolved the same way, every paint,
+        // so a role follows the theme and a signal is read live. A disabled
+        // field still greys out — a crisp custom colour on an inert field reads
+        // as editable — unless the app wrapped the colour in
+        // `ColorProp::undimmed`, the framework's statement that it carries
+        // meaning a disabled control keeps.
+        let text_color = match &self.text_color {
+            Some(color) if ctx.effective_enabled || matches!(color, ColorProp::Undimmed(_)) => {
+                color.resolve(ctx.theme, ctx.effective_enabled)
+            }
+            _ if ctx.effective_enabled => ctx.theme.colors.text_primary,
+            _ => ctx.theme.colors.text_disabled,
         };
         st.engine.set_text_color(text_color.to_array());
         st.engine.set_cursor_color(text_color.to_array());
@@ -997,6 +1057,17 @@ impl Widget for TextInputField {
             st.needs_full_layout = false;
             st.content_dirty = true;
         }
+
+        // A chosen style sizes the field to `size × line_height`, which is not
+        // the height the font's own metrics give the shaped line; centre the
+        // line in the slack so the text sits where the placeholder does. Zero
+        // without a style: the default field's height was tuned to its font.
+        st.text_offset_y = if st.text_style.is_some() && st.engine.has_full_layout() {
+            ((bounds.height - st.engine.content_height()) / 2.0).max(0.0)
+        } else {
+            0.0
+        };
+        let offset_y = st.text_offset_y;
 
         // Suppress the caret in an inactive window for every paint — the
         // authoritative gate, covering the frame between a window-active flip
@@ -1023,7 +1094,12 @@ impl Widget for TextInputField {
         };
         st.engine.set_cursor(&cursor_display);
 
-        ensure_caret_visible_h(&mut st, text_viewport_width, &ctx.theme.input);
+        ensure_caret_visible_h(
+            &mut st,
+            text_viewport_width,
+            &ctx.theme.input,
+            ctx.layout_direction == teksilo_core::environment::LayoutDirection::RightToLeft,
+        );
 
         let scroll_x = st.scroll_x;
 
@@ -1044,7 +1120,7 @@ impl Widget for TextInputField {
                     canvas,
                     PaintParams {
                         frame,
-                        origin: Point::new(bounds.x - scroll_x, bounds.y),
+                        origin: Point::new(bounds.x - scroll_x, bounds.y + offset_y),
                         document,
                         image_cache,
                         // No inline images on this surface, so none can be missing.
@@ -1073,11 +1149,11 @@ impl Widget for TextInputField {
             let end_c = st.engine.caret_rect(range.end, CursorAffinity::Downstream);
             let x0 = bounds.x - scroll_x + start_c[0];
             let x1 = bounds.x - scroll_x + end_c[0];
-            let y = bounds.y + start_c[1] + start_c[3] - 1.0;
+            let y = bounds.y + offset_y + start_c[1] + start_c[3] - 1.0;
             canvas.draw_line(
                 Point::new(x0, y),
                 Point::new(x1, y),
-                ctx.theme.colors.text_primary,
+                text_color,
                 teksilo_canvas::StrokeStyle::solid(1.0),
             );
         }
@@ -1102,7 +1178,7 @@ impl Widget for TextInputField {
                 bounds.height,
             );
             canvas.set_clip(suffix_clip);
-            let suffix_origin = Point::new(bounds.x + text_viewport_width, bounds.y);
+            let suffix_origin = Point::new(bounds.x + text_viewport_width, bounds.y + offset_y);
             suffix_engine.with_render_frame(|frame| {
                 paint_suffix_glyphs(canvas, frame, suffix_origin);
             });
@@ -1120,7 +1196,7 @@ impl Widget for TextInputField {
         if let Some(backend) = canvas.text_backend() {
             self.retain_text_geometry(
                 bounds,
-                &ctx.theme.typography.body,
+                &self.measured_style(&ctx.theme.typography, ctx.text_scale),
                 backend,
                 base_text_direction(ctx.layout_direction),
             );
@@ -1230,7 +1306,7 @@ impl Widget for TextInputField {
                 Some(geometry) => TextRunSource::from_geometry(
                     &placed.text,
                     geometry,
-                    Point::new(-st.scroll_x, 0.0),
+                    Point::new(-st.scroll_x, st.text_offset_y),
                     0,
                 )
                 .with_base_direction(placed.base_direction),

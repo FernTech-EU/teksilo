@@ -32,7 +32,7 @@ pub(crate) fn report_ime_cursor_area(state: &SharedState, ctx: &mut EventContext
             .caret_rect(st.cursor.position(), CursorAffinity::Downstream);
         teksilo_canvas::Rect::new(
             st.viewport_origin.x + caret[0] - st.scroll_x,
-            st.viewport_origin.y + caret[1],
+            st.viewport_origin.y + st.text_offset_y + caret[1],
             caret[2].max(1.0),
             caret[3],
         )

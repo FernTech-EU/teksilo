@@ -17,8 +17,12 @@ use teksilo_canvas::Point;
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::EventContext;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_text::text_document::{DocumentEvent, Subscription, TextCursor, TextDocument};
-use teksilo_text::{RichTextEngine, WrapMode};
+use teksilo_text::text_document::{
+    DocumentEvent, FlowElementSnapshot, FlowSnapshot, FragmentContent, Subscription, TextCursor,
+    TextDocument, TextFormat,
+};
+use teksilo_text::{EmbeddedInterRegistrar, RichTextEngine, WrapMode};
+use teksilo_tokens::{HAlignment, TextStyle};
 
 use super::{AtRevealPolicy, EchoMode};
 use crate::common::editor_runtime::{CaretBlink, Debounce};
@@ -136,10 +140,29 @@ pub(crate) struct TextInputState {
     pub drag_state: DragState,
     pub needs_full_layout: bool,
     pub content_dirty: bool,
-    /// Last applied global text-scale factor (`ctx.text_scale`). Tracked so the
-    /// engine's logical `font_scale` is only re-set (and a relayout forced) when
-    /// the accessibility scale actually changes.
-    pub last_text_scale: f32,
+    /// The logical `font_scale` last handed to the engines: the global text
+    /// scale (`ctx.text_scale`) times the [`text_style`](Self::text_style)'s
+    /// size over the engine's own base size. Tracked so the engine is only
+    /// re-scaled (and a relayout forced) when that product actually changes.
+    pub applied_font_scale: f32,
+    /// The size, in logical pixels, the engine shapes at when its font scale
+    /// is `1.0` — the default size of the font service it shapes through.
+    /// [`text_style`](Self::text_style) is honoured by scaling from it.
+    pub engine_base_size: f32,
+    /// The text style set with `TextInputField::text_style`, resolved against
+    /// the theme's (unscaled) typography. `None` — the default — shapes in the
+    /// engine's own default font, which is what every field did before the
+    /// style could be chosen.
+    pub text_style: Option<TextStyle>,
+    /// Where the text sits in a viewport wider than it. `None` keeps the
+    /// field's original placement (start at the left edge, scroll to follow
+    /// the caret); see `TextInputField::text_alignment`.
+    pub text_alignment: Option<HAlignment>,
+    /// How far below the top of the field the text line starts, in logical
+    /// pixels. Zero unless a [`text_style`](Self::text_style) is set, in which
+    /// case `paint` centres the shaped line in the field's height. Every
+    /// conversion between the engine's space and the field's adds it.
+    pub text_offset_y: f32,
     /// Empty image cache kept to satisfy paint_frame's API. TextInput
     /// never has inline images.
     pub image_cache: ImageCache,
@@ -334,7 +357,7 @@ impl TextInputState {
         }
         let cursor = document.cursor();
 
-        let mut engine = RichTextEngine::private_default();
+        let mut engine = private_engine();
         engine.set_wrap_mode(WrapMode::None);
 
         let event_queue = Arc::new(Mutex::new(VecDeque::<DocumentEvent>::new()));
@@ -382,7 +405,11 @@ impl TextInputState {
             drag_state: DragState::Idle,
             needs_full_layout: true,
             content_dirty: true,
-            last_text_scale: 1.0,
+            applied_font_scale: 1.0,
+            engine_base_size: PRIVATE_ENGINE_BASE_SIZE,
+            text_style: None,
+            text_alignment: None,
+            text_offset_y: 0.0,
             image_cache: ImageCache::new(),
             max_length,
             read_only,
@@ -473,40 +500,53 @@ impl TextInputState {
 
     /// Apply the global accessibility text scale to the shaping engine(s).
     ///
-    /// `scale` is `ctx.text_scale` (combined user×OS factor). When it changes,
-    /// the main engine's logical `font_scale` is updated so the value text grows
-    /// (advances + line height + content height), a full relayout is forced, and
-    /// the suffix engine is re-laid out at the new scale so its width stays
-    /// correct. Cheap no-op when the scale is unchanged.
-    /// Run a full layout, applying secure masking. Installs the echo
-    /// char on the engine (or clears it), and for `NoEcho` while masked
-    /// lays out an empty source so nothing — not even length — is
-    /// shown. The real `document` is never mutated: masking is
-    /// display-only, so caret / selection / hit-test (all char-indexed)
-    /// stay aligned because one echo char is emitted per source char.
-    ///
-    /// `scale` is `ctx.text_scale` (combined user×OS factor). When it changes,
-    /// the main engine's logical `font_scale` is updated so the value text grows
-    /// (advances + line height + content height), a full relayout is forced, and
-    /// the suffix engine is re-laid out at the new scale so its width stays
-    /// correct. Cheap no-op when the scale is unchanged.
+    /// `scale` is `ctx.text_scale` (combined user×OS factor). The engines'
+    /// logical `font_scale` is that factor times the
+    /// [`text_style`](Self::text_style)'s size over
+    /// [`engine_base_size`](Self::engine_base_size) — the factor alone when no
+    /// style is set. When the product changes, the value text grows or shrinks
+    /// (advances + line height + content height), a full relayout is forced,
+    /// and the suffix engine is re-laid out at the new scale so its width stays
+    /// correct. Cheap no-op when nothing changed.
     pub fn apply_font_scale(&mut self, scale: f32) {
-        if (self.last_text_scale - scale).abs() <= f32::EPSILON {
+        let target = scale * self.style_size_factor();
+        if (self.applied_font_scale - target).abs() <= f32::EPSILON {
             return;
         }
-        self.last_text_scale = scale;
-        self.engine.set_font_scale(scale);
+        self.applied_font_scale = target;
+        self.engine.set_font_scale(target);
         self.needs_full_layout = true;
-        if !self.suffix.is_empty()
-            && let Some(engine) = self.suffix_engine.as_mut()
-        {
-            engine.set_font_scale(scale);
-            let doc = TextDocument::new();
-            let _ = doc.set_plain_text(&self.suffix);
-            let flow = doc.snapshot_flow();
-            engine.layout_full(&flow);
-            self.suffix_width = engine.max_content_width();
+        if let Some(engine) = self.suffix_engine.as_mut() {
+            engine.set_font_scale(target);
         }
+        if !self.suffix.is_empty() {
+            self.relayout_suffix_engine();
+        }
+    }
+
+    /// The text style's size as a multiple of the engine's base size; `1.0`
+    /// without a style.
+    fn style_size_factor(&self) -> f32 {
+        match &self.text_style {
+            Some(style) if self.engine_base_size > 0.0 => style.size / self.engine_base_size,
+            _ => 1.0,
+        }
+    }
+
+    /// Lay the suffix engine out again from [`suffix`](Self::suffix), in the
+    /// field's text style, and cache its width.
+    pub fn relayout_suffix_engine(&mut self) {
+        let Some(engine) = self.suffix_engine.as_mut() else {
+            return;
+        };
+        let doc = TextDocument::new();
+        let _ = doc.set_plain_text(&self.suffix);
+        let mut flow = doc.snapshot_flow();
+        if let Some(style) = &self.text_style {
+            fill_text_style(&mut flow, style);
+        }
+        engine.layout_full(&flow);
+        self.suffix_width = engine.max_content_width();
     }
 
     /// Adopt `bounds` as the field's viewport — the single writer of
@@ -533,6 +573,15 @@ impl TextInputState {
         changed
     }
 
+    /// Run a full layout, applying secure masking. Installs the echo
+    /// char on the engine (or clears it), and for `NoEcho` while masked
+    /// lays out an empty source so nothing — not even length — is
+    /// shown. The real `document` is never mutated: masking is
+    /// display-only, so caret / selection / hit-test (all char-indexed)
+    /// stay aligned because one echo char is emitted per source char.
+    ///
+    /// A [`text_style`](Self::text_style)'s family and weight are filled onto
+    /// the disposable layout snapshot here, never onto the document.
     pub fn layout_full_masked(&mut self) {
         let masked = self.should_mask();
         let echo = if masked && self.echo_mode != EchoMode::NoEcho {
@@ -543,13 +592,15 @@ impl TextInputState {
         if self.engine.echo_char() != echo {
             self.engine.set_echo_char(echo);
         }
-        if masked && self.echo_mode == EchoMode::NoEcho {
-            let flow = self.empty_doc.snapshot_flow();
-            self.engine.layout_full(&flow);
+        let mut flow = if masked && self.echo_mode == EchoMode::NoEcho {
+            self.empty_doc.snapshot_flow()
         } else {
-            let flow = self.document.snapshot_flow();
-            self.engine.layout_full(&flow);
+            self.document.snapshot_flow()
+        };
+        if let Some(style) = &self.text_style {
+            fill_text_style(&mut flow, style);
         }
+        self.engine.layout_full(&flow);
     }
 
     /// Drain the local event queue. Returns `true` if any events
@@ -599,6 +650,66 @@ impl TextInputState {
         }
 
         had_events
+    }
+}
+
+/// The size the private engine's default font is registered at. The engine is
+/// built with an explicit registrar rather than `RichTextEngine::private_default`
+/// so this number is the field's own, not a private constant of the registrar.
+pub(crate) const PRIVATE_ENGINE_BASE_SIZE: f32 = 14.0;
+
+/// The engine a field shapes with until `build` finds the app's shared
+/// typesetter — and for good under a headless test.
+pub(crate) fn private_engine() -> RichTextEngine {
+    RichTextEngine::private_with_registrar(&EmbeddedInterRegistrar::with_size(
+        PRIVATE_ENGINE_BASE_SIZE,
+    ))
+}
+
+/// Fill a text style's family and weight onto every text fragment of a layout
+/// snapshot that does not name its own.
+///
+/// The size is not filled here: a fragment carries an integer point size, and a
+/// style's size is a float that the global text scale multiplies anyway. It
+/// reaches the engine as its logical font scale instead (see
+/// [`TextInputState::apply_font_scale`]).
+///
+/// A block with no fragment — an empty field — is given an empty one carrying
+/// the style, the way `teksilo_text`'s editor typography defaults do it, so the
+/// empty line is measured in the face its first character will use and the
+/// caret does not change height on the first keystroke.
+pub(crate) fn fill_text_style(flow: &mut FlowSnapshot, style: &TextStyle) {
+    let fill = |format: &mut TextFormat| {
+        if format.font_family.is_none() {
+            format.font_family = Some(style.family.clone());
+        }
+        if format.font_weight.is_none() {
+            format.font_weight = Some(u32::from(style.weight.0));
+        }
+    };
+    for element in &mut flow.elements {
+        let FlowElementSnapshot::Block(block) = element else {
+            // A single-line field holds one plain paragraph: no table, no frame.
+            continue;
+        };
+        if block.fragments.is_empty() {
+            let mut format = TextFormat::default();
+            fill(&mut format);
+            block.fragments.push(FragmentContent::Text {
+                text: String::new(),
+                format,
+                offset: 0,
+                length: 0,
+                element_id: 0,
+                word_starts: Vec::new(),
+            });
+            continue;
+        }
+        for fragment in &mut block.fragments {
+            if let FragmentContent::Text { format, .. } = fragment {
+                fill(format);
+            }
+        }
     }
 }
 

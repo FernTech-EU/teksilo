@@ -26,6 +26,26 @@
 //!     .on_submit_fn(|ctx| ctx.send_intent(AppIntent::Search))
 //! ```
 //!
+//! ## Appearance
+//!
+//! - [`text_style`](TextInput::text_style) — the size, family and weight of
+//!   the typed text and of the placeholder, from a `TextStyleRole` (follows the
+//!   theme) or a fixed `TextStyle`. The field's height follows the style's
+//!   line, so a small style gives a short field and a large one a tall field.
+//! - [`text_alignment`](TextInput::text_alignment) — where a text narrower
+//!   than the field sits: start, centre or end, mirrored in a right-to-left
+//!   layout. A longer text scrolls as usual.
+//! - [`text_color`](TextInput::text_color) — the colour of the text and the
+//!   caret. A disabled field still greys out. For one colour at rest and
+//!   another while editing, map the field's focus:
+//!   `input.handle().focused_signal().map(|f| if *f { TextRole::Primary } else
+//!   { TextRole::Secondary })`.
+//! - [`min_height`](TextInput::min_height) — replaces the minimum height the
+//!   style and the density would give the field. Below 24 dp the field fails
+//!   WCAG 2.5.8 unless the app offers a larger target for it.
+//!
+//! None of them is set by default, and the field then looks as it always has.
+//!
 //! ## Touch and pen
 //!
 //! The trailing clear affordance is 16 dp of paint and a 24 dp target: raising
@@ -49,6 +69,7 @@ use std::rc::Rc;
 use teksilo_canvas::{Point, Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::color_prop::{ColorProp, TextStyleProp};
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::{
     SharedTextInputStyle, TextInputStyle, TextInputStyleConfig, TextInputValidationLevel,
@@ -56,7 +77,7 @@ use teksilo_core::styles::{
 use teksilo_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Alignment, TextRole, TextStyleRole};
+use teksilo_tokens::{Alignment, HAlignment, TextRole, TextStyleRole};
 
 use crate::button::InteractionState;
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
@@ -154,6 +175,16 @@ pub struct TextInput {
     /// VStack — so the floor doesn't fight the VStack's
     /// `proposal.width.unwrap_or(max_width)` rule.
     min_width: Option<f32>,
+    /// See [`TextInput::min_height`]. `None` keeps the style's own minimum.
+    min_height: Option<f32>,
+    /// Forwarded to the inner field's `text_style`, and given to the
+    /// placeholder so the two read alike.
+    text_style: Option<TextStyleProp>,
+    /// Forwarded to the inner field's `text_alignment`, and applied to the
+    /// placeholder.
+    text_alignment: Option<HAlignment>,
+    /// Forwarded to the inner field's `text_color`.
+    text_color: Option<ColorProp>,
     show_clear_button: bool,
     leading_slot: Option<Box<dyn Widget>>,
     trailing_slot: Option<Box<dyn Widget>>,
@@ -212,6 +243,10 @@ impl TextInput {
             feedback_signal: Signal::new(ValidationFeedback::Pristine),
             label: None,
             min_width: None,
+            min_height: None,
+            text_style: None,
+            text_alignment: None,
+            text_color: None,
             show_clear_button: false,
             leading_slot: None,
             trailing_slot: None,
@@ -309,6 +344,69 @@ impl TextInput {
     /// generic 65 dp floor would look out of place.
     pub fn min_width(mut self, w: f32) -> Self {
         self.min_width = Some(w.max(0.0));
+        self
+    }
+
+    /// Override the field's minimum height, in logical pixels.
+    ///
+    /// By default the field is at least the style's control height — 28 dp
+    /// in the IntUI style, raised to the density's target size — or, when a
+    /// [`text_style`](Self::text_style) is set, at least the density's target
+    /// size, with the style's line deciding the rest. This replaces that
+    /// floor with `height`, as given: the field still grows to fit its text,
+    /// and is centred in a taller box. The value reaches the active
+    /// [`TextInputStyle`] through [`TextInputStyleConfig::min_height`]; a
+    /// style that ignores it keeps its own minimum.
+    ///
+    /// The field is the pointer target: a press anywhere in it places the
+    /// caret. Below 24 dp it fails WCAG 2.2 SC 2.5.8 *Target Size (Minimum)*
+    /// unless the app gives the same function a larger target elsewhere — an
+    /// enclosing row that focuses the field when pressed, say.
+    pub fn min_height(mut self, height: f32) -> Self {
+        self.min_height = Some(height.max(0.0));
+        self
+    }
+
+    /// The style the typed text is shaped in: its size, family and weight.
+    ///
+    /// Forwarded to [`TextInputField::text_style`], where the details live,
+    /// and given to the placeholder too, so the hint and the text it stands in
+    /// for read alike. The field's height follows the style's line: an 11 px
+    /// style gives a short field, a large one a tall field (see
+    /// [`min_height`](Self::min_height) for the floor). A role tracks the
+    /// theme; the global text scale multiplies the size.
+    pub fn text_style(mut self, style: impl Into<TextStyleProp>) -> Self {
+        self.text_style = Some(style.into());
+        self
+    }
+
+    /// Where the text — and the placeholder — sits when it is narrower than
+    /// the field: at its start, in the middle, or at its end, mirrored in a
+    /// right-to-left layout. Text wider than the field scrolls as usual.
+    /// Forwarded to [`TextInputField::text_alignment`].
+    pub fn text_alignment(mut self, alignment: HAlignment) -> Self {
+        self.text_alignment = Some(alignment);
+        self
+    }
+
+    /// The colour of the typed text and of the caret: a colour, a theme role
+    /// or a signal of either, resolved every paint. A disabled field still
+    /// paints the theme's disabled text colour. Forwarded to
+    /// [`TextInputField::text_color`].
+    ///
+    /// A different colour at rest and while editing follows the field's
+    /// focus, which [`handle`](Self::handle) exposes before the input is
+    /// built:
+    ///
+    /// ```ignore
+    /// let input = TextInput::new(text);
+    /// let focused = input.handle().focused_signal();
+    /// let input = input.text_color(focused.map(|f| {
+    ///     if *f { TextRole::Primary } else { TextRole::Secondary }
+    /// }));
+    /// ```
+    pub fn text_color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.text_color = Some(color.into());
         self
     }
 

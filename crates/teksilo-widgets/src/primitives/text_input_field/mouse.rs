@@ -264,7 +264,7 @@ pub(crate) fn hit_test_in(st: &TextInputState, local: Point) -> Option<usize> {
     }
 
     let adjusted_x = local.x + st.scroll_x;
-    if let Some(result) = st.engine.hit_test(adjusted_x, local.y) {
+    if let Some(result) = st.engine.hit_test(adjusted_x, local.y - st.text_offset_y) {
         return Some(result.position);
     }
 

@@ -583,6 +583,7 @@ impl Widget for PasswordField {
             is_disabled,
             validation: validation_level,
             variant: self.variant,
+            min_height: None,
         };
         let chrome_id = style.make_body(&cfg, ctx);
 

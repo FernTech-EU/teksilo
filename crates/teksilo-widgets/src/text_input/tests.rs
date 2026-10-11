@@ -1030,3 +1030,113 @@ fn clear_slot(
     }
     None
 }
+
+// ── Height, text style and alignment ──────────────────────────────
+
+/// The height of the framed field, without the validation strip below it:
+/// the first child of the composite's root `VStack`.
+fn frame_height(input: TextInput, density: Option<teksilo_tokens::TargetDensity>) -> f32 {
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    if let Some(density) = density {
+        tree.set_density(density);
+    }
+    // In a `VStack`, so the composite is laid out at the height it asks for.
+    let id = tree.add(crate::primitives::VStack::new().child(input));
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    let input_id = tree.children(id)[0];
+    let root = tree.children(input_id)[0];
+    let frame = tree.children(root)[0];
+    tree.bounds(frame).height
+}
+
+fn style(size: f32, line_height: f32) -> teksilo_tokens::TextStyle {
+    teksilo_tokens::TextStyle {
+        family: "Inter".to_string(),
+        size,
+        weight: teksilo_tokens::FontWeight::REGULAR,
+        line_height,
+        letter_spacing: 0.0,
+    }
+}
+
+fn input() -> TextInput {
+    TextInput::new(Signal::new(String::new()))
+}
+
+/// The default field is the IntUI control height, as it has always been.
+#[test]
+fn the_default_field_keeps_the_control_height() {
+    assert_eq!(frame_height(input(), None), 28.0);
+}
+
+/// A text style sizes the field from its line: a small style gives a short
+/// field — down to the density's target size, never under it — and a large
+/// style a tall one.
+#[test]
+fn a_text_style_makes_a_short_or_a_tall_field() {
+    // 11 × 1.3 + 2 × 4 padding = 22.3, floored at Compact's 24 dp target.
+    assert_eq!(
+        frame_height(input().text_style(style(11.0, 1.3)), None),
+        24.0
+    );
+    // 20 × 1.4 + 2 × 4 = 36.
+    let tall = frame_height(input().text_style(style(20.0, 1.4)), None);
+    assert!((tall - 36.0).abs() < 0.01, "{tall}");
+}
+
+/// An explicit minimum is honoured as given: above the content it grows the
+/// field, below the target size it lowers the floor.
+#[test]
+fn min_height_replaces_the_floor() {
+    assert_eq!(frame_height(input().min_height(40.0), None), 40.0);
+    let short = frame_height(input().text_style(style(11.0, 1.3)).min_height(20.0), None);
+    assert!((short - 22.3).abs() < 0.01, "the line still fits: {short}");
+}
+
+/// Under the Touch density both the widget's floor and the style's are 44 dp;
+/// an explicit minimum replaces both, or the style's would still hold.
+#[test]
+fn min_height_reaches_the_style_as_well_as_the_widget() {
+    let touch = Some(teksilo_tokens::TargetDensity::Touch);
+    assert_eq!(frame_height(input(), touch), 44.0);
+    assert_eq!(frame_height(input().min_height(30.0), touch), 30.0);
+}
+
+/// The placeholder follows the alignment of the text it stands in for.
+#[test]
+fn a_centred_inputs_placeholder_is_centred() {
+    let text = Signal::new(String::new());
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        TextInput::new(text)
+            .placeholder(lit!("Short hint"))
+            .text_alignment(teksilo_tokens::HAlignment::Center),
+    );
+    tree.layout(SizeProposal::exact(400.0, 40.0));
+
+    let ph = placeholder_text_widget(&tree, id);
+    let pb = tree.bounds(ph);
+    let column = tree.bounds(tree.parent(ph).expect("placeholder has a parent"));
+    let ph_mid = pb.x + pb.width / 2.0;
+    let col_mid = column.x + column.width / 2.0;
+    assert!((ph_mid - col_mid).abs() < 0.5, "{ph_mid} vs {col_mid}");
+}
+
+/// The placeholder is set in the text style, so the hint is the size of the
+/// text that replaces it. Measured with the real typesetter: the mock backend
+/// ignores the style.
+#[test]
+fn the_placeholder_takes_the_text_style() {
+    let measure = |input: TextInput| {
+        let typesetter = teksilo_text::SharedTypesetter::new_with_default_font();
+        let mut tree = WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light())
+            .with_text_backend(typesetter.as_text_backend());
+        let id = tree.add(input.placeholder(lit!("Short hint")));
+        tree.layout(SizeProposal::exact(400.0, 80.0));
+        tree.bounds(placeholder_text_widget(&tree, id)).height
+    };
+    let body = measure(input());
+    let large = measure(input().text_style(style(26.0, 1.4)));
+    assert!(large > body * 1.5, "{large} vs {body}");
+}

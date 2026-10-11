@@ -34,6 +34,14 @@
 //!   the field's bounds (Qt's `QSpinBox::suffix`). Caret cannot
 //!   enter it; clicks past the text end clamp to the last
 //!   character.
+//! - Appearance: [`text_style`](TextInputField::text_style) shapes the
+//!   text in a `TextStyleRole` or a `TextStyle` (size, family, weight) and
+//!   sizes the field to one line of it;
+//!   [`text_alignment`](TextInputField::text_alignment) places a text
+//!   narrower than the field at its start, centre or end;
+//!   [`text_color`](TextInputField::text_color) colours the text and the
+//!   caret, from a colour, a role or a signal. All three are unset by
+//!   default, and the field then looks as it always has.
 //! - Right-click context menu (Cut / Copy / Paste / Select All).
 //! - AccessKit `Role::TextInput` with value, selection, and
 //!   character/word boundary metadata.
@@ -69,6 +77,7 @@ use teksilo_core::accessibility::text_runs::{
     RetainedText, TextRunEmission, TextRunSource, push_text_runs,
 };
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::color_prop::{ColorProp, TextStyleProp};
 use teksilo_core::event::EventResponse;
 use teksilo_core::shortcut::StandardEdit;
 use teksilo_core::signal::{Prop, Signal};
@@ -77,9 +86,9 @@ use teksilo_core::widget::{
 };
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_text::text_document::{SelectionType, TextDocument};
+use teksilo_text::text_document::SelectionType;
 use teksilo_text::{CursorAffinity, CursorDisplay, RichTextEngine, SharedTypesetter};
-use teksilo_tokens::{InputTokens, TextStyle};
+use teksilo_tokens::{HAlignment, InputTokens, TextStyle, TypographyTokens};
 
 use crate::button::InteractionState;
 use crate::menu_item::MenuItem;
@@ -221,6 +230,14 @@ pub struct TextInputField {
     /// `special_value_text` is active).
     suffix: Prop<String>,
     text_height: Option<f32>,
+    /// See [`text_style`](Self::text_style). `None` shapes in the engine's
+    /// default font, as every field did before the style could be chosen.
+    text_style: Option<TextStyleProp>,
+    /// See [`text_alignment`](Self::text_alignment).
+    text_alignment: Option<HAlignment>,
+    /// See [`text_color`](Self::text_color). `None` paints the theme's
+    /// primary text colour.
+    text_color: Option<ColorProp>,
     external_interaction: Option<Signal<InteractionState>>,
 
     /// Optional input mask. When set, the field auto-derives a
@@ -337,6 +354,9 @@ impl TextInputField {
             char_filter: None,
             suffix: Prop::Static(String::new()),
             text_height: None,
+            text_style: None,
+            text_alignment: None,
+            text_color: None,
             external_interaction: None,
             mask: None,
             mask_placeholder_override: None,
@@ -475,8 +495,81 @@ impl TextInputField {
     /// (in `crate::styles::recipe_text_input_style`) minus
     /// border + padding here so the visuals line up with the
     /// rest of the form.
+    ///
+    /// Wins over the line height a [`text_style`](Self::text_style) would
+    /// derive: a composite that passes both asked for this height.
     pub fn text_height(mut self, height: f32) -> Self {
         self.text_height = Some(height);
+        self
+    }
+
+    /// The style the text is shaped in: its size, family and weight.
+    ///
+    /// Accepts a [`TextStyleRole`](teksilo_tokens::TextStyleRole), resolved
+    /// against the theme's typography and re-resolved when the theme changes,
+    /// or a fixed [`TextStyle`]. The global text scale multiplies the size
+    /// either way, as it does for every text in the tree.
+    ///
+    /// The style also sets the field's height: unless
+    /// [`text_height`](Self::text_height) overrides it, the text area is one
+    /// line of `size × line_height` tall, and the shaped line is centred in it.
+    /// An 11 px style makes a short field, a 20 px one a tall field.
+    ///
+    /// The family resolves through the app's font registry like any other
+    /// text: a family that is not registered falls back to the default face,
+    /// with a warning on the console. The weight is honoured when the family
+    /// has that weight (a variable face covers every weight). The style's
+    /// `letter_spacing` is not applied to the editable text, and its
+    /// `line_height` sizes the field without spacing the glyphs.
+    ///
+    /// Unset, the field shapes in the text engine's default font at its
+    /// default size, exactly as before this setting existed.
+    pub fn text_style(mut self, style: impl Into<TextStyleProp>) -> Self {
+        self.text_style = Some(style.into());
+        self
+    }
+
+    /// Where the text sits when it is narrower than the field.
+    ///
+    /// [`HAlignment::Leading`] puts it at the start of the field — the left
+    /// edge in a left-to-right layout, the right edge in a right-to-left one —
+    /// [`HAlignment::Center`] in the middle and [`HAlignment::Trailing`] at
+    /// the end. Text wider than the field scrolls horizontally to follow the
+    /// caret, as an unaligned field does. The caret, a click, the selection,
+    /// the IME candidate window, the touch handles and the character extents a
+    /// screen reader is given all follow the placement.
+    ///
+    /// Unset, the text starts at the left edge whatever the layout direction,
+    /// as it always has.
+    pub fn text_alignment(mut self, alignment: HAlignment) -> Self {
+        self.text_alignment = Some(alignment);
+        self
+    }
+
+    /// The colour of the text and of the caret.
+    ///
+    /// Accepts a [`Color`](teksilo_tokens::Color), a theme role, a
+    /// `Signal<Color>` or a `Signal<TextRole>`, resolved against the theme
+    /// every time the field paints, so a role follows the theme and a signal
+    /// repaints the field when it changes. A disabled field paints the theme's
+    /// disabled text colour whatever is set here, unless the colour is wrapped
+    /// in [`ColorProp::undimmed`].
+    ///
+    /// A different colour at rest and while editing is a signal of the
+    /// field's focus, which [`handle`](Self::handle) exposes before the field
+    /// is built:
+    ///
+    /// ```ignore
+    /// let field = TextInputField::new(text);
+    /// let focused = field.handle().focused_signal();
+    /// let field = field.text_color(focused.map(|f| {
+    ///     if *f { TextRole::Primary } else { TextRole::Secondary }
+    /// }));
+    /// ```
+    ///
+    /// Unset, the text is the theme's primary text colour.
+    pub fn text_color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.text_color = Some(color.into());
         self
     }
 
@@ -749,6 +842,36 @@ impl TextInputField {
         });
     }
 
+    /// The style the field's text is measured in for the accessibility pass,
+    /// at the scale the tree is laid out at. `typography` is the layout or
+    /// paint context's, which the global text scale has already been applied
+    /// to; a fixed style is scaled here to match.
+    ///
+    /// Without a style this is the body style, as it has always been.
+    fn measured_style(&self, typography: &TypographyTokens, text_scale: f32) -> TextStyle {
+        match &self.text_style {
+            None => typography.body.clone(),
+            Some(TextStyleProp::Role(role)) => role.resolve(typography),
+            Some(TextStyleProp::Static(style)) => TextStyle {
+                size: style.size * text_scale,
+                ..style.clone()
+            },
+        }
+    }
+
+    /// The text area's height at a text scale of 1: the explicit
+    /// [`text_height`](Self::text_height), else one line of the resolved
+    /// [`text_style`](Self::text_style), else the default.
+    fn base_text_height(&self) -> f32 {
+        if let Some(height) = self.text_height {
+            return height;
+        }
+        self.state
+            .as_ref()
+            .and_then(|state| state.borrow().text_style.as_ref().map(line_height_of))
+            .unwrap_or(DEFAULT_TEXT_HEIGHT)
+    }
+
     /// Borrow the shared state. Panics if called before `build()`
     /// has run — the state is allocated in `build()` from the
     /// builder config.
@@ -764,6 +887,11 @@ impl TextInputField {
     pub(crate) fn suffix_shown(&self) -> String {
         self.state().borrow().suffix.clone()
     }
+}
+
+/// One line of `style`, in logical pixels: its size times its line height.
+pub(crate) fn line_height_of(style: &TextStyle) -> f32 {
+    style.size * style.line_height
 }
 
 /// The reading direction the field's runs are announced with.
@@ -789,7 +917,20 @@ fn base_text_direction(
 /// editable text, i.e. `viewport_width - suffix_width`. Callers pass
 /// the reduced width explicitly so the scroll never slides text
 /// behind the non-editable suffix.
-fn ensure_caret_visible_h(st: &mut TextInputState, text_viewport_width: f32, tokens: &InputTokens) {
+///
+/// With a [`text_alignment`](TextInputField::text_alignment) set, a text
+/// that fits is placed by a *negative* scroll: every conversion between the
+/// engine's space and the field's already subtracts `scroll_x` — paint, the
+/// caret, hit-testing, the selection, the IME area, the touch handles, the
+/// reader's character extents — so moving the text this way moves all of them
+/// with it, and none can be forgotten. A text that overflows scrolls exactly as
+/// an unaligned one does.
+fn ensure_caret_visible_h(
+    st: &mut TextInputState,
+    text_viewport_width: f32,
+    tokens: &InputTokens,
+    rtl: bool,
+) {
     if !st.engine.has_full_layout() || text_viewport_width <= 0.0 {
         return;
     }
@@ -799,6 +940,18 @@ fn ensure_caret_visible_h(st: &mut TextInputState, text_viewport_width: f32, tok
     let caret_x = caret[0];
     let caret_w = caret[2].max(1.0);
     let vw = text_viewport_width;
+
+    if let Some(alignment) = st.text_alignment {
+        // The caret's width is part of the run, or a trailing-aligned caret at
+        // the end of the text would sit one pixel outside the clip.
+        let run = st.engine.max_content_width() + caret_w;
+        if run <= vw {
+            st.scroll_x = -alignment.resolve(run, vw, rtl);
+            return;
+        }
+        // Overflowing: whatever offset placed a short text is not a scroll.
+        st.scroll_x = st.scroll_x.max(0.0);
+    }
 
     let margin = scroll_margin(tokens);
     if caret_x - st.scroll_x < margin {
@@ -820,18 +973,11 @@ fn relayout_suffix(state: &SharedState, new_text: &str) {
         // lay out — paint skips the suffix when width is zero.
         return;
     }
-    let Some(engine) = st.suffix_engine.as_mut() else {
-        // No engine allocated (pure-static path that started
-        // empty and never became non-empty). Nothing to lay out —
-        // `build()` allocates the engine eagerly for every bound
-        // suffix, so a late signal flip never reaches this branch.
-        return;
-    };
-    let doc = TextDocument::new();
-    let _ = doc.set_plain_text(new_text);
-    let flow = doc.snapshot_flow();
-    engine.layout_full(&flow);
-    st.suffix_width = engine.max_content_width();
+    // No engine allocated (pure-static path that started empty and never
+    // became non-empty) makes this a no-op — `build()` allocates the engine
+    // eagerly for every bound suffix, so a late signal flip never reaches
+    // that case.
+    st.relayout_suffix_engine();
 }
 
 /// Paint glyphs from a pre-laid-out suffix `RenderFrame` at a fixed
@@ -1372,6 +1518,11 @@ mod text_run_tests {
 
 #[cfg(test)]
 mod window_active_tests;
+
+/// **The appearance knobs** — text style, alignment, colour — read back from
+/// the engine and the painted frame.
+#[cfg(test)]
+mod appearance_tests;
 
 /// **What a screen reader is told as the field is edited**, read through
 /// `accesskit_consumer` the way the AT-SPI adapter reads it: caret moves,

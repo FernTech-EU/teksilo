@@ -101,6 +101,59 @@ impl Default for TextInputRecipe {
     }
 }
 
+/// The heights a `TextInput` builds its field with, resolved in one place so
+/// the text area, the widget's own minimum and the style's minimum cannot
+/// disagree.
+///
+/// The text area is one line of text and the minimum is a floor under the
+/// whole frame; the frame is the larger of the two plus its chrome, and a frame
+/// taller than its content centres the line. A minimum never squeezes the text
+/// area — the line would be clipped — so a floor below what the text needs has
+/// no visible effect.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TextFieldHeights {
+    /// The text area's height to hand the inner field, at a text scale of 1.
+    /// `None` when a text style is set: the field then sizes it from the
+    /// style's line, and follows the theme when the style is a role.
+    pub text_area: Option<f32>,
+    /// The frame's minimum height.
+    pub min_height: f32,
+    /// The minimum the style is told
+    /// ([`TextInputStyleConfig::min_height`]). `None` leaves the style its
+    /// own, which is the default path.
+    pub style_min_height: Option<f32>,
+}
+
+impl TextFieldHeights {
+    /// Resolve the heights from the app's explicit `min_height`, whether a
+    /// text style is set, and the density.
+    ///
+    /// - Neither set: the IntUI field exactly as it has always been — an
+    ///   18 dp text area (the control height less its border and padding)
+    ///   in a frame of at least [`TextInputRecipe::height`].
+    /// - A text style: the style's line sizes the text area, and the floor
+    ///   drops to the density's target size, the WCAG 2.5.8 bar, so a small
+    ///   style makes a short field and a large style a tall one.
+    /// - An explicit minimum: honoured as given, in both the frame and the
+    ///   style.
+    pub(crate) fn resolve(min_height: Option<f32>, styled: bool, tokens: &InputTokens) -> Self {
+        let floor = match (min_height, styled) {
+            (Some(height), _) => Some(height),
+            (None, true) => Some(tokens.target_size),
+            (None, false) => None,
+        };
+        let text_area = (!styled).then(|| {
+            (TEXT_FIELD_HEIGHT - 2.0 * TEXT_FIELD_BORDER_WIDTH - 2.0 * TEXT_FIELD_PADDING_VERTICAL)
+                .max(0.0)
+        });
+        Self {
+            text_area,
+            min_height: floor.unwrap_or_else(|| TextInputRecipe::for_tokens(tokens).height),
+            style_min_height: floor,
+        }
+    }
+}
+
 /// Default `TextInputStyle` shipped with Teksilo.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipeTextInputStyle {
@@ -132,7 +185,9 @@ impl TextInputStyle for RecipeTextInputStyle {
         let focus_ring_width = theme.shape.focus_ring_width;
         let padding_h = self.recipe.padding_horizontal;
         let corner_radius = self.recipe.corner_radius;
-        let height = self.recipe.height;
+        // The widget's resolved minimum wins over the recipe's control height:
+        // an app that asked for a shorter or taller field gets it here too.
+        let height = cfg.min_height.unwrap_or(self.recipe.height);
 
         // Bare variant: no chrome at all. Just hand the editor back
         // wrapped in a MinSize so consumers still get a predictable

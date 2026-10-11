@@ -77,11 +77,28 @@ changes all stay consistent.
 
 Editable widgets (`TextInput`, `SpinBox`, `DateEdit`, hex color input) and
 `RichTextEditor` shape text through a per-widget `RichTextEngine`, whose size
-does **not** come from the theme. They scale via a true per-engine **logical
-font scale** in `text-typeset`: `RichTextEngine::set_font_scale(f)` multiplies
-the resolved font size *before* shaping, so advances, line heights, content
-height, and wrapping all grow correctly. Driven automatically from
-`ctx.text_scale` at layout/paint.
+does not come from `ctx.theme.typography` by default: the engine shapes in its
+font service's default font at that font's default size. They scale via a true
+per-engine **logical font scale** in `text-typeset`:
+`RichTextEngine::set_font_scale(f)` multiplies the resolved font size *before*
+shaping, so advances, line heights, content height, and wrapping all grow
+correctly. Driven automatically from `ctx.text_scale` at layout/paint.
+
+A single-line field can take its size from the theme after all:
+`TextInput::text_style` / `TextInputField::text_style` accept a
+`TextStyleRole` (resolved against the theme's typography, and again when the
+theme changes) or a fixed `TextStyle`. The style's size reaches the engine as
+part of the same font scale, so the global text scale still multiplies it:
+
+```text
+engine.font_scale = ctx.text_scale × style.size / engine default size
+```
+
+The field's height follows: one line of `style.size × style.line_height`,
+times the text scale, with the shaped line centred in it. The style's family
+and weight are filled onto the disposable layout snapshot, never onto the
+document; the weight is applied on the variable face's `wght` axis when the
+glyphs are rasterised.
 
 This is distinct from two pre-existing factors, see the comparison below.
 

@@ -141,8 +141,9 @@ can: the paint-time route reads the live tree and cannot go stale.
 
 **Raw-colour widgets bypass all of this.** Anything shaping through a
 `RichTextEngine` (e.g. `TextInputField`) hands GPU colours straight to the
-engine, so no `ColorProp` is involved. Resolve against `ctx.effective_enabled`
-in `paint` instead.
+engine, so the substitution above never reaches its glyphs on its own. Resolve
+against `ctx.effective_enabled` in `paint` instead, including any `ColorProp`
+the app set (`TextInputField::text_color` resolves one there every paint).
 
 ### `Color::mix` and non-finite factors
 

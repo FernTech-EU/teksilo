@@ -110,9 +110,12 @@ impl<'a> FieldHitSource<'a> {
 /// dp below the descender — so hit-testing a point at its own `y` would miss the
 /// glyph row for every `x` and fall back to the document end for all of them. A
 /// one-line surface has no vertical information to lose.
+///
+/// In the field's own space: it includes the offset a text style centres the
+/// line by, which `hit_test_in` takes back off.
 pub(crate) fn line_middle_y(st: &TextInputState) -> f32 {
     let caret = st.engine.caret_rect(0, CursorAffinity::Downstream);
-    caret[1] + caret[3] / 2.0
+    st.text_offset_y + caret[1] + caret[3] / 2.0
 }
 
 /// The window rectangle of the caret at `offset`.
@@ -125,7 +128,7 @@ pub(crate) fn caret_rect_in_window(st: &TextInputState, offset: usize) -> Rect {
     let caret = st.engine.caret_rect(offset, CursorAffinity::Downstream);
     Rect::new(
         st.viewport_origin.x + caret[0] - st.scroll_x,
-        st.viewport_origin.y + caret[1],
+        st.viewport_origin.y + st.text_offset_y + caret[1],
         caret[2].max(1.0),
         caret[3],
     )
@@ -776,7 +779,10 @@ impl super::TextInputField {
             if !st.engine.has_full_layout() {
                 return;
             }
-            let origin = Point::new(st.viewport_origin.x - st.scroll_x, st.viewport_origin.y);
+            let origin = Point::new(
+                st.viewport_origin.x - st.scroll_x,
+                st.viewport_origin.y + st.text_offset_y,
+            );
             let target: &mut TextInputState = &mut st;
             let TextInputState {
                 ref mut engine,
