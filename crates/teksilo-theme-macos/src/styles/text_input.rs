@@ -89,7 +89,8 @@ impl TextInputStyle for MacOsTextInputStyle {
             TargetAxes::HEIGHT,
             tokens,
         );
-        ctx.add(MinSize::new(0.0, min.height).child(stack))
+        // An app's `TextInput::min_height` (or a styled field's floor) wins.
+        ctx.add(MinSize::new(0.0, cfg.min_height.unwrap_or(min.height)).child(stack))
     }
 }
 

@@ -90,7 +90,11 @@ impl TextInputStyle for FluentTextInputStyle {
             .child(cfg.editor),
         );
         let stack = ctx.add(ZStack::new().child(chrome).child(padded));
-        ctx.add(MinSize::new(0.0, dp(MIN_HEIGHT, TargetRole::Target, tokens)).child(stack))
+        // An app's `TextInput::min_height` (or a styled field's floor) wins.
+        let height = cfg
+            .min_height
+            .unwrap_or_else(|| dp(MIN_HEIGHT, TargetRole::Target, tokens));
+        ctx.add(MinSize::new(0.0, height).child(stack))
     }
 }
 
