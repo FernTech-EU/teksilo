@@ -239,6 +239,31 @@ fn above_selection_bounds(selection: Rect, size: Size, area: Rect, rtl: bool) ->
     Rect::new(x, y, w, h)
 }
 
+/// Place `size` below `selection`, centred on it, flipping above when the
+/// selection is against the bottom of `area`.
+///
+/// [`above_selection_bounds`] with the sides swapped; the horizontal clamp is
+/// the same, ordered by direction.
+fn below_selection_bounds(selection: Rect, size: Size, area: Rect, rtl: bool) -> Rect {
+    let (w, h) = (size.width, size.height);
+    let below_y = selection.bottom() + SELECTION_GAP;
+    let above_y = selection.y - SELECTION_GAP - h;
+    let y = if below_y + h <= area.bottom() {
+        below_y
+    } else if above_y >= area.y {
+        above_y
+    } else {
+        below_y.min(area.bottom() - h).max(area.y)
+    };
+    let centred = selection.center().x - w / 2.0;
+    let x = if rtl {
+        centred.max(area.x).min(area.right() - w)
+    } else {
+        centred.min(area.right() - w).max(area.x)
+    };
+    Rect::new(x, y, w, h)
+}
+
 impl OverlayManager {
     /// Compute overlay positions based on anchor bounds.
     /// Called after layout to position overlays correctly.
@@ -285,6 +310,7 @@ impl OverlayManager {
                             | OverlayPlacement::AtPointer(_)
                             | OverlayPlacement::AtPointerAvoiding { .. }
                             | OverlayPlacement::AboveSelection { .. }
+                            | OverlayPlacement::BelowSelection { .. }
                     ) {
                         Rect::ZERO
                     } else {
@@ -352,6 +378,9 @@ impl OverlayManager {
                 }
                 OverlayPlacement::AboveSelection { selection } => {
                     above_selection_bounds(*selection, content_size, area, rtl)
+                }
+                OverlayPlacement::BelowSelection { selection } => {
+                    below_selection_bounds(*selection, content_size, area, rtl)
                 }
                 OverlayPlacement::NearAnchor { offset } => {
                     // Prefer below the anchor at `offset` + 4 px.
@@ -1059,6 +1088,39 @@ mod tests {
         );
         assert_eq!(bounds.y, 40.0, "below the notch");
         assert_eq!(bounds.height, 156.0, "200 - 40 - 4");
+    }
+
+    // -----------------------------------------------------------------
+    // BelowSelection
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn a_below_selection_panel_hangs_centred_under_the_rectangle() {
+        let selection = Rect::new(300.0, 300.0, 100.0, 20.0);
+        let bounds = placed(
+            OverlayPlacement::BelowSelection { selection },
+            Size::new(200.0, 40.0),
+            Rect::ZERO,
+            (800.0, 600.0),
+            LayoutDirection::LeftToRight,
+        );
+        assert_eq!(bounds.x, 250.0, "centred on the rectangle");
+        assert_eq!(bounds.y, 328.0, "8 dp below it");
+    }
+
+    /// Against the bottom of the window there is no room underneath, so the
+    /// panel goes above rather than off the bottom.
+    #[test]
+    fn a_below_selection_panel_flips_above_at_the_bottom_of_the_window() {
+        let selection = Rect::new(300.0, 570.0, 100.0, 20.0);
+        let bounds = placed(
+            OverlayPlacement::BelowSelection { selection },
+            Size::new(200.0, 40.0),
+            Rect::ZERO,
+            (800.0, 600.0),
+            LayoutDirection::LeftToRight,
+        );
+        assert_eq!(bounds.y, 522.0, "8 dp above the rectangle");
     }
 
     // -----------------------------------------------------------------

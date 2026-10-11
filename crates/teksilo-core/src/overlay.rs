@@ -166,6 +166,17 @@ pub enum OverlayPlacement {
         /// The selection's bounding rectangle, in window coordinates.
         selection: Rect,
     },
+    /// Below a rectangle, centred on it, flipping above when the rectangle is
+    /// against the bottom of the usable area.
+    ///
+    /// The mirror of [`AboveSelection`](Self::AboveSelection), and like it
+    /// anchor-independent: the caller supplies the rectangle in window
+    /// coordinates and keeps it current, as a slider's value readout does
+    /// with the strip its thumb occupies.
+    BelowSelection {
+        /// The rectangle to hang below, in window coordinates.
+        selection: Rect,
+    },
     /// Near the anchor with a preferred alignment and offset (tooltip).
     NearAnchor { offset: Vec2 },
     /// Centered within the viewport (dialog).

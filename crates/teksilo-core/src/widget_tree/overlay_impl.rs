@@ -875,11 +875,13 @@ impl WidgetTree {
             // off is a range of text, not the widget recorded as its anchor.
             // Its lifetime belongs to the selection controller that raised it,
             // which is also why it lives in the text-affordance band.
+            // `BelowSelection` is its mirror and answers the same.
             P::Centered
             | P::BottomCenter
             | P::ViewportCorner { .. }
             | P::FullViewport
-            | P::AboveSelection { .. } => false,
+            | P::AboveSelection { .. }
+            | P::BelowSelection { .. } => false,
         }
     }
 
