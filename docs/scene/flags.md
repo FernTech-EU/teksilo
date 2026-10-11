@@ -118,7 +118,6 @@ the whole `Scene` and filters for itself — nothing reads this bit.
 #### `pub const ACCEPTS_HOVER: Self = Self(1 << 5);`
 
 Item dispatches hover events (Qt `setAcceptHoverEvents`).
-Item dispatches hover events (Qt `setAcceptHoverEvents`).
 Default off. Declared only: the view dispatches hover from the
 presence of a `SceneItemHandlerSet::on_hover` callback, and
 nothing sets or reads this bit.

@@ -44,6 +44,8 @@ MessageBox — QMessageBox-style alert dialog.
 | `Self` | [`escape_button(which: StandardButton)`](#messagebox-escape_button) |
 | `Self` | [`show_again_checkbox(label: impl Into<LocalizedString>)`](#messagebox-show_again_checkbox) |
 | `Self` | [`show_again_checkbox_state(signal: Signal<bool>)`](#messagebox-show_again_checkbox_state) |
+| `Self` | [`title_alignment(alignment: HAlignment)`](#messagebox-title_alignment) |
+| `Self` | [`button_alignment(alignment: HAlignment)`](#messagebox-button_alignment) |
 | `Self` | [`on_result(f: impl Fn(MessageBoxResult, &mut EventContext) + 'static)`](#messagebox-on_result) |
 | | **Methods** |
 |  | [`present(ctx: &mut EventContext)`](#messagebox-present) |
@@ -161,6 +163,15 @@ It matters more than it looks, because **no platform announces which
 button is the default**: `Node::keyboard_shortcut` appears in none of
 the three AccessKit adapters, so a screen-reader user discovers the
 default only by pressing Enter. Where focus lands is the whole contract.
+
+#### Title and button alignment
+
+`MessageBox::title_alignment` places the title in the header's text
+column (default `Leading`) and `MessageBox::button_alignment` places the
+button row (default `Trailing`), both as `teksilo_tokens::HAlignment`.
+macOS alerts centre both; Windows and GNOME keep the title leading and the
+buttons trailing, which is the default. `Leading` and `Trailing` follow the
+layout direction.
 
 #### Result reporting
 
@@ -547,6 +558,24 @@ For external observation, use
 Like `MessageBox::show_again_checkbox`, but with a
 caller-owned `Signal<bool>` so the checkbox state survives the
 dialog lifetime (useful for "remember my choice" persistence).
+
+<a id="messagebox-title_alignment"></a>
+
+#### `pub fn title_alignment(mut self, alignment: HAlignment) -> Self`
+
+Where the title sits in the header's text column. Default
+`HAlignment::Leading`. `Center` matches a macOS alert; Windows and
+GNOME keep the title leading. `Leading` / `Trailing` follow the layout
+direction, so they mirror in right-to-left locales.
+
+<a id="messagebox-button_alignment"></a>
+
+#### `pub fn button_alignment(mut self, alignment: HAlignment) -> Self`
+
+Where the button row sits along the bottom of the dialog. Default
+`HAlignment::Trailing`. `Center` matches a macOS alert; `Leading`
+packs the buttons at the start edge. `Leading` / `Trailing` follow the
+layout direction, so they mirror in right-to-left locales.
 
 <a id="messagebox-on_result"></a>
 

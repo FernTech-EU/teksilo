@@ -239,7 +239,7 @@ in-tree modal pipeline in `teksilo-app`).
 
 <a id="modalscrim-click_to_dismiss"></a>
 
-#### `pub fn click_to_dismiss(mut self, enabled: bool) -> Self`
+#### `pub fn click_to_dismiss(mut self, enabled: bool) -> Self` (default: `false`)
 
 Enable click-to-dismiss on the scrim. Should mirror whether the
 modal's `ModalCloseBehavior` permits click-outside dismissal.
@@ -267,14 +267,14 @@ Create an empty dialog body with no sections set.
 
 <a id="dialogcontent-title"></a>
 
-#### `pub fn title(mut self, title: impl Into<LocalizedString>) -> Self`
+#### `pub fn title(mut self, title: impl Into<LocalizedString>) -> Self` (default: `None`)
 
 Bold title shown at the top of the content area. Also propagated to
 the enclosing `ModalContainer` via `accessible_title_hint`.
 
 <a id="dialogcontent-supporting_text"></a>
 
-#### `pub fn supporting_text(mut self, text: impl Into<LocalizedString>) -> Self`
+#### `pub fn supporting_text(mut self, text: impl Into<LocalizedString>) -> Self` (default: `None`)
 
 Secondary description text shown below the title.
 

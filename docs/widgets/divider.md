@@ -105,7 +105,7 @@ Override the stroke thickness in logical pixels; defaults to
 
 <a id="divider-color"></a>
 
-#### `pub fn color(mut self, color: impl Into<ColorProp>) -> Self`
+#### `pub fn color(mut self, color: impl Into<ColorProp>) -> Self` (default: `None`)
 
 Override the line color. Accepts `Color`, a role (typically
 `BorderRole`), or a `Signal<Color>`.

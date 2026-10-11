@@ -293,7 +293,7 @@ chevron icon. Defaults to `TextRole::Primary`. Accepts a literal
 
 <a id="accordion-title_style"></a>
 
-#### `pub fn title_style(mut self, style: impl Into<TextStyleProp>) -> Self`
+#### `pub fn title_style(mut self, style: impl Into<TextStyleProp>) -> Self` (default: `None`)
 
 Override the header title's text style. Use this to make the
 disclosure label smaller (e.g. inside a tooltip) or to match a

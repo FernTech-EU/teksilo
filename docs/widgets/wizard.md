@@ -87,7 +87,7 @@ Set the visual variant of the trigger button (default `Filled`).
 
 <a id="wizard-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Enable or disable the trigger button, statically or reactively.
 When disabled, tapping or pressing the trigger is a no-op.
@@ -101,13 +101,13 @@ markers become `Role::Tab`). Default: linear.
 
 <a id="wizard-presentation"></a>
 
-#### `pub fn presentation(mut self, presentation: ModalPresentation) -> Self`
+#### `pub fn presentation(mut self, presentation: ModalPresentation) -> Self` (default: `ModalPresentation::Auto`)
 
 Control how the modal is presented (auto, sheet, full-screen, …).
 
 <a id="wizard-close_behavior"></a>
 
-#### `pub fn close_behavior(mut self, close_behavior: ModalCloseBehavior) -> Self`
+#### `pub fn close_behavior(mut self, close_behavior: ModalCloseBehavior) -> Self` (default: `ModalCloseBehavior::Manual`)
 
 Control how the modal is dismissed (manual, click-outside, …).
 

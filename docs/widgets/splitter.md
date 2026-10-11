@@ -73,6 +73,7 @@ N-pane split container with draggable, collapsible dividers.
 |  | [`toggle_collapsed(index: usize)`](#splittermodel-toggle_collapsed) |
 |  | [`set_collapsed_size(index: usize, px: f32)`](#splittermodel-set_collapsed_size) |
 |  | [`set_pane_visible(index: usize, visible: bool)`](#splittermodel-set_pane_visible) |
+|  | [`set_pane_visible_immediate(index: usize, visible: bool)`](#splittermodel-set_pane_visible_immediate) |
 | `bool` | [`is_pane_visible(index: usize)`](#splittermodel-is_pane_visible) |
 | `bool` | [`consume_animate_flag()`](#splittermodel-consume_animate_flag) |
 |  | [`insert_pane(index: usize, desc: PaneDescriptor)`](#splittermodel-insert_pane) |
@@ -115,6 +116,11 @@ stretch (container-resize policy), animated collapse with four triggers
 (programmatic / double-click / drag-past-min snap / keyboard), a Tier-3
 `SplitterStyle`, and serializable import/export. It is the building
 block `DockingLayout` is built from.
+
+Collapsing and hiding a pane each have an animated door
+(`SplitterModel::set_collapsed`, `SplitterModel::set_pane_visible`) and
+an instant one (`SplitterModel::set_collapsed_immediate`,
+`SplitterModel::set_pane_visible_immediate`) for restoring a layout.
 
 ```ignore
 let model = SplitterModel::from_panes(vec![
@@ -221,7 +227,7 @@ Override the active `SplitterStyle` for this instance only.
 
 <a id="splitter-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Enable or disable handle dragging. When `false`, divider handles are
 rendered inert — the pane layout is still valid but the user cannot
@@ -262,27 +268,27 @@ pub struct PaneDescriptor { /* fields */ }
 
 <a id="panedescriptor-size"></a>
 
-#### `pub fn size(mut self, size: f32) -> Self`
+#### `pub fn size(mut self, size: f32) -> Self` (default: `None`)
 
 <a id="panedescriptor-min_size"></a>
 
-#### `pub fn min_size(mut self, min: f32) -> Self`
+#### `pub fn min_size(mut self, min: f32) -> Self` (default: `SPLITTER_MIN_PANE_SIZE`)
 
 <a id="panedescriptor-max_size"></a>
 
-#### `pub fn max_size(mut self, max: f32) -> Self`
+#### `pub fn max_size(mut self, max: f32) -> Self` (default: `None`)
 
 <a id="panedescriptor-stretch"></a>
 
-#### `pub fn stretch(mut self, stretch: f32) -> Self`
+#### `pub fn stretch(mut self, stretch: f32) -> Self` (default: `1.0`)
 
 <a id="panedescriptor-collapsible"></a>
 
-#### `pub fn collapsible(mut self, collapsible: bool) -> Self`
+#### `pub fn collapsible(mut self, collapsible: bool) -> Self` (default: `false`)
 
 <a id="panedescriptor-collapsed"></a>
 
-#### `pub fn collapsed(mut self, collapsed: bool) -> Self`
+#### `pub fn collapsed(mut self, collapsed: bool) -> Self` (default: `false`)
 
 <a id="panedescriptor-collapsed_size"></a>
 
@@ -293,7 +299,7 @@ Size a collapsed pane folds down to (default `0`). See
 
 <a id="panedescriptor-visible"></a>
 
-#### `pub fn visible(mut self, visible: bool) -> Self`
+#### `pub fn visible(mut self, visible: bool) -> Self` (default: `true`)
 
 <a id="panesnapshot"></a>
 
@@ -466,6 +472,15 @@ pane and an adjacent gutter from the layout — it reads as absent,
 unlike a collapsed pane (which keeps its grabbable gutter). The pane
 must be pre-mounted in the `Splitter`; this is the reactive "add /
 remove a pane from a fixed set" trick (no rebuild).
+
+<a id="splittermodel-set_pane_visible_immediate"></a>
+
+#### `pub fn set_pane_visible_immediate(&self, index: usize, visible: bool)`
+
+Show or hide pane `index` *instantly* (no tween): the next layout
+already has the pane removed from, or restored to, the split. The
+counterpart of `Self::set_collapsed_immediate`, for a caller that is
+restoring a layout or reacting to something that is already the motion.
 
 <a id="splittermodel-is_pane_visible"></a>
 

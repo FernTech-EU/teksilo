@@ -136,7 +136,7 @@ Override the K/V store filename (without `.toml`). Default: `general`.
 
 <a id="settingsbundle-with_window_state"></a>
 
-#### `pub fn with_window_state(mut self, enabled: bool) -> Self`
+#### `pub fn with_window_state(mut self, enabled: bool) -> Self` (default: `false`)
 
 Enable the window-state service. The service stores
 per-`label` entries, so a multi-window app records each
@@ -145,10 +145,7 @@ window's geometry under its own label (e.g. `"main"`,
 
 <a id="settingsbundle-with_debounce"></a>
 
-#### `pub fn with_debounce(mut self, delay: Duration) -> Self`
-
-Override the debounce window passed to every service this bundle
-opens.
+#### `pub fn with_debounce(mut self, delay: Duration) -> Self` (default: `DEFAULT_DEBOUNCE`)
 
 Override the debounce window passed to every service this bundle
 opens.

@@ -115,7 +115,7 @@ switch without rebuilding the zone — the same model as
 
 <a id="dropzone-subtitle"></a>
 
-#### `pub fn subtitle(mut self, text: impl Into<LocalizedString>) -> Self`
+#### `pub fn subtitle(mut self, text: impl Into<LocalizedString>) -> Self` (default: `None`)
 
 Secondary line under the prompt (e.g. `tr!("png_or_jpeg")`).
 
@@ -151,8 +151,6 @@ single pointer. See
 
 #### `pub fn starting_dir(mut self, path: impl Into<PathBuf>) -> Self`
 
-Directory the Browse button's dialog opens in. If unset, the OS default is
-used.
 Directory the Browse button's dialog opens in. If unset, the OS default is
 used.
 

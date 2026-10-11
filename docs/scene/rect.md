@@ -106,7 +106,7 @@ one or the item is invisible.
 
 <a id="rectitem-fill"></a>
 
-#### `pub fn fill(mut self, color: impl Into<ColorProp>) -> Self`
+#### `pub fn fill(mut self, color: impl Into<ColorProp>) -> Self` (default: `None`)
 
 Fill colour. Accepts a plain `Color`, a theme
 role, a `Signal<Color>`, or a `Signal<Role>` — resolved against the

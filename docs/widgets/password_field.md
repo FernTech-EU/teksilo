@@ -155,7 +155,7 @@ Strongly recommended for screen-reader users.
 
 <a id="passwordfield-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Set the enabled state, statically or reactively. Forwarded to the
 arena at build time — a bound `Signal<bool>` updates live as it
@@ -163,13 +163,13 @@ changes.
 
 <a id="passwordfield-read_only"></a>
 
-#### `pub fn read_only(mut self, read_only: bool) -> Self`
+#### `pub fn read_only(mut self, read_only: bool) -> Self` (default: `false`)
 
 Read-only: selection works, edits don't.
 
 <a id="passwordfield-max_length"></a>
 
-#### `pub fn max_length(mut self, max_length: usize) -> Self`
+#### `pub fn max_length(mut self, max_length: usize) -> Self` (default: `None`)
 
 Hard cap on length in `char`s.
 

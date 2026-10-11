@@ -200,7 +200,7 @@ border + size composition; icon coloring stays on the widget.
 
 <a id="iconbutton-style_shared"></a>
 
-#### `pub fn style_shared(mut self, style: SharedIconButtonStyle) -> Self`
+#### `pub fn style_shared(mut self, style: SharedIconButtonStyle) -> Self` (default: `None`)
 
 Per-call style override from an already-shared
 `SharedIconButtonStyle` (`Rc<dyn IconButtonStyle>`). Same effect as
@@ -228,7 +228,7 @@ derive their own chrome colors from the same icon role.
 
 <a id="iconbutton-share_interaction"></a>
 
-#### `pub fn share_interaction(mut self, signal: Signal<InteractionState>) -> Self`
+#### `pub fn share_interaction(mut self, signal: Signal<InteractionState>) -> Self` (default: `None`)
 
 Bind the button's internal interaction state to a caller-owned
 `Signal<InteractionState>` instead of letting `build()` allocate
@@ -256,7 +256,7 @@ visually with the host's content. Default mode is stand-alone
 
 <a id="iconbutton-icon_role"></a>
 
-#### `pub fn icon_role(mut self, role: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
+#### `pub fn icon_role(mut self, role: impl Into<teksilo_core::color_prop::ColorProp>) -> Self` (default: `None`)
 
 Override the icon's tint with a static `ColorProp`. When set,
 the icon ignores `embedded` and the auto-derived idle/hover/press
@@ -323,7 +323,7 @@ the body via a `Fn() -> Box<dyn Widget>` factory (e.g. a `ToolbarAction`).
 
 <a id="iconbutton-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Set the enabled state, statically or reactively. Disabled
 buttons ignore input and dim their icon (handled by the
@@ -342,7 +342,7 @@ and updates reactively from the signal.
 
 <a id="iconbutton-size"></a>
 
-#### `pub fn size(mut self, size: IconButtonSize) -> Self`
+#### `pub fn size(mut self, size: IconButtonSize) -> Self` (default: `IconButtonSize::Default`)
 
 Set the size variant. Most callers prefer the named shortcuts
 `large` / `toolbar` /
@@ -402,7 +402,7 @@ eye-off). For surface-only bistate (icon stays the same), use
 
 <a id="iconbutton-has_popup"></a>
 
-#### `pub fn has_popup(mut self, kind: teksilo_core::accesskit::HasPopup) -> Self`
+#### `pub fn has_popup(mut self, kind: teksilo_core::accesskit::HasPopup) -> Self` (default: `None`)
 
 Declare that this button is a disclosure trigger for a popup
 (menu, dialog, listbox, …). Surfaced via `set_has_popup` in
@@ -412,7 +412,7 @@ named popup kind. Wired automatically by
 
 <a id="iconbutton-expanded_when"></a>
 
-#### `pub fn expanded_when(mut self, signal: impl Into<Prop<bool>>) -> Self`
+#### `pub fn expanded_when(mut self, signal: impl Into<Prop<bool>>) -> Self` (default: `None`)
 
 Bind a signal reporting whether this button's popup is
 currently visible. The popover wrapper owns the signal and

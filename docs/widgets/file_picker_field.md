@@ -111,13 +111,13 @@ is updated on a successful pick; existing content is shown as-is.
 
 <a id="filepickerfield-kind"></a>
 
-#### `pub fn kind(mut self, kind: FilePickerKind) -> Self`
+#### `pub fn kind(mut self, kind: FilePickerKind) -> Self` (default: `FilePickerKind::OpenFile`)
 
 Pick the dialog kind opened by the Browse button.
 
 <a id="filepickerfield-dialog_title"></a>
 
-#### `pub fn dialog_title(mut self, title: impl Into<LocalizedString>) -> Self`
+#### `pub fn dialog_title(mut self, title: impl Into<LocalizedString>) -> Self` (default: `None`)
 
 Title shown in the file-dialog window caption.
 
@@ -129,7 +129,7 @@ Directory the dialog opens in. If not set, the OS default is used.
 
 <a id="filepickerfield-default_file_name"></a>
 
-#### `pub fn default_file_name(mut self, name: impl Into<String>) -> Self`
+#### `pub fn default_file_name(mut self, name: impl Into<String>) -> Self` (default: `None`)
 
 Pre-filled file name for the `FilePickerKind::SaveFile` dialog.
 No-op for `OpenFile` / `PickFolder`.
@@ -175,7 +175,7 @@ Accessible name for the path field.
 
 <a id="filepickerfield-validation"></a>
 
-#### `pub fn validation(mut self, validation: impl Into<Prop<ValidationState>>) -> Self`
+#### `pub fn validation(mut self, validation: impl Into<Prop<ValidationState>>) -> Self` (default: `None`)
 
 Bind an external `ValidationState` signal — shown as the same inline
 error/warning strip and border tint the inner `TextInput` renders (e.g.
@@ -183,7 +183,7 @@ error/warning strip and border tint the inner `TextInput` renders (e.g.
 
 <a id="filepickerfield-enabled"></a>
 
-#### `pub fn enabled(mut self, on: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, on: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Set the initial enabled state for the text field and Browse button.
 Forwarded to the arena at build time.

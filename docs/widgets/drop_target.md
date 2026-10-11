@@ -425,7 +425,7 @@ Custom predicate — full control over payload inspection.
 
 <a id="droptarget-targeted_signal"></a>
 
-#### `pub fn targeted_signal(mut self, signal: Signal<bool>) -> Self`
+#### `pub fn targeted_signal(mut self, signal: Signal<bool>) -> Self` (default: `None`)
 
 The widget writes `true` while a drag with an *accepted* payload is over
 the target, `false` otherwise — SwiftUI's `isTargeted` pattern. Drive
@@ -433,13 +433,13 @@ custom visuals off this signal.
 
 <a id="droptarget-drag_state_signal"></a>
 
-#### `pub fn drag_state_signal(mut self, signal: Signal<DropTargetDragState>) -> Self`
+#### `pub fn drag_state_signal(mut self, signal: Signal<DropTargetDragState>) -> Self` (default: `None`)
 
 Full three-state version of `Self::targeted_signal`.
 
 <a id="droptarget-active_region_signal"></a>
 
-#### `pub fn active_region_signal(mut self, signal: Signal<Option<DropRegion>>) -> Self`
+#### `pub fn active_region_signal(mut self, signal: Signal<Option<DropRegion>>) -> Self` (default: `None`)
 
 The widget writes which `DropRegion` an *accepted* drag is currently
 over (`None` when idle, rejecting, or over a disabled middle). Drive
@@ -477,7 +477,7 @@ cancel).
 
 <a id="droptarget-variant"></a>
 
-#### `pub fn variant(mut self, variant: DropTargetVariant) -> Self`
+#### `pub fn variant(mut self, variant: DropTargetVariant) -> Self` (default: `DropTargetVariant::Default`)
 
 Visual prominence of the hover indicator.
 

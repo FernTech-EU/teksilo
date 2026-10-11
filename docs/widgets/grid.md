@@ -29,7 +29,7 @@ Grid — a 2D layout container with explicit row and column tracks.
 | `Self` | [`row_gap(gap: impl Into<Prop<f32>>)`](#grid-row_gap) |
 | `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#grid-child) |
 | `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#grid-children) |
-| `Self` | [`child_opt(widget: Option<impl Widget + 'static>)`](#grid-child_opt) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#grid-child_opt) |
 
 ## Detailed description
 
@@ -126,13 +126,13 @@ mode.
 
 <a id="grid-column_gap"></a>
 
-#### `pub fn column_gap(mut self, gap: impl Into<Prop<f32>>) -> Self`
+#### `pub fn column_gap(mut self, gap: impl Into<Prop<f32>>) -> Self` (default: `0.0`)
 
 Set the inter-column gap. Accepts static `f32` or `Signal<f32>`.
 
 <a id="grid-row_gap"></a>
 
-#### `pub fn row_gap(mut self, gap: impl Into<Prop<f32>>) -> Self`
+#### `pub fn row_gap(mut self, gap: impl Into<Prop<f32>>) -> Self` (default: `0.0`)
 
 Set the inter-row gap. Accepts static `f32` or `Signal<f32>`.
 
@@ -151,7 +151,7 @@ next cell in row-major order.
 
 <a id="grid-child_opt"></a>
 
-#### `pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(mut self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Append an optional inline child; a `None` value is a no-op, keeping
 subsequent children at their original cell positions.

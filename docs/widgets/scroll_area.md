@@ -36,6 +36,8 @@ finger's pan, and on assistive-technology actions.
 | `Self` | [`line_height(lh: f32)`](#scrollarea-line_height) |
 | `Self` | [`scroll_bar_thickness(thickness: f32)`](#scrollarea-scroll_bar_thickness) |
 | `Self` | [`widget_resizable(resizable: bool)`](#scrollarea-widget_resizable) |
+| `Self` | [`shift_wheel_scrolls_horizontally(enabled: bool)`](#scrollarea-shift_wheel_scrolls_horizontally) |
+| `Self` | [`reveal_bars_on_hover(enabled: bool)`](#scrollarea-reveal_bars_on_hover) |
 | `Self` | [`smooth_scrolling(enabled: bool)`](#scrollarea-smooth_scrolling) |
 | `Self` | [`smooth_scroll_duration(duration: Duration)`](#scrollarea-smooth_scroll_duration) |
 | `Self` | [`scroll_past_end(fraction: impl Into<Prop<f32>>)`](#scrollarea-scroll_past_end) |
@@ -74,6 +76,13 @@ unchanged in every particular.
 Following the finger *past* the end is off by default
 (`ScrollArea::rubber_band`); a nested area that banded at its own end could
 never hand the gesture to the container around it.
+
+#### Wheel and hover
+
+Shift held over a vertical wheel scrolls the area horizontally when it has
+horizontal range (`ScrollArea::shift_wheel_scrolls_horizontally`, on by
+default). Overlay bars can be shown for as long as the pointer is over the
+area (`ScrollArea::reveal_bars_on_hover`, off by default).
 
 #### Accessibility
 
@@ -218,7 +227,7 @@ Set the scroll bar display mode (`Overlay`, `Permanent`, or `Thin`).
 
 <a id="scrollarea-scroll_bar_thumb_color"></a>
 
-#### `pub fn scroll_bar_thumb_color(mut self, color: impl Into<ColorProp>) -> Self`
+#### `pub fn scroll_bar_thumb_color(mut self, color: impl Into<ColorProp>) -> Self` (default: `None`)
 
 Tint the built-in scroll bars' thumb with an explicit colour instead of
 the theme's `scrollbar_thumb*` tokens. Accepts anything
@@ -243,22 +252,51 @@ Set the horizontal scroll bar visibility policy.
 
 <a id="scrollarea-line_height"></a>
 
-#### `pub fn line_height(mut self, lh: f32) -> Self`
+#### `pub fn line_height(mut self, lh: f32) -> Self` (default: `20.0`)
 
 Set the pixels-per-line used when translating line-based wheel events.
 
 <a id="scrollarea-scroll_bar_thickness"></a>
 
-#### `pub fn scroll_bar_thickness(mut self, thickness: f32) -> Self`
+#### `pub fn scroll_bar_thickness(mut self, thickness: f32) -> Self` (default: `12.0`)
 
 Set the scroll bar thickness in logical pixels (applies to both axes).
 
 <a id="scrollarea-widget_resizable"></a>
 
-#### `pub fn widget_resizable(mut self, resizable: bool) -> Self`
+#### `pub fn widget_resizable(mut self, resizable: bool) -> Self` (default: `false`)
 
 When true, content smaller than the viewport is stretched to fill it.
 Similar to Qt's `QScrollArea::setWidgetResizable(true)`.
+
+<a id="scrollarea-shift_wheel_scrolls_horizontally"></a>
+
+#### `pub fn shift_wheel_scrolls_horizontally(mut self, enabled: bool) -> Self`
+
+Whether Shift held over a vertical wheel scrolls the area sideways
+(default `true`) — the Windows and GTK convention, and the one
+`TabBar` and the table views already follow.
+
+The remap applies only to a wheel notch or trackpad delta with no
+horizontal component of its own, and only while the area can actually
+scroll horizontally: a vertical-only area keeps scrolling vertically
+with Shift held, and a real horizontal delta (macOS sends one itself)
+is never rewritten. A finger's pan is never remapped. Turn it off for
+an area whose content binds Shift+wheel to something else.
+
+<a id="scrollarea-reveal_bars_on_hover"></a>
+
+#### `pub fn reveal_bars_on_hover(mut self, enabled: bool) -> Self`
+
+Show the scroll bars while the pointer is over the area (default
+`false`), and hide them again when it leaves.
+
+Overlay and thin bars are otherwise revealed only by proximity to the
+bar itself, or by a finger's pan. With this on, a bar appears as soon as
+the mouse (or a hovering pen) enters the area, through the same reveal
+a touch pan raises, so the style renders it exactly as it does for a
+pan; a contact never produces hover, so touch is unchanged. Ignored for
+`ScrollBarMode::Permanent`, whose bar is always there.
 
 <a id="scrollarea-smooth_scrolling"></a>
 
@@ -318,7 +356,7 @@ zero, and the scroll area will collapse.
 
 <a id="scrollarea-preferred_height"></a>
 
-#### `pub fn preferred_height(mut self, height: f32) -> Self`
+#### `pub fn preferred_height(mut self, height: f32) -> Self` (default: `None`)
 
 Cap the height when the parent proposes an unconstrained one, while
 letting the **width** continue to follow the content.

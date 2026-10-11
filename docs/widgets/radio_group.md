@@ -97,7 +97,7 @@ read top-to-bottom.
 
 <a id="radiogroup-spacing"></a>
 
-#### `pub fn spacing(mut self, spacing: f32) -> Self`
+#### `pub fn spacing(mut self, spacing: f32) -> Self` (default: `8.0`)
 
 Gap between children.
 

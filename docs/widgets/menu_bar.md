@@ -149,7 +149,7 @@ macOS system menu bar.
 
 <a id="menubar-native_on_macos"></a>
 
-#### `pub fn native_on_macos(mut self, mode: crate::menu::NativeMenuMode) -> Self`
+#### `pub fn native_on_macos(mut self, mode: crate::menu::NativeMenuMode) -> Self` (default: `crate::menu::NativeMenuMode::Off`)
 
 Choose how this bar behaves on macOS, where the convention is a global
 menu bar at the top of the screen. Requires the bar to have been built

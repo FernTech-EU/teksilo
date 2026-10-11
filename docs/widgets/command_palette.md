@@ -162,13 +162,13 @@ A palette over every command in the tree's registry.
 
 <a id="commandpalette-placeholder"></a>
 
-#### `pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self`
+#### `pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self` (default: `None`)
 
 Replace the search field's placeholder text.
 
 <a id="commandpalette-empty_text"></a>
 
-#### `pub fn empty_text(mut self, text: impl Into<LocalizedString>) -> Self`
+#### `pub fn empty_text(mut self, text: impl Into<LocalizedString>) -> Self` (default: `None`)
 
 Replace the text shown when nothing matches the query.
 

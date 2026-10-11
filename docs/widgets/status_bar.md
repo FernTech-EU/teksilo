@@ -206,7 +206,7 @@ Override the corner radius. Accepts a static `f32` or a reactive
 
 <a id="statusbar-border_color"></a>
 
-#### `pub fn border_color(mut self, color: impl Into<ColorProp>) -> Self`
+#### `pub fn border_color(mut self, color: impl Into<ColorProp>) -> Self` (default: `None`)
 
 Override the border color. Accepts `Color`, a
 `BorderRole`, or a `Signal<Color>`.

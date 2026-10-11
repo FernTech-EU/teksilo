@@ -118,7 +118,7 @@ region (e.g. when you need the child's `WidgetId` for another reference).
 
 <a id="dragregion-close_action"></a>
 
-#### `pub fn close_action( mut self, action: Option<Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>>, ) -> Self`
+#### `pub fn close_action( mut self, action: Option<Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>>, ) -> Self` (default: `None`)
 
 Forward the title bar's close-action override, so the fallback window
 menu's Close entry matches the close button. No effect on platforms

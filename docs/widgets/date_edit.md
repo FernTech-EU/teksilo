@@ -221,7 +221,7 @@ the source alone until the next valid commit re-establishes it).
 
 <a id="dateedit-min_date"></a>
 
-#### `pub fn min_date(mut self, d: Date) -> Self`
+#### `pub fn min_date(mut self, d: Date) -> Self` (default: `None`)
 
 Clamp the selectable range from below. Dates earlier than `d`
 are clamped up to `d` on commit and on step, and are shown as
@@ -229,7 +229,7 @@ disabled in the calendar popover.
 
 <a id="dateedit-max_date"></a>
 
-#### `pub fn max_date(mut self, d: Date) -> Self`
+#### `pub fn max_date(mut self, d: Date) -> Self` (default: `None`)
 
 Clamp the selectable range from above. Dates later than `d`
 are clamped down to `d` on commit and on step, and are shown as
@@ -237,7 +237,7 @@ disabled in the calendar popover.
 
 <a id="dateedit-format_pattern"></a>
 
-#### `pub fn format_pattern(mut self, pat: impl Into<String>) -> Self`
+#### `pub fn format_pattern(mut self, pat: impl Into<String>) -> Self` (default: `None`)
 
 Override the locale-derived format pattern (strftime subset, see
 `crate::common::datetime::pattern`).
@@ -272,14 +272,14 @@ Default is `OverlayPlacement::BelowPreferred`.
 
 <a id="dateedit-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Set the enabled state, statically or reactively. Forwarded to
 the arena at build time.
 
 <a id="dateedit-read_only"></a>
 
-#### `pub fn read_only(mut self, read_only: bool) -> Self`
+#### `pub fn read_only(mut self, read_only: bool) -> Self` (default: `false`)
 
 Make the field read-only: text is selectable and copyable but
 not editable, and step keys are suppressed.

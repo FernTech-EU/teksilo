@@ -207,13 +207,13 @@ Bypasses the locale-derived and `format`-derived defaults entirely.
 
 <a id="timeedit-min_time"></a>
 
-#### `pub fn min_time(mut self, t: Time) -> Self`
+#### `pub fn min_time(mut self, t: Time) -> Self` (default: `None`)
 
 Clamp the accepted value to at or after `t` (inclusive).
 
 <a id="timeedit-max_time"></a>
 
-#### `pub fn max_time(mut self, t: Time) -> Self`
+#### `pub fn max_time(mut self, t: Time) -> Self` (default: `None`)
 
 Clamp the accepted value to at or before `t` (inclusive).
 
@@ -238,20 +238,20 @@ Text shown when the field is empty (value is `None`).
 
 <a id="timeedit-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Set the enabled state, statically or reactively. Forwarded to the
 arena at build time.
 
 <a id="timeedit-read_only"></a>
 
-#### `pub fn read_only(mut self, read_only: bool) -> Self`
+#### `pub fn read_only(mut self, read_only: bool) -> Self` (default: `false`)
 
 Allow display-only mode: text is selectable but not editable.
 
 <a id="timeedit-validation_behavior"></a>
 
-#### `pub fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self`
+#### `pub fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self` (default: `ValidationBehavior::AutoCorrect`)
 
 How parse failures are surfaced. See
 `ValidationBehavior`.

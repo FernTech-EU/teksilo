@@ -136,7 +136,7 @@ Clamped to at least 1. Defaults to 50.
 
 <a id="privacysettings-privacy_policy_url"></a>
 
-#### `pub fn privacy_policy_url(mut self, url: impl Into<String>) -> Self`
+#### `pub fn privacy_policy_url(mut self, url: impl Into<String>) -> Self` (default: `None`)
 
 Surface a "Read full privacy policy" link in the Art. 13 notice.
 When not set the link is hidden — the controller is responsible for

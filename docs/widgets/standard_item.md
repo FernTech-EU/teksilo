@@ -737,21 +737,21 @@ Forwarded to the inner `StandardListItem` — see its
 
 <a id="standardtreeitem-depth"></a>
 
-#### `pub fn depth(mut self, depth: usize) -> Self`
+#### `pub fn depth(mut self, depth: usize) -> Self` (default: `0`)
 
 Set the indent depth (0 = root level). Each level adds one
 `STANDARD_ITEM_TREE_INDENT_STEP` of leading whitespace.
 
 <a id="standardtreeitem-has_children"></a>
 
-#### `pub fn has_children(mut self, has: bool) -> Self`
+#### `pub fn has_children(mut self, has: bool) -> Self` (default: `false`)
 
 Declare whether the node has children, which determines whether the
 chevron column is interactive or decorative-only.
 
 <a id="standardtreeitem-is_expanded"></a>
 
-#### `pub fn is_expanded(mut self, expanded: impl Into<Prop<bool>>) -> Self`
+#### `pub fn is_expanded(mut self, expanded: impl Into<Prop<bool>>) -> Self` (default: `false`)
 
 Set the expanded state, statically or reactively via a bound
 `Signal<bool>`.
@@ -780,7 +780,7 @@ before mutating model state.
 
 <a id="standardtreeitem-on_chevron_toggle_rc"></a>
 
-#### `pub fn on_chevron_toggle_rc( mut self, f: Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>, ) -> Self`
+#### `pub fn on_chevron_toggle_rc( mut self, f: Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>, ) -> Self` (default: `None`)
 
 Variant accepting an already-`Rc`'d callback. Useful when the
 same callback is shared across multiple call sites without an

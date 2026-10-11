@@ -73,7 +73,7 @@ container has no slack to give).
 
 <a id="spacer-min_length"></a>
 
-#### `pub fn min_length(mut self, min: f32) -> Self`
+#### `pub fn min_length(mut self, min: f32) -> Self` (default: `0.0`)
 
 Set a hard floor, in logical pixels, on the spacer's main-axis size.
 

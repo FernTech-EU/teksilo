@@ -100,7 +100,7 @@ Human-readable label, used as the default AT group name and
 
 <a id="groupitem-show_label"></a>
 
-#### `pub fn show_label(mut self, show: bool) -> Self`
+#### `pub fn show_label(mut self, show: bool) -> Self` (default: `false`)
 
 Render the label inline at paint time.
 
@@ -120,7 +120,7 @@ reactive signal.
 
 <a id="groupitem-fill"></a>
 
-#### `pub fn fill(mut self, color: impl Into<ColorProp>) -> Self`
+#### `pub fn fill(mut self, color: impl Into<ColorProp>) -> Self` (default: `None`)
 
 Background fill colour. Accepts a plain `Color`, a theme role, a
 `Signal<Color>`, or a `Signal<Role>` — resolved against the active theme

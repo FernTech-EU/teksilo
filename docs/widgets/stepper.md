@@ -220,14 +220,14 @@ Append multiple `Step` definitions from an iterator.
 
 <a id="stepper-controller"></a>
 
-#### `pub fn controller(mut self, controller: StepperController) -> Self`
+#### `pub fn controller(mut self, controller: StepperController) -> Self` (default: `None`)
 
 Drive the stepper with an externally-held controller (for programmatic
 reset / jump / introspection). If omitted, the stepper creates its own.
 
 <a id="stepper-orientation"></a>
 
-#### `pub fn orientation(mut self, orientation: StepperOrientation) -> Self`
+#### `pub fn orientation(mut self, orientation: StepperOrientation) -> Self` (default: `StepperOrientation::Horizontal`)
 
 Set the indicator-strip orientation (horizontal or vertical).
 
@@ -246,7 +246,7 @@ become `Role::Tab`). Linear (default) markers are `Role::ListItem`.
 
 <a id="stepper-circle_size"></a>
 
-#### `pub fn circle_size(mut self, size: f32) -> Self`
+#### `pub fn circle_size(mut self, size: f32) -> Self` (default: `DEFAULT_CIRCLE_SIZE`)
 
 Override the marker circle diameter (logical px).
 
@@ -265,7 +265,7 @@ wide sidebar holding a few words.
 
 <a id="stepper-chrome_position"></a>
 
-#### `pub fn chrome_position(mut self, position: ChromePosition) -> Self`
+#### `pub fn chrome_position(mut self, position: ChromePosition) -> Self` (default: `ChromePosition::Leading`)
 
 Choose where the optional chrome widget sits relative to the stepper
 body. Forced to `ChromePosition::Top` when
@@ -627,13 +627,13 @@ Step::new(lit!("Details")).content_boxed({
 
 <a id="step-supporting_text"></a>
 
-#### `pub fn supporting_text(mut self, text: impl Into<LocalizedString>) -> Self`
+#### `pub fn supporting_text(mut self, text: impl Into<LocalizedString>) -> Self` (default: `None`)
 
 Secondary line under the title in the header / indicator.
 
 <a id="step-status"></a>
 
-#### `pub fn status(mut self, status: StepStatus) -> Self`
+#### `pub fn status(mut self, status: StepStatus) -> Self` (default: `StepStatus::Upcoming`)
 
 Set the step's initial `StepStatus`.
 
@@ -646,7 +646,7 @@ button while active). Equivalent to `.status(StepStatus::Optional)`.
 
 <a id="step-complete_when"></a>
 
-#### `pub fn complete_when(mut self, signal: impl Into<teksilo_core::signal::Prop<bool>>) -> Self`
+#### `pub fn complete_when(mut self, signal: impl Into<teksilo_core::signal::Prop<bool>>) -> Self` (default: `None`)
 
 Reactive Next gate: while this step is active, Next is enabled iff
 `signal` is `true`. Derive it from the same form signals the step's
@@ -662,7 +662,7 @@ where a reactive signal is available.
 
 <a id="step-visible_when"></a>
 
-#### `pub fn visible_when(mut self, visible: impl Into<teksilo_core::signal::Prop<bool>>) -> Self`
+#### `pub fn visible_when(mut self, visible: impl Into<teksilo_core::signal::Prop<bool>>) -> Self` (default: `None`)
 
 Reactive visibility: while `visible` is `false` this step drops out of
 the flow — Next / Back / indicator clicks skip it, and its marker is

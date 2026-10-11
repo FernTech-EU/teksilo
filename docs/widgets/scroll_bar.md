@@ -187,13 +187,13 @@ Create a new ScrollBar with shared state.
 
 <a id="scrollbar-thickness"></a>
 
-#### `pub fn thickness(mut self, thickness: f32) -> Self`
+#### `pub fn thickness(mut self, thickness: f32) -> Self` (default: `8.0`)
 
 Set the bar thickness (width for vertical, height for horizontal).
 
 <a id="scrollbar-min_thumb_length"></a>
 
-#### `pub fn min_thumb_length(mut self, len: f32) -> Self`
+#### `pub fn min_thumb_length(mut self, len: f32) -> Self` (default: `None`)
 
 Set the minimum thumb length in pixels, overriding the density.
 
@@ -215,7 +215,7 @@ here can hide a bar that hover has shown.
 
 <a id="scrollbar-step_size"></a>
 
-#### `pub fn step_size(mut self, step: f32) -> Self`
+#### `pub fn step_size(mut self, step: f32) -> Self` (default: `40.0`)
 
 Set the scroll step for keyboard navigation.
 
@@ -241,7 +241,7 @@ Override the active `ScrollBarStyle` for this widget instance only.
 
 <a id="scrollbar-thumb_color"></a>
 
-#### `pub fn thumb_color(mut self, color: impl Into<ColorProp>) -> Self`
+#### `pub fn thumb_color(mut self, color: impl Into<ColorProp>) -> Self` (default: `None`)
 
 Tint the thumb with an explicit colour instead of the theme's
 `scrollbar_thumb*` tokens. Accepts anything `impl Into<ColorProp>` —

@@ -1436,7 +1436,7 @@ regardless of `editing_cell`.
 
 <a id="column-edit_triggers"></a>
 
-#### `pub fn edit_triggers(mut self, triggers: EditTriggers) -> Self`
+#### `pub fn edit_triggers(mut self, triggers: EditTriggers) -> Self` (default: `None`)
 
 Override the view's `EditTriggers` for this column alone.
 

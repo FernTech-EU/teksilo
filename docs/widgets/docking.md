@@ -489,7 +489,7 @@ enabled, untoggled, with the label as its hover tooltip.
 
 <a id="dockaction-placement"></a>
 
-#### `pub fn placement(mut self, placement: DockActionPlacement) -> Self`
+#### `pub fn placement(mut self, placement: DockActionPlacement) -> Self` (default: `DockActionPlacement::End`)
 
 Where the action sits along the rail. See `DockActionPlacement`.
 
@@ -502,13 +502,13 @@ Override the hover tooltip (defaults to the label). Ignored in
 
 <a id="dockaction-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Enable / disable the action. Accepts a `bool` or a `Signal<bool>`.
 
 <a id="dockaction-toggled"></a>
 
-#### `pub fn toggled(mut self, state: Signal<bool>) -> Self`
+#### `pub fn toggled(mut self, state: Signal<bool>) -> Self` (default: `None`)
 
 Paint the selected surface while `state` is `true` — the same
 highlight an open activity gets. **Reflect-only**: activating the
@@ -571,7 +571,7 @@ colour.
 
 <a id="dockrail-divider_color"></a>
 
-#### `pub fn divider_color(mut self, color: impl Into<ColorProp>) -> Self`
+#### `pub fn divider_color(mut self, color: impl Into<ColorProp>) -> Self` (default: `None`)
 
 Like `divider`, but with an explicit colour. Accepts
 `Color`, a `BorderRole`, or a

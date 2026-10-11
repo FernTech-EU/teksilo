@@ -345,7 +345,7 @@ The card's mode signal, for an app that did not supply one.
 
 <a id="scenecard-selection"></a>
 
-#### `pub fn selection(mut self, selection: SceneSelection) -> Self`
+#### `pub fn selection(mut self, selection: SceneSelection) -> Self` (default: `None`)
 
 The scene selection this card takes part in.
 
@@ -357,7 +357,7 @@ nothing.
 
 <a id="scenecard-label"></a>
 
-#### `pub fn label(mut self, label: impl Into<Prop<String>>) -> Self`
+#### `pub fn label(mut self, label: impl Into<Prop<String>>) -> Self` (default: `String::new()`)
 
 The card's accessible name. Locale-reactive when given a `tr!` string.
 

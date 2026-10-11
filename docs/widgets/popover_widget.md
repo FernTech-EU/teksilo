@@ -321,7 +321,7 @@ than its trigger, use `open_action`.
 
 <a id="popoverwidget-open_action"></a>
 
-#### `pub fn open_action(mut self, intent: &'static str) -> Self`
+#### `pub fn open_action(mut self, intent: &'static str) -> Self` (default: `None`)
 
 Register a **named global action** that toggles this popover, so a menu
 entry, a global shortcut or `ctx.send_intent(...)` can open it — not only
@@ -380,7 +380,7 @@ the per-call override the standalone `Popover` used to offer. No effect under
 
 <a id="popoverwidget-surface_name"></a>
 
-#### `pub fn surface_name(mut self, name: impl Into<String>) -> Self`
+#### `pub fn surface_name(mut self, name: impl Into<String>) -> Self` (default: `String::new()`)
 
 Accessible name for the surface's `Role::Dialog` node. Without one
 the surface is named by the trigger that opens it. No effect under

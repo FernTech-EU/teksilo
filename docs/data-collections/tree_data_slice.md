@@ -157,7 +157,7 @@ case where it cannot be.
 
 <a id="treerow-with_children"></a>
 
-#### `pub fn with_children(mut self, has_children: bool) -> Self`
+#### `pub fn with_children(mut self, has_children: bool) -> Self` (default: `None`)
 
 Declare whether this row has children, rather than letting the stream say.
 

@@ -259,7 +259,7 @@ A magnet at `local_pos` in the owning item's local frame, role
 
 <a id="magnet-role"></a>
 
-#### `pub fn role(mut self, role: MagnetRole) -> Self`
+#### `pub fn role(mut self, role: MagnetRole) -> Self` (default: `MagnetRole::Bidirectional`)
 
 Set the connection direction (advisory — see `MagnetRole`).
 
@@ -272,7 +272,7 @@ event can downcast. Cheap to carry around (held in an `Rc`).
 
 <a id="magnet-payload_rc"></a>
 
-#### `pub fn payload_rc(mut self, payload: Rc<dyn Any>) -> Self`
+#### `pub fn payload_rc(mut self, payload: Rc<dyn Any>) -> Self` (default: `None`)
 
 Attach an already-`Rc`-wrapped payload (use when several magnets
 share one payload object).

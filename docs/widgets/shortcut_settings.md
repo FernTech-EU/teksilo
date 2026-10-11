@@ -157,7 +157,7 @@ from another command.
 
 <a id="shortcutsettings-with_filter"></a>
 
-#### `pub fn with_filter(mut self, filter: Signal<String>) -> Self`
+#### `pub fn with_filter(mut self, filter: Signal<String>) -> Self` (default: `None`)
 
 Bind the search text to `filter`. The toolbar's search field edits
 this signal, and anything else may write it too: a command palette
@@ -168,7 +168,7 @@ everything.
 
 <a id="shortcutsettings-modified_only"></a>
 
-#### `pub fn modified_only(mut self, signal: Signal<bool>) -> Self`
+#### `pub fn modified_only(mut self, signal: Signal<bool>) -> Self` (default: `None`)
 
 Bind "Modified only" to `signal`: while it is `true` the list shows
 only the shortcuts the user changed. The toolbar's checkbox edits

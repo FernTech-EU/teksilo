@@ -20,7 +20,7 @@ VStack — a vertical layout container that distributes children top-to-bottom.
 | `Self` | [`alignment(alignment: HAlignment)`](#vstack-alignment) |
 | `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#vstack-child) |
 | `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#vstack-children) |
-| `Self` | [`child_opt(widget: Option<impl Widget + 'static>)`](#vstack-child_opt) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#vstack-child_opt) |
 
 ## Detailed description
 
@@ -82,14 +82,14 @@ Create an empty vertical stack with `Leading` alignment and zero spacing.
 
 <a id="vstack-spacing"></a>
 
-#### `pub fn spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self`
+#### `pub fn spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self` (default: `0.0`)
 
 Set inter-child spacing. Accepts a static `f32` or a reactive
 `Signal<f32>`.
 
 <a id="vstack-alignment"></a>
 
-#### `pub fn alignment(mut self, alignment: HAlignment) -> Self`
+#### `pub fn alignment(mut self, alignment: HAlignment) -> Self` (default: `HAlignment::Leading`)
 
 Set the cross-axis (horizontal) alignment applied to every child that
 does not have a per-child override set via `WidgetTree::set_alignment`.
@@ -108,6 +108,6 @@ Add multiple inline children from an iterator.
 
 <a id="vstack-child_opt"></a>
 
-#### `pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(mut self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Conditionally add a child. No-op if None.

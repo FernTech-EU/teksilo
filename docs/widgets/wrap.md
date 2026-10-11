@@ -21,7 +21,7 @@ they exceed the available width.
 | `Self` | [`line_spacing(spacing: impl Into<Prop<f32>>)`](#wrap-line_spacing) |
 | `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#wrap-child) |
 | `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#wrap-children) |
-| `Self` | [`child_opt(widget: Option<impl Widget + 'static>)`](#wrap-child_opt) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#wrap-child_opt) |
 
 ## Detailed description
 
@@ -80,14 +80,14 @@ Create an empty `Wrap` container with zero spacing.
 
 <a id="wrap-spacing"></a>
 
-#### `pub fn spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self`
+#### `pub fn spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self` (default: `0.0`)
 
 Horizontal spacing between items on the same line. Accepts a static
 `f32` or a reactive `Signal<f32>`.
 
 <a id="wrap-line_spacing"></a>
 
-#### `pub fn line_spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self`
+#### `pub fn line_spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self` (default: `0.0`)
 
 Vertical spacing between lines. Accepts a static `f32` or a
 reactive `Signal<f32>`.
@@ -106,6 +106,6 @@ Add multiple inline children from an iterator.
 
 <a id="wrap-child_opt"></a>
 
-#### `pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(mut self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Conditionally add a child. No-op if `None`.

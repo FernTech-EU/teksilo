@@ -92,12 +92,12 @@ accessibility tree, and a stack applies no spacing around it.
 
 <a id="fixedsize-width"></a>
 
-#### `pub fn width(mut self, state: impl Into<Prop<f32>>) -> Self`
+#### `pub fn width(mut self, state: impl Into<Prop<f32>>) -> Self` (default: `None`)
 
 Bind width to a reactive state. When the state changes, relayout is triggered.
 
 <a id="fixedsize-height"></a>
 
-#### `pub fn height(mut self, state: impl Into<Prop<f32>>) -> Self`
+#### `pub fn height(mut self, state: impl Into<Prop<f32>>) -> Self` (default: `None`)
 
 Bind height to a reactive state. When the state changes, relayout is triggered.

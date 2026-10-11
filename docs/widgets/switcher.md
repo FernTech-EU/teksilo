@@ -104,7 +104,7 @@ is the starting value (the most common case).
 
 <a id="switcher-capture_child_ids_into"></a>
 
-#### `pub fn capture_child_ids_into(mut self, out: Rc<RefCell<Vec<WidgetId>>>) -> Self`
+#### `pub fn capture_child_ids_into(mut self, out: Rc<RefCell<Vec<WidgetId>>>) -> Self` (default: `None`)
 
 Capture each mounted page's `WidgetId` into an externally owned
 buffer during `build()`. Use when the caller needs to reference

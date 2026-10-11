@@ -227,7 +227,6 @@ pub struct TreeTableView<T: 'static> { /* fields */ }
 #### `pub fn from_projection(proxy: SortFilterTreeModel<T>) -> Self`
 
 Wrap a `SortFilterTreeModel<T>`.
-Wrap a `SortFilterTreeModel<T>`.
 
 <a id="treetableview-from_source"></a>
 

@@ -347,7 +347,7 @@ computing item indices for `initial_selected`.
 
 <a id="splitbutton-variant"></a>
 
-#### `pub fn variant(mut self, variant: ButtonVariant) -> Self`
+#### `pub fn variant(mut self, variant: ButtonVariant) -> Self` (default: `ButtonVariant::Plain`)
 
 Set the visual style variant (filled, plain, ghost, …) for the entire
 button frame. Mirrors the same variants as
@@ -398,7 +398,7 @@ replaces it wholesale (loses hover/disabled tint).
 
 <a id="splitbutton-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Set the enabled state, statically or reactively. Forwarded to the
 arena at build time.

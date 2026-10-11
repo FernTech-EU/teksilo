@@ -101,19 +101,19 @@ Create an empty `FormLayout` with zero label gap and zero row spacing.
 
 <a id="formlayout-label_gap"></a>
 
-#### `pub fn label_gap(mut self, gap: f32) -> Self`
+#### `pub fn label_gap(mut self, gap: f32) -> Self` (default: `0.0`)
 
 Horizontal gap between the label column and the field column.
 
 <a id="formlayout-row_spacing"></a>
 
-#### `pub fn row_spacing(mut self, spacing: f32) -> Self`
+#### `pub fn row_spacing(mut self, spacing: f32) -> Self` (default: `0.0`)
 
 Vertical gap between rows.
 
 <a id="formlayout-label"></a>
 
-#### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
+#### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self` (default: `None`)
 
 Set an accessible name for this form. When set, the widget emits
 the `Role::Form` landmark so assistive-technology users can

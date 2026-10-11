@@ -152,7 +152,7 @@ suggestion popup (`suggestions`) wires itself and needs none of this.
 
 <a id="searchfield-enabled"></a>
 
-#### `pub fn enabled(mut self, on: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, on: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Set the initial enabled state. Forwarded to the arena at build time.
 

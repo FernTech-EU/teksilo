@@ -13,6 +13,7 @@ Slider — a draggable value selector bound to a `Signal<f32>`.
 | ---: | :--- |
 | `const` | [`SLIDER_PART_BODY`](#slider_part_body) — `Widget::target_regions` part id for the whole press surface — the track plus everything either side of it, which is what a tap or a drag acts on |
 | `const` | [`SLIDER_PART_THUMB`](#slider_part_thumb) — `Widget::target_regions` part id for the knob |
+| `enum` | [`SliderValueTooltipPlacement`](#slidervaluetooltipplacement) — Where `Slider::value_tooltip`'s readout sits, set with `Slider::value_tooltip_placement` |
 | `struct` | [`Slider`](#slider) — A draggable value selector bound to a `Signal<f32>` in a continuous or discrete range |
 
 ## Public functions
@@ -38,6 +39,9 @@ Slider — a draggable value selector bound to a `Signal<f32>`.
 | `Self` | [`rich_tooltip_content(content: crate::tooltip::TooltipContent)`](#slider-rich_tooltip_content) |
 | `Self` | [`composite_tooltip(content: impl Widget + 'static)`](#slider-composite_tooltip) |
 | `Self` | [`value_tooltip(format: impl Fn(f32) -> LocalizedString + 'static)`](#slider-value_tooltip) |
+| `Self` | [`value_tooltip_placement(placement: SliderValueTooltipPlacement)`](#slider-value_tooltip_placement) |
+| `Self` | [`value_tooltip_style(style: impl TooltipStyle)`](#slider-value_tooltip_style) |
+| `Self` | [`jump_on_press(on: bool)`](#slider-jump_on_press) |
 | `Self` | [`default_value(value: f32)`](#slider-default_value) |
 
 ## Detailed description
@@ -95,6 +99,17 @@ keeping the key from the field the user pressed it for. The same text
 becomes the slider's accessible value, beside the number, so a reader that
 speaks a value's text says "-3.0 dB" rather than "-3".
 
+`value_tooltip_placement` moves the
+readout: `Above` or
+`Below` the thumb, or
+`FollowPointer`, which rides
+the pointer rather than the thumb while a drag moves the value — useful on
+a stepped slider, whose thumb snaps away from the hand. The default,
+`Auto`, is the placement described
+above. `value_tooltip_style` paints this
+slider's readout with a `TooltipStyle` of its own instead of the theme's
+tooltip chrome.
+
 `default_value` adds a way back: a double-click on
 the slider, or the "Reset to default" accessibility action, puts the value
 back to the default, as a user change, so `on_change`
@@ -103,14 +118,41 @@ reports it.
 ```rust
 # use teksilo_core::signal::Signal;
 # use teksilo_i18n::lit;
-# use teksilo_widgets::Slider;
+# use teksilo_widgets::{Slider, SliderValueTooltipPlacement};
 let gain = Signal::new(0.0_f32);
 let _band = Slider::new(gain, -12.0, 12.0)
     .step(0.5)
     .label(lit!("Low shelf"))
     .value_tooltip(|db| lit!(format!("{db:+.1} dB")))
+    .value_tooltip_placement(SliderValueTooltipPlacement::Below)
     .default_value(0.0);
 ```
+
+#### Clicks, presses and buttons
+
+A click on the track jumps the value to it, on release; a drag moves it
+from the moment the pointer has travelled far enough to be a drag. Both
+answer to the primary button only. An application that wants a click of
+its own on the slider — a secondary-click reset, say — attaches its own
+`on_tap` and widens that handler's mask; the slider's track click stays on
+the primary button, and the secondary click is the application's alone:
+
+```rust
+# use teksilo_core::event::ButtonMask;
+# use teksilo_core::signal::Signal;
+# use teksilo_core::widget_builder::WidgetBuilder;
+# use teksilo_widgets::Slider;
+let gain = Signal::new(0.0_f32);
+let reset = gain.clone();
+let _w = Slider::new(gain, -12.0, 12.0)
+    .on_tap(move |_, _| reset.set(0.0))
+    .accept_tap_buttons(ButtonMask::SECONDARY);
+```
+
+`jump_on_press` moves the value as soon as a mouse
+button goes down rather than on release, and a drag carries on from there.
+A finger's or a pen's press still writes nothing until it is a tap or a
+drag: such a press may yet become a scroll.
 
 #### Touch and pen
 
@@ -173,6 +215,31 @@ pub const SLIDER_PART_BODY: u16 = 0;
 ```rust
 pub const SLIDER_PART_THUMB: u16 = 1;
 ```
+
+<a id="slidervaluetooltipplacement"></a>
+
+## `pub enum SliderValueTooltipPlacement`
+
+**Import:** `use teksilo::widgets::SliderValueTooltipPlacement;`
+
+Where `Slider::value_tooltip`'s readout sits, set with
+`Slider::value_tooltip_placement`.
+
+Every placement keeps the readout clear of the strip the thumb occupies
+across the whole slider, so it covers neither the knob nor what the style
+draws beside the track, and flips to the other side when the window has no
+room on the one asked for.
+
+```rust
+pub enum SliderValueTooltipPlacement { /* variants */ }
+```
+
+### Variants
+
+- **`Auto`** — Above a horizontal slider's thumb, or below it near the top of the window; beside a vertical slider's thumb, on the inline-start side when there is room. The default.
+- **`Above`** — Above the thumb, centred on it, below when the window has no room above. On a vertical slider this sits over the track above the thumb.
+- **`Below`** — Below the thumb, centred on it, above when the window has no room below. On a vertical slider this sits over the track below the thumb.
+- **`FollowPointer`** — Where `Auto` puts it, but at the pointer rather than the thumb while a drag is moving the value: along the slider's axis it tracks the pointer, past either end of the track too, where the thumb has stopped. Hovered or focused from the keyboard, it sits by the thumb as `Auto` does.
 
 <a id="slider"></a>
 
@@ -246,7 +313,7 @@ sliders map Up/Down arrow keys to increase/decrease.
 
 <a id="slider-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Set the enabled state, statically or reactively. Forwarded to
 the arena at build time via
@@ -332,12 +399,15 @@ slider is hovered, dragged, or focused from the keyboard.
 Unlike a `tooltip`, the readout is up at once, with no
 hover delay; a press does not close it, so it stays up through a drag;
 and it moves with the thumb and changes as the value does, without a
-rebuild. It sits above a horizontal slider's thumb, or below it near
-the top of the window, and beside a vertical slider, on the
+rebuild. By default it sits above a horizontal slider's thumb, or below
+it near the top of the window, and beside a vertical slider, on the
 inline-start side when there is room, so it covers neither the thumb
-nor the track. It is re-placed on every layout pass from where the
+nor the track; `value_tooltip_placement`
+picks another side. It is re-placed on every layout pass from where the
 slider is then, so it follows a value the application writes, a scroll
-that moves the slider and a resize that stretches it.
+that moves the slider and a resize that stretches it. Its chrome is the
+theme's tooltip chrome unless
+`value_tooltip_style` gives it another.
 
 It takes no input of its own. A press or a hover on it reaches what is
 under it, and a press there closes a popover it is outside of. Escape
@@ -360,6 +430,49 @@ A `tooltip`, rich or composite tooltip set beside it
 keeps its hover delay, its place under the slider and the accessible
 description it gives, and both show; to name the control in the
 readout instead, say so in `format`.
+
+<a id="slider-value_tooltip_placement"></a>
+
+#### `pub fn value_tooltip_placement(mut self, placement: SliderValueTooltipPlacement) -> Self`
+
+Choose where the `value_tooltip` readout sits:
+above or below the thumb, or at the pointer while a drag moves the
+value. `SliderValueTooltipPlacement::Auto` by default, which is where
+the readout has always gone. Has no effect without a `value_tooltip`.
+
+<a id="slider-value_tooltip_style"></a>
+
+#### `pub fn value_tooltip_style(mut self, style: impl TooltipStyle) -> Self`
+
+Paint the `value_tooltip` readout with `style`
+rather than the active theme's tooltip chrome
+(`theme.style_slots.tooltip`, else the built-in recipe). Only this
+slider's readout changes; its plain, rich or composite
+`tooltip` keeps the theme's. Has no effect without a
+`value_tooltip`.
+
+<a id="slider-jump_on_press"></a>
+
+#### `pub fn jump_on_press(mut self, on: bool) -> Self`
+
+Move the value to the pointer as soon as a mouse button goes down on
+the slider, rather than when the click is released or a drag starts.
+Off by default.
+
+With it off, a press writes nothing: the value moves when the pointer
+has travelled far enough to start a drag, or to the click's position
+when it is released without one. With it on, a primary press of a
+mouse moves the value to the pointer at once, a drag that follows
+carries on from there without a jump, and the release of a click adds
+nothing. `on_change` reports the press's value as a
+user change.
+
+Touch and pen keep the default whatever this says: a contact landing
+on a slider may be the start of a scroll or of something an ancestor
+claims, so it writes nothing until it is a drag or a tap. The second
+press of a double-click does not jump either when a
+`default_value` is set, since that click resets.
+The keyboard and the accessibility actions are unaffected.
 
 <a id="slider-default_value"></a>
 

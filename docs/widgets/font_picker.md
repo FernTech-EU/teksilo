@@ -199,14 +199,14 @@ filters and the script-aware sample without a font backend.
 
 <a id="fontpicker-spacing_filter"></a>
 
-#### `pub fn spacing_filter(mut self, filter: impl Into<Prop<FontSpacingFilter>>) -> Self`
+#### `pub fn spacing_filter(mut self, filter: impl Into<Prop<FontSpacingFilter>>) -> Self` (default: `FontSpacingFilter::Any`)
 
 Restrict the list by spacing (monospaced / proportional). Accepts a
 static value or a `Signal` for a reactive filter toolbar.
 
 <a id="fontpicker-writing_system"></a>
 
-#### `pub fn writing_system(mut self, ws: impl Into<Prop<Option<WritingSystem>>>) -> Self`
+#### `pub fn writing_system(mut self, ws: impl Into<Prop<Option<WritingSystem>>>) -> Self` (default: `None`)
 
 Restrict the list to fonts covering a writing system. `None` shows
 all. Accepts a static value or a `Signal`. The first time a
@@ -229,7 +229,7 @@ Convenience: `true` keeps the default preview; `false` switches to
 
 <a id="fontpicker-sample_text"></a>
 
-#### `pub fn sample_text(mut self, text: impl Into<String>) -> Self`
+#### `pub fn sample_text(mut self, text: impl Into<String>) -> Self` (default: `None`)
 
 Global sample text override (used when the font's writing system has
 no more specific sample). Mirrors GTK's preview text.
@@ -270,7 +270,7 @@ Accessible / control label. Defaults to a localized "Font".
 
 <a id="fontpicker-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Enable / disable the control, statically or reactively.
 

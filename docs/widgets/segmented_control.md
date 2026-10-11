@@ -330,7 +330,7 @@ Mutually exclusive with `tooltip` /
 
 <a id="segment-disabled"></a>
 
-#### `pub fn disabled(mut self, disabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn disabled(mut self, disabled: impl Into<Prop<bool>>) -> Self` (default: `false`)
 
 Disable this segment: not selectable via click or keyboard,
 dimmed, and announced disabled to assistive tech.
@@ -342,7 +342,7 @@ snapshotted at build time).
 
 <a id="segment-visible"></a>
 
-#### `pub fn visible(mut self, visible: impl Into<Prop<bool>>) -> Self`
+#### `pub fn visible(mut self, visible: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Hide this segment entirely: it leaves the strip, the overflow
 menu, the keyboard order, and the accessibility tree, and it is
@@ -450,7 +450,7 @@ Convenient for feeding `index_signal` without repeating the list.
 
 <a id="segmentedcontrol-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Set the enabled state, statically or reactively. Forwarded to
 the arena at build time via
@@ -458,7 +458,7 @@ the arena at build time via
 
 <a id="segmentedcontrol-label"></a>
 
-#### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
+#### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self` (default: `None`)
 
 Accessible name for the group — e.g. "View mode". Screen readers
 announce it before the selected segment. Matches

@@ -110,7 +110,7 @@ New wrapper. Both axes animate by default.
 
 <a id="smoothsize-axes"></a>
 
-#### `pub fn axes(mut self, axes: SmoothSizeAxes) -> Self`
+#### `pub fn axes(mut self, axes: SmoothSizeAxes) -> Self` (default: `SmoothSizeAxes::Both`)
 
 Restrict the tween to one axis (the other tracks the child's
 natural size instantly).

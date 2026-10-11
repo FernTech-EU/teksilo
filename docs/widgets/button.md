@@ -81,6 +81,15 @@ hover-leave to correct a hovered state with.
 The whole family — `IconButton`, `CommandLinkButton`, every `Toolbar`
 command — shares `build_interaction_handlers` and gets all of this with it.
 
+#### Label colour
+
+The label and icon take their colour from the interaction state
+(`OnAccent` on accent fills, `Primary` otherwise, `Link` for links). The
+active `ButtonStyle` may redirect it per variant with `label_text_role`,
+or per variant *and* state with `label_text_role_for` — for example to
+brighten the label on hover. Both are repaint-only; a per-call
+`Button::text_role` wins over them.
+
 #### Accessibility
 
 Announces as `Role::Button` with the resolved label as its AT name.

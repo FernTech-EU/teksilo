@@ -319,7 +319,7 @@ clears the others so last-call wins.
 
 <a id="toolbaraction-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Enabled state, static or reactive.
 
@@ -331,7 +331,7 @@ Activation handler (tap / Enter / Space / AT click / menu activate).
 
 <a id="toolbaraction-toggle"></a>
 
-#### `pub fn toggle(mut self, state: Signal<bool>) -> Self`
+#### `pub fn toggle(mut self, state: Signal<bool>) -> Self` (default: `None`)
 
 Make this a checkable (toggle) action bound to `state`. Inline it reads
 as a pressed toggle button; in overflow as a checkmark menu item.
@@ -558,7 +558,10 @@ icon-button style.
 
 <a id="toolbar-spacing"></a>
 
-#### `pub fn spacing(mut self, spacing: f32) -> Self`
+#### `pub fn spacing(mut self, spacing: f32) -> Self` (default: `None`)
+
+Gap between consecutive toolbar items in logical pixels. Overrides the
+density's `toolbar_spacing` (`TOOLBAR_SPACING` at Compact).
 
 <a id="toolbar-label"></a>
 

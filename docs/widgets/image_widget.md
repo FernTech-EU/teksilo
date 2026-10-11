@@ -153,7 +153,7 @@ texture is left alone. `ImageMaskShape::None` is a no-op.
 
 <a id="imagewidget-fit"></a>
 
-#### `pub fn fit(mut self, fit: ImageFit) -> Self`
+#### `pub fn fit(mut self, fit: ImageFit) -> Self` (default: `ImageFit::Contain`)
 
 Set the content-fit mode — how the image pixels map into the box.
 See `ImageFit`.
@@ -169,7 +169,7 @@ active layout direction (RTL-aware).
 
 <a id="imagewidget-width"></a>
 
-#### `pub fn width(mut self, w: f32) -> Self`
+#### `pub fn width(mut self, w: f32) -> Self` (default: `None`)
 
 Pin a fixed display width (in logical pixels). The width axis
 becomes rigid — reported as-is and never scaled to a parent
@@ -178,7 +178,7 @@ image's aspect ratio (CSS `width: Npx; height: auto`).
 
 <a id="imagewidget-height"></a>
 
-#### `pub fn height(mut self, h: f32) -> Self`
+#### `pub fn height(mut self, h: f32) -> Self` (default: `None`)
 
 Pin a fixed display height (in logical pixels). The height axis
 becomes rigid. With no width pinned, the width derives from the
@@ -206,7 +206,7 @@ dimension is pinned via `width` /
 
 <a id="imagewidget-alt"></a>
 
-#### `pub fn alt(mut self, text: impl Into<String>) -> Self`
+#### `pub fn alt(mut self, text: impl Into<String>) -> Self` (default: `None`)
 
 Set the accessibility alt text.
 

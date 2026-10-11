@@ -27,7 +27,7 @@ re-partitioning every child when a column is gained or lost.
 | `Self` | [`semantic_list(enabled: bool)`](#columnflow-semantic_list) |
 | `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#columnflow-child) |
 | `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#columnflow-children) |
-| `Self` | [`child_opt(widget: Option<impl Widget + 'static>)`](#columnflow-child_opt) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#columnflow-child_opt) |
 | | **Methods** |
 | `Signal<usize>` | [`column_count_signal()`](#columnflow-column_count_signal) |
 
@@ -138,7 +138,7 @@ column width, and no column-count cap.
 
 <a id="columnflow-min_column_width"></a>
 
-#### `pub fn min_column_width(mut self, width: f32) -> Self`
+#### `pub fn min_column_width(mut self, width: f32) -> Self` (default: `DEFAULT_MIN_COLUMN_WIDTH`)
 
 The narrowest a column may be. The column count is the largest *N* whose
 columns are all at least this wide — CSS `column-width` / SwiftUI
@@ -172,13 +172,13 @@ Clamped to at least 1.
 
 <a id="columnflow-column_spacing"></a>
 
-#### `pub fn column_spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self`
+#### `pub fn column_spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self` (default: `0.0`)
 
 Horizontal gap between columns. Accepts an `f32` or a `Signal<f32>`.
 
 <a id="columnflow-item_spacing"></a>
 
-#### `pub fn item_spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self`
+#### `pub fn item_spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self` (default: `0.0`)
 
 Vertical gap between items within a column. Accepts an `f32` or a
 `Signal<f32>`.
@@ -237,7 +237,7 @@ Add multiple inline children from an iterator.
 
 <a id="columnflow-child_opt"></a>
 
-#### `pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(mut self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Conditionally add a child. No-op if `None`.
 

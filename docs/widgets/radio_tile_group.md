@@ -117,7 +117,7 @@ Create a group bound to the shared selection signal. Add tiles with
 
 <a id="radiotilegroup-label"></a>
 
-#### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
+#### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self` (default: `None`)
 
 Accessible name for the group (announced before individual tiles).
 
@@ -149,7 +149,7 @@ Defaults to 6 dp for `TileLayout::Vertical`, 12 dp otherwise.
 
 <a id="radiotilegroup-line_spacing"></a>
 
-#### `pub fn line_spacing(mut self, spacing: f32) -> Self`
+#### `pub fn line_spacing(mut self, spacing: f32) -> Self` (default: `12.0`)
 
 Gap between rows in `TileLayout::Grid`.
 
@@ -164,7 +164,7 @@ other layouts.
 
 <a id="radiotilegroup-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Set the enabled state for the whole group, statically or
 reactively.

@@ -137,7 +137,7 @@ already has it.
 
 <a id="toggle-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Set the enabled state, statically or reactively. Forwarded to the
 arena via `ctx.enabled_when(self_id, self.enabled.clone())` at

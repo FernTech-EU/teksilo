@@ -920,7 +920,7 @@ A controller with every handle, no ratio lock, corner-anchored scaling,
 
 <a id="transformconfig-handles"></a>
 
-#### `pub fn handles(mut self, set: TransformHandleSet) -> Self`
+#### `pub fn handles(mut self, set: TransformHandleSet) -> Self` (default: `TransformHandleSet::ALL`)
 
 Which handles the frame offers. Konva's `enabledAnchors`.
 
@@ -931,13 +931,13 @@ for the rule. What is drawn is exactly what will happen.
 
 <a id="transformconfig-keep_ratio"></a>
 
-#### `pub fn keep_ratio(mut self, on: impl Into<Prop<bool>>) -> Self`
+#### `pub fn keep_ratio(mut self, on: impl Into<Prop<bool>>) -> Self` (default: `false`)
 
 Keep the selection's aspect ratio through a resize. Konva's `keepRatio`.
 
 <a id="transformconfig-centered_scaling"></a>
 
-#### `pub fn centered_scaling(mut self, on: impl Into<Prop<bool>>) -> Self`
+#### `pub fn centered_scaling(mut self, on: impl Into<Prop<bool>>) -> Self` (default: `false`)
 
 Scale about the frame's centre rather than the opposite anchor.
 Konva's `centeredScaling`.
@@ -994,7 +994,7 @@ band is the route that always works.
 
 <a id="transformconfig-live_preview"></a>
 
-#### `pub fn live_preview(mut self, mode: LivePreview) -> Self`
+#### `pub fn live_preview(mut self, mode: LivePreview) -> Self` (default: `LivePreview::Live`)
 
 Whether the items follow the gesture or only the frame does.
 

@@ -94,7 +94,7 @@ Fill. Accepts `Color`, a theme role (`SurfaceRole`, etc.), a
 
 <a id="rectwidget-border_sides"></a>
 
-#### `pub fn border_sides(mut self, sides: impl Into<Prop<Option<BorderSides>>>) -> Self`
+#### `pub fn border_sides(mut self, sides: impl Into<Prop<Option<BorderSides>>>) -> Self` (default: `None`)
 
 Per-side border widths (e.g. `BorderSides::bottom` for an
 underline). When set, overrides the uniform stroke; sides are
@@ -102,7 +102,7 @@ drawn as edge fills in `border_color`.
 
 <a id="rectwidget-border_position"></a>
 
-#### `pub fn border_position(mut self, position: BorderPosition) -> Self`
+#### `pub fn border_position(mut self, position: BorderPosition) -> Self` (default: `BorderPosition::Center`)
 
 Where a uniform stroke sits relative to the rect edge
 (inside / center / outside). Ignored when `border_sides` is set.
@@ -116,13 +116,13 @@ or a `Signal<Color>`.
 
 <a id="rectwidget-border_width"></a>
 
-#### `pub fn border_width(mut self, width: impl Into<Prop<f32>>) -> Self`
+#### `pub fn border_width(mut self, width: impl Into<Prop<f32>>) -> Self` (default: `0.0`)
 
 Stroke width, in logical pixels. Accepts a static value or a reactive `Signal<f32>`.
 
 <a id="rectwidget-corner_radius"></a>
 
-#### `pub fn corner_radius(mut self, radius: impl Into<Prop<CornerRadius>>) -> Self`
+#### `pub fn corner_radius(mut self, radius: impl Into<Prop<CornerRadius>>) -> Self` (default: `CornerRadius::ZERO`)
 
 Corner radius for the fill and stroke. Accepts a `CornerRadius` (per-corner
 control) or a reactive `Signal<CornerRadius>`.

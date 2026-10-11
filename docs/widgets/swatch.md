@@ -94,7 +94,7 @@ re-paints the cell whenever the signal changes.
 
 <a id="colorswatch-selected"></a>
 
-#### `pub fn selected(mut self, selected: bool) -> Self`
+#### `pub fn selected(mut self, selected: bool) -> Self` (default: `false`)
 
 Mark the swatch as currently selected, which paints an accent
 border and appends a localized "selected" suffix to the AT name.

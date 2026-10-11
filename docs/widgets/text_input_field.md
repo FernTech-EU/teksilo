@@ -36,6 +36,9 @@
 | `Self` | [`char_filter(f: impl Fn(char) -> bool + 'static)`](#textinputfield-char_filter) |
 | `Self` | [`suffix(text: impl Into<Prop<String>>)`](#textinputfield-suffix) |
 | `Self` | [`text_height(height: f32)`](#textinputfield-text_height) |
+| `Self` | [`text_style(style: impl Into<TextStyleProp>)`](#textinputfield-text_style) |
+| `Self` | [`text_alignment(alignment: HAlignment)`](#textinputfield-text_alignment) |
+| `Self` | [`text_color(color: impl Into<ColorProp>)`](#textinputfield-text_color) |
 | `Self` | [`interaction_signal(signal: Signal<InteractionState>)`](#textinputfield-interaction_signal) |
 | `Self` | [`input_mask(mask: impl AsRef<str>)`](#textinputfield-input_mask) |
 | `Self` | [`mask_placeholder(c: char)`](#textinputfield-mask_placeholder) |
@@ -121,6 +124,14 @@ Features:
   the field's bounds (Qt's `QSpinBox::suffix`). Caret cannot
   enter it; clicks past the text end clamp to the last
   character.
+- Appearance: `text_style` shapes the
+  text in a `TextStyleRole` or a `TextStyle` (size, family, weight) and
+  sizes the field to one line of it;
+  `text_alignment` places a text
+  narrower than the field at its start, centre or end;
+  `text_color` colours the text and the
+  caret, from a colour, a role or a signal. All three are unset by
+  default, and the field then looks as it always has.
 - Right-click context menu (Cut / Copy / Paste / Select All).
 - AccessKit `Role::TextInput` with value, selection, and
   character/word boundary metadata.
@@ -345,6 +356,79 @@ reports `DEFAULT_TEXT_HEIGHT`. A wrapping composite like
 (in `crate::styles::recipe_text_input_style`) minus
 border + padding here so the visuals line up with the
 rest of the form.
+
+Wins over the line height a `text_style` would
+derive: a composite that passes both asked for this height.
+
+<a id="textinputfield-text_style"></a>
+
+#### `pub fn text_style(mut self, style: impl Into<TextStyleProp>) -> Self`
+
+The style the text is shaped in: its size, family and weight.
+
+Accepts a `TextStyleRole`, resolved
+against the theme's typography and re-resolved when the theme changes,
+or a fixed `TextStyle`. The global text scale multiplies the size
+either way, as it does for every text in the tree.
+
+The style also sets the field's height: unless
+`text_height` overrides it, the text area is one
+line of `size × line_height` tall, and the shaped line is centred in it.
+An 11 px style makes a short field, a 20 px one a tall field.
+
+The family resolves through the app's font registry like any other
+text: a family that is not registered falls back to the default face,
+with a warning on the console. The weight is honoured when the family
+has that weight (a variable face covers every weight). The style's
+`letter_spacing` is not applied to the editable text, and its
+`line_height` sizes the field without spacing the glyphs.
+
+Unset, the field shapes in the text engine's default font at its
+default size, exactly as before this setting existed.
+
+<a id="textinputfield-text_alignment"></a>
+
+#### `pub fn text_alignment(mut self, alignment: HAlignment) -> Self`
+
+Where the text sits when it is narrower than the field.
+
+`HAlignment::Leading` puts it at the start of the field — the left
+edge in a left-to-right layout, the right edge in a right-to-left one —
+`HAlignment::Center` in the middle and `HAlignment::Trailing` at
+the end. Text wider than the field scrolls horizontally to follow the
+caret, as an unaligned field does. The caret, a click, the selection,
+the IME candidate window, the touch handles and the character extents a
+screen reader is given all follow the placement.
+
+Unset, the text starts at the left edge whatever the layout direction,
+as it always has.
+
+<a id="textinputfield-text_color"></a>
+
+#### `pub fn text_color(mut self, color: impl Into<ColorProp>) -> Self`
+
+The colour of the text and of the caret.
+
+Accepts a `Color`, a theme role, a
+`Signal<Color>` or a `Signal<TextRole>`, resolved against the theme
+every time the field paints, so a role follows the theme and a signal
+repaints the field when it changes. A disabled field paints the theme's
+disabled text colour whatever is set here, unless the colour is wrapped
+in `ColorProp::undimmed`.
+
+A different colour at rest and while editing is a signal of the
+field's focus, which `handle` exposes before the field
+is built:
+
+```ignore
+let field = TextInputField::new(text);
+let focused = field.handle().focused_signal();
+let field = field.text_color(focused.map(|f| {
+    if *f { TextRole::Primary } else { TextRole::Secondary }
+}));
+```
+
+Unset, the text is the theme's primary text colour.
 
 <a id="textinputfield-interaction_signal"></a>
 

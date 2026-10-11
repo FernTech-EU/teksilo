@@ -210,19 +210,19 @@ state from the widget paint pass.
 
 <a id="sceneitempaintcontext-with_text_scale"></a>
 
-#### `pub fn with_text_scale(mut self, text_scale: f32) -> Self`
+#### `pub fn with_text_scale(mut self, text_scale: f32) -> Self` (default: `1.0`)
 
 Set the global accessibility text-scale factor carried to opted-in items.
 
 <a id="sceneitempaintcontext-with_window_active"></a>
 
-#### `pub fn with_window_active(mut self, window_active: bool) -> Self`
+#### `pub fn with_window_active(mut self, window_active: bool) -> Self` (default: `true`)
 
 Set whether the host window is currently active (focused and unoccluded).
 
 <a id="sceneitempaintcontext-with_enabled"></a>
 
-#### `pub fn with_enabled(mut self, enabled: bool) -> Self`
+#### `pub fn with_enabled(mut self, enabled: bool) -> Self` (default: `true`)
 
 Set the effective enabled state of the item being painted.
 

@@ -104,7 +104,7 @@ Pass a `tr!(...)` to localize it.
 
 <a id="languageswitcher-locales"></a>
 
-#### `pub fn locales(mut self, locales: Vec<LanguageIdentifier>) -> Self`
+#### `pub fn locales(mut self, locales: Vec<LanguageIdentifier>) -> Self` (default: `None`)
 
 Override the locale list instead of auto-discovering it from the
 active `I18nManager`. Useful in previews / tests, or to restrict

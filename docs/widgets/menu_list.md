@@ -23,6 +23,8 @@ MenuList — a themed vertical menu container with keyboard navigation.
 | | **Constructors** |
 | `Self` | [`new()`](#menulist-new) |
 | | **Builder methods** |
+| `Self` | [`inset(inset: f32)`](#menulist-inset) |
+| `Self` | [`surface_style(style: impl PopoverStyle)`](#menulist-surface_style) |
 | `Self` | [`type_ahead_timeout(d: Duration)`](#menulist-type_ahead_timeout) |
 | `Self` | [`attached_side(side: crate::shadow::AttachedSide)`](#menulist-attached_side) |
 | `Self` | [`item(widget: impl Widget + 'static)`](#menulist-item) |
@@ -51,6 +53,12 @@ Items are added with `.item(widget)` (any `impl Widget`, but typically a
 and is skipped by keyboard navigation. For very long lists (recent files,
 etc.) call `.max_visible_items(n)` to cap the panel height and wrap the
 content in a `ScrollArea`.
+
+Two knobs shape the surface. `.inset(dp)` sets the gap between the menu
+surface and its rows (default 4 dp; the `max_visible_items` scroll cap
+follows it). `.surface_style(style)` gives this one list its own
+`PopoverStyle` — frame, fill, shadow — ahead of the theme's popover slot,
+which a `ComboBox` dropdown shares; other lists are unaffected.
 
 **Safe-triangle hover gate.** When the pointer leaves a submenu trigger's
 row with the submenu still up, the trigger arms the safe region (the apex
@@ -127,6 +135,29 @@ pub struct MenuList { /* fields */ }
 Create an empty menu list with no items, no height cap, and the default
 500 ms type-ahead reset window.
 
+<a id="menulist-inset"></a>
+
+#### `pub fn inset(mut self, inset: f32) -> Self`
+
+Set the gap, in dp, between the menu surface and its rows, on every
+side. Defaults to 4 dp. A smaller value lets the rows (and their
+hover / highlight bands) reach nearer the surface's frame, which
+suits a thin or accent-coloured border. Negative values are treated
+as zero. The scroll cap of `max_visible_items`
+follows the same value.
+
+<a id="menulist-surface_style"></a>
+
+#### `pub fn surface_style(mut self, style: impl PopoverStyle) -> Self`
+
+Give this list its own surface: background, border, corner radius
+and shadow come from `style` instead of the theme's popover slot.
+
+Precedence, highest first: this per-list style, the theme's
+`style_slots.popover`, the built-in `RecipePopoverStyle`. Only this
+list is affected; a `ComboBox` dropdown or another menu keeps the
+theme's. The style is asked for `PopoverVariant::Menu`.
+
 <a id="menulist-type_ahead_timeout"></a>
 
 #### `pub fn type_ahead_timeout(mut self, d: Duration) -> Self`
@@ -138,7 +169,7 @@ search.
 
 <a id="menulist-attached_side"></a>
 
-#### `pub fn attached_side(mut self, side: crate::shadow::AttachedSide) -> Self`
+#### `pub fn attached_side(mut self, side: crate::shadow::AttachedSide) -> Self` (default: `None`)
 
 Suppress drop-shadow drawing on the side that visually merges
 with the menu's trigger. See `crate::shadow::AttachedSide`

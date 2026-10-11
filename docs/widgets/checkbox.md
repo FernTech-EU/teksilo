@@ -21,6 +21,10 @@ Checkbox — a two-state or tristate checkbox with an optional label.
 | `Self` | [`labelled_externally()`](#checkbox-labelled_externally) |
 | `Self` | [`label(label: impl Into<LocalizedString>)`](#checkbox-label) |
 | `Self` | [`caption(text: impl Into<LocalizedString>)`](#checkbox-caption) |
+| `Self` | [`label_style(style: impl Into<teksilo_core::color_prop::TextStyleProp>)`](#checkbox-label_style) |
+| `Self` | [`label_color(color: impl Into<teksilo_core::color_prop::ColorProp>)`](#checkbox-label_color) |
+| `Self` | [`caption_style(style: impl Into<teksilo_core::color_prop::TextStyleProp>)`](#checkbox-caption_style) |
+| `Self` | [`caption_color(color: impl Into<teksilo_core::color_prop::ColorProp>)`](#checkbox-caption_color) |
 | `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#checkbox-enabled) |
 | `Self` | [`variant(variant: CheckboxVariant)`](#checkbox-variant) |
 | `Self` | [`style(style: impl teksilo_core::styles::CheckboxStyle)`](#checkbox-style) |
@@ -45,6 +49,14 @@ alongside an optional label and caption. Two modes are supported:
 Chrome (box shape, fill, focus ring) is driven by the active
 `CheckboxStyle`; three visual variants are available via
 `CheckboxVariant`.
+
+#### Label styling
+
+The label is `Body` / `Primary` and the caption `Small` / `Secondary` by
+default. `Checkbox::label_style` / `Checkbox::label_color` and
+`Checkbox::caption_style` / `Checkbox::caption_color` override them.
+A theme role colour still dims when the checkbox is disabled; a literal
+`Color` stays as given.
 
 #### Touch and pen
 
@@ -177,9 +189,41 @@ Secondary explanatory text rendered below the label, left-aligned
 with the label (not the box). Uses the `small` / `text_secondary`
 style. Has no effect unless `label(...)` is also set.
 
+<a id="checkbox-label_style"></a>
+
+#### `pub fn label_style( mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>, ) -> Self`
+
+Override the label's text style (font, size, weight). Accepts a
+`TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default is
+`TextStyleRole::Body`.
+
+<a id="checkbox-label_color"></a>
+
+#### `pub fn label_color(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
+
+Override the label's text color. Accepts `Color`, a theme role, or a
+`Signal` of either. Default is `TextRole::Primary`. A role still dims
+to the disabled color when the checkbox is disabled; a literal `Color`
+stays as given.
+
+<a id="checkbox-caption_style"></a>
+
+#### `pub fn caption_style( mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>, ) -> Self`
+
+Override the caption's text style. Default is `TextStyleRole::Small`.
+
+<a id="checkbox-caption_color"></a>
+
+#### `pub fn caption_color(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
+
+Override the caption's text color. Accepts `Color`, a theme role, or
+a `Signal` of either. Default is `TextRole::Secondary`. A role still
+dims to the disabled color when the checkbox is disabled; a literal
+`Color` stays as given.
+
 <a id="checkbox-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Set the enabled state, statically or reactively. Forwarded to the
 arena via `ctx.enabled_when(self_id, self.enabled.clone())` at

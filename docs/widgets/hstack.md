@@ -20,7 +20,7 @@ HStack — a horizontal layout container that distributes children left-to-right
 | `Self` | [`alignment(alignment: VAlignment)`](#hstack-alignment) |
 | `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#hstack-child) |
 | `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#hstack-children) |
-| `Self` | [`child_opt(widget: Option<impl Widget + 'static>)`](#hstack-child_opt) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#hstack-child_opt) |
 
 ## Detailed description
 
@@ -81,7 +81,7 @@ Create an empty `HStack` with no spacing and `VAlignment::Center`.
 
 <a id="hstack-spacing"></a>
 
-#### `pub fn spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self`
+#### `pub fn spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self` (default: `0.0`)
 
 Set inter-child spacing. Accepts a static `f32` or a reactive
 `Signal<f32>` — use a signal derived from
@@ -89,7 +89,7 @@ Set inter-child spacing. Accepts a static `f32` or a reactive
 
 <a id="hstack-alignment"></a>
 
-#### `pub fn alignment(mut self, alignment: VAlignment) -> Self`
+#### `pub fn alignment(mut self, alignment: VAlignment) -> Self` (default: `VAlignment::Center`)
 
 Set the vertical alignment for children that are shorter than the stack's height.
 
@@ -107,6 +107,6 @@ Add multiple inline children from an iterator.
 
 <a id="hstack-child_opt"></a>
 
-#### `pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(mut self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Conditionally add a child. No-op if None.

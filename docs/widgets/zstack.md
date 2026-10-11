@@ -19,7 +19,7 @@ ZStack — a layout container that layers children on top of each other.
 | `Self` | [`alignment(alignment: Alignment)`](#zstack-alignment) |
 | `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#zstack-child) |
 | `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#zstack-children) |
-| `Self` | [`child_opt(widget: Option<impl Widget + 'static>)`](#zstack-child_opt) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#zstack-child_opt) |
 
 ## Detailed description
 
@@ -38,6 +38,12 @@ compositions where a paint layer and a content layer share the same bounds.
 Children that expand to fill their proposal (e.g. `RectWidget`) fill the
 full ZStack area; children with fixed intrinsic sizes are positioned by
 alignment.
+
+Every layer is offered the stack's full size, so a widget that answers
+`proposal.resolve(0.0, 0.0)` fills the whole stack. Being on top, it takes
+every press over the stack even with no handler, which is correct
+occlusion. An invisible helper layer (a frame-tick driver, say) should be
+`.hit_transparent(true)` or answer `Size::ZERO`.
 
 Propagates shrink weight and minimum size when any child opts in, so
 wrapping a shrinkable single-line label in a `ZStack` stays shrinkable.
@@ -88,7 +94,7 @@ Create an empty `ZStack` with center alignment.
 
 <a id="zstack-alignment"></a>
 
-#### `pub fn alignment(mut self, alignment: Alignment) -> Self`
+#### `pub fn alignment(mut self, alignment: Alignment) -> Self` (default: `Alignment::CENTER`)
 
 Set the alignment applied to every child that does not have a
 per-child override set via `WidgetTree::set_alignment`.
@@ -107,6 +113,6 @@ Add multiple inline children from an iterator.
 
 <a id="zstack-child_opt"></a>
 
-#### `pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(mut self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Conditionally add a child. No-op if None.

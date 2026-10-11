@@ -163,19 +163,19 @@ Leading icon slot (top-left of the tile). Any widget — typically an
 
 <a id="radiotile-icon_boxed"></a>
 
-#### `pub fn icon_boxed(mut self, widget: Box<dyn Widget>) -> Self`
+#### `pub fn icon_boxed(mut self, widget: Box<dyn Widget>) -> Self` (default: `None`)
 
 Leading icon slot, pre-boxed.
 
 <a id="radiotile-title"></a>
 
-#### `pub fn title(mut self, title: impl Into<LocalizedString>) -> Self`
+#### `pub fn title(mut self, title: impl Into<LocalizedString>) -> Self` (default: `None`)
 
 Bold title text (the tile's accessible name).
 
 <a id="radiotile-description"></a>
 
-#### `pub fn description(mut self, text: impl Into<LocalizedString>) -> Self`
+#### `pub fn description(mut self, text: impl Into<LocalizedString>) -> Self` (default: `None`)
 
 Muted, multi-line description (the tile's accessible description).
 Ignored when a `body` is set.
@@ -191,13 +191,13 @@ description, which is folded into the tile's accessible description).
 
 <a id="radiotile-body_boxed"></a>
 
-#### `pub fn body_boxed(mut self, widget: Box<dyn Widget>) -> Self`
+#### `pub fn body_boxed(mut self, widget: Box<dyn Widget>) -> Self` (default: `None`)
 
 Custom body slot, pre-boxed.
 
 <a id="radiotile-trailing"></a>
 
-#### `pub fn trailing(mut self, text: impl Into<LocalizedString>) -> Self`
+#### `pub fn trailing(mut self, text: impl Into<LocalizedString>) -> Self` (default: `None`)
 
 Right-aligned trailing meta text (e.g. "20 chapters", "free-form
 notes"). Tints to the accent color when the tile is selected. Most
@@ -213,7 +213,7 @@ Takes precedence over `trailing`.
 
 <a id="radiotile-compact"></a>
 
-#### `pub fn compact(mut self, compact: bool) -> Self`
+#### `pub fn compact(mut self, compact: bool) -> Self` (default: `false`)
 
 Compact single-line arrangement: `[indicator] [icon] [title] [Spacer]
 [trailing]` with no description row — the vertical settings-list look.
@@ -246,7 +246,7 @@ Override the description text color (default `TextRole::Secondary`).
 
 <a id="radiotile-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Set the enabled state, statically or reactively. A disabled tile
 is skipped by the group's keyboard navigation and cannot be

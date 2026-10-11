@@ -21,7 +21,7 @@ shortest column (Pinterest-style).
 | `Self` | [`item_spacing(spacing: f32)`](#masonrylayout-item_spacing) |
 | `Self` | [`child(widget: impl teksilo_core::IntoTeksiChild)`](#masonrylayout-child) |
 | `Self` | [`children(iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>)`](#masonrylayout-children) |
-| `Self` | [`child_opt(widget: Option<impl Widget + 'static>)`](#masonrylayout-child_opt) |
+| `Self` | [`child_opt(widget: Option<impl teksilo_core::IntoTeksiChild>)`](#masonrylayout-child_opt) |
 
 ## Detailed description
 
@@ -96,13 +96,13 @@ The count is clamped to a minimum of 1.
 
 <a id="masonrylayout-column_spacing"></a>
 
-#### `pub fn column_spacing(mut self, spacing: f32) -> Self`
+#### `pub fn column_spacing(mut self, spacing: f32) -> Self` (default: `0.0`)
 
 Horizontal gap between columns.
 
 <a id="masonrylayout-item_spacing"></a>
 
-#### `pub fn item_spacing(mut self, spacing: f32) -> Self`
+#### `pub fn item_spacing(mut self, spacing: f32) -> Self` (default: `0.0`)
 
 Vertical gap between items within the same column.
 
@@ -120,6 +120,6 @@ Add multiple inline children from an iterator.
 
 <a id="masonrylayout-child_opt"></a>
 
-#### `pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(mut self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Conditionally add a child. No-op if `None`.

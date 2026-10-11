@@ -39,6 +39,9 @@ Virtualized 2D tile grid bound to a `ListModel<T>` / `ListDataSource`.
 | `Self` | [`row_spacing(spacing: f32)`](#gridview-row_spacing) |
 | `Self` | [`spacing(spacing: f32)`](#gridview-spacing) |
 | `Self` | [`content_inset(inset: EdgeInsets)`](#gridview-content_inset) |
+| `Self` | [`min_columns(count: usize)`](#gridview-min_columns) |
+| `Self` | [`max_columns(count: usize)`](#gridview-max_columns) |
+| `Self` | [`column_alignment(alignment: HAlignment)`](#gridview-column_alignment) |
 | `Self` | [`selection(sel: SelectionModel)`](#gridview-selection) |
 | `Self` | [`on_selection_changed(f: impl Fn(&BTreeSet<usize>) + 'static)`](#gridview-on_selection_changed) |
 | `Self` | [`marquee_selection(enabled: bool)`](#gridview-marquee_selection) |
@@ -115,6 +118,27 @@ GridView::new(model, |tc| {
 .sizing(GridSizing::Adaptive { min_width: 120.0, max_width: None, height: 140.0 })
 .spacing(8.0)
 .selection(selection_model)
+```
+
+#### Column bounds and alignment
+
+`GridView::min_columns` and `GridView::max_columns` bound the column
+count that `GridSizing::Fixed` and `GridSizing::Adaptive` derive from the
+width (`GridSizing::FixedColumnCount` ignores both). A floor the width
+cannot afford **narrows** the tiles to share it, never overflowing
+horizontally; the tile height stays the sizing's. `GridView::column_alignment`
+places a block of columns narrower than the content at the leading edge (the
+default), the centre or the trailing edge, swapping sides in a right-to-left
+layout. Section headers and the detail band keep spanning the content width;
+tiles, the rubber band, the insertion bar and the focus ring follow the
+offset. An album grid of fixed 182 dp cards, two to ten columns, centred:
+
+```ignore
+GridView::new(albums, |tc| album_card(tc))
+    .sizing(GridSizing::Fixed { width: 182.0, height: 230.0 })
+    .min_columns(2)
+    .max_columns(10)
+    .column_alignment(HAlignment::Center)
 ```
 
 #### Selection by position or by key
@@ -367,6 +391,50 @@ Set both column and row spacing.
 
 Inset from the scroll-content edge to the tiles.
 
+<a id="gridview-min_columns"></a>
+
+#### `pub fn min_columns(mut self, count: usize) -> Self`
+
+Never fewer than `count` columns (at least 1).
+
+Bounds the count a `GridSizing::Fixed` or `GridSizing::Adaptive`
+derives from the width; ignored by `GridSizing::FixedColumnCount`,
+whose count is already the answer. When the width cannot afford
+`count` columns of the sizing's width, the tiles **narrow** to share
+the width — the grid never overflows horizontally. The tile height is
+kept as the sizing gives it (a card gets narrower, not shorter), so a
+tile that must hold its aspect ratio sizes its own content from the
+width it is handed. If `min_columns` exceeds
+`max_columns`, the maximum wins.
+
+<a id="gridview-max_columns"></a>
+
+#### `pub fn max_columns(mut self, count: usize) -> Self`
+
+Never more than `count` columns (at least 1), however wide the viewport.
+
+Bounds the count a `GridSizing::Fixed` or `GridSizing::Adaptive`
+derives from the width; ignored by `GridSizing::FixedColumnCount`.
+Under `Fixed` the tiles keep their width and the leftover is placed by
+`column_alignment`; under `Adaptive` they
+stretch to share the width of the capped count, up to `max_width`.
+
+<a id="gridview-column_alignment"></a>
+
+#### `pub fn column_alignment(mut self, alignment: HAlignment) -> Self`
+
+Where the block of columns sits in the viewport when it is narrower
+than the content: `HAlignment::Leading` (the default, the tiles
+against the leading inset, leftover trailing), `Center` or
+`Trailing`. Leading and trailing swap in a right-to-left layout. Only
+the columns move: a section header and a `detail_row`
+band span the content width. The order of the columns within the
+block is the same in both directions.
+
+Only a layout that leaves width over has anything to place: a
+`GridSizing::Fixed` grid, an `Adaptive` one with `max_width`, or any
+grid capped by `max_columns`.
+
 <a id="gridview-selection"></a>
 
 #### `pub fn selection(mut self, sel: SelectionModel) -> Self`
@@ -383,6 +451,11 @@ through a sort or a filter, build the grid with
 Called whenever the selection set changes — including programmatic
 changes — with the new set of selected indices. For a keyed selection
 these are the positions its keys have at that moment.
+
+Because it also fires for programmatic changes, it carries no input
+modifiers and no `EventContext`;
+for the modifiers held at the moment of input, use
+`on_tile_activate`, which receives one.
 
 <a id="gridview-marquee_selection"></a>
 

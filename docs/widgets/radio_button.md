@@ -19,6 +19,10 @@ RadioButton — mutually exclusive selection control.
 | `Self` | [`on_change(f: impl Fn(usize, &mut EventContext) + 'static)`](#radiobutton-on_change) |
 | `Self` | [`label(label: impl Into<LocalizedString>)`](#radiobutton-label) |
 | `Self` | [`caption(text: impl Into<LocalizedString>)`](#radiobutton-caption) |
+| `Self` | [`label_style(style: impl Into<teksilo_core::color_prop::TextStyleProp>)`](#radiobutton-label_style) |
+| `Self` | [`label_color(color: impl Into<teksilo_core::color_prop::ColorProp>)`](#radiobutton-label_color) |
+| `Self` | [`caption_style(style: impl Into<teksilo_core::color_prop::TextStyleProp>)`](#radiobutton-caption_style) |
+| `Self` | [`caption_color(color: impl Into<teksilo_core::color_prop::ColorProp>)`](#radiobutton-caption_color) |
 | `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#radiobutton-enabled) |
 | `Self` | [`variant(variant: RadioVariant)`](#radiobutton-variant) |
 | `Self` | [`style(style: impl teksilo_core::styles::RadioStyle)`](#radiobutton-style) |
@@ -35,6 +39,14 @@ observes the same signal. The widget is non-generic: values are `usize`
 indices into the caller's choice list. Wrap related buttons in a
 `RadioGroup` to provide the AT "2 of 3"
 positional announcement required by ARIA.
+
+#### Label styling
+
+The label is `Body` / `Primary` and the caption `Small` / `Secondary` by
+default. `RadioButton::label_style` / `RadioButton::label_color` and
+`RadioButton::caption_style` / `RadioButton::caption_color` override
+them. A theme role colour still dims when the button is disabled; a literal
+`Color` stays as given.
 
 #### Touch and pen
 
@@ -94,9 +106,6 @@ pub struct RadioButton { /* fields */ }
 
 Run `f` when the **user** selects this button and it was not already
 selected, with this button's value and an `EventContext`, so it can do
-Create a radio button with the given `value` and shared selection signal.
-Run `f` when the **user** selects this button and it was not already
-selected, with this button's value and an `EventContext`, so it can do
 what a bare `Signal` write cannot (`ctx.send_intent(...)`,
 `ctx.set_locale(...)`, opening a window). Fires for the pointer, for
 `Space`, and for an assistive-technology `Click`.
@@ -109,6 +118,8 @@ carry. Observe the signal for those.
 <a id="radiobutton-new"></a>
 
 #### `pub fn new(value: usize, selected: Signal<usize>) -> Self`
+
+Create a radio button with the given `value` and shared selection signal.
 
 <a id="radiobutton-label"></a>
 
@@ -124,9 +135,41 @@ Secondary explanatory text rendered below the label, left-aligned
 with the label (not the radio circle). Uses the `small` /
 `text_secondary` style. Has no effect unless `label(...)` is also set.
 
+<a id="radiobutton-label_style"></a>
+
+#### `pub fn label_style( mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>, ) -> Self`
+
+Override the label's text style (font, size, weight). Accepts a
+`TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default is
+`TextStyleRole::Body`.
+
+<a id="radiobutton-label_color"></a>
+
+#### `pub fn label_color(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
+
+Override the label's text color. Accepts `Color`, a theme role, or a
+`Signal` of either. Default is `TextRole::Primary`. A role still dims
+to the disabled color when the radio button is disabled; a literal `Color`
+stays as given.
+
+<a id="radiobutton-caption_style"></a>
+
+#### `pub fn caption_style( mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>, ) -> Self`
+
+Override the caption's text style. Default is `TextStyleRole::Small`.
+
+<a id="radiobutton-caption_color"></a>
+
+#### `pub fn caption_color(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
+
+Override the caption's text color. Accepts `Color`, a theme role, or
+a `Signal` of either. Default is `TextRole::Secondary`. A role still
+dims to the disabled color when the radio button is disabled; a literal
+`Color` stays as given.
+
 <a id="radiobutton-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Set the enabled state, statically or reactively. Forwarded to
 the arena via `ctx.enabled_when(self_id, self.enabled.clone())`

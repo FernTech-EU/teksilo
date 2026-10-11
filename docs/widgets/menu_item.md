@@ -242,16 +242,11 @@ the chord renders first and the hint follows it.
 
 Bind the trailing shortcut label to a registered
 `Shortcut` by its stable id.
-Bind the trailing shortcut label to a registered
-`Shortcut` by its stable id.
 The effective primary keystroke is bound *reactively*, via a
 per-id signal, so a rebind performed through
 `ShortcutRegistry`
 refreshes the chord in place — the item itself is never rebuilt
 for shortcut changes.
-
-A manual `shortcut_label` takes
-precedence when both are set.
 
 A manual `shortcut_label` takes
 precedence when both are set.

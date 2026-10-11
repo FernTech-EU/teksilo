@@ -259,7 +259,7 @@ tab and the framework activates it.
 
 <a id="tabwidget-enabled"></a>
 
-#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
 Enable or disable the whole widget. A disabled `TabWidget` greys out
 and stops accepting focus / selection / keyboard input
@@ -424,7 +424,7 @@ mismatch, so `Any` never leaks into app code.
 
 <a id="tabwidget-dynamic_model"></a>
 
-#### `pub fn dynamic_model(mut self, model: ListModel<TabHandle>) -> Self`
+#### `pub fn dynamic_model(mut self, model: ListModel<TabHandle>) -> Self` (default: `None`)
 
 Connect the dynamic-tab data source. Mutations rebuild the
 dynamic-tab subtree; static tabs are unaffected.
@@ -472,21 +472,21 @@ transparent. To tint the bar's backdrop instead, use
 
 <a id="tabwidget-selected_tab_background"></a>
 
-#### `pub fn selected_tab_background( mut self, color: impl Into<teksilo_core::color_prop::ColorProp>, ) -> Self`
+#### `pub fn selected_tab_background( mut self, color: impl Into<teksilo_core::color_prop::ColorProp>, ) -> Self` (default: `None`)
 
 Background for the **selected** tab. Falls back to
 `tab_background`, then transparent.
 
 <a id="tabwidget-hover_tab_background"></a>
 
-#### `pub fn hover_tab_background( mut self, color: impl Into<teksilo_core::color_prop::ColorProp>, ) -> Self`
+#### `pub fn hover_tab_background( mut self, color: impl Into<teksilo_core::color_prop::ColorProp>, ) -> Self` (default: `None`)
 
 Background for the **hovered** (non-selected) tab. Falls back to
 `tab_background`, then transparent.
 
 <a id="tabwidget-idle_tab_background"></a>
 
-#### `pub fn idle_tab_background( mut self, color: impl Into<teksilo_core::color_prop::ColorProp>, ) -> Self`
+#### `pub fn idle_tab_background( mut self, color: impl Into<teksilo_core::color_prop::ColorProp>, ) -> Self` (default: `None`)
 
 Background for **idle** tabs (not selected, not hovered). Falls back
 to `tab_background`, then transparent.
@@ -1131,7 +1131,7 @@ decline (falling through to an ancestor). Cloned per header build.
 
 <a id="tabinfo-title"></a>
 
-#### `pub fn title(mut self, t: impl Into<LocalizedString>) -> Self`
+#### `pub fn title(mut self, t: impl Into<LocalizedString>) -> Self` (default: `None`)
 
 Set the tab's title. Accepts `tr!(...)`, a literal string,
 or any value implementing `Into<LocalizedString>`.

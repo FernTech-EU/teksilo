@@ -146,7 +146,7 @@ proposal, useful inside non-stack containers). Default: `1.0`.
 
 <a id="expand-align_child"></a>
 
-#### `pub fn align_child(mut self, alignment: Alignment) -> Self`
+#### `pub fn align_child(mut self, alignment: Alignment) -> Self` (default: `None`)
 
 Opt out of stretching the child. The child is laid out at its
 natural size and positioned within the Expand's bounds according

@@ -119,7 +119,7 @@ override with `.from(...)`.
 
 <a id="slide-from"></a>
 
-#### `pub fn from(mut self, edge: SlideEdge) -> Self`
+#### `pub fn from(mut self, edge: SlideEdge) -> Self` (default: `SlideEdge::Bottom`)
 
 Edge the child slides in from (and out to).
 

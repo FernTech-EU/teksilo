@@ -151,7 +151,7 @@ pub struct ChartDatum<T> { /* fields */ }
 
 <a id="chartdatum-with_color"></a>
 
-#### `pub fn with_color(mut self, color: impl Into<ColorProp>) -> Self`
+#### `pub fn with_color(mut self, color: impl Into<ColorProp>) -> Self` (default: `None`)
 
 Override this point's color (a bar's fill). Ignored by line/pie charts,
 which color by series.
@@ -189,18 +189,18 @@ pub struct ChartSeries<T> { /* fields */ }
 
 <a id="chartseries-color"></a>
 
-#### `pub fn color(mut self, color: impl Into<ColorProp>) -> Self`
+#### `pub fn color(mut self, color: impl Into<ColorProp>) -> Self` (default: `None`)
 
 <a id="chartseries-pattern"></a>
 
-#### `pub fn pattern(mut self, pattern: SeriesPattern) -> Self`
+#### `pub fn pattern(mut self, pattern: SeriesPattern) -> Self` (default: `None`)
 
 Pin this series' non-colour channel instead of taking the one its
 position implies. See `SeriesPattern`.
 
 <a id="chartseries-visibility"></a>
 
-#### `pub fn visibility(mut self, visible: bool) -> Self`
+#### `pub fn visibility(mut self, visible: bool) -> Self` (default: `true`)
 
 <a id="chartseries-push"></a>
 
@@ -208,7 +208,7 @@ position implies. See `SeriesPattern`.
 
 <a id="chartseries-data"></a>
 
-#### `pub fn data(mut self, points: Vec<ChartDatum<T>>) -> Self`
+#### `pub fn data(mut self, points: Vec<ChartDatum<T>>) -> Self` (default: `Vec::new()`)
 
 <a id="seriesview"></a>
 
