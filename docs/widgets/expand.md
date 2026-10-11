@@ -67,6 +67,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Expand`
 
+**Import:** `use teksilo::widgets::Expand;`
+
 Layout modifier that claims space along one or both axes from its parent
 and stretches its child to fill it.
 

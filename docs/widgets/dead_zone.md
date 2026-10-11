@@ -37,6 +37,8 @@ pointer-kind-specific.
 
 ## `pub struct DeadZone`
 
+**Import:** `use teksilo::widgets::DeadZone;`
+
 A layout-transparent wrapper whose subtree is a **gesture dead zone**: a
 pointer press inside it never arms a drag/swipe recognizer on any ancestor.
 

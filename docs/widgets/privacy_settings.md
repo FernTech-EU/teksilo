@@ -80,6 +80,8 @@ let panel = PrivacySettings::new()
 
 ## `pub struct PrivacySettings`
 
+**Import:** `use teksilo::widgets::PrivacySettings;` — needs teksilo's `telemetry` feature.
+
 Settings widget for telemetry consent. Construct with
 `PrivacySettings::new` and embed in any container.
 

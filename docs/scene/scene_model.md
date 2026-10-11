@@ -254,6 +254,8 @@ delegate's *handlers* may mutate later).
 
 ## `pub struct SceneModel`
 
+**Import:** `use teksilo_scene::SceneModel;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 A shared, cloneable handle to a `Scene`.
 
 ```rust
@@ -1540,6 +1542,8 @@ A node's declared rotor / quick-nav categories.
 
 ## `pub struct WeakSceneModel`
 
+**Import:** `use teksilo_scene::WeakSceneModel;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 A non-owning handle to a `Scene` — `SceneModel` without the ownership.
 
 Produced by `SceneModel::downgrade` and turned back into a `SceneModel`,
@@ -1579,6 +1583,8 @@ Whether the scene is still alive, without building a handle.
 
 ## `pub struct SceneWriteGuard`
 
+**Import:** `use teksilo_scene::SceneWriteGuard;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Write guard over a `SceneModel`'s `Scene`: `Deref`/`DerefMut` to the
 scene, with the deferred-notification contract of a `SceneModel` mutator.
 
@@ -1614,6 +1620,8 @@ pub struct SceneWriteGuard<'a> { /* fields */ }
 <a id="scenetransaction"></a>
 
 ## `pub struct SceneTransaction`
+
+**Import:** `use teksilo_scene::SceneTransaction;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 ```rust
 pub struct SceneTransaction<'a> { /* fields */ }

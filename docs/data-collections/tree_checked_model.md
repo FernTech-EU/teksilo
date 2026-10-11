@@ -100,6 +100,8 @@ and clear the relevant entries. Tracked as out-of-scope for V1.
 
 ## `pub enum AggregateMode`
 
+**Import:** `use teksilo::data::AggregateMode;`
+
 How a parent's `CheckState` relates to its descendants.
 
 ```rust
@@ -114,6 +116,8 @@ pub enum AggregateMode { /* variants */ }
 <a id="treecheckedmodel"></a>
 
 ## `pub struct TreeCheckedModel`
+
+**Import:** `use teksilo::data::TreeCheckedModel;`
 
 Per-node checkbox state for a `TreeModel<T>`, with optional
 descendant→ancestor tristate aggregation.

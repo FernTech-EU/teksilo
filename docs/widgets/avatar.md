@@ -110,6 +110,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Avatar`
 
+**Import:** `use teksilo::widgets::Avatar;`
+
 Circular (or rounded-square / square) user-identity widget showing
 either a photo or hash-tinted initials, with an optional presence dot.
 

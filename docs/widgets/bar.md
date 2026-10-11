@@ -119,6 +119,8 @@ let _bar = TabBar::horizontal(model, delegate, selected, |_i, t| t.id)
 
 ## `pub const DEFAULT_MIN_TAB_WIDTH`
 
+**Import:** `use teksilo::widgets::tab_widget::DEFAULT_MIN_TAB_WIDTH;`
+
 Default min width for an unpinned tab.
 
 ```rust
@@ -128,6 +130,8 @@ pub const DEFAULT_MIN_TAB_WIDTH: f32 = 96.0;
 <a id="default_min_tab_width-2"></a>
 
 ## `pub fn default_min_tab_width(...)`
+
+**Import:** none — `default_min_tab_width` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 `DEFAULT_MIN_TAB_WIDTH` raised to the density's `target_size`
 (24 / 32 / 44 dp). The identity at Compact.
@@ -140,6 +144,8 @@ pub fn default_min_tab_width(tokens: &InputTokens) -> f32;
 
 ## `pub const DEFAULT_MAX_TAB_WIDTH`
 
+**Import:** `use teksilo::widgets::tab_widget::DEFAULT_MAX_TAB_WIDTH;`
+
 Default max width for an unpinned tab.
 
 ```rust
@@ -149,6 +155,8 @@ pub const DEFAULT_MAX_TAB_WIDTH: f32 = 240.0;
 <a id="default_tab_spacing"></a>
 
 ## `pub const DEFAULT_TAB_SPACING`
+
+**Import:** `use teksilo::widgets::tab_widget::DEFAULT_TAB_SPACING;`
 
 Default spacing between tab headers in the row. `0.0` so tabs sit
 flush against each other (Firefox / Chrome convention) — adjacent
@@ -163,6 +171,8 @@ pub const DEFAULT_TAB_SPACING: f32 = 0.0;
 
 ## `pub fn default_tab_spacing(...)`
 
+**Import:** none — `default_tab_spacing` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 `DEFAULT_TAB_SPACING` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
 
@@ -173,6 +183,8 @@ pub fn default_tab_spacing(tokens: &InputTokens) -> f32;
 <a id="default_bar_slot_spacing"></a>
 
 ## `pub const DEFAULT_BAR_SLOT_SPACING`
+
+**Import:** `use teksilo::widgets::tab_widget::DEFAULT_BAR_SLOT_SPACING;`
 
 Default spacing between the bar's leading slot, scroll area, and
 trailing slot.
@@ -185,6 +197,8 @@ pub const DEFAULT_BAR_SLOT_SPACING: f32 = 8.0;
 
 ## `pub fn default_bar_slot_spacing(...)`
 
+**Import:** none — `default_bar_slot_spacing` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 `DEFAULT_BAR_SLOT_SPACING` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
 
@@ -196,6 +210,8 @@ pub fn default_bar_slot_spacing(tokens: &InputTokens) -> f32;
 
 ## `pub const DEFAULT_PINNED_TAB_WIDTH`
 
+**Import:** `use teksilo::widgets::tab_widget::DEFAULT_PINNED_TAB_WIDTH;`
+
 Default width (in dp) of a pinned tab — icon-only squares.
 
 ```rust
@@ -205,6 +221,8 @@ pub const DEFAULT_PINNED_TAB_WIDTH: f32 = 32.0;
 <a id="default_pinned_tab_width-2"></a>
 
 ## `pub fn default_pinned_tab_width(...)`
+
+**Import:** none — `default_pinned_tab_width` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 `DEFAULT_PINNED_TAB_WIDTH` raised to the density's `target_size`
 (24 / 32 / 44 dp). The identity at Compact.
@@ -216,6 +234,8 @@ pub fn default_pinned_tab_width(tokens: &InputTokens) -> f32;
 <a id="tabbardragdata"></a>
 
 ## `pub struct TabBarDragData`
+
+**Import:** `use teksilo::widgets::tab_widget::TabBarDragData;`
 
 Drag payload published by a tab header when the user starts
 dragging it.
@@ -250,6 +270,8 @@ pub struct TabBarDragData<T: 'static> { /* fields */ }
 <a id="tabbar"></a>
 
 ## `pub struct TabBar`
+
+**Import:** `use teksilo::widgets::TabBar;`
 
 A reactive header strip that pulls its tab list from a data source
 and writes the active tab into a shared `Signal<Option<TabId>>`.

@@ -115,6 +115,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum TimeFormat`
 
+**Import:** `use teksilo::widgets::TimeFormat;`
+
 12h vs 24h time formatting.
 
 Used with `TimeEdit::format` to lock the clock style independently of the locale default.
@@ -132,6 +134,8 @@ pub enum TimeFormat { /* variants */ }
 
 ## `pub enum SecondsMode`
 
+**Import:** `use teksilo::widgets::SecondsMode;`
+
 Whether the seconds segment is shown in `TimeEdit`.
 
 ```rust
@@ -146,6 +150,8 @@ pub enum SecondsMode { /* variants */ }
 <a id="timeedit"></a>
 
 ## `pub struct TimeEdit`
+
+**Import:** `use teksilo::widgets::TimeEdit;`
 
 Single-line editable time-of-day field.
 

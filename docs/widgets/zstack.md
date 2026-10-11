@@ -68,6 +68,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct ZStack`
 
+**Import:** `use teksilo::widgets::ZStack;`
+
 A layout container that stacks children on top of each other.
 Size = max of children sizes. Children are positioned according to
 the container's `Alignment` (default: center), with per-child overrides.

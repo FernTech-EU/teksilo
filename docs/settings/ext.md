@@ -54,6 +54,8 @@ window manager. No widget-side wiring needed.
 
 ## `pub trait SettingsExt`
 
+**Import:** `use teksilo::prelude::SettingsExt;` — in `teksilo::prelude::*`.
+
 Convenience accessors for settings services attached to the app's
 `app_state` registry.
 

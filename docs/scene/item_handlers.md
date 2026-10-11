@@ -68,6 +68,8 @@ scene.handlers_mut(id).unwrap()
 
 ## `pub struct SceneTapEvent`
 
+**Import:** `use teksilo_scene::SceneTapEvent;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Click-style gesture envelope for scene items. Mirrors the
 widget-tier `teksilo_core::gesture::TapEvent` but with the
 position in **scene** coordinates instead of widget-local. Used
@@ -100,6 +102,8 @@ these from the live pointer event in `SceneView`.
 
 ## `pub enum DragMode`
 
+**Import:** `use teksilo_scene::DragMode;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 What a `SceneView`'s on-canvas pointer drag
 does in empty space.
 
@@ -126,6 +130,8 @@ pub enum DragMode { /* variants */ }
 <a id="sceneitemhandlerset"></a>
 
 ## `pub struct SceneItemHandlerSet`
+
+**Import:** `use teksilo_scene::SceneItemHandlerSet;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Per-item event closures + cursor + tooltip + drop acceptance.
 

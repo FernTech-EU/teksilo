@@ -167,6 +167,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct IconButton`
 
+**Import:** `use teksilo::widgets::IconButton;`
+
 A square, icon-only, flat-surface button. See module docs for
 embedded vs stand-alone modes, the five sizes, and the two bistate
 toggle modes.
@@ -504,6 +506,8 @@ it to decide whether to mask or show the text.
 <a id="builtinicons"></a>
 
 ## `pub struct BuiltInIcons`
+
+**Import:** `use teksilo::widgets::BuiltInIcons;`
 
 Icon factory set for predefined built-in buttons.
 

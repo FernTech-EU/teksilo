@@ -61,6 +61,8 @@ in the scene with `Scene::add_item(item, local_pos)`.
 
 ## `pub enum AccessSubtreeMode`
 
+**Import:** `use teksilo_scene::AccessSubtreeMode;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 How the AT walker treats descendants of an item.
 
 Mirrors the widget-tier `AccessSubtreeMode`: `Inherit` is the
@@ -83,6 +85,8 @@ pub enum AccessSubtreeMode { /* variants */ }
 
 ## `pub struct ItemA11yOverrides`
 
+**Import:** none — `ItemA11yOverrides` is public in a private module of `teksilo-scene` and nothing re-exports it.
+
 Builder-level accessibility overrides shared by every built-in
 `SceneItem`. Mirrors the widget-level `.access_*` chain — names
 match so muscle memory carries over.
@@ -103,6 +107,8 @@ Read access for the AT walker.
 
 ## `pub fn access_label(...)`
 
+**Import:** none — `access_label` is public in a private module of `teksilo-scene` and nothing re-exports it.
+
 Override the AT name announced for this item. Accepts
 anything convertible into `LocalizedString` — most
 commonly `tr!(...)` for translated labels, or any plain
@@ -116,6 +122,8 @@ pub fn access_label(mut self, label: impl Into<LocalizedString>) -> Self;
 
 ## `pub fn access_description(...)`
 
+**Import:** none — `access_description` is public in a private module of `teksilo-scene` and nothing re-exports it.
+
 Long-form context appended to the item's announcement.
 
 ```rust
@@ -125,6 +133,8 @@ pub fn access_description(mut self, description: impl Into<LocalizedString>) -> 
 <a id="access_role"></a>
 
 ## `pub fn access_role(...)`
+
+**Import:** none — `access_role` is public in a private module of `teksilo-scene` and nothing re-exports it.
 
 Override the AccessKit role for this item.
 
@@ -136,6 +146,8 @@ pub fn access_role(mut self, role: accesskit::Role) -> Self;
 
 ## `pub fn access_hidden(...)`
 
+**Import:** none — `access_hidden` is public in a private module of `teksilo-scene` and nothing re-exports it.
+
 Hide this item from the AT tree.
 
 ```rust
@@ -145,6 +157,8 @@ pub fn access_hidden(mut self, hidden: bool) -> Self;
 <a id="access_subtree"></a>
 
 ## `pub fn access_subtree(...)`
+
+**Import:** none — `access_subtree` is public in a private module of `teksilo-scene` and nothing re-exports it.
 
 Set the AT subtree mode. `Merge` collapses descendants
 into this item's AT node; `Exclude` prunes them; the
@@ -158,6 +172,8 @@ pub fn access_subtree(mut self, mode: $crate::items::AccessSubtreeMode) -> Self;
 
 ## `pub fn access_merge_subtree(...)`
 
+**Import:** none — `access_merge_subtree` is public in a private module of `teksilo-scene` and nothing re-exports it.
+
 Convenience: collapse all descendants into this item's
 AT node so the subtree reads as one element.
 
@@ -169,6 +185,8 @@ pub fn access_merge_subtree(mut self) -> Self;
 
 ## `pub fn access_exclude_subtree(...)`
 
+**Import:** none — `access_exclude_subtree` is public in a private module of `teksilo-scene` and nothing re-exports it.
+
 Convenience: prune all descendants from the AT tree.
 
 ```rust
@@ -178,6 +196,8 @@ pub fn access_exclude_subtree(mut self) -> Self;
 <a id="access_value"></a>
 
 ## `pub fn access_value(...)`
+
+**Import:** none — `access_value` is public in a private module of `teksilo-scene` and nothing re-exports it.
 
 Announce a string value for this item (e.g. a formatted data
 reading like `"42 %"`). Mirrors the widget-tier `.access_value`.
@@ -189,6 +209,8 @@ pub fn access_value(mut self, value: impl Into<LocalizedString>) -> Self;
 <a id="access_numeric_value"></a>
 
 ## `pub fn access_numeric_value(...)`
+
+**Import:** none — `access_numeric_value` is public in a private module of `teksilo-scene` and nothing re-exports it.
 
 Announce a numeric value for this item, for slider/gauge-like data
 marks whose magnitude assistive tech should describe. Pair with
@@ -204,6 +226,8 @@ pub fn access_numeric_value(mut self, value: f64) -> Self;
 
 ## `pub fn access_numeric_range(...)`
 
+**Import:** none — `access_numeric_range` is public in a private module of `teksilo-scene` and nothing re-exports it.
+
 Announce the numeric min/max bounds for this item.
 
 ```rust
@@ -213,6 +237,8 @@ pub fn access_numeric_range(mut self, min: f64, max: f64) -> Self;
 <a id="access_numeric_step"></a>
 
 ## `pub fn access_numeric_step(...)`
+
+**Import:** none — `access_numeric_step` is public in a private module of `teksilo-scene` and nothing re-exports it.
 
 Announce the numeric step (per-arrow increment) for this item.
 

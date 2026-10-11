@@ -63,6 +63,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct AspectRatio`
 
+**Import:** `use teksilo::widgets::AspectRatio;`
+
 A single-child wrapper that maintains a fixed width/height ratio.
 
 ```rust

@@ -107,6 +107,8 @@ if let Some(saved) = svc.state_for("main") {
 
 ## `pub struct PerWindowState`
 
+**Import:** `use teksilo::prelude::PerWindowState;` — in `teksilo::prelude::*`.
+
 Persisted geometry for one labeled window.
 
 `placement` captures the full `WindowPlacement` enum (Floating /
@@ -162,6 +164,8 @@ connected.
 <a id="windowstateservice"></a>
 
 ## `pub struct WindowStateService`
+
+**Import:** `use teksilo::prelude::WindowStateService;` — in `teksilo::prelude::*`.
 
 Persistent, in-memory-backed store for per-window geometry.
 

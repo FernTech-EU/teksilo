@@ -109,6 +109,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct LogView`
 
+**Import:** `use teksilo::widgets::LogView;`
+
 A read-only, append-only, tail-following log / console view.
 
 Construct with `LogView::new`, feed it with a `LogViewHandle` from
@@ -254,6 +256,8 @@ A cloneable handle to append to the view and drive it from anywhere.
 <a id="logviewhandle"></a>
 
 ## `pub struct LogViewHandle`
+
+**Import:** `use teksilo::widgets::LogViewHandle;`
 
 A cloneable handle to append to a `LogView` and drive it.
 

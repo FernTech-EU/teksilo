@@ -78,6 +78,8 @@ Honours `prefers-reduced-motion`: snaps progress to its end value
 
 ## `pub enum ScaleOrigin`
 
+**Import:** `use teksilo::widgets::ScaleOrigin;`
+
 Pivot point for the scale matrix, expressed relative to the
 wrapper's slot rectangle.
 
@@ -96,6 +98,8 @@ pub enum ScaleOrigin { /* variants */ }
 <a id="scale"></a>
 
 ## `pub struct Scale`
+
+**Import:** `use teksilo::widgets::Scale;`
 
 Wraps a child widget and animates a uniform 2D visual scale on its
 subtree when an external `Prop<bool>` toggles between visible and hidden.

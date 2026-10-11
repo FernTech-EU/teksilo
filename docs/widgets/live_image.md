@@ -144,6 +144,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum LiveImageSizing`
 
+**Import:** `use teksilo::widgets::LiveImageSizing;`
+
 How a `LiveImage` sizes its box. `LiveImage::width`,
 `LiveImage::height` and `LiveImage::size` pin it and win over the
 mode.
@@ -161,6 +163,8 @@ pub enum LiveImageSizing { /* variants */ }
 <a id="liveimage"></a>
 
 ## `pub struct LiveImage`
+
+**Import:** `use teksilo::widgets::LiveImage;`
 
 Shows a `LiveImageSource`. See the `module documentation`.
 
@@ -341,6 +345,8 @@ widget.
 <a id="liveimagehandle"></a>
 
 ## `pub struct LiveImageHandle`
+
+**Import:** `use teksilo::widgets::LiveImageHandle;`
 
 A handle to a `LiveImage`, for the UI thread: the size and status of
 what it shows, where it shows it, and the mapping between its points and

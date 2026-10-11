@@ -56,6 +56,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Banner`
 
+**Import:** `use teksilo::widgets::Banner;`
+
 A persistent inline status strip.
 
 ```rust

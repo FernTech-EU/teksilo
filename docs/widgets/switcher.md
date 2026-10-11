@@ -59,6 +59,8 @@ let _w = Switcher::new(page.clone())
 
 ## `pub struct Switcher`
 
+**Import:** `use teksilo::widgets::Switcher;`
+
 A container that shows exactly one child at a time, driven by a
 `Signal<usize>` index.
 

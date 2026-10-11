@@ -122,6 +122,8 @@ of its slot, so a panicking sink does not vanish.
 
 ## `pub struct TxnId`
 
+**Import:** `use teksilo_scene::TxnId;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Process-unique id for one transaction.
 
 Rides on every `SceneChange` emitted inside it, so a consumer watching the
@@ -155,6 +157,8 @@ scene actually opened.
 
 ## `pub enum ChangeSource`
 
+**Import:** `use teksilo_scene::ChangeSource;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 *Whose* change this is.
 
 Ambient on the open transaction rather than a parameter on every mutator:
@@ -184,6 +188,8 @@ pub enum ChangeSource { /* variants */ }
 
 ## `pub enum HistoryMode`
 
+**Import:** `use teksilo_scene::HistoryMode;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 What a history *above* the scene should do with this transaction.
 
 Three-valued, matching what the editors that have solved this converged on
@@ -208,6 +214,8 @@ pub enum HistoryMode { /* variants */ }
 
 ## `pub enum TxnOutcome`
 
+**Import:** `use teksilo_scene::TxnOutcome;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 How a transaction finished.
 
 `#[non_exhaustive]`: this crate has out-of-tree consumers.
@@ -224,6 +232,8 @@ pub enum TxnOutcome { /* variants */ }
 <a id="scenechange"></a>
 
 ## `pub struct SceneChange`
+
+**Import:** `use teksilo_scene::SceneChange;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 One `ItemChange` plus the context the notification channel needs in order
 to be usable as a change feed rather than just a repaint trigger.
@@ -257,6 +267,8 @@ The item this change is about.
 
 ## `pub enum Salvage`
 
+**Import:** `use teksilo_scene::Salvage;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 The ownership an `ItemChange` cannot carry, attached to the removal that
 produced it.
 
@@ -274,6 +286,8 @@ pub enum Salvage { /* variants */ }
 <a id="sceneedit"></a>
 
 ## `pub enum SceneEdit`
+
+**Import:** `use teksilo_scene::SceneEdit;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 One edit inside a `SceneTransactionRecord`, in application order.
 
@@ -307,6 +321,8 @@ pub enum SceneEdit { /* variants */ }
 <a id="scenetransactionrecord"></a>
 
 ## `pub struct SceneTransactionRecord`
+
+**Import:** `use teksilo_scene::SceneTransactionRecord;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 One committed transaction, delivered to the edit sink with the scene
 unborrowed.

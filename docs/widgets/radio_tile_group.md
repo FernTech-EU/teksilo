@@ -78,6 +78,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum TileLayout`
 
+**Import:** `use teksilo::widgets::TileLayout;`
+
 How a `RadioTileGroup` arranges its tiles.
 
 ```rust
@@ -94,6 +96,8 @@ pub enum TileLayout { /* variants */ }
 <a id="radiotilegroup"></a>
 
 ## `pub struct RadioTileGroup`
+
+**Import:** `use teksilo::widgets::RadioTileGroup;`
 
 An N-ary, single-selection group of selectable-card radios. See the
 `module docs`.

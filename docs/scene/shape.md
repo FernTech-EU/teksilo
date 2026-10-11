@@ -162,6 +162,8 @@ rule, and why no approximation substitutes for it, is on
 
 ## `pub const SHAPE_FLATTEN_TOLERANCE`
 
+**Import:** `use teksilo_scene::SHAPE_FLATTEN_TOLERANCE;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Curve-flattening tolerance, in **local item coordinates**.
 
 Fixed rather than derived from the live zoom so a `ShapeGeometry` can
@@ -175,6 +177,8 @@ pub const SHAPE_FLATTEN_TOLERANCE: f32 = 0.25;
 <a id="hit_band_slack"></a>
 
 ## `pub const HIT_BAND_SLACK`
+
+**Import:** `use teksilo_scene::HIT_BAND_SLACK;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Grab tolerance added to every stroke band's half-width, in local
 coordinates.
@@ -192,6 +196,8 @@ pub const HIT_BAND_SLACK: f32 = 2.0;
 <a id="shapegeometry"></a>
 
 ## `pub struct ShapeGeometry`
+
+**Import:** `use teksilo_scene::ShapeGeometry;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 A `Path` plus its flattening, computed once and shared by handle.
 
@@ -245,6 +251,8 @@ empty path.
 <a id="itemshape"></a>
 
 ## `pub struct ItemShape`
+
+**Import:** `use teksilo_scene::ItemShape;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 What an item's geometry **is**, in local item coordinates — the single
 source of truth for hit-test, marquee, collision and path queries.
@@ -636,6 +644,8 @@ collides as though its band were the narrowest the map allows.
 
 ## `pub enum ItemSelectionMode`
 
+**Import:** `use teksilo_scene::ItemSelectionMode;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 How a region query decides whether an item is picked — Qt's
 `Qt::ItemSelectionMode`, one variant for one.
 
@@ -685,6 +695,8 @@ Whether this mode requires full containment (rather than any overlap).
 <a id="sceneregion"></a>
 
 ## `pub struct SceneRegion`
+
+**Import:** `use teksilo_scene::SceneRegion;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 The region a geometry query asks about.
 

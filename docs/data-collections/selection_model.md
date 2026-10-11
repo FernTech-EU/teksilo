@@ -85,6 +85,8 @@ assert_eq!(sel.count(), 0);
 
 ## `pub enum SelectionMode`
 
+**Import:** `use teksilo::data::SelectionMode;`
+
 Selection behavior mode.
 
 ```rust
@@ -100,6 +102,8 @@ pub enum SelectionMode { /* variants */ }
 <a id="selectionmodel"></a>
 
 ## `pub struct SelectionModel`
+
+**Import:** `use teksilo::data::SelectionModel;`
 
 Manages selection state for a collection widget.
 

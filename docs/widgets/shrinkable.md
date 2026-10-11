@@ -59,6 +59,8 @@ let _row = HStack::new()
 
 ## `pub struct Shrinkable`
 
+**Import:** `use teksilo::widgets::Shrinkable;`
+
 Layout modifier that lets its child be **compressed** when a stack is
 over-constrained — the shrink counterpart to `Expand`.
 

@@ -105,6 +105,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum RevealMode`
 
+**Import:** `use teksilo::widgets::RevealMode;`
+
 How the reveal affordance behaves. Mirrors WinUI's
 `PasswordRevealMode`.
 
@@ -121,6 +123,8 @@ pub enum RevealMode { /* variants */ }
 <a id="passwordfield"></a>
 
 ## `pub struct PasswordField`
+
+**Import:** `use teksilo::widgets::PasswordField;`
 
 Secure single-line text entry. See the `module docs`.
 

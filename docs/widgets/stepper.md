@@ -152,6 +152,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum StepperOrientation`
 
+**Import:** `use teksilo::widgets::StepperOrientation;`
+
 Indicator-strip orientation for a `Stepper`.
 
 ```rust
@@ -166,6 +168,8 @@ pub enum StepperOrientation { /* variants */ }
 <a id="chromeposition"></a>
 
 ## `pub enum ChromePosition`
+
+**Import:** `use teksilo::widgets::ChromePosition;`
 
 Where the optional chrome slot (banner / sidebar) sits relative to the
 stepper body.
@@ -182,6 +186,8 @@ pub enum ChromePosition { /* variants */ }
 <a id="stepper"></a>
 
 ## `pub struct Stepper`
+
+**Import:** `use teksilo::widgets::Stepper;`
 
 An embeddable multi-step flow widget. See the `module docs` for the
 data-flow pattern and a usage example.
@@ -374,6 +380,8 @@ previously set plain or rich tooltip.
 
 ## `pub struct StepperController`
 
+**Import:** none — `StepperController` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Shared handle controlling a `Stepper`.
 
 ```rust
@@ -527,6 +535,8 @@ Bumped on every structural mutation; bind at `BindingLevel::Rebuild`.
 
 ## `pub enum StepStatus`
 
+**Import:** none — `StepStatus` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Lifecycle state of a single step, surfaced in the indicator strip and
 (for the active step) as `aria-current="step"`.
 
@@ -561,6 +571,8 @@ pub enum StepStatus { /* variants */ }
 <a id="step"></a>
 
 ## `pub struct Step`
+
+**Import:** none — `Step` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 One page in a `Stepper`.
 

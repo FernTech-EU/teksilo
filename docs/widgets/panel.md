@@ -73,6 +73,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Panel`
 
+**Import:** `use teksilo::widgets::Panel;`
+
 A themed container with background, border, corner radius, and padding.
 
 ```rust

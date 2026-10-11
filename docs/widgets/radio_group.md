@@ -70,6 +70,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct RadioGroup`
 
+**Import:** `use teksilo::widgets::RadioGroup;`
+
 Invisible layout container that groups `RadioButton`s for
 accessibility. Arranges children in an `HStack` or `VStack`
 and carries `Role::RadioGroup` on its own a11y node.

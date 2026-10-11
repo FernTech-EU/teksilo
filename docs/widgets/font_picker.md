@@ -106,6 +106,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum FontSpacingFilter`
 
+**Import:** `use teksilo::widgets::FontSpacingFilter;`
+
 Spacing filter, mirroring the monospaced / proportional axis of Qt's
 `QFontComboBox::FontFilters`. Cheap — it reads only font metadata.
 
@@ -123,6 +125,8 @@ pub enum FontSpacingFilter { /* variants */ }
 
 ## `pub enum FontPreviewMode`
 
+**Import:** `use teksilo::widgets::FontPreviewMode;`
+
 How each row — and the closed trigger — previews a font.
 
 ```rust
@@ -138,6 +142,8 @@ pub enum FontPreviewMode { /* variants */ }
 <a id="fontmeta"></a>
 
 ## `pub struct FontMeta`
+
+**Import:** `use teksilo::widgets::FontMeta;`
 
 Per-family metadata for headless testing / restricted font sets via
 `FontPicker::families_with_meta`. In a real app this data comes from
@@ -155,6 +161,8 @@ pub struct FontMeta { /* fields */ }
 <a id="fontpicker"></a>
 
 ## `pub struct FontPicker`
+
+**Import:** `use teksilo::widgets::FontPicker;`
 
 A font-family selector built on `ComboBox`. See the module docs.
 

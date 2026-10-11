@@ -61,6 +61,8 @@ assert_eq!(paths.config_file("settings"), tmp.path().join("settings.toml"));
 
 ## `pub struct AppPaths`
 
+**Import:** `use teksilo::prelude::AppPaths;` — in `teksilo::prelude::*`.
+
 Resolved OS-correct application directories (config and data).
 
 Construct with `AppPaths::new` for production code, or

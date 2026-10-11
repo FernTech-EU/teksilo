@@ -310,6 +310,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct TableView`
 
+**Import:** `use teksilo::widgets::TableView;`
+
 Generic, virtualized, accessible table with sortable / filterable / resizable columns.
 
 Construct with `TableView::new` (from a `ListModel<T>`)
@@ -1008,6 +1010,8 @@ before the first layout pass, when the viewport height is not yet known.
 
 ## `pub enum ColumnWidth`
 
+**Import:** none — `ColumnWidth` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 How a column's width is determined during layout.
 
 ```rust
@@ -1023,6 +1027,8 @@ pub enum ColumnWidth { /* variants */ }
 <a id="pinnedside"></a>
 
 ## `pub enum PinnedSide`
+
+**Import:** none — `PinnedSide` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Whether a column is pinned to one side of the table.
 
@@ -1040,6 +1046,8 @@ pub enum PinnedSide { /* variants */ }
 
 ## `pub enum Alignment`
 
+**Import:** none — `Alignment` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Horizontal alignment of a cell's content within its column.
 
 ```rust
@@ -1056,6 +1064,8 @@ pub enum Alignment { /* variants */ }
 
 ## `pub enum TruncationPolicy`
 
+**Import:** none — `TruncationPolicy` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Strategy when a cell's text overflows its column.
 
 ```rust
@@ -1071,6 +1081,8 @@ pub enum TruncationPolicy { /* variants */ }
 <a id="gridlines"></a>
 
 ## `pub enum GridLines`
+
+**Import:** none — `GridLines` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Whether the table draws grid lines between rows / columns.
 
@@ -1089,6 +1101,8 @@ pub enum GridLines { /* variants */ }
 
 ## `pub enum ColumnResizePolicy`
 
+**Import:** none — `ColumnResizePolicy` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Whether column resize commits the new width on every drag tick (`Live`)
 or only on `Ended` (`OnRelease`).
 
@@ -1104,6 +1118,8 @@ pub enum ColumnResizePolicy { /* variants */ }
 <a id="edittriggers"></a>
 
 ## `pub struct EditTriggers`
+
+**Import:** none — `EditTriggers` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Which gestures open a cell editor — a **set**, composed with `|`, after
 Qt's `QAbstractItemView::EditTriggers`.
@@ -1198,6 +1214,8 @@ Every trigger at once.
 
 ## `pub enum TabTraversal`
 
+**Import:** none — `TabTraversal` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Tab / Shift-Tab traversal policy across cells of a row.
 
 Regardless of the policy, **Ctrl+Tab / Ctrl+Shift+Tab always move focus
@@ -1216,6 +1234,8 @@ pub enum TabTraversal { /* variants */ }
 <a id="cellcontext"></a>
 
 ## `pub struct CellContext`
+
+**Import:** none — `CellContext` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Per-cell context handed to a column's cell delegate during build.
 
@@ -1239,6 +1259,8 @@ pub struct CellContext { /* fields */ }
 
 ## `pub struct ColumnContext`
 
+**Import:** none — `ColumnContext` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Per-column-header context handed to a column's header delegate.
 
 ```rust
@@ -1256,6 +1278,8 @@ pub struct ColumnContext { /* fields */ }
 <a id="columnspec"></a>
 
 ## `pub struct ColumnSpec`
+
+**Import:** none — `ColumnSpec` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 What a column is to its header: id, title, width policy and the user
 gestures it allows — every part of a `Column` except how its cells are
@@ -1348,6 +1372,8 @@ Stable column id.
 <a id="column"></a>
 
 ## `pub struct Column`
+
+**Import:** none — `Column` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Single column declaration. Column ids must be **stable, unique strings**
 — they're the persistence key for sort, filter, width, and ordering.
@@ -1457,6 +1483,8 @@ and ordering signals).
 
 ## `pub enum TableSelectionMode`
 
+**Import:** none — `TableSelectionMode` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Selection mode for a `TableView` or `TreeTableView`.
 
 ```rust
@@ -1488,6 +1516,8 @@ Whether the mode allows more than one entry to be selected.
 <a id="cellselectionmodel"></a>
 
 ## `pub struct CellSelectionModel`
+
+**Import:** none — `CellSelectionModel` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Cell-level selection state for `TableSelectionMode::SingleCell` /
 `MultiCell`. Tracks `(row, col)` pairs in visible-index space.

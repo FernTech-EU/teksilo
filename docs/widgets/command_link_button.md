@@ -84,6 +84,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub const COMMAND_LINK_BUTTON_ICON_SIZE`
 
+**Import:** `use teksilo::widgets::command_link_button::COMMAND_LINK_BUTTON_ICON_SIZE;`
+
 CommandLinkButton design tokens. The widget is a group-4 composite
 with no dedicated recipe module.
 
@@ -95,6 +97,8 @@ pub const COMMAND_LINK_BUTTON_ICON_SIZE: f32 = 28.0;
 
 ## `pub const COMMAND_LINK_BUTTON_ICON_TEXT_GAP`
 
+**Import:** `use teksilo::widgets::command_link_button::COMMAND_LINK_BUTTON_ICON_TEXT_GAP;`
+
 ```rust
 pub const COMMAND_LINK_BUTTON_ICON_TEXT_GAP: f32 = 14.0;
 ```
@@ -102,6 +106,8 @@ pub const COMMAND_LINK_BUTTON_ICON_TEXT_GAP: f32 = 14.0;
 <a id="command_link_button_icon_text_gap-2"></a>
 
 ## `pub fn command_link_button_icon_text_gap(...)`
+
+**Import:** `use teksilo::widgets::command_link_button::command_link_button_icon_text_gap;`
 
 `COMMAND_LINK_BUTTON_ICON_TEXT_GAP` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -114,6 +120,8 @@ pub fn command_link_button_icon_text_gap(tokens: &InputTokens) -> f32;
 
 ## `pub const COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP`
 
+**Import:** `use teksilo::widgets::command_link_button::COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP;`
+
 ```rust
 pub const COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP: f32 = 4.0;
 ```
@@ -121,6 +129,8 @@ pub const COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP: f32 = 4.0;
 <a id="command_link_button_title_description_gap-2"></a>
 
 ## `pub fn command_link_button_title_description_gap(...)`
+
+**Import:** `use teksilo::widgets::command_link_button::command_link_button_title_description_gap;`
 
 `COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -133,6 +143,8 @@ pub fn command_link_button_title_description_gap(tokens: &InputTokens) -> f32;
 
 ## `pub const COMMAND_LINK_BUTTON_PADDING_HORIZONTAL`
 
+**Import:** `use teksilo::widgets::command_link_button::COMMAND_LINK_BUTTON_PADDING_HORIZONTAL;`
+
 ```rust
 pub const COMMAND_LINK_BUTTON_PADDING_HORIZONTAL: f32 = 16.0;
 ```
@@ -140,6 +152,8 @@ pub const COMMAND_LINK_BUTTON_PADDING_HORIZONTAL: f32 = 16.0;
 <a id="command_link_button_padding_horizontal-2"></a>
 
 ## `pub fn command_link_button_padding_horizontal(...)`
+
+**Import:** `use teksilo::widgets::command_link_button::command_link_button_padding_horizontal;`
 
 `COMMAND_LINK_BUTTON_PADDING_HORIZONTAL` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -152,6 +166,8 @@ pub fn command_link_button_padding_horizontal(tokens: &InputTokens) -> f32;
 
 ## `pub const COMMAND_LINK_BUTTON_PADDING_VERTICAL`
 
+**Import:** `use teksilo::widgets::command_link_button::COMMAND_LINK_BUTTON_PADDING_VERTICAL;`
+
 ```rust
 pub const COMMAND_LINK_BUTTON_PADDING_VERTICAL: f32 = 14.0;
 ```
@@ -159,6 +175,8 @@ pub const COMMAND_LINK_BUTTON_PADDING_VERTICAL: f32 = 14.0;
 <a id="command_link_button_padding_vertical-2"></a>
 
 ## `pub fn command_link_button_padding_vertical(...)`
+
+**Import:** `use teksilo::widgets::command_link_button::command_link_button_padding_vertical;`
 
 `COMMAND_LINK_BUTTON_PADDING_VERTICAL` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -171,6 +189,8 @@ pub fn command_link_button_padding_vertical(tokens: &InputTokens) -> f32;
 
 ## `pub const COMMAND_LINK_BUTTON_MIN_HEIGHT`
 
+**Import:** `use teksilo::widgets::command_link_button::COMMAND_LINK_BUTTON_MIN_HEIGHT;`
+
 ```rust
 pub const COMMAND_LINK_BUTTON_MIN_HEIGHT: f32 = 64.0;
 ```
@@ -178,6 +198,8 @@ pub const COMMAND_LINK_BUTTON_MIN_HEIGHT: f32 = 64.0;
 <a id="command_link_button_min_height-2"></a>
 
 ## `pub fn command_link_button_min_height(...)`
+
+**Import:** `use teksilo::widgets::command_link_button::command_link_button_min_height;`
 
 `COMMAND_LINK_BUTTON_MIN_HEIGHT` raised to the density's `target_size`
 (24 / 32 / 44 dp). The identity at Compact.
@@ -189,6 +211,8 @@ pub fn command_link_button_min_height(tokens: &InputTokens) -> f32;
 <a id="commandlinkbutton"></a>
 
 ## `pub struct CommandLinkButton`
+
+**Import:** `use teksilo::widgets::CommandLinkButton;`
 
 A large two-line CTA button: icon + title + subtitle.
 

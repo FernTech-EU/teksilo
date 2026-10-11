@@ -44,6 +44,8 @@ a wrapped Finish both dismiss it.
 
 ## `pub struct Wizard`
 
+**Import:** `use teksilo::widgets::Wizard;`
+
 A button (or custom trigger) that opens a modal `Stepper`.
 
 `Wizard::new(label)` renders as a `Filled` `Button` whose tap opens a

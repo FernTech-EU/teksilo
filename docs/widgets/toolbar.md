@@ -174,6 +174,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub const TOOLBAR_HEIGHT_DEFAULT`
 
+**Import:** `use teksilo::widgets::toolbar::TOOLBAR_HEIGHT_DEFAULT;`
+
 Toolbar design tokens.
 
 ```rust
@@ -183,6 +185,8 @@ pub const TOOLBAR_HEIGHT_DEFAULT: f32 = 40.0;
 <a id="toolbar_height_default-2"></a>
 
 ## `pub fn toolbar_height_default(...)`
+
+**Import:** `use teksilo::widgets::toolbar::toolbar_height_default;`
 
 `TOOLBAR_HEIGHT_DEFAULT` raised to the density's `target_size`
 (24 / 32 / 44 dp). The identity at Compact.
@@ -195,6 +199,8 @@ pub fn toolbar_height_default(tokens: &InputTokens) -> f32;
 
 ## `pub const TOOLBAR_SPACING`
 
+**Import:** `use teksilo::widgets::toolbar::TOOLBAR_SPACING;`
+
 ```rust
 pub const TOOLBAR_SPACING: f32 = 4.0;
 ```
@@ -202,6 +208,8 @@ pub const TOOLBAR_SPACING: f32 = 4.0;
 <a id="toolbar_spacing-2"></a>
 
 ## `pub fn toolbar_spacing(...)`
+
+**Import:** `use teksilo::widgets::toolbar::toolbar_spacing;`
 
 `TOOLBAR_SPACING` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -213,6 +221,8 @@ pub fn toolbar_spacing(tokens: &InputTokens) -> f32;
 <a id="toolbarorientation"></a>
 
 ## `pub enum ToolbarOrientation`
+
+**Import:** `use teksilo::widgets::ToolbarOrientation;`
 
 Layout axis of the toolbar.
 
@@ -228,6 +238,8 @@ pub enum ToolbarOrientation { /* variants */ }
 <a id="toolbaraction"></a>
 
 ## `pub struct ToolbarAction`
+
+**Import:** `use teksilo::widgets::ToolbarAction;`
 
 A toolbar command: a **label + an icon** (both required), plus optional
 tooltip/toggle, an activation handler, an overflow priority, and an
@@ -341,6 +353,8 @@ Always live in the overflow menu, never inline (WinUI secondary command).
 
 ## `pub trait ToolbarOverflow`
 
+**Import:** `use teksilo::widgets::ToolbarOverflow;`
+
 A widget that knows how to represent itself in a `Toolbar`'s overflow menu
 when it is collapsed (NSToolbar `menuFormRepresentation` / Qt
 `QWidgetAction`). Implement this on a widget and add it with
@@ -367,6 +381,8 @@ The menu-form representation shown when this widget overflows.
 <a id="toolbaritem"></a>
 
 ## `pub struct ToolbarItem`
+
+**Import:** `use teksilo::widgets::ToolbarItem;`
 
 One slot in a `Toolbar`.
 
@@ -440,6 +456,8 @@ Flexible space that pushes the following items to the trailing edge
 <a id="toolbar"></a>
 
 ## `pub struct Toolbar`
+
+**Import:** `use teksilo::widgets::Toolbar;`
 
 A command bar with automatic overflow. See the `module docs`.
 

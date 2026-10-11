@@ -30,6 +30,8 @@ were never related beyond sharing a file.
 
 ## `pub struct PopoverSurface`
 
+**Import:** `use teksilo::widgets::PopoverSurface;`
+
 ```rust
 pub struct PopoverSurface { /* fields */ }
 ```

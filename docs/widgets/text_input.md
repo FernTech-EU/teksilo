@@ -113,6 +113,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum ValidationState`
 
+**Import:** `use teksilo::widgets::ValidationState;`
+
 Validation state for the text input field.
 
 Drives the inline feedback strip and border tint of `TextInput`.
@@ -131,6 +133,8 @@ pub enum ValidationState { /* variants */ }
 <a id="textinput"></a>
 
 ## `pub struct TextInput`
+
+**Import:** `use teksilo::widgets::TextInput;`
 
 Styled single-line text input composite.
 

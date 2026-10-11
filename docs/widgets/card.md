@@ -76,6 +76,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Card`
 
+**Import:** `use teksilo::widgets::Card;`
+
 A card container with shadow, background, and optional header/content/footer.
 
 ```rust

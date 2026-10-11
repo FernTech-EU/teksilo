@@ -65,6 +65,8 @@ gate never fires for one.
 
 ## `pub struct ResizeStrip`
 
+**Import:** `use teksilo::widgets::ResizeStrip;`
+
 A single edge of a resize frame. Construct one per side and lay them
 out around your content (HStack of left + content + right inside a
 VStack of top + middle + bottom is the conventional shape — see the

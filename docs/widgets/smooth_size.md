@@ -71,6 +71,8 @@ layout pass instead of tweening.
 
 ## `pub enum SmoothSizeAxes`
 
+**Import:** `use teksilo::widgets::SmoothSizeAxes;`
+
 Which axes participate in the size tween. Use `Width` or `Height`
 to leave the other axis tracking the child's natural size
 instantly.
@@ -88,6 +90,8 @@ pub enum SmoothSizeAxes { /* variants */ }
 <a id="smoothsize"></a>
 
 ## `pub struct SmoothSize`
+
+**Import:** `use teksilo::widgets::SmoothSize;`
 
 Wraps a child widget and animates the wrapper's reported size toward
 the child's current natural size whenever that size changes.

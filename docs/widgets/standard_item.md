@@ -202,6 +202,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct StandardListItem`
 
+**Import:** `use teksilo::widgets::StandardListItem;`
+
 Canonical single-line or two-line row layout for use in a `ListView`.
 
 See the `module-level documentation` for the full slot layout and
@@ -492,6 +494,8 @@ called wins and clears the other slots.
 <a id="standardtreeitem"></a>
 
 ## `pub struct StandardTreeItem`
+
+**Import:** `use teksilo::widgets::StandardTreeItem;`
 
 Canonical row layout for a `TreeView` — `StandardListItem` plus
 a depth-driven indent column and an always-reserved chevron column.

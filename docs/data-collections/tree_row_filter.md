@@ -96,6 +96,8 @@ assert_eq!(out.iter().map(|r| r.item).collect::<Vec<_>>(), vec!["Book One", "The
 
 ## `pub struct TreeRowFilter`
 
+**Import:** `use teksilo::data::TreeRowFilter;`
+
 A reusable sort + tree-aware filter over a `Vec<``TreeRow``<K, T>>`. Build
 it once, `apply` it to each freshly-sourced row stream (e.g.
 inside a `TreeDataSlice::set_source` closure). See the `module docs`.

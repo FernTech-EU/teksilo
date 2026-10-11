@@ -96,6 +96,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct MenuSeparator`
 
+**Import:** `use teksilo::widgets::MenuSeparator;`
+
 A 1 dp horizontal divider line between groups of menu items.
 
 ```rust
@@ -105,6 +107,8 @@ pub struct MenuSeparator;
 <a id="menulist"></a>
 
 ## `pub struct MenuList`
+
+**Import:** `use teksilo::widgets::MenuList;`
 
 A themed vertical dropdown menu panel with keyboard navigation and type-ahead.
 

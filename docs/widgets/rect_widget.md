@@ -63,6 +63,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct RectWidget`
 
+**Import:** `use teksilo::widgets::RectWidget;`
+
 A leaf widget that paints a filled and/or stroked rounded rectangle.
 
 See the `module documentation` for the full feature description.

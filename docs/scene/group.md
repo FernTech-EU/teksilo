@@ -68,6 +68,8 @@ let _id = scene.add_item(group, Point::new(20.0, 20.0));
 
 ## `pub struct GroupItem`
 
+**Import:** `use teksilo_scene::GroupItem;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 A group container with optional fill / stroke / inline label, in
 local item coordinates.
 

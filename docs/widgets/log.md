@@ -89,6 +89,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct NotificationLog`
 
+**Import:** `use teksilo::prelude::NotificationLog;` — in `teksilo::prelude::*`.
+
 Configurable archive log. Shipped chrome:
 - mark-all-read + clear buttons in a toolbar row;
 - empty-state hint when the archive is empty;

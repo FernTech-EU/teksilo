@@ -92,6 +92,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct DropZone`
 
+**Import:** `use teksilo::widgets::DropZone;`
+
 A drop target for external (OS) drag-and-drop. See the module docs.
 
 ```rust

@@ -119,6 +119,8 @@ assert!(index.is_empty());
 
 ## `pub trait SpatialIndex`
 
+**Import:** `use teksilo_scene::SpatialIndex;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 A spatial index over `ItemId`s keyed by axis-aligned scene
 rectangles. Used by `Scene` for `items_in_rect`
 queries and by `SceneView` for viewport
@@ -177,6 +179,8 @@ Whether the index is empty.
 
 ## `pub const DEFAULT_CELL_SIZE`
 
+**Import:** none — `DEFAULT_CELL_SIZE` is public in a private module of `teksilo-scene` and nothing re-exports it.
+
 Default cell size for `GridHashIndex` — 256 logical pixels.
 Item-side typical 200 px cards bucket into 1–4 cells; viewport
 queries (~800–1200 px) hit a small fan-out.
@@ -188,6 +192,8 @@ pub const DEFAULT_CELL_SIZE: f32 = 256.0;
 <a id="gridhashindex"></a>
 
 ## `pub struct GridHashIndex`
+
+**Import:** `use teksilo_scene::GridHashIndex;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Uniform grid spatial hash. Each item is bucketed into every cell
 its AABB overlaps; queries union all items from the cells the

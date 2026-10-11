@@ -82,6 +82,8 @@ all of that itself, within its own bounds, which it clips to.
 
 ## `pub struct TableHeader`
 
+**Import:** `use teksilo::widgets::TableHeader;`
+
 A table's column header strip: one `Role::ColumnHeader` cell per column,
 with click-to-sort, drag-to-resize on every divider, drag-to-reorder,
 pinned columns, the filter popover and a horizontal scroll offset to follow

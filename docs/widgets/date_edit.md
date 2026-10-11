@@ -145,6 +145,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum WidthPolicy`
 
+**Import:** `use teksilo::widgets::WidthPolicy;`
+
 How a datetime widget claims horizontal space.
 
 Shared across `DateEdit`, `TimeEdit`, `DateRangeEdit`, and
@@ -166,6 +168,8 @@ pub enum WidthPolicy { /* variants */ }
 
 ## `pub enum ValidationBehavior`
 
+**Import:** `use teksilo::widgets::date_edit::ValidationBehavior;`
+
 How the date editor reacts to out-of-range or partially invalid input.
 
 ```rust
@@ -180,6 +184,8 @@ pub enum ValidationBehavior { /* variants */ }
 <a id="dateedit"></a>
 
 ## `pub struct DateEdit`
+
+**Import:** `use teksilo::widgets::DateEdit;`
 
 Single-line date input with optional calendar popover. See the
 `module docs` for the full feature list.

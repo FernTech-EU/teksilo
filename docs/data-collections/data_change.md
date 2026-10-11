@@ -46,6 +46,8 @@ assert_eq!(new_idx, 2);
 
 ## `pub enum DataChange`
 
+**Import:** `use teksilo::data::DataChange;`
+
 Describes a mutation to a flat list. Emitted by `crate::ListModel` automatically
 and by `crate::ListDataSource` implementors manually.
 
@@ -66,6 +68,8 @@ pub enum DataChange { /* variants */ }
 
 ## `pub fn map_index_after_move(...)`
 
+**Import:** `use teksilo::data::map_index_after_move;`
+
 Map an index through a `DataChange::ItemsMoved { from, to, count }`.
 
 Mirrors `ListModel::move_item`: the contiguous block `from..from+count` is
@@ -80,6 +84,8 @@ pub fn map_index_after_move(idx: usize, from: usize, to: usize, count: usize) ->
 <a id="adjust_single_index_for_change"></a>
 
 ## `pub fn adjust_single_index_for_change(...)`
+
+**Import:** `use teksilo::data::data_change::adjust_single_index_for_change;`
 
 Map a **single** index anchor (not a selection set) through a
 `DataChange`, or `None` if the row the anchor pointed at no longer

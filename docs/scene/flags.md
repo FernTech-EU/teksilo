@@ -56,6 +56,8 @@ defaults; setters layer additional flags on top.
 
 ## `pub struct ItemFlags`
 
+**Import:** `use teksilo_scene::ItemFlags;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 A bitset of per-item behavior flags.
 
 Use `ItemFlags::default` for the standard "interactive,

@@ -73,6 +73,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum FilePickerKind`
 
+**Import:** `use teksilo::widgets::FilePickerKind;`
+
 Which file-dialog kind the trailing button opens.
 
 ```rust
@@ -88,6 +90,8 @@ pub enum FilePickerKind { /* variants */ }
 <a id="filepickerfield"></a>
 
 ## `pub struct FilePickerField`
+
+**Import:** `use teksilo::widgets::FilePickerField;`
 
 A single-line path entry field with a trailing Browse button that invokes the
 native file dialog and writes the chosen path back into the bound `Signal<String>`.

@@ -61,6 +61,8 @@ paint_layered_shadow(
 
 ## `pub const DENSITY_TOOLTIP`
 
+**Import:** `use teksilo::widgets::shadow::DENSITY_TOOLTIP;`
+
 Inner-rim alpha multiplier for tooltips — full intensity for maximum lift.
 
 ```rust
@@ -70,6 +72,8 @@ pub const DENSITY_TOOLTIP: f32 = 1.0;
 <a id="density_surface"></a>
 
 ## `pub const DENSITY_SURFACE`
+
+**Import:** `use teksilo::widgets::shadow::DENSITY_SURFACE;`
 
 Inner-rim alpha multiplier for cards, popovers, and menus — moderate lift.
 
@@ -81,6 +85,8 @@ pub const DENSITY_SURFACE: f32 = 0.5;
 
 ## `pub const DENSITY_DIALOG`
 
+**Import:** `use teksilo::widgets::shadow::DENSITY_DIALOG;`
+
 Inner-rim alpha multiplier for snackbars and dialogs — subtle lift.
 
 ```rust
@@ -90,6 +96,8 @@ pub const DENSITY_DIALOG: f32 = 0.3;
 <a id="attachedside"></a>
 
 ## `pub enum AttachedSide`
+
+**Import:** `use teksilo::widgets::shadow::AttachedSide;`
 
 Which geometric edge of the surface is attached to its trigger and
 should have shadow drawing suppressed on that side. Geometric (Top
@@ -111,6 +119,8 @@ pub enum AttachedSide { /* variants */ }
 <a id="paint_layered_shadow"></a>
 
 ## `pub fn paint_layered_shadow(...)`
+
+**Import:** `use teksilo::widgets::shadow::paint_layered_shadow;`
 
 Paint a two-layer drop shadow behind a rounded rect.
 

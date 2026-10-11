@@ -84,6 +84,8 @@ let migrator: Migrator<Recents> = Migrator::new()
 
 ## `pub trait Versioned`
 
+**Import:** `use teksilo::settings::Versioned;`
+
 A persisted struct whose schema is versioned.
 
 `CURRENT_VERSION` is the version this build of the code reads and
@@ -119,6 +121,8 @@ after a successful chain of steps.
 
 ## `pub enum MigrationError`
 
+**Import:** `use teksilo::settings::MigrationError;`
+
 Errors surfaced by `Migrator::run`.
 
 ```rust
@@ -135,6 +139,8 @@ pub enum MigrationError { /* variants */ }
 <a id="migrator"></a>
 
 ## `pub struct Migrator`
+
+**Import:** `use teksilo::settings::Migrator;`
 
 Schema migration pipeline for a `Versioned` type.
 

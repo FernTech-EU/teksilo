@@ -84,6 +84,8 @@ let region = DragRegion::with_child(host.clone(), TextWidget::new(lit!("My App")
 
 ## `pub struct DragRegion`
 
+**Import:** `use teksilo::widgets::DragRegion;`
+
 Flexible, hit-transparent region inside a title bar that routes pointer events to the
 platform host for window dragging, maximize-toggle, and the system window menu.
 

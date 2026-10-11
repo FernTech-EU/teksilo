@@ -74,6 +74,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum TrackSize`
 
+**Import:** `use teksilo::widgets::TrackSize;`
+
 Sizing mode for a single row or column track in a `Grid`.
 
 ```rust
@@ -89,6 +91,8 @@ pub enum TrackSize { /* variants */ }
 <a id="grid"></a>
 
 ## `pub struct Grid`
+
+**Import:** `use teksilo::widgets::Grid;`
 
 A 2D grid layout container with explicit track declarations.
 

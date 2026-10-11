@@ -128,6 +128,8 @@ assert_eq!(model.point_count(s), 3);
 
 ## `pub struct ChartDatum`
 
+**Import:** `use teksilo::data::ChartDatum;`
+
 One numeric data point at a category/x-axis position, with an optional
 per-point color that overrides the series color (bar charts only).
 
@@ -157,6 +159,8 @@ which color by series.
 <a id="chartseries"></a>
 
 ## `pub struct ChartSeries`
+
+**Import:** `use teksilo::data::ChartSeries;`
 
 A named series of data points with an optional explicit color and a
 visibility flag, used to construct a `ChartModel` (via
@@ -210,6 +214,8 @@ position implies. See `SeriesPattern`.
 
 ## `pub struct SeriesView`
 
+**Import:** `use teksilo::data::SeriesView;`
+
 A read-only, borrowed view over one series — returned by
 `ChartModel::with_series_view` / `ChartModel::with_all_series`.
 
@@ -229,6 +235,8 @@ pub struct SeriesView<'a, T> { /* fields */ }
 <a id="chartmodel"></a>
 
 ## `pub struct ChartModel`
+
+**Import:** `use teksilo::data::ChartModel;`
 
 A concrete reactive multi-series chart data model.
 

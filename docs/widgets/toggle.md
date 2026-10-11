@@ -77,6 +77,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Toggle`
 
+**Import:** `use teksilo::widgets::Toggle;`
+
 An animated toggle switch bound to a `Signal<bool>`.
 
 ```rust

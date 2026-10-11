@@ -121,6 +121,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum ToolBoxOrientation`
 
+**Import:** `use teksilo::widgets::ToolBoxOrientation;`
+
 Orientation of a `ToolBox`: how its collapsible sections are arranged.
 
 `Vertical` (the default) stacks sections
@@ -143,6 +145,8 @@ pub enum ToolBoxOrientation { /* variants */ }
 <a id="toolboxitem"></a>
 
 ## `pub struct ToolBoxItem`
+
+**Import:** `use teksilo::widgets::ToolBoxItem;`
 
 One section of a `ToolBox`. Construct with `ToolBoxItem::new` and pass
 to `ToolBox::add`, or use the convenience `ToolBox::item` builder
@@ -258,6 +262,8 @@ flipping a bound `Signal<bool>` after build has no effect until the
 
 ## `pub const TOOL_BOX_HEADER_MIN_HEIGHT`
 
+**Import:** `use teksilo::widgets::tool_box::TOOL_BOX_HEADER_MIN_HEIGHT;`
+
 ToolBox design tokens.
 
 ```rust
@@ -267,6 +273,8 @@ pub const TOOL_BOX_HEADER_MIN_HEIGHT: f32 = 28.0;
 <a id="tool_box_header_min_height-2"></a>
 
 ## `pub fn tool_box_header_min_height(...)`
+
+**Import:** `use teksilo::widgets::tool_box::tool_box_header_min_height;`
 
 `TOOL_BOX_HEADER_MIN_HEIGHT` raised to the density's `target_size`
 (24 / 32 / 44 dp). The identity at Compact.
@@ -279,6 +287,8 @@ pub fn tool_box_header_min_height(tokens: &InputTokens) -> f32;
 
 ## `pub const TOOL_BOX_HEADER_PADDING_HORIZONTAL`
 
+**Import:** `use teksilo::widgets::tool_box::TOOL_BOX_HEADER_PADDING_HORIZONTAL;`
+
 ```rust
 pub const TOOL_BOX_HEADER_PADDING_HORIZONTAL: f32 = 12.0;
 ```
@@ -286,6 +296,8 @@ pub const TOOL_BOX_HEADER_PADDING_HORIZONTAL: f32 = 12.0;
 <a id="tool_box_header_padding_horizontal-2"></a>
 
 ## `pub fn tool_box_header_padding_horizontal(...)`
+
+**Import:** `use teksilo::widgets::tool_box::tool_box_header_padding_horizontal;`
 
 `TOOL_BOX_HEADER_PADDING_HORIZONTAL` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -298,6 +310,8 @@ pub fn tool_box_header_padding_horizontal(tokens: &InputTokens) -> f32;
 
 ## `pub const TOOL_BOX_ICON_TEXT_SPACING`
 
+**Import:** `use teksilo::widgets::tool_box::TOOL_BOX_ICON_TEXT_SPACING;`
+
 ```rust
 pub const TOOL_BOX_ICON_TEXT_SPACING: f32 = 8.0;
 ```
@@ -305,6 +319,8 @@ pub const TOOL_BOX_ICON_TEXT_SPACING: f32 = 8.0;
 <a id="tool_box_icon_text_spacing-2"></a>
 
 ## `pub fn tool_box_icon_text_spacing(...)`
+
+**Import:** `use teksilo::widgets::tool_box::tool_box_icon_text_spacing;`
 
 `TOOL_BOX_ICON_TEXT_SPACING` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -317,6 +333,8 @@ pub fn tool_box_icon_text_spacing(tokens: &InputTokens) -> f32;
 
 ## `pub const TOOL_BOX_CHEVRON_SIZE`
 
+**Import:** `use teksilo::widgets::tool_box::TOOL_BOX_CHEVRON_SIZE;`
+
 ```rust
 pub const TOOL_BOX_CHEVRON_SIZE: f32 = 12.0;
 ```
@@ -325,6 +343,8 @@ pub const TOOL_BOX_CHEVRON_SIZE: f32 = 12.0;
 
 ## `pub const TOOL_BOX_INDICATOR_THICKNESS`
 
+**Import:** `use teksilo::widgets::tool_box::TOOL_BOX_INDICATOR_THICKNESS;`
+
 ```rust
 pub const TOOL_BOX_INDICATOR_THICKNESS: f32 = 1.0;
 ```
@@ -332,6 +352,8 @@ pub const TOOL_BOX_INDICATOR_THICKNESS: f32 = 1.0;
 <a id="toolbox"></a>
 
 ## `pub struct ToolBox`
+
+**Import:** `use teksilo::widgets::ToolBox;`
 
 A vertical container of collapsible sections with exactly one expanded
 at a time — the Int UI / `QToolBox` pattern.

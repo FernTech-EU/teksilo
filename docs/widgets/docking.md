@@ -280,6 +280,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct DockingLayout`
 
+**Import:** `use teksilo::widgets::DockingLayout;`
+
 The docking layout widget. See the module docs.
 
 ```ignore
@@ -360,6 +362,8 @@ more than a couple of panels to register.
 
 ## `pub type DockRailSlot`
 
+**Import:** none — `DockRailSlot` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Factory for a rail slot widget (rebuilt on each rail rebuild).
 
 A slot that wants to match the rail's current item size binds
@@ -374,6 +378,8 @@ pub type DockRailSlot = Rc<dyn Fn() -> Box<dyn Widget>>;
 <a id="dockactionid"></a>
 
 ## `pub struct DockActionId`
+
+**Import:** none — `DockActionId` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Stable identity for a `DockAction`.
 
@@ -422,6 +428,8 @@ Wrap a raw value. Prefer `named`.
 
 ## `pub enum DockActionPlacement`
 
+**Import:** none — `DockActionPlacement` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Where a `DockAction` sits along the rail's column.
 
 ```rust
@@ -437,6 +445,8 @@ pub enum DockActionPlacement { /* variants */ }
 <a id="dockaction"></a>
 
 ## `pub struct DockAction`
+
+**Import:** none — `DockAction` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 A **dockless command button** in the activity rail: it looks and behaves
 like an activity item, but opens no panel — activating it just runs a
@@ -513,6 +523,8 @@ The action's id.
 <a id="dockrail"></a>
 
 ## `pub struct DockRail`
+
+**Import:** none — `DockRail` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 App-facing configuration for a side's activity rail (Rail presentation).
 
@@ -645,6 +657,8 @@ list of the overflowed entries.
 
 ## `pub enum DockSide`
 
+**Import:** none — `DockSide` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 One of the four dockable sides. `Leading`/`Trailing` are
 writing-direction-relative (mirrored under RTL by the caller); `Top`/
 `Bottom` never mirror.
@@ -679,6 +693,8 @@ is vertical — they stack their dock content top-to-bottom.
 
 ## `pub enum DockCorner`
 
+**Import:** none — `DockCorner` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 One of the four corners of the container. Each corner is owned by exactly
 one of its two adjacent sides (Qt `setCorner`).
 
@@ -712,6 +728,8 @@ side)` — i.e. `(Leading|Trailing, Top|Bottom)`.
 
 ## `pub struct CornerOwners`
 
+**Import:** none — `CornerOwners` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Which side owns each corner. Default = the classic IDE shell where the
 top and bottom bars span the full width and the leading / trailing columns
 occupy only the middle band.
@@ -741,6 +759,8 @@ pub struct CornerOwners { /* fields */ }
 
 ## `pub struct DockWidgetId`
 
+**Import:** none — `DockWidgetId` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Process-unique identity for a registered dock widget (the atomic unit).
 
 ```rust
@@ -767,6 +787,8 @@ Mint a fresh, process-unique id.
 
 ## `pub struct DockTabId`
 
+**Import:** none — `DockTabId` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Process-unique identity for a dock tab (a tab of a side's TabWidget).
 
 ```rust
@@ -791,6 +813,8 @@ pub struct DockTabId(pub u64);
 
 ## `pub enum TabPresentation`
 
+**Import:** none — `TabPresentation` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 How a side surfaces its tabs: an in-side strip (the TabWidget's own bar) or
 an always-visible activity rail outboard of the collapsible content.
 
@@ -807,6 +831,8 @@ pub enum TabPresentation { /* variants */ }
 
 ## `pub enum DockOpenMode`
 
+**Import:** none — `DockOpenMode` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Placement mode for a programmatically-opened dock.
 
 ```rust
@@ -821,6 +847,8 @@ pub enum DockOpenMode { /* variants */ }
 <a id="dockopenlocation"></a>
 
 ## `pub struct DockOpenLocation`
+
+**Import:** none — `DockOpenLocation` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Target for `DockingModel::open_dock` / `DockingModel::move_dock`.
 
@@ -857,6 +885,8 @@ Open as a fresh tab.
 
 ## `pub enum DockRailItemSize`
 
+**Import:** none — `DockRailItemSize` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Activity-bar item size for a side's rail (context-menu "Activity bar size").
 
 ```rust
@@ -881,6 +911,8 @@ hover tooltip.
 <a id="docktabdisplay"></a>
 
 ## `pub enum DockTabDisplay`
+
+**Import:** none — `DockTabDisplay` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 How a side's dock tabs render (context-menu "Tab size").
 
@@ -911,6 +943,8 @@ Whether this mode shows the title text.
 <a id="dockpolicy"></a>
 
 ## `pub struct DockPolicy`
+
+**Import:** none — `DockPolicy` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 App-declared policy that **locks down end-user layout edits** on a
 `DockingLayout`. Each flag removes a *user
@@ -946,6 +980,8 @@ The app's programmatic API still drives it.
 <a id="dockingmodel"></a>
 
 ## `pub struct DockingModel`
+
+**Import:** none — `DockingModel` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 The shared docking-layout model. `Clone` = share-by-handle.
 
@@ -1316,6 +1352,8 @@ emptied panes / tabs pruned, selections clamped. Bumps `version`.
 
 ## `pub struct DockWidget`
 
+**Import:** none — `DockWidget` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 App-facing declaration of a dock widget: identity, chrome metadata, and a
 lazy content factory. Collect these on `DockingLayout::dock`.
 
@@ -1386,6 +1424,8 @@ without an explicit target.
 <a id="docklayoutstate"></a>
 
 ## `pub struct DockLayoutState`
+
+**Import:** none — `DockLayoutState` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 The full serializable snapshot of a `DockingModel`.
 

@@ -110,6 +110,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct TreeRowContext`
 
+**Import:** `use teksilo::widgets::TreeRowContext;`
+
 Per-row context passed to a 4-arg TreeView delegate. Carries a
 reference to the slice handle and the row's `NodeId` so the
 delegate can wire chevron toggles and other tree-aware behavior
@@ -147,6 +149,8 @@ The `NodeId` of this row in the backing `TreeModel`.
 <a id="treeview"></a>
 
 ## `pub struct TreeView`
+
+**Import:** `use teksilo::widgets::TreeView;`
 
 ```rust
 pub struct TreeView<T: 'static> { /* fields */ }

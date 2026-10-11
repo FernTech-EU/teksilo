@@ -76,6 +76,8 @@ assert_eq!(window.point_count(s), 10); // last 10 points only
 
 ## `pub struct ChartWindow`
 
+**Import:** `use teksilo::data::ChartWindow;`
+
 A "last N points per series" streaming projection over a `ChartModel<T>`.
 
 See the module documentation for semantics.

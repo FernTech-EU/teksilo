@@ -123,6 +123,8 @@ everything else is shared by the generic.
 
 ## `pub trait PopoverTrigger`
 
+**Import:** `use teksilo::widgets::PopoverTrigger;`
+
 A trigger widget usable with `PopoverWidget`. Implemented for
 `Button`, `IconButton` and `OverlayTrigger`. Captures the few
 points where the triggers differ; everything else is handled by the
@@ -203,6 +205,8 @@ the caller — the wrapper replaces it and will warn at build time.
 
 ## `pub type PopoverCustom`
 
+**Import:** `use teksilo::widgets::PopoverCustom;`
+
 A popover whose trigger is an arbitrary widget, wrapped in
 `OverlayTrigger`.
 
@@ -217,6 +221,8 @@ pub type PopoverCustom = PopoverWidget<OverlayTrigger>;
 <a id="popoverwidget"></a>
 
 ## `pub struct PopoverWidget`
+
+**Import:** `use teksilo::widgets::PopoverWidget;`
 
 A trigger paired with a popover surface. See the module docs for the
 contract on which trigger properties get overridden during `build()`.
@@ -421,6 +427,8 @@ a longer hover delay. Mutually exclusive with the other tooltip setters
 
 ## `pub type PopoverButton`
 
+**Import:** `use teksilo::widgets::PopoverButton;`
+
 A `Button` that opens a popover when activated. Alias for
 `PopoverWidget<Button>` — `HasPopup::Dialog`, no caret by default.
 
@@ -431,6 +439,8 @@ pub type PopoverButton = PopoverWidget<Button>;
 <a id="popovericonbutton"></a>
 
 ## `pub type PopoverIconButton`
+
+**Import:** `use teksilo::widgets::PopoverIconButton;`
 
 An `IconButton` that opens a popover when activated. Alias for
 `PopoverWidget<IconButton>` — `HasPopup::Menu`, corner caret on by

@@ -28,6 +28,8 @@ the one that actually moves things.
 
 ## `pub struct TouchTarget`
 
+**Import:** `use teksilo::widgets::primitives::TouchTarget;`
+
 Give an undersized control a conforming touch target, growing the layout
 around it when nothing cheaper will do — and **only at
 `TargetDensity::Touch`**.

@@ -68,6 +68,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct ColorSwatch`
 
+**Import:** `use teksilo::widgets::ColorSwatch;`
+
 Single-cell color swatch.
 
 The displayed color is a `Prop<Color>` — pass a `Color` for a

@@ -53,6 +53,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct ValidationStrip`
 
+**Import:** `use teksilo::widgets::primitives::ValidationStrip;`
+
 Inline validation-feedback strip. See module docs.
 
 ```rust

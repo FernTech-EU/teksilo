@@ -90,6 +90,8 @@ axis-aligned formula above.
 
 ## `pub struct SceneScrollView`
 
+**Import:** `use teksilo_scene::SceneScrollView;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 A `SceneView` with draggable scroll bars.
 
 Construct directly from a configured view, or via the

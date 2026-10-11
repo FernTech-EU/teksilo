@@ -59,6 +59,8 @@ every pointer kind.
 
 ## `pub struct OverlayTrigger`
 
+**Import:** `use teksilo::widgets::OverlayTrigger;`
+
 Wraps an arbitrary widget so it can drive a popover.
 
 `PopoverButton` and `PopoverIconButton` cover the two stock triggers; this

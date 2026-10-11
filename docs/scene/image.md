@@ -53,6 +53,8 @@ model.add_item(item, teksilo_canvas::Point::new(100.0, 50.0));
 
 ## `pub struct ImageItem`
 
+**Import:** `use teksilo_scene::ImageItem;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 A raster image in a local-coord rectangle.
 
 The image is referenced by a string key into the Canvas image registry.

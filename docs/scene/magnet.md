@@ -186,6 +186,8 @@ if let Some(snap) = scene.compute_item_snap(dragged, Vec2::new(95.0, 0.0), 20.0,
 
 ## `pub struct MagnetId`
 
+**Import:** `use teksilo_scene::MagnetId;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Opaque identifier for a `Magnet` inside a `Scene`.
 
 Globally unique within a process, minted by `MagnetId::next`. Stable
@@ -207,6 +209,8 @@ Raw numeric value, used by AccessKit's synthetic-NodeId derivation.
 <a id="magnetrole"></a>
 
 ## `pub enum MagnetRole`
+
+**Import:** `use teksilo_scene::MagnetRole;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 The direction a magnet faces in a connection.
 
@@ -230,6 +234,8 @@ pub enum MagnetRole { /* variants */ }
 <a id="magnet"></a>
 
 ## `pub struct Magnet`
+
+**Import:** `use teksilo_scene::Magnet;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 A magnetism anchor attached to a scene item.
 
@@ -289,6 +295,8 @@ keyboard cycle, and AT emission. Enabled by default.
 
 ## `pub struct MagnetRef`
 
+**Import:** `use teksilo_scene::MagnetRef;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 An owned, borrow-free snapshot of one magnet, handed to the
 accept/reject predicate and carried in a `MagnetConnection`.
 
@@ -337,6 +345,8 @@ a predicate.
 
 ## `pub enum MagnetVerdict`
 
+**Import:** `use teksilo_scene::MagnetVerdict;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 The result of running the accept/reject predicate on a candidate
 magnet pair. "Both payloads in, reject or accept-with-payload out."
 
@@ -372,6 +382,8 @@ Whether this verdict accepts the pair.
 <a id="magnetconnection"></a>
 
 ## `pub struct MagnetConnection`
+
+**Import:** `use teksilo_scene::MagnetConnection;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 A formed connection between two magnets, delivered to the consumer's
 `on_connect` handler on release (mouse) or confirm (keyboard).
@@ -414,6 +426,8 @@ Borrow the connection payload downcast to `P`.
 
 ## `pub struct MagnetSnap`
 
+**Import:** `use teksilo_scene::MagnetSnap;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 The chosen snap when a dragged item's magnet aligns onto another
 item's magnet. Returned by
 `Scene::compute_item_snap`.
@@ -453,6 +467,8 @@ The scene computes its own; this is for a consumer's own tests.
 
 ## `pub enum MarkerVisibility`
 
+**Import:** `use teksilo_scene::MarkerVisibility;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 When the `SceneView` paints magnet markers.
 
 ```rust
@@ -468,6 +484,8 @@ pub enum MarkerVisibility { /* variants */ }
 <a id="magnetvisualstate"></a>
 
 ## `pub enum MagnetVisualState`
+
+**Import:** `use teksilo_scene::MagnetVisualState;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 The visual state of a magnet as the feedback renderer sees it.
 
@@ -491,6 +509,8 @@ pub enum MagnetVisualState { /* variants */ }
 <a id="magnetmarker"></a>
 
 ## `pub struct MagnetMarker`
+
+**Import:** `use teksilo_scene::MagnetMarker;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 One magnet's render data, handed to the feedback renderer.
 
@@ -523,6 +543,8 @@ A marker stated field by field — the constructor
 
 ## `pub struct MagnetFeedback`
 
+**Import:** `use teksilo_scene::MagnetFeedback;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Everything the magnetism feedback renderer needs for one frame, in
 scene coordinates (the canvas is already in the view-transform
 scope). The built-in renderer draws markers plus a connector; a
@@ -554,6 +576,8 @@ A frame of feedback stated field by field — the constructor
 <a id="magnetismconfig"></a>
 
 ## `pub struct MagnetismConfig`
+
+**Import:** `use teksilo_scene::MagnetismConfig;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Per-view magnetism configuration, installed via
 `SceneView::magnetism`.

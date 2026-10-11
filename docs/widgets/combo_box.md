@@ -122,6 +122,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct ComboBox`
 
+**Import:** `use teksilo::widgets::ComboBox;`
+
 A dropdown selection widget.
 
 ```ignore

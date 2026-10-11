@@ -51,6 +51,8 @@ built (so widget construction is identical) but are never shown.
 
 ## `pub struct Cycle`
 
+**Import:** `use teksilo::widgets::Cycle;`
+
 A wrapper that cycles through its children on a fixed period.
 
 ```rust

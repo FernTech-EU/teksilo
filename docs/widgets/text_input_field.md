@@ -146,6 +146,8 @@ ctx.add(
 
 ## `pub enum InputPurpose`
 
+**Import:** `use teksilo::widgets::InputPurpose;`
+
 The semantic purpose of a text field, surfaced to assistive technology as
 a specialised AccessKit role (WCAG 1.3.5 Identify Input Purpose / EN 301 549).
 
@@ -174,6 +176,8 @@ pub enum InputPurpose { /* variants */ }
 
 ## `pub enum EchoMode`
 
+**Import:** `use teksilo::widgets::EchoMode;`
+
 How a secure (`TextInputField::secure`) field echoes typed
 characters. Mirrors Qt's `QLineEdit::EchoMode`.
 
@@ -191,6 +195,8 @@ pub enum EchoMode { /* variants */ }
 
 ## `pub enum AtRevealPolicy`
 
+**Import:** `use teksilo::widgets::AtRevealPolicy;`
+
 How a *revealed* secure field reports to assistive technology.
 
 ```rust
@@ -205,6 +211,8 @@ pub enum AtRevealPolicy { /* variants */ }
 <a id="textinputfield"></a>
 
 ## `pub struct TextInputField`
+
+**Import:** `use teksilo::widgets::TextInputField;`
 
 Editable single-line text surface primitive.
 
@@ -554,6 +562,8 @@ keep the caret within its current segment after Up/Down.
 
 ## `pub struct TextFieldHandle`
 
+**Import:** `use teksilo::widgets::TextFieldHandle;`
+
 A live handle on a `TextInputField` — its text-editing commands, for a
 caller outside the widget.
 
@@ -665,6 +675,8 @@ Is there anything to redo?
 
 ## `pub enum ValidationOutcome`
 
+**Import:** none — `ValidationOutcome` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 What a validator returns for a given commit attempt.
 
 ```rust
@@ -680,6 +692,8 @@ pub enum ValidationOutcome { /* variants */ }
 <a id="validationfeedback"></a>
 
 ## `pub enum ValidationFeedback`
+
+**Import:** none — `ValidationFeedback` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 What composites render. Distinct from `ValidationOutcome`: the
 outcome is the validator's return value (no time concept); the

@@ -89,6 +89,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Link`
 
+**Import:** `use teksilo::widgets::Link;`
+
 A clickable text link that renders as underlined inline text.
 
 ```rust

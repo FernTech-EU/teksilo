@@ -212,6 +212,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct TreeTableView`
 
+**Import:** `use teksilo::widgets::TreeTableView;`
+
 Hierarchical multi-column widget. See module documentation.
 
 ```rust

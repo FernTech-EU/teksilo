@@ -131,6 +131,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct DateTimeEdit`
 
+**Import:** `use teksilo::widgets::DateTimeEdit;`
+
 Single unified datetime picker over `Signal<Option<DateTime>>`. See
 the `module docs` for the visual layout and behaviour.
 

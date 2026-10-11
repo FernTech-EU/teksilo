@@ -121,6 +121,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct DateRangeEdit`
 
+**Import:** `use teksilo::widgets::DateRangeEdit;`
+
 Two-handle date picker over `Signal<Option<DateRange>>`. See the
 `module docs` for the visual layout and behaviour.
 

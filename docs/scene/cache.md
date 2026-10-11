@@ -54,6 +54,8 @@ repaint dirties. The default for every `SceneItem` is
 
 ## `pub enum CacheMode`
 
+**Import:** `use teksilo_scene::CacheMode;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Per-item paint caching strategy.
 
 ```rust
@@ -68,6 +70,8 @@ pub enum CacheMode { /* variants */ }
 <a id="itemcoordinatecache"></a>
 
 ## `pub struct ItemCoordinateCache`
+
+**Import:** none — `ItemCoordinateCache` is public in a private module of `teksilo-scene` and nothing re-exports it.
 
 SceneView's per-item paint cache. Owned by the SceneView, shared
 via `Rc<RefCell<>>` so the paint walk and the item-change

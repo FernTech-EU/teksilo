@@ -65,6 +65,8 @@ Implementors: `crate::SettingsFile`, `crate::SettingsStore`,
 
 ## `pub trait Reloadable`
 
+**Import:** `use teksilo::settings::Reloadable;`
+
 A persisted type that can be told "the file may have changed on disk —
 go look," and will push any genuinely new content into its live
 signals/models.

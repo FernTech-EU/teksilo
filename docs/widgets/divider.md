@@ -67,6 +67,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Divider`
 
+**Import:** `use teksilo::widgets::Divider;`
+
 A themed separator line. Thickness defaults to `DIVIDER_THICKNESS`
 and the color defaults to `BorderRole::Divider`; both can be overridden.
 
@@ -111,6 +113,8 @@ Override the line color. Accepts `Color`, a role (typically
 <a id="divider_thickness"></a>
 
 ## `pub const DIVIDER_THICKNESS`
+
+**Import:** `use teksilo::widgets::primitives::divider::DIVIDER_THICKNESS;`
 
 Default visual thickness of a `Divider` stroke. Divider has no
 per-widget `Recipe*Style` module, so the constant lives alongside

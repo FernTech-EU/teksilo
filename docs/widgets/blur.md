@@ -81,6 +81,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Blur`
 
+**Import:** `use teksilo::widgets::Blur;`
+
 Wraps a child and applies a Gaussian-equivalent blur to the entire
 subtree, driven by an external `Prop<f32>` radius (logical pixels).
 

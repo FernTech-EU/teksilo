@@ -107,6 +107,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub const BREADCRUMB_ITEM_HEIGHT`
 
+**Import:** `use teksilo::widgets::breadcrumb::BREADCRUMB_ITEM_HEIGHT;`
+
 Minimum height of a single breadcrumb segment in logical pixels.
 
 ```rust
@@ -117,6 +119,8 @@ pub const BREADCRUMB_ITEM_HEIGHT: f32 = 20.0;
 
 ## `pub const BREADCRUMB_ITEM_PADDING_HORIZONTAL`
 
+**Import:** `use teksilo::widgets::breadcrumb::BREADCRUMB_ITEM_PADDING_HORIZONTAL;`
+
 Horizontal inner padding of each segment pill in logical pixels.
 
 ```rust
@@ -126,6 +130,8 @@ pub const BREADCRUMB_ITEM_PADDING_HORIZONTAL: f32 = 6.0;
 <a id="breadcrumb_item_padding_horizontal-2"></a>
 
 ## `pub fn breadcrumb_item_padding_horizontal(...)`
+
+**Import:** `use teksilo::widgets::breadcrumb::breadcrumb_item_padding_horizontal;`
 
 `BREADCRUMB_ITEM_PADDING_HORIZONTAL` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -138,6 +144,8 @@ pub fn breadcrumb_item_padding_horizontal(tokens: &InputTokens) -> f32;
 
 ## `pub const BREADCRUMB_SEPARATOR_GAP`
 
+**Import:** `use teksilo::widgets::breadcrumb::BREADCRUMB_SEPARATOR_GAP;`
+
 Gap reserved for the chevron separator between adjacent segments.
 
 ```rust
@@ -147,6 +155,8 @@ pub const BREADCRUMB_SEPARATOR_GAP: f32 = 4.0;
 <a id="breadcrumb_separator_gap-2"></a>
 
 ## `pub fn breadcrumb_separator_gap(...)`
+
+**Import:** `use teksilo::widgets::breadcrumb::breadcrumb_separator_gap;`
 
 `BREADCRUMB_SEPARATOR_GAP` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -159,6 +169,8 @@ pub fn breadcrumb_separator_gap(tokens: &InputTokens) -> f32;
 
 ## `pub const BREADCRUMB_CORNER_RADIUS`
 
+**Import:** `use teksilo::widgets::breadcrumb::BREADCRUMB_CORNER_RADIUS;`
+
 Corner radius of the interactive segment hover/focus rectangle.
 
 ```rust
@@ -168,6 +180,8 @@ pub const BREADCRUMB_CORNER_RADIUS: f32 = 4.0;
 <a id="breadcrumbitem"></a>
 
 ## `pub struct BreadcrumbItem`
+
+**Import:** `use teksilo::widgets::BreadcrumbItem;`
 
 A single breadcrumb segment definition.
 
@@ -228,6 +242,8 @@ segment. Clears any previously set plain or rich tooltip.
 <a id="breadcrumb"></a>
 
 ## `pub struct Breadcrumb`
+
+**Import:** `use teksilo::widgets::Breadcrumb;`
 
 A breadcrumb navigation row with **automatic overflow**: when the trail is
 too wide, the middle crumbs collapse into a trailing-of-root `…` menu while

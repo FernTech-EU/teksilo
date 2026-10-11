@@ -84,6 +84,8 @@ let opened = SettingsBundle::new()
 
 ## `pub enum SettingsBundleError`
 
+**Import:** `use teksilo::settings::SettingsBundleError;`
+
 Errors surfaced by `SettingsBundle::open`.
 
 ```rust
@@ -98,6 +100,8 @@ pub enum SettingsBundleError { /* variants */ }
 <a id="settingsbundle"></a>
 
 ## `pub struct SettingsBundle`
+
+**Import:** `use teksilo::prelude::SettingsBundle;` — in `teksilo::prelude::*`.
 
 Declarative configuration for the persistence services an app
 wants installed.
@@ -191,6 +195,8 @@ long as the returned `OpenedSettings` (or any clone of it) is.
 <a id="openedsettings"></a>
 
 ## `pub struct OpenedSettings`
+
+**Import:** `use teksilo::settings::OpenedSettings;`
 
 The outcome of `SettingsBundle::open`: ready-to-register handles.
 

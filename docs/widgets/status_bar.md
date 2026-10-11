@@ -73,6 +73,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub const STATUS_BAR_HEIGHT`
 
+**Import:** `use teksilo::widgets::status_bar::STATUS_BAR_HEIGHT;`
+
 StatusBar design tokens.
 
 ```rust
@@ -83,6 +85,8 @@ pub const STATUS_BAR_HEIGHT: f32 = 22.0;
 
 ## `pub const STATUS_BAR_PADDING_HORIZONTAL`
 
+**Import:** `use teksilo::widgets::status_bar::STATUS_BAR_PADDING_HORIZONTAL;`
+
 ```rust
 pub const STATUS_BAR_PADDING_HORIZONTAL: f32 = 8.0;
 ```
@@ -90,6 +94,8 @@ pub const STATUS_BAR_PADDING_HORIZONTAL: f32 = 8.0;
 <a id="status_bar_padding_horizontal-2"></a>
 
 ## `pub fn status_bar_padding_horizontal(...)`
+
+**Import:** `use teksilo::widgets::status_bar::status_bar_padding_horizontal;`
 
 `STATUS_BAR_PADDING_HORIZONTAL` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -102,6 +108,8 @@ pub fn status_bar_padding_horizontal(tokens: &InputTokens) -> f32;
 
 ## `pub const STATUS_BAR_ITEM_GAP`
 
+**Import:** `use teksilo::widgets::status_bar::STATUS_BAR_ITEM_GAP;`
+
 ```rust
 pub const STATUS_BAR_ITEM_GAP: f32 = 2.0;
 ```
@@ -109,6 +117,8 @@ pub const STATUS_BAR_ITEM_GAP: f32 = 2.0;
 <a id="status_bar_item_gap-2"></a>
 
 ## `pub fn status_bar_item_gap(...)`
+
+**Import:** `use teksilo::widgets::status_bar::status_bar_item_gap;`
 
 `STATUS_BAR_ITEM_GAP` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -120,6 +130,8 @@ pub fn status_bar_item_gap(tokens: &InputTokens) -> f32;
 <a id="statusbar"></a>
 
 ## `pub struct StatusBar`
+
+**Import:** `use teksilo::widgets::StatusBar;`
 
 A status bar for displaying information at the bottom of a window.
 

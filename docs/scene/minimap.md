@@ -290,6 +290,8 @@ every AT walk, so it follows a locale change),
 
 ## `pub struct SceneMinimap`
 
+**Import:** `use teksilo_scene::SceneMinimap;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 A small thumbnail rendering of a `Scene`'s
 content, with the live viewport rectangle highlighted.
 
@@ -429,6 +431,8 @@ them disagree.
 <a id="minimapreadout"></a>
 
 ## `pub struct MinimapReadout`
+
+**Import:** `use teksilo_scene::MinimapReadout;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Where the viewport sits inside the picture the minimap is drawing — the
 numbers behind the AT node's announced value, as plain fractions.

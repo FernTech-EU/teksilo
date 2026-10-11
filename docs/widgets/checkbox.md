@@ -92,6 +92,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Checkbox`
 
+**Import:** `use teksilo::widgets::Checkbox;`
+
 A checkbox that toggles a `Signal<bool>` or cycles a `Signal<CheckState>`.
 
 ```rust

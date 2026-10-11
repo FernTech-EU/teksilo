@@ -44,6 +44,8 @@ assert_eq!(pixels[(16 * 32 + 16) * 4 + 3], 255); // center alpha
 
 ## `pub enum ImageMaskShape`
 
+**Import:** `use teksilo::widgets::primitives::ImageMaskShape;`
+
 Shape of the alpha mask applied to an image.
 
 `RoundedSquare` carries the corner radius **as a fraction of the
@@ -66,6 +68,8 @@ pub enum ImageMaskShape { /* variants */ }
 
 ## `pub fn center_crop_square(...)`
 
+**Import:** `use teksilo::widgets::primitives::image_mask::center_crop_square;`
+
 Crop the source RGBA buffer to a centered square of edge `min(w, h)`.
 The returned buffer is `side * side * 4` bytes. If the input is
 already square, a copy of the original is returned.
@@ -77,6 +81,8 @@ pub fn center_crop_square(pixels: &[u8], width: u32, height: u32) -> (Vec<u8>, u
 <a id="apply_alpha_mask"></a>
 
 ## `pub fn apply_alpha_mask(...)`
+
+**Import:** `use teksilo::widgets::primitives::image_mask::apply_alpha_mask;`
 
 Apply an alpha mask in-place to an RGBA8 buffer. RGB channels are
 preserved; only alpha is modulated by the coverage value, so a

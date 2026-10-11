@@ -76,6 +76,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct ProgressBar`
 
+**Import:** `use teksilo::widgets::ProgressBar;`
+
 A progress bar — determinate or indeterminate, horizontal or vertical.
 
 ```rust

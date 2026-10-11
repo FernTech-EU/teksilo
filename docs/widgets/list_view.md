@@ -186,6 +186,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct ListView`
 
+**Import:** `use teksilo::widgets::ListView;`
+
 A virtualized scrollable list backed by a `ListModel<T>` or `ListDataSource`.
 
 See the module-level documentation for the full feature overview.

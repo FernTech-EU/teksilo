@@ -123,6 +123,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum RepeaterLayout`
 
+**Import:** `use teksilo::widgets::repeater::RepeaterLayout;`
+
 How a `Repeater` arranges its item widgets.
 
 ```rust
@@ -138,6 +140,8 @@ pub enum RepeaterLayout { /* variants */ }
 <a id="repeater"></a>
 
 ## `pub struct Repeater`
+
+**Import:** `use teksilo::widgets::Repeater;`
 
 A non-virtualized dynamic collection that creates one child widget per item in a `ListModel<T>`.
 

@@ -112,6 +112,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct TextWidget`
 
+**Import:** `use teksilo::widgets::TextWidget;`
+
 ```rust
 pub struct TextWidget { /* fields */ }
 ```

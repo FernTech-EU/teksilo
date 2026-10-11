@@ -117,6 +117,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub const SPLIT_BUTTON_HEIGHT`
 
+**Import:** `use teksilo::widgets::split_button::SPLIT_BUTTON_HEIGHT;`
+
 SplitButton design tokens.
 
 ```rust
@@ -126,6 +128,8 @@ pub const SPLIT_BUTTON_HEIGHT: f32 = 24.0;
 <a id="split_button_height-2"></a>
 
 ## `pub fn split_button_height(...)`
+
+**Import:** `use teksilo::widgets::split_button::split_button_height;`
 
 `SPLIT_BUTTON_HEIGHT` raised to the density's `target_size`
 (24 / 32 / 44 dp). The identity at Compact.
@@ -138,6 +142,8 @@ pub fn split_button_height(tokens: &InputTokens) -> f32;
 
 ## `pub const SPLIT_BUTTON_MIN_WIDTH`
 
+**Import:** `use teksilo::widgets::split_button::SPLIT_BUTTON_MIN_WIDTH;`
+
 ```rust
 pub const SPLIT_BUTTON_MIN_WIDTH: f32 = 72.0;
 ```
@@ -145,6 +151,8 @@ pub const SPLIT_BUTTON_MIN_WIDTH: f32 = 72.0;
 <a id="split_button_min_width-2"></a>
 
 ## `pub fn split_button_min_width(...)`
+
+**Import:** `use teksilo::widgets::split_button::split_button_min_width;`
 
 `SPLIT_BUTTON_MIN_WIDTH` raised to the density's `target_size`
 (24 / 32 / 44 dp). The identity at Compact.
@@ -157,6 +165,8 @@ pub fn split_button_min_width(tokens: &InputTokens) -> f32;
 
 ## `pub const SPLIT_BUTTON_PADDING_HORIZONTAL`
 
+**Import:** `use teksilo::widgets::split_button::SPLIT_BUTTON_PADDING_HORIZONTAL;`
+
 ```rust
 pub const SPLIT_BUTTON_PADDING_HORIZONTAL: f32 = 14.0;
 ```
@@ -164,6 +174,8 @@ pub const SPLIT_BUTTON_PADDING_HORIZONTAL: f32 = 14.0;
 <a id="split_button_padding_horizontal-2"></a>
 
 ## `pub fn split_button_padding_horizontal(...)`
+
+**Import:** `use teksilo::widgets::split_button::split_button_padding_horizontal;`
 
 `SPLIT_BUTTON_PADDING_HORIZONTAL` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -176,6 +188,8 @@ pub fn split_button_padding_horizontal(tokens: &InputTokens) -> f32;
 
 ## `pub const SPLIT_BUTTON_PADDING_VERTICAL`
 
+**Import:** `use teksilo::widgets::split_button::SPLIT_BUTTON_PADDING_VERTICAL;`
+
 ```rust
 pub const SPLIT_BUTTON_PADDING_VERTICAL: f32 = 0.0;
 ```
@@ -183,6 +197,8 @@ pub const SPLIT_BUTTON_PADDING_VERTICAL: f32 = 0.0;
 <a id="split_button_padding_vertical-2"></a>
 
 ## `pub fn split_button_padding_vertical(...)`
+
+**Import:** `use teksilo::widgets::split_button::split_button_padding_vertical;`
 
 `SPLIT_BUTTON_PADDING_VERTICAL` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -195,6 +211,8 @@ pub fn split_button_padding_vertical(tokens: &InputTokens) -> f32;
 
 ## `pub const SPLIT_BUTTON_CORNER_RADIUS`
 
+**Import:** `use teksilo::widgets::split_button::SPLIT_BUTTON_CORNER_RADIUS;`
+
 ```rust
 pub const SPLIT_BUTTON_CORNER_RADIUS: f32 = 4.0;
 ```
@@ -202,6 +220,8 @@ pub const SPLIT_BUTTON_CORNER_RADIUS: f32 = 4.0;
 <a id="split_button_border_width"></a>
 
 ## `pub const SPLIT_BUTTON_BORDER_WIDTH`
+
+**Import:** `use teksilo::widgets::split_button::SPLIT_BUTTON_BORDER_WIDTH;`
 
 ```rust
 pub const SPLIT_BUTTON_BORDER_WIDTH: f32 = 1.0;
@@ -211,6 +231,8 @@ pub const SPLIT_BUTTON_BORDER_WIDTH: f32 = 1.0;
 
 ## `pub const SPLIT_BUTTON_CHEVRON_WIDTH`
 
+**Import:** `use teksilo::widgets::split_button::SPLIT_BUTTON_CHEVRON_WIDTH;`
+
 ```rust
 pub const SPLIT_BUTTON_CHEVRON_WIDTH: f32 = 22.0;
 ```
@@ -218,6 +240,8 @@ pub const SPLIT_BUTTON_CHEVRON_WIDTH: f32 = 22.0;
 <a id="split_button_divider_width"></a>
 
 ## `pub const SPLIT_BUTTON_DIVIDER_WIDTH`
+
+**Import:** `use teksilo::widgets::split_button::SPLIT_BUTTON_DIVIDER_WIDTH;`
 
 ```rust
 pub const SPLIT_BUTTON_DIVIDER_WIDTH: f32 = 1.0;
@@ -227,6 +251,8 @@ pub const SPLIT_BUTTON_DIVIDER_WIDTH: f32 = 1.0;
 
 ## `pub const SPLIT_BUTTON_CHEVRON_ICON_SIZE`
 
+**Import:** `use teksilo::widgets::split_button::SPLIT_BUTTON_CHEVRON_ICON_SIZE;`
+
 ```rust
 pub const SPLIT_BUTTON_CHEVRON_ICON_SIZE: f32 = 12.0;
 ```
@@ -234,6 +260,8 @@ pub const SPLIT_BUTTON_CHEVRON_ICON_SIZE: f32 = 12.0;
 <a id="split_button_icon_label_gap"></a>
 
 ## `pub const SPLIT_BUTTON_ICON_LABEL_GAP`
+
+**Import:** `use teksilo::widgets::split_button::SPLIT_BUTTON_ICON_LABEL_GAP;`
 
 Gap between an optional main-region leading icon and the label.
 
@@ -245,6 +273,8 @@ pub const SPLIT_BUTTON_ICON_LABEL_GAP: f32 = 6.0;
 
 ## `pub fn split_button_icon_label_gap(...)`
 
+**Import:** `use teksilo::widgets::split_button::split_button_icon_label_gap;`
+
 `SPLIT_BUTTON_ICON_LABEL_GAP` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
 
@@ -255,6 +285,8 @@ pub fn split_button_icon_label_gap(tokens: &InputTokens) -> f32;
 <a id="splitbutton"></a>
 
 ## `pub struct SplitButton`
+
+**Import:** `use teksilo::widgets::SplitButton;`
 
 A button split into a default-action region and a chevron dropdown region.
 

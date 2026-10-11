@@ -67,6 +67,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct FormLayout`
 
+**Import:** `use teksilo::widgets::FormLayout;`
+
 A two-column form layout with auto-sized label column.
 
 Children are added as label/field pairs via `line()` or as

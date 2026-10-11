@@ -74,6 +74,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct NotificationCenterButton`
 
+**Import:** `use teksilo::prelude::NotificationCenterButton;` — in `teksilo::prelude::*`.
+
 Bell-icon trigger + unread-count badge + popover that contains a
 `NotificationLog`. On popover *close* the entries in this bell's
 scope are marked read (the user is presumed to have seen the

@@ -120,6 +120,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct MenuItem`
 
+**Import:** `use teksilo::widgets::MenuItem;`
+
 A single command row in a `MenuList` or context menu.
 
 See the module documentation for the full mode table, mnemonic syntax, and

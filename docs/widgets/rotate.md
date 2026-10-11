@@ -66,6 +66,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Rotate`
 
+**Import:** `use teksilo::widgets::Rotate;`
+
 Wraps a child widget and rotates its entire subtree by an
 externally-driven angle in radians.
 

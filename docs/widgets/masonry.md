@@ -60,6 +60,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct MasonryLayout`
 
+**Import:** `use teksilo::widgets::MasonryLayout;`
+
 A masonry (Pinterest-style) layout that packs children into the shortest
 column.
 

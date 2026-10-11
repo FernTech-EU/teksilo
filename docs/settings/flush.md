@@ -118,6 +118,8 @@ worker is leaner and has identical semantics from the caller's point of view.
 
 ## `pub enum FlushError`
 
+**Import:** `use teksilo::settings::FlushError;`
+
 Errors surfaced by `DebouncedWriter::flush_now`.
 
 ```rust
@@ -133,6 +135,8 @@ pub enum FlushError { /* variants */ }
 <a id="writefailuresink"></a>
 
 ## `pub type WriteFailureSink`
+
+**Import:** `use teksilo::settings::WriteFailureSink;`
 
 Invoked (off the caller's thread — on the shared worker thread) when a
 `DebouncedWriter`'s queued patches are **permanently** discarded: either
@@ -153,6 +157,8 @@ pub type WriteFailureSink = Arc<dyn Fn(PathBuf, u32, usize, String) + Send + Syn
 
 ## `pub fn set_write_failure_sink(...)`
 
+**Import:** `use teksilo::settings::set_write_failure_sink;`
+
 Register a process-wide sink invoked whenever any `DebouncedWriter`
 permanently discards a queued write (see `WriteFailureSink`). There is
 only one slot: a later call replaces an earlier one. `teksilo-app` uses
@@ -166,6 +172,8 @@ pub fn set_write_failure_sink(sink: WriteFailureSink);
 
 ## `pub type LandedStamp`
 
+**Import:** `use teksilo::settings::LandedStamp;`
+
 The `(mtime, len)` stamp `disk_stamp` computes for a settings file —
 named so every `Arc<Mutex<...>>` wrapping it (here and in
 `WindowStateService`) reads as one term instead of clippy's
@@ -178,6 +186,8 @@ pub type LandedStamp = (Option<SystemTime>, Option<u64>);
 <a id="writelandedsink"></a>
 
 ## `pub type WriteLandedSink`
+
+**Import:** `use teksilo::settings::WriteLandedSink;`
 
 Invoked on the shared worker thread the instant a `DebouncedWriter`'s
 queued patches land successfully, with the fresh on-disk `(mtime, len)`
@@ -195,6 +205,8 @@ pub type WriteLandedSink = Arc<dyn Fn(LandedStamp) + Send + Sync + 'static>;
 <a id="debouncedwriter"></a>
 
 ## `pub struct DebouncedWriter`
+
+**Import:** `use teksilo::settings::DebouncedWriter;`
 
 Atomic, debounced single-file writer.
 

@@ -203,6 +203,8 @@ naming the offending frame rather than losing the item quietly.
 
 ## `pub struct ProposedChange`
 
+**Import:** `use teksilo_scene::ProposedChange;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 A change a gesture is about to make, offered to the geometry constraint.
 
 Every field is a *question*, never a channel: the answer is the returned
@@ -249,6 +251,8 @@ The exact inverse of `translation`, so
 <a id="changeverdict"></a>
 
 ## `pub enum ChangeVerdict`
+
+**Import:** `use teksilo_scene::ChangeVerdict;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 What a geometry constraint decides.
 

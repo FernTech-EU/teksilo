@@ -114,6 +114,8 @@ assert_eq!(proxy.len(), 2); // Alice, Carol
 
 ## `pub enum SortDirection`
 
+**Import:** `use teksilo::data::SortDirection;`
+
 Sort direction emitted by `TableView` / `TreeTableView` headers and consumed by sort projections.
 
 ```rust
@@ -128,6 +130,8 @@ pub enum SortDirection { /* variants */ }
 <a id="sortfilterlistmodel"></a>
 
 ## `pub struct SortFilterListModel`
+
+**Import:** `use teksilo::data::SortFilterListModel;`
 
 Flat list source projecting an upstream `ListModel<T>` /
 `ListDataSource<Item = T>` through sort + filter.

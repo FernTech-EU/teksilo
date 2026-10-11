@@ -202,6 +202,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct DateRange`
 
+**Import:** `use teksilo::widgets::DateRange;`
+
 Inclusive range of two dates, with `start <= end` enforced at
 construction. Used by `Calendar::range`.
 
@@ -233,6 +235,8 @@ invariant `start <= end` always holds.
 
 ## `pub enum CalendarMode`
 
+**Import:** `use teksilo::widgets::calendar::CalendarMode;`
+
 What the calendar body is showing — drives the WPF/Avalonia
 "header-zoom" UX where clicking the title cycles to a coarser
 grid, letting the user reach any year in 2-3 clicks instead of
@@ -261,6 +265,8 @@ Mode after demoting one level (clicking the header title).
 
 ## `pub enum WeekNumberDisplay`
 
+**Import:** `use teksilo::widgets::WeekNumberDisplay;`
+
 Whether and how week numbers are displayed in the leading column of the day grid.
 
 ```rust
@@ -275,6 +281,8 @@ pub enum WeekNumberDisplay { /* variants */ }
 <a id="calendar"></a>
 
 ## `pub struct Calendar`
+
+**Import:** `use teksilo::widgets::Calendar;`
 
 Standalone month-grid date picker. See the `module docs` for
 the full feature list and a usage example.

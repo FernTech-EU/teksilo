@@ -124,6 +124,8 @@ assert_eq!(slice.visible_count(), 3);         // all expanded
 
 ## `pub struct TreeRow`
 
+**Import:** `use teksilo::data::TreeRow;`
+
 One row the app hands to a `TreeDataSlice`, in **document (pre-)order**.
 
 `depth` is the indent level (`0` = a root). The engine derives each row's
@@ -166,6 +168,8 @@ without it.
 <a id="treedataslice"></a>
 
 ## `pub struct TreeDataSlice`
+
+**Import:** `use teksilo::data::TreeDataSlice;`
 
 Per-view flattened projection of an external, indent-ordered tree source.
 See the `module documentation`.

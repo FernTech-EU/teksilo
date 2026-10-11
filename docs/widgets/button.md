@@ -112,6 +112,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum InteractionState`
 
+**Import:** `use teksilo::widgets::button::InteractionState;`
+
 Internal interaction state.
 
 ```rust
@@ -129,6 +131,8 @@ pub enum InteractionState { /* variants */ }
 <a id="iconlocation"></a>
 
 ## `pub enum IconLocation`
+
+**Import:** `use teksilo::widgets::IconLocation;`
 
 Where an optional icon is placed relative to the button label.
 
@@ -148,6 +152,8 @@ pub enum IconLocation { /* variants */ }
 <a id="button"></a>
 
 ## `pub struct Button`
+
+**Import:** `use teksilo::widgets::Button;`
 
 A labelled action trigger; use `Button::new` and chain builder methods.
 

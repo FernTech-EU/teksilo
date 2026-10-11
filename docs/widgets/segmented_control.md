@@ -174,6 +174,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum SegmentDisplay`
 
+**Import:** `use teksilo::widgets::SegmentDisplay;`
+
 What a segment paints: its icon, its label, or both.
 
 Set on the control with
@@ -200,6 +202,8 @@ pub enum SegmentDisplay { /* variants */ }
 
 ## `pub enum SegmentSizing`
 
+**Import:** `use teksilo::widgets::SegmentSizing;`
+
 How the visible segments divide the control's width.
 
 ```rust
@@ -215,6 +219,8 @@ pub enum SegmentSizing { /* variants */ }
 
 ## `pub enum SegmentOverflow`
 
+**Import:** `use teksilo::widgets::SegmentOverflow;`
+
 What the control does when its segments do not fit.
 
 ```rust
@@ -229,6 +235,8 @@ pub enum SegmentOverflow { /* variants */ }
 <a id="segment"></a>
 
 ## `pub struct Segment`
+
+**Import:** `use teksilo::widgets::Segment;`
 
 One segment descriptor: a localized label with a stable
 `SegmentId`, an optional leading icon, a hover tooltip, and
@@ -349,6 +357,8 @@ overflow plan with no rebuild.
 
 ## `pub fn index_signal(...)`
 
+**Import:** `use teksilo::widgets::segmented_control::index_signal;`
+
 Derive a `Switcher`-compatible index from a keyed selection.
 
 `SegmentedControl` is keyed precisely so that a contributed segment
@@ -370,6 +380,8 @@ pub fn index_signal(selected: &Signal<Option<SegmentId>>, ids: &[SegmentId]) -> 
 <a id="segmentedcontrol"></a>
 
 ## `pub struct SegmentedControl`
+
+**Import:** `use teksilo::widgets::SegmentedControl;`
 
 A segmented control binding a `Signal<Option<SegmentId>>` to a row of
 mutually exclusive segments. Build the segment list with
@@ -527,6 +539,8 @@ bounds.
 <a id="segmentid"></a>
 
 ## `pub struct SegmentId`
+
+**Import:** none — `SegmentId` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Stable identity of a segment. Cheap to copy; survives rebuilds,
 locale changes, and segments being inserted around it.

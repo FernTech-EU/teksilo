@@ -84,6 +84,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Snackbar`
 
+**Import:** `use teksilo::widgets::Snackbar;`
+
 A button-triggered transient notification surface.
 
 Call `.content(...)` to supply the notification body, then add the

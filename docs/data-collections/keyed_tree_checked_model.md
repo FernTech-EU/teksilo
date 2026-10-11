@@ -81,6 +81,8 @@ assert_eq!(checked.check_state(&1), CheckState::Indeterminate); // Binder: 2 of 
 
 ## `pub struct KeyedTreeCheckedModel`
 
+**Import:** `use teksilo::data::KeyedTreeCheckedModel;`
+
 Per-node checkbox state for a domain-keyed tree, with optional
 descendant→ancestor tristate aggregation. See the `module docs`.
 

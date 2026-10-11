@@ -66,6 +66,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct TextScaleControl`
 
+**Import:** `use teksilo::widgets::TextScaleControl;`
+
 A specialized `SpinBox` for the global user text-scale setting.
 
 See the `module docs` for the persistence + app-wide application

@@ -96,6 +96,8 @@ file.mutate(|p| p.font_size = 16.0).unwrap();
 
 ## `pub enum SettingsFileError`
 
+**Import:** `use teksilo::settings::SettingsFileError;`
+
 Errors surfaced by `SettingsFile` operations (and, by extension, every
 other persisted type in this crate — they all share this error type).
 
@@ -114,6 +116,8 @@ pub enum SettingsFileError { /* variants */ }
 <a id="settingsfile"></a>
 
 ## `pub struct SettingsFile`
+
+**Import:** `use teksilo::prelude::SettingsFile;` — in `teksilo::prelude::*`.
 
 A reactive handle to a single typed file on disk.
 

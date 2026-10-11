@@ -74,6 +74,8 @@ assert_eq!(sel.count(), 0);
 
 ## `pub struct KeyedSelectionModel`
 
+**Import:** `use teksilo::data::KeyedSelectionModel;`
+
 Selection state keyed by source-defined identity rather than visible index.
 
 The selection set is exposed as a `Signal<HashSet<K>>` (via

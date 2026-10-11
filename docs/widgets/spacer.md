@@ -54,6 +54,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Spacer`
 
+**Import:** `use teksilo::widgets::Spacer;`
+
 An invisible, flexible gap that claims a container's leftover main-axis space.
 
 ```rust

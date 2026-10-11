@@ -96,6 +96,8 @@ own.
 
 ## `pub struct WetLayer`
 
+**Import:** `use teksilo_scene::WetLayer;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 A surface for content being authored **right now**, which repaints without
 taking the scene's item bands with it.
 
@@ -251,6 +253,8 @@ view (the overwhelmingly common case) that is the one tree there is.
 <a id="wetnode"></a>
 
 ## `pub struct WetNode`
+
+**Import:** `use teksilo_scene::WetNode;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 One of a `WetLayer`'s mounted paint nodes, as
 `WetLayer::nodes` reports it.

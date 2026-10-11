@@ -46,6 +46,8 @@ model.add_series("Revenue");
 
 ## `pub struct SeriesId`
 
+**Import:** `use teksilo::data::SeriesId;`
+
 Opaque identifier for a series in a `ChartModel`.
 
 `SeriesId` values are stable across mutations — inserting or removing
@@ -59,6 +61,8 @@ pub struct SeriesId(slotmap::DefaultKey);
 <a id="chartchange"></a>
 
 ## `pub enum ChartChange`
+
+**Import:** `use teksilo::data::ChartChange;`
 
 Describes a mutation to a chart's series or point data. Emitted by
 `ChartModel<T>` automatically.

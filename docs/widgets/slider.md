@@ -153,6 +153,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub const SLIDER_PART_BODY`
 
+**Import:** `use teksilo::widgets::slider::SLIDER_PART_BODY;`
+
 `Widget::target_regions` part id for the whole press surface — the track
 plus everything either side of it, which is what a tap or a drag acts on.
 
@@ -164,6 +166,8 @@ pub const SLIDER_PART_BODY: u16 = 0;
 
 ## `pub const SLIDER_PART_THUMB`
 
+**Import:** `use teksilo::widgets::slider::SLIDER_PART_THUMB;`
+
 `Widget::target_regions` part id for the knob.
 
 ```rust
@@ -173,6 +177,8 @@ pub const SLIDER_PART_THUMB: u16 = 1;
 <a id="slider"></a>
 
 ## `pub struct Slider`
+
+**Import:** `use teksilo::widgets::Slider;`
 
 A draggable value selector bound to a `Signal<f32>` in a continuous
 or discrete range. Visual chrome is fully delegated to a

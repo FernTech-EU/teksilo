@@ -86,6 +86,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum IconMode`
 
+**Import:** `use teksilo::widgets::primitives::icon_widget::IconMode;`
+
 Whether an icon is rendered as a theme-tinted mask or in its original colors.
 
 Applies to every source an `IconWidget` can hold — raster *and* SVG. For an
@@ -112,6 +114,8 @@ pub enum IconMode { /* variants */ }
 <a id="iconwidget"></a>
 
 ## `pub struct IconWidget`
+
+**Import:** `use teksilo::widgets::IconWidget;`
 
 A leaf widget that renders an icon from a path, SVG string, PNG, or WebP source.
 

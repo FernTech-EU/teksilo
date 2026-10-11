@@ -114,6 +114,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub const DEFAULT_SWATCHES`
 
+**Import:** `use teksilo::widgets::DEFAULT_SWATCHES;`
+
 Default 12-color preset palette (Int UI–flavored). Apps can use
 this verbatim or pass their own via `ColorPicker::swatches`.
 
@@ -124,6 +126,8 @@ pub const DEFAULT_SWATCHES: `Color;
 <a id="colorpicker"></a>
 
 ## `pub struct ColorPicker`
+
+**Import:** `use teksilo::widgets::ColorPicker;`
 
 Embeddable HSV+RGB+hex+alpha+swatches color picker.
 

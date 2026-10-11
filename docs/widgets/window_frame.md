@@ -94,6 +94,8 @@ so the list is now exhaustive and lint-guarded at its own impl.
 
 ## `pub struct WindowFrame`
 
+**Import:** `use teksilo::widgets::WindowFrame;`
+
 Invisible overlay of resize strips and corner cells that gives a borderless window
 draggable edges. The content child fills the full client area with no visible inset;
 the strips are hit-test-only overlays along the outer `thickness` pixels.
@@ -151,6 +153,8 @@ thickness — so a caller reading one field reads them all.
 <a id="window_frame_resize_thickness"></a>
 
 ## `pub const WINDOW_FRAME_RESIZE_THICKNESS`
+
+**Import:** `use teksilo::widgets::title_bar::WINDOW_FRAME_RESIZE_THICKNESS;`
 
 Logical-pixel thickness of each resize strip, and the frame's default.
 

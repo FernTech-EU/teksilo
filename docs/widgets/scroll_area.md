@@ -107,6 +107,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum ScrollBarMode`
 
+**Import:** `use teksilo::widgets::ScrollBarMode;`
+
 How the scroll bar is presented relative to the viewport content.
 
 ```rust
@@ -123,6 +125,8 @@ pub enum ScrollBarMode { /* variants */ }
 
 ## `pub enum ScrollBarPolicy`
 
+**Import:** `use teksilo::widgets::ScrollBarPolicy;`
+
 Controls when the scroll bar appears for a given axis.
 
 ```rust
@@ -138,6 +142,8 @@ pub enum ScrollBarPolicy { /* variants */ }
 <a id="scrollarea"></a>
 
 ## `pub struct ScrollArea`
+
+**Import:** `use teksilo::widgets::ScrollArea;`
 
 A clipping viewport that makes any child widget scrollable.
 

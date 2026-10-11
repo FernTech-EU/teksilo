@@ -72,6 +72,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct LanguageSwitcher`
 
+**Import:** `use teksilo::widgets::LanguageSwitcher;`
+
 A UI-language picker built on `ComboBox`. See the module docs.
 
 ```rust

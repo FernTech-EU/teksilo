@@ -205,6 +205,8 @@ signal gets the body focused too, with no dispatch of its own to do it in.
 
 ## `pub enum CardMode`
 
+**Import:** `use teksilo_scene::CardMode;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 What a `SceneCard` is doing.
 
 Three states rather than a `bool`, because `Selected` and `Editing` differ
@@ -236,6 +238,8 @@ does: a card being edited is the selected one.
 <a id="scenecard"></a>
 
 ## `pub struct SceneCard`
+
+**Import:** `use teksilo_scene::SceneCard;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 A heavyweight scene item's container: surface, header, body, modes,
 gestures and accessibility. See the `scene_card` module docs.

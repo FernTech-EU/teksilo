@@ -90,6 +90,8 @@ a service that no longer exists.
 
 ## `pub type SettingsReloadSink`
 
+**Import:** `use teksilo::settings::SettingsReloadSink;`
+
 Sink type invoked on the notify worker thread whenever a watched
 settings directory reports a create/modify event. Implementations
 must be thread-safe; `teksilo-app`'s implementation posts the path
@@ -104,6 +106,8 @@ pub type SettingsReloadSink = Arc<dyn Fn(PathBuf) + Send + Sync + 'static>;
 <a id="settingswatcher"></a>
 
 ## `pub struct SettingsWatcher`
+
+**Import:** `use teksilo::settings::SettingsWatcher;`
 
 Active directory watcher over one or more settings directories. One
 per `TeksiloAppBuilder::run` invocation (when a settings bundle with
@@ -141,6 +145,8 @@ files that matter.
 <a id="settingsregistry"></a>
 
 ## `pub struct SettingsRegistry`
+
+**Import:** `use teksilo::settings::SettingsRegistry;`
 
 Registry mapping a canonical settings path to the live `Reloadable`
 handle that owns it, so a file-watcher event naming that path can be

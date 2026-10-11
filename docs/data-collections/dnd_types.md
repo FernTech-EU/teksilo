@@ -58,6 +58,8 @@ fn can_accept(&self, query: &teksilo_data::DropQuery<'_, usize>) -> teksilo_data
 
 ## `pub trait ItemKey`
 
+**Import:** `use teksilo::data::ItemKey;`
+
 A stable, hashable identity for a row/node. Blanket-implemented for every
 `Clone + Eq + Hash + Debug + 'static` type, so `usize`, `NodeId`, `i64`,
 `String`, `Uuid`, … all qualify with no extra work.
@@ -73,6 +75,8 @@ pub trait ItemKey: Clone + Eq + std::hash::Hash + std::fmt::Debug + 'static { /*
 <a id="rowstate"></a>
 
 ## `pub enum RowState`
+
+**Import:** `use teksilo::data::RowState;`
 
 Whether a realized row's data is resident yet. A windowed/lazy source returns
 `Loading` for indices outside its resident window; the view renders a
@@ -91,6 +95,8 @@ pub enum RowState { /* variants */ }
 
 ## `pub enum DropPosition`
 
+**Import:** `use teksilo::data::DropPosition;`
+
 Where, relative to a target row, a drop lands. `Into` (reparent) is only
 meaningful for trees; flat lists reject it.
 
@@ -108,6 +114,8 @@ pub enum DropPosition { /* variants */ }
 
 ## `pub enum DragEligibility`
 
+**Import:** `use teksilo::data::DragEligibility;`
+
 Whether a row may begin a drag at all (the per-item transferable gate, Qt's
 `Qt::ItemIsDragEnabled` / `TabBar`'s `with_transferable_predicate`).
 
@@ -123,6 +131,8 @@ pub enum DragEligibility { /* variants */ }
 <a id="dragsource"></a>
 
 ## `pub enum DragSource`
+
+**Import:** `use teksilo::data::DragSource;`
 
 Who is dragging, from the receiving source's point of view.
 
@@ -146,6 +156,8 @@ pub enum DragSource<'a, K> { /* variants */ }
 
 ## `pub struct DropQuery`
 
+**Import:** `use teksilo::data::DropQuery;`
+
 A hover-time question posed to a source: "may `source` drop at `position`
 relative to `target`?" The source answers with a `DropResponse`.
 
@@ -163,6 +175,8 @@ pub struct DropQuery<'a, K> { /* fields */ }
 
 ## `pub enum DropResponse`
 
+**Import:** `use teksilo::data::DropResponse;`
+
 A source's verdict on a `DropQuery`. Drives the hover affordance and gates
 the commit.
 
@@ -179,6 +193,8 @@ pub enum DropResponse { /* variants */ }
 <a id="dropcommit"></a>
 
 ## `pub struct DropCommit`
+
+**Import:** `use teksilo::data::DropCommit;`
 
 A drop the user actually committed, handed to `accept_drop` to apply.
 

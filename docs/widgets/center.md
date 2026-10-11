@@ -70,6 +70,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Center`
 
+**Import:** `use teksilo::widgets::Center;`
+
 Centers a single child within the space this widget is **given**.
 
 Sizing follows the incoming constraint, per axis: `Center` **fills a

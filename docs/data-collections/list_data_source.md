@@ -75,6 +75,8 @@ assert_eq!(_first, Some("alpha"));
 
 ## `pub trait ListDataSource`
 
+**Import:** `use teksilo::data::ListDataSource;`
+
 A data source for a flat collection viewed by `ListView`, `TableView`, and `GridView`.
 
 The trait separates the read interface (`len`, `with_item`) from the capability

@@ -59,6 +59,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct HStack`
 
+**Import:** `use teksilo::widgets::HStack;`
+
 Horizontal layout container that distributes children left-to-right.
 
 Cross-axis (vertical) alignment defaults to `VAlignment::Center` and may be

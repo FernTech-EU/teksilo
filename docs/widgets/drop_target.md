@@ -197,6 +197,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub fn band_depth(...)`
 
+**Import:** `use teksilo::widgets::drop_target::band_depth;`
+
 The depth of one edge band along the axis it is measured on: the caller's
 fraction of the extent, raised to `floor` when that fraction does not reach
 it.
@@ -226,6 +228,8 @@ pub fn band_depth(extent: f32, factor: f32, floor: f32) -> f32;
 
 ## `pub fn region_at_floored(...)`
 
+**Import:** `use teksilo::widgets::drop_target::region_at_floored;`
+
 `region_at` with `band_depth`'s floor
 applied per axis.
 
@@ -247,6 +251,8 @@ pub fn region_at_floored(
 
 ## `pub fn region_rect_floored(...)`
 
+**Import:** `use teksilo::widgets::drop_target::region_rect_floored;`
+
 `region_rect` with `band_depth`'s
 floor applied per axis — the paint side of `region_at_floored`, so the
 zone a user sees stays the zone that drops.
@@ -258,6 +264,8 @@ pub fn region_rect_floored(region: DropRegion, bounds: Rect, factor: f32, floor:
 <a id="dropregionspec"></a>
 
 ## `pub struct DropRegionSpec`
+
+**Import:** `use teksilo::widgets::DropRegionSpec;`
 
 Per-region configuration for a multi-zone `DropTarget`: an optional hint
 plus a reactive enabled flag. Kept as a struct so more per-zone knobs can
@@ -296,6 +304,8 @@ tick, so a `.set(false)` mid-drag takes effect on the next hover.
 <a id="droptarget"></a>
 
 ## `pub struct DropTarget`
+
+**Import:** `use teksilo::widgets::DropTarget;`
 
 A transparent container that turns its child into a drop target. See the
 module docs.

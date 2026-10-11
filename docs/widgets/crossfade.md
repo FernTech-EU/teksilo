@@ -57,6 +57,8 @@ instead of tweening (instant swap).
 
 ## `pub struct Crossfade`
 
+**Import:** `use teksilo::widgets::Crossfade;`
+
 Animated swap between widgets keyed by an external signal.
 
 ```rust

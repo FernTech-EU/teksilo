@@ -45,6 +45,8 @@ handed to the legacy delegate — lives in `tree_view.rs`, not here.
 
 ## `pub struct TreeRowMeta`
 
+**Import:** `use teksilo::widgets::TreeRowMeta;`
+
 Key-erased per-row flat metadata, derived from the source's `FlatEntry`.
 
 ```rust
@@ -60,6 +62,8 @@ pub struct TreeRowMeta { /* fields */ }
 <a id="treerow"></a>
 
 ## `pub struct TreeRow`
+
+**Import:** `use teksilo::widgets::TreeRow;`
 
 Per-row context handed to a `TreeView::from_source`
 delegate — the key-erased counterpart of the built-in

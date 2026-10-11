@@ -53,6 +53,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct GroupHeader`
 
+**Import:** `use teksilo::widgets::GroupHeader;`
+
 A labelled section header with a trailing rule line.
 
 ```rust

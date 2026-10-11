@@ -100,6 +100,8 @@ relations, which `remove` retains on either endpoint.
 
 ## `pub struct ItemA11yDecorations`
 
+**Import:** `use teksilo_scene::ItemA11yDecorations;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 The per-item slice of the **logical accessibility tree**, harvested by
 `Scene::take` and re-attached by
 `Scene::restore`.
@@ -134,6 +136,8 @@ of an undecorated item touches none of the scene's AT maps.
 <a id="removeditem"></a>
 
 ## `pub struct RemovedItem`
+
+**Import:** `use teksilo_scene::RemovedItem;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 One item lifted whole out of a `Scene`: its entry, its
 magnets and its logical-AT decorations, still owned and still carrying its
@@ -316,6 +320,8 @@ a restore, so a consumer keying connections on
 
 ## `pub enum RestoreError`
 
+**Import:** `use teksilo_scene::RestoreError;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Why `Scene::restore` could not put a salvage back.
 
 `#[non_exhaustive]`: this crate has out-of-tree consumers and the restore
@@ -333,6 +339,8 @@ pub enum RestoreError { /* variants */ }
 <a id="replacerejected"></a>
 
 ## `pub struct ReplaceRejected`
+
+**Import:** `use teksilo_scene::ReplaceRejected;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 A refused `Scene::replace_item`: why, and the
 item it did not take.
@@ -359,6 +367,8 @@ pub struct ReplaceRejected { /* fields */ }
 <a id="replaceitemerror"></a>
 
 ## `pub enum ReplaceItemError`
+
+**Import:** `use teksilo_scene::ReplaceItemError;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Why `Scene::replace_item` could not swap an
 item box. Travels inside a `ReplaceRejected`, which also carries the item.

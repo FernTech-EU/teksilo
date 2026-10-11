@@ -155,6 +155,8 @@ assert_eq!(adapter.len(), 3);
 
 ## `pub struct SceneListAdapter`
 
+**Import:** `use teksilo_scene::SceneListAdapter;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Keeps a set of lightweight `SceneItem`s in sync with a
 `teksilo_data::ListModel<T>` / `ListDataSource<Item = T>`.
 

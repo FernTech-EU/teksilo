@@ -115,6 +115,8 @@ surface's own boundary. See `docs/kinetic-scrolling.md` §10.1.
 
 ## `pub struct CodeEditor`
 
+**Import:** `use teksilo::widgets::CodeEditor;`
+
 A multi-line source-code editing surface: gutter, current-line highlight,
 indentation, bracket handling, and multiple carets.
 
@@ -390,6 +392,8 @@ A cloneable handle to drive the editor from a toolbar, shortcut, or test.
 <a id="plaintexteditor"></a>
 
 ## `pub struct PlainTextEditor`
+
+**Import:** `use teksilo::widgets::PlainTextEditor;`
 
 A multi-line plain-text editing surface — the code editor with its code
 affordances off and wrapping on. A notes field, a commit message, a

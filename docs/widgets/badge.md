@@ -81,6 +81,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Badge`
 
+**Import:** `use teksilo::widgets::Badge;`
+
 A pill-shaped label for displaying tags, counts, or status.
 
 ```rust

@@ -100,6 +100,8 @@ let log = NotificationLog::new(archive.clone());
 
 ## `pub struct NotificationEntry`
 
+**Import:** `use teksilo::prelude::NotificationEntry;` — in `teksilo::prelude::*`.
+
 A single archived notification entry rendered by `NotificationLog` and
 persisted under `NotificationArchive::Persistent`. Carries plain owned
 fields only — no closures, no `Rc<dyn Fn>` — so it is `Serialize`-friendly.
@@ -128,6 +130,8 @@ pub struct NotificationEntry { /* fields */ }
 
 ## `pub struct NotificationUpdate`
 
+**Import:** `use teksilo::widgets::NotificationUpdate;`
+
 One in-place mutation applied when a `Toast` with the same `id` as an
 existing entry is presented again. The archive merges these onto the
 existing row — the "Uploading 3 of 7 → Upload complete" pattern.
@@ -146,6 +150,8 @@ pub struct NotificationUpdate { /* fields */ }
 <a id="archivedactionstyle"></a>
 
 ## `pub enum ArchivedActionStyle`
+
+**Import:** `use teksilo::widgets::ArchivedActionStyle;`
 
 Visual presentation of an archived action button. Maps one-to-one to
 `ToastActionStyle`; re-declared as a self-contained `Serialize`-friendly
@@ -166,6 +172,8 @@ pub enum ArchivedActionStyle { /* variants */ }
 
 ## `pub struct ArchivedAction`
 
+**Import:** `use teksilo::widgets::ArchivedAction;`
+
 A single action stored alongside an archived notification entry. Only
 re-invokable from `NotificationLog` when `intent_name` is set — actions
 whose live closure has torn down render as inert descriptive labels.
@@ -185,6 +193,8 @@ pub struct ArchivedAction { /* fields */ }
 
 ## `pub const DEFAULT_ARCHIVE_LIMIT`
 
+**Import:** none — `DEFAULT_ARCHIVE_LIMIT` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Default per-archive entry cap. IntelliJ's notification log keeps
 hundreds of entries with no cap visible to the user; we pick a
 pragmatic limit so persistent files don't grow unbounded.
@@ -197,6 +207,8 @@ pub const DEFAULT_ARCHIVE_LIMIT: usize = 200;
 
 ## `pub const ARCHIVE_FILE_NAME`
 
+**Import:** none — `ARCHIVE_FILE_NAME` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 File-name (without extension) used for the persistent archive.
 Resolved through `AppPaths::config_file` into
 `<config_dir>/<app>/notifications.toml`.
@@ -208,6 +220,8 @@ pub const ARCHIVE_FILE_NAME: &str = "notifications";
 <a id="update_history_limit"></a>
 
 ## `pub const UPDATE_HISTORY_LIMIT`
+
+**Import:** none — `UPDATE_HISTORY_LIMIT` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 How many `NotificationUpdate`
 records one row keeps. A progress notice that reports each step in its
@@ -223,6 +237,8 @@ pub const UPDATE_HISTORY_LIMIT: usize = 20;
 <a id="notificationarchive"></a>
 
 ## `pub enum NotificationArchive`
+
+**Import:** none — `NotificationArchive` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Storage mode for the notification archive. Passed inside
 `ToastInstallOptions::archive` to the install helper.
@@ -271,6 +287,8 @@ name and use `AppPaths::for_testing(tmpdir)`.
 <a id="notificationarchivemodel"></a>
 
 ## `pub struct NotificationArchiveModel`
+
+**Import:** none — `NotificationArchiveModel` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Shared model — clones share state. Constructed by the install
 helper from `NotificationArchive` + `AppPaths`; apps reach it
@@ -454,6 +472,8 @@ moment of removal, so it always removes the entry the caller meant.
 <a id="notificationlogdialog"></a>
 
 ## `pub struct NotificationLogDialog`
+
+**Import:** none — `NotificationLogDialog` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 One-liner modal preset around `NotificationLog`. Apps usually
 wire this to a menu item or shortcut (e.g. "Window → Notification

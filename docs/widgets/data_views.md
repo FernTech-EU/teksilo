@@ -64,6 +64,8 @@ the lazy placeholder are wired one way everywhere:
 
 ## `pub enum ActivateOn`
 
+**Import:** `use teksilo::widgets::ActivateOn;`
+
 How a data-view row/tile is *activated* (opened/committed) by pointer —
 distinct from *selection*, which also moves on arrow-key navigation. Mirrors
 the platform split other toolkits expose (Qt
@@ -85,6 +87,8 @@ pub enum ActivateOn { /* variants */ }
 
 ## `pub struct ViewId`
 
+**Import:** `use teksilo::widgets::ViewId;`
+
 Opaque, kind-tagged, process-unique identity of a drag-capable data-view
 instance. Used to tell a view's OWN reorder (`SameView`) from a foreign drop
 on the receive side. Apps only ever compare two `ViewId`s for equality (e.g.
@@ -99,6 +103,8 @@ pub struct ViewId(ViewKind, usize);
 <a id="dragtransfermode"></a>
 
 ## `pub enum DragTransferMode`
+
+**Import:** `use teksilo::widgets::DragTransferMode;`
 
 What the *origin* view does to its own rows once a drag is accepted by a
 **foreign** target (a different `DropTarget` / view / the OS). Purely an
@@ -117,6 +123,8 @@ pub enum DragTransferMode { /* variants */ }
 <a id="rowdragdata"></a>
 
 ## `pub struct RowDragData`
+
+**Import:** `use teksilo::widgets::RowDragData;`
 
 The public, generic drag payload every data-view row (or selected set)
 emits. It occupies the single typed slot of a
@@ -181,6 +189,8 @@ Whether no rows are carried (never true for a real drag).
 <a id="rowanchor"></a>
 
 ## `pub struct RowAnchor`
+
+**Import:** none — `RowAnchor` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Active drag-drop feedback a tree data view paints itself: a between-rows
 insertion line (Before/After) or a highlighted row (an into-container drop).

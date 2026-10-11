@@ -69,6 +69,8 @@ assert!(!model.is_checked(1));
 
 ## `pub struct CheckedModel`
 
+**Import:** `use teksilo::data::CheckedModel;`
+
 Per-row checkbox state for a flat list, with a reactive aggregate checked-set.
 
 ```rust

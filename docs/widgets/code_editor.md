@@ -129,6 +129,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct CodeEditorHandle`
 
+**Import:** `use teksilo::widgets::CodeEditorHandle;`
+
 A handle onto a live editor, cloneable and detachable from the widget.
 
 The `EditorHandle` pattern: an app keeps one to drive the editor from a
@@ -242,6 +244,8 @@ Bumps on every content or format change.
 
 ## `pub struct CompletionItem`
 
+**Import:** none — `CompletionItem` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 A completion candidate. Build with `CompletionItem::new` and the fluent
 setters; `insert_text` defaults to `label`.
 
@@ -286,6 +290,8 @@ The leading badge category.
 
 ## `pub enum CompletionKind`
 
+**Import:** none — `CompletionKind` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 The category of a completion candidate — drives a small leading badge only.
 Deliberately a fixed, language-neutral set: the editor renders a glyph, the
 application decides which candidate is which kind.
@@ -311,6 +317,8 @@ pub enum CompletionKind { /* variants */ }
 
 ## `pub struct CompletionContext`
 
+**Import:** none — `CompletionContext` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 What a completion provider is told about the caret when asked for candidates.
 
 ```rust
@@ -327,6 +335,8 @@ pub struct CompletionContext<'a> { /* fields */ }
 <a id="indentstyle"></a>
 
 ## `pub enum IndentStyle`
+
+**Import:** none — `IndentStyle` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 How a line's leading indentation is written.
 
@@ -358,6 +368,8 @@ spaces to know how many to strip on dedent, tabs to render the stop.
 
 ## `pub struct BracketPair`
 
+**Import:** none — `BracketPair` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 A pair of characters the editor treats as opening and closing delimiters.
 
 Used for auto-closing and for match highlighting. The application declares
@@ -384,6 +396,8 @@ pub struct BracketPair { /* fields */ }
 
 ## `pub const COMMON_BRACKETS`
 
+**Import:** none — `COMMON_BRACKETS` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 The three pairs that are structural in essentially every bracketed
 language. A convenience starting point, not a default — an editor with no
 configured pairs simply does no bracket handling, which is correct for
@@ -400,6 +414,8 @@ pub const COMMON_BRACKETS: &[BracketPair] = &[
 <a id="codeconfig"></a>
 
 ## `pub struct CodeConfig`
+
+**Import:** none — `CodeConfig` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Editing behaviour the code editor applies, all supplied by the application.
 

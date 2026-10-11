@@ -71,6 +71,8 @@ hover on any platform and loses nothing by it.
 
 ## `pub struct WindowControlsLayout`
 
+**Import:** `use teksilo::widgets::title_bar::WindowControlsLayout;`
+
 Layout snapshot that `WindowControls` exports to its parent `TitleBar`
 so the `after_paint` aggregator can read the per-button `WidgetId`s.
 Populated during `WindowControls::build`.
@@ -97,6 +99,8 @@ pub struct WindowControlsLayout { /* fields */ }
 
 ## `pub type ControlAction`
 
+**Import:** `use teksilo::widgets::title_bar::ControlAction;`
+
 Action invoked when a `ControlButton` is tapped.
 
 ```rust
@@ -106,6 +110,8 @@ pub type ControlAction = Rc<dyn Fn(&mut EventContext)>;
 <a id="controlbutton"></a>
 
 ## `pub struct ControlButton`
+
+**Import:** `use teksilo::widgets::title_bar::ControlButton;`
 
 A compact, flush-fitting window-control button.
 
@@ -148,6 +154,8 @@ Register the callback invoked when the user taps this button.
 <a id="windowcontrols"></a>
 
 ## `pub struct WindowControls`
+
+**Import:** `use teksilo::widgets::WindowControls;`
 
 The minimize / maximize / close cluster, laid out as an HStack of
 `ControlButton`s. Each cell drives the window directly through

@@ -46,6 +46,8 @@ built it.
 
 ## `pub struct ToastSurfaceData`
 
+**Import:** `use teksilo::widgets::toast::surface::ToastSurfaceData;`
+
 Snapshot data passed to a `ToastSurface` for one live entry. Owned
 by the host's `LiveEntry` and cloned into the surface at build
 time. `Rc<...>` fields keep callbacks cheap to copy.
@@ -71,6 +73,8 @@ pub struct ToastSurfaceData { /* fields */ }
 <a id="toastsurface"></a>
 
 ## `pub struct ToastSurface`
+
+**Import:** `use teksilo::widgets::ToastSurface;`
 
 One rendered toast — chrome owned by `ToastStyle::make_body`,
 functional pieces (glyph, body, action row, close button) owned

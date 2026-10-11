@@ -81,6 +81,8 @@ assert_eq!(model.len(), 2);
 
 ## `pub struct ListModel`
 
+**Import:** `use teksilo::data::ListModel;`
+
 A concrete reactive list that stores items in a `Vec<T>`.
 
 `ListModel<T>` is `Clone` — cloning produces a second handle to the same

@@ -197,6 +197,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum MessageBoxSeverity`
 
+**Import:** `use teksilo::widgets::MessageBoxSeverity;`
+
 Alert severity level. Drives the icon glyph + tint shown beside the
 title, and (for `Critical`) whether click-outside dismiss is enabled.
 
@@ -215,6 +217,8 @@ pub enum MessageBoxSeverity { /* variants */ }
 <a id="buttonrole"></a>
 
 ## `pub enum ButtonRole`
+
+**Import:** `use teksilo::widgets::ButtonRole;`
 
 Semantic role of a message-box button. Used for fallback escape
 resolution (`Reject` wins when no explicit escape button is set).
@@ -236,6 +240,8 @@ pub enum ButtonRole { /* variants */ }
 <a id="standardbutton"></a>
 
 ## `pub enum StandardButton`
+
+**Import:** `use teksilo::widgets::StandardButton;`
 
 The Qt-modeled catalog of standard buttons. Each variant resolves
 to a localized label, a semantic `ButtonRole`, and a stable
@@ -296,6 +302,8 @@ catalog via `tr_widget!` so apps can override per-locale.
 
 ## `pub struct MessageBoxButton`
 
+**Import:** `use teksilo::widgets::MessageBoxButton;`
+
 A single button placement inside a MessageBox, including an optional
 per-instance label override. Callers usually build these via
 `From<StandardButton>` (`StandardButton::Ok.into()`), or
@@ -328,6 +336,8 @@ Override the default translated label.
 
 ## `pub enum MessageBoxButtons`
 
+**Import:** `use teksilo::widgets::MessageBoxButtons;`
+
 Pre-built button bundles covering the common MessageBox shapes.
 Custom combinations go through `MessageBox::add_button` or
 `MessageBoxButtons::Custom`.
@@ -349,6 +359,8 @@ pub enum MessageBoxButtons { /* variants */ }
 <a id="messageboxdismissal"></a>
 
 ## `pub enum MessageBoxDismissal`
+
+**Import:** `use teksilo::widgets::MessageBoxDismissal;`
 
 How a `MessageBox` came to close.
 
@@ -374,6 +386,8 @@ pub enum MessageBoxDismissal { /* variants */ }
 <a id="messageboxresult"></a>
 
 ## `pub struct MessageBoxResult`
+
+**Import:** `use teksilo::widgets::MessageBoxResult;`
 
 Report passed to `MessageBox::on_result` when the dialog closes.
 
@@ -401,6 +415,8 @@ the claim that Escape was the only way to get there.
 <a id="messagebox"></a>
 
 ## `pub struct MessageBox`
+
+**Import:** `use teksilo::widgets::MessageBox;`
 
 A modal alert dialog that displays a severity icon, title, body text, and
 one or more buttons.
@@ -551,6 +567,8 @@ dialogs with shared config should build a factory closure.
 <a id="eventcontextmessageboxext"></a>
 
 ## `pub trait EventContextMessageBoxExt`
+
+**Import:** `use teksilo::widgets::EventContextMessageBoxExt;`
 
 Extension trait on `EventContext` for ergonomic MessageBox
 presentation. Mirrors `ctx.present_modal(...)` for the general

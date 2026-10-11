@@ -56,6 +56,8 @@ error text) when error state must be communicated.
 
 ## `pub struct Shake`
 
+**Import:** `use teksilo::widgets::Shake;`
+
 Wraps a child and plays a damped horizontal-oscillation shake
 each time the trigger signal value changes.
 

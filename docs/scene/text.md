@@ -100,6 +100,8 @@ model.add_item(item, Point::new(40.0, 40.0));
 
 ## `pub enum TextAlign`
 
+**Import:** `use teksilo_scene::TextAlign;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Horizontal alignment of a `TextItem` within its `local_bounds`.
 
 Alignment shifts the text's draw origin by the leftover width
@@ -119,6 +121,8 @@ pub enum TextAlign { /* variants */ }
 <a id="textitem"></a>
 
 ## `pub struct TextItem`
+
+**Import:** `use teksilo_scene::TextItem;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Text in a local-coord rectangle, with optional alignment and rotation.
 

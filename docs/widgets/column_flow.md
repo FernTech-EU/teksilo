@@ -105,6 +105,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct ColumnFlow`
 
+**Import:** `use teksilo::widgets::ColumnFlow;`
+
 A layout that flows its children into as many columns as the available
 width affords, re-partitioning every child when a column is gained or lost.
 

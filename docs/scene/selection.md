@@ -69,6 +69,8 @@ let stroke_color = selected.map(move |s| {
 
 ## `pub enum SceneSelectionMode`
 
+**Import:** `use teksilo_scene::SceneSelectionMode;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Selection-mode discriminator. Mirrors `teksilo_data::SelectionMode`.
 
 ```rust
@@ -84,6 +86,8 @@ pub enum SceneSelectionMode { /* variants */ }
 <a id="sceneselection"></a>
 
 ## `pub struct SceneSelection`
+
+**Import:** `use teksilo_scene::SceneSelection;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Reactive selection state for a `Scene`.
 

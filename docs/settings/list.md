@@ -113,6 +113,8 @@ plm.flush_now().expect("flush");
 
 ## `pub trait Keyed`
 
+**Import:** `use teksilo::settings::Keyed;`
+
 An item with a stable, owned identity — the merge key
 `PersistedListModel` dedupes and diffs by.
 
@@ -145,6 +147,8 @@ sidesteps borrow-lifetime issues entirely.
 
 ## `pub enum ListOp`
 
+**Import:** `use teksilo::settings::ListOp;`
+
 A replayable mutation of a `PersistedListModel`'s backing list,
 expressed **by key** so it can be applied to *any* starting `Vec<T>` —
 in particular, the fresh one read off disk at flush time, which may
@@ -165,6 +169,8 @@ pub enum ListOp<T: Keyed> { /* variants */ }
 
 ## `pub struct ListFile`
 
+**Import:** `use teksilo::settings::ListFile;`
+
 On-disk shape for a persisted list: a versioned wrapper around
 `Vec<T>`. Apps write migrations against this type, not the bare `Vec`.
 
@@ -180,6 +186,8 @@ pub struct ListFile<T> { /* fields */ }
 <a id="persistedlistmodel"></a>
 
 ## `pub struct PersistedListModel`
+
+**Import:** `use teksilo::settings::PersistedListModel;`
 
 A reactive, `Keyed`-item list whose mutations persist to a single
 TOML file by merging **ops**, not by overwriting a whole-document

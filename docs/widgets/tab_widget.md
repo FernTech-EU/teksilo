@@ -222,6 +222,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub type StaticContentFactory`
 
+**Import:** `use teksilo::widgets::StaticContentFactory;`
+
 Closure that builds a static tab's content widget. Called once
 per static tab — on the `TabWidget`'s first build that includes
 it. The resulting pane is then memoized: rebuilds caused by
@@ -235,6 +237,8 @@ pub type StaticContentFactory = Rc<dyn Fn(&TabHandle) -> Box<dyn Widget>>;
 <a id="tabwidget"></a>
 
 ## `pub struct TabWidget`
+
+**Import:** `use teksilo::widgets::TabWidget;`
 
 All-in-one tabbed container. Builds a `TabBar` above a
 `Switcher` of content panes, sharing one selection signal.
@@ -716,6 +720,8 @@ tab and overflow button). Memoized like
 
 ## `pub enum TabBarVisibility`
 
+**Import:** `use teksilo::widgets::TabBarVisibility;`
+
 Controls whether a `TabWidget`'s tab strip is shown.
 
 The default is `Always` — fully
@@ -740,6 +746,8 @@ pub enum TabBarVisibility { /* variants */ }
 
 ## `pub type ContextMenuFactory`
 
+**Import:** none — `ContextMenuFactory` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 A reusable widget factory the framework calls every time a context
 menu opens. Returns a fresh widget instance each call (the
 framework can't reuse a single widget across multiple openings).
@@ -759,6 +767,8 @@ pub type ContextMenuFactory = Rc<dyn Fn(Point, &mut EventContext) -> Option<Box<
 
 ## `pub enum TabBarOrientation`
 
+**Import:** none — `TabBarOrientation` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Bar orientation. Selects between a horizontal row of tabs (default
 for browser-style document tabs) and a vertical column of pills
 (sidebar / IDE perspective convention).
@@ -775,6 +785,8 @@ pub enum TabBarOrientation { /* variants */ }
 <a id="tabsizing"></a>
 
 ## `pub enum TabSizing`
+
+**Import:** none — `TabSizing` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 How wide each tab is: shared across all unpinned tabs, chosen
 per-tab from content, or stretched to fill the bar.
@@ -802,6 +814,8 @@ pub enum TabSizing { /* variants */ }
 
 ## `pub enum TabDisplayMode`
 
+**Import:** none — `TabDisplayMode` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Bar-level control over what each tab shows — its icon, its label, or both.
 
 Each tab still declares both a title and (optionally) an icon; this mode
@@ -825,6 +839,8 @@ pub enum TabDisplayMode { /* variants */ }
 
 ## `pub enum TabOverflowButton`
 
+**Import:** none — `TabOverflowButton` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 When the trailing "show all tabs" overflow dropdown button appears.
 
 The dropdown is a chevron-down `PopoverIconButton` whose popover lists every
@@ -845,6 +861,8 @@ pub enum TabOverflowButton { /* variants */ }
 <a id="tabdelegate"></a>
 
 ## `pub struct TabDelegate`
+
+**Import:** none — `TabDelegate` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Resolves per-tab UI from a model item.
 
@@ -959,6 +977,8 @@ can carry per-tab dynamic state.
 
 ## `pub const STATIC_KIND`
 
+**Import:** none — `STATIC_KIND` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Sentinel `kind` reserved for static tabs accumulated via
 `TabWidget::static_tab`.
 Application-level `kind` strings must not collide with this
@@ -973,6 +993,8 @@ pub const STATIC_KIND: &str = "__static__";
 <a id="tabhandle"></a>
 
 ## `pub struct TabHandle`
+
+**Import:** none — `TabHandle` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 One tab's identity, presentation, and state pointer.
 
@@ -1017,6 +1039,8 @@ handles share the same underlying state object.
 
 ## `pub struct TabId`
 
+**Import:** none — `TabId` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Stable identity of a tab. Cheap to copy; persists across model
 reorders, rebuilds, and reorders triggered by drag-and-drop.
 
@@ -1055,6 +1079,8 @@ across sessions: serialize this, restore via `from_raw`.
 
 ## `pub type IconFactory`
 
+**Import:** none — `IconFactory` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Reusable factory for an `IconWidget`. Boxed in `Rc` so
 `TabInfo` is `Clone` without forcing `IconWidget: Clone`.
 
@@ -1065,6 +1091,8 @@ pub type IconFactory = Rc<dyn Fn() -> IconWidget>;
 <a id="tabinfo"></a>
 
 ## `pub struct TabInfo`
+
+**Import:** none — `TabInfo` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Per-tab presentation metadata. Build with `TabInfo::new` and
 fluent setters.

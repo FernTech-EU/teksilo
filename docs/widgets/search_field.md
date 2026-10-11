@@ -100,6 +100,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct SearchField`
 
+**Import:** `use teksilo::widgets::SearchField;`
+
 A search input with optional inline suggestions popup.
 
 ```rust

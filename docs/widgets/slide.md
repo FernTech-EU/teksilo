@@ -76,6 +76,8 @@ or out of position instead of tweening.
 
 ## `pub enum SlideEdge`
 
+**Import:** `use teksilo::widgets::SlideEdge;`
+
 Which edge the child slides in from / out to.
 
 `Leading` and `Trailing` honour layout direction (RTL flips them);
@@ -95,6 +97,8 @@ pub enum SlideEdge { /* variants */ }
 <a id="slide"></a>
 
 ## `pub struct Slide`
+
+**Import:** `use teksilo::widgets::Slide;`
 
 Wraps a child widget and translates it in or out from one edge of
 its slot whenever `visible` flips.

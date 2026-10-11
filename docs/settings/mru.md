@@ -116,6 +116,8 @@ assert_eq!(recents.model().len(), 1);
 
 ## `pub trait MruEntry`
 
+**Import:** `use teksilo::prelude::MruEntry;` — in `teksilo::prelude::*`.
+
 An item that can live in an `MruList`. Requires `Keyed` for its
 stable merge identity; adds the pin / touch vocabulary an MRU list
 specifically needs on top.
@@ -150,6 +152,8 @@ timestamp update it here. Default: no-op.
 <a id="mrulist"></a>
 
 ## `pub struct MruList`
+
+**Import:** `use teksilo::prelude::MruList;` — in `teksilo::prelude::*`.
 
 A persisted MRU list backed by `PersistedListModel<T>`.
 

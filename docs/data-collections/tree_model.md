@@ -77,6 +77,8 @@ assert_eq!(tree.root_count(), 2); // both handles share the same data
 
 ## `pub struct TreeModel`
 
+**Import:** `use teksilo::data::TreeModel;`
+
 A concrete reactive tree that stores a hierarchy of `T` items in a flat arena.
 
 `TreeModel<T>` is `Clone` — cloning produces a second handle to the same

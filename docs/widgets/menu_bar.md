@@ -99,6 +99,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum CollapsePolicy`
 
+**Import:** `use teksilo::widgets::CollapsePolicy;`
+
 Controls when a collapsible `MenuBar` switches from the full inline bar
 to the hamburger `IconButton` representation.
 
@@ -114,6 +116,8 @@ pub enum CollapsePolicy { /* variants */ }
 <a id="menubar"></a>
 
 ## `pub struct MenuBar`
+
+**Import:** `use teksilo::widgets::MenuBar;`
 
 A horizontal application menu bar with labelled trigger buttons and dropdown menus.
 

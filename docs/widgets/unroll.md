@@ -75,6 +75,8 @@ let _w = Unroll::new(expanded)
 
 ## `pub enum UnrollFrom`
 
+**Import:** `use teksilo::widgets::UnrollFrom;`
+
 Which edge stays anchored as the child unrolls.
 
 ```rust
@@ -89,6 +91,8 @@ pub enum UnrollFrom { /* variants */ }
 <a id="unroll"></a>
 
 ## `pub struct Unroll`
+
+**Import:** `use teksilo::widgets::Unroll;`
 
 Wraps a child widget and reveals or hides it along the horizontal
 axis by animating the wrapper's reported width between zero and the

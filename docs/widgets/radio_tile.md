@@ -110,6 +110,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum RadioTileIndicatorSide`
 
+**Import:** `use teksilo::widgets::RadioTileIndicatorSide;`
+
 Which side of the top row the radio indicator sits on. Defaults to
 `Trailing` (top-right in LTR), matching the reference design.
 
@@ -125,6 +127,8 @@ pub enum RadioTileIndicatorSide { /* variants */ }
 <a id="radiotile"></a>
 
 ## `pub struct RadioTile`
+
+**Import:** `use teksilo::widgets::RadioTile;`
 
 A single selectable-card radio option. See the `module docs`.
 

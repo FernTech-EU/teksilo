@@ -368,6 +368,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum ScrollPolicy`
 
+**Import:** `use teksilo::widgets::rich_text::ScrollPolicy;`
+
 Scroll bar visibility policy for `RichTextEditor`, applied independently per axis.
 
 ```rust
@@ -383,6 +385,8 @@ pub enum ScrollPolicy { /* variants */ }
 <a id="editsource"></a>
 
 ## `pub enum EditSource`
+
+**Import:** `use teksilo::widgets::rich_text::EditSource;`
 
 How a piece of text reached the document — the **channel**, not the author.
 
@@ -413,6 +417,8 @@ pub enum EditSource { /* variants */ }
 <a id="richtexteditor"></a>
 
 ## `pub struct RichTextEditor`
+
+**Import:** `use teksilo::widgets::rich_text::RichTextEditor;`
 
 ```rust
 pub struct RichTextEditor { /* fields */ }
@@ -1918,6 +1924,8 @@ image. The callback receives the activation (see
 
 ## `pub struct EditorHandle`
 
+**Import:** `use teksilo::widgets::rich_text::EditorHandle;`
+
 A clone-able, `'static` handle to a `RichTextEditor`'s shared
 state.
 
@@ -2979,6 +2987,8 @@ Reactive redo-availability signal.
 
 ## `pub struct WeakEditorHandle`
 
+**Import:** `use teksilo::widgets::rich_text::WeakEditorHandle;`
+
 An `EditorHandle` that does not keep its editor alive.
 
 **For a callback the editor itself stores.** `on_image_activated`,
@@ -3025,6 +3035,8 @@ The handle, if its editor is still alive.
 
 ## `pub struct ImageActivation`
 
+**Import:** `use teksilo::widgets::rich_text::ImageActivation;`
+
 An inline image the user clicked.
 
 Carries the offset as well as the name because a document may hold the same
@@ -3045,6 +3057,8 @@ pub struct ImageActivation { /* fields */ }
 <a id="editortextdrag"></a>
 
 ## `pub struct EditorTextDrag`
+
+**Import:** `use teksilo::widgets::rich_text::EditorTextDrag;`
 
 Rich text being dragged out of an editor.
 
@@ -3072,6 +3086,8 @@ pub struct EditorTextDrag { /* fields */ }
 <a id="imageresize"></a>
 
 ## `pub struct ImageResize`
+
+**Import:** `use teksilo::widgets::rich_text::ImageResize;`
 
 A resize the reader finished dragging.
 

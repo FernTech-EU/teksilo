@@ -65,6 +65,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Spinner`
 
+**Import:** `use teksilo::widgets::Spinner;`
+
 A circular-arc loading indicator driven by a GPU shader quad.
 
 Decorative — pair with `.label` to give screen readers

@@ -136,6 +136,8 @@ assert!(model.local_pos(item_id).is_some());
 
 ## `pub const DEFAULT_RETENTION_MARGIN`
 
+**Import:** `use teksilo_scene::DEFAULT_RETENTION_MARGIN;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Default `SceneView::retention_margin`, in screen pixels.
 
 96 px is what a very fast fling covers in one frame at 120 Hz
@@ -150,6 +152,8 @@ pub const DEFAULT_RETENTION_MARGIN: f32 = 96.0;
 <a id="debugoverlay"></a>
 
 ## `pub struct DebugOverlay`
+
+**Import:** `use teksilo_scene::DebugOverlay;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Visual debug overlays painted on top of normal scene rendering.
 
@@ -199,6 +203,8 @@ Whether at least one debug overlay is enabled.
 
 ## `pub enum FocusDirection`
 
+**Import:** `use teksilo_scene::FocusDirection;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Direction passed to a `SceneView::focus_order` callback when the
 app wants to override the default Tab cycle.
 
@@ -220,6 +226,8 @@ pub enum FocusDirection { /* variants */ }
 <a id="sceneview"></a>
 
 ## `pub struct SceneView`
+
+**Import:** `use teksilo_scene::SceneView;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 A pannable/zoomable viewport that renders a `Scene`'s items at scene
 coordinates and routes user input (scroll, pinch, drag, keyboard) back into

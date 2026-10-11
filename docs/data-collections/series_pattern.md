@@ -70,6 +70,8 @@ has nothing to disambiguate).
 
 ## `pub enum SeriesPattern`
 
+**Import:** `use teksilo::data::SeriesPattern;`
+
 The non-colour visual channel identifying one chart series.
 
 See the `module docs` for the rendering table and the reasoning.
@@ -133,6 +135,8 @@ The hatch for a filled region carrying this pattern.
 
 ## `pub enum SeriesMarker`
 
+**Import:** `use teksilo::data::SeriesMarker;`
+
 The marker glyph drawn at a line chart's data points, and next to a series
 in a legend. Shape, not colour — that is the whole point.
 
@@ -152,6 +156,8 @@ pub enum SeriesMarker { /* variants */ }
 <a id="serieshatch"></a>
 
 ## `pub enum SeriesHatch`
+
+**Import:** `use teksilo::data::SeriesHatch;`
 
 How a filled region (a bar, an area, a pie slice) carries its series'
 pattern. `None` is a plain fill; the rest are line hatches at the named

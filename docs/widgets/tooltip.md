@@ -71,6 +71,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct TooltipWidget`
 
+**Import:** `use teksilo::widgets::TooltipWidget;`
+
 A tooltip content widget — a themed rounded rect with text.
 
 Composes a `TextWidget` with `Small` typography in `tooltip_text` color,

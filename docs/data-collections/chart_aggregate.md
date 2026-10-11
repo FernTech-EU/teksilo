@@ -91,6 +91,8 @@ assert_eq!(weekly.point_count(s), 10); // 70 / 7
 
 ## `pub enum ChartAggregateFn`
 
+**Import:** `use teksilo::data::ChartAggregateFn;`
+
 A reduction applied to the numeric values within one bucket.
 
 ```rust
@@ -127,6 +129,8 @@ direct caller.
 <a id="chartaggregate"></a>
 
 ## `pub struct ChartAggregate`
+
+**Import:** `use teksilo::data::ChartAggregate;`
 
 A bucket/rollup projection over a `ChartModel<T>`.
 

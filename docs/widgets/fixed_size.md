@@ -52,6 +52,8 @@ let _sidebar = FixedSize::new()
 
 ## `pub struct FixedSize`
 
+**Import:** `use teksilo::widgets::FixedSize;`
+
 Layout modifier that prevents a widget from expanding beyond its natural size,
 or constrains it to specific reactive dimensions.
 

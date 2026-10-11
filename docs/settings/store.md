@@ -130,6 +130,8 @@ store.flush_now()?;                           // force sync (useful in tests)
 
 ## `pub const DEFAULT_DEBOUNCE`
 
+**Import:** `use teksilo::settings::DEFAULT_DEBOUNCE;`
+
 Default debounce window for store flushes.
 
 ```rust
@@ -139,6 +141,8 @@ pub const DEFAULT_DEBOUNCE: Duration = Duration::from_millis(500);
 <a id="settingsstoreerror"></a>
 
 ## `pub enum SettingsStoreError`
+
+**Import:** `use teksilo::settings::SettingsStoreError;`
 
 Errors surfaced by `SettingsStore::open`.
 
@@ -155,6 +159,8 @@ pub enum SettingsStoreError { /* variants */ }
 <a id="settingskey"></a>
 
 ## `pub struct SettingsKey`
+
+**Import:** `use teksilo::prelude::SettingsKey;` — in `teksilo::prelude::*`.
 
 A statically-named setting. Centralizes the dotted key, the value
 type, and the default factory. Construct as a `const`:
@@ -187,6 +193,8 @@ Create a new key descriptor; intended for use in `const` declarations.
 
 ## `pub const TEXT_SCALE_KEY`
 
+**Import:** `use teksilo::prelude::TEXT_SCALE_KEY;` — in `teksilo::prelude::*`.
+
 Persisted user-controlled global text-scale factor (`1.0` = 100 %).
 
 Read at startup by `teksilo-app` to seed every window's text scale, and
@@ -203,6 +211,8 @@ pub const TEXT_SCALE_KEY: SettingsKey<f32> =
 <a id="settingsstore"></a>
 
 ## `pub struct SettingsStore`
+
+**Import:** `use teksilo::prelude::SettingsStore;` — in `teksilo::prelude::*`.
 
 A dynamic dotted-key reactive settings store.
 

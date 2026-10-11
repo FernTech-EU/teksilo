@@ -162,6 +162,8 @@ ctx.show_toast(
 
 ## `pub const DEFAULT_TOAST_AUTO_DISMISS`
 
+**Import:** `use teksilo::widgets::toast::DEFAULT_TOAST_AUTO_DISMISS;`
+
 Default auto-dismiss duration when the caller does not override
 it (matches IntelliJ `BALLOON` and Material Snackbar maximum).
 
@@ -172,6 +174,8 @@ pub const DEFAULT_TOAST_AUTO_DISMISS: Duration = Duration::from_secs(10);
 <a id="toastdismisscause"></a>
 
 ## `pub enum ToastDismissCause`
+
+**Import:** `use teksilo::prelude::ToastDismissCause;` — in `teksilo::prelude::*`.
 
 Why a toast was dismissed — delivered to the `on_dismiss` callback.
 
@@ -193,6 +197,8 @@ pub enum ToastDismissCause { /* variants */ }
 <a id="toastaudience"></a>
 
 ## `pub struct ToastAudience`
+
+**Import:** `use teksilo::prelude::ToastAudience;` — in `teksilo::prelude::*`.
 
 Opaque per-app routing token. teksilo has no notion of what an
 "audience" means to the host app (a document, a project, a user
@@ -226,6 +232,8 @@ The raw numeric value, for debugging/serialization by the app.
 
 ## `pub enum ToastRoute`
 
+**Import:** `use teksilo::prelude::ToastRoute;` — in `teksilo::prelude::*`.
+
 Resolved delivery target for a toast (and, mirrored, its archived
 `NotificationEntry`).
 
@@ -257,6 +265,8 @@ pub enum ToastRoute { /* variants */ }
 
 ## `pub enum ToastActionStyle`
 
+**Import:** `use teksilo::prelude::ToastActionStyle;` — in `teksilo::prelude::*`.
+
 How a `ToastAction` should be rendered inside the toast surface.
 
 ```rust
@@ -272,6 +282,8 @@ pub enum ToastActionStyle { /* variants */ }
 
 ## `pub type ToastActionCallback`
 
+**Import:** `use teksilo::widgets::toast::ToastActionCallback;`
+
 Type-erased callback for a `ToastAction`. `Fn` (not `FnMut`) so
 the same callback can be wrapped in an `Rc` and dispatched from
 multiple paths (tap, keyboard, AT custom action).
@@ -283,6 +295,8 @@ pub type ToastActionCallback = Rc<dyn Fn(&mut EventContext)>;
 <a id="toastaction"></a>
 
 ## `pub struct ToastAction`
+
+**Import:** `use teksilo::prelude::ToastAction;` — in `teksilo::prelude::*`.
 
 One actionable element inside a `Toast` — a button or hyperlink
 the user can click to drive a domain action.
@@ -387,6 +401,8 @@ Clone the invocation callback — cheap because the underlying closure is `Rc`-w
 
 ## `pub struct ToastHandle`
 
+**Import:** `use teksilo::prelude::ToastHandle;` — in `teksilo::prelude::*`.
+
 Returned by `Toast::present` (and `ctx.show_toast(toast)`). Cheap
 to clone (`Rc<Inner>`). Lets app code dismiss the toast
 programmatically or check whether it is still alive.
@@ -430,6 +446,8 @@ already dismissed (timer, user, host shutdown).
 
 ## `pub type ToastDismissCallback`
 
+**Import:** `use teksilo::widgets::toast::ToastDismissCallback;`
+
 Type-erased on_dismiss callback receiving the cause + context.
 
 ```rust
@@ -439,6 +457,8 @@ pub type ToastDismissCallback = Rc<dyn Fn(ToastDismissCause, &mut EventContext)>
 <a id="toast"></a>
 
 ## `pub struct Toast`
+
+**Import:** `use teksilo::prelude::Toast;` — in `teksilo::prelude::*`.
 
 Toast — a present-able request (NOT a `Widget`). Construct with one
 of the severity-named constructors, configure via builder methods,
@@ -679,6 +699,8 @@ returned handle is in the "dropped" state (`is_alive` returns
 
 ## `pub trait EventContextToastExt`
 
+**Import:** none — `EventContextToastExt` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Convenience methods on `EventContext` for the toast system. The
 registry is looked up via `EventContext::app_state` — the
 `install_toast` extension trait registers `ToastRegistry` there
@@ -716,6 +738,8 @@ dismissed.
 <a id="toastregistry"></a>
 
 ## `pub struct ToastRegistry`
+
+**Import:** none — `ToastRegistry` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Cheap to clone (`Rc<RefCell<…>>`). All public methods take `&self`
 and use interior mutability.

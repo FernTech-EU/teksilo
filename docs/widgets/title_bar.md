@@ -64,6 +64,8 @@ the host from the widget tree:
 
 ## `pub type CloseAction`
 
+**Import:** `use teksilo::widgets::title_bar::CloseAction;`
+
 Type alias for the user-supplied close action that overrides the close
 button's default `ctx.close_window()`. Set via `TitleBar::close_action`.
 
@@ -74,6 +76,8 @@ pub type CloseAction = Rc<dyn Fn(&mut EventContext)>;
 <a id="titlebar"></a>
 
 ## `pub struct TitleBar`
+
+**Import:** `use teksilo::widgets::TitleBar;`
 
 A custom window title bar.
 

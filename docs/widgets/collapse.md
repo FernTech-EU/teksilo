@@ -47,6 +47,8 @@ snaps to its end value instead of tweening.
 
 ## `pub struct Collapse`
 
+**Import:** `use teksilo::widgets::Collapse;`
+
 Wraps a child and animates it between hidden (progress=0) and
 natural size (progress=1), driven by an external `Signal<bool>`.
 

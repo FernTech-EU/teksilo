@@ -71,6 +71,8 @@ per-window registry.
 
 ## `pub struct ToastInstallOptions`
 
+**Import:** `use teksilo::prelude::ToastInstallOptions;` — in `teksilo::prelude::*`.
+
 Configuration for the installed `ToastHost`. Passed to
 `install_toast` in the `teksilo` umbrella crate.
 
@@ -92,6 +94,8 @@ pub struct ToastInstallOptions { /* fields */ }
 <a id="toasthost"></a>
 
 ## `pub struct ToastHost`
+
+**Import:** `use teksilo::prelude::ToastHost;` — in `teksilo::prelude::*`.
 
 Invisible sibling widget that owns the toast queue. Installed once
 per window by the `install_toast` extension trait via a

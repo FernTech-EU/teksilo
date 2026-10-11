@@ -90,6 +90,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct HexColorInput`
 
+**Import:** `use teksilo::widgets::HexColorInput;`
+
 Single-line hex color editor.
 
 ```rust

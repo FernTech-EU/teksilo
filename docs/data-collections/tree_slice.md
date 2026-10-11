@@ -101,6 +101,8 @@ assert_eq!(slice1.visible_count(), 3); // child2 also visible in the expanded sl
 
 ## `pub struct TreeSlice`
 
+**Import:** `use teksilo::data::TreeSlice;`
+
 Per-view flattened projection of a `TreeModel<T>`.
 
 Owns an independent expand/collapse set and re-flattens automatically on
@@ -244,6 +246,8 @@ Shares all Rc-based internals but does not keep the observer alive.
 <a id="treeslicehandle"></a>
 
 ## `pub struct TreeSliceHandle`
+
+**Import:** `use teksilo::data::TreeSliceHandle;`
 
 Lightweight handle to a `TreeSlice`'s shared state, usable in closures.
 

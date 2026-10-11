@@ -60,6 +60,8 @@ The struct is plain-old-data — manual round-trip is trivial.
 
 ## `pub struct SceneViewState`
 
+**Import:** `use teksilo_scene::SceneViewState;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Snapshot of a SceneView's view transform: pan offset, zoom
 factor, and rotation in radians. Use `SceneView::state` to
 capture the current values; `SceneView::restore_state` to

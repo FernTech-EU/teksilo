@@ -62,6 +62,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct VStack`
 
+**Import:** `use teksilo::widgets::VStack;`
+
 Vertical layout container that distributes children top-to-bottom
 based on their intrinsic sizes. Cross-axis alignment is controlled
 by `HAlignment` (default: `Leading`).

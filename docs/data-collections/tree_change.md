@@ -46,6 +46,8 @@ tree.insert_root(0, "root".to_string());
 
 ## `pub struct NodeId`
 
+**Import:** `use teksilo::data::NodeId;`
+
 Opaque identifier for a node in a `TreeModel`.
 
 `NodeId` values are stable across mutations — inserting or removing other
@@ -58,6 +60,8 @@ pub struct NodeId(slotmap::DefaultKey);
 <a id="treechange"></a>
 
 ## `pub enum TreeChange`
+
+**Import:** `use teksilo::data::TreeChange;`
 
 Describes a mutation to a tree structure. Emitted by `TreeModel<T>` automatically.
 

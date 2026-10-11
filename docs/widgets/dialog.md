@@ -137,6 +137,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct ModalContainer`
 
+**Import:** `use teksilo::widgets::ModalContainer;`
+
 Rounded panel chrome that wraps a modal dialog's content widget.
 
 All visual dimensions (padding, corner radius, min-width, shadow) are owned
@@ -188,6 +190,8 @@ publishes no node for this title to name.
 <a id="modalscrim"></a>
 
 ## `pub struct ModalScrim`
+
+**Import:** `use teksilo::widgets::ModalScrim;`
 
 Full-viewport dimming scrim painted behind a `ModalContainer`.
 
@@ -244,6 +248,8 @@ modal's `ModalCloseBehavior` permits click-outside dismissal.
 
 ## `pub struct DialogContent`
 
+**Import:** `use teksilo::widgets::DialogContent;`
+
 Convenience body layout for a modal dialog: optional title, supporting text,
 scrollable body slot, and a `Divider`-separated footer row.
 
@@ -288,6 +294,8 @@ buttons like "OK" / "Cancel").
 <a id="dialog"></a>
 
 ## `pub struct Dialog`
+
+**Import:** `use teksilo::widgets::Dialog;`
 
 A trigger button that presents a modal dialog when activated.
 

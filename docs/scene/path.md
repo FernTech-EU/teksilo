@@ -89,6 +89,8 @@ model.add_item(item, Point::new(50.0, 50.0));
 
 ## `pub struct PathItem`
 
+**Import:** `use teksilo_scene::PathItem;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 An arbitrary vector path with optional fill and stroke, in local
 item coordinates.
 

@@ -91,6 +91,8 @@ assert_eq!(sel.count(), 0);
 
 ## `pub struct ChartSelection`
 
+**Import:** `use teksilo::data::ChartSelection;`
+
 Point-level selection state for a chart, keyed by `(series, point
 index)`. See module documentation for semantics.
 

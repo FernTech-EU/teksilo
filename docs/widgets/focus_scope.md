@@ -61,6 +61,8 @@ accessibility semantics. The scope node is never itself a Tab stop
 
 ## `pub struct FocusScope`
 
+**Import:** `use teksilo::widgets::FocusScope;`
+
 Wraps a child subtree and declares it a Tab traversal scope. See the
 `module documentation` for semantics.
 

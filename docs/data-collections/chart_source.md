@@ -33,6 +33,8 @@ Shared chart input for a complete model or a live tail projection.
 
 ## `pub enum ChartSource`
 
+**Import:** `use teksilo::data::ChartSource;`
+
 A reactive chart input. Conversions retain shared handles and copy no points.
 
 Window point indices (including hover and selection indices) are local to

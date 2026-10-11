@@ -123,6 +123,8 @@ assert_eq!(proxy.visible_count(), 3); // src + main.rs + docs
 
 ## `pub enum TreeFilterMode`
 
+**Import:** `use teksilo::data::TreeFilterMode;`
+
 Filter strategy used by `SortFilterTreeModel`.
 
 ```rust
@@ -138,6 +140,8 @@ pub enum TreeFilterMode { /* variants */ }
 <a id="sortfiltertreemodel"></a>
 
 ## `pub struct SortFilterTreeModel`
+
+**Import:** `use teksilo::data::SortFilterTreeModel;`
 
 Hierarchical projection over a `TreeModel<T>` driven by sort + filter
 signals. Exposes a `TreeSlice`-shaped read API consumed by `TreeTableView`.

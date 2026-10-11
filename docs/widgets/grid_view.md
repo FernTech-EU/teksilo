@@ -210,6 +210,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct TileContext`
 
+**Import:** `use teksilo::widgets::TileContext;`
+
 Context passed to the tile delegate for each realized tile.
 
 Richer than `ListView`'s `(index, &item, selected)` — carries the 2D
@@ -234,6 +236,8 @@ pub struct TileContext<'a, T: 'static> { /* fields */ }
 <a id="gridview"></a>
 
 ## `pub struct GridView`
+
+**Import:** `use teksilo::widgets::GridView;`
 
 A virtualized 2D tile grid backed by a `ListModel<T>`.
 
@@ -748,6 +752,8 @@ it. See `detail_row`.
 
 ## `pub enum GridTabTraversal`
 
+**Import:** none — `GridTabTraversal` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 How Tab moves out of (or within) the grid.
 
 ```rust
@@ -762,6 +768,8 @@ pub enum GridTabTraversal { /* variants */ }
 <a id="sectionprovider"></a>
 
 ## `pub trait SectionProvider`
+
+**Import:** none — `SectionProvider` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Partitions a flat model into display sections.
 
@@ -798,6 +806,8 @@ Per-section item counts, in order. Used by the layout strategy.
 <a id="groupingsections"></a>
 
 ## `pub struct GroupingSections`
+
+**Import:** none — `GroupingSections` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 A `SectionProvider` built by partitioning consecutive equal-key runs of
 an (already ordered) model. The titles come from each run's key.

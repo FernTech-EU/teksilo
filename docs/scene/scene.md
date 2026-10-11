@@ -274,6 +274,8 @@ assert_eq!(scene.scene_pos(id), Some(Point::new(100.0, 100.0)));
 
 ## `pub enum ItemChange`
 
+**Import:** `use teksilo_scene::ItemChange;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 A change to an item's state, fired through
 `Scene::item_change_signal` for every mutation. Apps observe to wire
 validation, persistence, telemetry, mirroring to a data layer, and other
@@ -373,6 +375,8 @@ edit" needs: hiding a card is one change through
 
 ## `pub struct HandlerReplacement`
 
+**Import:** `use teksilo_scene::HandlerReplacement;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 The two sides of a `Scene::set_item_handlers`, as they ride an
 `ItemChange::HandlersChanged`.
 
@@ -397,6 +401,8 @@ pub struct HandlerReplacement { /* fields */ }
 <a id="itempayload"></a>
 
 ## `pub struct ItemPayload`
+
+**Import:** `use teksilo_scene::ItemPayload;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 A `Delegated` heavyweight entry's type-erased payload, as it rides an
 `ItemChange::PayloadChanged`.
@@ -434,6 +440,8 @@ is something else.
 
 ## `pub enum AppearanceChange`
 
+**Import:** `use teksilo_scene::AppearanceChange;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Which paint-only appearance slot changed, with both sides of the write.
 
 One variant per slot rather than one struct carrying both, because a write
@@ -456,6 +464,8 @@ pub enum AppearanceChange { /* variants */ }
 <a id="placement"></a>
 
 ## `pub struct Placement`
+
+**Import:** `use teksilo_scene::Placement;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Where an item sits, as **one** property: logical parent, paint z, position
 in the parent frame, and local to parent transform.
@@ -503,6 +513,8 @@ A placement stated field by field — the constructor
 <a id="cascadebudget"></a>
 
 ## `pub struct CascadeBudget`
+
+**Import:** `use teksilo_scene::CascadeBudget;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 The runaway-detection budget for one scene's change fan-out — how much work
 **observers** may generate from one batch before the drain declares the
@@ -624,6 +636,8 @@ describe no cascade that happened.
 
 ## `pub enum SceneLayer`
 
+**Import:** `use teksilo_scene::SceneLayer;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Which paint band a lightweight `SceneItem` sits in, relative to
 the heavyweight widget tier.
 
@@ -696,6 +710,8 @@ pub enum SceneLayer { /* variants */ }
 <a id="sizepolicy"></a>
 
 ## `pub enum SizePolicy`
+
+**Import:** `use teksilo_scene::SizePolicy;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 How an entry's `local_bounds` is decided each layout pass.
 
@@ -789,6 +805,8 @@ pub enum SizePolicy { /* variants */ }
 
 ## `pub enum PanAxes`
 
+**Import:** `use teksilo_scene::PanAxes;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Which axes a `SceneView` is allowed to pan
 along. Set on the `Scene` (not the View) because a given scene
 model often makes sense at one orientation only — a horizontal
@@ -809,6 +827,8 @@ pub enum PanAxes { /* variants */ }
 <a id="sceneconstraints"></a>
 
 ## `pub struct SceneConstraints`
+
+**Import:** `use teksilo_scene::SceneConstraints;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Reactive interaction-policy bundle owned by `Scene`. Apps
 configure pan/zoom behaviour by writing to these signals; gesture
@@ -864,6 +884,8 @@ efficient short-circuit at gesture time.
 <a id="scene"></a>
 
 ## `pub struct Scene`
+
+**Import:** `use teksilo_scene::Scene;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 The data model behind a `SceneView`: a flat list of entries in a
 parent-relative scene-graph plus a `SpatialIndex` for rectangular

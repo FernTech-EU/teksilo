@@ -97,6 +97,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub const ACCORDION_HEADER_HEIGHT`
 
+**Import:** `use teksilo::widgets::accordion::ACCORDION_HEADER_HEIGHT;`
+
 Height of the accordion header row in pixels (vertical mode).
 
 ```rust
@@ -106,6 +108,8 @@ pub const ACCORDION_HEADER_HEIGHT: f32 = 28.0;
 <a id="accordion_header_height-2"></a>
 
 ## `pub fn accordion_header_height(...)`
+
+**Import:** `use teksilo::widgets::accordion::accordion_header_height;`
 
 `ACCORDION_HEADER_HEIGHT` raised to the density's `target_size`
 (24 / 32 / 44 dp). The identity at Compact.
@@ -118,6 +122,8 @@ pub fn accordion_header_height(tokens: &InputTokens) -> f32;
 
 ## `pub const ACCORDION_HEADER_PADDING_HORIZONTAL`
 
+**Import:** `use teksilo::widgets::accordion::ACCORDION_HEADER_PADDING_HORIZONTAL;`
+
 Horizontal padding inside the accordion header on the leading and trailing edges.
 
 ```rust
@@ -127,6 +133,8 @@ pub const ACCORDION_HEADER_PADDING_HORIZONTAL: f32 = 8.0;
 <a id="accordion_header_padding_horizontal-2"></a>
 
 ## `pub fn accordion_header_padding_horizontal(...)`
+
+**Import:** `use teksilo::widgets::accordion::accordion_header_padding_horizontal;`
 
 `ACCORDION_HEADER_PADDING_HORIZONTAL` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -139,6 +147,8 @@ pub fn accordion_header_padding_horizontal(tokens: &InputTokens) -> f32;
 
 ## `pub const ACCORDION_INDICATOR_SIZE`
 
+**Import:** `use teksilo::widgets::accordion::ACCORDION_INDICATOR_SIZE;`
+
 Size of the chevron disclosure indicator icon in pixels.
 
 ```rust
@@ -149,6 +159,8 @@ pub const ACCORDION_INDICATOR_SIZE: f32 = 12.0;
 
 ## `pub const ACCORDION_INDICATOR_GAP`
 
+**Import:** `use teksilo::widgets::accordion::ACCORDION_INDICATOR_GAP;`
+
 Gap between the disclosure indicator and the title label.
 
 ```rust
@@ -158,6 +170,8 @@ pub const ACCORDION_INDICATOR_GAP: f32 = 6.0;
 <a id="accordion_indicator_gap-2"></a>
 
 ## `pub fn accordion_indicator_gap(...)`
+
+**Import:** `use teksilo::widgets::accordion::accordion_indicator_gap;`
 
 `ACCORDION_INDICATOR_GAP` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -170,6 +184,8 @@ pub fn accordion_indicator_gap(tokens: &InputTokens) -> f32;
 
 ## `pub const ACCORDION_CORNER_RADIUS`
 
+**Import:** `use teksilo::widgets::accordion::ACCORDION_CORNER_RADIUS;`
+
 Corner radius of the keyboard-focus ring painted on the accordion header.
 
 ```rust
@@ -179,6 +195,8 @@ pub const ACCORDION_CORNER_RADIUS: f32 = 4.0;
 <a id="accordionorientation"></a>
 
 ## `pub enum AccordionOrientation`
+
+**Import:** `use teksilo::widgets::AccordionOrientation;`
 
 Orientation of an `Accordion`: how its header sits relative to its
 content. `Vertical` (the default) is a
@@ -198,6 +216,8 @@ pub enum AccordionOrientation { /* variants */ }
 <a id="accordion"></a>
 
 ## `pub struct Accordion`
+
+**Import:** `use teksilo::widgets::Accordion;`
 
 A collapsible section widget whose header button shows or hides attached content.
 

@@ -73,6 +73,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct ThemeSwitcher`
 
+**Import:** `use teksilo::widgets::ThemeSwitcher;`
+
 A drop-in app-theme picker built on `ComboBox`. See the module docs.
 
 ```rust

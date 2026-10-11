@@ -89,6 +89,8 @@ withheld until the field has been edited for the same reason, so a caller can re
 
 ## `pub type ValidateResult`
 
+**Import:** `use teksilo::widgets::input_dialog::ValidateResult;`
+
 Verdict from an `InputDialog::validate` callback.
 
 `Ok(())` accepts. `Err(None)` blocks silently; `Err(Some(msg))` blocks and shows
@@ -101,6 +103,8 @@ pub type ValidateResult = Result<(), Option<LocalizedString>>;
 <a id="inputdialog"></a>
 
 ## `pub struct InputDialog`
+
+**Import:** `use teksilo::widgets::InputDialog;`
 
 A single-field input modal.
 

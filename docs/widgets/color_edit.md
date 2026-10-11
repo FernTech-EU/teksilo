@@ -92,6 +92,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct ColorEdit`
 
+**Import:** `use teksilo::widgets::ColorEdit;`
+
 Compact color cell that opens a full `ColorPicker` in a popover when activated.
 
 ```rust

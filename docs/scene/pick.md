@@ -118,6 +118,8 @@ disagree".
 
 ## `pub const RANK_UNDER`
 
+**Import:** `use teksilo_scene::RANK_UNDER;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 The `PaintKey::rank` of a lightweight item in the
 `Under` band.
 
@@ -129,6 +131,8 @@ pub const RANK_UNDER: u8 = 0;
 
 ## `pub const RANK_WIDGET`
 
+**Import:** `use teksilo_scene::RANK_WIDGET;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 The `PaintKey::rank` of a heavyweight widget entry.
 
 ```rust
@@ -138,6 +142,8 @@ pub const RANK_WIDGET: u8 = 1;
 <a id="rank_over"></a>
 
 ## `pub const RANK_OVER`
+
+**Import:** `use teksilo_scene::RANK_OVER;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 The `PaintKey::rank` of a lightweight item in the
 `Over` band.
@@ -149,6 +155,8 @@ pub const RANK_OVER: u8 = 2;
 <a id="paintkey"></a>
 
 ## `pub struct PaintKey`
+
+**Import:** `use teksilo_scene::PaintKey;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Where an entry sits in a `SceneView`'s **single** paint
 order.
@@ -254,6 +262,8 @@ cards and below others.
 
 ## `pub fn claims_press(...)`
 
+**Import:** `use teksilo_scene::claims_press;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Whether an entry would **act on a press** — the occlusion rule of this
 module, in one predicate.
 
@@ -299,6 +309,8 @@ pub fn claims_press(handlers: Option<&SceneItemHandlerSet>, flags: ItemFlags) ->
 <a id="hit_testable"></a>
 
 ## `pub fn hit_testable(...)`
+
+**Import:** `use teksilo_scene::hit_testable;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Whether an entry takes part in pointer hit-testing at all.
 

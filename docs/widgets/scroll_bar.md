@@ -105,6 +105,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub const SCROLLBAR_COARSE_TARGET`
 
+**Import:** `use teksilo::widgets::scroll_bar::SCROLLBAR_COARSE_TARGET;`
+
 The width a scroll bar's thumb must be reachable across for a finger.
 
 Android's `ViewConfiguration.MIN_SCROLLBAR_TOUCH_TARGET` — the bar keeps its
@@ -119,6 +121,8 @@ pub const SCROLLBAR_COARSE_TARGET: f32 = 48.0;
 
 ## `pub const SCROLLBAR_MIN_THUMB_LENGTH`
 
+**Import:** `use teksilo::widgets::scroll_bar::SCROLLBAR_MIN_THUMB_LENGTH;`
+
 The shipped minimum thumb length, at Compact. Raised to the density's
 `target_size` (44 dp at Touch) at build time; a
 `min_thumb_length` override wins over both.
@@ -130,6 +134,8 @@ pub const SCROLLBAR_MIN_THUMB_LENGTH: f32 = 24.0;
 <a id="scrollbar_part_thumb"></a>
 
 ## `pub const SCROLLBAR_PART_THUMB`
+
+**Import:** `use teksilo::widgets::scroll_bar::SCROLLBAR_PART_THUMB;`
 
 Which part of the bar a `TargetRegion` describes.
 
@@ -144,6 +150,8 @@ pub const SCROLLBAR_PART_THUMB: u16 = 0;
 
 ## `pub const SCROLLBAR_PART_TRACK`
 
+**Import:** `use teksilo::widgets::scroll_bar::SCROLLBAR_PART_TRACK;`
+
 The track either side of the thumb: a tap there pages.
 
 ```rust
@@ -153,6 +161,8 @@ pub const SCROLLBAR_PART_TRACK: u16 = 1;
 <a id="scrollbar"></a>
 
 ## `pub struct ScrollBar`
+
+**Import:** `use teksilo::widgets::ScrollBar;`
 
 A scroll bar that shares reactive scroll-position state with a `ScrollArea`.
 

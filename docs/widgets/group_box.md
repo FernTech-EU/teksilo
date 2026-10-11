@@ -82,6 +82,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub const GROUP_BOX_CONTENT_INDENT`
 
+**Import:** `use teksilo::widgets::group_box::GROUP_BOX_CONTENT_INDENT;`
+
 Horizontal indent of the content area below the title (dp).
 
 ```rust
@@ -91,6 +93,8 @@ pub const GROUP_BOX_CONTENT_INDENT: f32 = 24.0;
 <a id="group_box_content_indent-2"></a>
 
 ## `pub fn group_box_content_indent(...)`
+
+**Import:** `use teksilo::widgets::group_box::group_box_content_indent;`
 
 `GROUP_BOX_CONTENT_INDENT` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -103,6 +107,8 @@ pub fn group_box_content_indent(tokens: &InputTokens) -> f32;
 
 ## `pub const GROUP_BOX_TITLE_CONTENT_SPACING`
 
+**Import:** `use teksilo::widgets::group_box::GROUP_BOX_TITLE_CONTENT_SPACING;`
+
 Vertical gap between the title row and the content area (dp).
 
 ```rust
@@ -112,6 +118,8 @@ pub const GROUP_BOX_TITLE_CONTENT_SPACING: f32 = 8.0;
 <a id="group_box_title_content_spacing-2"></a>
 
 ## `pub fn group_box_title_content_spacing(...)`
+
+**Import:** `use teksilo::widgets::group_box::group_box_title_content_spacing;`
 
 `GROUP_BOX_TITLE_CONTENT_SPACING` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -124,6 +132,8 @@ pub fn group_box_title_content_spacing(tokens: &InputTokens) -> f32;
 
 ## `pub const GROUP_BOX_CHECKBOX_GAP`
 
+**Import:** `use teksilo::widgets::group_box::GROUP_BOX_CHECKBOX_GAP;`
+
 Gap between the checkbox and the adjacent title label in checkable mode (dp).
 
 ```rust
@@ -133,6 +143,8 @@ pub const GROUP_BOX_CHECKBOX_GAP: f32 = 6.0;
 <a id="group_box_checkbox_gap-2"></a>
 
 ## `pub fn group_box_checkbox_gap(...)`
+
+**Import:** `use teksilo::widgets::group_box::group_box_checkbox_gap;`
 
 `GROUP_BOX_CHECKBOX_GAP` scaled by the density's `spacing_factor`
 (1.00 / 1.15 / 1.30).
@@ -144,6 +156,8 @@ pub fn group_box_checkbox_gap(tokens: &InputTokens) -> f32;
 <a id="groupbox"></a>
 
 ## `pub struct GroupBox`
+
+**Import:** `use teksilo::widgets::GroupBox;`
 
 A titled cluster of controls with optional enable/disable toggle.
 

@@ -78,6 +78,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct RadioButton`
 
+**Import:** `use teksilo::widgets::RadioButton;`
+
 A single radio button option that writes `value` into a shared `Signal<usize>` on selection.
 
 ```rust

@@ -54,6 +54,8 @@ still communicates "active" without animating.
 
 ## `pub struct Pulse`
 
+**Import:** `use teksilo::widgets::Pulse;`
+
 Wraps a child and pulses its opacity smoothly between `min` and
 `max` on a fixed period. Useful for recording indicators,
 notification beacons, and attention-grabbing status icons.

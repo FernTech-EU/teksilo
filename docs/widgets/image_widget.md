@@ -85,6 +85,8 @@ let _avatar = ImageWidget::new(&icon)
 
 ## `pub struct ImageWidget`
 
+**Import:** `use teksilo::widgets::ImageWidget;`
+
 A widget that displays a raster image (PNG, WebP, or raw RGBA pixels) with configurable fit and alignment.
 
 ```rust

@@ -97,6 +97,8 @@ impl TreeDataSource for MySource {
 
 ## `pub struct FlatEntry`
 
+**Import:** `use teksilo::data::FlatEntry;`
+
 A single entry in a tree's flattened, currently-visible row list.
 
 Generic over the key type so external sources carry their own identity
@@ -118,6 +120,8 @@ pub struct FlatEntry<K: ItemKey = NodeId> { /* fields */ }
 <a id="treedatasource"></a>
 
 ## `pub trait TreeDataSource`
+
+**Import:** `use teksilo::data::TreeDataSource;`
 
 A per-view flattened, projectable view over hierarchical data.
 
@@ -294,6 +298,8 @@ Fetch the next page (append-only growth).
 
 ## `pub fn tree_is_desc_or_self(...)`
 
+**Import:** `use teksilo::data::tree_data_source::tree_is_desc_or_self;`
+
 Whether `node` is `ancestor` or one of its descendants — the move cycle
 guard (you cannot drop a node into its own subtree).
 
@@ -308,6 +314,8 @@ pub fn tree_is_desc_or_self<T: 'static>(
 <a id="tree_apply_reorder"></a>
 
 ## `pub fn tree_apply_reorder(...)`
+
+**Import:** `use teksilo::data::tree_data_source::tree_apply_reorder;`
 
 Apply a tree reorder by `NodeId`, with the cycle guard and the
 remove-then-insert index adjustment `TreeModel::move_node` requires. Shared

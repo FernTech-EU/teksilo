@@ -144,6 +144,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Splitter`
 
+**Import:** `use teksilo::widgets::Splitter;`
+
 An N-pane resizable split container driven by a `SplitterModel`.
 
 See the `module-level documentation` for a usage overview and
@@ -230,6 +232,8 @@ snapshotted, not tracked.
 
 ## `pub struct PaneDescriptor`
 
+**Import:** none — `PaneDescriptor` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Per-pane configuration passed to `SplitterModel::from_panes` /
 `SplitterModel::insert_pane`. Public fields + `Default` so it can
 be built with struct-literal `..Default::default()` syntax, or via the
@@ -295,6 +299,8 @@ Size a collapsed pane folds down to (default `0`). See
 
 ## `pub struct PaneSnapshot`
 
+**Import:** none — `PaneSnapshot` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Immutable per-pane view handed to the pure `distribute` sizing
 function (the internal `splitter::distribute` engine).
 
@@ -316,6 +322,8 @@ pub struct PaneSnapshot { /* fields */ }
 
 ## `pub struct PaneState`
 
+**Import:** none — `PaneState` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
 Persistable per-pane layout state. Captures the user-controllable
 values (size + collapsed); structural config (min/max/stretch/
 collapsible) is app-declared and not serialized — Qt `saveState`
@@ -333,6 +341,8 @@ pub struct PaneState { /* fields */ }
 <a id="splitterstate"></a>
 
 ## `pub struct SplitterState`
+
+**Import:** none — `SplitterState` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Full serializable snapshot of a `SplitterModel`'s sizes + collapsed
 flags. Round-trips through `SplitterModel::export_state` /
@@ -352,6 +362,8 @@ pub struct SplitterState { /* fields */ }
 <a id="splittermodel"></a>
 
 ## `pub struct SplitterModel`
+
+**Import:** none — `SplitterModel` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 A shared, cloneable handle to a splitter's layout state. `Clone` =
 share-by-handle (cheap `Rc` bump).

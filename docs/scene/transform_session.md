@@ -290,6 +290,8 @@ are `TransformLabels`, which takes `tr!`.
 
 ## `pub enum TransformHandle`
 
+**Import:** `use teksilo_scene::TransformHandle;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 One grab affordance on the selection frame.
 
 `Move` is the frame band itself (and the body of a selected
@@ -382,6 +384,8 @@ four named custom actions a non-scalar handle also publishes (see
 
 ## `pub enum TransformStep`
 
+**Import:** `use teksilo_scene::TransformStep;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 One directional nudge on a transform handle.
 
 The vocabulary the controller's non-pointer routes are stated in: the
@@ -432,6 +436,8 @@ from an assistive technology.
 
 ## `pub enum TransformOp`
 
+**Import:** `use teksilo_scene::TransformOp;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 What one gesture asks of the selection.
 
 ```rust
@@ -455,6 +461,8 @@ The per-item flag an item must carry to take part in this operation.
 <a id="transformhandleset"></a>
 
 ## `pub struct TransformHandleSet`
+
+**Import:** `use teksilo_scene::TransformHandleSet;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 A bitset of `TransformHandle`s — Konva's `enabledAnchors`, in the house
 style of `ItemFlags`.
@@ -541,6 +549,8 @@ Construct from raw bits.
 
 ## `pub struct TransformDelta`
 
+**Import:** `use teksilo_scene::TransformDelta;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 What one in-flight gesture asks of the selection, stated **once** in scene
 coordinates.
 
@@ -624,6 +634,8 @@ The frame `start` becomes under this delta.
 
 ## `pub struct TransformFrame`
 
+**Import:** `use teksilo_scene::TransformFrame;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 The box the handles are drawn on.
 
 `rect` is stated in the frame's **own** basis: a point `p` of
@@ -697,6 +709,8 @@ constant on-screen size at any zoom).
 
 ## `pub enum LivePreview`
 
+**Import:** `use teksilo_scene::LivePreview;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Whether the items follow the gesture or only the frame does.
 
 ```rust
@@ -711,6 +725,8 @@ pub enum LivePreview { /* variants */ }
 <a id="transformsource"></a>
 
 ## `pub enum TransformSource`
+
+**Import:** `use teksilo_scene::TransformSource;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Which route produced a session.
 
@@ -727,6 +743,8 @@ pub enum TransformSource { /* variants */ }
 
 ## `pub enum TransformOutcome`
 
+**Import:** `use teksilo_scene::TransformOutcome;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 How a session finished.
 
 ```rust
@@ -741,6 +759,8 @@ pub enum TransformOutcome { /* variants */ }
 <a id="transformsession"></a>
 
 ## `pub struct TransformSession`
+
+**Import:** `use teksilo_scene::TransformSession;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 A snapshot of the live session, handed to the three event hooks and
 published by
@@ -786,6 +806,8 @@ The operation this session performs.
 
 ## `pub struct TransformChrome`
 
+**Import:** `use teksilo_scene::TransformChrome;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Everything the chrome painter is told. Scene coordinates throughout — the
 view transform is already on the canvas, exactly as for
 `MagnetismConfig::feedback`.
@@ -808,6 +830,8 @@ pub struct TransformChrome { /* fields */ }
 <a id="transformlabels"></a>
 
 ## `pub struct TransformLabels`
+
+**Import:** `use teksilo_scene::TransformLabels;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 The assistive-technology names the controller publishes.
 
@@ -870,6 +894,8 @@ Resolve one step's name now.
 <a id="transformconfig"></a>
 
 ## `pub struct TransformConfig`
+
+**Import:** `use teksilo_scene::TransformConfig;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Per-view transform-controller configuration, installed via
 `SceneView::transform_controller`.
@@ -1049,6 +1075,8 @@ Replace the built-in chrome painter. Paints in scene coordinates.
 
 ## `pub const DEFAULT_PADDING_PX`
 
+**Import:** `use teksilo_scene::DEFAULT_PADDING_PX;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Default frame padding, in screen pixels. Chosen so the handle discs clear
 the selection's own bounds: a card never owns the pixels a handle is drawn
 on, which is what makes the chrome grabbable over a heavyweight child.
@@ -1061,6 +1089,8 @@ pub const DEFAULT_PADDING_PX: f32 = 6.0;
 
 ## `pub const DEFAULT_HANDLE_PX`
 
+**Import:** `use teksilo_scene::DEFAULT_HANDLE_PX;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Default handle size, in screen pixels.
 
 ```rust
@@ -1070,6 +1100,8 @@ pub const DEFAULT_HANDLE_PX: f32 = 9.0;
 <a id="rotate_offset_px"></a>
 
 ## `pub const ROTATE_OFFSET_PX`
+
+**Import:** `use teksilo_scene::ROTATE_OFFSET_PX;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 How far above the frame the rotate puck floats, in screen pixels.
 
@@ -1081,6 +1113,8 @@ pub const ROTATE_OFFSET_PX: f32 = 22.0;
 
 ## `pub const DEFAULT_EDGE_PAN_PX`
 
+**Import:** `use teksilo_scene::DEFAULT_EDGE_PAN_PX;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 Default distance from the viewport edge at which a pointer gesture starts
 panning the view, in screen pixels.
 
@@ -1091,6 +1125,8 @@ pub const DEFAULT_EDGE_PAN_PX: f32 = 28.0;
 <a id="default_edge_pan_speed"></a>
 
 ## `pub const DEFAULT_EDGE_PAN_SPEED`
+
+**Import:** `use teksilo_scene::DEFAULT_EDGE_PAN_SPEED;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
 
 Default auto-pan speed, in screen pixels per second.
 

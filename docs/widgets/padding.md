@@ -67,6 +67,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Padding`
 
+**Import:** `use teksilo::widgets::Padding;`
+
 A layout container that adds padding (insets) around a single child.
 
 See the `module documentation` for the full feature description and

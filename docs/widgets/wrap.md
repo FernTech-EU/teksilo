@@ -62,6 +62,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Wrap`
 
+**Import:** `use teksilo::widgets::Wrap;`
+
 A horizontal flow layout that wraps children to the next line.
 
 ```rust

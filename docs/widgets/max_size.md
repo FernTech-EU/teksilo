@@ -51,6 +51,8 @@ let _w = MaxSize::width(240.0)
 
 ## `pub struct MaxSize`
 
+**Import:** `use teksilo::widgets::MaxSize;`
+
 Layout modifier that enforces a maximum width and/or height on a single child widget.
 
 Constraints can be static or bound to a reactive `Signal<f32>` for dynamic resizing.

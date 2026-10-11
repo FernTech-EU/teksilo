@@ -62,6 +62,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct TwistArrow`
 
+**Import:** `use teksilo::widgets::primitives::TwistArrow;`
+
 Small interactive chevron rendered in the leading indent column of a tree row.
 
 ```rust

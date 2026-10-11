@@ -42,6 +42,8 @@ assert_eq!(CheckState::from(true), CheckState::Checked);
 
 ## `pub enum CheckState`
 
+**Import:** `use teksilo::data::CheckState;`
+
 ```rust
 pub enum CheckState { /* variants */ }
 ```

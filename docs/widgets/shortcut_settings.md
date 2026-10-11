@@ -78,6 +78,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct ShortcutConflict`
 
+**Import:** `use teksilo::widgets::shortcut_settings::ShortcutConflict;`
+
 Describes a rebind that collides with an existing binding.
 
 Passed to the `ShortcutSettings::on_conflict` callback so the app
@@ -97,6 +99,8 @@ pub struct ShortcutConflict { /* fields */ }
 <a id="shortcutsettings"></a>
 
 ## `pub struct ShortcutSettings`
+
+**Import:** `use teksilo::widgets::ShortcutSettings;`
 
 A settings panel for browsing and rebinding application shortcuts.
 

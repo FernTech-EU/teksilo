@@ -82,6 +82,8 @@ model.add_item(item, Point::new(40.0, 40.0));
 
 ## `pub struct RectItem`
 
+**Import:** `use teksilo_scene::RectItem;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
+
 A rectangle with optional fill and stroke, in local item coordinates.
 
 Construct with `RectItem::new(Rect::new(0.0, 0.0, w, h))` and place

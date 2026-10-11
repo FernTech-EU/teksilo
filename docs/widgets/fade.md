@@ -61,6 +61,8 @@ opacity snaps to its end value instead of tweening.
 
 ## `pub struct Fade`
 
+**Import:** `use teksilo::widgets::Fade;`
+
 Wraps a child and animates the entire subtree's opacity between
 0 and 1, driven by an external `Signal<bool>`.
 

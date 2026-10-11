@@ -76,6 +76,8 @@ ladder aims for. 44 dp is never the AA figure.
 
 ## `pub struct MinSize`
 
+**Import:** `use teksilo::widgets::MinSize;`
+
 Layout modifier that enforces a minimum width and/or height on a single child widget.
 
 Constraints can be static or bound to a reactive `Signal<f32>` for dynamic resizing.

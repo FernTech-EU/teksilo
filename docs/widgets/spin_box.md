@@ -289,6 +289,8 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub enum WrapMode`
 
+**Import:** `use teksilo::widgets::WrapMode;`
+
 Out-of-range behavior when stepping past `min` or `max`.
 
 Set via `SpinBox::wrap_mode`.
@@ -305,6 +307,8 @@ pub enum WrapMode { /* variants */ }
 <a id="steptype"></a>
 
 ## `pub enum StepType`
+
+**Import:** `use teksilo::widgets::StepType;`
 
 Step-size policy for each key/button press.
 
@@ -323,6 +327,8 @@ pub enum StepType { /* variants */ }
 
 ## `pub enum WheelMode`
 
+**Import:** `use teksilo::widgets::WheelMode;`
+
 When the mouse wheel is allowed to adjust the value.
 
 Set via `SpinBox::wheel_mode`.
@@ -340,6 +346,8 @@ pub enum WheelMode { /* variants */ }
 <a id="widthpolicy"></a>
 
 ## `pub enum WidthPolicy`
+
+**Import:** `use teksilo::widgets::spin_box::WidthPolicy;`
 
 How the SpinBox decides its horizontal size envelope.
 
@@ -363,6 +371,8 @@ pub enum WidthPolicy { /* variants */ }
 
 ## `pub const SPIN_BOX_STEP_BUTTON_WIDTH`
 
+**Import:** `use teksilo::widgets::spin_box::SPIN_BOX_STEP_BUTTON_WIDTH;`
+
 Minimum total width. Below this the stacked step buttons stop
 fitting next to the field. Widgets narrower than this are
 enforced to the minimum at layout time via `MinSize`.
@@ -384,6 +394,8 @@ pub const SPIN_BOX_STEP_BUTTON_WIDTH: f32 = 18.0;
 
 ## `pub const SPIN_BOX_STEP_BUTTON_HEIGHT`
 
+**Import:** `use teksilo::widgets::spin_box::SPIN_BOX_STEP_BUTTON_HEIGHT;`
+
 Painted height of one stacked step button, in dp. Only a fallback — the
 real height is half the field's inner height (see `build_step_buttons`).
 
@@ -394,6 +406,8 @@ pub const SPIN_BOX_STEP_BUTTON_HEIGHT: f32 = 12.0;
 <a id="spinbox"></a>
 
 ## `pub struct SpinBox`
+
+**Import:** `use teksilo::widgets::SpinBox;`
 
 Numeric input with step buttons. Generic over
 `SpinValue` — pre-implemented for `i32`, `i64`, `u32`, `u64`,
@@ -707,6 +721,8 @@ The bound numeric value signal.
 <a id="spinvalue"></a>
 
 ## `pub trait SpinValue`
+
+**Import:** none — `SpinValue` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Numeric primitive that a `SpinBox` can hold.
 
