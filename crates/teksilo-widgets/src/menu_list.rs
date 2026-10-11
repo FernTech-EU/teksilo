@@ -18,6 +18,12 @@
 //! etc.) call `.max_visible_items(n)` to cap the panel height and wrap the
 //! content in a `ScrollArea`.
 //!
+//! Two knobs shape the surface. `.inset(dp)` sets the gap between the menu
+//! surface and its rows (default 4 dp; the `max_visible_items` scroll cap
+//! follows it). `.surface_style(style)` gives this one list its own
+//! `PopoverStyle` — frame, fill, shadow — ahead of the theme's popover slot,
+//! which a `ComboBox` dropdown shares; other lists are unaffected.
+//!
 //! **Safe-triangle hover gate.** When the pointer leaves a submenu trigger's
 //! row with the submenu still up, the trigger arms the safe region (the apex
 //! and the cone live in `teksilo_core::overlay`) and publishes that submenu's
@@ -57,7 +63,7 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::overlay::OverlayPlacement;
 use teksilo_core::signal::Signal;
-use teksilo_core::styles::{PopoverStyleConfig, PopoverVariant};
+use teksilo_core::styles::{PopoverStyle, PopoverStyleConfig, PopoverVariant, SharedPopoverStyle};
 use teksilo_core::widget::{
     EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
@@ -67,6 +73,9 @@ use teksilo_tokens::SurfaceRole;
 
 use crate::primitives::{MaxSize, Padding, RectWidget, VStack, ZStack};
 use crate::scroll_area::ScrollArea;
+
+/// Default gap between the menu surface and its rows, in dp.
+const DEFAULT_INSET: f32 = 4.0;
 
 /// Marker for whether a pending entry is a menu item, a separator, or a header.
 enum MenuEntry {
@@ -120,8 +129,9 @@ impl Widget for MenuSeparator {
 
     fn paint(&self, bounds: Rect, canvas: &mut teksilo_canvas::Canvas, ctx: &PaintContext) {
         // Int UI menu separator: a flush-edge 1 dp line in `divider` color,
-        // vertically centered in the `separator_height` (9 dp) slot — that
-        // slot provides 4 dp top/bottom breathing room around the line.
+        // vertically centered in the `separator_height` slot (read from the
+        // theme's menu-item style, so it follows the preset) — the slot
+        // provides the breathing room above and below the line.
         let color = ctx.theme.colors.divider;
         let thickness = ctx.theme.shape.border_width;
         let y = bounds.y + (bounds.height - thickness) * 0.5;
@@ -309,6 +319,10 @@ pub struct MenuList {
     /// What opened this menu, when the opener said so (a menu-bar trigger,
     /// a submenu row, a popover's button). The menu is named after it.
     opener: Option<WidgetId>,
+    /// Gap in dp between the menu surface and its rows, on every side.
+    inset: f32,
+    /// Per-list surface override; wins over the theme's popover slot.
+    surface_style: Option<SharedPopoverStyle>,
 }
 
 /// The rows of one [`MenuList`], as assistive technology counts them.
@@ -401,6 +415,8 @@ impl MenuList {
             highlight: Signal::new(None),
             rows: SharedMenuRows::default(),
             opener: None,
+            inset: DEFAULT_INSET,
+            surface_style: None,
         }
     }
 
@@ -410,6 +426,29 @@ impl MenuList {
     /// "menu" and nothing else. Set by the opener before the menu is built.
     pub(crate) fn set_opener(&mut self, opener: WidgetId) {
         self.opener = Some(opener);
+    }
+
+    /// Set the gap, in dp, between the menu surface and its rows, on every
+    /// side. Defaults to 4 dp. A smaller value lets the rows (and their
+    /// hover / highlight bands) reach nearer the surface's frame, which
+    /// suits a thin or accent-coloured border. Negative values are treated
+    /// as zero. The scroll cap of [`max_visible_items`](Self::max_visible_items)
+    /// follows the same value.
+    pub fn inset(mut self, inset: f32) -> Self {
+        self.inset = inset.max(0.0);
+        self
+    }
+
+    /// Give this list its own surface: background, border, corner radius
+    /// and shadow come from `style` instead of the theme's popover slot.
+    ///
+    /// Precedence, highest first: this per-list style, the theme's
+    /// `style_slots.popover`, the built-in `RecipePopoverStyle`. Only this
+    /// list is affected; a `ComboBox` dropdown or another menu keeps the
+    /// theme's. The style is asked for `PopoverVariant::Menu`.
+    pub fn surface_style(mut self, style: impl PopoverStyle) -> Self {
+        self.surface_style = Some(Rc::new(style));
+        self
     }
 
     /// Override the type-ahead buffer reset window. Defaults to 500ms
@@ -782,19 +821,20 @@ impl Widget for MenuList {
 
         let vstack_id = ctx.add(vstack);
 
-        let padding = Padding::uniform(4.0).child(vstack_id);
+        let padding = Padding::uniform(self.inset).child(vstack_id);
         let padding_id = ctx.add(padding);
 
         // Viewport cap. When `max_visible_items` is set and the real
         // item count exceeds it, wrap the padded column in a
         // `ScrollArea` + `MaxSize` pair sized to `cap * item_height`
-        // + the 4 px outer padding on each edge. Separators don't
+        // + the inset on each edge. Separators don't
         // count against the cap — they're visually small and no real
         // menu stacks enough of them for the slight under-shoot to
         // matter.
         let visible_cap_id = match self.max_visible_items {
             Some(cap) if self.item_widget_ids.len() > cap => {
-                let max_height = cap as f32 * menu_metrics(ctx.theme()).item_height + 8.0;
+                let max_height =
+                    cap as f32 * menu_metrics(ctx.theme()).item_height + 2.0 * self.inset;
                 // Cap the HEIGHT only. `preferred_size(0.0, ..)` would set the preferred
                 // *width* to zero — and a popover proposes an unconstrained width (it
                 // hugs its content), so the zero was taken literally: the menu collapsed
@@ -812,8 +852,11 @@ impl Widget for MenuList {
         // active popover style instead of a hand-rolled bg `RectWidget`
         // + `MenuList::paint`. The full-halo vs trigger-attached
         // shadow choice is derived from `attached_side`.
-        let popover_style: teksilo_core::styles::SharedPopoverStyle =
-            ctx.theme().style_slots.popover.clone().unwrap_or_else(|| {
+        let surface_style: SharedPopoverStyle = self
+            .surface_style
+            .clone()
+            .or_else(|| ctx.theme().style_slots.popover.clone())
+            .unwrap_or_else(|| {
                 Rc::new(crate::styles::RecipePopoverStyle::for_tokens(
                     &ctx.theme().input,
                 ))
@@ -826,7 +869,7 @@ impl Widget for MenuList {
             show_caret: false,
             caret_size: 0.0,
         };
-        let root_id = popover_style.make_body(&surface_cfg, ctx);
+        let root_id = surface_style.make_body(&surface_cfg, ctx);
 
         self.root_child_id = Some(root_id);
 
@@ -2105,5 +2148,147 @@ mod tests {
             panel.y,
             panel.bottom()
         );
+    }
+
+    // --- `inset` ---
+
+    /// Lay `menu` (with a probe row as its only row) out at a 300 dp width
+    /// and return the menu panel's bounds and the probe row's.
+    fn panel_and_row(menu: MenuList) -> (Rect, Rect) {
+        let seen = StdRc::new(Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0)));
+        let mut tree = light_tree();
+        let id = tree.add(menu.item(ProbeRow { seen: seen.clone() }));
+        tree.layout(SizeProposal::with_width(300.0));
+        (tree.bounds(id), seen.get())
+    }
+
+    #[test]
+    fn inset_defaults_to_four_dp() {
+        let (panel, row) = panel_and_row(MenuList::new());
+        assert!((row.x - panel.x - 4.0).abs() < 0.01, "row x {}", row.x);
+        assert!((row.y - panel.y - 4.0).abs() < 0.01, "row y {}", row.y);
+        assert!((row.width - (panel.width - 8.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn inset_one_lets_rows_span_the_menu() {
+        let (panel, row) = panel_and_row(MenuList::new().inset(1.0));
+        assert!((row.x - panel.x - 1.0).abs() < 0.01, "row x {}", row.x);
+        assert!((row.y - panel.y - 1.0).abs() < 0.01, "row y {}", row.y);
+        assert!(
+            (row.width - (panel.width - 2.0)).abs() < 0.01,
+            "row width {} in a panel {}",
+            row.width,
+            panel.width
+        );
+        assert!((panel.bottom() - row.bottom() - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn inset_below_zero_is_clamped() {
+        let (panel, row) = panel_and_row(MenuList::new().inset(-5.0));
+        assert!((row.x - panel.x).abs() < 0.01);
+        assert!((row.width - panel.width).abs() < 0.01);
+    }
+
+    #[test]
+    fn scroll_cap_follows_the_inset() {
+        // The cap is `cap * item_height + 2 * inset`: shrinking the inset by
+        // 3 dp must shrink the capped panel by 6 dp, not leave the old
+        // literal `+ 8.0` behind.
+        let capped = |inset: Option<f32>| {
+            let mut tree = light_tree();
+            let mut menu = MenuList::new().max_visible_items(5);
+            if let Some(i) = inset {
+                menu = menu.inset(i);
+            }
+            for i in 0..20 {
+                menu = menu.item(MenuItem::new(lit!(format!("Entry {i}"))));
+            }
+            let id = tree.add(menu);
+            tree.layout(SizeProposal::with_width(300.0));
+            tree.bounds(id).height
+        };
+        let default = capped(None);
+        let thin = capped(Some(1.0));
+        let wide = capped(Some(10.0));
+        assert!((default - thin - 6.0).abs() < 0.01, "{default} vs {thin}");
+        assert!((wide - default - 12.0).abs() < 0.01, "{wide} vs {default}");
+    }
+
+    // --- `surface_style` ---
+
+    /// A popover style that counts its calls and delegates the drawing.
+    struct SpyPopoverStyle {
+        calls: StdRc<Cell<u32>>,
+        menu_variant: StdRc<Cell<bool>>,
+    }
+
+    impl PopoverStyle for SpyPopoverStyle {
+        fn make_body(&self, cfg: &PopoverStyleConfig, ctx: &mut BuildContext) -> WidgetId {
+            self.calls.set(self.calls.get() + 1);
+            self.menu_variant
+                .set(matches!(cfg.variant, PopoverVariant::Menu));
+            crate::styles::RecipePopoverStyle::default().make_body(cfg, ctx)
+        }
+    }
+
+    fn spy() -> (SpyPopoverStyle, StdRc<Cell<u32>>, StdRc<Cell<bool>>) {
+        let calls = StdRc::new(Cell::new(0));
+        let menu_variant = StdRc::new(Cell::new(false));
+        (
+            SpyPopoverStyle {
+                calls: calls.clone(),
+                menu_variant: menu_variant.clone(),
+            },
+            calls,
+            menu_variant,
+        )
+    }
+
+    #[test]
+    fn surface_style_is_used_for_that_list_only() {
+        let (style, calls, menu_variant) = spy();
+        let mut tree = light_tree();
+        let styled = MenuList::new()
+            .surface_style(style)
+            .item(MenuItem::new(lit!("A")));
+        let plain = MenuList::new().item(MenuItem::new(lit!("B")));
+        tree.add(plain);
+        tree.layout(SizeProposal::with_width(300.0));
+        assert_eq!(calls.get(), 0, "another list must not reach the spy");
+        tree.add(styled);
+        tree.layout(SizeProposal::with_width(300.0));
+        assert_eq!(calls.get(), 1, "the styled list builds its surface once");
+        assert!(
+            menu_variant.get(),
+            "the surface is asked for the Menu variant"
+        );
+    }
+
+    #[test]
+    fn surface_style_wins_over_the_theme_slot() {
+        let (slot_style, slot_calls, _) = spy();
+        let (list_style, list_calls, _) = spy();
+        let mut theme = teksilo_core::presets::intui::light();
+        theme.style_slots.popover = Some(StdRc::new(slot_style));
+        let mut tree = WidgetTree::new().with_theme(theme);
+
+        tree.add(MenuList::new().item(MenuItem::new(lit!("A"))));
+        tree.layout(SizeProposal::with_width(300.0));
+        assert_eq!(
+            slot_calls.get(),
+            1,
+            "without a per-list style the slot rules"
+        );
+
+        tree.add(
+            MenuList::new()
+                .surface_style(list_style)
+                .item(MenuItem::new(lit!("B"))),
+        );
+        tree.layout(SizeProposal::with_width(300.0));
+        assert_eq!(list_calls.get(), 1);
+        assert_eq!(slot_calls.get(), 1, "the per-list style bypasses the slot");
     }
 }
