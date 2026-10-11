@@ -108,9 +108,6 @@ impl SettingsBundle {
     /// Override the debounce window passed to every service this bundle
     /// opens.
     ///
-    /// Override the debounce window passed to every service this bundle
-    /// opens.
-    ///
     /// Both [`SettingsStore`] and [`WindowStateService`] actually debounce
     /// on it: `SettingsStore`'s writes are frequent enough (every
     /// `Signal::set`) that coalescing matters, and `WindowStateService`'s

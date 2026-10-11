@@ -53,8 +53,6 @@ const SELECTION_GAP: f32 = 8.0;
 
 /// Leading-edge-aligned x for a `Below` / `Above` overlay, clamped so the
 /// overlay stays inside the viewport.
-/// Leading-edge-aligned x for a `Below` / `Above` overlay, clamped so the
-/// overlay stays inside the viewport.
 ///
 /// In LTR the leading edge is `anchor.x`; in RTL it is the anchor's physical
 /// right edge. **Both are clamped.** The LTR arm used to be a bare `anchor.x`,

@@ -167,8 +167,6 @@ impl DropZone {
 
     /// Directory the Browse button's dialog opens in. If unset, the OS default is
     /// used.
-    /// Directory the Browse button's dialog opens in. If unset, the OS default is
-    /// used.
     ///
     /// The same builder [`FilePickerField::starting_dir`](crate::file_picker_field::FilePickerField::starting_dir)
     /// offers, and for the same reason: an app that remembers where its writer last

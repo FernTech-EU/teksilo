@@ -686,14 +686,12 @@ impl Toolbar {
 
     /// The gap actually used: the app's override if it set one, else the
     /// density's [`toolbar_spacing`].
-    /// Gap between consecutive toolbar items in logical pixels. Overrides the
-    /// density's [`toolbar_spacing`] ([`TOOLBAR_SPACING`] at Compact).
-    /// The gap actually used: the app's override if it set one, else the
-    /// density's [`toolbar_spacing`].
     fn resolved_spacing(&self, tokens: &InputTokens) -> f32 {
         self.spacing.unwrap_or_else(|| toolbar_spacing(tokens))
     }
 
+    /// Gap between consecutive toolbar items in logical pixels. Overrides the
+    /// density's [`toolbar_spacing`] ([`TOOLBAR_SPACING`] at Compact).
     pub fn spacing(mut self, spacing: f32) -> Self {
         self.spacing = Some(spacing);
         self

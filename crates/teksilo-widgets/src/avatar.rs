@@ -35,9 +35,7 @@
 //! border / focus ring / presence to the active `AvatarStyle`, whose
 //! default (`RecipeAvatarStyle`) draws them via `Canvas`. Hash-derived
 //! background tints come from `theme.colors.chart_palette` (Okabe-Ito),
-//! so they track the active theme automatically. Hash-derived background
-//! tints come from `theme.colors.chart_palette` (Okabe-Ito), so they
-//! track the active theme automatically.
+//! so they track the active theme automatically.
 //!
 //! ## Touch and pen
 //!

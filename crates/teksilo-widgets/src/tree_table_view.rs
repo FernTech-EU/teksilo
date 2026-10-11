@@ -478,7 +478,6 @@ pub struct TreeTableView<T: 'static> {
 
 impl<T: 'static> TreeTableView<T> {
     /// Wrap a `SortFilterTreeModel<T>`.
-    /// Wrap a `SortFilterTreeModel<T>`.
     pub fn from_projection(proxy: SortFilterTreeModel<T>) -> Self {
         let source = Rc::new(TreeSource::from_data_source(Rc::new(proxy.clone())));
         Self::assemble(source, Some(proxy))

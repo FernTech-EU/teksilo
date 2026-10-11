@@ -217,12 +217,10 @@ struct Row {
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum Scenario {
     /// **A5 scenario 1 — a reorderable row in a vertical list.**
-    /// **A5 scenario 1 — a reorderable row in a vertical list.**
     /// `teksilo-widgets/src/list_view/body_pane.rs:538` installs the row's
     /// drag; the enclosing scroll area declares the claim
     /// (`common/scrollable.rs:741`).
     ListRow,
-    /// **A5 scenario 2 — a slider thumb**, which declares
     /// **A5 scenario 2 — a slider thumb**, which declares
     /// `TouchAction::NONE` (`teksilo-widgets/src/slider.rs:534`) inside a
     /// scroller.
@@ -278,13 +276,11 @@ enum Scenario {
     /// double-tap on the node the pointer lands on, no capture, no claim.
     DragRegion,
     /// **A5 scenario 6 — a `TabBar` strip against a tab drag**
-    /// **A5 scenario 6 — a `TabBar` strip against a tab drag**
     /// (`teksilo-widgets/src/tab_widget/header.rs:1031`), the horizontal twin of
     /// [`Scenario::ListRow`]; the strip's claim comes from the `ScrollArea`
     /// `TabBar` wraps its header row in (`tab_widget/bar.rs:1591` for the
     /// horizontal strip, `:1597` for the vertical one).
     TabStrip,
-    /// **A5 scenario 7 — a `TableView` column grip**
     /// **A5 scenario 7 — a `TableView` column grip**
     /// (`teksilo-widgets/src/table_view/header.rs:881`): `capture_pointer()`
     /// and `Handled` on the press, under the header strip's claim and a

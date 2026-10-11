@@ -421,18 +421,6 @@ impl WidgetTree {
     /// Every node inside `root` (inclusive) that Tab traversal would stop on:
     /// focusable, and not suppressed by a `tab_stop` flag on itself or any
     /// ancestor.
-    /// Every widget the arena still holds — active, dormant and orphaned alike.
-    ///
-    /// The number a leak test must assert on. `active_widget_count` walks the
-    /// tree from its roots and so cannot see the failure mode that matters
-    /// here: a node kept alive in the arena with nothing pointing at it. A
-    /// parentless orphan (tooltip content is `ctx.add`ed, hence parentless by
-    /// construction) is invisible to every other count in this file, and to the
-    /// accessibility tree, while still paying for itself in the arena's slotmap
-    /// forever.
-    /// Every node inside `root` (inclusive) that Tab traversal would stop on:
-    /// focusable, and not suppressed by a `tab_stop` flag on itself or any
-    /// ancestor.
     ///
     /// Pressing Tab and watching focus cannot answer this for a view that
     /// claims the key for its own navigation — `TableView` moves a cell cursor
@@ -486,6 +474,15 @@ impl WidgetTree {
         }
     }
 
+    /// Every widget the arena still holds — active, dormant and orphaned alike.
+    ///
+    /// The number a leak test must assert on. `active_widget_count` walks the
+    /// tree from its roots and so cannot see the failure mode that matters
+    /// here: a node kept alive in the arena with nothing pointing at it. A
+    /// parentless orphan (tooltip content is `ctx.add`ed, hence parentless by
+    /// construction) is invisible to every other count in this file, and to the
+    /// accessibility tree, while still paying for itself in the arena's slotmap
+    /// forever.
     pub fn widget_count(&self) -> usize {
         self.arena.len()
     }

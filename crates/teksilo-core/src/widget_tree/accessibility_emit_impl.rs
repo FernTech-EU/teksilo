@@ -813,7 +813,6 @@ impl WidgetTree {
     }
 
     /// Which tooltip's text this node should carry, if any.
-    /// Which tooltip's text this node should carry, if any.
     ///
     /// Two ways a node can come to own a tooltip's description, tried in that
     /// order:

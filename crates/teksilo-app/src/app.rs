@@ -1631,20 +1631,6 @@ impl TeksiloAppHandler {
     /// window); everything else goes through [`teksilo_automation::execute`]
     /// with a real `WindowOps`. The settle runs synchronously on this (the
     /// main) thread, never across a frame boundary.
-    /// Run `f` against window `winit_id`'s tree with a real
-    /// [`WindowOps`](teksilo_core::WindowOps) sink (so `open_window`,
-    /// `parent_window_handle`, etc. work). Encapsulates the take-out /
-    /// build-`WindowOpsImpl` / reinsert dance that the `AppEvent::External`
-    /// routers and the mount-action drain all share — keeping the reinsert
-    /// (whose omission silently freezes a window) in exactly one place.
-    /// No-op if `winit_id` is not a managed window.
-    /// Route a debug-bridge [`AutomationPayload`](crate::automation_bridge::AutomationPayload):
-    /// resolve the target window, then run the op against the live tree
-    /// (and, for screenshots, the live `PlatformWindow`). `list_windows` and
-    /// `screenshot` are served here (they need the window manager / platform
-    /// window); everything else goes through [`teksilo_automation::execute`]
-    /// with a real `WindowOps`. The settle runs synchronously on this (the
-    /// main) thread, never across a frame boundary.
     #[cfg(all(feature = "automation", debug_assertions))]
     fn try_route_automation_payload(
         &mut self,
@@ -1958,6 +1944,13 @@ impl TeksiloAppHandler {
         frame
     }
 
+    /// Run `f` against window `winit_id`'s tree with a real
+    /// [`WindowOps`](teksilo_core::WindowOps) sink (so `open_window`,
+    /// `parent_window_handle`, etc. work). Encapsulates the take-out /
+    /// build-`WindowOpsImpl` / reinsert dance that the `AppEvent::External`
+    /// routers and the mount-action drain all share — keeping the reinsert
+    /// (whose omission silently freezes a window) in exactly one place.
+    /// No-op if `winit_id` is not a managed window.
     fn run_in_window(
         &mut self,
         winit_id: winit::window::WindowId,

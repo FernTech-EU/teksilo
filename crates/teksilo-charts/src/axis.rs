@@ -152,8 +152,6 @@ fn default_format(v: f32) -> String {
 
 /// Generate a "nice" set of tick values covering `[min, max]` using the
 /// Wilkinson / Heckbert algorithm. Returns ticks in ascending order, each
-/// Generate a "nice" set of tick values covering `[min, max]` using the
-/// Wilkinson / Heckbert algorithm. Returns ticks in ascending order, each
 /// at a spacing of 1/2/2.5/5/10 × 10^k.
 ///
 /// `target_count` is a hint for the desired number of intervals (so

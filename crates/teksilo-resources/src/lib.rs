@@ -233,7 +233,6 @@ fn emit_static(
 }
 
 /// Return the (type, initializer_body) for a LazyLock based on resource kind.
-/// Return the (type, initializer_body) for a LazyLock based on resource kind.
 ///
 /// Paths go through `::teksilo::canvas::` so consuming crates only need
 /// to depend on `teksilo` (the umbrella), not on `teksilo-canvas` directly.

@@ -389,7 +389,6 @@ impl TabletState {
     /// `Removed` arm, are not witnessed: reaching them needs a compositor
     /// advertising a tablet manager, so deleting either leaves the suite green
     /// while a real stylus is polled at the idle rate. Listed with the other
-    /// reviewed-rather-than-tested call sites in `docs/touch-and-pen.md` §9. Listed with the other
     /// reviewed-rather-than-tested call sites in `docs/touch-and-pen.md` §9.
     fn sync_tool_presence(&self) {
         self.queue

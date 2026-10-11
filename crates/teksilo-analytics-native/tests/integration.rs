@@ -9,12 +9,7 @@
 //! These tests cover the client half of sub-phase A acceptance: "a
 //! Teksilo app emits events; events appear in a Parquet file readable
 //! by `duckdb -c 'SELECT * FROM events_*.parquet'`." The Parquet half
-//! is the collector's and is verified there. Mirrors the structure of the Plausible adapter integration
-//! test ([crates/teksilo-analytics-plausible/tests/integration.rs]).
-//!
-//! These tests cover sub-phase A acceptance: "a Teksilo app emits
-//! events; events appear in a Parquet file readable by `duckdb -c
-//! 'SELECT * FROM events_*.parquet'`."
+//! is the collector's and is verified there.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

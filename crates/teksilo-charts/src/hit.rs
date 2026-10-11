@@ -543,9 +543,6 @@ pub(crate) enum MarkStep {
 /// (series, category) pair, and a line chart's points are per series. One
 /// sequence is the only ordering all three share, and it is the order the
 /// AT tree publishes its per-datum nodes in, so the keyboard and a screen
-/// reader's own review agree. One
-/// sequence is the only ordering all three share, and it is the order the
-/// AT tree publishes its per-datum nodes in, so the keyboard and a screen
 /// reader's own review agree.
 ///
 /// A chord with any modifier is left alone, so nothing here can shadow a

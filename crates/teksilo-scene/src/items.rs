@@ -155,8 +155,6 @@ impl ItemA11yOverrides {
 
 /// Emit the `.access_*` builder chain on a struct that holds an
 /// `a11y: ItemA11yOverrides` field. Built-in items invoke this inside
-/// Emit the `.access_*` builder chain on a struct that holds an
-/// `a11y: ItemA11yOverrides` field. Built-in items invoke this inside
 /// their inherent impl block so they all share the same method names.
 /// Custom items can do the same.
 #[doc(hidden)]

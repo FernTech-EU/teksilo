@@ -245,13 +245,6 @@ impl<T: 'static> TreeView<T> {
     ///
     /// A `TreeView` mints its own by default, which is right for a tree whose
     /// lifetime is the writer's: it is created once and scrolls until they leave.
-    /// (…rest of the existing block unchanged, through the ⚠ animated-signal note…)
-    /// How the scroll bar is displayed (default `Permanent`). `Overlay`
-    /// and `Thin` float the bar over the content instead of reserving a
-    /// layout column for it, mirroring `ScrollArea::scroll_bar_style`.
-    ///
-    /// A `TreeView` mints its own by default, which is right for a tree whose
-    /// lifetime is the writer's: it is created once and scrolls until they leave.
     /// It is wrong for one inside a dock, whose content is torn down and rebuilt
     /// whenever the layout changes -- opening a panel beside it, or the first
     /// reveal of the band a result previews into. The tree comes back at the top,
@@ -268,6 +261,9 @@ impl<T: 'static> TreeView<T> {
         self
     }
 
+    /// How the scroll bar is displayed (default `Permanent`). `Overlay`
+    /// and `Thin` float the bar over the content instead of reserving a
+    /// layout column for it, mirroring `ScrollArea::scroll_bar_style`.
     pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self {
         self.scroll_bar_style = style;
         self
@@ -470,20 +466,6 @@ impl<T: 'static> TreeView<T> {
     /// is nothing to pin, so the countdown indicator would promise an
     /// interaction that does not exist and the surface would outlive the
     /// pointer for no reason.
-    /// Enable **type-ahead** ("type to jump"): typing a printable character
-    /// while the tree has keyboard focus jumps the selection to the next
-    /// *visible* row whose label starts with the accumulated search term,
-    /// wrapping around (Qt `keyboardSearch` / macOS & Windows type-select).
-    /// `label(&item)` yields the searchable text; matching is
-    /// ASCII-case-insensitive. A pause longer than the
-    /// [`type_ahead_timeout`](Self::type_ahead_timeout) starts a fresh term.
-    /// Whether a composite row tooltip offers dwell-to-sticky promotion.
-    /// Default `true`.
-    ///
-    /// Turn it off for a read-only row card: with nothing to reach into there
-    /// is nothing to pin, so the countdown indicator would promise an
-    /// interaction that does not exist and the surface would outlive the
-    /// pointer for no reason.
     pub fn row_tooltip_sticky(mut self, on: bool) -> Self {
         self.row_tooltips.set_composite_sticky(on);
         self
@@ -533,6 +515,13 @@ impl<T: 'static> TreeView<T> {
         self
     }
 
+    /// Enable **type-ahead** ("type to jump"): typing a printable character
+    /// while the tree has keyboard focus jumps the selection to the next
+    /// *visible* row whose label starts with the accumulated search term,
+    /// wrapping around (Qt `keyboardSearch` / macOS & Windows type-select).
+    /// `label(&item)` yields the searchable text; matching is
+    /// ASCII-case-insensitive. A pause longer than the
+    /// [`type_ahead_timeout`](Self::type_ahead_timeout) starts a fresh term.
     pub fn type_ahead_label(mut self, label: impl Fn(&T) -> String + 'static) -> Self {
         self.type_ahead_label = Some(Rc::new(label));
         self

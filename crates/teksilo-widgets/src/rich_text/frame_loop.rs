@@ -3,10 +3,6 @@
 
 //! The editor's per-frame effect body.
 //!
-//! The editor's per-frame effect body.
-//!
-//! Runs on every frame the widget tree was asked to pump (see
-//! `BuildContext::frame_tick`). Steps 1-9 mirror the godot reference's
 //! Runs on every frame the widget tree was asked to pump (see
 //! `BuildContext::frame_tick`). Steps 1–9 mirror the godot reference's
 //! `_process` ordering: flush pending typed characters, drain queued

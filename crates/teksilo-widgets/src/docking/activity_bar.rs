@@ -3,8 +3,6 @@
 
 //! `DockActivityBar` — the tailored VS Code-style **vertical** icon rail. One
 //! item per tab of a side; clicking an inactive item selects + shows the side,
-//! `DockActivityBar` — the tailored VS Code-style **vertical** icon rail. One
-//! item per tab of a side; clicking an inactive item selects + shows the side,
 //! clicking the active item hides the side. On a **leading / trailing** side it
 //! survives the side being hidden (it lives in the layout chrome, outboard of
 //! the collapsible content), so it is the reopen affordance there; a hidden

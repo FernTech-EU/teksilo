@@ -445,6 +445,15 @@ impl WidgetTree {
     /// host has handed its widget value to a real child and has nothing left to
     /// say. Follow it, or a tooltip's description would be readable exactly
     /// until the first time it was shown.
+    pub(crate) fn tooltip_content_node(&self, content_id: WidgetId) -> WidgetId {
+        self.arena
+            .get(content_id)
+            .and_then(|node| node.widget.as_any())
+            .and_then(|any| any.downcast_ref::<crate::deferred_subtree::DeferredSubtree>())
+            .and_then(|d| d.materialized_child())
+            .unwrap_or(content_id)
+    }
+
     /// The text a tooltip would announce, harvested from its (dormant)
     /// content widget so an anchor can carry it as a static AT description
     /// while the tooltip is not shown.
@@ -455,22 +464,6 @@ impl WidgetTree {
     /// threaded through `attach_tooltip*` and kept in sync. Reads at walk
     /// time, so a locale change or a `Signal<String>` swap is picked up by the
     /// same AT re-walk that already tracks them.
-    /// Resolve a tooltip's content node past a deferred host.
-    ///
-    /// A deferred tooltip body answers for itself while un-built (see
-    /// `DeferredSubtree::accessibility`), but once the user has hovered it the
-    /// host has handed its widget value to a real child and has nothing left to
-    /// say. Follow it, or a tooltip's description would be readable exactly
-    /// until the first time it was shown.
-    pub(crate) fn tooltip_content_node(&self, content_id: WidgetId) -> WidgetId {
-        self.arena
-            .get(content_id)
-            .and_then(|node| node.widget.as_any())
-            .and_then(|any| any.downcast_ref::<crate::deferred_subtree::DeferredSubtree>())
-            .and_then(|d| d.materialized_child())
-            .unwrap_or(content_id)
-    }
-
     pub(crate) fn tooltip_access_description(&self, content_id: WidgetId) -> Option<String> {
         let content_id = self.tooltip_content_node(content_id);
         let node = self.arena.get(content_id)?;

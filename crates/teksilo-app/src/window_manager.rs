@@ -173,8 +173,6 @@ pub(crate) struct ManagedWindow {
     /// platform supports it.
     /// The same `Rc` is also stored on the `WidgetTree` so the root-builder
     /// closure can hand it to a `TitleBar` widget.
-    /// The same `Rc` is also stored on the `WidgetTree` so the root-builder
-    /// closure can hand it to a `TitleBar` widget.
     pub title_bar_host: Option<Rc<dyn PlatformTitleBarHost>>,
     /// Tracks `WindowEvent::Focused`. On Linux/X11, Linux/Wayland, and
     /// Windows this also fires on minimize (no separate minimize event

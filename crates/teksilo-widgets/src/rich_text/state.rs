@@ -557,8 +557,6 @@ pub(crate) struct EditorState {
     /// already bumped, since the typed `on_text_changed` emission is
     /// still Phase B (see `frame_loop::tick`). Distinct from
     /// `pending_format_changed` so a pure-format edit doesn't pretend
-    /// text changed. Distinct from
-    /// `pending_format_changed` so a pure-format edit doesn't pretend
     /// text changed.
     pub pending_text_changed: bool,
     pub pending_format_changed: bool,

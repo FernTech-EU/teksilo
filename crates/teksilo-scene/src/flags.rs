@@ -47,7 +47,6 @@ impl ItemFlags {
     pub const IS_FOCUSABLE: Self = Self(1 << 4);
 
     /// Item dispatches hover events (Qt `setAcceptHoverEvents`).
-    /// Item dispatches hover events (Qt `setAcceptHoverEvents`).
     /// Default off. Declared only: the view dispatches hover from the
     /// presence of a `SceneItemHandlerSet::on_hover` callback, and
     /// nothing sets or reads this bit.

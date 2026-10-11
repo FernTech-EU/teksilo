@@ -580,7 +580,6 @@ fn a_wheel_report_names_the_cell_under_the_pointer() {
 /// A real mouse wheel carries **no** position — it is routed by hover, and
 /// `WidgetEvent::Scroll::window_position` is `None` for it — so the cell comes
 /// from where the cursor last was. Without that, the shipped wheel would keep
-/// reporting the origin however the positioned form behaved. Without that, the shipped wheel would keep
 /// reporting the origin however the positioned form behaved.
 #[test]
 fn a_positionless_wheel_report_names_the_cell_the_cursor_is_over() {

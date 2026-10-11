@@ -135,8 +135,6 @@ impl CompositeTooltipWidget {
     }
 
     /// Whether the surface offers dwell-to-sticky promotion. Default `true`.
-    /// Override the per-theme `composite_tooltip.max_width`.
-    /// Whether the surface offers dwell-to-sticky promotion. Default `true`.
     ///
     /// Turn it **off** for a read-only body — a fact sheet, a data-view row's
     /// card. Three things follow, all of them the point:
@@ -166,6 +164,7 @@ impl CompositeTooltipWidget {
         self.sticky_enabled
     }
 
+    /// Override the per-theme `composite_tooltip.max_width`.
     pub fn max_width(mut self, w: f32) -> Self {
         self.max_width_override = Some(w);
         self
