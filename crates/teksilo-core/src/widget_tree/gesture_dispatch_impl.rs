@@ -6,6 +6,117 @@ use super::*;
 use crate::event::ButtonMask;
 use crate::gesture::{GestureArenaSet, GestureEvent};
 
+/// The buttons each of a node's two handler buckets answers to, for one
+/// tap-family recognizer (tap, double tap, triple tap or long press).
+///
+/// A node carries two buckets: the widget's own (`apply_self_handlers`) and
+/// the app's (the `WidgetBuilder` chain). They share ONE recognizer per
+/// gesture, which accepts the union of their masks, and the dispatch keeps
+/// them apart again: each bucket's handler runs only for a button in its own
+/// mask. Without that split, an app's `.accept_tap_buttons(SECONDARY)` meant
+/// for its own `on_tap` retargeted a composite's built-in tap as well — a
+/// `Slider` stopped jumping on a left click and jumped on a right one.
+///
+/// A bucket's mask is the one it declared, else [`ButtonMask::PRIMARY`]. One
+/// exception keeps the only door an app has to a composite's built-in
+/// activation: a mask declared on a bucket that carries **no** handler for
+/// this gesture is addressed to the other bucket's handler, unless that one
+/// declared its own. That is how `Button::new(..).accept_tap_buttons(PRIMARY |
+/// SECONDARY)` lets a right click activate the button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BucketMasks {
+    /// The widget's own bucket: `None` when it carries no handler.
+    own: Option<ButtonMask>,
+    /// The builder-chain bucket: `None` when it carries no handler.
+    external: Option<ButtonMask>,
+}
+
+impl BucketMasks {
+    /// Resolve the two buckets' masks from what each declared and whether
+    /// each carries a handler. See the type's docs for the rule.
+    fn resolve(
+        own_has: bool,
+        own_declared: Option<ButtonMask>,
+        external_has: bool,
+        external_declared: Option<ButtonMask>,
+    ) -> Self {
+        let effective =
+            |declared: Option<ButtonMask>, other_has: bool, other_declared: Option<ButtonMask>| {
+                declared
+                    .or(if other_has { None } else { other_declared })
+                    .unwrap_or(ButtonMask::PRIMARY)
+            };
+        Self {
+            own: own_has.then(|| effective(own_declared, external_has, external_declared)),
+            external: external_has.then(|| effective(external_declared, own_has, own_declared)),
+        }
+    }
+
+    /// Read one tap-family gesture's masks off a node: `has` says whether a
+    /// bucket carries the handler, `declared` reads the bucket's override.
+    fn read(
+        node: &crate::arena::WidgetNode,
+        has: impl Fn(&crate::event_handlers::EventHandlers) -> bool,
+        declared: impl Fn(&crate::event_handlers::EventHandlers) -> Option<ButtonMask>,
+    ) -> Self {
+        Self::resolve(
+            has(&node.handlers),
+            declared(&node.handlers),
+            has(&node.external_handlers),
+            declared(&node.external_handlers),
+        )
+    }
+
+    fn tap(node: &crate::arena::WidgetNode) -> Self {
+        Self::read(node, |h| h.on_tap.is_some(), |h| h.tap_buttons)
+    }
+
+    fn double_tap(node: &crate::arena::WidgetNode) -> Self {
+        Self::read(
+            node,
+            |h| h.on_double_tap.is_some(),
+            |h| h.double_tap_buttons,
+        )
+    }
+
+    fn triple_tap(node: &crate::arena::WidgetNode) -> Self {
+        Self::read(
+            node,
+            |h| h.on_triple_tap.is_some(),
+            |h| h.triple_tap_buttons,
+        )
+    }
+
+    fn long_press(node: &crate::arena::WidgetNode) -> Self {
+        Self::read(
+            node,
+            |h| h.on_long_press.is_some(),
+            |h| h.long_press_buttons,
+        )
+    }
+
+    /// Whether either bucket carries the handler.
+    fn any(self) -> bool {
+        self.own.is_some() || self.external.is_some()
+    }
+
+    /// What the shared recognizer accepts: the union of the two buckets'
+    /// masks ([`ButtonMask::NONE`] when neither carries the handler).
+    fn union(self) -> ButtonMask {
+        self.own
+            .unwrap_or(ButtonMask::NONE)
+            .union(self.external.unwrap_or(ButtonMask::NONE))
+    }
+
+    fn own_accepts(self, button: crate::event::PointerButton) -> bool {
+        self.own.is_some_and(|m| m.contains(button))
+    }
+
+    fn external_accepts(self, button: crate::event::PointerButton) -> bool {
+        self.external.is_some_and(|m| m.contains(button))
+    }
+}
+
 /// Which recognizers a node's handler set asks for, and on which buttons.
 ///
 /// Read once and used twice: [`WidgetTree::ensure_gesture_arena`] installs the
@@ -14,18 +125,14 @@ use crate::gesture::{GestureArenaSet, GestureEvent};
 /// arena and the visual cannot come to disagree about what this node acts on.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ArenaRecognizers {
-    has_tap: bool,
-    has_double_tap: bool,
-    has_triple_tap: bool,
-    has_long_press: bool,
+    /// Per-bucket masks of the four click-style recognizers; a recognizer is
+    /// wanted when either bucket carries its handler, and accepts the union.
+    tap: BucketMasks,
+    double_tap: BucketMasks,
+    triple_tap: BucketMasks,
+    long_press: BucketMasks,
     has_drag: bool,
     has_swipe: bool,
-    /// Per-recognizer overrides, own bucket preferred over external. `None`
-    /// leaves the recognizer on its own default, [`ButtonMask::PRIMARY`].
-    tap_buttons: Option<ButtonMask>,
-    double_tap_buttons: Option<ButtonMask>,
-    triple_tap_buttons: Option<ButtonMask>,
-    long_press_buttons: Option<ButtonMask>,
 }
 
 impl ArenaRecognizers {
@@ -34,39 +141,23 @@ impl ArenaRecognizers {
     /// chain count the same.
     pub(crate) fn read(node: &crate::arena::WidgetNode) -> Self {
         Self {
-            has_tap: node.any_handler(|h| h.on_tap.is_some()),
-            has_double_tap: node.any_handler(|h| h.on_double_tap.is_some()),
-            has_triple_tap: node.any_handler(|h| h.on_triple_tap.is_some()),
-            has_long_press: node.any_handler(|h| h.on_long_press.is_some()),
+            tap: BucketMasks::tap(node),
+            double_tap: BucketMasks::double_tap(node),
+            triple_tap: BucketMasks::triple_tap(node),
+            long_press: BucketMasks::long_press(node),
             has_drag: node.any_handler(|h| h.on_drag.is_some()),
             has_swipe: node.any_handler(|h| h.on_swipe.is_some()),
-            tap_buttons: node
-                .handlers
-                .tap_buttons
-                .or(node.external_handlers.tap_buttons),
-            double_tap_buttons: node
-                .handlers
-                .double_tap_buttons
-                .or(node.external_handlers.double_tap_buttons),
-            triple_tap_buttons: node
-                .handlers
-                .triple_tap_buttons
-                .or(node.external_handlers.triple_tap_buttons),
-            long_press_buttons: node
-                .handlers
-                .long_press_buttons
-                .or(node.external_handlers.long_press_buttons),
         }
     }
 
     /// Whether any recognizer at all is wanted — the gate on installing an
     /// arena.
     fn any(self) -> bool {
-        self.has_tap
-            || self.has_double_tap
-            || self.has_triple_tap
+        self.tap.any()
+            || self.double_tap.any()
+            || self.triple_tap.any()
             || self.has_drag
-            || self.has_long_press
+            || self.long_press.any()
             || self.has_swipe
     }
 
@@ -76,7 +167,7 @@ impl ArenaRecognizers {
     /// the install site — so its mask must not speak for a node whose
     /// `TapRecognizer` was never built.
     fn installs_tap(self) -> bool {
-        self.has_tap && !(self.has_double_tap || self.has_triple_tap)
+        self.tap.any() && !(self.double_tap.any() || self.triple_tap.any())
     }
 
     /// The buttons a press on this node could actually act on.
@@ -94,15 +185,12 @@ impl ArenaRecognizers {
             return ButtonMask::ALL;
         }
         let mut mask = ButtonMask::NONE;
-        let mut add = |on: bool, declared: Option<ButtonMask>| {
-            if on {
-                mask = mask.union(declared.unwrap_or(ButtonMask::PRIMARY));
-            }
-        };
-        add(self.installs_tap(), self.tap_buttons);
-        add(self.has_double_tap, self.double_tap_buttons);
-        add(self.has_triple_tap, self.triple_tap_buttons);
-        add(self.has_long_press, self.long_press_buttons);
+        if self.installs_tap() {
+            mask = mask.union(self.tap.union());
+        }
+        for masks in [self.double_tap, self.triple_tap, self.long_press] {
+            mask = mask.union(masks.union());
+        }
         if mask.is_empty() {
             ButtonMask::ALL
         } else {
@@ -161,23 +249,20 @@ impl WidgetTree {
             return;
         }
         let ArenaRecognizers {
-            // `has_tap` alone does not decide: a multi-tap recognizer
-            // suppresses the plain one, so the install below asks
-            // `installs_tap()`.
-            has_tap: _,
-            has_double_tap,
-            has_triple_tap,
-            has_long_press,
+            tap,
+            double_tap,
+            triple_tap,
+            long_press,
             has_drag,
             has_swipe,
-            tap_buttons,
-            double_tap_buttons,
-            triple_tap_buttons,
-            long_press_buttons,
         } = wanted;
 
         let mut set = GestureArenaSet::new();
         set.set_multi_contact(node.multi_contact);
+        // Each click-style recognizer accepts the union of the two buckets'
+        // masks; `dispatch_recognized_gesture` hands the recognized event to
+        // each bucket only on a button in that bucket's own mask.
+        //
         // Important: install `TapRecognizer` ONLY when the widget actually
         // wired `on_tap` AND no multi-tap recognizer is in the arena. A
         // parallel `TapRecognizer` would let `Tap` win on the first up
@@ -190,45 +275,25 @@ impl WidgetTree {
         // use `on_pointer_event::PointerDown` (which fires before the
         // gesture arena and runs regardless of multi-tap state).
         if wanted.installs_tap() {
-            set.add(move || {
-                let rec = crate::gesture::TapRecognizer::new();
-                match tap_buttons {
-                    Some(mask) => rec.accept_buttons(mask),
-                    None => rec,
-                }
-            });
+            let mask = tap.union();
+            set.add(move || crate::gesture::TapRecognizer::new().accept_buttons(mask));
         }
-        if has_double_tap {
-            set.add(move || {
-                let rec = crate::gesture::DoubleTapRecognizer::new();
-                match double_tap_buttons {
-                    Some(mask) => rec.accept_buttons(mask),
-                    None => rec,
-                }
-            });
+        if double_tap.any() {
+            let mask = double_tap.union();
+            set.add(move || crate::gesture::DoubleTapRecognizer::new().accept_buttons(mask));
         }
-        if has_triple_tap {
-            set.add(move || {
-                let rec = crate::gesture::TripleTapRecognizer::new();
-                match triple_tap_buttons {
-                    Some(mask) => rec.accept_buttons(mask),
-                    None => rec,
-                }
-            });
+        if triple_tap.any() {
+            let mask = triple_tap.union();
+            set.add(move || crate::gesture::TripleTapRecognizer::new().accept_buttons(mask));
         }
         if has_drag {
             // No `.threshold(..)`: the drag slop is the active profile's, so a
             // finger gets 18 dp where a mouse keeps its 5.
             set.add(crate::gesture::DragRecognizer::new);
         }
-        if has_long_press {
-            set.add(move || {
-                let rec = crate::gesture::LongPressRecognizer::new();
-                match long_press_buttons {
-                    Some(mask) => rec.accept_buttons(mask),
-                    None => rec,
-                }
-            });
+        if long_press.any() {
+            let mask = long_press.union();
+            set.add(move || crate::gesture::LongPressRecognizer::new().accept_buttons(mask));
         }
         if has_swipe {
             set.add(crate::gesture::SwipeRecognizer::new);
@@ -259,36 +324,61 @@ impl WidgetTree {
         // WidgetBuilder AND via apply_self_handlers sees both callbacks —
         // and more importantly, so widgets that rely on one bucket don't
         // miss the gesture when the other is empty.
+        //
+        // The four click-style gestures go to a bucket only on a button in
+        // that bucket's own mask (see `BucketMasks`): the shared recognizer
+        // accepted the union, so an app's widened mask must not reach the
+        // widget's own handler, nor the widget's mask the app's.
         match gesture {
             GestureEvent::Tap(event) => {
-                if let Some(h) = node.external_handlers.on_tap.as_mut() {
+                let masks = BucketMasks::tap(node);
+                if masks.external_accepts(event.button)
+                    && let Some(h) = node.external_handlers.on_tap.as_mut()
+                {
                     h(&event, ctx);
                 }
-                if let Some(h) = node.handlers.on_tap.as_mut() {
+                if masks.own_accepts(event.button)
+                    && let Some(h) = node.handlers.on_tap.as_mut()
+                {
                     h(&event, ctx);
                 }
             }
             GestureEvent::DoubleTap(event) => {
-                if let Some(h) = node.external_handlers.on_double_tap.as_mut() {
+                let masks = BucketMasks::double_tap(node);
+                if masks.external_accepts(event.button)
+                    && let Some(h) = node.external_handlers.on_double_tap.as_mut()
+                {
                     h(&event, ctx);
                 }
-                if let Some(h) = node.handlers.on_double_tap.as_mut() {
+                if masks.own_accepts(event.button)
+                    && let Some(h) = node.handlers.on_double_tap.as_mut()
+                {
                     h(&event, ctx);
                 }
             }
             GestureEvent::TripleTap(event) => {
-                if let Some(h) = node.external_handlers.on_triple_tap.as_mut() {
+                let masks = BucketMasks::triple_tap(node);
+                if masks.external_accepts(event.button)
+                    && let Some(h) = node.external_handlers.on_triple_tap.as_mut()
+                {
                     h(&event, ctx);
                 }
-                if let Some(h) = node.handlers.on_triple_tap.as_mut() {
+                if masks.own_accepts(event.button)
+                    && let Some(h) = node.handlers.on_triple_tap.as_mut()
+                {
                     h(&event, ctx);
                 }
             }
             GestureEvent::LongPress(event) => {
-                if let Some(h) = node.external_handlers.on_long_press.as_mut() {
+                let masks = BucketMasks::long_press(node);
+                if masks.external_accepts(event.button)
+                    && let Some(h) = node.external_handlers.on_long_press.as_mut()
+                {
                     h(&event, ctx);
                 }
-                if let Some(h) = node.handlers.on_long_press.as_mut() {
+                if masks.own_accepts(event.button)
+                    && let Some(h) = node.handlers.on_long_press.as_mut()
+                {
                     h(&event, ctx);
                 }
             }
@@ -1319,6 +1409,203 @@ mod tests {
         }
         assert_eq!(doubles.get(), 1, "click 2 fires DoubleTap");
         assert_eq!(triples.get(), 1, "click 3 fires TripleTap");
+    }
+
+    // -----------------------------------------------------------------
+    // The two handler buckets keep their own button masks
+    // -----------------------------------------------------------------
+
+    use crate::event::{ButtonMask, PointerButton};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// Which bucket heard which button.
+    type Heard = Rc<RefCell<Vec<(&'static str, PointerButton)>>>;
+
+    /// A leaf that wires its own `on_tap` and `on_long_press` in `build`, the
+    /// way a composite wires its built-in click, optionally with a mask of its
+    /// own.
+    #[derive(Debug)]
+    struct OwnTap {
+        heard: Heard,
+        mask: Option<ButtonMask>,
+        /// Whether it wires `on_long_press` too.
+        hold: bool,
+    }
+
+    impl Widget for OwnTap {
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            let tap = self.heard.clone();
+            let hold = self.heard.clone();
+            let mut handlers = crate::widget_builder::HandlerSet::new()
+                .on_tap(move |e, _| tap.borrow_mut().push(("own tap", e.button)));
+            if self.hold {
+                handlers = handlers
+                    .on_long_press(move |e, _| hold.borrow_mut().push(("own hold", e.button)));
+            }
+            if let Some(mask) = self.mask {
+                handlers = handlers.accept_tap_buttons(mask);
+            }
+            ctx.apply_self_handlers(handlers);
+            vec![]
+        }
+
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+
+    fn click_with(tree: &mut WidgetTree, at: Point, button: PointerButton) {
+        tree.pointer_down_button(at, button);
+        tree.pointer_up_button(at, button);
+        // Out of the multi-tap window, so each click stands alone.
+        tree.advance_time(std::time::Duration::from_secs(1));
+    }
+
+    /// An app that widens ITS `on_tap` to the secondary button does not
+    /// retarget the widget's own: each set fires on its own buttons only, and
+    /// the recognizer they share accepts both.
+    #[test]
+    fn each_bucket_fires_only_on_the_buttons_in_its_own_tap_mask() {
+        let heard: Heard = Rc::default();
+        let app = heard.clone();
+        let mut tree = WidgetTree::new();
+        let w = tree.add(
+            OwnTap {
+                heard: heard.clone(),
+                mask: None,
+                hold: true,
+            }
+            .on_tap(move |e, _| app.borrow_mut().push(("app tap", e.button)))
+            .accept_tap_buttons(ButtonMask::SECONDARY),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let at = tree.bounds(w).center();
+
+        click_with(&mut tree, at, PointerButton::Primary);
+        click_with(&mut tree, at, PointerButton::Secondary);
+        click_with(&mut tree, at, PointerButton::Middle);
+        assert_eq!(
+            *heard.borrow(),
+            vec![
+                ("own tap", PointerButton::Primary),
+                ("app tap", PointerButton::Secondary),
+            ],
+        );
+    }
+
+    /// The same split for a long press, the one tap-family gesture that
+    /// recognises on a timer.
+    #[test]
+    fn each_bucket_fires_only_on_the_buttons_in_its_own_long_press_mask() {
+        let heard: Heard = Rc::default();
+        let app = heard.clone();
+        let mut tree = WidgetTree::new();
+        let w = tree.add(
+            OwnTap {
+                heard: heard.clone(),
+                mask: None,
+                hold: true,
+            }
+            .on_long_press(move |e, _| app.borrow_mut().push(("app hold", e.button)))
+            .accept_long_press_buttons(ButtonMask::SECONDARY),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let at = tree.bounds(w).center();
+
+        for button in [PointerButton::Primary, PointerButton::Secondary] {
+            tree.pointer_down_button(at, button);
+            tree.advance_time(std::time::Duration::from_secs(2));
+            tree.pointer_up_button(at, button);
+            tree.advance_time(std::time::Duration::from_secs(1));
+        }
+        let holds: Vec<_> = heard
+            .borrow()
+            .iter()
+            .copied()
+            .filter(|(who, _)| who.ends_with("hold"))
+            .collect();
+        assert_eq!(
+            holds,
+            vec![
+                ("own hold", PointerButton::Primary),
+                ("app hold", PointerButton::Secondary),
+            ],
+        );
+    }
+
+    /// A mask on a chain that attaches no `on_tap` of its own is addressed to
+    /// the widget's: that is how an app lets a right click activate a button.
+    #[test]
+    fn a_mask_with_no_handler_beside_it_reaches_the_widgets_own() {
+        let heard: Heard = Rc::default();
+        let mut tree = WidgetTree::new();
+        let w = tree.add(
+            OwnTap {
+                heard: heard.clone(),
+                mask: None,
+                hold: true,
+            }
+            .accept_tap_buttons(ButtonMask::PRIMARY | ButtonMask::SECONDARY),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let at = tree.bounds(w).center();
+
+        click_with(&mut tree, at, PointerButton::Secondary);
+        click_with(&mut tree, at, PointerButton::Primary);
+        assert_eq!(
+            *heard.borrow(),
+            vec![
+                ("own tap", PointerButton::Secondary),
+                ("own tap", PointerButton::Primary),
+            ],
+        );
+    }
+
+    /// ...unless the widget declared a mask of its own, which wins.
+    #[test]
+    fn a_widgets_own_mask_wins_over_one_with_no_handler_beside_it() {
+        let heard: Heard = Rc::default();
+        let mut tree = WidgetTree::new();
+        let w = tree.add(
+            OwnTap {
+                heard: heard.clone(),
+                mask: Some(ButtonMask::PRIMARY),
+                hold: true,
+            }
+            .accept_tap_buttons(ButtonMask::SECONDARY),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let at = tree.bounds(w).center();
+
+        click_with(&mut tree, at, PointerButton::Secondary);
+        click_with(&mut tree, at, PointerButton::Primary);
+        assert_eq!(*heard.borrow(), vec![("own tap", PointerButton::Primary)]);
+    }
+
+    /// The press visual answers to the union, the buttons on which SOME
+    /// handler acts.
+    #[test]
+    fn the_press_buttons_are_the_union_of_both_buckets() {
+        let mut tree = WidgetTree::new();
+        let w = tree.add(
+            OwnTap {
+                heard: Rc::default(),
+                mask: None,
+                hold: false,
+            }
+            .on_tap(|_, _| {})
+            .accept_tap_buttons(ButtonMask::MIDDLE),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(
+            tree.press_buttons(w),
+            ButtonMask::PRIMARY | ButtonMask::MIDDLE,
+        );
     }
 }
 

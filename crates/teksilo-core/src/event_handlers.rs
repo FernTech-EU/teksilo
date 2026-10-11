@@ -46,7 +46,9 @@ pub(crate) struct EventHandlers {
     /// `accept_double_tap_buttons(...)` / `accept_triple_tap_buttons(...)`
     /// / `accept_long_press_buttons(...)` on the widget builder or
     /// `HandlerSet`. Read by `ensure_gesture_arena` when constructing
-    /// the arena.
+    /// the arena, which accepts the union of the node's two buckets, and by
+    /// `dispatch_recognized_gesture`, which hands a gesture to each bucket
+    /// only on a button in that bucket's own mask (see `BucketMasks`).
     pub tap_buttons: Option<ButtonMask>,
     pub double_tap_buttons: Option<ButtonMask>,
     pub triple_tap_buttons: Option<ButtonMask>,

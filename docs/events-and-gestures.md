@@ -270,6 +270,8 @@ Button::new(lit!("Action"))
     });
 ```
 
+The mask belongs to the handler beside it. A node carries two handler sets, the widget's own (wired in its `build`) and the one a builder chain attaches, and they share one recognizer, which accepts the union of their masks; each set's handler then runs only for a button in its own mask. So in the example above a right click runs `alt_action` and does **not** also activate the button, and widening an application's `on_tap` on a `Slider` adds a secondary click without making the slider jump to it. A mask set where no handler of that gesture is attached beside it reaches the widget's own handler instead, unless that handler declared a mask of its own: `Button::new(..).accept_tap_buttons(ButtonMask::PRIMARY | ButtonMask::SECONDARY)`, with no `on_tap`, is how a right click activates the button itself.
+
 `ButtonMask` exposes the obvious constants and bitwise operators; `ButtonMask::ALL` is the catch-everything shorthand and `accept_any_button()` on the recognizer types is the equivalent. The same family of knobs exists for double-tap (`accept_double_tap_buttons`), triple-tap (`accept_triple_tap_buttons`), and long-press (`accept_long_press_buttons`).
 
 The `PointerButton` enum covers `Primary`, `Secondary`, `Middle`, plus `Back` and `Forward` (mouse 4 / 5). Platforms that don't surface the auxiliary buttons simply never emit them.

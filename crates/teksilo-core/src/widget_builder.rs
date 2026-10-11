@@ -627,6 +627,16 @@ impl HandlerSet {
     /// [`on_tap`](Self::on_tap). Default is [`ButtonMask::PRIMARY`]
     /// (left-click only). Pass `ButtonMask::ALL` or
     /// `ButtonMask::PRIMARY | ButtonMask::SECONDARY`, etc.
+    ///
+    /// The mask belongs to the `on_tap` set beside it. A node carries two
+    /// handler sets, the widget's own (from its `build`) and the one this
+    /// builder chain attaches, and each fires only on the buttons in its own
+    /// mask: widening the app's `on_tap` to the secondary button does not make
+    /// a right click run the widget's built-in click (a `Slider` jumping to
+    /// it, say). A mask set where no `on_tap` is attached beside it reaches
+    /// the widget's own instead, unless that one declared a mask of its own:
+    /// `Button::new(..).accept_tap_buttons(PRIMARY | SECONDARY)` is how a
+    /// right click activates a button.
     pub fn accept_tap_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
         self.handlers.tap_buttons = Some(mask.into());
         self
@@ -635,6 +645,9 @@ impl HandlerSet {
     /// Restrict (or extend) the set of pointer buttons that fire
     /// [`on_double_tap`](Self::on_double_tap). Default
     /// [`ButtonMask::PRIMARY`].
+    ///
+    /// Scoped to the handler set it is attached with, the way
+    /// [`accept_tap_buttons`](Self::accept_tap_buttons) is.
     pub fn accept_double_tap_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
         self.handlers.double_tap_buttons = Some(mask.into());
         self
@@ -643,6 +656,9 @@ impl HandlerSet {
     /// Restrict (or extend) the set of pointer buttons that fire
     /// [`on_triple_tap`](Self::on_triple_tap). Default
     /// [`ButtonMask::PRIMARY`].
+    ///
+    /// Scoped to the handler set it is attached with, the way
+    /// [`accept_tap_buttons`](Self::accept_tap_buttons) is.
     pub fn accept_triple_tap_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
         self.handlers.triple_tap_buttons = Some(mask.into());
         self
@@ -651,6 +667,9 @@ impl HandlerSet {
     /// Restrict (or extend) the set of pointer buttons that fire
     /// [`on_long_press`](Self::on_long_press). Default
     /// [`ButtonMask::PRIMARY`].
+    ///
+    /// Scoped to the handler set it is attached with, the way
+    /// [`accept_tap_buttons`](Self::accept_tap_buttons) is.
     pub fn accept_long_press_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
         self.handlers.long_press_buttons = Some(mask.into());
         self
@@ -1200,6 +1219,16 @@ impl<W: Widget> WidgetWithHandlers<W> {
 
     /// Restrict (or extend) the set of pointer buttons that fire
     /// `on_tap`. Default is [`ButtonMask::PRIMARY`].
+    ///
+    /// The mask belongs to the `on_tap` set beside it. A node carries two
+    /// handler sets, the widget's own (from its `build`) and the one this
+    /// builder chain attaches, and each fires only on the buttons in its own
+    /// mask: widening the app's `on_tap` to the secondary button does not make
+    /// a right click run the widget's built-in click (a `Slider` jumping to
+    /// it, say). A mask set where no `on_tap` is attached beside it reaches
+    /// the widget's own instead, unless that one declared a mask of its own:
+    /// `Button::new(..).accept_tap_buttons(PRIMARY | SECONDARY)` is how a
+    /// right click activates a button.
     pub fn accept_tap_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
         self.handler_set.handlers.tap_buttons = Some(mask.into());
         self
@@ -1207,6 +1236,9 @@ impl<W: Widget> WidgetWithHandlers<W> {
 
     /// Restrict (or extend) the set of pointer buttons that fire
     /// `on_double_tap`. Default [`ButtonMask::PRIMARY`].
+    ///
+    /// Scoped to the handler set it is attached with, the way
+    /// [`accept_tap_buttons`](Self::accept_tap_buttons) is.
     pub fn accept_double_tap_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
         self.handler_set.handlers.double_tap_buttons = Some(mask.into());
         self
@@ -1214,6 +1246,9 @@ impl<W: Widget> WidgetWithHandlers<W> {
 
     /// Restrict (or extend) the set of pointer buttons that fire
     /// `on_triple_tap`. Default [`ButtonMask::PRIMARY`].
+    ///
+    /// Scoped to the handler set it is attached with, the way
+    /// [`accept_tap_buttons`](Self::accept_tap_buttons) is.
     pub fn accept_triple_tap_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
         self.handler_set.handlers.triple_tap_buttons = Some(mask.into());
         self
@@ -1221,6 +1256,9 @@ impl<W: Widget> WidgetWithHandlers<W> {
 
     /// Restrict (or extend) the set of pointer buttons that fire
     /// `on_long_press`. Default [`ButtonMask::PRIMARY`].
+    ///
+    /// Scoped to the handler set it is attached with, the way
+    /// [`accept_tap_buttons`](Self::accept_tap_buttons) is.
     pub fn accept_long_press_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
         self.handler_set.handlers.long_press_buttons = Some(mask.into());
         self
@@ -2163,24 +2201,43 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
 
     /// Restrict (or extend) the set of pointer buttons that fire
     /// `on_tap`. Default is [`ButtonMask::PRIMARY`].
+    ///
+    /// The mask belongs to the `on_tap` set beside it. A node carries two
+    /// handler sets, the widget's own (from its `build`) and the one this
+    /// builder chain attaches, and each fires only on the buttons in its own
+    /// mask: widening the app's `on_tap` to the secondary button does not make
+    /// a right click run the widget's built-in click (a `Slider` jumping to
+    /// it, say). A mask set where no `on_tap` is attached beside it reaches
+    /// the widget's own instead, unless that one declared a mask of its own:
+    /// `Button::new(..).accept_tap_buttons(PRIMARY | SECONDARY)` is how a
+    /// right click activates a button.
     fn accept_tap_buttons(self, mask: impl Into<ButtonMask>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).accept_tap_buttons(mask)
     }
 
     /// Restrict (or extend) the set of pointer buttons that fire
     /// `on_double_tap`. Default [`ButtonMask::PRIMARY`].
+    ///
+    /// Scoped to the handler set it is attached with, the way
+    /// [`accept_tap_buttons`](Self::accept_tap_buttons) is.
     fn accept_double_tap_buttons(self, mask: impl Into<ButtonMask>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).accept_double_tap_buttons(mask)
     }
 
     /// Restrict (or extend) the set of pointer buttons that fire
     /// `on_triple_tap`. Default [`ButtonMask::PRIMARY`].
+    ///
+    /// Scoped to the handler set it is attached with, the way
+    /// [`accept_tap_buttons`](Self::accept_tap_buttons) is.
     fn accept_triple_tap_buttons(self, mask: impl Into<ButtonMask>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).accept_triple_tap_buttons(mask)
     }
 
     /// Restrict (or extend) the set of pointer buttons that fire
     /// `on_long_press`. Default [`ButtonMask::PRIMARY`].
+    ///
+    /// Scoped to the handler set it is attached with, the way
+    /// [`accept_tap_buttons`](Self::accept_tap_buttons) is.
     fn accept_long_press_buttons(self, mask: impl Into<ButtonMask>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).accept_long_press_buttons(mask)
     }
