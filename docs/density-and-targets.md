@@ -261,6 +261,7 @@ does reach the checkbox, which is the case the mechanism exists for.
 | rule | why |
 | --- | --- |
 | earns a non-zero outset | the formula excludes anything already at `up_to` |
+| has an **area**: non-zero width and height | a zero-size helper (a frame-tick driver, a probe) would earn the whole radius and catch every miss in the empty space around it |
 | would act on a press (a pointer handler, or focusable) | re-attributing to an inert node swallows a press silently |
 | **enabled**, its own state and every ancestor's | a disabled control ignores presses |
 | not **read-only** | likewise; answered by the `TextSurface` registry, via a probe the tree hands the arena |

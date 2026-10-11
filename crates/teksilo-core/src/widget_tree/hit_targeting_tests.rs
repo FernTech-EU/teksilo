@@ -938,6 +938,47 @@ fn a_widget_can_withdraw_by_reporting_no_distance() {
     );
 }
 
+/// A node with no area is never a candidate. A helper that answers
+/// `Size::ZERO` (a frame-tick driver, a measuring probe) and still carries a
+/// handler would otherwise earn the largest top-up the formula gives — the
+/// whole radius — and catch every press that misses near it, in what the user
+/// sees as empty space. Zero on either axis counts: a 0 dp-wide strip is no
+/// more a target than a point.
+#[test]
+fn a_node_with_no_area_never_catches_a_near_miss() {
+    let point_taps = Rc::new(StdCell::new(0));
+    let strip_taps = Rc::new(StdCell::new(0));
+    let mut tree = WidgetTree::new();
+    tree.set_input_density(TargetDensity::Touch);
+    let point = tree.add(Cell::new().counting(&point_taps));
+    let strip = tree.add(Cell::new().counting(&strip_taps));
+    let real = tree.add(Cell::new().tappable());
+    // The backdrop takes no press, so the bubble path carries no owner and
+    // the miss-only pass runs.
+    let back = tree.add(Cell::new());
+    tree.add(
+        Board::new()
+            .at(back, Rect::new(0.0, 0.0, 200.0, 200.0))
+            .at(real, Rect::new(40.0, 92.0, 16.0, 16.0))
+            .at(point, Rect::new(100.0, 100.0, 0.0, 0.0))
+            .at(strip, Rect::new(150.0, 0.0, 0.0, 200.0)),
+    );
+    tree.layout(SizeProposal::exact(200.0, 200.0));
+    let finger = touch_pointer();
+
+    // 4 dp from the point and 44 dp from the real target: empty space.
+    assert_eq!(tree.hit_test_for(at(104.0, 100.0), &finger), Some(back));
+    // 3 dp beside the zero-width strip.
+    assert_eq!(tree.hit_test_for(at(153.0, 100.0), &finger), Some(back));
+    tree.tap_with(PointerKind::Touch, at(104.0, 100.0));
+    tree.tap_with(PointerKind::Touch, at(153.0, 100.0));
+    assert_eq!(point_taps.get(), 0, "the zero-size node took a tap");
+    assert_eq!(strip_taps.get(), 0, "the zero-width node took a tap");
+
+    // The real target beside them still catches its own near miss.
+    assert_eq!(tree.hit_test_for(at(60.0, 100.0), &finger), Some(real));
+}
+
 /// A candidate must still be something a press would reach. Re-attributing to a
 /// node that ignores presses would swallow one silently.
 #[test]

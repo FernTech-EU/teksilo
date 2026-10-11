@@ -1551,7 +1551,14 @@ impl WidgetArena {
         } else {
             scale_children
         };
+        // A node with no area is a helper, not a control: a frame-tick driver,
+        // a measuring probe, a collapsed placeholder. Nobody aimed at it, and
+        // the size formula would hand it the largest top-up there is, so it
+        // would catch every miss within reach of a point. Its children are
+        // still walked: an empty node may host real content that overflows it.
+        let has_area = space.bounds.width > 0.0 && space.bounds.height > 0.0;
         if enabled
+            && has_area
             && !node.no_hit_slop
             && !node.event_pass_through
             && !hit.is_read_only(id)
