@@ -54,10 +54,19 @@ by crate for clarity, not because crates version independently.
   `teksu!`, `#[derive(IntentKind)]`) with their crate's usage doc, and every
   `#[macro_export]` macro (`compile_in_locales!`, `lit!`) with the forms it
   accepts. They answered "unknown type" before.
+- **`symbol` says where to import each item from**: an **Import:** line
+  under every type, function, constant and macro gives the shortest `use`
+  path through `teksilo` (`teksilo::core::ObserverHandle`,
+  `teksilo::prelude::Theme`), the umbrella feature it needs when a default
+  build lacks it (`WebView`: `web-view-headless` or `web-view`), the crate to
+  add when `teksilo` does not re-export it (`teksilo_scene::SceneView`), or
+  that nothing outside its crate can reach it. `-f json` gains `imports`,
+  every path, best first. rustc suggests none of these paths.
 
 #### Documentation
 
-- The generated catalog pages list the same fields and variant payloads.
+- The generated catalog pages list the same fields and variant payloads,
+  and each item's import path.
 
 ### Changed
 

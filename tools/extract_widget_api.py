@@ -2062,7 +2062,7 @@ def _find_members(query: str) -> "tuple[str, list[MemberMatch]]":
             for it in pf.items:
                 if it.hidden:
                     continue
-                if it.kind == "fn" and it.name == name and owner_name is None:
+                if it.kind in ("fn", "const", "type") and it.name == name and owner_name is None:
                     found = [(None, it)]
                 else:
                     found = [
@@ -2088,8 +2088,9 @@ def _member_page(name: str, match: MemberMatch) -> ParsedFile:
     owner reduced to this member, and a header saying where the rest is."""
     crate = CRATE_SPECS[match.crate_key].crate
     if match.owner is None:
+        what = {"fn": "a free function", "const": "a constant", "type": "a type alias"}[match.member.kind]
         header = (
-            f"`{name}` is a free function in `{crate}` (`--crate {match.crate_key}`), "
+            f"`{name}` is {what} in `{crate}` (`--crate {match.crate_key}`), "
             f"module `{match.file.stem}`."
         )
         return ParsedFile(match.file.stem, match.file, header, match.cfg, [match.member])
@@ -2121,6 +2122,666 @@ def _member_candidates(name: str, matches: "list[MemberMatch]") -> str:
 
 
 # ----------------------------------------------------------------------------
+# Import paths — where an app writes `use` for an item
+# ----------------------------------------------------------------------------
+#
+# rustc does not help here. For a name that is not in scope it suggests no
+# path through the umbrella's re-exports, none into a crate the app does not
+# depend on, and none behind a disabled feature: `ObserverHandle`, `SceneView`
+# and `ColumnFlow` all answered a bare "not found in this scope". So the
+# paths are computed from the sources.
+#
+# Module-level statements are read line by line at their module's indent,
+# which rustfmt makes reliable: a file module's items sit at column 0, an
+# inline `mod x { … }` block's at the next four, and deeper lines are bodies.
+# No public `pub use` in these crates is a glob, so names resolve one by one.
+
+# A `cfg` predicate, tagged with the package whose source declares it: the
+# same feature name means different things in different crates.
+_Cond = "tuple[str, str]"
+
+
+@dataclass
+class _UseEntry:
+    """One name a `pub use` exports. `pub use a::b::C as D;` gives alias `D`
+    and path `[a, b, C]`; a `self` in braces names the module itself."""
+    alias: str
+    path: list[str]
+    module: "tuple[str, tuple[str, ...]]"  # (crate ident, module path) it sits in
+    conds: "tuple[_Cond, ...]"
+    hidden: bool
+
+
+@dataclass
+class _ModDecl:
+    public: bool
+    conds: "tuple[_Cond, ...]"
+    inline: bool
+    path_attr: "str | None" = None
+
+
+@dataclass
+class _ModInfo:
+    decls: "dict[str, _ModDecl]" = field(default_factory=dict)
+    uses: "list[_UseEntry]" = field(default_factory=list)
+    # Public item name -> the cfgs on the item itself.
+    defines: "dict[str, tuple[_Cond, ...]]" = field(default_factory=dict)
+
+
+_IMPORT_ITEM = re.compile(
+    r"^pub\s+(?:unsafe\s+|async\s+|const\s+(?=(?:unsafe\s+)?fn\b))*"
+    r"(?:struct|enum|trait|type|fn|const|static|union)\s+([A-Za-z_]\w*)"
+)
+_IMPORT_MOD = re.compile(r"^(pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)\s*([;{])")
+_IMPORT_USE = re.compile(r"^(pub(?:\s*\([^)]*\))?\s+)?use\s")
+_IMPORT_MACRO_RULES = re.compile(r"^macro_rules!\s*([A-Za-z_]\w*)")
+_USE_TOKEN = re.compile(r"::|[{},*]|[A-Za-z_]\w*")
+
+
+class _ImportState:
+    """Everything parsed so far, shared by every lookup in one run."""
+
+    def __init__(self) -> None:
+        self.roots: dict[str, tuple[str, Path]] = {}
+        for spec in CRATE_SPECS.values():
+            self.roots[spec.crate.replace("-", "_")] = (spec.crate, spec.src)
+        for crate in PROC_MACRO_CRATES:
+            self.roots[crate.replace("-", "_")] = (crate, REPO_ROOT / "crates" / crate / "src")
+        self.files: dict[tuple[str, tuple[str, ...]], "Path | None"] = {}
+        self.mods: dict[tuple[str, tuple[str, ...]], _ModInfo] = {}
+        self.parsed: set[Path] = set()
+        self.all_parsed = False
+        self.use_index: "dict[str, list[_UseEntry]] | None" = None
+        self.tomls: dict[str, dict] = {}
+        self.closures: dict[frozenset, set[tuple[str, str]]] = {}
+
+
+_IMPORTS: "_ImportState | None" = None
+
+
+def _imports() -> _ImportState:
+    global _IMPORTS
+    if _IMPORTS is None:
+        _IMPORTS = _ImportState()
+    return _IMPORTS
+
+
+def _module_file(ident: str, modpath: "tuple[str, ...]") -> "Path | None":
+    """The file a module's body lives in, by the 2018 layout (`a/b.rs`), with
+    `a/b/mod.rs` and `#[path]` accepted for crates that use them."""
+    st = _imports()
+    key = (ident, modpath)
+    if key in st.files:
+        return st.files[key]
+    st.files[key] = None
+    root = st.roots.get(ident)
+    found: "Path | None" = None
+    if root is not None:
+        src = root[1]
+        if not modpath:
+            found = src / "lib.rs" if (src / "lib.rs").exists() else None
+        else:
+            decl = _module_info(ident, modpath[:-1]).decls.get(modpath[-1])
+            if decl is not None and not decl.inline:
+                parent = _module_file(ident, modpath[:-1])
+                if decl.path_attr and parent is not None:
+                    # Relative to the declaring file's directory, whatever
+                    # kind of file that is (the reference's rule for a
+                    # `#[path]` outside an inline module).
+                    cand = parent.parent / decl.path_attr
+                    found = cand if cand.exists() else None
+                else:
+                    base = src.joinpath(*modpath)
+                    for cand in (base.with_suffix(".rs"), base / "mod.rs"):
+                        if cand.exists():
+                            found = cand
+                            break
+    st.files[key] = found
+    return found
+
+
+def _module_path_of_file(ident: str, path: Path) -> "tuple[str, ...] | None":
+    root = _imports().roots.get(ident)
+    if root is None:
+        return None
+    try:
+        rel = path.resolve().relative_to(root[1].resolve())
+    except ValueError:
+        return None
+    parts = list(rel.with_suffix("").parts)
+    if parts == ["lib"]:
+        return ()
+    if parts and parts[-1] == "mod":
+        parts = parts[:-1]
+    return tuple(parts)
+
+
+def _split_use_tree(text: str) -> "list[tuple[list[str], str]]":
+    """`a::{b, c::D as E, self}` → [([a, b], b), ([a, c, D], E), ([a, self], a)].
+    A glob or an `_` alias names nothing."""
+    toks = _USE_TOKEN.findall(text)
+    out: list[tuple[list[str], str]] = []
+    pos = 0
+
+    def tree(prefix: list[str]) -> None:
+        nonlocal pos
+        segs = list(prefix)
+        while pos < len(toks):
+            t = toks[pos]
+            if t == "::":
+                pos += 1
+            elif t == "{":
+                pos += 1
+                while pos < len(toks) and toks[pos] != "}":
+                    if toks[pos] == ",":
+                        pos += 1
+                        continue
+                    tree(segs)
+                pos += 1  # the `}`
+                return
+            elif t == "*":
+                pos += 1
+                return
+            elif t in (",", "}"):
+                break
+            elif t == "as":
+                pos += 1
+                alias = toks[pos] if pos < len(toks) else "_"
+                pos += 1
+                if alias != "_" and segs:
+                    out.append((segs, alias))
+                return
+            else:
+                segs.append(t)
+                pos += 1
+        if len(segs) > len(prefix) or (segs and segs[-1] == "self"):
+            name = segs[-2] if segs[-1] == "self" and len(segs) > 1 else segs[-1]
+            out.append((segs, name))
+
+    while pos < len(toks):
+        if toks[pos] == ",":
+            pos += 1
+            continue
+        tree([])
+    return out
+
+
+def _parse_module_file(ident: str, path: Path, modpath: "tuple[str, ...]") -> None:
+    """Record the module decls, public `use`s and public items of a file's
+    module and of every inline module inside it."""
+    st = _imports()
+    if path in st.parsed:
+        return
+    st.parsed.add(path)
+    try:
+        raw = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    package = st.roots[ident][0]
+    cleaned = preprocess(raw)
+    stack: list[tuple[int, tuple[str, ...]]] = [(0, modpath)]
+    st.mods.setdefault((ident, modpath), _ModInfo())
+    attrs: list[str] = []
+    i = 0
+    while i < len(raw):
+        line = cleaned[i]
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if not stripped or stripped.startswith("//"):
+            i += 1
+            continue
+        while len(stack) > 1 and indent < stack[-1][0]:
+            stack.pop()
+        cur_indent, cur = stack[-1]
+        if indent != cur_indent:
+            attrs = []
+            i += 1
+            continue
+        info = st.mods.setdefault((ident, cur), _ModInfo())
+        if stripped.startswith("#["):
+            attr, end = consume_attribute(raw, cleaned, i)
+            attrs.append(attr)
+            i = end + 1
+            continue
+        conds = tuple(
+            (package, m.group(1).strip())
+            for a in attrs
+            for m in [re.match(r"#\[\s*cfg\s*\((.*)\)\s*\]$", a.strip(), re.S)]
+            if m
+        )
+        test_only = any(c.replace(" ", "") in ("test", "all(test)") for _p, c in conds)
+        m = _IMPORT_MOD.match(stripped)
+        if m:
+            name, opener = m.group(2), m.group(3)
+            if test_only and opener == "{":
+                close, _ = find_matching_brace(cleaned, i, line.index("{"))
+                attrs = []
+                i = close + 1
+                continue
+            public = bool(m.group(1)) and "(" not in m.group(1) and not test_only
+            path_attr = next(
+                (pm.group(1) for a in attrs for pm in [re.search(r'#\[\s*path\s*=\s*"([^"]+)"', a)] if pm),
+                None,
+            )
+            info.decls[name] = _ModDecl(public, conds, opener == "{", path_attr)
+            if opener == "{":
+                stack.append((indent + 4, cur + (name,)))
+                st.mods.setdefault((ident, cur + (name,)), _ModInfo())
+            attrs = []
+            i += 1
+            continue
+        m = _IMPORT_USE.match(stripped)
+        if m:
+            j = i
+            while ";" not in cleaned[j] and j + 1 < len(raw):
+                j += 1
+            vis = m.group(1)
+            if vis and "(" not in vis and not test_only:
+                body = " ".join(cleaned[k] for k in range(i, j + 1))
+                body = body[body.index("use") + 3: body.rindex(";")]
+                hidden = _is_hidden(attrs)
+                for segs, alias in _split_use_tree(body):
+                    info.uses.append(_UseEntry(alias, segs, (ident, cur), conds, hidden))
+            attrs = []
+            i = j + 1
+            continue
+        if not test_only:
+            m = _IMPORT_ITEM.match(stripped)
+            if m:
+                info.defines[m.group(1)] = conds
+            mm = _IMPORT_MACRO_RULES.match(stripped)
+            if mm and any("macro_export" in a for a in attrs) and not _is_hidden(attrs):
+                # `#[macro_export]` puts the macro at the crate root.
+                st.mods.setdefault((ident, ()), _ModInfo()).defines[mm.group(1)] = conds
+            for a in attrs:
+                dm = re.search(r"proc_macro_derive\s*\(\s*(\w+)", a)
+                if dm:
+                    info.defines[dm.group(1)] = conds
+        attrs = []
+        i += 1
+
+
+def _module_info(ident: str, modpath: "tuple[str, ...]") -> _ModInfo:
+    st = _imports()
+    key = (ident, modpath)
+    if key not in st.mods:
+        # A file module's own file, or else the ancestor file that holds it
+        # as an inline block.
+        for k in range(len(modpath), -1, -1):
+            f = _module_file(ident, modpath[:k])
+            if f is not None:
+                _parse_module_file(ident, f, modpath[:k])
+                if key in st.mods:
+                    break
+        st.mods.setdefault(key, _ModInfo())
+    return st.mods[key]
+
+
+def _use_index() -> "dict[str, list[_UseEntry]]":
+    """Every public `use` entry of every known crate, keyed by the last
+    segment it names (a `self` entry by its module's name)."""
+    st = _imports()
+    if st.use_index is None:
+        for ident, (_crate, src) in st.roots.items():
+            if not src.is_dir():
+                continue
+            for path in sorted(src.rglob("*.rs")):
+                modpath = _module_path_of_file(ident, path)
+                if modpath is None:
+                    continue
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                if "pub use" in text or "macro_export" in text:
+                    _parse_module_file(ident, path, modpath)
+        index: dict[str, list[_UseEntry]] = {}
+        for info in list(st.mods.values()):
+            for u in info.uses:
+                last = u.path[-1]
+                if last == "self":
+                    last = u.path[-2] if len(u.path) > 1 else ""
+                index.setdefault(last, []).append(u)
+        st.use_index = index
+    return st.use_index
+
+
+def _resolve_use(entry: _UseEntry, depth: int = 0) -> "tuple | None":
+    """What a `pub use` entry names: ("item", ident, modpath, name) or
+    ("module", ident, modpath, "")."""
+    if depth > 12:
+        return None
+    st = _imports()
+    ident, cur = entry.module
+    segs = list(entry.path)
+    first = segs[0]
+    if first == "crate":
+        cur, segs = (), segs[1:]
+    elif first == "self":
+        segs = segs[1:]
+    elif first == "super":
+        while segs and segs[0] == "super":
+            cur, segs = cur[:-1], segs[1:]
+    elif first not in _module_info(ident, cur).decls:
+        if first in st.roots:
+            ident, cur, segs = first, (), segs[1:]
+        elif not any(u.alias == first for u in _module_info(ident, cur).uses):
+            return None  # std, or a crate this tool does not read
+    return _resolve_segments(ident, cur, segs, depth)
+
+
+def _resolve_segments(ident: str, cur: "tuple[str, ...]", segs: "list[str]", depth: int) -> "tuple | None":
+    for k, seg in enumerate(segs):
+        last = k == len(segs) - 1
+        if seg == "self" and last:
+            return ("module", ident, cur, "")
+        info = _module_info(ident, cur)
+        if last and seg in info.defines:
+            return ("item", ident, cur, seg)
+        if seg in info.decls:
+            if last:
+                return ("module", ident, cur + (seg,), "")
+            cur = cur + (seg,)
+            continue
+        hit = None
+        for u in info.uses:
+            if u.alias == seg:
+                hit = _resolve_use(u, depth + 1)
+                if hit is not None:
+                    break
+        if hit is None:
+            return None
+        if last:
+            return hit
+        if hit[0] != "module":
+            return None
+        ident, cur = hit[1], hit[2]
+    return ("module", ident, cur, "")
+
+
+# (root crate ident, path segments under it, conds, through a hidden re-export)
+_RawPath = "tuple[str, tuple[str, ...], tuple[_Cond, ...], bool]"
+
+
+def _module_paths(ident: str, modpath: "tuple[str, ...]", seen: "frozenset" = frozenset()) -> "list":
+    key = (ident, modpath)
+    if key in seen or len(seen) > 8:
+        return []
+    seen = seen | {key}
+    out: list = []
+    if not modpath:
+        out.append((ident, (), (), False))
+    else:
+        decl = _module_info(ident, modpath[:-1]).decls.get(modpath[-1])
+        if decl is not None and decl.public:
+            for root, segs, conds, hidden in _module_paths(ident, modpath[:-1], seen):
+                out.append((root, segs + (modpath[-1],), conds + decl.conds, hidden))
+    name = modpath[-1] if modpath else ident
+    for u in _use_index().get(name, []):
+        target = _resolve_use(u)
+        if target and target[0] == "module" and (target[1], target[2]) == key:
+            for root, segs, conds, hidden in _module_paths(u.module[0], u.module[1], seen):
+                out.append((root, segs + (u.alias,), conds + u.conds, hidden or u.hidden))
+    return out
+
+
+def _item_raw_paths(ident: str, modpath: "tuple[str, ...]", name: str) -> "list":
+    index = _use_index()  # also parses the files a `#[macro_export]` sits in
+    # A cfg on the item itself holds whichever path reaches it.
+    own = _module_info(ident, modpath).defines.get(name, ())
+    out: list = []
+    if name in _module_info(ident, modpath).defines:
+        for root, segs, conds, hidden in _module_paths(ident, modpath):
+            out.append((root, segs + (name,), conds, hidden))
+    for u in index.get(name, []):
+        if _resolve_use(u) == ("item", ident, modpath, name):
+            for root, segs, conds, hidden in _module_paths(u.module[0], u.module[1]):
+                out.append((root, segs + (u.alias,), conds + u.conds, hidden or u.hidden))
+    unique: dict = {}
+    for root, segs, conds, hidden in out:
+        unique.setdefault((root, segs), (root, segs, own + conds, hidden))
+    return list(unique.values())
+
+
+def _cargo_toml(crate: str) -> dict:
+    """A crate's parsed Cargo.toml, `{}` when absent (a copied stage) or when
+    Python predates `tomllib` (3.11): every feature then reads as one to turn
+    on, which over-reports and never under-reports."""
+    st = _imports()
+    if crate not in st.tomls:
+        try:
+            import tomllib
+
+            path = REPO_ROOT / "Cargo.toml" if crate == "" else REPO_ROOT / "crates" / crate / "Cargo.toml"
+            st.tomls[crate] = tomllib.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            st.tomls[crate] = {}
+    return st.tomls[crate]
+
+
+def _dependency_specs(crate: str) -> "list[tuple[str, bool, bool, list[str]]]":
+    """(dependency key, optional, default-features, features) for each normal
+    dependency, target-specific ones included, `workspace = true` merged
+    with the root's `[workspace.dependencies]`."""
+    data = _cargo_toml(crate)
+    tables = [data.get("dependencies", {})]
+    tables += [t.get("dependencies", {}) for t in data.get("target", {}).values()]
+    workspace = _cargo_toml("").get("workspace", {}).get("dependencies", {})
+    out = []
+    for table in tables:
+        for key, spec in table.items():
+            if isinstance(spec, str):
+                spec = {}
+            features = list(spec.get("features", []))
+            default = spec.get("default-features", spec.get("default_features", True))
+            if spec.get("workspace"):
+                base = workspace.get(key, {})
+                if isinstance(base, dict):
+                    features += base.get("features", [])
+                    default = base.get("default-features", default)
+            out.append((key, bool(spec.get("optional")), bool(default), features))
+    return out
+
+
+def _feature_closure(extra: "frozenset[str]" = frozenset()) -> "set[tuple[str, str]]":
+    """The (crate, feature) pairs an app depending on `teksilo` with its
+    default features, plus `extra`, ends up compiling with."""
+    st = _imports()
+    if extra in st.closures:
+        return st.closures[extra]
+    enabled = {("teksilo", "default")} | {("teksilo", f) for f in extra}
+    compiled = {"teksilo"}
+    changed = True
+    while changed:
+        changed = False
+        size = (len(enabled), len(compiled))
+        for crate in list(compiled):
+            feats = _cargo_toml(crate).get("features", {})
+            optional = {k for k, opt, _d, _f in _dependency_specs(crate) if opt}
+            for c, f in list(enabled):
+                if c != crate:
+                    continue
+                if f in optional:
+                    compiled.add(f)
+                for e in feats.get(f, []):
+                    if e.startswith("dep:"):
+                        compiled.add(e[4:])
+                    elif "/" in e:
+                        dep, sub = e.split("/", 1)
+                        if not dep.endswith("?"):
+                            compiled.add(dep)
+                        enabled.add((dep.rstrip("?"), sub))
+                    else:
+                        enabled.add((crate, e))
+            for dep, opt, default, dep_feats in _dependency_specs(crate):
+                if not opt:
+                    compiled.add(dep)
+                if dep in compiled:
+                    if default:
+                        enabled.add((dep, "default"))
+                    enabled.update((dep, f) for f in dep_feats)
+        changed = size != (len(enabled), len(compiled))
+    st.closures[extra] = enabled
+    return enabled
+
+
+def _cfg_holds(expr: str, features: "set[str]") -> "bool | None":
+    """Whether a `cfg` holds with `features` on: True, False, or None when it
+    depends on more than features (a target, `debug_assertions`)."""
+    e = expr.strip()
+    m = re.fullmatch(r'feature\s*=\s*"([^"]+)"', e)
+    if m:
+        return m.group(1) in features
+    m = re.fullmatch(r"(any|all|not)\s*\((.*)\)", e, re.S)
+    if not m:
+        return None
+    parts, depth, start = [], 0, 0
+    inner = m.group(2)
+    for i, c in enumerate(inner + ","):
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        elif c == "," and depth == 0:
+            if inner[start:i].strip():
+                parts.append(inner[start:i])
+            start = i + 1
+    vals = [_cfg_holds(p, features) for p in parts]
+    if m.group(1) == "not":
+        return None if not vals or vals[0] is None else not vals[0]
+    if m.group(1) == "any":
+        return True if any(v is True for v in vals) else (None if None in vals else False)
+    return False if any(v is False for v in vals) else (None if None in vals else True)
+
+
+def _cond_needs(cond: "_Cond") -> "str | None":
+    """What an app does for a cfg to hold, or None when a default build of
+    the umbrella crate already satisfies it."""
+    crate, expr = cond
+
+    def of(closure: "set[tuple[str, str]]") -> "set[str]":
+        return {f for c, f in closure if c == crate}
+
+    holds = _cfg_holds(expr, of(_feature_closure()))
+    if holds:
+        return None
+    if holds is False:
+        umbrella = [f for f in _cargo_toml("teksilo").get("features", {}) if f != "default"]
+        if crate == "teksilo":
+            # The umbrella's own cfg already names its features.
+            turn_on = list(dict.fromkeys(re.findall(r'feature\s*=\s*"([^"]+)"', expr)))
+            narrow = turn_on
+        else:
+            turn_on = [f for f in umbrella if _cfg_holds(expr, of(_feature_closure(frozenset([f])))) is True]
+            # The narrowest: a candidate that turns on no other candidate.
+            narrow = [
+                f for f in turn_on
+                if not any(("teksilo", g) in _feature_closure(frozenset([f])) for g in turn_on if g != f)
+            ] or turn_on
+        if turn_on:
+            joined = " or ".join(f"`{f}`" for f in narrow)
+            plural = "feature" if len(narrow) == 1 else "features"
+            return f"teksilo's {joined} {plural}"
+        feats = list(dict.fromkeys(re.findall(r'feature\s*=\s*"([^"]+)"', expr)))
+        if feats:
+            joined = " or ".join(f"`{f}`" for f in feats)
+            return f"`{crate}`'s {joined} feature" + ("s" if len(feats) > 1 else "")
+    return f"`cfg({expr})`"
+
+
+def _definition_module(ident: str, modpath: "tuple[str, ...]", name: str) -> "tuple[str, ...]":
+    """The module that defines `name`: the file's module, or an inline
+    `mod x { … }` inside that file (`pub mod codes { pub const … }`)."""
+    todo = [modpath]
+    while todo:
+        mp = todo.pop(0)
+        info = _module_info(ident, mp)
+        if name in info.defines:
+            return mp
+        todo.extend(mp + (n,) for n, d in info.decls.items() if d.inline)
+    return modpath
+
+
+def import_paths(ident: str, modpath: "tuple[str, ...]", name: str) -> "list[dict]":
+    """Every public path to an item, best first: through the umbrella crate,
+    then fewest requirements, the prelude, the shortest."""
+    st = _imports()
+    ranked = []
+    for root, segs, conds, hidden in _item_raw_paths(ident, modpath, name):
+        needs: list[str] = []
+        for c in conds:
+            n = _cond_needs(c)
+            if n and n not in needs:
+                needs.append(n)
+        ranked.append({
+            "path": "::".join((root,) + segs),
+            # Named directly in the prelude, so `use teksilo::prelude::*`
+            # brings it in (`prelude::macos::…` it does not).
+            "prelude": root == "teksilo" and len(segs) == 2 and segs[0] == "prelude",
+            "needs": needs,
+            "hidden": hidden,
+            # The package to add to `[dependencies]` when teksilo does not
+            # re-export it; None through the umbrella crate.
+            "dependency": None if root == "teksilo" else st.roots[root][0],
+        })
+    ranked.sort(key=lambda r: (
+        r["dependency"] is not None,
+        r["hidden"],
+        len(r["needs"]),
+        not r["prelude"],
+        r["path"].count("::"),
+        r["path"],
+    ))
+    return ranked
+
+
+def _item_location(path: Path) -> "tuple[str, tuple[str, ...]] | None":
+    """(crate ident, module path) of a source file."""
+    st = _imports()
+    resolved = path.resolve()
+    for ident, (_crate, src) in st.roots.items():
+        try:
+            resolved.relative_to(src.resolve())
+        except (ValueError, OSError):
+            continue
+        modpath = _module_path_of_file(ident, path)
+        if modpath is not None:
+            return ident, modpath
+    return None
+
+
+def import_line(path: Path, item: Item) -> "str | None":
+    """The `**Import:**` line for an item defined in `path`, in Markdown."""
+    if item.hidden or item.kind not in ("struct", "enum", "trait", "type", "const", "fn", "macro"):
+        return None
+    loc = _item_location(path)
+    if loc is None:
+        return None
+    ident, modpath = loc
+    name = item.name
+    modpath = () if item.kind == "macro" else _definition_module(ident, modpath, name)
+    paths = import_paths(ident, modpath, name)
+    crate = _imports().roots[ident][0]
+    if not paths:
+        return (
+            f"**Import:** none — `{name}` is public in a private module of "
+            f"`{crate}` and nothing re-exports it."
+        )
+    best = paths[0]
+    text = f"**Import:** `use {best['path']};`"
+    extra: list[str] = []
+    if best["prelude"]:
+        extra.append("in `teksilo::prelude::*`")
+    if best["dependency"]:
+        extra.append(f"add `{best['dependency']}` to `[dependencies]`: teksilo does not re-export it")
+    if best["needs"]:
+        extra.append("needs " + " and ".join(best["needs"]))
+    if extra:
+        text += " — " + "; ".join(extra) + "."
+    return text
+
+
+# ----------------------------------------------------------------------------
 # Formatters
 # ----------------------------------------------------------------------------
 
@@ -2143,7 +2804,7 @@ def format_markdown(pf: ParsedFile) -> str:
         out.append(pf.header_doc.rstrip())
         out.append("")
 
-    _emit_items_md(pf.items, out)
+    _emit_items_md(pf.items, out, source=pf.file_path)
 
     see_also = _see_also(pf)
     if see_also:
@@ -2224,7 +2885,10 @@ def _variant_payload(v: EnumVariant) -> str:
 
 
 def _emit_items_md(
-    items: list[Item], out: list[str], anchors: "dict[int, str] | None" = None
+    items: list[Item],
+    out: list[str],
+    anchors: "dict[int, str] | None" = None,
+    source: "Path | None" = None,
 ) -> None:
     """Render the struct/enum/type/const/fn items of a file as Markdown.
 
@@ -2266,6 +2930,11 @@ def _emit_items_md(
             shown = it.signature if it.signature.startswith("#[") else f"{it.name}!"
             out.append(f"## `{shown}`{flags_str}")
         out.append("")
+
+        imported = import_line(source, it) if source is not None else None
+        if imported:
+            out.append(imported)
+            out.append("")
 
         if it.doc:
             out.append(it.doc.rstrip())
@@ -2372,6 +3041,9 @@ def format_text(pf: ParsedFile) -> str:
                 flags.append(_fmt_cfg(it.cfg))
             fs = f" [{'; '.join(flags)}]" if flags else ""
             out.append(f"--- {tag} {it.name}{fs} ---")
+            imported = import_line(pf.file_path, it)
+            if imported:
+                out.append("  import: " + re.sub(r"\*\*Import:\*\* ", "", imported).replace("`", ""))
             if it.doc:
                 out.append(_indent(it.doc, "  "))
             if it.signature:
@@ -2417,7 +3089,16 @@ def _indent(s: str, prefix: str) -> str:
 
 
 def format_json(pfs: list[ParsedFile]) -> str:
-    def item_to_dict(it: Item) -> dict:
+    def imports_of(path: Path, it: Item) -> "list[dict] | None":
+        if it.hidden or it.kind not in ("struct", "enum", "trait", "type", "const", "fn", "macro"):
+            return None
+        loc = _item_location(path)
+        if loc is None:
+            return None
+        modpath = () if it.kind == "macro" else _definition_module(loc[0], loc[1], it.name)
+        return import_paths(loc[0], modpath, it.name)
+
+    def item_to_dict(it: Item, path: "Path | None" = None) -> dict:
         return {
             "kind": it.kind,
             "name": it.name,
@@ -2429,6 +3110,8 @@ def format_json(pfs: list[ParsedFile]) -> str:
             "fields": [f.__dict__ for f in it.fields],
             "restricted_fields": it.restricted_fields,
             "methods": [item_to_dict(m) for m in it.methods],
+            # Public paths, best first; null for a member or a hidden item.
+            "imports": imports_of(path, it) if path is not None else None,
         }
 
     payload = [
@@ -2437,7 +3120,7 @@ def format_json(pfs: list[ParsedFile]) -> str:
             "file": str(pf.file_path),
             "cfg": pf.cfg,
             "header_doc": pf.header_doc,
-            "items": [item_to_dict(it) for it in pf.items],
+            "items": [item_to_dict(it, pf.file_path) for it in pf.items],
         }
         for pf in pfs
     ]
@@ -3041,7 +3724,7 @@ def format_catalog_markdown(
         f"({_rustdoc_module_url(api_base, pf.file_path, api_dir)})"
     )
     out.append("")
-    _emit_items_md(pf.items, out, anchors)
+    _emit_items_md(pf.items, out, anchors, source=pf.file_path)
 
     # The module header + item docs were swept from rustdoc-style source, so they
     # carry links that don't resolve in the book — reduce them to plain code.
@@ -3527,6 +4210,47 @@ def _test_macro_lookup() -> None:
     assert found == [], "a #[doc(hidden)] macro must stay hidden"
 
 
+def _test_import_paths() -> None:
+    """Import paths: the `use` tree parser, then paths through the live tree
+    (each checked once with `cargo check` when this was written)."""
+    got = _split_use_tree("a::{b, c::{Canvas as Cv, self}, D as _, e::*}, f")
+    assert got == [(["a", "b"], "b"), (["a", "c", "Canvas"], "Cv"), (["a", "c", "self"], "c"), (["f"], "f")], got
+
+    def best(file: str, name: str, kind: str = "struct") -> "dict | None":
+        path = REPO_ROOT / file
+        loc = _item_location(path)
+        assert loc is not None, file
+        modpath = () if kind == "macro" else _definition_module(loc[0], loc[1], name)
+        found = import_paths(loc[0], modpath, name)
+        return found[0] if found else None
+
+    b = best("crates/teksilo-core/src/signal.rs", "ObserverHandle")
+    assert b and b["path"] == "teksilo::core::ObserverHandle" and not b["needs"], b
+    # Through two re-exports and a `#[path]` module declared in a non-mod.rs file.
+    b = best("crates/teksilo-core/src/styles/theme.rs", "Theme")
+    assert b and b["path"] == "teksilo::prelude::Theme" and b["prelude"], b
+    b = best("crates/teksilo-scene/src/view.rs", "SceneView")
+    assert b and b["dependency"] == "teksilo-scene", b
+    b = best("crates/teksilo-webview/src/lib.rs", "WebView")
+    assert b and b["needs"] == ["teksilo's `web-view-headless` or `web-view` features"], b
+    # A default feature reached through another crate's dependency table is
+    # not a requirement: `teksilo-widgets` turns on `native-menu`.
+    b = best("crates/teksilo-platform/src/native_menu.rs", "NativeMenuHandle")
+    assert b and not b["needs"], b
+    b = best("crates/teksilo-resources/src/lib.rs", "res", "macro")
+    assert b and b["path"] == "teksilo::res", b
+    # An inline `pub mod codes { … }` inside dto.rs.
+    b = best("crates/teksilo-automation/src/dto.rs", "NOT_FOUND", "const")
+    assert b and b["path"] == "teksilo::automation::codes::NOT_FOUND", b
+    # A cfg on the item itself, which `cargo check` caught the first version
+    # missing: the prelude path holds only with the theme crate's feature on.
+    b = best("crates/teksilo-theme-macos/src/typography.rs", "MACOS_UI_FONT_FAMILY", "const")
+    assert b and "`teksilo-theme-macos`'s `system-fonts` feature" in b["needs"], b
+    assert not b["prelude"], "a name under prelude::macos is not brought in by prelude::*"
+    # `pub(crate) mod items`, re-exported nowhere.
+    assert best("crates/teksilo-scene/src/items.rs", "ItemA11yOverrides") is None
+
+
 def run_self_tests() -> int:
     """Smoke tests for the catalog generator (`--test`). stdlib-only, runs
     against the live source tree."""
@@ -3535,6 +4259,7 @@ def run_self_tests() -> int:
     _test_fields_and_variant_shapes()
     _test_member_lookup()
     _test_macro_lookup()
+    _test_import_paths()
     _test_prune()
     _test_density_images()
     _test_summary_scope()

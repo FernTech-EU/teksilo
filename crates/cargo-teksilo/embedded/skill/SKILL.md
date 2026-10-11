@@ -150,7 +150,7 @@ types and required methods, so inspect `EventSource` before implementing it.
 
 | The question is about | Do this |
 |---|---|
-| A specific type's builder methods / signature | `cargo teksilo symbol <Name>` |
+| A specific type's builder methods / signature, or where to import it from | `cargo teksilo symbol <Name>` (its **Import:** line names the path, and any feature or dependency it needs) |
 | A method, a free function or a macro (`res!`, `compile_in_locales!`) | `cargo teksilo symbol <name>`, or `<Type>::<method>` for one owner |
 | "Which widget / model / approach do I want?" | `cargo teksilo search "<question>"`, then the guide's catalog section |
 | Layout, Signal/Prop, events, theming, settings, i18n, a11y, data models | `reference/teksilo_app_guide.md` |
