@@ -115,12 +115,22 @@ In full-color mode, the icon's RGB is rendered directly; the widget color only c
 
 ## Raster images and GPU memory
 
-A window uploads each raster it draws to a GPU texture, with a mip chain, and keeps that texture until the window closes: no image texture is freed before then. The texture is named after the image's identity:
+A window uploads each raster it draws to a GPU texture, with a mip chain. How long the texture stays depends on how the widget got its pixels.
+
+**A shared texture, kept until the window closes.** `ImageWidget::new(&icon)` without a mask, and `IconWidget::from_raster`, name the texture after the icon's identity:
 
 - Clones of one `RasterIcon` share its pixels and its texture, and a `res!()` raster is a single static value, so showing one image in many widgets costs one texture (one per mode for `IconWidget`).
-- Every `RasterIcon::decode`, `RasterIcon::from_raw` and `ImageWidget::from_raw` call is a new identity, even for the same bytes, and gets a texture of its own once drawn.
+- Every `RasterIcon::decode` and `RasterIcon::from_raw` call is a new identity, even for the same bytes.
+- The texture is never freed before the window closes, even once no widget shows the icon.
 
-For images decoded at runtime, such as album covers in a virtualized grid, keep the decoded `RasterIcon`s in an application cache and build each tile's `ImageWidget::new(&icon)` from a cached value. Decoding in the tile's delegate instead adds a texture every time the tile scrolls back into view. Debug builds print a warning when one window holds more than 256 image textures.
+**A texture of its own, freed with the widget.** `ImageWidget::from_raw` and any `ImageWidget` with a `mask` hold their pixels in a source of their own, and so does an `Avatar`'s image. The window frees that texture at the first frame that does not draw the widget, because it was destroyed, scrolled out or parked, and uploads it again if the widget comes back. GPU memory follows what is on screen.
+
+Pick by how long the image lives:
+
+- A bounded set of long-lived images (toolbar art, a logo, a handful of placeholders): `res!()` or a cached `RasterIcon`, shown with `ImageWidget::new(&icon)`.
+- Images that come and go, such as album covers or thumbnails in a virtualized grid: `ImageWidget::from_raw(pixels, width, height)`. Keep the decoded pixels in an application cache if decoding is expensive. A tile then costs a texture only while it is drawn.
+
+Building tiles with `ImageWidget::new(&icon)` from icons decoded at runtime is the case to avoid: each new identity keeps its texture until the window closes. Debug builds print a warning when one window holds more than 256 shared image textures.
 
 ## Creating Icon Assets
 

@@ -79,6 +79,16 @@ by crate for clarity, not because crates version independently.
   case two releases on. It now lists the copy as differing and prints the
   `agent install claude --force` line, at project and at user scope.
 
+#### Documentation
+
+- **The icons guide said no image texture is ever freed**, and advised
+  `ImageWidget::new(&icon)` for runtime images such as album covers. Since
+  0.16.0 an `ImageWidget::from_raw` texture goes with the first frame that
+  does not draw the widget. The guide now separates the shared textures a
+  window keeps (`res!()`, `ImageWidget::new`, `IconWidget::from_raster`)
+  from the ones that follow what is on screen, and recommends `from_raw`
+  for images that come and go.
+
 ## [0.16.0] - 2026-10-09
 
 ### Added
