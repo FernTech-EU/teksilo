@@ -335,6 +335,21 @@ signals), hands the bag to the active style, and uses the returned
 `WidgetId` as its root child. Everything else, background, border,
 focus ring, padding, min size, is the style's responsibility.
 
+`ButtonStyle` also has two defaulted hooks for the label colour, which the
+`Button` resolves before `make_body` runs: `label_text_role(variant)`
+answers once per variant, and `label_text_role_for(variant, state)` is asked
+again each time the interaction state changes (idle, hovered, pressed,
+focused), so a style can brighten the label on hover. The second forwards to
+the first by default and a `None` keeps the built-in mapping; the change is a
+repaint, not a rebuild. A per-call `Button::text_role(...)` wins over both.
+
+`Checkbox` and `RadioButton` keep their label and caption text on the widget
+rather than in the style: `.label_style(..)` / `.label_color(..)` and
+`.caption_style(..)` / `.caption_color(..)` override the defaults (Body /
+Primary, Small / Secondary), and a role colour still dims when the control is
+disabled. `MessageBox` takes `.title_alignment(..)` and `.button_alignment(..)`
+for the platform's alert layout (macOS centres both).
+
 The trait is `'static` only (not `Send + Sync`) because all Teksilo
 trees are single-threaded by construction; `Rc<dyn FooStyle>` is the
 public alias (`SharedButtonStyle` and friends).

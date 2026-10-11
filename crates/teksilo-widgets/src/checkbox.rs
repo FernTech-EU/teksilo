@@ -18,6 +18,14 @@
 //! `CheckboxStyle`; three visual variants are available via
 //! [`CheckboxVariant`].
 //!
+//! ## Label styling
+//!
+//! The label is `Body` / `Primary` and the caption `Small` / `Secondary` by
+//! default. [`Checkbox::label_style`] / [`Checkbox::label_color`] and
+//! [`Checkbox::caption_style`] / [`Checkbox::caption_color`] override them.
+//! A theme role colour still dims when the checkbox is disabled; a literal
+//! `Color` stays as given.
+//!
 //! ## Touch and pen
 //!
 //! The pressed state comes from the framework press
@@ -162,6 +170,10 @@ pub struct Checkbox {
     /// or an `access_label*` override). Used by `StandardListItem` /
     /// `StandardTreeItem`.
     labelled_externally: bool,
+    label_style: teksilo_core::color_prop::TextStyleProp,
+    label_color: teksilo_core::color_prop::ColorProp,
+    caption_style: teksilo_core::color_prop::TextStyleProp,
+    caption_color: teksilo_core::color_prop::ColorProp,
     tooltip_text: Option<LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn teksilo_core::widget::Widget>>,
@@ -180,6 +192,10 @@ impl Checkbox {
             kind: CheckKind::TwoState(checked),
             enabled: Prop::Static(true),
             labelled_externally: false,
+            label_style: TextStyleRole::Body.into(),
+            label_color: TextRole::Primary.into(),
+            caption_style: TextStyleRole::Small.into(),
+            caption_color: TextRole::Secondary.into(),
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -204,6 +220,10 @@ impl Checkbox {
             kind: CheckKind::TriState(state),
             enabled: Prop::Static(true),
             labelled_externally: false,
+            label_style: TextStyleRole::Body.into(),
+            label_color: TextRole::Primary.into(),
+            caption_style: TextStyleRole::Small.into(),
+            caption_color: TextRole::Secondary.into(),
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -270,6 +290,44 @@ impl Checkbox {
     pub fn caption(mut self, text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();
         self.caption = Some(ls);
+        self
+    }
+
+    /// Override the label's text style (font, size, weight). Accepts a
+    /// `TextStyleRole`, a `TextStyle`, or a `Signal` of either. Default is
+    /// `TextStyleRole::Body`.
+    pub fn label_style(
+        mut self,
+        style: impl Into<teksilo_core::color_prop::TextStyleProp>,
+    ) -> Self {
+        self.label_style = style.into();
+        self
+    }
+
+    /// Override the label's text color. Accepts `Color`, a theme role, or a
+    /// `Signal` of either. Default is `TextRole::Primary`. A role still dims
+    /// to the disabled color when the checkbox is disabled; a literal `Color`
+    /// stays as given.
+    pub fn label_color(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self {
+        self.label_color = color.into();
+        self
+    }
+
+    /// Override the caption's text style. Default is `TextStyleRole::Small`.
+    pub fn caption_style(
+        mut self,
+        style: impl Into<teksilo_core::color_prop::TextStyleProp>,
+    ) -> Self {
+        self.caption_style = style.into();
+        self
+    }
+
+    /// Override the caption's text color. Accepts `Color`, a theme role, or
+    /// a `Signal` of either. Default is `TextRole::Secondary`. A role still
+    /// dims to the disabled color when the checkbox is disabled; a literal
+    /// `Color` stays as given.
+    pub fn caption_color(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self {
+        self.caption_color = color.into();
         self
     }
 
@@ -432,16 +490,16 @@ impl Widget for Checkbox {
             && let Some(ref label) = self.label
         {
             let label_widget = TextWidget::new(label.clone())
-                .style(TextStyleRole::Body)
-                .color(TextRole::Primary)
+                .style(self.label_style.clone())
+                .color(self.label_color.clone())
                 .single_line()
                 .a11y_hidden();
             let label_id = ctx.add(label_widget);
 
             let label_column_id = if let Some(ref caption) = self.caption {
                 let caption_widget = TextWidget::new(caption.clone())
-                    .style(TextStyleRole::Small)
-                    .color(TextRole::Secondary)
+                    .style(self.caption_style.clone())
+                    .color(self.caption_color.clone())
                     .a11y_hidden();
                 let caption_id = ctx.add(caption_widget);
                 ctx.add(VStack::new().spacing(2.0).child(label_id).child(caption_id))
@@ -697,6 +755,138 @@ mod tests {
     use teksilo_core::event::Modifiers;
     use teksilo_core::widget_tree::WidgetTree;
     use teksilo_i18n::lit;
+
+    /// Records the size every text run was shaped at, so a test can see which
+    /// style reached the label and which the caption. The mock backend
+    /// ignores styles.
+    struct StyleSpy {
+        inner: teksilo_canvas::MockTextBackend,
+        shaped: Rc<std::cell::RefCell<Vec<(String, f32)>>>,
+    }
+
+    impl teksilo_canvas::TextBackend for StyleSpy {
+        fn layout_single_line(
+            &mut self,
+            text: &str,
+            style: &teksilo_tokens::TextStyle,
+            max_width: Option<f32>,
+        ) -> teksilo_canvas::TextLayout {
+            self.shaped
+                .borrow_mut()
+                .push((text.to_string(), style.size));
+            self.inner.layout_single_line(text, style, max_width)
+        }
+
+        fn ensure_glyphs(
+            &mut self,
+            layout: &teksilo_canvas::TextLayout,
+        ) -> Vec<teksilo_canvas::GlyphQuad> {
+            self.inner.ensure_glyphs(layout)
+        }
+    }
+
+    fn spy_tree() -> (WidgetTree, Rc<std::cell::RefCell<Vec<(String, f32)>>>) {
+        let shaped = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let backend = StyleSpy {
+            inner: teksilo_canvas::MockTextBackend::new(),
+            shaped: shaped.clone(),
+        };
+        let tree = WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light())
+            .with_text_backend(Rc::new(std::cell::RefCell::new(backend)));
+        (tree, shaped)
+    }
+
+    fn size_of(shaped: &Rc<std::cell::RefCell<Vec<(String, f32)>>>, text: &str) -> f32 {
+        shaped
+            .borrow()
+            .iter()
+            .rev()
+            .find(|(t, _)| t == text)
+            .unwrap_or_else(|| panic!("`{text}` was never shaped"))
+            .1
+    }
+
+    #[test]
+    fn label_and_caption_styles_reach_the_text() {
+        let big = teksilo_tokens::TextStyle {
+            size: 31.0,
+            ..Default::default()
+        };
+        let (mut tree, shaped) = spy_tree();
+        let _w = tree.add(
+            Checkbox::new(Signal::new(false))
+                .label(lit!("Lbl"))
+                .caption(lit!("Cap"))
+                .label_style(big.clone())
+                .caption_style(TextStyleRole::BodyBold),
+        );
+        tree.layout(SizeProposal::exact(300.0, 100.0));
+        tree.render();
+        assert_eq!(size_of(&shaped, "Lbl"), 31.0);
+        let heading = teksilo_core::presets::intui::light()
+            .typography
+            .body_bold
+            .size;
+        assert_eq!(size_of(&shaped, "Cap"), heading);
+
+        let (mut tree, shaped) = spy_tree();
+        let _w = tree.add(
+            Checkbox::new(Signal::new(false))
+                .label(lit!("Lbl"))
+                .caption(lit!("Cap")),
+        );
+        tree.layout(SizeProposal::exact(300.0, 100.0));
+        tree.render();
+        let typography = teksilo_core::presets::intui::light().typography;
+        assert_eq!(
+            size_of(&shaped, "Lbl"),
+            typography.body.size,
+            "default label"
+        );
+        assert_eq!(
+            size_of(&shaped, "Cap"),
+            typography.small.size,
+            "default caption"
+        );
+    }
+
+    #[test]
+    fn label_and_caption_colors_apply_and_a_role_still_dims_when_disabled() {
+        use std::cell::RefCell;
+        use teksilo_canvas::MockTextBackend;
+        let theme = teksilo_core::presets::intui::light();
+        let accent = theme.colors.accent.to_array();
+        let error = theme.colors.text_error.to_array();
+        let disabled = theme.colors.text_disabled.to_array();
+        let colors = |enabled: bool| {
+            let mut tree = WidgetTree::new()
+                .with_theme(theme.clone())
+                .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+            let _w = tree.add(
+                Checkbox::new(Signal::new(false))
+                    .label(lit!("Lbl"))
+                    .caption(lit!("Cap"))
+                    .label_color(TextRole::Accent)
+                    .caption_color(TextRole::Error)
+                    .enabled(enabled),
+            );
+            tree.layout(SizeProposal::exact(300.0, 100.0));
+            tree.render()
+                .glyphs
+                .iter()
+                .map(|g| g.color)
+                .collect::<Vec<_>>()
+        };
+        let on = colors(true);
+        assert!(on.contains(&accent), "label takes label_color: {on:?}");
+        assert!(on.contains(&error), "caption takes caption_color: {on:?}");
+        let off = colors(false);
+        assert!(
+            !off.contains(&accent) && !off.contains(&error) && off.contains(&disabled),
+            "disabled dims the role colours: {off:?}"
+        );
+    }
 
     #[test]
     fn focus_ring_only_under_focus_visible() {
