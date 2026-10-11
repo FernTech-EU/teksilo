@@ -83,6 +83,15 @@
 //! the three AccessKit adapters, so a screen-reader user discovers the
 //! default only by pressing Enter. Where focus lands is the whole contract.
 //!
+//! ## Title and button alignment
+//!
+//! [`MessageBox::title_alignment`] places the title in the header's text
+//! column (default `Leading`) and [`MessageBox::button_alignment`] places the
+//! button row (default `Trailing`), both as [`teksilo_tokens::HAlignment`].
+//! macOS alerts centre both; Windows and GNOME keep the title leading and the
+//! buttons trailing, which is the default. `Leading` and `Trailing` follow the
+//! layout direction.
+//!
 //! ## Result reporting
 //!
 //! [`MessageBox::on_result`] takes `impl Fn(MessageBoxResult,
@@ -117,7 +126,7 @@ use teksilo_core::widget::{EventContext, LayoutContext, PaintContext, Widget, Wi
 use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::LocalizedString;
-use teksilo_tokens::{InputTokens, TargetRole, VAlignment};
+use teksilo_tokens::{Alignment, HAlignment, InputTokens, TargetRole, VAlignment};
 
 use crate::accordion::Accordion;
 use crate::button::{Button, ButtonVariant};
@@ -629,6 +638,8 @@ pub struct MessageBox {
     escape_button: Option<StandardButton>,
     show_again_label: Option<LocalizedString>,
     show_again_state: Option<Signal<bool>>,
+    title_alignment: HAlignment,
+    button_alignment: HAlignment,
     on_result: Option<Box<dyn Fn(MessageBoxResult, &mut EventContext)>>,
     default_button_id: Cell<Option<WidgetId>>,
     root_child_id: Option<WidgetId>,
@@ -669,6 +680,8 @@ impl MessageBox {
             escape_button: None,
             show_again_label: None,
             show_again_state: None,
+            title_alignment: HAlignment::Leading,
+            button_alignment: HAlignment::Trailing,
             on_result: None,
             default_button_id: Cell::new(None),
             root_child_id: None,
@@ -796,6 +809,24 @@ impl MessageBox {
         self
     }
 
+    /// Where the title sits in the header's text column. Default
+    /// [`HAlignment::Leading`]. `Center` matches a macOS alert; Windows and
+    /// GNOME keep the title leading. `Leading` / `Trailing` follow the layout
+    /// direction, so they mirror in right-to-left locales.
+    pub fn title_alignment(mut self, alignment: HAlignment) -> Self {
+        self.title_alignment = alignment;
+        self
+    }
+
+    /// Where the button row sits along the bottom of the dialog. Default
+    /// [`HAlignment::Trailing`]. `Center` matches a macOS alert; `Leading`
+    /// packs the buttons at the start edge. `Leading` / `Trailing` follow the
+    /// layout direction, so they mirror in right-to-left locales.
+    pub fn button_alignment(mut self, alignment: HAlignment) -> Self {
+        self.button_alignment = alignment;
+        self
+    }
+
     /// Register the result callback, invoked exactly once however the
     /// dialog closes — a button (by click, or by the Enter/Escape
     /// shortcut), a press outside, or a programmatic dismissal.
@@ -891,14 +922,26 @@ impl Widget for MessageBox {
         state.escape_button.set(self.escape_button);
 
         let mut header_text_stack = VStack::new().spacing(6.0);
-        header_text_stack = header_text_stack.child(
-            // The MessageBox itself already carries the title as its
-            // AlertDialog name (see `Widget::accessibility` below).
-            TextWidget::new(self.title.clone())
-                .style(theme.typography.body_bold.clone())
-                .color(theme.colors.text_primary)
-                .a11y_hidden(),
-        );
+        // The MessageBox itself already carries the title as its
+        // AlertDialog name (see `Widget::accessibility` below).
+        let title_text = TextWidget::new(self.title.clone())
+            .style(theme.typography.body_bold.clone())
+            .color(theme.colors.text_primary)
+            .a11y_hidden();
+        header_text_stack =
+            if self.title_alignment == HAlignment::Leading {
+                header_text_stack.child(title_text)
+            } else {
+                // Claim the column's width and place the title inside it; the
+                // default (leading) keeps the bare title and the same tree as
+                // before the knob existed.
+                header_text_stack.child(Expand::horizontal().child(title_text).align_child(
+                    Alignment {
+                        horizontal: self.title_alignment,
+                        vertical: VAlignment::Top,
+                    },
+                ))
+            };
         if let Some(text) = self.text.clone() {
             header_text_stack = header_text_stack.child(
                 TextWidget::new(text)
@@ -958,7 +1001,13 @@ impl Widget for MessageBox {
             cb
         });
 
-        let mut footer = HStack::new().spacing(8.0).child(Spacer::new());
+        // Slack goes before the buttons when they sit trailing or centred,
+        // and after them when they sit leading or centred.
+        let button_alignment = self.button_alignment;
+        let mut footer = HStack::new().spacing(8.0);
+        if button_alignment != HAlignment::Leading {
+            footer = footer.child(Spacer::new());
+        }
         state.button_ids.borrow_mut().clear();
         for button_cfg in &buttons {
             let kind = button_cfg.kind;
@@ -981,6 +1030,9 @@ impl Widget for MessageBox {
             }
             state.button_ids.borrow_mut().push((btn_id, kind));
             footer = footer.child(btn_id);
+        }
+        if button_alignment != HAlignment::Trailing {
+            footer = footer.child(Spacer::new());
         }
 
         let mut stack = VStack::new().spacing(16.0);
@@ -1206,6 +1258,120 @@ mod tests {
             tree.focus(id);
         }
         content_id
+    }
+
+    /// The `MessageBox`, the title widget and the leftmost / rightmost button
+    /// edges, all in the tree's own bounds space.
+    struct Placement {
+        message_box: Rect,
+        title: Rect,
+        buttons_left: f32,
+        buttons_right: f32,
+    }
+
+    fn placement_of(tree: &WidgetTree, content: WidgetId) -> Placement {
+        let panel = tree.children(content).first().copied().unwrap();
+        let mb_id = tree.children(panel).first().copied().unwrap();
+        let mut stack = vec![mb_id];
+        let mut title_rect = None;
+        let (mut left, mut right) = (f32::MAX, f32::MIN);
+        while let Some(id) = stack.pop() {
+            stack.extend(tree.children(id));
+            let is = |name: &str| tree.widget_type_name(id).is_some_and(|t| t.ends_with(name));
+            // The title is the topmost text in the box (`TextWidget` has no
+            // `Debug` content to match on).
+            if is("TextWidget") {
+                let b = tree.bounds(id);
+                if title_rect.is_none_or(|t: Rect| b.y < t.y) {
+                    title_rect = Some(b);
+                }
+            }
+            if is("Button") {
+                let b = tree.bounds(id);
+                left = left.min(b.x);
+                right = right.max(b.x + b.width);
+            }
+        }
+        Placement {
+            message_box: tree.bounds(mb_id),
+            title: title_rect.expect("title widget"),
+            buttons_left: left,
+            buttons_right: right,
+        }
+    }
+
+    fn placement_with(
+        title_alignment: Option<HAlignment>,
+        button_alignment: Option<HAlignment>,
+    ) -> Placement {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let mut mb = MessageBox::plain(lit!("ZqTitle"))
+            .text(lit!(
+                "A body line that is long enough to make the column wide."
+            ))
+            .buttons(MessageBoxButtons::OkCancel);
+        if let Some(a) = title_alignment {
+            mb = mb.title_alignment(a);
+        }
+        if let Some(a) = button_alignment {
+            mb = mb.button_alignment(a);
+        }
+        let content = present_and_lay_out(&mut tree, mb);
+        placement_of(&tree, content)
+    }
+
+    #[test]
+    fn default_alignment_is_leading_title_and_trailing_buttons() {
+        let p = placement_with(None, None);
+        let m = p.message_box;
+        assert!(
+            (p.title.x - m.x).abs() < 40.0,
+            "title leads: {:?} in {m:?}",
+            p.title
+        );
+        assert!(
+            (m.x + m.width - p.buttons_right).abs() < 40.0,
+            "buttons trail: right edge {} in {m:?}",
+            p.buttons_right
+        );
+        assert!(p.buttons_left > m.x + m.width / 2.0 - 100.0 || m.width < 300.0);
+    }
+
+    #[test]
+    fn centred_title_and_buttons_sit_in_the_middle() {
+        let p = placement_with(Some(HAlignment::Center), Some(HAlignment::Center));
+        let m = p.message_box;
+        let mid = m.x + m.width / 2.0;
+        let title_mid = p.title.x + p.title.width / 2.0;
+        assert!(
+            (title_mid - mid).abs() < 12.0,
+            "title centre {title_mid} vs {mid}"
+        );
+        let buttons_mid = (p.buttons_left + p.buttons_right) / 2.0;
+        assert!(
+            (buttons_mid - mid).abs() < 12.0,
+            "buttons centre {buttons_mid} vs {mid}"
+        );
+    }
+
+    #[test]
+    fn trailing_title_and_leading_buttons_swap_edges() {
+        let p = placement_with(Some(HAlignment::Trailing), Some(HAlignment::Leading));
+        let m = p.message_box;
+        let default = placement_with(None, None);
+        assert!(
+            p.title.x > default.title.x + 20.0,
+            "title moved to the trailing side"
+        );
+        assert!(
+            p.buttons_left < default.buttons_left - 20.0,
+            "buttons moved to the leading side"
+        );
+        assert!(
+            p.buttons_left < m.x + 60.0,
+            "buttons lead: {} in {m:?}",
+            p.buttons_left
+        );
     }
 
     #[test]
