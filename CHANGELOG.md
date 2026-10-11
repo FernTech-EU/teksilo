@@ -27,6 +27,17 @@ by crate for clarity, not because crates version independently.
   `ShortcutRegistry::register_shared` register a global shortcut that several
   widgets declare together. It stays registered while any of them lives.
 
+- **`clear_focus`.** `EventContext::clear_focus` and
+  `WidgetTree::clear_focus` drop the keyboard focus, so nothing is focused.
+  A click on space that takes no focus still keeps it, as in Qt and AppKit;
+  `on_tap(|_, ctx| ctx.clear_focus())` on a background gives the browser
+  behaviour.
+- `AccessibilityInfo`, from `WidgetTree::accessibility_node`, carries a
+  node's value, numeric value and range, and custom-action labels, after the
+  application's `access_*` overrides.
+- `OverlayPlacement::BelowSelection`, the mirror of `AboveSelection`: below
+  a rectangle, flipping above when there is no room.
+
 #### Widgets
 
 - **Rebindable editor shortcuts.** `RichTextEditor` declares `format.bold`,
@@ -49,6 +60,44 @@ by crate for clarity, not because crates version independently.
   the same `TileContext` `detail_row` receives. A tile it refuses is no longer
   offered to a screen reader as expandable, and activating it opens nothing.
   Without it, every tile is still offered as one.
+
+- **`TextInput` appearance.** `TextInput` and `TextInputField` take a
+  `text_style` (a typography role that follows the theme, or a fixed style),
+  shaped at its size and in its family, with the placeholder matching and the
+  field's height following the line; a `text_alignment` that places a text
+  narrower than the field at its start, centre or end, the caret, clicks,
+  selection and IME window following; and a `text_color` from a colour, a
+  role or a signal, for instance one colour at rest and another while
+  focused. `TextInput::min_height` replaces the field's minimum height, under
+  the default, Fluent and macOS styles alike.
+- **`Slider::jump_on_press`** moves the value when a mouse button goes down
+  on the slider, not when a drag starts or the button is released; touch and
+  pen are unchanged. `value_tooltip_placement` puts the value readout above
+  or below the thumb, or at the pointer while dragging
+  (`SliderValueTooltipPlacement`), and `value_tooltip_style` gives it a
+  tooltip style of its own.
+- **`GridView::min_columns` and `max_columns`** bound the column count of
+  fixed-width and adaptive tiles; a minimum the width cannot afford narrows
+  the tiles rather than overflowing. `column_alignment` places a block of
+  columns narrower than the viewport at the leading edge, the centre or the
+  trailing edge.
+- **`ScrollArea` scrolls sideways on Shift+wheel** when it can scroll
+  horizontally, like `TabBar` and the table views;
+  `shift_wheel_scrolls_horizontally(false)` turns it off.
+  `reveal_bars_on_hover(true)` shows overlay scroll bars while the pointer is
+  over the area.
+- `SplitterModel::set_pane_visible_immediate` hides or shows a pane without
+  sliding it.
+- `MenuList::inset` sets the gap between a menu's surface and its rows
+  (4 dp by default), and `MenuList::surface_style` gives one menu its own
+  popover style, ahead of the theme's, without touching combo-box dropdowns.
+- A `ButtonStyle` can pick the label colour per interaction state with
+  `label_text_role_for`, for example to brighten it on hover. Existing
+  styles and the presets are unchanged.
+- `MessageBox::title_alignment` and `button_alignment` place the title and
+  the buttons, for instance centred as in a macOS alert.
+- `Checkbox` and `RadioButton` take `label_style`, `label_color`,
+  `caption_style` and `caption_color`.
 
 #### cargo-teksilo
 
@@ -80,10 +129,21 @@ by crate for clarity, not because crates version independently.
   that nothing outside its crate can reach it. `-f json` gains `imports`,
   every path, best first. rustc suggests none of these paths.
 
+- **`status` reports the `teksilo-automation-mcp` on `PATH`**, and whether
+  its version matches the app's teksilo; when it does not, it prints the
+  `cargo install teksilo-automation-mcp --version <x>` line. `--json` gains
+  `automation_server`.
+- **`symbol` prints a setter's default** when the type's constructor sets
+  the field to a literal: `HStack::spacing` defaults to `0.0`.
+- **`symbol` resolves an enum variant** to its enum: `symbol
+  FixedColumnCount` shows `GridSizing`.
+
 #### Documentation
 
 - The generated catalog pages list the same fields and variant payloads,
   and each item's import path.
+- The layout guide and the skill say that a widget added as a tree's root
+  is laid out at the whole viewport, and how to test one at its own size.
 
 ### Changed
 
@@ -98,6 +158,11 @@ by crate for clarity, not because crates version independently.
   intent with an `Action` instead. The same holds for `Ctrl+B`, `Ctrl+I`,
   `Ctrl+U` and `Ctrl+Enter` while a `RichTextEditor` exists, and `Ctrl+/` and
   `Ctrl+D` while a `CodeEditor` does.
+- **Behaviour change:** under a touch or a pen, a widget with no width or
+  height no longer catches a press that misses near it.
+- **Breaking.** `OverlayPlacement` has a new variant, so an exhaustive
+  `match` on it needs a `BelowSelection` arm. `TextInputStyleConfig` has a
+  new `min_height` field.
 
 #### Widgets
 
@@ -133,8 +198,28 @@ by crate for clarity, not because crates version independently.
   interface language, translates all its text, and searches the text of the
   chords instead of the internal ids. A shortcut that is currently disabled
   can still be rebound.
+- **Behaviour change:** Shift+wheel scrolls a `ScrollArea` that can scroll
+  sideways horizontally (see Added).
+- **Behaviour change:** in a right-to-left layout, a `GridView` of
+  fixed-width tiles that leaves width over now puts its columns at the right
+  edge, its leading edge.
+- `child_opt` on `VStack`, `HStack`, `ZStack`, `Grid`, `ColumnFlow`,
+  `MasonryLayout` and `Wrap` takes a widget id, as `child` does.
 
 ### Fixed
+
+#### Core
+
+- **A focus request into a control that the same handler reveals was
+  lost.** Showing a `Switcher` page or a `visible_when` branch and asking for
+  focus on a control in it moved the focus, at the next layout, to the page's
+  first control, or dropped it. The request now waits for that layout and
+  focuses the control it named.
+- **`accept_tap_buttons` retargeted a widget's own click.** Widening an
+  application's `on_tap` on a `Slider` to the secondary button made a right
+  click jump the value and a left click do nothing. A tap mask (and the
+  double-tap, triple-tap and long-press masks) now applies to the handlers
+  set beside it; a widget's own keep their buttons.
 
 #### Widgets
 
@@ -168,6 +253,12 @@ by crate for clarity, not because crates version independently.
   window keeps (`res!()`, `ImageWidget::new`, `IconWidget::from_raster`)
   from the ones that follow what is on screen, and recommends `from_raw`
   for images that come and go.
+- The documented change order of `ListModel::reconcile_by_key` is what it
+  emits: the removals, then one pass in target order in which moves, updates
+  and inserts interleave, each index valid after the previous change.
+- About thirty doc comments that an old edit had duplicated, or spliced into
+  the neighbouring item (`RadioButton::on_change`, `MenuItem::for_shortcut`,
+  `TreeView::scroll_bar_style` and others), document their own item again.
 
 ## [0.16.0] - 2026-10-09
 
