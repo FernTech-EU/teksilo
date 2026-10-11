@@ -564,6 +564,14 @@ a term. Build one with `new`, `IDENTITY` or
 pub struct TransformDelta { /* fields */ }
 ```
 
+### Fields
+
+- **`pivot`**: `Point` — Scene-space point every scale and rotation is taken about.
+- **`basis`**: `f32` — The frame's angle, in radians — the basis the `scale` is expressed in.
+- **`scale`**: `Vec2` — Multiplier along the frame's axes. Never negative: a resize stops at the controller's `min_size` rather than mirroring, because a negative-extent `Rect` is silently un-hit-testable and un-indexable.
+- **`rotation`**: `f32` — Additive rotation, in radians.
+- **`translation`**: `Vec2` — Scene-space translation, applied last.
+
 ### Methods
 
 <a id="transformdelta-identity"></a>
@@ -629,6 +637,12 @@ a construct type. Build one with `new`.
 ```rust
 pub struct TransformFrame { /* fields */ }
 ```
+
+### Fields
+
+- **`rect`**: `Rect` — The union of the selection, in the frame's own (unrotated) basis.
+- **`rotation`**: `f32` — The frame's angle, in radians. Non-zero only for a single-item selection that carries its own rotation — a multi-item union has no well-defined angle, so its frame is axis-aligned.
+- **`count`**: `usize` — How many selection roots the frame encloses.
 
 ### Methods
 
@@ -741,6 +755,15 @@ one with `new`, which is what a consumer's own test of its
 pub struct TransformSession { /* fields */ }
 ```
 
+### Fields
+
+- **`items`**: `Rc<[ItemId]>` — The selection **roots** this gesture will actually change — pruned of any item whose ancestor is also in the set (moving the ancestor already moves it) and filtered to those carrying the operation's flag.
+- **`handle`**: `TransformHandle` — The handle being driven.
+- **`start_frame`**: `TransformFrame` — The frame as it was when the gesture started.
+- **`frame`**: `TransformFrame` — The frame now, **after** the scene's geometry constraint.
+- **`delta`**: `TransformDelta` — The delta now, in agreement with `frame`.
+- **`source`**: `TransformSource` — Which route produced it.
+
 ### Methods
 
 <a id="transformsession-new"></a>
@@ -770,6 +793,17 @@ view transform is already on the canvas, exactly as for
 ```rust
 pub struct TransformChrome { /* fields */ }
 ```
+
+### Fields
+
+- **`frame`**: `TransformFrame` — The frame to draw (the live preview frame during a gesture).
+- **`outline`**: `Rect` — The outline rectangle, in the frame's basis — `frame.rect` grown by the configured padding.
+- **`handles`**: `Vec<(TransformHandle, Point)>` — Every visible handle and its scene-space position.
+- **`handle_half`**: `f32` — Half the handle's on-screen size, in **scene** units.
+- **`view_scale`**: `f32` — The live view scale — divide a screen-pixel constant by it to get a scene-unit one.
+- **`hovered`**: `Option<TransformHandle>` — The handle under the pointer, if any.
+- **`active`**: `Option<TransformHandle>` — The handle being dragged, if a gesture is live.
+- **`keyboard_focus`**: `Option<TransformHandle>` — The handle the keyboard transform mode has roving focus on.
 
 <a id="transformlabels"></a>
 

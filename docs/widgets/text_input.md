@@ -124,9 +124,9 @@ pub enum ValidationState { /* variants */ }
 ### Variants
 
 - **`None`** — No validation message — the field is pristine or valid.
-- **`Error`** — The committed value is invalid; `LocalizedString` is shown in red below the field.
-- **`Warning`** — The committed value is suspicious but accepted; `LocalizedString` is shown as a warning.
-- **`Corrected`** — Last commit was auto-corrected; the field's value has already been replaced with the normalized form. The composite renders the message in secondary text and tints the border accent briefly (decay-managed by the framework's frame loop, not a concern of this enum).
+- **`Error`** `(LocalizedString)` — The committed value is invalid; `LocalizedString` is shown in red below the field.
+- **`Warning`** `(LocalizedString)` — The committed value is suspicious but accepted; `LocalizedString` is shown as a warning.
+- **`Corrected`** `(LocalizedString)` — Last commit was auto-corrected; the field's value has already been replaced with the normalized form. The composite renders the message in secondary text and tints the border accent briefly (decay-managed by the framework's frame loop, not a concern of this enum).
 
 <a id="textinput"></a>
 

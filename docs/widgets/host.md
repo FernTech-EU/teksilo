@@ -78,6 +78,17 @@ Configuration for the installed `ToastHost`. Passed to
 pub struct ToastInstallOptions { /* fields */ }
 ```
 
+### Fields
+
+- **`corner`**: `Corner` — Which viewport corner the toasts anchor to. Default `BottomTrailing` (matches JetBrains IntelliJ and Windows system tray conventions). Under RTL, Trailing flips to the physical left edge.
+- **`margin`**: `Vec2` — Outer margin from the corner — (x, y) in logical pixels. Default `(24, 24)`.
+- **`gap`**: `f32` — Vertical gap between stacked toasts. Default `8.0`.
+- **`max_visible`**: `usize` — Maximum simultaneously visible toasts PER ROUTE BUCKET — each window, each audience and `Broadcast` get their own budget (see `ToastRegistry::enqueue`). Default `5`. Normal priority overflow drops; High / Urgent evict the oldest Normal in the same bucket.
+- **`entry_width`**: `f32` — Fixed width for each toast surface. Default `380.0` (matches IntelliJ balloon width).
+- **`pause_on_hover_group`**: `bool` — When true (default), hovering any toast pauses every timer. When false, only the hovered toast pauses (libadwaita behaviour).
+- **`archive`**: `Option<NotificationArchive>` — Notification archive — `None` disables archival entirely (apps don't need a NotificationLog). Default: `Some(NotificationArchive::persistent(ARCHIVE_FILE_NAME))`, which writes to `<config>/notifications.toml` via `PersistedListModel`. Apps that don't have `AppPaths` configured (`SettingsBundle` not installed) should explicitly override to `Some(NotificationArchive::in_memory())` or `None` — `Persistent` will fail at install time without a `config_dir`.
+- **`initial_audience`**: `Option<ToastAudience>` — Audience to seed this window with, the first time its `ToastHost` observes a real window (see `ToastHost::build`). Default `None` — the window starts unassigned (its toasts/bell show only origin-window-routed and broadcast entries) until app code calls `ToastRegistry::set_window_audience` explicitly.  Because `install_toast`'s `DefaultPostRoot` closure clones the SAME `ToastInstallOptions` for every window it wraps, this field gives every window the SAME initial audience — it is NOT a way to give distinct windows distinct starting audiences through the shared install path. Apps that need per-window initial audiences should call `set_window_audience` right after creating each window instead (typically from the window-opened handler that also knows which document/session that window is showing).
+
 <a id="toasthost"></a>
 
 ## `pub struct ToastHost`

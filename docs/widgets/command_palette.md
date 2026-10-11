@@ -125,6 +125,17 @@ reaching.
 pub struct PaletteCommand { /* fields */ }
 ```
 
+### Fields
+
+- **`id`**: `&'static str` — The stable registry id, e.g. `"work.export"`.
+- **`name`**: `String` — The localized display name, already resolved for the active locale.
+- **`category`**: `Option<&'static str>` — The grouping key, if the command declared one — stable across languages, so an `CommandPalette::include` filter can match on it.
+- **`category_text`**: `Option<String>` — The category as the reader sees it, already resolved for the active locale: the command's `category_label`, or the key when it gave none.
+- **`description`**: `Option<String>` — The longer explanation, if the command declared one.
+- **`keystroke`**: `Option<KeyStroke>` — The effective primary chord — user rebinds merged in — or `None` when the command has no keystroke at all, which is normal for a palette-only command.
+- **`enabled`**: `bool` — Whether the command's own `enabled_when` predicate currently says yes.
+- **`intent`**: `&'static str` — The intent name activation sends. Falls back to `Self::id` when the command declared no explicit intent, exactly as the keystroke dispatcher does.
+
 <a id="commandpalette"></a>
 
 ## `pub struct CommandPalette`

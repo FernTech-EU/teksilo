@@ -51,7 +51,11 @@ extend-exclude = [
 # French in `command_palette::tests`: "Nouveau projet" ("New project"), the
 # localized command name a French reader types to find it. A phrase for the
 # same reason, so "projet" stays a typo elsewhere.
-extend-ignore-re = ["alle ore", "Accademia della Crusca", "Nouveau projet"]
+#
+# `toml::ser`: the toml crate's serializer module, which a generated catalog
+# page quotes in a variant's payload (`SettingsFileError::Serialize`). typos reads
+# it as an identifier in the Rust source and as the word "ser" in Markdown.
+extend-ignore-re = ["alle ore", "Accademia della Crusca", "Nouveau projet", "toml::ser::"]
 
 [default.extend-words]
 # Project / domain vocabulary

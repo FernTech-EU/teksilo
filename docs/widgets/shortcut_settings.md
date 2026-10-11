@@ -88,6 +88,12 @@ internally to drive the optional inline confirm prompt.
 pub struct ShortcutConflict { /* fields */ }
 ```
 
+### Fields
+
+- **`displaced_id`**: `String` — Id of the shortcut that currently owns the chord and will be unbound if the rebind proceeds.
+- **`displaced_name`**: `String` — Display name of that shortcut (its registry `name`).
+- **`keystroke`**: `KeyStroke` — The chord being assigned to the new target.
+
 <a id="shortcutsettings"></a>
 
 ## `pub struct ShortcutSettings`

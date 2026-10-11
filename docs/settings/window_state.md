@@ -120,6 +120,15 @@ docs).
 pub struct PerWindowState { /* fields */ }
 ```
 
+### Fields
+
+- **`label`**: `String`
+- **`x`**: `i32`
+- **`y`**: `i32`
+- **`width`**: `u32`
+- **`height`**: `u32`
+- **`placement`**: `WindowPlacement`
+
 ### Methods
 
 <a id="perwindowstate-sanitize"></a>

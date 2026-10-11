@@ -92,8 +92,8 @@ pub enum SettingsBundleError { /* variants */ }
 
 ### Variants
 
-- **`Store`** — The K/V store could not be opened or flushed.
-- **`File`** — A settings file (e.g. the window-state file) could not be opened or flushed.
+- **`Store`** `(SettingsStoreError)` — The K/V store could not be opened or flushed.
+- **`File`** `(SettingsFileError)` — A settings file (e.g. the window-state file) could not be opened or flushed.
 
 <a id="settingsbundle"></a>
 
@@ -204,6 +204,14 @@ through any clone are visible to every clone, and `flush_all` /
 ```rust
 pub struct OpenedSettings { /* fields */ }
 ```
+
+### Fields
+
+- **`store`**: `SettingsStore`
+- **`window_state`**: `Option<WindowStateService>`
+- **`registry`**: `SettingsRegistry` — Registry mapping every managed service's canonical path to its live `Reloadable` handle, so a `crate::SettingsWatcher` event can be dispatched to the right one. Exposed so application code can register its own ad hoc `crate::SettingsFile` / `crate::PersistedListModel` / `crate::MruList` handles into the same registry (reachable elsewhere via `ctx.app_state::<SettingsRegistry>()` once installed).
+
+Other fields are not public.
 
 ### Methods
 

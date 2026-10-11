@@ -113,6 +113,15 @@ re-inserting it would name a node the AT walker cannot resolve.
 pub struct ItemA11yDecorations { /* fields */ }
 ```
 
+### Fields
+
+- **`parent`**: `Option<A11yNode>` — The node this item was AT-parented under (`Scene::set_a11y_parent`).
+- **`adopted`**: `Vec<A11yNode>` — Nodes that were AT-parented **under** this item and survived its removal. `remove` re-roots them at the view root; a restore re-adopts each one that still exists.
+- **`relations`**: `Vec<(A11yNode, A11yRelation, A11yNode)>` — Every relation with this item at *either* endpoint, in declaration order. A relation between two removed items is recorded once, on the `from` endpoint's salvage.
+- **`live`**: `Option<accesskit::Live>` — Live-region politeness (`Scene::set_a11y_live`).
+- **`landmark`**: `Option<accesskit::Role>` — Landmark role (`Scene::set_a11y_landmark`).
+- **`categories`**: `Vec<A11yCategory>` — Rotor / quick-nav categories (`Scene::set_a11y_categories`).
+
 ### Methods
 
 <a id="itema11ydecorations-is_empty"></a>
@@ -318,8 +327,8 @@ pub enum RestoreError { /* variants */ }
 
 ### Variants
 
-- **`IdAlreadyLive`** — An entry with this id is already in the scene. Restoring over it would alias two items onto one identity.  **Defensive.** `Scene::take` retires the id, so a second salvage for it cannot exist while the first is held, and the restore that succeeds consumes the one that does — which makes this unreachable through the public API today. It stays because it is the only thing standing between a future door that breaks that invariant and a corrupted `entry_index`, and refusing is better than aliasing.
-- **`MissingParent`** — The parent the item was removed from is not in the scene. Restore roots-first — `Scene::restore_all` orders a whole `take` result for you — or clear the recorded parent with `RemovedItem::detach` before restoring, which is what a move into a *different* scene normally wants.  The salvage is consumed by the refused call, so a caller that may hit this checks `parent()` (or calls `detach()`) **before** handing it over.
+- **`IdAlreadyLive`** `(ItemId)` — An entry with this id is already in the scene. Restoring over it would alias two items onto one identity.  **Defensive.** `Scene::take` retires the id, so a second salvage for it cannot exist while the first is held, and the restore that succeeds consumes the one that does — which makes this unreachable through the public API today. It stays because it is the only thing standing between a future door that breaks that invariant and a corrupted `entry_index`, and refusing is better than aliasing.
+- **`MissingParent`** `{ id: ItemId, parent: ItemId }` — The parent the item was removed from is not in the scene. Restore roots-first — `Scene::restore_all` orders a whole `take` result for you — or clear the recorded parent with `RemovedItem::detach` before restoring, which is what a move into a *different* scene normally wants.  The salvage is consumed by the refused call, so a caller that may hit this checks `parent()` (or calls `detach()`) **before** handing it over.
 
 <a id="replacerejected"></a>
 
@@ -342,6 +351,11 @@ reconciling would silently vanish.
 pub struct ReplaceRejected { /* fields */ }
 ```
 
+### Fields
+
+- **`error`**: `ReplaceItemError` — Why the write was refused.
+- **`item`**: `Box<dyn SceneItem>` — The item that was not inserted, handed straight back.
+
 <a id="replaceitemerror"></a>
 
 ## `pub enum ReplaceItemError`
@@ -357,5 +371,5 @@ pub enum ReplaceItemError { /* variants */ }
 
 ### Variants
 
-- **`UnknownItem`** — No entry with this id.
-- **`NotLightweight`** — The entry is a heavyweight `Widget`, which holds no `SceneItem` box. Replace its *data* with `SceneModel::set_payload` instead.
+- **`UnknownItem`** `(ItemId)` — No entry with this id.
+- **`NotLightweight`** `(ItemId)` — The entry is a heavyweight `Widget`, which holds no `SceneItem` box. Replace its *data* with `SceneModel::set_payload` instead.

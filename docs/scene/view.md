@@ -174,6 +174,13 @@ multiple flags can be combined without visual confusion:
 pub struct DebugOverlay { /* fields */ }
 ```
 
+### Fields
+
+- **`item_bounds`**: `bool`
+- **`content_bounds`**: `bool`
+- **`viewport`**: `bool`
+- **`selection_bounds`**: `bool`
+
 ### Methods
 
 <a id="debugoverlay-all"></a>

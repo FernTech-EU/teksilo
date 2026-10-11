@@ -239,6 +239,17 @@ fluent setters.
 pub struct PaneDescriptor { /* fields */ }
 ```
 
+### Fields
+
+- **`initial_size`**: `Option<f32>` — Initial main-axis size in px. `None` ⇒ take an equal share (the first layout equalizes via the stretch path).
+- **`min_size`**: `f32` — Hard compression floor in px.
+- **`max_size`**: `Option<f32>` — Optional growth ceiling in px.
+- **`stretch`**: `f32` — Container-resize slack weight (Qt `setStretchFactor`). `0.0` ⇒ rigid (keeps its size on resize); `>0` ⇒ absorbs slack ∝ weight.
+- **`collapsible`**: `bool` — Whether the user may collapse this pane (drag-snap / double-click / keyboard). Programmatic `set_collapsed` ignores this flag (it governs *interactive* collapse only, like Qt's `childrenCollapsible`).
+- **`collapsed`**: `bool` — Initial collapsed state.
+- **`collapsed_size`**: `f32` — The main-axis size a collapsed pane folds down to (default `0` ⇒ fully gone). Set this to keep a sliver visible while collapsed — e.g. an accordion's header height, so the pane shrinks to just its header and can be re-expanded from there. The pane restores to its prior size on expand regardless.
+- **`visible`**: `bool` — Whether the pane is present at all. Unlike `collapsed` (which folds the pane but keeps its grabbable gutter), a hidden pane removes both the pane *and* an adjacent gutter from the layout — it reads as absent. Toggled reactively via `set_pane_visible`.
+
 ### Methods
 
 <a id="panedescriptor-new"></a>
@@ -291,6 +302,16 @@ function (the internal `splitter::distribute` engine).
 pub struct PaneSnapshot { /* fields */ }
 ```
 
+### Fields
+
+- **`stored_size`**: `f32`
+- **`min_size`**: `f32`
+- **`max_size`**: `Option<f32>`
+- **`stretch`**: `f32`
+- **`collapsed`**: `bool`
+- **`collapsed_size`**: `f32`
+- **`visible`**: `bool`
+
 <a id="panestate"></a>
 
 ## `pub struct PaneState`
@@ -303,6 +324,11 @@ parity.
 ```rust
 pub struct PaneState { /* fields */ }
 ```
+
+### Fields
+
+- **`stored_size`**: `f32`
+- **`collapsed`**: `bool`
 
 <a id="splitterstate"></a>
 
@@ -317,6 +343,11 @@ flags. Round-trips through `SplitterModel::export_state` /
 ```rust
 pub struct SplitterState { /* fields */ }
 ```
+
+### Fields
+
+- **`version`**: `u32`
+- **`panes`**: `Vec<PaneState>`
 
 <a id="splittermodel"></a>
 

@@ -108,6 +108,22 @@ fields only — no closures, no `Rc<dyn Fn>` — so it is `Serialize`-friendly.
 pub struct NotificationEntry { /* fields */ }
 ```
 
+### Fields
+
+- **`id`**: `u64` — Stable per-archive id (separate from the runtime `Toast::id` dedup key — that one lives in `dedup_id` below). Assigned by the archive on first push; never reused.
+- **`severity`**: `BannerSeverity` — Severity of the notice as it now stands: the latest in-place update's, else the original push's. Drives the log's row glyph + severity-chip filter.
+- **`priority`**: `ToastPriority`
+- **`title`**: `String` — Resolved title (`LocalizedString::resolve_now()` snapshot).
+- **`body`**: `Option<String>`
+- **`actions`**: `Vec<ArchivedAction>` — The actions the notice offers as it now stands. An in-place update replaces them; one that offers none leaves none.
+- **`timestamp`**: `jiff::Timestamp` — Wall-clock time the notice was last raised: its first push, or the latest time a notice with the same `dedup_id` was raised again after the first had left the screen. In-place updates of a notice still on screen leave it alone. The log's day-bucket computation runs against this in the user's local timezone.
+- **`group`**: `Option<String>` — Optional grouping key for the log's visual section headers.
+- **`source`**: `Option<String>` — Optional originating-feature tag (e.g. `"build"`, `"sync"`). Surfaced as a chip in the log row.
+- **`read`**: `bool` — Flipped when the user opens the log popover. Drives the bell badge's `unread_count` signal.
+- **`dedup_id`**: `Option<String>` — `Toast::id(...)` value, if any — used for update-in-place merge logic. New entries with a matching `dedup_id` merge into the existing row rather than creating a separate one (see `NotificationArchiveModel::push` and `push_update`).
+- **`updates`**: `Vec<NotificationUpdate>` — Later presents of the same `Toast::id(...)`: one per in-place update that changed what the row shows, and one per time the notice was raised again. Holds the most recent `UPDATE_HISTORY_LIMIT`. Empty on a freshly-pushed entry.
+- **`route`**: `ToastRoute` — Mirrored from the originating `LiveEntry::route` (see `ToastRegistry::entry_to_archive`) — drives which bell(s) show this entry and which bell's "mark all read" / "clear" affects it. Defaults to `ToastRoute::Broadcast` on deserialization when the field is absent (a `notifications.toml` written before this feature existed): treating pre-upgrade history as broadcast keeps it visible in every window's bell, rather than it silently vanishing from all of them the moment routing scopes are introduced.
+
 <a id="notificationupdate"></a>
 
 ## `pub struct NotificationUpdate`
@@ -119,6 +135,13 @@ existing row — the "Uploading 3 of 7 → Upload complete" pattern.
 ```rust
 pub struct NotificationUpdate { /* fields */ }
 ```
+
+### Fields
+
+- **`timestamp`**: `jiff::Timestamp`
+- **`title`**: `Option<String>`
+- **`body`**: `Option<String>`
+- **`progress`**: `Option<f32>`
 
 <a id="archivedactionstyle"></a>
 
@@ -150,6 +173,13 @@ whose live closure has torn down render as inert descriptive labels.
 ```rust
 pub struct ArchivedAction { /* fields */ }
 ```
+
+### Fields
+
+- **`label`**: `String` — Resolved label snapshot.
+- **`intent_name`**: `Option<String>` — Intent name for archive replay through `ctx.send_intent(...)`. `None` for closure-only actions; the log renders these as non-clickable past-action tags.
+- **`style`**: `ArchivedActionStyle`
+- **`closes_on_invoke`**: `bool` — Mirrors the live action's `closes_toast` flag. The log uses it informationally only — a replayed Intent fires and the archive row itself doesn't dismiss (since it's not a live toast).
 
 <a id="default_archive_limit"></a>
 
@@ -203,8 +233,8 @@ pub enum NotificationArchive { /* variants */ }
 
 ### Variants
 
-- **`InMemory`** — Session-only — entries live in a `ListModel` for the running session. Cheap, no disk I/O. Default for apps that don't install a `SettingsBundle`.
-- **`Persistent`** — File-backed via `PersistedListModel`. The path is built at install time from `AppPaths::config_file` using the configured `file_name`.
+- **`InMemory`** `{ limit: usize }` — Session-only — entries live in a `ListModel` for the running session. Cheap, no disk I/O. Default for apps that don't install a `SettingsBundle`.
+- **`Persistent`** `{ file_name: String, limit: usize }` — File-backed via `PersistedListModel`. The path is built at install time from `AppPaths::config_file` using the configured `file_name`.
 
 ### Methods
 

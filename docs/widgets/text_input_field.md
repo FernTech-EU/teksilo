@@ -674,8 +674,8 @@ pub enum ValidationOutcome { /* variants */ }
 ### Variants
 
 - **`Valid`** — Input is valid as typed. The field commits unchanged and the feedback signal flips to `ValidationFeedback::Valid`.
-- **`Corrected`** — Input was accepted after normalization. The field replaces its text with `corrected`, the bound `Signal<String>` observes the new value, and the feedback signal carries `message` for composites to surface as a polite announcement.  Use for clamping, completion, and reformat. Examples: `"12/50/2026"` → `Corrected { corrected: "12/31/2026", … }` for "day clamped to month length"; `"2026"` → `Corrected { corrected: "2026-01-01", … }` for "year-only completed to start of year".
-- **`Invalid`** — Input is rejected. The field reverts its text to the pre-edit value and the feedback signal carries `message` for composites to surface as an assertive error.
+- **`Corrected`** `{ corrected: String, message: LocalizedString }` — Input was accepted after normalization. The field replaces its text with `corrected`, the bound `Signal<String>` observes the new value, and the feedback signal carries `message` for composites to surface as a polite announcement.  Use for clamping, completion, and reformat. Examples: `"12/50/2026"` → `Corrected { corrected: "12/31/2026", … }` for "day clamped to month length"; `"2026"` → `Corrected { corrected: "2026-01-01", … }` for "year-only completed to start of year".
+- **`Invalid`** `{ message: LocalizedString }` — Input is rejected. The field reverts its text to the pre-edit value and the feedback signal carries `message` for composites to surface as an assertive error.
 
 <a id="validationfeedback"></a>
 
@@ -695,8 +695,8 @@ pub enum ValidationFeedback { /* variants */ }
 
 - **`Pristine`** — No commit has happened yet, or the user is editing again after a previous outcome (typing always clears prior feedback).
 - **`Valid`** — Last commit returned `ValidationOutcome::Valid`. Composites typically render this identically to `Pristine` — the distinction matters for tests and for callers that want to signal "yes, it's confirmed valid" with a checkmark.
-- **`Corrected`** — Last commit returned `ValidationOutcome::Corrected`. `since` is the wall-clock instant the correction was applied; composites use it to decay the visual after `corrected_pulse_duration_ms` from the theme.
-- **`Invalid`** — Last commit returned `ValidationOutcome::Invalid`. Persists until the user edits again or an external `Pristine` reset.
+- **`Corrected`** `{ message: LocalizedString, since: Instant }` — Last commit returned `ValidationOutcome::Corrected`. `since` is the wall-clock instant the correction was applied; composites use it to decay the visual after `corrected_pulse_duration_ms` from the theme.
+- **`Invalid`** `{ message: LocalizedString }` — Last commit returned `ValidationOutcome::Invalid`. Persists until the user edits again or an external `Pristine` reset.
 
 ### Methods
 

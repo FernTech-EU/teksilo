@@ -108,6 +108,13 @@ and `entry.node_id` read compiling unchanged.
 pub struct FlatEntry<K: ItemKey = NodeId> { /* fields */ }
 ```
 
+### Fields
+
+- **`node_id`**: `K` — The row's stable key in its source.
+- **`depth`**: `usize` — Depth in the tree (0 for roots).
+- **`has_children`**: `bool` — Whether this row has children in the source.
+- **`is_expanded`**: `bool` — Whether this row is currently expanded (children visible).
+
 <a id="treedatasource"></a>
 
 ## `pub trait TreeDataSource`

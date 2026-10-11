@@ -183,6 +183,15 @@ Build one with `new` plus the `with_*` setters.
 pub struct SceneItemPaintContext<'a> { /* fields */ }
 ```
 
+### Fields
+
+- **`view_transform`**: `Transform2D` — View pan/zoom/rotation as a single affine. Items rarely need this directly — the canvas's transform stack already accounts for it — but custom items wanting to draw at a fixed pixel size regardless of zoom can read the zoom factor from here.
+- **`dirty_scene_rect`**: `Option<Rect>` — Optional scene-coord region the renderer is currently repainting. Items that internally subdivide their geometry can use this to skip work outside the dirty region. `None` means "full repaint".
+- **`text_scale`**: `f32` — Global accessibility text-scale factor (`1.0` = 100 %), forwarded from the widget `PaintContext`. Lightweight text items that opt in (see `TextItem::follow_text_scale`) multiply their font size by this so they grow with the app-wide "grow all text" setting. Off-by-default because the scene already has its own pan/zoom.
+- **`theme`**: `&'a Theme` — Fully-projected theme for this paint pass. Already swapped to the inactive-window / high-contrast variant by the render walker — read it directly and never call `Theme::for_inactive_window` yourself. Pass to `ColorProp::resolve` to turn a role/reactive colour into a concrete `Color`.
+- **`window_active`**: `bool` — `true` iff the host window is focused AND not occluded (`true` in headless tests). Read for behavioural blur cues the accent-desaturation theme swap can't cover (e.g. hiding a caret / muting a selection).
+- **`enabled`**: `bool` — Effective enabled state of the item being painted (derived from `ItemFlags::IS_ENABLED`). Forwarded to `ColorProp::resolve` so a role-based colour picks its disabled variant on a disabled item.
+
 ### Methods
 
 <a id="sceneitempaintcontext-new"></a>
@@ -261,6 +270,13 @@ may learn to be told more. Build one with `new`.
 pub struct SceneItemA11yContext { /* fields */ }
 ```
 
+### Fields
+
+- **`view_transform`**: `Transform2D` — View transform (pan/zoom/rotation) at AT-build time.  Not for projecting geometry — see the type's own documentation. It is here for an item whose *content* depends on the camera: how much detail to describe at the current zoom, say.
+- **`scene_bounds`**: `Rect` — The item's bounds in scene coordinates — the box written onto its AccessKit node.
+- **`item_id`**: `ItemId` — The id under which this item is being emitted.
+- **`local_to_scene`**: `Transform2D` — The item's own local coordinates mapped into scene coordinates — its `scene_transform`.  An item emitting sub-element geometry of its own (a `TextItem`'s AccessKit text runs, whose per-character positions and widths live in the same space as the node's box) needs this rather than `scene_bounds`, which is an axis-aligned box and says nothing about where a point *inside* the item lands.
+
 ### Methods
 
 <a id="sceneitema11ycontext-new"></a>
@@ -308,7 +324,7 @@ pub enum AppearanceWrite<T> { /* variants */ }
 ### Variants
 
 - **`Refused`** — This item kind has no such slot, or rejected this particular value (`TextItem` always has a foreground colour, so it refuses a `None` fill). **Nothing was written**, and the scene emits no change.
-- **`Accepted`** — The slot took the value. `was` is what it held immediately before — `None` when the slot was empty.
+- **`Accepted`** `{ was: Option<T> }` — The slot took the value. `was` is what it held immediately before — `None` when the slot was empty.
 
 ### Methods
 

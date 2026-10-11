@@ -305,6 +305,11 @@ construct them manually when `Custom` is needed.
 pub struct MessageBoxButton { /* fields */ }
 ```
 
+### Fields
+
+- **`kind`**: `StandardButton` — Which standard button this is — drives role, intent name, and (when `label_override` is `None`) the label.
+- **`label_override`**: `Option<LocalizedString>` — Optional explicit label that overrides `kind.default_label()`. Use sparingly: prefer translating the default via Fluent rather than hard-coding per-call labels.
+
 ### Methods
 
 <a id="messageboxbutton-standard"></a>
@@ -339,7 +344,7 @@ pub enum MessageBoxButtons { /* variants */ }
 - **`YesNoCancel`** — Yes + No + Cancel. **No** is the default, Cancel is the escape — Enter takes the safe answer to the question asked, Escape leaves the dialog.
 - **`SaveDiscardCancel`** — The unsaved-changes triad: Save + Discard + Cancel.
 - **`RetryIgnoreAbort`** — The error-recovery triad: Retry + Ignore + Abort.
-- **`Custom`** — Explicit list. MessageBox preserves the order as the visual button order (leading Spacer pushes all buttons to the trailing edge; default button may appear anywhere).
+- **`Custom`** `(Vec<MessageBoxButton>)` — Explicit list. MessageBox preserves the order as the visual button order (leading Spacer pushes all buttons to the trailing edge; default button may appear anywhere).
 
 <a id="messageboxdismissal"></a>
 
@@ -375,6 +380,12 @@ Report passed to `MessageBox::on_result` when the dialog closes.
 ```rust
 pub struct MessageBoxResult { /* fields */ }
 ```
+
+### Fields
+
+- **`button`**: `StandardButton` — Which button fired — either by click, Enter (the focused button, else the default), or escape-button resolution for any of the dismissal routes.
+- **`checkbox_checked`**: `bool` — State of the "Don't show again" checkbox at dismiss time, when one was configured via `MessageBox::show_again_checkbox` or `MessageBox::show_again_checkbox_state`. `false` when no checkbox was attached.
+- **`dismissal`**: `MessageBoxDismissal` — Which route closed the dialog.
 
 ### Methods
 

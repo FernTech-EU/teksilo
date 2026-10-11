@@ -1016,8 +1016,8 @@ pub enum ColumnWidth { /* variants */ }
 
 ### Variants
 
-- **`Fixed`** — Exact pixel width. Clamped by `min_width` / `max_width`.
-- **`Flex`** — Share of the leftover space proportional to the flex factor — behaves like CSS `flex-grow`. The factor must be `> 0.0`.
+- **`Fixed`** `(f32)` — Exact pixel width. Clamped by `min_width` / `max_width`.
+- **`Flex`** `(f32)` — Share of the leftover space proportional to the flex factor — behaves like CSS `flex-grow`. The factor must be `> 0.0`.
 - **`Auto`** — Intrinsic content width (currently approximated by the table's `min_column_width_default` token; refined to probe the header label and visible cells).
 
 <a id="pinnedside"></a>
@@ -1223,6 +1223,18 @@ Per-cell context handed to a column's cell delegate during build.
 pub struct CellContext { /* fields */ }
 ```
 
+### Fields
+
+- **`row_index`**: `usize` — Row index in the visible-list space (post sort/filter).
+- **`col_id`**: `String` — Column id (slug supplied at construction).
+- **`col_index`**: `usize` — Visible-column index, starting at 0 in display order.
+- **`is_selected`**: `bool` — Whether this row (or this specific cell, in cell-selection mode) is part of the current selection.
+- **`is_focused`**: `bool` — Whether this cell currently carries the keyboard focus.
+- **`is_hovered`**: `bool` — Whether the pointer is hovering this cell.
+- **`is_editing`**: `bool` — Whether `editing_cell_signal` matches this cell.
+- **`depth`**: `Option<usize>` — `TreeTableView` only — depth of the row in the hierarchy. `None` for flat tables.
+- **`is_tree_column`**: `bool` — `TreeTableView` only — true on the column hosting the twist arrow.
+
 <a id="columncontext"></a>
 
 ## `pub struct ColumnContext`
@@ -1232,6 +1244,14 @@ Per-column-header context handed to a column's header delegate.
 ```rust
 pub struct ColumnContext { /* fields */ }
 ```
+
+### Fields
+
+- **`col_id`**: `String`
+- **`col_index`**: `usize`
+- **`sort`**: `Option<SortDirection>` — Active sort direction if this column is the current sort column.
+- **`filter_text`**: `String` — Current filter text (empty = no filter).
+- **`is_hovered`**: `bool`
 
 <a id="columnspec"></a>
 

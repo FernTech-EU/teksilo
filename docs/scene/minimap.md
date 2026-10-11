@@ -446,6 +446,13 @@ another number. Build one with `new`.
 pub struct MinimapReadout { /* fields */ }
 ```
 
+### Fields
+
+- **`extent`**: `Rect` — The scene-space rect actually projected onto the drawing area: `content_bounds ∪ every item rect ∪ viewport`.
+- **`viewport`**: `Rect` — The viewport rect, in scene coordinates.
+- **`position`**: `Point` — The viewport centre's position inside `extent`, per axis, in `0.0..=1.0` (leading/top → trailing/bottom). A degenerate axis reads `0.5` — dead centre of a scene with no extent along it.
+- **`coverage`**: `Size` — How much of `extent` the viewport covers, per axis, in `0.0..=1.0`. A degenerate axis reads `1.0`: you are seeing all there is of it.
+
 ### Methods
 
 <a id="minimapreadout-new"></a>

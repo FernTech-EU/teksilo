@@ -222,6 +222,15 @@ mouse-move and is handled per-tile inside the delegate's own widget
 pub struct TileContext<'a, T: 'static> { /* fields */ }
 ```
 
+### Fields
+
+- **`index`**: `usize` — Flat model index.
+- **`row`**: `usize` — Row in the logical grid (0-based).
+- **`col`**: `usize` — Column in the logical grid (0-based).
+- **`item`**: `&'a T` — Borrow of the item.
+- **`is_selected`**: `bool` — Whether this tile is in the selection set.
+- **`is_focused`**: `bool` — Whether this tile is the keyboard-focus current item. A build-time snapshot — the canonical focus indicator is the grid's painted focus ring (it does not rebuild tiles), so a delegate reading this for custom styling accepts a one-rebuild lag.
+
 <a id="gridview"></a>
 
 ## `pub struct GridView`

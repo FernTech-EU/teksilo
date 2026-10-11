@@ -212,6 +212,16 @@ Every field is a *question*, never a channel: the answer is the returned
 pub struct ProposedChange<'a> { /* fields */ }
 ```
 
+### Fields
+
+- **`scene`**: `&'a Scene` — The scene, read-only. Query siblings, guides, parents, magnets, flags — anything a constraint needs to decide.  This is the whole read surface, and the reason a constraint never needs to capture a `SceneModel`: one that does closes a reference cycle through the closure the scene owns and leaks the scene. A closure that must reach the model holds a `WeakSceneModel`. Writes panic; see the module header.
+- **`items`**: `&'a [ItemId]` — The **roots** this gesture will change, pruned of any item whose ancestor is also in the set — a descendant moves because its root does, so it is deliberately not listed.  The transform controller narrows this further to the roots carrying the operation's own flag (`TransformOp::required_flag`); the lightweight item drag lists the whole drag group, which is what it moves.  There is no "primary": the subject of the decision is the frame, which is what makes the constraint grab-offset invariant. Per-item policy is still expressible — a one-item gesture is `items.len() == 1`.
+- **`op`**: `TransformOp` — What the gesture asks of them.
+- **`start`**: `TransformFrame` — The frame the gesture started from. Fixed for the gesture's life, so a constraint measures total travel rather than per-sample travel.
+- **`proposed`**: `TransformFrame` — The frame about to be applied, **after** magnetism.  Both frames' `rect`s are stated in the frame's **own** basis. For a single rotated item that is the item's basis, so a grid snap written against `rect.x` snaps along the item's axes; a multi-item frame is axis-aligned, so the same rule snaps along the scene's.
+- **`source`**: `TransformSource` — Which route produced it.
+- **`magnet_snapped`**: `bool` — Whether magnetism moved `proposed` onto a magnet.  The seam where the two snapping systems compose: returning `ChangeVerdict::Accept` when this is `true` lets an explicit magnet win over a standing rule. Overriding it is also allowed — and then the magnet's connection does **not** fire, because a magnet whose alignment was overruled did not connect anything.  Only the lightweight item drag runs magnetism today, so this is `false` on the transform-controller, keyboard-nudge and app-driven routes.
+
 ### Methods
 
 <a id="proposedchange-translation"></a>
@@ -249,5 +259,5 @@ pub enum ChangeVerdict { /* variants */ }
 ### Variants
 
 - **`Accept`** — Apply `ProposedChange::proposed` unchanged.
-- **`Adjust`** — Apply this frame instead. The delta is **re-derived** from it, so the preview, the commit, the chrome and the announcement cannot disagree about what happened.
+- **`Adjust`** `(TransformFrame)` — Apply this frame instead. The delta is **re-derived** from it, so the preview, the commit, the chrome and the announcement cannot disagree about what happened.
 - **`Reject`** — Apply nothing: this sample leaves the items where the gesture found them.  Exactly equivalent to `Adjust(change.start)`, and deliberately so — a "freeze at the last accepted sample" rejection would need history, and the next accepted sample would then jump by everything the frozen ones travelled. Stateless refusal means a rejected gesture shows nothing happening and resumes the moment the proposal becomes acceptable, and a gesture that *ends* rejected commits nothing at all — its delta is the identity, so `TransformOutcome::Cancelled` is what `on_end` reports.

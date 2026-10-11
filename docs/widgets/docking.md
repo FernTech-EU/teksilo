@@ -720,6 +720,13 @@ occupy only the middle band.
 pub struct CornerOwners { /* fields */ }
 ```
 
+### Fields
+
+- **`top_leading`**: `DockSide`
+- **`top_trailing`**: `DockSide`
+- **`bottom_leading`**: `DockSide`
+- **`bottom_trailing`**: `DockSide`
+
 ### Methods
 
 <a id="cornerowners-owner"></a>
@@ -821,6 +828,11 @@ Target for `DockingModel::open_dock` / `DockingModel::move_dock`.
 pub struct DockOpenLocation { /* fields */ }
 ```
 
+### Fields
+
+- **`side`**: `DockSide`
+- **`mode`**: `DockOpenMode`
+
 ### Methods
 
 <a id="dockopenlocation-side"></a>
@@ -853,9 +865,9 @@ pub enum DockRailItemSize { /* variants */ }
 
 ### Variants
 
-- **`Default`** — The rail's configured size (`DockRail::size`); icon only, title on hover.
-- **`Compact`** — Compact items — the standard `IconButtonSize::Default` regardless of the rail's configured (larger) size; icon only, title on hover. Not the extra-small `Compact` button: a rail glyph is the activity's identifier and must stay legible.
-- **`Labeled`** — Icon at the configured size **plus** a 90°-rotated title beneath it (the vertical-accordion look). The title shows inline, so no hover tooltip.
+- **`Default`** `= 0` — The rail's configured size (`DockRail::size`); icon only, title on hover.
+- **`Compact`** `= 1` — Compact items — the standard `IconButtonSize::Default` regardless of the rail's configured (larger) size; icon only, title on hover. Not the extra-small `Compact` button: a rail glyph is the activity's identifier and must stay legible.
+- **`Labeled`** `= 2` — Icon at the configured size **plus** a 90°-rotated title beneath it (the vertical-accordion look). The title shows inline, so no hover tooltip.
 
 ### Methods
 
@@ -878,9 +890,9 @@ pub enum DockTabDisplay { /* variants */ }
 
 ### Variants
 
-- **`Text`** — Title text only (the default).
-- **`Icon`** — The dock's icon only (falls back to the title initial if it has none).
-- **`IconText`** — Icon + title.
+- **`Text`** `= 0` — Title text only (the default).
+- **`Icon`** `= 1` — The dock's icon only (falls back to the title initial if it has none).
+- **`IconText`** `= 2` — Icon + title.
 
 ### Methods
 
@@ -914,6 +926,13 @@ App-declared each run (like `rail_thickness` / `min_size` / `DockRail`)
 ```rust
 pub struct DockPolicy { /* fields */ }
 ```
+
+### Fields
+
+- **`allow_activity_drag`**: `bool` — The user may drag activities (rail items / tab headers) to reorder them or move them between sides, and relocate them via the context-menu "Move to" submenu. Default `true`.
+- **`allow_dock_drag`**: `bool` — The user may drag a single dock out of a split pane (its accordion header is a drag handle). Default `true`.
+- **`allow_side_collapse`**: `bool` — The user may hide / collapse a whole side — via the resize handle (drag-past-min snap, double-click, keyboard) or by clicking the active activity-rail item. Default `true`.
+- **`allow_activity_hide`**: `bool` — The user may hide an activity from the context menu. Default `true`.
 
 ### Methods
 
@@ -1373,3 +1392,12 @@ The full serializable snapshot of a `DockingModel`.
 ```rust
 pub struct DockLayoutState { /* fields */ }
 ```
+
+### Fields
+
+- **`version`**: `u32`
+- **`leading`**: `DockSideState`
+- **`trailing`**: `DockSideState`
+- **`top`**: `DockSideState`
+- **`bottom`**: `DockSideState`
+- **`corners`**: `CornerOwners`

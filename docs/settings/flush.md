@@ -127,8 +127,8 @@ pub enum FlushError { /* variants */ }
 ### Variants
 
 - **`Disconnected`** — The shared I/O worker thread has panicked or shut down; writes can no longer be delivered.
-- **`Io`** — The atomic write (temp-file + rename) failed at the OS level.
-- **`Merge`** — A `Patch` could not be applied to the document currently on disk — e.g. a peer wrote something this process cannot parse or migrate.
+- **`Io`** `(io::Error)` — The atomic write (temp-file + rename) failed at the OS level.
+- **`Merge`** `(String)` — A `Patch` could not be applied to the document currently on disk — e.g. a peer wrote something this process cannot parse or migrate.
 
 <a id="writefailuresink"></a>
 

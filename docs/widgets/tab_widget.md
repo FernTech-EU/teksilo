@@ -984,6 +984,13 @@ One tab's identity, presentation, and state pointer.
 pub struct TabHandle { /* fields */ }
 ```
 
+### Fields
+
+- **`id`**: `TabId`
+- **`info`**: `TabInfo`
+- **`kind`**: `&'static str`
+- **`payload`**: `Rc<dyn Any>`
+
 ### Methods
 
 <a id="tabhandle-dynamic"></a>

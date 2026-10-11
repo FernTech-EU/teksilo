@@ -87,7 +87,7 @@ pub enum TileLayout { /* variants */ }
 ### Variants
 
 - **`Row`** — A single horizontal row of equal-width, equal-height tiles (the tiles stretch to the tallest). The reference "two cards side-by-side" layout.
-- **`Grid`** — A wrapping grid whose column count adapts to the available width: `cols = floor((width + spacing) / (min_tile_width + spacing))`, at least one. All cells share the same width and the tallest tile's height.
+- **`Grid`** `{ min_tile_width: f32 }` — A wrapping grid whose column count adapts to the available width: `cols = floor((width + spacing) / (min_tile_width + spacing))`, at least one. All cells share the same width and the tallest tile's height.
 - **`Column`** — A vertical column of full-width tiles, each its natural height. Tiles keep their full card content (icon + title + description).
 - **`Vertical`** — A vertical list of **compact** fixed-height full-width rows: `[radio] [icon] [title] [Spacer] [trailing]`, no description — the settings-list look. Every row is a fixed height taken from the active `RadioTileStyle` (the theme's `RadioTileRecipe::vertical_row_height`, 44 dp by default; override per-group with `RadioTileGroup::row_height`), and the group switches each tile to the compact arrangement (leading radio) automatically.
 

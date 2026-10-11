@@ -136,6 +136,13 @@ shape any indent-stored outline already has.
 pub struct TreeRow<K, T> { /* fields */ }
 ```
 
+### Fields
+
+- **`key`**: `K` — The row's stable domain identity (entity id, tagged key, …). Must be stable across reloads for expand-state and divergence to survive.
+- **`item`**: `T` — The row's display payload.
+- **`depth`**: `usize` — Indent level; `0` is a root.
+- **`has_children`**: `Option<bool>` — **Declares that this row has children the source has not emitted.**  Unset (`None`) is the ordinary case and the historical behaviour: whether a row has children is derived structurally, from whether any row in the stream names it as parent. That is right for a source that always hands over the whole tree, which is what most of them do.  It is a deadlock for a source that wants to materialise a branch only when it is opened. Such a source emits no children until the row is expanded, so the row is derived childless, so no chevron is drawn, so there is nothing to click, so it is never expanded. `StandardTreeItem::on_chevron_toggle` exists to hang exactly that kind of load off, and without this the callback can never fire.  Set it to `Some(true)` to promise children that are not there yet: the row draws its chevron, the toggle reaches the app, and the app re-sources with the branch filled in. `Some(false)` promises the opposite — a leaf, even if the stream happens to contain rows beneath it.  ⚠ It is a **promise, not a projection**. A row that claims children and then produces none on expand opens onto nothing, and the tree cannot detect that for you.
+
 ### Methods
 
 <a id="treerow-new"></a>

@@ -135,6 +135,12 @@ per-point color that overrides the series color (bar charts only).
 pub struct ChartDatum<T> { /* fields */ }
 ```
 
+### Fields
+
+- **`category`**: `T`
+- **`value`**: `f32`
+- **`color`**: `Option<ColorProp>`
+
 ### Methods
 
 <a id="chartdatum-new"></a>
@@ -162,6 +168,14 @@ lives in the model's `ChartModel::structure_version` /
 ```rust
 pub struct ChartSeries<T> { /* fields */ }
 ```
+
+### Fields
+
+- **`name`**: `String`
+- **`color`**: `Option<ColorProp>`
+- **`pattern`**: `Option<SeriesPattern>` — The non-colour channel identifying this series — a dash pattern on a line, a marker shape on a point, a hatch on a filled region. `None` takes the pattern for the series' position (`SeriesPattern::for_index`), which is why the channel exists even with no application code. Set it when a series' identity must survive a reorder. See `SeriesPattern`.
+- **`visible`**: `bool`
+- **`points`**: `Vec<ChartDatum<T>>`
 
 ### Methods
 
@@ -202,6 +216,15 @@ A read-only, borrowed view over one series — returned by
 ```rust
 pub struct SeriesView<'a, T> { /* fields */ }
 ```
+
+### Fields
+
+- **`id`**: `SeriesId`
+- **`name`**: `&'a str`
+- **`color`**: `Option<&'a ColorProp>`
+- **`pattern`**: `Option<SeriesPattern>` — The series' explicit non-colour channel, or `None` to take the one its position implies. See `SeriesPattern`.
+- **`visible`**: `bool`
+- **`points`**: `&'a [ChartDatum<T>]`
 
 <a id="chartmodel"></a>
 

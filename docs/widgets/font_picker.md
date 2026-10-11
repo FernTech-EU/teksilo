@@ -147,6 +147,11 @@ the shared typesetter instead.
 pub struct FontMeta { /* fields */ }
 ```
 
+### Fields
+
+- **`monospaced`**: `bool` — Whether the family is monospaced (drives `FontSpacingFilter`).
+- **`writing_systems`**: `WritingSystemSet` — The scripts the family covers (drives the writing-system filter and the per-row sample text).
+
 <a id="fontpicker"></a>
 
 ## `pub struct FontPicker`

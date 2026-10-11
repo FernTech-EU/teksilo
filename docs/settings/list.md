@@ -156,9 +156,9 @@ pub enum ListOp<T: Keyed> { /* variants */ }
 
 ### Variants
 
-- **`UpsertFront`** — Remove any existing entry with this item's key, then insert `T` at the front. This is the "most recently used" operation: re-running it against any starting vector — including one a peer has already mutated — reproduces the same dedupe-and-promote-to-front invariant `MruList::add` relies on.
-- **`UpdateInPlace`** — Replace the entry with this item's key **in place** (no reordering). A no-op if the key is no longer present — e.g. a peer concurrently removed it, in which case that removal wins.
-- **`Remove`** — Remove the entry with this key, if present. No-op otherwise.
+- **`UpsertFront`** `(T)` — Remove any existing entry with this item's key, then insert `T` at the front. This is the "most recently used" operation: re-running it against any starting vector — including one a peer has already mutated — reproduces the same dedupe-and-promote-to-front invariant `MruList::add` relies on.
+- **`UpdateInPlace`** `(T)` — Replace the entry with this item's key **in place** (no reordering). A no-op if the key is no longer present — e.g. a peer concurrently removed it, in which case that removal wins.
+- **`Remove`** `(T::Key)` — Remove the entry with this key, if present. No-op otherwise.
 - **`Clear`** — Drop every entry.
 
 <a id="listfile"></a>
@@ -171,6 +171,11 @@ On-disk shape for a persisted list: a versioned wrapper around
 ```rust
 pub struct ListFile<T> { /* fields */ }
 ```
+
+### Fields
+
+- **`version`**: `u32` — Schema version, matched against `Versioned::CURRENT_VERSION` on load to run any registered migrations before deserialization.
+- **`items`**: `Vec<T>` — The ordered list of items as stored on disk.
 
 <a id="persistedlistmodel"></a>
 

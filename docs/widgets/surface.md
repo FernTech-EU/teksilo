@@ -54,6 +54,20 @@ time. `Rc<...>` fields keep callbacks cheap to copy.
 pub struct ToastSurfaceData { /* fields */ }
 ```
 
+### Fields
+
+- **`entry_id`**: `u64`
+- **`severity`**: `ToastSeverity`
+- **`priority`**: `teksilo_core::styles::ToastPriority`
+- **`title`**: `LocalizedString`
+- **`body`**: `Option<LocalizedString>`
+- **`announcement`**: `Option<LocalizedString>`
+- **`actions`**: `Rc<Vec<ToastAction>>`
+- **`show_close_button`**: `bool`
+- **`on_click`**: `Option<Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>>`
+- **`style_override`**: `Option<SharedToastStyle>`
+- **`body_state`**: `teksilo_core::signal::Signal<u8>` — Clamped / unfolded state of the body, owned by the live entry so it survives the host's surface rebuilds — see `LiveEntry::body_state`.
+
 <a id="toastsurface"></a>
 
 ## `pub struct ToastSurface`

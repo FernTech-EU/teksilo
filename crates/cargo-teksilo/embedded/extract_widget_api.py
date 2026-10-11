@@ -593,6 +593,16 @@ class EnumVariant:
     name: str
     signature: str
     doc: str
+    # The variant on one line, without comments or inner docs:
+    # `KeyDown { key: Key, modifiers: Modifiers }`.
+    shape: str = ""
+
+
+@dataclass
+class StructField:
+    name: str
+    type: str
+    doc: str
 
 
 @dataclass
@@ -604,6 +614,9 @@ class Item:
     hidden: bool = False
     cfg: list[str] = field(default_factory=list)
     variants: list[EnumVariant] = field(default_factory=list)
+    fields: list[StructField] = field(default_factory=list)
+    # A struct with fields outside `fields` (private, `pub(crate)`, hidden).
+    restricted_fields: bool = False
     methods: list["Item"] = field(default_factory=list)
 
 
@@ -954,48 +967,55 @@ def _extract_cfgs(attrs: list[str]) -> list[str]:
     return [a for a in attrs if re.search(r"#\[\s*cfg\s*\(", a)]
 
 
-def _parse_enum_variants(
-    raw: list[str], cleaned: list[str], start: int, end: int
-) -> list[EnumVariant]:
-    """Parse variants from cleaned[start..=end] which is the interior of the
-    enum body (between `{` and `}`)."""
-    variants: list[EnumVariant] = []
-    v_doc: list[str] = []
+def _split_members(
+    raw: list[str], cleaned: list[str], start: int, end: int, *, angles: bool = False
+) -> "list[tuple[int, int, int, str, list[str]]]":
+    """Split the interior of a `{ ... }` body (lines start..=end) into its
+    comma-separated members: enum variants, or struct fields.
+
+    Returns `(first_line, end_line, end_col, doc, attributes)` per member, the
+    member's text running from `first_line` to `end_col` on `end_line` (the
+    separating comma excluded). `angles` also counts `<...>` as nesting, which
+    a field type needs (`HashMap<K, V>`) and an enum discriminant must not
+    (`A = 1 << 2`)."""
+    members: "list[tuple[int, int, int, str, list[str]]]" = []
+    doc: list[str] = []
+    attrs: list[str] = []
     i = start
     while i <= end:
         line = raw[i]
-        cln = cleaned[i]
         stripped = line.strip()
 
         m = DOC_OUTER.match(line)
         if m:
-            v_doc.append(_doc_text(m))
+            doc.append(_doc_text(m))
             i += 1
             continue
         if stripped.startswith("#["):
-            _, end_i = consume_attribute(raw, cleaned, i)
+            attr, end_i = consume_attribute(raw, cleaned, i)
+            attrs.append(attr)
             i = end_i + 1
             continue
-        if not stripped:
+        if not stripped or stripped.startswith("//"):
             i += 1
             continue
 
-        # Start of a variant. Collect until `,` at brace/paren-depth 0, or end.
-        paren = 0
-        brace = 0
+        # Start of a member. Collect until `,` at depth 0, or end.
+        depth = 0
         end_line = None
         end_col = None
         for li in range(i, end + 1):
-            for col, c in enumerate(cleaned[li]):
-                if c == "(":
-                    paren += 1
-                elif c == ")":
-                    paren -= 1
-                elif c == "{":
-                    brace += 1
-                elif c == "}":
-                    brace -= 1
-                elif paren == 0 and brace == 0 and c == ",":
+            cln = cleaned[li]
+            for col, c in enumerate(cln):
+                if c in "({[":
+                    depth += 1
+                elif c in ")}]":
+                    depth -= 1
+                elif angles and c == "<":
+                    depth += 1
+                elif angles and c == ">" and not (col > 0 and cln[col - 1] in "-="):
+                    depth -= 1
+                elif depth == 0 and c == ",":
                     end_line, end_col = li, col
                     break
             if end_line is not None:
@@ -1004,19 +1024,70 @@ def _parse_enum_variants(
             end_line = end
             end_col = len(cleaned[end])
 
-        sig = _join_signature(raw, i, end_line, end_col).strip()
+        members.append((i, end_line, end_col, "\n".join(doc).rstrip(), attrs))
+        doc = []
+        attrs = []
+        i = end_line + 1
+    return members
+
+
+def _member_shape(raw: list[str], cleaned: list[str], start: int, end_line: int, end_col: int) -> str:
+    """A member's source text on one line, without its comments, inner
+    attributes or inner `///` docs: `KeyDown { key: Key, text: Option<String> }`."""
+    parts: list[str] = []
+    for li in range(start, end_line + 1):
+        text = raw[li] if li < end_line else raw[li][:end_col]
+        cut = cleaned[li].find("//")
+        if cut >= 0 and cut < len(text):
+            text = text[:cut]
+        parts.append(text)
+    shape = " ".join(parts)
+    shape = re.sub(r"#\[[^\]]*\]", " ", shape)
+    shape = re.sub(r"\s+", " ", shape).strip()
+    shape = re.sub(r",\s*([}\)])", r" \1", shape)
+    shape = re.sub(r"\(\s+", "(", shape)
+    shape = re.sub(r"\s+\)", ")", shape)
+    return shape
+
+
+def _parse_enum_variants(
+    raw: list[str], cleaned: list[str], start: int, end: int
+) -> list[EnumVariant]:
+    """Parse variants from cleaned[start..=end] which is the interior of the
+    enum body (between `{` and `}`)."""
+    variants: list[EnumVariant] = []
+    for first, end_line, end_col, doc, _attrs in _split_members(raw, cleaned, start, end):
+        sig = _join_signature(raw, first, end_line, end_col).strip()
         name_m = re.match(r"(\w+)", sig)
-        name = name_m.group(1) if name_m else "<?>"
         variants.append(
             EnumVariant(
-                name=name,
+                name=name_m.group(1) if name_m else "<?>",
                 signature=sig,
-                doc="\n".join(v_doc).rstrip(),
+                doc=doc,
+                shape=_member_shape(raw, cleaned, first, end_line, end_col),
             )
         )
-        v_doc = []
-        i = end_line + 1
     return variants
+
+
+def _parse_struct_fields(
+    raw: list[str], cleaned: list[str], start: int, end: int
+) -> "tuple[list[StructField], bool]":
+    """The `pub` fields of a struct body (lines start..=end), and whether it
+    also has fields a caller cannot name (`pub(crate)`, private, hidden),
+    which rule out building it with a struct expression."""
+    fields: list[StructField] = []
+    restricted = False
+    for first, end_line, end_col, doc, attrs in _split_members(
+        raw, cleaned, start, end, angles=True
+    ):
+        shape = _member_shape(raw, cleaned, first, end_line, end_col)
+        m = re.match(r"pub\s+(?:r#)?(\w+)\s*:\s*(.+)$", shape)
+        if not m or _is_hidden(attrs):
+            restricted = True
+            continue
+        fields.append(StructField(name=m.group(1), type=m.group(2), doc=doc))
+    return fields, restricted
 
 
 def _parse_impl_body(
@@ -1270,7 +1341,13 @@ def parse_file(path: Path, module_name: str, cfg: list[str]) -> ParsedFile:
 
         if PUB_STRUCT.match(line):
             name = PUB_STRUCT.match(line).group(1)  # type: ignore[union-attr]
-            sig, end_line, _open = consume_item_signature(raw, cleaned, i)
+            sig, end_line, open_pos = consume_item_signature(raw, cleaned, i)
+            fields: list[StructField] = []
+            restricted = False
+            if open_pos is not None:
+                fields, restricted = _parse_struct_fields(
+                    raw, cleaned, open_pos[0] + 1, end_line - 1
+                )
             item = Item(
                 kind="struct",
                 name=name,
@@ -1278,6 +1355,8 @@ def parse_file(path: Path, module_name: str, cfg: list[str]) -> ParsedFile:
                 doc="\n".join(doc_buf).rstrip(),
                 hidden=_is_hidden(attr_buf),
                 cfg=_extract_cfgs(attr_buf),
+                fields=fields,
+                restricted_fields=restricted,
             )
             items.append(item)
             item_by_name[name] = item
@@ -1831,6 +1910,12 @@ def _emit_anchor(anchors: "dict[int, str] | None", item: Item, out: list[str]) -
         out.append("")
 
 
+def _variant_payload(v: EnumVariant) -> str:
+    """What a variant carries, after its name: `{ key: Key, … }`, `(u32)` or
+    `= 2`; empty for a plain unit variant."""
+    return v.shape[len(v.name):].strip() if v.shape.startswith(v.name) else ""
+
+
 def _emit_items_md(
     items: list[Item], out: list[str], anchors: "dict[int, str] | None" = None
 ) -> None:
@@ -1899,15 +1984,28 @@ def _emit_items_md(
             out.append("```")
             out.append("")
 
+        if it.kind == "struct" and it.fields:
+            out.append("### Fields")
+            out.append("")
+            for f in it.fields:
+                doc = f.doc.replace("\n", " ").strip()
+                line = f"- **`{f.name}`**: `{f.type}`"
+                out.append(f"{line} — {doc}" if doc else line)
+            if it.restricted_fields:
+                out.append("")
+                out.append("Other fields are not public.")
+            out.append("")
+
         if it.kind == "enum" and it.variants:
             out.append("### Variants")
             out.append("")
             for v in it.variants:
                 doc = v.doc.replace("\n", " ").strip()
-                if doc:
-                    out.append(f"- **`{v.name}`** — {doc}")
-                else:
-                    out.append(f"- **`{v.name}`**")
+                line = f"- **`{v.name}`**"
+                payload = _variant_payload(v)
+                if payload:
+                    line += f" `{payload}`"
+                out.append(f"{line} — {doc}" if doc else line)
             out.append("")
 
         if it.methods:
@@ -1967,13 +2065,23 @@ def format_text(pf: ParsedFile) -> str:
             if it.signature:
                 out.append(f"  {it.signature.strip()}")
 
+        if it.fields:
+            out.append("  fields:")
+            for f in it.fields:
+                line = f"    - {f.name}: {f.type}"
+                out.append(f"{line} — {f.doc.splitlines()[0]}" if f.doc else line)
+            if it.restricted_fields:
+                out.append("    (other fields are not public)")
+
         if it.variants:
             out.append("  variants:")
             for v in it.variants:
+                payload = _variant_payload(v)
+                label = f"{v.name} {payload}" if payload else v.name
                 if v.doc:
-                    out.append(f"    - {v.name}: {v.doc.splitlines()[0]}")
+                    out.append(f"    - {label}: {v.doc.splitlines()[0]}")
                 else:
-                    out.append(f"    - {v.name}")
+                    out.append(f"    - {label}")
 
         if it.methods:
             out.append("  methods:")
@@ -2006,6 +2114,8 @@ def format_json(pfs: list[ParsedFile]) -> str:
             "hidden": it.hidden,
             "cfg": it.cfg,
             "variants": [v.__dict__ for v in it.variants],
+            "fields": [f.__dict__ for f in it.fields],
+            "restricted_fields": it.restricted_fields,
             "methods": [item_to_dict(m) for m in it.methods],
         }
 
@@ -2984,11 +3094,84 @@ def _test_summary_scope() -> None:
     )
 
 
+def _test_fields_and_variant_shapes() -> None:
+    """Struct fields and variant payloads reach the lookup output."""
+    import tempfile
+
+    src = """//! Fixture.
+
+/// A struct.
+pub struct Shown<K, V> {
+    /// The map.
+    pub map: std::collections::HashMap<K, V>,
+    pub check: Box<dyn Fn(u32) -> bool>,
+    /// Two
+    /// lines.
+    pub pair: (u8, [u8; 4]),
+    pub(crate) internal: u32,
+    #[doc(hidden)]
+    pub hidden: u32,
+}
+
+/// All public.
+pub struct Open {
+    pub a: u32,
+}
+
+pub enum Event {
+    /// A key.
+    KeyDown {
+        /// Which key.
+        key: Key,
+        text: Option<String>,
+    },
+    // A plain comment between variants must not swallow the next one.
+    Moved(f32, f32),
+    Flag = 1 << 2,
+    Plain,
+}
+"""
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "fixture.rs"
+        path.write_text(src, encoding="utf-8")
+        pf = parse_file(path, "fixture", [])
+        items = {it.name: it for it in pf.items}
+
+        shown = items["Shown"]
+        got = [(f.name, f.type, f.doc) for f in shown.fields]
+        assert got == [
+            ("map", "std::collections::HashMap<K, V>", "The map."),
+            ("check", "Box<dyn Fn(u32) -> bool>", ""),
+            ("pair", "(u8, [u8; 4])", "Two\nlines."),
+        ], got
+        assert shown.restricted_fields, "pub(crate) and hidden fields went unnoticed"
+        assert not items["Open"].restricted_fields
+
+        shapes = [(v.name, _variant_payload(v)) for v in items["Event"].variants]
+        assert shapes == [
+            ("KeyDown", "{ key: Key, text: Option<String> }"),
+            ("Moved", "(f32, f32)"),
+            ("Flag", "= 1 << 2"),
+            ("Plain", ""),
+        ], shapes
+
+        md = format_markdown(pf)
+        assert "- **`map`**: `std::collections::HashMap<K, V>` — The map." in md, md
+        assert "Other fields are not public." in md
+        assert "- **`KeyDown`** `{ key: Key, text: Option<String> }` — A key." in md, md
+        text = format_text(pf)
+        assert "    - map: std::collections::HashMap<K, V> — The map." in text, text
+        data = json.loads(format_json([pf]))[0]["items"]
+        assert data[0]["fields"][0]["name"] == "map", data[0]
+        assert data[0]["restricted_fields"] is True
+
+
 def run_self_tests() -> int:
     """Smoke tests for the catalog generator (`--test`). stdlib-only, runs
     against the live source tree."""
     import tempfile
 
+    _test_fields_and_variant_shapes()
     _test_prune()
     _test_density_images()
     _test_summary_scope()

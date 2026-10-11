@@ -307,6 +307,14 @@ one with `new`.
 pub struct MagnetRef { /* fields */ }
 ```
 
+### Fields
+
+- **`id`**: `MagnetId` — The magnet's id.
+- **`item`**: `ItemId` — The item the magnet is attached to.
+- **`role`**: `MagnetRole` — The magnet's advisory direction.
+- **`payload`**: `Option<Rc<dyn Any>>` — The magnet's payload, if any (an `Rc` clone of the stored one).
+- **`scene_pos`**: `Point` — The magnet's current position in scene coordinates.
+
 ### Methods
 
 <a id="magnetref-new"></a>
@@ -339,7 +347,7 @@ pub enum MagnetVerdict { /* variants */ }
 ### Variants
 
 - **`Reject`** — The pair may not connect; the scene skips it.
-- **`Accept`** — The pair may connect. The optional payload is attached to the resulting `MagnetConnection` (e.g. a derived edge descriptor).
+- **`Accept`** `(Option<Rc<dyn Any>>)` — The pair may connect. The optional payload is attached to the resulting `MagnetConnection` (e.g. a derived edge descriptor).
 
 ### Methods
 
@@ -380,6 +388,12 @@ argument of `on_connect`. Build one with `new`.
 pub struct MagnetConnection { /* fields */ }
 ```
 
+### Fields
+
+- **`from`**: `MagnetRef` — The initiating magnet.
+- **`to`**: `MagnetRef` — The receiving magnet.
+- **`payload`**: `Option<Rc<dyn Any>>` — The connection payload from the accepting verdict, if any.
+
 ### Methods
 
 <a id="magnetconnection-new"></a>
@@ -416,6 +430,14 @@ heavyweight consumer driving its own drag reads it. Build one with
 ```rust
 pub struct MagnetSnap { /* fields */ }
 ```
+
+### Fields
+
+- **`from`**: `MagnetId` — The dragged item's magnet that is snapping.
+- **`to`**: `MagnetId` — The stationary magnet it snaps onto.
+- **`snap_vector`**: `Vec2` — Add this to the drag delta (or the item's position) so `from`'s scene position coincides with `to`'s.
+- **`payload`**: `Option<Rc<dyn Any>>` — The accepting verdict's payload, if any.
+- **`distance`**: `f32` — Scene-space distance between the pair before snapping (the tie-break used to pick the closest accepting pair).
 
 ### Methods
 
@@ -481,6 +503,13 @@ one with `new`.
 pub struct MagnetMarker { /* fields */ }
 ```
 
+### Fields
+
+- **`id`**: `MagnetId` — The magnet's id.
+- **`scene_pos`**: `Point` — Its current scene position.
+- **`role`**: `MagnetRole` — Its advisory role.
+- **`state`**: `MagnetVisualState` — Its visual state for this frame.
+
 ### Methods
 
 <a id="magnetmarker-new"></a>
@@ -506,6 +535,12 @@ magnetism learns to draw. Build one with `new`.
 ```rust
 pub struct MagnetFeedback { /* fields */ }
 ```
+
+### Fields
+
+- **`zoom`**: `f32` — The view's current geometric zoom, so the renderer can size constant-pixel chrome as `pixels / zoom` in scene units.
+- **`markers`**: `Vec<MagnetMarker>` — Eligible magnets to mark, with their per-frame state.
+- **`connector`**: `Option<(Point, Point, bool)>` — A connector to draw between two scene points, if an interaction is forming one: the active item-drag snap pair, the port-drag wire (source to snapped target or cursor), or the keyboard preview (pending source to focused candidate). `true` in the second field marks an *accepted* connector (drawn solid / highlighted) versus a tentative one (the free port-drag wire).
 
 ### Methods
 

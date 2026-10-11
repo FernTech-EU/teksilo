@@ -82,8 +82,8 @@ pub enum TrackSize { /* variants */ }
 
 ### Variants
 
-- **`Fixed`** — Fixed size in logical pixels regardless of available space.
-- **`Fractional`** — Share of the remaining space after `Fixed` and `Auto` tracks are resolved; equivalent to the CSS `fr` unit.  Multiple `Fractional` tracks divide the remainder proportionally to their weights.
+- **`Fixed`** `(f32)` — Fixed size in logical pixels regardless of available space.
+- **`Fractional`** `(f32)` — Share of the remaining space after `Fixed` and `Auto` tracks are resolved; equivalent to the CSS `fr` unit.  Multiple `Fractional` tracks divide the remainder proportionally to their weights.
 - **`Auto`** — Sized to the largest intrinsic dimension among all children in the track; expands to fill content, never clips.
 
 <a id="grid"></a>

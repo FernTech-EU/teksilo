@@ -87,6 +87,12 @@ child is currently visible.
 pub struct WindowControlsLayout { /* fields */ }
 ```
 
+### Fields
+
+- **`minimize_id`**: `WidgetId`
+- **`maximize_id`**: `WidgetId`
+- **`close_id`**: `WidgetId`
+
 <a id="controlaction"></a>
 
 ## `pub type ControlAction`

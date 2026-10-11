@@ -33,6 +33,21 @@ by crate for clarity, not because crates version independently.
   offered to a screen reader as expandable, and activating it opens nothing.
   Without it, every tile is still offered as one.
 
+#### cargo-teksilo
+
+- **`symbol` lists a struct's public fields**, with their types and docs,
+  and says when the struct also has fields that are not public. The theme
+  token structs (`ColorTokens`, `TypographyTokens`, `TextStyle`, …), whose
+  whole API is their fields, can now be read from the tool. `-f json` gains
+  `fields` and `restricted_fields` on each struct.
+- **`symbol` shows what each enum variant carries**: `KeyDown { key: Key,
+  modifiers: Modifiers, text: Option<String> }`, `Fraction (f32)`. The JSON
+  variants gain the same `shape`.
+
+#### Documentation
+
+- The generated catalog pages list the same fields and variant payloads.
+
 ### Changed
 
 #### Core
@@ -74,6 +89,11 @@ by crate for clarity, not because crates version independently.
 
 #### cargo-teksilo
 
+- **`symbol` dropped the enum variant after each plain `//` comment** inside
+  an enum: the comment and the variant were read as one unnamed variant.
+  `Key` lost `A`, `F1` and `CapsLock` this way, and `AutomationOp`,
+  `CodeCommand` and `EditCommandKind` lost variants too. A comment after the
+  last variant showed as an unnamed variant (`AnimatedQuadKind`).
 - **`status` reported an older release's Claude skill as missing** once
   every one of its files differed from this release's, which is the usual
   case two releases on. It now lists the copy as differing and prints the

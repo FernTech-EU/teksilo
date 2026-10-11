@@ -240,6 +240,13 @@ Two consumers:
 pub struct TabBarDragData<T: 'static> { /* fields */ }
 ```
 
+### Fields
+
+- **`source_index`**: `usize` — Model index of the dragged tab in the *source* bar.
+- **`source_bar_id`**: `WidgetId` — Widget id of the source `TabBar`. The receiving bar compares it to its own id to tell an intra-bar reorder from a cross-bar transfer.
+- **`source_id`**: `TabId` — Stable id of the dragged tab — handed to the source bar's `on_transfer_out` so the app can remove it by id.
+- **`item`**: `Option<T>` — A clone of the dragged item, carried for cross-bar transfer. `None` when the source bar didn't opt into transfer or the tab is non-transferable (e.g. a static tab).
+
 <a id="tabbar"></a>
 
 ## `pub struct TabBar`

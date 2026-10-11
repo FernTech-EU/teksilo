@@ -355,8 +355,8 @@ pub enum WidthPolicy { /* variants */ }
 
 ### Variants
 
-- **`Pixels`** — Cap the widget at a fixed logical-pixel width. Default is `DEFAULT_PREFERRED_WIDTH` (120 dp), matching Qt's `QSpinBox` sizeHint.
-- **`Chars`** — Size the widget to fit this many reference digits (`'0'`) plus the configured suffix, padding, and step buttons. Measurement uses the theme font at build time.
+- **`Pixels`** `(f32)` — Cap the widget at a fixed logical-pixel width. Default is `DEFAULT_PREFERRED_WIDTH` (120 dp), matching Qt's `QSpinBox` sizeHint.
+- **`Chars`** `(u32)` — Size the widget to fit this many reference digits (`'0'`) plus the configured suffix, padding, and step buttons. Measurement uses the theme font at build time.
 - **`Fill`** — Let the widget expand horizontally to fill whatever space the parent offers. Equivalent to an infinite pixel cap.
 
 <a id="spin_box_step_button_width"></a>

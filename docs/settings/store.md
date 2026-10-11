@@ -148,9 +148,9 @@ pub enum SettingsStoreError { /* variants */ }
 
 ### Variants
 
-- **`Io`** — The settings file could not be read or written (missing directory, permission denied, etc.).
-- **`Parse`** — The settings file exists but its contents are not valid TOML.
-- **`Flush`** — An attempt to flush the in-memory state to disk failed.
+- **`Io`** `(io::Error)` — The settings file could not be read or written (missing directory, permission denied, etc.).
+- **`Parse`** `(toml::de::Error)` — The settings file exists but its contents are not valid TOML.
+- **`Flush`** `(FlushError)` — An attempt to flush the in-memory state to disk failed.
 
 <a id="settingskey"></a>
 
@@ -169,6 +169,11 @@ const FONT_SIZE: SettingsKey<f32> =
 ```rust
 pub struct SettingsKey<T: 'static> { /* fields */ }
 ```
+
+### Fields
+
+- **`key`**: `&'static str` — The dotted TOML path used to look up this setting (e.g. `"editor.font_size"`).
+- **`default`**: `fn() -> T` — Factory that produces the default value when the key is absent from disk.
 
 ### Methods
 

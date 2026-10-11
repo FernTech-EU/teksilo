@@ -69,6 +69,13 @@ apply a saved snapshot.
 pub struct SceneViewState { /* fields */ }
 ```
 
+### Fields
+
+- **`pan_x`**: `f32` — X pan offset (the same value driven by the SceneView's `pan_x` signal).
+- **`pan_y`**: `f32` — Y pan offset.
+- **`zoom`**: `f32` — Zoom factor (1.0 = identity).
+- **`rotation`**: `f32` — Rotation in radians (0.0 = no rotation).
+
 ### Methods
 
 <a id="sceneviewstate-identity"></a>

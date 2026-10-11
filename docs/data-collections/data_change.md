@@ -55,11 +55,11 @@ pub enum DataChange { /* variants */ }
 
 ### Variants
 
-- **`ItemsInserted`** — Rows were inserted; `range` holds the indices of the newly inserted items.
-- **`ItemsRemoved`** — Rows were removed; `range` holds the indices they occupied *before* removal.
-- **`ItemsMoved`** — A contiguous block of `count` rows moved from `from` to `to` (post-removal index).
-- **`ItemUpdated`** — A single row's data changed in place without any structural shift.
-- **`WindowLoaded`** — A window of previously-`Loading` rows became `Ready` (lazy / windowed sources). Semantically like `ItemsInserted` for a row-height cache (divergence = `range.start`), but no rows were added — the count was already declared — so a `SelectionModel` must NOT index-shift for it.
+- **`ItemsInserted`** `{ range: Range<usize> }` — Rows were inserted; `range` holds the indices of the newly inserted items.
+- **`ItemsRemoved`** `{ range: Range<usize> }` — Rows were removed; `range` holds the indices they occupied *before* removal.
+- **`ItemsMoved`** `{ from: usize, to: usize, count: usize }` — A contiguous block of `count` rows moved from `from` to `to` (post-removal index).
+- **`ItemUpdated`** `{ index: usize }` — A single row's data changed in place without any structural shift.
+- **`WindowLoaded`** `{ range: Range<usize> }` — A window of previously-`Loading` rows became `Ready` (lazy / windowed sources). Semantically like `ItemsInserted` for a row-height cache (divergence = `range.start`), but no rows were added — the count was already declared — so a `SelectionModel` must NOT index-shift for it.
 - **`Reset`** — The entire list was replaced; consumers must discard all cached state and rebuild.
 
 <a id="map_index_after_move"></a>

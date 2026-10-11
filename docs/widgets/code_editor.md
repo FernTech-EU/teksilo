@@ -249,6 +249,13 @@ setters; `insert_text` defaults to `label`.
 pub struct CompletionItem { /* fields */ }
 ```
 
+### Fields
+
+- **`label`**: `String` — The text shown in the list.
+- **`insert_text`**: `String` — The text that replaces the word being completed when accepted. Defaults to `label`.
+- **`detail`**: `Option<String>` — Optional dimmed detail shown at the trailing edge of the row (a type, a signature, a source).
+- **`kind`**: `CompletionKind` — A category driving the row's leading badge — purely visual, no behaviour.
+
 ### Methods
 
 <a id="completionitem-new"></a>
@@ -310,6 +317,13 @@ What a completion provider is told about the caret when asked for candidates.
 pub struct CompletionContext<'a> { /* fields */ }
 ```
 
+### Fields
+
+- **`prefix`**: `&'a str` — The identifier characters immediately before the caret.
+- **`line`**: `&'a str` — The whole current line.
+- **`column`**: `usize` — The caret's column within the line (character index).
+- **`position`**: `usize` — The caret's absolute document position.
+
 <a id="indentstyle"></a>
 
 ## `pub enum IndentStyle`
@@ -322,8 +336,8 @@ pub enum IndentStyle { /* variants */ }
 
 ### Variants
 
-- **`Spaces`** — `width` spaces per indent level.
-- **`Tabs`** — One tab character per level, rendered `width` columns wide.
+- **`Spaces`** `(u8)` — `width` spaces per indent level.
+- **`Tabs`** `{ width: u8 }` — One tab character per level, rendered `width` columns wide.
 
 ### Methods
 
@@ -354,6 +368,11 @@ arithmetic, and only the caller knows which document this is.
 ```rust
 pub struct BracketPair { /* fields */ }
 ```
+
+### Fields
+
+- **`open`**: `char`
+- **`close`**: `char`
 
 ### Methods
 
@@ -387,6 +406,15 @@ Editing behaviour the code editor applies, all supplied by the application.
 ```rust
 pub struct CodeConfig { /* fields */ }
 ```
+
+### Fields
+
+- **`indent`**: `IndentStyle` — How indentation is written and how wide a level is.
+- **`auto_indent`**: `bool` — Whether Enter carries the current line's leading whitespace onto the new line.
+- **`line_comment`**: `Option<String>` — Token that starts a line comment (`"//"`, `"#"`, `"--"`, `";"`). `None` disables `CodeCommand::ToggleLineComment` entirely rather than guessing.
+- **`brackets`**: `Vec<BracketPair>` — Delimiter pairs for auto-closing and match highlighting. Empty disables both.
+- **`auto_close_brackets`**: `bool` — Whether typing an opening delimiter inserts its closing partner.
+- **`match_brackets`**: `bool` — Whether the delimiter matching the caret's is highlighted.
 
 ### Methods
 

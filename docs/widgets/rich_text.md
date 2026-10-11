@@ -3037,6 +3037,11 @@ would be guessing. The offset addresses the image's single `U+FFFC`, so
 pub struct ImageActivation { /* fields */ }
 ```
 
+### Fields
+
+- **`name`**: `String` — The image's resource name — the `src` the document stores.
+- **`offset`**: `usize` — Character offset of the image within the document.
+
 <a id="editortextdrag"></a>
 
 ## `pub struct EditorTextDrag`
@@ -3057,6 +3062,13 @@ and only the source editor can say which range that was.
 pub struct EditorTextDrag { /* fields */ }
 ```
 
+### Fields
+
+- **`source`**: `teksilo_core::WidgetId` — The editor the text was picked up from.
+- **`range`**: `(usize, usize)` — The dragged range in that editor, as document offsets.
+- **`fragment`**: `teksilo_text::text_document::DocumentFragment` — The dragged content, with its formatting.
+- **`text`**: `String` — The same content as plain text — the drop's fallback, and the bytes handed to another application when the drag leaves the window.
+
 <a id="imageresize"></a>
 
 ## `pub struct ImageResize`
@@ -3070,3 +3082,10 @@ entries on the undo stack for one gesture.
 ```rust
 pub struct ImageResize { /* fields */ }
 ```
+
+### Fields
+
+- **`name`**: `String` — The image's resource name.
+- **`offset`**: `usize` — Character offset of its `U+FFFC` — the identity, since a document may hold one picture in several places.
+- **`width`**: `u32` — The new display size in logical pixels, proportions preserved.
+- **`height`**: `u32`

@@ -105,7 +105,7 @@ pub enum ChartAggregateFn { /* variants */ }
 - **`Max`** — Largest value in the bucket.
 - **`First`** — The bucket's first value.
 - **`Last`** — The bucket's last value.
-- **`Custom`** — A caller-supplied reduction.
+- **`Custom`** `(Rc<dyn Fn(&[f32]) -> f32>)` — A caller-supplied reduction.
 
 ### Methods
 

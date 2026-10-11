@@ -105,11 +105,11 @@ pub enum SettingsFileError { /* variants */ }
 
 ### Variants
 
-- **`Io`** — An OS-level file I/O error (read, write, or rename).
-- **`Parse`** — The file's TOML could not be parsed.
-- **`Migrate`** — A migration step failed; the file version could not be brought up to `T::CURRENT_VERSION`.
-- **`Serialize`** — The in-memory value could not be serialized to TOML before writing.
-- **`Flush`** — The debounced background write failed.
+- **`Io`** `(io::Error)` — An OS-level file I/O error (read, write, or rename).
+- **`Parse`** `(toml::de::Error)` — The file's TOML could not be parsed.
+- **`Migrate`** `(MigrationError)` — A migration step failed; the file version could not be brought up to `T::CURRENT_VERSION`.
+- **`Serialize`** `(toml::ser::Error)` — The in-memory value could not be serialized to TOML before writing.
+- **`Flush`** `(FlushError)` — The debounced background write failed.
 
 <a id="settingsfile"></a>
 

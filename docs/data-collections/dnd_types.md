@@ -139,8 +139,8 @@ pub enum DragSource<'a, K> { /* variants */ }
 
 ### Variants
 
-- **`SameView`** — An intra-view reorder; `key` identifies the dragged row.
-- **`Foreign`** — A drag from another view or the OS; downcast `payload` to interpret it.
+- **`SameView`** `{ key: K }` — An intra-view reorder; `key` identifies the dragged row.
+- **`Foreign`** `{ payload: &'a DragPayload }` — A drag from another view or the OS; downcast `payload` to interpret it.
 
 <a id="dropquery"></a>
 
@@ -152,6 +152,12 @@ relative to `target`?" The source answers with a `DropResponse`.
 ```rust
 pub struct DropQuery<'a, K> { /* fields */ }
 ```
+
+### Fields
+
+- **`source`**: `DragSource<'a, K>` — Who is dragging.
+- **`target`**: `K` — The row currently hovered.
+- **`position`**: `DropPosition` — Where, relative to `target`, the drop would land.
 
 <a id="dropresponse"></a>
 
@@ -168,7 +174,7 @@ pub enum DropResponse { /* variants */ }
 
 - **`Accept`** — Allowed: paint the insertion line / reparent box at this position.
 - **`Reject`** — Forbidden: paint the no-drop affordance; the drop will be refused.
-- **`Redirect`** — Allowed, but only at a different position — the view snaps its indicator to `.0` (e.g. a container that accepts children but not sibling reorder redirects `Before`/`After` → `Into`).
+- **`Redirect`** `(DropPosition)` — Allowed, but only at a different position — the view snaps its indicator to `.0` (e.g. a container that accepts children but not sibling reorder redirects `Before`/`After` → `Into`).
 
 <a id="dropcommit"></a>
 
@@ -179,3 +185,9 @@ A drop the user actually committed, handed to `accept_drop` to apply.
 ```rust
 pub struct DropCommit<'a, K> { /* fields */ }
 ```
+
+### Fields
+
+- **`source`**: `DragSource<'a, K>` — Who dragged.
+- **`target`**: `K` — The row dropped onto.
+- **`position`**: `DropPosition` — Where, relative to `target`, the drop landed (after any `Redirect`).

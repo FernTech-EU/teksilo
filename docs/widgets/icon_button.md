@@ -531,6 +531,20 @@ BuiltInIcons::set_global(BuiltInIcons {
 pub struct BuiltInIcons { /* fields */ }
 ```
 
+### Fields
+
+- **`browse`**: `fn() -> IconWidget`
+- **`expand`**: `fn() -> IconWidget`
+- **`search`**: `fn() -> IconWidget`
+- **`copy`**: `fn() -> IconWidget`
+- **`clear`**: `fn() -> IconWidget`
+- **`add`**: `fn() -> IconWidget`
+- **`bell`**: `fn() -> IconWidget`
+- **`eye`**: `fn() -> IconWidget`
+- **`eye_off`**: `fn() -> IconWidget`
+- **`menu`**: `fn() -> IconWidget`
+- **`more`**: `fn() -> IconWidget`
+
 ### Methods
 
 <a id="builtinicons-defaults"></a>

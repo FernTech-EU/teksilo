@@ -249,8 +249,8 @@ pub enum ToastRoute { /* variants */ }
 
 ### Variants
 
-- **`Window`** — Delivered only to the window with this id. Never publicly constructible from a `Toast` builder — only the framework stamps this, from a real `EventContext::window()` at present time — so an app can't accidentally fabricate a route to a window it doesn't own.
-- **`Audience`** — Delivered to every window currently assigned this audience.
+- **`Window`** `(TeksiloWindowId)` — Delivered only to the window with this id. Never publicly constructible from a `Toast` builder — only the framework stamps this, from a real `EventContext::window()` at present time — so an app can't accidentally fabricate a route to a window it doesn't own.
+- **`Audience`** `(ToastAudience)` — Delivered to every window currently assigned this audience.
 - **`Broadcast`** — Delivered to every window, unconditionally.
 
 <a id="toastactionstyle"></a>
@@ -266,7 +266,7 @@ pub enum ToastActionStyle { /* variants */ }
 ### Variants
 
 - **`Link`** — JetBrains-style hyperlink. Rendered inline with the body row. Default — minimal visual weight, scales to many actions.
-- **`Button`** — Material / Windows-style button. Rendered in a dedicated row below the body. Use for primary calls-to-action ("Retry", "Save", "Discard").
+- **`Button`** `{ variant: crate::button::ButtonVariant }` — Material / Windows-style button. Rendered in a dedicated row below the body. Use for primary calls-to-action ("Retry", "Save", "Discard").
 
 <a id="toastactioncallback"></a>
 

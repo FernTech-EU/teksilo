@@ -67,8 +67,8 @@ pub enum TreeChange { /* variants */ }
 
 ### Variants
 
-- **`NodeInserted`** — A node was inserted as a child of `parent` at the given index. `parent` is `None` for root-level insertions.
-- **`NodeRemoved`** — A node (and its entire subtree) was removed. `parent` is `None` if it was a root-level node.
-- **`NodeMoved`** — A node was moved to a new parent at the given index.
-- **`NodeUpdated`** — A node's data was updated in place.
+- **`NodeInserted`** `{ parent: Option<NodeId>, index: usize, node: NodeId }` — A node was inserted as a child of `parent` at the given index. `parent` is `None` for root-level insertions.
+- **`NodeRemoved`** `{ parent: Option<NodeId>, node: NodeId }` — A node (and its entire subtree) was removed. `parent` is `None` if it was a root-level node.
+- **`NodeMoved`** `{ node: NodeId, old_parent: Option<NodeId>, new_parent: Option<NodeId>, new_index: usize }` — A node was moved to a new parent at the given index.
+- **`NodeUpdated`** `{ node: NodeId }` — A node's data was updated in place.
 - **`Reset`** — The entire tree was replaced. Consumers should discard all state and rebuild.

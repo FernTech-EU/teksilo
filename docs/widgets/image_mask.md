@@ -60,7 +60,7 @@ pub enum ImageMaskShape { /* variants */ }
 
 - **`None`** — No mask. The pixels pass through unchanged.
 - **`Circle`** — Inscribed circle in the image's bounding square (after a centred crop to the shorter side).
-- **`RoundedSquare`** — Rounded rectangle. The carried `f32` is the corner radius as a fraction of `min(width, height)`, clamped to `0.0..=0.5`.
+- **`RoundedSquare`** `(f32)` — Rounded rectangle. The carried `f32` is the corner radius as a fraction of `min(width, height)`, clamped to `0.0..=0.5`.
 
 <a id="center_crop_square"></a>
 

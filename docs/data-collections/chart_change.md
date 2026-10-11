@@ -69,15 +69,15 @@ pub enum ChartChange { /* variants */ }
 
 ### Variants
 
-- **`SeriesInserted`** — A series was inserted at the given index.
-- **`SeriesRemoved`** — A series (and all of its points) was removed.
-- **`SeriesMoved`** — A series was moved to a new position among its siblings.
-- **`SeriesRenamed`** — A series' display name changed.
-- **`SeriesColorChanged`** — A series' explicit color changed (set or cleared). Bumps `crate::ChartModel::style_version` rather than `crate::ChartModel::structure_version`.
-- **`SeriesPatternChanged`** — A series' explicit `SeriesPattern` changed (set or cleared). Paint-only, like `SeriesColorChanged`: it bumps `crate::ChartModel::style_version`, not `structure_version`.
-- **`SeriesVisibilityChanged`** — A series' visibility flag changed.
-- **`PointsInserted`** — Points were inserted; `range` holds the indices of the newly inserted points within `series`.
-- **`PointsRemoved`** — Points were removed; `range` holds the indices they occupied *before* removal within `series`.
-- **`PointUpdated`** — A single point's data changed in place without any structural shift.
-- **`SeriesDataReplaced`** — A series' entire point list was replaced; consumers must discard cached state for that series and rebuild it.
+- **`SeriesInserted`** `{ index: usize, series: SeriesId }` — A series was inserted at the given index.
+- **`SeriesRemoved`** `{ series: SeriesId }` — A series (and all of its points) was removed.
+- **`SeriesMoved`** `{ series: SeriesId, from: usize, to: usize }` — A series was moved to a new position among its siblings.
+- **`SeriesRenamed`** `{ series: SeriesId }` — A series' display name changed.
+- **`SeriesColorChanged`** `{ series: SeriesId }` — A series' explicit color changed (set or cleared). Bumps `crate::ChartModel::style_version` rather than `crate::ChartModel::structure_version`.
+- **`SeriesPatternChanged`** `{ series: SeriesId }` — A series' explicit `SeriesPattern` changed (set or cleared). Paint-only, like `SeriesColorChanged`: it bumps `crate::ChartModel::style_version`, not `structure_version`.
+- **`SeriesVisibilityChanged`** `{ series: SeriesId }` — A series' visibility flag changed.
+- **`PointsInserted`** `{ series: SeriesId, range: std::ops::Range<usize> }` — Points were inserted; `range` holds the indices of the newly inserted points within `series`.
+- **`PointsRemoved`** `{ series: SeriesId, range: std::ops::Range<usize> }` — Points were removed; `range` holds the indices they occupied *before* removal within `series`.
+- **`PointUpdated`** `{ series: SeriesId, index: usize }` — A single point's data changed in place without any structural shift.
+- **`SeriesDataReplaced`** `{ series: SeriesId }` — A series' entire point list was replaced; consumers must discard cached state for that series and rebuild it.
 - **`Reset`** — The entire chart was replaced. Consumers should discard all state and rebuild.

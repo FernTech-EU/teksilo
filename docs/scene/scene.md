@@ -311,24 +311,24 @@ pub enum ItemChange { /* variants */ }
 
 ### Variants
 
-- **`LocalPosChanged`** — `set_local_pos`: position in parent coords moved.
-- **`LocalBoundsChanged`** — `set_local_bounds`: AABB in local coords changed.
-- **`MeasuredSizeChanged`** — `set_measured_size`: a **derived** geometry write — the size an entry under a non-`Fixed` `SizePolicy` measured from its widget, or one an app computed from content it already owns.  Separate from `LocalBoundsChanged` because it means something different to every consumer of the channel:  * It is **not an edit**. `is_edit` is `false` and the   change is stamped `ephemeral`, so a   history above the scene does not gain an undo step because a   paragraph re-wrapped. A reflow is a function of content the document   already holds; undoing it would mean undoing the width or the words. * It is **not structural**. It is counted out of   `Scene::structural_version`, the way   `refresh_dynamic_bounds`'s   per-frame churn is, so a line wrap does not buy an AccessKit re-walk. * The observing `SceneView` answers it with a   **relayout**, not a rebuild: the geometry moved, nothing was   materialised or reaped, and the delegate does not need re-running.  An app mirroring scene geometry into its document should match `LocalBoundsChanged` and ignore this one. An app that wants the measured height persisted anyway (so a cold start opens at the right size without waiting for a measurement) can read it and store it as a hint.
-- **`SizePolicyChanged`** — `set_size_policy`: who decides this entry's box changed.  An **edit**, unlike the `MeasuredSizeChanged` that follows it: "this note's height follows its words" is a decision someone made about the document, the way a flag change is, and a history above the scene should be able to put it back.  It carries no geometry — the policy decides how the *next* layout pass computes one. It exists at all because nothing else would tell a view that the answer to a question it asks every pass has changed: a policy written silently would take effect whenever something unrelated happened to dirty the view, which in a test is never and in an app is worse — unpredictable.
-- **`TransformChanged`** — `set_transform`: local→parent transform changed.
-- **`VisibilityChanged`** — `IS_VISIBLE` flipped, by whichever door flipped it — `set_visible`, `set_flag` or a wholesale `set_flags`.  A **derived notification**, always emitted immediately before the `FlagsChanged` that describes the same mutation. It exists so a consumer that only cares about visibility need not diff two `ItemFlags` bitsets, and it is deliberately not an edit: `is_edit` is `false` for it and it never reaches a transaction record, so one mutation is one recorded edit no matter which door made it. (It used to be emitted by `set_flag` and not by `set_flags`, which made hiding a card two recorded changes through one door and one through the other.)
-- **`FlagsChanged`** — `set_flags` / `set_flag` changed the bitset. The edit that describes a flag change, visibility included.
-- **`OpacityChanged`** — `set_opacity`: local opacity multiplier changed.
-- **`ZChanged`** — `set_z`: paint z-order changed.
-- **`LayerChanged`** — `set_layer`: the Under/Over paint band changed.
-- **`ParentChanged`** — `set_item_parent`: logical parent changed.
-- **`Removed`** — `remove`: item is gone.
-- **`Added`** — `add_item` / `add_widget`: item was inserted.
-- **`PayloadChanged`** — `set_payload`: the type-erased payload of a `Delegated` heavyweight entry was replaced. A `SceneView` rebuilds that entry's widget (re-invokes its delegate) on the next build. Routed through `emit_item_change`, so `mutation_seq` advances and the AT-walk gate notices.
-- **`AppearanceChanged`** — `set_item_fill` / `set_item_stroke` / `clear_item_*`: a lightweight item's paint-only appearance (fill / stroke colour or style) changed. Never moves geometry, so the observing `SceneView` evicts the item's cached frame and repaints **without** relayout or rebuild.  It *can* move the item's hit **shape**, though: a stroked `PathItem` derives its hit band from the stroke it draws, so a view caching hit geometry must re-read this item's shape even while skipping relayout.
-- **`ItemReplaced`** — `replace_item`: the lightweight item box at this id was swapped for a different one, keeping the entry — position, transform, z, layer, parent, flags, opacity, handlers, magnets and logical-AT decorations all survive, and so does the `ItemId`.  One change, not `Removed` + `Added`, because nothing about the item's identity changed. Consumers must treat it as a **geometry** change: the new item carries its own `local_bounds` and its own hit shape.  `old_bounds` / `new_bounds` are the entry's AABB either side of the swap; the replaced box itself is returned to whoever called `Scene::replace_item`.
-- **`PlacementChanged`** — `set_placement`: parent, z, local position and transform written together as one property.  The atomic form of the four separate mutators. A visually-stable reparent ("drag this card into that group") is one edit here, where `set_item_parent` + `set_local_pos` + `set_transform` is three edits, three undo steps, and two intermediate states in which the item is visibly in the wrong place.
-- **`HandlersChanged`** — `set_item_handlers` / `handlers_mut`: the item's handler set was replaced or handed out for mutation.  Always means at least "this item's handlers are no longer what you last read", which is what a consumer caching them — the `SceneView`'s dispatch snapshot — needs. Without it, the two handler mutators were the only doors in the model that changed observable state silently.  Whether it *also* describes the change is `replaced`; see `HandlerReplacement`.
+- **`LocalPosChanged`** `{ id: ItemId, old: Point, new: Point }` — `set_local_pos`: position in parent coords moved.
+- **`LocalBoundsChanged`** `{ id: ItemId, old: Rect, new: Rect }` — `set_local_bounds`: AABB in local coords changed.
+- **`MeasuredSizeChanged`** `{ id: ItemId, old: Rect, new: Rect }` — `set_measured_size`: a **derived** geometry write — the size an entry under a non-`Fixed` `SizePolicy` measured from its widget, or one an app computed from content it already owns.  Separate from `LocalBoundsChanged` because it means something different to every consumer of the channel:  * It is **not an edit**. `is_edit` is `false` and the   change is stamped `ephemeral`, so a   history above the scene does not gain an undo step because a   paragraph re-wrapped. A reflow is a function of content the document   already holds; undoing it would mean undoing the width or the words. * It is **not structural**. It is counted out of   `Scene::structural_version`, the way   `refresh_dynamic_bounds`'s   per-frame churn is, so a line wrap does not buy an AccessKit re-walk. * The observing `SceneView` answers it with a   **relayout**, not a rebuild: the geometry moved, nothing was   materialised or reaped, and the delegate does not need re-running.  An app mirroring scene geometry into its document should match `LocalBoundsChanged` and ignore this one. An app that wants the measured height persisted anyway (so a cold start opens at the right size without waiting for a measurement) can read it and store it as a hint.
+- **`SizePolicyChanged`** `{ id: ItemId, old: SizePolicy, new: SizePolicy }` — `set_size_policy`: who decides this entry's box changed.  An **edit**, unlike the `MeasuredSizeChanged` that follows it: "this note's height follows its words" is a decision someone made about the document, the way a flag change is, and a history above the scene should be able to put it back.  It carries no geometry — the policy decides how the *next* layout pass computes one. It exists at all because nothing else would tell a view that the answer to a question it asks every pass has changed: a policy written silently would take effect whenever something unrelated happened to dirty the view, which in a test is never and in an app is worse — unpredictable.
+- **`TransformChanged`** `{ id: ItemId, old: Transform2D, new: Transform2D }` — `set_transform`: local→parent transform changed.
+- **`VisibilityChanged`** `{ id: ItemId, visible: bool }` — `IS_VISIBLE` flipped, by whichever door flipped it — `set_visible`, `set_flag` or a wholesale `set_flags`.  A **derived notification**, always emitted immediately before the `FlagsChanged` that describes the same mutation. It exists so a consumer that only cares about visibility need not diff two `ItemFlags` bitsets, and it is deliberately not an edit: `is_edit` is `false` for it and it never reaches a transaction record, so one mutation is one recorded edit no matter which door made it. (It used to be emitted by `set_flag` and not by `set_flags`, which made hiding a card two recorded changes through one door and one through the other.)
+- **`FlagsChanged`** `{ id: ItemId, old: ItemFlags, new: ItemFlags }` — `set_flags` / `set_flag` changed the bitset. The edit that describes a flag change, visibility included.
+- **`OpacityChanged`** `{ id: ItemId, old: f32, new: f32 }` — `set_opacity`: local opacity multiplier changed.
+- **`ZChanged`** `{ id: ItemId, old: f32, new: f32 }` — `set_z`: paint z-order changed.
+- **`LayerChanged`** `{ id: ItemId, old: SceneLayer, new: SceneLayer }` — `set_layer`: the Under/Over paint band changed.
+- **`ParentChanged`** `{ id: ItemId, old: Option<ItemId>, new: Option<ItemId> }` — `set_item_parent`: logical parent changed.
+- **`Removed`** `{ id: ItemId }` — `remove`: item is gone.
+- **`Added`** `{ id: ItemId }` — `add_item` / `add_widget`: item was inserted.
+- **`PayloadChanged`** `{ id: ItemId, old: ItemPayload, new: ItemPayload }` — `set_payload`: the type-erased payload of a `Delegated` heavyweight entry was replaced. A `SceneView` rebuilds that entry's widget (re-invokes its delegate) on the next build. Routed through `emit_item_change`, so `mutation_seq` advances and the AT-walk gate notices.
+- **`AppearanceChanged`** `{ id: ItemId, change: AppearanceChange }` — `set_item_fill` / `set_item_stroke` / `clear_item_*`: a lightweight item's paint-only appearance (fill / stroke colour or style) changed. Never moves geometry, so the observing `SceneView` evicts the item's cached frame and repaints **without** relayout or rebuild.  It *can* move the item's hit **shape**, though: a stroked `PathItem` derives its hit band from the stroke it draws, so a view caching hit geometry must re-read this item's shape even while skipping relayout.
+- **`ItemReplaced`** `{ id: ItemId, old_bounds: Rect, new_bounds: Rect }` — `replace_item`: the lightweight item box at this id was swapped for a different one, keeping the entry — position, transform, z, layer, parent, flags, opacity, handlers, magnets and logical-AT decorations all survive, and so does the `ItemId`.  One change, not `Removed` + `Added`, because nothing about the item's identity changed. Consumers must treat it as a **geometry** change: the new item carries its own `local_bounds` and its own hit shape.  `old_bounds` / `new_bounds` are the entry's AABB either side of the swap; the replaced box itself is returned to whoever called `Scene::replace_item`.
+- **`PlacementChanged`** `{ id: ItemId, old: Placement, new: Placement }` — `set_placement`: parent, z, local position and transform written together as one property.  The atomic form of the four separate mutators. A visually-stable reparent ("drag this card into that group") is one edit here, where `set_item_parent` + `set_local_pos` + `set_transform` is three edits, three undo steps, and two intermediate states in which the item is visibly in the wrong place.
+- **`HandlersChanged`** `{ id: ItemId, replaced: Option<Box<HandlerReplacement>> }` — `set_item_handlers` / `handlers_mut`: the item's handler set was replaced or handed out for mutation.  Always means at least "this item's handlers are no longer what you last read", which is what a consumer caching them — the `SceneView`'s dispatch snapshot — needs. Without it, the two handler mutators were the only doors in the model that changed observable state silently.  Whether it *also* describes the change is `replaced`; see `HandlerReplacement`.
 
 ### Methods
 
@@ -389,6 +389,11 @@ is why this could be carried and, until it was, simply was not.
 pub struct HandlerReplacement { /* fields */ }
 ```
 
+### Fields
+
+- **`old`**: `Option<SceneItemHandlerSet>` — What the item had before. `None` when it had none.
+- **`new`**: `Option<SceneItemHandlerSet>` — What it has now. `None` when the call cleared them.
+
 <a id="itempayload"></a>
 
 ## `pub struct ItemPayload`
@@ -445,8 +450,8 @@ pub enum AppearanceChange { /* variants */ }
 
 ### Variants
 
-- **`Fill`** — `Scene::set_item_fill` / `Scene::clear_item_fill`. `None` on either side means "no fill".
-- **`Stroke`** — `Scene::set_item_stroke` / `Scene::clear_item_stroke`. `None` on either side means "no stroke".
+- **`Fill`** `{ old: Option<ColorProp>, new: Option<ColorProp> }` — `Scene::set_item_fill` / `Scene::clear_item_fill`. `None` on either side means "no fill".
+- **`Stroke`** `{ old: Option<(ColorProp, StrokeStyle)>, new: Option<(ColorProp, StrokeStyle)> }` — `Scene::set_item_stroke` / `Scene::clear_item_stroke`. `None` on either side means "no stroke".
 
 <a id="placement"></a>
 
@@ -478,6 +483,13 @@ property joining the set is exactly the growth this guards. Build one with
 ```rust
 pub struct Placement { /* fields */ }
 ```
+
+### Fields
+
+- **`parent`**: `Option<ItemId>` — Logical parent, or `None` for scene-rooted.
+- **`z`**: `f32` — Paint z-order within the band.
+- **`local_pos`**: `Point` — Origin of the item's local frame, in the parent's coordinates.
+- **`transform`**: `Transform2D` — Rotation / scale applied around the local origin.
 
 ### Methods
 
@@ -590,6 +602,10 @@ without breaking a caller.
 ```rust
 pub struct CascadeBudget { /* fields */ }
 ```
+
+### Fields
+
+- **`total`**: `u64` — Observer-generated deliveries one drain may make before it panics.  Flat: not scaled by the scene's entry count, by design — see the type's own docs for the measurements that settled that. Default 100 000.  Zero is not a usable budget and is clamped to 1 by `CascadeBudget::new` and by `SceneModel::set_cascade_budget`.
 
 ### Methods
 

@@ -51,6 +51,12 @@ Key-erased per-row flat metadata, derived from the source's `FlatEntry`.
 pub struct TreeRowMeta { /* fields */ }
 ```
 
+### Fields
+
+- **`depth`**: `usize` — Depth in the tree (0 for roots).
+- **`has_children`**: `bool` — Whether this row has children in the source.
+- **`is_expanded`**: `bool` — Whether this row is currently expanded.
+
 <a id="treerow"></a>
 
 ## `pub struct TreeRow`
@@ -64,6 +70,14 @@ source (by index → key → `set_expanded`).
 ```rust
 pub struct TreeRow { /* fields */ }
 ```
+
+### Fields
+
+- **`depth`**: `usize` — Depth in the tree (0 for roots).
+- **`has_children`**: `bool` — Whether this row has children in the source.
+- **`is_expanded`**: `bool` — Whether this row is currently expanded.
+
+Other fields are not public.
 
 ### Methods
 

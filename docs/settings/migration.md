@@ -127,10 +127,10 @@ pub enum MigrationError { /* variants */ }
 
 ### Variants
 
-- **`NewerThanCurrent`** — The on-disk version number exceeds `T::CURRENT_VERSION`; the file was written by a newer build and cannot be read safely.
-- **`NoStepFor`** — The chain is missing a step for the encountered version, making it impossible to reach `T::CURRENT_VERSION`.
-- **`Step`** — A migration step closure returned `Err(message)`.
-- **`Deserialize`** — The migrated `toml::Value` did not deserialize as `T`.
+- **`NewerThanCurrent`** `{ on_disk: u32, current: u32 }` — The on-disk version number exceeds `T::CURRENT_VERSION`; the file was written by a newer build and cannot be read safely.
+- **`NoStepFor`** `(u32)` — The chain is missing a step for the encountered version, making it impossible to reach `T::CURRENT_VERSION`.
+- **`Step`** `{ from: u32, message: String }` — A migration step closure returned `Err(message)`.
+- **`Deserialize`** `(toml::de::Error)` — The migrated `toml::Value` did not deserialize as `T`.
 
 <a id="migrator"></a>
 

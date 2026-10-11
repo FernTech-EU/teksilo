@@ -209,6 +209,11 @@ construction. Used by `Calendar::range`.
 pub struct DateRange { /* fields */ }
 ```
 
+### Fields
+
+- **`start`**: `Date`
+- **`end`**: `Date`
+
 ### Methods
 
 <a id="daterange-new"></a>

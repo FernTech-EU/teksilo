@@ -81,6 +81,12 @@ stylus pressure) can land without breaking match patterns.
 pub struct SceneTapEvent { /* fields */ }
 ```
 
+### Fields
+
+- **`position_scene`**: `Point` — Click position in **scene** coordinates. The SceneView's dispatch converts the raw screen-pixel pointer position through the view transform before populating this field, so handlers see the same frame their item's geometry is in.
+- **`button`**: `PointerButton` — Which button finalised the gesture.
+- **`modifiers`**: `Modifiers` — Modifier keys held at dispatch time.
+
 ### Methods
 
 <a id="scenetapevent-new"></a>
@@ -129,6 +135,17 @@ is cheap; the SceneView clones into its dispatch path.
 ```rust
 pub struct SceneItemHandlerSet { /* fields */ }
 ```
+
+### Fields
+
+- **`on_tap`**: `Option<SceneTapHandler>` — Tap (single click). Stored as the rich `SceneTapEvent` form internally; the simpler `Self::on_tap` setter wraps `Fn(Point, ...)` callers in a shim that extracts `event.position_scene`.
+- **`on_double_tap`**: `Option<SceneTapHandler>` — Double-tap. Storage only — the SceneView's dispatch site doesn't synthesise double-tap recognition yet; this field stays unset-on-fire until a future unit wires the recognizer in. Treat as a forward-declared slot.
+- **`on_hover`**: `Option<ItemHandler<bool>>` — Hover transitions: `bool` is `true` on enter, `false` on leave.
+- **`on_context_menu`**: `Option<SceneTapHandler>` — Right-click / OS-native context-menu trigger.
+- **`accept_tap_buttons`**: `ButtonMask` — Which pointer buttons count as a "tap" / context-menu invocation. Default `ButtonMask::PRIMARY` for tap; the SECONDARY button always routes through `on_context_menu` regardless of this mask. Items wanting middle-click-as-tap extend the mask: `accept_tap_buttons(PRIMARY | MIDDLE)`. Mirrors widget-tier `accept_tap_buttons(...)`.
+- **`cursor`**: `Option<CursorIcon>` — Cursor icon shown while the pointer is over this item. Overrides the SceneView default.
+- **`tooltip`**: `Option<LocalizedString>` — Tooltip body for this item. Kept as a `LocalizedString` (not an eagerly-resolved `String`) so a `tr!(...)` source follows the active locale — the SceneView resolves it against the current locale at show time. The SceneView's hover machinery surfaces it as a point-anchored overlay through the standard overlay manager.
+- **`accepts_drops`**: `bool` — Whether the item accepts dropped payloads.
 
 ### Methods
 

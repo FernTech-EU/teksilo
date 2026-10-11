@@ -237,6 +237,14 @@ This is what
 pub struct SceneChange { /* fields */ }
 ```
 
+### Fields
+
+- **`txn`**: `TxnId` — The transaction this change belongs to. Every change emitted inside one write scope — or one `SceneTransaction` — shares it.
+- **`source`**: `ChangeSource` — Whose change it is. See `ChangeSource`.
+- **`history`**: `HistoryMode` — What a history above the scene should do with it. See `HistoryMode`.
+- **`ephemeral`**: `bool` — A change that must be **rendered** but must not be **recorded**.  Set for per-frame model churn that is an artefact of animation rather than an edit: the scene's own `refresh_dynamic_bounds`, which re-reads every signal-driven AABB each build and so emits a `LocalBoundsChanged` per frame for an animating item. An app driving its own per-frame stream — an item whose `transform` follows a rotation signal — marks it the same way with `SceneTransaction::ephemeral`, so the knob is not one-sided across the seam.
+- **`change`**: `ItemChange` — The change itself.
+
 ### Methods
 
 <a id="scenechange-id"></a>
@@ -260,7 +268,7 @@ pub enum Salvage { /* variants */ }
 
 ### Variants
 
-- **`Owned`** — The framework owns the removed entry and is handing it over. Feed it back to `Scene::restore` to undo the removal.
+- **`Owned`** `(Box<RemovedItem>)` — The framework owns the removed entry and is handing it over. Feed it back to `Scene::restore` to undo the removal.
 - **`TakenByCaller`** — The caller used `Scene::take` and already holds the salvage, so the record carries only the fact of the removal.
 
 <a id="sceneedit"></a>
@@ -293,8 +301,8 @@ pub enum SceneEdit { /* variants */ }
 
 ### Variants
 
-- **`Change`** — Any non-removal change, verbatim from the notification channel.
-- **`Removed`** — A removal, with what it destroyed. Descendants come before the named root, the order `remove` announces in.
+- **`Change`** `(ItemChange)` — Any non-removal change, verbatim from the notification channel.
+- **`Removed`** `{ id: ItemId, salvage: Salvage }` — A removal, with what it destroyed. Descendants come before the named root, the order `remove` announces in.
 
 <a id="scenetransactionrecord"></a>
 
@@ -312,6 +320,15 @@ channels; see the module docs.
 ```rust
 pub struct SceneTransactionRecord { /* fields */ }
 ```
+
+### Fields
+
+- **`txn`**: `TxnId` — Matches the `txn` on every `SceneChange` this transaction emitted.
+- **`source`**: `ChangeSource` — Whose change it was.
+- **`history`**: `HistoryMode` — What a history above the scene should do with it.
+- **`outcome`**: `TxnOutcome` — How it finished.
+- **`ephemeral`**: `bool` — `true` iff **every** edit in it was emitted while `SceneTransaction::ephemeral` (or the scene's own dynamic-bounds refresh) was in effect. Never `true` for an empty record.
+- **`edits`**: `Vec<SceneEdit>` — The edits, in application order.
 
 ### Methods
 

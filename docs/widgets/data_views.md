@@ -137,6 +137,12 @@ anyway), so a reorder-only view is never accidentally droppable elsewhere.
 pub struct RowDragData<T: 'static> { /* fields */ }
 ```
 
+### Fields
+
+- **`source`**: `ViewId` — Identity of the view that started the drag.
+- **`rows`**: `Vec<usize>` — The dragged rows as the origin view's flat visible indices at drag-start, ascending. Informational (row count, app callbacks): the origin's accept path resolves the dragged rows' **stable keys** at drag-start and never re-reads these indices at hover/drop time — they go stale the moment the source reflows mid-drag (a spring-load auto-expand, a peer write). A foreign consumer should read `items` instead.
+- **`items`**: `Option<Vec<T>>` — Clones of the dragged items, `rows`-ordered. `None` for a reorder-only (non-exportable) drag.
+
 ### Methods
 
 <a id="rowdragdata-items"></a>
