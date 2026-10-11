@@ -37,6 +37,15 @@
 //! The whole family — `IconButton`, `CommandLinkButton`, every `Toolbar`
 //! command — shares `build_interaction_handlers` and gets all of this with it.
 //!
+//! ## Label colour
+//!
+//! The label and icon take their colour from the interaction state
+//! (`OnAccent` on accent fills, `Primary` otherwise, `Link` for links). The
+//! active [`ButtonStyle`] may redirect it per variant with `label_text_role`,
+//! or per variant *and* state with `label_text_role_for` — for example to
+//! brighten the label on hover. Both are repaint-only; a per-call
+//! [`Button::text_role`] wins over them.
+//!
 //! ## Accessibility
 //!
 //! Announces as `Role::Button` with the resolved label as its AT name.
@@ -89,6 +98,21 @@ pub enum InteractionState {
     Pressed,
     Focused,
     Disabled,
+}
+
+impl InteractionState {
+    /// The framework-wide [`WidgetState`](teksilo_core::styles::WidgetState)
+    /// this state corresponds to (same five states).
+    pub(crate) fn widget_state(self) -> teksilo_core::styles::WidgetState {
+        use teksilo_core::styles::WidgetState;
+        match self {
+            Self::Idle => WidgetState::Idle,
+            Self::Hovered => WidgetState::Hovered,
+            Self::Pressed => WidgetState::Pressed,
+            Self::Focused => WidgetState::Focused,
+            Self::Disabled => WidgetState::Disabled,
+        }
+    }
 }
 
 /// Build the interaction handler set shared by every activatable button
@@ -1138,11 +1162,17 @@ impl teksilo_core::widget::Widget for Button {
         let text_role: teksilo_core::color_prop::ColorProp =
             if let Some(ref over) = self.text_role_override {
                 over.clone()
-            } else if let Some(role) = style.label_text_role(variant) {
-                role.into()
             } else {
+                // Reactive in the interaction state, so a style's per-state
+                // answer (`label_text_role_for`) re-resolves on hover / press
+                // as a repaint. `None` falls back to the built-in mapping.
+                let style = style.clone();
                 interaction
-                    .map(move |s| resolve_text_role(variant, *s))
+                    .map(move |s| {
+                        style
+                            .label_text_role_for(variant, s.widget_state())
+                            .unwrap_or_else(|| resolve_text_role(variant, *s))
+                    })
                     .into()
             };
 
@@ -1905,6 +1935,65 @@ mod tests {
             "style.label_text_role(...) should drive the label glyph color; \
              expected the theme error color {want:?}, saw {:?}",
             frame.glyphs.iter().map(|g| g.color).collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn style_label_text_role_for_changes_the_label_color_with_the_state() {
+        // `label_text_role_for` is asked again whenever the interaction
+        // state changes: Secondary while idle, Primary once hovered.
+        use std::cell::RefCell;
+        use teksilo_canvas::MockTextBackend;
+        use teksilo_core::styles::{ButtonStyle, ButtonStyleConfig, WidgetState};
+        use teksilo_tokens::TextRole;
+
+        struct HoverBrightens;
+        impl ButtonStyle for HoverBrightens {
+            fn make_body(
+                &self,
+                cfg: &ButtonStyleConfig,
+                ctx: &mut teksilo_core::build_context::BuildContext,
+            ) -> teksilo_core::widget_id::WidgetId {
+                ctx.add(crate::primitives::ZStack::new().child(cfg.label))
+            }
+            fn label_text_role_for(
+                &self,
+                _variant: ButtonVariant,
+                state: WidgetState,
+            ) -> Option<TextRole> {
+                Some(match state {
+                    WidgetState::Hovered => TextRole::Primary,
+                    _ => TextRole::Secondary,
+                })
+            }
+        }
+
+        let theme = teksilo_core::presets::intui::light();
+        let secondary = theme.colors.text_secondary.to_array();
+        let primary = theme.colors.text_primary.to_array();
+        assert_ne!(secondary, primary, "the probe needs two distinct colours");
+        let mut theme = theme;
+        theme.style_slots.button = Some(Rc::new(HoverBrightens));
+        let mut tree = WidgetTree::new()
+            .with_theme(theme)
+            .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+        let btn = tree.add(Button::new(lit!("T")).on_activate_fn(|_| {}));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        let idle = tree.render();
+        assert!(
+            idle.glyphs.iter().all(|g| g.color == secondary) && !idle.glyphs.is_empty(),
+            "idle label should be Secondary, saw {:?}",
+            idle.glyphs.iter().map(|g| g.color).collect::<Vec<_>>(),
+        );
+
+        let at = tree.bounds(btn).center();
+        tree.dispatch_event(WidgetEvent::pointer_move(at));
+        let hovered = tree.render();
+        assert!(
+            hovered.glyphs.iter().all(|g| g.color == primary) && !hovered.glyphs.is_empty(),
+            "hovered label should be Primary, saw {:?}",
+            hovered.glyphs.iter().map(|g| g.color).collect::<Vec<_>>(),
         );
     }
 

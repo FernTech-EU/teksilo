@@ -78,6 +78,31 @@ pub trait ButtonStyle: 'static {
     fn label_text_role(&self, _variant: ButtonVariant) -> Option<teksilo_tokens::TextRole> {
         None
     }
+
+    /// Per-variant **and per-state** override of the label/icon text role.
+    ///
+    /// [`label_text_role`](Self::label_text_role) answers once per variant,
+    /// so a role it returns is the same in every interaction state. This
+    /// method is asked again each time the button's interaction state
+    /// changes (idle, hovered, pressed, focused), so a style can brighten
+    /// the label on hover or dim it on press. The answer is re-resolved
+    /// reactively: it is a repaint, never a rebuild.
+    ///
+    /// `state` is the button's own interaction state. The disabled look is not
+    /// routed through here: a disabled button's label is dimmed at paint time
+    /// whatever role this returns, so a style never has to answer for it.
+    ///
+    /// The default forwards to [`label_text_role`](Self::label_text_role),
+    /// so a style that implements only that method behaves as before. Return
+    /// `None` for a state to keep the Button's built-in mapping for it. A
+    /// per-call `Button::text_role(...)` still wins over both methods.
+    fn label_text_role_for(
+        &self,
+        variant: ButtonVariant,
+        _state: crate::styles::WidgetState,
+    ) -> Option<teksilo_tokens::TextRole> {
+        self.label_text_role(variant)
+    }
 }
 
 /// Shared handle for a `ButtonStyle` impl. Cheap to clone; one shared
