@@ -18,6 +18,11 @@
 //! [`SplitterStyle`], and serializable import/export. It is the building
 //! block `DockingLayout` is built from.
 //!
+//! Collapsing and hiding a pane each have an animated door
+//! ([`SplitterModel::set_collapsed`], [`SplitterModel::set_pane_visible`]) and
+//! an instant one ([`SplitterModel::set_collapsed_immediate`],
+//! [`SplitterModel::set_pane_visible_immediate`]) for restoring a layout.
+//!
 //! ```ignore
 //! let model = SplitterModel::from_panes(vec![
 //!     PaneDescriptor::new().size(220.0).min_size(160.0).stretch(0.0).collapsible(true),

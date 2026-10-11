@@ -472,6 +472,18 @@ impl SplitterModel {
     /// must be pre-mounted in the `Splitter`; this is the reactive "add /
     /// remove a pane from a fixed set" trick (no rebuild).
     pub fn set_pane_visible(&self, index: usize, visible: bool) {
+        self.set_pane_visible_inner(index, visible, true);
+    }
+
+    /// Show or hide pane `index` *instantly* (no tween): the next layout
+    /// already has the pane removed from, or restored to, the split. The
+    /// counterpart of [`Self::set_collapsed_immediate`], for a caller that is
+    /// restoring a layout or reacting to something that is already the motion.
+    pub fn set_pane_visible_immediate(&self, index: usize, visible: bool) {
+        self.set_pane_visible_inner(index, visible, false);
+    }
+
+    fn set_pane_visible_inner(&self, index: usize, visible: bool, animate: bool) {
         {
             let mut inner = self.0.borrow_mut();
             let Some(p) = inner.panes.get_mut(index) else {
@@ -481,7 +493,7 @@ impl SplitterModel {
                 return;
             }
             p.visible = visible;
-            inner.animate_next_collapse = true;
+            inner.animate_next_collapse = animate;
         }
         self.bump_version();
     }

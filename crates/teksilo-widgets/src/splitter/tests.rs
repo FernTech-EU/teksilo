@@ -708,6 +708,39 @@ fn collapsing_content_keeps_full_layout_size() {
 }
 
 #[test]
+fn set_pane_visible_immediate_needs_no_tick() {
+    let model = SplitterModel::new(2, Orientation::Horizontal);
+    let mut tree = theme_tree();
+    let root = tree.add(
+        Splitter::new(model.clone())
+            .pane(FixedLeaf(50.0, 40.0))
+            .pane(FixedLeaf(50.0, 40.0)),
+    );
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+
+    // No `tick_animations`: a single layout must already show the change.
+    model.set_pane_visible_immediate(0, false);
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+    assert!(
+        tree.bounds(tree.child_widget(root, 0)).width < 2.0,
+        "hidden at once, got {}",
+        tree.bounds(tree.child_widget(root, 0)).width
+    );
+    assert!(
+        tree.bounds(tree.child_widget(root, 2)).width > 396.0,
+        "the remaining pane fills the container at once"
+    );
+
+    model.set_pane_visible_immediate(0, true);
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+    assert!(
+        tree.bounds(tree.child_widget(root, 0)).width > 100.0,
+        "shown again at once, got {}",
+        tree.bounds(tree.child_widget(root, 0)).width
+    );
+}
+
+#[test]
 fn hiding_a_pane_removes_pane_and_its_gutter() {
     let model = SplitterModel::new(2, Orientation::Horizontal);
     let mut tree = theme_tree();
