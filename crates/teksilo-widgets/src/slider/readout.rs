@@ -31,13 +31,14 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use teksilo_canvas::Rect;
+use teksilo_canvas::{Point, Rect};
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::environment::LayoutDirection;
 use teksilo_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayPlacement, OverlayRequest,
 };
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::{SharedTooltipStyle, TooltipStyle, TooltipStyleConfig};
 use teksilo_core::widget::EventContext;
 use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
@@ -45,6 +46,8 @@ use teksilo_i18n::LocalizedString;
 use teksilo_tokens::Orientation;
 
 use crate::tooltip::TooltipWidget;
+
+use super::SliderValueTooltipPlacement;
 
 /// The formatter [`Slider::value_tooltip`](super::Slider::value_tooltip) takes.
 pub(super) type ValueFormat = Rc<dyn Fn(f32) -> LocalizedString>;
@@ -63,6 +66,25 @@ pub(super) struct ReadoutInputs {
     pub(super) hovered: Signal<bool>,
     pub(super) dragging: Signal<bool>,
     pub(super) focused: Signal<bool>,
+    /// Which side of the thumb, or the pointer, the readout goes by.
+    pub(super) placement: SliderValueTooltipPlacement,
+    /// Where a drag's pointer is, widget-local; `None` outside a drag. Written
+    /// only for [`SliderValueTooltipPlacement::FollowPointer`].
+    pub(super) drag_at: Signal<Option<Point>>,
+    /// The chrome [`Slider::value_tooltip_style`](super::Slider::value_tooltip_style)
+    /// gives the surface, else the theme's.
+    pub(super) style: Option<SharedTooltipStyle>,
+}
+
+/// A shared [`TooltipStyle`] handed on to [`TooltipWidget::style`], which
+/// takes one by value: the slider keeps its style across rebuilds and hands
+/// each generation's surface the same one.
+struct SharedStyle(SharedTooltipStyle);
+
+impl TooltipStyle for SharedStyle {
+    fn make_body(&self, cfg: &TooltipStyleConfig, ctx: &mut BuildContext) -> WidgetId {
+        self.0.make_body(cfg, ctx)
+    }
 }
 
 /// One slider's readout: its parked surface and the state of the overlay
@@ -102,8 +124,12 @@ impl Readout {
                 .also_observing(&inputs.value)
                 .to_signal()
         };
+        let mut surface = TooltipWidget::bound(text);
+        if let Some(style) = inputs.style.clone() {
+            surface = surface.style(SharedStyle(style));
+        }
         let content = ctx.add_detached(
-            TooltipWidget::bound(text)
+            surface
                 // The slider's own node carries the same text as its value, so
                 // a reader reaching this one too would hear it twice.
                 .access_hidden(true),
@@ -187,8 +213,9 @@ impl Readout {
     }
 
     /// Where the readout goes for a slider at a given rectangle: clear of the
-    /// thumb and of the track, above a horizontal slider's thumb, beside a
-    /// vertical one's.
+    /// thumb and of the track, by default above a horizontal slider's thumb
+    /// and beside a vertical one's, else on the side
+    /// [`SliderValueTooltipPlacement`] asks for.
     ///
     /// Re-run by the tree on every layout pass with the bounds that pass gave
     /// the slider, and with the value as it stands, so the readout rides the
@@ -205,7 +232,12 @@ impl Readout {
     /// on the slider's inline-start side, the far side from a hand coming in
     /// from the reader's own, or on the other side when that one has no room,
     /// just below the strip the thumb occupies (above it near the bottom of
-    /// the window), and never over that strip.
+    /// the window), and never over that strip. `Above` and `Below` centre on
+    /// that strip in either orientation, flipping when the window has no room.
+    ///
+    /// `FollowPointer` places as `Auto` does, about a thumb-sized rectangle
+    /// at the drag's pointer rather than at the thumb, for as long as a drag
+    /// is on.
     fn follow(&self) -> impl Fn(Rect, LayoutDirection) -> OverlayPlacement + 'static {
         let ReadoutInputs {
             ref value,
@@ -213,9 +245,12 @@ impl Readout {
             max,
             orientation,
             thumb_diameter,
+            placement,
+            ref drag_at,
             ..
         } = self.inputs;
         let value = value.clone();
+        let drag_at = drag_at.clone();
         move |bounds, direction| {
             let thumb = super::thumb_rect(
                 bounds,
@@ -224,13 +259,43 @@ impl Readout {
                 orientation,
                 matches!(direction, LayoutDirection::RightToLeft),
             );
-            match orientation {
-                Orientation::Horizontal => OverlayPlacement::AboveSelection {
-                    selection: Rect::new(thumb.x, bounds.y, thumb.width, bounds.height),
+            // What the readout hangs off: the thumb, or a thumb-sized
+            // rectangle at the dragging pointer along the slider's axis.
+            let at = match (placement, drag_at.get()) {
+                (SliderValueTooltipPlacement::FollowPointer, Some(p)) => match orientation {
+                    Orientation::Horizontal => Rect::new(
+                        bounds.x + p.x - thumb.width / 2.0,
+                        thumb.y,
+                        thumb.width,
+                        thumb.height,
+                    ),
+                    Orientation::Vertical => Rect::new(
+                        thumb.x,
+                        bounds.y + p.y - thumb.height / 2.0,
+                        thumb.width,
+                        thumb.height,
+                    ),
                 },
-                Orientation::Vertical => OverlayPlacement::AtPointerAvoiding {
-                    point: thumb.center(),
-                    avoid: Rect::new(bounds.x, thumb.y, bounds.width, thumb.height),
+                _ => thumb,
+            };
+            // The strip `at` occupies across the whole slider.
+            let strip = match orientation {
+                Orientation::Horizontal => Rect::new(at.x, bounds.y, at.width, bounds.height),
+                Orientation::Vertical => Rect::new(bounds.x, at.y, bounds.width, at.height),
+            };
+            match (placement, orientation) {
+                (SliderValueTooltipPlacement::Above, _) => {
+                    OverlayPlacement::AboveSelection { selection: strip }
+                }
+                (SliderValueTooltipPlacement::Below, _) => {
+                    OverlayPlacement::BelowSelection { selection: strip }
+                }
+                (_, Orientation::Horizontal) => {
+                    OverlayPlacement::AboveSelection { selection: strip }
+                }
+                (_, Orientation::Vertical) => OverlayPlacement::AtPointerAvoiding {
+                    point: at.center(),
+                    avoid: strip,
                 },
             }
         }

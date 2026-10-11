@@ -56,6 +56,17 @@
 //! becomes the slider's accessible value, beside the number, so a reader that
 //! speaks a value's text says "-3.0 dB" rather than "-3".
 //!
+//! [`value_tooltip_placement`](Slider::value_tooltip_placement) moves the
+//! readout: [`Above`](SliderValueTooltipPlacement::Above) or
+//! [`Below`](SliderValueTooltipPlacement::Below) the thumb, or
+//! [`FollowPointer`](SliderValueTooltipPlacement::FollowPointer), which rides
+//! the pointer rather than the thumb while a drag moves the value — useful on
+//! a stepped slider, whose thumb snaps away from the hand. The default,
+//! [`Auto`](SliderValueTooltipPlacement::Auto), is the placement described
+//! above. [`value_tooltip_style`](Slider::value_tooltip_style) paints this
+//! slider's readout with a [`TooltipStyle`] of its own instead of the theme's
+//! tooltip chrome.
+//!
 //! [`default_value`](Slider::default_value) adds a way back: a double-click on
 //! the slider, or the "Reset to default" accessibility action, puts the value
 //! back to the default, as a user change, so [`on_change`](Slider::on_change)
@@ -64,14 +75,41 @@
 //! ```rust
 //! # use teksilo_core::signal::Signal;
 //! # use teksilo_i18n::lit;
-//! # use teksilo_widgets::Slider;
+//! # use teksilo_widgets::{Slider, SliderValueTooltipPlacement};
 //! let gain = Signal::new(0.0_f32);
 //! let _band = Slider::new(gain, -12.0, 12.0)
 //!     .step(0.5)
 //!     .label(lit!("Low shelf"))
 //!     .value_tooltip(|db| lit!(format!("{db:+.1} dB")))
+//!     .value_tooltip_placement(SliderValueTooltipPlacement::Below)
 //!     .default_value(0.0);
 //! ```
+//!
+//! ## Clicks, presses and buttons
+//!
+//! A click on the track jumps the value to it, on release; a drag moves it
+//! from the moment the pointer has travelled far enough to be a drag. Both
+//! answer to the primary button only. An application that wants a click of
+//! its own on the slider — a secondary-click reset, say — attaches its own
+//! `on_tap` and widens that handler's mask; the slider's track click stays on
+//! the primary button, and the secondary click is the application's alone:
+//!
+//! ```rust
+//! # use teksilo_core::event::ButtonMask;
+//! # use teksilo_core::signal::Signal;
+//! # use teksilo_core::widget_builder::WidgetBuilder;
+//! # use teksilo_widgets::Slider;
+//! let gain = Signal::new(0.0_f32);
+//! let reset = gain.clone();
+//! let _w = Slider::new(gain, -12.0, 12.0)
+//!     .on_tap(move |_, _| reset.set(0.0))
+//!     .accept_tap_buttons(ButtonMask::SECONDARY);
+//! ```
+//!
+//! [`jump_on_press`](Slider::jump_on_press) moves the value as soon as a mouse
+//! button goes down rather than on release, and a drag carries on from there.
+//! A finger's or a pen's press still writes nothing until it is a tap or a
+//! drag: such a press may yet become a scroll.
 //!
 //! ## Touch and pen
 //!
@@ -101,7 +139,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use teksilo_canvas::{Rect, SizeProposal};
+use teksilo_canvas::{Point, Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
@@ -111,7 +149,8 @@ use teksilo_core::pointer::PointerId;
 use teksilo_core::pointer::touch_action::TouchAction;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::{
-    SharedSliderStyle, SliderOrientation, SliderStyle, SliderStyleConfig, SliderVariant,
+    SharedSliderStyle, SharedTooltipStyle, SliderOrientation, SliderStyle, SliderStyleConfig,
+    SliderVariant, TooltipStyle,
 };
 use teksilo_core::widget::{CursorIcon, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
@@ -145,6 +184,35 @@ pub const SLIDER_PART_THUMB: u16 = 1;
 /// dispatcher hands one `CustomAction(id)` to the widget and to those entries
 /// alike.
 const RESET_ACTION_ID: i32 = 1000;
+
+/// Where [`Slider::value_tooltip`]'s readout sits, set with
+/// [`Slider::value_tooltip_placement`].
+///
+/// Every placement keeps the readout clear of the strip the thumb occupies
+/// across the whole slider, so it covers neither the knob nor what the style
+/// draws beside the track, and flips to the other side when the window has no
+/// room on the one asked for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SliderValueTooltipPlacement {
+    /// Above a horizontal slider's thumb, or below it near the top of the
+    /// window; beside a vertical slider's thumb, on the inline-start side when
+    /// there is room. The default.
+    #[default]
+    Auto,
+    /// Above the thumb, centred on it, below when the window has no room
+    /// above. On a vertical slider this sits over the track above the thumb.
+    Above,
+    /// Below the thumb, centred on it, above when the window has no room
+    /// below. On a vertical slider this sits over the track below the thumb.
+    Below,
+    /// Where [`Auto`](Self::Auto) puts it, but at the pointer rather than the
+    /// thumb while a drag is moving the value: along the slider's axis it
+    /// tracks the pointer, past either end of the track too, where the thumb
+    /// has stopped. Hovered or focused from the keyboard, it sits by the thumb
+    /// as `Auto` does.
+    FollowPointer,
+}
 
 /// A draggable value selector bound to a `Signal<f32>` in a continuous
 /// or discrete range. Visual chrome is fully delegated to a
@@ -191,8 +259,14 @@ pub struct Slider {
     composite_tooltip_content: Option<Box<dyn Widget>>,
     /// Formats the value for the live readout and the accessible value text.
     value_format: Option<ValueFormat>,
+    /// Where the readout sits.
+    value_tooltip_placement: SliderValueTooltipPlacement,
+    /// The readout's chrome, when it is not the theme's tooltip chrome.
+    value_tooltip_style: Option<SharedTooltipStyle>,
     /// The value the reset gesture and the reset action put back.
     default_value: Option<f32>,
+    /// Whether a mouse press moves the value at once.
+    jump_on_press: bool,
     /// The arena's effective enabled state, captured at build so
     /// `accessibility()` can withdraw the reset action from a disabled slider.
     effective_enabled: Option<Signal<bool>>,
@@ -226,7 +300,10 @@ impl Slider {
             rich_tooltip_source: None,
             composite_tooltip_content: None,
             value_format: None,
+            value_tooltip_placement: SliderValueTooltipPlacement::Auto,
+            value_tooltip_style: None,
             default_value: None,
+            jump_on_press: false,
             effective_enabled: None,
         }
     }
@@ -388,12 +465,15 @@ impl Slider {
     /// Unlike a [`tooltip`](Self::tooltip), the readout is up at once, with no
     /// hover delay; a press does not close it, so it stays up through a drag;
     /// and it moves with the thumb and changes as the value does, without a
-    /// rebuild. It sits above a horizontal slider's thumb, or below it near
-    /// the top of the window, and beside a vertical slider, on the
+    /// rebuild. By default it sits above a horizontal slider's thumb, or below
+    /// it near the top of the window, and beside a vertical slider, on the
     /// inline-start side when there is room, so it covers neither the thumb
-    /// nor the track. It is re-placed on every layout pass from where the
+    /// nor the track; [`value_tooltip_placement`](Self::value_tooltip_placement)
+    /// picks another side. It is re-placed on every layout pass from where the
     /// slider is then, so it follows a value the application writes, a scroll
-    /// that moves the slider and a resize that stretches it.
+    /// that moves the slider and a resize that stretches it. Its chrome is the
+    /// theme's tooltip chrome unless
+    /// [`value_tooltip_style`](Self::value_tooltip_style) gives it another.
     ///
     /// It takes no input of its own. A press or a hover on it reaches what is
     /// under it, and a press there closes a popover it is outside of. Escape
@@ -418,6 +498,49 @@ impl Slider {
     /// readout instead, say so in `format`.
     pub fn value_tooltip(mut self, format: impl Fn(f32) -> LocalizedString + 'static) -> Self {
         self.value_format = Some(Rc::new(format));
+        self
+    }
+
+    /// Choose where the [`value_tooltip`](Self::value_tooltip) readout sits:
+    /// above or below the thumb, or at the pointer while a drag moves the
+    /// value. [`SliderValueTooltipPlacement::Auto`] by default, which is where
+    /// the readout has always gone. Has no effect without a `value_tooltip`.
+    pub fn value_tooltip_placement(mut self, placement: SliderValueTooltipPlacement) -> Self {
+        self.value_tooltip_placement = placement;
+        self
+    }
+
+    /// Paint the [`value_tooltip`](Self::value_tooltip) readout with `style`
+    /// rather than the active theme's tooltip chrome
+    /// (`theme.style_slots.tooltip`, else the built-in recipe). Only this
+    /// slider's readout changes; its plain, rich or composite
+    /// [`tooltip`](Self::tooltip) keeps the theme's. Has no effect without a
+    /// `value_tooltip`.
+    pub fn value_tooltip_style(mut self, style: impl TooltipStyle) -> Self {
+        self.value_tooltip_style = Some(Rc::new(style));
+        self
+    }
+
+    /// Move the value to the pointer as soon as a mouse button goes down on
+    /// the slider, rather than when the click is released or a drag starts.
+    /// Off by default.
+    ///
+    /// With it off, a press writes nothing: the value moves when the pointer
+    /// has travelled far enough to start a drag, or to the click's position
+    /// when it is released without one. With it on, a primary press of a
+    /// mouse moves the value to the pointer at once, a drag that follows
+    /// carries on from there without a jump, and the release of a click adds
+    /// nothing. [`on_change`](Self::on_change) reports the press's value as a
+    /// user change.
+    ///
+    /// Touch and pen keep the default whatever this says: a contact landing
+    /// on a slider may be the start of a scroll or of something an ancestor
+    /// claims, so it writes nothing until it is a drag or a tap. The second
+    /// press of a double-click does not jump either when a
+    /// [`default_value`](Self::default_value) is set, since that click resets.
+    /// The keyboard and the accessibility actions are unaffected.
+    pub fn jump_on_press(mut self, on: bool) -> Self {
+        self.jump_on_press = on;
         self
     }
 
@@ -576,6 +699,16 @@ impl Widget for Slider {
         // The value readout, when one is configured, and the one call every
         // handler below ends with: it raises, moves or takes down the readout
         // after whatever the handler changed. A no-op on a slider without one.
+        // Where a drag's pointer is, widget-local, for a readout that follows
+        // it. Written only for `FollowPointer`, and then bound at `Relayout`:
+        // a pointer move that changes no value would otherwise run no layout
+        // pass, and the overlay is re-placed only on one.
+        let follows_pointer = self.value_format.is_some()
+            && self.value_tooltip_placement == SliderValueTooltipPlacement::FollowPointer;
+        let drag_at: Signal<Option<Point>> = Signal::new(None);
+        if follows_pointer {
+            drag_at.bind_to(self_id, ctx.binding_registry(), BindingLevel::Relayout);
+        }
         let readout = self.value_format.clone().map(|format| {
             Readout::mount(
                 ctx,
@@ -589,6 +722,9 @@ impl Widget for Slider {
                     hovered: hovered.clone(),
                     dragging: dragging.clone(),
                     focused: focused.clone(),
+                    placement: self.value_tooltip_placement,
+                    drag_at: drag_at.clone(),
+                    style: self.value_tooltip_style.clone(),
                 },
                 format,
                 effective_enabled.clone(),
@@ -722,6 +858,7 @@ impl Widget for Slider {
             let report = report.clone();
             let sync_readout = sync_readout.clone();
             let taps = taps.clone();
+            let drag_at = drag_at.clone();
             handlers = handlers.on_drag(move |phase, ctx| {
                 match phase {
                     DragPhase::Started {
@@ -734,11 +871,23 @@ impl Widget for Slider {
                         taps.set(TapStreak::EMPTY);
                         dragging.set(true);
                         drag_pointer.set(Some(pointer.id));
+                        if follows_pointer {
+                            // `Started` carries the press position; the
+                            // pointer is already past the slop from it.
+                            let now = ctx
+                                .pointer_position()
+                                .and_then(|p| ctx.to_local(p))
+                                .unwrap_or(position);
+                            drag_at.set(Some(now));
+                        }
                         let before = value_before.get();
                         set_value(position.x, position.y, ctx.is_rtl());
                         report(before, ctx);
                     }
                     DragPhase::Moved { position, .. } if dragging.get() => {
+                        if follows_pointer {
+                            drag_at.set(Some(position));
+                        }
                         let before = value_before.get();
                         set_value(position.x, position.y, ctx.is_rtl());
                         report(before, ctx);
@@ -749,6 +898,9 @@ impl Widget for Slider {
                     DragPhase::Ended { .. } | DragPhase::Cancelled { .. } => {
                         dragging.set(false);
                         drag_pointer.set(None);
+                        if drag_at.get().is_some() {
+                            drag_at.set(None);
+                        }
                     }
                     _ => return,
                 }
@@ -767,13 +919,70 @@ impl Widget for Slider {
         {
             let dragging = dragging.clone();
             let sync_readout = sync_readout.clone();
+            let drag_at = drag_at.clone();
             handlers = handlers.on_pointer_cancel(move |pointer, _reason, ctx| {
                 if drag_pointer.get() != Some(pointer.id) {
                     return;
                 }
                 drag_pointer.set(None);
                 dragging.set(false);
+                if drag_at.get().is_some() {
+                    drag_at.set(None);
+                }
                 sync_readout(ctx);
+            });
+        }
+
+        // Whether the press that a tap now completes has already moved the
+        // value (`jump_on_press`), so the tap does not move it a second time.
+        let press_jumped = Rc::new(Cell::new(false));
+
+        // `jump_on_press`: a mouse press writes the value at once. A precise,
+        // indirect pointer only; a direct one's press is not yet a choice
+        // (`docs/touch-and-pen.md`, "Common operations") and keeps writing on
+        // the drag or the tap, as without the option.
+        if self.jump_on_press {
+            let set_value = set_value_from_position.clone();
+            let value_before = value.clone();
+            let report = report.clone();
+            let sync_readout = sync_readout.clone();
+            let press_jumped = press_jumped.clone();
+            let taps = taps.clone();
+            let resets = reset_to_default.is_some();
+            let input = ctx.theme().input;
+            handlers = handlers.on_pointer_event(move |event, ctx| {
+                let WidgetEvent::PointerDown {
+                    position,
+                    button: PointerButton::Primary,
+                    pointer,
+                    ..
+                } = event
+                else {
+                    return EventResponse::Ignored;
+                };
+                press_jumped.set(false);
+                if pointer.kind.is_direct() {
+                    return EventResponse::Ignored;
+                }
+                // The second press of a double-click is the reset's, which the
+                // tap applies on its release; jumping first would report a
+                // value the reset then takes back.
+                if resets {
+                    let mut streak = taps.get();
+                    let profile = input.profile(pointer.kind);
+                    if streak.advance(pointer.time, profile, *position, PointerButton::Primary) >= 2
+                    {
+                        return EventResponse::Ignored;
+                    }
+                }
+                let before = value_before.get();
+                set_value(position.x, position.y, ctx.is_rtl());
+                report(before, ctx);
+                press_jumped.set(true);
+                sync_readout(ctx);
+                // Not consumed: the same press still feeds the tap and the
+                // drag recognizers.
+                EventResponse::Ignored
             });
         }
 
@@ -800,7 +1009,14 @@ impl Widget for Slider {
             // The profile the recognizers would read, as the theme stands at
             // build time; the thumb radius above is read the same way.
             let input = ctx.theme().input;
+            let press_jumped = press_jumped.clone();
             handlers = handlers.on_tap(move |event, ctx| {
+                // The track click is the primary button's. The arena already
+                // keeps an application's widened tap mask from reaching this
+                // handler; the guard keeps it so if a mask ever does.
+                if event.button != PointerButton::Primary {
+                    return;
+                }
                 if let Some(ref reset) = reset {
                     // The streak measures from where each click was pressed;
                     // a tap's release is within its slop of that.
@@ -821,6 +1037,12 @@ impl Widget for Slider {
                         return;
                     }
                     taps.set(streak);
+                }
+                // `jump_on_press` already put the value where this click
+                // pressed; its release, a few dp away, adds nothing.
+                if press_jumped.replace(false) {
+                    sync_readout(ctx);
+                    return;
                 }
                 let before = value_before.get();
                 set_value(event.position.x, event.position.y, ctx.is_rtl());
@@ -3796,5 +4018,329 @@ mod tests {
             (true, true),
             "and comes back with the slider"
         );
+    }
+
+    // -----------------------------------------------------------------
+    // An application's tap mask, `jump_on_press`, readout placement/style
+    // -----------------------------------------------------------------
+
+    /// A slider 0..10 at 5, 200 dp wide, with `wrap` applied to it, and the
+    /// points a quarter and three quarters along it.
+    fn tap_mask_scene(
+        build: impl FnOnce(Slider) -> Box<dyn Widget>,
+    ) -> (WidgetTree, Signal<f32>, Point, Point) {
+        let value = Signal::new(5.0_f32);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let s = tree.add_boxed(build(Slider::new(value.clone(), 0.0, 10.0)));
+        let _row = tree.add(FixedSize::new().width(200.0).height(40.0).child(s));
+        tree.layout(SizeProposal::exact(400.0, 100.0));
+        let b = tree.bounds(s);
+        let at = |f: f32| Point::new(b.x + b.width * f, b.center().y);
+        (tree, value, at(0.25), at(0.75))
+    }
+
+    /// One click with `button`, then time enough that the next is a click of
+    /// its own.
+    fn click_with(tree: &mut WidgetTree, at: Point, button: PointerButton) {
+        tree.pointer_move(at);
+        tree.pointer_down_button(at, button);
+        tree.pointer_up_button(at, button);
+        tree.advance_time(std::time::Duration::from_secs(1));
+    }
+
+    /// The way an application adds a secondary-click action to a slider: its
+    /// own `on_tap`, widened to the secondary button. The track click stays
+    /// the primary button's, and the secondary click is the application's
+    /// alone.
+    #[test]
+    fn an_applications_secondary_tap_does_not_retarget_the_track_click() {
+        use teksilo_core::event::ButtonMask;
+        use teksilo_core::widget_builder::WidgetBuilder;
+
+        let app = Rc::new(Cell::new(0_u32));
+        let count = app.clone();
+        let (mut tree, value, quarter, three_quarters) = tap_mask_scene(move |s| {
+            Box::new(
+                s.on_tap(move |_, _| count.set(count.get() + 1))
+                    .accept_tap_buttons(ButtonMask::SECONDARY),
+            )
+        });
+
+        click_with(&mut tree, three_quarters, PointerButton::Primary);
+        let jumped = value.get();
+        assert!(jumped > 6.0, "a primary click still jumps: {jumped}");
+        assert_eq!(app.get(), 0, "and is not the application's");
+
+        click_with(&mut tree, quarter, PointerButton::Secondary);
+        assert_eq!(value.get(), jumped, "a secondary click does not jump");
+        assert_eq!(app.get(), 1, "it is the application's");
+    }
+
+    /// A mask with no `on_tap` beside it reaches the slider's own tap — the
+    /// door a `Button` opens to a right click — and the slider still jumps on
+    /// the primary button only.
+    #[test]
+    fn the_track_click_is_the_primary_buttons_whatever_mask_reaches_it() {
+        use teksilo_core::event::ButtonMask;
+        use teksilo_core::widget_builder::WidgetBuilder;
+
+        let (mut tree, value, quarter, three_quarters) = tap_mask_scene(|s| {
+            Box::new(s.accept_tap_buttons(ButtonMask::PRIMARY | ButtonMask::SECONDARY))
+        });
+        click_with(&mut tree, quarter, PointerButton::Secondary);
+        assert_eq!(value.get(), 5.0, "a secondary click does not jump");
+        click_with(&mut tree, three_quarters, PointerButton::Primary);
+        assert!(value.get() > 6.0, "a primary one does: {}", value.get());
+    }
+
+    /// A slider reporting every change into `seen`, with `jump_on_press` as
+    /// given, in the horizontal readout scene.
+    fn press_scene(jump: bool) -> (WidgetTree, WidgetId, Signal<f32>, Rc<RefCell<Vec<f32>>>) {
+        let value = Signal::new(0.0_f32);
+        let seen: Rc<RefCell<Vec<f32>>> = Rc::default();
+        let sink = seen.clone();
+        let (tree, s) = horizontal_scene(
+            Slider::new(value.clone(), 0.0, 100.0)
+                .jump_on_press(jump)
+                .on_change(move |now, _ctx| sink.borrow_mut().push(now)),
+        );
+        (tree, s, value, seen)
+    }
+
+    /// The point `f` of the way along slider `s`'s track.
+    fn along(tree: &WidgetTree, s: WidgetId, f: f32) -> Point {
+        let b = tree.bounds(s);
+        let r = crate::styles::recipe_slider_style::SLIDER_THUMB_DIAMETER * 0.5;
+        Point::new(b.x + r + (b.width - 2.0 * r) * f, b.center().y)
+    }
+
+    #[test]
+    fn jump_on_press_moves_the_value_on_a_mouse_press() {
+        let (mut tree, s, value, seen) = press_scene(true);
+        let at = along(&tree, s, 0.75);
+        tree.pointer_move(at);
+        tree.pointer_down_button(at, PointerButton::Primary);
+        assert!(
+            (value.get() - 75.0).abs() < 1.01,
+            "the press moved it: {}",
+            value.get()
+        );
+        assert_eq!(seen.borrow().len(), 1, "and reported it as a user change");
+
+        // Released a few dp on, inside the tap slop: still a click, which
+        // would jump again on its own.
+        let release = Point::new(at.x + 4.0, at.y);
+        tree.pointer_move(release);
+        tree.pointer_up_button(release, PointerButton::Primary);
+        assert_eq!(
+            seen.borrow().len(),
+            1,
+            "the release adds nothing: {:?}",
+            seen.borrow()
+        );
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    /// The drag that follows carries on from the press: crossing the drag slop
+    /// writes nothing new, and the value then follows the pointer.
+    #[test]
+    fn a_drag_after_a_jumping_press_carries_on_without_a_jump() {
+        let (mut tree, s, value, seen) = press_scene(true);
+        let start = along(&tree, s, 0.25);
+        tree.pointer_move(start);
+        tree.pointer_down_button(start, PointerButton::Primary);
+        let pressed = value.get();
+        assert!((pressed - 25.0).abs() < 1.01, "pressed to {pressed}");
+
+        // Inside the slop, then across it.
+        tree.pointer_move(Point::new(start.x + 2.0, start.y));
+        tree.pointer_move(Point::new(start.x + 8.0, start.y));
+        assert_eq!(
+            *seen.borrow(),
+            vec![pressed],
+            "crossing the slop does not move the value again"
+        );
+
+        let end = along(&tree, s, 0.6);
+        tree.pointer_move(end);
+        tree.pointer_up_button(end, PointerButton::Primary);
+        assert!(
+            (value.get() - 60.0).abs() < 1.01,
+            "the drag moved it on: {}",
+            value.get()
+        );
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    /// A finger's press is not a choice yet, so it writes nothing until it is
+    /// a tap or a drag, `jump_on_press` or not.
+    #[test]
+    fn jump_on_press_leaves_a_touch_press_alone() {
+        let (mut tree, s, value, _seen) = press_scene(true);
+        let at = along(&tree, s, 0.75);
+        let finger = tree.new_contact();
+        tree.touch_down(finger, at);
+        assert_eq!(value.get(), 0.0, "the contact landing wrote nothing");
+        tree.touch_up(finger, at);
+        assert!(
+            (value.get() - 75.0).abs() < 1.01,
+            "the tap did: {}",
+            value.get()
+        );
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    #[test]
+    fn without_jump_on_press_a_mouse_press_writes_nothing() {
+        let (mut tree, s, value, seen) = press_scene(false);
+        let at = along(&tree, s, 0.75);
+        tree.pointer_move(at);
+        tree.pointer_down_button(at, PointerButton::Primary);
+        assert_eq!(value.get(), 0.0, "the press wrote nothing");
+        tree.pointer_up_button(at, PointerButton::Primary);
+        assert_eq!(seen.borrow().len(), 1, "the click wrote once, on release");
+    }
+
+    /// With a default set, the second press of a double-click is the reset's:
+    /// it does not jump first.
+    #[test]
+    fn a_jumping_double_click_reports_the_jump_and_then_the_reset() {
+        let value = Signal::new(0.0_f32);
+        let seen: Rc<RefCell<Vec<f32>>> = Rc::default();
+        let sink = seen.clone();
+        let (mut tree, s) = horizontal_scene(
+            Slider::new(value.clone(), 0.0, 100.0)
+                .jump_on_press(true)
+                .default_value(10.0)
+                .on_change(move |now, _ctx| sink.borrow_mut().push(now)),
+        );
+        let at = along(&tree, s, 0.75);
+        click(&mut tree, at);
+        tree.advance_time(std::time::Duration::from_millis(100));
+        tree.pointer_move(Point::new(at.x - 3.0, at.y));
+        tree.pointer_down_button(Point::new(at.x - 3.0, at.y), PointerButton::Primary);
+        assert_eq!(seen.borrow().len(), 1, "the second press did not jump");
+        tree.pointer_up_button(Point::new(at.x - 3.0, at.y), PointerButton::Primary);
+        let reported = seen.borrow().clone();
+        assert_eq!(reported.len(), 2, "the jump, then the reset: {reported:?}");
+        assert_eq!(value.get(), 10.0);
+    }
+
+    #[test]
+    fn a_below_readout_hangs_under_the_thumb() {
+        let (mut tree, s) = horizontal_scene(
+            Slider::new(Signal::new(-3.0_f32), -12.0, 12.0)
+                .value_tooltip(db)
+                .value_tooltip_placement(SliderValueTooltipPlacement::Below),
+        );
+        let bounds = tree.bounds(s);
+        tree.pointer_move(bounds.center());
+        tree.layout(window());
+        let (_, rect) = readout(&tree).expect("up");
+        let thumb = knob(&tree, s);
+        assert!(
+            rect.y >= bounds.bottom(),
+            "below the slider: {rect:?} under {bounds:?}"
+        );
+        assert!(
+            (rect.center().x - thumb.center().x).abs() < 0.51,
+            "centred on the thumb: {rect:?} under {thumb:?}",
+        );
+    }
+
+    #[test]
+    fn an_above_readout_on_a_vertical_slider_sits_over_the_thumb() {
+        let mut tree = readout_tree();
+        let s = tree.add(
+            Slider::new(Signal::new(0.0_f32), -12.0, 12.0)
+                .orientation(Orientation::Vertical)
+                .value_tooltip(db)
+                .value_tooltip_placement(SliderValueTooltipPlacement::Above),
+        );
+        let _row = tree.add(
+            HStack::new()
+                .child(FixedSize::new().width(150.0))
+                .child(FixedSize::new().height(200.0).child(s)),
+        );
+        tree.layout(window());
+        tree.pointer_move(knob(&tree, s).center());
+        tree.layout(window());
+        let (_, rect) = readout(&tree).expect("up");
+        let (bounds, thumb) = (tree.bounds(s), knob(&tree, s));
+        assert!(
+            rect.bottom() <= thumb.y,
+            "above the thumb: {rect:?} over {thumb:?}"
+        );
+        assert!(
+            (rect.center().x - bounds.center().x).abs() < 0.51,
+            "centred on the slider: {rect:?} over {bounds:?}",
+        );
+    }
+
+    /// A stepped slider snaps its thumb; a readout that follows the pointer
+    /// does not, and goes back to the thumb when the drag ends.
+    #[test]
+    fn a_follow_pointer_readout_rides_the_pointer_through_a_drag() {
+        let (mut tree, s) = horizontal_scene(
+            Slider::new(Signal::new(0.0_f32), -12.0, 12.0)
+                .step(6.0)
+                .value_tooltip(db)
+                .value_tooltip_placement(SliderValueTooltipPlacement::FollowPointer),
+        );
+        let bounds = tree.bounds(s);
+        let start = knob(&tree, s).center();
+        tree.pointer_move(start);
+        tree.pointer_down_button(start, PointerButton::Primary);
+        let mut pointer = start;
+        for dx in [10.0, 37.0, 52.0] {
+            pointer = Point::new(start.x + dx, start.y);
+            tree.pointer_move(pointer);
+            tree.layout(window());
+            let (_, rect) = readout(&tree).expect("up for the whole drag");
+            assert!(
+                (rect.center().x - pointer.x).abs() < 0.51,
+                "centred on the pointer: {rect:?} at {pointer:?}",
+            );
+            assert!(rect.bottom() <= bounds.y, "above the slider: {rect:?}");
+        }
+        let thumb = knob(&tree, s);
+        assert!(
+            (thumb.center().x - pointer.x).abs() > 2.0,
+            "fixture: the snapped thumb is not under the pointer"
+        );
+
+        tree.pointer_up_button(pointer, PointerButton::Primary);
+        tree.layout(window());
+        let (_, rect) = readout(&tree).expect("still hovered");
+        assert!(
+            (rect.center().x - thumb.center().x).abs() < 0.51,
+            "back on the thumb once the drag is over: {rect:?} over {thumb:?}",
+        );
+    }
+
+    #[test]
+    fn the_readout_takes_the_style_it_is_given() {
+        use teksilo_core::build_context::BuildContext;
+        use teksilo_core::styles::TooltipStyleConfig;
+
+        struct Counting(Rc<Cell<u32>>);
+        impl TooltipStyle for Counting {
+            fn make_body(&self, cfg: &TooltipStyleConfig, ctx: &mut BuildContext) -> WidgetId {
+                self.0.set(self.0.get() + 1);
+                crate::styles::RecipeTooltipStyle::default().make_body(cfg, ctx)
+            }
+        }
+
+        let used = Rc::new(Cell::new(0_u32));
+        let (mut tree, s) = horizontal_scene(
+            Slider::new(Signal::new(-3.0_f32), -12.0, 12.0)
+                .value_tooltip(db)
+                .value_tooltip_style(Counting(used.clone())),
+        );
+        tree.pointer_move(tree.bounds(s).center());
+        tree.layout(window());
+        let (text, _) = readout(&tree).expect("up");
+        assert_eq!(text, "-3.0 dB");
+        assert!(used.get() > 0, "the readout was built by the given style");
     }
 }

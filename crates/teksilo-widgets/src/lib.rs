@@ -248,7 +248,7 @@ pub use segmented_control::{
     Segment, SegmentDisplay, SegmentId, SegmentOverflow, SegmentSizing, SegmentedControl,
 };
 pub use shortcut_settings::ShortcutSettings;
-pub use slider::Slider;
+pub use slider::{Slider, SliderValueTooltipPlacement};
 pub use snackbar::Snackbar;
 pub use spin_box::{
     ButtonLayout as SpinButtonLayout, SpinBox, SpinValue, StepType, WheelMode, WrapMode,
