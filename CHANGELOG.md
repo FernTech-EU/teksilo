@@ -72,6 +72,13 @@ by crate for clarity, not because crates version independently.
   drops the removed keys after reading each of the view's keys once, as a
   `GridView`'s does.
 
+#### cargo-teksilo
+
+- **`status` reported an older release's Claude skill as missing** once
+  every one of its files differed from this release's, which is the usual
+  case two releases on. It now lists the copy as differing and prints the
+  `agent install claude --force` line, at project and at user scope.
+
 ## [0.16.0] - 2026-10-09
 
 ### Added

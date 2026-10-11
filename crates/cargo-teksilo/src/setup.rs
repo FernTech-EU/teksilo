@@ -818,7 +818,7 @@ fn inspect_skill(dest: &Path) -> Presence {
             _ => all = false,
         }
     }
-    if !any {
+    if !any && !declares_our_skill(dest) {
         // A directory of this name holding none of our files is not a stale
         // install — it is somebody else's directory, and saying "installed,
         // outdated" about it would be a claim we have no evidence for.
@@ -831,6 +831,27 @@ fn inspect_skill(dest: &Path) -> Presence {
     } else {
         Presence::Stale
     }
+}
+
+/// Whether `dest/SKILL.md` names this skill in its frontmatter.
+///
+/// The ownership evidence for a copy an older release installed. Matching
+/// bytes cannot serve: `SKILL.md` carries the release that ships it, so it
+/// differs in every older copy, and once the reference files have changed
+/// too, nothing in the copy is byte-identical. A two-release-old skill then
+/// read as no skill at all, and `status` was silent about the one copy most
+/// in need of a refresh.
+fn declares_our_skill(dest: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(dest.join("SKILL.md")) else {
+        return false;
+    };
+    let mut lines = text.lines();
+    if lines.next().map(str::trim_end) != Some("---") {
+        return false;
+    }
+    lines
+        .take_while(|l| l.trim_end() != "---")
+        .any(|l| l.trim_end() == format!("name: {SKILL_NAME}"))
 }
 
 /// The read-only twin of [`remove_strays`]: is there a file we would delete?
@@ -1581,6 +1602,45 @@ mod tests {
         std::fs::write(
             t.path().join(".claude/skills/teksilo/unrelated.md"),
             b"not ours",
+        )
+        .unwrap();
+        let target = project_targets(t.path()).remove(0);
+        assert_eq!(inspect(&target), Presence::Absent);
+    }
+
+    #[test]
+    fn an_older_skill_with_every_file_changed_is_stale_not_absent() {
+        // The copy two releases back: SKILL.md names another release and every
+        // reference file has moved, so no byte matches. Its frontmatter is
+        // still ours, and that is the evidence.
+        let t = temp();
+        std::fs::create_dir_all(t.path().join(".claude")).unwrap();
+        let target = project_targets(t.path()).remove(0);
+        apply(&target).unwrap();
+        let mut wanted = Vec::new();
+        collect(&SKILL, Path::new(""), &mut wanted);
+        for (relative, bytes) in &wanted {
+            let mut older = bytes.to_vec();
+            older.extend_from_slice(b"\nfrom 0.9\n");
+            std::fs::write(target.path.join(relative), older).unwrap();
+        }
+        assert_eq!(inspect(&target), Presence::Stale);
+        assert!(
+            check_conflict(&target, false).is_err(),
+            "replacing it still asks for --force"
+        );
+        assert_eq!(apply(&target).unwrap().change, Change::Updated);
+        assert_eq!(inspect(&target), Presence::Current);
+    }
+
+    #[test]
+    fn a_foreign_skill_with_another_name_is_absent() {
+        let t = temp();
+        let dir = t.path().join(".claude/skills/teksilo");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("SKILL.md"),
+            "---\nname: something-else\ndescription: name: teksilo\n---\n\nname: teksilo\n",
         )
         .unwrap();
         let target = project_targets(t.path()).remove(0);
