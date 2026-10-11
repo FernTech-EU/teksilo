@@ -28,6 +28,11 @@ impl WidgetTree {
         origin: crate::focus::FocusOrigin,
         ops: &mut dyn crate::window::WindowOps,
     ) {
+        // Every focus move passes through here, so this is where a deferred
+        // request for a dormant node is superseded: whatever the user or the
+        // app did since that request, it is newer. Before the early return,
+        // because naming the node that already has focus is a request too.
+        self.pending_focus_request = None;
         if self.focused == Some(id) {
             return;
         }
@@ -90,7 +95,7 @@ impl WidgetTree {
         // lives in — so the focus just installed is never disturbed. Running it
         // before the tooltip pass also means that pass sees already-reset
         // `self.tooltips` entries instead of chasing a dismissed overlay id.
-        self.dismiss_overlays_left_by_focus(previously_focused, id, &mut *ops);
+        self.dismiss_overlays_left_by_focus(previously_focused, Some(id), &mut *ops);
         // Focus-driven tooltip machinery: close any previously-shown
         // focus-promoted rich tooltip whose scope no longer contains
         // the focus target, then immediately surface+sticky the rich
@@ -335,8 +340,149 @@ impl WidgetTree {
     }
 
     /// Set focus to a specific widget (programmatic origin, no ops).
+    ///
+    /// **A dormant target is focused when it wakes, not now.** If `id` sits in
+    /// a parked `Switcher` page or a `visible_when(false)` branch, focus stays
+    /// where it is and the request is held until the end of the next
+    /// [`layout`](Self::layout): if that pass has made `id` active, focus moves
+    /// there; if `id` is still dormant, or gone, the request is dropped. Any
+    /// focus move in between, and [`clear_focus`](Self::clear_focus), cancel
+    /// it. This is what lets one handler show a page and focus a control on it.
     pub fn focus(&mut self, id: WidgetId) {
-        self.focus_with_origin(id, crate::focus::FocusOrigin::Programmatic);
+        let mut noop = crate::window::NoopWindowOps;
+        self.request_focus_with_ops(id, FocusRequestMode::Exact, &mut noop);
+    }
+
+    /// Drop keyboard focus: afterwards nothing is focused.
+    ///
+    /// It is a focus move to nothing, with everything a move carries: the
+    /// node that had focus receives `FocusLost`, every `focus_within` signal on
+    /// its ancestors turns `false`, a data view stops showing its selection as
+    /// focused, the focus ring is hidden (`focus_visible` resets to `false`),
+    /// a non-modal overlay that focus was inside or anchored at closes as it
+    /// would on Tab-away, and the accessibility tree is marked for a rebuild.
+    /// A focus request still waiting for a dormant target (see
+    /// [`focus`](Self::focus)) is cancelled.
+    ///
+    /// A no-op, apart from that cancellation, when nothing is focused.
+    ///
+    /// From a handler, use
+    /// [`EventContext::clear_focus`](crate::widget::EventContext::clear_focus),
+    /// which is applied after the handler returns like every other focus
+    /// request.
+    pub fn clear_focus(&mut self) {
+        let mut noop = crate::window::NoopWindowOps;
+        self.clear_focus_ops(&mut noop);
+    }
+
+    /// [`clear_focus`](Self::clear_focus), threading `ops` through to the
+    /// `FocusLost` handler and to any overlay the move dismisses.
+    pub(crate) fn clear_focus_ops(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        self.pending_focus_request = None;
+        let Some(old) = self.focused else {
+            return;
+        };
+        // Same WCAG 3.2.1 guard as `focus_with_origin_ops`: a `FocusLost`
+        // handler is focus dispatch too.
+        struct ClearOnDrop(std::rc::Rc<std::cell::Cell<bool>>);
+        impl Drop for ClearOnDrop {
+            fn drop(&mut self) {
+                self.0.set(false);
+            }
+        }
+        self.in_focus_dispatch.set(true);
+        let _focus_dispatch_guard = ClearOnDrop(self.in_focus_dispatch.clone());
+
+        // The tree lets go first and tells the widget second, so a `FocusLost`
+        // handler that puts focus somewhere else makes an ordinary move from
+        // nothing, rather than re-entering a move away from itself.
+        self.set_focused(None);
+        self.focus_origin = None;
+        if self.focus_visible.get() {
+            self.focus_visible.set(false);
+        }
+        self.a11y_dirty = true;
+        self.update_focus_within_signals(Some(old), None);
+        self.update_view_focus_signals(Some(old), None);
+        self.dispatch_to_widget(old, &WidgetEvent::FocusLost, &mut *ops);
+        // Then what a move away from `old` closes, measured against wherever
+        // focus is now: nowhere, unless that handler redirected it.
+        let now = self.focused;
+        self.dismiss_overlays_left_by_focus(Some(old), now, &mut *ops);
+        self.tooltip_focus_leave_outside(now, &mut *ops);
+    }
+
+    /// Focus `id` the way `mode` says — or, when `id` exists but is dormant,
+    /// hold the request for the end of the next layout pass. See
+    /// [`focus`](Self::focus) for the deferred contract.
+    ///
+    /// The one door for the *requests* (`WidgetTree::focus`,
+    /// `BuildContext::focus` / `focus_into`, `EventContext::request_focus` /
+    /// `request_focus_into`). The framework's own focus restores go straight to
+    /// [`focus_ops`](Self::focus_ops): they already check that their target is
+    /// active, and a restore aimed at something dormant has nothing to wait for.
+    ///
+    /// An id that is not in the arena at all is passed through as before; only
+    /// a node that exists and is parked is deferred.
+    pub(crate) fn request_focus_with_ops(
+        &mut self,
+        id: WidgetId,
+        mode: FocusRequestMode,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        // A newer request replaces an older one, whether or not it moves focus.
+        self.pending_focus_request = None;
+        if self.arena.get(id).is_some() && !self.arena.is_active(id) {
+            self.pending_focus_request = Some(PendingFocusRequest { id, mode });
+            return;
+        }
+        self.resolve_focus_request(id, mode, ops);
+    }
+
+    /// Whether a focus request is waiting for a dormant target to wake.
+    #[cfg(test)]
+    pub(crate) fn has_pending_focus_request(&self) -> bool {
+        self.pending_focus_request.is_some()
+    }
+
+    /// Apply a focus request against an active (or absent) target.
+    fn resolve_focus_request(
+        &mut self,
+        id: WidgetId,
+        mode: FocusRequestMode,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        match mode {
+            FocusRequestMode::Exact => self.focus_ops(id, ops),
+            FocusRequestMode::SelfOrDescendant => {
+                let target = self.first_focusable_descendant(id).unwrap_or(id);
+                self.focus_ops(target, ops);
+            }
+            FocusRequestMode::Into => {
+                if let Some(target) = self.first_focusable_descendant(id) {
+                    self.focus_ops(target, ops);
+                }
+            }
+        }
+    }
+
+    /// Honour the focus request a dormant target deferred, now that the layout
+    /// pass has settled activation: focus it if it woke, drop it otherwise.
+    ///
+    /// Runs at the tail of `layout_with_ops` — after the culling parents have
+    /// woken what they wake and the bounds are fresh, so the focus-driven
+    /// scroll-into-view has real geometry — and before `pending_focus_restore`,
+    /// so a rebuild's restore never overrides an explicit request. Also runs on
+    /// the pass's idle early return, where activation is just as settled.
+    pub(super) fn settle_pending_focus_request(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        let Some(request) = self.pending_focus_request.take() else {
+            return;
+        };
+        // A `*_into` / resolving request re-resolves its descendant here, so
+        // it lands on what the page holds *now*.
+        if self.arena.is_active(request.id) {
+            self.resolve_focus_request(request.id, request.mode, ops);
+        }
     }
 
     /// Set focus — the dispatch-path variant that threads `ops` through
@@ -861,6 +1007,28 @@ impl WidgetTree {
             }
         }
     }
+}
+
+/// How a focus request picks its target, kept with a request that had to wait
+/// for a dormant node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FocusRequestMode {
+    /// The named node itself (`WidgetTree::focus`, `BuildContext::focus`).
+    Exact,
+    /// The named node's first focusable descendant, or the node itself when it
+    /// has none (`EventContext::request_focus`).
+    SelfOrDescendant,
+    /// The first focusable descendant only; nothing when there is none
+    /// (`EventContext::request_focus_into`, `BuildContext::focus_into`).
+    Into,
+}
+
+/// A focus request whose target was dormant when it was made. See
+/// `WidgetTree::pending_focus_request`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PendingFocusRequest {
+    id: WidgetId,
+    mode: FocusRequestMode,
 }
 
 // ─── Traversal scope tree ────────────────────────────────────────────────

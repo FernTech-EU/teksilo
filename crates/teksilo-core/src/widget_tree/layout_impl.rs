@@ -625,6 +625,9 @@ impl WidgetTree {
         self.last_proposal = proposal;
 
         if !proposal_changed && !self.arena.any_needs_layout() {
+            // Nothing to lay out, so nothing left to wake: a focus request
+            // waiting on a dormant node is decided now, as at the tail below.
+            self.settle_pending_focus_request(&mut *ops);
             return;
         }
 
@@ -913,6 +916,13 @@ impl WidgetTree {
         // into hidden content — its own dismiss path restores focus to the
         // trigger), and only if it still has somewhere to put it. Otherwise focus
         // stays `None`, exactly as before.
+        //
+        // An explicit request that was waiting for its target to wake goes
+        // first. Activation is settled — the `visible_when` sweep and the
+        // culling parents have both run — and the bounds are fresh. Landing it
+        // makes `focused` non-`None`, so the restore below then stands down: a
+        // rebuild's guess never overrides what a handler asked for.
+        self.settle_pending_focus_request(&mut *ops);
         let restore = std::mem::take(&mut self.pending_focus_restore);
         if self.focused.is_none()
             && let Some(target) = restore.into_iter().find_map(|root| {

@@ -29,6 +29,9 @@ mod announcer_tests;
 mod device_scale_tests;
 mod drag_drop_impl;
 mod focus_impl;
+#[cfg(test)]
+mod focus_request_tests;
+pub(crate) use focus_impl::FocusRequestMode;
 mod gesture_dispatch_impl;
 #[cfg(test)]
 mod hit_targeting_tests;
@@ -206,6 +209,19 @@ pub struct WidgetTree {
     /// still there, and the root's first focusable descendant is the *first*
     /// group, whichever one the user was in.
     pending_focus_restore: Vec<WidgetId>,
+    /// A focus request whose target was **dormant** when it was made: a page
+    /// of a `Switcher`, a `visible_when` branch, that the same handler is
+    /// about to show. Focusing a dormant node outright does not survive the
+    /// next layout — `revalidate_interaction_state` runs before the pass wakes
+    /// the page, finds the target inactive, and drops focus — so the request
+    /// waits here instead, and the tail of `layout_with_ops` honours it once
+    /// activation has settled (see `settle_pending_focus_request`).
+    ///
+    /// One slot, last request wins. Any focus move that actually happens in
+    /// the meantime (`focus_with_origin_ops`, which every move goes through)
+    /// and [`WidgetTree::clear_focus`] cancel it; a target still dormant, or
+    /// gone, when the pass ends drops it.
+    pending_focus_request: Option<focus_impl::PendingFocusRequest>,
     /// The interaction anchors as of the last layout walk — the focused node,
     /// each live pointer's captor, and an in-flight drag's source.
     ///
@@ -973,6 +989,7 @@ impl WidgetTree {
             view_focus_stack: Vec::new(),
             previous_pointer_position: None,
             pending_focus_restore: Vec::new(),
+            pending_focus_request: None,
             last_interaction_anchors: Vec::new(),
             last_proposal: SizeProposal::exact(800.0, 600.0),
             pending_modal_requests: Vec::new(),

@@ -972,6 +972,9 @@ impl<'a> BuildContext<'a> {
     /// `EventContext::request_focus` for use during `build()` — e.g.
     /// when a composing widget pre-builds an editor and needs focus to
     /// land on it as soon as the subtree is wired in.
+    ///
+    /// A dormant `id` is focused once the next layout pass wakes it, as for
+    /// [`WidgetTree::focus`](crate::widget_tree::WidgetTree::focus).
     pub fn focus(&mut self, id: WidgetId) {
         self.tree.focus(id);
     }
@@ -1016,6 +1019,11 @@ impl<'a> BuildContext<'a> {
     /// A subtree with nothing focusable leaves focus exactly where it was: an
     /// empty region never traps it.
     ///
+    /// A **dormant** `id` (a parked page, a hidden branch) is entered once the
+    /// next layout pass has woken it, as for
+    /// [`WidgetTree::focus`](crate::widget_tree::WidgetTree::focus); this
+    /// returns `false` meanwhile, since focus is not inside `id` yet.
+    ///
     /// ⚠ **Ancestor-chain side effects do not run**, and that is a property of
     /// focusing from `build` at all, not of this method — [`focus`](Self::focus)
     /// has it too. A node added during `build` is not parented until the build
@@ -1036,13 +1044,12 @@ impl<'a> BuildContext<'a> {
         {
             return true;
         }
-        match self.tree.first_focusable_descendant(id) {
-            Some(target) => {
-                self.tree.focus(target);
-                true
-            }
-            None => false,
-        }
+        let mut noop = crate::window::NoopWindowOps;
+        self.tree
+            .request_focus_with_ops(id, crate::widget_tree::FocusRequestMode::Into, &mut noop);
+        self.tree
+            .focused()
+            .is_some_and(|focused| focused == id || self.tree.is_descendant_of(focused, id))
     }
 
     // --- Actions & shortcuts ---

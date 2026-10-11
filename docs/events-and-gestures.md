@@ -101,6 +101,30 @@ The framework decides what "target" means per event type:
 
 There is no "capture phase" distinct from preview, no event replay, no explicit listener list. The tree structure is the listener list.
 
+### An invisible layer still occludes
+
+The exact pass takes the **topmost** node whose bounds contain the point,
+whether or not that node has a handler or paints anything. That is ordinary
+occlusion, and it is right: a card blocks the page behind it.
+
+It catches out a helper widget, though. A `ZStack` offers every layer its full
+size, so a layer that answers `proposal.resolve(0.0, 0.0)` (the stock answer of
+a leaf with no content of its own, such as a frame-tick driver or a measuring
+probe) is given the whole stack and becomes the topmost hit over all of it.
+Every press over the panel then lands on the helper and bubbles from there,
+even though the helper has no handler and nothing on screen marks it. The
+controls under it receive nothing.
+
+An invisible helper must therefore do one of two things:
+
+- declare itself out of hit testing with `.hit_transparent(true)` (the node
+  and its subtree are pruned from both passes), or
+- answer `Size::ZERO` from `layout_response`, so it has no area to be hit in.
+
+A node with no area is also never a candidate of the coarse-pointer slop pass
+(see [Density & targets](density-and-targets.md)), so a zero-size helper that
+does carry a handler cannot catch a near miss in the empty space around it.
+
 ### An ancestor that owns a second picking system
 
 A widget that picks its own content over the same area, a `SceneView`'s
@@ -957,6 +981,8 @@ pub struct EventContext<'ops> {
     tree_mutations: Vec<TreeMutation>,        // SetDormant / Activate / Destroy
     // focus
     focus_requests: Vec<WidgetId>,
+    focus_into_requests: Vec<WidgetId>,
+    clear_focus_requested: bool,
     // overlays
     overlay_requests: Vec<OverlayRequest>,
     overlay_dismissals: Vec<OverlayId>,
@@ -998,7 +1024,8 @@ Via `EventContext`, any handler can:
 - `ctx.set_theme(theme)`, swap the app theme in every window; the trees are dirty-marked for relayout and repaint, not rebuilt, so focus and scroll offsets survive.
 - `ctx.set_locale(id)`, switch i18n locale; dirty-marks locale-bound signals.
 - `ctx.close_window()`, request the owning window close.
-- `ctx.request_focus(widget_id)`, programmatic focus transfer (overlay content on open, first error field on submit).
+- `ctx.request_focus(widget_id)`, programmatic focus transfer (overlay content on open, first error field on submit). A target on a page the same handler is showing is focused once the next layout has woken it (§6).
+- `ctx.clear_focus()`, drop keyboard focus so that nothing is focused (§6).
 - `ctx.dismiss_all_overlays()`, useful after menu item activation.
 - `ctx.send_intent(AppIntent::X)`, fire a typed intent; framework walks source → root invoking any matching `Action`. See [shortcut-intent-action.md](shortcut-intent-action.md).
 - `ctx.request_frame()`, ask the event loop to pump one more frame (caret blink restart, drag auto-scroll, pending document events).
@@ -1028,6 +1055,45 @@ Focus is a single `Option<WidgetId>` stored on the tree. Tab / Shift+Tab moves i
 Programmatic focus transfer goes through `ctx.request_focus(id)`. The framework also exposes `first_focusable_descendant(id)` for modal openers (dialogs that should land focus on the primary action button, it returns the widget Tab would land on *first*, respecting the scope rules below) and `ScrollIntoView` synthesized on focus change so that tab-focusing an offscreen widget scrolls the nearest clipping ancestor to reveal it.
 
 Focus cleanup on destroy is automatic: destroying a focused widget clears focus; the next input event that requires focus routes to the nearest focusable ancestor or root.
+
+**A request into a hidden page waits for the page.** A handler that shows a
+`Switcher` page or a `visible_when` branch and asks for focus inside it makes
+the request while its target is still **dormant**: the page wakes only during
+the next layout pass. So a request whose target is dormant
+(`ctx.request_focus`, `ctx.request_focus_into`, `BuildContext::focus` /
+`focus_into`, `WidgetTree::focus`) does not move focus at once. It is kept, as
+the exact node it names, and settled at the end of the next layout pass, once
+activation has settled and the bounds are fresh: if the target is active by
+then, focus moves to it (a `request_focus_into` / composite request picks the
+first focusable descendant at that point); if it is still dormant, or has been
+destroyed, the request is dropped rather than kept for later. There is one
+pending request at a time, and anything that moves focus in the meantime (a
+newer request, a click, Tab) or `clear_focus` cancels it. The request also
+takes precedence over the rebuild's own focus restore, so a request for the
+second control on a page lands there and not on the page's first.
+
+**A click on space with nothing focusable keeps focus where it was.** A press
+moves focus only when the router finds a focusable node at or above the hit
+target; a click on a label, on a panel's padding or on a toolbar's empty
+stretch changes nothing, for a mouse and for a touch alike. This is deliberate
+and matches Qt and AppKit: the caret stays in the field while the user clicks
+around it. Browsers blur instead. An app that wants that behaviour opts in on
+its background:
+
+```rust
+background.on_tap(|_, ctx| ctx.clear_focus())
+```
+
+**`clear_focus` is a move to nothing.** `ctx.clear_focus()` (deferred like the
+other requests; calls made after it in the same handler still apply) and
+`WidgetTree::clear_focus()` (immediate, for tests and code outside a handler)
+leave nothing focused, with everything a focus move carries: `FocusLost` on the
+node that had focus, every `focus_within` on its ancestors turned `false`, a
+data view's selection shown as unfocused, the focus ring hidden, a non-modal
+overlay that focus was in closed as on Tab-away, the accessibility tree
+updated, and any pending request cancelled. Focus is set to `None` before
+`FocusLost` is delivered, so a `FocusLost` handler that puts focus somewhere
+else makes an ordinary move.
 
 An assistive technology's `Action::Focus` takes the same walk, but only from a node that **advertises the action**. A composite publishes one AT node on a root that is not itself focusable (a `ComboBox` or a `DateEdit` keeps focus on an inner leaf), and each adds `Action::Focus` in its own `accessibility()`, so the walk lands where the keys go. A `SpinBox` publishes its node on the focusable field itself, through `Widget::accessibility_proxy`, so a `Focus` there needs no walk. An editor publishes its node on a text body that is not focusable, through the same hook, so a `Focus` there puts the keyboard on the editor that body stands for. Everything else (a `Panel`, a `GroupBox`, a landmark, a label) is not focusable and offers no `Focus`; walking in from *any* non-focusable node moved the keyboard onto the first control inside it, a node the technology could have named itself and did not, and then reported success. Such a node now reports the action unhandled instead.
 

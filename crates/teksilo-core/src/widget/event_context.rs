@@ -221,6 +221,11 @@ pub struct EventContext<'ops> {
     /// header → into the tab panel), distinct from `focus_requests` which
     /// focuses the container itself as a last resort.
     pub(crate) focus_into_requests: Vec<crate::widget_id::WidgetId>,
+    /// Drop keyboard focus once this handler returns. Applied before
+    /// `focus_requests` / `focus_into_requests`, which
+    /// [`clear_focus`](EventContext::clear_focus) empties as it is queued, so
+    /// the order of the calls is the order of the effects.
+    pub(crate) clear_focus_requested: bool,
     /// Rect-based "scroll this into view" requests, stated in the **queuing
     /// widget's own bounds space** — window coordinates everywhere except
     /// inside a content transform (a `SceneView`'s scene coordinates), which
@@ -539,6 +544,7 @@ impl<'ops> EventContext<'ops> {
             synthetic_clicks: Vec::new(),
             focus_requests: Vec::new(),
             focus_into_requests: Vec::new(),
+            clear_focus_requested: false,
             scroll_into_view_requests: Vec::new(),
             scroll_widget_into_view_requests: Vec::new(),
             highlight_tooltip_requests: Vec::new(),
@@ -1875,8 +1881,44 @@ impl<'ops> EventContext<'ops> {
 
     /// Transfer focus to a specific widget. Use this when opening overlay
     /// content (menus, dialogs) that should receive keyboard events.
+    ///
+    /// The request is applied when the handler returns. If `id` is
+    /// **dormant** at that moment — a `Switcher` page or a `visible_when`
+    /// branch the same handler has just asked to show — focus moves when the
+    /// next layout pass has woken it, and the request is dropped if that pass
+    /// leaves it hidden. A later focus move, or
+    /// [`clear_focus`](Self::clear_focus), cancels a request still waiting.
     pub fn request_focus(&mut self, id: crate::widget_id::WidgetId) {
         self.focus_requests.push(id);
+    }
+
+    /// Drop keyboard focus once this handler returns, so that nothing is
+    /// focused.
+    ///
+    /// A click on space that holds no focusable widget leaves focus where it
+    /// was — the desktop convention (Qt, AppKit), and what keeps a caret alive
+    /// while the user clicks a label or a toolbar's empty stretch. An app that
+    /// wants the browser behaviour instead, where a click on empty space drops
+    /// focus, puts this on its background:
+    ///
+    /// ```ignore
+    /// background.on_tap(|_, ctx| ctx.clear_focus())
+    /// ```
+    ///
+    /// It is a focus move to nothing, with everything a move carries:
+    /// `FocusLost` on the node that had focus, `focus_within` signals turned
+    /// `false`, the focus ring hidden, a non-modal overlay focus was in closed,
+    /// the accessibility tree updated. It also cancels a focus request still
+    /// waiting for a dormant target (see [`request_focus`](Self::request_focus)),
+    /// and any `request_focus` / `request_focus_into` this handler queued
+    /// before it; one queued after it still applies.
+    ///
+    /// The immediate form, for tests and code outside a handler, is
+    /// [`WidgetTree::clear_focus`](crate::widget_tree::WidgetTree::clear_focus).
+    pub fn clear_focus(&mut self) {
+        self.focus_requests.clear();
+        self.focus_into_requests.clear();
+        self.clear_focus_requested = true;
     }
 
     /// Move focus **into** the content of `id`: focus its first focusable
@@ -1890,6 +1932,10 @@ impl<'ops> EventContext<'ops> {
     /// with focusable content lands on its first control; a panel that opted
     /// into focusability itself (no inner controls) lands on the panel; a bare
     /// panel with neither leaves focus where it was.
+    ///
+    /// A dormant `id` is handled as in [`request_focus`](Self::request_focus):
+    /// the first focusable descendant is chosen once the next layout pass has
+    /// woken it.
     pub fn request_focus_into(&mut self, id: crate::widget_id::WidgetId) {
         self.focus_into_requests.push(id);
     }

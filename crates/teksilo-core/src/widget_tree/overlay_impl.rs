@@ -1005,7 +1005,7 @@ impl WidgetTree {
     pub(super) fn dismiss_overlays_left_by_focus(
         &mut self,
         old: Option<WidgetId>,
-        new_focus: WidgetId,
+        new_focus: Option<WidgetId>,
         ops: &mut dyn crate::window::WindowOps,
     ) {
         let Some(old) = old else {
@@ -1019,7 +1019,9 @@ impl WidgetTree {
         // where Escape would have put you — so Shift+Tab off the front of a
         // popover closes it rather than parking an open panel under the focus
         // ring of the button that owns it.
-        let new_overlay = self.overlay_ancestor_for_widget(new_focus);
+        // `None` is focus cleared outright (`WidgetTree::clear_focus`), which
+        // leaves every overlay it was in.
+        let new_overlay = new_focus.and_then(|id| self.overlay_ancestor_for_widget(id));
 
         // Focus went *deeper* into the same cascade — a submenu opening off its
         // parent, a picker inside a popover. Nothing was left behind.

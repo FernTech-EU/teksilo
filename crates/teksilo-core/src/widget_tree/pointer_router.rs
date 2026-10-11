@@ -3121,6 +3121,15 @@ impl WidgetTree {
             // multi-window API this dispatch already has in hand.
             self.synthesise_tap_with_ops(id, &mut *ops);
         }
+        // `clear_focus` first: it emptied the two request lists as it was
+        // queued, so anything still in them was requested after it.
+        if ctx.clear_focus_requested {
+            self.clear_focus_ops(&mut *ops);
+        }
+        // Both request kinds go through `request_focus_with_ops`, which holds
+        // a request for a dormant node (a page this same handler is showing)
+        // until the next layout pass has woken it, rather than focusing a node
+        // the pass's revalidation would take focus straight back from.
         if let Some(&id) = ctx.focus_requests.last() {
             // If the requested widget is itself not focusable (e.g. a
             // composite like `TextInput` whose focus-handling lives on
@@ -3131,8 +3140,7 @@ impl WidgetTree {
             // ids. `first_focusable_descendant` returns the node itself
             // when it's focusable, so the usual leaf-target case is
             // still a no-op lookup.
-            let target = self.first_focusable_descendant(id).unwrap_or(id);
-            self.focus_ops(target, &mut *ops);
+            self.request_focus_with_ops(id, super::FocusRequestMode::SelfOrDescendant, &mut *ops);
         }
         if let Some(&id) = ctx.focus_into_requests.last() {
             // "Focus into" semantics: land on the first focusable descendant
@@ -3141,9 +3149,7 @@ impl WidgetTree {
             // focusable in its own right) leaves focus untouched rather than
             // trapping it on a non-interactive node. Drives Enter-on-a-tab →
             // into the tab panel.
-            if let Some(target) = self.first_focusable_descendant(id) {
-                self.focus_ops(target, &mut *ops);
-            }
+            self.request_focus_with_ops(id, super::FocusRequestMode::Into, &mut *ops);
         }
 
         // Rect-based "scroll this into view" requests (`ctx.ensure_visible`).
