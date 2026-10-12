@@ -3629,6 +3629,82 @@ mod tests {
         assert_eq!(tree.current_cursor(), CursorIcon::Default);
     }
 
+    /// A leaf that declares its cursor from `build()` through
+    /// `apply_self_handlers`, the route a composing widget takes.
+    #[derive(Debug)]
+    struct SelfDeclared(CursorIcon);
+
+    impl crate::widget::Widget for SelfDeclared {
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            ctx.apply_self_handlers(crate::widget_builder::HandlerSet::new().cursor(self.0));
+            Vec::new()
+        }
+
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(100.0, 50.0).into()
+        }
+    }
+
+    /// A test reads the cursor two ways: `current_cursor` is the window's
+    /// running answer and follows the hover, `declared_cursor` is what a node
+    /// asks for and does not care where the pointer is. Both declaration
+    /// routes (`.cursor(..)` and `apply_self_handlers`) land in the latter,
+    /// and "declares nothing" is `None`, distinct from declaring `Default`.
+    #[test]
+    fn declared_cursor_reads_what_a_node_asks_for_and_current_cursor_follows_the_hover() {
+        let over = Point::new(50.0, 25.0);
+        let away = Point::new(200.0, 200.0);
+
+        // `.cursor(..)` through the builder.
+        let mut tree = WidgetTree::new();
+        let built = tree.add(FillWidget::new().cursor(CursorIcon::ColResize));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(tree.declared_cursor(built), Some(CursorIcon::ColResize));
+        assert_eq!(
+            tree.current_cursor(),
+            CursorIcon::Default,
+            "not hovered yet"
+        );
+        tree.pointer_move(over);
+        assert_eq!(tree.current_cursor(), CursorIcon::ColResize);
+        assert_eq!(tree.declared_cursor(built), Some(CursorIcon::ColResize));
+        tree.pointer_move(away);
+        assert_eq!(tree.current_cursor(), CursorIcon::Default);
+        assert_eq!(
+            tree.declared_cursor(built),
+            Some(CursorIcon::ColResize),
+            "the declaration does not depend on the pointer",
+        );
+
+        // `apply_self_handlers` in `build()`.
+        let mut tree = WidgetTree::new();
+        let own = tree.add(SelfDeclared(CursorIcon::Crosshair));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(tree.declared_cursor(own), Some(CursorIcon::Crosshair));
+        tree.pointer_move(over);
+        assert_eq!(tree.current_cursor(), CursorIcon::Crosshair);
+        tree.pointer_move(away);
+        assert_eq!(tree.current_cursor(), CursorIcon::Default);
+
+        // Nothing declared, and an explicit `Default`.
+        let mut tree = WidgetTree::new();
+        let plain = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(tree.declared_cursor(plain), None);
+        let mut tree = WidgetTree::new();
+        let explicit = tree.add(FillWidget::new().cursor(CursorIcon::Default));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(
+            tree.declared_cursor(explicit),
+            Some(CursorIcon::Default),
+            "declaring the default cursor is not declaring nothing",
+        );
+    }
+
     /// A handler's `set_cursor` outlives its dispatch, so a handler that
     /// re-decides the cursor on every move needs a way to stop deciding.
     ///

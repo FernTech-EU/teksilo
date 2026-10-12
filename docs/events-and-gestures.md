@@ -314,6 +314,20 @@ chain declared none), so it cannot disagree with the mechanism it defers to, and
 it is a no-op for a handler that never spoke. Call it unconditionally rather
 than tracking whether you once set a cursor.
 
+**Reading the cursor in a test.** Two accessors, and they answer different
+questions:
+
+| Reader | Answers | Moves when |
+|---|---|---|
+| `tree.current_cursor()` | The cursor the window would show now (what `teksilo-app` hands to the OS), including any handler override | The hover owner enters or leaves a node, or a handler calls `set_cursor` / `release_cursor`. Not on a move within one node, so it is stale if a node's `.cursor(..)` changes under a pointer that does not move. |
+| `tree.declared_cursor(id)` | What node `id` itself declares, through `.cursor(..)` or `apply_self_handlers(HandlerSet::new().cursor(..))`, wherever the pointer is | The declaration changes (a rebuild). It never sees a handler override. |
+
+`declared_cursor` is `None` for a node that declares nothing, which leaves the
+cursor as it was on entry, and `Some(CursorIcon::Default)` for one that
+declares the default cursor, which resets it. The automation `inspect_node` /
+`layout_tree` tools report the declaration as `cursor`, and `query_pointers`
+reports the current cursor (see [automation-mcp.md](automation-mcp.md)).
+
 ### 3.1.4 Context-menu factory: `Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>`
 
 Context menus live at a different tier from the four tap-family hooks. Instead of a recognizer-driven callback, the framework wires a single **factory** that produces the menu widget on demand. Four things reach it, a secondary press, the `Shift+F10` / Menu chord, the AccessKit `ShowContextMenu` action, and a **hold** on a pointer that cannot hover (a finger has no secondary button; see [`touch_route`](../crates/teksilo-core/src/widget_tree/touch_route.rs)), and all four go through one `show_context_menu_for`, which walks up the parent chain looking for the nearest ancestor with a factory installed, calls it with the click position (window-local) plus a full `EventContext`, and:

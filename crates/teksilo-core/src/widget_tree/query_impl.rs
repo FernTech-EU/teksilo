@@ -266,8 +266,39 @@ impl WidgetTree {
         self.pending_modal_dismissal
     }
 
+    /// The cursor the window would show right now.
+    ///
+    /// This is what `teksilo-app` hands to the OS after each pointer
+    /// dispatch. It is the tree's running answer, not a function of the
+    /// widgets: the hovered chain's `.cursor(..)` declaration is written into
+    /// it on `PointerEnter` and undone (back to `Default`) on `PointerLeave`,
+    /// and a handler's `ctx.set_cursor(..)` / `ctx.release_cursor()` moves it
+    /// within a dispatch. So it follows the *hover owner* (a mouse, or a pen
+    /// in proximity; a touch contact never hovers), and it changes when the
+    /// pointer enters or leaves a node, never on the moves in between.
+    ///
+    /// It can therefore go **stale**: if a node's cursor is changed (a rebuild
+    /// re-declaring it, for one) under a pointer that does not move, nothing
+    /// re-applies it until the next enter / leave pair. Read
+    /// [`declared_cursor`](Self::declared_cursor) for what a node asks for
+    /// regardless of where the pointer is.
     pub fn current_cursor(&self) -> crate::widget::CursorIcon {
         self.current_cursor
+    }
+
+    /// The cursor a node *declares* for itself, if it declares one.
+    ///
+    /// Reads what `.cursor(..)` (or `HandlerSet::cursor` through
+    /// `BuildContext::apply_self_handlers`) recorded on the node, whatever the
+    /// pointer is doing; it says nothing about a handler's `ctx.set_cursor(..)`
+    /// override, which lives only in [`current_cursor`](Self::current_cursor).
+    ///
+    /// `None` means the node declares nothing: entering it leaves the cursor
+    /// as it was. `Some(CursorIcon::Default)` is a different answer, an
+    /// explicit declaration of the default cursor, which entering the node
+    /// does apply. `None` for an id that is not in the tree.
+    pub fn declared_cursor(&self, id: WidgetId) -> Option<crate::widget::CursorIcon> {
+        self.arena.get(id).and_then(|node| node.node_cursor)
     }
 
     /// The widget currently under the pointer, if any. The framework
