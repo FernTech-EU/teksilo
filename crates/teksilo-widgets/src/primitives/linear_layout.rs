@@ -289,6 +289,11 @@ pub(crate) fn response(n: &Negotiated) -> LayoutResponse {
 /// still-shrinkable children. Terminates in at most `O(n)` rounds; any residual
 /// deficit (every shrinkable child at its floor, or none shrinkable) is left as
 /// unavoidable overflow.
+///
+/// The weights are proportional, not strict priorities: a child at its floor
+/// hands its remaining share on to the others, and a rigid child (`shrink == 0`)
+/// never takes any. A weight 1000 times a sibling's therefore empties that child
+/// first and leaves the sibling a sub-pixel loss until it has done so.
 fn distribute_deficit(
     mut deficit: f32,
     active: &[bool],

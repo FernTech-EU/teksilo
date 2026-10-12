@@ -52,7 +52,11 @@ impl std::fmt::Debug for PendingChild {
 ///   the widget below this. Defaults to `size` (i.e. "I do not shrink").
 /// - `shrink` — negative-slack **shrink** weight. `0.0` = will not compress
 ///   (the widget overflows before it shrinks); `> 0.0` = absorbs a share of an
-///   over-constraint deficit proportional to its weight, down to `min`.
+///   over-constraint deficit proportional to its weight, down to `min`. The
+///   stack distributes iteratively: a child that reaches `min` is frozen there
+///   and hands its remaining share on to the other shrinkable children; a
+///   rigid sibling never shrinks. Weights are proportional, so to shrink A fully
+///   before B starts give A a much larger weight (for example 1000 times B's).
 ///
 /// `flex` and `shrink` are independent — as in CSS flexbox (`flex-grow` vs
 /// `flex-shrink`), a widget may grow but not shrink, or shrink but not grow.

@@ -22,6 +22,15 @@
 //! - A thumbnail image column that may compress while a fixed sidebar stays at full width.
 //! - "Compress A before B": give A `Shrinkable`, leave B rigid (`shrink = 0`).
 //!
+//! ## Ordering shrink between children
+//!
+//! The stack distributes a deficit iteratively. A child that reaches its floor is
+//! frozen at it, and its unspent share goes on to the other shrinkable children;
+//! a rigid sibling never shrinks. Weights are proportional, not strict priorities:
+//! to shrink A fully before B starts, give A a much larger weight (say 1000 times
+//! B's). B then loses only a sub-pixel amount until A reaches its floor, and takes
+//! the rest of the deficit from there.
+//!
 //! ```rust
 //! # use teksilo_widgets::primitives::{HStack, Shrinkable, TextWidget};
 //! # use teksilo_i18n::lit;
@@ -55,6 +64,12 @@ use teksilo_core::widget_id::WidgetId;
 ///     .child(Shrinkable::new().min_width(40.0).child(long_label))
 ///     .child(icon); // rigid — never shrinks
 /// ```
+///
+/// The stack distributes a deficit iteratively: a child that reaches its floor
+/// is frozen there and hands its remaining share on to the other shrinkable
+/// children, and a rigid sibling never shrinks. To shrink A fully before B
+/// starts, give A a much larger [`shrink`](Self::shrink) weight (for example
+/// 1000 times B's); B then loses only a sub-pixel amount until A is at its floor.
 ///
 /// `Shrinkable` preserves its child's grow weight (`flex`) and cross size, so a
 /// child can both grow on surplus and shrink on a deficit. It forwards the

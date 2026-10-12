@@ -225,6 +225,8 @@ HStack::new()
 
 **"Compress A before B"** = give A `shrink > 0` and B `shrink = 0`: A absorbs the entire deficit (down to its floor) before B is touched.
 
+**Ordering shrink between children.** The stack distributes a deficit iteratively. A child that reaches its floor is frozen there and hands its remaining share on to the other shrinkable children; a rigid sibling never shrinks. Weights are proportional, not strict priorities, so to shrink A fully before B starts, give A a much larger weight (say 1000 times B's). B then loses only a sub-pixel amount until A is at its floor, and takes the rest of the deficit from there.
+
 **Native shrink (no wrapper needed).** Single-line / ellipsis `TextWidget` opts in for you: it reports `shrink = 1` with a `min` of the ellipsis-glyph width, so display labels truncate-to-fit (tune with `.min_shrink_width`, disable with `.no_shrink`). **Controls (`Button`, `IconButton`, `Badge`, `ComboBox`) are deliberately rigid**, a truncated *action* reads poorly, so the desktop convention is to overflow excess actions into a menu rather than shrink them (see [`Toolbar`](../crates/teksilo-widgets/src/toolbar.rs)). The wrappers `Padding` / `ZStack` / `MinSize` propagate `flex` + `shrink` + `min`, so a shrinkable child stays shrinkable through them, and a stack advertises its aggregate grow/shrink to its parent only on its own main axis.
 
 ### 3.5 Height-for-width

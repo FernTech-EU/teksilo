@@ -368,6 +368,49 @@ mod tests {
     }
 
     #[test]
+    fn a_much_larger_weight_shrinks_one_child_to_its_floor_first() {
+        // figures (wanted 200, floor 40, weight 1000) vs slot (wanted 100,
+        // floor 0, weight 1) next to a rigid 80. The slot loses a sub-pixel
+        // share until the figures reach their floor; the figures then freeze
+        // and the slot takes what is left. The rigid child never moves.
+        let layout = |bounds: f32| {
+            let mut tree = WidgetTree::new();
+            let figures = tree.add(ShrinkLeaf {
+                wanted: 200.0,
+                min: 40.0,
+                shrink: 1000.0,
+                height: 20.0,
+            });
+            let slot = tree.add(ShrinkLeaf {
+                wanted: 100.0,
+                min: 0.0,
+                shrink: 1.0,
+                height: 20.0,
+            });
+            let rigid = tree.add(FixedLeaf(80.0, 20.0));
+            let _stack = tree.add(HStack::new().child(figures).child(slot).child(rigid));
+            tree.layout(SizeProposal::exact(bounds, 40.0));
+            (
+                tree.bounds(figures).width,
+                tree.bounds(slot).width,
+                tree.bounds(rigid).width,
+            )
+        };
+
+        // Deficit 180: the figures give 160 and freeze, the slot gives 20.
+        let (figures, slot, rigid) = layout(200.0);
+        assert!((figures - 40.0).abs() < 0.5, "figures={figures}");
+        assert!((slot - 80.0).abs() < 0.5, "slot={slot}");
+        assert!((rigid - 80.0).abs() < 0.01, "rigid={rigid}");
+
+        // Deficit 80: the figures have room for all of it, the slot barely moves.
+        let (figures, slot, rigid) = layout(300.0);
+        assert!((figures - 120.0).abs() < 0.5, "figures={figures}");
+        assert!((slot - 100.0).abs() < 0.5, "slot={slot}");
+        assert!((rigid - 80.0).abs() < 0.01, "rigid={rigid}");
+    }
+
+    #[test]
     fn no_shrink_weight_overflows_unchanged() {
         // A rigid child still overflows (no silent shrink without opt-in).
         let mut tree = WidgetTree::new();
