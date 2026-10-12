@@ -481,6 +481,18 @@ is heard on the next arrival, the same on all three.
 
 All headless. Assertions go through `WidgetTree::accessibility_node(id)` (synthetic snapshot) or `WidgetTree::sync_accessibility()` (full TreeUpdate, useful when checking pruning, custom_actions, controls relationships, etc.).
 
+What a screen reader is *told*, as opposed to what the tree holds, is read with `WidgetTree::announcements_since(seq)`: every announcement the platform adapters would have spoken from the updates `sync_accessibility()` has returned, a `ctx.announce(…)` and a live region's change alike. Take the last `seq` before the action, act, sync once, and read what came after:
+
+```rust
+let seq = tree.announcements_since(0).last().map_or(0, |a| a.seq);
+tree.press_key(Key::Enter, Modifiers::NONE);   // a handler calls ctx.announce("Saved")
+tree.sync_accessibility();
+let said: Vec<String> = tree.announcements_since(seq).into_iter().map(|a| a.text).collect();
+assert_eq!(said, ["Saved"]);
+```
+
+The sync is what records them, so nothing is there before it. A tree built with `WidgetTree::new()` records from its first update; the tree of a window `teksilo-app` opens records only when the automation bridge is installed.
+
 A test about what a screen reader is told as a node leaves the tree and comes back reads the update the platform adapter is handed, `WidgetTree::deliver_accessibility(window_focused)`, through `accesskit_consumer`. `sync_accessibility()` keeps every node's own id; a node that returns is handed a new one on its way to the adapter, because the AT-SPI adapter announced the old one defunct as it left.
 
 ```rust

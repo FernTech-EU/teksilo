@@ -207,6 +207,58 @@ instead of panicking, which is the id `HeadlessApp` gives its stub window. A
 future that awaits `spawn_blocking` needs several ticks while the worker
 finishes; loop on `tick` until `pending_len()` is non-zero, then drain.
 
+### Events from an `EventSource`
+
+The data path needs no executor, but it does need a poster. A source publishes
+on its own thread, the framework hands each event to the tree's
+`AppEventPoster`, and the app's event loop runs the `subscribe_event` callback
+on the UI thread. A headless tree has no event loop, so a test gives the tree a
+poster that keeps what it is given, then replays it:
+
+```rust
+use std::any::Any;
+use std::sync::{Arc, Mutex};
+use teksilo::core::event_source::{SubscriptionId, TreeAppContext};
+use teksilo::core::{AppEventPoster, EventSourceAdapter};
+
+#[derive(Default)]
+struct Recorder(Mutex<Vec<(SubscriptionId, Box<dyn Any + Send>)>>);
+
+impl AppEventPoster for Recorder {
+    fn post_subscription_event(&self, sub_id: SubscriptionId, event: Box<dyn Any + Send>) {
+        self.0.lock().unwrap().push((sub_id, event));
+    }
+}
+
+let poster = Arc::new(Recorder::default());
+let mut tree = WidgetTree::new();
+// Before the widgets are added: their build() registers the subscriptions.
+tree.set_app_context(Rc::new(TreeAppContext::with_source_and_poster(
+    EventSourceAdapter::new(bus.clone()),   // your EventSource
+    poster.clone(),
+)));
+tree.add(MyPanel::new());
+tree.layout(SizeProposal::exact(400.0, 300.0));
+
+bus.publish(Event::Saved);                  // reaches the poster, not the widget
+for (sub_id, event) in poster.0.lock().unwrap().drain(..) {
+    tree.app_context().dispatch_subscription_event(sub_id, &*event);
+}
+```
+
+A `subscribe_event_with_ctx` callback takes an `EventContext`, so it is
+replayed inside `run_with_event_context`. The tree is borrowed there, so clone
+the app context first:
+
+```rust
+let app = tree.app_context().clone();
+for (sub_id, event) in poster.0.lock().unwrap().drain(..) {
+    tree.run_with_event_context(&mut NoopWindowOps, |ctx| {
+        app.dispatch_subscription_event_with_ctx(sub_id, &*event, ctx);
+    });
+}
+```
+
 ## Limitations
 
 - `spawn_local` futures cannot hold an `EventContext` across `.await`; ambient

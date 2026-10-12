@@ -318,6 +318,12 @@ by crate for clarity, not because crates version independently.
 - The scroll-to methods of the data views' builders say that they act at
   call time against the last layout; `ListView::scroll_to_index` claimed a
   call before the first layout was applied later.
+- The testing notes say how to read what a screen reader is told
+  (`announcements_since` after one `sync_accessibility`), how to deliver
+  `subscribe_event` callbacks in a headless tree (a poster that records,
+  replayed through `dispatch_subscription_event`), and that a press and a
+  release sent through `dispatch_pointer` form a tap, as `click` and
+  `tap_with` do in one call.
 
 ## [0.16.0] - 2026-10-09
 

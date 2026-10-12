@@ -1211,6 +1211,12 @@ Also there: `pen_down` / `pen_move` / `pen_up` / `pen_hover`, `touch_cancel`,
 `synthesise_tap(id)` still runs the preview-bubble walk with a fabricated event
 where only the handler matters.
 
+A press and a release built by hand as `PointerSample`s and handed to
+`dispatch_pointer` form a tap as well, whatever timestamps the test gives them,
+so `on_tap`, `Button::on_activate_fn` and a composing widget's own `on_tap` all
+fire. For a tap in one call, `click(id)` taps the centre of a widget and
+`tap_with(PointerKind::Mouse, point)` a point.
+
 Timing-sensitive behaviour, a long press, a multi-tap window, a fling, a
 press-feedback delay, an animation, runs on the tree's **one** simulated clock:
 `advance_time(Duration)` moves all of them together. Nothing sleeps, and nothing

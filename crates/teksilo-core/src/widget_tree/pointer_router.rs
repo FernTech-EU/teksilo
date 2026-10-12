@@ -224,6 +224,11 @@ impl WidgetTree {
     /// door exists and that the sample's
     /// [`PointerInfo`](crate::pointer::PointerInfo) is visible to handlers
     /// through [`EventContext::pointer`](crate::widget::EventContext::pointer).
+    ///
+    /// A `Down` and an `Up` sample at the same point form a tap, whatever
+    /// timestamps a test gives them. For a whole gesture in one call a test
+    /// has [`click`](Self::click) (the centre of a widget) and
+    /// [`tap_with`](Self::tap_with) (a point, for any pointer kind).
     pub fn dispatch_pointer(&mut self, sample: crate::pointer::PointerSample) {
         let mut noop = crate::window::NoopWindowOps;
         self.dispatch_pointer_with_ops(sample, &mut noop);
@@ -7213,6 +7218,34 @@ mod input_ingress_tests {
             events.iter().any(|e| e.contains("button: Primary")),
             "{events:?}"
         );
+    }
+
+    /// A mouse press and release delivered as samples, as a test writes them
+    /// by hand with timestamps of its own, form a tap: the sample door reaches
+    /// the tap recognizer, not only raw `on_pointer_event` handlers. A port
+    /// review reported the opposite for 0.16.0 and it did not reproduce; this
+    /// pins it, with a stamp unrelated to the tree's clock on purpose.
+    #[test]
+    fn a_sampled_press_and_release_form_a_tap() {
+        let taps = Rc::new(std::cell::Cell::new(0));
+        let seen = taps.clone();
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().on_tap(move |_event, _ctx| seen.set(seen.get() + 1)));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let at = Point::new(50.0, 50.0);
+        tree.dispatch_pointer(PointerSample::mouse(
+            PointerPhase::Down,
+            at,
+            EventTime::from_millis(0),
+        ));
+        tree.dispatch_pointer(PointerSample::mouse(
+            PointerPhase::Up,
+            at,
+            EventTime::from_millis(5),
+        ));
+
+        assert_eq!(taps.get(), 1);
     }
 
     // --- scroll routing --------------------------------------------------
