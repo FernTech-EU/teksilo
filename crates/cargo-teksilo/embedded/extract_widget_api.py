@@ -4251,6 +4251,65 @@ def merge_submodule_items(reg: "Registry", pf: ParsedFile) -> ParsedFile:
     )
 
 
+_SPLIT_IMPL_TEXT: "dict[Path, str]" = {}
+
+
+def merge_split_impls(reg: "Registry", pf: ParsedFile) -> ParsedFile:
+    """Fold into each type of `pf` the inherent methods its crate writes in
+    other files.
+
+    A large type spreads its `impl` blocks over several files: `WidgetTree`
+    over a dozen (`widget_tree/test_api.rs` alone holds `click`, `tap_with`
+    and 41 more), `TreeView` keeps its builder in `tree_view/builder.rs`,
+    `SceneView` its builder and camera in `view/`. Reading only the file
+    that defines the type left all of that out of a lookup, and an agent
+    took a missing method for one that does not exist: the headless test
+    helpers were found through failing tests instead.
+
+    Only inherent `impl Name` blocks are merged (the parser skips trait
+    impls), in file order, after the type's own methods.
+    """
+    names = {it.name for it in pf.items if it.kind in ("struct", "enum")}
+    if not names:
+        return pf
+    pattern = re.compile(
+        r"^\s*impl\b[^\n{;]*?\b(" + "|".join(sorted(map(re.escape, names))) + r")\b[^\n;]*\{",
+        re.M,
+    )
+    extra: dict[str, list[Item]] = {}
+    for fp in sorted(reg.files):
+        if fp == pf.file_path:
+            continue
+        text = _SPLIT_IMPL_TEXT.get(fp)
+        if text is None:
+            try:
+                text = fp.read_text(encoding="utf-8")
+            except OSError:
+                text = ""
+            _SPLIT_IMPL_TEXT[fp] = text
+        if not pattern.search(text):
+            continue
+        other = parse_file(fp, fp.stem, reg.cfg_by_file.get(fp.resolve(), []))
+        for it in other.items:
+            if it.kind == "external" and it.name in names and it.methods:
+                extra.setdefault(it.name, []).extend(it.methods)
+    if not extra:
+        return pf
+    items = []
+    for it in pf.items:
+        more = extra.get(it.name)
+        if more and it.kind in ("struct", "enum"):
+            have = {m.signature for m in it.methods}
+            added = [m for m in more if m.signature not in have]
+            it = Item(
+                kind=it.kind, name=it.name, signature=it.signature, doc=it.doc,
+                hidden=it.hidden, cfg=it.cfg, variants=it.variants, fields=it.fields,
+                restricted_fields=it.restricted_fields, methods=it.methods + added,
+            )
+        items.append(it)
+    return ParsedFile(pf.module_name, pf.file_path, pf.header_doc, pf.cfg, items)
+
+
 # Every generated page carries this line; `index.md` does not, and neither does
 # a hand-written guide. `_prune_stale_pages` requires it before deleting, so
 # pointing `--md-dir` at a directory of notes cannot destroy them.
@@ -4301,8 +4360,11 @@ def cmd_md_dir(
     # and impl-split modules carry none, so they get no catalog page.
     target = [fp for fp in reg.files if reg.widget_display.get(fp)]
     parsed = [
-        merge_submodule_items(
-            reg, parse_file(fp, fp.stem, reg.cfg_by_file.get(fp.resolve(), []))
+        merge_split_impls(
+            reg,
+            merge_submodule_items(
+                reg, parse_file(fp, fp.stem, reg.cfg_by_file.get(fp.resolve(), []))
+            ),
         )
         for fp in target
     ]
@@ -4824,6 +4886,24 @@ def _test_import_paths() -> None:
     assert best("crates/teksilo-scene/src/items.rs", "ItemA11yOverrides") is None
 
 
+def _test_split_impls() -> None:
+    """A type's methods written in other files of its crate reach its entry."""
+    def methods(key: str, name: str) -> "set[str]":
+        reg = _registry_for(key)
+        fp = resolve_name(reg, name)
+        assert fp is not None, name
+        pf = merge_split_impls(reg, parse_file(fp, fp.stem, reg.cfg_by_file.get(fp.resolve(), [])))
+        return {m.name for it in pf.items if it.name == name for m in it.methods}
+
+    tree = methods("core", "WidgetTree")
+    # The test API lives in widget_tree/test_api.rs, the pointer door in
+    # widget_tree/pointer_router.rs: none of it is in widget_tree.rs.
+    for name in ("tap_with", "click", "touch_down", "advance_time", "tab_stops_within", "dispatch_pointer"):
+        assert name in tree, name
+    # tree_view/builder.rs
+    assert {"new_with_context", "scroll_signal"} <= methods("widgets", "TreeView")
+
+
 def run_self_tests() -> int:
     """Smoke tests for the catalog generator (`--test`). stdlib-only, runs
     against the live source tree."""
@@ -4835,6 +4915,7 @@ def run_self_tests() -> int:
     _test_variant_lookup()
     _test_builder_defaults()
     _test_import_paths()
+    _test_split_impls()
     _test_prune()
     _test_density_images()
     _test_summary_scope()
@@ -5228,6 +5309,9 @@ def main(argv: list[str]) -> int:
         return cmd_md_dir(reg, args.md_dir, args.api_base, _api_dir())
 
     file_cfg: dict[Path, list[str]] = {}
+    # The registry each named lookup resolved in, for merging split impls;
+    # `--all` prints every file already, so it merges nothing.
+    file_reg: dict[Path, Registry] = {}
     # Names that are methods or free functions rather than types.
     member_pages: list[ParsedFile] = []
     if args.all:
@@ -5309,6 +5393,7 @@ def main(argv: list[str]) -> int:
                 seen.add(fp)
                 target_files.append(fp)
                 file_cfg[fp] = used_reg.cfg_by_file.get(fp.resolve(), [])
+                file_reg[fp] = used_reg
     else:
         parser.print_help(sys.stderr)
         print(
@@ -5320,6 +5405,8 @@ def main(argv: list[str]) -> int:
     parsed: list[ParsedFile] = []
     for fp in target_files:
         pf = parse_file(fp, fp.stem, file_cfg.get(fp, []))
+        if fp in file_reg:
+            pf = merge_split_impls(file_reg[fp], pf)
         parsed.append(pf)
     parsed.extend(member_pages)
 

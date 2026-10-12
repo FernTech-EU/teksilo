@@ -21,8 +21,46 @@ TreeView — a virtualized, expandable/collapsible hierarchical list widget.
 
 | Returns | Function |
 | ---: | :--- |
+| | **Constructors** |
+| `Self` | [`new(model: TreeModel<T>, delegate: impl Fn(&T, &FlatEntry, bool) -> Box<dyn Widget> + 'static)`](#treeview-new) |
+| `Self` | [`new_with_context(model: TreeModel<T>, delegate: impl Fn(&T, &FlatEntry, bool, &TreeRowContext<'_, T>) -> Box<dyn Widget> + 'static)`](#treeview-new_with_context) |
+| `Self` | [`from_source<S: TreeDataSource<Item = T>>(source: S, delegate: impl Fn(&T, &TreeRow, bool) -> Box<dyn Widget> + 'static)`](#treeview-from_source) |
+| `Self` | [`from_source_keyed<S: TreeDataSource<Item = T>>(source: S, keyed: KeyedSelectionModel<S::Key>, delegate: impl Fn(&T, &TreeRow, bool) -> Box<dyn Widget> + 'static)`](#treeview-from_source_keyed) |
+| | **Builder methods** |
+| `Self` | [`enabled(enabled: impl Into<Prop<bool>>)`](#treeview-enabled) |
+| `Self` | [`overscroll_behavior(behavior: OverscrollBehavior)`](#treeview-overscroll_behavior) |
+| `Self` | [`item_height(height: f32)`](#treeview-item_height) |
+| `Self` | [`smooth_scrolling(enabled: bool)`](#treeview-smooth_scrolling) |
+| `Self` | [`smooth_scroll_duration(duration: Duration)`](#treeview-smooth_scroll_duration) |
+| `Self` | [`scroll_signal(scroll: Signal<f32>)`](#treeview-scroll_signal) |
+| `Self` | [`scroll_bar_style(style: ScrollBarMode)`](#treeview-scroll_bar_style) |
+| `Self` | [`item_height_fn(f: impl Fn(usize) -> f32 + 'static)`](#treeview-item_height_fn) |
+| `Self` | [`auto_item_height(estimated: f32)`](#treeview-auto_item_height) |
+| `Self` | [`row_click_expands(b: bool)`](#treeview-row_click_expands) |
+| `Self` | [`selection(sel: SelectionModel)`](#treeview-selection) |
+| `Self` | [`keyed_selection(keyed: KeyedSelectionModel<NodeId>)`](#treeview-keyed_selection) |
+| `Self` | [`reorderable(enabled: bool)`](#treeview-reorderable) |
+| `Self` | [`exportable(mode: DragTransferMode)`](#treeview-exportable) |
+| `Self` | [`export_external(f: impl Fn(&[T]) -> Vec<(String, Vec<u8>)> + 'static)`](#treeview-export_external) |
+| `Self` | [`on_rows_transferred_out(f: impl Fn(&[usize], &mut teksilo_core::widget::EventContext) + 'static)`](#treeview-on_rows_transferred_out) |
+| `Self` | [`accept_foreign_rows(accept: bool)`](#treeview-accept_foreign_rows) |
+| `Self` | [`on_rows_received(f: impl Fn(Vec<T>, usize, &mut teksilo_core::widget::EventContext) + 'static)`](#treeview-on_rows_received) |
+| `Self` | [`on_activate(f: impl Fn(usize, &mut teksilo_core::widget::EventContext) + 'static)`](#treeview-on_activate) |
+| `Self` | [`activate_on(mode: crate::data_views::ActivateOn)`](#treeview-activate_on) |
+| `Self` | [`row_tooltip_sticky(on: bool)`](#treeview-row_tooltip_sticky) |
+| `Self` | [`row_tooltip(f: impl Fn(usize, &T) -> Option<teksilo_i18n::LocalizedString> + 'static)`](#treeview-row_tooltip) |
+| `Self` | [`row_rich_tooltip(f: impl Fn(usize, &T) -> Option<crate::tooltip::RichTooltipSource> + 'static)`](#treeview-row_rich_tooltip) |
+| `Self` | [`row_composite_tooltip(f: impl Fn(usize, &T) -> Option<Box<dyn teksilo_core::widget::Widget>> + 'static)`](#treeview-row_composite_tooltip) |
+| `Self` | [`type_ahead_label(label: impl Fn(&T) -> String + 'static)`](#treeview-type_ahead_label) |
+| `Self` | [`type_ahead_timeout(timeout: Duration)`](#treeview-type_ahead_timeout) |
 | | **Methods** |
 | `TreeViewHandle` | [`handle()`](#treeview-handle) |
+|  | [`expand(node: teksilo_data::NodeId)`](#treeview-expand) |
+|  | [`collapse(node: teksilo_data::NodeId)`](#treeview-collapse) |
+|  | [`toggle(node: teksilo_data::NodeId)`](#treeview-toggle) |
+|  | [`expand_all()`](#treeview-expand_all) |
+|  | [`collapse_all()`](#treeview-collapse_all) |
+| `Option<&TreeSlice<T>>` | [`tree_slice()`](#treeview-tree_slice) |
 
 ### `TreeRowContext`
 
@@ -208,6 +246,388 @@ A handle that scrolls this tree once it is mounted.
 Take it while describing the tree, before the view is handed to
 `ctx.add(...)`; it stays attached to the view across rebuilds. See
 `TreeViewHandle`.
+
+<a id="treeview-new"></a>
+
+#### `pub fn new( model: TreeModel<T>, delegate: impl Fn(&T, &FlatEntry, bool) -> Box<dyn Widget> + 'static, ) -> Self`
+
+Create a new TreeView backed by a `TreeModel<T>`.
+
+The delegate receives `(&item, &FlatEntry, selected)` and returns a
+boxed widget. The `FlatEntry` provides `depth`, `has_children`, and
+`is_expanded` for rendering indentation and expand/collapse toggles.
+
+<a id="treeview-new_with_context"></a>
+
+#### `pub fn new_with_context( model: TreeModel<T>, delegate: impl Fn(&T, &FlatEntry, bool, &TreeRowContext<'_, T>) -> Box<dyn Widget> + 'static, ) -> Self`
+
+Like `new`, but the delegate also receives a
+`TreeRowContext` from which `.toggle_callback()` can be
+pulled in a single line — eliminating the need to manually
+clone the slice handle outside the closure.
+
+```rust
+# use teksilo_widgets::{TreeView, StandardTreeItem};
+# use teksilo_data::TreeModel;
+# use teksilo_i18n::lit;
+# struct Item { title: String }
+# let model: TreeModel<Item> = TreeModel::new();
+let _w = TreeView::new_with_context(model, |item, entry, selected, ctx| {
+    Box::new(
+        StandardTreeItem::new(lit!(&item.title))
+            .from_entry(entry)
+            .selected(selected)
+            .on_chevron_toggle_rc(ctx.toggle_callback())
+    )
+});
+```
+
+<a id="treeview-from_source"></a>
+
+#### `pub fn from_source<S: TreeDataSource<Item = T>>( source: S, delegate: impl Fn(&T, &TreeRow, bool) -> Box<dyn Widget> + 'static, ) -> Self`
+
+Create a TreeView backed by any `TreeDataSource` — an external source of
+truth (e.g. an entity store) carrying its own `Key`, so it needs no
+`TreeModel` mirror. The delegate receives `(&item, &TreeRow, selected)`;
+`TreeRow` exposes `depth` / `has_children` / `is_expanded` and a one-call
+chevron `toggle_callback()`. Drop validation + lazy windowing route
+through the source's `can_accept` / `accept_drop` / `row_state`.
+
+<a id="treeview-from_source_keyed"></a>
+
+#### `pub fn from_source_keyed<S: TreeDataSource<Item = T>>( source: S, keyed: KeyedSelectionModel<S::Key>, delegate: impl Fn(&T, &TreeRow, bool) -> Box<dyn Widget> + 'static, ) -> Self where S::Key: ItemKey,`
+
+Like `from_source` but with **keyed** selection: the
+`KeyedSelectionModel<S::Key>` tracks selection by source identity, so it
+survives expand / collapse / filter / reorder and stays consistent across
+two views of the same source. The view stays `TreeView<T>` — the `Key` is
+captured here. Pruning consults the source's
+`contains_key`, so a
+collapsed-but-present node keeps its selection.
+
+<a id="treeview-enabled"></a>
+
+#### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
+
+Enable or disable the whole view. A disabled view greys out and stops
+accepting focus / selection / keyboard input (arena-gated).
+
+<a id="treeview-overscroll_behavior"></a>
+
+#### `pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self`
+
+Set the scroll-chaining behavior at the boundary (default
+`OverscrollBehavior::Chain`; `Contain`
+disables chaining to an ancestor scrollable).
+
+<a id="treeview-item_height"></a>
+
+#### `pub fn item_height(mut self, height: f32) -> Self`
+
+Set the fixed height per row (default 28.0) — the uniform fast
+path. Mutually exclusive with `item_height_fn`
+and `auto_item_height`; the last mode
+setter wins.
+
+<a id="treeview-smooth_scrolling"></a>
+
+#### `pub fn smooth_scrolling(mut self, enabled: bool) -> Self`
+
+Enable or disable animated wheel scrolling (enabled by default).
+When disabled, wheel events snap immediately to the new offset.
+
+<a id="treeview-smooth_scroll_duration"></a>
+
+#### `pub fn smooth_scroll_duration(mut self, duration: Duration) -> Self`
+
+Duration of the smooth scroll animation (default 150 ms).
+
+<a id="treeview-scroll_signal"></a>
+
+#### `pub fn scroll_signal(mut self, scroll: Signal<f32>) -> Self`
+
+**Scroll from a signal the caller owns**, so the position survives the
+view.
+
+A `TreeView` mints its own by default, which is right for a tree whose
+lifetime is the writer's: it is created once and scrolls until they leave.
+It is wrong for one inside a dock, whose content is torn down and rebuilt
+whenever the layout changes -- opening a panel beside it, or the first
+reveal of the band a result previews into. The tree comes back at the top,
+and the row the writer was reading is somewhere above it.
+
+Hold the signal wherever the *model* lives and the position outlives the
+widget, as the expand set already does.
+
+⚠ Pass an **animated** signal (`Signal::new_animated`) unless smooth
+scrolling is off: the view animates this one, and a plain signal makes
+every wheel notch a jump.
+
+<a id="treeview-scroll_bar_style"></a>
+
+#### `pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self`
+
+How the scroll bar is displayed (default `Permanent`). `Overlay`
+and `Thin` float the bar over the content instead of reserving a
+layout column for it, mirroring `ScrollArea::scroll_bar_style`.
+
+<a id="treeview-item_height_fn"></a>
+
+#### `pub fn item_height_fn(mut self, f: impl Fn(usize) -> f32 + 'static) -> Self`
+
+Per-row heights from a callback over the *flat (visible) index*.
+The callback must be pure (same index + same data → same height);
+it is re-swept from the first changed flat index on every model
+change or expand/collapse. No measurement pass runs.
+
+<a id="treeview-auto_item_height"></a>
+
+#### `pub fn auto_item_height(mut self, estimated: f32) -> Self`
+
+Auto-measured row heights: each realized row is measured at the
+tree's content width (height-for-width), unrealized rows assume
+`estimated`. Scroll anchoring keeps content above the viewport
+stationary as estimates are corrected; measured heights above a
+toggled row survive expand/collapse (divergence-driven
+invalidation).
+
+<a id="treeview-row_click_expands"></a>
+
+#### `pub fn row_click_expands(mut self, b: bool) -> Self`
+
+Whether a row-body PointerUp on a branch row auto-toggles its
+expansion (default `true`). Set to `false` when the delegate
+provides its own chevron tap target (e.g. `StandardTreeItem`)
+— without this, the auto-toggle fires in addition to the
+chevron's own click and they cancel out, leaving the row
+expanded only on body clicks.
+
+<a id="treeview-selection"></a>
+
+#### `pub fn selection(mut self, sel: SelectionModel) -> Self`
+
+Set the index-based selection model (visible positions). Unlike
+`ListView` (where every structural change carries an insert/remove
+`DataChange` the selection index-shifts against), a `TreeView`'s
+structural changes — including expand/collapse — surface only as a
+version bump, with no delta to shift a *selected index* by. The
+keyboard cursor tracks its row by identity (a `RowAnchor`), and in a
+**single** selection the view keeps the cursor on the selected row, so
+the selection follows that row to its new position. In a **multiple**
+selection a moved row's old index is only clamped into range, not
+followed. A selected row that disappears — removed, or hidden by a
+collapse — leaves the selection at its clamped position in either mode.
+For selection that survives all of these, use
+`keyed_selection` instead.
+
+<a id="treeview-keyed_selection"></a>
+
+#### `pub fn keyed_selection(mut self, keyed: KeyedSelectionModel<NodeId>) -> Self`
+
+Set a keyed selection model (by `NodeId`). Selection is tracked by node
+identity, so it survives expand / collapse, filtering, and node moves —
+and stays consistent if two views share the model. Pruned of deleted
+nodes on each slice change. Mutually exclusive with
+`selection` (last one set wins).
+
+<a id="treeview-reorderable"></a>
+
+#### `pub fn reorderable(mut self, enabled: bool) -> Self`
+
+Enable intra-widget drag reordering.
+
+When enabled, tree rows can be dragged to reparent or reorder them.
+Before/Into/After is chosen by where in the row the pointer drops; the
+move is cycle-guarded — a drop onto the node itself or into its own
+subtree is refused and shows no insertion line. Keyboard equivalent:
+Alt+ArrowUp/Down.
+
+<a id="treeview-exportable"></a>
+
+#### `pub fn exportable(mut self, mode: DragTransferMode) -> Self where T: Clone,`
+
+Make rows **droppable outside this view** — on a
+`DropTarget`, another data view, or the OS.
+
+A dragged row (or the whole selection, when the pressed row is part of a
+multi-selection) carries clones of its items in a public
+`RowDragData<T>`, so a foreign receiver can pull
+them out with `payload.get_typed::<RowDragData<T>>()` /
+`DropTarget::on_drop_typed::<RowDragData<T>>()` — no serialization. This
+also makes rows a drag source even without `reorderable`.
+
+`mode` chooses what happens to the origin rows once a *foreign* target
+accepts them: `DragTransferMode::Move` removes them (via the source's
+`on_drag_out`, or `on_rows_transferred_out`),
+`DragTransferMode::Copy` leaves them. A same-view reorder is never a
+transfer, so `mode` never affects it. Requires `T: Clone`.
+
+<a id="treeview-export_external"></a>
+
+#### `pub fn export_external(mut self, f: impl Fn(&[T]) -> Vec<(String, Vec<u8>)> + 'static) -> Self where T: Clone,`
+
+Additionally advertise the dragged rows as MIME data so they can be
+dropped on a `DropZone` or exported to another
+application / window via the OS. `f` maps the dragged items to
+`(mime_type, bytes)` pairs (e.g. `text/plain`, `text/uri-list`, an
+app-specific `application/x-…`). Implies `exportable`
+(defaulting to `DragTransferMode::Move` if not already set). Requires
+`T: Clone`.
+
+<a id="treeview-on_rows_transferred_out"></a>
+
+#### `pub fn on_rows_transferred_out( mut self, f: impl Fn(&[usize], &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
+
+Override how rows moved out to a foreign target are removed from this
+view. Receives the dragged rows' indices (descending-safe) and the live
+context. Without this, an `exportable`
+`Move` drag removes them through the source's
+`on_drag_out` (works out of the box for a `TreeSlice`/`TreeModel`).
+
+<a id="treeview-accept_foreign_rows"></a>
+
+#### `pub fn accept_foreign_rows(mut self, accept: bool) -> Self`
+
+Accept exported rows dropped from a **different** view or source without
+writing a custom `TreeDataSource`. Pair with
+`on_rows_received`, which is handed the dropped
+items and the insertion index. (Same-view reorder is
+`reorderable`; a custom `TreeDataSource` can still
+accept foreign drops through its `can_accept`/`accept_drop` instead.)
+
+<a id="treeview-on_rows_received"></a>
+
+#### `pub fn on_rows_received( mut self, f: impl Fn(Vec<T>, usize, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
+
+Handler for rows accepted via `accept_foreign_rows`:
+`(items, insertion_index, ctx)`. Insert them into your model at the
+index.
+
+<a id="treeview-on_activate"></a>
+
+#### `pub fn on_activate( mut self, f: impl Fn(usize, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
+
+Set the row-**activation** handler — invoked with the flat row index on a
+primary click on the row body (per `activate_on`,
+which defaults to a double click), or **Enter** on the focused row.
+Activation is distinct from *selection*: arrow-key navigation and
+**Space** move / toggle the selection but do **not** activate, so a view
+can open/commit a row on a deliberate click/Enter without firing on
+every navigation step.
+
+<a id="treeview-activate_on"></a>
+
+#### `pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self`
+
+Choose single- vs double-click activation (default
+`ActivateOn::DoubleClick` — the cross-platform
+convention; pass `SingleClick` for the
+KDE/web/Scrivener feel). Enter activates in either mode.
+
+<a id="treeview-row_tooltip_sticky"></a>
+
+#### `pub fn row_tooltip_sticky(mut self, on: bool) -> Self`
+
+Whether a composite row tooltip offers dwell-to-sticky promotion.
+Default `true`.
+
+Turn it off for a read-only row card: with nothing to reach into there
+is nothing to pin, so the countdown indicator would promise an
+interaction that does not exist and the surface would outlive the
+pointer for no reason.
+
+<a id="treeview-row_tooltip"></a>
+
+#### `pub fn row_tooltip( mut self, f: impl Fn(usize, &T) -> Option<teksilo_i18n::LocalizedString> + 'static, ) -> Self`
+
+Per-row plain tooltip: one line of text for the row under the pointer.
+
+The resolver receives the row's flat index and its item; returning
+`None` leaves that row without a tip. Mutually exclusive with
+`row_rich_tooltip` and
+`row_composite_tooltip` — last setter
+wins, matching the per-widget tooltip matrix.
+
+Opens to the row's trailing side, never below it: rows stack
+vertically, so a tip below would cover the next row.
+
+<a id="treeview-row_rich_tooltip"></a>
+
+#### `pub fn row_rich_tooltip( mut self, f: impl Fn(usize, &T) -> Option<crate::tooltip::RichTooltipSource> + 'static, ) -> Self`
+
+Per-row rich tooltip — a registry key or inline
+`TooltipContent`, both of which
+convert into `RichTooltipSource`.
+See `row_tooltip` for the shared semantics.
+
+<a id="treeview-row_composite_tooltip"></a>
+
+#### `pub fn row_composite_tooltip( mut self, f: impl Fn(usize, &T) -> Option<Box<dyn teksilo_core::widget::Widget>> + 'static, ) -> Self`
+
+Per-row composite tooltip — an arbitrary widget tree describing the row.
+
+The body is built for every **realized** row (the virtualization window)
+and rebuilt with it, so keep the resolver cheap and defer anything
+costly to the body's own first paint, which only runs if the tip is
+actually shown. See `row_tooltip` for the rest.
+
+<a id="treeview-type_ahead_label"></a>
+
+#### `pub fn type_ahead_label(mut self, label: impl Fn(&T) -> String + 'static) -> Self`
+
+Enable **type-ahead** ("type to jump"): typing a printable character
+while the tree has keyboard focus jumps the selection to the next
+*visible* row whose label starts with the accumulated search term,
+wrapping around (Qt `keyboardSearch` / macOS & Windows type-select).
+`label(&item)` yields the searchable text; matching is
+ASCII-case-insensitive. A pause longer than the
+`type_ahead_timeout` starts a fresh term.
+
+<a id="treeview-type_ahead_timeout"></a>
+
+#### `pub fn type_ahead_timeout(mut self, timeout: Duration) -> Self`
+
+Reset window between keystrokes before the type-ahead search term
+clears (default 500 ms). A zero duration disables type-ahead.
+
+<a id="treeview-expand"></a>
+
+#### `pub fn expand(&self, node: teksilo_data::NodeId)`
+
+Expand a node programmatically. No-op on the `from_source` path (which
+owns its own expand state — use the source's `set_expanded`).
+
+<a id="treeview-collapse"></a>
+
+#### `pub fn collapse(&self, node: teksilo_data::NodeId)`
+
+Collapse a node programmatically. No-op on the `from_source` path.
+
+<a id="treeview-toggle"></a>
+
+#### `pub fn toggle(&self, node: teksilo_data::NodeId)`
+
+Toggle a node's expand/collapse state. No-op on the `from_source` path.
+
+<a id="treeview-expand_all"></a>
+
+#### `pub fn expand_all(&self)`
+
+Expand all nodes. No-op on the `from_source` path.
+
+<a id="treeview-collapse_all"></a>
+
+#### `pub fn collapse_all(&self)`
+
+Collapse all nodes. No-op on the `from_source` path.
+
+<a id="treeview-tree_slice"></a>
+
+#### `pub fn tree_slice(&self) -> Option<&TreeSlice<T>>`
+
+Access the internal `TreeSlice` (for persistence of expand state).
+`None` on the `from_source` path, which has no
+`TreeSlice` (the external source owns expand state).
 
 <a id="treeviewhandle"></a>
 

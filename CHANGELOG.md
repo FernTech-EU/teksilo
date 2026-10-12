@@ -287,6 +287,12 @@ by crate for clarity, not because crates version independently.
   Paint` the rich text editor's `paint.rs`: a module of the same name in the
   searched crate hid the type the umbrella re-exports. Both, and `Path`,
   `Rect`, `Theme` and `Color` under `--crate`, now resolve to that type.
+- **`symbol` and the catalog pages left out the methods a type defines in
+  other files.** `WidgetTree` showed 134 of its 322: none of the test API
+  (`click`, `tap_with`, `touch_down`, `advance_time`, `tab_stops_within`)
+  or of `dispatch_pointer`. `TreeView` showed 1 of 37, `SceneView` 2 of 93
+  and `OverlayManager` 48 of 49. A type now lists every inherent method its
+  crate writes for it.
 
 #### Documentation
 
