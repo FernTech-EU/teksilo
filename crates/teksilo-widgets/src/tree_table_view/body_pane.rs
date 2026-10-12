@@ -38,6 +38,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_data::{DragEligibility, RowState};
 
 use crate::common::row_metrics::SharedRowMetrics;
+use crate::common::row_reveal::{RevealAlign, SharedRowReveal};
 use crate::data_views::{RowSelection, ViewId, default_placeholder};
 use crate::primitives::{HStack, Padding, TwistArrow};
 use crate::styles::recipe_table_style as cp;
@@ -173,6 +174,11 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     /// with the `TreeTableView` root (see `table_view::body_pane::BodyPane::cell_map`).
     /// Overwritten wholesale at the end of every `build()`.
     pub(crate) cell_map: Rc<RefCell<Vec<((usize, usize), WidgetId)>>>,
+    /// The pending [`TreeTableViewHandle`](crate::TreeTableViewHandle)
+    /// reveal, applied in `place_children` after the measure pass — this
+    /// pane is where the row offsets settle, and the scroll anchoring with
+    /// them.
+    pub(crate) reveal: SharedRowReveal,
 }
 
 /// The chevron's click on a realized row: toggles whichever row the anchor
@@ -244,6 +250,37 @@ pub(super) fn tree_chrome(
 }
 
 impl<T: 'static> TreeBodyPane<T> {
+    /// Apply the pending handle reveal against the settled row offsets of
+    /// this pass. `viewport` is the pane's own height. Below the pinned
+    /// ancestors when the view pins any, as `TreeTableView::scroll_to_row` /
+    /// `ensure_row_visible` reveal.
+    fn apply_reveal(&self, viewport: f32) {
+        let count = self.source.visible_count();
+        let measured = |row: usize| {
+            !self.row_metrics.borrow().needs_measure()
+                || self.row_entries.iter().any(|&(i, _)| i == row)
+        };
+        self.reveal
+            .apply(&self.scroll_y, count, measured, |row, align, scroll| {
+                let max = (self.row_metrics.borrow_mut().total_height(count) - viewport).max(0.0);
+                match (&self.pinned_reveal, align) {
+                    (Some(pinned), RevealAlign::Top) => pinned
+                        .top_for(row)
+                        .map_or(scroll, |top| top.clamp(0.0, max)),
+                    (Some(pinned), RevealAlign::Nearest) => {
+                        pinned.scroll_for(row, scroll, viewport, max)
+                    }
+                    (None, RevealAlign::Top) => {
+                        self.row_metrics.borrow_mut().row_top(row).clamp(0.0, max)
+                    }
+                    (None, RevealAlign::Nearest) => self
+                        .row_metrics
+                        .borrow_mut()
+                        .scroll_for_ensure_visible(row, scroll, viewport, max),
+                }
+            });
+    }
+
     fn visible_range(&self) -> (usize, usize) {
         self.row_metrics.borrow_mut().visible_range(
             self.scroll_y.get(),
@@ -361,6 +398,8 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
         // Self-rebuild trigger (persistent handle — see field doc).
         let version = self.version.clone();
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        // A handle's reveal request re-places this pane, which applies it.
+        self.reveal.bind(ctx);
 
         // Scroll position re-places rows without rebuilding (within buffer).
         self.scroll_y.bind_to(
@@ -1228,6 +1267,10 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 self.total_refresh.set(self.total_refresh.get() + 1);
             }
         }
+
+        // A handle's reveal, now that the measure pass and the anchoring have
+        // settled the offsets it is computed from.
+        self.apply_reveal(bounds.height);
 
         let scroll_y = self.scroll_y.get();
         for (i, child) in children.iter_mut().enumerate() {

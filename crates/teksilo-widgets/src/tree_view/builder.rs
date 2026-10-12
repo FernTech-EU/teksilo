@@ -192,6 +192,7 @@ impl<T: 'static> TreeView<T> {
             placed_content_width: Rc::new(Cell::new(0.0)),
             tree_id: view_id,
             enabled: Prop::Static(true),
+            reveal: RowReveal::new(),
         }
     }
 

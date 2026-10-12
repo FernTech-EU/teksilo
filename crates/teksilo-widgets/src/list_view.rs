@@ -39,6 +39,33 @@
 //! item; the insertion line shows on which side of the header the dropped
 //! rows land (see [`sections`](ListView::sections)).
 //!
+//! ## Scrolling to an item
+//!
+//! [`handle`](ListView::handle) returns a [`ListViewHandle`], a cheap `Clone`
+//! taken before the view is added and usable from any handler afterwards. Its
+//! [`scroll_to_index`](ListViewHandle::scroll_to_index) and
+//! [`ensure_index_visible`](ListViewHandle::ensure_index_visible) are applied at
+//! the next layout pass, after row measurement and scroll anchoring, so they
+//! may follow a model change in the same turn, or be called before mount:
+//!
+//! ```rust
+//! # use teksilo_widgets::ListView;
+//! # use teksilo_widgets::primitives::TextWidget;
+//! # use teksilo_data::ListModel;
+//! # use teksilo_i18n::lit;
+//! # let model: ListModel<String> = ListModel::from_vec(vec!["Alpha".into()]);
+//! let list = ListView::new(model.clone(), |_i, item, _selected| {
+//!     Box::new(TextWidget::new(lit!(item)))
+//! });
+//! let handle = list.handle();
+//! // … `ctx.add(list)`; then, from a handler:
+//! model.insert(0, "Fresh".into());
+//! handle.ensure_index_visible(0);
+//! ```
+//!
+//! The builder-value methods of the same names compute the offset when they
+//! are called, against the last layout pass.
+//!
 //! ## Pan to scroll
 //!
 //! The view installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior),
@@ -144,6 +171,7 @@ use teksilo_data::{DataChange, DropResponse, ListModel};
 // scope here and means something else (which data view a drag came from).
 use crate::common::list_nav;
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
+use crate::common::row_reveal::{RevealAlign, RowReveal, SharedRowReveal};
 use crate::common::scroll::OverscrollBehavior;
 use crate::data_views::{DragTransferMode, RowDragData, ViewId, ViewKind, flat_insertion_target};
 use crate::grid_view::sections::SectionProvider;
@@ -357,6 +385,10 @@ pub struct ListView<T: 'static> {
     /// Section headers the body pane realized in its latest build, so its
     /// scroll observer can tell when one it lacks comes into view.
     pane_built_headers: Rc<Cell<(usize, usize)>>,
+    /// The reveal a [`ListViewHandle`] asked for, applied by the body pane
+    /// after its measure pass. Created with the view so a handle taken before
+    /// mount reaches every pane the view builds.
+    reveal: SharedRowReveal,
 }
 
 impl<T: 'static> ListView<T> {
@@ -486,6 +518,7 @@ impl<T: 'static> ListView<T> {
             pinned_shown: Rc::new(Cell::new(None)),
             pinned_header_id: None,
             pane_built_headers: Rc::new(Cell::new((0, 0))),
+            reveal: RowReveal::new(),
         }
     }
 
@@ -1201,9 +1234,16 @@ impl<T: 'static> ListView<T> {
     }
 
     /// Scroll so the given model index is aligned to the top of the
-    /// viewport. Clamped to the valid scroll range. Safe to call before
-    /// the ListView has been laid out — the clamp will kick in on the
-    /// first layout pass.
+    /// viewport, now, against the scroll range and row offsets of the last
+    /// layout pass.
+    ///
+    /// The offset is computed and clamped when this is called, to the
+    /// [`max_scroll_y`](Self::max_scroll_y_signal) that pass wrote. Before the
+    /// view has been laid out that range is `0`, so the call scrolls to the
+    /// top and does nothing more; after a model change in the same turn the
+    /// range still describes the old list. On a list that is already mounted,
+    /// or to scroll before the first layout, use a [`handle`](Self::handle),
+    /// which defers the computation to the next layout pass.
     ///
     /// With [`sections`](Self::sections), the first item of a section brings
     /// its header to the top with it, and with
@@ -1220,6 +1260,10 @@ impl<T: 'static> ListView<T> {
     /// Scroll the minimum distance needed to bring the given model
     /// index fully into view. No-op if already visible. Sections are
     /// honoured as in [`scroll_to_index`](Self::scroll_to_index).
+    ///
+    /// Like `scroll_to_index`, this computes the offset when it is called,
+    /// against the viewport and scroll range of the last layout pass; a
+    /// [`handle`](Self::handle) defers it to the next one.
     pub fn ensure_index_visible(&self, index: usize) {
         let scroll = self.scroll_y.get();
         let new_scroll = self.geometry().scroll_for_ensure_visible(
@@ -1232,6 +1276,71 @@ impl<T: 'static> ListView<T> {
         if (new_scroll - scroll).abs() > f32::EPSILON {
             self.scroll_y.set(new_scroll);
         }
+    }
+
+    /// A handle that scrolls this list once it is mounted.
+    ///
+    /// Take it while describing the tree, before the view is handed to
+    /// `ctx.add(...)`; it stays attached to the view across rebuilds. See
+    /// [`ListViewHandle`].
+    pub fn handle(&self) -> ListViewHandle {
+        ListViewHandle {
+            reveal: self.reveal.clone(),
+        }
+    }
+}
+
+/// A handle on a mounted [`ListView`], to scroll it to an item from outside
+/// the widget — a view-model reacting to a search hit, a "jump to" command.
+///
+/// Cheap to clone, valid before the view is mounted, and it survives the
+/// view's rebuilds. Its methods never compute an offset when they are called:
+/// they record the request and ask for a layout pass, and the view applies it
+/// there, after row measurement and scroll anchoring have settled. So a model
+/// change made in the same turn (rows inserted above, say) is accounted for,
+/// a request made before mount is applied at the first layout, and a later
+/// request replaces an earlier pending one. A request on an empty list is
+/// dropped; an index past the end reveals the last item.
+///
+/// ```rust
+/// # use teksilo_widgets::ListView;
+/// # use teksilo_widgets::primitives::TextWidget;
+/// # use teksilo_data::ListModel;
+/// # use teksilo_i18n::lit;
+/// # let model: ListModel<String> = ListModel::from_vec(vec!["Alpha".into()]);
+/// let list = ListView::new(model, |_i, item, _selected| {
+///     Box::new(TextWidget::new(lit!(item)))
+/// });
+/// let handle = list.handle();
+/// // … `ctx.add(list)`, then later, from any handler:
+/// handle.scroll_to_index(120);
+/// ```
+#[derive(Clone)]
+pub struct ListViewHandle {
+    reveal: SharedRowReveal,
+}
+
+impl std::fmt::Debug for ListViewHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ListViewHandle")
+            .field("pending", &self.reveal.pending())
+            .finish()
+    }
+}
+
+impl ListViewHandle {
+    /// Scroll so the given model index is aligned to the top of the
+    /// viewport, as far as the scroll range allows, at the next layout pass.
+    /// Sections are honoured as in [`ListView::scroll_to_index`].
+    pub fn scroll_to_index(&self, index: usize) {
+        self.reveal.request(index, RevealAlign::Top);
+    }
+
+    /// Scroll the minimum distance that brings the given model index fully
+    /// into view, at the next layout pass; no scroll when it already is.
+    /// Sections are honoured as in [`ListView::ensure_index_visible`].
+    pub fn ensure_index_visible(&self, index: usize) {
+        self.reveal.request(index, RevealAlign::Nearest);
     }
 }
 
@@ -1251,3 +1360,6 @@ mod tests;
 
 #[cfg(test)]
 mod checkbox_keyboard_tests;
+
+#[cfg(test)]
+mod handle_tests;

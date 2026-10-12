@@ -26,6 +26,10 @@ impl<T: 'static> Widget for ListView<T> {
             ctx.binding_registry(),
             BindingLevel::Relayout,
         );
+        // A handle's reveal is applied by the body pane, which binds the same
+        // request; the root binds it too so the pass also refreshes the
+        // scroll range the pane clamps against.
+        self.reveal.bind(ctx);
         // Container focus ring: painted only while nothing is selected, so a
         // selection change has to reach the root's paint — without rebuilding
         // it and taking the scrollbar down with it.
@@ -836,6 +840,7 @@ impl<T: 'static> Widget for ListView<T> {
             child_kinds: Vec::new(),
             header_tab_stops: Vec::new(),
             presentational: self.presentational,
+            reveal: self.reveal.clone(),
         };
         self.body_pane_id = Some(ctx.add(pane));
 

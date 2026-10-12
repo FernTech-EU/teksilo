@@ -161,6 +161,51 @@ drop onto a row nothing is drawn for.
 
 ---
 
+## Scrolling to a row
+
+To bring a row into view from code, take the view's handle while building the
+tree, before the view is added, and keep it wherever the code that scrolls
+lives (a view-model, a search box's handler):
+
+```rust
+let table = TableView::new(model.clone()).add_column(name_col);
+let rows = table.handle();          // TableViewHandle; TreeTableViewHandle
+let table_id = ctx.add(table);
+
+// Later, from any handler, even in the same turn as a model change:
+model.insert(0, fresh_row);
+rows.ensure_row_visible(found);     // the minimum scroll, none if visible
+rows.scroll_to_row(found);          // or: align the row to the top
+```
+
+The handle is a cheap `Clone`, may be taken and used before the view is
+mounted, and survives the view's rebuilds. It never computes an offset when it
+is called: it records the request and asks for a layout pass, and the body
+pane applies it there, after the auto-measure pass and the scroll anchoring
+have settled the row offsets. Three consequences:
+
+- a request made before the first layout is applied at that layout;
+- a model change made in the same turn (rows inserted above, a
+  `TreeTableView` node expanded) is accounted for, including the larger
+  scroll range it makes;
+- with `auto_row_height`, the target's own height is a guess until the row is
+  realized, so the request is applied again on the pass that measures it.
+  The row lands where it should within a few frames, not on the first.
+
+A later request replaces a pending one. A request on a view with no rows is
+dropped; a row past the end reveals the last row. `TreeTableView` rows are
+flat visible indices, and with `pinned_ancestors` the row stops below its
+pinned ancestors, as every other reveal does.
+
+The views also have `scroll_to_row` / `ensure_row_visible` as methods on the
+builder value. Those compute the offset **when called**, against the scroll
+range and viewport of the last layout pass: before the first layout that range
+is zero, and after a same-turn model change it still describes the old rows.
+They are kept for code that already holds the view and has laid it out; prefer
+the handle.
+
+---
+
 ## Column model
 
 A column is a generic descriptor over the row type:

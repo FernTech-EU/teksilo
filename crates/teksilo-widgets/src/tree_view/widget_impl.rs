@@ -155,6 +155,10 @@ impl<T: 'static> Widget for TreeView<T> {
             ctx.binding_registry(),
             BindingLevel::Relayout,
         );
+        // A handle's reveal is applied by the body pane, which binds the same
+        // request; the root binds it too so the pass also refreshes the
+        // scroll range the pane clamps against.
+        self.reveal.bind(ctx);
         // Container focus ring: painted only while nothing is selected, so a
         // selection change has to reach the root's paint — without rebuilding
         // it and taking the scrollbar down with it.
@@ -1246,6 +1250,7 @@ impl<T: 'static> Widget for TreeView<T> {
             item_entries: Vec::new(),
             row_roots: Vec::new(),
             row_map: self.row_map.clone(),
+            reveal: self.reveal.clone(),
         };
         self.body_pane_id = Some(ctx.add(pane));
 

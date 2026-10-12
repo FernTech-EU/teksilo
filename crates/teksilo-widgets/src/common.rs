@@ -28,6 +28,7 @@ pub mod ordered_move;
 pub(crate) mod range_nav;
 pub(crate) mod row_metrics;
 pub(crate) mod row_offsets;
+pub(crate) mod row_reveal;
 pub(crate) mod scroll;
 pub mod scrollable;
 pub(crate) mod standard_edit;

@@ -35,6 +35,7 @@ use teksilo_data::{DragEligibility, RowState};
 
 use super::{BUFFER_ITEMS, RowDelegate};
 use crate::common::row_metrics::SharedRowMetrics;
+use crate::common::row_reveal::RevealAlign;
 use crate::data_views::{RowSelection, ViewId};
 use crate::tree_source::TreeSource;
 
@@ -117,9 +118,33 @@ pub(crate) struct TreeViewBodyPane<T: 'static> {
     /// a11y walk, the context-menu key target — can resolve a row index to a
     /// widget without reaching into this pane. Mirrors `ListView`'s `row_map`.
     pub(crate) row_map: Rc<RefCell<Vec<(usize, WidgetId)>>>,
+    /// The pending [`TreeViewHandle`](crate::TreeViewHandle) reveal, applied
+    /// in `place_children` after the measure pass — this pane is where the
+    /// row offsets settle, and the scroll anchoring with them.
+    pub(crate) reveal: crate::common::row_reveal::SharedRowReveal,
 }
 
 impl<T: 'static> TreeViewBodyPane<T> {
+    /// Apply the pending handle reveal against the settled row offsets of
+    /// this pass. `viewport` is the pane's own height.
+    fn apply_reveal(&self, viewport: f32, count: usize) {
+        let measured = |index: usize| {
+            !self.metrics.borrow().needs_measure()
+                || self.item_entries.iter().any(|&(i, _)| i == index)
+        };
+        self.reveal
+            .apply(&self.scroll_y, count, measured, |index, align, scroll| {
+                let mut m = self.metrics.borrow_mut();
+                let max = (m.total_height(count) - viewport).max(0.0);
+                match align {
+                    RevealAlign::Top => m.row_top(index).clamp(0.0, max),
+                    RevealAlign::Nearest => {
+                        m.scroll_for_ensure_visible(index, scroll, viewport, max)
+                    }
+                }
+            });
+    }
+
     fn visible_range(&self) -> (usize, usize) {
         self.metrics.borrow_mut().visible_range(
             self.scroll_y.get(),
@@ -147,6 +172,8 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
         // without rebuilding itself.
         let version = self.version.clone();
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        // A handle's reveal request re-places this pane, which applies it.
+        self.reveal.bind(ctx);
 
         // Scroll position re-places rows without rebuilding (within buffer).
         // Deliberately NOT `register_animated_signal`: the root owns that
@@ -724,10 +751,11 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
         crate::common::viewport::record_viewport_height(&self.viewport_height, bounds.height);
 
         let item_count = self.item_entries.len();
+        let count = self.source.visible_count();
         if item_count == 0 {
+            self.apply_reveal(bounds.height, count);
             return;
         }
-        let count = self.source.visible_count();
 
         // Auto-measure pass: measure every realized row at the pane width
         // (height-for-width), feed the heights back, and apply the
@@ -782,6 +810,10 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                 self.total_refresh.set(self.total_refresh.get() + 1);
             }
         }
+
+        // A handle's reveal, now that the measure pass and the anchoring have
+        // settled the offsets it is computed from.
+        self.apply_reveal(bounds.height, count);
 
         let scroll_y = self.scroll_y.get();
         for (idx, child) in children.iter_mut().enumerate() {

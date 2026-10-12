@@ -48,6 +48,14 @@ Use `Repeater` for small, changing groups of widgets. Use `ListView`, `TableView
 or `GridView` when rows or tiles need virtualization. For trees, keep expansion
 state per view when two views must expand independently.
 
+To bring an item into view after changing the model, do not compute a scroll
+offset from the model: take the view's handle (`ListView::handle`,
+`TreeView::handle`, `TableView::handle`, `TreeTableView::handle`) and call its
+`scroll_to_index` / `ensure_index_visible` (`scroll_to_row` /
+`ensure_row_visible` for the tables). The view applies the request at its next
+layout pass, once the change has reached the row heights, so it may follow the
+mutation in the same turn. See [table-view.md](table-view.md#scrolling-to-a-row).
+
 A view can share its selection model with another view. Match the selection key
 type to the source: index-based identity and stable domain identity have
 different behavior when items move or are filtered.

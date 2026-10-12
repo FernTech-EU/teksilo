@@ -41,6 +41,7 @@ use super::body::{BodyRow, SharedColumnWidths};
 use super::column::{CellContext, Column};
 use super::selection::{CellSelectionModel, TableSelectionMode};
 use crate::common::row_metrics::SharedRowMetrics;
+use crate::common::row_reveal::{RevealAlign, SharedRowReveal};
 use crate::data_views::deferred_select::PendingSelect;
 use crate::data_views::{RowSelection, ViewId, default_placeholder};
 use crate::table_view::column::EditTriggers;
@@ -175,9 +176,33 @@ pub(crate) struct BodyPane<T: 'static> {
     /// `accessibility()` reads it to resolve `active_descendant` for the
     /// keyboard-focused cell.
     pub(crate) cell_map: Rc<RefCell<Vec<((usize, usize), WidgetId)>>>,
+    /// The pending [`TableViewHandle`](crate::TableViewHandle) reveal,
+    /// applied in `place_children` after the measure pass — this pane is
+    /// where the row offsets settle, and the scroll anchoring with them.
+    pub(crate) reveal: SharedRowReveal,
 }
 
 impl<T: 'static> BodyPane<T> {
+    /// Apply the pending handle reveal against the settled row offsets of
+    /// this pass. `viewport` is the pane's own height (the body, below the
+    /// header and above any horizontal scroll bar).
+    fn apply_reveal(&self, viewport: f32) {
+        let count = (self.len_fn)();
+        let measured = |row: usize| {
+            !self.row_metrics.borrow().needs_measure()
+                || self.row_entries.iter().any(|&(i, _)| i == row)
+        };
+        self.reveal
+            .apply(&self.scroll_y, count, measured, |row, align, scroll| {
+                let mut m = self.row_metrics.borrow_mut();
+                let max = (m.total_height(count) - viewport).max(0.0);
+                match align {
+                    RevealAlign::Top => m.row_top(row).clamp(0.0, max),
+                    RevealAlign::Nearest => m.scroll_for_ensure_visible(row, scroll, viewport, max),
+                }
+            });
+    }
+
     fn visible_range(&self) -> (usize, usize) {
         self.row_metrics.borrow_mut().visible_range(
             self.scroll_y.get(),
@@ -211,6 +236,8 @@ impl<T: 'static> Widget for BodyPane<T> {
         // after measurement.
         let version = self.version.clone();
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        // A handle's reveal request re-places this pane, which applies it.
+        self.reveal.bind(ctx);
 
         // Scroll position re-places rows without rebuilding (within buffer).
         self.scroll_y.bind_to(
@@ -924,6 +951,10 @@ impl<T: 'static> Widget for BodyPane<T> {
                 self.total_refresh.set(self.total_refresh.get() + 1);
             }
         }
+
+        // A handle's reveal, now that the measure pass and the anchoring have
+        // settled the offsets it is computed from.
+        self.apply_reveal(bounds.height);
 
         let scroll_y = self.scroll_y.get();
         for (i, child) in children.iter_mut().enumerate() {

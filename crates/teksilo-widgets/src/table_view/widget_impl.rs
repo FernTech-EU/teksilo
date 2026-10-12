@@ -52,6 +52,10 @@ impl<T: 'static> Widget for TableView<T> {
             ctx.binding_registry(),
             BindingLevel::Relayout,
         );
+        // A handle's reveal is applied by the body pane, which binds the same
+        // request; the root binds it too, so a table with no pane (no rows)
+        // still gets the pass that drops it.
+        self.reveal.bind(ctx);
 
         // Column width overrides: any change re-runs place_children
         // (which calls ColumnSolver with the latest map). No rebuild
@@ -796,6 +800,7 @@ impl<T: 'static> Widget for TableView<T> {
                 row_roots: Vec::new(),
                 row_map: self.row_map.clone(),
                 cell_map: self.cell_map.clone(),
+                reveal: self.reveal.clone(),
             };
             self.body_pane_id = Some(ctx.add(pane));
             // An open cell editor also ends on a press that lands on no cell at
@@ -1027,6 +1032,13 @@ impl<T: 'static> Widget for TableView<T> {
             .set(Rect::new(band_left, body_origin_y, body_width, body_height));
 
         let mut next = 0;
+
+        // No body pane means no rows: there is nothing a handle's reveal could
+        // bring into view, so it is dropped rather than replayed onto rows
+        // that arrive later.
+        if self.body_pane_id.is_none() {
+            self.reveal.clear();
+        }
 
         // BodyPane fills the body region. It positions its rows
         // internally using its own scroll signal and clips them to

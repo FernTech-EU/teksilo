@@ -45,6 +45,7 @@ use teksilo_data::{DragEligibility, RowState};
 
 use super::BUFFER_ITEMS;
 use super::sections::{HeaderFactory, ListGeometry, SectionHeaderRow};
+use crate::common::row_reveal::RevealAlign;
 use crate::data_views::{RowSelection, ViewId, default_placeholder};
 use crate::list_source::ListSource;
 
@@ -160,9 +161,35 @@ pub(crate) struct ListBodyPane<T: 'static> {
     /// The owning view is [`presentational`](super::ListView::presentational):
     /// this pane and its row wrappers publish nothing.
     pub(crate) presentational: bool,
+    /// The pending [`ListViewHandle`](super::ListViewHandle) reveal, applied
+    /// in `place_children` after the measure pass — this pane is where the
+    /// row offsets settle, and the scroll anchoring with them.
+    pub(crate) reveal: crate::common::row_reveal::SharedRowReveal,
 }
 
 impl<T: 'static> ListBodyPane<T> {
+    /// Apply the pending handle reveal against the settled row offsets of
+    /// this pass. `viewport` is the pane's own height.
+    fn apply_reveal(&self, viewport: f32, count: usize) {
+        let measured = |index: usize| {
+            !self.geometry.metrics().borrow().needs_measure()
+                || self.item_entries.iter().any(|&(i, _)| i == index)
+        };
+        self.reveal
+            .apply(&self.scroll_y, count, measured, |index, align, scroll| {
+                let max = (self.geometry.total_height(count) - viewport).max(0.0);
+                match align {
+                    RevealAlign::Top => self
+                        .geometry
+                        .scroll_to_index_target(index, count)
+                        .clamp(0.0, max),
+                    RevealAlign::Nearest => self
+                        .geometry
+                        .scroll_for_ensure_visible(index, scroll, viewport, max, count),
+                }
+            });
+    }
+
     fn visible_range(&self) -> (usize, usize) {
         self.geometry.visible_range(
             self.scroll_y.get(),
@@ -235,6 +262,8 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         // it without rebuilding themselves.
         let version = self.version.clone();
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        // A handle's reveal request re-places this pane, which applies it.
+        self.reveal.bind(ctx);
 
         // Scroll position re-places rows without rebuilding (within buffer).
         // Deliberately NOT `register_animated_signal`: the root owns that
@@ -734,10 +763,11 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         // permanent rebuild loop (`common::viewport`).
         crate::common::viewport::record_viewport_height(&self.viewport_height, bounds.height);
 
+        let count = self.source.len();
         if self.child_kinds.is_empty() {
+            self.apply_reveal(bounds.height, count);
             return;
         }
-        let count = self.source.len();
 
         // Auto-measure pass: measure every realized row at the pane width
         // (height-for-width), feed the heights back, and apply the
@@ -802,6 +832,10 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                 self.total_refresh.set(self.total_refresh.get() + 1);
             }
         }
+
+        // A handle's reveal, now that the measure pass and the anchoring have
+        // settled the offsets it is computed from.
+        self.apply_reveal(bounds.height, count);
 
         let scroll_y = self.scroll_y.get();
         for (child, kind) in children.iter_mut().zip(&self.child_kinds) {

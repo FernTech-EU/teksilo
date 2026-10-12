@@ -16,6 +16,31 @@
 //! exact per-flat-index callback (`item_height_fn`), and auto-measured
 //! (`auto_item_height` — height-for-width per row, scroll-anchored).
 //!
+//! ## Scrolling to a row
+//!
+//! [`handle`](TreeView::handle) returns a [`TreeViewHandle`], a cheap `Clone`
+//! taken before the view is added and usable from any handler afterwards. Its
+//! [`scroll_to_index`](TreeViewHandle::scroll_to_index) and
+//! [`ensure_index_visible`](TreeViewHandle::ensure_index_visible) take a flat
+//! visible row index and are applied at the next layout pass, after row
+//! measurement and scroll anchoring, so they may follow an expansion in the
+//! same turn, or be called before mount:
+//!
+//! ```rust
+//! # use teksilo_widgets::TreeView;
+//! # use teksilo_widgets::primitives::TextWidget;
+//! # use teksilo_data::TreeModel;
+//! # use teksilo_i18n::lit;
+//! # let model: TreeModel<String> = TreeModel::new();
+//! let tree = TreeView::new(model, |item, _entry, _selected| {
+//!     Box::new(TextWidget::new(lit!(item)))
+//! });
+//! let handle = tree.handle();
+//! // … `ctx.add(tree)`; then, from a handler, after expanding the row's
+//! // ancestors in the same turn:
+//! handle.ensure_index_visible(42);
+//! ```
+//!
 //! ## Pan to scroll
 //!
 //! The view installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior),
@@ -95,6 +120,7 @@ use teksilo_data::{
 };
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
+use crate::common::row_reveal::{RevealAlign, RowReveal, SharedRowReveal};
 use crate::common::scroll::OverscrollBehavior;
 use crate::data_views::{DragTransferMode, RowDragData, RowSelection, ViewId, ViewKind};
 use crate::scroll_area::ScrollBarMode;
@@ -338,6 +364,10 @@ pub struct TreeView<T: 'static> {
     /// time; a disabled view greys out and stops accepting focus /
     /// selection / keyboard input (arena-gated).
     enabled: Prop<bool>,
+    /// The reveal a [`TreeViewHandle`] asked for, applied by the body pane
+    /// after its measure pass. Created with the view so a handle taken before
+    /// mount reaches every pane the view builds.
+    reveal: SharedRowReveal,
 }
 
 mod body_pane;
@@ -356,5 +386,80 @@ impl<T: 'static> std::fmt::Debug for TreeView<T> {
     }
 }
 
+impl<T: 'static> TreeView<T> {
+    /// A handle that scrolls this tree once it is mounted.
+    ///
+    /// Take it while describing the tree, before the view is handed to
+    /// `ctx.add(...)`; it stays attached to the view across rebuilds. See
+    /// [`TreeViewHandle`].
+    pub fn handle(&self) -> TreeViewHandle {
+        TreeViewHandle {
+            reveal: self.reveal.clone(),
+        }
+    }
+}
+
+/// A handle on a mounted [`TreeView`], to scroll it to a row from outside the
+/// widget — a view-model revealing the node a search found, say.
+///
+/// Rows are addressed by their **flat visible index**: the position of the row
+/// among the rows currently shown, counting the children of expanded nodes and
+/// skipping those of collapsed ones (the index the delegate's selection and the
+/// keyboard use).
+///
+/// Cheap to clone, valid before the view is mounted, and it survives the
+/// view's rebuilds. Its methods never compute an offset when they are called:
+/// they record the request and ask for a layout pass, and the view applies it
+/// there, after row measurement and scroll anchoring have settled. So a
+/// structural change made in the same turn (a node expanded above the target,
+/// say) is accounted for, a request made before mount is applied at the first
+/// layout, and a later request replaces an earlier pending one. A request on
+/// an empty tree is dropped; an index past the end reveals the last row.
+///
+/// ```rust
+/// # use teksilo_widgets::TreeView;
+/// # use teksilo_widgets::primitives::TextWidget;
+/// # use teksilo_data::TreeModel;
+/// # use teksilo_i18n::lit;
+/// # let model: TreeModel<String> = TreeModel::new();
+/// let tree = TreeView::new(model, |item, _entry, _selected| {
+///     Box::new(TextWidget::new(lit!(item)))
+/// });
+/// let handle = tree.handle();
+/// // … `ctx.add(tree)`; later, after expanding the node's ancestors:
+/// handle.ensure_index_visible(42);
+/// ```
+#[derive(Clone)]
+pub struct TreeViewHandle {
+    reveal: SharedRowReveal,
+}
+
+impl std::fmt::Debug for TreeViewHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TreeViewHandle")
+            .field("pending", &self.reveal.pending())
+            .finish()
+    }
+}
+
+impl TreeViewHandle {
+    /// Scroll so the row at the given flat visible index is aligned to the
+    /// top of the viewport, as far as the scroll range allows, at the next
+    /// layout pass.
+    pub fn scroll_to_index(&self, index: usize) {
+        self.reveal.request(index, RevealAlign::Top);
+    }
+
+    /// Scroll the minimum distance that brings the row at the given flat
+    /// visible index fully into view, at the next layout pass; no scroll
+    /// when it already is.
+    pub fn ensure_index_visible(&self, index: usize) {
+        self.reveal.request(index, RevealAlign::Nearest);
+    }
+}
+
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod handle_tests;

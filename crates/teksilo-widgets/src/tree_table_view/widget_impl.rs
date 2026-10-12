@@ -41,6 +41,10 @@ impl<T: 'static> Widget for TreeTableView<T> {
             ctx.binding_registry(),
             BindingLevel::Relayout,
         );
+        // A handle's reveal is applied by the body pane, which binds the same
+        // request; the root binds it too, so a view with no pane (no rows)
+        // still gets the pass that drops it.
+        self.reveal.bind(ctx);
 
         self.column_widths_signal.bind_to(
             ctx.self_id(),
@@ -882,6 +886,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 row_roots: Vec::new(),
                 row_map: self.row_map.clone(),
                 cell_map: self.cell_map.clone(),
+                reveal: self.reveal.clone(),
             };
             self.body_pane_id = Some(ctx.add(pane));
             if let Some(ref pinned_reveal) = pinned_reveal {
@@ -1141,6 +1146,13 @@ impl<T: 'static> Widget for TreeTableView<T> {
         };
 
         let mut next = 0;
+
+        // No body pane means no rows: there is nothing a handle's reveal could
+        // bring into view, so it is dropped rather than replayed onto rows
+        // that arrive later.
+        if self.body_pane_id.is_none() {
+            self.reveal.clear();
+        }
 
         // Body pane fills the body region; it positions its rows
         // internally and clips them to its own bounds.

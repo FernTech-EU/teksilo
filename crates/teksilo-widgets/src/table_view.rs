@@ -82,6 +82,30 @@
 //!     .row_height(32.0);
 //! ```
 //!
+//! ## Scrolling to a row
+//!
+//! [`handle`](TableView::handle) returns a [`TableViewHandle`], a cheap `Clone`
+//! taken before the table is added and usable from any handler afterwards. Its
+//! [`scroll_to_row`](TableViewHandle::scroll_to_row) and
+//! [`ensure_row_visible`](TableViewHandle::ensure_row_visible) are applied at
+//! the next layout pass, after row measurement and scroll anchoring, so they
+//! may follow a model change in the same turn, or be called before mount:
+//!
+//! ```rust
+//! # use teksilo_data::ListModel;
+//! # use teksilo_widgets::TableView;
+//! # let model: ListModel<String> = ListModel::new();
+//! let table = TableView::new(model.clone());
+//! let handle = table.handle();
+//! // … add the columns, `ctx.add(table)`; then, from a handler:
+//! model.insert(0, "Fresh".into());
+//! handle.ensure_row_visible(0);
+//! ```
+//!
+//! The builder-value methods of the same names compute the offset when they
+//! are called, against the last layout pass. See docs/table-view.md,
+//! "Scrolling to a row".
+//!
 //! ## Pan to scroll
 //!
 //! The view installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior),
@@ -112,6 +136,9 @@ mod widget_impl;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod handle_tests;
+
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -139,6 +166,7 @@ use teksilo_tokens::{BorderRole, OverscrollStyle, SurfaceRole};
 use crate::styles::recipe_table_style as cp;
 
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
+use crate::common::row_reveal::{RevealAlign, RowReveal, SharedRowReveal};
 use crate::common::scroll::OverscrollBehavior;
 use crate::data_views::{
     DragTransferMode, RowDragData, RowSelection, ViewId, ViewKind, flat_insertion_target,
@@ -414,6 +442,10 @@ pub struct TableView<T: 'static> {
     /// total; bound at `Relayout` on this root so `max_scroll_y` / the
     /// thumb ratio are recomputed with the corrected total next frame.
     pane_total_refresh: Signal<u64>,
+    /// The reveal a [`TableViewHandle`] asked for, applied by the body pane
+    /// after its measure pass. Created with the view so a handle taken before
+    /// mount reaches every pane the view builds.
+    reveal: SharedRowReveal,
 
     // Layout state
     /// Resolved widths in **display order** (parallel to
@@ -669,6 +701,7 @@ impl<T: 'static> TableView<T> {
             pane_built_start: Rc::new(Cell::new(0)),
             pane_built_end: Rc::new(Cell::new(0)),
             pane_total_refresh: Signal::new(0_u64),
+            reveal: RowReveal::new(),
             column_widths: Rc::new(RefCell::new(Vec::new())),
             display_indices: Rc::new(RefCell::new(Vec::new())),
             cell_map: Rc::new(RefCell::new(Vec::new())),
@@ -1308,8 +1341,15 @@ impl<T: 'static> TableView<T> {
 
     // ── Imperative API ─────────────────────────────────────────────────
 
-    /// Scroll so that `row` is aligned to the top of the viewport. A no-op
-    /// before the first layout pass.
+    /// Scroll so that `row` is aligned to the top of the viewport, now,
+    /// against the row offsets and scroll range of the last layout pass.
+    ///
+    /// The offset is clamped when this is called, to the range that pass
+    /// wrote. Before the table has been laid out that range is `0`, so the
+    /// call scrolls to the top and nothing more; after a model change in the
+    /// same turn the range still describes the old rows. On a mounted table,
+    /// or to scroll before the first layout, use a [`handle`](Self::handle),
+    /// which defers the computation to the next layout pass.
     pub fn scroll_to_row(&self, row: usize) {
         imperative::scroll_to_row(row, &self.row_metrics, &self.scroll_y, &self.max_scroll_y);
     }
@@ -1385,8 +1425,11 @@ impl<T: 'static> TableView<T> {
         out
     }
 
-    /// Scroll the minimum distance needed to make `row` visible. A no-op
-    /// before the first layout pass, when the viewport height is not yet known.
+    /// Scroll the minimum distance needed to make `row` visible, now, against
+    /// the viewport, row offsets and scroll range of the last layout pass. A
+    /// no-op before the first layout pass, when the viewport height is not yet
+    /// known. A [`handle`](Self::handle) defers the computation to the next
+    /// layout pass instead.
     pub fn ensure_row_visible(&self, row: usize) {
         imperative::ensure_row_visible(
             row,
@@ -1497,6 +1540,67 @@ impl<T: 'static> TableView<T> {
         if (clamped - current).abs() > 0.001 {
             self.scroll_y.set(clamped);
         }
+    }
+}
+
+impl<T: 'static> TableView<T> {
+    /// A handle that scrolls this table once it is mounted.
+    ///
+    /// Take it while describing the tree, before the table is handed to
+    /// `ctx.add(...)`; it stays attached to the table across rebuilds. See
+    /// [`TableViewHandle`].
+    pub fn handle(&self) -> TableViewHandle {
+        TableViewHandle {
+            reveal: self.reveal.clone(),
+        }
+    }
+}
+
+/// A handle on a mounted [`TableView`], to scroll it to a row from outside
+/// the widget — a view-model reacting to a search hit, a "go to row" command.
+///
+/// Cheap to clone, valid before the table is mounted, and it survives the
+/// table's rebuilds. Its methods never compute an offset when they are called:
+/// they record the request and ask for a layout pass, and the table applies it
+/// there, after row measurement and scroll anchoring have settled. So a model
+/// change made in the same turn (rows inserted above, say) is accounted for, a
+/// request made before mount is applied at the first layout, and a later
+/// request replaces an earlier pending one. A request on a table with no rows
+/// is dropped; a row past the end reveals the last row.
+///
+/// ```rust
+/// # use teksilo_data::ListModel;
+/// # use teksilo_widgets::TableView;
+/// # let model: ListModel<String> = ListModel::new();
+/// let table = TableView::new(model);
+/// let handle = table.handle();
+/// // … add the columns, `ctx.add(table)`, then later, from any handler:
+/// handle.ensure_row_visible(1_250);
+/// ```
+#[derive(Clone)]
+pub struct TableViewHandle {
+    reveal: SharedRowReveal,
+}
+
+impl std::fmt::Debug for TableViewHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TableViewHandle")
+            .field("pending", &self.reveal.pending())
+            .finish()
+    }
+}
+
+impl TableViewHandle {
+    /// Scroll so that `row` is aligned to the top of the viewport, as far as
+    /// the scroll range allows, at the next layout pass.
+    pub fn scroll_to_row(&self, row: usize) {
+        self.reveal.request(row, RevealAlign::Top);
+    }
+
+    /// Scroll the minimum distance that makes `row` fully visible, at the
+    /// next layout pass; no scroll when it already is.
+    pub fn ensure_row_visible(&self, row: usize) {
+        self.reveal.request(row, RevealAlign::Nearest);
     }
 }
 

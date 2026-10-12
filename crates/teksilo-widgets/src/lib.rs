@@ -197,7 +197,7 @@ pub use icon_button::{BuiltInIcons, IconButton, IconButtonSize};
 pub use input_dialog::InputDialog;
 pub use language_switcher::LanguageSwitcher;
 pub use link::Link;
-pub use list_view::ListView;
+pub use list_view::{ListView, ListViewHandle};
 pub use menu::{
     MenuEntry, MenuItemState, MenuItems, MenuModel, MenuNode, NativeMenuMode, StandardMenu,
     StandardMenuRole,
@@ -274,7 +274,8 @@ pub use tab_widget::{
 pub use table_view::{
     Alignment as TableAlignment, CellContext, CellSelectionModel, Column, ColumnContext,
     ColumnResizePolicy, ColumnSpec, ColumnWidth, EditTriggers, GridLines, PinnedSide,
-    SortDirection, TabTraversal, TableHeader, TableSelectionMode, TableView, TruncationPolicy,
+    SortDirection, TabTraversal, TableHeader, TableSelectionMode, TableView, TableViewHandle,
+    TruncationPolicy,
 };
 pub use teksilo_tokens::Orientation;
 pub use text_input::{TextInput, ValidationState};
@@ -291,8 +292,8 @@ pub use toggle::Toggle;
 pub use tool_box::{ToolBox, ToolBoxItem, ToolBoxOrientation};
 pub use toolbar::{Toolbar, ToolbarAction, ToolbarItem, ToolbarOrientation, ToolbarOverflow};
 pub use tree_source::{TreeRow, TreeRowMeta};
-pub use tree_table_view::TreeTableView;
-pub use tree_view::{TreeRowContext, TreeView};
+pub use tree_table_view::{TreeTableView, TreeTableViewHandle};
+pub use tree_view::{TreeRowContext, TreeView, TreeViewHandle};
 
 /// The framework bundle: teksilo-widgets' own translatable strings, grouped
 /// by locale. Registered by applications via
