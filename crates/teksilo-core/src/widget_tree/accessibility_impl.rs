@@ -17,9 +17,26 @@ pub(super) fn to_accesskit_rect(rect: teksilo_canvas::Rect) -> accesskit::Rect {
 }
 
 impl WidgetTree {
-    /// Build an AccessKit `TreeUpdate` from the current state of all active
-    /// widgets. Call this once per frame, between layout and paint, and push
-    /// the result to the `accesskit_winit::Adapter`.
+    /// The AccessKit `TreeUpdate` for the current state of all active widgets:
+    /// always the **full tree**, a complete snapshot of every node under the
+    /// tree's own ids, never a delta against an earlier call.
+    ///
+    /// Call this once per frame, between layout and paint. It is the read for
+    /// everything in process (a test, the automation bridge, the announcement
+    /// ring). It is **not** what a platform adapter is fed: an adapter is
+    /// handed [`deliver_accessibility`](Self::deliver_accessibility), which
+    /// maps the ids and is skipped when
+    /// [`accessibility_delivery_owed`](Self::accessibility_delivery_owed) says
+    /// the adapter already holds the tree.
+    ///
+    /// To find out whether something changed between two calls, a test
+    /// compares [`at_version`](Self::at_version) (it bumps only when the tree's
+    /// content differs), or
+    /// [`a11y_walk_generation`](Self::a11y_walk_generation) (it counts walks,
+    /// so it also moves for a walk that reproduced the same tree), or the node
+    /// itself in the two snapshots. The two snapshots are each complete, so
+    /// comparing their lengths or "what the update contains" says nothing.
+    ///
     /// Caches the result and rebuilds only when something that actually
     /// changes the AT tree has happened: a focus move, an overlay change, a
     /// widget rebuild, an active↔dormant transition, an `AccessibilityOnly`

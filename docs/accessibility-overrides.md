@@ -479,7 +479,7 @@ is heard on the next arrival, the same on all three.
 
 ## Testing patterns
 
-All headless. Assertions go through `WidgetTree::accessibility_node(id)` (synthetic snapshot) or `WidgetTree::sync_accessibility()` (full TreeUpdate, useful when checking pruning, custom_actions, controls relationships, etc.).
+All headless. Assertions go through `WidgetTree::accessibility_node(id)` (synthetic snapshot) or `WidgetTree::sync_accessibility()` (full TreeUpdate, useful when checking pruning, custom_actions, controls relationships, etc.). `sync_accessibility()` always returns the **complete** tree, never a delta, so a test that wants to know whether something changed compares `WidgetTree::at_version()` (bumps only when the content differs) or the node itself between two syncs; the update it returns is not what an adapter is fed, which is `deliver_accessibility`.
 
 What a screen reader is *told*, as opposed to what the tree holds, is read with `WidgetTree::announcements_since(seq)`: every announcement the platform adapters would have spoken from the updates `sync_accessibility()` has returned, a `ctx.announce(…)` and a live region's change alike. Take the last `seq` before the action, act, sync once, and read what came after:
 
