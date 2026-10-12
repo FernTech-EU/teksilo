@@ -618,6 +618,10 @@ class Item:
     # A struct with fields outside `fields` (private, `pub(crate)`, hidden).
     restricted_fields: bool = False
     methods: list["Item"] = field(default_factory=list)
+    # For a method: the doc of the `impl` block it is written in, when that
+    # block has one. Methods sharing it are printed under it, so a block like
+    # `WidgetTree`'s "Simulated input" says what its methods are for.
+    group: str = ""
     # A builder setter's default, as a source expression, when `new()` / `Default`
     # initialises the field it assigns with a literal or a plain path (see
     # `_apply_defaults`); empty otherwise.
@@ -1612,6 +1616,10 @@ def parse_file(path: Path, module_name: str, cfg: list[str]) -> ParsedFile:
             methods = _parse_impl_body(
                 raw, cleaned, open_line + 1, close_line - 1
             )
+            group = "\n".join(doc_buf).strip()
+            if group:
+                for m in methods:
+                    m.group = group
             parent = ensure_item(target) if target else None
             if parent is not None:
                 parent.methods.extend(methods)
@@ -3376,12 +3384,38 @@ def _emit_items_md(
             _emit_methods_md(it, out, anchors)
 
 
+def _impl_group_title(doc: str) -> "tuple[str | None, str]":
+    """The heading and the introduction for a group of methods, from the doc
+    of their `impl` block: its opening `# Heading` when it has one."""
+    lines = doc.strip().split("\n")
+    if lines and re.match(r"#{1,6}\s", lines[0]):
+        title: "str | None" = lines[0].lstrip("#").strip()
+        body = "\n".join(lines[1:]).strip()
+    else:
+        # No heading: the doc introduces its methods under the current one.
+        title, body = None, doc.strip()
+    return title, _demote_headings(body, 3) if body else ""
+
+
 def _emit_methods_md(
     it: Item, out: list[str], anchors: "dict[int, str] | None" = None
 ) -> None:
-    out.append("### Associated items" if it.kind == "trait" else "### Methods")
-    out.append("")
+    plain = "### Associated items" if it.kind == "trait" else "### Methods"
+    current: "str | None" = None
+    headed = False
     for m in it.methods:
+        if m.group != current:
+            current = m.group
+            title, body = _impl_group_title(m.group) if m.group else (None, "")
+            if title:
+                # A block whose doc opens with a heading is a section of its own.
+                out += [f"### {title}", ""]
+                headed = True
+            elif not headed or not m.group:
+                out += [plain, ""]
+                headed = True
+            if body:
+                out += [body, ""]
         _emit_anchor(anchors, m, out)
         flags: list[str] = []
         if m.hidden:
@@ -3453,7 +3487,12 @@ def format_text(pf: ParsedFile) -> str:
 
         if it.methods:
             out.append("  methods:")
+            group: "str | None" = None
             for m in it.methods:
+                if m.group and m.group != group:
+                    title, body = _impl_group_title(m.group)
+                    out.append(f"    [{title or body.splitlines()[0]}]")
+                group = m.group
                 flags = []
                 if m.hidden:
                     flags.append("hidden")
@@ -3496,6 +3535,7 @@ def format_json(pfs: list[ParsedFile]) -> str:
             "restricted_fields": it.restricted_fields,
             "default": it.default or None,
             "methods": [item_to_dict(m) for m in it.methods],
+            "group": it.group,
             # Public paths, best first; null for a member or a hidden item.
             "imports": imports_of(path, it) if path is not None else None,
         }
@@ -4902,6 +4942,18 @@ def _test_split_impls() -> None:
         assert name in tree, name
     # tree_view/builder.rs
     assert {"new_with_context", "scroll_signal"} <= methods("widgets", "TreeView")
+
+    # Each impl block's doc travels with its methods: `WidgetTree`'s test API
+    # prints under "Simulated input" and "Test inspection".
+    reg = _registry_for("core")
+    fp = resolve_name(reg, "WidgetTree")
+    pf = merge_split_impls(reg, parse_file(fp, fp.stem, reg.cfg_by_file.get(fp.resolve(), [])))
+    md = format_markdown(pf)
+    sim, ins = md.find("### Simulated input"), md.find("### Test inspection")
+    assert 0 < sim < md.find("pub fn tap_with(") and 0 < ins < md.find("pub fn tab_stops_within("), "groups"
+    assert md.find("pub fn tap_with(") < ins, "tap_with is simulated input, not inspection"
+    # A heading-less impl doc introduces its methods without a heading of its own.
+    assert _impl_group_title("Searchable-mode builders.") == (None, "Searchable-mode builders.")
 
 
 def run_self_tests() -> int:

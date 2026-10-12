@@ -380,6 +380,10 @@ widget tree (tabbed sections, charts, conditional rows). Promotes
 to a focusable `Role::Dialog` after the standard dwell. Overrides
 any plain or rich tooltip previously set.
 
+Searchable-mode builders. The search field is a `TextInput`, which
+shares the `RichTextEditor` engine and therefore the `teksilo-text`
+dependency.
+
 <a id="combobox-searchable"></a>
 
 #### `pub fn searchable(mut self, enabled: bool) -> Self`
