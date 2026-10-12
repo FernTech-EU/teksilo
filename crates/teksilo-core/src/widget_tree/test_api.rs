@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! Simulated input and test inspection for a [`WidgetTree`].
+//!
+//! Two `impl` blocks, one per audience. **Simulated input** drives a tree as
+//! a user would, without a window or a platform: taps, keys, typed text,
+//! touch, pen, gestures, and the simulated clock they run on. Headless tests
+//! use it, and so does the debug automation bridge, which drives a live
+//! window with the same calls. **Test inspection** reads what only a test
+//! asks about: the tab stops under a node, a tooltip's surface, leaked
+//! pointer state. An application has no use for either at run time; the
+//! methods it does use live with the rest of the tree.
+
 use super::*;
 
 /// Linear interpolation between two points, `t` in `0.0..=1.0`.
@@ -83,33 +94,18 @@ fn key_for_char(ch: char) -> Key {
     }
 }
 
+/// # Simulated input
+///
+/// Drive the tree as a user would, without a window or a platform: a click or
+/// a tap, keys and typed text, touch contacts, a pen, whole gestures (a long
+/// press, a drag, a fling, a pinch), and the simulated clock all of them run
+/// on. Each call dispatches through the same routing real input takes.
+///
+/// For headless tests and the debug automation bridge. An application does
+/// not call these at run time, with one exception:
+/// [`synthesise_tap`](Self::synthesise_tap) re-issues a click the operating
+/// system kept for its own window chrome.
 impl WidgetTree {
-    /// The content id of the tooltip anchored at `widget` or anywhere inside
-    /// it.
-    ///
-    /// The attach helpers keep the content id to themselves, so a test that
-    /// needs to drive a tooltip's own surface (promote it, focus into it) has
-    /// no other way to name it. Matching the whole subtree, not just the id,
-    /// is what makes this work for composing controls: `Button` keeps focus on
-    /// its outer node but attaches its tooltip to an inner body root.
-    pub fn tooltip_content_within(&self, widget: WidgetId) -> Option<WidgetId> {
-        self.tooltips
-            .iter()
-            .find(|e| self.is_descendant_of(e.anchor_id, widget))
-            .map(|e| e.content_id)
-    }
-
-    /// Whether that tooltip has been promoted.
-    ///
-    /// Promotion is the line between an informational tip and a panel the user
-    /// asked for: it decides the AT role, the dismiss behaviour, and whether
-    /// the surface takes a Tab stop.
-    pub fn tooltip_is_sticky_within(&self, widget: WidgetId) -> bool {
-        self.tooltips
-            .iter()
-            .any(|e| self.is_descendant_of(e.anchor_id, widget) && e.is_sticky)
-    }
-
     /// Simulate a click at the center of a widget.
     pub fn click(&mut self, id: WidgetId) {
         self.synthesise_tap(id);
@@ -261,17 +257,6 @@ impl WidgetTree {
         ));
     }
 
-    /// Get bounds of a child by index.
-    pub fn child_bounds(&self, parent: WidgetId, index: usize) -> Rect {
-        let children = self.children(parent);
-        self.bounds(children[index])
-    }
-
-    /// Get a child widget ID by index.
-    pub fn child_widget(&self, parent: WidgetId, index: usize) -> WidgetId {
-        self.children(parent)[index]
-    }
-
     /// Advance this tree's clock by `duration`, and run everything that clock
     /// drives.
     ///
@@ -405,162 +390,6 @@ impl WidgetTree {
     /// Get the current simulated clock value.
     pub fn simulated_now(&self) -> std::time::Instant {
         self.sim_clock
-    }
-
-    /// Total number of live tooltip attachments, dead ones included.
-    ///
-    /// Distinct from `pending_tooltip_count`, which only counts entries with a
-    /// running dwell. This is the raw table size — the number that must stay
-    /// flat across rebuilds, since `attach_tooltip*` is called from `build()`
-    /// and the table is scanned on every pointer move, every layout pass and
-    /// once per widget in the accessibility walk.
-    pub fn tooltip_entry_count(&self) -> usize {
-        self.tooltips.len()
-    }
-
-    /// Every node inside `root` (inclusive) that Tab traversal would stop on:
-    /// focusable, and not suppressed by a `tab_stop` flag on itself or any
-    /// ancestor.
-    ///
-    /// Pressing Tab and watching focus cannot answer this for a view that
-    /// claims the key for its own navigation — `TableView` moves a cell cursor
-    /// on Tab, so focus never moves and the traversal graph underneath stays
-    /// invisible. A data view should expose exactly one stop however many rows
-    /// are realized; more than one means a control inside a row has leaked
-    /// into the Tab order, where its presence would track the scroll position.
-    ///
-    /// Membership matches the real collector
-    /// ([`collect_scope_entries`](crate::widget_tree::WidgetTree)) exactly: a
-    /// dormant node and a disabled subtree are both skipped, because Tab
-    /// traversal returns at each. The two differ only in *shape* — the real
-    /// collector groups a `traversal_scope` subtree so it can order it
-    /// independently, and this returns one flat list in tree order — which is
-    /// what a membership assertion wants.
-    ///
-    /// The guards are load-bearing rather than cosmetic. Without them this
-    /// reports stops the traversal never visits, and a test asserting that a
-    /// culled or collapsed subtree left the Tab ring passes or fails for a
-    /// reason unrelated to the mechanism it is pinning.
-    pub fn tab_stops_within(&self, root: WidgetId) -> Vec<WidgetId> {
-        let mut out = Vec::new();
-        self.collect_tab_stops_within(root, &mut out);
-        out
-    }
-
-    fn collect_tab_stops_within(&self, id: WidgetId, out: &mut Vec<WidgetId>) {
-        // Dormant: `collect_scope_entries` returns here, so the whole subtree
-        // is off the traversal graph — a `Switcher`'s hidden branch, a closed
-        // popover, a `visible_when` gate that went false.
-        if !self.arena.is_active(id) {
-            return;
-        }
-        let Some(node) = self.arena.get(id) else {
-            return;
-        };
-        // Disabled: likewise a whole-subtree stop in the real collector.
-        if node
-            .enabled_state
-            .as_ref()
-            .map(|s| !s.get())
-            .unwrap_or(false)
-        {
-            return;
-        }
-        if self.is_node_focusable(node) && self.tab_stop_effective(id) {
-            out.push(id);
-        }
-        for &child in self.arena.children(id) {
-            self.collect_tab_stops_within(child, out);
-        }
-    }
-
-    /// Every widget the arena still holds — active, dormant and orphaned alike.
-    ///
-    /// The number a leak test must assert on. `active_widget_count` walks the
-    /// tree from its roots and so cannot see the failure mode that matters
-    /// here: a node kept alive in the arena with nothing pointing at it. A
-    /// parentless orphan (tooltip content is `ctx.add`ed, hence parentless by
-    /// construction) is invisible to every other count in this file, and to the
-    /// accessibility tree, while still paying for itself in the arena's slotmap
-    /// forever.
-    pub fn widget_count(&self) -> usize {
-        self.arena.len()
-    }
-
-    /// Tear down a widget and everything it owns — its subtree, its tooltip,
-    /// and the parentless content it built with
-    /// [`add_detached`](crate::build_context::BuildContext::add_detached).
-    ///
-    /// The application-facing door is `BuildContext::destroy_subtree`; this is
-    /// the same call for tests that hold the tree directly.
-    pub fn destroy_subtree_for_testing(&mut self, id: WidgetId) {
-        self.destroy_subtree(id);
-    }
-
-    /// Panic unless every trace of a pointer interaction is gone.
-    ///
-    /// The one assertion a touch test ends with. A leak here is not a cosmetic
-    /// untidiness: a surviving capture redelivers every later move to a widget
-    /// nobody is pointing at, a surviving sequence lets a stale competitor win
-    /// the *next* press, and a live recognizer entry starts the next contact
-    /// mid-gesture. All three are silent until something much later
-    /// misbehaves, which is why this is checked rather than reasoned about.
-    ///
-    /// A **hovering** pointer resting in the table is not a leak: a mouse that
-    /// has been seen once keeps its entry for the life of the tree, and that
-    /// entry is what every singular accessor reads. What must not survive is a
-    /// pointer still *contacting* the surface, a capture, a sequence, or a
-    /// gesture arena still following a contact.
-    ///
-    /// One thing the design lists is still absent: the touch-motion layer's own
-    /// state — live pans, coasts, the window's pinch and the palm watches. The
-    /// framework press *is* checked, at the bottom of this function.
-    pub fn assert_no_leaked_pointer_state(&self) {
-        let mut leaks: Vec<String> = Vec::new();
-        for entry in self.pointers.iter() {
-            let id = entry.info.id;
-            if entry.is_contacting() {
-                leaks.push(format!(
-                    "{id:?} ({:?}) is still contacting the surface",
-                    entry.info.kind
-                ));
-            }
-            if let Some(captor) = entry.captured_by {
-                leaks.push(format!("{id:?} still captures {captor:?}"));
-            }
-            if let Some(sequence) = entry.sequence.as_ref() {
-                leaks.push(format!(
-                    "{id:?} still has a sequence ({} member(s), winner {:?})",
-                    sequence.members().len(),
-                    sequence.winner()
-                ));
-            }
-        }
-        for &owner in &self.gesture_owners {
-            if self
-                .arena
-                .get(owner)
-                .and_then(|node| node.handlers.gesture_arena.as_ref())
-                .is_some_and(|set| set.is_live())
-            {
-                leaks.push(format!(
-                    "{owner:?} has a gesture arena still following a contact"
-                ));
-            }
-        }
-        // The framework press. Every exit — a release, a cancel, a peer claim —
-        // goes through `end_press`, so a surviving record means one of them was
-        // missed and some node is painted as held by a pointer that is gone.
-        for id in self.arena.active_ids_iter() {
-            if let Some(pointer) = self.pressed_by(id) {
-                leaks.push(format!("{id:?} is still pressed by {pointer:?}"));
-            }
-        }
-        assert!(
-            leaks.is_empty(),
-            "pointer state leaked after the interaction:\n  - {}",
-            leaks.join("\n  - ")
-        );
     }
 
     // ---------------------------------------------------------------
@@ -954,6 +783,207 @@ impl WidgetTree {
     pub fn set_density(&mut self, density: teksilo_tokens::TargetDensity) {
         self.set_input_density(density);
     }
+}
+
+/// # Test inspection
+///
+/// Queries and assertions a test needs and an application does not: the tab
+/// stops under a node, a child's bounds by index, a tooltip's surface, the
+/// touch action a press would freeze, and whether a test left pointer state
+/// behind.
+impl WidgetTree {
+    /// The content id of the tooltip anchored at `widget` or anywhere inside
+    /// it.
+    ///
+    /// The attach helpers keep the content id to themselves, so a test that
+    /// needs to drive a tooltip's own surface (promote it, focus into it) has
+    /// no other way to name it. Matching the whole subtree, not just the id,
+    /// is what makes this work for composing controls: `Button` keeps focus on
+    /// its outer node but attaches its tooltip to an inner body root.
+    pub fn tooltip_content_within(&self, widget: WidgetId) -> Option<WidgetId> {
+        self.tooltips
+            .iter()
+            .find(|e| self.is_descendant_of(e.anchor_id, widget))
+            .map(|e| e.content_id)
+    }
+
+    /// Whether that tooltip has been promoted.
+    ///
+    /// Promotion is the line between an informational tip and a panel the user
+    /// asked for: it decides the AT role, the dismiss behaviour, and whether
+    /// the surface takes a Tab stop.
+    pub fn tooltip_is_sticky_within(&self, widget: WidgetId) -> bool {
+        self.tooltips
+            .iter()
+            .any(|e| self.is_descendant_of(e.anchor_id, widget) && e.is_sticky)
+    }
+
+    /// Get bounds of a child by index.
+    pub fn child_bounds(&self, parent: WidgetId, index: usize) -> Rect {
+        let children = self.children(parent);
+        self.bounds(children[index])
+    }
+
+    /// Get a child widget ID by index.
+    pub fn child_widget(&self, parent: WidgetId, index: usize) -> WidgetId {
+        self.children(parent)[index]
+    }
+
+    /// Total number of live tooltip attachments, dead ones included.
+    ///
+    /// Distinct from `pending_tooltip_count`, which only counts entries with a
+    /// running dwell. This is the raw table size — the number that must stay
+    /// flat across rebuilds, since `attach_tooltip*` is called from `build()`
+    /// and the table is scanned on every pointer move, every layout pass and
+    /// once per widget in the accessibility walk.
+    pub fn tooltip_entry_count(&self) -> usize {
+        self.tooltips.len()
+    }
+
+    /// Every node inside `root` (inclusive) that Tab traversal would stop on:
+    /// focusable, and not suppressed by a `tab_stop` flag on itself or any
+    /// ancestor.
+    ///
+    /// Pressing Tab and watching focus cannot answer this for a view that
+    /// claims the key for its own navigation — `TableView` moves a cell cursor
+    /// on Tab, so focus never moves and the traversal graph underneath stays
+    /// invisible. A data view should expose exactly one stop however many rows
+    /// are realized; more than one means a control inside a row has leaked
+    /// into the Tab order, where its presence would track the scroll position.
+    ///
+    /// Membership matches the real collector
+    /// ([`collect_scope_entries`](crate::widget_tree::WidgetTree)) exactly: a
+    /// dormant node and a disabled subtree are both skipped, because Tab
+    /// traversal returns at each. The two differ only in *shape* — the real
+    /// collector groups a `traversal_scope` subtree so it can order it
+    /// independently, and this returns one flat list in tree order — which is
+    /// what a membership assertion wants.
+    ///
+    /// The guards are load-bearing rather than cosmetic. Without them this
+    /// reports stops the traversal never visits, and a test asserting that a
+    /// culled or collapsed subtree left the Tab ring passes or fails for a
+    /// reason unrelated to the mechanism it is pinning.
+    pub fn tab_stops_within(&self, root: WidgetId) -> Vec<WidgetId> {
+        let mut out = Vec::new();
+        self.collect_tab_stops_within(root, &mut out);
+        out
+    }
+
+    fn collect_tab_stops_within(&self, id: WidgetId, out: &mut Vec<WidgetId>) {
+        // Dormant: `collect_scope_entries` returns here, so the whole subtree
+        // is off the traversal graph — a `Switcher`'s hidden branch, a closed
+        // popover, a `visible_when` gate that went false.
+        if !self.arena.is_active(id) {
+            return;
+        }
+        let Some(node) = self.arena.get(id) else {
+            return;
+        };
+        // Disabled: likewise a whole-subtree stop in the real collector.
+        if node
+            .enabled_state
+            .as_ref()
+            .map(|s| !s.get())
+            .unwrap_or(false)
+        {
+            return;
+        }
+        if self.is_node_focusable(node) && self.tab_stop_effective(id) {
+            out.push(id);
+        }
+        for &child in self.arena.children(id) {
+            self.collect_tab_stops_within(child, out);
+        }
+    }
+
+    /// Every widget the arena still holds — active, dormant and orphaned alike.
+    ///
+    /// The number a leak test must assert on. `active_widget_count` walks the
+    /// tree from its roots and so cannot see the failure mode that matters
+    /// here: a node kept alive in the arena with nothing pointing at it. A
+    /// parentless orphan (tooltip content is `ctx.add`ed, hence parentless by
+    /// construction) is invisible to every other count in this file, and to the
+    /// accessibility tree, while still paying for itself in the arena's slotmap
+    /// forever.
+    pub fn widget_count(&self) -> usize {
+        self.arena.len()
+    }
+
+    /// Tear down a widget and everything it owns — its subtree, its tooltip,
+    /// and the parentless content it built with
+    /// [`add_detached`](crate::build_context::BuildContext::add_detached).
+    ///
+    /// The application-facing door is `BuildContext::destroy_subtree`; this is
+    /// the same call for tests that hold the tree directly.
+    pub fn destroy_subtree_for_testing(&mut self, id: WidgetId) {
+        self.destroy_subtree(id);
+    }
+
+    /// Panic unless every trace of a pointer interaction is gone.
+    ///
+    /// The one assertion a touch test ends with. A leak here is not a cosmetic
+    /// untidiness: a surviving capture redelivers every later move to a widget
+    /// nobody is pointing at, a surviving sequence lets a stale competitor win
+    /// the *next* press, and a live recognizer entry starts the next contact
+    /// mid-gesture. All three are silent until something much later
+    /// misbehaves, which is why this is checked rather than reasoned about.
+    ///
+    /// A **hovering** pointer resting in the table is not a leak: a mouse that
+    /// has been seen once keeps its entry for the life of the tree, and that
+    /// entry is what every singular accessor reads. What must not survive is a
+    /// pointer still *contacting* the surface, a capture, a sequence, or a
+    /// gesture arena still following a contact.
+    ///
+    /// One thing the design lists is still absent: the touch-motion layer's own
+    /// state — live pans, coasts, the window's pinch and the palm watches. The
+    /// framework press *is* checked, at the bottom of this function.
+    pub fn assert_no_leaked_pointer_state(&self) {
+        let mut leaks: Vec<String> = Vec::new();
+        for entry in self.pointers.iter() {
+            let id = entry.info.id;
+            if entry.is_contacting() {
+                leaks.push(format!(
+                    "{id:?} ({:?}) is still contacting the surface",
+                    entry.info.kind
+                ));
+            }
+            if let Some(captor) = entry.captured_by {
+                leaks.push(format!("{id:?} still captures {captor:?}"));
+            }
+            if let Some(sequence) = entry.sequence.as_ref() {
+                leaks.push(format!(
+                    "{id:?} still has a sequence ({} member(s), winner {:?})",
+                    sequence.members().len(),
+                    sequence.winner()
+                ));
+            }
+        }
+        for &owner in &self.gesture_owners {
+            if self
+                .arena
+                .get(owner)
+                .and_then(|node| node.handlers.gesture_arena.as_ref())
+                .is_some_and(|set| set.is_live())
+            {
+                leaks.push(format!(
+                    "{owner:?} has a gesture arena still following a contact"
+                ));
+            }
+        }
+        // The framework press. Every exit — a release, a cancel, a peer claim —
+        // goes through `end_press`, so a surviving record means one of them was
+        // missed and some node is painted as held by a pointer that is gone.
+        for id in self.arena.active_ids_iter() {
+            if let Some(pointer) = self.pressed_by(id) {
+                leaks.push(format!("{id:?} is still pressed by {pointer:?}"));
+            }
+        }
+        assert!(
+            leaks.is_empty(),
+            "pointer state leaked after the interaction:\n  - {}",
+            leaks.join("\n  - ")
+        );
+    }
 
     /// The [`TouchAction`](crate::pointer::touch_action::TouchAction) in force
     /// at `id`: the intersection of every declaration from the root down to
@@ -966,47 +996,6 @@ impl WidgetTree {
     /// the value is frozen.
     pub fn touch_action_for(&self, id: WidgetId) -> crate::pointer::touch_action::TouchAction {
         self.effective_touch_action(id)
-    }
-
-    /// Mark a widget as needing repaint.
-    pub fn mark_needs_paint(&mut self, id: WidgetId) {
-        self.arena.mark_needs_paint(id);
-    }
-
-    /// Set a widget subtree as dormant.
-    ///
-    /// Goes through the tree's cancel-aware parking door, so a pointer working
-    /// inside the subtree is cancelled rather than stranded on a widget the
-    /// dispatcher will no longer reach.
-    pub fn set_dormant(&mut self, id: WidgetId) {
-        self.park_subtree(id);
-        self.arena.mark_ancestors_need_layout(id);
-        self.cached_frame = None;
-        self.a11y_dirty = true;
-    }
-
-    /// Activate a dormant widget subtree.
-    pub fn activate(&mut self, id: WidgetId) {
-        self.arena.activate(id);
-        self.arena.mark_ancestors_need_layout(id);
-        self.cached_frame = None;
-        self.a11y_dirty = true;
-    }
-
-    /// Invalidate all per-widget paint caches (paint AND post-paint) and
-    /// the assembled frame cache. Forces every widget to repaint on the
-    /// next `render()` call. Used by the glyph-atlas eviction recovery:
-    /// after an eviction, any retained frame may hold quads whose atlas
-    /// UVs now point at recycled slots.
-    pub fn invalidate_all_paints(&mut self) {
-        for id in self.arena.active_ids() {
-            if let Some(node) = self.arena.get_mut(id) {
-                node.dirty.needs_paint = true;
-                node.cached_paint = None;
-                node.cached_post_paint = None;
-            }
-        }
-        self.cached_frame = None;
     }
 }
 

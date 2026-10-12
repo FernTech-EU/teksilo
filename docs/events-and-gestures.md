@@ -1192,8 +1192,9 @@ tree.dispatch_event(WidgetEvent::pointer_down(at, PointerButton::Primary, Modifi
 tree.dispatch_event(WidgetEvent::pointer_up(at, PointerButton::Primary, Modifiers::NONE));
 ```
 
-**A finger, a stylus, a pinch, a fling** come from the `test_api` module on
-`WidgetTree`, which is the *sample* door rather than the legacy event door:
+**A finger, a stylus, a pinch, a fling** come from `WidgetTree`'s simulated
+input methods, which go through the *sample* door rather than the legacy event
+door:
 
 ```rust
 let finger = tree.new_contact();               // one identity per press

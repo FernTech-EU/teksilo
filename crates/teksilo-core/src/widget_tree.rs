@@ -2123,6 +2123,27 @@ impl WidgetTree {
         self.arena.mark_all_needs_paint_only();
     }
 
+    /// Mark a widget as needing repaint.
+    pub fn mark_needs_paint(&mut self, id: WidgetId) {
+        self.arena.mark_needs_paint(id);
+    }
+
+    /// Invalidate all per-widget paint caches (paint AND post-paint) and
+    /// the assembled frame cache. Forces every widget to repaint on the
+    /// next `render()` call. Used by the glyph-atlas eviction recovery:
+    /// after an eviction, any retained frame may hold quads whose atlas
+    /// UVs now point at recycled slots.
+    pub fn invalidate_all_paints(&mut self) {
+        for id in self.arena.active_ids() {
+            if let Some(node) = self.arena.get_mut(id) {
+                node.dirty.needs_paint = true;
+                node.cached_paint = None;
+                node.cached_post_paint = None;
+            }
+        }
+        self.cached_frame = None;
+    }
+
     /// Mark the owning window as active (focused AND not occluded) or
     /// inactive. Propagates to the animation scheduler and to the
     /// animated-quad registry, which do not pause the same things:
@@ -4243,6 +4264,26 @@ impl WidgetTree {
         if let Some(node) = self.arena.get_mut(id) {
             node.visible_state = Some(prop);
         }
+    }
+
+    /// Set a widget subtree as dormant.
+    ///
+    /// Goes through the tree's cancel-aware parking door, so a pointer working
+    /// inside the subtree is cancelled rather than stranded on a widget the
+    /// dispatcher will no longer reach.
+    pub fn set_dormant(&mut self, id: WidgetId) {
+        self.park_subtree(id);
+        self.arena.mark_ancestors_need_layout(id);
+        self.cached_frame = None;
+        self.a11y_dirty = true;
+    }
+
+    /// Activate a dormant widget subtree.
+    pub fn activate(&mut self, id: WidgetId) {
+        self.arena.activate(id);
+        self.arena.mark_ancestors_need_layout(id);
+        self.cached_frame = None;
+        self.a11y_dirty = true;
     }
 
     /// Install (or reuse) the activation signal on a node and return a

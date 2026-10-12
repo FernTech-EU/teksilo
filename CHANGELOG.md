@@ -153,6 +153,9 @@ by crate for clarity, not because crates version independently.
   add when `teksilo` does not re-export it (`teksilo_scene::SceneView`), or
   that nothing outside its crate can reach it. `-f json` gains `imports`,
   every path, best first. rustc suggests none of these paths.
+- **`symbol` prints methods under the doc of the `impl` block they are
+  written in**: `WidgetTree`'s test API now reads as "Simulated input" and
+  "Test inspection", each introduced by what it is for.
 
 - **`status` reports the `teksilo-automation-mcp` on `PATH`**, and whether
   its version matches the app's teksilo; when it does not, it prints the
@@ -324,6 +327,10 @@ by crate for clarity, not because crates version independently.
   replayed through `dispatch_subscription_event`), and that a press and a
   release sent through `dispatch_pointer` form a tap, as `click` and
   `tap_with` do in one call.
+- `WidgetTree`'s documentation sets apart its simulated input (taps, keys,
+  touch, pen, gestures and the simulated clock, for headless tests and the
+  automation bridge) and its test inspection methods from the rest, under a
+  heading each on docs.rs.
 
 ## [0.16.0] - 2026-10-09
 
