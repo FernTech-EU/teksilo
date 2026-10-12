@@ -57,7 +57,7 @@ pub(crate) struct TreeViewBodyPane<T: 'static> {
     /// Keyboard cursor + the identity it resolves through, shared with the
     /// root's key handler: the per-row pointer handler moves both, so arrows
     /// step from the clicked row and keep following it across reflattens.
-    pub(crate) focused_index: Rc<Cell<Option<usize>>>,
+    pub(crate) focused_index: Signal<Option<usize>>,
     pub(crate) focused_anchor: Rc<RefCell<Option<crate::data_views::RowAnchor>>>,
 
     pub(crate) reorderable: bool,

@@ -197,6 +197,39 @@ together, and a selection the application sets moves the focus onto it. Matrix
 Shift + any navigation extends the selection range. Every navigation scrolls
 the new focus into view.
 
+### The cursor from outside
+
+The current tile, the keyboard cursor, is readable and settable through the
+grid's handle (see [Scrolling](#scrolling)):
+
+```rust,ignore
+let handle = grid.handle();
+let current = handle.cursor_signal();            // Signal<Option<usize>>, read-only
+let _keep = current.observe(move |tile| status.set(describe(*tile))); // held while needed
+handle.set_cursor(Some(12));                     // the ring and the active descendant move
+handle.ensure_index_visible(12, ScrollAnchor::Auto);
+```
+
+`cursor()` is `None` until the grid has been navigated, clicked or given a
+cursor; the keys then start from the first selected tile. `set_cursor` clamps an
+index past the end to the last tile (and removes the cursor on an empty grid),
+and leaves keyboard focus, the selection and the scroll offset alone; the next
+arrow key steps from it. Like a reveal, it may be called before the grid is
+mounted.
+
+In a `Multi` selection the cursor and the selection are **separate**. After
+`→`, `Ctrl+→`, `Ctrl+↓` in three columns the selection is still tile 0 while
+the cursor, the focus ring and the active descendant are on tile 4, and
+`selection.select(20)` from outside leaves the cursor on tile 4. Code that acts
+on "the tile the user is on" (a status line, context actions, keyboard
+extensions of its own) reads the cursor, not the first selected tile. In a
+`Single` selection the two are one tile: a selection written from outside
+moves the cursor onto it.
+
+An open detail band needs no walk of its own either: `↓` on the open tile
+enters the band's first focusable control and `↑` from there returns to the
+tile (see [Detail band](#detail-band)).
+
 ## Scrolling
 
 `.scroll_y_signal()` / `.max_scroll_y_signal()` / `.viewport_ratio_y_signal()`
@@ -485,6 +518,6 @@ lazy loading (`fetch_more` + placeholder rows), the detail band (layout,
 following its tile, keys, rubber band, accessibility, reveal, focus, scroll
 anchoring, tile node identity, a lazy source's window loads, its visible span),
 `GridViewHandle` (before mount, across rebuilds, in the same turn as opening a
-band), and accessibility roles. `tests/grid_view_keyed_selection_cost.rs` bounds what a
+band; the cursor read, set, clamped and observed), and accessibility roles. `tests/grid_view_keyed_selection_cost.rs` bounds what a
 keyed selection costs as the grid grows, counting allocated bytes and key
 reads rather than time.

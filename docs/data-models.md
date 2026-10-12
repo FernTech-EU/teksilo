@@ -56,6 +56,15 @@ offset from the model: take the view's handle (`ListView::handle`,
 layout pass, once the change has reached the row heights, so it may follow the
 mutation in the same turn. See [table-view.md](table-view.md#scrolling-to-a-row).
 
+The same handle carries the view's keyboard cursor for `ListView`, `TreeView`
+and `GridView`: `cursor()`, `set_cursor(Some(i))` and a read-only
+`cursor_signal()` (the tables expose `focused_cell_signal()` /
+`set_focused_cell` on the view). In a multiple selection the cursor and the
+selection are separate (`Ctrl+Arrow` moves the cursor alone), so code acting on
+"the row the user is on" reads the cursor. Setting it moves the active
+descendant, and the grid's focus ring, without moving keyboard focus or the
+selection; it does not scroll, so follow it with `ensure_index_visible`.
+
 A view can share its selection model with another view. Match the selection key
 type to the source: index-based identity and stable domain identity have
 different behavior when items move or are filtered.

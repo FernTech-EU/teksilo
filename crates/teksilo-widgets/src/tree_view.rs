@@ -41,6 +41,26 @@
 //! handle.ensure_index_visible(42);
 //! ```
 //!
+//! ## The keyboard cursor
+//!
+//! The tree has one current row, its keyboard cursor: the row the arrow keys
+//! step from and the one it names to assistive technology as its active
+//! descendant while it holds keyboard focus. The same [`TreeViewHandle`]
+//! reads and moves it, in flat visible indices:
+//! [`cursor`](TreeViewHandle::cursor),
+//! [`set_cursor`](TreeViewHandle::set_cursor) (clamped to the last visible
+//! row; keyboard focus, the selection and the scroll offset are left alone)
+//! and [`cursor_signal`](TreeViewHandle::cursor_signal), for an application
+//! to observe. The cursor follows its row through an expansion or a collapse
+//! above it, whoever set it. A cursor set before mount is there at the first
+//! build.
+//!
+//! In a single selection the cursor follows the selection. In a multiple
+//! selection the two are **separate**: `Ctrl+↓` moves the cursor and leaves
+//! the selection, and a selection written from outside leaves the cursor
+//! where it was. Read the cursor, not the first selected row, for "the row
+//! the user is on".
+//!
 //! ## Pan to scroll
 //!
 //! The view installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior),
@@ -226,8 +246,12 @@ pub struct TreeView<T: 'static> {
     /// `KeyedSelectionModel<NodeId>`, unified behind the index-facing facade.
     row_selection: Option<RowSelection>,
 
-    /// Keyboard-focused flat index.
-    focused_index: Rc<Cell<Option<usize>>>,
+    /// The keyboard cursor, a flat visible index: the row the arrow keys
+    /// step from and the view names as its active descendant. A signal,
+    /// bound `AccessibilityOnly` by the root, so a write from anywhere (the
+    /// keys, a click, a [`TreeViewHandle`]) re-walks the AT tree; shared with
+    /// every handle.
+    focused_index: Signal<Option<usize>>,
     /// The row identity `focused_index` currently points at, refreshed
     /// alongside every write to `focused_index`. A tree's structural changes
     /// (insert/remove/reorder, and — unlike a flat list — expand/collapse)
@@ -393,8 +417,14 @@ impl<T: 'static> TreeView<T> {
     /// `ctx.add(...)`; it stays attached to the view across rebuilds. See
     /// [`TreeViewHandle`].
     pub fn handle(&self) -> TreeViewHandle {
+        let count = self.source.clone();
+        let anchor = self.source.clone();
         TreeViewHandle {
             reveal: self.reveal.clone(),
+            cursor: self.focused_index.clone(),
+            cursor_anchor: self.focused_anchor.clone(),
+            len: Rc::new(move || count.visible_count()),
+            anchor_at: Rc::new(move |index| anchor.anchor(index)),
         }
     }
 }
@@ -416,6 +446,14 @@ impl<T: 'static> TreeView<T> {
 /// layout, and a later request replaces an earlier pending one. A request on
 /// an empty tree is dropped; an index past the end reveals the last row.
 ///
+/// The handle also reads and moves the tree's **keyboard cursor**, the row the
+/// arrow keys step from and assistive technology is told is current:
+/// [`cursor`](Self::cursor), [`set_cursor`](Self::set_cursor) and
+/// [`cursor_signal`](Self::cursor_signal), in the same flat visible indices.
+/// In a multiple selection the cursor and the selection are separate: the
+/// accelerator with an arrow moves the cursor alone, and a selection written
+/// from outside leaves the cursor where it was.
+///
 /// ```rust
 /// # use teksilo_widgets::TreeView;
 /// # use teksilo_widgets::primitives::TextWidget;
@@ -432,12 +470,22 @@ impl<T: 'static> TreeView<T> {
 #[derive(Clone)]
 pub struct TreeViewHandle {
     reveal: SharedRowReveal,
+    /// The tree's `focused_index`, the same signal the keyboard writes.
+    cursor: Signal<Option<usize>>,
+    /// The tree's `focused_anchor`: the row identity the cursor follows
+    /// through a structural change, written with every write of the cursor.
+    cursor_anchor: Rc<RefCell<Option<crate::data_views::RowAnchor>>>,
+    /// The tree's visible row count, to clamp a cursor written from here.
+    len: Rc<dyn Fn() -> usize>,
+    /// The identity of the row at a flat index, for `cursor_anchor`.
+    anchor_at: Rc<dyn Fn(usize) -> crate::data_views::RowAnchor>,
 }
 
 impl std::fmt::Debug for TreeViewHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TreeViewHandle")
             .field("pending", &self.reveal.pending())
+            .field("cursor", &self.cursor.get())
             .finish()
     }
 }
@@ -456,6 +504,56 @@ impl TreeViewHandle {
     pub fn ensure_index_visible(&self, index: usize) {
         self.reveal.request(index, RevealAlign::Nearest);
     }
+
+    /// The flat visible index the keyboard cursor is on, or `None` while the
+    /// tree has no cursor: it has not been navigated, clicked or given one by
+    /// [`set_cursor`](Self::set_cursor). With no cursor the keys start from
+    /// the first selected row, and from the first or last row when nothing is
+    /// selected.
+    ///
+    /// The cursor follows its row: an expansion or a collapse above it, or an
+    /// insertion, moves the index with the row, and a row that leaves the
+    /// visible rows takes the cursor with it. In a single selection
+    /// the cursor follows the selection: the keys move them together, and a
+    /// selection written from outside moves the cursor onto it. In a multiple
+    /// selection they are separate: the accelerator with an arrow
+    /// (`Ctrl+Arrow`) moves the cursor alone, and a selection written from
+    /// outside leaves the cursor where it was.
+    pub fn cursor(&self) -> Option<usize> {
+        self.cursor.get()
+    }
+
+    /// Move the keyboard cursor to the row at flat visible index `index`, or
+    /// remove it with `None`.
+    ///
+    /// An index past the last visible row is clamped to that row; on an empty
+    /// tree the cursor is removed. While the tree holds keyboard focus it
+    /// names the row as its active descendant at the next accessibility
+    /// update, when the row is realized; the next arrow key steps from it,
+    /// and the cursor follows that row through later structural changes.
+    ///
+    /// Keyboard focus and the selection are left alone, and the tree does not
+    /// scroll: pair it with
+    /// [`ensure_index_visible`](Self::ensure_index_visible) to bring the row
+    /// into view. Usable before the tree is mounted and across its rebuilds;
+    /// in a single selection the tree seats the cursor on the selected row
+    /// when it is built and whenever the selection changes.
+    pub fn set_cursor(&self, index: Option<usize>) {
+        let len = (self.len)();
+        let index = index.and_then(|i| len.checked_sub(1).map(|last| i.min(last)));
+        // The anchor first: an observer of the cursor reads a consistent pair.
+        *self.cursor_anchor.borrow_mut() = index.map(|i| (self.anchor_at)(i));
+        self.cursor.set(index);
+    }
+
+    /// A read-only signal of the cursor, as [`cursor`](Self::cursor) reports
+    /// it, for an application to observe or bind: a status line naming the
+    /// current row, actions enabled for it. It changes with every write of
+    /// the cursor, by the keys, a click, a structural change moving it or
+    /// [`set_cursor`](Self::set_cursor).
+    pub fn cursor_signal(&self) -> Signal<Option<usize>> {
+        self.cursor.map(|index| *index)
+    }
 }
 
 #[cfg(test)]
@@ -463,3 +561,6 @@ mod tests;
 
 #[cfg(test)]
 mod handle_tests;
+
+#[cfg(test)]
+mod cursor_tests;

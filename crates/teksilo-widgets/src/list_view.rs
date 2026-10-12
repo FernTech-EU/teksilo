@@ -66,6 +66,24 @@
 //! The builder-value methods of the same names compute the offset when they
 //! are called, against the last layout pass.
 //!
+//! ## The keyboard cursor
+//!
+//! The list has one current row, its keyboard cursor: the row the arrow keys
+//! step from and the one it names to assistive technology as its active
+//! descendant while it holds keyboard focus. The same [`ListViewHandle`]
+//! reads and moves it: [`cursor`](ListViewHandle::cursor),
+//! [`set_cursor`](ListViewHandle::set_cursor) (clamped to the last row;
+//! keyboard focus, the selection and the scroll offset are left alone) and
+//! [`cursor_signal`](ListViewHandle::cursor_signal), for an application to
+//! observe. A cursor set before mount is there at the first build.
+//!
+//! In a single selection the cursor follows the selection. In a multiple
+//! selection the two are **separate**: `Ctrl+↓` moves the cursor and leaves
+//! the selection, so after `↓`, `Ctrl+↓`, `Ctrl+↓` the selection is still row 0
+//! while the cursor and the active descendant are on row 2, and a selection
+//! written from outside leaves the cursor where it was. Read the cursor, not
+//! the first selected row, for "the row the user is on".
+//!
 //! ## Pan to scroll
 //!
 //! The view installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior),
@@ -219,8 +237,12 @@ pub struct ListView<T: 'static> {
     /// [`KeyedSelectionModel<K>`], unified behind the index-facing facade.
     row_selection: Option<RowSelection>,
 
-    /// Keyboard-focused item index within the list.
-    focused_index: Rc<Cell<Option<usize>>>,
+    /// The keyboard cursor: the model index the arrow keys step from and the
+    /// view names as its active descendant. A signal, bound
+    /// `AccessibilityOnly` by the root, so a write from anywhere (the keys, a
+    /// click, a [`ListViewHandle`]) re-walks the AT tree; shared with every
+    /// handle.
+    focused_index: Signal<Option<usize>>,
 
     /// Shared (model index → row wrapper id) map, written by the body pane at
     /// the end of every build. Handed out by
@@ -475,7 +497,7 @@ impl<T: 'static> ListView<T> {
             height_source: HeightSource::Uniform,
             metrics: Rc::new(RefCell::new(RowMetrics::uniform(DEFAULT_ITEM_HEIGHT, 0.0))),
             row_selection: None,
-            focused_index: Rc::new(Cell::new(None)),
+            focused_index: Signal::new(None),
             row_map: Rc::new(RefCell::new(Vec::new())),
             type_ahead_label: None,
             type_ahead_timeout: crate::common::type_ahead::DEFAULT_TYPE_AHEAD_TIMEOUT,
@@ -1286,6 +1308,8 @@ impl<T: 'static> ListView<T> {
     pub fn handle(&self) -> ListViewHandle {
         ListViewHandle {
             reveal: self.reveal.clone(),
+            cursor: self.focused_index.clone(),
+            len: self.source.len_fn.clone(),
         }
     }
 }
@@ -1301,6 +1325,14 @@ impl<T: 'static> ListView<T> {
 /// a request made before mount is applied at the first layout, and a later
 /// request replaces an earlier pending one. A request on an empty list is
 /// dropped; an index past the end reveals the last item.
+///
+/// The handle also reads and moves the list's **keyboard cursor**, the row
+/// the arrow keys step from and assistive technology is told is current:
+/// [`cursor`](Self::cursor), [`set_cursor`](Self::set_cursor) and
+/// [`cursor_signal`](Self::cursor_signal). In a multiple selection the cursor
+/// and the selection are separate: the accelerator with an arrow moves the
+/// cursor alone, and a selection written from outside leaves the cursor where
+/// it was.
 ///
 /// ```rust
 /// # use teksilo_widgets::ListView;
@@ -1318,12 +1350,17 @@ impl<T: 'static> ListView<T> {
 #[derive(Clone)]
 pub struct ListViewHandle {
     reveal: SharedRowReveal,
+    /// The list's `focused_index`, the same signal the keyboard writes.
+    cursor: Signal<Option<usize>>,
+    /// The list's item count, to clamp a cursor written from here.
+    len: Rc<dyn Fn() -> usize>,
 }
 
 impl std::fmt::Debug for ListViewHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ListViewHandle")
             .field("pending", &self.reveal.pending())
+            .field("cursor", &self.cursor.get())
             .finish()
     }
 }
@@ -1341,6 +1378,51 @@ impl ListViewHandle {
     /// Sections are honoured as in [`ListView::ensure_index_visible`].
     pub fn ensure_index_visible(&self, index: usize) {
         self.reveal.request(index, RevealAlign::Nearest);
+    }
+
+    /// The model index the keyboard cursor is on, or `None` while the list
+    /// has no cursor: it has not been navigated, clicked or given one by
+    /// [`set_cursor`](Self::set_cursor). With no cursor the keys start from
+    /// the first selected row, and from the first or last row when nothing is
+    /// selected.
+    ///
+    /// In a single selection the cursor follows the selection: the keys move
+    /// them together, and a selection written from outside takes the cursor
+    /// off any other row (it reads `None` then, and the keys start from the
+    /// selection). In a multiple selection they are separate: the accelerator
+    /// with an arrow (`Ctrl+Arrow`) moves the cursor alone, and a selection
+    /// written from outside leaves the cursor where it was.
+    pub fn cursor(&self) -> Option<usize> {
+        self.cursor.get()
+    }
+
+    /// Move the keyboard cursor to model index `index`, or remove it with
+    /// `None`.
+    ///
+    /// An index past the last row is clamped to the last row; on an empty
+    /// list the cursor is removed. While the list holds keyboard focus it
+    /// names the row as its active descendant at the next accessibility
+    /// update, when the row is realized; the next arrow key steps from it.
+    ///
+    /// Keyboard focus and the selection are left alone, and the list does
+    /// not scroll: pair it with
+    /// [`ensure_index_visible`](Self::ensure_index_visible) to bring the row
+    /// into view. Usable before the list is mounted (the first build finds
+    /// the cursor there) and across its rebuilds. In a single selection the
+    /// next change of selection takes the cursor back to the selected row.
+    pub fn set_cursor(&self, index: Option<usize>) {
+        let len = (self.len)();
+        let index = index.and_then(|i| len.checked_sub(1).map(|last| i.min(last)));
+        self.cursor.set(index);
+    }
+
+    /// A read-only signal of the cursor, as [`cursor`](Self::cursor) reports
+    /// it, for an application to observe or bind: a status line naming the
+    /// current row, actions enabled for it. It changes with every write of
+    /// the cursor, by the keys, a click, the data shifting it or
+    /// [`set_cursor`](Self::set_cursor).
+    pub fn cursor_signal(&self) -> Signal<Option<usize>> {
+        self.cursor.map(|index| *index)
     }
 }
 
@@ -1363,3 +1445,6 @@ mod checkbox_keyboard_tests;
 
 #[cfg(test)]
 mod handle_tests;
+
+#[cfg(test)]
+mod cursor_tests;

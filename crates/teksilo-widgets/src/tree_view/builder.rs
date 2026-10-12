@@ -156,7 +156,7 @@ impl<T: 'static> TreeView<T> {
             height_source: HeightSource::Uniform,
             metrics: Rc::new(RefCell::new(RowMetrics::uniform(DEFAULT_ITEM_HEIGHT, 0.0))),
             row_selection: None,
-            focused_index: Rc::new(Cell::new(None)),
+            focused_index: Signal::new(None),
             focused_anchor: Rc::new(RefCell::new(None)),
             row_map: Rc::new(RefCell::new(Vec::new())),
             row_tooltips: Default::default(),

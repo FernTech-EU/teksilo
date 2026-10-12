@@ -98,6 +98,35 @@
 //! handle.reveal_band(album);
 //! ```
 //!
+//! ## The keyboard cursor
+//!
+//! The grid has one current tile, its keyboard cursor: the tile the arrow
+//! keys step from, the one the focus ring marks while the grid holds keyboard
+//! focus, and the one it names to assistive technology as its active
+//! descendant. The same [`GridViewHandle`] reads and moves it:
+//! [`cursor`](GridViewHandle::cursor),
+//! [`set_cursor`](GridViewHandle::set_cursor) (clamped to the last tile;
+//! keyboard focus, the selection and the scroll offset are left alone) and
+//! [`cursor_signal`](GridViewHandle::cursor_signal), which an application
+//! observes to key a status line or its context actions on the current tile.
+//! Like a reveal, a cursor set before the grid is mounted is there at its
+//! first build.
+//!
+//! The cursor and the selection are one tile in a single selection: the keys
+//! move them together, and a selection written from outside moves the cursor
+//! onto it. In a multiple selection they are **separate**: `Ctrl+Arrow` moves
+//! the cursor and leaves the selection, so after `→`, `Ctrl+→`, `Ctrl+↓` the
+//! selection is still tile 0 while the cursor, the ring and the active
+//! descendant are on tile 4 (in three columns), and a selection written from
+//! outside leaves the cursor where it was. Read the cursor, not the first
+//! selected tile, for "the tile the user is on".
+//!
+//! An open [detail band](GridView::detail_row) is on the keyboard path
+//! already: `↓` on the open tile moves focus into its band, onto its first
+//! control, while the cursor stays on the tile, and `↑` from the band's top
+//! comes back to it. A band with no control to focus is stepped over. An
+//! application has no walk of its own to write.
+//!
 //! ## A long band
 //!
 //! A band that holds hundreds of rows, an album's tracks say, need not build
@@ -945,7 +974,11 @@ impl<T: 'static> GridView<T> {
     /// [`ensure_index_visible`](Self::ensure_index_visible), which compute
     /// the offset when they are called.
     pub fn handle(&self) -> GridViewHandle {
-        GridViewHandle::new(self.reveal.clone())
+        GridViewHandle::new(
+            self.reveal.clone(),
+            self.focused_index.clone(),
+            self.source.len_fn.clone(),
+        )
     }
 
     /// Bring `index` into view: nothing when the tile is already fully

@@ -123,7 +123,7 @@ impl<T: 'static> TreeView<T> {
 fn seat_the_cursor_on_the_selection<T: 'static>(
     selection: &crate::data_views::RowSelection,
     source: &crate::tree_source::TreeSource<T>,
-    focused_index: &Cell<Option<usize>>,
+    focused_index: &Signal<Option<usize>>,
     focused_anchor: &RefCell<Option<crate::data_views::RowAnchor>>,
 ) {
     let Some(&selected) = selection.selected_indices().first() else {
@@ -166,6 +166,17 @@ impl<T: 'static> Widget for TreeView<T> {
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
+        );
+
+        // The keyboard cursor names the active descendant (`accessibility`),
+        // so any write of it — the keys, a click, a handle's `set_cursor` —
+        // re-walks the AT tree. A cursor-only move (the accelerator with an
+        // arrow in a multiple selection) changes nothing else the walk would
+        // notice. Neither a rebuild nor a relayout: no row is drawn from it.
+        self.focused_index.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
         );
 
         // Bind scroll_y at Relayout so place_children runs on every scroll

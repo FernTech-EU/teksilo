@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! [`GridViewHandle`]: scroll a [`GridView`](super::GridView) from outside,
-//! before it is laid out and across its rebuilds.
+//! [`GridViewHandle`]: scroll a [`GridView`](super::GridView) and move its
+//! keyboard cursor from outside, before it is laid out and across its
+//! rebuilds.
 //!
 //! The builder's own `scroll_to_index` / `ensure_index_visible` compute an
 //! offset at call time, from the geometry of the last layout. Before the
@@ -16,6 +17,11 @@
 //! asks for a relayout, and `GridView::place_children` applies the request
 //! once the band is measured and that anchoring has run: the offset is
 //! computed from the layout it will be shown in.
+//!
+//! The cursor is the grid's own signal, shared by the handle: a write is seen
+//! by the focus ring (bound `RepaintOnly` in `GridOverlay`) and by the grid's
+//! active descendant (bound `AccessibilityOnly` on the root), and a write
+//! made before mount is simply the value the first build finds.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -102,22 +108,87 @@ impl RevealShared {
 /// Only the latest request is applied: a later one replaces one still
 /// pending. A request for a tile the grid does not have when it is applied
 /// does nothing.
+///
+/// The handle also reads and moves the grid's **keyboard cursor**, the tile
+/// the arrow keys step from, the focus ring marks and assistive technology is
+/// told is current: [`cursor`](Self::cursor),
+/// [`set_cursor`](Self::set_cursor) and [`cursor_signal`](Self::cursor_signal).
+/// In a multiple selection the cursor and the selection are separate: the
+/// accelerator with an arrow moves the cursor alone, and a selection written
+/// from outside leaves the cursor where it was.
 #[derive(Clone)]
 pub struct GridViewHandle {
     shared: Rc<RevealShared>,
+    /// The grid's `focused_index`, the same signal the keyboard writes.
+    cursor: Signal<Option<usize>>,
+    /// The grid's item count, to clamp a cursor written from here.
+    len: Rc<dyn Fn() -> usize>,
 }
 
 impl std::fmt::Debug for GridViewHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GridViewHandle")
             .field("pending", &self.shared.pending.get())
+            .field("cursor", &self.cursor.get())
             .finish()
     }
 }
 
 impl GridViewHandle {
-    pub(crate) fn new(shared: Rc<RevealShared>) -> Self {
-        Self { shared }
+    pub(crate) fn new(
+        shared: Rc<RevealShared>,
+        cursor: Signal<Option<usize>>,
+        len: Rc<dyn Fn() -> usize>,
+    ) -> Self {
+        Self {
+            shared,
+            cursor,
+            len,
+        }
+    }
+
+    /// The tile the keyboard cursor is on, or `None` while the grid has no
+    /// cursor: it has not been navigated, clicked or given one by
+    /// [`set_cursor`](Self::set_cursor). With no cursor the keys start from
+    /// the first selected tile, and from the first or last tile when nothing
+    /// is selected.
+    ///
+    /// In a single selection the cursor follows the selection: the keys move
+    /// them together, and a selection written from outside moves the cursor
+    /// onto it. In a multiple selection they are separate: the accelerator
+    /// with an arrow (`Ctrl+Arrow`) moves the cursor alone, and a selection
+    /// written from outside leaves the cursor where it was.
+    pub fn cursor(&self) -> Option<usize> {
+        self.cursor.get()
+    }
+
+    /// Move the keyboard cursor to tile `index`, or remove it with `None`.
+    ///
+    /// An index past the last tile is clamped to the last tile; on an empty
+    /// grid the cursor is removed. The focus ring moves at the next paint,
+    /// while the grid holds keyboard focus, and the grid names the tile as
+    /// its active descendant at the next accessibility update when the tile
+    /// is realized. The next arrow key steps from it.
+    ///
+    /// Keyboard focus and the selection are left alone, and the grid does not
+    /// scroll: pair it with [`ensure_index_visible`](Self::ensure_index_visible)
+    /// to bring the tile into view. Usable before the grid is mounted (the
+    /// first build finds the cursor there) and across its rebuilds. In a
+    /// single selection the next change of selection puts the cursor back on
+    /// the selected tile.
+    pub fn set_cursor(&self, index: Option<usize>) {
+        let len = (self.len)();
+        let index = index.and_then(|i| len.checked_sub(1).map(|last| i.min(last)));
+        self.cursor.set(index);
+    }
+
+    /// A read-only signal of the cursor, as [`cursor`](Self::cursor) reports
+    /// it, for an application to observe or bind: a status line naming the
+    /// current tile, actions enabled for it. It changes with every write of
+    /// the cursor, by the keys, a click, the data shifting it or
+    /// [`set_cursor`](Self::set_cursor).
+    pub fn cursor_signal(&self) -> Signal<Option<usize>> {
+        self.cursor.map(|index| *index)
     }
 
     /// Scroll to tile `index`, forcing its position in the viewport per

@@ -4381,3 +4381,6 @@ fn section_headers_and_the_detail_band_still_span_the_content_width() {
 
 /// `GridViewHandle` and `GridView::detail_visible_span_signal`.
 mod reveal_handle;
+
+/// The keyboard cursor through `GridViewHandle`.
+mod cursor_handle;

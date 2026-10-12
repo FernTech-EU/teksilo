@@ -80,7 +80,7 @@ pub(crate) struct ListBodyPane<T: 'static> {
     pub(crate) row_selection: Option<RowSelection>,
     /// Keyboard cursor, shared with the root's key handler — the per-row
     /// pointer handler moves it so arrows step from the clicked row.
-    pub(crate) focused_index: Rc<Cell<Option<usize>>>,
+    pub(crate) focused_index: Signal<Option<usize>>,
 
     pub(crate) reorderable: bool,
     /// The non-drag reorder, bound once by the root. `Some` exactly when the

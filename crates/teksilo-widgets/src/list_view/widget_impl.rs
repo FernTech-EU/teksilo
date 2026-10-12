@@ -39,6 +39,17 @@ impl<T: 'static> Widget for ListView<T> {
             BindingLevel::RepaintOnly,
         );
 
+        // The keyboard cursor names the active descendant (`accessibility`),
+        // so any write of it — the keys, a click, a handle's `set_cursor` —
+        // re-walks the AT tree. A cursor-only move (the accelerator with an
+        // arrow in a multiple selection) changes nothing else the walk would
+        // notice. Neither a rebuild nor a relayout: no row is drawn from it.
+        self.focused_index.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
+        );
+
         // Bind scroll_y at Relayout so place_children runs on every scroll
         // position change (re-clamps and refreshes the thumb) without a
         // rebuild. The pane holds the matching binding for its rows.
