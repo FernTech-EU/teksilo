@@ -49,6 +49,11 @@ by crate for clarity, not because crates version independently.
 - `BuildContext::attached_tap_buttons` reads the buttons an `on_tap`
   attached to a node from outside answers to.
 
+- `WidgetTree::declared_cursor(id)` reads the cursor a widget declares, and
+  tells a declared `Default` from none, so a test can check a `.cursor(..)`
+  without hovering it. `current_cursor` is documented: the cursor shown now,
+  which changes as the pointer enters or leaves a node.
+
 #### Widgets
 
 - **Rebindable editor shortcuts.** `RichTextEditor` declares `format.bold`,
@@ -124,6 +129,12 @@ by crate for clarity, not because crates version independently.
 - `PopoverWidget::on_close_with` tells the callback why the popover closed
   (`DismissReason`).
 
+- **The keyboard cursor of a data view.** `GridViewHandle`, `ListViewHandle`
+  and `TreeViewHandle` gain `cursor()`, `set_cursor(..)` and a read-only
+  `cursor_signal()`. In a multiple selection the cursor moves apart from the
+  selection; setting it moves the focus ring and the announced item without
+  moving keyboard focus, the selection or the scroll position.
+
 #### cargo-teksilo
 
 - **`symbol` lists a struct's public fields**, with their types and docs,
@@ -166,6 +177,12 @@ by crate for clarity, not because crates version independently.
 - **`symbol` resolves an enum variant** to its enum: `symbol
   FixedColumnCount` shows `GridSizing`.
 
+#### Automation
+
+- `inspect_node` and `layout_tree` report each widget's declared `cursor`,
+  and `query_pointers` gives the hovering pointer the cursor the window
+  shows.
+
 #### Documentation
 
 - The generated catalog pages list the same fields and variant payloads,
@@ -191,6 +208,10 @@ by crate for clarity, not because crates version independently.
 - **Breaking.** `OverlayPlacement` has a new variant, so an exhaustive
   `match` on it needs a `BelowSelection` arm. `TextInputStyleConfig` has a
   new `min_height` field.
+
+- The `Debug` text of a mounted widget built with handler methods says the
+  handlers moved to the tree, instead of showing an empty set with
+  `cursor: None`.
 
 #### Widgets
 
@@ -274,6 +295,10 @@ by crate for clarity, not because crates version independently.
   selection was not among the items. It now announces the placeholder it
   shows.
 
+- **A cursor-only move in a `ListView` or `TreeView` was not announced.**
+  With a multiple selection, Ctrl+arrows moved the cursor but a screen
+  reader kept hearing the old row as current.
+
 #### cargo-teksilo
 
 - **`symbol` dropped the enum variant after each plain `//` comment** inside
@@ -331,6 +356,9 @@ by crate for clarity, not because crates version independently.
   touch, pen, gestures and the simulated clock, for headless tests and the
   automation bridge) and its test inspection methods from the rest, under a
   heading each on docs.rs.
+- `sync_accessibility` says that it returns the whole tree on every call,
+  that adapters receive `deliver_accessibility`'s update, and that
+  `at_version` tells a test that something changed.
 
 ## [0.16.0] - 2026-10-09
 
