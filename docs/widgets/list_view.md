@@ -70,6 +70,9 @@ ListView — a virtualized, scrollable list backed by a reactive data model.
 | | **Methods** |
 |  | [`scroll_to_index(index: usize)`](#listviewhandle-scroll_to_index) |
 |  | [`ensure_index_visible(index: usize)`](#listviewhandle-ensure_index_visible) |
+| `Option<usize>` | [`cursor()`](#listviewhandle-cursor) |
+|  | [`set_cursor(index: Option<usize>)`](#listviewhandle-set_cursor) |
+| `Signal<Option<usize>>` | [`cursor_signal()`](#listviewhandle-cursor_signal) |
 
 ## Detailed description
 
@@ -135,6 +138,24 @@ handle.ensure_index_visible(0);
 
 The builder-value methods of the same names compute the offset when they
 are called, against the last layout pass.
+
+#### The keyboard cursor
+
+The list has one current row, its keyboard cursor: the row the arrow keys
+step from and the one it names to assistive technology as its active
+descendant while it holds keyboard focus. The same `ListViewHandle`
+reads and moves it: `cursor`,
+`set_cursor` (clamped to the last row;
+keyboard focus, the selection and the scroll offset are left alone) and
+`cursor_signal`, for an application to
+observe. A cursor set before mount is there at the first build.
+
+In a single selection the cursor follows the selection. In a multiple
+selection the two are **separate**: `Ctrl+↓` moves the cursor and leaves
+the selection, so after `↓`, `Ctrl+↓`, `Ctrl+↓` the selection is still row 0
+while the cursor and the active descendant are on row 2, and a selection
+written from outside leaves the cursor where it was. Read the cursor, not
+the first selected row, for "the row the user is on".
 
 #### Pan to scroll
 
@@ -782,6 +803,14 @@ a request made before mount is applied at the first layout, and a later
 request replaces an earlier pending one. A request on an empty list is
 dropped; an index past the end reveals the last item.
 
+The handle also reads and moves the list's **keyboard cursor**, the row
+the arrow keys step from and assistive technology is told is current:
+`cursor`, `set_cursor` and
+`cursor_signal`. In a multiple selection the cursor
+and the selection are separate: the accelerator with an arrow moves the
+cursor alone, and a selection written from outside leaves the cursor where
+it was.
+
 ```rust
 # use teksilo_widgets::ListView;
 # use teksilo_widgets::primitives::TextWidget;
@@ -817,3 +846,49 @@ Sections are honoured as in `ListView::scroll_to_index`.
 Scroll the minimum distance that brings the given model index fully
 into view, at the next layout pass; no scroll when it already is.
 Sections are honoured as in `ListView::ensure_index_visible`.
+
+<a id="listviewhandle-cursor"></a>
+
+#### `pub fn cursor(&self) -> Option<usize>`
+
+The model index the keyboard cursor is on, or `None` while the list
+has no cursor: it has not been navigated, clicked or given one by
+`set_cursor`. With no cursor the keys start from
+the first selected row, and from the first or last row when nothing is
+selected.
+
+In a single selection the cursor follows the selection: the keys move
+them together, and a selection written from outside takes the cursor
+off any other row (it reads `None` then, and the keys start from the
+selection). In a multiple selection they are separate: the accelerator
+with an arrow (`Ctrl+Arrow`) moves the cursor alone, and a selection
+written from outside leaves the cursor where it was.
+
+<a id="listviewhandle-set_cursor"></a>
+
+#### `pub fn set_cursor(&self, index: Option<usize>)`
+
+Move the keyboard cursor to model index `index`, or remove it with
+`None`.
+
+An index past the last row is clamped to the last row; on an empty
+list the cursor is removed. While the list holds keyboard focus it
+names the row as its active descendant at the next accessibility
+update, when the row is realized; the next arrow key steps from it.
+
+Keyboard focus and the selection are left alone, and the list does
+not scroll: pair it with
+`ensure_index_visible` to bring the row
+into view. Usable before the list is mounted (the first build finds
+the cursor there) and across its rebuilds. In a single selection the
+next change of selection takes the cursor back to the selected row.
+
+<a id="listviewhandle-cursor_signal"></a>
+
+#### `pub fn cursor_signal(&self) -> Signal<Option<usize>>`
+
+A read-only signal of the cursor, as `cursor` reports
+it, for an application to observe or bind: a status line naming the
+current row, actions enabled for it. It changes with every write of
+the cursor, by the keys, a click, the data shifting it or
+`set_cursor`.

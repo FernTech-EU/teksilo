@@ -78,6 +78,9 @@ TreeView — a virtualized, expandable/collapsible hierarchical list widget.
 | | **Methods** |
 |  | [`scroll_to_index(index: usize)`](#treeviewhandle-scroll_to_index) |
 |  | [`ensure_index_visible(index: usize)`](#treeviewhandle-ensure_index_visible) |
+| `Option<usize>` | [`cursor()`](#treeviewhandle-cursor) |
+|  | [`set_cursor(index: Option<usize>)`](#treeviewhandle-set_cursor) |
+| `Signal<Option<usize>>` | [`cursor_signal()`](#treeviewhandle-cursor_signal) |
 
 ## Detailed description
 
@@ -118,6 +121,26 @@ let handle = tree.handle();
 // ancestors in the same turn:
 handle.ensure_index_visible(42);
 ```
+
+#### The keyboard cursor
+
+The tree has one current row, its keyboard cursor: the row the arrow keys
+step from and the one it names to assistive technology as its active
+descendant while it holds keyboard focus. The same `TreeViewHandle`
+reads and moves it, in flat visible indices:
+`cursor`,
+`set_cursor` (clamped to the last visible
+row; keyboard focus, the selection and the scroll offset are left alone)
+and `cursor_signal`, for an application
+to observe. The cursor follows its row through an expansion or a collapse
+above it, whoever set it. A cursor set before mount is there at the first
+build.
+
+In a single selection the cursor follows the selection. In a multiple
+selection the two are **separate**: `Ctrl+↓` moves the cursor and leaves
+the selection, and a selection written from outside leaves the cursor
+where it was. Read the cursor, not the first selected row, for "the row
+the user is on".
 
 #### Pan to scroll
 
@@ -652,6 +675,14 @@ say) is accounted for, a request made before mount is applied at the first
 layout, and a later request replaces an earlier pending one. A request on
 an empty tree is dropped; an index past the end reveals the last row.
 
+The handle also reads and moves the tree's **keyboard cursor**, the row the
+arrow keys step from and assistive technology is told is current:
+`cursor`, `set_cursor` and
+`cursor_signal`, in the same flat visible indices.
+In a multiple selection the cursor and the selection are separate: the
+accelerator with an arrow moves the cursor alone, and a selection written
+from outside leaves the cursor where it was.
+
 ```rust
 # use teksilo_widgets::TreeView;
 # use teksilo_widgets::primitives::TextWidget;
@@ -687,3 +718,52 @@ layout pass.
 Scroll the minimum distance that brings the row at the given flat
 visible index fully into view, at the next layout pass; no scroll
 when it already is.
+
+<a id="treeviewhandle-cursor"></a>
+
+#### `pub fn cursor(&self) -> Option<usize>`
+
+The flat visible index the keyboard cursor is on, or `None` while the
+tree has no cursor: it has not been navigated, clicked or given one by
+`set_cursor`. With no cursor the keys start from
+the first selected row, and from the first or last row when nothing is
+selected.
+
+The cursor follows its row: an expansion or a collapse above it, or an
+insertion, moves the index with the row, and a row that leaves the
+visible rows takes the cursor with it. In a single selection
+the cursor follows the selection: the keys move them together, and a
+selection written from outside moves the cursor onto it. In a multiple
+selection they are separate: the accelerator with an arrow
+(`Ctrl+Arrow`) moves the cursor alone, and a selection written from
+outside leaves the cursor where it was.
+
+<a id="treeviewhandle-set_cursor"></a>
+
+#### `pub fn set_cursor(&self, index: Option<usize>)`
+
+Move the keyboard cursor to the row at flat visible index `index`, or
+remove it with `None`.
+
+An index past the last visible row is clamped to that row; on an empty
+tree the cursor is removed. While the tree holds keyboard focus it
+names the row as its active descendant at the next accessibility
+update, when the row is realized; the next arrow key steps from it,
+and the cursor follows that row through later structural changes.
+
+Keyboard focus and the selection are left alone, and the tree does not
+scroll: pair it with
+`ensure_index_visible` to bring the row
+into view. Usable before the tree is mounted and across its rebuilds;
+in a single selection the tree seats the cursor on the selected row
+when it is built and whenever the selection changes.
+
+<a id="treeviewhandle-cursor_signal"></a>
+
+#### `pub fn cursor_signal(&self) -> Signal<Option<usize>>`
+
+A read-only signal of the cursor, as `cursor` reports
+it, for an application to observe or bind: a status line naming the
+current row, actions enabled for it. It changes with every write of
+the cursor, by the keys, a click, a structural change moving it or
+`set_cursor`.

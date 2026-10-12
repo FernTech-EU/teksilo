@@ -93,6 +93,9 @@ Virtualized 2D tile grid bound to a `ListModel<T>` / `ListDataSource`.
 | Returns | Function |
 | ---: | :--- |
 | | **Methods** |
+| `Option<usize>` | [`cursor()`](#gridviewhandle-cursor) |
+|  | [`set_cursor(index: Option<usize>)`](#gridviewhandle-set_cursor) |
+| `Signal<Option<usize>>` | [`cursor_signal()`](#gridviewhandle-cursor_signal) |
 |  | [`scroll_to_index(index: usize, anchor: ScrollAnchor)`](#gridviewhandle-scroll_to_index) |
 |  | [`ensure_index_visible(index: usize, anchor: ScrollAnchor)`](#gridviewhandle-ensure_index_visible) |
 |  | [`reveal_band(index: usize)`](#gridviewhandle-reveal_band) |
@@ -203,6 +206,35 @@ let handle = grid.handle();
 expanded.set(Some(album));
 handle.reveal_band(album);
 ```
+
+#### The keyboard cursor
+
+The grid has one current tile, its keyboard cursor: the tile the arrow
+keys step from, the one the focus ring marks while the grid holds keyboard
+focus, and the one it names to assistive technology as its active
+descendant. The same `GridViewHandle` reads and moves it:
+`cursor`,
+`set_cursor` (clamped to the last tile;
+keyboard focus, the selection and the scroll offset are left alone) and
+`cursor_signal`, which an application
+observes to key a status line or its context actions on the current tile.
+Like a reveal, a cursor set before the grid is mounted is there at its
+first build.
+
+The cursor and the selection are one tile in a single selection: the keys
+move them together, and a selection written from outside moves the cursor
+onto it. In a multiple selection they are **separate**: `Ctrl+Arrow` moves
+the cursor and leaves the selection, so after `→`, `Ctrl+→`, `Ctrl+↓` the
+selection is still tile 0 while the cursor, the ring and the active
+descendant are on tile 4 (in three columns), and a selection written from
+outside leaves the cursor where it was. Read the cursor, not the first
+selected tile, for "the tile the user is on".
+
+An open `detail band` is on the keyboard path
+already: `↓` on the open tile moves focus into its band, onto its first
+control, while the cursor stays on the tile, and `↑` from the band's top
+comes back to it. A band with no control to focus is stepped over. An
+application has no walk of its own to write.
 
 #### A long band
 
@@ -962,11 +994,64 @@ Only the latest request is applied: a later one replaces one still
 pending. A request for a tile the grid does not have when it is applied
 does nothing.
 
+The handle also reads and moves the grid's **keyboard cursor**, the tile
+the arrow keys step from, the focus ring marks and assistive technology is
+told is current: `cursor`,
+`set_cursor` and `cursor_signal`.
+In a multiple selection the cursor and the selection are separate: the
+accelerator with an arrow moves the cursor alone, and a selection written
+from outside leaves the cursor where it was.
+
 ```rust
 pub struct GridViewHandle { /* fields */ }
 ```
 
 ### Methods
+
+<a id="gridviewhandle-cursor"></a>
+
+#### `pub fn cursor(&self) -> Option<usize>`
+
+The tile the keyboard cursor is on, or `None` while the grid has no
+cursor: it has not been navigated, clicked or given one by
+`set_cursor`. With no cursor the keys start from
+the first selected tile, and from the first or last tile when nothing
+is selected.
+
+In a single selection the cursor follows the selection: the keys move
+them together, and a selection written from outside moves the cursor
+onto it. In a multiple selection they are separate: the accelerator
+with an arrow (`Ctrl+Arrow`) moves the cursor alone, and a selection
+written from outside leaves the cursor where it was.
+
+<a id="gridviewhandle-set_cursor"></a>
+
+#### `pub fn set_cursor(&self, index: Option<usize>)`
+
+Move the keyboard cursor to tile `index`, or remove it with `None`.
+
+An index past the last tile is clamped to the last tile; on an empty
+grid the cursor is removed. The focus ring moves at the next paint,
+while the grid holds keyboard focus, and the grid names the tile as
+its active descendant at the next accessibility update when the tile
+is realized. The next arrow key steps from it.
+
+Keyboard focus and the selection are left alone, and the grid does not
+scroll: pair it with `ensure_index_visible`
+to bring the tile into view. Usable before the grid is mounted (the
+first build finds the cursor there) and across its rebuilds. In a
+single selection the next change of selection puts the cursor back on
+the selected tile.
+
+<a id="gridviewhandle-cursor_signal"></a>
+
+#### `pub fn cursor_signal(&self) -> Signal<Option<usize>>`
+
+A read-only signal of the cursor, as `cursor` reports
+it, for an application to observe or bind: a status line naming the
+current tile, actions enabled for it. It changes with every write of
+the cursor, by the keys, a click, the data shifting it or
+`set_cursor`.
 
 <a id="gridviewhandle-scroll_to_index"></a>
 
