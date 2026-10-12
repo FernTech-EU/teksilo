@@ -13,6 +13,12 @@ use crate::executor::{AsyncRuntimeHandle, TaskHandle};
 const NOT_INSTALLED: &str = "teksilo-async: AsyncRuntimeHandle not installed — call \
      TeksiloAppBuilder::install_async() at startup";
 
+/// The window a completion is bound to when the context has no window: the id
+/// `HeadlessApp` gives its stub window.
+fn headless_window_id() -> TeksiloWindowId {
+    TeksiloWindowId::new(0)
+}
+
 /// Spawn async work on the main-thread executor from inside an event handler.
 ///
 /// Brought into scope with `use teksilo_async::EventContextAsyncExt;` (or via
@@ -28,10 +34,10 @@ pub trait EventContextAsyncExt {
     /// a one-shot ambient op (`open_window`, `send_intent`, …) once the work
     /// finishes. The future body itself runs handle-only.
     ///
-    /// # Panics
-    /// Panics if called outside a window context (there is no window to bind
-    /// the completion to). Use [`spawn_local`](Self::spawn_local) from such
-    /// sites and drive UI updates through `Signal`s.
+    /// Outside a window context (a headless [`WidgetTree`](teksilo_core::WidgetTree)
+    /// driven by `run_with_event_context`) the completion is bound to window
+    /// `0`, the id `HeadlessApp` gives its stub window; deliver it with
+    /// [`AsyncCompletionHandle::drain_into`](teksilo_core::AsyncCompletionHandle::drain_into).
     fn spawn_local_with<R: 'static>(
         &mut self,
         future: impl Future<Output = R> + 'static,
@@ -66,7 +72,7 @@ impl EventContextAsyncExt for EventContext<'_> {
         let window_id: TeksiloWindowId = self
             .window()
             .map(|w| w.id())
-            .expect("teksilo-async: spawn_local_with requires a window context");
+            .unwrap_or_else(headless_window_id);
         handle.spawn_local_with(window_id, future, on_complete)
     }
 }

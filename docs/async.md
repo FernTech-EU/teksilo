@@ -184,6 +184,29 @@ are complementary, not competing:
 Both deliver their effects on the UI thread and both update the UI through
 `Signal`s.
 
+## Testing
+
+A headless tree has no event loop, so nothing ticks the executor and nothing
+routes a `spawn_local_with` completion. Drive both by hand:
+
+```rust
+let mut app = TeksiloAppBuilder::new().install_async().build_headless();
+let rt = app.tree.app_context().app_state::<AsyncRuntimeHandle>().unwrap().clone();
+
+app.tree.run_with_event_context(&mut NoopWindowOps, |ctx| {
+    ctx.spawn_local_with(async { 21 * 2 }, |value, ctx| { /* ambient ops */ }).detach();
+});
+rt.tick();                                      // poll the future
+rt.completions().drain_into(&mut app.tree);     // run the callback with a fresh context
+```
+
+`AsyncCompletionHandle::drain_into` delivers every completion that is ready,
+each through `run_with_event_context` with a no-op window sink, and returns how
+many ran. A context with no window binds `spawn_local_with` to window `0`
+instead of panicking, which is the id `HeadlessApp` gives its stub window. A
+future that awaits `spawn_blocking` needs several ticks while the worker
+finishes; loop on `tick` until `pending_len()` is non-zero, then drain.
+
 ## Limitations
 
 - `spawn_local` futures cannot hold an `EventContext` across `.await`; ambient

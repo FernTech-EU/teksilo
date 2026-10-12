@@ -25,5 +25,8 @@ thiserror = { workspace = true }
 # `teksilo-analytics-native` and async-std in `teksilo-platform`).
 async-channel = "2"
 
+[dev-dependencies]
+teksilo-widgets = { workspace = true }
+
 [package.metadata.docs.rs]
 all-features = true

@@ -11647,6 +11647,7 @@ dependencies = [
  "async-channel 2.5.0",
  "teksilo-app",
  "teksilo-core",
+ "teksilo-widgets",
  "thiserror 2.0.20",
 ]
 

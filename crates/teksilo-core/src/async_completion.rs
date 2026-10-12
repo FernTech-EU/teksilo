@@ -26,7 +26,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::widget::EventContext;
-use crate::window::TeksiloWindowId;
+use crate::widget_tree::WidgetTree;
+use crate::window::{NoopWindowOps, TeksiloWindowId};
 
 type CompletionCallback = Box<dyn FnOnce(&mut EventContext)>;
 
@@ -106,6 +107,37 @@ impl AsyncCompletionHandle {
             .retain(|_, p| p.window_id != window_id);
     }
 
+    /// Deliver every completion that is ready, each with its own fresh
+    /// [`EventContext`] over `tree` and a [`NoopWindowOps`] sink. Returns how
+    /// many ran.
+    ///
+    /// A completion is registered only once its future has resolved, so every
+    /// pending entry is ready. This is the test door: a headless
+    /// [`WidgetTree`] has no event loop to route an
+    /// [`AsyncCompletionPayload`], so a test ticks the executor and then calls
+    /// this instead. Completions registered by a callback that runs here wait
+    /// for the next call. Delivery order is registration order.
+    ///
+    /// Window ops a callback performs (`open_window`, …) go to the no-op sink.
+    /// In a running app the event loop delivers completions itself; calling
+    /// this there is harmless (the loop's later delivery finds nothing).
+    pub fn drain_into(&self, tree: &mut WidgetTree) -> usize {
+        let mut ready: Vec<(u64, TeksiloWindowId)> = self
+            .inner
+            .borrow()
+            .pending
+            .iter()
+            .map(|(id, p)| (*id, p.window_id))
+            .collect();
+        ready.sort_by_key(|(id, _)| *id);
+        for (id, window_id) in &ready {
+            tree.run_with_event_context(&mut NoopWindowOps, |ctx| {
+                self.deliver(*id, *window_id, ctx)
+            });
+        }
+        ready.len()
+    }
+
     /// Number of pending completions (diagnostics / tests).
     pub fn pending_len(&self) -> usize {
         self.inner.borrow().pending.len()
@@ -148,6 +180,24 @@ mod tests {
             0,
             "delivered completion must be removed"
         );
+    }
+
+    #[test]
+    fn drain_into_delivers_every_pending_completion_in_order() {
+        let handle = AsyncCompletionHandle::new();
+        let order = Rc::new(RefCell::new(Vec::new()));
+        for n in 0..3 {
+            let log = order.clone();
+            handle.register(
+                TeksiloWindowId::new(n),
+                Box::new(move |_ctx| log.borrow_mut().push(n)),
+            );
+        }
+        let mut tree = WidgetTree::new();
+        assert_eq!(handle.drain_into(&mut tree), 3);
+        assert_eq!(*order.borrow(), vec![0, 1, 2]);
+        assert_eq!(handle.pending_len(), 0);
+        assert_eq!(handle.drain_into(&mut tree), 0, "nothing left to deliver");
     }
 
     #[test]
