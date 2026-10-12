@@ -48,10 +48,10 @@ content behind it legible, which is the one thing a scrim exists to prevent.
 
 | Placement | Anchored to | Notes |
 | --- | --- | --- |
-| `Below` | anchor rect | leading-edge aligned; **x** clamped into `usable()`, y is not, it drops below the anchor and may run past the bottom |
-| `Above` | anchor rect | leading-edge aligned, x clamped; sits above the anchor, shrunk to the room there rather than clamped down onto it, see §2.1 |
+| `Below` | anchor rect | at least the anchor's width; leading-edge aligned; **x** clamped into `usable()`, y is not, it drops below the anchor and may run past the bottom |
+| `Above` | anchor rect | at least the anchor's width; leading-edge aligned, x clamped; sits above the anchor, shrunk to the room there rather than clamped down onto it, see §2.1 |
 | `TrailingEdge` | anchor rect | submenus; flips to the leading side when it does not fit; y clamped at both ends |
-| `BelowPreferred` | anchor rect | drops below, flips above; when it fits on neither side, the roomier side, shrunk to it, see §2.1 |
+| `BelowPreferred` | anchor rect | at least the anchor's width; drops below, flips above; when it fits on neither side, the roomier side, shrunk to it, see §2.1 |
 | `NearAnchor { offset }` | anchor rect | tooltips; direction-aware horizontal anchoring, x clamped at both ends, y flips above and clamps to the top |
 | `AtPointer(point)` | a point | the mouse context menu, unchanged; x clamped at both ends, y flips above and clamps to the top |
 | `AtPointerAvoiding { point, avoid }` | a point | the **touch** context menu, see §3 |
@@ -60,6 +60,14 @@ content behind it legible, which is the one thing a scrim exists to prevent.
 | `BottomCenter` | viewport | snackbars |
 | `ViewportCorner { corner, margin }` | viewport | toasts; `corner` is RTL-resolved |
 | `FullViewport` | window | the scrim; ignores insets and occlusion |
+
+`Below`, `Above` and `BelowPreferred` widen the panel to **at least the anchor's
+width**. That is the drop-down convention, a list hanging off a field spans the
+field, and it is why a combo box's list never comes out narrower than the box.
+The panel is still as wide as its content asks when that is wider. Content that
+must keep its own width, a small popover off a wide trigger for instance, wants
+`NearAnchor` (below or above, leading edges aligned) or `TrailingEdge` (beside
+the anchor); both size the panel to its content alone.
 
 ### 2.1 A panel never covers its own anchor
 
@@ -169,9 +177,30 @@ outside every overlay above *k*, so those close and *k* and below survive.
 
 Unchanged. The press closes what it is outside of and then **falls through** to
 the widget beneath, so one click both closes the menu and actuates the control
-under it. The single exception is a primary press on a click-opened overlay's
-own anchor, which is consumed, the anchor's tap handler would otherwise
-reopen what the press just closed.
+under it. The single exception is a press on a click-opened overlay's own
+anchor, which is consumed, the anchor's tap handler would otherwise reopen what
+the press just closed. A primary press there is always consumed. Another button
+is consumed when the anchor opens on it, that is when a tap with that button
+would reach a tap handler between the node pressed and the anchor: a right
+click on an open right-click trigger closes it, and a right click on an open
+left-click trigger closes it and falls through, to the trigger's context menu
+for instance.
+
+### 6.1.1 A trigger that opens on another button
+
+`OverlayTrigger` opens on whichever buttons the widget it wraps accepts taps
+from. To open on a right click, give the wrapped widget
+`.accept_tap_buttons(ButtonMask::SECONDARY)`:
+
+```rust
+PopoverWidget::new(OverlayTrigger::around(
+    tag_chip.accept_tap_buttons(ButtonMask::SECONDARY),
+))
+.content(tag_menu)
+```
+
+`ButtonMask::PRIMARY | ButtonMask::SECONDARY` opens on either. The second click
+with the same button closes the popover again, per the rule above.
 
 That is defensible for a cursor: it names one pixel, and the user could see
 that pixel the whole time they were aiming at it.

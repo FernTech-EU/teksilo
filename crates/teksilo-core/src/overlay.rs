@@ -118,6 +118,12 @@ impl OverlayId {
 #[derive(Debug, Clone)]
 pub enum OverlayPlacement {
     /// Below the anchor, leading-edge aligned (dropdown).
+    ///
+    /// The panel is made **at least as wide as the anchor** (the drop-down
+    /// convention: a list hanging off a field spans the field) and may be
+    /// wider when its content asks for more. Content that must keep its own
+    /// width, such as a small popover off a wide trigger, wants
+    /// [`NearAnchor`](Self::NearAnchor) or [`TrailingEdge`](Self::TrailingEdge).
     Below,
     /// Above the anchor (fallback when no space below).
     ///
@@ -127,6 +133,12 @@ pub enum OverlayPlacement {
     /// user is choosing blind. Where there is no room at all to shrink into,
     /// the ideal position is kept — an empty panel is not an improvement on a
     /// badly placed one.
+    ///
+    /// The panel is made **at least as wide as the anchor** (the drop-down
+    /// convention: a list hanging off a field spans the field) and may be
+    /// wider when its content asks for more. Content that must keep its own
+    /// width, such as a small popover off a wide trigger, wants
+    /// [`NearAnchor`](Self::NearAnchor) or [`TrailingEdge`](Self::TrailingEdge).
     Above,
     /// To the trailing side of the anchor (submenu).
     TrailingEdge,
@@ -189,6 +201,12 @@ pub enum OverlayPlacement {
     /// When the panel fits on neither side it takes whichever side has more
     /// room and is shrunk to it — a tie keeps the flip upward. It is never slid
     /// over the anchor; see [`Above`](Self::Above).
+    ///
+    /// The panel is made **at least as wide as the anchor** (the drop-down
+    /// convention: a list hanging off a field spans the field) and may be
+    /// wider when its content asks for more. Content that must keep its own
+    /// width, such as a small popover off a wide trigger, wants
+    /// [`NearAnchor`](Self::NearAnchor) or [`TrailingEdge`](Self::TrailingEdge).
     BelowPreferred,
     /// Snaps content to a viewport corner with a per-axis margin
     /// (used by `ToastHost` for stacked toast notifications, also
