@@ -2094,10 +2094,21 @@ def _resolve_across_crates(
     the sweep is what makes that true, for 2247 names across 30 crates rather
     than for the ~100 hand-listed ones.
     """
+    owner = UMBRELLA_REEXPORTS.get(name)
+    if owner is not None and owner != current_key and name.lower() not in reg.type_to_file:
+        # The active crate has no *type* of this name, so any hit it gives is a
+        # module that merely shares the file stem (`code_editor/widget.rs` for
+        # `Widget`, `rich_text/paint.rs` for `Paint`). The table names the type
+        # an app actually sees, so ask its owner first.
+        try:
+            owner_reg = _registry_for(owner)
+        except MissingCrateSource:
+            owner_reg = None
+        if owner_reg is not None and name.lower() in owner_reg.type_to_file:
+            return owner_reg.type_to_file[name.lower()], owner, owner_reg
     fp = resolve_name(reg, name)
     if fp is not None:
         return fp, current_key, reg
-    owner = UMBRELLA_REEXPORTS.get(name)
     if owner is not None and owner != current_key:
         other_reg = _registry_for(owner)
         fp = resolve_name(other_reg, name)
@@ -5032,6 +5043,21 @@ def run_self_tests() -> int:
         _fp, _key, _ = _resolve_across_crates(reg, "widgets", _name)
         assert _fp is not None and _key == _expect, (
             f"{_name} should resolve to --crate {_expect}, got {_key!r}"
+        )
+
+    # A table-pinned type must not lose to a same-stem module of the active
+    # crate: `Widget` is teksilo-core's trait, not `code_editor/widget.rs`, and
+    # `Paint` is the canvas type, not `rich_text/paint.rs`.
+    for _name, _expect in (("Widget", "core"), ("Paint", "canvas")):
+        assert UMBRELLA_REEXPORTS.get(_name) == _expect, (
+            f"test assumption: the table pins {_name} to {_expect}"
+        )
+        assert _name.lower() in reg.module_to_file and _name.lower() not in reg.type_to_file, (
+            f"test assumption: {_name} is only a module stem in teksilo-widgets"
+        )
+        _fp, _key, _ = _resolve_across_crates(reg, "widgets", _name)
+        assert _key == _expect and _fp is not None and "teksilo-widgets" not in str(_fp), (
+            f"{_name} should resolve to {_expect}, got {_key!r} / {_fp}"
         )
 
     # A genuine typo draws its hints from every crate, tagged with the flag
