@@ -74,6 +74,59 @@
 //! the framework's `WidgetEvent::ScrollIntoView`, which a scroll container is
 //! sent when a descendant it clips takes focus.
 //!
+//! ## Scrolling from outside
+//!
+//! [`GridView::handle`] returns a [`GridViewHandle`], a cheap clone usable
+//! before the grid is mounted and through all its rebuilds:
+//! [`scroll_to_index`](GridViewHandle::scroll_to_index),
+//! [`ensure_index_visible`](GridViewHandle::ensure_index_visible) and
+//! [`reveal_band`](GridViewHandle::reveal_band) (a tile and its open band
+//! together). A handle computes no offset when it is called: it records the
+//! request, and the next layout applies it once the band is measured and the
+//! scroll anchoring has run. Opening a band and scrolling to a tile under it
+//! in one turn therefore lands the tile where it was asked to be, which an
+//! offset written from outside does not: the layout keeps the content under
+//! the top edge still across the band opening, and takes that offset for
+//! one of the old layout. The builder's own `scroll_to_index` and
+//! `ensure_index_visible` act at call time, so before the first layout they
+//! do nothing.
+//!
+//! ```ignore
+//! let handle = grid.handle();
+//! // later, from a command:
+//! expanded.set(Some(album));
+//! handle.reveal_band(album);
+//! ```
+//!
+//! ## A long band
+//!
+//! A band that holds hundreds of rows, an album's tracks say, need not build
+//! them all. [`GridView::detail_visible_span_signal`] publishes the part of
+//! the open band on screen, in band-local coordinates, and only when it
+//! changes, so the band can realize the rows in the span and stand spacers
+//! in for the rest, with no copy of the grid's placement arithmetic:
+//!
+//! ```ignore
+//! const ROW: f32 = 24.0;
+//! let grid = GridView::new(albums, album_card);
+//! let span = grid.detail_visible_span_signal().clone();
+//! grid.detail_row(move |tc| {
+//!     let n = tc.item.tracks.len();
+//!     let first = span.map(|s| s.as_ref().map_or(0, |r| (r.start / ROW) as usize));
+//!     let last = span.map(move |s| {
+//!         s.as_ref().map_or(0, |r| ((r.end / ROW).ceil() as usize).min(n))
+//!     });
+//!     // `window` holds tracks[first..last], refilled when the span moves.
+//!     let window = track_window(&tc.item.tracks, &first, &last);
+//!     Some(Box::new(
+//!         VStack::new()
+//!             .child(FixedSize::new().height(first.map(|f| *f as f32 * ROW)))
+//!             .child(Repeater::new(window, |track| track_row(track)))
+//!             .child(FixedSize::new().height(last.map(move |l| (n - *l) as f32 * ROW))),
+//!     ))
+//! })
+//! ```
+//!
 //! ## Pan to scroll
 //!
 //! The view installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior),
@@ -128,6 +181,7 @@ pub(crate) mod a11y;
 pub(crate) mod body_pane;
 pub(crate) mod detail;
 pub(crate) mod drag;
+pub(crate) mod handle;
 pub(crate) mod keyboard;
 pub mod layout;
 pub mod sections;
@@ -197,6 +251,7 @@ enum StrategyKind {
     Waterfall { estimated: f32 },
 }
 
+pub use handle::GridViewHandle;
 pub use keyboard::GridTabTraversal;
 pub use layout::{GridSizing, ScrollAnchor};
 
@@ -324,6 +379,9 @@ pub struct GridView<T: 'static> {
     scroll_y: Signal<f32>,
     max_scroll_y: Signal<f32>,
     viewport_ratio_y: Signal<f32>,
+    /// Shared with every [`GridViewHandle`]: the reveal a handle recorded,
+    /// for `place_children` to apply, and the trigger it relays out with.
+    reveal: Rc<handle::RevealShared>,
     /// Live column count for the current viewport width. Written in
     /// `place_children`; drives the body pane's reflow rebuild on resize and
     /// is read by the keyboard handler.
@@ -459,6 +517,9 @@ pub struct GridView<T: 'static> {
     /// The disclosed tile's anchor, for finding it again after a reset.
     detail_anchor: Rc<RefCell<Option<crate::data_views::RowAnchor>>>,
     band_id: Option<WidgetId>,
+    /// The part of the open band on screen, in band-local coordinates
+    /// (`detail_visible_span_signal`). Written by `place_children`.
+    detail_visible_span: Signal<Option<std::ops::Range<f32>>>,
 }
 
 impl<T: 'static> GridView<T> {
@@ -557,6 +618,7 @@ impl<T: 'static> GridView<T> {
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
+            reveal: handle::RevealShared::new(),
             column_count: Signal::new(1),
             reorderable: false,
             on_item_drop: None,
@@ -601,6 +663,7 @@ impl<T: 'static> GridView<T> {
             detail_layout: None,
             detail_anchor: Rc::new(RefCell::new(None)),
             band_id: None,
+            detail_visible_span: Signal::new(None),
         }
     }
 
@@ -852,28 +915,80 @@ impl<T: 'static> GridView<T> {
         &self.viewport_ratio_y
     }
 
-    /// Scroll the minimum distance to bring `index` into view per `anchor`.
+    /// The part of the open detail band that is on screen, in band-local
+    /// coordinates: `max(0, scroll_y − band.y) .. min(band.height, scroll_y +
+    /// viewport_height − band.y)`, where `band.y` is the band's top in the
+    /// grid's content. `None` while no band is open, and while the open band
+    /// is entirely off screen.
+    ///
+    /// Written by each layout after the scroll offset is clamped, and only
+    /// when it changes, so an observer is not told of a scroll that leaves
+    /// the band's visible part as it was. Meant for a band holding far more
+    /// than a viewport shows, hundreds of tracks say, that realizes only the
+    /// rows in the span: a window of rows between two spacers, with no copy
+    /// of the grid's placement arithmetic. See the module docs, "A long
+    /// band".
+    pub fn detail_visible_span_signal(&self) -> &Signal<Option<std::ops::Range<f32>>> {
+        &self.detail_visible_span
+    }
+
+    /// A [`GridViewHandle`] on this grid: scroll it to a tile, or to a tile
+    /// and its detail band, from outside the widget.
+    ///
+    /// Usable at once and for the grid's whole life: a request made before
+    /// the grid is mounted is applied at its first layout, and the handle
+    /// keeps working through every rebuild. A request is applied by the
+    /// layout, after it has measured the detail band and settled the scroll
+    /// anchoring, so one made in the same turn as opening a band lands where
+    /// the new layout puts the tile. Prefer it to
+    /// [`scroll_to_index`](Self::scroll_to_index) and
+    /// [`ensure_index_visible`](Self::ensure_index_visible), which compute
+    /// the offset when they are called.
+    pub fn handle(&self) -> GridViewHandle {
+        GridViewHandle::new(self.reveal.clone())
+    }
+
+    /// Bring `index` into view: nothing when the tile is already fully
+    /// visible, otherwise a scroll per `anchor`, as
+    /// [`scroll_to_index`](Self::scroll_to_index).
+    ///
+    /// Computed at call time from the last layout's geometry and clamped to
+    /// its scroll range. Before the grid has been laid out there is no
+    /// geometry and this does nothing, and a change of layout made in the
+    /// same turn (a detail band opened above the tile) is not yet counted.
+    /// [`GridViewHandle::ensure_index_visible`] has neither limit.
     pub fn ensure_index_visible(&self, index: usize, anchor: ScrollAnchor) {
+        self.reveal_now(handle::RevealRequest::Ensure { index, anchor });
+    }
+
+    /// Scroll to `index`, forcing its position in the viewport per `anchor`;
+    /// [`ScrollAnchor::Auto`] scrolls the least that shows it.
+    ///
+    /// Computed at call time, with the limits
+    /// [`ensure_index_visible`](Self::ensure_index_visible) documents: it
+    /// does nothing before the grid's first layout.
+    /// [`GridViewHandle::scroll_to_index`] has neither limit.
+    pub fn scroll_to_index(&self, index: usize, anchor: ScrollAnchor) {
+        self.reveal_now(handle::RevealRequest::ScrollTo { index, anchor });
+    }
+
+    /// Apply `request` now, against the last layout.
+    fn reveal_now(&self, request: handle::RevealRequest) {
         let Some(ref strategy) = self.strategy else {
             return;
         };
-        if let Some(target) = scroll_for_ensure_visible(
+        if let Some(target) = scroll_for_request(
             strategy.as_ref(),
-            index,
+            self.detail_layout.as_deref(),
+            request,
+            self.source.len(),
             self.scroll_y.get(),
             self.viewport_height.get(),
             self.viewport_width.get(),
             self.max_scroll_y.get(),
-            anchor,
         ) {
             self.scroll_y.set(target);
         }
-    }
-
-    /// Scroll to `index`, forcing the viewport position per `anchor`
-    /// (`Auto` behaves like [`ensure_index_visible`](Self::ensure_index_visible)).
-    pub fn scroll_to_index(&self, index: usize, anchor: ScrollAnchor) {
-        self.ensure_index_visible(index, anchor);
     }
 
     /// In a single selection, put the keyboard cursor back on the selection
@@ -1669,6 +1784,92 @@ fn scroll_for_ensure_visible(
     Some((scroll_y + delta).clamp(0.0, max_scroll_y))
 }
 
+/// The scroll offset a [`handle::RevealRequest`] asks for, or `None` when the
+/// offset already satisfies it or the grid has no such tile.
+///
+/// The one arithmetic behind [`GridView::scroll_to_index`] and
+/// [`GridView::ensure_index_visible`], applied at call time, and behind a
+/// [`GridViewHandle`]'s requests, applied by `place_children`. A band
+/// request reveals the span from the top of the tile's row to the bottom of
+/// its band, the row first when the two do not fit, as the grid does for a
+/// band a user opens; with that tile's band not open it reveals the tile.
+#[allow(clippy::too_many_arguments)]
+fn scroll_for_request(
+    strategy: &dyn GridLayoutStrategy,
+    detail_layout: Option<&detail::DetailRowStrategy>,
+    request: handle::RevealRequest,
+    len: usize,
+    scroll_y: f32,
+    viewport_height: f32,
+    viewport_width: f32,
+    max_scroll_y: f32,
+) -> Option<f32> {
+    let index = request.index();
+    if index >= len {
+        return None;
+    }
+    let reveal = |anchor| {
+        scroll_for_ensure_visible(
+            strategy,
+            index,
+            scroll_y,
+            viewport_height,
+            viewport_width,
+            max_scroll_y,
+            anchor,
+        )
+    };
+    match request {
+        handle::RevealRequest::ScrollTo { anchor, .. } => reveal(anchor),
+        handle::RevealRequest::Ensure { anchor, .. } => {
+            // Fully visible is what `Auto` leaves alone.
+            reveal(ScrollAnchor::Auto)?;
+            reveal(anchor)
+        }
+        handle::RevealRequest::Band(_) => {
+            let Some((top, bottom)) =
+                detail_layout.and_then(|layout| layout.reveal_span(index, viewport_width))
+            else {
+                return reveal(ScrollAnchor::Auto);
+            };
+            let y = reveal_span_offset(top, bottom, scroll_y, viewport_height, max_scroll_y);
+            ((y - scroll_y).abs() > 0.001).then_some(y)
+        }
+    }
+}
+
+/// The least scroll from `scroll_y` that shows the content span
+/// `top..bottom`, its top first when it is taller than the viewport, clamped
+/// to `0..=max_scroll_y`.
+fn reveal_span_offset(
+    top: f32,
+    bottom: f32,
+    scroll_y: f32,
+    viewport_height: f32,
+    max_scroll_y: f32,
+) -> f32 {
+    let mut y = scroll_y;
+    if bottom > y + viewport_height {
+        y = bottom - viewport_height;
+    }
+    if top < y {
+        y = top;
+    }
+    y.clamp(0.0, max_scroll_y)
+}
+
+/// The part of a band at content rect `band` on screen at `scroll_y`, in
+/// band-local coordinates; `None` when none of it is.
+fn band_visible_span(
+    band: TileRect,
+    scroll_y: f32,
+    viewport_height: f32,
+) -> Option<std::ops::Range<f32>> {
+    let start = (scroll_y - band.y).max(0.0);
+    let end = (scroll_y + viewport_height - band.y).min(band.height);
+    (end > start).then_some(start..end)
+}
+
 impl<T: 'static> Widget for GridView<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
@@ -1700,6 +1901,12 @@ impl<T: 'static> Widget for GridView<T> {
             BindingLevel::Relayout,
         );
         ctx.register_animated_signal(&self.scroll_y);
+        // A handle's request relays the grid out; `place_children` applies it.
+        self.reveal.relayout_signal().bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
 
         // Re-walk container a11y when selection / focus changes, and repaint
         // the overlay's container ring. Never a rebuild: each tile watches
@@ -2659,17 +2866,31 @@ impl<T: 'static> Widget for GridView<T> {
             && let Some((top, bottom)) = layout.reveal_span(index, body_w)
         {
             let cur = self.scroll_y.get();
-            let mut y = cur;
-            if bottom > y + vp_h {
-                y = bottom - vp_h;
-            }
-            if top < y {
-                y = top;
-            }
-            let y = y.clamp(0.0, max_y);
+            let y = reveal_span_offset(top, bottom, cur, vp_h, max_y);
             if (y - cur).abs() > 0.001 {
                 self.scroll_y.set(y);
             }
+        }
+        // A handle's request, at the same point and for the same reason: the
+        // band is measured and the anchoring above has run, so the offset is
+        // computed in the layout the tile will be shown in. An offset
+        // written from outside before this pass would have been taken for
+        // one of the old layout and moved by the anchoring. After the
+        // grid's own reveal, which it replaces when both are pending: it was
+        // asked for explicitly.
+        if let Some(request) = self.reveal.take()
+            && let Some(y) = scroll_for_request(
+                strategy.as_ref(),
+                self.detail_layout.as_deref(),
+                request,
+                len,
+                self.scroll_y.get(),
+                vp_h,
+                body_w,
+                max_y,
+            )
+        {
+            self.scroll_y.set(y);
         }
         let ratio = if total > 0.0 {
             (vp_h / total).clamp(0.0, 1.0)
@@ -2709,6 +2930,12 @@ impl<T: 'static> Widget for GridView<T> {
             .detail_layout
             .as_ref()
             .and_then(|layout| layout.band_rect(body_w));
+        // What of the band is on screen, now that the offset is final.
+        self.detail_visible_span.set_if_changed(
+            band_rect
+                .filter(|(_, r)| r.height > 0.0)
+                .and_then(|(_, r)| band_visible_span(r, self.scroll_y.get(), vp_h)),
+        );
 
         let body_rect_origin = bounds.origin();
         let body_size = Size::new(body_w, vp_h);

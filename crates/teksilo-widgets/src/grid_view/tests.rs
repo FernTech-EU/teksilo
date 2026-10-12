@@ -4378,3 +4378,6 @@ fn section_headers_and_the_detail_band_still_span_the_content_width() {
     assert_close(band.x, 0.0, "the band starts at the inset");
     assert_close(band.width, 400.0, "and spans the viewport");
 }
+
+/// `GridViewHandle` and `GridView::detail_visible_span_signal`.
+mod reveal_handle;

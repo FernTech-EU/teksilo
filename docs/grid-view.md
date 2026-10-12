@@ -201,10 +201,37 @@ the new focus into view.
 
 `.scroll_y_signal()` / `.max_scroll_y_signal()` / `.viewport_ratio_y_signal()`
 expose the reactive scroll state (wire an external `ScrollBar` with
-`.show_scrollbar(false)` so it survives rebuilds). `.ensure_index_visible(i,
-ScrollAnchor)` / `.scroll_to_index(i, ScrollAnchor)` where `ScrollAnchor` is
-`Auto | Start | Center | End`. `.overscroll_behavior(Chain | Contain)` controls
-scroll chaining.
+`.show_scrollbar(false)` so it survives rebuilds). `.overscroll_behavior(Chain |
+Contain)` controls scroll chaining.
+
+To scroll the grid from outside, take a handle: `.handle()` returns a
+`GridViewHandle`, cheap to clone, usable before the grid is mounted and through
+all its rebuilds.
+
+```rust,ignore
+let handle = grid.handle();
+handle.scroll_to_index(30, ScrollAnchor::Start); // force a position
+handle.ensure_index_visible(30, ScrollAnchor::Auto); // only if not fully visible
+handle.reveal_band(30);                          // the tile and its open band
+```
+
+`ScrollAnchor` is `Auto | Start | Center | End`. A handle computes no offset
+when it is called: it records the request (a later one replaces one still
+pending) and asks for a relayout, and the layout applies it after measuring the
+detail band and settling the scroll anchoring. A request made before mount is
+applied by the first layout, and one made in the same turn as opening a band
+lands where the new layout puts the tile. That is the difference from writing
+`scroll_y` yourself: `expanded.set(Some(0)); scroll.set(668.0)` ends at 756,
+because the layout keeps the content under the top edge still across the band
+opening and takes 668 for an offset of the old layout, while
+`expanded.set(Some(0)); handle.scroll_to_index(30, ScrollAnchor::Start)` puts
+tile 30 at the top, at 668.
+
+The builder's own `.ensure_index_visible(i, ScrollAnchor)` and
+`.scroll_to_index(i, ScrollAnchor)` take the same arguments but compute the
+offset when they are called, from the last layout: before the first layout they
+do nothing. Both `ensure_index_visible`s leave a fully visible tile alone,
+whatever the anchor.
 
 ## Touch
 
@@ -354,6 +381,39 @@ are unchanged. Opening, closing and moving the band replace no tile node; a
 scroll it causes (the reveal of a band a user opened) realizes tiles as any
 scroll does.
 
+**Scrolling to it.** `GridViewHandle::reveal_band(i)` scrolls the least that
+shows tile `i`'s row and its open band, the row first when they do not fit
+together, as the grid does when a user opens a band; with `i`'s band not open it
+shows the tile alone. Write `expanded` and call it in the same turn: the band is
+measured before the request is applied. See [Scrolling](#scrolling).
+
+**A long band.** `.detail_visible_span_signal()` is the part of the open band on
+screen, in band-local coordinates: `max(0, scroll_y − band.y) ..
+min(band.height, scroll_y + viewport_height − band.y)`. It is `None` while no
+band is open or the open one is entirely off screen, and it is written after the
+scroll offset is clamped, only when it changes. A band holding hundreds of rows
+realizes only those in the span, a window of rows between two spacers, with no
+copy of the grid's placement arithmetic:
+
+```rust,ignore
+const ROW: f32 = 24.0;
+let grid = GridView::new(albums, album_card);
+let span = grid.detail_visible_span_signal().clone();
+grid.detail_row(move |tc| {
+    let n = tc.item.tracks.len();
+    let first = span.map(|s| s.as_ref().map_or(0, |r| (r.start / ROW) as usize));
+    let last = span.map(move |s| s.as_ref().map_or(0, |r| ((r.end / ROW).ceil() as usize).min(n)));
+    // `window` holds tracks[first..last], refilled when the span moves.
+    let window = track_window(&tc.item.tracks, &first, &last);
+    Some(Box::new(
+        VStack::new()
+            .child(FixedSize::new().height(first.map(|f| *f as f32 * ROW)))
+            .child(Repeater::new(window, |track| track_row(track)))
+            .child(FixedSize::new().height(last.map(move |l| (n - *l) as f32 * ROW))),
+    ))
+})
+```
+
 **Lifetime.** The band widget is a child of the grid, not of the body pane, so
 scrolling, resizing and a lazy source loading a window keep its content (a
 track list's own scroll and focus). The content is rebuilt when the band moves
@@ -423,7 +483,8 @@ waterfall / sectioned), prefix-sum + anchoring, selection (by index and by
 key), 2D keyboard, reorder (source `accept_drop`), type-ahead, source-driven
 lazy loading (`fetch_more` + placeholder rows), the detail band (layout,
 following its tile, keys, rubber band, accessibility, reveal, focus, scroll
-anchoring, tile node identity, a lazy source's window loads), and
-accessibility roles. `tests/grid_view_keyed_selection_cost.rs` bounds what a
+anchoring, tile node identity, a lazy source's window loads, its visible span),
+`GridViewHandle` (before mount, across rebuilds, in the same turn as opening a
+band), and accessibility roles. `tests/grid_view_keyed_selection_cost.rs` bounds what a
 keyed selection costs as the grid grows, counting allocated bytes and key
 reads rather than time.

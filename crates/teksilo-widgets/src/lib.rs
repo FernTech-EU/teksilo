@@ -187,8 +187,8 @@ pub use teksilo_data::CheckState;
 // Re-export the policy enum alongside the widget so consumers need a single
 // `use teksilo::widgets::{FocusScope, TraversalScopePolicy}`.
 pub use grid_view::{
-    GridSectionProvider, GridSizing, GridTabTraversal, GridView, GroupingSections, ScrollAnchor,
-    SectionProvider, TileContext, grouping_sections,
+    GridSectionProvider, GridSizing, GridTabTraversal, GridView, GridViewHandle, GroupingSections,
+    ScrollAnchor, SectionProvider, TileContext, grouping_sections,
 };
 pub use group_box::GroupBox;
 pub use group_header::GroupHeader;
