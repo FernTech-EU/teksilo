@@ -1489,6 +1489,21 @@ fn accessibility_placeholder_when_no_selection() {
 }
 
 #[test]
+fn accessibility_announces_the_placeholder_for_a_selection_not_among_the_items() {
+    let mut tree = light_tree();
+    // Bound to a value no item carries from the start: the trigger shows the
+    // placeholder, so the node must not announce "Durian".
+    let selected = Signal::new(Some("Durian".to_string()));
+    let cb =
+        tree.add(ComboBox::new(fruits(), selected.clone()).placeholder(lit!("Select a fruit")));
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+
+    let node = build_raw_a11y_node(&mut tree, cb);
+    assert_eq!(node.value(), None);
+    assert_eq!(node.placeholder(), Some("Select a fruit"));
+}
+
+#[test]
 fn accessibility_value_when_selection_present() {
     let mut tree = light_tree();
     let selected = Signal::new(Some("Banana".to_string()));

@@ -1334,7 +1334,14 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // A11y gap #3: use `placeholder` when nothing is selected, `value`
         // when something is. The two are distinct ARIA properties; screen
         // readers announce placeholders as hints rather than current values.
-        match self.selected.get() {
+        // The trigger shows the placeholder for a selection no item carries
+        // (see `label_text` in `build`), so a value absent from the items is
+        // announced as no value: the same presence check, the same text.
+        let present = self
+            .selected
+            .get()
+            .filter(|v| resolve_index(&self.source, v, &self.selected_index_hint).is_some());
+        match present {
             Some(v) => {
                 let label = (self.item_label)(&v).resolve_now();
                 if !label.is_empty() {
