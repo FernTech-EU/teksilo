@@ -38,6 +38,17 @@ by crate for clarity, not because crates version independently.
 - `OverlayPlacement::BelowSelection`, the mirror of `AboveSelection`: below
   a rectangle, flipping above when there is no room.
 
+- **`AsyncCompletionHandle::drain_into`** runs the completions of
+  `spawn_local_with` against a headless tree, each with an `EventContext`, so
+  a handler that shows a toast or a modal after an `await` can be tested.
+  `spawn_local_with` no longer panics in a context without a window.
+- **`WidgetTree::try_accessibility_node`** answers `None` for a destroyed
+  widget, and `AccessibilityInfo::published` says whether assistive
+  technology can reach the node: a dormant page, an excluded or merged
+  subtree and a hidden node are not published.
+- `BuildContext::attached_tap_buttons` reads the buttons an `on_tap`
+  attached to a node from outside answers to.
+
 #### Widgets
 
 - **Rebindable editor shortcuts.** `RichTextEditor` declares `format.bold`,
@@ -98,6 +109,20 @@ by crate for clarity, not because crates version independently.
   the buttons, for instance centred as in a macOS alert.
 - `Checkbox` and `RadioButton` take `label_style`, `label_color`,
   `caption_style` and `caption_color`.
+
+- **Scroll handles on the data views.** `handle()` on `ListView`,
+  `TreeView`, `TableView`, `TreeTableView` and `GridView` returns a
+  cloneable handle that scrolls the mounted view to an item
+  (`scroll_to_index` / `ensure_index_visible`, `scroll_to_row` /
+  `ensure_row_visible`, and `GridViewHandle::reveal_band`). It can be taken
+  before mount, survives rebuilds, and is applied at the next layout, so it
+  lands on the right item after a same-turn insert, expand or opened detail
+  band, also with auto-measured row heights.
+- **`GridView::detail_visible_span_signal`** reports which part of the open
+  detail band is on screen, so a band holding hundreds of rows can build
+  only the rows in view.
+- `PopoverWidget::on_close_with` tells the callback why the popover closed
+  (`DismissReason`).
 
 #### cargo-teksilo
 
@@ -205,6 +230,8 @@ by crate for clarity, not because crates version independently.
   edge, its leading edge.
 - `child_opt` on `VStack`, `HStack`, `ZStack`, `Grid`, `ColumnFlow`,
   `MasonryLayout` and `Wrap` takes a widget id, as `child` does.
+- `GridView::ensure_index_visible` leaves a tile that is already fully
+  visible alone, whatever the anchor.
 
 ### Fixed
 
@@ -221,6 +248,10 @@ by crate for clarity, not because crates version independently.
   double-tap, triple-tap and long-press masks) now applies to the handlers
   set beside it; a widget's own keep their buttons.
 
+- **A popover that opens on a right click closed and reopened** on a second
+  right click on its trigger. A press on the trigger now toggles it whenever
+  the trigger accepts that button.
+
 #### Widgets
 
 - **`set_column_pinning(id, PinnedSide::None)` could not unpin a column
@@ -231,6 +262,14 @@ by crate for clarity, not because crates version independently.
   `TableView` cost the row count times the selection.** The selection now
   drops the removed keys after reading each of the view's keys once, as a
   `GridView`'s does.
+
+- **An `OverlayTrigger` around a composite control did not open on a pointer
+  click** when the control's focus stop handled taps itself: only Enter,
+  Space and a screen reader's click opened it. It now opens on the click,
+  with the button mask the application set.
+- **`ComboBox` announced a value its trigger did not show** when the bound
+  selection was not among the items. It now announces the placeholder it
+  shows.
 
 #### cargo-teksilo
 
@@ -243,6 +282,11 @@ by crate for clarity, not because crates version independently.
   every one of its files differed from this release's, which is the usual
   case two releases on. It now lists the copy as differing and prints the
   `agent install claude --force` line, at project and at user scope.
+
+- **`symbol Widget` described the code editor's `widget.rs`**, and `symbol
+  Paint` the rich text editor's `paint.rs`: a module of the same name in the
+  searched crate hid the type the umbrella re-exports. Both, and `Path`,
+  `Rect`, `Theme` and `Color` under `--crate`, now resolve to that type.
 
 #### Documentation
 
@@ -259,6 +303,15 @@ by crate for clarity, not because crates version independently.
 - About thirty doc comments that an old edit had duplicated, or spliced into
   the neighbouring item (`RadioButton::on_change`, `MenuItem::for_shortcut`,
   `TreeView::scroll_bar_style` and others), document their own item again.
+- The `Below`, `Above` and `BelowPreferred` placements say that they widen
+  an overlay to at least its anchor's width, and the overlay guide shows how
+  to open a popover on a right click.
+- `Shrinkable`, `LayoutResponse::shrink` and the layout guide say that a
+  child at its floor hands the rest of its share on, so a much larger weight
+  shrinks one child fully before another starts.
+- The scroll-to methods of the data views' builders say that they act at
+  call time against the last layout; `ListView::scroll_to_index` claimed a
+  call before the first layout was applied later.
 
 ## [0.16.0] - 2026-10-09
 
