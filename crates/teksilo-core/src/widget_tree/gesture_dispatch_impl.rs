@@ -213,6 +213,31 @@ impl WidgetTree {
         })
     }
 
+    /// The buttons a tap on `id` is recognized for: the union of the masks the
+    /// `on_tap` handlers of its two buckets answer to (see [`BucketMasks`]),
+    /// which is the mask its `TapRecognizer` is built with.
+    /// [`ButtonMask::NONE`] when the node has no `on_tap`, or when a multi-tap
+    /// recognizer keeps the plain one from being installed.
+    pub(crate) fn tap_buttons(&self, id: WidgetId) -> ButtonMask {
+        self.arena.get(id).map_or(ButtonMask::NONE, |node| {
+            let wanted = ArenaRecognizers::read(node);
+            if wanted.installs_tap() {
+                wanted.tap.union()
+            } else {
+                ButtonMask::NONE
+            }
+        })
+    }
+
+    /// The buttons the builder-chain bucket's `on_tap` on `id` answers to, by
+    /// the [`BucketMasks`] rule; `None` when that bucket has no `on_tap`. See
+    /// [`BuildContext::attached_tap_buttons`](crate::build_context::BuildContext::attached_tap_buttons).
+    pub(crate) fn attached_tap_buttons(&self, id: WidgetId) -> Option<ButtonMask> {
+        self.arena
+            .get(id)
+            .and_then(|node| BucketMasks::tap(node).external)
+    }
+
     /// Lazily install a gesture arena set populated with whichever recognizers
     /// the widget's handler set actually needs. Without this, a widget
     /// that wires `on_drag` or `on_double_tap` (but not `on_tap`) would

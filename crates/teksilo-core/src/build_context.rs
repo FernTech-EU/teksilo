@@ -1259,6 +1259,26 @@ impl<'a> BuildContext<'a> {
         self.tree.apply_external_handler_set(id, handler_set);
     }
 
+    /// The buttons the `on_tap` attached to `id` from outside answers to: the
+    /// one added by its builder chain (`.on_tap(..)`) or by a composing
+    /// parent's [`apply_handlers`](Self::apply_handlers). `None` when nothing
+    /// outside attached an `on_tap` to it.
+    ///
+    /// The mask is the one that bucket declared with `accept_tap_buttons`,
+    /// else the one declared beside the widget's own `on_tap` when the widget
+    /// has none, else [`ButtonMask::PRIMARY`](crate::event::ButtonMask::PRIMARY)
+    /// — the rule the node's tap recognizer applies.
+    ///
+    /// For a wrapper that routes one tap to several nodes: it reads the
+    /// buttons its caller chose on the node it was given, and attaches the
+    /// same tap with the same mask to a node inside it.
+    pub fn attached_tap_buttons(
+        &self,
+        id: crate::widget_id::WidgetId,
+    ) -> Option<crate::event::ButtonMask> {
+        self.tree.attached_tap_buttons(id)
+    }
+
     /// Wire an accessibility `labelled_by` relation from an already-mounted
     /// child (`id`) to its label (`label_id`), so assistive tech announces the
     /// field by its visible label (WCAG 3.3.2 / EN 301 549 11.5.2.7). Unlike

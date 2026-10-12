@@ -24,13 +24,40 @@
 //!   the control's own text is what a sighted user reads on it, and a second
 //!   button around the first would be one control heard as two.
 //!
-//! ## Touch and pen
+//! ## Pointer, touch and pen
 //!
 //! The trigger has no geometry and no press visual of its own: it forwards the
-//! caller's child, whose target and appearance are the child's, and routes the
-//! pointer handler onto that child's external bucket so it fires beside the
-//! child's own. The activation is an `on_tap`, so it happens on the release for
-//! every pointer kind.
+//! caller's child, whose target and appearance are the child's. The opener is
+//! an `on_tap`, attached beside the handlers already there (the external
+//! bucket), so it happens on the release for every pointer kind and never
+//! replaces what the child does itself. It goes on two nodes:
+//!
+//! * **the wrapped widget**, so a tap anywhere on it opens, its margins and
+//!   its non-interactive parts included;
+//! * **the wrapped control**, when that is a node inside the widget rather
+//!   than the widget itself. A control that handles taps of its own takes a
+//!   tap before any ancestor sees it, so an opener left on the wrapper alone
+//!   would answer Enter, Space and a reader's `Click` and never a click.
+//!
+//! A tap is delivered to the innermost node that recognizes it, and nowhere
+//! else, so a click on the control opens once, beside the control's own
+//! response to it.
+//!
+//! ## Opening on another button
+//!
+//! The trigger opens on the buttons the wrapped widget accepts taps from,
+//! [`ButtonMask::PRIMARY`](teksilo_core::event::ButtonMask::PRIMARY) unless
+//! it says otherwise. To open on a right click, give the wrapped widget
+//! `.accept_tap_buttons(ButtonMask::SECONDARY)`; the inner control gets the
+//! same mask for the opener, so a left click on it stays the control's own.
+//! A second click with the same button on an open trigger closes it.
+//!
+//! ```ignore
+//! PopoverWidget::new(OverlayTrigger::around(
+//!     tag_chip.accept_tap_buttons(ButtonMask::SECONDARY),
+//! ))
+//! .content(tag_menu)
+//! ```
 
 use std::rc::Rc;
 
@@ -38,7 +65,7 @@ use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accesskit::{Action, HasPopup, Role};
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::{EventResponse, Key, WidgetEvent};
+use teksilo_core::event::{ButtonMask, EventResponse, Key, WidgetEvent};
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::{
     CursorIcon, EventContext, LayoutContext, PendingChild, Widget, WidgetPlacement,
@@ -265,19 +292,40 @@ impl Widget for OverlayTrigger {
             // child's *external* bucket the opener fires alongside the child's
             // own handlers when the gesture arena emits `Tap`. For a
             // non-interactive child (a `Panel`, a glyph) `ensure_gesture_arena`
-            // lazily installs a recognizer for it.
-            let tap = activate.clone();
-            let pointer = HandlerSet::new()
-                .on_tap(move |_event, ctx| tap(ctx))
-                .cursor(CursorIcon::Pointer);
+            // lazily installs a recognizer for it. The same holds one level
+            // down for a control inside the child, which is why the opener
+            // goes on that control too (below).
+            let pointer = || {
+                let tap = activate.clone();
+                HandlerSet::new()
+                    .on_tap(move |_event, ctx| tap(ctx))
+                    .cursor(CursorIcon::Pointer)
+            };
             // Keys and the AT action go to the node that takes focus: key
             // events are dispatched there, and an `AccessAction` to the node a
             // reader is on, bubbling only if that node leaves it unhandled,
             // which a `Button` never does.
-            let keys = self.keyboard_and_at(activate);
+            let keys = self.keyboard_and_at(activate.clone());
             match (self.child_id, self.wrapped_control) {
                 (Some(child), Some(control)) => {
-                    ctx.apply_handlers(child, pointer);
+                    ctx.apply_handlers(child, pointer());
+                    if control != child {
+                        // A control inside the wrapped widget that handles
+                        // taps itself takes every tap on it before the
+                        // wrapper's recognizer can: the opener goes beside
+                        // the control's own tap as well, with the buttons the
+                        // caller chose on the wrapper. A tap is recognized by
+                        // the innermost node only, so it still opens once.
+                        // Left unset for the default, so a mask the
+                        // composite itself declared on that bucket stands.
+                        let mut on_control = pointer();
+                        if let Some(mask) = ctx.attached_tap_buttons(child)
+                            && mask != ButtonMask::PRIMARY
+                        {
+                            on_control = on_control.accept_tap_buttons(mask);
+                        }
+                        ctx.apply_handlers(control, on_control);
+                    }
                     let keys = match self.disclosure() {
                         Some(disclosure) => keys.access_customize(disclosure),
                         None => keys,
@@ -285,11 +333,11 @@ impl Widget for OverlayTrigger {
                     ctx.apply_handlers(control, keys);
                 }
                 (Some(child), None) => {
-                    ctx.apply_handlers(child, pointer);
+                    ctx.apply_handlers(child, pointer());
                     ctx.apply_self_handlers(keys.focusable(true));
                 }
                 (None, _) => {
-                    ctx.apply_self_handlers(pointer);
+                    ctx.apply_self_handlers(pointer());
                     ctx.apply_self_handlers(keys.focusable(true));
                 }
             }
@@ -372,5 +420,7 @@ impl Widget for OverlayTrigger {
     }
 }
 
+#[cfg(test)]
+mod pointer_tests;
 #[cfg(test)]
 mod reader_tests;

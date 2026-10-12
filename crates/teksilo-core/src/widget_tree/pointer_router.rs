@@ -7,6 +7,7 @@
 
 use super::*;
 
+use crate::event::ButtonMask;
 use crate::gesture::{GestureEvent, RawPointerEvent, TapEvent};
 
 /// Fire an `EventResponse`-returning handler from BOTH the external
@@ -1533,16 +1534,50 @@ impl WidgetTree {
         // The press dismissed one or more overlays. By default it
         // now ALSO falls through to the widget under the cursor,
         // so a single click both closes the menu/popover and
-        // activates the control beneath — the behaviour a
-        // secondary press already had. The one case still
-        // swallowed: a primary press on the anchor of a
-        // click-opened overlay, because the anchor's own tap
-        // handler would otherwise reopen the overlay this very
-        // press just dismissed (click-the-trigger-to-close).
-        button == PointerButton::Primary
-            && toggle_anchors.iter().any(|&anchor| {
-                self.arena.is_active(anchor) && self.arena.bounds(anchor).contains(position)
-            })
+        // activates the control beneath. The one case swallowed: a
+        // press on the anchor of a click-opened overlay, with a
+        // button the anchor's tap answers to, because that tap
+        // would otherwise reopen the overlay this very press just
+        // dismissed (click-the-trigger-to-close). A primary press
+        // is always taken for the toggle, as it always was; any
+        // other button only where the trigger opens on it, so a
+        // right click on a left-click trigger still dismisses and
+        // falls through to the trigger's context menu.
+        toggle_anchors.iter().any(|&anchor| {
+            self.arena.is_active(anchor)
+                && self.arena.bounds(anchor).contains(position)
+                && (button == PointerButton::Primary
+                    || self
+                        .anchor_tap_buttons(anchor, position, &pressing)
+                        .contains(button))
+        })
+    }
+
+    /// The buttons a tap at `position` would be recognized for on its way up
+    /// to `anchor`: the union of the tap masks of every node from the one hit
+    /// at `position` up to and including `anchor`.
+    ///
+    /// An anchor is often not the node carrying the tap. A popover anchors on
+    /// its own wrapper, and the opener sits on the trigger inside it, or on a
+    /// control inside that; any of them answering to the button means the
+    /// press would reach an opener. [`ButtonMask::NONE`] when the node hit is
+    /// not inside `anchor` at all.
+    fn anchor_tap_buttons(
+        &self,
+        anchor: WidgetId,
+        position: Point,
+        pointer: &crate::pointer::PointerInfo,
+    ) -> ButtonMask {
+        let mut mask = ButtonMask::NONE;
+        let mut node = self.hit_test_for(position, pointer);
+        while let Some(id) = node {
+            mask = mask.union(self.tap_buttons(id));
+            if id == anchor {
+                return mask;
+            }
+            node = self.arena.parent(id);
+        }
+        ButtonMask::NONE
     }
 
     /// Complete a direct pointer's armed dismissal on its release.
@@ -1658,7 +1693,7 @@ impl WidgetTree {
     /// says "release here and this control acts", so it has to answer to the
     /// same buttons the activation does: the router opens a record for every
     /// button, but only [`press_buttons`](Self::press_buttons) — the union of
-    /// the owner's own click-style [`ButtonMask`](crate::event::ButtonMask)s,
+    /// the owner's own click-style [`ButtonMask`]s,
     /// `PRIMARY` unless the widget widened it — decides which of them may light
     /// the control up. Without the gate a middle-click, or a right-click on a
     /// node with no context menu, would raise a press that can never complete;

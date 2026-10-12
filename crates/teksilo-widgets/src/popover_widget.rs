@@ -45,7 +45,9 @@
 //! caret is shown). These **replace** any previous values the caller set
 //! — in particular any `on_activate_fn` set before `::new` is discarded,
 //! because the activate slot is owned by the popover wiring. Use
-//! `on_open` / `on_close`, or observe `open_signal`, for side effects.
+//! `on_open` / `on_close`, or observe `open_signal`, for side effects;
+//! `on_close_with` also says why the popover closed (a [`DismissReason`]:
+//! an outside press, Escape, the popover closing itself, a cascade).
 //!
 //! # Per-trigger differences (the `PopoverTrigger` trait)
 //!
@@ -65,7 +67,7 @@ use teksilo_core::accesskit::HasPopup;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, WidgetEvent};
 use teksilo_core::overlay::{
-    DismissBehavior, OverlayDismissCallback, OverlayPlacement, OverlayRequest,
+    DismissBehavior, DismissReason, OverlayDismissCallback, OverlayPlacement, OverlayRequest,
 };
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{PopoverStyle, PopoverStyleConfig, PopoverVariant, SharedPopoverStyle};
@@ -84,6 +86,7 @@ use crate::popover_caret::DisclosureCaret;
 use crate::primitives::ZStack;
 
 type OnVoid = Rc<dyn Fn()>;
+type OnClose = Rc<dyn Fn(DismissReason)>;
 
 /// A trigger widget usable with [`PopoverWidget`]. Implemented for
 /// [`Button`], [`IconButton`] and [`OverlayTrigger`]. Captures the few
@@ -289,7 +292,9 @@ pub struct PopoverWidget<T: PopoverTrigger> {
     show_disclosure_caret: bool,
 
     on_open: Option<OnVoid>,
-    on_close: Option<OnVoid>,
+    /// Set by [`on_close`](PopoverWidget::on_close) or
+    /// [`on_close_with`](PopoverWidget::on_close_with); the last call wins.
+    on_close: Option<OnClose>,
 
     /// Which themed [`PopoverStyle`] surface to wrap the content in.
     /// `Some(variant)` (the default — `PopoverVariant::Default`) routes
@@ -428,7 +433,32 @@ impl<T: PopoverTrigger> PopoverWidget<T> {
 
     /// Notification fired on the falling edge of the popover (when the
     /// overlay's dismiss callback runs).
+    ///
+    /// Replaces any [`on_close_with`](Self::on_close_with) set before it. Use
+    /// that one to learn how the popover was closed.
     pub fn on_close(mut self, f: impl Fn() + 'static) -> Self {
+        self.on_close = Some(Rc::new(move |_reason| f()));
+        self
+    }
+
+    /// [`on_close`](Self::on_close), told why the popover closed.
+    ///
+    /// The [`DismissReason`] is the overlay manager's own:
+    ///
+    /// * [`OutsidePress`](DismissReason::OutsidePress) — a press outside the
+    ///   panel, including a click on the trigger itself while the popover is
+    ///   open (the press closes it before the trigger sees it);
+    /// * [`Escape`](DismissReason::Escape) — Escape pressed in the panel;
+    /// * [`Programmatic`](DismissReason::Programmatic) — the popover closed
+    ///   itself: `Alt+ArrowUp`, Enter or Space on the trigger, the
+    ///   [`open_action`](Self::open_action) toggle, Tab out of the panel, or
+    ///   the application dismissing it;
+    /// * [`Cascade`](DismissReason::Cascade) — an overlay this popover was
+    ///   opened from went away and took it along.
+    ///
+    /// The enum is `#[non_exhaustive]`, so match it with a wildcard arm.
+    /// Replaces any [`on_close`](Self::on_close) set before it.
+    pub fn on_close_with(mut self, f: impl Fn(DismissReason) + 'static) -> Self {
         self.on_close = Some(Rc::new(f));
         self
     }
@@ -763,16 +793,17 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
         let on_close = self.on_close.clone();
 
         // Dismiss callback — runs when the overlay manager closes the
-        // overlay (Escape, click-outside, or explicit dismiss). Flips
-        // popover_open and fires the user's on_close. No `EventContext`
-        // available here, so on_close is `Fn()`.
+        // overlay, whatever the route (Escape, click-outside, the trigger's
+        // own toggle, an explicit dismiss, a cascade). Flips popover_open and
+        // hands the manager's reason to the user's on_close. The context the
+        // manager passes is not forwarded: on_close is a notification.
         let dismiss_cb: OverlayDismissCallback = {
             let popover_open = popover_open.clone();
             let on_close = on_close.clone();
-            Rc::new(move |_, _| {
+            Rc::new(move |reason, _| {
                 popover_open.set(false);
                 if let Some(cb) = on_close.as_ref() {
-                    cb();
+                    cb(reason);
                 }
             })
         };
