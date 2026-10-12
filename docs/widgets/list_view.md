@@ -7,6 +7,13 @@
 
 ListView — a virtualized, scrollable list backed by a reactive data model.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`ListView`](#listview) — A virtualized scrollable list backed by a `ListModel<T>` or `ListDataSource` |
+| `struct` | [`ListViewHandle`](#listviewhandle) — A handle on a mounted `ListView`, to scroll it to an item from outside the widget — a view-model reacting to a search hit, a "jump to" command |
+
 ## Public functions
 
 ### `ListView`
@@ -54,6 +61,15 @@ ListView — a virtualized, scrollable list backed by a reactive data model.
 | `&Signal<f32>` | [`viewport_ratio_y_signal()`](#listview-viewport_ratio_y_signal) |
 |  | [`scroll_to_index(index: usize)`](#listview-scroll_to_index) |
 |  | [`ensure_index_visible(index: usize)`](#listview-ensure_index_visible) |
+| `ListViewHandle` | [`handle()`](#listview-handle) |
+
+### `ListViewHandle`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+|  | [`scroll_to_index(index: usize)`](#listviewhandle-scroll_to_index) |
+|  | [`ensure_index_visible(index: usize)`](#listviewhandle-ensure_index_visible) |
 
 ## Detailed description
 
@@ -92,6 +108,33 @@ model, and the keys step over the headers. A drop on a header, or on the
 pinned copy of one, inserts at the boundary before its section's first
 item; the insertion line shows on which side of the header the dropped
 rows land (see `sections`).
+
+#### Scrolling to an item
+
+`handle` returns a `ListViewHandle`, a cheap `Clone`
+taken before the view is added and usable from any handler afterwards. Its
+`scroll_to_index` and
+`ensure_index_visible` are applied at
+the next layout pass, after row measurement and scroll anchoring, so they
+may follow a model change in the same turn, or be called before mount:
+
+```rust
+# use teksilo_widgets::ListView;
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_data::ListModel;
+# use teksilo_i18n::lit;
+# let model: ListModel<String> = ListModel::from_vec(vec!["Alpha".into()]);
+let list = ListView::new(model.clone(), |_i, item, _selected| {
+    Box::new(TextWidget::new(lit!(item)))
+});
+let handle = list.handle();
+// … `ctx.add(list)`; then, from a handler:
+model.insert(0, "Fresh".into());
+handle.ensure_index_visible(0);
+```
+
+The builder-value methods of the same names compute the offset when they
+are called, against the last layout pass.
 
 #### Pan to scroll
 
@@ -683,9 +726,16 @@ thumb size on any external scrollbar.
 #### `pub fn scroll_to_index(&self, index: usize)`
 
 Scroll so the given model index is aligned to the top of the
-viewport. Clamped to the valid scroll range. Safe to call before
-the ListView has been laid out — the clamp will kick in on the
-first layout pass.
+viewport, now, against the scroll range and row offsets of the last
+layout pass.
+
+The offset is computed and clamped when this is called, to the
+`max_scroll_y` that pass wrote. Before the
+view has been laid out that range is `0`, so the call scrolls to the
+top and does nothing more; after a model change in the same turn the
+range still describes the old list. On a list that is already mounted,
+or to scroll before the first layout, use a `handle`,
+which defers the computation to the next layout pass.
 
 With `sections`, the first item of a section brings
 its header to the top with it, and with
@@ -699,3 +749,71 @@ stops below the pinned header.
 Scroll the minimum distance needed to bring the given model
 index fully into view. No-op if already visible. Sections are
 honoured as in `scroll_to_index`.
+
+Like `scroll_to_index`, this computes the offset when it is called,
+against the viewport and scroll range of the last layout pass; a
+`handle` defers it to the next one.
+
+<a id="listview-handle"></a>
+
+#### `pub fn handle(&self) -> ListViewHandle`
+
+A handle that scrolls this list once it is mounted.
+
+Take it while describing the tree, before the view is handed to
+`ctx.add(...)`; it stays attached to the view across rebuilds. See
+`ListViewHandle`.
+
+<a id="listviewhandle"></a>
+
+## `pub struct ListViewHandle`
+
+**Import:** `use teksilo::widgets::ListViewHandle;`
+
+A handle on a mounted `ListView`, to scroll it to an item from outside
+the widget — a view-model reacting to a search hit, a "jump to" command.
+
+Cheap to clone, valid before the view is mounted, and it survives the
+view's rebuilds. Its methods never compute an offset when they are called:
+they record the request and ask for a layout pass, and the view applies it
+there, after row measurement and scroll anchoring have settled. So a model
+change made in the same turn (rows inserted above, say) is accounted for,
+a request made before mount is applied at the first layout, and a later
+request replaces an earlier pending one. A request on an empty list is
+dropped; an index past the end reveals the last item.
+
+```rust
+# use teksilo_widgets::ListView;
+# use teksilo_widgets::primitives::TextWidget;
+# use teksilo_data::ListModel;
+# use teksilo_i18n::lit;
+# let model: ListModel<String> = ListModel::from_vec(vec!["Alpha".into()]);
+let list = ListView::new(model, |_i, item, _selected| {
+    Box::new(TextWidget::new(lit!(item)))
+});
+let handle = list.handle();
+// … `ctx.add(list)`, then later, from any handler:
+handle.scroll_to_index(120);
+```
+
+```rust
+pub struct ListViewHandle { /* fields */ }
+```
+
+### Methods
+
+<a id="listviewhandle-scroll_to_index"></a>
+
+#### `pub fn scroll_to_index(&self, index: usize)`
+
+Scroll so the given model index is aligned to the top of the
+viewport, as far as the scroll range allows, at the next layout pass.
+Sections are honoured as in `ListView::scroll_to_index`.
+
+<a id="listviewhandle-ensure_index_visible"></a>
+
+#### `pub fn ensure_index_visible(&self, index: usize)`
+
+Scroll the minimum distance that brings the given model index fully
+into view, at the next layout pass; no scroll when it already is.
+Sections are honoured as in `ListView::ensure_index_visible`.

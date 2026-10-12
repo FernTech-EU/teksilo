@@ -43,13 +43,40 @@ was wrapped, and is decided once, as it mounts:
   the control's own text is what a sighted user reads on it, and a second
   button around the first would be one control heard as two.
 
-#### Touch and pen
+#### Pointer, touch and pen
 
 The trigger has no geometry and no press visual of its own: it forwards the
-caller's child, whose target and appearance are the child's, and routes the
-pointer handler onto that child's external bucket so it fires beside the
-child's own. The activation is an `on_tap`, so it happens on the release for
-every pointer kind.
+caller's child, whose target and appearance are the child's. The opener is
+an `on_tap`, attached beside the handlers already there (the external
+bucket), so it happens on the release for every pointer kind and never
+replaces what the child does itself. It goes on two nodes:
+
+* **the wrapped widget**, so a tap anywhere on it opens, its margins and
+  its non-interactive parts included;
+* **the wrapped control**, when that is a node inside the widget rather
+  than the widget itself. A control that handles taps of its own takes a
+  tap before any ancestor sees it, so an opener left on the wrapper alone
+  would answer Enter, Space and a reader's `Click` and never a click.
+
+A tap is delivered to the innermost node that recognizes it, and nowhere
+else, so a click on the control opens once, beside the control's own
+response to it.
+
+#### Opening on another button
+
+The trigger opens on the buttons the wrapped widget accepts taps from,
+`ButtonMask::PRIMARY` unless
+it says otherwise. To open on a right click, give the wrapped widget
+`.accept_tap_buttons(ButtonMask::SECONDARY)`; the inner control gets the
+same mask for the opener, so a left click on it stays the control's own.
+A second click with the same button on an open trigger closes it.
+
+```ignore
+PopoverWidget::new(OverlayTrigger::around(
+    tag_chip.accept_tap_buttons(ButtonMask::SECONDARY),
+))
+.content(tag_menu)
+```
 
 ## API reference
 

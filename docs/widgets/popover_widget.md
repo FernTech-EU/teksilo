@@ -33,6 +33,7 @@ activated, plus the `PopoverButton` / `PopoverIconButton` aliases.
 | `Self` | [`show_disclosure_caret(on: bool)`](#popoverwidget-show_disclosure_caret) |
 | `Self` | [`on_open(f: impl Fn() + 'static)`](#popoverwidget-on_open) |
 | `Self` | [`on_close(f: impl Fn() + 'static)`](#popoverwidget-on_close) |
+| `Self` | [`on_close_with(f: impl Fn(DismissReason) + 'static)`](#popoverwidget-on_close_with) |
 | `Self` | [`open_action(intent: &'static str)`](#popoverwidget-open_action) |
 | `Self` | [`surface(variant: PopoverVariant)`](#popoverwidget-surface) |
 | `Self` | [`bare()`](#popoverwidget-bare) |
@@ -105,7 +106,9 @@ let _w = PopoverIconButton::new(IconButton::add().toolbar())
 caret is shown). These **replace** any previous values the caller set
 — in particular any `on_activate_fn` set before `::new` is discarded,
 because the activate slot is owned by the popover wiring. Use
-`on_open` / `on_close`, or observe `open_signal`, for side effects.
+`on_open` / `on_close`, or observe `open_signal`, for side effects;
+`on_close_with` also says why the popover closed (a `DismissReason`:
+an outside press, Escape, the popover closing itself, a cascade).
 
 ### Per-trigger differences (the `PopoverTrigger` trait)
 
@@ -306,6 +309,31 @@ frame / dispatch context.
 
 Notification fired on the falling edge of the popover (when the
 overlay's dismiss callback runs).
+
+Replaces any `on_close_with` set before it. Use
+that one to learn how the popover was closed.
+
+<a id="popoverwidget-on_close_with"></a>
+
+#### `pub fn on_close_with(mut self, f: impl Fn(DismissReason) + 'static) -> Self`
+
+`on_close`, told why the popover closed.
+
+The `DismissReason` is the overlay manager's own:
+
+* `OutsidePress` — a press outside the
+  panel, including a click on the trigger itself while the popover is
+  open (the press closes it before the trigger sees it);
+* `Escape` — Escape pressed in the panel;
+* `Programmatic` — the popover closed
+  itself: `Alt+ArrowUp`, Enter or Space on the trigger, the
+  `open_action` toggle, Tab out of the panel, or
+  the application dismissing it;
+* `Cascade` — an overlay this popover was
+  opened from went away and took it along.
+
+The enum is `#[non_exhaustive]`, so match it with a wildcard arm.
+Replaces any `on_close` set before it.
 
 <a id="popoverwidget-open_signal"></a>
 

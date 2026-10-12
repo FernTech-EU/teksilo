@@ -7,6 +7,13 @@
 
 `TreeTableView<T>` — hierarchical multi-column data table with expand/collapse.
 
+## Public types
+
+| Kind | Name |
+| ---: | :--- |
+| `struct` | [`TreeTableView`](#treetableview) — Hierarchical multi-column widget |
+| `struct` | [`TreeTableViewHandle`](#treetableviewhandle) — A handle on a mounted `TreeTableView`, to scroll it to a row from outside the widget — a view-model revealing the node a search found, say |
+
 ## Public functions
 
 ### `TreeTableView`
@@ -101,6 +108,15 @@
 |  | [`set_column_pinning(col_id: &str, side: PinnedSide)`](#treetableview-set_column_pinning) |
 |  | [`begin_edit(row: usize, col_id: &str)`](#treetableview-begin_edit) |
 |  | [`end_edit()`](#treetableview-end_edit) |
+| `TreeTableViewHandle` | [`handle()`](#treetableview-handle) |
+
+### `TreeTableViewHandle`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+|  | [`scroll_to_row(row: usize)`](#treetableviewhandle-scroll_to_row) |
+|  | [`ensure_row_visible(row: usize)`](#treetableviewhandle-ensure_row_visible) |
 
 ## Detailed description
 
@@ -182,6 +198,30 @@ use teksilo_data::TreeModel;
 # let model: TreeModel<File> = TreeModel::new();
 let _view = TreeTableView::new(model).row_height(28.0);
 ```
+
+#### Scrolling to a row
+
+`handle` returns a `TreeTableViewHandle`, a
+cheap `Clone` taken before the view is added and usable from any handler
+afterwards. Its `scroll_to_row` and
+`ensure_row_visible` take a flat
+visible row index and are applied at the next layout pass, after row
+measurement and scroll anchoring, so they may follow an expansion in the
+same turn, or be called before mount:
+
+```rust
+# use teksilo_data::TreeModel;
+# use teksilo_widgets::TreeTableView;
+# let model: TreeModel<String> = TreeModel::new();
+let view = TreeTableView::new(model);
+let handle = view.handle();
+// … add the columns, `ctx.add(view)`; then, from a handler, after
+// expanding the row's ancestors in the same turn:
+handle.ensure_row_visible(42);
+```
+
+The builder-value methods of the same names compute the offset when they
+are called, against the last layout pass.
 
 #### Pan to scroll
 
@@ -1016,8 +1056,15 @@ Clear the active sort.
 
 #### `pub fn scroll_to_row(&self, row: usize)`
 
-Scroll so that `row` is aligned to the top of the viewport. A no-op
-before the first layout pass.
+Scroll so that `row` (a flat visible index) is aligned to the top of
+the viewport, now, against the row offsets and scroll range of the last
+layout pass. A no-op before the first layout pass.
+
+The offset is clamped when this is called, to the range that pass
+wrote, so after a structural change in the same turn (a node expanded
+above the row) it still describes the old rows. On a mounted view, or
+to scroll before the first layout, use a `handle`,
+which defers the computation to the next layout pass.
 
 With `pinned_ancestors`, the top it is
 aligned to is the bottom of its own pinned ancestors.
@@ -1026,8 +1073,11 @@ aligned to is the bottom of its own pinned ancestors.
 
 #### `pub fn ensure_row_visible(&self, row: usize)`
 
-Scroll the minimum distance needed to make `row` visible. A no-op
-before the first layout pass, when the viewport height is not yet known.
+Scroll the minimum distance needed to make `row` (a flat visible
+index) visible, now, against the viewport, row offsets and scroll range
+of the last layout pass. A no-op before the first layout pass, when the
+viewport height is not yet known. A `handle` defers the
+computation to the next layout pass instead.
 
 With `pinned_ancestors`, "visible" means
 below the ancestors that would be pinned over it.
@@ -1102,3 +1152,69 @@ to edit, so a row that is one is a no-op too.
 #### `pub fn end_edit(&self)`
 
 Close the active cell editor without committing (the field's `on_blur` still fires).
+
+<a id="treetableview-handle"></a>
+
+#### `pub fn handle(&self) -> TreeTableViewHandle`
+
+A handle that scrolls this view once it is mounted.
+
+Take it while describing the tree, before the view is handed to
+`ctx.add(...)`; it stays attached to the view across rebuilds. See
+`TreeTableViewHandle`.
+
+<a id="treetableviewhandle"></a>
+
+## `pub struct TreeTableViewHandle`
+
+**Import:** `use teksilo::widgets::TreeTableViewHandle;`
+
+A handle on a mounted `TreeTableView`, to scroll it to a row from
+outside the widget — a view-model revealing the node a search found, say.
+
+Rows are addressed by their **flat visible index**, as by
+`TreeTableView::scroll_to_row`: the position of the row among the rows
+currently shown, counting the children of expanded nodes and skipping those
+of collapsed ones. With `pinned_ancestors`
+the row is revealed below the ancestors pinned over it.
+
+Cheap to clone, valid before the view is mounted, and it survives the
+view's rebuilds. Its methods never compute an offset when they are called:
+they record the request and ask for a layout pass, and the view applies it
+there, after row measurement and scroll anchoring have settled. So a
+structural change made in the same turn (a node expanded above the target,
+say) is accounted for, a request made before mount is applied at the first
+layout, and a later request replaces an earlier pending one. A request on a
+view with no rows is dropped; a row past the end reveals the last row.
+
+```rust
+# use teksilo_data::TreeModel;
+# use teksilo_widgets::TreeTableView;
+# let model: TreeModel<String> = TreeModel::new();
+let view = TreeTableView::new(model);
+let handle = view.handle();
+// … add the columns, `ctx.add(view)`; later, after expanding the row's
+// ancestors:
+handle.ensure_row_visible(42);
+```
+
+```rust
+pub struct TreeTableViewHandle { /* fields */ }
+```
+
+### Methods
+
+<a id="treetableviewhandle-scroll_to_row"></a>
+
+#### `pub fn scroll_to_row(&self, row: usize)`
+
+Scroll so that `row` (a flat visible index) is aligned to the top of
+the viewport, as far as the scroll range allows, at the next layout
+pass.
+
+<a id="treetableviewhandle-ensure_row_visible"></a>
+
+#### `pub fn ensure_row_visible(&self, row: usize)`
+
+Scroll the minimum distance that makes `row` (a flat visible index)
+fully visible, at the next layout pass; no scroll when it already is.

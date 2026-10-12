@@ -13,6 +13,7 @@ Virtualized 2D tile grid bound to a `ListModel<T>` / `ListDataSource`.
 | ---: | :--- |
 | `struct` | [`TileContext`](#tilecontext) — Context passed to the tile delegate for each realized tile |
 | `struct` | [`GridView`](#gridview) — A virtualized 2D tile grid backed by a `ListModel<T>` |
+| `struct` | [`GridViewHandle`](#gridviewhandle) — A handle on a `GridView`'s scroll position, for a caller outside the widget: a toolbar, a "show current" command, a search result, an… |
 | `enum` | [`GridTabTraversal`](#gridtabtraversal) — How Tab moves out of (or within) the grid |
 | `trait` | [`SectionProvider`](#sectionprovider) — Partitions a flat model into display sections |
 | `struct` | [`GroupingSections`](#groupingsections) — A `SectionProvider` built by partitioning consecutive equal-key runs of an (already ordered) model |
@@ -82,8 +83,19 @@ Virtualized 2D tile grid bound to a `ListModel<T>` / `ListDataSource`.
 | `&Signal<f32>` | [`scroll_y_signal()`](#gridview-scroll_y_signal) |
 | `&Signal<f32>` | [`max_scroll_y_signal()`](#gridview-max_scroll_y_signal) |
 | `&Signal<f32>` | [`viewport_ratio_y_signal()`](#gridview-viewport_ratio_y_signal) |
+| `&Signal<Option<std::ops::Range<f32>>>` | [`detail_visible_span_signal()`](#gridview-detail_visible_span_signal) |
+| `GridViewHandle` | [`handle()`](#gridview-handle) |
 |  | [`ensure_index_visible(index: usize, anchor: ScrollAnchor)`](#gridview-ensure_index_visible) |
 |  | [`scroll_to_index(index: usize, anchor: ScrollAnchor)`](#gridview-scroll_to_index) |
+
+### `GridViewHandle`
+
+| Returns | Function |
+| ---: | :--- |
+| | **Methods** |
+|  | [`scroll_to_index(index: usize, anchor: ScrollAnchor)`](#gridviewhandle-scroll_to_index) |
+|  | [`ensure_index_visible(index: usize, anchor: ScrollAnchor)`](#gridviewhandle-ensure_index_visible) |
+|  | [`reveal_band(index: usize)`](#gridviewhandle-reveal_band) |
 
 ### `SectionProvider`
 
@@ -167,6 +179,59 @@ rows and ignores it. See the module docs of `grid_view/detail.rs`.
 Focus inside the band is revealed like focus anywhere: this root answers
 the framework's `WidgetEvent::ScrollIntoView`, which a scroll container is
 sent when a descendant it clips takes focus.
+
+#### Scrolling from outside
+
+`GridView::handle` returns a `GridViewHandle`, a cheap clone usable
+before the grid is mounted and through all its rebuilds:
+`scroll_to_index`,
+`ensure_index_visible` and
+`reveal_band` (a tile and its open band
+together). A handle computes no offset when it is called: it records the
+request, and the next layout applies it once the band is measured and the
+scroll anchoring has run. Opening a band and scrolling to a tile under it
+in one turn therefore lands the tile where it was asked to be, which an
+offset written from outside does not: the layout keeps the content under
+the top edge still across the band opening, and takes that offset for
+one of the old layout. The builder's own `scroll_to_index` and
+`ensure_index_visible` act at call time, so before the first layout they
+do nothing.
+
+```ignore
+let handle = grid.handle();
+// later, from a command:
+expanded.set(Some(album));
+handle.reveal_band(album);
+```
+
+#### A long band
+
+A band that holds hundreds of rows, an album's tracks say, need not build
+them all. `GridView::detail_visible_span_signal` publishes the part of
+the open band on screen, in band-local coordinates, and only when it
+changes, so the band can realize the rows in the span and stand spacers
+in for the rest, with no copy of the grid's placement arithmetic:
+
+```ignore
+const ROW: f32 = 24.0;
+let grid = GridView::new(albums, album_card);
+let span = grid.detail_visible_span_signal().clone();
+grid.detail_row(move |tc| {
+    let n = tc.item.tracks.len();
+    let first = span.map(|s| s.as_ref().map_or(0, |r| (r.start / ROW) as usize));
+    let last = span.map(move |s| {
+        s.as_ref().map_or(0, |r| ((r.end / ROW).ceil() as usize).min(n))
+    });
+    // `window` holds tracks[first..last], refilled when the span moves.
+    let window = track_window(&tc.item.tracks, &first, &last);
+    Some(Box::new(
+        VStack::new()
+            .child(FixedSize::new().height(first.map(|f| *f as f32 * ROW)))
+            .child(Repeater::new(window, |track| track_row(track)))
+            .child(FixedSize::new().height(last.map(move |l| (n - *l) as f32 * ROW))),
+    ))
+})
+```
 
 #### Pan to scroll
 
@@ -527,18 +592,66 @@ The maximum scroll offset signal (`content_height - viewport_height`).
 
 The vertical viewport-to-content ratio signal (drives the thumb size).
 
+<a id="gridview-detail_visible_span_signal"></a>
+
+#### `pub fn detail_visible_span_signal(&self) -> &Signal<Option<std::ops::Range<f32>>>`
+
+The part of the open detail band that is on screen, in band-local
+coordinates: `max(0, scroll_y − band.y) .. min(band.height, scroll_y +
+viewport_height − band.y)`, where `band.y` is the band's top in the
+grid's content. `None` while no band is open, and while the open band
+is entirely off screen.
+
+Written by each layout after the scroll offset is clamped, and only
+when it changes, so an observer is not told of a scroll that leaves
+the band's visible part as it was. Meant for a band holding far more
+than a viewport shows, hundreds of tracks say, that realizes only the
+rows in the span: a window of rows between two spacers, with no copy
+of the grid's placement arithmetic. See the module docs, "A long
+band".
+
+<a id="gridview-handle"></a>
+
+#### `pub fn handle(&self) -> GridViewHandle`
+
+A `GridViewHandle` on this grid: scroll it to a tile, or to a tile
+and its detail band, from outside the widget.
+
+Usable at once and for the grid's whole life: a request made before
+the grid is mounted is applied at its first layout, and the handle
+keeps working through every rebuild. A request is applied by the
+layout, after it has measured the detail band and settled the scroll
+anchoring, so one made in the same turn as opening a band lands where
+the new layout puts the tile. Prefer it to
+`scroll_to_index` and
+`ensure_index_visible`, which compute
+the offset when they are called.
+
 <a id="gridview-ensure_index_visible"></a>
 
 #### `pub fn ensure_index_visible(&self, index: usize, anchor: ScrollAnchor)`
 
-Scroll the minimum distance to bring `index` into view per `anchor`.
+Bring `index` into view: nothing when the tile is already fully
+visible, otherwise a scroll per `anchor`, as
+`scroll_to_index`.
+
+Computed at call time from the last layout's geometry and clamped to
+its scroll range. Before the grid has been laid out there is no
+geometry and this does nothing, and a change of layout made in the
+same turn (a detail band opened above the tile) is not yet counted.
+`GridViewHandle::ensure_index_visible` has neither limit.
 
 <a id="gridview-scroll_to_index"></a>
 
 #### `pub fn scroll_to_index(&self, index: usize, anchor: ScrollAnchor)`
 
-Scroll to `index`, forcing the viewport position per `anchor`
-(`Auto` behaves like `ensure_index_visible`).
+Scroll to `index`, forcing its position in the viewport per `anchor`;
+`ScrollAnchor::Auto` scrolls the least that shows it.
+
+Computed at call time, with the limits
+`ensure_index_visible` documents: it
+does nothing before the grid's first layout.
+`GridViewHandle::scroll_to_index` has neither limit.
 
 <a id="gridview-sections"></a>
 
@@ -820,6 +933,77 @@ whose item has not arrived is offered until it does. Without
 
 The detail band's height for the tile at `index`, instead of measuring
 it. See `detail_row`.
+
+<a id="gridviewhandle"></a>
+
+## `pub struct GridViewHandle`
+
+**Import:** none — `GridViewHandle` is public in a private module of `teksilo-widgets` and nothing re-exports it.
+
+A handle on a `GridView`'s scroll position, for a
+caller outside the widget: a toolbar, a "show current" command, a search
+result, an observer of the application's own state.
+
+Taken with `GridView::handle`, cheap to clone,
+and usable at once: a request made before the grid is mounted is kept and
+applied at its first layout, and the handle keeps working through every
+rebuild of the grid. Each method records a request and asks for a
+relayout; the layout applies it after it has measured the detail band and
+settled the scroll anchoring, so a request made in the same turn as a
+change of layout lands where the new layout puts the tile:
+
+```ignore
+// Open the band of tile 0 and put tile 30 at the top, in one turn.
+expanded.set(Some(0));
+handle.scroll_to_index(30, ScrollAnchor::Start);
+```
+
+Only the latest request is applied: a later one replaces one still
+pending. A request for a tile the grid does not have when it is applied
+does nothing.
+
+```rust
+pub struct GridViewHandle { /* fields */ }
+```
+
+### Methods
+
+<a id="gridviewhandle-scroll_to_index"></a>
+
+#### `pub fn scroll_to_index(&self, index: usize, anchor: ScrollAnchor)`
+
+Scroll to tile `index`, forcing its position in the viewport per
+`anchor`: `ScrollAnchor::Start` puts its top at the viewport's top,
+`Center` centres it,
+`End` puts its bottom at the viewport's bottom,
+and `Auto` scrolls the least that shows it.
+Clamped to the scroll range. Applied at the next layout.
+
+<a id="gridviewhandle-ensure_index_visible"></a>
+
+#### `pub fn ensure_index_visible(&self, index: usize, anchor: ScrollAnchor)`
+
+Bring tile `index` into view: nothing when it is already fully
+visible, otherwise a scroll per `anchor`, as
+`scroll_to_index`. Applied at the next
+layout, against the layout it will be shown in.
+
+<a id="gridviewhandle-reveal_band"></a>
+
+#### `pub fn reveal_band(&self, index: usize)`
+
+Scroll so tile `index` and its open detail band are both visible:
+the least scroll that shows the span from the top of the tile's row
+to the bottom of its band, and the row first when the two do not fit
+together, so the band reads as the tile's. This is what the grid does
+itself when a user opens a band.
+
+When `index`'s band is not open at the layout that applies it (no
+`detail_row`, another tile disclosed,
+or a tile with nothing to disclose), the tile alone is brought into
+view, as `ensure_index_visible` with
+`ScrollAnchor::Auto`. Open the band and call this in the same turn:
+the band is measured before the request is applied.
 
 <a id="gridtabtraversal"></a>
 
