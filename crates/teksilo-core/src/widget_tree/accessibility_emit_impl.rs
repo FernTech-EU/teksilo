@@ -489,7 +489,10 @@ impl WidgetTree {
             return;
         }
 
-        let node = self.arena.get(id).expect("widget id is active in arena");
+        let node = self
+            .arena
+            .get(id)
+            .expect("widget id is not in the arena (destroyed?)");
         let mut builder = AccessNodeBuilder::for_widget(id);
         node.widget.accessibility(&mut builder);
         // Same call, same place, as `build_overridden_builder` — the two builder
@@ -965,7 +968,10 @@ impl WidgetTree {
 
     pub(super) fn build_overridden_builder(&self, id: WidgetId) -> AccessNodeBuilder {
         use crate::widget_builder::AccessSubtreeMode;
-        let node = self.arena.get(id).expect("widget id is active in arena");
+        let node = self
+            .arena
+            .get(id)
+            .expect("widget id is not in the arena (destroyed?)");
         // Every consumer of this builder reads scalars off it — role, name,
         // actions, the tri-state flags — and discards it. A name probe so a
         // text-bearing widget does not shape and emit runs nobody collects.

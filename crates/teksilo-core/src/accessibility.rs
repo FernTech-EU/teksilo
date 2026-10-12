@@ -2061,6 +2061,7 @@ pub struct AccessibilityInfo {
     selected: Option<bool>,
     disabled: bool,
     hidden: bool,
+    published: bool,
     value: Option<String>,
     numeric_value: Option<f64>,
     min_numeric_value: Option<f64>,
@@ -2079,6 +2080,7 @@ impl AccessibilityInfo {
             selected: None,
             disabled: false,
             hidden: false,
+            published: true,
             value: None,
             numeric_value: None,
             min_numeric_value: None,
@@ -2135,6 +2137,14 @@ impl AccessibilityInfo {
         self
     }
 
+    /// Record whether the node is in the published AT tree; see
+    /// [`published`](Self::published). A node is published unless set
+    /// otherwise.
+    pub fn with_published(mut self, published: bool) -> Self {
+        self.published = published;
+        self
+    }
+
     pub fn role(&self) -> Role {
         self.role
     }
@@ -2165,6 +2175,18 @@ impl AccessibilityInfo {
 
     pub fn is_hidden(&self) -> bool {
         self.hidden
+    }
+
+    /// Whether assistive technology can reach this node: `false` for a
+    /// dormant node (a hidden `Switcher` page, a `visible_when(false)`
+    /// branch), one under an ancestor whose subtree is excluded or merged,
+    /// and one marked [hidden](Self::is_hidden).
+    ///
+    /// The other getters describe what the widget would say; this says
+    /// whether it is being heard. A test that reads names across a tree
+    /// filters on it.
+    pub fn published(&self) -> bool {
+        self.published && !self.hidden
     }
 
     /// The node's value text (`Node::value`), if it has one.

@@ -479,8 +479,21 @@ impl WidgetTree {
             .map(str::to_owned)
     }
 
+    /// What the accessibility layer would say about the node `id`: its role,
+    /// name, value, states and actions, after the app's `access_*` overrides.
+    ///
+    /// The answer comes from the widget's own accessibility emission whether
+    /// or not the node is in the published AT tree. A **dormant** node (a
+    /// hidden `Switcher` page, a `visible_when(false)` branch) answers with
+    /// its full role and name and is not marked hidden; ask
+    /// [`AccessibilityInfo::published`] whether assistive technology can see
+    /// it, so a walk that reads names does not count invisible widgets.
+    ///
+    /// # Panics
+    /// Panics if `id` is not in the arena (a destroyed widget). Use
+    /// [`try_accessibility_node`](Self::try_accessibility_node) when the id
+    /// may be stale.
     pub fn accessibility_node(&self, id: WidgetId) -> AccessibilityInfo {
-        // Panics on an inactive id, like every caller of this has relied on.
         let builder = self.build_overridden_builder(id);
         let role = builder.role();
         let name = builder.name().map(|s| s.to_string());
@@ -517,6 +530,7 @@ impl WidgetTree {
         if builder.is_hidden() {
             info = info.with_hidden(true);
         }
+        info = info.with_published(self.is_in_published_at_tree(id));
         if let Some(value) = builder.value() {
             info = info.with_value(value);
         }
@@ -531,6 +545,34 @@ impl WidgetTree {
                 .map(|a| a.description.clone())
                 .collect(),
         )
+    }
+
+    /// [`accessibility_node`](Self::accessibility_node) for an id that may no
+    /// longer be in the arena: `None` for a destroyed widget, instead of a
+    /// panic.
+    pub fn try_accessibility_node(&self, id: WidgetId) -> Option<AccessibilityInfo> {
+        self.arena.get(id)?;
+        Some(self.accessibility_node(id))
+    }
+
+    /// Whether the walker reaches `id`: it is active, and no ancestor prunes
+    /// its subtree out of the AT tree (`access_exclude_subtree` drops it;
+    /// `access_merge_subtree` folds it into the ancestor's own node).
+    fn is_in_published_at_tree(&self, id: WidgetId) -> bool {
+        use crate::widget_builder::AccessSubtreeMode;
+        if !self.arena.is_active(id) {
+            return false;
+        }
+        let mut cursor = self.arena.parent(id);
+        while let Some(ancestor) = cursor {
+            match self.arena.get(ancestor) {
+                Some(node) if node.access_subtree != AccessSubtreeMode::Inherit => return false,
+                Some(_) => {}
+                None => break,
+            }
+            cursor = self.arena.parent(ancestor);
+        }
+        true
     }
 
     pub fn find_by_role(&self, role: accesskit::Role) -> Option<WidgetId> {
@@ -1568,6 +1610,50 @@ mod tests {
         let update = tree.sync_accessibility();
         assert_eq!(update.nodes.len(), 2 + ANNOUNCER_NODES);
         assert_a11y_tree_valid(&update);
+    }
+
+    #[test]
+    fn try_accessibility_node_is_none_for_a_destroyed_id() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().label("Gone soon"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert!(tree.try_accessibility_node(id).is_some());
+
+        tree.destroy_subtree_for_testing(id);
+        assert!(tree.try_accessibility_node(id).is_none());
+    }
+
+    #[test]
+    fn a_dormant_node_answers_but_is_not_published() {
+        let mut tree = WidgetTree::new();
+        let shown = tree.add(FillWidget::new().label("Shown"));
+        let parked = tree.add(FillWidget::new().label("Parked"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.set_dormant(parked);
+
+        let shown = tree.try_accessibility_node(shown).expect("in the arena");
+        assert!(shown.published());
+
+        let parked = tree.try_accessibility_node(parked).expect("in the arena");
+        assert_eq!(
+            parked.name(),
+            Some("Parked"),
+            "a dormant node still answers"
+        );
+        assert!(!parked.is_hidden(), "dormancy is not the hidden flag");
+        assert!(!parked.published());
+    }
+
+    #[test]
+    fn a_node_under_an_excluded_ancestor_is_not_published() {
+        use crate::widget_builder::WidgetBuilder;
+        let mut tree = WidgetTree::new();
+        let inner = tree.add(FillWidget::new().label("Inner"));
+        let outer = tree.add(StackWidget::new().child(inner).access_exclude_subtree());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        assert!(tree.accessibility_node(outer).published());
+        assert!(!tree.accessibility_node(inner).published());
     }
 
     /// Regression test: a Relayout-only signal flip (no activation

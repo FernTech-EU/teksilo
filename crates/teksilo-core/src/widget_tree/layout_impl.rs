@@ -1079,7 +1079,9 @@ fn layout_widget_recursive(
             extras,
             stack_main_axis: None,
         };
-        let node = arena.get(id).expect("widget id is active in arena");
+        let node = arena
+            .get(id)
+            .expect("widget id is not in the arena (destroyed?)");
         node.widget
             .place_children(bounds, proposal, &mut placements, &ctx);
     }
