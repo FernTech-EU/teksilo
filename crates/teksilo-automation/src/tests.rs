@@ -537,6 +537,107 @@ fn layout_tree_includes_widgets_the_at_tree_prunes() {
     assert!(at_roles.contains(&"Button"), "Button is in the AT tree");
 }
 
+/// A widget's declared cursor is on its layout node, absent when it declares
+/// none and `default` when it declares the default: the three are different
+/// answers. Its `Debug` text, which the same reply carries, must not print the
+/// emptied handler set the mount left behind as if it were the declaration.
+#[test]
+fn inspect_node_reports_the_cursor_a_widget_declares() {
+    use teksilo_core::widget::CursorIcon;
+    let inspect = |tree: &mut WidgetTree, id| {
+        let reply = run(tree, &AutomationOp::InspectNode { node: node_ref(id) });
+        let AutomationReply::Ok { data } = reply else {
+            panic!("{reply:?}");
+        };
+        let raw = data.clone();
+        (serde_json::from_value::<LayoutNode>(data).unwrap(), raw)
+    };
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(Probe::new(accesskit::Role::Button, "Grip").cursor(CursorIcon::ColResize));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let (node, _) = inspect(&mut tree, id);
+    assert_eq!(node.cursor.as_deref(), Some("col_resize"));
+    let debug = node.debug.expect("inspect_node carries the debug repr");
+    assert!(
+        debug.contains("moved to the tree") && !debug.contains("cursor: None"),
+        "a mounted wrapper must not claim it declares no cursor: {debug}"
+    );
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(Probe::new(accesskit::Role::Button, "Plain").cursor(CursorIcon::Default));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(inspect(&mut tree, id).0.cursor.as_deref(), Some("default"));
+
+    let (mut tree, id) = laid_out(Probe::new(accesskit::Role::Button, "None"));
+    let (node, raw) = inspect(&mut tree, id);
+    assert_eq!(node.cursor, None);
+    assert!(
+        raw.get("cursor").is_none(),
+        "an undeclared cursor is left out of the reply, not sent as null: {raw}"
+    );
+
+    // layout_tree carries it too.
+    let mut tree = WidgetTree::new();
+    tree.add(Probe::new(accesskit::Role::Button, "Grip").cursor(CursorIcon::RowResize));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let AutomationReply::Ok { data } = run(
+        &mut tree,
+        &AutomationOp::LayoutTree {
+            max_depth: None,
+            include_debug: false,
+        },
+    ) else {
+        panic!("layout_tree failed");
+    };
+    let nodes: Vec<LayoutNode> = serde_json::from_value(data["nodes"].clone()).unwrap();
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.cursor.as_deref() == Some("row_resize")),
+        "{nodes:?}"
+    );
+}
+
+/// `query_pointers` says what the window's cursor is now, on the report of the
+/// pointer it follows: the mouse. A touch contact never owns the cursor.
+#[test]
+fn query_pointers_reports_the_current_cursor_on_the_hover_owner() {
+    use PointerAction::{Down, Move};
+    use PointerButtonDto::Primary;
+    use teksilo_core::widget::CursorIcon;
+    let mut tree = WidgetTree::new();
+    tree.add(Probe::new(accesskit::Role::Button, "Grip").cursor(CursorIcon::ColResize));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let mouse_cursor = |tree: &mut WidgetTree| {
+        query_pointers(tree)
+            .into_iter()
+            .find(|p| p.kind == PointerKindDto::Mouse)
+            .expect("the mouse is live")
+            .cursor
+    };
+    let mouse = |x| pointer_op(PointerKindDto::Mouse, Move, Primary, x);
+    assert!(run(&mut tree, &mouse(200.0)).is_ok());
+    assert_eq!(mouse_cursor(&mut tree).as_deref(), Some("col_resize"));
+    assert!(run(&mut tree, &mouse(900.0)).is_ok());
+    assert_eq!(mouse_cursor(&mut tree).as_deref(), Some("default"));
+
+    assert!(run(&mut tree, &mouse(200.0)).is_ok());
+    assert!(
+        run(
+            &mut tree,
+            &pointer_op(PointerKindDto::Touch, Down, Primary, 200.0)
+        )
+        .is_ok()
+    );
+    let touch = query_pointers(&mut tree)
+        .into_iter()
+        .find(|p| p.kind == PointerKindDto::Touch)
+        .expect("the finger is live");
+    assert_eq!(touch.cursor, None, "a contact does not own the cursor");
+}
+
 #[test]
 fn inspect_node_returns_type_bounds_and_debug() {
     let (mut tree, id) = laid_out(Probe::new(accesskit::Role::Button, "Inspect"));

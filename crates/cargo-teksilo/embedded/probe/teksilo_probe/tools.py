@@ -120,7 +120,7 @@ def layout_tree(
     include_debug: bool | None = None,
 ) -> Any:
     """Walk the full widget/layout tree (incl. widgets the AT tree prunes) with
-    bounds + types.
+    bounds, types and each widget's declared cursor.
 
     Read-only tool.
     """
@@ -133,8 +133,8 @@ def layout_tree(
 
 
 def inspect_node(session, node: int, *, window_id: int | None = None) -> Any:
-    """One widget's full layout record: type, bounds, flags, tree position, Debug
-    repr.
+    """One widget's full layout record: type, bounds, flags, declared cursor,
+    tree position, Debug repr.
 
     Read-only tool.
     """
@@ -681,9 +681,10 @@ def cancel_pointer(
 
 def query_pointers(session, *, window_id: int | None = None) -> Any:
     """Every live pointer with its id, kind, position, pressure/tilt, capture,
-    frozen touch_action, competitors and arbitration winner. How to learn the
-    id of a contact left down by anything but inject_touch_sequence, whose
-    reply names its own.
+    frozen touch_action, competitors and arbitration winner, plus the window's
+    current cursor on the mouse's (hover owner's) report. How to learn the id
+    of a contact left down by anything but inject_touch_sequence, whose reply
+    names its own.
 
     Read-only tool.
     """

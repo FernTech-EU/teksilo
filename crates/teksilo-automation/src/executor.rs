@@ -1453,6 +1453,8 @@ fn pointer_report(tree: &WidgetTree, info: PointerInfo) -> PointerReport {
         pressure: info.axes.pressure,
         tilt: info.axes.tilt.map(|(x, y)| [x, y]),
         captured_by: tree.captured_by(info.id).map(node_ref_of),
+        cursor: (tree.hover_owner().map(|h| h.id) == Some(info.id))
+            .then(|| cursor_name(tree.current_cursor()).to_string()),
         touch_action: render_touch_action(tree.sequence_touch_action(info.id)).to_string(),
         sequence_members: tree
             .sequence_members(info.id)
@@ -1464,6 +1466,26 @@ fn pointer_report(tree: &WidgetTree, info: PointerInfo) -> PointerReport {
             })
             .collect(),
         sequence_winner: tree.sequence_winner(info.id).map(node_ref_of),
+    }
+}
+
+/// A cursor under its wire name. Exhaustive on purpose: a cursor added to
+/// `CursorIcon` stops this compiling rather than rendering as a placeholder.
+fn cursor_name(cursor: teksilo_core::widget::CursorIcon) -> &'static str {
+    use teksilo_core::widget::CursorIcon as C;
+    match cursor {
+        C::Default => "default",
+        C::Pointer => "pointer",
+        C::Text => "text",
+        C::Crosshair => "crosshair",
+        C::Move => "move",
+        C::NotAllowed => "not_allowed",
+        C::Grab => "grab",
+        C::Grabbing => "grabbing",
+        C::ColResize => "col_resize",
+        C::RowResize => "row_resize",
+        C::NeswResize => "nesw_resize",
+        C::NwseResize => "nwse_resize",
     }
 }
 
@@ -2257,6 +2279,7 @@ fn layout_node(tree: &WidgetTree, id: WidgetId, include_debug: bool) -> crate::d
         },
         active: tree.is_active(id),
         clips_children: tree.widget_clips_children(id),
+        cursor: tree.declared_cursor(id).map(|c| cursor_name(c).to_string()),
         parent: tree.parent(id).map(to_ref),
         children: tree.children(id).into_iter().map(to_ref).collect(),
         debug: if include_debug {

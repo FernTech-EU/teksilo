@@ -1180,6 +1180,12 @@ impl std::fmt::Debug for HandlerSet {
 pub struct WidgetWithHandlers<W: Widget> {
     pub(crate) widget: W,
     pub(crate) handler_set: HandlerSet,
+    /// Whether [`take_handler_set`](Self::take_handler_set) has run: the
+    /// handlers (and cursor, focusability, ...) now live on the arena node,
+    /// and `handler_set` is the empty default left behind. Only `Debug` reads
+    /// it, so a mounted wrapper does not print an empty set as if it were the
+    /// widget's declaration.
+    handlers_taken: bool,
 }
 
 impl<W: Widget> WidgetWithHandlers<W> {
@@ -1187,11 +1193,13 @@ impl<W: Widget> WidgetWithHandlers<W> {
         Self {
             widget,
             handler_set: HandlerSet::new(),
+            handlers_taken: false,
         }
     }
 
     /// Take the handler set out, leaving defaults.
     pub(crate) fn take_handler_set(&mut self) -> HandlerSet {
+        self.handlers_taken = true;
         std::mem::take(&mut self.handler_set)
     }
 
@@ -1896,10 +1904,16 @@ impl<W: Widget> WidgetWithHandlers<W> {
 // Delegate all Widget trait methods to the inner widget.
 impl<W: Widget> std::fmt::Debug for WidgetWithHandlers<W> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WidgetWithHandlers")
-            .field("widget", &self.widget)
-            .field("handler_set", &self.handler_set)
-            .finish()
+        let mut s = f.debug_struct("WidgetWithHandlers");
+        s.field("widget", &self.widget);
+        if self.handlers_taken {
+            // Mounting moved the set to the node; what is left is the empty
+            // default, which would read as "no cursor, no handlers".
+            s.field("handlers", &format_args!("<moved to the tree>"));
+        } else {
+            s.field("handler_set", &self.handler_set);
+        }
+        s.finish()
     }
 }
 

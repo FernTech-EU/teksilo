@@ -165,6 +165,16 @@ pub struct LayoutNode {
     /// Whether the widget clips its children (`ScrollArea`, `MaxSize`, …).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub clips_children: bool,
+    /// The cursor the widget declares for itself (`.cursor(..)`, or a cursor in
+    /// the handler set it applies from `build()`), as a snake_case name:
+    /// `default`, `pointer`, `text`, `crosshair`, `move`, `not_allowed`,
+    /// `grab`, `grabbing`, `col_resize`, `row_resize`, `nesw_resize` or
+    /// `nwse_resize`. Absent when the widget declares none, which is not the
+    /// same as `default`: entering a widget that declares nothing leaves the
+    /// cursor as it was. A handler's own override is not a declaration and is
+    /// not shown here; see `cursor` on [`PointerReport`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
     /// Parent widget ref, or `None` for a root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<NodeRef>,
@@ -474,6 +484,14 @@ pub struct PointerReport {
     /// The widget holding this pointer's capture, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub captured_by: Option<NodeRef>,
+    /// The cursor the window shows now, as a snake_case name (the names listed
+    /// on [`LayoutNode::cursor`]). Present on the **hover owner's** report only
+    /// (a mouse, or a pen in proximity): the window has one cursor and it
+    /// follows that pointer. It is the tree's running answer, so it changes on
+    /// a hover transition or a handler's override, not when a node's
+    /// declaration changes under a pointer that does not move.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
     /// The `TouchAction` frozen at this pointer's press, under the name it is
     /// declared by: `AUTO`, `NONE`, `PAN`, `PAN_X`, `PAN_Y`, `PINCH_ZOOM`,
     /// `MANIPULATION`, or `(composite)` for a combination none of those names.

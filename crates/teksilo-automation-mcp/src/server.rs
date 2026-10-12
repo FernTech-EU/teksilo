@@ -525,7 +525,7 @@ impl AutomationServer {
     }
 
     #[tool(
-        description = "Walk the full widget/layout tree (incl. widgets the accessibility tree prunes — layout primitives, dormant branches, presentational widgets) with each widget's type, bounds, flags, and tree position. Returns { roots, nodes } keyed by the same node ids as the AT tools."
+        description = "Walk the full widget/layout tree (incl. widgets the accessibility tree prunes — layout primitives, dormant branches, presentational widgets) with each widget's type, bounds, flags, declared cursor (`cursor`, absent when it declares none), and tree position. Returns { roots, nodes } keyed by the same node ids as the AT tools."
     )]
     pub(crate) async fn layout_tree(
         &self,
@@ -543,7 +543,7 @@ impl AutomationServer {
     }
 
     #[tool(
-        description = "Inspect one widget by node id: its type, bounds, flags (active/clips_children), tree position, and its Debug repr (constructor parameters). The inspector's Properties tab for a single node. Works for any widget, AT-visible or not."
+        description = "Inspect one widget by node id: its type, bounds, flags (active/clips_children), declared cursor, tree position, and its Debug repr (constructor parameters). The inspector's Properties tab for a single node. Works for any widget, AT-visible or not."
     )]
     pub(crate) async fn inspect_node(
         &self,
@@ -986,7 +986,8 @@ impl AutomationServer {
 
     #[tool(
         description = "Every live pointer with its id, kind, position, pressure/tilt, capture, \
-                       frozen touch_action, competitors and arbitration winner. How to learn the \
+                       frozen touch_action, competitors and arbitration winner, and on the mouse's \
+                       (hover owner's) report the window's current `cursor`. How to learn the \
                        id of a contact left down by anything but inject_touch_sequence, whose reply \
                        names its own. A mouse appears once it has produced a sample and stays; a \
                        finger appears at its press and is gone after its up or cancel."

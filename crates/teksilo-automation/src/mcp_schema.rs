@@ -38,12 +38,12 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "layout_tree",
-        description: "Walk the full widget/layout tree (incl. widgets the AT tree prunes) with bounds + types.",
+        description: "Walk the full widget/layout tree (incl. widgets the AT tree prunes) with bounds, types and each widget's declared cursor.",
         mutating: false,
     },
     ToolDescriptor {
         name: "inspect_node",
-        description: "One widget's full layout record: type, bounds, flags, tree position, Debug repr.",
+        description: "One widget's full layout record: type, bounds, flags, declared cursor, tree position, Debug repr.",
         mutating: false,
     },
     ToolDescriptor {
@@ -150,7 +150,7 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "query_pointers",
-        description: "Every live pointer with its id, kind, position, pressure/tilt, capture, frozen touch_action, competitors and arbitration winner. How to learn the id of a contact left down by anything but inject_touch_sequence, whose reply names its own.",
+        description: "Every live pointer with its id, kind, position, pressure/tilt, capture, frozen touch_action, competitors and arbitration winner, plus the window's current cursor on the mouse's (hover owner's) report. How to learn the id of a contact left down by anything but inject_touch_sequence, whose reply names its own.",
         mutating: false,
     },
     ToolDescriptor {

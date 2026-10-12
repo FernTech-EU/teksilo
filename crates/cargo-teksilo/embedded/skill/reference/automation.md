@@ -94,7 +94,8 @@ constructor parameters. `layout_tree` returns the **full** widget tree including
 the layout primitives the accessibility tree prunes (`Padding` / `Expand` /
 `FixedSize`), each with its bounds — position plus size is a widget's full
 geometry, and this is the tool for size / overlap / off-screen / clipping
-questions the semantic tree cannot answer. `list_windows` enumerates windows, and
+questions the semantic tree cannot answer. Both also give each widget's declared
+`cursor` (`col_resize`, `pointer`, …; absent when it declares none). `list_windows` enumerates windows, and
 **every** tool takes an optional `window_id`.
 
 `screenshot {node?}` returns an image block plus a `{width, height, scale}`
@@ -170,7 +171,9 @@ script need not know the number).
 
 `query_pointers` lists every live pointer with id, kind, position, pressure/tilt,
 capture, frozen `touch_action`, competitors and winner — the way to learn the id
-of a contact left down by anything other than `inject_touch_sequence`.
+of a contact left down by anything other than `inject_touch_sequence`. The
+hovering pointer (the mouse, or a pen in proximity) also carries the `cursor` the
+window shows now.
 `cancel_pointer {id}` revokes a pointer the way the system does (a compositor
 grab, a lost capture): **not** an up — no tap completes, and every widget working
 on it is told. `set_density {compact | comfortable | touch}` switches the target

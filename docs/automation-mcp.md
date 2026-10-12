@@ -417,7 +417,9 @@ tree *prunes* (layout primitives like `HStack`/`Padding`/`Spacer`, dormant
 `Switcher` branches, presentational / `access_exclude` widgets), so an agent
 can debug layout (overlap, clipping, off-screen, wrong size), not just
 semantics. Each `LayoutNode` carries `id`, `type` (the concrete Rust type
-name), `bounds`, `active`, `clips_children`, `parent`, `children`, and, when
+name), `bounds`, `active`, `clips_children`, `cursor` (the cursor the widget
+declares, as `col_resize`, `pointer`, ... ; absent when it declares none,
+which is not `default`), `parent`, `children`, and, when
 requested (`include_debug`, or always for `inspect_node`), `debug`, the
 widget's `Debug` repr (its constructor parameters). Layout nodes are keyed by
 the **same** node-id space as the AT tools, so when a widget appears in both,
@@ -498,10 +500,14 @@ the number.
 
 **`query_pointers`** lists every live pointer, id, kind, primary flag, whether
 it is down, position, pressure/tilt, capture, and the same arbitration fields
-listed above. An `inject_touch_sequence` reply already names the identity each
-of its own slots got; `query_pointers` is how to learn one otherwise, and is
-therefore what a script reaches for before addressing a contact with
-`inject_pointer {pointer_id}` or `cancel_pointer`. A mouse appears once it has
+listed above. The mouse's report (the hover owner's, so a pen in proximity
+too) also carries `cursor`, the cursor the window shows now: the tree's running
+answer, which follows hover transitions and handler overrides and so differs
+from a hovered node's declared `cursor` when a handler has overridden it. An
+`inject_touch_sequence` reply already names the identity each of its own slots
+got; `query_pointers` is how to learn one otherwise, and is therefore what a
+script reaches for before addressing a contact with `inject_pointer
+{pointer_id}` or `cancel_pointer`. A mouse appears once it has
 produced a sample and stays for the life of the tree; a finger appears at its
 press and is gone after its up or cancel.
 
