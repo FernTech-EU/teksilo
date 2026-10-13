@@ -33,10 +33,24 @@
 //! is. A host then asks [`WidgetTree::focused_text_surface`] and either drives it
 //! or — knowing one exists — steps aside and lets the widget keep its own keys.
 //!
+//! # An empty history can pass the command on
+//!
+//! By default the focused text widget answers Undo and Redo whether or not it
+//! has anything to step through, so an application's own `edit.undo` action is
+//! reached only from a menu, or where no text widget has focus. An application
+//! whose Undo deliberately falls back to a wider history when the caret's own
+//! is exhausted — and says so, in a menu row naming what it will undo — turns
+//! on [`TextSurfaces::set_empty_history_passes_on`]: a text widget with nothing
+//! to undo then declines the command, and the intent climbs to the
+//! application's action exactly as it does from a refused history. Off by
+//! default, because an application that never announces the fallback would
+//! have Ctrl+Z in an empty search field undo something the user is not looking
+//! at.
+//!
 //! [`BuildContext::register_text_surface`]: crate::build_context::BuildContext::register_text_surface
 //! [`WidgetTree::focused_text_surface`]: crate::widget_tree::WidgetTree::focused_text_surface
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::signal::Signal;
@@ -95,6 +109,7 @@ pub trait TextSurface {
 pub struct TextSurfaces {
     entries: Rc<RefCell<Vec<(WidgetId, Rc<dyn TextSurface>)>>>,
     focused: Signal<Option<WidgetId>>,
+    empty_history_passes_on: Rc<Cell<bool>>,
 }
 
 impl std::fmt::Debug for TextSurfaces {
@@ -102,6 +117,7 @@ impl std::fmt::Debug for TextSurfaces {
         f.debug_struct("TextSurfaces")
             .field("registered", &self.entries.borrow().len())
             .field("focused_is_text", &self.focused_is_text_surface())
+            .field("empty_history_passes_on", &self.empty_history_passes_on())
             .finish()
     }
 }
@@ -111,6 +127,7 @@ impl TextSurfaces {
         Self {
             entries: Rc::new(RefCell::new(Vec::new())),
             focused,
+            empty_history_passes_on: Rc::new(Cell::new(false)),
         }
     }
 
@@ -160,6 +177,28 @@ impl TextSurfaces {
             .find(|(id, _)| *id == owner)
             .map(|(_, s)| s.is_read_only())
             .unwrap_or(false)
+    }
+
+    /// Make every text widget of this tree decline Undo when it has nothing to
+    /// undo, and Redo when it has nothing to redo, so the intent goes on to an
+    /// ancestor's action — the application's own history — instead of stopping
+    /// at a widget that would do nothing with it. See the
+    /// [module documentation](self#an-empty-history-can-pass-the-command-on).
+    ///
+    /// Off by default. Applies to `RichTextEditor`, `TextInputField` and the
+    /// fields built on it, and `CodeEditor`, from the next command they
+    /// receive; set it once, from the root's `build`. The widgets ask their
+    /// document at the moment the command runs, never a cached
+    /// [`can_undo`](TextSurface::can_undo), so a keystroke typed a moment
+    /// earlier is always undone where it was typed.
+    pub fn set_empty_history_passes_on(&self, on: bool) {
+        self.empty_history_passes_on.set(on);
+    }
+
+    /// Whether a text widget with nothing to undo (or redo) passes the command
+    /// on. See [`set_empty_history_passes_on`](Self::set_empty_history_passes_on).
+    pub fn empty_history_passes_on(&self) -> bool {
+        self.empty_history_passes_on.get()
     }
 
     /// The signal to react to. A host mirroring "can undo" into a menu row

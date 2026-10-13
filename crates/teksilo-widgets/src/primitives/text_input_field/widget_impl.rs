@@ -938,10 +938,16 @@ impl Widget for TextInputField {
         {
             let state = self.state().clone();
             let touch = self.touch.clone();
+            let surfaces = ctx.text_surfaces();
             crate::common::standard_edit::register_standard_edit_actions(
                 ctx,
                 move |command, ctx| {
-                    let ran = keyboard::run_standard_edit(&state, command, ctx);
+                    let ran = keyboard::run_standard_edit(
+                        &state,
+                        command,
+                        surfaces.empty_history_passes_on(),
+                        ctx,
+                    );
                     if ran {
                         // As after a key: the handles the controller published
                         // point at where the text used to be.

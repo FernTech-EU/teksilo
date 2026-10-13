@@ -274,10 +274,14 @@ pub(crate) fn handle_key(
 
 /// Run one of the standard edit commands for the field, as its `edit.*`
 /// action does. Returns whether the command ran: a read-only field declines
-/// every command that would change its text, which passes the intent on.
+/// every command that would change its text, which passes the intent on, and
+/// with `empty_history_passes_on` (the tree's
+/// [`TextSurfaces::set_empty_history_passes_on`](teksilo_core::text_surface::TextSurfaces::set_empty_history_passes_on))
+/// so does Undo with nothing to undo and Redo with nothing to redo.
 pub(crate) fn run_standard_edit(
     state: &SharedState,
     command: StandardEdit,
+    empty_history_passes_on: bool,
     ctx: &mut EventContext,
 ) -> bool {
     {
@@ -291,10 +295,14 @@ pub(crate) fn run_standard_edit(
             StandardEdit::Paste | StandardEdit::PastePlain if !read_only => {
                 clipboard_paste(&mut st, ctx)
             }
-            StandardEdit::Undo if !read_only => {
+            StandardEdit::Undo
+                if !read_only && (st.document.can_undo() || !empty_history_passes_on) =>
+            {
                 let _ = st.document.undo();
             }
-            StandardEdit::Redo if !read_only => {
+            StandardEdit::Redo
+                if !read_only && (st.document.can_redo() || !empty_history_passes_on) =>
+            {
                 let _ = st.document.redo();
             }
             _ => return false,

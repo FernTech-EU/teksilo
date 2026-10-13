@@ -532,10 +532,14 @@ pub(super) fn handle_key(
 /// [`CommandFilter`](crate::common::editor_runtime::CommandFilter) refuses is declined, which
 /// passes the intent on to an ancestor's action and then to the plain key —
 /// an application that must not route a refused Undo elsewhere asks the
-/// focused text surface's `history_frozen` in its own action.
+/// focused text surface's `history_frozen` in its own action. With
+/// `empty_history_passes_on` (the tree's
+/// [`TextSurfaces::set_empty_history_passes_on`](teksilo_core::text_surface::TextSurfaces::set_empty_history_passes_on)),
+/// Undo with nothing to undo and Redo with nothing to redo are declined too.
 pub(super) fn run_standard_edit(
     state: &SharedState,
     command: StandardEdit,
+    empty_history_passes_on: bool,
     ctx: &mut EventContext,
 ) -> bool {
     let action = {
@@ -574,11 +578,17 @@ pub(super) fn run_standard_edit(
                 clipboard::paste_unformatted(&mut st, ctx);
                 KeyAction::ClearPreferredX
             }
-            StandardEdit::Undo if filter.accepts(EditCommandKind::Undo) => {
+            StandardEdit::Undo
+                if filter.accepts(EditCommandKind::Undo)
+                    && (st.document.can_undo() || !empty_history_passes_on) =>
+            {
                 let _ = st.document.undo();
                 KeyAction::ClearPreferredX
             }
-            StandardEdit::Redo if filter.accepts(EditCommandKind::Redo) => {
+            StandardEdit::Redo
+                if filter.accepts(EditCommandKind::Redo)
+                    && (st.document.can_redo() || !empty_history_passes_on) =>
+            {
                 let _ = st.document.redo();
                 KeyAction::ClearPreferredX
             }

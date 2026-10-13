@@ -13,6 +13,20 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Core
+
+- **`TextSurfaces::set_empty_history_passes_on`.** With it on, a text
+  widget with nothing to undo declines Undo, and one with nothing to redo
+  declines Redo, so the `edit.undo` / `edit.redo` intent reaches the
+  application's own action from the keyboard: an application whose Undo
+  falls back to a wider history once the caret's own is exhausted gets
+  that fallback from Ctrl+Z again, as it had before 0.17.0 made the focused
+  widget answer first. `RichTextEditor`, `TextInputField` (and the fields
+  built on it) and `CodeEditor` honour it, asking their document when the
+  command runs rather than the debounced `can_undo` signal. Off by default.
+
 ## [0.17.0] - 2026-10-13
 
 ### Added

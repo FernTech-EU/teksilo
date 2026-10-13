@@ -364,10 +364,14 @@ pub(super) fn handle_key(
 ///
 /// Returns whether it ran: a command the policy's filter rejects (Cut, Paste,
 /// Undo and Redo in a read-only viewer) is declined, which passes the intent
-/// on to an ancestor's action and then to the plain key.
+/// on to an ancestor's action and then to the plain key. With
+/// `empty_history_passes_on` (the tree's
+/// [`TextSurfaces::set_empty_history_passes_on`](teksilo_core::text_surface::TextSurfaces::set_empty_history_passes_on)),
+/// Undo with nothing to undo and Redo with nothing to redo are declined too.
 pub(super) fn run_standard_edit(
     state: &SharedState,
     command: StandardEdit,
+    empty_history_passes_on: bool,
     ctx: &mut EventContext,
 ) -> bool {
     {
@@ -395,13 +399,19 @@ pub(super) fn run_standard_edit(
             {
                 clipboard::paste(&mut st, ctx);
             }
-            StandardEdit::Undo if filter.accepts(CodeCommand::Undo) => {
+            StandardEdit::Undo
+                if filter.accepts(CodeCommand::Undo)
+                    && (st.document.can_undo() || !empty_history_passes_on) =>
+            {
                 // Undoing text under several carets would leave them pointing
                 // at offsets the undone edit invented; collapse first.
                 st.clear_extra_carets();
                 let _ = st.document.undo();
             }
-            StandardEdit::Redo if filter.accepts(CodeCommand::Redo) => {
+            StandardEdit::Redo
+                if filter.accepts(CodeCommand::Redo)
+                    && (st.document.can_redo() || !empty_history_passes_on) =>
+            {
                 st.clear_extra_carets();
                 let _ = st.document.redo();
             }

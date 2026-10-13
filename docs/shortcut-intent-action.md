@@ -878,6 +878,29 @@ A custom text widget should call `register_text_surface` too. Failing to
 is not a compile error and will not be noticed until an application
 routes one of these commands from a menu and your widget quietly loses it.
 
+#### Falling back when the caret's history is empty
+
+By default a focused text widget answers Undo and Redo even when it has
+nothing to step through, so from the keyboard the application's action is
+reached only where no text widget has focus. An application whose Undo
+falls back to a wider history once the caret's own is exhausted (and says
+so, in a menu row that names what it will undo) turns that on for the
+whole tree:
+
+```rust
+// Once, in the root's build.
+ctx.text_surfaces().set_empty_history_passes_on(true);
+```
+
+`RichTextEditor`, `TextInputField` and every field built on it, and
+`CodeEditor` then decline Undo when their document has nothing to undo,
+and Redo when it has nothing to redo, and the intent climbs to the
+application's action as it does from a refused history. They ask the
+document when the command runs, not the debounced `can_undo` signal, so a
+character typed a moment earlier is still undone in the widget. Leave it
+off unless the application announces the fallback: otherwise Ctrl+Z in an
+empty search field undoes something the user is not looking at.
+
 ---
 
 ## End-to-end skeleton
