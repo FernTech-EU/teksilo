@@ -84,18 +84,16 @@ pub(crate) fn parse_dom(text: &str) -> Result<Option<XmlElement>, String> {
                 // Retain character data on the enclosing element (for <style>).
                 // `xml_content` decodes + resolves entity references, matching
                 // the XML 1.0 normalization used for attribute values above.
-                if let Some(parent) = stack.last_mut()
-                    && let Ok(text) = e.xml_content(quick_xml::XmlVersion::Implicit1_0)
-                {
-                    parent.text_content.push_str(&text);
+                if let Some(parent) = stack.last_mut() {
+                    parent
+                        .text_content
+                        .push_str(&e.xml_content(quick_xml::XmlVersion::Implicit1_0));
                 }
             }
             Ok(Event::CData(e)) => {
-                // CData is literal — decode bytes, no entity resolution.
-                if let Some(parent) = stack.last_mut()
-                    && let Ok(text) = e.decode()
-                {
-                    parent.text_content.push_str(&text);
+                // CData is literal — no entity resolution.
+                if let Some(parent) = stack.last_mut() {
+                    parent.text_content.push_str(&e);
                 }
             }
             Ok(Event::Eof) => break,
@@ -128,17 +126,13 @@ fn attach_or_root(stack: &mut [XmlElement], root: &mut Option<XmlElement>, elem:
 
 fn element_from_start(e: &quick_xml::events::BytesStart<'_>) -> Result<XmlElement, String> {
     let name_bytes = e.local_name();
-    let name = std::str::from_utf8(name_bytes.as_ref())
-        .map_err(|err| format!("non-UTF-8 element name: {err}"))?
-        .to_string();
+    let name = name_bytes.as_ref().to_string();
 
     let mut attrs = HashMap::new();
     for attr in e.attributes() {
         let attr = attr.map_err(|err| err.to_string())?;
         let key_bytes = attr.key.local_name();
-        let key = std::str::from_utf8(key_bytes.as_ref())
-            .map_err(|err| format!("non-UTF-8 attribute name: {err}"))?
-            .to_string();
+        let key = key_bytes.as_ref().to_string();
         // SVG icon files are XML 1.0 in practice — that's what every
         // editor and asset pipeline targets. `normalized_value` needs
         // an explicit version because XML 1.1 normalises a slightly

@@ -1311,8 +1311,8 @@ bounds (an embedded WebView reads back as a transparent hole, and says so).";
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for AutomationServer {
-    fn get_info(&self) -> ServerInfo {
-        let mut info = ServerInfo::new(ServerCapabilities::builder().enable_tools().build());
+    fn get_info(&self) -> ServerConfig {
+        let mut info = ServerConfig::new(ServerCapabilities::builder().enable_tools().build());
         info.instructions = Some(SERVER_INSTRUCTIONS.to_string());
         info
     }

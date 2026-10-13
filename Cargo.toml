@@ -118,7 +118,7 @@ serde_json = "1"
 redb = "4.1"
 arboard = { version = "3.6", features = ["wayland-data-control"] }
 open = "5.3"
-quick-xml = "0.41.0"
+quick-xml = "0.42.0"
 png = "0.18"
 image-webp = "0.2"
 # JPEG decode for user-supplied images. Already in the tree via `image`/`resvg`/
