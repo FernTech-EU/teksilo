@@ -3242,9 +3242,9 @@ dependencies = [
 
 [[package]]
 name = "font-types"
-version = "0.12.4"
+version = "0.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e64eb721ca85a34323425f4041adc5d82704d3782d5f8f03793bc012419dce23"
+checksum = "6c92d9081c7ab3bd83ef1eecdfad090f3d966e3ce74106779664114cfe1a6274"
 dependencies = [
  "bytemuck",
 ]
@@ -4010,14 +4010,13 @@ dependencies = [
 
 [[package]]
 name = "harfrust"
-version = "0.13.3"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "948d0741125ba89cd3e1c23e5642415b6ade7e1d29d67ba25fb925b533e989d6"
+checksum = "86aa776d6d32b072119e1f1650f4db843ff4382a4aaa6a2c9c4e35703cd377cb"
 dependencies = [
  "bitflags 2.13.1",
  "bytemuck",
- "once_cell",
- "read-fonts 0.43.3",
+ "read-fonts 0.45.0",
  "smallvec",
 ]
 
@@ -8257,19 +8256,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "046a7d674daf459825b32f5062056d6882db0d2f5a479fbd76ccfc870ac18709"
 dependencies = [
  "bytemuck",
- "font-types 0.12.4",
+ "font-types 0.12.6",
  "once_cell",
 ]
 
 [[package]]
 name = "read-fonts"
-version = "0.43.3"
+version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "005c8acf251756c478b0bf402885bfd88a1476020c4c7e6060edc1aa68da38ea"
+checksum = "8a5b7bed3d16ab428d8fa533640ab805ff50e7ad8a4d00649de1259e70023282"
 dependencies = [
  "bytemuck",
- "font-types 0.12.4",
+ "font-types 0.12.6",
  "once_cell",
+ "yoke 0.8.3",
 ]
 
 [[package]]
@@ -9644,7 +9644,7 @@ dependencies = [
  "content-security-policy",
  "dwrote",
  "euclid",
- "font-types 0.12.4",
+ "font-types 0.12.6",
  "fontsan",
  "freetype-sys",
  "harfbuzz-sys",
@@ -12201,7 +12201,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
@@ -12242,9 +12242,9 @@ dependencies = [
 
 [[package]]
 name = "text-document"
-version = "1.12.5"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2dcb9bd3ec0c9dca5be8013c8f575291f6acfccc08d597847f1cf8fbe1415bf"
+checksum = "a9fd52983ef327c112db6b316e108369aab47e6246dcefa89c2e3ce435d3eb52"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -12259,9 +12259,9 @@ dependencies = [
 
 [[package]]
 name = "text-document-common"
-version = "1.12.5"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf3fcb5da972fe46330e824d613d9d744afdc981423a50d79ac44eefe6675497"
+checksum = "ebcaeab8a323b7b8d74d76284af9cb217707cdbe73945ed1e9a05c66c80d1fd3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -12284,9 +12284,9 @@ dependencies = [
 
 [[package]]
 name = "text-document-direct-access"
-version = "1.12.5"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9819ff9af31017a1e744293a7917c1d0ec806e3d47d7bb7005af91832020b710"
+checksum = "1ba27c2d068e3ae11ee4b6e4993dba6cf8c426d040a52b4a4ed898261f3b6241"
 dependencies = [
  "anyhow",
  "chrono",
@@ -12299,9 +12299,9 @@ dependencies = [
 
 [[package]]
 name = "text-document-editing"
-version = "1.12.5"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05ad630339278ca67499cff73d0761ef442ba81ff64cdead30e6d477659bfd0d"
+checksum = "3aaa801b2cb362d5039aadb250ce0f406b515a921211cc5b1914a1027bb6ee90"
 dependencies = [
  "anyhow",
  "chrono",
@@ -12314,9 +12314,9 @@ dependencies = [
 
 [[package]]
 name = "text-document-formatting"
-version = "1.12.5"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cb42cb2d8f652a8e5914a12b3bd3806a83d7fcb4efd3969c7827a78e8b8cf1b"
+checksum = "014ce552f4c8f1cd9bb90672e7f522b2ddc79697b8faadc853a2f30d14406d95"
 dependencies = [
  "anyhow",
  "chrono",
@@ -12329,9 +12329,9 @@ dependencies = [
 
 [[package]]
 name = "text-document-frontend"
-version = "1.12.5"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ace6683e7bbaed75c73814e29f686a2a9d41b7d227335136daa806c360522e2f"
+checksum = "bc2ce7249dfe7a64529a0b1449d499165b0622faa7c7340f1305f008d84d85e9"
 dependencies = [
  "anyhow",
  "chrono",
@@ -12349,9 +12349,9 @@ dependencies = [
 
 [[package]]
 name = "text-document-inspection"
-version = "1.12.5"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b38a1da0a713eef2eaab3b6da43af986b1018f9a67bbcf866f5a4a85e4811e7d"
+checksum = "9ddd36f1b9baad065bce04300f54e935bb7a7978c65d914e6500d2eff5ecf4dc"
 dependencies = [
  "anyhow",
  "chrono",
@@ -12364,9 +12364,9 @@ dependencies = [
 
 [[package]]
 name = "text-document-io"
-version = "1.12.5"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22ee6a152cc90169a14393319506fa44ba7ffaebf33b5faa54eba66e994ceee5"
+checksum = "625d603c23d3379bcfa8bd4c32f40f4e02f429effe427ad9d7c23fe17f06c57a"
 dependencies = [
  "anyhow",
  "chrono",
@@ -12386,9 +12386,9 @@ dependencies = [
 
 [[package]]
 name = "text-document-macros"
-version = "1.12.5"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4b2c0c4cd124b5528790e4680bb4384021170c7622340af4f31bff27f1c8468"
+checksum = "4fced3c615108edefa549fad0be1b5f9dbb991058dc716116602199db215b4e7"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -12398,9 +12398,9 @@ dependencies = [
 
 [[package]]
 name = "text-document-search"
-version = "1.12.5"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8bc904973b2fc0760c66664aedad3d9b2cacddb4e1f9d75f64a913c7f8afd47"
+checksum = "040bcbeeebd1effd486316fc7f137a251fe733623456c348d97a2aee5b7c38bb"
 dependencies = [
  "anyhow",
  "caseless",
@@ -12418,13 +12418,13 @@ dependencies = [
 
 [[package]]
 name = "text-typeset"
-version = "1.12.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0813a1b7a5f08e835bea5dd9cda0d20afc33189cbbcbc897ecf5d4749f9e4d56"
+checksum = "daeb1619accd0e4f9c634cbca966c36acf58d92705825ed8e333f453bc0e4155"
 dependencies = [
  "etagere 0.3.0",
  "fontdb",
- "harfrust 0.13.3",
+ "harfrust 0.14.0",
  "hypher",
  "icu_segmenter 2.3.0",
  "swash",
