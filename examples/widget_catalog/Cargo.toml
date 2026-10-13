@@ -3,7 +3,7 @@
 
 [package]
 name = "widget-catalog"
-edition = "2024"
+edition.workspace = true
 version.workspace = true
 authors.workspace = true
 publish = false

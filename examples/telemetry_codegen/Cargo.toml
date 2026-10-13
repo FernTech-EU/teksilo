@@ -3,7 +3,7 @@
 
 [package]
 name = "telemetry-codegen"
-edition = "2024"
+edition.workspace = true
 version.workspace = true
 publish = false
 authors.workspace = true

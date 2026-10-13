@@ -3,7 +3,7 @@
 
 [package]
 name = "teksilo-tokio"
-edition = "2024"
+edition.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true

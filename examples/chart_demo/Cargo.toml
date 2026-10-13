@@ -4,7 +4,7 @@
 [package]
 name = "chart-demo"
 default-run = "chart-demo"
-edition = "2024"
+edition.workspace = true
 version.workspace = true
 authors.workspace = true
 publish = false
