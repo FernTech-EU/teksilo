@@ -128,6 +128,9 @@ Rich text editor and viewer widget.
 |  | [`indent()`](#richtexteditor-indent) |
 |  | [`outdent()`](#richtexteditor-outdent) |
 |  | [`remove_from_list()`](#richtexteditor-remove_from_list) |
+| `Option<ListStyle>` | [`current_list_style()`](#richtexteditor-current_list_style) |
+|  | [`set_list_style(style: ListStyle)`](#richtexteditor-set_list_style) |
+|  | [`toggle_list(ordered: bool)`](#richtexteditor-toggle_list) |
 | `bool` | [`is_in_blockquote()`](#richtexteditor-is_in_blockquote) |
 | `bool` | [`selection_spans_multiple_frames()`](#richtexteditor-selection_spans_multiple_frames) |
 |  | [`toggle_blockquote()`](#richtexteditor-toggle_blockquote) |
@@ -266,6 +269,9 @@ Rich text editor and viewer widget.
 |  | [`indent()`](#editorhandle-indent) |
 |  | [`outdent()`](#editorhandle-outdent) |
 |  | [`remove_from_list()`](#editorhandle-remove_from_list) |
+| `Option<ListStyle>` | [`current_list_style()`](#editorhandle-current_list_style) |
+|  | [`set_list_style(style: ListStyle)`](#editorhandle-set_list_style) |
+|  | [`toggle_list(ordered: bool)`](#editorhandle-toggle_list) |
 | `bool` | [`is_in_blockquote()`](#editorhandle-is_in_blockquote) |
 | `bool` | [`selection_spans_multiple_frames()`](#editorhandle-selection_spans_multiple_frames) |
 |  | [`toggle_blockquote()`](#editorhandle-toggle_blockquote) |
@@ -1403,6 +1409,38 @@ paragraph. No-op when the caret is not inside a list.
 should not silently destroy the list — so a toolbar that offers
 "remove list formatting" needs this instead. Backspace at block-start
 reaches the same codepath from the keyboard.
+
+<a id="richtexteditor-current_list_style"></a>
+
+#### `pub fn current_list_style(&self) -> Option<ListStyle>`
+
+The style of the list the caret's paragraph belongs to, or `None`
+outside a list. What a toolbar reads to show its "Bullets" or
+"Numbering" button pressed; `list_style_is_ordered` says which.
+
+<a id="richtexteditor-set_list_style"></a>
+
+#### `pub fn set_list_style(&self, style: ListStyle)`
+
+Give the caret's whole list `style`, keeping its depth: every item of
+it, not only the caret's. No-op outside a list.
+
+<a id="richtexteditor-toggle_list"></a>
+
+#### `pub fn toggle_list(&self, ordered: bool)`
+
+The press of a word processor's "Bullets" (`ordered == false`) or
+"Numbering" (`ordered == true`) button, as one undo step:
+
+* in a list of that kind, the caret's paragraph (or every selected
+  one) leaves the list;
+* in a list of the other kind, the caret's whole list changes kind
+  (with a selection, the selected paragraphs become one new list);
+* outside a list, the paragraphs become one, as
+  `insert_list` does.
+
+"Kind" is `list_style_is_ordered`: a circle-bullet list is a bullet
+list, and a roman-numbered one a numbered list.
 
 <a id="richtexteditor-is_in_blockquote"></a>
 
@@ -2731,6 +2769,27 @@ paragraph. No-op when the caret is not inside a list.
 
 See `RichTextEditor::remove_from_list` for why this is separate from
 `outdent`, which stops at depth 0 by design.
+
+<a id="editorhandle-current_list_style"></a>
+
+#### `pub fn current_list_style(&self) -> Option<ListStyle>`
+
+The style of the caret's list, or `None` outside a list. See
+`RichTextEditor::current_list_style`.
+
+<a id="editorhandle-set_list_style"></a>
+
+#### `pub fn set_list_style(&self, style: ListStyle)`
+
+Give the caret's whole list `style`, keeping its depth. No-op outside a
+list. See `RichTextEditor::set_list_style`.
+
+<a id="editorhandle-toggle_list"></a>
+
+#### `pub fn toggle_list(&self, ordered: bool)`
+
+The press of a "Bullets" or "Numbering" button, as one undo step. See
+`RichTextEditor::toggle_list`.
 
 <a id="editorhandle-is_in_blockquote"></a>
 
