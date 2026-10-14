@@ -56,6 +56,7 @@ mod frame_loop;
 pub(crate) mod hit_test;
 pub(crate) mod image_cache;
 mod keyboard;
+mod lists;
 mod mouse;
 mod nesting;
 pub(crate) mod paint;
@@ -65,6 +66,10 @@ mod state;
 pub(crate) mod touch;
 pub(crate) mod touch_mount;
 
+pub use self::lists::list_style_is_ordered;
+
+#[cfg(test)]
+mod lists_tests;
 #[cfg(test)]
 mod nesting_tests;
 #[cfg(test)]
@@ -1470,6 +1475,37 @@ impl RichTextEditor {
     /// reaches the same codepath from the keyboard.
     pub fn remove_from_list(&self) {
         let _ = self.state.borrow().cursor.remove_current_block_from_list();
+        sync_cursor_signals(&self.state);
+    }
+
+    /// The style of the list the caret's paragraph belongs to, or `None`
+    /// outside a list. What a toolbar reads to show its "Bullets" or
+    /// "Numbering" button pressed; [`list_style_is_ordered`] says which.
+    pub fn current_list_style(&self) -> Option<ListStyle> {
+        lists::current_list_style(&self.state.borrow())
+    }
+
+    /// Give the caret's whole list `style`, keeping its depth: every item of
+    /// it, not only the caret's. No-op outside a list.
+    pub fn set_list_style(&self, style: ListStyle) {
+        lists::set_list_style(&self.state.borrow(), style);
+        sync_cursor_signals(&self.state);
+    }
+
+    /// The press of a word processor's "Bullets" (`ordered == false`) or
+    /// "Numbering" (`ordered == true`) button, as one undo step:
+    ///
+    /// * in a list of that kind, the caret's paragraph (or every selected
+    ///   one) leaves the list;
+    /// * in a list of the other kind, the caret's whole list changes kind
+    ///   (with a selection, the selected paragraphs become one new list);
+    /// * outside a list, the paragraphs become one, as
+    ///   [`insert_list`](Self::insert_list) does.
+    ///
+    /// "Kind" is [`list_style_is_ordered`]: a circle-bullet list is a bullet
+    /// list, and a roman-numbered one a numbered list.
+    pub fn toggle_list(&self, ordered: bool) {
+        lists::toggle_list(&self.state.borrow(), ordered);
         sync_cursor_signals(&self.state);
     }
 
@@ -3229,6 +3265,26 @@ impl EditorHandle {
             let st = self.state.borrow();
             let _ = st.cursor.remove_current_block_from_list();
         }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// The style of the caret's list, or `None` outside a list. See
+    /// [`RichTextEditor::current_list_style`].
+    pub fn current_list_style(&self) -> Option<ListStyle> {
+        lists::current_list_style(&self.state.borrow())
+    }
+
+    /// Give the caret's whole list `style`, keeping its depth. No-op outside a
+    /// list. See [`RichTextEditor::set_list_style`].
+    pub fn set_list_style(&self, style: ListStyle) {
+        lists::set_list_style(&self.state.borrow(), style);
+        sync_cursor_signals(&self.state);
+    }
+
+    /// The press of a "Bullets" or "Numbering" button, as one undo step. See
+    /// [`RichTextEditor::toggle_list`].
+    pub fn toggle_list(&self, ordered: bool) {
+        lists::toggle_list(&self.state.borrow(), ordered);
         sync_cursor_signals(&self.state);
     }
 

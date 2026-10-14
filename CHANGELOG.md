@@ -25,6 +25,22 @@ by crate for clarity, not because crates version independently.
   `None` outside a focus gain. `FocusOrigin` is `#[non_exhaustive]`, so a
   match with a wildcard arm keeps compiling.
 
+#### Widgets
+
+- **List buttons for a rich-text toolbar: `current_list_style`,
+  `set_list_style` and `toggle_list`.** `RichTextEditor` and `EditorHandle`
+  could make a list (`insert_list`) but could not say whether the caret was
+  in one, so a toolbar's "Bullets" and "Numbering" buttons could neither show
+  as pressed nor take the list away. `current_list_style` returns the style
+  of the caret's list, or `None` outside one. `toggle_list(ordered)` is a
+  word processor's button press, as one undo step: in a list of that kind
+  the paragraph leaves it (with a selection, every selected paragraph does);
+  in a list of the other kind the whole list changes kind and keeps its
+  depth (with a selection, the selected paragraphs become a new list); and
+  outside a list it makes one. `set_list_style` restyles the caret's whole
+  list. `rich_text::list_style_is_ordered` sorts a `ListStyle` into the two
+  kinds: disc, circle and square are bullets, and the rest are numbered.
+
 ### Fixed
 
 #### Widgets
