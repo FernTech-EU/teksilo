@@ -2443,7 +2443,11 @@ impl WidgetTree {
                     node.node_cursor.map(|_| EventResponse::Handled)
                 }
             }
-            WidgetEvent::FocusGained { .. } => {
+            WidgetEvent::FocusGained { origin } => {
+                // The handler signature is a bare `bool`; the origin rides on
+                // the context so a widget can tell a rebuild's restore from a
+                // real arrival (`EventContext::focus_origin`).
+                let previous_origin = ctx.focus_origin.replace(*origin);
                 let mut fired = false;
                 if let Some(h) = node.external_handlers.on_focus.as_mut() {
                     h(true, ctx);
@@ -2453,6 +2457,7 @@ impl WidgetTree {
                     h(true, ctx);
                     fired = true;
                 }
+                ctx.focus_origin = previous_origin;
                 fired.then_some(EventResponse::Handled)
             }
             WidgetEvent::FocusLost => {

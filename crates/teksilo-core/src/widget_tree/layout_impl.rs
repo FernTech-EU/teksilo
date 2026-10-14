@@ -932,7 +932,11 @@ impl WidgetTree {
                     .flatten()
             })
         {
-            self.focus_ops(target, &mut *ops);
+            // `Restored`, not `Programmatic`: the widget landing here is the
+            // successor of the one that had focus, and a text field reading
+            // this as a fresh keyboard focus selects all of its text, so the
+            // next keystroke replaces everything typed before it.
+            self.focus_with_origin_ops(target, crate::focus::FocusOrigin::Restored, &mut *ops);
         }
 
         // A widget that changed size may have re-wrapped its text, and a

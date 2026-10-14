@@ -178,6 +178,10 @@ pub struct EventContext<'ops> {
     /// innermost node the arena's hit walk accepted. Read by
     /// [`dispatch_target`](EventContext::dispatch_target).
     pub(crate) dispatch_target: Option<WidgetId>,
+    /// How the focus being delivered was acquired, set only while an
+    /// `on_focus(true, …)` handler runs. Read by
+    /// [`focus_origin`](EventContext::focus_origin).
+    pub(crate) focus_origin: Option<crate::focus::FocusOrigin>,
     /// Delayed overlay requests (request, delay, optional focus target,
     /// whether to dismiss sibling overlays when it finally shows).
     pub(crate) delayed_overlay_requests: Vec<(
@@ -534,6 +538,7 @@ impl<'ops> EventContext<'ops> {
             dispatch_node: None,
             local_frame: None,
             dispatch_target: None,
+            focus_origin: None,
             delayed_overlay_requests: Vec::new(),
             timed_overlay_requests: Vec::new(),
             reveal_overlay_requests: Vec::new(),
@@ -1154,6 +1159,19 @@ impl<'ops> EventContext<'ops> {
     /// available", not as "not the target".
     pub fn dispatch_target(&self) -> Option<WidgetId> {
         self.dispatch_target
+    }
+
+    /// How the focus an `on_focus(true, …)` handler is being told about was
+    /// acquired: the origin [`FocusGained`](crate::event::WidgetEvent::FocusGained)
+    /// carries, which the `bool` handler signature does not.
+    ///
+    /// `None` everywhere else, including focus *loss*. The case that needs it
+    /// is [`FocusOrigin::Restored`](crate::focus::FocusOrigin::Restored): a
+    /// widget whose focus arrived because a rebuild replaced its predecessor
+    /// must not run its arrival behaviour (a text field selecting all of its
+    /// text) as if the user had just tabbed in.
+    pub fn focus_origin(&self) -> Option<crate::focus::FocusOrigin> {
+        self.focus_origin
     }
 
     /// Look up the bounds rect of an open overlay by its root content

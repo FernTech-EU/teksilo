@@ -804,7 +804,22 @@ impl Widget for TextInputField {
                     let is_keyboard = !hovered_for_focus.get();
                     let back_from_menu = menu_took_focus_for_focus.replace(false);
                     drop(st);
-                    if is_keyboard && !back_from_menu {
+                    if ctx.focus_origin() == Some(teksilo_core::FocusOrigin::Restored) {
+                        // A rebuild replaced the field the user was typing in
+                        // (a search box whose query re-filters its own
+                        // ancestor). This is the same edit going on, not an
+                        // arrival: selecting all here made every keystroke
+                        // replace the whole query. The predecessor's caret
+                        // died with it; the end is where typing continues.
+                        let st = state_for_focus.borrow();
+                        st.cursor.move_position(
+                            teksilo_text::text_document::MoveOperation::End,
+                            teksilo_text::text_document::MoveMode::MoveAnchor,
+                            1,
+                        );
+                        drop(st);
+                        sync_cursor_signals(&state_for_focus);
+                    } else if is_keyboard && !back_from_menu {
                         let st = state_for_focus.borrow();
                         st.cursor.select(SelectionType::Document);
                         drop(st);

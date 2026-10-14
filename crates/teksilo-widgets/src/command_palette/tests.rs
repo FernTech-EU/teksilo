@@ -543,3 +543,43 @@ fn an_empty_result_set_publishes_no_stale_active_descendant() {
     );
     assert_eq!(state.listbox_id.get(), None, "and no listbox either");
 }
+
+#[test]
+fn typing_a_query_keeps_every_character() {
+    // Each keystroke rebuilds the palette, field included, and the tree puts
+    // focus back on the new field. That restore used to look like a fresh
+    // keyboard focus, so the field selected all of its text and the next key
+    // replaced it: typing "exp" left "p", and only the last keystroke ever
+    // showed. One frame per key, as a user types.
+    let mut tree = tree_with_commands().with_theme(teksilo_core::presets::intui::light());
+    let palette = CommandPalette::new();
+    let state = palette.state.clone();
+    let root = tree.add(palette);
+    let frame = |tree: &mut WidgetTree| {
+        tree.request_frame();
+        tree.tick_animations(std::time::Duration::from_millis(16));
+        tree.layout(SizeProposal::exact(560.0, 420.0));
+    };
+    frame(&mut tree);
+    let field = tree
+        .first_focusable_descendant(root)
+        .expect("the palette's search field must be focusable");
+    tree.focus_with_origin(field, teksilo_core::FocusOrigin::Keyboard);
+
+    for ch in ["e", "x", "p"] {
+        tree.type_text(root, ch);
+        frame(&mut tree);
+        frame(&mut tree);
+    }
+
+    assert_eq!(
+        state.query.get(),
+        "exp",
+        "a rebuild restoring focus must not select the query for the next key to replace"
+    );
+    let focused = tree.focused().expect("focus must survive the rebuilds");
+    assert!(
+        tree.is_descendant_of(focused, root),
+        "focus must stay in the palette"
+    );
+}

@@ -32,6 +32,19 @@ pub enum FocusOrigin {
     /// standing in for one. Reveals the focus ring: the user is navigating,
     /// they are simply not doing it with a key.
     Accessibility,
+    /// Focus put back by the tree after a rebuild destroyed the widget that
+    /// held it: the rebuilt subtree's successor takes the focus its
+    /// predecessor had. Nobody moved focus, so a widget must treat this as
+    /// *continuity*, not arrival.
+    ///
+    /// The case it exists for is a text field whose own value rebuilds an
+    /// ancestor, as a filtering search box does: every keystroke recreates
+    /// the field, and a field that selected its whole text on what it took
+    /// for a fresh keyboard focus made the next keystroke replace everything
+    /// typed so far, leaving only the last character visible. Declares no
+    /// modality, like [`Programmatic`](Self::Programmatic): the ring stays
+    /// wherever the rebuilt widget's predecessor had it.
+    Restored,
 }
 
 impl FocusOrigin {
@@ -79,7 +92,7 @@ impl FocusOrigin {
         match self {
             Self::Keyboard | Self::Accessibility => Some(true),
             Self::Pointer(_) => Some(false),
-            Self::Programmatic => None,
+            Self::Programmatic | Self::Restored => None,
         }
     }
 }

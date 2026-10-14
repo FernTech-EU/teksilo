@@ -13,6 +13,32 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Core
+
+- **`FocusOrigin::Restored` and `EventContext::focus_origin`.** When a
+  rebuild destroys the focused widget, the tree now puts focus back on its
+  successor with the `Restored` origin rather than `Programmatic`. Like
+  `Programmatic`, it leaves the focus ring as it was. An `on_focus(true, …)`
+  handler can read the origin from `EventContext::focus_origin`, which is
+  `None` outside a focus gain. `FocusOrigin` is `#[non_exhaustive]`, so a
+  match with a wildcard arm keeps compiling.
+
+### Fixed
+
+#### Widgets
+
+- **A search field that rebuilt itself as the user typed kept only the last
+  character.** In a `CommandPalette`, or any field whose own value rebuilds
+  an ancestor, each keystroke recreated the field. The tree put focus back
+  on the new field, the field took that for a keyboard focus and selected all
+  of its text, and the next keystroke replaced it. A `TextInputField`
+  (`TextInput`, `SearchField` and `SpinBox` are built on it) now puts the
+  caret at the end of its text on a restored focus instead. The previous
+  caret position is lost with the destroyed field, so editing in the middle
+  of a field that rebuilds this way still moves the caret to the end.
+
 ## [0.17.1] - 2026-10-13
 
 ### Added
