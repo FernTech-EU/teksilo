@@ -58,9 +58,8 @@ other bundled script fonts (`fonts-*`).
 
 ## Status
 
-Pre-1.0: expect breaking changes between 0.x releases. Production deployment is
-currently limited to FernTech's own applications, which is what the 0.x label
-reflects. Teksilo builds on two MPL-2.0 crates already at 1.x:
+Pre-1.0: expect breaking changes between 0.x releases. Teksilo builds on two
+MPL-2.0 crates already at 1.x:
 [text-document](https://github.com/ferntech-eu/text-document) and
 [text-typeset](https://github.com/ferntech-eu/text-typeset).
 
