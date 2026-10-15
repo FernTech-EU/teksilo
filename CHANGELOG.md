@@ -49,6 +49,10 @@ by crate for clarity, not because crates version independently.
 
 - **`servo-backend` builds again.** The lock held a `pkcs1` release that the
   `rsa` crate in Servo's dependencies does not compile against.
+- **A second Servo `WebView` no longer panics.** Every web view a
+  `ServoBackend` opens now shares one engine; Servo allows only one per
+  process. A second `ServoBackend` in the same process shows the error state,
+  with a console message, instead of panicking.
 
 ## [0.18.0] - 2026-10-15
 

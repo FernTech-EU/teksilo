@@ -32,6 +32,7 @@
 
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use teksilo_canvas::Rect;
 use teksilo_core::AppEventPoster;
@@ -53,16 +54,57 @@ use crate::backend::{
 
 /// Best-effort Wayland engine backend. Construct and hand to
 /// `install_web_view(ServoBackend::new())`.
-#[derive(Debug, Default)]
+///
+/// Every web view this backend opens shares one Servo engine, built when the
+/// first one opens. Servo allows one engine per process, ever: its options are
+/// a process-wide once-cell that a dropped engine does not reset. So a second
+/// `ServoBackend` in the same process (a second application builder, say)
+/// cannot get an engine of its own, and its web views show the error chrome
+/// with a console message saying why.
+#[derive(Default)]
 pub struct ServoBackend {
-    _private: (),
+    servo: Option<Servo>,
+}
+
+impl std::fmt::Debug for ServoBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServoBackend")
+            .field("engine_built", &self.servo.is_some())
+            .finish()
+    }
 }
 
 impl ServoBackend {
     /// Construct the Servo backend.
     pub fn new() -> Self {
-        Self { _private: () }
+        Self::default()
     }
+}
+
+/// Set once this process has built a Servo engine. Servo panics on a second
+/// build (`opts::initialize_options` sets a once-cell), so this is what turns
+/// that panic into an error a web view can report.
+static ENGINE_BUILT: AtomicBool = AtomicBool::new(false);
+
+/// The process already built its one engine, for another backend.
+#[derive(Debug, PartialEq, Eq)]
+struct EngineTaken;
+
+/// The engine `slot` holds, built with `build` if this process has none yet.
+///
+/// Generic so the rule can be tested without starting Servo.
+fn shared_engine<T: Clone>(
+    slot: &mut Option<T>,
+    built: &AtomicBool,
+    build: impl FnOnce() -> T,
+) -> Result<T, EngineTaken> {
+    if let Some(engine) = slot {
+        return Ok(engine.clone());
+    }
+    if built.swap(true, Ordering::AcqRel) {
+        return Err(EngineTaken);
+    }
+    Ok(slot.insert(build()).clone())
 }
 
 /// Report engine-init failure: drive the widget to its Error chrome via
@@ -141,9 +183,23 @@ impl WebViewBackend for ServoBackend {
             };
         let _ = rendering_context.make_current();
 
-        let servo = ServoBuilder::default()
-            .event_loop_waker(Box::new(NoopWaker))
-            .build();
+        let servo = match shared_engine(&mut self.servo, &ENGINE_BUILT, || {
+            ServoBuilder::default()
+                .event_loop_waker(Box::new(NoopWaker))
+                .build()
+        }) {
+            Ok(servo) => servo,
+            Err(EngineTaken) => {
+                return fail(
+                    &poster,
+                    window_id,
+                    web_view_id,
+                    "ServoBackend: this process already built its one Servo engine for another \
+                     backend, and Servo allows only one; install a single ServoBackend"
+                        .to_string(),
+                );
+            }
+        };
 
         let delegate: Rc<dyn WebViewDelegate> = Rc::new(ServoEventDelegate {
             poster: poster.clone(),
@@ -228,9 +284,10 @@ impl WebViewDelegate for ServoEventDelegate {
     }
 }
 
-/// Live handle owning the Servo instance + its rendering context + the webview.
-/// All `!Send` (Rc / GL); the backend only runs on the main thread. Dropping
-/// tears everything down (RAII).
+/// Live handle: the shared Servo engine, this view's rendering context, and
+/// the webview. All `!Send` (Rc / GL); the backend only runs on the main
+/// thread. Dropping closes the webview; the engine lives on while the backend
+/// or another handle holds it.
 struct ServoHandle {
     _servo: Servo,
     _rendering_context: Rc<WindowRenderingContext>,
@@ -316,4 +373,33 @@ impl EventLoopWaker for NoopWaker {
         Box::new(NoopWaker)
     }
     fn wake(&self) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_backend_builds_its_engine_once_and_shares_it() {
+        let built = AtomicBool::new(false);
+        let mut slot = None;
+        let mut builds = 0;
+        let mut build = || {
+            builds += 1;
+            builds
+        };
+        assert_eq!(shared_engine(&mut slot, &built, &mut build), Ok(1));
+        assert_eq!(shared_engine(&mut slot, &built, &mut build), Ok(1));
+        assert_eq!(builds, 1);
+    }
+
+    #[test]
+    fn a_second_backend_in_the_process_gets_no_engine() {
+        let built = AtomicBool::new(false);
+        let mut first = None;
+        let mut second = None;
+        assert_eq!(shared_engine(&mut first, &built, || 1), Ok(1));
+        assert_eq!(shared_engine(&mut second, &built, || 2), Err(EngineTaken));
+        assert_eq!(second, None);
+    }
 }
