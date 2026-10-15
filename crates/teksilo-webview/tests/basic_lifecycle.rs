@@ -110,7 +110,7 @@ fn webview_in_switcher_hides_native_subview_on_tab_away() {
         records
             .ops()
             .iter()
-            .any(|op| matches!(op, WebViewOp::Open { web_view_id } if *web_view_id == wv_id)),
+            .any(|op| matches!(op, WebViewOp::Open { web_view_id, .. } if *web_view_id == wv_id)),
         "WebView must open on the initially-selected tab"
     );
 

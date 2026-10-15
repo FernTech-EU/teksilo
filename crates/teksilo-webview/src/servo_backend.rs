@@ -47,9 +47,11 @@ use servo::{
 };
 use url::Url;
 
+use teksilo_canvas::live_image::LiveImageWriter;
+
 use crate::backend::{
     ConsoleLevel, NoopWebViewHandle, WebSource, WebViewAttributes, WebViewBackend, WebViewEvent,
-    WebViewHandle, WebViewId, js_string, post_event,
+    WebViewHandle, WebViewId, WebViewRendering, js_string, post_event,
 };
 
 /// Best-effort Wayland engine backend. Construct and hand to
@@ -138,6 +140,12 @@ fn fail(
 }
 
 impl WebViewBackend for ServoBackend {
+    fn rendering(&self) -> WebViewRendering {
+        // Until the engine renders offscreen, it draws into a GL surface
+        // over the whole window: a native view in all but name.
+        WebViewRendering::NativeSubview
+    }
+
     fn open(
         &mut self,
         web_view_id: WebViewId,
@@ -145,6 +153,7 @@ impl WebViewBackend for ServoBackend {
         parent: Option<ParentHandle>,
         attrs: WebViewAttributes,
         poster: Option<Arc<dyn AppEventPoster>>,
+        _surface: Option<LiveImageWriter>,
     ) -> Box<dyn WebViewHandle> {
         let Some(parent) = parent else {
             return fail(

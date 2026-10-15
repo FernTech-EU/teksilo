@@ -13,6 +13,25 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### WebView
+
+- **`WebView` shows a surface engine's page inside the window.** With a
+  backend whose `rendering()` is `Surface`, the widget makes the picture the
+  engine draws into and paints it over its chrome, one frame pixel per device
+  pixel, so the page clips, sits under popovers and dialogs, and scrolls inside
+  a `ScrollArea` like any other content. The engine is given the widget's whole
+  box, and is told the page is hidden when it is dormant or scrolled out of
+  view. Pointer, touch, wheel and keyboard input over the page is forwarded to
+  the engine at the page pixel it landed on; keys only while the page holds the
+  keyboard, and never Ctrl+Tab, which stays the way out.
+- **`MemoryWebViewBackend::surface` and `memory_surface_registry`.** A surface
+  test backend that commits one frame of the bounds' device-pixel size on every
+  `set_bounds` and records forwarded input (`WebViewOp::Input`,
+  `MemoryWebViewRecords::input_log`). `WebViewOp::Open` now says whether the
+  widget handed over a picture.
+
 ### Changed
 
 #### cargo-teksilo
@@ -34,6 +53,24 @@ by crate for clarity, not because crates version independently.
 
 - The features page covers `DockingLayout` and the `Terminal` widget.
 
+#### WebView
+
+- **A backend can draw its page into a picture the widget shows.**
+  `WebViewBackend::rendering` says how a backend's engines show their page:
+  `WebViewRendering::NativeSubview` (a native view over the window, as wry
+  does) or `WebViewRendering::Surface { orientation }` (offscreen, into a
+  `LiveImageWriter` the widget passes to `open`, its rows laid out as
+  `orientation` says). Breaking for a custom backend: `rendering` is
+  required, and `WebViewBackend::open` and `WebViewRegistry::open` take the
+  writer as a new `surface` argument (`None` for a native view).
+- **Input for a surface engine.** `WebViewHandle::send_input` takes a
+  `WebViewInputEvent` (pointer, touch, scroll, key, input method, clipboard
+  command) in the page's pixels; a native view ignores it.
+- **`WebViewRegistry::pump` and `WebViewPumpPayload`.** A surface engine that
+  needs to run on the UI thread posts the payload, and the registry passes the
+  pump on to `WebViewBackend::pump`. `teksilo-app` answers the payload on
+  the UI thread.
+
 ### Fixed
 
 #### Widgets
@@ -53,6 +90,13 @@ by crate for clarity, not because crates version independently.
   `ServoBackend` opens now shares one engine; Servo allows only one per
   process. A second `ServoBackend` in the same process shows the error state,
   with a console message, instead of panicking.
+
+#### App
+
+- **No `webview_hole_possible` warning for a page drawn into the frame.** An
+  automation screenshot now carries the warning only when the installed
+  web-view backend is a native subview; a surface engine's page (Servo) is in
+  the capture.
 
 ## [0.18.0] - 2026-10-15
 

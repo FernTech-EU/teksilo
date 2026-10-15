@@ -58,9 +58,11 @@ use wry::{PageLoadEvent, WebView, WebViewBuilder};
 #[cfg(not(target_os = "linux"))]
 use wry::dpi::{LogicalPosition, LogicalSize};
 
+use teksilo_canvas::live_image::LiveImageWriter;
+
 use crate::backend::{
     ConsoleLevel, NoopWebViewHandle, WebSource, WebViewAttributes, WebViewBackend, WebViewEvent,
-    WebViewHandle, WebViewId, js_string, post_event,
+    WebViewHandle, WebViewId, WebViewRendering, js_string, post_event,
 };
 
 /// The IPC message prefix reserved for the page-focus bridge.
@@ -133,6 +135,10 @@ fn fail(
 }
 
 impl WebViewBackend for WryBackend {
+    fn rendering(&self) -> WebViewRendering {
+        WebViewRendering::NativeSubview
+    }
+
     fn open(
         &mut self,
         web_view_id: WebViewId,
@@ -140,6 +146,7 @@ impl WebViewBackend for WryBackend {
         parent: Option<ParentHandle>,
         attrs: WebViewAttributes,
         poster: Option<Arc<dyn AppEventPoster>>,
+        _surface: Option<LiveImageWriter>,
     ) -> Box<dyn WebViewHandle> {
         // On Linux, WebKitGTK requires GTK to be initialised before any webview
         // is created (and its GLib loop pumped each turn — see

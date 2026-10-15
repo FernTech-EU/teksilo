@@ -1798,22 +1798,34 @@ impl TeksiloAppHandler {
             })
         });
 
-        // WebView blind-spot warning.
+        // WebView blind-spot warning: a native engine view is composited
+        // over the window by the OS, so the capture misses it. A page an
+        // engine renders into the frame (`WebViewRendering::Surface`) is in
+        // the capture like any other content.
         let warnings = {
             // `accessibility_tree_snapshot`, not `sync_accessibility`: this
             // update is inspected and dropped. Delivering it would consume one
             // step of the framework's live regions, so taking a screenshot
             // while something was being announced would eat the announcement.
             let update = current.tree.accessibility_tree_snapshot();
-            if update
+            let has_web_view = update
                 .nodes
                 .iter()
-                .any(|(_, nd)| nd.role() == teksilo_core::accesskit::Role::WebView)
-            {
-                vec!["webview_hole_possible".to_string()]
-            } else {
-                Vec::new()
-            }
+                .any(|(_, nd)| nd.role() == teksilo_core::accesskit::Role::WebView);
+            #[cfg(feature = "web-view")]
+            let drawn_in_frame = self
+                .wm
+                .app_context_template()
+                .and_then(|t| t.app_state::<teksilo_webview::WebViewRegistry>().cloned())
+                .is_some_and(|registry| {
+                    matches!(
+                        registry.rendering(),
+                        teksilo_webview::WebViewRendering::Surface { .. }
+                    )
+                });
+            #[cfg(not(feature = "web-view"))]
+            let drawn_in_frame = false;
+            web_view_hole_warning(has_web_view, drawn_in_frame)
         };
 
         let clear = teksilo_render::vertex::srgb_to_linear_rgba(
@@ -2141,10 +2153,27 @@ impl TeksiloAppHandler {
         }
     }
 
+    /// Let the installed web-view engine run, on this thread: the answer to a
+    /// [`WebViewPumpPayload`](teksilo_webview::WebViewPumpPayload). It belongs
+    /// to no window: its frames reach their windows through the pictures they
+    /// draw.
+    #[cfg(feature = "web-view")]
+    fn pump_web_views(&self) {
+        let registry = self
+            .wm
+            .app_context_template()
+            .and_then(|t| t.app_state::<teksilo_webview::WebViewRegistry>().cloned());
+        if let Some(registry) = registry {
+            registry.pump();
+        }
+    }
+
     /// Try to route an `AppEvent::External` payload as a
     /// [`WebViewEventPayload`](teksilo_webview::WebViewEventPayload) posted by a
     /// web-view engine backend, delivering it to the originating window's tree
     /// via [`WebViewRegistry::deliver`](teksilo_webview::WebViewRegistry::deliver).
+    /// (A [`WebViewPumpPayload`](teksilo_webview::WebViewPumpPayload) never
+    /// gets here: `user_event` answers it first, with `pump_web_views`.)
     /// Returns `Ok(())` if matched and delivered, `Err(payload)` to hand the
     /// box back for fallthrough. Same take/run-with-context/reinsert dance as
     /// [`Self::try_route_file_dialog_payload`].
@@ -2158,6 +2187,12 @@ impl TeksiloAppHandler {
         {
             use teksilo_webview::{WebViewEventPayload, WebViewRegistry};
 
+            let registry = || {
+                self.wm
+                    .app_context_template()
+                    .and_then(|t| t.app_state::<WebViewRegistry>().cloned())
+            };
+
             let payload = *payload.downcast::<WebViewEventPayload>()?;
 
             let target_winit = self
@@ -2169,11 +2204,7 @@ impl TeksiloAppHandler {
                 return Ok(());
             };
 
-            let registry = self
-                .wm
-                .app_context_template()
-                .and_then(|t| t.app_state::<WebViewRegistry>().cloned());
-            let Some(registry) = registry else {
+            let Some(registry) = registry() else {
                 return Ok(());
             };
 
@@ -3480,7 +3511,18 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
                         self.wm.apply_session(Instant::now());
                         return;
                     }
-                    Err(payload) => AppEvent::External(payload),
+                    Err(payload) => {
+                        // A web-view engine asking to run. Answered here, with
+                        // no redraw: the frames it commits wake their windows
+                        // through their pictures, and the events it posts
+                        // arrive as payloads of their own.
+                        #[cfg(feature = "web-view")]
+                        if payload.is::<teksilo_webview::WebViewPumpPayload>() {
+                            self.pump_web_views();
+                            return;
+                        }
+                        AppEvent::External(payload)
+                    }
                 },
             },
             event => event,
@@ -6726,5 +6768,32 @@ mod a11y_delivery_tests {
             A11yDelivery::Deliver,
             "the adapter asked for the whole tree"
         );
+    }
+}
+
+/// The capture caveat a screenshot carries for a web view: a page drawn by a
+/// native view over the window is missing from it, one drawn into the frame
+/// is not.
+#[cfg(any(test, all(feature = "automation", debug_assertions)))]
+fn web_view_hole_warning(has_web_view: bool, drawn_in_frame: bool) -> Vec<String> {
+    if has_web_view && !drawn_in_frame {
+        vec!["webview_hole_possible".to_string()]
+    } else {
+        Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod web_view_hole_tests {
+    use super::web_view_hole_warning;
+
+    #[test]
+    fn only_a_native_web_view_leaves_a_hole_in_a_capture() {
+        assert_eq!(
+            web_view_hole_warning(true, false),
+            vec!["webview_hole_possible"]
+        );
+        assert!(web_view_hole_warning(true, true).is_empty());
+        assert!(web_view_hole_warning(false, false).is_empty());
     }
 }

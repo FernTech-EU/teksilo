@@ -3,14 +3,22 @@
 
 //! `teksilo-webview` — an embeddable [`WebView`] widget for Teksilo.
 //!
-//! A web view is the one widget that **cannot** render into Teksilo's wgpu
-//! surface: every realistic engine (WKWebView, WebView2, WebKitGTK, Servo)
-//! owns its own rendering and lives as a native subview *on top of* the wgpu
-//! pass. This crate accepts that reality and mirrors the established
-//! platform-backend pattern — a swappable [`WebViewBackend`] creates an
-//! engine-specific [`WebViewHandle`], and a per-app [`WebViewRegistry`]
-//! (installed in app-state) routes JS→Rust / lifecycle events back to the
-//! widget.
+//! An engine shows its page in one of two ways, and its backend says which
+//! ([`WebViewRendering`]):
+//!
+//! - **A native subview** (WKWebView, WebView2 and WebKitGTK, through wry): the
+//!   engine owns its rendering and lives as an OS view *on top of* the wgpu
+//!   pass. The widget keeps it positioned, clipped and hidden; the two
+//!   sections below are about this case.
+//! - **A surface** (Servo): the engine renders offscreen into a picture the
+//!   widget draws inside the pass, like any other content. Clipping, overlays
+//!   and dormancy then need no help from the engine, and the widget forwards
+//!   pointer, scroll and keyboard input to it ([`WebViewInputEvent`]).
+//!
+//! Either way the crate mirrors the established platform-backend pattern: a
+//! swappable [`WebViewBackend`] creates an engine-specific [`WebViewHandle`],
+//! and a per-app [`WebViewRegistry`] (installed in app-state) routes JS→Rust /
+//! lifecycle events back to the widget.
 //!
 //! ```rust
 //! # use teksilo_core::signal::Signal;
@@ -27,7 +35,7 @@
 //!
 //! # The Switcher / dormancy caveat
 //!
-//! Because the engine surface lives *outside* the wgpu pass, "not painted"
+//! Because a native subview lives *outside* the wgpu pass, "not painted"
 //! does NOT mean "hidden" for a `WebView`. When a [`Switcher`] /
 //! `TabWidget` / `visible_when` gate parks the widget dormant, the framework
 //! simply stops painting it — but the native subview keeps floating over the
@@ -62,9 +70,11 @@ mod servo_backend;
 pub use servo_backend::ServoBackend;
 
 pub use backend::{
-    ConsoleLevel, MemoryWebViewBackend, MemoryWebViewRecords, NoopWebViewBackend, WebSource,
-    WebViewAttributes, WebViewBackend, WebViewEvent, WebViewEventPayload, WebViewHandle, WebViewId,
-    WebViewOp, WebViewRegistry, memory_registry,
+    ConsoleLevel, MEMORY_SURFACE_COLOUR, MemoryWebViewBackend, MemoryWebViewRecords,
+    NoopWebViewBackend, WebSource, WebViewAttributes, WebViewBackend, WebViewEditCommand,
+    WebViewEvent, WebViewEventPayload, WebViewHandle, WebViewId, WebViewInputEvent, WebViewOp,
+    WebViewPumpPayload, WebViewRegistry, WebViewRendering, WebViewTouchPhase, memory_registry,
+    memory_surface_registry,
 };
 pub use recipe_web_view_style::RecipeWebViewStyle;
 
@@ -117,7 +127,10 @@ pub fn pump_gtk_events() {}
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use teksilo_canvas::{Rect, SizeProposal};
+use teksilo_canvas::live_image::{LiveImageDraw, LiveImageSource, LivePixelFormat};
+use teksilo_canvas::{
+    Canvas, ImageGeometry, ImageOrientation, Point, Rect, SizeProposal, Transform2D,
+};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accesskit::Role;
 use teksilo_core::build_context::BuildContext;
@@ -128,6 +141,7 @@ use teksilo_core::widget::{
 };
 use teksilo_core::widget_id::WidgetId;
 use teksilo_core::window::TeksiloWindowId;
+use teksilo_core::{LiveImageAttachment, LiveImageSignals};
 
 type MessageCallback = Rc<RefCell<dyn FnMut(String, &mut EventContext)>>;
 type TitleCallback = Rc<RefCell<dyn FnMut(String, &mut EventContext)>>;
@@ -192,6 +206,11 @@ pub struct DownloadOutcome {
 /// sees it, and in [`Transparent`](Self::Transparent) the engine has to be
 /// asked to stop taking it ([`WebViewHandle::set_input_passthrough`]) — which
 /// not every engine can do.
+///
+/// A surface engine (see [`WebViewRendering::Surface`]) receives only the
+/// input the widget forwards to it, so the declaration is fully Teksilo's to
+/// honour there: in `Native` the widget forwards every event over the page and
+/// answers it, in `Transparent` it forwards the event and lets it bubble too.
 ///
 /// What Teksilo does on its own side follows from the declaration:
 ///
@@ -266,6 +285,81 @@ impl EngineVisibility {
     }
 }
 
+/// The picture a [`WebViewRendering::Surface`] engine draws into, and where
+/// the widget shows it.
+///
+/// Made once, by the first `build` that finds a surface backend, and kept
+/// across rebuilds: the engine holds its writer for the widget's lifetime.
+struct SurfaceView {
+    source: LiveImageSource,
+    signals: LiveImageSignals,
+    /// How the engine lays its rows out in the picture.
+    orientation: ImageOrientation,
+    /// This build's attachment; every `build` attaches anew.
+    attachment: RefCell<Option<LiveImageAttachment>>,
+    /// Where the picture lies, widget-local, as the last layout placed it:
+    /// what `post_paint` draws and input maps through.
+    geometry: Cell<Option<ImageGeometry>>,
+    /// The touch and pen contacts currently down on the page, so a move is
+    /// told apart from a hover.
+    contacts: RefCell<Vec<teksilo_core::pointer::PointerId>>,
+    /// The page pixel the pointer was last forwarded at: where a scroll with
+    /// no position of its own lands, and where a cancelled contact ends.
+    last_pointer: Cell<Option<Point>>,
+}
+
+impl SurfaceView {
+    fn new(orientation: ImageOrientation) -> Self {
+        // Opaque: an engine composites its page over its own background.
+        let source = LiveImageSource::builder(LivePixelFormat::Rgbx8)
+            .label("web view")
+            .build();
+        Self {
+            signals: LiveImageSignals::new(&source),
+            source,
+            orientation,
+            attachment: RefCell::new(None),
+            geometry: Cell::new(None),
+            contacts: RefCell::new(Vec::new()),
+            last_pointer: Cell::new(None),
+        }
+    }
+
+    /// Where the picture lies in a box of `size`, at `scale` device pixels per
+    /// logical pixel: unscaled, one frame pixel per device pixel, anchored at
+    /// the box's top-left. While a resize is on its way to the engine the
+    /// previous frame keeps its size rather than stretching, as a browser
+    /// shows it.
+    fn place(&self, size: teksilo_canvas::Size, scale: f32) -> Option<ImageGeometry> {
+        let (w, h) = self.signals.frame_size.get()?;
+        let (dw, dh) = self.orientation.displayed_size(w, h);
+        let content = Rect::new(0.0, 0.0, dw as f32 / scale, dh as f32 / scale);
+        let bounds = Rect::new(0.0, 0.0, size.width, size.height);
+        Some(ImageGeometry::new(
+            (w, h),
+            self.orientation,
+            content,
+            bounds,
+        ))
+    }
+
+    /// The page pixel under `local`, a widget-local point: the frame as
+    /// displayed, origin at its top-left, whatever order its rows were
+    /// written in. `None` before the first frame.
+    fn page_point(&self, local: Point) -> Option<Point> {
+        let placed = self.geometry.get()?;
+        let upright = ImageGeometry::new(
+            placed.displayed(),
+            ImageOrientation::Normal,
+            placed.content,
+            placed.bounds,
+        );
+        upright
+            .map_to_source_f32(local)
+            .map(|(x, y)| Point::new(x, y))
+    }
+}
+
 /// Shared slot holding the live engine handle once opened. Cloned into the
 /// activation-signal effect so the visibility bridge can reach the handle
 /// created later in `build`.
@@ -326,6 +420,9 @@ pub struct WebView {
     /// The last `set_visible` value actually issued, so a layout pass that
     /// changes nothing issues nothing.
     visible_applied: Rc<Cell<bool>>,
+    /// The picture, when the installed backend renders into one. `None` for a
+    /// native subview.
+    surface: Option<Rc<SurfaceView>>,
 
     // Optional bindings.
     /// Two-way: the engine writes the resolved URL on navigation-finish, and
@@ -390,6 +487,7 @@ impl WebView {
             page_focused: Signal::new(false),
             visibility: Rc::new(Cell::new(EngineVisibility::VISIBLE)),
             visible_applied: Rc::new(Cell::new(true)),
+            surface: None,
             url_signal: None,
             title_signal: None,
             loading_signal: None,
@@ -648,6 +746,29 @@ impl WebView {
         Some(rect)
     }
 
+    /// Place a surface page's picture for this layout: unscaled, its edges on
+    /// the device-pixel grid through the ancestors' transforms, recorded on
+    /// the attachment for automation and kept for paint and input.
+    fn place_surface(&self, surface: &SurfaceView, bounds: Rect, scale: f32, ctx: &LayoutContext) {
+        let scale = usable_scale(scale);
+        let ancestors = ctx
+            .arena()
+            .zip(self.self_id.get())
+            .map(|(arena, id)| arena.effective_transform(id))
+            .unwrap_or(Transform2D::IDENTITY);
+        let to_device = ancestors.then(&Transform2D::scale(scale, scale));
+        let placed = surface
+            .place(bounds.size(), scale)
+            .map(|g| g.snapped(Transform2D::translate(bounds.x, bounds.y).then(&to_device)));
+        if let Some(attachment) = surface.attachment.borrow().as_ref() {
+            attachment.set_snapped_under(Some(ancestors));
+            if let Some(g) = placed {
+                attachment.set_geometry(g);
+            }
+        }
+        surface.geometry.set(placed);
+    }
+
     fn with_handle(&self, f: impl FnOnce(&dyn WebViewHandle)) {
         if let Some(h) = self.handle.borrow().as_ref() {
             f(h.as_ref());
@@ -794,6 +915,37 @@ impl Widget for WebView {
 
         self.self_id.set(Some(self_id));
 
+        // --- A surface engine: make its picture, once, and attach it ---
+        //
+        // The backend is asked now rather than at open, because the picture
+        // has to be attached in `build` (and in every `build`: a rebuild
+        // detaches it) and handed to the engine when it opens.
+        let rendering = ctx
+            .app_state::<WebViewRegistry>()
+            .map(WebViewRegistry::rendering)
+            .unwrap_or(WebViewRendering::NativeSubview);
+        if let WebViewRendering::Surface { orientation } = rendering {
+            let surface = self
+                .surface
+                .get_or_insert_with(|| Rc::new(SurfaceView::new(orientation)))
+                .clone();
+            let attachment = ctx.attach_live_image(&surface.source, &surface.signals);
+            *surface.attachment.borrow_mut() = Some(attachment);
+            let registry = ctx.binding_registry();
+            // A new frame size places the picture anew; a status change only
+            // repaints. A commit of pixels alone touches neither.
+            surface.signals.frame_size.bind_to(
+                self_id,
+                registry,
+                teksilo_core::binding::BindingLevel::Relayout,
+            );
+            surface.signals.status.bind_to(
+                self_id,
+                registry,
+                teksilo_core::binding::BindingLevel::RepaintOnly,
+            );
+        }
+
         // --- Keyboard: put the frame in the Tab cycle, then let Enter in ---
         //
         // The page's own focus ring lives in the engine's tree, not ours, so a
@@ -825,8 +977,22 @@ impl Widget for WebView {
             });
 
         let key_handle = self.handle.clone();
+        let key_page_focused = self.page_focused.clone();
+        let key_forwards = self.surface.is_some();
         handlers = handlers.on_key(move |event, _ctx| {
             use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
+            // A surface engine has no native view for the OS to send keys to:
+            // while the page holds the keyboard, they go to it from here.
+            // Ctrl+Tab and Ctrl+Shift+Tab stay Teksilo's, so the page is never
+            // a keyboard trap (WCAG 2.1.2).
+            if key_forwards
+                && key_page_focused.get()
+                && let Some(input) = forwarded_key(event)
+                && let Some(h) = key_handle.borrow().as_ref()
+            {
+                h.send_input(&input);
+                return EventResponse::Handled;
+            }
             // Enter / Space enter the page. Everything else — Tab included —
             // is declined, so the frame never becomes a trap: focus cycles off
             // it exactly as it would off any other control.
@@ -881,7 +1047,9 @@ impl Widget for WebView {
         // and is unreachable from here; its recognizers are denied by the
         // cancel. Measured: returning `Ignored` instead leaves every test in
         // `tests/input_and_clip.rs` green.
-        if self.input.is_native() {
+        if let Some(surface) = self.surface.clone() {
+            handlers = forward_surface_pointer(handlers, surface, self.handle.clone(), self.input);
+        } else if self.input.is_native() {
             use teksilo_core::event::EventResponse;
             use teksilo_core::pointer::CancelReason;
             use teksilo_core::pointer::touch_action::TouchAction;
@@ -989,6 +1157,7 @@ impl Widget for WebView {
             let input = self.input;
             let visibility = self.visibility.clone();
             let visible_applied = self.visible_applied.clone();
+            let surface = self.surface.clone();
 
             ctx.run_after_mount(move |ectx| {
                 // Guard against a double-open if a rebuild ever re-queues.
@@ -1004,14 +1173,18 @@ impl Widget for WebView {
                 let poster = ectx.poster().cloned();
                 let wid = window_id.unwrap_or_else(|| TeksiloWindowId::new(0));
 
-                let handle = registry.open(web_view_id, wid, parent, attrs, poster, on_event);
+                let writer = surface.as_ref().map(|s| s.source.writer());
+                let handle =
+                    registry.open(web_view_id, wid, parent, attrs, poster, writer, on_event);
                 // Apply the bounds layout already resolved, then the current
                 // activation state (so a view mounted while its tab is parked
                 // opens hidden, not visible-then-flashing).
                 if let Some(b) = bounds_slot.get() {
                     handle.set_bounds(b, scale_slot.get());
                 }
-                if input == WebViewInput::Transparent {
+                // A surface engine takes no input but what the widget forwards,
+                // so there is nothing for it to pass through.
+                if input == WebViewInput::Transparent && surface.is_none() {
                     handle.set_input_passthrough(true);
                 }
 
@@ -1080,7 +1253,17 @@ impl Widget for WebView {
         state.in_view = visible.is_some();
         self.visibility.set(state);
 
-        if let Some(rect) = visible
+        // A surface page is drawn inside the pass, so the canvas clips it and
+        // the engine is given the whole box: a page half-scrolled out of a
+        // viewport keeps its layout instead of reflowing to the strip.
+        let target = match &self.surface {
+            Some(surface) => {
+                self.place_surface(surface, bounds, scale, ctx);
+                Some(bounds)
+            }
+            None => visible,
+        };
+        if let Some(rect) = target
             && (self.last_bounds.get() != Some(rect) || scale_changed)
         {
             self.last_bounds.set(Some(rect));
@@ -1090,7 +1273,46 @@ impl Widget for WebView {
     }
 
     fn wants_after_paint(&self) -> bool {
-        true
+        // Only a native subview has to stand down for an overlay; a surface
+        // page is drawn under overlays like any other content.
+        self.surface.is_none()
+    }
+
+    fn wants_post_paint(&self) -> bool {
+        self.surface.is_some()
+    }
+
+    /// A surface page is drawn over the style's chrome, where a native
+    /// subview would sit: the loading wash shows only until the first frame
+    /// covers it.
+    fn post_paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
+        let Some(surface) = &self.surface else {
+            return;
+        };
+        let attachment = surface.attachment.borrow();
+        let Some(attachment) = attachment.as_ref() else {
+            return;
+        };
+        // Drawn on every paint, with or without a frame yet, so the window
+        // takes the engine's commits.
+        let content = surface
+            .geometry
+            .get()
+            .map(|g| {
+                Rect::new(
+                    bounds.x + g.content.x,
+                    bounds.y + g.content.y,
+                    g.content.width,
+                    g.content.height,
+                )
+            })
+            .unwrap_or(Rect::new(bounds.x, bounds.y, 0.0, 0.0));
+        canvas.draw_live_image(
+            attachment.consumer(),
+            &LiveImageDraw::new(content, bounds)
+                .orientation(surface.orientation)
+                .pixel_snap(true),
+        );
     }
 
     fn after_paint(&self, view: &WidgetTreeView<'_>, _ctx: &PaintContext) {
@@ -1196,6 +1418,215 @@ fn intersect(a: Rect, b: Rect) -> Option<Rect> {
     } else {
         None
     }
+}
+
+/// A device scale that can divide: the window's, or 1 when it is not usable.
+fn usable_scale(scale: f32) -> f32 {
+    if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    }
+}
+
+/// The input a key event forwards to a surface page, or `None` for what
+/// Teksilo keeps: Ctrl+Tab and Ctrl+Shift+Tab, the way out of the page.
+fn forwarded_key(event: &teksilo_core::event::WidgetEvent) -> Option<WebViewInputEvent> {
+    use teksilo_core::event::{Key, WidgetEvent};
+    let escape = |key: &Key, modifiers: &teksilo_core::event::Modifiers| {
+        *key == Key::Tab && modifiers.ctrl()
+    };
+    match event {
+        WidgetEvent::KeyDown {
+            key,
+            modifiers,
+            text,
+        } if !escape(key, modifiers) => Some(WebViewInputEvent::Key {
+            key: *key,
+            modifiers: *modifiers,
+            pressed: true,
+            text: text.clone(),
+        }),
+        WidgetEvent::KeyUp { key, modifiers } if !escape(key, modifiers) => {
+            Some(WebViewInputEvent::Key {
+                key: *key,
+                modifiers: *modifiers,
+                pressed: false,
+                text: None,
+            })
+        }
+        WidgetEvent::ImeComposition { text, cursor } => Some(WebViewInputEvent::ImeComposition {
+            text: text.clone(),
+            cursor: cursor.clone(),
+        }),
+        WidgetEvent::ImeCommit { text } => {
+            Some(WebViewInputEvent::ImeCommit { text: text.clone() })
+        }
+        _ => None,
+    }
+}
+
+/// The pointer handlers of a surface page: everything over it is forwarded
+/// to the engine at the page pixel it landed on.
+///
+/// In [`WebViewInput::Native`] the page owns its rectangle, as a native
+/// subview does: the same `touch_action(NONE)` and `no_hit_slop`, events
+/// answered `Handled`, and a mouse press captured so a drag that leaves the
+/// page (a text selection) keeps reaching it. In
+/// [`WebViewInput::Transparent`] the page is told and the event still bubbles,
+/// so app UI over the page stays operable.
+fn forward_surface_pointer(
+    handlers: teksilo_core::widget_builder::HandlerSet,
+    surface: Rc<SurfaceView>,
+    handle: SharedHandle,
+    input: WebViewInput,
+) -> teksilo_core::widget_builder::HandlerSet {
+    use teksilo_core::event::{EventResponse, WidgetEvent};
+    use teksilo_core::pointer::touch_action::TouchAction;
+    use teksilo_tokens::PointerKind;
+
+    let native = input.is_native();
+    let answer = if native {
+        EventResponse::Handled
+    } else {
+        EventResponse::Ignored
+    };
+    let send = |handle: &SharedHandle, event: WebViewInputEvent| {
+        if let Some(h) = handle.borrow().as_ref() {
+            h.send_input(&event);
+        }
+    };
+
+    let mut handlers = handlers;
+    if native {
+        handlers = handlers.touch_action(TouchAction::NONE).no_hit_slop();
+    }
+
+    let (pointer_surface, pointer_handle) = (surface.clone(), handle.clone());
+    handlers = handlers.on_pointer_event(move |event, ctx| {
+        let (position, pointer, button, phase) = match event {
+            WidgetEvent::PointerDown {
+                position,
+                pointer,
+                button,
+                ..
+            } => (*position, *pointer, Some(*button), Some(true)),
+            WidgetEvent::PointerUp {
+                position,
+                pointer,
+                button,
+                ..
+            } => (*position, *pointer, Some(*button), Some(false)),
+            WidgetEvent::PointerMove {
+                position, pointer, ..
+            } => (*position, *pointer, None, None),
+            _ => return EventResponse::Ignored,
+        };
+        let Some(page) = pointer_surface.page_point(position) else {
+            return answer;
+        };
+        let contact_kind = matches!(pointer.kind, PointerKind::Touch | PointerKind::Pen(_));
+        let pen = matches!(pointer.kind, PointerKind::Pen(_));
+        let mut contacts = pointer_surface.contacts.borrow_mut();
+        let in_contact = contacts.contains(&pointer.id);
+        let forwarded = match phase {
+            Some(true) if contact_kind => {
+                contacts.push(pointer.id);
+                WebViewInputEvent::Touch {
+                    contact: pointer.id,
+                    phase: WebViewTouchPhase::Down,
+                    position: page,
+                    pen,
+                }
+            }
+            Some(false) if in_contact => {
+                contacts.retain(|c| *c != pointer.id);
+                WebViewInputEvent::Touch {
+                    contact: pointer.id,
+                    phase: WebViewTouchPhase::Up,
+                    position: page,
+                    pen,
+                }
+            }
+            None if in_contact => WebViewInputEvent::Touch {
+                contact: pointer.id,
+                phase: WebViewTouchPhase::Move,
+                position: page,
+                pen,
+            },
+            Some(pressed) => {
+                if pressed && native {
+                    ctx.capture_pointer();
+                }
+                WebViewInputEvent::PointerButton {
+                    position: page,
+                    button: button.unwrap_or(teksilo_core::event::PointerButton::Primary),
+                    pressed,
+                }
+            }
+            None => WebViewInputEvent::PointerMove { position: page },
+        };
+        drop(contacts);
+        pointer_surface.last_pointer.set(Some(page));
+        send(&pointer_handle, forwarded);
+        answer
+    });
+
+    let (cancel_surface, cancel_handle) = (surface.clone(), handle.clone());
+    handlers = handlers.on_pointer_cancel(move |pointer, _reason, _ctx| {
+        let mut contacts = cancel_surface.contacts.borrow_mut();
+        if !contacts.contains(&pointer.id) {
+            return;
+        }
+        contacts.retain(|c| *c != pointer.id);
+        drop(contacts);
+        send(
+            &cancel_handle,
+            WebViewInputEvent::Touch {
+                contact: pointer.id,
+                phase: WebViewTouchPhase::Cancel,
+                position: cancel_surface.last_pointer.get().unwrap_or(Point::ZERO),
+                pen: matches!(pointer.kind, PointerKind::Pen(_)),
+            },
+        );
+    });
+
+    let leave_handle = handle.clone();
+    handlers = handlers.on_hover(move |entered, _ctx| {
+        if !entered {
+            send(&leave_handle, WebViewInputEvent::PointerLeave);
+        }
+    });
+
+    handlers.on_scroll(move |event, ctx| {
+        let WidgetEvent::Scroll {
+            delta,
+            modifiers,
+            window_position,
+            ..
+        } = event
+        else {
+            return EventResponse::Ignored;
+        };
+        // A scroll carries a window position when its producer knows one;
+        // otherwise it is where the pointer last was.
+        let position = window_position
+            .and_then(|p| ctx.to_local(p))
+            .and_then(|local| surface.page_point(local))
+            .or(surface.last_pointer.get());
+        let Some(position) = position else {
+            return answer;
+        };
+        send(
+            &handle,
+            WebViewInputEvent::Scroll {
+                position,
+                delta: *delta,
+                modifiers: *modifiers,
+            },
+        );
+        answer
+    })
 }
 
 /// Resolve the three reasons a subview may be hidden into one `set_visible`,

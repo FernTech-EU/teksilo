@@ -3,15 +3,25 @@
 
 //! Backend abstraction for [`WebView`](crate::WebView).
 //!
-//! A web view is the one widget that cannot render into Teksilo's wgpu
-//! surface — every realistic engine (WKWebView, WebView2, WebKitGTK, Servo)
-//! owns its own rendering and lives as a native subview *on top of* the wgpu
-//! pass. This module mirrors the established platform-backend pattern
-//! (`FileDialogBackend` /
-//! `ExternalDndBackend`): a swappable [`WebViewBackend`] trait creates an
-//! engine-specific [`WebViewHandle`], and a per-app [`WebViewRegistry`]
-//! (registered in app-state) owns the backend and routes JS→Rust /
-//! browser-lifecycle events back into the originating widget tree.
+//! An engine shows its page in one of two ways, and a backend says which with
+//! [`WebViewBackend::rendering`]:
+//!
+//! - [`WebViewRendering::NativeSubview`]: the engine owns a native OS view
+//!   placed *on top of* the wgpu pass (WKWebView, WebView2 and WebKitGTK, all
+//!   through wry). The OS delivers its input; the widget positions, clips and
+//!   hides it.
+//! - [`WebViewRendering::Surface`]: the engine renders offscreen and writes each
+//!   frame into the [`LiveImageWriter`] the widget hands
+//!   [`WebViewBackend::open`]. The widget draws the picture in the wgpu pass
+//!   like any other content and forwards input with
+//!   [`WebViewHandle::send_input`].
+//!
+//! This module mirrors the established platform-backend pattern
+//! (`FileDialogBackend` / `ExternalDndBackend`): a swappable
+//! [`WebViewBackend`] trait creates an engine-specific [`WebViewHandle`], and a
+//! per-app [`WebViewRegistry`] (registered in app-state) owns the backend and
+//! routes JS→Rust / browser-lifecycle events back into the originating widget
+//! tree.
 //!
 //! The default build ships only the [`MemoryWebViewBackend`] (headless,
 //! deterministic). The native `wry` / `servo` backends live behind the
@@ -24,8 +34,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use teksilo_canvas::Rect;
+use teksilo_canvas::live_image::LiveImageWriter;
+use teksilo_canvas::{ImageOrientation, Point, Rect};
 use teksilo_core::AppEventPoster;
+use teksilo_core::event::{Key, Modifiers, PointerButton, ScrollDelta};
+use teksilo_core::pointer::PointerId;
 use teksilo_core::raw_handle::ParentHandle;
 use teksilo_core::widget::EventContext;
 use teksilo_core::window::TeksiloWindowId;
@@ -88,8 +101,132 @@ pub struct WebViewAttributes {
     pub custom_protocols: Vec<String>,
 }
 
-/// A live native engine subview. Dropping the handle tears the subview down
-/// (RAII, same contract as `ExternalDndGuard`).
+/// How an engine shows its page, as its backend reports through
+/// [`WebViewBackend::rendering`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebViewRendering {
+    /// A native OS view placed over the host window. The OS delivers its
+    /// input, and the widget keeps it positioned, clipped to its visible
+    /// part and hidden when dormant or covered by an overlay.
+    NativeSubview,
+    /// Offscreen rendering into the [`LiveImageWriter`] the widget passes to
+    /// [`WebViewBackend::open`]. The widget draws the picture inside the wgpu
+    /// pass, so clipping, overlays and dormancy need no help from the engine,
+    /// and it forwards input through [`WebViewHandle::send_input`].
+    Surface {
+        /// How the engine's rows lie in the picture:
+        /// [`ImageOrientation::FlipVertical`] for an engine that writes its
+        /// frame bottom row first, as an OpenGL readback does, so the widget
+        /// turns it upright when drawing instead of the engine copying every
+        /// row in reverse.
+        orientation: ImageOrientation,
+    },
+}
+
+/// The phase of a touch contact in [`WebViewInputEvent::Touch`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebViewTouchPhase {
+    /// The contact landed.
+    Down,
+    /// The contact moved.
+    Move,
+    /// The contact lifted.
+    Up,
+    /// The contact was taken away (palm rejection, a gesture claimed it, the
+    /// window lost it). Nothing may activate from it.
+    Cancel,
+}
+
+/// A clipboard command the page should carry out on its own selection or
+/// focused field, sent as [`WebViewInputEvent::Edit`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebViewEditCommand {
+    /// Copy the selection.
+    Copy,
+    /// Cut the selection.
+    Cut,
+    /// Paste at the caret.
+    Paste,
+}
+
+/// Input the widget forwards to a [`WebViewRendering::Surface`] engine.
+///
+/// A surface engine has no native view for the OS to deliver input to, so the
+/// widget receives it like any other widget and passes it on. Every position
+/// is in **page pixels**: the pixels of the frame the engine last wrote into
+/// its [`LiveImageWriter`], as displayed, with the origin at the page's
+/// top-left whatever orientation the rows were written in. The widget converts
+/// from its own coordinates with the same placement it painted the frame
+/// with, so a click lands on the pixel the user saw, even while a resize is
+/// still on its way to the engine.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum WebViewInputEvent {
+    /// A mouse, or a pen hovering, moved over the page.
+    PointerMove {
+        /// Where the pointer is.
+        position: Point,
+    },
+    /// A mouse or pen button went down or up.
+    PointerButton {
+        /// Where the pointer is.
+        position: Point,
+        /// Which button.
+        button: PointerButton,
+        /// `true` on press, `false` on release.
+        pressed: bool,
+    },
+    /// The pointer left the page.
+    PointerLeave,
+    /// A finger, or a pen in contact with the screen.
+    Touch {
+        /// Identifies the contact from `Down` to `Up` or `Cancel`.
+        contact: PointerId,
+        /// What happened to it.
+        phase: WebViewTouchPhase,
+        /// Where it is.
+        position: Point,
+        /// Whether the contact is a pen rather than a finger.
+        pen: bool,
+    },
+    /// A wheel or trackpad scroll, as Teksilo reports it.
+    Scroll {
+        /// Where the pointer is.
+        position: Point,
+        /// How far, in lines or in logical pixels.
+        delta: ScrollDelta,
+        /// The modifiers held during the scroll.
+        modifiers: Modifiers,
+    },
+    /// A key went down or up while the page held the keyboard.
+    Key {
+        /// The logical key.
+        key: Key,
+        /// The modifiers held.
+        modifiers: Modifiers,
+        /// `true` on press, `false` on release.
+        pressed: bool,
+        /// The text the key produces, on a press that produces any.
+        text: Option<String>,
+    },
+    /// An input method updated its composition.
+    ImeComposition {
+        /// The text being composed.
+        text: String,
+        /// The caret or selection inside it, in bytes.
+        cursor: Option<std::ops::Range<usize>>,
+    },
+    /// An input method committed text.
+    ImeCommit {
+        /// The committed text.
+        text: String,
+    },
+    /// A clipboard command, from the application's standard edit shortcuts.
+    Edit(WebViewEditCommand),
+}
+
+/// A live engine view. Dropping the handle tears it down (RAII, same contract
+/// as `ExternalDndGuard`).
 ///
 /// All methods are `&self` — the handle is cheaply shareable and the engine
 /// state lives behind the platform's own interior mutability.
@@ -146,6 +283,10 @@ pub trait WebViewHandle: 'static {
     fn open_devtools(&self) {}
     /// Close the engine's developer tools (no-op where unsupported).
     fn close_devtools(&self) {}
+    /// Pass input to the page. Only a [`WebViewRendering::Surface`] engine
+    /// receives this: a native subview gets its input from the OS. See
+    /// [`WebViewInputEvent`] for the coordinate space.
+    fn send_input(&self, _event: &WebViewInputEvent) {}
 }
 
 /// A browser lifecycle / JS→Rust event surfaced by a backend.
@@ -197,6 +338,25 @@ pub struct WebViewEventPayload {
     pub web_view_id: WebViewId,
     /// The event itself.
     pub event: WebViewEvent,
+}
+
+/// Boxed inside `AppEvent::External` when a [`WebViewRendering::Surface`]
+/// engine asks to run. `teksilo-app` answers it on the main thread with
+/// [`WebViewRegistry::pump`].
+///
+/// A surface engine works on threads of its own and needs its embedder to call
+/// back on the thread that owns it, which is the UI thread. Posting this
+/// payload is how it asks; a backend coalesces its requests so that one
+/// payload is in flight at a time.
+#[derive(Debug, Default)]
+pub struct WebViewPumpPayload;
+
+/// Ask the UI loop to call [`WebViewRegistry::pump`], if a poster is available.
+#[allow(dead_code)] // used only by the feature-gated engine backends
+pub(crate) fn post_pump(poster: &Option<Arc<dyn AppEventPoster>>) {
+    if let Some(poster) = poster {
+        poster.post_external(Box::new(WebViewPumpPayload) as Box<dyn std::any::Any + Send>);
+    }
 }
 
 /// Post a [`WebViewEvent`] back to the UI loop, if a poster is available.
@@ -252,18 +412,26 @@ pub(crate) fn js_string(s: &str) -> String {
 /// Swappable web-view engine backend.
 ///
 /// The real backends (`WryBackend` / `ServoBackend`, behind their features)
-/// create a native engine subview parented to the host window. The test
-/// backend ([`MemoryWebViewBackend`]) records calls and synthesizes events.
+/// open an engine for the host window. The test backend
+/// ([`MemoryWebViewBackend`]) records calls and synthesizes events.
 pub trait WebViewBackend {
-    /// Create a native engine subview for `web_view_id`, parented to
-    /// `window_id`'s OS window. The backend MUST deliver browser events by
-    /// calling [`AppEventPoster::post_external`] on `poster` with a boxed
+    /// How this backend's engines show their page. The widget asks before it
+    /// opens anything, so it knows whether to make a picture for the engine
+    /// to draw into.
+    fn rendering(&self) -> WebViewRendering;
+
+    /// Open an engine view for `web_view_id` in `window_id`'s OS window. The
+    /// backend MUST deliver browser events by calling
+    /// [`AppEventPoster::post_external`] on `poster` with a boxed
     /// [`WebViewEventPayload`] whose `web_view_id` / `window_id_owner` match.
     ///
     /// `parent` is `None` when the host context can't surface an OS handle
-    /// (headless tests, or a build-time open before the window-ops sink is
-    /// available); native backends treat `None` as "defer until a handle
-    /// arrives" rather than failing hard.
+    /// (headless tests). A native backend cannot open without one and reports
+    /// the failure through the events above.
+    ///
+    /// `surface` is `Some` exactly when [`rendering`](Self::rendering) is
+    /// [`WebViewRendering::Surface`]: the picture the widget draws, for the
+    /// engine to write its frames into.
     fn open(
         &mut self,
         web_view_id: WebViewId,
@@ -271,7 +439,13 @@ pub trait WebViewBackend {
         parent: Option<ParentHandle>,
         attrs: WebViewAttributes,
         poster: Option<Arc<dyn AppEventPoster>>,
+        surface: Option<LiveImageWriter>,
     ) -> Box<dyn WebViewHandle>;
+
+    /// Let the engine run, on the UI thread. Called by
+    /// [`WebViewRegistry::pump`] when a [`WebViewPumpPayload`] arrives; a
+    /// backend whose engine never posts one has nothing to do here.
+    fn pump(&mut self) {}
 }
 
 // ============================================================
@@ -327,8 +501,21 @@ impl WebViewRegistry {
         }
     }
 
-    /// Open a native subview and register the widget's event callback in one
+    /// How the installed backend's engines show their page.
+    pub fn rendering(&self) -> WebViewRendering {
+        self.inner.backend.borrow().rendering()
+    }
+
+    /// Let the installed backend's engine run. Called by `teksilo-app` on the
+    /// UI thread when a [`WebViewPumpPayload`] arrives.
+    pub fn pump(&self) {
+        self.inner.backend.borrow_mut().pump();
+    }
+
+    /// Open an engine view and register the widget's event callback in one
     /// step. Returns the live [`WebViewHandle`] (dropped on widget removal).
+    /// `surface` follows the rule of [`WebViewBackend::open`].
+    #[allow(clippy::too_many_arguments)]
     pub fn open(
         &self,
         web_view_id: WebViewId,
@@ -336,6 +523,7 @@ impl WebViewRegistry {
         parent: Option<ParentHandle>,
         attrs: WebViewAttributes,
         poster: Option<Arc<dyn AppEventPoster>>,
+        surface: Option<LiveImageWriter>,
         on_event: impl FnMut(WebViewEvent, &mut EventContext) + 'static,
     ) -> Box<dyn WebViewHandle> {
         self.inner
@@ -351,7 +539,7 @@ impl WebViewRegistry {
         self.inner
             .backend
             .borrow_mut()
-            .open(web_view_id, window_id, parent, attrs, poster)
+            .open(web_view_id, window_id, parent, attrs, poster, surface)
     }
 
     /// Route a backend-produced payload to its registered widget callback.
@@ -446,6 +634,8 @@ impl std::fmt::Debug for WebViewRegistry {
 pub enum WebViewOp {
     Open {
         web_view_id: WebViewId,
+        /// Whether the widget handed the backend a picture to draw into.
+        surface: bool,
     },
     SetBounds {
         web_view_id: WebViewId,
@@ -495,6 +685,11 @@ pub enum WebViewOp {
     CloseDevtools {
         web_view_id: WebViewId,
     },
+    /// Input forwarded with [`WebViewHandle::send_input`].
+    Input {
+        web_view_id: WebViewId,
+        event: WebViewInputEvent,
+    },
     Dropped {
         web_view_id: WebViewId,
     },
@@ -542,6 +737,20 @@ impl MemoryWebViewRecords {
             .collect()
     }
 
+    /// The input forwarded to a web view, in order.
+    pub fn input_log(&self, id: WebViewId) -> Vec<WebViewInputEvent> {
+        self.ops
+            .borrow()
+            .iter()
+            .filter_map(|op| match op {
+                WebViewOp::Input { web_view_id, event } if *web_view_id == id => {
+                    Some(event.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The ordered scale factors the `set_bounds` of a web view were given,
     /// one per [`WebViewOp::SetBounds`]: what an engine that positions in
     /// device pixels converts the logical bounds with.
@@ -561,7 +770,7 @@ impl MemoryWebViewRecords {
 
 fn op_web_view_id(op: &WebViewOp) -> WebViewId {
     match op {
-        WebViewOp::Open { web_view_id }
+        WebViewOp::Open { web_view_id, .. }
         | WebViewOp::SetBounds { web_view_id, .. }
         | WebViewOp::LoadUrl { web_view_id, .. }
         | WebViewOp::LoadHtml { web_view_id }
@@ -576,33 +785,56 @@ fn op_web_view_id(op: &WebViewOp) -> WebViewId {
         | WebViewOp::SetInputPassthrough { web_view_id, .. }
         | WebViewOp::OpenDevtools { web_view_id }
         | WebViewOp::CloseDevtools { web_view_id }
+        | WebViewOp::Input { web_view_id, .. }
         | WebViewOp::Dropped { web_view_id } => *web_view_id,
     }
 }
 
 /// In-memory deterministic backend for headless tests. Records every op into a
-/// shared [`MemoryWebViewRecords`]; never renders. Mirrors `MemoryFileDialog`.
+/// shared [`MemoryWebViewRecords`]. Mirrors `MemoryFileDialog`.
+///
+/// [`new`](Self::new) behaves as a [`WebViewRendering::NativeSubview`] engine
+/// and draws nothing. [`surface`](Self::surface) behaves as a
+/// [`WebViewRendering::Surface`] engine: each `set_bounds` commits one opaque
+/// frame of the bounds' device-pixel size, the way an engine answers a resize,
+/// so a test can lay the widget out against a frame and check where input
+/// lands.
 pub struct MemoryWebViewBackend {
     records: MemoryWebViewRecords,
+    surface: bool,
 }
 
+/// The colour of every frame a surface [`MemoryWebViewBackend`] commits:
+/// opaque, and neither black nor white, so it is told apart from a cleared
+/// buffer.
+pub const MEMORY_SURFACE_COLOUR: [u8; 4] = [0x33, 0x66, 0x99, 0xff];
+
 impl MemoryWebViewBackend {
-    /// Build a backend plus its shared recorder; clone the returned records
-    /// before moving the backend into a [`WebViewRegistry`].
+    /// A native-subview backend plus its shared recorder; clone the returned
+    /// records before moving the backend into a [`WebViewRegistry`].
     pub fn new() -> (Self, MemoryWebViewRecords) {
         let records = MemoryWebViewRecords::default();
         (
             Self {
                 records: records.clone(),
+                surface: false,
             },
             records,
         )
+    }
+
+    /// A surface backend plus its shared recorder.
+    pub fn surface() -> (Self, MemoryWebViewRecords) {
+        let (mut backend, records) = Self::new();
+        backend.surface = true;
+        (backend, records)
     }
 }
 
 struct MemoryWebViewHandle {
     web_view_id: WebViewId,
     records: MemoryWebViewRecords,
+    surface: Option<LiveImageWriter>,
 }
 
 impl WebViewHandle for MemoryWebViewHandle {
@@ -617,6 +849,17 @@ impl WebViewHandle for MemoryWebViewHandle {
             .scales
             .borrow_mut()
             .push((self.web_view_id, scale_factor));
+        if let Some(writer) = &self.surface {
+            let width = (bounds.width * scale_factor).round().max(1.0) as u32;
+            let height = (bounds.height * scale_factor).round().max(1.0) as u32;
+            let frame: Vec<u8> = MEMORY_SURFACE_COLOUR
+                .iter()
+                .copied()
+                .cycle()
+                .take(width as usize * height as usize * 4)
+                .collect();
+            let _ = writer.write_frame(width, height, &frame, width as usize * 4);
+        }
     }
     fn load_url(&self, url: &str) {
         self.records.push(WebViewOp::LoadUrl {
@@ -688,6 +931,12 @@ impl WebViewHandle for MemoryWebViewHandle {
             web_view_id: self.web_view_id,
         });
     }
+    fn send_input(&self, event: &WebViewInputEvent) {
+        self.records.push(WebViewOp::Input {
+            web_view_id: self.web_view_id,
+            event: event.clone(),
+        });
+    }
 }
 
 impl Drop for MemoryWebViewHandle {
@@ -699,6 +948,16 @@ impl Drop for MemoryWebViewHandle {
 }
 
 impl WebViewBackend for MemoryWebViewBackend {
+    fn rendering(&self) -> WebViewRendering {
+        if self.surface {
+            WebViewRendering::Surface {
+                orientation: ImageOrientation::Normal,
+            }
+        } else {
+            WebViewRendering::NativeSubview
+        }
+    }
+
     fn open(
         &mut self,
         web_view_id: WebViewId,
@@ -706,8 +965,12 @@ impl WebViewBackend for MemoryWebViewBackend {
         _parent: Option<ParentHandle>,
         attrs: WebViewAttributes,
         _poster: Option<Arc<dyn AppEventPoster>>,
+        surface: Option<LiveImageWriter>,
     ) -> Box<dyn WebViewHandle> {
-        self.records.push(WebViewOp::Open { web_view_id });
+        self.records.push(WebViewOp::Open {
+            web_view_id,
+            surface: surface.is_some(),
+        });
         // Replay the initial source as the corresponding load op so tests can
         // see what the widget asked to display.
         match attrs.source {
@@ -718,6 +981,7 @@ impl WebViewBackend for MemoryWebViewBackend {
         Box::new(MemoryWebViewHandle {
             web_view_id,
             records: self.records.clone(),
+            surface,
         })
     }
 }
@@ -726,6 +990,12 @@ impl WebViewBackend for MemoryWebViewBackend {
 /// its shared recorder. The one-liner headless-test setup.
 pub fn memory_registry() -> (WebViewRegistry, MemoryWebViewRecords) {
     let (backend, records) = MemoryWebViewBackend::new();
+    (WebViewRegistry::new(backend), records)
+}
+
+/// The same with a surface backend ([`MemoryWebViewBackend::surface`]).
+pub fn memory_surface_registry() -> (WebViewRegistry, MemoryWebViewRecords) {
+    let (backend, records) = MemoryWebViewBackend::surface();
     (WebViewRegistry::new(backend), records)
 }
 
@@ -764,6 +1034,10 @@ impl WebViewHandle for NoopWebViewHandle {
 }
 
 impl WebViewBackend for NoopWebViewBackend {
+    fn rendering(&self) -> WebViewRendering {
+        WebViewRendering::NativeSubview
+    }
+
     fn open(
         &mut self,
         _web_view_id: WebViewId,
@@ -771,7 +1045,57 @@ impl WebViewBackend for NoopWebViewBackend {
         _parent: Option<ParentHandle>,
         _attrs: WebViewAttributes,
         _poster: Option<Arc<dyn AppEventPoster>>,
+        _surface: Option<LiveImageWriter>,
     ) -> Box<dyn WebViewHandle> {
         Box::new(NoopWebViewHandle)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A surface backend that counts the pumps it is given.
+    struct CountingSurfaceBackend(Rc<Cell<u32>>);
+
+    impl WebViewBackend for CountingSurfaceBackend {
+        fn rendering(&self) -> WebViewRendering {
+            WebViewRendering::Surface {
+                orientation: ImageOrientation::FlipVertical,
+            }
+        }
+        fn open(
+            &mut self,
+            _web_view_id: WebViewId,
+            _window_id: TeksiloWindowId,
+            _parent: Option<ParentHandle>,
+            _attrs: WebViewAttributes,
+            _poster: Option<Arc<dyn AppEventPoster>>,
+            _surface: Option<LiveImageWriter>,
+        ) -> Box<dyn WebViewHandle> {
+            Box::new(NoopWebViewHandle)
+        }
+        fn pump(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    #[test]
+    fn the_registry_answers_for_its_backend_and_passes_pumps_on() {
+        let pumps = Rc::new(Cell::new(0));
+        let registry = WebViewRegistry::new(CountingSurfaceBackend(pumps.clone()));
+        assert_eq!(
+            registry.rendering(),
+            WebViewRendering::Surface {
+                orientation: ImageOrientation::FlipVertical
+            }
+        );
+        registry.pump();
+        registry.pump();
+        assert_eq!(pumps.get(), 2);
+        assert_eq!(
+            WebViewRegistry::new(NoopWebViewBackend).rendering(),
+            WebViewRendering::NativeSubview
+        );
     }
 }
