@@ -29,15 +29,21 @@
 //! messages and the page taking or giving up the keyboard reach the widget as
 //! [`WebViewEvent`]s.
 //!
+//! # Input
+//!
+//! The widget forwards what lands on the page ([`WebViewInputEvent`]), and
+//! [`input`] passes it to Servo; see there for the two things that do not
+//! carry over exactly.
+//!
 //! # What is not here yet
 //!
-//! Input does not reach the page, and JS→Rust messages (`window.ipc`) are not
-//! delivered.
+//! JS→Rust messages (`window.ipc`) are not delivered.
 //!
 //! [`WebViewPumpPayload`]: crate::WebViewPumpPayload
 
 mod frame_clock;
 mod gl_context;
+mod input;
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -61,7 +67,8 @@ use url::Url;
 
 use crate::backend::{
     ConsoleLevel, NoopWebViewHandle, WebSource, WebViewAttributes, WebViewBackend, WebViewEvent,
-    WebViewHandle, WebViewId, WebViewRendering, js_string, post_event, post_pump,
+    WebViewHandle, WebViewId, WebViewInputEvent, WebViewRendering, js_string, post_event,
+    post_pump,
 };
 
 use frame_clock::FrameClock;
@@ -601,6 +608,17 @@ impl WebViewHandle for ServoHandle {
     fn set_input_passthrough(&self, _passthrough: bool) {
         // A surface engine takes no input but what the widget forwards, and
         // the widget never asks it to pass any through.
+    }
+    fn send_input(&self, event: &WebViewInputEvent) {
+        let Some(event) = input::to_servo(event, self.view.scale.get()) else {
+            return;
+        };
+        // Servo answers through `notify_input_event_handled`; the widget has
+        // already decided whether the event is the page's, so the answer is
+        // not waited for.
+        self.with_webview(|w| {
+            w.notify_input_event(event);
+        });
     }
 }
 

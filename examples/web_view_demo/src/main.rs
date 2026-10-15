@@ -21,8 +21,7 @@
 //! shows its error wash (a pink fill). Servo is the native-Wayland engine. So
 //! on a Wayland session this demo forces itself onto XWayland
 //! (`GDK_BACKEND=x11`) so wry can embed, unless built `--features servo`,
-//! where the runtime picks Servo instead. Servo renders the page but takes no
-//! input yet.
+//! where the runtime picks Servo instead.
 
 use teksilo::core::binding::BindingLevel;
 use teksilo::prelude::*;

@@ -5,8 +5,9 @@
 
 > **Status: prototype.** The **wry** backend (the default) is functional on
 > macOS / Windows / Linux-X11 and, via XWayland, on Linux/Wayland. The **Servo**
-> backend (the native Wayland path) renders pages inside the window, but takes
-> no input yet. See
+> backend (the native Wayland path) renders pages inside the window and takes
+> pointer, touch, wheel and keyboard input; page dialogs, `window.ipc` and the
+> page's accessibility tree are still missing. See
 > [Servo backend: requirements & status](#servo-backend-requirements--status).
 
 `WebView` embeds HTML / web content in a Teksilo window, for documentation
@@ -160,9 +161,14 @@ run at most 60 a second, and only while the page animates, instead of Servo's
 own 120 Hz timer. That clock is not tied to the display's refresh: a page
 animates at 60 frames a second on a 120 Hz display.
 
-**What does not work yet.** The page takes no input: the widget forwards
-pointer, touch, wheel and key events, and the backend does not yet pass them
-to Servo. JS→Rust messages (`window.ipc`) are not delivered. Dialogs and
+**Input.** The widget forwards what lands on the page to Servo, at the page
+pixel it landed on: mouse buttons and moves, touch and pen contacts, the
+wheel, and, once the page holds the keyboard (a click in it, or Enter on the
+focused frame), keys and input-method text. Ctrl+Tab and Ctrl+Shift+Tab leave
+the page. Teksilo's key events carry the logical key and the text it produced,
+not the physical key, so a page sees `KeyboardEvent.code` as `"Unidentified"`.
+
+**What does not work yet.** JS→Rust messages (`window.ipc`) are not delivered. Dialogs and
 pickers a page opens (`alert`, `<select>`, file inputs) are not shown. The
 page's accessibility tree is not published. A page loaded with
 `.html(...)` travels as a `data:` URL, so a `base_url` does not apply to it.
@@ -455,8 +461,8 @@ one-liner) and pump post-mount opens with `tree.run_mount_actions(&mut NoopWindo
 - **Custom-protocol handlers** (`app://` serving local SPAs) are not yet plumbed
   through `WebViewAttributes`, only scheme *names* are carried, no dispatch
   closure. Load local content inline with `.html(...)` for now.
-- **The Servo backend takes no input yet**, and has no `window.ipc`, page
-  dialogs or page accessibility tree. See
+- **The Servo backend has no `window.ipc`, page dialogs or page
+  accessibility tree yet**, and a page sees no physical key codes. See
   [Servo backend: requirements & status](#servo-backend-requirements--status).
 - **`load_html` `base_url`** is ignored on wry (no runtime load-HTML API;
   emulated via `document.write`).

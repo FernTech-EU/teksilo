@@ -132,7 +132,9 @@ fn servo_renders_a_page_into_the_web_views_picture() {
             .loading_signal(loading.clone())
             .html(concat!(
         "<html><head><title>Two halves</title></head>",
-        "<body style='margin:0'><script>console.warn('from the page')</script>",
+        "<body style='margin:0'><script>console.warn('from the page');",
+        "addEventListener('mousedown',e=>{if(e.button===0){document.body.innerHTML='';",
+        "document.body.style.background='rgb(0,255,0)'}})</script>",
         "<div style='position:fixed;left:0;top:0;width:100%;height:50%;background:rgb(255,0,0)'></div>",
         "<div style='position:fixed;left:0;top:50%;width:100%;height:50%;background:rgb(0,0,255)'></div>",
         "</body></html>"
@@ -187,6 +189,23 @@ fn servo_renders_a_page_into_the_web_views_picture() {
         },
     );
     assert!(resized, "the page follows the widget to its new size");
+
+    // A click on the widget reaches the page, which turns green.
+    tree.tap_with(
+        teksilo_tokens::PointerKind::Mouse,
+        teksilo_canvas::Point::new(100.0, 50.0),
+    );
+    let clicked = run_until(
+        &mut tree,
+        &registry,
+        &mailbox,
+        &mut seen,
+        &mut mirror,
+        (200.0, 100.0),
+        Duration::from_secs(30),
+        |w, h, pixels| px(w, h, pixels, 100, 50) == [0, 255, 0],
+    );
+    assert!(clicked, "a click on the widget reached the page");
 
     // The page's events reached the widget, through the same posts.
     assert!(seen.pumps > 0, "the engine asked to run, and was run");

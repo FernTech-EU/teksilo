@@ -25,7 +25,12 @@ by crate for clarity, not because crates version independently.
   frame identical to the previous one costs no upload. A dormant or
   scrolled-out page is hidden and throttled in Servo. Animated pages run at most
   60 frames a second, and only while they animate. Inline HTML (`.html(...)`,
-  `load_html`) loads as a `data:` URL. The page takes no input yet.
+  `load_html`) loads as a `data:` URL.
+- **Servo pages take input.** What the widget forwards reaches the page:
+  mouse buttons and moves, touch and pen contacts, the wheel (lines and
+  trackpad pixels), keys and input-method text while the page holds the
+  keyboard, and clipboard commands. A page sees no physical key code
+  (`KeyboardEvent.code` is `"Unidentified"`): Teksilo's key events carry none.
 - **Servo pages report their events.** Navigations (`on_navigation`), URL
   changes with no load behind them (`url_signal`), console messages and the
   page taking or giving up the keyboard (`page_focused_signal`) now reach the
