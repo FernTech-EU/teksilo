@@ -23,6 +23,12 @@
 //! one commits nothing and wakes no window. A web view that is dormant or
 //! scrolled out of view is hidden and throttled in Servo, and paints nothing.
 //!
+//! # Events
+//!
+//! Load start and finish, navigations, URL changes, the title, console
+//! messages and the page taking or giving up the keyboard reach the widget as
+//! [`WebViewEvent`]s.
+//!
 //! # What is not here yet
 //!
 //! Input does not reach the page, and JS→Rust messages (`window.ipc`) are not
@@ -48,8 +54,8 @@ use teksilo_core::window::TeksiloWindowId;
 use dpi::PhysicalSize;
 use euclid::Scale;
 use servo::{
-    EventLoopWaker, LoadStatus, RenderingContext, Servo, ServoBuilder, WebView as ServoWebView,
-    WebViewBuilder, WebViewDelegate,
+    ConsoleLogLevel, EventLoopWaker, LoadStatus, NavigationRequest, RenderingContext, Servo,
+    ServoBuilder, WebView as ServoWebView, WebViewBuilder, WebViewDelegate,
 };
 use url::Url;
 
@@ -323,6 +329,49 @@ impl WebViewDelegate for ServoEventDelegate {
 
     fn notify_page_title_changed(&self, _webview: ServoWebView, title: Option<String>) {
         self.post(WebViewEvent::TitleChanged(title.unwrap_or_default()));
+    }
+
+    fn request_navigation(&self, _webview: ServoWebView, request: NavigationRequest) {
+        self.post(WebViewEvent::NavigationStarted {
+            url: request.url.to_string(),
+            can_cancel: false,
+        });
+        // Dropping the request allows the navigation: the widget observes
+        // navigations, it does not veto them.
+        drop(request);
+    }
+
+    /// A URL change with no load behind it (`history.pushState`, a fragment)
+    /// finishes a navigation as far as the widget's URL binding is concerned.
+    fn notify_url_changed(&self, _webview: ServoWebView, url: Url) {
+        self.post(WebViewEvent::NavigationFinished {
+            url: url.to_string(),
+            success: true,
+        });
+    }
+
+    fn notify_focus_changed(&self, _webview: ServoWebView, focused: bool) {
+        self.post(WebViewEvent::EngineFocusChanged(focused));
+    }
+
+    fn show_console_message(&self, _webview: ServoWebView, level: ConsoleLogLevel, text: String) {
+        self.post(WebViewEvent::ConsoleMessage {
+            level: console_level(level),
+            text,
+        });
+    }
+}
+
+/// The widget's three console levels, from Servo's seven.
+fn console_level(level: ConsoleLogLevel) -> ConsoleLevel {
+    match level {
+        ConsoleLogLevel::Warn => ConsoleLevel::Warn,
+        ConsoleLogLevel::Error => ConsoleLevel::Error,
+        ConsoleLogLevel::Log
+        | ConsoleLogLevel::Debug
+        | ConsoleLogLevel::Info
+        | ConsoleLogLevel::Trace
+        | ConsoleLogLevel::Dir => ConsoleLevel::Log,
     }
 }
 

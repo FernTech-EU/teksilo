@@ -26,6 +26,10 @@ by crate for clarity, not because crates version independently.
   scrolled-out page is hidden and throttled in Servo. Animated pages run at most
   60 frames a second, and only while they animate. Inline HTML (`.html(...)`,
   `load_html`) loads as a `data:` URL. The page takes no input yet.
+- **Servo pages report their events.** Navigations (`on_navigation`), URL
+  changes with no load behind them (`url_signal`), console messages and the
+  page taking or giving up the keyboard (`page_focused_signal`) now reach the
+  widget, beside the load and title events it already had.
 - **`WebView` shows a surface engine's page inside the window.** With a
   backend whose `rendering()` is `Surface`, the widget makes the picture the
   engine draws into and paints it over its chrome, one frame pixel per device
