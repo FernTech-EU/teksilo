@@ -2892,6 +2892,17 @@ impl WidgetTree {
         if ctx.dismiss_modal && !self.dismiss_modal_for_source(source_widget, &mut *ops) {
             self.pending_modal_dismissal = true;
         }
+        // After the dismissal above, which hands focus back to whatever the
+        // modal was opened over: `send_intent_from_focus` means that widget.
+        if !ctx.pending_focus_intents.is_empty() {
+            let from = self
+                .focused
+                .filter(|id| self.arena.is_active(*id))
+                .unwrap_or(source_widget);
+            for intent in ctx.pending_focus_intents {
+                self.enqueue_intent(from, intent, true);
+            }
+        }
         for callback in ctx.idle_callbacks {
             self.idle_queue.push_boxed(callback);
         }
@@ -3551,7 +3562,7 @@ impl WidgetTree {
             }
         }
 
-        if self.overlay_manager.topmost_centered().is_some() {
+        if self.overlay_manager.topmost_modal().is_some() {
             return None;
         }
 

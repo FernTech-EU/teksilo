@@ -384,6 +384,7 @@ toast-body-copied = تم النسخ
 # crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = اكتب أمرًا
 command-palette-empty = لا يوجد أمر مطابق
+command-palette-category = { $category }:
 # الاسم المتاح لقارئات الشاشة لمربع حوار اللوحة ولحقل البحث فيها. لا يظهر
 # على الشاشة إطلاقًا، فهو الشيء الوحيد الذي يخبر مستخدم قارئ الشاشة بما فُتح.
 command-palette-title = لوحة الأوامر

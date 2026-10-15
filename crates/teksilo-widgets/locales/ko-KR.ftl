@@ -380,6 +380,7 @@ toast-body-copied = 복사됨
 # crates/teksilo-widgets/src/command_palette.rs 참조.
 command-palette-placeholder = 명령 입력
 command-palette-empty = 일치하는 명령 없음
+command-palette-category = { $category }:
 # 팔레트 대화 상자와 검색 필드의 접근성 이름. 화면에는 표시되지 않습니다.
 command-palette-title = 명령 팔레트
 # 대화 상자 설명으로 안내되며, 검색어를 좁힐 때마다 다시 안내됩니다.

@@ -395,6 +395,7 @@ toast-body-copied = Copiato
 # crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Digita un comando
 command-palette-empty = Nessun comando corrispondente
+command-palette-category = { $category }:
 # Nome accessibile della finestra della palette e del suo campo di ricerca.
 # Non è mai visibile a schermo, quindi è l'unica indicazione che un utente di
 # lettore di schermo riceve su ciò che si è appena aperto.

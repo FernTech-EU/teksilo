@@ -553,6 +553,92 @@ doc_snippet!("crates/teksilo-widgets/src/command_link_button.rs", {
     )
 });
 
+/// A palette over a handful of commands, the way `present` mounts it, with a
+/// query typed so the picture shows the matched letters.
+///
+/// The commands are registered by the host before the palette is built,
+/// because the palette's content is the tree's shortcut registry.
+#[derive(Debug)]
+struct PaletteScene {
+    root: Option<teksilo_core::widget_id::WidgetId>,
+}
+
+impl Widget for PaletteScene {
+    fn build(
+        &mut self,
+        ctx: &mut teksilo_core::build_context::BuildContext,
+    ) -> Vec<teksilo_core::widget_id::WidgetId> {
+        use teksilo_core::event::Key;
+        use teksilo_core::shortcut::{KeyStroke, Shortcut};
+        let commands: [(&'static str, &str, &str, Option<KeyStroke>, Option<&str>); 6] = [
+            (
+                "view.zoom_in",
+                "Zoom In",
+                "View",
+                Some(KeyStroke::ctrl(Key::Character('='))),
+                None,
+            ),
+            (
+                "view.zoom_out",
+                "Zoom Out",
+                "View",
+                Some(KeyStroke::ctrl(Key::Character('-'))),
+                None,
+            ),
+            (
+                "view.zoom_reset",
+                "Reset Zoom",
+                "View",
+                Some(KeyStroke::ctrl(Key::Character('0'))),
+                Some("Show the page at its actual size."),
+            ),
+            ("view.zen", "Zen Mode", "View", None, None),
+            (
+                "file.new",
+                "New Window",
+                "File",
+                Some(KeyStroke::ctrl(Key::N)),
+                None,
+            ),
+            ("file.export", "Export Document", "File", None, None),
+        ];
+        for (id, name, category, key, description) in commands {
+            let mut shortcut = Shortcut::new(id).name(name).category(category);
+            if let Some(key) = key {
+                shortcut = shortcut.primary(key);
+            }
+            if let Some(description) = description {
+                shortcut = shortcut.description(description);
+            }
+            ctx.register_shortcut_global(shortcut.build());
+        }
+        let palette = crate::CommandPalette::new();
+        palette.query_signal().set("zo".to_string());
+        let root = ctx.add(crate::dialog::ModalContainer::new(palette).padding(0.0));
+        self.root = Some(root);
+        vec![root]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: teksilo_canvas::SizeProposal,
+        ctx: &teksilo_core::widget::LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        self.root
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_default()
+            .into()
+    }
+
+    fn children(&self) -> Vec<teksilo_core::widget_id::WidgetId> {
+        self.root.into_iter().collect()
+    }
+}
+
+doc_snippet!("crates/teksilo-widgets/src/command_palette.rs", {
+    Box::new(PaletteScene { root: None })
+});
+
 // =========================================================================
 // Data views
 // =========================================================================

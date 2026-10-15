@@ -300,3 +300,115 @@ impl TreeChangeHandler for Removed {
         }
     }
 }
+
+/// A focusable page control that answers the `test.run` intent, counting runs.
+#[derive(Debug)]
+struct Editor {
+    runs: Rc<Cell<u32>>,
+}
+
+impl crate::widget::Widget for Editor {
+    fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+        let runs = self.runs.clone();
+        ctx.register_action(
+            crate::action::Action::new("test.run").on_invoke(move |_, _| {
+                runs.set(runs.get() + 1);
+            }),
+        );
+        ctx.apply_self_handlers(crate::widget_builder::HandlerSet::new().focusable(true));
+        vec![]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &crate::widget::LayoutContext,
+    ) -> crate::widget::LayoutResponse {
+        proposal.resolve(100.0, 20.0).into()
+    }
+}
+
+/// A page whose focused control answers `test.run`, and a modal over it whose
+/// one control closes it and sends `test.run` the way `send` says.
+fn run_from_modal(send: fn(&mut crate::widget::EventContext)) -> u32 {
+    let mut tree = WidgetTree::new();
+    let runs = Rc::new(Cell::new(0));
+    let editor = tree.add(Editor { runs: runs.clone() });
+    tree.add(StackWidget::new().child(editor));
+    let run = tree.add(
+        FillWidget::new()
+            .label("Run")
+            .focusable()
+            .access_role(Role::Button)
+            .access_action(Action::Click, move |ctx| {
+                ctx.dismiss_modal();
+                send(ctx);
+            }),
+    );
+    let panel = tree.add(StackWidget::new().child(run));
+    tree.set_dormant(panel);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(editor);
+
+    tree.activate(panel);
+    tree.show_overlay(overlay(
+        panel,
+        editor,
+        OverlayPlacement::TopCenter { offset: 40.0 },
+    ));
+    tree.overlay_manager_mut().set_top_focus_restore(editor);
+    tree.focus(run);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    assert!(tree.dispatch_access_action(
+        widget_id_to_node_id(run),
+        Action::Click,
+        None,
+        &mut NoopWindowOps
+    ));
+    assert_eq!(
+        tree.focused(),
+        Some(editor),
+        "closing the modal hands focus back to the page"
+    );
+    runs.get()
+}
+
+#[test]
+fn an_intent_sent_from_focus_reaches_what_the_modal_was_opened_over() {
+    assert_eq!(
+        run_from_modal(|ctx| ctx.send_intent_from_focus(crate::intent::Intent::new("test.run"))),
+        1,
+        "dispatched after the dismissal, from the focus it restored: the editor's \
+         own action answers"
+    );
+}
+
+#[test]
+fn an_intent_sent_from_a_closing_modal_reaches_no_page_action() {
+    // The contrast that makes the one above worth having: `send_intent`
+    // starts the walk at the modal's control, which the dismissal has
+    // already parked, so a scoped action on the page never hears it.
+    assert_eq!(
+        run_from_modal(|ctx| ctx.send_intent(crate::intent::Intent::new("test.run"))),
+        0
+    );
+}
+
+#[test]
+fn a_top_anchored_overlay_is_a_modal() {
+    let mut scene = Scene::page();
+    let tree = &mut scene.tree;
+    tree.activate(scene.panel);
+    tree.show_overlay(overlay(
+        scene.panel,
+        scene.welcome,
+        OverlayPlacement::TopCenter { offset: 40.0 },
+    ));
+    tree.focus(scene.save);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert!(
+        !scene.request(scene.welcome, Action::Click),
+        "the page behind a top-anchored modal refuses requests, as behind a centred one"
+    );
+}

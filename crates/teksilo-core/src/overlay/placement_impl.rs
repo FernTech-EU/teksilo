@@ -306,6 +306,7 @@ impl OverlayManager {
                         OverlayPlacement::Centered
                             | OverlayPlacement::FullViewport
                             | OverlayPlacement::BottomCenter
+                            | OverlayPlacement::TopCenter { .. }
                             | OverlayPlacement::ViewportCorner { .. }
                             | OverlayPlacement::AtPointer(_)
                             | OverlayPlacement::AtPointerAvoiding { .. }
@@ -425,6 +426,19 @@ impl OverlayManager {
                     content_size.width.min(area.width),
                     content_size.height.min(area.height),
                 ),
+                // The top edge sits `offset` down, raised only as far as it
+                // takes to keep the bottom inside the usable area, and never
+                // above its top.
+                OverlayPlacement::TopCenter { offset } => {
+                    let height = content_size.height.min(area.height);
+                    let room = (area.height - height).max(0.0);
+                    Rect::new(
+                        area.x + ((area.width - content_size.width) / 2.0).max(0.0),
+                        area.y + offset.max(0.0).min(room),
+                        content_size.width.min(area.width),
+                        height,
+                    )
+                }
                 OverlayPlacement::BottomCenter => Rect::new(
                     area.x + ((area.width - content_size.width) / 2.0).max(0.0),
                     (area.bottom() - content_size.height - 24.0).max(area.y),
@@ -572,6 +586,54 @@ mod tests {
             .bounds;
         assert!((bounds.x - 280.0).abs() < 0.01);
         assert!((bounds.y - 512.0).abs() < 0.01);
+    }
+
+    fn top_center_bounds(offset: f32, size: Size, viewport: (f32, f32)) -> Rect {
+        let mut mgr = OverlayManager::new();
+        let id = mgr.show(OverlayRequest::new(
+            fake_id(10),
+            fake_id(1),
+            OverlayPlacement::TopCenter { offset },
+            DismissBehavior::Manual,
+        ));
+        mgr.set_content_bounds(id, size);
+        mgr.position_overlays(
+            |_| Some(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            viewport,
+            LayoutDirection::LeftToRight,
+        );
+        mgr.stack
+            .iter()
+            .find(|overlay| overlay.id == id)
+            .unwrap()
+            .bounds
+    }
+
+    #[test]
+    fn top_center_placement_keeps_its_top_edge_as_the_content_shrinks() {
+        let tall = top_center_bounds(64.0, Size::new(240.0, 400.0), (800.0, 600.0));
+        let short = top_center_bounds(64.0, Size::new(240.0, 80.0), (800.0, 600.0));
+        assert_eq!((tall.x, tall.y), (280.0, 64.0));
+        assert_eq!(
+            short.y, tall.y,
+            "the top edge must not move when the content's height does"
+        );
+    }
+
+    #[test]
+    fn top_center_placement_rises_and_then_shrinks_to_fit() {
+        let raised = top_center_bounds(64.0, Size::new(240.0, 580.0), (800.0, 600.0));
+        assert_eq!(
+            (raised.y, raised.height),
+            (20.0, 580.0),
+            "raised just enough to keep its bottom in the window"
+        );
+        let shrunk = top_center_bounds(64.0, Size::new(240.0, 700.0), (800.0, 600.0));
+        assert_eq!(
+            (shrunk.y, shrunk.height),
+            (0.0, 600.0),
+            "taller than the window: pinned to the top and shrunk to it"
+        );
     }
 
     // --- ViewportCorner placement ---

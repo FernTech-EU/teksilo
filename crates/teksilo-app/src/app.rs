@@ -160,6 +160,12 @@ fn present_in_tree_modal_request(
     let requested_focus = request.focus_target;
     let user_on_dismiss = request.on_dismiss;
     let close_behavior = request.close_behavior;
+    let placement = match request.placement {
+        teksilo_core::modal::ModalPlacement::Centered => OverlayPlacement::Centered,
+        teksilo_core::modal::ModalPlacement::Top { offset } => {
+            OverlayPlacement::TopCenter { offset }
+        }
+    };
     // Capture the focus owner BEFORE the modal moves focus into itself
     // (below). Recorded as the modal overlay's `focus_restore` so that
     // dismissing the dialog returns keyboard focus to the trigger — e.g.
@@ -243,14 +249,9 @@ fn present_in_tree_modal_request(
     // `show_overlay_from_source`: the latter re-parents the overlay to the source
     // widget's overlay ancestor, so a modal opened from a menu item would be
     // trapped in (and positioned relative to) the transient menu overlay instead
-    // of centering on the window. `Centered` already ignores the anchor; keeping
-    // `parent_overlay: None` makes it center on the viewport.
-    let mut request = OverlayRequest::new(
-        content_id,
-        source_widget,
-        OverlayPlacement::Centered,
-        dismiss,
-    );
+    // of centering on the window. Both modal placements ignore the anchor;
+    // keeping `parent_overlay: None` places the modal against the viewport.
+    let mut request = OverlayRequest::new(content_id, source_widget, placement, dismiss);
     request.on_dismiss = on_dismiss;
     let modal_overlay = tree.show_overlay(request);
     // The modal is now the topmost overlay; record where focus should
@@ -5490,6 +5491,31 @@ mod tests {
     }
 
     #[test]
+    fn present_in_tree_modal_request_honours_a_top_placement() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let source = tree.add(Button::new(lit!("Trigger")));
+        let content = tree.add(Button::new(lit!("Modal content")));
+        tree.set_dormant(content);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::in_tree(content)
+                .presentation(ModalPresentation::InTree)
+                .placement(teksilo_core::modal::ModalPlacement::Top { offset: 64.0 }),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let bounds = tree.bounds(content);
+        assert_eq!(bounds.y, 64.0, "the top edge sits at the requested offset");
+        assert!(
+            (bounds.x + bounds.width / 2.0 - 400.0).abs() < 0.5,
+            "and the modal is centred horizontally: {bounds:?}"
+        );
+    }
+
+    #[test]
     fn present_in_tree_modal_request_builds_deferred_content() {
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let source = tree.add(Button::new(lit!("Trigger")));
@@ -5972,6 +5998,85 @@ mod tests {
 
         let continue_button = tree.find_by_label("Continue").unwrap();
         assert_eq!(tree.focused(), Some(continue_button));
+    }
+
+    /// **A command run from the palette reaches the field it was opened over.**
+    ///
+    /// The palette closes, focus goes back to the field, and the intent is
+    /// dispatched from there, so an action registered around the field
+    /// answers it. Before, the intent started from the palette, already
+    /// dismissed, and only window-global actions heard it.
+    #[test]
+    fn a_palette_command_runs_where_the_palette_was_opened() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        use teksilo_core::event::Key;
+        use teksilo_core::shortcut::Shortcut;
+        use teksilo_core::signal::Signal;
+        use teksilo_widgets::{CommandPalette, TextInput};
+
+        /// Wraps a text field and answers `doc.count_words`, counting runs.
+        #[derive(Debug)]
+        struct Document {
+            runs: Rc<Cell<u32>>,
+            child: Option<WidgetId>,
+        }
+        impl teksilo_core::widget::Widget for Document {
+            fn build(&mut self, ctx: &mut teksilo_core::BuildContext) -> Vec<WidgetId> {
+                let runs = self.runs.clone();
+                ctx.register_action(
+                    teksilo_core::Action::new("doc.count_words")
+                        .on_invoke(move |_, _| runs.set(runs.get() + 1)),
+                );
+                self.child = Some(ctx.add(TextInput::new(Signal::new("hello".to_string()))));
+                self.child.into_iter().collect()
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                ctx: &teksilo_core::LayoutContext,
+            ) -> teksilo_core::LayoutResponse {
+                self.child
+                    .and_then(|id| ctx.child_size(id, proposal))
+                    .unwrap_or_default()
+                    .into()
+            }
+            fn children(&self) -> Vec<WidgetId> {
+                self.child.into_iter().collect()
+            }
+        }
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("doc.count_words")
+                .name("Count words")
+                .category("Document")
+                .build(),
+        );
+        let runs = Rc::new(Cell::new(0));
+        let document = tree.add(Document {
+            runs: runs.clone(),
+            child: None,
+        });
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let field = tree.first_focusable_descendant(document).unwrap();
+        tree.focus(field);
+
+        tree.run_with_event_context(&mut teksilo_core::window::NoopWindowOps, |ctx| {
+            CommandPalette::new().present(ctx)
+        });
+        for queued in tree.drain_pending_modal_requests() {
+            present_in_tree_modal_request(&mut tree, queued.source_widget, queued.request);
+        }
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_ne!(tree.focused(), Some(field), "the palette took focus");
+
+        tree.type_text(field, "count words");
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        tree.press_key(Key::Enter, Default::default());
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_eq!(tree.focused(), Some(field), "closing hands focus back");
+        assert_eq!(runs.get(), 1, "the action around the field ran the command");
     }
 
     /// **A modal whose content is a text editor opens with the caret in it.**

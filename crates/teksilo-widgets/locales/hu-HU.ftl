@@ -384,6 +384,7 @@ toast-body-copied = Másolva
 # crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Írjon be egy parancsot
 command-palette-empty = Nincs megfelelő parancs
+command-palette-category = { $category }:
 command-palette-title = Parancskatalógus
 command-palette-result-count =
     { $count ->

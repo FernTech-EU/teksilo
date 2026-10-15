@@ -673,10 +673,7 @@ impl WidgetTree {
 
         while let Some(overlay_id) = current {
             let overlay = self.overlay_manager.overlay(overlay_id)?;
-            if matches!(
-                overlay.placement,
-                crate::overlay::OverlayPlacement::Centered
-            ) {
+            if overlay.placement.is_modal() {
                 return Some(overlay_id);
             }
             current = overlay.parent_overlay;
@@ -713,7 +710,7 @@ impl WidgetTree {
     /// the bar wherever focus is, so `teksilo-app` asks this before acting on
     /// one.
     pub fn is_behind_modal(&self, widget_id: WidgetId) -> bool {
-        let Some(modal) = self.overlay_manager.topmost_centered() else {
+        let Some(modal) = self.overlay_manager.topmost_modal() else {
             return false;
         };
         let stack = &self.overlay_manager.stack;
@@ -877,6 +874,7 @@ impl WidgetTree {
             // which is also why it lives in the text-affordance band.
             // `BelowSelection` is its mirror and answers the same.
             P::Centered
+            | P::TopCenter { .. }
             | P::BottomCenter
             | P::ViewportCorner { .. }
             | P::FullViewport
@@ -1108,7 +1106,7 @@ impl WidgetTree {
         let Some(overlay) = self.overlay_manager.overlay(overlay_id) else {
             return false;
         };
-        // A modal (a `Centered` overlay — see `modal_overlay_for_widget`) is
+        // A modal (an overlay whose placement `is_modal`, see `modal_overlay_for_widget`) is
         // always a host surface: a dropdown / popover / menu opened *inside* a
         // modal must dismiss only its own cascade, never tear down the hosting
         // modal. Without this, a `ComboBox`/menu inside a modal that closes via
@@ -1116,10 +1114,7 @@ impl WidgetTree {
         // walks past the modal (whose content is not a `Dialog`-role widget) and
         // dismisses it too. Same fix that stopped a `TabWidget` overflow menu
         // from closing its hosting composite tooltip, extended to modals.
-        if matches!(
-            overlay.placement,
-            crate::overlay::OverlayPlacement::Centered
-        ) {
+        if overlay.placement.is_modal() {
             return true;
         }
         let Some(node) = self.arena.get(overlay.content_id) else {
@@ -1966,10 +1961,7 @@ impl WidgetTree {
     ) -> crate::overlay::OverlayId {
         let fade_duration = request.fade_duration;
         let content_id = request.content_id;
-        let is_modal = matches!(
-            request.placement,
-            crate::overlay::OverlayPlacement::Centered
-        );
+        let is_modal = request.placement.is_modal();
         let id = self.overlay_manager.show(request);
         self.cancel_pointers_for_modal(is_modal);
         // The overlay's content subtree just entered the active set;
@@ -2002,10 +1994,7 @@ impl WidgetTree {
     ) -> crate::overlay::OverlayId {
         let fade_duration = request.fade_duration;
         let content_id = request.content_id;
-        let is_modal = matches!(
-            request.placement,
-            crate::overlay::OverlayPlacement::Centered
-        );
+        let is_modal = request.placement.is_modal();
         let id = self.overlay_manager.show_in_band(request, band);
         self.cancel_pointers_for_modal(is_modal);
         self.a11y_dirty = true;
@@ -2031,10 +2020,7 @@ impl WidgetTree {
 
         let fade_duration = request.fade_duration;
         let content_id = request.content_id;
-        let is_modal = matches!(
-            request.placement,
-            crate::overlay::OverlayPlacement::Centered
-        );
+        let is_modal = request.placement.is_modal();
         let current_focus = self.focused;
         let id = self.overlay_manager.show(request);
         self.cancel_pointers_for_modal(is_modal);
@@ -2055,10 +2041,7 @@ impl WidgetTree {
     ) -> crate::overlay::OverlayId {
         let fade_duration = request.fade_duration;
         let content_id = request.content_id;
-        let is_modal = matches!(
-            request.placement,
-            crate::overlay::OverlayPlacement::Centered
-        );
+        let is_modal = request.placement.is_modal();
         let id = self.overlay_manager.show_for(request, duration);
         self.cancel_pointers_for_modal(is_modal);
         self.overlay_manager.set_shown_at_sim(id, self.sim_clock);
@@ -2530,7 +2513,7 @@ mod tests {
         assert!(!tree.is_visible(content));
     }
 
-    /// A modal (a `Centered` overlay) must count as a host surface so a
+    /// A modal (an overlay whose placement `is_modal`) must count as a host surface so a
     /// `ComboBox` / menu / popover opened *inside* it — which closes via
     /// `dismiss_all_except_hosts` / `dismiss_self_overlay_chain_for_source` —
     /// dismisses only its own cascade and never tears down the hosting modal.

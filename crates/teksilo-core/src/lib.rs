@@ -103,8 +103,8 @@ pub use kinetic::{
 };
 pub use menu_item_id::MenuItemId;
 pub use modal::{
-    ModalBuilder, ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest,
-    QueuedModalRequest,
+    ModalBuilder, ModalCloseBehavior, ModalContent, ModalPlacement, ModalPresentation,
+    ModalRequest, QueuedModalRequest,
 };
 pub use off_thread::{
     LiveImageAttachment, LiveImageSignals, PullOutcome, RepaintTrigger, RepaintTriggerStats,

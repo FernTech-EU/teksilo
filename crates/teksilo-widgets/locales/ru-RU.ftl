@@ -387,6 +387,7 @@ toast-body-copied = Скопировано
 # crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Введите команду
 command-palette-empty = Нет подходящих команд
+command-palette-category = { $category }:
 command-palette-title = Палитра команд
 command-palette-result-count =
     { $count ->

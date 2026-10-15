@@ -387,6 +387,7 @@ toast-body-copied = Αντιγράφηκε
 # crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Πληκτρολογήστε μια εντολή
 command-palette-empty = Καμία αντίστοιχη εντολή
+command-palette-category = { $category }:
 command-palette-title = Παλέτα εντολών
 command-palette-result-count =
     { $count ->

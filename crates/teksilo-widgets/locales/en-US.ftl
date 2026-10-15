@@ -426,6 +426,10 @@ toast-body-copied = Copied
 # See crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Type a command
 command-palette-empty = No matching command
+# A palette row starts with the command's category, then the command:
+# "File: New Window". Keep { $category } at the start: the letters a query
+# matched are highlighted in it.
+command-palette-category = { $category }:
 # Accessible name of the palette dialog and of its search field. Never shown
 # on screen — the palette has no visible title bar — so it is the only thing
 # telling a screen-reader user what just opened.

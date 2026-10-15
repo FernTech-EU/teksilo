@@ -30,6 +30,27 @@ pub enum ModalCloseBehavior {
     Manual,
 }
 
+/// Where an in-tree modal sits in the window.
+///
+/// Read only by the in-tree presentation: a modal presented as a native
+/// window is placed by the operating system.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum ModalPlacement {
+    /// Centred in the window: the dialog convention.
+    #[default]
+    Centered,
+    /// Centred horizontally, with its top edge `offset` logical pixels below
+    /// the top of the window. For a surface whose height changes while it
+    /// is open, such as a command palette that narrows as the user types: a
+    /// centred one would move its search field with every keystroke, while
+    /// this keeps the top edge still and lets the bottom edge follow the
+    /// content. Raised as far as needed to keep the modal inside the window.
+    Top {
+        /// Distance from the top of the window to the modal's top edge.
+        offset: f32,
+    },
+}
+
 /// Builder used to create modal content in a target widget tree later.
 pub type ModalBuilder = Box<dyn FnOnce(&mut crate::widget_tree::WidgetTree) -> WidgetId>;
 
@@ -57,6 +78,9 @@ pub struct ModalRequest {
     pub close_behavior: ModalCloseBehavior,
     pub title: Option<String>,
     pub size: Option<(u32, u32)>,
+    /// Where an in-tree presentation places the modal. Ignored by a native
+    /// window.
+    pub placement: ModalPlacement,
     /// Optional explicit initial-focus target inside the modal content
     /// subtree. When `None`, the framework falls back to
     /// `first_focusable_descendant(content_id)`. When `Some`, the id
@@ -82,6 +106,7 @@ impl ModalRequest {
             close_behavior: ModalCloseBehavior::default(),
             title: None,
             size: None,
+            placement: ModalPlacement::Centered,
             focus_target: None,
             on_dismiss: None,
         }
@@ -97,6 +122,7 @@ impl ModalRequest {
             close_behavior: ModalCloseBehavior::default(),
             title: None,
             size: None,
+            placement: ModalPlacement::Centered,
             focus_target: None,
             on_dismiss: None,
         }
@@ -119,6 +145,12 @@ impl ModalRequest {
 
     pub fn size(mut self, width: u32, height: u32) -> Self {
         self.size = Some((width, height));
+        self
+    }
+
+    /// Where an in-tree presentation places the modal. See [`ModalPlacement`].
+    pub fn placement(mut self, placement: ModalPlacement) -> Self {
+        self.placement = placement;
         self
     }
 
@@ -149,6 +181,7 @@ impl std::fmt::Debug for ModalRequest {
             .field("close_behavior", &self.close_behavior)
             .field("title", &self.title)
             .field("size", &self.size)
+            .field("placement", &self.placement)
             .field("focus_target", &self.focus_target)
             .field(
                 "on_dismiss",

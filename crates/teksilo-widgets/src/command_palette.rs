@@ -28,18 +28,27 @@
 //! );
 //! ```
 //!
-//! The standard edit commands every tree registers ([`StandardEdit`]: cut,
-//! copy, paste, undo, redo, select all) are left out, and so are the editors'
-//! own ([`FormatShortcut`](crate::editor_shortcuts::FormatShortcut),
-//! [`CodeShortcut`](crate::editor_shortcuts::CodeShortcut)). They act on the
-//! widget that holds the focus, and the palette has taken it, so a row for one
-//! would run nothing. An application whose own undo should be searchable
-//! registers it as a command of its own.
+//! # Running a command
+//!
+//! Activating a row (Enter, or a click) closes the palette, which hands focus
+//! back to whatever the user was working in, and then sends the command's
+//! intent from there, as its keystroke would have been sent
+//! ([`EventContext::send_intent_from_focus`]). So a command answers wherever
+//! its action is registered: on the editor the palette was opened over, on
+//! one of that editor's ancestors, or window-wide.
+//!
+//! That is also why a presented palette lists the commands that act on the
+//! focused editor: the standard edit commands every tree registers
+//! ([`StandardEdit`]: cut, copy, paste, undo, redo, select all) and the
+//! editors' own ([`FormatShortcut`](crate::editor_shortcuts::FormatShortcut),
+//! [`CodeShortcut`](crate::editor_shortcuts::CodeShortcut)). A palette embedded
+//! in a surface of the caller's keeps the focus in its own search field, where
+//! those commands would act on the query, so it leaves them out.
 //!
 //! # Presenting it
 //!
-//! [`CommandPalette::present`] shows it centered, dismissed by Escape or a click
-//! outside:
+//! [`CommandPalette::present`] shows it as a modal near the top of the window,
+//! dismissed by Escape or a click outside:
 //!
 //! ```ignore
 //! ctx.register_action_global(Action::new("app.command_palette").on_invoke(|_, ctx| {
@@ -50,7 +59,18 @@
 //! Presenting it as a **window-level** modal is deliberate, not incidental: a palette
 //! is routinely opened from a menu, and a menu is itself a transient overlay.
 //! Anchoring to the invoking widget would render the palette inside the menu that
-//! opened it, positioned against a surface that is about to disappear.
+//! opened it, positioned against a surface that is about to disappear. It is
+//! anchored by its top edge ([`ModalPlacement::Top`]) rather than centred: the
+//! palette is as tall as its list, and a centred one would move its search field
+//! with every keystroke that changed the number of matches.
+//!
+//! # What a row shows
+//!
+//! One line: the category, muted (`File:`), then the command's name, with the
+//! letters the query matched in bold, then its description when it has one,
+//! muted and the first to give way to a long name, and the effective shortcut,
+//! user rebinds merged in, drawn as a key at the trailing edge. Rows grow with
+//! the global text scale.
 //!
 //! # Matching
 //!
@@ -60,6 +80,9 @@
 //! first. An empty query lists everything in the registry's own deterministic
 //! `(category, id)` order. The category takes part in matching, so `file new` finds
 //! the New command filed under File.
+//! A query can usually land in a command in more than one way (`exp` in "File:
+//! Export": the `e` of "File", or the `E` of "Export"); the best-scoring way is
+//! kept, and its letters are the ones the row shows in bold.
 //!
 //! The category a reader sees and matches against is the shortcut's
 //! `category_label` when it has one, and its `category` key otherwise. Give a
@@ -72,64 +95,54 @@
 //!
 //! # Keyboard
 //!
-//! Focus stays in the search field throughout — that is what makes a palette feel
+//! Focus stays in the search field throughout: that is what makes a palette feel
 //! like one. Arrow keys are not editing keys for the field, so they bubble to the
-//! palette's own handler, which moves the highlight and scrolls it into view. Enter
-//! runs the highlighted command; Escape dismisses.
+//! palette's own handler, which moves the highlight (wrapping at either end) and
+//! scrolls it into view; PageUp and PageDown move it a viewport at a time. Home and
+//! End stay with the field, which moves its caret with them. Enter runs the
+//! highlighted command; Escape dismisses.
+//!
+//! Typing re-filters the list and nothing else: the list is a sibling of the search
+//! field, not its parent, so the field keeps its caret, its selection and an input
+//! method's composition from one keystroke to the next.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use teksilo_canvas::{Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
-use teksilo_core::accesskit::Role;
+use teksilo_core::accesskit::{Live, Role};
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::color_prop::ColorProp;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::intent::Intent;
-use teksilo_core::modal::{ModalCloseBehavior, ModalPresentation, ModalRequest};
+use teksilo_core::modal::{ModalCloseBehavior, ModalPlacement, ModalPresentation, ModalRequest};
 use teksilo_core::shortcut::{KeyStroke, StandardEdit};
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
-use teksilo_core::widget_builder::WidgetBuilder;
+use teksilo_core::widget_builder::{HandlerSet, WidgetBuilder};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_data::{ListModel, SelectionMode, SelectionModel};
-use teksilo_i18n::{LocalizedString, lit, tr_widget};
-use teksilo_tokens::{BorderRole, InputTokens, SurfaceRole, TargetRole, TextRole, TextStyleRole};
+use teksilo_i18n::{LocalizedString, tr_widget};
 
 use crate::dialog::ModalContainer;
-use crate::keystroke_format::format_keystroke;
-use crate::list_view::ListView;
-use crate::primitives::{
-    Expand, FixedSize, HStack, Padding, RectWidget, Spacer, TextWidget, VStack, ZStack,
-};
+use crate::list_view::ListViewHandle;
+use crate::primitives::{Divider, Padding};
 use crate::search_field::SearchField;
-use teksilo_core::styles::density::dp;
 
-/// Presented size. Wide enough for a command name plus its chord without either
-/// having to ellipsize in the common case.
-const PALETTE_WIDTH: u32 = 560;
-const PALETTE_HEIGHT: u32 = 420;
-/// Row height fed to the list's own metrics; two lines of text plus padding.
-const ROW_HEIGHT: f32 = 44.0;
+mod matcher;
+mod results;
+mod row;
 
-/// [`ROW_HEIGHT`] raised to the density's `target_size`
-/// (24 / 32 / 44 dp). The identity at Compact.
-fn row_height(tokens: &InputTokens) -> f32 {
-    dp(ROW_HEIGHT, TargetRole::Target, tokens)
-}
-/// Width of the leading bar marking the highlighted row — the non-colour half
-/// of the highlight. 3 dp matches the selection edge `StandardListItem` draws.
-const SELECTION_MARKER_WIDTH: f32 = 3.0;
-/// How many rows the presented palette shows at once.
-///
-/// Derived from [`PALETTE_HEIGHT`] rather than measured, which is what lets the
-/// keyboard scroll be computed without waiting on layout — the palette presents
-/// itself at a fixed size, so the number is known. A caller embedding the palette in
-/// a taller surface still scrolls correctly by pointer and still selects correctly by
-/// keyboard; only the auto-scroll may leave the highlight a row from the edge.
-const VISIBLE_ROWS: usize = 7;
+use results::{PaletteEntry, PaletteResults, ResultsConfig};
+
+/// The palette's width when nothing narrower is proposed. Room for a category,
+/// a command name and its chord without any of them having to ellipsize in
+/// the common case.
+const PALETTE_WIDTH: f32 = 600.0;
+/// How far below the top of the window a presented palette's top edge sits.
+const PALETTE_TOP_OFFSET: f32 = 56.0;
+/// Inset of the search field from the palette's edges.
+const FIELD_PADDING: f32 = 8.0;
 
 /// One command as the palette sees it.
 ///
@@ -145,7 +158,7 @@ pub struct PaletteCommand {
     pub id: &'static str,
     /// The localized display name, already resolved for the active locale.
     pub name: String,
-    /// The grouping key, if the command declared one — stable across languages,
+    /// The grouping key, if the command declared one: stable across languages,
     /// so an [`CommandPalette::include`] filter can match on it.
     pub category: Option<&'static str>,
     /// The category as the reader sees it, already resolved for the active
@@ -153,7 +166,7 @@ pub struct PaletteCommand {
     pub category_text: Option<String>,
     /// The longer explanation, if the command declared one.
     pub description: Option<String>,
-    /// The effective primary chord — user rebinds merged in — or `None` when the
+    /// The effective primary chord (user rebinds merged in), or `None` when the
     /// command has no keystroke at all, which is normal for a palette-only command.
     pub keystroke: Option<KeyStroke>,
     /// Whether the command's own `enabled_when` predicate currently says yes.
@@ -179,47 +192,44 @@ impl PaletteCommand {
 type IncludeFn = Rc<dyn Fn(&PaletteCommand) -> bool>;
 type DismissFn = Rc<dyn Fn(&mut EventContext)>;
 
-/// The parts of a palette its event closures need, separated from the widget so they
-/// can be cloned into `'static` handlers without cloning the widget itself.
+/// The parts of a palette its rows, its result list and its handlers share,
+/// separated from the widget so they can be cloned into `'static` closures.
 #[derive(Clone)]
 struct PaletteState {
     query: Signal<String>,
-    selected: Signal<usize>,
-    /// The rows currently on screen. The key handler acts on exactly what the reader
-    /// is looking at rather than re-deriving the list and risking a different answer.
-    rows: Rc<RefCell<Vec<PaletteCommand>>>,
-    /// First row currently scrolled into view.
-    ///
-    /// Tracked here rather than read back off the list because the list is rebuilt
-    /// from scratch on every keystroke — a scroll offset living on the widget would
-    /// reset to the top each time the reader typed a letter.
-    top_index: Signal<usize>,
-    /// The query as of the last build, so a *changed* query can reset the highlight
-    /// to the best match without an effect that would fire mid-build.
-    last_query: Rc<RefCell<String>>,
+    /// The highlighted row: what Enter runs, what the row tint follows, what a
+    /// screen reader is told is selected. One signal, so the three cannot
+    /// drift apart.
+    highlight: Signal<usize>,
+    /// The rows on screen. The key handler acts on exactly what the reader is
+    /// looking at rather than re-deriving the list and risking a different
+    /// answer.
+    rows: Rc<RefCell<Vec<Rc<PaletteEntry>>>>,
+    /// How many rows match, for the palette's own accessible description.
+    count: Signal<usize>,
+    /// The query the rows were last built for. `None` before the first build.
+    last_query: Rc<RefCell<Option<String>>>,
+    /// The result list, to keep the highlight scrolled into view.
+    list: Rc<RefCell<Option<ListViewHandle>>>,
+    /// How many rows fit in the list's viewport: one PageUp / PageDown.
+    page_rows: Rc<Cell<usize>>,
+    /// Whether [`CommandPalette::present`] put this palette up. A presented
+    /// palette hands focus back before a command runs; an embedded one keeps
+    /// it.
+    presented: Rc<Cell<bool>>,
     on_dismiss: Rc<RefCell<Option<DismissFn>>>,
     /// Whether the dismissal hook has already run.
     ///
-    /// It is now reachable from two directions — the palette's own Escape /
-    /// activate path, and the modal's `on_dismiss` for the routes the overlay
-    /// system handles before the palette ever sees the key — and a caller
-    /// that installed it to release a resource must not be called twice.
-    dismissed: Rc<std::cell::Cell<bool>>,
-
-    // ── Accessibility ───────────────────────────────────────────────────
-    /// The result list's selection, mirroring [`Self::selected`].
-    ///
-    /// The highlight is `selected`; this exists so each realized row's
-    /// `Role::ListBoxOption` reports `selected` truthfully. Without it every row
-    /// answered "not selected" and the arrow keys moved a highlight no
-    /// assistive technology could observe. Owned by the state, not rebuilt per
-    /// build, so a pointer click on a row can be routed back into `selected`.
-    selection: SelectionModel,
-    /// The result `ListView`'s node, published for the search field's
-    /// `controls` relation.
+    /// It is reachable from two directions, the palette's own Escape /
+    /// activate path and the modal's `on_dismiss` for the routes the overlay
+    /// system handles before the palette ever sees the key, and a caller that
+    /// installed it to release a resource must not be called twice.
+    dismissed: Rc<Cell<bool>>,
+    /// The result list's node, published for the search field's `controls`
+    /// relation. `None` while nothing matches.
     listbox_id: Signal<Option<WidgetId>>,
     /// The highlighted row's node, published for the search field's
-    /// `active_descendant`. `None` when the list is empty, or when the
+    /// `active_descendant`. `None` when the list is empty, or while the
     /// highlighted row is outside the realized virtualization window.
     active_row: Signal<Option<WidgetId>>,
 }
@@ -228,87 +238,90 @@ impl PaletteState {
     fn new() -> Self {
         Self {
             query: Signal::new(String::new()),
-            selected: Signal::new(0),
+            highlight: Signal::new(0),
             rows: Rc::new(RefCell::new(Vec::new())),
-            top_index: Signal::new(0),
-            last_query: Rc::new(RefCell::new(String::new())),
+            count: Signal::new(0),
+            last_query: Rc::new(RefCell::new(None)),
+            list: Rc::new(RefCell::new(None)),
+            page_rows: Rc::new(Cell::new(1)),
+            presented: Rc::new(Cell::new(false)),
             on_dismiss: Rc::new(RefCell::new(None)),
-            dismissed: Rc::new(std::cell::Cell::new(false)),
-            selection: SelectionModel::new(SelectionMode::Single),
+            dismissed: Rc::new(Cell::new(false)),
             listbox_id: Signal::new(None),
             active_row: Signal::new(None),
         }
     }
 
-    /// Move the highlight to `index`, keeping the AT-visible selection with it.
-    ///
-    /// Every write to `selected` goes through here. The two must not drift:
-    /// `selected` is what Enter runs and what the row tint follows, while
-    /// `selection` is what a screen reader is told, and a palette that
-    /// announces one row while running another is worse than one that
-    /// announces nothing.
-    fn set_selected(&self, index: usize) {
-        self.selected.set(index);
-        self.selection.select(index);
+    fn len(&self) -> usize {
+        self.rows.borrow().len()
     }
 
-    /// Move the highlight by `delta`, clamped to the list, and scroll it into view.
-    fn step_selection(&self, delta: isize) {
-        let len = self.rows.borrow().len();
+    /// Move the highlight to `index`. Writes nothing when it is already
+    /// there, so a rebuild that keeps the reader's place notifies no row.
+    fn set_highlight(&self, index: usize) {
+        if self.highlight.get() != index {
+            self.highlight.set(index);
+        }
+    }
+
+    /// Move the highlight to `index` and scroll it into view.
+    fn move_highlight(&self, index: usize) {
+        self.set_highlight(index);
+        if let Some(list) = self.list.borrow().as_ref() {
+            list.ensure_index_visible(index);
+        }
+    }
+
+    /// One row up or down, wrapping at either end, as a menu does.
+    fn step(&self, down: bool) {
+        let len = self.len();
         if len == 0 {
             return;
         }
-        let current = self.selected.get() as isize;
-        let next = (current + delta).clamp(0, len as isize - 1) as usize;
-        self.set_selected(next);
-        self.reveal(next);
-    }
-
-    /// Move the selection to an absolute row (Home / End).
-    fn select_edge(&self, last: bool) {
-        let len = self.rows.borrow().len();
-        if len == 0 {
-            return;
-        }
-        let target = if last { len - 1 } else { 0 };
-        self.set_selected(target);
-        self.reveal(target);
-    }
-
-    /// Scroll the minimum distance that brings row `index` into view.
-    fn reveal(&self, index: usize) {
-        let top = self.top_index.get();
-        let new_top = if index < top {
-            index
-        } else if index >= top + VISIBLE_ROWS {
-            index + 1 - VISIBLE_ROWS
+        let current = self.highlight.get().min(len - 1);
+        let next = if down {
+            (current + 1) % len
         } else {
-            top
+            (current + len - 1) % len
         };
-        if new_top != top {
-            self.top_index.set(new_top);
-        }
+        self.move_highlight(next);
     }
 
-    /// Send the highlighted command's intent, then dismiss.
-    ///
-    /// The intent is synthesized from the command's declared name, which is what the
-    /// dispatcher sends for a chord with no custom activation closure — so a command
-    /// reached from the palette and the same command reached from its keystroke
-    /// arrive at the identical action.
-    fn activate_selected(&self, ctx: &mut EventContext) {
-        let picked = {
-            let rows = self.rows.borrow();
-            rows.get(self.selected.get()).cloned()
-        };
-        let Some(cmd) = picked else { return };
-        if !cmd.enabled {
-            // Reachable only with `show_disabled`, where a greyed row is displayed
-            // precisely to say "not now" — running it anyway would make the grey a lie.
+    /// One viewport up or down, stopping at either end.
+    fn page(&self, down: bool) {
+        let len = self.len();
+        if len == 0 {
             return;
         }
-        ctx.send_intent(Intent::new(cmd.intent));
+        let page = self.page_rows.get().max(1);
+        let current = self.highlight.get().min(len - 1);
+        let next = if down {
+            (current + page).min(len - 1)
+        } else {
+            current.saturating_sub(page)
+        };
+        self.move_highlight(next);
+    }
+
+    /// Run the highlighted command and close the palette.
+    ///
+    /// The palette closes first and the intent is sent from the focus that
+    /// closing hands back ([`EventContext::send_intent_from_focus`]), which
+    /// is how the command's own keystroke would have been dispatched: the
+    /// editor the palette was opened over hears it, along with its ancestors
+    /// and the window-global actions. Sent from the palette, it would start
+    /// from a surface that is already gone.
+    fn activate_highlighted(&self, ctx: &mut EventContext) {
+        let picked = self.rows.borrow().get(self.highlight.get()).cloned();
+        let Some(entry) = picked else { return };
+        if !entry.command.enabled {
+            // Reachable only with `show_disabled`, where a greyed row is
+            // displayed precisely to say "not now": running it anyway would
+            // make the grey a lie.
+            return;
+        }
         self.dismiss(ctx);
+        ctx.send_intent_from_focus(Intent::new(entry.command.intent));
     }
 
     fn dismiss(&self, ctx: &mut EventContext) {
@@ -329,7 +342,9 @@ pub struct CommandPalette {
     empty_text: Option<LocalizedString>,
     include: Option<IncludeFn>,
     show_disabled: bool,
-    root_child_id: Option<WidgetId>,
+    field_id: Option<WidgetId>,
+    divider_id: Option<WidgetId>,
+    results_id: Option<WidgetId>,
 }
 
 impl Default for CommandPalette {
@@ -347,7 +362,9 @@ impl CommandPalette {
             empty_text: None,
             include: None,
             show_disabled: false,
-            root_child_id: None,
+            field_id: None,
+            divider_id: None,
+            results_id: None,
         }
     }
 
@@ -395,14 +412,15 @@ impl CommandPalette {
         self.state.query.clone()
     }
 
-    /// Show the palette centered in the window, dismissed by Escape or a click
-    /// outside. See the [module docs](self) on why this is window-level.
+    /// Show the palette near the top of the window, dismissed by Escape or a
+    /// click outside. See the [module docs](self) on why this is window-level.
     pub fn present(self, ctx: &mut EventContext) {
+        self.state.presented.set(true);
         // The palette's own Escape handler never runs for a presented palette:
         // the overlay system claims Escape first and tears the modal down
         // without it, and the same is true of a press outside. So a caller's
-        // `on_dismiss` — installed to release whatever opening the palette
-        // reserved — only ever fired when a command was actually run. Route
+        // `on_dismiss`, installed to release whatever opening the palette
+        // reserved, only ever fired when a command was actually run. Route
         // the framework's dismissal into the same latched hook.
         //
         // Only the caller's own callback is carried here, never the default
@@ -411,10 +429,15 @@ impl CommandPalette {
         // on whatever modal is topmost when it is read.
         let user_dismiss = self.state.on_dismiss.borrow().clone();
         let already_dismissed = self.state.dismissed.clone();
-        let palette = if user_dismiss.is_none() {
-            self.on_dismiss(|ctx| ctx.dismiss_modal())
-        } else {
-            self
+        let palette = match user_dismiss.clone() {
+            None => self.on_dismiss(|ctx| ctx.dismiss_modal()),
+            // Close the modal as well as running the caller's hook: a
+            // palette that ran a command and stayed up would leave the
+            // command's focus target under it.
+            Some(user) => self.on_dismiss(move |ctx| {
+                user(ctx);
+                ctx.dismiss_modal();
+            }),
         };
         let mut inner = Some(palette);
         ctx.present_modal(
@@ -422,11 +445,17 @@ impl CommandPalette {
                 let palette = inner
                     .take()
                     .expect("CommandPalette present closure called twice");
-                tree.add(ModalContainer::new(palette))
+                // The palette draws its own insets: the dialog padding would
+                // float the search field in the middle of the panel.
+                tree.add(ModalContainer::new(palette).padding(0.0))
             })
             .presentation(ModalPresentation::InTree)
             .close_behavior(ModalCloseBehavior::EscapeOrClickOutside)
-            .size(PALETTE_WIDTH, PALETTE_HEIGHT)
+            // Top-anchored, so the search field stays where it is while the
+            // list under it narrows.
+            .placement(ModalPlacement::Top {
+                offset: PALETTE_TOP_OFFSET,
+            })
             .on_dismiss(Rc::new(move |_reason, ctx: &mut EventContext| {
                 if already_dismissed.replace(true) {
                     return;
@@ -436,37 +465,6 @@ impl CommandPalette {
                 }
             })),
         );
-    }
-
-    /// Read the registry, apply `include`, match against the query, and rank.
-    fn visible_rows(&self, ctx: &BuildContext) -> Vec<PaletteCommand> {
-        let needle = self.state.query.get().trim().to_lowercase();
-        let mut scored: Vec<(i32, PaletteCommand)> = ctx
-            .shortcut_registry()
-            .iter_effective()
-            .map(|eff| PaletteCommand {
-                id: eff.shortcut.id,
-                name: eff.shortcut.name.get(),
-                category: eff.shortcut.category,
-                category_text: eff.shortcut.category_text(),
-                description: eff.shortcut.description.as_ref().map(|d| d.get()),
-                keystroke: eff.primary,
-                enabled: eff.enabled,
-                intent: eff.shortcut.intent_name(),
-            })
-            .filter(|cmd| self.show_disabled || cmd.enabled)
-            // Cut, copy, undo, bold and the rest act on the widget that holds
-            // the focus, which the palette has just taken: run from here they
-            // would reach no editor.
-            .filter(|cmd| !acts_on_the_focused_editor(cmd.id))
-            .filter(|cmd| self.include.as_ref().is_none_or(|f| f(cmd)))
-            .filter_map(|cmd| Some((fuzzy_score(&needle, &cmd.haystack())?, cmd)))
-            .collect();
-        // Highest score first. `iter_effective` already ordered by (category, id) and
-        // `sort_by` is stable, so equal scores — which is every row when the query is
-        // empty — keep exactly that order.
-        scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
-        scored.into_iter().map(|(_, cmd)| cmd).collect()
     }
 }
 
@@ -482,196 +480,84 @@ impl std::fmt::Debug for CommandPalette {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CommandPalette")
             .field("query", &self.state.query.get())
-            .field("rows", &self.state.rows.borrow().len())
+            .field("rows", &self.state.len())
             .finish_non_exhaustive()
     }
 }
 
 impl Widget for CommandPalette {
+    /// Built once. Neither typing nor moving the highlight rebuilds the
+    /// palette: the query rebuilds only the result list, a sibling of the
+    /// search field, and the highlight repaints the rows.
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // Any registry change — a command registered, rebound, enabled — changes what
-        // the palette should be showing.
-        ctx.shortcut_version().bind_to(
+        // The match count is this node's accessible description.
+        self.state.count.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
-            BindingLevel::Rebuild,
+            BindingLevel::AccessibilityOnly,
         );
-        self.state
-            .query
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
-        self.state
-            .selected
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
-        self.state
-            .top_index
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
-
-        let rows = self.visible_rows(ctx);
-        // A changed query means a different list: send the highlight back to the best
-        // match rather than leaving it on whatever now happens to sit at that index.
-        let query_now = self.state.query.get();
-        if *self.state.last_query.borrow() != query_now {
-            *self.state.last_query.borrow_mut() = query_now;
-            self.state.set_selected(0);
-            self.state.top_index.set(0);
-        }
-        // Clamp before rendering, not after: a query that shortened the list must not
-        // leave the highlight past the end for even one frame, or Enter would run
-        // whichever row happens to sit at a stale index.
-        if self.state.selected.get() >= rows.len() {
-            self.state.set_selected(rows.len().saturating_sub(1));
-        }
-        // Keep the AT-visible selection on the highlight even when neither
-        // branch above fired (first build, or a rebuild driven by the shortcut
-        // registry rather than by a keystroke).
-        if !rows.is_empty() && !self.state.selection.is_selected(self.state.selected.get()) {
-            self.state.selection.select(self.state.selected.get());
-        }
-        *self.state.rows.borrow_mut() = rows.clone();
-        let selected_index = self.state.selected.get();
 
         let placeholder = self
             .placeholder
             .clone()
             .unwrap_or_else(|| tr_widget!(command_palette_placeholder()));
-
         let submit_state = self.state.clone();
         let field = SearchField::new(self.state.query.clone())
             .placeholder(placeholder)
             .label(tr_widget!(command_palette_title()))
-            .on_submit_fn(move |ctx| submit_state.activate_selected(ctx))
-            // The ARIA combobox pattern. Focus never leaves this field — that
-            // is what makes a palette feel like one — so the arrow-key
-            // highlight has to be announced through the field's own AT node.
-            // `SearchField` forwards both down to the focusable
-            // `TextInputField`, the only node whose `active_descendant`
-            // assistive technology follows.
+            .on_submit_fn(move |ctx| submit_state.activate_highlighted(ctx))
+            // The ARIA combobox pattern. Focus never leaves this field (that
+            // is what makes a palette feel like one), so the highlight has to
+            // be announced through the field's own AT node. `SearchField`
+            // forwards both down to the focusable `TextInputField`, the only
+            // node whose `active_descendant` assistive technology follows.
             .drives_listbox(self.state.listbox_id.clone(), self.state.active_row.clone());
 
-        // Stale entries would otherwise survive an empty result set and point
-        // `active_descendant` at a destroyed node.
-        self.state.listbox_id.set(None);
-        self.state.active_row.set(None);
-
-        let body: Box<dyn Widget> = if rows.is_empty() {
-            let empty = self
-                .empty_text
-                .clone()
-                .unwrap_or_else(|| tr_widget!(command_palette_empty()));
-            Box::new(
-                Padding::symmetric(14.0, 12.0).child(
-                    TextWidget::new(empty)
-                        .style(TextStyleRole::Body)
-                        .color(TextRole::Secondary),
-                ),
-            )
-        } else {
-            let list = ListView::new(
-                ListModel::from_vec(rows),
-                move |index, cmd: &PaletteCommand, _row_selected| {
-                    Box::new(command_row(cmd, index == selected_index))
-                },
-            )
-            .item_height(row_height(&ctx.theme().input))
-            // Makes each row's `Role::ListBoxOption` report `selected` truthfully.
-            .selection(self.state.selection.clone());
-            // Take the realized-row map before the view moves into the tree.
-            let row_ids = list.realized_row_ids();
-            // The window the reader is looking at is state this widget owns, so it
-            // survives the rebuild that every keystroke causes.
-            list.scroll_to_index(self.state.top_index.get());
-
-            // `ctx.add` builds the subtree synchronously, so by the time this
-            // returns the body pane has already published its realized rows and
-            // the highlighted row's id is resolvable — no deferred effect, no
-            // frame of silence after an arrow key.
-            let list_id = ctx.add(list);
-            self.state.listbox_id.set(Some(list_id));
-            let active = row_ids
-                .borrow()
-                .iter()
-                .find(|(index, _)| *index == selected_index)
-                .map(|(_, id)| *id);
-            self.state.active_row.set(active);
-
-            Box::new(Expand::new().child(list_id))
-        };
-
-        let key_state = self.state.clone();
-        // The column is pinned to the presented size rather than left to size itself.
-        // `ModalContainer` sizes to its content, and the result list lives under an
-        // `Expand` — with no bounded height to fill, the list measures zero and the
-        // palette collapses to just its search field, which is exactly what shipped
-        // the first time this was run.
-        let column = VStack::new()
-            .spacing(4.0)
-            .child(Padding::symmetric(8.0, 8.0).child(field))
-            .child(ctx.add_boxed(body))
-            .on_key(move |ev, ctx| match ev {
-                WidgetEvent::KeyDown {
-                    key: Key::ArrowDown,
-                    ..
-                } => {
-                    key_state.step_selection(1);
-                    EventResponse::Handled
-                }
-                WidgetEvent::KeyDown {
-                    key: Key::ArrowUp, ..
-                } => {
-                    key_state.step_selection(-1);
-                    EventResponse::Handled
-                }
-                // A palette is a list, and a long result set is exactly
-                // where jumping to an end matters — these were the only list
-                // keys it did not answer.
-                WidgetEvent::KeyDown { key: Key::Home, .. } => {
-                    key_state.select_edge(false);
-                    EventResponse::Handled
-                }
-                WidgetEvent::KeyDown { key: Key::End, .. } => {
-                    key_state.select_edge(true);
-                    EventResponse::Handled
-                }
-                WidgetEvent::KeyDown {
-                    key: Key::PageUp, ..
-                } => {
-                    key_state.step_selection(-(VISIBLE_ROWS as isize));
-                    EventResponse::Handled
-                }
-                WidgetEvent::KeyDown {
-                    key: Key::PageDown, ..
-                } => {
-                    key_state.step_selection(VISIBLE_ROWS as isize);
-                    EventResponse::Handled
-                }
-                WidgetEvent::KeyDown {
-                    key: Key::Escape, ..
-                } => {
-                    key_state.dismiss(ctx);
-                    EventResponse::Handled
-                }
-                _ => EventResponse::Ignored,
-            });
-
-        // `Live::Off` on the root of the content. The palette's own node is
+        // `Live::Off` on each part of the content. The palette's own node is
         // a polite live region, and `accesskit_consumer` hands a node's
         // politeness down to every descendant that sets none (node.rs:
         // 906-910), while all three adapters announce each named node that
         // enters the filtered tree, or is renamed there, with an inherited
         // politeness (atspi_common adapter.rs:71-77 and node.rs:610-622,
-        // windows adapter.rs:255-263, macos event.rs:236-241). Once the
-        // dialog panel stopped hiding the palette, opening it announced the
-        // field and every row and category, and each keystroke announced
-        // the rows it brought in, each cutting off the one before.
-        let root = ctx.add_boxed(Box::new(
-            FixedSize::new()
-                .width(PALETTE_WIDTH as f32)
-                .height(PALETTE_HEIGHT as f32)
-                .child(column)
-                .access_live(teksilo_core::accesskit::Live::Off),
-        ));
-        self.root_child_id = Some(root);
-        vec![root]
+        // windows adapter.rs:255-263, macos event.rs:236-241). Without it,
+        // opening the palette announced the field and every row, and each
+        // keystroke announced the rows it brought in, each cutting off the
+        // one before.
+        self.field_id = Some(
+            ctx.add(
+                Padding::uniform(FIELD_PADDING)
+                    .child(field)
+                    .access_live(Live::Off),
+            ),
+        );
+        self.divider_id = Some(ctx.add(Divider::horizontal()));
+        let config = Rc::new(ResultsConfig {
+            include: self.include.clone(),
+            show_disabled: self.show_disabled,
+            empty_text: self.empty_text.clone(),
+        });
+        self.results_id =
+            Some(ctx.add(PaletteResults::new(self.state.clone(), config).access_live(Live::Off)));
+
+        let key_state = self.state.clone();
+        ctx.apply_self_handlers(HandlerSet::new().on_key(move |ev, ctx| {
+            // Home and End are not here: they belong to the search field,
+            // which moves its caret with them.
+            let WidgetEvent::KeyDown { key, .. } = ev else {
+                return EventResponse::Ignored;
+            };
+            match key {
+                Key::ArrowDown => key_state.step(true),
+                Key::ArrowUp => key_state.step(false),
+                Key::PageDown => key_state.page(true),
+                Key::PageUp => key_state.page(false),
+                Key::Escape => key_state.dismiss(ctx),
+                _ => return EventResponse::Ignored,
+            }
+            EventResponse::Handled
+        }));
+
+        self.children()
     }
 
     fn accessibility(&self, node: &mut AccessNodeBuilder) {
@@ -684,21 +570,40 @@ impl Widget for CommandPalette {
                 .to_string(),
         );
         node.set_modal();
-        // How many commands the query currently matches — the one fact a
+        // How many commands the query currently matches: the one fact a
         // sighted user reads off the list at a glance and a screen-reader user
         // otherwise has to arrow through the whole list to learn.
-        let count = self.state.rows.borrow().len();
+        let count = self.state.count.get();
         node.set_description(
             tr_widget!(command_palette_result_count(count = count as i64)).resolve_now(),
         );
-        node.set_live(teksilo_core::accesskit::Live::Polite);
+        node.set_live(Live::Polite);
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        self.root_child_id
-            .and_then(|id| ctx.child_size(id, proposal))
-            .map(LayoutResponse::from)
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0).into())
+        let width = proposal.width.unwrap_or(PALETTE_WIDTH);
+        let at_width = SizeProposal::with_width(width);
+        let fixed: f32 = [self.field_id, self.divider_id]
+            .into_iter()
+            .flatten()
+            .filter_map(|id| ctx.child_size(id, at_width))
+            .map(|s| s.height)
+            .sum();
+        let results = self
+            .results_id
+            .and_then(|id| ctx.child_layout_response(id, at_width));
+        let (ideal, min) = match results {
+            Some(r) => (fixed + r.size.height, fixed + r.min.height),
+            None => (fixed, fixed),
+        };
+        // As tall as the content and no taller, so the panel hugs a short
+        // list; squeezed by a short window, the list gives up rows first.
+        let height = proposal.height.map_or(ideal, |h| h.min(ideal));
+        LayoutResponse::shrinkable(
+            Size::new(width, height),
+            Size::new(width, min.min(height)),
+            1.0,
+        )
     }
 
     fn place_children(
@@ -706,162 +611,30 @@ impl Widget for CommandPalette {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
+        let at_width = SizeProposal::with_width(bounds.width);
+        let mut y = bounds.y;
         for child in children.iter_mut() {
-            child.origin = Point::new(bounds.x, bounds.y);
-            child.size = Size::new(bounds.width, bounds.height);
+            let height = if Some(child.id) == self.results_id {
+                (bounds.bottom() - y).max(0.0)
+            } else {
+                ctx.child_size(child.id, at_width)
+                    .map(|s| s.height)
+                    .unwrap_or(0.0)
+            };
+            child.origin = Point::new(bounds.x, y);
+            child.size = Size::new(bounds.width, height);
+            y += height;
         }
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.root_child_id.into_iter().collect()
+        [self.field_id, self.divider_id, self.results_id]
+            .into_iter()
+            .flatten()
+            .collect()
     }
-}
-
-/// One rendered row: name over category on the left, chord on the right, on a
-/// selection-tinted ground.
-fn command_row(cmd: &PaletteCommand, selected: bool) -> impl Widget + 'static {
-    let name_color = if cmd.enabled {
-        TextRole::Primary
-    } else {
-        TextRole::Disabled
-    };
-    let mut left = VStack::new().spacing(1.0).child(
-        TextWidget::new(lit!(cmd.name.clone()))
-            .style(TextStyleRole::Body)
-            .color(name_color)
-            .single_line(),
-    );
-    // The category is the row's disambiguator — two features' "Close" read identically
-    // without it — so it shows always, not only while searching.
-    if let Some(cat) = &cmd.category_text {
-        left = left.child(
-            TextWidget::new(lit!(cat.clone()))
-                .style(TextStyleRole::Small)
-                .color(TextRole::Secondary)
-                .single_line(),
-        );
-    }
-
-    // An unbound command is the normal case here, not a defect, so it gets empty space
-    // rather than the em-dash a settings table uses to mean "nothing bound yet".
-    let chord = cmd.keystroke.map(format_keystroke).unwrap_or_default();
-
-    let row = HStack::new()
-        .spacing(10.0)
-        .child(left)
-        .child(Spacer::new())
-        .child(
-            TextWidget::new(lit!(chord))
-                .style(TextStyleRole::Small)
-                .color(TextRole::Secondary)
-                .single_line(),
-        );
-
-    // The highlight carries two channels, not one. A background tint alone is a
-    // colour-only distinction (WCAG 1.4.1) and disappears entirely under a
-    // high-contrast or forced-colours setting; the leading bar is a shape, so it
-    // survives both. Same reading as the selection edge `StandardListItem`
-    // draws — a palette row is a list row wearing different padding.
-    let bg = RectWidget::new().background(if selected {
-        SurfaceRole::Selected
-    } else {
-        SurfaceRole::Transparent
-    });
-    let marker =
-        FixedSize::new()
-            .width(SELECTION_MARKER_WIDTH)
-            .child(RectWidget::new().background(if selected {
-                ColorProp::from(BorderRole::Focused)
-            } else {
-                ColorProp::from(SurfaceRole::Transparent)
-            }));
-
-    ZStack::new().child(bg).child(
-        HStack::new()
-            .child(marker)
-            .child(Expand::new().child(Padding::symmetric(6.0, 10.0).child(row))),
-    )
-}
-
-// ── Matching ────────────────────────────────────────────────────────────────
-
-/// Score `haystack` against an already-lowercased `needle`, or `None` when the needle
-/// is not a subsequence of it.
-///
-/// Higher is better. The weights encode three preferences, strongest first: a run of
-/// typed letters landing consecutively beats the same letters scattered; a letter
-/// landing at the start of a word beats one landing mid-word; and an early match beats
-/// a late one. That is enough to put the row a person meant at the top for the queries
-/// people actually type, without a general-purpose ranking library.
-///
-/// A space in the needle matches a space in the haystack like any other character, so
-/// `file new` behaves as a two-word query against the "category name" haystack.
-fn fuzzy_score(needle: &str, haystack: &str) -> Option<i32> {
-    if needle.is_empty() {
-        return Some(0);
-    }
-    const CONSECUTIVE_BONUS: i32 = 15;
-    const WORD_START_BONUS: i32 = 20;
-    const GAP_PENALTY: i32 = 1;
-    const MAX_GAP_PENALTY: i32 = 20;
-
-    let hay: Vec<char> = haystack.to_lowercase().chars().collect();
-    // Word starts are read off the *original* casing, so a TitleCase or camelCase
-    // boundary counts even with no separator before it.
-    let raw: Vec<char> = haystack.chars().collect();
-    let is_word_start = |i: usize| -> bool {
-        if i == 0 {
-            return true;
-        }
-        // `hay` is the lowercased haystack and `raw` the original. Lowercasing can
-        // change the character count for some scripts, so only consult `raw` when the
-        // two line up; otherwise fall back to the separator test alone.
-        let Some(&prev) = raw.get(i.wrapping_sub(1)) else {
-            return true;
-        };
-        let Some(&cur) = raw.get(i) else {
-            return false;
-        };
-        !prev.is_alphanumeric() || (prev.is_lowercase() && cur.is_uppercase())
-    };
-
-    let mut score = 0;
-    let mut hay_pos = 0usize;
-    let mut last_match: Option<usize> = None;
-    // Length of the run of consecutive matches ending at the previous character. The
-    // bonus compounds with it, which is what makes a whole word typed out beat the
-    // same letters collected from the start of several words: `exp` must find
-    // "Export", not "Edit XML Properties", even though the latter matches three word
-    // starts and the former only one.
-    let mut streak = 0;
-
-    for want in needle.chars() {
-        let found = hay[hay_pos..].iter().position(|c| *c == want)? + hay_pos;
-        match last_match {
-            Some(prev) if found == prev + 1 => {
-                streak += 1;
-                score += CONSECUTIVE_BONUS * streak;
-            }
-            Some(prev) => {
-                streak = 0;
-                score -= ((found - prev - 1) as i32 * GAP_PENALTY).min(MAX_GAP_PENALTY);
-            }
-            // Reward matching near the front, so `new` prefers "New Window" over a
-            // command that merely contains the letters later on.
-            None => {
-                streak = 0;
-                score -= (found as i32 * GAP_PENALTY).min(MAX_GAP_PENALTY);
-            }
-        }
-        if is_word_start(found) {
-            score += WORD_START_BONUS;
-        }
-        last_match = Some(found);
-        hay_pos = found + 1;
-    }
-    Some(score)
 }
 
 #[cfg(test)]

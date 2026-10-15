@@ -3,6 +3,8 @@
 
 # CommandPalette
 
+![CommandPalette preview](img/command_palette.png)
+
 CommandPalette — type-to-run access to every command an app has registered.
 
 ## Public types
@@ -57,18 +59,27 @@ ctx.register_shortcut_global(
 );
 ```
 
-The standard edit commands every tree registers (`StandardEdit`: cut,
-copy, paste, undo, redo, select all) are left out, and so are the editors'
-own (`FormatShortcut`,
-`CodeShortcut`). They act on the
-widget that holds the focus, and the palette has taken it, so a row for one
-would run nothing. An application whose own undo should be searchable
-registers it as a command of its own.
+### Running a command
+
+Activating a row (Enter, or a click) closes the palette, which hands focus
+back to whatever the user was working in, and then sends the command's
+intent from there, as its keystroke would have been sent
+(`EventContext::send_intent_from_focus`). So a command answers wherever
+its action is registered: on the editor the palette was opened over, on
+one of that editor's ancestors, or window-wide.
+
+That is also why a presented palette lists the commands that act on the
+focused editor: the standard edit commands every tree registers
+(`StandardEdit`: cut, copy, paste, undo, redo, select all) and the
+editors' own (`FormatShortcut`,
+`CodeShortcut`). A palette embedded
+in a surface of the caller's keeps the focus in its own search field, where
+those commands would act on the query, so it leaves them out.
 
 ### Presenting it
 
-`CommandPalette::present` shows it centered, dismissed by Escape or a click
-outside:
+`CommandPalette::present` shows it as a modal near the top of the window,
+dismissed by Escape or a click outside:
 
 ```ignore
 ctx.register_action_global(Action::new("app.command_palette").on_invoke(|_, ctx| {
@@ -79,7 +90,18 @@ ctx.register_action_global(Action::new("app.command_palette").on_invoke(|_, ctx|
 Presenting it as a **window-level** modal is deliberate, not incidental: a palette
 is routinely opened from a menu, and a menu is itself a transient overlay.
 Anchoring to the invoking widget would render the palette inside the menu that
-opened it, positioned against a surface that is about to disappear.
+opened it, positioned against a surface that is about to disappear. It is
+anchored by its top edge (`ModalPlacement::Top`) rather than centred: the
+palette is as tall as its list, and a centred one would move its search field
+with every keystroke that changed the number of matches.
+
+### What a row shows
+
+One line: the category, muted (`File:`), then the command's name, with the
+letters the query matched in bold, then its description when it has one,
+muted and the first to give way to a long name, and the effective shortcut,
+user rebinds merged in, drawn as a key at the trailing edge. Rows grow with
+the global text scale.
 
 ### Matching
 
@@ -89,6 +111,9 @@ consecutively and on word starts, so the most literal reading of a query sorts
 first. An empty query lists everything in the registry's own deterministic
 `(category, id)` order. The category takes part in matching, so `file new` finds
 the New command filed under File.
+A query can usually land in a command in more than one way (`exp` in "File:
+Export": the `e` of "File", or the `E` of "Export"); the best-scoring way is
+kept, and its letters are the ones the row shows in bold.
 
 The category a reader sees and matches against is the shortcut's
 `category_label` when it has one, and its `category` key otherwise. Give a
@@ -101,10 +126,24 @@ declared no category from the widget catalogue
 
 ### Keyboard
 
-Focus stays in the search field throughout — that is what makes a palette feel
+Focus stays in the search field throughout: that is what makes a palette feel
 like one. Arrow keys are not editing keys for the field, so they bubble to the
-palette's own handler, which moves the highlight and scrolls it into view. Enter
-runs the highlighted command; Escape dismisses.
+palette's own handler, which moves the highlight (wrapping at either end) and
+scrolls it into view; PageUp and PageDown move it a viewport at a time. Home and
+End stay with the field, which moves its caret with them. Enter runs the
+highlighted command; Escape dismisses.
+
+Typing re-filters the list and nothing else: the list is a sibling of the search
+field, not its parent, so the field keeps its caret, its selection and an input
+method's composition from one keystroke to the next.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![CommandPalette at Touch density](img/command_palette-touch.png)
 
 ## API reference
 
@@ -133,10 +172,10 @@ pub struct PaletteCommand { /* fields */ }
 
 - **`id`**: `&'static str` — The stable registry id, e.g. `"work.export"`.
 - **`name`**: `String` — The localized display name, already resolved for the active locale.
-- **`category`**: `Option<&'static str>` — The grouping key, if the command declared one — stable across languages, so an `CommandPalette::include` filter can match on it.
+- **`category`**: `Option<&'static str>` — The grouping key, if the command declared one: stable across languages, so an `CommandPalette::include` filter can match on it.
 - **`category_text`**: `Option<String>` — The category as the reader sees it, already resolved for the active locale: the command's `category_label`, or the key when it gave none.
 - **`description`**: `Option<String>` — The longer explanation, if the command declared one.
-- **`keystroke`**: `Option<KeyStroke>` — The effective primary chord — user rebinds merged in — or `None` when the command has no keystroke at all, which is normal for a palette-only command.
+- **`keystroke`**: `Option<KeyStroke>` — The effective primary chord (user rebinds merged in), or `None` when the command has no keystroke at all, which is normal for a palette-only command.
 - **`enabled`**: `bool` — Whether the command's own `enabled_when` predicate currently says yes.
 - **`intent`**: `&'static str` — The intent name activation sends. Falls back to `Self::id` when the command declared no explicit intent, exactly as the keystroke dispatcher does.
 
@@ -209,5 +248,5 @@ The query signal, so a caller can seed or observe what was typed.
 
 #### `pub fn present(self, ctx: &mut EventContext)`
 
-Show the palette centered in the window, dismissed by Escape or a click
-outside. See the `module docs` on why this is window-level.
+Show the palette near the top of the window, dismissed by Escape or a
+click outside. See the `module docs` on why this is window-level.

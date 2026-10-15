@@ -390,6 +390,7 @@ toast-body-copied = Kopiert
 # crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Skriv en kommando
 command-palette-empty = Ingen kommandoer samsvarer
+command-palette-category = { $category }:
 # Tilgjengelig navn på dialogen og søkefeltet i paletten. Vises aldri på
 # skjermen, så dette er det eneste som forteller en skjermleserbruker
 # hva som nettopp ble åpnet.

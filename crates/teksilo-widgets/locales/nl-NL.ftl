@@ -390,6 +390,7 @@ toast-body-copied = Gekopieerd
 # crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Typ een opdracht
 command-palette-empty = Geen overeenkomende opdracht
+command-palette-category = { $category }:
 command-palette-title = Opdrachtenpalet
 command-palette-result-count =
     { $count ->

@@ -382,6 +382,7 @@ toast-body-copied = Kopyalandı
 # crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Bir komut yazın
 command-palette-empty = Eşleşen komut yok
+command-palette-category = { $category }:
 command-palette-title = Komut paleti
 command-palette-result-count =
     { $count ->

@@ -104,6 +104,18 @@ pub type OverlayDismissCallback = Rc<dyn Fn(DismissReason, &mut crate::widget::E
 /// for an overlay that hangs off a part of its anchor no placement names.
 pub type OverlayPlacementSource = Rc<dyn Fn(Rect, LayoutDirection) -> OverlayPlacement>;
 
+impl OverlayPlacement {
+    /// Whether this is a modal's placement: [`Centered`](Self::Centered), the
+    /// dialog's, or [`TopCenter`](Self::TopCenter), a command palette's. The
+    /// tree reads modality off the placement, so these are the overlays it
+    /// treats as modal: focus stays inside them, the page behind them refuses
+    /// assistive-technology requests, and an overlay opened inside one never
+    /// dismisses it.
+    pub fn is_modal(&self) -> bool {
+        matches!(self, Self::Centered | Self::TopCenter { .. })
+    }
+}
+
 /// Unique identifier for an active overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OverlayId(u64);
@@ -195,6 +207,13 @@ pub enum OverlayPlacement {
     Centered,
     /// Bottom-centered within the viewport (snackbar/toast).
     BottomCenter,
+    /// Horizontally centred, with the top edge `offset` below the top of the
+    /// usable area (a command palette). Anchor bounds are ignored. The top
+    /// edge stays put while the content's height changes, which is the point:
+    /// a centred surface that shrinks as its list narrows moves everything
+    /// above the list with it. When the content would run past the bottom,
+    /// it is raised, and then shrunk, to fit.
+    TopCenter { offset: f32 },
     /// Below the anchor if space allows, otherwise above (combo box dropdown).
     /// The viewport height is supplied by `position_overlays()` at layout time.
     ///
@@ -1027,11 +1046,11 @@ impl OverlayManager {
         self.overlay(id).map(|o| o.bounds)
     }
 
-    pub(crate) fn topmost_centered(&self) -> Option<&ActiveOverlay> {
+    pub(crate) fn topmost_modal(&self) -> Option<&ActiveOverlay> {
         self.stack
             .iter()
             .rev()
-            .find(|overlay| matches!(overlay.placement, OverlayPlacement::Centered))
+            .find(|overlay| overlay.placement.is_modal())
     }
 
     /// Dismiss an overlay and all its children (cascade), returning the

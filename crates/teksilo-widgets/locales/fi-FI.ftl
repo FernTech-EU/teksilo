@@ -386,6 +386,7 @@ toast-body-copied = Kopioitu
 # crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Kirjoita komento
 command-palette-empty = Ei vastaavia komentoja
+command-palette-category = { $category }:
 command-palette-title = Komentopaletti
 command-palette-result-count =
     { $count ->

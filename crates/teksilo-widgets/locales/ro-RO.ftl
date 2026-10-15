@@ -389,6 +389,7 @@ toast-body-copied = Copiat
 # crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Tastați o comandă
 command-palette-empty = Nicio comandă corespunzătoare
+command-palette-category = { $category }:
 # Numele accesibil al casetei de dialog a paletei și al câmpului său de
 # căutare. Nu apare niciodată pe ecran.
 command-palette-title = Paletă de comenzi

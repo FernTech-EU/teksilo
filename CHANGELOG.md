@@ -13,6 +13,65 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Core
+
+- **`ModalPlacement` and `ModalRequest::placement`.** An in-tree modal can be
+  anchored by its top edge (`ModalPlacement::Top { offset }`) instead of
+  centred, for a surface whose height changes while it is open. Backed by the
+  new `OverlayPlacement::TopCenter`. `OverlayPlacement::is_modal` says which
+  placements the tree treats as modal: `Centered` and `TopCenter`.
+- **`EventContext::send_intent_from_focus`.** Sends an intent from whichever
+  widget holds focus once the handler's other effects have been applied, a
+  modal dismissal included, the way a keyboard shortcut is sent. A surface
+  that closes and then runs a command reaches the actions registered around
+  what the user was working in.
+
+### Changed
+
+#### Core
+
+- **`ModalRequest` has a `placement` field.** Code building a `ModalRequest`
+  with a struct literal must add `placement: ModalPlacement::Centered`; the
+  constructors set it.
+
+#### Widgets
+
+- **`CommandPalette` has a new look.** It opens near the top of the window
+  and is as tall as its list, up to ten rows. Each row is one line,
+  `Category: Name`, with the letters the query matched in bold, the
+  command's description after it, and the shortcut drawn as a key. Rows grow
+  with the global text scale. The arrow keys wrap
+  at either end; Home and End move the search field's caret.
+- **A presented `CommandPalette` lists cut, copy, paste, undo, redo, select
+  all and the editors' own commands,** and runs them in the editor it was
+  opened over. An embedded palette still leaves them out.
+- **New message `command-palette-category`** in every widget locale, the
+  category prefix of a palette row (`File:`).
+
+### Fixed
+
+#### Widgets
+
+- **A `CommandPalette` with no match rebuilt itself every frame** for as long
+  as nothing matched, and drew its "No matching command" text outside the
+  panel.
+- **Clicking a palette row ran nothing.** It now runs the command.
+- **Typing in the palette moved the caret to the end after every key,** and
+  each key or arrow press also lost an input method's composition. The
+  search field is no longer rebuilt as the query changes.
+- **A palette command reached only window-global actions.** It now reaches
+  an action registered on, or around, the widget the palette was opened
+  over.
+- **The palette's keyboard scrolling assumed seven visible rows,** and left
+  the highlight out of view at other densities, at other text scales and
+  after a scroll with the wheel.
+- **The highlighted palette row had no outline,** so the highlight was
+  colour only.
+- **A presented palette given its own `on_dismiss` stayed open** after
+  running a command. It now closes, and the hook still runs once.
+
 ## [0.17.2] - 2026-10-14
 
 ### Added

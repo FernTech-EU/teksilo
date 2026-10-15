@@ -343,6 +343,10 @@ pub struct EventContext<'ops> {
     /// Intents queued by handlers via `send_intent`. Drained by the
     /// tree after event dispatch and routed source-widget → root.
     pub(crate) pending_intents: Vec<crate::intent::Intent>,
+    /// Intents queued via `send_intent_from_focus`: routed from the focus
+    /// the tree holds once this handler's effects, a modal dismissal among
+    /// them, have been applied.
+    pub(crate) pending_focus_intents: Vec<crate::intent::Intent>,
     /// The dispatcher sets this to the appropriate
     /// [`IntentSource`](crate::telemetry::IntentSource) before
     /// invoking a typed handler (menu select → `Menu`, AccessKit
@@ -563,6 +567,7 @@ impl<'ops> EventContext<'ops> {
             frame_requested: false,
             app_context: None,
             pending_intents: Vec::new(),
+            pending_focus_intents: Vec::new(),
             current_source: None,
             pending_key_capture: None,
             cancel_key_capture: false,
@@ -990,6 +995,29 @@ impl<'ops> EventContext<'ops> {
             intent.source = src;
         }
         self.pending_intents.push(intent);
+    }
+
+    /// Queue `intent` to be dispatched from the widget that holds keyboard
+    /// focus once this handler's other effects have been applied, the way a
+    /// keyboard shortcut is dispatched. [`send_intent`](Self::send_intent)
+    /// dispatches from the widget whose handler is running instead.
+    ///
+    /// The difference matters for a surface that runs commands on behalf of
+    /// whatever the user was working in and then closes, such as a command
+    /// palette: it calls [`dismiss_modal`](Self::dismiss_modal), focus goes
+    /// back to the editor the palette was opened over, and the intent then
+    /// walks from that editor, so the actions it registered answer. Sent with
+    /// `send_intent`, the same intent would start from the palette, which is
+    /// gone by the time the walk runs, and only window-global actions could
+    /// catch it.
+    ///
+    /// Falls back to this handler's widget when nothing is focused.
+    pub fn send_intent_from_focus(&mut self, intent: impl Into<crate::intent::Intent>) {
+        let mut intent: crate::intent::Intent = intent.into();
+        if let Some(src) = self.current_source {
+            intent.source = src;
+        }
+        self.pending_focus_intents.push(intent);
     }
 
     /// Run a closure with the given `IntentSource` active. Any
@@ -2644,6 +2672,7 @@ mod multi_window_tests {
             close_behavior: crate::modal::ModalCloseBehavior::default(),
             title: Some("Confirm".to_string()),
             size: Some((420, 180)),
+            placement: crate::modal::ModalPlacement::Centered,
             focus_target: None,
             on_dismiss: None,
         };
@@ -2680,6 +2709,7 @@ mod multi_window_tests {
             close_behavior: crate::modal::ModalCloseBehavior::default(),
             title: None,
             size: None,
+            placement: crate::modal::ModalPlacement::Centered,
             focus_target: None,
             on_dismiss: None,
         };

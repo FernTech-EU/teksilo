@@ -381,6 +381,7 @@ toast-body-copied = הועתק
 # crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = יש להקליד פקודה
 command-palette-empty = אין פקודה מתאימה
+command-palette-category = { $category }:
 command-palette-title = לוח הפקודות
 command-palette-result-count =
     { $count ->

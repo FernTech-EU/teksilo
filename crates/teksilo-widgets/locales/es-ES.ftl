@@ -397,6 +397,7 @@ toast-body-copied = Copiado
 # crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Escriba un comando
 command-palette-empty = No hay comandos coincidentes
+command-palette-category = { $category }:
 command-palette-title = Paleta de comandos
 command-palette-result-count =
     { $count ->

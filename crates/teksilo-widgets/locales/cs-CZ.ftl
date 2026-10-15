@@ -385,6 +385,7 @@ toast-body-copied = Zkopírováno
 # crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Zadejte příkaz
 command-palette-empty = Žádný odpovídající příkaz
+command-palette-category = { $category }:
 command-palette-title = Paleta příkazů
 command-palette-result-count =
     { $count ->

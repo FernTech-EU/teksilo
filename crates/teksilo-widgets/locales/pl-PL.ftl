@@ -384,6 +384,7 @@ toast-body-copied = Skopiowano
 # i crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Wpisz polecenie
 command-palette-empty = Brak pasujących poleceń
+command-palette-category = { $category }:
 command-palette-title = Paleta poleceń
 command-palette-result-count =
     { $count ->

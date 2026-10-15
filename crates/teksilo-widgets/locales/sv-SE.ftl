@@ -382,6 +382,7 @@ toast-body-copied = Kopierat
 # crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Skriv ett kommando
 command-palette-empty = Inget matchande kommando
+command-palette-category = { $category }:
 command-palette-title = Kommandopalett
 command-palette-result-count =
     { $count ->

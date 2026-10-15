@@ -385,6 +385,7 @@ toast-body-copied = コピーしました
 # crates/teksilo-widgets/src/command_palette.rs を参照。
 command-palette-placeholder = コマンドを入力
 command-palette-empty = 一致するコマンドがありません
+command-palette-category = { $category }:
 # パレットのダイアログと検索フィールドのアクセシブル名。画面には表示されない
 # ため、スクリーンリーダー利用者に何が開いたかを伝える唯一の手掛かりとなる。
 command-palette-title = コマンドパレット

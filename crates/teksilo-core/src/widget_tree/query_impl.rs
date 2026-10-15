@@ -552,7 +552,7 @@ mod tests {
 
         let center = tree
             .overlay_manager()
-            .topmost_centered()
+            .topmost_modal()
             .expect("expected centered modal overlay")
             .bounds
             .center();

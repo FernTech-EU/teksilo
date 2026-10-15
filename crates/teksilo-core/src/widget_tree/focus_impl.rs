@@ -605,7 +605,7 @@ impl WidgetTree {
     /// `Cycle` scope, so Tab is confined to the modal.
     pub(super) fn cycle_focus(&mut self, reverse: bool, ops: &mut dyn crate::window::WindowOps) {
         let mut entries = Vec::new();
-        if let Some(modal_overlay) = self.overlay_manager.topmost_centered() {
+        if let Some(modal_overlay) = self.overlay_manager.topmost_modal() {
             let content_id = modal_overlay.content_id;
             self.collect_scope_entries(content_id, &mut entries);
         } else {

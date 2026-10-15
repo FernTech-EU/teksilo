@@ -352,6 +352,7 @@ toast-body-copied = Kopiita
 # CommandPalette / GridView / CodeEditor.
 command-palette-placeholder = Tajpu komandon
 command-palette-empty = Neniu kongrua komando
+command-palette-category = { $category }:
 command-palette-title = Komandpaletro
 command-palette-result-count =
     { $count ->

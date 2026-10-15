@@ -392,6 +392,7 @@ toast-body-copied = Copiado
 # crates/teksilo-widgets/src/command_palette.rs.
 command-palette-placeholder = Escrever um comando
 command-palette-empty = Nenhum comando correspondente
+command-palette-category = { $category }:
 # Nome acessível da caixa de diálogo da paleta e do seu campo de pesquisa.
 command-palette-title = Paleta de comandos
 # Anunciado como descrição da caixa de diálogo e reanunciado à medida que a
