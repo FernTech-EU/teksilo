@@ -78,7 +78,7 @@ the umbrella `teksilo` crate. **wry is the default engine.**
   depend on `teksilo-webview` directly with `features = ["servo-backend"]` and
   pass `ServoBackend::new()` to `install_web_view(...)`.
 
-Pinned versions: `wry = 0.56.1`, `servo = 0.5.0`.
+Pinned versions: `wry = 0.57.0`, `servo = 0.5.0`.
 
 ### Linux build dependencies (wry / WebKitGTK)
 
@@ -124,7 +124,7 @@ GTK engine inside a winit app today. A future revision may pump only while a
 
 ## Servo backend: requirements & status
 
-Servo (`servo = 0.2.0`) is the intended **native Wayland** engine, pure Rust,
+Servo (`servo = 0.5.0`) is the intended **native Wayland** engine, pure Rust,
 no GTK reparenting problem. It is **work in progress**: the backend compiles and
 constructs a real Servo webview, but it is **not yet frame-driven**, so it does
 not paint a page. Building `--features servo` and running on Wayland selects it

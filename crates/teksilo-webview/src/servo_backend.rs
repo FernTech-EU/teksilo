@@ -4,8 +4,8 @@
 //! `ServoBackend` — best-effort pure-Rust engine backend (Linux/Wayland) via
 //! the [`servo`] crate. Gated behind the `servo-backend` feature.
 //!
-//! Built against Servo 0.2.0's real embedding API: a [`WindowRenderingContext`]
-//! bound to the OS window handle, a [`Servo`] instance, and a [`WebView`]
+//! Built against Servo 0.5's real embedding API: a [`WindowRenderingContext`]
+//! bound to the OS window handle, a [`Servo`] instance, and a [`WebView`](ServoWebView)
 //! created via [`WebViewBuilder`] with a [`WebViewDelegate`] that translates
 //! Servo's `notify_*` callbacks into [`WebViewEvent`]s.
 //!

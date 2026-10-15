@@ -25,8 +25,8 @@ teksilo-canvas = { workspace = true }
 # stays light and green without pulling a browser engine. The umbrella
 # `teksilo` crate's `web-view` feature selects the right one per platform.
 #
-# wry 0.55.1 (winit-0.30 compatible) is the production backend on
-# macOS / Windows / Linux-X11; servo 0.2.0 is the best-effort Wayland
+# wry 0.57 (winit-0.30 compatible) is the production backend on
+# macOS / Windows / Linux-X11; servo 0.5 is the best-effort Wayland
 # backend. Both are optional + feature-gated, so the default build never
 # pulls a browser engine.
 wry = { version = "0.57.0", optional = true, features = ["devtools"] }
@@ -40,7 +40,7 @@ raw-window-handle = { version = "0.6", optional = true }
 # wry's Linux engine is WebKitGTK, which runs on the GLib/GTK main loop. When
 # embedded in a winit (non-GTK) app, the host must `gtk::init()` and pump the
 # GTK loop each turn or the page never paints — that's what `pump_gtk_events`
-# does. Same gtk major (0.18) that wry 0.55 pulls. Linux-only.
+# does. Same gtk major (0.18) that wry 0.57 pulls. Linux-only.
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18", optional = true }
 
