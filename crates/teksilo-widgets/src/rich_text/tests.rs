@@ -4752,6 +4752,57 @@ fn min_and_max_lines_clamp_growth_within_window() {
     );
 }
 
+/// An intrinsic-height editor whose width changes re-wraps in `paint`, and the
+/// height it then has must reach the layout on the very next frame.
+///
+/// `layout_response` reports the content height of the layout it already has,
+/// `place_children` is the first to see the new width, and the re-wrap runs in
+/// `paint`. So the pass that narrows the editor always reports the *old*
+/// height. That is unavoidable inside one pass; what this pins is that the tree
+/// does not stop there. Before the fix nothing marked the editor for layout
+/// again, so a single jump in width (a window leaving fullscreen) left it, and
+/// everything measured against it, at the wide layout's height until some
+/// unrelated input caused another layout pass.
+#[test]
+fn a_rewrap_in_paint_reaches_the_next_layout_without_any_input() {
+    use crate::styles::recipe_text_input_style::TEXT_FIELD_PADDING_VERTICAL;
+    let doc = TextDocument::new();
+    doc.set_plain_text(&"The rain kept on for three days and then it stopped. ".repeat(40))
+        .unwrap();
+    let editor = RichTextEditor::editor(doc).min_lines(1);
+    let state = editor.state_handle();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+
+    tree.layout(SizeProposal::with_width(900.0));
+    let _ = tree.render();
+    let wide = state.borrow().engine.content_height();
+    assert!(wide > 0.0, "the wide pass must have laid the text out");
+
+    // The jump: one pass at a much narrower width, painted.
+    tree.layout(SizeProposal::with_width(250.0));
+    let _ = tree.render();
+    let narrow = state.borrow().engine.content_height();
+    assert!(
+        narrow > wide * 2.0,
+        "the paint must have re-wrapped at the narrow width ({wide:.1} -> {narrow:.1})"
+    );
+
+    // Nothing else happens: no input, no resize. The app runs another frame
+    // only if the tree says it has reactive work pending.
+    assert!(
+        tree.needs_reconcile(),
+        "the re-wrap left the tree idle: no frame would follow it"
+    );
+    tree.layout(SizeProposal::with_width(250.0));
+    let height = tree.bounds(id).height;
+    let expected = narrow + 2.0 * TEXT_FIELD_PADDING_VERTICAL;
+    assert!(
+        (height - expected).abs() < 1.0,
+        "the editor still claims {height:.1} px after the re-wrap; its text is {expected:.1}"
+    );
+}
+
 // -----------------------------------------------------------------------------
 // Composing/leaf split + RichTextEditorStyle wiring.
 // -----------------------------------------------------------------------------

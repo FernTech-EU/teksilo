@@ -102,6 +102,17 @@ pub(crate) struct EditorState {
     pub scroll_y: Signal<f32>,
     pub max_scroll_x: Signal<f32>,
     pub max_scroll_y: Signal<f32>,
+    /// The height of the text as last laid out, published after every layout
+    /// (full or incremental) by [`publish_laid_out_height`](Self::publish_laid_out_height).
+    ///
+    /// An editor sized to its content (`min_lines` / `max_lines`) measures
+    /// itself from this, and the body binds it at `Relayout` for that reason. A
+    /// width change is first seen at placement and re-wraps the text in `paint`,
+    /// after the pass that measured; without this the new height reached the
+    /// layout only if something unrelated asked for another pass, so a single
+    /// jump in width (a window leaving fullscreen) left the editor, and
+    /// everything measured against it, at the old height.
+    pub laid_out_height: Signal<f32>,
     pub viewport_ratio_x: Signal<f32>,
     pub viewport_ratio_y: Signal<f32>,
     /// This surface's pan physics: the range a finger's pan is clamped to and
@@ -851,6 +862,7 @@ impl EditorState {
             scroll_y: Signal::new(0.0),
             max_scroll_x: Signal::new(0.0),
             max_scroll_y: Signal::new(0.0),
+            laid_out_height: Signal::new(0.0),
             viewport_ratio_x: Signal::new(1.0),
             viewport_ratio_y: Signal::new(1.0),
             scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
@@ -983,6 +995,16 @@ impl EditorState {
             self.needs_full_layout = true;
         }
         changed
+    }
+
+    /// Publish [`laid_out_height`](Self::laid_out_height) from the engine's
+    /// current layout. Call after anything that lays the text out; a no-op when
+    /// the height did not move, so the binding only fires on a real change.
+    pub fn publish_laid_out_height(&self) {
+        if self.engine.has_full_layout() {
+            self.laid_out_height
+                .set_if_changed(self.engine.content_height());
+        }
     }
 
     /// The sessions this view actually renders: its [`highlight_mask`](Self::highlight_mask),

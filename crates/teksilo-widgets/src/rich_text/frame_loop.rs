@@ -188,6 +188,10 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
         }
     }
 
+    // Either branch above may have changed how tall the text is: publish it for
+    // an editor sized to its content (see `EditorState::laid_out_height`).
+    state.publish_laid_out_height();
+
     // Step 4b: paint-only highlight recolor. A `HighlightPaintChanged` event
     // only changes colors, so re-derive the cached layout's colors WITHOUT
     // reshaping/reflowing, then force a full re-render (re-bakes glyph &

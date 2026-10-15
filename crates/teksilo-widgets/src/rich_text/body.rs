@@ -218,6 +218,19 @@ impl Widget for RichTextEditorBody {
             );
         }
 
+        // An editor sized to its content measures itself from the laid-out
+        // height, so it is re-measured whenever that height moves. Only then: a
+        // greedy editor takes its proposal whatever the text does, and binding it
+        // there would relayout the tree on every line a writer adds.
+        if self.min_lines.is_some() || self.max_lines.is_some() {
+            let laid_out_height = self.state.borrow().laid_out_height.clone();
+            laid_out_height.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                teksilo_core::binding::BindingLevel::Relayout,
+            );
+        }
+
         Vec::new()
     }
 
@@ -514,6 +527,10 @@ impl Widget for RichTextEditorBody {
             st.engine.layout_full(&flow);
             st.needs_full_layout = false;
             st.content_dirty = true;
+            // The re-wrap a width change forces lands here, after the pass that
+            // measured this body, so an editor sized to its content needs the new
+            // height pushed back to the layout. See `EditorState::laid_out_height`.
+            st.publish_laid_out_height();
             #[cfg(feature = "debug-traces")]
             if height_debug() {
                 eprintln!(

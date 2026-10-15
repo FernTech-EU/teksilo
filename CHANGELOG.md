@@ -13,6 +13,17 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Widgets
+
+- **A `RichTextEditor` sized to its content (`min_lines` / `max_lines`) kept
+  its old height after a single change of width,** such as a window leaving
+  fullscreen. The text re-wrapped, but the editor, and anything laid out
+  against it, stayed at the height of the old wrap until some unrelated input
+  caused another layout. The new height now reaches the layout on the next
+  frame.
+
 ## [0.18.0] - 2026-10-15
 
 ### Added
