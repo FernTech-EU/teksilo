@@ -30,11 +30,12 @@ use crate::widget_id::WidgetId;
 pub enum WebViewVisualState {
     /// The engine is loading the current page — show the loading shimmer.
     Loading,
-    /// The page has finished loading and is displayed by the engine subview.
+    /// The page has finished loading and is displayed by the engine.
     /// The overlay is fully transparent; only the focus ring may show.
     Ready,
     /// Navigation or engine init failed — show the error chrome. Also the
-    /// state the Wayland-without-Servo / unsupported-platform path lands in.
+    /// state a platform with no engine that can embed lands in (wry under a
+    /// Wayland session, without Servo).
     Error,
 }
 

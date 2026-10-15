@@ -31,11 +31,17 @@ teksilo-canvas = { workspace = true }
 # pulls a browser engine.
 wry = { version = "0.57.0", optional = true, features = ["devtools"] }
 servo = { version = "0.5.0", optional = true }
-# Servo embedding-API support types (its WebView/RenderingContext speak `url`,
-# `dpi`, and raw-window-handle 0.6 — the same rwh major as teksilo-core).
+# Servo embedding-API support types: its WebView and RenderingContext speak
+# `url` and `dpi`. The Servo backend renders offscreen through a GL context of
+# its own (servo_backend/gl_context.rs), written against the same surfman,
+# gleam, glow and euclid releases servo-paint-api 0.5 uses, so the types its
+# RenderingContext trait names are the ones this crate hands it.
 url = { version = "2", optional = true }
 dpi = { version = "0.1", optional = true }
-raw-window-handle = { version = "0.6", optional = true }
+surfman = { version = "0.13.0", optional = true, features = ["chains"] }
+gleam = { version = "0.15", optional = true }
+glow = { version = "0.17", optional = true }
+euclid = { version = "0.22", optional = true }
 
 # wry's Linux engine is WebKitGTK, which runs on the GLib/GTK main loop. When
 # embedded in a winit (non-GTK) app, the host must `gtk::init()` and pump the
@@ -50,7 +56,15 @@ default = []
 # Linux-X11 WebKitGTK) via `wry`.
 wry-backend = ["dep:wry", "dep:gtk"]
 # Best-effort pure-Rust engine backend (Linux/Wayland) via `servo`.
-servo-backend = ["dep:servo", "dep:url", "dep:dpi", "dep:raw-window-handle"]
+servo-backend = [
+    "dep:servo",
+    "dep:url",
+    "dep:dpi",
+    "dep:surfman",
+    "dep:gleam",
+    "dep:glow",
+    "dep:euclid",
+]
 
 [dev-dependencies]
 teksilo-core = { workspace = true }

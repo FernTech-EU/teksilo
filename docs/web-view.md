@@ -5,8 +5,8 @@
 
 > **Status: prototype.** The **wry** backend (the default) is functional on
 > macOS / Windows / Linux-X11 and, via XWayland, on Linux/Wayland. The **Servo**
-> backend (the native Wayland path) is **work in progress**, it constructs a
-> real engine but is not yet frame-driven, so it does not paint a page. See
+> backend (the native Wayland path) renders pages inside the window, but takes
+> no input yet. See
 > [Servo backend: requirements & status](#servo-backend-requirements--status).
 
 `WebView` embeds HTML / web content in a Teksilo window, for documentation
@@ -36,11 +36,22 @@ TeksiloAppBuilder::new()
     .run();
 ```
 
-## The one widget that can't render into wgpu
+## Two ways an engine shows its page
 
-Every realistic engine, WKWebView (macOS), WebView2 (Windows), WebKitGTK
-(Linux/X11), Servo, owns its own rendering and lives as a **native OS subview
-on top of** Teksilo's wgpu surface. `WebView` accepts that and mirrors the
+The platform engines, WKWebView (macOS), WebView2 (Windows) and WebKitGTK
+(Linux/X11), all through wry, own their rendering and live as a **native OS
+subview on top of** Teksilo's wgpu surface. Most of this page is about that
+case: the widget has to position, clip and hide a view the wgpu pass cannot
+reach.
+
+Servo renders **offscreen** instead, into a picture the widget draws inside the
+wgpu pass like any other content (a `LiveImage`). A backend says which kind it
+is with `WebViewBackend::rendering()` (`WebViewRendering::NativeSubview` or
+`WebViewRendering::Surface`); for a surface engine the widget forwards input
+itself (`WebViewHandle::send_input`), since there is no native view for the OS
+to deliver it to.
+
+Either way `WebView` mirrors the
 established platform-backend pattern ([`FileDialogBackend`](../crates/teksilo-platform/src/file_dialog.rs),
 `ExternalDndBackend`): a swappable [`WebViewBackend`] creates an engine-specific
 [`WebViewHandle`]; a per-app [`WebViewRegistry`] (in `app_state`) routes
@@ -66,10 +77,9 @@ the umbrella `teksilo` crate. **wry is the default engine.**
 - **wry by default.** Enabling `web-view` gives a working webview with no extra
   flag. `cargo run -p web-view-demo` renders via wry.
 - **Servo is additive, Wayland-only at runtime.** `web-view-servo` *implies*
-  `web-view`, so it ships both engines; Servo is only selected under Wayland
-  (where wry's WebKitGTK can't reparent into a child window). There is no
-  "Servo-everywhere" build by design, Servo renders whole-window via GL,
-  conflicting with wgpu, and is the wrong engine off Wayland.
+  `web-view`, so it ships both engines; Servo is only selected under Wayland,
+  where wry's WebKitGTK can't reparent into a child window. Elsewhere the
+  platform's own engine, through wry, is the better page renderer.
 - **`web-view-headless`** is the no-engine escape hatch (mirrors
   `file-dialog-trait`): the widget + event routing, the inert no-op backend.
   Use for headless tests, or apps that install their own backend with
@@ -124,13 +134,38 @@ GTK engine inside a winit app today. A future revision may pump only while a
 
 ## Servo backend: requirements & status
 
-Servo (`servo = 0.5.0`) is the intended **native Wayland** engine, pure Rust,
-no GTK reparenting problem. It is **work in progress**: the backend compiles and
-constructs a real Servo webview, but it is **not yet frame-driven**, so it does
-not paint a page. Building `--features servo` and running on Wayland selects it
-(via [`is_wayland`](../crates/teksilo-webview/src/lib.rs)) and you get the
-loading wash plus a "constructed but not yet frame-driven" console message, not
-web content. For now, use wry + XWayland on Linux.
+Servo (`servo = 0.5.0`) is the **native Wayland** engine: pure Rust, no GTK
+reparenting problem, nothing on the window wgpu presents to. Building
+`--features servo` and running on Wayland selects it (via
+[`is_wayland`](../crates/teksilo-webview/src/lib.rs)).
+
+**How it renders.** Each page renders into an OpenGL context of the backend's
+own, on the GPU's hardware adapter (the software one, with a console warning,
+where there is none), with no window. Servo runs on its own threads and asks
+the UI thread to run it; `teksilo-app` answers with `WebViewRegistry::pump`.
+Each new frame is read back from the GPU without stalling the UI thread and
+committed to the `WebView`'s picture through a diffing writer, so a frame
+identical to the last costs no upload and wakes no window. Measured on a
+Radeon 890M: a median 1.9 ms of the UI thread per 1920 x 1080 frame. The page
+therefore clips, sits under popovers and dialogs, and scrolls inside a
+`ScrollArea` like any other widget.
+
+**Idle.** A page that is dormant (a parked tab) or scrolled out of view is
+hidden and throttled in Servo and reads nothing back. Measured in
+`web-view-demo --features servo` (a debug build, in a private KWin session):
+a page whose counter changes once a second costs one rendered frame a second,
+the frame its picture asks for, and the same page parked in the demo's other
+tab costs none. Servo's animation frames
+run at most 60 a second, and only while the page animates, instead of Servo's
+own 120 Hz timer. That clock is not tied to the display's refresh: a page
+animates at 60 frames a second on a 120 Hz display.
+
+**What does not work yet.** The page takes no input: the widget forwards
+pointer, touch, wheel and key events, and the backend does not yet pass them
+to Servo. JS→Rust messages (`window.ipc`) are not delivered. Dialogs and
+pickers a page opens (`alert`, `<select>`, file inputs) are not shown. The
+page's accessibility tree is not published. A page loaded with
+`.html(...)` travels as a `data:` URL, so a `base_url` does not apply to it.
 
 **Build requirements (Linux).** Servo pulls a large native toolchain on top of
 the wry/WebKitGTK deps above. Expect to install (Debian/Ubuntu names; exact set
@@ -150,18 +185,9 @@ are authoritative; `./mach bootstrap` in a Servo checkout lists the current
 system packages for your distro. The first build also downloads and compiles the
 **entire Servo tree**, many GB and a long compile.
 
-**What remains (Phase 4).** To make Servo actually render:
-
-1. Wire an `EventLoopWaker` to teksilo-app's winit proxy so Servo gets pumped.
-2. Call `servo.spin_event_loop()` + `webview.paint()` +
-   `rendering_context.present()` from the render loop.
-3. Composite Servo's surface as a **positioned region** rather than the whole
-   window, its GL/surfman context currently wants the entire window surface,
-   which conflicts with wgpu owning it.
-
-Until then the Servo path is best-effort and documented, not a supported engine.
-JS→Rust IPC (`window.ipc`) is also unsupported on Servo (no built-in channel
-like wry's `with_ipc_handler`).
+A smoke test renders a real page through the whole path with no window:
+`cargo test -p teksilo-webview --features servo-backend --test servo_smoke --release -- --ignored`
+(it needs OpenGL; `LIBGL_ALWAYS_SOFTWARE=1` runs it on llvmpipe).
 
 ## Installing the subsystem
 
@@ -250,7 +276,7 @@ a property of that engine's embedding API, not of Teksilo:
 | Backend | `set_input_passthrough(true)` |
 |---|---|
 | `wry` | **Unsupported.** `wry::WebView`'s whole mutating surface is `set_cookie`, `set_background_color`, `set_bounds` and `set_visible`; none of them touches the native surface's hit region. The call is answered with a `WebViewEvent::ConsoleMessage`, this crate's channel for an operation a backend cannot perform. |
-| `servo` | Honoured trivially, and inverted: Servo takes input only through `notify_input_event`, which that backend never calls, so its surface already passes everything through. |
+| `servo` | Never asked. A surface engine receives only the input the widget forwards, so in `Transparent` the widget forwards each event and lets it bubble as well. |
 | `MemoryWebViewBackend` | Recorded as `WebViewOp::SetInputPassthrough`, which is what lets a headless test assert the widget asked. |
 | `NoopWebViewBackend` | No surface, nothing to do. |
 
@@ -429,13 +455,14 @@ one-liner) and pump post-mount opens with `tree.run_mount_actions(&mut NoopWindo
 - **Custom-protocol handlers** (`app://` serving local SPAs) are not yet plumbed
   through `WebViewAttributes`, only scheme *names* are carried, no dispatch
   closure. Load local content inline with `.html(...)` for now.
-- **Servo backend is work in progress** (not yet frame-driven, no render). See
-  [Servo backend: requirements & status](#servo-backend-requirements--status)
-  for build deps and the remaining Phase-4 work.
+- **The Servo backend takes no input yet**, and has no `window.ipc`, page
+  dialogs or page accessibility tree. See
+  [Servo backend: requirements & status](#servo-backend-requirements--status).
 - **`load_html` `base_url`** is ignored on wry (no runtime load-HTML API;
   emulated via `document.write`).
 - **HiDPI / monitor moves** mid-flight: wry handles its native engines; Servo
-  handling is unverified.
+  renders at the widget's size times the window's scale, one frame pixel per
+  device pixel, and follows a scale change.
 - **Memory** of an open WebView with heavy content is non-trivial (~50–150 MB
   for WebView2 / WKWebView); a `WebView` is not a cheap widget.
 - **Leaving an entered page** is not under Teksilo's control. Once

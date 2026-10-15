@@ -12262,9 +12262,12 @@ name = "teksilo-webview"
 version = "0.18.0"
 dependencies = [
  "dpi",
+ "euclid",
+ "gleam",
+ "glow",
  "gtk",
- "raw-window-handle",
  "servo",
+ "surfman",
  "teksilo-canvas",
  "teksilo-core",
  "teksilo-tokens",

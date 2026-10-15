@@ -89,8 +89,8 @@ web-view = ["web-view-headless", "teksilo-webview/wry-backend"]
 # Additive Servo support for Linux/Wayland (where wry's WebKitGTK can't
 # reparent). Implies `web-view`, so this ships BOTH engines and
 # `install_web_view_default()` picks Servo only under a Wayland session, wry
-# everywhere else. Never a "servo-only" build — Servo renders whole-window via
-# GL (conflicting with wgpu) and is the wrong engine off Wayland.
+# everywhere else: off Wayland the platform's own engine, through wry, is the
+# better page renderer.
 web-view-servo = ["web-view", "teksilo-webview/servo-backend"]
 # The widget + event routing WITHOUT any engine — `install_web_view_default()`
 # installs the inert no-op backend. For headless tests, or apps that bring

@@ -18,10 +18,11 @@
 //!
 //! **Wayland note.** wry's WebKitGTK can only embed as a *child window* under
 //! X11; on a native Wayland session `build_as_child` fails and the WebView
-//! shows its error wash (a pink fill). Servo is the eventual native-Wayland
-//! engine, but its backend isn't frame-driven yet. So on a Wayland session this
-//! demo forces itself onto XWayland (`GDK_BACKEND=x11`) so wry can embed —
-//! unless built `--features servo`, where the runtime picks Servo instead.
+//! shows its error wash (a pink fill). Servo is the native-Wayland engine. So
+//! on a Wayland session this demo forces itself onto XWayland
+//! (`GDK_BACKEND=x11`) so wry can embed, unless built `--features servo`,
+//! where the runtime picks Servo instead. Servo renders the page but takes no
+//! input yet.
 
 use teksilo::core::binding::BindingLevel;
 use teksilo::prelude::*;

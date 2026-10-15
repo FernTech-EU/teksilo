@@ -17,6 +17,15 @@ by crate for clarity, not because crates version independently.
 
 #### WebView
 
+- **The Servo backend renders pages.** `ServoBackend` is now a surface
+  backend: each page renders offscreen into an OpenGL context of its own (the
+  hardware adapter, or the software one with a console warning), is read back
+  without stalling the UI thread, and is drawn by the `WebView` widget inside
+  the window. It needs no window of its own, so it works under Wayland, and a
+  frame identical to the previous one costs no upload. A dormant or
+  scrolled-out page is hidden and throttled in Servo. Animated pages run at most
+  60 frames a second, and only while they animate. Inline HTML (`.html(...)`,
+  `load_html`) loads as a `data:` URL. The page takes no input yet.
 - **`WebView` shows a surface engine's page inside the window.** With a
   backend whose `rendering()` is `Surface`, the widget makes the picture the
   engine draws into and paints it over its chrome, one frame pixel per device

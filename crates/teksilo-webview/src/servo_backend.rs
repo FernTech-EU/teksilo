@@ -1,60 +1,74 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! `ServoBackend` — best-effort pure-Rust engine backend (Linux/Wayland) via
-//! the [`servo`] crate. Gated behind the `servo-backend` feature.
+//! `ServoBackend`: the pure-Rust engine backend, through the [`servo`] crate,
+//! behind the `servo-backend` feature.
 //!
-//! Built against Servo 0.5's real embedding API: a [`WindowRenderingContext`]
-//! bound to the OS window handle, a [`Servo`] instance, and a [`WebView`](ServoWebView)
-//! created via [`WebViewBuilder`] with a [`WebViewDelegate`] that translates
-//! Servo's `notify_*` callbacks into [`WebViewEvent`]s.
+//! Servo renders each page offscreen, into a GL context of this backend's own
+//! ([`gl_context`]), and its frames reach the window through the picture the
+//! `WebView` widget draws: a [`WebViewRendering::Surface`] backend. Nothing of
+//! it touches the window wgpu presents to, so it works under Wayland, where wry
+//! cannot embed, and the page clips, sits under overlays and scrolls with its
+//! container like any other content.
 //!
-//! # Scope: real API, not yet frame-driven
+//! # The loop
 //!
-//! Servo's model differs fundamentally from wry's child-subview: it renders the
-//! page into its **own** GL/surfman surface tied to the *whole* window
-//! ([`WindowRenderingContext::new`] takes the window's display+window handles,
-//! not a sub-rectangle), and it must be pumped by the embedder —
-//! `servo.spin_event_loop()` each tick, then `webview.paint()` +
-//! `rendering_context.present()` to display, woken via an
-//! [`EventLoopWaker`]. None of that is wired into teksilo-app's wgpu render
-//! loop yet, and Servo's whole-window GL context conflicts with wgpu owning the
-//! same surface.
+//! Servo works on threads of its own and asks to be run on the UI thread
+//! through an [`EventLoopWaker`]. The waker posts one [`WebViewPumpPayload`]
+//! at a time; `teksilo-app` answers it with `WebViewRegistry::pump`, which runs
+//! [`Servo::spin_event_loop`] and then, for each web view Servo reported a new
+//! frame for, paints it and starts reading it back. A read is handed on the
+//! next time the engine runs (the frame clock wakes it a few milliseconds
+//! later), through a `LiveImageDiffWriter`, so a frame identical to the last
+//! one commits nothing and wakes no window. A web view that is dormant or
+//! scrolled out of view is hidden and throttled in Servo, and paints nothing.
 //!
-//! So this backend **constructs** a real Servo webview (the API surface is
-//! exercised and compiled), but does not yet drive rendering. Completing it is
-//! the plan's Phase 4: route an `EventLoopWaker` to teksilo-app's winit proxy,
-//! call `spin_event_loop`/`paint`/`present` from the render loop, and composite
-//! Servo's surface as a positioned region rather than the whole window. Until
-//! then it is best-effort per the plan, and `WebViewEvent::ConsoleMessage`
-//! reports the not-yet-driven state. JS↔Rust IPC (`window.ipc`) is unsupported
-//! here (Servo has no built-in IPC channel like wry's `with_ipc_handler`).
+//! # What is not here yet
+//!
+//! Input does not reach the page, and JS→Rust messages (`window.ipc`) are not
+//! delivered.
+//!
+//! [`WebViewPumpPayload`]: crate::WebViewPumpPayload
 
-use std::rc::Rc;
+mod frame_clock;
+mod gl_context;
+
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
-use teksilo_canvas::Rect;
+use teksilo_canvas::live_image::{LiveImageDiffWriter, LiveImageWriter};
+use teksilo_canvas::{ImageOrientation, Rect};
 use teksilo_core::AppEventPoster;
 use teksilo_core::raw_handle::ParentHandle;
 use teksilo_core::window::TeksiloWindowId;
 
 use dpi::PhysicalSize;
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+use euclid::Scale;
 use servo::{
     EventLoopWaker, LoadStatus, RenderingContext, Servo, ServoBuilder, WebView as ServoWebView,
-    WebViewBuilder, WebViewDelegate, WindowRenderingContext,
+    WebViewBuilder, WebViewDelegate,
 };
 use url::Url;
 
-use teksilo_canvas::live_image::LiveImageWriter;
-
 use crate::backend::{
     ConsoleLevel, NoopWebViewHandle, WebSource, WebViewAttributes, WebViewBackend, WebViewEvent,
-    WebViewHandle, WebViewId, WebViewRendering, js_string, post_event,
+    WebViewHandle, WebViewId, WebViewRendering, js_string, post_event, post_pump,
 };
 
-/// Best-effort Wayland engine backend. Construct and hand to
+use frame_clock::FrameClock;
+use gl_context::{AdapterKind, HeadlessGlContext};
+
+/// How long a read may wait on the GPU when the engine runs: past it, the
+/// clock looks again a little later instead of holding the UI thread.
+const READ_WAIT: Duration = Duration::from_millis(2);
+
+/// When to look again for a read still on the GPU.
+const READ_RETRY: Duration = Duration::from_millis(3);
+
+/// The pure-Rust engine backend. Construct and hand to
 /// `install_web_view(ServoBackend::new())`.
 ///
 /// Every web view this backend opens shares one Servo engine, built when the
@@ -65,13 +79,13 @@ use crate::backend::{
 /// with a console message saying why.
 #[derive(Default)]
 pub struct ServoBackend {
-    servo: Option<Servo>,
+    engine: Option<Rc<Engine>>,
 }
 
 impl std::fmt::Debug for ServoBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ServoBackend")
-            .field("engine_built", &self.servo.is_some())
+            .field("engine_built", &self.engine.is_some())
             .finish()
     }
 }
@@ -139,65 +153,209 @@ fn fail(
     Box::new(NoopWebViewHandle)
 }
 
+/// Asks the UI thread to run the engine: posts one pump request at a time.
+/// Called by Servo from its own threads, and by the frame clock.
+#[derive(Clone)]
+struct ServoWaker {
+    inner: Arc<WakerState>,
+}
+
+struct WakerState {
+    /// A pump request is posted and not yet answered.
+    posted: AtomicBool,
+    poster: Option<Arc<dyn AppEventPoster>>,
+}
+
+impl ServoWaker {
+    fn new(poster: Option<Arc<dyn AppEventPoster>>) -> Self {
+        Self {
+            inner: Arc::new(WakerState {
+                posted: AtomicBool::new(false),
+                poster,
+            }),
+        }
+    }
+
+    /// The request is being answered: a wake from now on posts another.
+    fn answered(&self) {
+        self.inner.posted.store(false, Ordering::Release);
+    }
+}
+
+impl EventLoopWaker for ServoWaker {
+    fn clone_box(&self) -> Box<dyn EventLoopWaker> {
+        Box::new(self.clone())
+    }
+
+    fn wake(&self) {
+        if !self.inner.posted.swap(true, Ordering::AcqRel) {
+            post_pump(&self.inner.poster);
+        }
+    }
+}
+
+/// The one Servo of the process, and what runs it.
+struct Engine {
+    servo: Servo,
+    waker: ServoWaker,
+    clock: FrameClock,
+    /// Every open web view; dead entries are dropped as the engine runs.
+    views: RefCell<Vec<Weak<View>>>,
+}
+
+impl Engine {
+    fn start(poster: Option<Arc<dyn AppEventPoster>>) -> Rc<Self> {
+        let waker = ServoWaker::new(poster);
+        let clock_waker = waker.clone();
+        let clock = FrameClock::start(move || clock_waker.wake());
+        let servo = ServoBuilder::default()
+            .event_loop_waker(Box::new(waker.clone()))
+            .build();
+        Rc::new(Self {
+            servo,
+            waker,
+            clock,
+            views: RefCell::new(Vec::new()),
+        })
+    }
+
+    /// Run Servo once, then paint and read back what changed.
+    fn pump(&self) {
+        self.waker.answered();
+        self.servo.spin_event_loop();
+        let views: Vec<Rc<View>> = {
+            let mut views = self.views.borrow_mut();
+            views.retain(|view| view.strong_count() > 0);
+            views.iter().filter_map(Weak::upgrade).collect()
+        };
+        let now = Instant::now();
+        for view in views {
+            view.present(&self.clock, now);
+        }
+    }
+}
+
+/// One open web view: its rendering context, its Servo `WebView`, and the
+/// picture its frames go to.
+struct View {
+    gl: Rc<HeadlessGlContext>,
+    webview: RefCell<Option<ServoWebView>>,
+    picture: RefCell<LiveImageDiffWriter>,
+    /// Servo reported a frame not painted yet.
+    frame_ready: Cell<bool>,
+    /// The widget shows the page: not dormant, and some of it in view.
+    shown: Cell<bool>,
+    /// The context's size, in device pixels.
+    size: Cell<PhysicalSize<u32>>,
+    scale: Cell<f32>,
+}
+
+impl View {
+    /// Hand on a finished read, then paint a reported frame if there is one
+    /// and the page is shown.
+    fn present(&self, clock: &FrameClock, now: Instant) {
+        if self.gl.reads_pending() {
+            let mut picture = self.picture.borrow_mut();
+            self.gl.finish_reads(READ_WAIT, &mut |rows, width, height| {
+                // A refused frame (a size past LiveImage's limits) leaves the
+                // previous one shown; the next resize brings it back in range.
+                let _ = picture.write_frame(width, height, rows, width as usize * 4);
+            });
+            if self.gl.reads_pending() {
+                clock.wake_at(now + READ_RETRY);
+            }
+        }
+
+        // The first frame at a new size still shows the page's previous
+        // layout, its newly exposed part the page background; the relaid page
+        // follows one frame later. Committed as it comes, as a browser shows
+        // it.
+        if !self.frame_ready.get() || !self.shown.get() {
+            return;
+        }
+        self.frame_ready.set(false);
+        let Some(webview) = self.webview.borrow().clone() else {
+            return;
+        };
+        webview.paint();
+        self.gl.begin_read();
+        clock.wake_at(now + READ_RETRY);
+    }
+}
+
+/// Translates Servo's delegate callbacks into [`WebViewEvent`]s, and marks
+/// its view when a frame is ready.
+struct ServoEventDelegate {
+    view: Weak<View>,
+    poster: Option<Arc<dyn AppEventPoster>>,
+    window_id: TeksiloWindowId,
+    web_view_id: WebViewId,
+}
+
+impl ServoEventDelegate {
+    fn post(&self, event: WebViewEvent) {
+        post_event(&self.poster, self.window_id, self.web_view_id, event);
+    }
+}
+
+impl WebViewDelegate for ServoEventDelegate {
+    fn notify_new_frame_ready(&self, _webview: ServoWebView) {
+        // Painted by `Engine::pump` once `spin_event_loop` returns, so every
+        // view's frame of this spin is painted in one place.
+        if let Some(view) = self.view.upgrade() {
+            view.frame_ready.set(true);
+        }
+    }
+
+    fn notify_load_status_changed(&self, webview: ServoWebView, status: LoadStatus) {
+        match status {
+            LoadStatus::Started => self.post(WebViewEvent::PageLoadStarted),
+            LoadStatus::HeadParsed => {}
+            LoadStatus::Complete => {
+                self.post(WebViewEvent::PageLoadFinished);
+                self.post(WebViewEvent::NavigationFinished {
+                    url: webview.url().map(|u| u.to_string()).unwrap_or_default(),
+                    success: true,
+                });
+            }
+        }
+    }
+
+    fn notify_page_title_changed(&self, _webview: ServoWebView, title: Option<String>) {
+        self.post(WebViewEvent::TitleChanged(title.unwrap_or_default()));
+    }
+}
+
 impl WebViewBackend for ServoBackend {
     fn rendering(&self) -> WebViewRendering {
-        // Until the engine renders offscreen, it draws into a GL surface
-        // over the whole window: a native view in all but name.
-        WebViewRendering::NativeSubview
+        // A GL readback stores the bottom row first.
+        WebViewRendering::Surface {
+            orientation: ImageOrientation::FlipVertical,
+        }
     }
 
     fn open(
         &mut self,
         web_view_id: WebViewId,
         window_id: TeksiloWindowId,
-        parent: Option<ParentHandle>,
+        _parent: Option<ParentHandle>,
         attrs: WebViewAttributes,
         poster: Option<Arc<dyn AppEventPoster>>,
-        _surface: Option<LiveImageWriter>,
+        surface: Option<LiveImageWriter>,
     ) -> Box<dyn WebViewHandle> {
-        let Some(parent) = parent else {
+        let Some(surface) = surface else {
             return fail(
                 &poster,
                 window_id,
                 web_view_id,
-                "ServoBackend: no parent window handle available; webview not created".to_string(),
+                "ServoBackend: opened without a picture to render into".to_string(),
             );
         };
-
-        let (Ok(display_handle), Ok(window_handle)) =
-            (parent.display_handle(), parent.window_handle())
-        else {
-            return fail(
-                &poster,
-                window_id,
-                web_view_id,
-                "ServoBackend: could not resolve raw window/display handles".to_string(),
-            );
-        };
-
-        // Servo renders into its own GL surface over the whole window. A real
-        // size arrives later via set_bounds → resize; start with a placeholder.
-        let initial_size = PhysicalSize::new(800u32, 600u32);
-        let rendering_context =
-            match WindowRenderingContext::new(display_handle, window_handle, initial_size) {
-                Ok(ctx) => Rc::new(ctx),
-                Err(e) => {
-                    return fail(
-                        &poster,
-                        window_id,
-                        web_view_id,
-                        format!("ServoBackend: rendering context init failed: {e:?}"),
-                    );
-                }
-            };
-        let _ = rendering_context.make_current();
-
-        let servo = match shared_engine(&mut self.servo, &ENGINE_BUILT, || {
-            ServoBuilder::default()
-                .event_loop_waker(Box::new(NoopWaker))
-                .build()
+        let engine_poster = poster.clone();
+        let engine = match shared_engine(&mut self.engine, &ENGINE_BUILT, || {
+            Engine::start(engine_poster)
         }) {
-            Ok(servo) => servo,
+            Ok(engine) => engine,
             Err(EngineTaken) => {
                 return fail(
                     &poster,
@@ -210,178 +368,191 @@ impl WebViewBackend for ServoBackend {
             }
         };
 
+        // A real size arrives with the widget's first `set_bounds`.
+        let size = PhysicalSize::new(1, 1);
+        let gl = match HeadlessGlContext::new(size, Rc::new(engine.clock.driver())) {
+            Ok(gl) => Rc::new(gl),
+            Err(error) => {
+                return fail(
+                    &poster,
+                    window_id,
+                    web_view_id,
+                    format!("ServoBackend: no OpenGL context to render into: {error:?}"),
+                );
+            }
+        };
+        if gl.adapter() == AdapterKind::Software {
+            post_event(
+                &poster,
+                window_id,
+                web_view_id,
+                WebViewEvent::ConsoleMessage {
+                    level: ConsoleLevel::Warn,
+                    text: format!(
+                        "ServoBackend: no hardware OpenGL adapter, rendering on {}",
+                        gl.renderer()
+                    ),
+                },
+            );
+        }
+
+        let view = Rc::new(View {
+            gl: gl.clone(),
+            webview: RefCell::new(None),
+            picture: RefCell::new(LiveImageDiffWriter::new(surface)),
+            frame_ready: Cell::new(false),
+            shown: Cell::new(true),
+            size: Cell::new(size),
+            scale: Cell::new(1.0),
+        });
         let delegate: Rc<dyn WebViewDelegate> = Rc::new(ServoEventDelegate {
+            view: Rc::downgrade(&view),
             poster: poster.clone(),
             window_id,
             web_view_id,
         });
-
-        let mut builder = WebViewBuilder::new(&servo, rendering_context.clone()).delegate(delegate);
-        if let Some(WebSource::Url(url)) = &attrs.source
-            && let Ok(parsed) = Url::parse(url)
-        {
-            builder = builder.url(parsed);
+        let mut builder = WebViewBuilder::new(&engine.servo, gl as Rc<dyn RenderingContext>)
+            .delegate(delegate)
+            .hidpi_scale_factor(Scale::new(1.0));
+        if let Some(url) = attrs.source.as_ref().and_then(source_url) {
+            builder = builder.url(url);
         }
-        let webview = builder.build();
-
-        post_event(
-            &poster,
-            window_id,
-            web_view_id,
-            WebViewEvent::ConsoleMessage {
-                level: ConsoleLevel::Warn,
-                text: "ServoBackend: webview constructed but not yet frame-driven (Phase 4 — \
-                       spin_event_loop / paint / present not wired into the render loop)."
-                    .to_string(),
-            },
-        );
-
-        Box::new(ServoHandle {
-            _servo: servo,
-            _rendering_context: rendering_context,
-            webview,
-        })
+        *view.webview.borrow_mut() = Some(builder.build());
+        engine.views.borrow_mut().push(Rc::downgrade(&view));
+        // The page starts loading on Servo's threads, which wake the engine
+        // when there is something to run.
+        Box::new(ServoHandle { engine, view })
     }
-}
 
-/// Translates Servo's delegate callbacks into [`WebViewEvent`]s.
-struct ServoEventDelegate {
-    poster: Option<Arc<dyn AppEventPoster>>,
-    window_id: TeksiloWindowId,
-    web_view_id: WebViewId,
-}
-
-impl WebViewDelegate for ServoEventDelegate {
-    fn notify_load_status_changed(&self, webview: ServoWebView, status: LoadStatus) {
-        match status {
-            LoadStatus::Started => {
-                post_event(
-                    &self.poster,
-                    self.window_id,
-                    self.web_view_id,
-                    WebViewEvent::PageLoadStarted,
-                );
-            }
-            LoadStatus::HeadParsed => {}
-            LoadStatus::Complete => {
-                post_event(
-                    &self.poster,
-                    self.window_id,
-                    self.web_view_id,
-                    WebViewEvent::PageLoadFinished,
-                );
-                post_event(
-                    &self.poster,
-                    self.window_id,
-                    self.web_view_id,
-                    WebViewEvent::NavigationFinished {
-                        url: webview.url().map(|u| u.to_string()).unwrap_or_default(),
-                        success: true,
-                    },
-                );
-            }
+    fn pump(&mut self) {
+        if let Some(engine) = &self.engine {
+            engine.pump();
         }
     }
+}
 
-    fn notify_page_title_changed(&self, _webview: ServoWebView, title: Option<String>) {
-        post_event(
-            &self.poster,
-            self.window_id,
-            self.web_view_id,
-            WebViewEvent::TitleChanged(title.unwrap_or_default()),
-        );
+/// The URL that shows `source`: inline HTML travels as a `data:` URL, as
+/// Servo has no call to load a string.
+fn source_url(source: &WebSource) -> Option<Url> {
+    match source {
+        WebSource::Url(url) => Url::parse(url).ok(),
+        WebSource::Html { html, .. } => html_url(html),
     }
 }
 
-/// Live handle: the shared Servo engine, this view's rendering context, and
-/// the webview. All `!Send` (Rc / GL); the backend only runs on the main
-/// thread. Dropping closes the webview; the engine lives on while the backend
-/// or another handle holds it.
+/// `html` as a `data:` URL. A `data:` document has an opaque origin, so a
+/// base URL cannot apply to it; relative links in it resolve to nothing.
+fn html_url(html: &str) -> Option<Url> {
+    let mut url = String::with_capacity(html.len() + 32);
+    url.push_str("data:text/html;charset=utf-8,");
+    for byte in html.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-_.~".contains(&byte) {
+            url.push(byte as char);
+        } else {
+            url.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    Url::parse(&url).ok()
+}
+
+/// A live web view. Dropping it closes the page; the engine lives on while
+/// the backend or another handle holds it.
 struct ServoHandle {
-    _servo: Servo,
-    _rendering_context: Rc<WindowRenderingContext>,
-    webview: ServoWebView,
+    engine: Rc<Engine>,
+    view: Rc<View>,
+}
+
+impl ServoHandle {
+    fn with_webview(&self, f: impl FnOnce(&ServoWebView)) {
+        if let Some(webview) = self.view.webview.borrow().as_ref() {
+            f(webview);
+        }
+    }
 }
 
 impl WebViewHandle for ServoHandle {
     fn set_bounds(&self, bounds: Rect, scale_factor: f32) {
-        // Servo's surface is whole-window; honour size, ignore position (it
-        // can't render to a sub-rectangle through this context). Size is in
-        // device pixels (logical × scale).
-        self.webview.resize(PhysicalSize::new(
-            (bounds.width * scale_factor).max(1.0) as u32,
-            (bounds.height * scale_factor).max(1.0) as u32,
-        ));
+        let scale = if scale_factor.is_finite() && scale_factor > 0.0 {
+            scale_factor
+        } else {
+            1.0
+        };
+        let size = PhysicalSize::new(
+            (bounds.width * scale).round().max(1.0) as u32,
+            (bounds.height * scale).round().max(1.0) as u32,
+        );
+        let view = &self.view;
+        if (view.scale.get() - scale).abs() > f32::EPSILON {
+            view.scale.set(scale);
+            self.with_webview(|w| w.set_hidpi_scale_factor(Scale::new(scale)));
+        }
+        if view.size.get() != size {
+            view.size.set(size);
+            self.with_webview(|w| w.resize(size));
+        }
     }
     fn load_url(&self, url: &str) {
         if let Ok(parsed) = Url::parse(url) {
-            self.webview.load(parsed);
+            self.with_webview(|w| w.load(parsed));
         }
     }
-    fn load_html(&self, _html: &str, _base_url: Option<&str>) {
-        // No direct inline-HTML load on Servo's WebView; would need a data: URL.
+    fn load_html(&self, html: &str, _base_url: Option<&str>) {
+        if let Some(url) = html_url(html) {
+            self.with_webview(|w| w.load(url));
+        }
     }
     fn eval(&self, script: &str) {
-        self.webview
-            .evaluate_javascript(script.to_string(), |_result| {});
+        self.with_webview(|w| w.evaluate_javascript(script.to_string(), |_result| {}));
     }
     fn post_message(&self, msg: &str) {
-        // No built-in IPC channel; emulate Rust→JS via a dispatched event.
-        // Uses the shared, fully-escaping js_string (the hand-rolled escaper
-        // here previously missed \n / \t / U+2028 / U+2029 → silent SyntaxError).
-        self.webview.evaluate_javascript(
-            format!(
-                "window.dispatchEvent(new MessageEvent('teksilo-message',{{data:{}}}))",
-                js_string(msg)
-            ),
-            |_result| {},
+        // No built-in IPC channel; emulate Rust→JS via a dispatched event,
+        // through the shared escaper.
+        let script = format!(
+            "window.dispatchEvent(new MessageEvent('teksilo-message',{{data:{}}}))",
+            js_string(msg)
         );
+        self.with_webview(|w| w.evaluate_javascript(script, |_result| {}));
     }
     fn reload(&self) {
-        self.webview.reload();
+        self.with_webview(|w| w.reload());
     }
     fn go_back(&self) {
-        self.webview.go_back(1);
+        self.with_webview(|w| {
+            w.go_back(1);
+        });
     }
     fn go_forward(&self) {
-        self.webview.go_forward(1);
+        self.with_webview(|w| {
+            w.go_forward(1);
+        });
     }
     fn stop(&self) {
-        self.webview
-            .evaluate_javascript("window.stop()".to_string(), |_r| {});
+        self.eval("window.stop()");
     }
     fn set_visible(&self, visible: bool) {
-        if visible {
-            self.webview.show();
-        } else {
-            self.webview.hide();
+        self.view.shown.set(visible);
+        self.with_webview(|w| {
+            if visible {
+                w.show();
+            } else {
+                w.hide();
+            }
+            // A hidden page runs no animation frames and no timers it can
+            // defer, so a page parked in another tab costs next to nothing.
+            w.set_throttled(!visible);
+        });
+        if visible && self.view.frame_ready.get() {
+            // A frame reported while hidden is painted now.
+            self.engine.waker.wake();
         }
     }
     fn set_focus(&self) {
-        self.webview.focus();
+        self.with_webview(|w| w.focus());
     }
-    fn set_input_passthrough(&self, passthrough: bool) {
-        // Inverted here, and honestly so: Servo takes input only through
-        // `notify_input_event`, which this backend never calls, so the surface
-        // passes every press through already and being asked for that is a
-        // no-op. The *other* direction — an engine that takes its own input —
-        // is what this backend cannot offer, and the widget never asks for it
-        // (it only ever requests pass-through).
-        let _ = passthrough;
+    fn set_input_passthrough(&self, _passthrough: bool) {
+        // A surface engine takes no input but what the widget forwards, and
+        // the widget never asks it to pass any through.
     }
-}
-
-/// A no-op [`EventLoopWaker`]. A real backend wakes teksilo-app's winit event
-/// loop so it calls `spin_event_loop`; that integration is Phase-4 work, so
-/// this placeholder lets Servo construct without self-waking.
-#[derive(Clone)]
-struct NoopWaker;
-
-impl EventLoopWaker for NoopWaker {
-    fn clone_box(&self) -> Box<dyn EventLoopWaker> {
-        Box::new(NoopWaker)
-    }
-    fn wake(&self) {}
 }
 
 #[cfg(test)]
@@ -410,5 +581,16 @@ mod tests {
         assert_eq!(shared_engine(&mut first, &built, || 1), Ok(1));
         assert_eq!(shared_engine(&mut second, &built, || 2), Err(EngineTaken));
         assert_eq!(second, None);
+    }
+
+    #[test]
+    fn inline_html_travels_as_a_data_url() {
+        let url = html_url("<p>a&b # 50% é</p>").expect("a data: URL");
+        assert_eq!(url.scheme(), "data");
+        assert!(
+            !url.as_str().contains('#'),
+            "a raw '#' would cut the document at a fragment: {url}"
+        );
+        assert!(url.as_str().contains("%25"), "a raw '%' is escaped: {url}");
     }
 }
