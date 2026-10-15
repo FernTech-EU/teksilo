@@ -77,6 +77,47 @@ Use `--force` to replace conflicting generated files, `--quiet` to suppress
 informational output, and `--verbose` for diagnostics. Shared instructions
 outside the managed region are preserved.
 
+## Read first
+
+Before planning anything in this app, read these four guides. Together they
+are a few hundred lines, and they are the only place that says what the
+framework already provides:
+
+```bash
+cargo teksilo show docs/features.md          # every subsystem, incl. opt-in features and separate crates
+cargo teksilo show docs/first-application.md # the shape of a whole app
+cargo teksilo show docs/widgets-overview.md  # the widget catalog, by job
+cargo teksilo show docs/guide-index.md       # task -> the guide that covers it
+```
+
+**Never conclude from silence that Teksilo lacks something.** Before adding a
+dependency or writing infrastructure yourself (an async runtime, a background
+thread, persistence, file dialogs, the clipboard, notifications, menus, a
+terminal, a web view), run `cargo teksilo search "<what you need>"`. Several
+subsystems are off by default and invisible until you look; the table below
+names them.
+
+## Optional subsystems
+
+Depend on the umbrella crate `teksilo` and turn these on as its features, not
+as separate `teksilo-*` dependencies. On by default already: `widgets`, `i18n`,
+`toast`, `inspector`, `file-dialog`, `clipboard`.
+
+| You need | Enable | Start from |
+| --- | --- | --- |
+| `async`/`.await` inside handlers | feature `async` | `.install_async()`, `ctx.spawn_local(..)`, `spawn_blocking` |
+| Tokio or async-std futures (timers, sockets, `reqwest`) | feature `tokio` or `async-std` (each implies `async`) | `.install_async_tokio()` / `.install_async_async_std()` |
+| Embedded web content | feature `web-view` (`web-view-servo` adds Servo for Wayland) | `.install_web_view_default()`, `WebView` |
+| An embedded shell | feature `terminal` | `Terminal` |
+| Driving the running app from an agent or a test | feature `automation` | `.install_automation_bridge_in_debug()` |
+| Product analytics | feature `telemetry` | `.telemetry(bundle)`, `PrivacySettings` |
+| Material 3, Fluent or macOS look | feature `theme-material3`, `theme-fluent` or `theme-macos` | `material3::light()` etc., from the prelude |
+| Bar, line and pie charts | crate `teksilo-charts`, at the same version as `teksilo` | `BarChart`, `LineChart`, `PieChart` |
+| A pan/zoom canvas: node graphs, corkboards, maps | crate `teksilo-scene`, at the same version as `teksilo` | `SceneView`, `SceneModel` |
+
+The two crates are the exception: the umbrella does not re-export them. Look
+each entry point up with `cargo teksilo symbol` before using it.
+
 ## The rule that matters most
 
 **Read a search result with `cargo teksilo show <path>`. Do not fetch it from
@@ -88,15 +129,18 @@ version-matched.
 
 ## Working in this app
 
-1. **Conceptual question** ("which data model do I want?", "how does
+1. **New to this app** → the four guides under **Read first**.
+2. **About to add a dependency or build infrastructure** → `cargo teksilo
+   search "<what you need>"` first; Teksilo may already provide it.
+3. **Conceptual question** ("which data model do I want?", "how does
    drag-and-drop escalate to the OS?") → `cargo teksilo search "<question>"`,
    then `cargo teksilo show <path>` to read the hit in full rather than
    working from its snippet.
-2. **Before using a type** → `cargo teksilo symbol <Name>`.
-3. **Compile:** `cargo check -p <app-crate>`. If it fails twice on the same
+4. **Before using a type** → `cargo teksilo symbol <Name>`.
+5. **Compile:** `cargo check -p <app-crate>`. If it fails twice on the same
    item, re-extract that type's API before a third attempt — the mental model
    is wrong, not the compiler.
-4. **Verify behaviour** where it matters: headless widget tests for layout and
+6. **Verify behaviour** where it matters: headless widget tests for layout and
    state logic, a probe for "the user clicks this and that happens on screen".
 
 If `cargo teksilo` is not installed, fall back to
@@ -1764,6 +1808,98 @@ mod tests {
             BRIEF.contains("blob/main"),
             "the GitHub warning is the point"
         );
+    }
+
+    #[test]
+    fn no_shipped_instruction_dates_itself_by_hand() {
+        // The release hook rewrites the one stamp that says which teksilo a
+        // copy ships with. A hand-written "verified against 0.12.1" is never
+        // rewritten: it reads as stale on the next release and stays that way.
+        // Name a version only to say when something changed ("removed in
+        // 0.12", "needs 0.15 or later").
+        let mut files = Vec::new();
+        collect(&SKILL, Path::new(""), &mut files);
+        files.push((PathBuf::from("BRIEF"), BRIEF.as_bytes()));
+        let stamps = ["verified against", "api line", "as of 0.", "as of teksilo"];
+        let mut found = Vec::new();
+        for (path, bytes) in files {
+            let Ok(text) = std::str::from_utf8(bytes) else {
+                continue;
+            };
+            for (number, line) in text.lines().enumerate() {
+                let lower = line.to_lowercase();
+                if stamps.iter().any(|stamp| lower.contains(stamp)) {
+                    found.push(format!("{}:{}: {line}", path.display(), number + 1));
+                }
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "hand-written freshness stamps:\n{}",
+            found.join("\n")
+        );
+    }
+
+    #[test]
+    fn every_feature_the_brief_names_is_one_the_umbrella_declares() {
+        // A feature the brief names and the umbrella lacks fails the agent's
+        // first `cargo check` with no hint where it went. Skipped outside a
+        // checkout, where the umbrella's manifest is not on disk.
+        let manifest =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../teksilo/Cargo.toml");
+        let Ok(text) = std::fs::read_to_string(manifest) else {
+            return;
+        };
+        let manifest: toml::Table = text.parse().unwrap();
+        let declared = manifest["features"].as_table().unwrap();
+        // Every code span on the default-on line, and in each table row's
+        // "Enable" cell that names a feature rather than a crate.
+        let code_spans = |text: &str| -> Vec<String> {
+            text.split('`')
+                .skip(1)
+                .step_by(2)
+                .map(str::to_owned)
+                .collect()
+        };
+        let mut named = Vec::new();
+        for line in BRIEF.lines() {
+            let cells: Vec<&str> = line.split(" | ").collect();
+            if cells.len() == 3 && cells[1].starts_with("feature ") {
+                named.extend(code_spans(cells[1]));
+            }
+        }
+        let defaults = BRIEF
+            .split("On by default already:")
+            .nth(1)
+            .and_then(|rest| rest.split("\n\n").next())
+            .expect("the brief lists the default features");
+        named.extend(code_spans(defaults));
+        assert!(named.len() >= 18, "parsed too few features: {named:?}");
+        for feature in named {
+            assert!(
+                declared.contains_key(&feature),
+                "the brief names feature `{feature}`, which crates/teksilo does not declare"
+            );
+        }
+    }
+
+    #[test]
+    fn every_guide_the_brief_says_to_read_first_is_in_the_corpus() {
+        // An agent told to `show` a guide the corpus lacks gets an error and
+        // starts with no map at all, so a renamed guide must fail here.
+        let corpus = teksilo_corpus::index().unwrap();
+        let read_first: Vec<&str> = BRIEF
+            .lines()
+            .filter_map(|line| line.strip_prefix("cargo teksilo show "))
+            .filter_map(|rest| rest.split_whitespace().next())
+            .collect();
+        assert_eq!(read_first.len(), 4, "{read_first:?}");
+        for path in read_first {
+            assert!(
+                corpus.chunks.iter().any(|chunk| chunk.path == path),
+                "the brief says to read {path}, which the corpus does not carry"
+            );
+        }
     }
 
     #[test]

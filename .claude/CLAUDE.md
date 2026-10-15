@@ -108,7 +108,7 @@ initialization and search never download it. Search uses BM25 until cached.
 `status` reports the project, and lists the user-scope instructions, flagging a copy that differs from this release's; `agent list --user` inspects them per agent.
 `status --json` and `search --json` provide structured output.
 
-Four things to know when changing it:
+Five things to know when changing it:
 
 - **The corpus is generated and committed, and it is one file.**
   `tools/build_corpus.py` writes `crates/teksilo-corpus/corpus/index.json` —
@@ -151,6 +151,16 @@ Four things to know when changing it:
   ONNX Runtime plus two other C/C++ sys crates. `--no-default-features` is a
   fully working tool (symbol, probe, setup, BM25 search) and CI builds both on
   all three OSes, so the escape hatch is proven rather than hoped for.
+- **The shipped instructions carry one version stamp, and the release writes
+  it.** "This copy ships with teksilo **X**" in the skill files and the
+  `teksilo = "=X"` pins in the app guide are rewritten by the
+  `pre-release-replacements` in `crates/teksilo-corpus/Cargo.toml`. Never add
+  a hand-written freshness stamp ("verified against 0.12.1", "as of 0.14",
+  "the 0.14 API line"): nothing rewrites it, so it is stale one release later.
+  `cargo-teksilo`'s `no_shipped_instruction_dates_itself_by_hand` rejects them
+  in the skill and the brief. Name a version only to say when something
+  changed ("removed in 0.12", "needs 0.15 or later"), and keep counts that
+  drift (tools, slots, guides) out of the prose for the same reason.
 
 [tools/extract_widget_api.py](tools/extract_widget_api.py) parses widget source files in [crates/teksilo-widgets/src/](crates/teksilo-widgets/src/) and emits their `//!` module header, `pub struct`/`enum`/`type`/`const` declarations with `///` docs, and `pub fn` builder methods from inherent `impl Foo { ... }` blocks. Skips `impl Widget for Foo` trait plumbing and `pub(crate)` items. Accepts type names (`Button`) or module names (`button`); flags `#[doc(hidden)]` and `#[cfg(...)]`. Use when reading a widget's public surface without opening the file, packing widget docs into LLM context, or auditing API coverage.
 

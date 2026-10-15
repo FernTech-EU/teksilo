@@ -1,12 +1,12 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-# Teksilo — App Developer Reference (for Claude)
+# Teksilo: App Developer Reference
 
-> Drop this file into your app repo (rename it `CLAUDE.md`, or reference it from your
-> own `CLAUDE.md`) so Claude has accurate context when helping you build a GUI with
-> Teksilo. It documents the **public API and usage patterns** you need as a consumer
-> of the `teksilo` crate — not the framework internals.
+> The **public API and usage patterns** you need as a consumer of the `teksilo` crate,
+> not the framework internals. The same text is the `teksilo` agent skill's main
+> reference (installed by `cargo teksilo init`) and the `teksilo::app_guide` page on
+> docs.rs.
 
 ## What Teksilo is
 
@@ -23,7 +23,8 @@ wire behavior with attached event handlers, and drive state with `Signal<T>`.
 
 Depend on the **umbrella crate** `teksilo`. It re-exports everything and gates optional
 subsystems behind feature flags. Don't depend on the individual `teksilo-*` crates
-directly.
+directly, with two exceptions: `teksilo-charts` and `teksilo-scene` are not
+re-exported, so add them as direct dependencies at the same version as `teksilo`.
 
 ```toml
 [dependencies]
@@ -63,7 +64,10 @@ opt-outs:
 | `file-dialog` (default) | Native open/save/pick-folder via `rfd`; `file-dialog-trait` for the trait surface only |
 | `clipboard` (default) | System clipboard for text widgets — text input is unusable without it |
 | `web-view` / `web-view-servo` / `web-view-headless` | Embeddable `WebView` widget (wry by default; Servo additive for Wayland). Off by default |
-| `async` / `tokio` / `async-std` | Optional main-thread async executor (`ctx.spawn_local`) + reactor adapters. Off by default |
+| `async` / `tokio` / `async-std` | Optional main-thread async executor (`.install_async()`, `ctx.spawn_local`, `spawn_blocking`). `tokio` / `async-std` imply `async` and add the reactor (`.install_async_tokio()` / `.install_async_async_std()`) so a handler can `.await` that runtime's futures: timers, sockets, `reqwest`. Off by default. See `cargo teksilo show docs/async.md` |
+| `terminal` | Embeddable `Terminal` widget: a real shell over a PTY. Off by default |
+| `automation` | Debug-only automation bridge (`.install_automation_bridge_in_debug()`) for agents and tests. Off by default |
+| `theme-material3` / `theme-fluent` / `theme-macos` | Material 3, Fluent (Windows 11) and macOS Aqua presets, as `material3::light()` etc. from the prelude |
 | `telemetry` | Privacy-respecting analytics wiring + `PrivacySettings` widget |
 | `fonts-cjk-sc` / `fonts-thai` / `fonts-all` / `system-emoji` | Extra bundled script fonts / runtime color-emoji fallback |
 
@@ -907,7 +911,7 @@ plain property forms `child: id` / `<slot>: id`. The structural slots — `child
 `header`, `pane`, `tab` — take `impl IntoTeksiChild`, so one name accepts a `WidgetId` and a
 widget alike, and the `add_child` / `*_id` twins for those are gone.
 
-**Not every slot takes an id, though, and the slot's name does not tell you.** 65 slot
+**Not every slot takes an id, though, and the slot's name does not tell you.** Dozens of slot
 declarations still take `impl Widget + 'static` and reject a `WidgetId`. The ones that bite:
 **`PopoverWidget::content`** (a named slot that nonetheless refuses an id),
 `TextInput::leading_slot` / `trailing_slot`, every `StandardListItem` / `StandardTreeItem`
@@ -1069,7 +1073,7 @@ primary accelerator (Control on Windows/Linux, ⌘ on macOS), which is what a sh
 *declared* `Ctrl+S` resolves to. `ctrl` stays literal Control everywhere — on macOS it
 injects a key that matches no binding **and still reports success**.
 
-Beyond mouse and keyboard, the catalog (36 tools) drives **touch and pen**:
+Beyond mouse and keyboard, the catalog drives **touch and pen**:
 `inject_pointer` takes `kind` (`mouse` / `touch` / `pen`, with `pressure` and `tilt` for a
 stylus), and `inject_touch_sequence` runs a whole multi-touch gesture step by step, reporting
 the **arbitration** after each one — the frozen `touch_action`, every competitor with its role
@@ -1245,8 +1249,8 @@ All three are about *why* an overlay closed, which the old API could not report.
 
 ---
 
-*This guide is abridged from Teksilo's internal `CLAUDE.md` and targets app developers
-consuming the **teksilo 0.14 API line**. The runnable dashboard example is compiled
+*This guide is abridged from Teksilo's internal `CLAUDE.md` for app developers consuming
+the `teksilo` release pinned at the top of the guide. The runnable dashboard example is compiled
 and its visible bindings are tested in the workspace. Use `cargo check` and
 `cargo teksilo symbol` for exact signatures in the version your app resolves.
 For framework internals, source layout and implementation status, search the version-matched

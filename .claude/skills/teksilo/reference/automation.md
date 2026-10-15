@@ -17,7 +17,7 @@ Two ways in, and they are complements:
 | **MCP server** — `teksilo-automation-mcp` | An MCP server an agent talks to directly, tool by tool | Exploring, diagnosing, one-off "what does the app actually do here" questions |
 | **Python probe** — `cargo teksilo probe install` | A script that launches the app, attaches, drives it and asserts | Anything you want to re-run: a regression test, a de-risking experiment, a CI gate |
 
-This copy ships with teksilo **0.18.0**; it was verified against teksilo 0.12.1.
+This copy ships with teksilo **0.18.0**.
 
 ---
 
@@ -80,7 +80,7 @@ the live bridge above.
 
 ## 3. The tool catalog, by job
 
-36 tools. On connect the server hands the client a "how to drive this app"
+On connect the server hands the client a "how to drive this app"
 briefing plus a JSON schema per tool, so a capable agent can self-guide the
 **snapshot → find node → act → settle → assert** loop. What follows is the map,
 not a substitute for the schemas.

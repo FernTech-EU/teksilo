@@ -13,6 +13,27 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Changed
+
+#### cargo-teksilo
+
+- **The agent instructions say where to start and what exists.** The skill
+  and the brief written into `AGENTS.md` and the other agents' rules files
+  open with four guides to read first (features, first application, widgets
+  overview, guide index) and a rule to search before adding a dependency or
+  building infrastructure. The brief gains a table of the optional
+  subsystems: the umbrella feature that enables each (`async`, `tokio`,
+  `async-std`, `web-view`, `terminal`, `automation`, `telemetry`, the theme
+  presets), where to start, and the two crates added as direct dependencies
+  (`teksilo-charts`, `teksilo-scene`).
+- The skill no longer carries hand-written "verified against" version stamps
+  or counts that go stale; the release-written "ships with" stamp is its only
+  version claim.
+
+#### Documentation
+
+- The features page covers `DockingLayout` and the `Terminal` widget.
+
 ### Fixed
 
 #### Widgets

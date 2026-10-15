@@ -14,11 +14,10 @@ It is **optional**. It earns its keep on deep, nested trees where
 reads just as well in plain builder form. The two nest in either direction, so
 adopt it where it helps.
 
-> This copy ships with teksilo **0.18.0**; it was verified against teksilo
-> 0.12.1. Routing rules and slot arities are version-sensitive — when a rule
-> here disagrees with the compiler, the compiler is right, and `cargo teksilo
-> symbol <Widget>` will tell you the real signature for the version your app
-> pins.
+> This copy ships with teksilo **0.18.0**. Routing rules and slot arities are
+> version-sensitive: when a rule here disagrees with the compiler, the compiler
+> is right, and `cargo teksilo symbol <Widget>` will tell you the real signature
+> for the version your app pins.
 
 ## Where the deeper material is
 
@@ -73,10 +72,10 @@ id-carrying containers, …) take `impl IntoTeksiChild`, implemented for
 new one), so `.child(w)` and `.child(id)` are both fine. The redundant
 `add_child` / `child_id` / `*_id` twins for those were removed in 0.12.
 
-**This is not universal, and the slot name does not tell you.** As of 0.12.1, 65
-slot declarations still take `impl Widget + 'static` and will **not** accept a
-`WidgetId` (18 distinct names; `composite_tooltip` accounts for 31 of them, one
-per widget). The ones that bite:
+**This is not universal, and the slot name does not tell you.** Dozens of slot
+declarations still take `impl Widget + 'static` and will **not** accept a
+`WidgetId`, about half of them `composite_tooltip` (one per widget). The ones that
+bite:
 
 - **`PopoverWidget::content`** — a named slot on a widget you would most expect
   to take an id, and it does not, so `content: some_id` fails there.

@@ -14,6 +14,31 @@ which part they need help with. If they name a type (`/teksilo ComboBox`), go
 straight to `cargo teksilo symbol ComboBox`. If they paste a `teksu!` block or
 ask about the DSL, read `reference/teksu.md` first.
 
+## Read first
+
+Before planning anything in an app new to you, read these four guides. Together
+they are a few hundred lines, and they are the only place that says what the
+framework already provides:
+
+```bash
+cargo teksilo show docs/features.md          # every subsystem, incl. opt-in features and separate crates
+cargo teksilo show docs/first-application.md # the shape of a whole app
+cargo teksilo show docs/widgets-overview.md  # the widget catalog, by job
+cargo teksilo show docs/guide-index.md       # task -> the guide that covers it
+```
+
+Without the tool, the bundled `reference/teksilo_app_guide.md` is the fallback;
+its feature table and catalog section cover the same ground less completely.
+
+**Never conclude from silence that Teksilo lacks something.** Before adding a
+dependency or writing infrastructure yourself (an async runtime, a background
+thread, persistence, file dialogs, the clipboard, notifications, menus, a
+terminal, a web view), run `cargo teksilo search "<what you need>"`. Several
+subsystems are off by default and invisible until you look: the async executor
+and its Tokio / async-std adapters (`teksilo-tokio`, `teksilo-async-std`),
+`web-view`, `terminal`, the automation bridge, the Material 3 / Fluent / macOS
+theme presets, and the separate `teksilo-charts` and `teksilo-scene` crates.
+
 ## Sources of truth — when they disagree, trust in THIS order
 
 1. **`cargo check`** — the compiler is the territory. A clean check is the
@@ -21,10 +46,11 @@ ask about the DSL, read `reference/teksu.md` first.
 2. **Live API extraction** — `cargo teksilo symbol <Name>`, `cargo doc`, or
    docs.rs, all read from the version the app actually pins.
 3. **The bundled reference prose** — the files under `reference/`. A *map*, not
-   the territory. This copy ships with teksilo **0.18.0**; a section that names
-   an older version was last verified against that one, and any of it MAY lag
-   the version this app pins. Never let it override the compiler or live
-   extraction.
+   the territory. This copy ships with teksilo **0.18.0**, and that stamp is
+   the only freshness claim in it. Where the prose names an older version, it
+   says when something changed, not when the prose was last checked. Any of it
+   MAY lag the version this app pins. Never let it override the compiler or
+   live extraction.
 
 If the version this app resolves (`cargo teksilo status`, or `Cargo.lock`) is
 not the one this copy ships with, the skill was installed for another release.
@@ -80,7 +106,7 @@ cargo teksilo init                         # the harness, plus a teksilo brief f
   for a widget (handlers, `context_menu`, `access_*`) and the style protocol a
   `.style(…)` takes. Look those up too before designing around either.
 - **`search`** is hybrid BM25 + semantic retrieval over the framework's
-  hand-written guides (69 of them) and worked examples (56 crates). Neither reaches a
+  hand-written guides and worked examples (`show --list` names them all). Neither reaches a
   consumer app any other way: the guides live in no crate, and every example is
   `publish = false`. Reach for it whenever the question is conceptual ("which
   data model do I want?", "how does drag-and-drop escalate to the OS?") rather
@@ -128,7 +154,8 @@ types and required methods, so inspect `EventSource` before implementing it.
 
 ## Workflow
 
-1. **Orient.** `reference/teksilo_app_guide.md` is the app-author surface — entry
+1. **Orient.** Start with the four guides under **Read first**. Then
+   `reference/teksilo_app_guide.md` is the app-author surface: entry
    point, Widget trait, layout, Signal/Prop, events, theming, settings, i18n,
    widget catalog, testing. Treat it as directional, not authoritative on exact
    signatures. For a conceptual question, `cargo teksilo search "<question>"`
@@ -153,6 +180,7 @@ types and required methods, so inspect `EventSource` before implementing it.
 | A specific type's builder methods / signature, or where to import it from | `cargo teksilo symbol <Name>` (its **Import:** line names the path, and any feature or dependency it needs) |
 | A method, a free function or a macro (`res!`, `compile_in_locales!`) | `cargo teksilo symbol <name>`, or `<Type>::<method>` for one owner |
 | "Which widget / model / approach do I want?" | `cargo teksilo search "<question>"`, then the guide's catalog section |
+| "Does Teksilo have X?", or about to add a dependency for it | `cargo teksilo search "<X>"` and `cargo teksilo show docs/features.md`; never assume it is absent |
 | Layout, Signal/Prop, events, theming, settings, i18n, a11y, data models | `reference/teksilo_app_guide.md` |
 | Writing / translating / debugging a `teksu!` block | `reference/teksu.md` |
 | Driving, screenshotting or testing the running app | `reference/automation.md` |
@@ -170,8 +198,7 @@ i18n + geometry, and `use teksilo::widgets::*;` brings the widget builders —
 
 ## High-leverage gotchas
 
-Verified against **teksilo 0.12.1** — re-verify with `cargo teksilo symbol` if
-the app pins something newer.
+Confirm the API with `cargo teksilo symbol` before relying on one.
 
 - **No `Theme::default()`** — pick a preset: `intui::light()` / `intui::dark()`.
 - **Charts and Scene are separate crates** (`teksilo-charts`, `teksilo-scene`),
@@ -190,9 +217,8 @@ the app pins something newer.
   (`ListModel` / `TreeModel`) or a *`ListDataSource` / `TreeDataSource` you
   implement over your domain* — never a hand-rolled `for`-loop of children.
   Decide that ownership shape first; see the guide's *Reactive data models*
-  section. Doc caveat as of 0.12.1: the `data-models` guide's §3
-  `ListDataSource` snippet is stale (it omits `type Key: ItemKey`) — trust the
-  `data-source` guide and the extracted API.
+  section, then `cargo teksilo show docs/data-source.md` before implementing a
+  source.
 - **Pixels another thread rewrites go through `LiveImage`, never `ImageWidget`.**
   A VM screen, a video or a camera writes a `LiveImageSource` from its own
   thread (`writer.write_frame(..)`, or a transaction marking only what changed),
@@ -222,7 +248,7 @@ the app pins something newer.
   you.** Most structural slots (`child`, `content`, `header`, `pane`, `tab`) take
   `impl IntoTeksiChild`, so a `WidgetId` or a widget both work, and the old
   `*_id` twins are gone (including `TabWidget::tab_id` and `ToolBox::item_id`).
-  But 65 slot declarations still take `impl Widget + 'static` and reject an id —
+  But dozens of slot declarations still take `impl Widget + 'static` and reject an id,
   including **`PopoverWidget::content`**, which is a named slot on a widget you
   would expect to take one. Also `TextInput::leading_slot` / `trailing_slot`,
   every `StandardListItem` / `StandardTreeItem` slot, `MenuList::item` / `header`,
@@ -266,6 +292,6 @@ binding and still reports success. Full catalog, error codes and probe workflow:
 
 | File | Read it when |
 |---|---|
-| `reference/teksilo_app_guide.md` | Anything about the app-author surface: entry point, Widget trait, layout model, Signal/Prop, events, intents & shortcuts, theming, animation, accessibility overrides, i18n, settings, data models, widget catalog, toasts, drag-and-drop, `EventContext`, breaking changes 0.9 → 0.12. The default first read. |
+| `reference/teksilo_app_guide.md` | Anything about the app-author surface: entry point, Widget trait, layout model, Signal/Prop, events, intents & shortcuts, theming, animation, accessibility overrides, i18n, settings, data models, widget catalog, toasts, drag-and-drop, `EventContext`, breaking changes 0.9 → 0.13. The first bundled read, after the **Read first** guides. |
 | `reference/teksu.md` | Writing, reading, translating or debugging a `teksu!` block. Routing rules, slot arity, diagnostics, limitations, the formatter. |
-| `reference/automation.md` | Driving or testing the running app: wiring the bridge, attaching, the 36-tool catalog by job, error codes, and the probe harness workflow. |
+| `reference/automation.md` | Driving or testing the running app: wiring the bridge, attaching, the tool catalog by job, error codes, and the probe harness workflow. |
