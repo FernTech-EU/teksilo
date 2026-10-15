@@ -208,7 +208,12 @@ pub struct WidgetTree {
     /// keeps the children it re-attaches, so the group that held focus is often
     /// still there, and the root's first focusable descendant is the *first*
     /// group, whichever one the user was in.
-    pending_focus_restore: Vec<WidgetId>,
+    ///
+    /// Each ancestor carries the focused node's position among its focusable
+    /// descendants, in tree order. The restore lands on whatever holds that
+    /// position after the rebuild, so focus in the second of two fields comes
+    /// back to the second field, not the first.
+    pending_focus_restore: Vec<(WidgetId, usize)>,
     /// A focus request whose target was **dormant** when it was made: a page
     /// of a `Switcher`, a `visible_when` branch, that the same handler is
     /// about to show. Focusing a dormant node outright does not survive the

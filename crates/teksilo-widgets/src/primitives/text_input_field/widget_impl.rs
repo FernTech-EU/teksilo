@@ -719,14 +719,6 @@ impl Widget for TextInputField {
         let self_id = ctx.self_id();
         ctx.enabled_when(self_id, self.enabled.clone());
 
-        // Attach handlers. Focus-origin inference mirrors the
-        // `Slider` pattern: hover cached, focus event checks hover
-        // to distinguish keyboard vs pointer origin for the
-        // select-all-on-keyboard-focus rule.
-        let hovered = std::rc::Rc::new(std::cell::Cell::new(false));
-        let hovered_for_focus = hovered.clone();
-        let hovered_for_hover = hovered.clone();
-
         let state_for_focus = self.state().clone();
         let touch_for_focus = self.touch.clone();
         let interaction_for_focus = self.interaction.clone();
@@ -746,16 +738,6 @@ impl Widget for TextInputField {
         let state_for_access = self.state().clone();
         let touch_for_access = self.touch.clone();
         let state_for_menu = self.state().clone();
-        // Set when the field's own context menu takes focus from it, and spent
-        // by the next focus gain. That gain is focus coming back from the menu
-        // (Escape, one of its commands, a click outside it), which is a return
-        // to the field as the reader left it, not an arrival: selecting the
-        // whole field there made the next key replace everything in it. Focus
-        // that leaves the menu for somewhere else (Tab) leaves the flag set
-        // until the field's next gain, which then keeps the caret it had
-        // instead of selecting all, once.
-        let menu_took_focus = std::rc::Rc::new(std::cell::Cell::new(false));
-        let menu_took_focus_for_focus = menu_took_focus.clone();
 
         let handlers = HandlerSet::new()
             .focusable(true)
@@ -771,9 +753,6 @@ impl Widget for TextInputField {
                 teksilo_core::ime::ImeContext::password()
             } else {
                 teksilo_core::ime::ImeContext::text()
-            })
-            .on_hover(move |entered, _ctx| {
-                hovered_for_hover.set(entered);
             })
             .on_focus(move |gained, ctx| {
                 interaction_for_focus.set(if gained {
@@ -801,29 +780,42 @@ impl Widget for TextInputField {
                 if gained {
                     st.blink.restart();
                     st.caret_visible.set(true);
-                    let is_keyboard = !hovered_for_focus.get();
-                    let back_from_menu = menu_took_focus_for_focus.replace(false);
                     drop(st);
-                    if ctx.focus_origin() == Some(teksilo_core::FocusOrigin::Restored) {
-                        // A rebuild replaced the field the user was typing in
-                        // (a search box whose query re-filters its own
-                        // ancestor). This is the same edit going on, not an
-                        // arrival: selecting all here made every keystroke
-                        // replace the whole query. The predecessor's caret
-                        // died with it; the end is where typing continues.
-                        let st = state_for_focus.borrow();
-                        st.cursor.move_position(
-                            teksilo_text::text_document::MoveOperation::End,
-                            teksilo_text::text_document::MoveMode::MoveAnchor,
-                            1,
-                        );
-                        drop(st);
-                        sync_cursor_signals(&state_for_focus);
-                    } else if is_keyboard && !back_from_menu {
-                        let st = state_for_focus.borrow();
-                        st.cursor.select(SelectionType::Document);
-                        drop(st);
-                        sync_cursor_signals(&state_for_focus);
+                    // What a focus gain does to the text depends on how it
+                    // arrived, and only one arrival selects it all: Tab, which
+                    // is how a reader moves *to a field*, to replace what is
+                    // in it or to read it whole (Qt's `QLineEdit` does the
+                    // same on `TabFocusReason`). A click places the caret
+                    // itself, where it lands. A programmatic focus (a
+                    // dialog opening, a menu or popover closing and handing
+                    // focus back, an application's `request_focus`) and an
+                    // assistive technology's leave the text as it is: a
+                    // field that selected all there made the next key wipe
+                    // what the reader came back to. A caller that wants the
+                    // text selected on its own focus says so with
+                    // `TextFieldHandle::select_all`.
+                    match ctx.focus_origin() {
+                        Some(teksilo_core::FocusOrigin::Keyboard) => {
+                            let st = state_for_focus.borrow();
+                            st.cursor.select(SelectionType::Document);
+                            drop(st);
+                            sync_cursor_signals(&state_for_focus);
+                        }
+                        Some(teksilo_core::FocusOrigin::Restored) => {
+                            // A rebuild replaced the field that had focus, and
+                            // this one sits where it was. Its predecessor's
+                            // caret died with it; the end is where typing
+                            // carries on.
+                            let st = state_for_focus.borrow();
+                            st.cursor.move_position(
+                                teksilo_text::text_document::MoveOperation::End,
+                                teksilo_text::text_document::MoveMode::MoveAnchor,
+                                1,
+                            );
+                            drop(st);
+                            sync_cursor_signals(&state_for_focus);
+                        }
+                        _ => {}
                     }
                     // Seed the OS IME candidate area at the caret so the
                     // first composition appears in the right place.
@@ -936,12 +928,6 @@ impl Widget for TextInputField {
                     .is_none_or(teksilo_core::widget_builder::ContextMenuTrigger::is_pointer)
                 {
                     mouse::reposition_caret_for_context_menu(&state_for_menu, position);
-                }
-                // The menu takes focus from the field only if the field has
-                // it; a right-click on an unfocused field hands focus back to
-                // whatever held it.
-                if state_for_menu.borrow().has_focus {
-                    menu_took_focus.set(true);
                 }
                 Some(build_context_menu_widget(&state_for_menu))
             });

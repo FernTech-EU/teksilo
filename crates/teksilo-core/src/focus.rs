@@ -33,17 +33,16 @@ pub enum FocusOrigin {
     /// they are simply not doing it with a key.
     Accessibility,
     /// Focus put back by the tree after a rebuild destroyed the widget that
-    /// held it: the rebuilt subtree's successor takes the focus its
-    /// predecessor had. Nobody moved focus, so a widget must treat this as
-    /// *continuity*, not arrival.
+    /// held it. The tree cannot follow a widget across a rebuild, which
+    /// allocates fresh ids, so it focuses the node at the same position: the
+    /// same index among the focusable descendants of the innermost ancestor
+    /// the rebuild left alive (the last one, when there are fewer now). Nobody
+    /// moved focus, so a widget treats this as the same interaction going on,
+    /// not as an arrival: a text field that would select all on a Tab puts
+    /// its caret at the end instead.
     ///
-    /// The case it exists for is a text field whose own value rebuilds an
-    /// ancestor, as a filtering search box does: every keystroke recreates
-    /// the field, and a field that selected its whole text on what it took
-    /// for a fresh keyboard focus made the next keystroke replace everything
-    /// typed so far, leaving only the last character visible. Declares no
-    /// modality, like [`Programmatic`](Self::Programmatic): the ring stays
-    /// wherever the rebuilt widget's predecessor had it.
+    /// Declares no modality, like [`Programmatic`](Self::Programmatic): the
+    /// ring stays wherever the predecessor had it.
     Restored,
 }
 

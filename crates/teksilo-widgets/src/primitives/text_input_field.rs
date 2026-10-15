@@ -1557,6 +1557,11 @@ mod context_menu_tests;
 #[cfg(test)]
 mod standard_edit_tests;
 
+/// **Only Tab selects the text**: a programmatic, assistive or restored
+/// focus leaves it as it was.
+#[cfg(test)]
+mod focus_origin_tests;
+
 /// A live handle on a [`TextInputField`] — its text-editing commands, for a
 /// caller outside the widget.
 ///

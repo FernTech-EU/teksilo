@@ -208,7 +208,7 @@ fn focused(field: TextInputField) -> (WidgetTree, Reader) {
     let mut tree = app_tree();
     let id = tree.add(field);
     tick(&mut tree);
-    tree.focus(id);
+    tree.focus_with_origin(id, teksilo_core::FocusOrigin::Keyboard);
     tick(&mut tree);
     let reader = Reader::attach(&mut tree);
     (tree, reader)

@@ -38,6 +38,15 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A text field selects all of its text only when focus arrives by Tab.**
+  `TextInputField`, and `TextInput`, `SearchField`, `PasswordField` and
+  `SpinBox` built on it, used to select all on any focus that was not a
+  click: a dialog opening, a modal or popover closing, an application's
+  `request_focus`, a screen reader's focus. Those now leave the text and
+  the caret as they were. A focus the tree restores after a rebuild puts
+  the caret at the end. `InputDialog` selects its default text when it
+  opens; an application that wants the text selected on a focus of its own
+  calls `TextFieldHandle::select_all`.
 - **`CommandPalette` has a new look.** It opens near the top of the window
   and is as tall as its list, up to ten rows. Each row is one line,
   `Category: Name`, with the letters the query matched in bold, the
@@ -52,7 +61,17 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+#### Core
+
+- **A rebuild that destroyed the focused widget put focus on the first
+  focusable widget of the rebuilt subtree,** whichever one the user was in,
+  so typing after a form rebuilt went on in its first field. Focus now
+  comes back to the widget at the same position.
+
 #### Widgets
+
+- **Closing a dialog, popover or menu over a text field selected the
+  field's text,** so the next key replaced it.
 
 - **A `CommandPalette` with no match rebuilt itself every frame** for as long
   as nothing matched, and drew its "No matching command" text outside the

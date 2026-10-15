@@ -523,6 +523,38 @@ impl WidgetTree {
         enter_scope_edge(&scope, false)
     }
 
+    /// Every widget within a subtree, `root` included, that can take focus
+    /// now, in depth-first tree order: active, under no disabled ancestor,
+    /// declared focusable. Tab-stop flags are not consulted, so a node that
+    /// holds focus without being a Tab stop (a roving-focus item) still has
+    /// a position here.
+    ///
+    /// Read on both sides of a rebuild to put focus back at the position it
+    /// had (see `pending_focus_restore`), which needs only the two readings to
+    /// agree, not to match Tab order.
+    pub(crate) fn focusable_descendants(&self, root: WidgetId) -> Vec<WidgetId> {
+        fn walk(tree: &WidgetTree, id: WidgetId, out: &mut Vec<WidgetId>) {
+            if !tree.arena.is_active(id) {
+                return;
+            }
+            let Some(node) = tree.arena.get(id) else {
+                return;
+            };
+            if node.enabled_state.as_ref().is_some_and(|s| !s.get()) {
+                return;
+            }
+            if tree.is_node_focusable(node) {
+                out.push(id);
+            }
+            for &child in tree.arena.children(id) {
+                walk(tree, child, out);
+            }
+        }
+        let mut out = Vec::new();
+        walk(self, root, &mut out);
+        out
+    }
+
     /// The first widget within a subtree, in depth-first order, that is
     /// declared focusable, whether or not it can take focus right now. See
     /// [`BuildContext::first_focus_capable_descendant`](crate::build_context::BuildContext::first_focus_capable_descendant).
@@ -1494,6 +1526,37 @@ mod tests {
             "focus must land back inside the rebuilt subtree"
         );
         assert!(tree.is_active(focused), "the focused node must be live");
+    }
+
+    /// The restore lands where focus was, not on the first focusable: focus on
+    /// the third row comes back to the third row, and the widget hears that it
+    /// was put back (`Restored`), not that something moved it.
+    ///
+    /// It used to land on the rebuilt subtree's first focusable whatever the
+    /// user had been in, so typing after a rebuild of a form went on in its
+    /// first field.
+    #[test]
+    fn a_rebuild_restores_focus_to_the_position_it_had() {
+        let mut tree = WidgetTree::new();
+        let epoch = crate::signal::Signal::new(0u64);
+        let root = tree.add(RebuildingRows {
+            epoch: epoch.clone(),
+            rows: Vec::new(),
+        });
+        tree.layout(SizeProposal::exact(100.0, 60.0));
+        let third = tree.children(root)[2];
+        tree.focus(third);
+
+        epoch.set(1);
+        tree.layout(SizeProposal::exact(100.0, 60.0));
+
+        let rows = tree.children(root);
+        assert_ne!(rows[2], third, "precondition: the rows were rebuilt");
+        assert_eq!(tree.focused(), Some(rows[2]), "the third row again");
+        assert_eq!(
+            tree.focus_origin(),
+            Some(crate::focus::FocusOrigin::Restored)
+        );
     }
 
     /// The restore is scoped: a rebuild that did *not* own focus must leave

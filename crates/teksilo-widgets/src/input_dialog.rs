@@ -393,6 +393,7 @@ impl Widget for InputDialogBody {
         if self.validate.is_some() {
             input = input.validation(self.validation.clone());
         }
+        let field = input.handle();
         column = column.child(input);
 
         // Footer: Spacer + Cancel + OK (right-aligned).
@@ -425,6 +426,11 @@ impl Widget for InputDialogBody {
         column = column.child(footer);
 
         let root = ctx.add(column);
+        // The pre-filled value selected, so typing replaces it and an arrow
+        // key keeps it: the rename-dialog convention. The modal's opening
+        // focus is programmatic and leaves a field's text alone, so the
+        // dialog asks for it.
+        field.select_all();
         self.root_child_id = Some(root);
         vec![root]
     }
@@ -576,6 +582,22 @@ mod tests {
                 .validate(reject_empty()),
         );
         assert!(b.valid.get());
+    }
+
+    /// The pre-filled value opens selected, so typing replaces it: the rename
+    /// convention. A modal's opening focus is programmatic, which leaves a
+    /// field's text alone, so the dialog has to select it itself.
+    #[test]
+    fn the_default_text_opens_selected() {
+        let (mut t, b) = built(InputDialog::new(lit!("Rename")).default_text("Chapter One"));
+        let field = t
+            .find_by_role(teksilo_core::accesskit::Role::TextInput)
+            .expect("the dialog has a field");
+        t.focus(field);
+        t.layout(SizeProposal::exact(420.0, 300.0));
+        t.type_text(field, "Prologue");
+        t.layout(SizeProposal::exact(420.0, 300.0));
+        assert_eq!(b.text.get(), "Prologue");
     }
 
     /// The message is withheld until the field is edited: an error on a dialog nobody has

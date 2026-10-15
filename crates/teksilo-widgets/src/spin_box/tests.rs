@@ -2312,10 +2312,13 @@ fn arriving_at_the_minimum_says_the_special_text() {
 
 #[test]
 fn a_number_typed_over_the_special_text_replaces_it() {
-    // Focus that a click did not give selects the whole text, so the special
-    // text is typed over as the number was.
+    // Tabbing into the field selects the whole text, so the special text is
+    // typed over as the number was.
     let (mut tree, value, spin) = timeout_box();
-    focus_field(&mut tree, spin);
+    let field = tree
+        .first_focusable_descendant(spin)
+        .expect("SpinBox should have a focusable inner field");
+    tree.focus_with_origin(field, teksilo_core::FocusOrigin::Keyboard);
     tick(&mut tree);
     let field = tree.focused().expect("the field holds focus");
     tree.type_text(field, "30");

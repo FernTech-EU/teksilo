@@ -42,7 +42,6 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
-use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::{SharedToggleStyle, ToggleStyle, ToggleStyleConfig};
 use teksilo_core::widget::{
@@ -70,7 +69,6 @@ pub struct Toggle {
     hovered: Signal<bool>,
     focused: Signal<bool>,
     pressed: Signal<bool>,
-    focus_origin: Signal<Option<FocusOrigin>>,
     body_id: Option<WidgetId>,
     /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
     /// with the rich / composite slots — every setter clears the other two so
@@ -102,7 +100,6 @@ impl Toggle {
             hovered: Signal::new(false),
             focused: Signal::new(false),
             pressed: Signal::new(false),
-            focus_origin: Signal::new(None),
             body_id: None,
             tooltip_text: None,
             rich_tooltip_source: None,
@@ -313,7 +310,6 @@ impl Widget for Toggle {
         let hovered = self.hovered.clone();
         let focused = self.focused.clone();
         let pressed = self.pressed.clone();
-        let focus_origin = self.focus_origin.clone();
 
         let toggle = {
             let on = on.clone();
@@ -380,20 +376,7 @@ impl Widget for Toggle {
         }
         {
             let focused = focused.clone();
-            let focus_origin = focus_origin.clone();
-            let hovered_for_focus = hovered.clone();
-            handlers = handlers.on_focus(move |gained, _ctx| {
-                focused.set(gained);
-                if gained {
-                    focus_origin.set(Some(if hovered_for_focus.get() {
-                        FocusOrigin::POINTER
-                    } else {
-                        FocusOrigin::Keyboard
-                    }));
-                } else {
-                    focus_origin.set(None);
-                }
-            });
+            handlers = handlers.on_focus(move |gained, _ctx| focused.set(gained));
         }
         {
             let toggle = toggle.clone();

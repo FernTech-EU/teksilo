@@ -374,14 +374,21 @@ impl WidgetTree {
                 .min_by_key(|&root| depth(root))
         });
 
-        // The focused node's ancestors up to that root, innermost first. The
-        // restore below goes into the innermost one the rebuild left alive.
-        let focus_ancestors: Vec<WidgetId> = match (self.focused, focus_owner) {
+        // The focused node's ancestors up to that root, innermost first, each
+        // with the focused node's position among its focusable descendants.
+        // The restore below goes into the innermost one the rebuild left
+        // alive, at the same position.
+        let focus_ancestors: Vec<(WidgetId, usize)> = match (self.focused, focus_owner) {
             (Some(focused), Some(owner)) => {
                 let mut chain = Vec::new();
                 let mut cur = self.arena.parent(focused);
                 while let Some(id) = cur {
-                    chain.push(id);
+                    let position = self
+                        .focusable_descendants(id)
+                        .iter()
+                        .position(|&f| f == focused)
+                        .unwrap_or(0);
+                    chain.push((id, position));
                     if id == owner {
                         break;
                     }
@@ -427,7 +434,7 @@ impl WidgetTree {
         {
             self.pending_focus_restore = focus_ancestors
                 .into_iter()
-                .filter(|&id| {
+                .filter(|&(id, _)| {
                     self.arena.get(id).is_some()
                         && (id == owner || self.is_descendant_of(id, owner))
                 })
@@ -925,17 +932,20 @@ impl WidgetTree {
         self.settle_pending_focus_request(&mut *ops);
         let restore = std::mem::take(&mut self.pending_focus_restore);
         if self.focused.is_none()
-            && let Some(target) = restore.into_iter().find_map(|root| {
-                self.arena
-                    .is_active(root)
-                    .then(|| self.first_focusable_descendant(root))
-                    .flatten()
+            && let Some(target) = restore.into_iter().find_map(|(root, position)| {
+                if !self.arena.is_active(root) {
+                    return None;
+                }
+                // The node at the position focus had. A rebuild that left
+                // fewer focusables than that takes the last one: the nearest
+                // to where the user was.
+                let focusables = self.focusable_descendants(root);
+                focusables.get(position).or(focusables.last()).copied()
             })
         {
-            // `Restored`, not `Programmatic`: the widget landing here is the
-            // successor of the one that had focus, and a text field reading
-            // this as a fresh keyboard focus selects all of its text, so the
-            // next keystroke replaces everything typed before it.
+            // `Restored`, not `Programmatic`: nobody moved focus, the rebuild
+            // replaced the widget that had it. A text field takes this as the
+            // same edit going on, not as a new arrival.
             self.focus_with_origin_ops(target, crate::focus::FocusOrigin::Restored, &mut *ops);
         }
 
