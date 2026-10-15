@@ -45,6 +45,11 @@ by crate for clarity, not because crates version independently.
   caused another layout. The new height now reaches the layout on the next
   frame.
 
+#### WebView
+
+- **`servo-backend` builds again.** The lock held a `pkcs1` release that the
+  `rsa` crate in Servo's dependencies does not compile against.
+
 ## [0.18.0] - 2026-10-15
 
 ### Added
