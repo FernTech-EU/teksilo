@@ -316,3 +316,116 @@ fn an_overlay_over_a_surface_page_leaves_it_shown() {
     let _ = tree.render();
     assert_eq!(records.visibility_log(id), Vec::<bool>::new());
 }
+
+/// A page holding the keyboard, beside another focusable widget.
+fn focused_surface_page() -> (
+    WidgetTree,
+    WebViewRegistry,
+    WebViewId,
+    MemoryWebViewRecords,
+    teksilo_core::widget_id::WidgetId,
+    teksilo_core::widget_id::WidgetId,
+) {
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let (registry, records) = memory_surface_registry();
+    let mut tree = tree_with_registry(registry.clone());
+    let webview = WebView::new().url("about:blank");
+    let id = webview.id();
+    let mut stack = VStack::new();
+    stack = stack.child(FixedSize::new().width(400.0).height(300.0).child(webview));
+    stack = stack.child(WidgetBuilder::focusable(
+        teksilo_widgets::primitives::RectWidget::new(),
+        true,
+    ));
+    let root = tree.add(stack);
+    settle(&mut tree);
+    let frame = find(&tree, root, "WebView").expect("the frame");
+    let other = find(&tree, root, "RectWidget").expect("the other widget");
+    tree.focus(frame);
+    deliver(
+        &mut tree,
+        &registry,
+        id,
+        WebViewEvent::EngineFocusChanged(true),
+    );
+    (tree, registry, id, records, frame, other)
+}
+
+fn find(
+    tree: &WidgetTree,
+    from: teksilo_core::widget_id::WidgetId,
+    name: &str,
+) -> Option<teksilo_core::widget_id::WidgetId> {
+    if tree
+        .widget_type_name(from)
+        .is_some_and(|n| n.ends_with(name))
+    {
+        return Some(from);
+    }
+    tree.children(from)
+        .into_iter()
+        .find_map(|child| find(tree, child, name))
+}
+
+#[test]
+fn the_applications_copy_reaches_a_page_holding_the_keyboard() {
+    use teksilo_webview::WebViewEditCommand;
+    let (mut tree, registry, id, records, _frame, _other) = focused_surface_page();
+    tree.press_key(Key::C, Modifiers::COMMAND);
+    assert!(
+        records
+            .input_log(id)
+            .contains(&WebViewInputEvent::Edit(WebViewEditCommand::Copy)),
+        "the Copy shortcut is the page's: {:?}",
+        records.input_log(id)
+    );
+
+    deliver(
+        &mut tree,
+        &registry,
+        id,
+        WebViewEvent::EngineFocusChanged(false),
+    );
+    let before = records.input_log(id).len();
+    tree.press_key(Key::C, Modifiers::COMMAND);
+    assert!(
+        !records.input_log(id)[before..]
+            .iter()
+            .any(|e| matches!(e, WebViewInputEvent::Edit(_))),
+        "a page that gave the keyboard up copies nothing"
+    );
+}
+
+#[test]
+fn ctrl_tab_leaves_a_page_holding_the_keyboard() {
+    let (mut tree, _registry, id, records, frame, other) = focused_surface_page();
+    assert_eq!(tree.focused(), Some(frame));
+    tree.press_key(Key::Tab, Modifiers::CTRL);
+    assert_eq!(
+        tree.focused(),
+        Some(other),
+        "Ctrl+Tab moves focus on, out of the page"
+    );
+    assert!(
+        records
+            .ops_for(id)
+            .iter()
+            .any(|op| matches!(op, WebViewOp::Blur { .. })),
+        "and the engine is told the page lost the keyboard"
+    );
+}
+
+#[test]
+fn the_pages_cursor_shows_over_it() {
+    use teksilo_core::widget::CursorIcon;
+    let (mut tree, registry, id, _records, _frame, _other) = focused_surface_page();
+    deliver(
+        &mut tree,
+        &registry,
+        id,
+        WebViewEvent::CursorChanged(CursorIcon::Text),
+    );
+    tree.pointer_move(Point::new(50.0, 50.0));
+    tree.pointer_move(Point::new(60.0, 60.0));
+    assert_eq!(tree.current_cursor(), CursorIcon::Text);
+}

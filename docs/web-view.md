@@ -165,8 +165,14 @@ animates at 60 frames a second on a 120 Hz display.
 pixel it landed on: mouse buttons and moves, touch and pen contacts, the
 wheel, and, once the page holds the keyboard (a click in it, or Enter on the
 focused frame), keys and input-method text. Ctrl+Tab and Ctrl+Shift+Tab leave
-the page. Teksilo's key events carry the logical key and the text it produced,
-not the physical key, so a page sees `KeyboardEvent.code` as `"Unidentified"`.
+the page, and focus leaving the frame takes the keyboard from the page.
+Application shortcuts resolve before the page sees a key, as a browser's own
+shortcuts do over a focused page: Copy, Cut and Paste (rebound or not, from a
+menu or the keyboard) act on the page's selection; Select All, Undo and Redo
+reach it as the plain keys they were. The page's cursor shows over it, and the
+input method's candidate window opens beside its caret. Teksilo's key events
+carry the logical key and the text it produced, not the physical key, so a page
+sees `KeyboardEvent.code` as `"Unidentified"`.
 
 **What does not work yet.** JS→Rust messages (`window.ipc`) are not delivered. Dialogs and
 pickers a page opens (`alert`, `<select>`, file inputs) are not shown. The

@@ -306,6 +306,11 @@ struct SurfaceView {
     /// The page pixel the pointer was last forwarded at: where a scroll with
     /// no position of its own lands, and where a cancelled contact ends.
     last_pointer: Cell<Option<Point>>,
+    /// The cursor the page asked for, applied while the pointer is over it.
+    cursor: Cell<Option<teksilo_core::widget::CursorIcon>>,
+    /// The widget's window-space box at its last layout, to place the input
+    /// method's candidate window beside the page's caret.
+    window_bounds: Cell<Rect>,
 }
 
 impl SurfaceView {
@@ -322,6 +327,8 @@ impl SurfaceView {
             geometry: Cell::new(None),
             contacts: RefCell::new(Vec::new()),
             last_pointer: Cell::new(None),
+            cursor: Cell::new(None),
+            window_bounds: Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0)),
         }
     }
 
@@ -340,6 +347,24 @@ impl SurfaceView {
             self.orientation,
             content,
             bounds,
+        ))
+    }
+
+    /// Where page pixels `rect` are shown, in window-logical coordinates.
+    fn window_rect(&self, rect: Rect) -> Option<Rect> {
+        let placed = self.geometry.get()?;
+        let (w, h) = placed.displayed();
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let sx = placed.content.width / w as f32;
+        let sy = placed.content.height / h as f32;
+        let origin = self.window_bounds.get();
+        Some(Rect::new(
+            origin.x + placed.content.x + rect.x * sx,
+            origin.y + placed.content.y + rect.y * sy,
+            rect.width * sx,
+            rect.height * sy,
         ))
     }
 
@@ -767,6 +792,7 @@ impl WebView {
             }
         }
         surface.geometry.set(placed);
+        surface.window_bounds.set(bounds);
     }
 
     fn with_handle(&self, f: impl FnOnce(&dyn WebViewHandle)) {
@@ -792,6 +818,7 @@ impl WebView {
         let on_page_load = self.on_page_load.clone();
         let on_download_started = self.on_download_started.clone();
         let on_download_finished = self.on_download_finished.clone();
+        let surface = self.surface.clone();
 
         move |event, ctx| match event {
             WebViewEvent::PageLoadStarted => {
@@ -867,6 +894,16 @@ impl WebView {
             WebViewEvent::ConsoleMessage { .. } => {
                 // Diagnostics only (backend init / unsupported-op reports);
                 // not surfaced to a dedicated app callback today.
+            }
+            WebViewEvent::CursorChanged(cursor) => {
+                if let Some(surface) = &surface {
+                    surface.cursor.set(Some(cursor));
+                }
+            }
+            WebViewEvent::InputMethodArea(area) => {
+                if let Some(area) = area.and_then(|a| surface.as_ref()?.window_rect(a)) {
+                    ctx.set_ime_cursor_area(area);
+                }
             }
             WebViewEvent::EngineFocusChanged(has_focus) => {
                 page_focused.set(has_focus);
@@ -964,6 +1001,8 @@ impl Widget for WebView {
         let focused = self.focused.clone();
         let focus_handle = self.handle.clone();
         let enter_on_focus = self.enter_page_on_focus;
+        let blur_page_focused = self.page_focused.clone();
+        let blurs = self.surface.is_some();
         let mut handlers = teksilo_core::widget_builder::HandlerSet::new()
             .focusable(true)
             .on_focus(move |gained, _ctx| {
@@ -974,7 +1013,20 @@ impl Widget for WebView {
                 {
                     h.set_focus();
                 }
+                // Focus leaving the frame leaves the page: a surface engine
+                // has no OS focus of its own to lose, so it is told.
+                if !gained && blurs {
+                    blur_page_focused.set(false);
+                    if let Some(h) = focus_handle.borrow().as_ref() {
+                        h.blur();
+                    }
+                }
             });
+        if self.surface.is_some() {
+            // The page's text fields take input-method text through the
+            // frame, the only node Teksilo focuses.
+            handlers = handlers.ime_input(teksilo_core::ime::ImeContext::text());
+        }
 
         let key_handle = self.handle.clone();
         let key_page_focused = self.page_focused.clone();
@@ -1084,6 +1136,40 @@ impl Widget for WebView {
         }
 
         ctx.apply_self_handlers(handlers);
+
+        // --- The standard edit commands, for a page holding the keyboard ---
+        //
+        // Shortcuts resolve before a focused widget sees its keys, so the
+        // application's Copy, Cut and Paste, rebound or not, and its menu's,
+        // reach the page here, as editing actions on its own selection. Select
+        // All, Undo and Redo are declined and fall through as the plain key
+        // they were, which the page receives below.
+        if self.surface.is_some() {
+            use teksilo_core::shortcut::StandardEdit;
+            for (command, edit) in [
+                (StandardEdit::Copy, WebViewEditCommand::Copy),
+                (StandardEdit::Cut, WebViewEditCommand::Cut),
+                (StandardEdit::Paste, WebViewEditCommand::Paste),
+                (StandardEdit::PastePlain, WebViewEditCommand::Paste),
+            ] {
+                let handle = self.handle.clone();
+                let page_focused = self.page_focused.clone();
+                ctx.register_action(
+                    teksilo_core::action::Action::new(command.id()).on_invoke_with_response(
+                        move |_intent, _ctx| {
+                            if page_focused.get()
+                                && let Some(h) = handle.borrow().as_ref()
+                            {
+                                h.send_input(&WebViewInputEvent::Edit(edit));
+                                teksilo_core::intent::IntentResponse::Handled
+                            } else {
+                                teksilo_core::intent::IntentResponse::Propagated
+                            }
+                        },
+                    ),
+                );
+            }
+        }
 
         // Capture the window id now — the post-mount EventContext has no
         // direct window-id accessor, but BuildContext::window() does.
@@ -1568,6 +1654,9 @@ fn forward_surface_pointer(
         };
         drop(contacts);
         pointer_surface.last_pointer.set(Some(page));
+        if let Some(cursor) = pointer_surface.cursor.get() {
+            ctx.set_cursor(cursor);
+        }
         send(&pointer_handle, forwarded);
         answer
     });

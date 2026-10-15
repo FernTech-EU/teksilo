@@ -60,9 +60,11 @@ use teksilo_core::window::TeksiloWindowId;
 use dpi::PhysicalSize;
 use euclid::Scale;
 use servo::{
-    ConsoleLogLevel, EventLoopWaker, LoadStatus, NavigationRequest, RenderingContext, Servo,
-    ServoBuilder, WebView as ServoWebView, WebViewBuilder, WebViewDelegate,
+    ConsoleLogLevel, Cursor, EmbedderControl, EmbedderControlId, EventLoopWaker, LoadStatus,
+    NavigationRequest, RenderingContext, Servo, ServoBuilder, WebView as ServoWebView,
+    WebViewBuilder, WebViewDelegate,
 };
+use teksilo_core::widget::CursorIcon;
 use url::Url;
 
 use crate::backend::{
@@ -361,11 +363,57 @@ impl WebViewDelegate for ServoEventDelegate {
         self.post(WebViewEvent::EngineFocusChanged(focused));
     }
 
+    fn notify_cursor_changed(&self, _webview: ServoWebView, cursor: Cursor) {
+        self.post(WebViewEvent::CursorChanged(cursor_icon(cursor)));
+    }
+
+    /// An editable element took focus: say where its caret is. Every other
+    /// control (a dialog, a `<select>`, a picker) is dropped, which answers it
+    /// with its default (an alert acknowledged, a confirm or prompt
+    /// cancelled, a picker closed), so no page waits on one.
+    fn show_embedder_control(&self, _webview: ServoWebView, control: EmbedderControl) {
+        if let EmbedderControl::InputMethod(input) = control {
+            let caret = input.position();
+            self.post(WebViewEvent::InputMethodArea(Some(Rect::new(
+                caret.min.x as f32,
+                caret.min.y as f32,
+                caret.width() as f32,
+                caret.height() as f32,
+            ))));
+        }
+    }
+
+    fn hide_embedder_control(&self, _webview: ServoWebView, _id: EmbedderControlId) {
+        self.post(WebViewEvent::InputMethodArea(None));
+    }
+
     fn show_console_message(&self, _webview: ServoWebView, level: ConsoleLogLevel, text: String) {
         self.post(WebViewEvent::ConsoleMessage {
             level: console_level(level),
             text,
         });
+    }
+}
+
+/// The nearest of Teksilo's cursors to the one the page asked for.
+fn cursor_icon(cursor: Cursor) -> CursorIcon {
+    match cursor {
+        Cursor::Pointer | Cursor::Alias | Cursor::ContextMenu => CursorIcon::Pointer,
+        Cursor::Text | Cursor::VerticalText => CursorIcon::Text,
+        Cursor::Crosshair | Cursor::Cell => CursorIcon::Crosshair,
+        Cursor::Move | Cursor::AllScroll => CursorIcon::Move,
+        Cursor::NotAllowed | Cursor::NoDrop => CursorIcon::NotAllowed,
+        Cursor::Grab => CursorIcon::Grab,
+        Cursor::Grabbing => CursorIcon::Grabbing,
+        Cursor::EResize | Cursor::WResize | Cursor::EwResize | Cursor::ColResize => {
+            CursorIcon::ColResize
+        }
+        Cursor::NResize | Cursor::SResize | Cursor::NsResize | Cursor::RowResize => {
+            CursorIcon::RowResize
+        }
+        Cursor::NeResize | Cursor::SwResize | Cursor::NeswResize => CursorIcon::NeswResize,
+        Cursor::NwResize | Cursor::SeResize | Cursor::NwseResize => CursorIcon::NwseResize,
+        _ => CursorIcon::Default,
     }
 }
 
@@ -604,6 +652,9 @@ impl WebViewHandle for ServoHandle {
     }
     fn set_focus(&self) {
         self.with_webview(|w| w.focus());
+    }
+    fn blur(&self) {
+        self.with_webview(|w| w.blur());
     }
     fn set_input_passthrough(&self, _passthrough: bool) {
         // A surface engine takes no input but what the widget forwards, and

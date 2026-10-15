@@ -40,6 +40,7 @@ use teksilo_core::AppEventPoster;
 use teksilo_core::event::{Key, Modifiers, PointerButton, ScrollDelta};
 use teksilo_core::pointer::PointerId;
 use teksilo_core::raw_handle::ParentHandle;
+use teksilo_core::widget::CursorIcon;
 use teksilo_core::widget::EventContext;
 use teksilo_core::window::TeksiloWindowId;
 
@@ -283,6 +284,10 @@ pub trait WebViewHandle: 'static {
     fn open_devtools(&self) {}
     /// Close the engine's developer tools (no-op where unsupported).
     fn close_devtools(&self) {}
+    /// Take the keyboard away from the page: the frame lost Teksilo's focus.
+    /// Only a [`WebViewRendering::Surface`] engine needs telling; a native
+    /// subview loses the OS focus with the frame.
+    fn blur(&self) {}
     /// Pass input to the page. Only a [`WebViewRendering::Surface`] engine
     /// receives this: a native subview gets its input from the OS. See
     /// [`WebViewInputEvent`] for the coordinate space.
@@ -326,6 +331,14 @@ pub enum WebViewEvent {
     /// `EventContext::request_focus` on its own frame, so the toolkit's focus
     /// agrees with the OS.
     EngineFocusChanged(bool),
+    /// The page wants this cursor over itself. Sent by a
+    /// [`WebViewRendering::Surface`] engine; a native subview sets the OS
+    /// cursor itself.
+    CursorChanged(CursorIcon),
+    /// Where the page's text caret is, in page pixels, while an editable
+    /// element in it has focus (`None` once none has), so the input method's
+    /// candidate window opens beside it. Sent by a surface engine.
+    InputMethodArea(Option<Rect>),
 }
 
 /// Boxed inside `AppEvent::External` when a backend produces an event.
@@ -685,6 +698,9 @@ pub enum WebViewOp {
     CloseDevtools {
         web_view_id: WebViewId,
     },
+    Blur {
+        web_view_id: WebViewId,
+    },
     /// Input forwarded with [`WebViewHandle::send_input`].
     Input {
         web_view_id: WebViewId,
@@ -785,6 +801,7 @@ fn op_web_view_id(op: &WebViewOp) -> WebViewId {
         | WebViewOp::SetInputPassthrough { web_view_id, .. }
         | WebViewOp::OpenDevtools { web_view_id }
         | WebViewOp::CloseDevtools { web_view_id }
+        | WebViewOp::Blur { web_view_id }
         | WebViewOp::Input { web_view_id, .. }
         | WebViewOp::Dropped { web_view_id } => *web_view_id,
     }
@@ -928,6 +945,11 @@ impl WebViewHandle for MemoryWebViewHandle {
     }
     fn close_devtools(&self) {
         self.records.push(WebViewOp::CloseDevtools {
+            web_view_id: self.web_view_id,
+        });
+    }
+    fn blur(&self) {
+        self.records.push(WebViewOp::Blur {
             web_view_id: self.web_view_id,
         });
     }

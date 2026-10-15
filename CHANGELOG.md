@@ -31,6 +31,12 @@ by crate for clarity, not because crates version independently.
   trackpad pixels), keys and input-method text while the page holds the
   keyboard, and clipboard commands. A page sees no physical key code
   (`KeyboardEvent.code` is `"Unidentified"`): Teksilo's key events carry none.
+- **A surface page and the application share the keyboard.** Application
+  shortcuts resolve first: the standard Copy, Cut and Paste act on the page's
+  selection while it holds the keyboard. Focus leaving the frame takes the
+  keyboard from the page (`WebViewHandle::blur`). The page's cursor shows over
+  it and the input method's candidate window opens at its caret
+  (`WebViewEvent::CursorChanged`, `WebViewEvent::InputMethodArea`).
 - **Servo pages report their events.** Navigations (`on_navigation`), URL
   changes with no load behind them (`url_signal`), console messages and the
   page taking or giving up the keyboard (`page_focused_signal`) now reach the
