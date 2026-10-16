@@ -37,6 +37,12 @@ by crate for clarity, not because crates version independently.
   keyboard from the page (`WebViewHandle::blur`). The page's cursor shows over
   it and the input method's candidate window opens at its caret
   (`WebViewEvent::CursorChanged`, `WebViewEvent::InputMethodArea`).
+- **A Servo page's accessibility tree is in the application's.** The page's
+  headings, paragraphs, links and text are mirrored under the `WebView`'s
+  `Role::WebView` node (`WebViewEvent::PageAccessibility`,
+  `PageAccessibilityUpdate`), for a screen reader to read. Servo takes no
+  accessibility actions back, so the page is still operated through the frame
+  and forwarded input.
 - **A Servo page's dialogs are shown.** `alert()`, `confirm()`, `prompt()` and
   `<select>` lists reach a `WebViewControlPresenter` in app state
   (`teksilo_webview::controls`, `WebViewEvent::ControlRequested`,

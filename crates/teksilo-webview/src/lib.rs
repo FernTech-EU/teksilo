@@ -56,6 +56,7 @@
 
 mod backend;
 pub mod controls;
+mod page_a11y;
 
 #[path = "styles/recipe_web_view_style.rs"]
 mod recipe_web_view_style;
@@ -81,6 +82,7 @@ pub use controls::{
     SharedWebViewControlPresenter, WebViewControl, WebViewControlAnswer, WebViewControlPresenter,
     WebViewSelectOption,
 };
+pub use page_a11y::PageAccessibilityUpdate;
 pub use recipe_web_view_style::RecipeWebViewStyle;
 
 // Re-export the Tier-3 style surface (the trait lives in teksilo-core so the
@@ -453,6 +455,9 @@ pub struct WebView {
     /// The picture, when the installed backend renders into one. `None` for a
     /// native subview.
     surface: Option<Rc<SurfaceView>>,
+    /// The page's accessibility tree, when the engine hands it over rather
+    /// than publishing it to the OS itself.
+    page_tree: Rc<RefCell<page_a11y::PageTree>>,
 
     // Optional bindings.
     /// Two-way: the engine writes the resolved URL on navigation-finish, and
@@ -518,6 +523,7 @@ impl WebView {
             visibility: Rc::new(Cell::new(EngineVisibility::VISIBLE)),
             visible_applied: Rc::new(Cell::new(true)),
             surface: None,
+            page_tree: Rc::new(RefCell::new(page_a11y::PageTree::default())),
             url_signal: None,
             title_signal: None,
             loading_signal: None,
@@ -825,6 +831,7 @@ impl WebView {
         let on_download_finished = self.on_download_finished.clone();
         let surface = self.surface.clone();
         let control_handle = self.handle.clone();
+        let page_tree = self.page_tree.clone();
 
         move |event, ctx| match event {
             WebViewEvent::PageLoadStarted => {
@@ -924,6 +931,10 @@ impl WebView {
                     // not wait.
                     None => reply(WebViewControlAnswer::Dismissed),
                 }
+            }
+            WebViewEvent::PageAccessibility(update) => {
+                page_tree.borrow_mut().apply(update);
+                ctx.request_accessibility_update();
             }
             WebViewEvent::InputMethodArea(area) => {
                 if let Some(area) = area.and_then(|a| surface.as_ref()?.window_rect(a)) {
@@ -1474,6 +1485,9 @@ impl Widget for WebView {
         builder.add_action(teksilo_core::accesskit::Action::Click);
         if !self.enter_page_on_focus {
             builder.set_keyboard_shortcut("Enter");
+        }
+        if let Some(owner) = self.self_id.get() {
+            self.page_tree.borrow().emit(owner, builder);
         }
     }
 

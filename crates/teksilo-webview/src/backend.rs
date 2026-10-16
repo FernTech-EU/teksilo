@@ -43,6 +43,7 @@ use teksilo_core::raw_handle::ParentHandle;
 use teksilo_core::widget::CursorIcon;
 
 use crate::controls::{WebViewControl, WebViewControlAnswer};
+use crate::page_a11y::PageAccessibilityUpdate;
 use teksilo_core::widget::EventContext;
 use teksilo_core::window::TeksiloWindowId;
 
@@ -350,6 +351,10 @@ pub enum WebViewEvent {
     /// [`WebViewHandle::answer_control`] and the same `key`. A `Select`'s
     /// `area` is in page pixels here; the widget maps it to the window.
     ControlRequested { key: u64, control: WebViewControl },
+    /// An update of the page's accessibility tree, from an engine that hands
+    /// it to its embedder instead of publishing it to the OS (Servo). The
+    /// widget mirrors it under its own node.
+    PageAccessibility(PageAccessibilityUpdate),
 }
 
 /// Boxed inside `AppEvent::External` when a backend produces an event.

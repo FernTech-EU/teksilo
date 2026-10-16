@@ -35,6 +35,8 @@ version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad442f58ee04714aaa0ba0a2768c1ea1935b29507bb22ddece8cbbc76db02932"
 dependencies = [
+ "enumn",
+ "serde",
  "uuid",
 ]
 
@@ -12261,11 +12263,13 @@ dependencies = [
 name = "teksilo-webview"
 version = "0.18.0"
 dependencies = [
+ "accesskit 0.25.1",
  "dpi",
  "euclid",
  "gleam",
  "glow",
  "gtk",
+ "serde_json",
  "servo",
  "surfman",
  "teksilo-canvas",

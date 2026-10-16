@@ -135,6 +135,7 @@ fn servo_renders_a_page_into_the_web_views_picture() {
             .on_message(move |message, _ctx| received.borrow_mut().push(message))
             .html(concat!(
         "<html><head><title>Two halves</title></head>",
+        "<h1 style='position:absolute;left:-1000px'>Spoken heading</h1>",
         "<body style='margin:0'><script>console.warn('from the page');",
         "window.ipc.postMessage('hello \\u00e9\\n\\u2028+%');",
         "addEventListener('mousedown',e=>{if(e.button===0){document.body.innerHTML='';",
@@ -194,6 +195,40 @@ fn servo_renders_a_page_into_the_web_views_picture() {
         },
     );
     assert!(resized, "the page follows the widget to its new size");
+
+    // The page's accessibility tree is mirrored under the web view's node.
+    let has_heading = |tree: &WidgetTree| {
+        tree.accessibility_tree_snapshot()
+            .nodes
+            .iter()
+            .any(|(_, node)| {
+                node.role() == teksilo_core::accesskit::Role::Heading
+                    && node.label() == Some("Spoken heading")
+            })
+    };
+    let end = Instant::now() + Duration::from_secs(30);
+    while !has_heading(&tree) && Instant::now() < end {
+        answer(&mut tree, &registry, &mailbox, &mut seen);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        has_heading(&tree),
+        "the page's heading is in Teksilo's accessibility tree"
+    );
+    // And the tree holding it is one AccessKit accepts, with the heading
+    // reachable the way a screen reader walks it.
+    let snapshot = tree.accessibility_tree_snapshot();
+    let heading = snapshot
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("Spoken heading"))
+        .map(|(id, _)| *id)
+        .expect("the heading node");
+    assert!(
+        teksilo_core::accessibility::audit::nodes_in_filtered_tree(&snapshot).contains(&heading),
+        "the page's heading is reachable through AccessKit's consumer"
+    );
 
     // A click on the widget reaches the page, which turns green.
     tree.tap_with(

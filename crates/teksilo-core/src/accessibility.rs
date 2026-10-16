@@ -295,6 +295,11 @@ pub enum SyntheticKind {
     /// positioned or floating text frame — with no role to announce, and
     /// wrapping one in a node a reader stops on would be AT noise.
     RichTextBlockquote = 17,
+    /// A node of a web page, mirrored from the accessibility tree an engine
+    /// that renders offscreen publishes (`teksilo-webview`'s Servo backend).
+    /// Keyed by the page's own node id, so a node keeps its id across the
+    /// engine's incremental updates.
+    WebPageNode = 18,
 }
 
 /// A live-region announcement every platform adapter would have made.
@@ -1329,8 +1334,9 @@ impl AccessNodeBuilder {
                     | SyntheticKind::SceneHandle
                     | SyntheticKind::ChartMark
                     | SyntheticKind::LaneMark
+                    | SyntheticKind::WebPageNode
             ),
-            "push_scene_child requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::SceneHandle, ::ChartMark, or ::LaneMark"
+            "push_scene_child requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::SceneHandle, ::ChartMark, ::LaneMark or ::WebPageNode"
         );
         let Some(owner) = self.owner else {
             debug_assert!(
@@ -1411,8 +1417,9 @@ impl AccessNodeBuilder {
                     | SyntheticKind::SceneHandle
                     | SyntheticKind::ChartMark
                     | SyntheticKind::LaneMark
+                    | SyntheticKind::WebPageNode
             ),
-            "push_scene_child_under requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::SceneHandle, ::ChartMark, or ::LaneMark"
+            "push_scene_child_under requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::SceneHandle, ::ChartMark, ::LaneMark or ::WebPageNode"
         );
         let Some(owner) = self.owner else {
             debug_assert!(

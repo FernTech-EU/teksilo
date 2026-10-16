@@ -6,8 +6,8 @@
 > **Status: prototype.** The **wry** backend (the default) is functional on
 > macOS / Windows / Linux-X11 and, via XWayland, on Linux/Wayland. The **Servo**
 > backend (the native Wayland path) renders pages inside the window and takes
-> pointer, touch, wheel and keyboard input, `window.ipc` messages and the
-> page's dialogs; the page's accessibility tree is still missing. See
+> pointer, touch, wheel and keyboard input, `window.ipc` messages, the
+> page's dialogs and its accessibility tree. See
 > [Servo backend: requirements & status](#servo-backend-requirements--status).
 
 `WebView` embeds HTML / web content in a Teksilo window, for documentation
@@ -187,7 +187,15 @@ with nothing highlighted until an arrow key or type-ahead moves onto an option.
 With no presenter installed, each gets its default answer at once. File and
 colour pickers and the page's context menu are not shown; they are cancelled.
 
-**What does not work yet.** The page's accessibility tree is not published. A page loaded with
+**Accessibility.** Servo hands its page's accessibility tree to the backend
+rather than to the OS. The widget mirrors it under its own `Role::WebView` node
+(`WebViewEvent::PageAccessibility`), so a screen reader reads the page's
+headings, paragraphs, links and text inside the application's tree. It is a
+tree to read: Servo takes no accessibility actions back, so the page is entered
+and operated through the frame (Enter, or the frame's `Click`) and the input
+the widget forwards.
+
+**What does not work yet.** A page loaded with
 `.html(...)` travels as a `data:` URL, so a `base_url` does not apply to it.
 
 **Build requirements (Linux).** Servo pulls a large native toolchain on top of
@@ -481,9 +489,9 @@ one-liner) and pump post-mount opens with `tree.run_mount_actions(&mut NoopWindo
 - **Custom-protocol handlers** (`app://` serving local SPAs) are not yet plumbed
   through `WebViewAttributes`, only scheme *names* are carried, no dispatch
   closure. Load local content inline with `.html(...)` for now.
-- **The Servo backend publishes no page accessibility tree yet**, shows no
-  file or colour picker or context menu, and a page sees no physical key
-  codes. See
+- **The Servo backend shows no file or colour picker or context menu**, a
+  page's accessibility tree can be read but not acted on, and a page sees no
+  physical key codes. See
   [Servo backend: requirements & status](#servo-backend-requirements--status).
 - **`load_html` `base_url`** is ignored on wry (no runtime load-HTML API;
   emulated via `document.write`).

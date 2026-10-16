@@ -242,7 +242,14 @@ impl Engine {
                 routes: routes.clone(),
             },
         );
+        // A page's accessibility tree reaches the widget only with this on;
+        // it is a process-wide preference, read as the engine starts.
+        let preferences = servo::Preferences {
+            accessibility_enabled: true,
+            ..Default::default()
+        };
         let servo = ServoBuilder::default()
+            .preferences(preferences)
             .event_loop_waker(Box::new(waker.clone()))
             .protocol_registry(protocols)
             .build();
@@ -415,6 +422,16 @@ impl WebViewDelegate for ServoEventDelegate {
         self.post(WebViewEvent::EngineFocusChanged(focused));
     }
 
+    fn notify_accessibility_tree_update(
+        &self,
+        _webview: ServoWebView,
+        update: servo::accesskit::TreeUpdate,
+    ) {
+        if let Some(update) = page_accessibility(&update) {
+            self.post(WebViewEvent::PageAccessibility(update));
+        }
+    }
+
     fn notify_cursor_changed(&self, _webview: ServoWebView, cursor: Cursor) {
         self.post(WebViewEvent::CursorChanged(cursor_icon(cursor)));
     }
@@ -486,6 +503,27 @@ impl WebViewDelegate for ServoEventDelegate {
             text,
         });
     }
+}
+
+/// Servo's tree update (AccessKit 0.24) as the widget takes it (0.25).
+///
+/// Both versions serialise a node as a map from property name to value and
+/// share the names, 0.25 only adding ones 0.24 never writes, so a round trip
+/// through serde converts. `None` if a later Servo writes something 0.25
+/// cannot read: the page's tree is then not mirrored, and the page still works.
+fn page_accessibility(
+    update: &servo::accesskit::TreeUpdate,
+) -> Option<crate::PageAccessibilityUpdate> {
+    let value = serde_json::to_value(update).ok()?;
+    let update: teksilo_core::accesskit::TreeUpdate = serde_json::from_value(value).ok()?;
+    Some(crate::PageAccessibilityUpdate {
+        root: update.tree.map(|tree| tree.root.0),
+        nodes: update
+            .nodes
+            .into_iter()
+            .map(|(id, node)| (id.0, node))
+            .collect(),
+    })
 }
 
 /// A `<select>`'s options, its groups flattened into a label on each option.
@@ -646,6 +684,10 @@ impl WebViewBackend for ServoBackend {
             builder = builder.url(url);
         }
         let webview = builder.build();
+        // The page's tree goes to the widget, which mirrors it under its own
+        // node; the subtree id Servo returns is for a graft, which the mirror
+        // does not need.
+        let _ = webview.set_accessibility_active(true);
         engine
             .routes
             .lock()
