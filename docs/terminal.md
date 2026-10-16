@@ -34,7 +34,7 @@ of it") and `teksilo-webview` (a heavy engine behind a feature flag):
   openpty) with [`alacritty_terminal`](https://docs.rs/alacritty_terminal) (the
   VT parser + grid + scrollback). Nothing in this crate parses escape codes.
 
-Unlike `teksilo-webview`, the terminal renders **into the wgpu surface**, so it
+Unlike a wry `WebView`, the terminal renders **into the wgpu surface**, so it
 keeps full accessibility, theming, and the opacity/blur/transform paint scopes,
 and needs no native-subview compositing.
 

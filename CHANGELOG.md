@@ -17,32 +17,50 @@ by crate for clarity, not because crates version independently.
 
 #### WebView
 
+- **`WebView` shows a surface engine's page inside the window.** With a
+  backend whose `rendering()` is `Surface`, the widget paints the picture the
+  engine draws into, one frame pixel per device pixel, so the page clips, sits
+  under popovers and dialogs, and scrolls inside a `ScrollArea` like any other
+  content. The engine is told the page is hidden while it is dormant or
+  scrolled out of view. Pointer, touch, wheel and keyboard input over the page
+  is forwarded to the engine at the page pixel it landed on; keys only while
+  the page holds the keyboard, and never Ctrl+Tab, which stays the way out.
+- **`WebViewHandle::send_input` and `WebViewInputEvent`.** The input the
+  widget forwards to a surface engine (pointer, touch, scroll, key, input
+  method, clipboard command), in the page's pixels; a native view ignores it.
+- **`WebViewRegistry::pump` and `WebViewPumpPayload`.** A surface engine that
+  needs to run on the UI thread posts the payload, and the registry passes the
+  pump on to `WebViewBackend::pump`. `teksilo-app` answers the payload on the
+  UI thread without redrawing any window.
 - **The Servo backend renders pages.** `ServoBackend` is now a surface
-  backend: each page renders offscreen into an OpenGL context of its own (the
-  hardware adapter, or the software one with a console warning), is read back
-  without stalling the UI thread, and is drawn by the `WebView` widget inside
-  the window. It needs no window of its own, so it works under Wayland, and a
-  frame identical to the previous one costs no upload. A dormant or
-  scrolled-out page is hidden and throttled in Servo. Animated pages run at most
-  60 frames a second, and only while they animate. Inline HTML (`.html(...)`,
-  `load_html`) loads as a `data:` URL.
-- **Servo pages take input.** What the widget forwards reaches the page:
-  mouse buttons and moves, touch and pen contacts, the wheel (lines and
-  trackpad pixels), keys and input-method text while the page holds the
-  keyboard, and clipboard commands. A page sees no physical key code
-  (`KeyboardEvent.code` is `"Unidentified"`): Teksilo's key events carry none.
+  backend: each page renders offscreen into an OpenGL context of its own, on
+  the hardware adapter, or on the software one where there is none. It needs no window of its own, so it works under Wayland. A
+  frame identical to the previous one costs no upload, a dormant or
+  scrolled-out page is throttled in Servo, and animated pages run at most 60
+  frames a second, only while they animate. The page is in automation
+  screenshots, with no `webview_hole_possible` warning. Inline HTML
+  (`.html(...)`, `load_html`) loads as a `data:` URL, and the widget reports
+  its URL as `about:blank`.
+- **Servo pages take input.** Mouse buttons and moves, touch and pen
+  contacts, the wheel (lines and trackpad pixels), keys and input-method text
+  while the page holds the keyboard, and clipboard commands reach the page. A
+  page sees no physical key code (`KeyboardEvent.code` is `"Unidentified"`):
+  Teksilo's key events carry none.
 - **A surface page and the application share the keyboard.** Application
   shortcuts resolve first: the standard Copy, Cut and Paste act on the page's
   selection while it holds the keyboard. Focus leaving the frame takes the
   keyboard from the page (`WebViewHandle::blur`). The page's cursor shows over
   it and the input method's candidate window opens at its caret
   (`WebViewEvent::CursorChanged`, `WebViewEvent::InputMethodArea`).
-- **A Servo page's accessibility tree is in the application's.** The page's
-  headings, paragraphs, links and text are mirrored under the `WebView`'s
-  `Role::WebView` node (`WebViewEvent::PageAccessibility`,
-  `PageAccessibilityUpdate`), for a screen reader to read. Servo takes no
-  accessibility actions back, so the page is still operated through the frame
-  and forwarded input.
+- **Servo pages report their events.** Navigations (`on_navigation`), URL
+  changes with no load behind them (`url_signal`) and the page taking or
+  giving up the keyboard (`page_focused_signal`) now reach the widget, beside
+  the load and title events it already had. Console messages are posted as
+  `WebViewEvent::ConsoleMessage`, which the widget does not pass on to the
+  application yet.
+- **`window.ipc` on Servo.** `window.ipc.postMessage(m)` in a Servo page now
+  reaches `on_message`, as on wry. Two messages posted back to back may arrive
+  out of order.
 - **A Servo page's dialogs are shown.** `alert()`, `confirm()`, `prompt()` and
   `<select>` lists reach a `WebViewControlPresenter` in app state
   (`teksilo_webview::controls`, `WebViewEvent::ControlRequested`,
@@ -50,27 +68,16 @@ by crate for clarity, not because crates version independently.
   `teksilo::webview_install::WidgetsControlPresenter`, built on `MessageBox`,
   `InputDialog` and `MenuList`; with no presenter each gets its default answer.
   File and colour pickers and the page's context menu are cancelled.
-- **`window.ipc` on Servo.** `window.ipc.postMessage(m)` in a Servo page now
-  reaches `on_message`, as on wry. Two messages posted back to back may arrive
-  out of order.
-- **Servo pages report their events.** Navigations (`on_navigation`), URL
-  changes with no load behind them (`url_signal`), console messages and the
-  page taking or giving up the keyboard (`page_focused_signal`) now reach the
-  widget, beside the load and title events it already had.
-- **`WebView` shows a surface engine's page inside the window.** With a
-  backend whose `rendering()` is `Surface`, the widget makes the picture the
-  engine draws into and paints it over its chrome, one frame pixel per device
-  pixel, so the page clips, sits under popovers and dialogs, and scrolls inside
-  a `ScrollArea` like any other content. The engine is given the widget's whole
-  box, and is told the page is hidden when it is dormant or scrolled out of
-  view. Pointer, touch, wheel and keyboard input over the page is forwarded to
-  the engine at the page pixel it landed on; keys only while the page holds the
-  keyboard, and never Ctrl+Tab, which stays the way out.
+- **A Servo page's accessibility tree is in the application's.** The page's
+  headings, paragraphs, links and text are mirrored under the `WebView`'s
+  `Role::WebView` node (`WebViewEvent::PageAccessibility`,
+  `PageAccessibilityUpdate`), for a screen reader to read. Servo takes no
+  accessibility actions back, so the page is still operated through the frame
+  and forwarded input.
 - **`MemoryWebViewBackend::surface` and `memory_surface_registry`.** A surface
   test backend that commits one frame of the bounds' device-pixel size on every
   `set_bounds` and records forwarded input (`WebViewOp::Input`,
-  `MemoryWebViewRecords::input_log`). `WebViewOp::Open` now says whether the
-  widget handed over a picture.
+  `MemoryWebViewRecords::input_log`).
 
 ### Changed
 
@@ -95,21 +102,19 @@ by crate for clarity, not because crates version independently.
 
 #### WebView
 
-- **A backend can draw its page into a picture the widget shows.**
-  `WebViewBackend::rendering` says how a backend's engines show their page:
-  `WebViewRendering::NativeSubview` (a native view over the window, as wry
-  does) or `WebViewRendering::Surface { orientation }` (offscreen, into a
+- **A backend says how its engine shows a page.** `WebViewBackend::rendering`
+  returns `WebViewRendering::NativeSubview` (a native view over the window, as
+  wry does) or `WebViewRendering::Surface { orientation }` (offscreen, into a
   `LiveImageWriter` the widget passes to `open`, its rows laid out as
-  `orientation` says). Breaking for a custom backend: `rendering` is
-  required, and `WebViewBackend::open` and `WebViewRegistry::open` take the
-  writer as a new `surface` argument (`None` for a native view).
-- **Input for a surface engine.** `WebViewHandle::send_input` takes a
-  `WebViewInputEvent` (pointer, touch, scroll, key, input method, clipboard
-  command) in the page's pixels; a native view ignores it.
-- **`WebViewRegistry::pump` and `WebViewPumpPayload`.** A surface engine that
-  needs to run on the UI thread posts the payload, and the registry passes the
-  pump on to `WebViewBackend::pump`. `teksilo-app` answers the payload on
-  the UI thread.
+  `orientation` says).
+- **Breaking.** For a custom backend, `WebViewBackend::rendering` is required,
+  and `WebViewBackend::open` and `WebViewRegistry::open` take the writer as a
+  new `surface` argument (`None` for a native view). `WebViewEvent` has four
+  new variants (`CursorChanged`, `InputMethodArea`, `ControlRequested`,
+  `PageAccessibility`) and `WebViewOp` three (`Blur`, `AnswerControl`,
+  `Input`), so an exhaustive `match` on either needs their arms;
+  `WebViewOp::Open` has a new `surface` field. `SyntheticKind` (in
+  `teksilo-core`) has a new `WebPageNode` variant.
 - **On wry, `load_html` loads a new page.** It used to rewrite the current
   document in place; it now navigates to the HTML, with the load and
   navigation events a navigation brings. Back and forward call the engine's
@@ -129,19 +134,15 @@ by crate for clarity, not because crates version independently.
 
 #### WebView
 
-- **`servo-backend` builds again.** The lock held a `pkcs1` release that the
-  `rsa` crate in Servo's dependencies does not compile against.
+- **`servo-backend` builds in this repository again.** Its lockfile now holds
+  `pkcs1` at 0.8.0-rc.4: the `rsa` release in Servo's dependencies does not
+  compile against 0.8.0-rc.5, which its requirement allows. An application
+  that enables `web-view-servo` needs the same pin in its own lockfile:
+  `cargo update -p pkcs1 --precise 0.8.0-rc.4`.
 - **A second Servo `WebView` no longer panics.** Every web view a
   `ServoBackend` opens now shares one engine; Servo allows only one per
-  process. A second `ServoBackend` in the same process shows the error state,
-  with a console message, instead of panicking.
-
-#### App
-
-- **No `webview_hole_possible` warning for a page drawn into the frame.** An
-  automation screenshot now carries the warning only when the installed
-  web-view backend is a native subview; a surface engine's page (Servo) is in
-  the capture.
+  process. A second `ServoBackend` in the same process shows the error state
+  instead of panicking.
 
 ## [0.18.0] - 2026-10-15
 

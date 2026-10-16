@@ -59,7 +59,8 @@ established platform-backend pattern ([`FileDialogBackend`](../crates/teksilo-pl
 JS→Rust / lifecycle events back into the widget tree. The engine is pluggable;
 the widget feels native to Teksilo.
 
-Two architectural consequences fall out of "the engine is a native subview":
+Two architectural consequences fall out of "the engine is a native subview"
+(a surface engine has neither):
 
 - **Visibility doesn't ride the paint pass**, see [Dormancy bridge](#the-dormancy--visibility-bridge).
 - **Z-order is above wgpu**, see [Z-order](#z-order-with-overlays).
@@ -141,19 +142,19 @@ reparenting problem, nothing on the window wgpu presents to. Building
 [`is_wayland`](../crates/teksilo-webview/src/lib.rs)).
 
 **How it renders.** Each page renders into an OpenGL context of the backend's
-own, on the GPU's hardware adapter (the software one, with a console warning,
-where there is none), with no window. Servo runs on its own threads and asks
-the UI thread to run it; `teksilo-app` answers with `WebViewRegistry::pump`.
+own, on the GPU's hardware adapter (the software one where there is none),
+with no window. Servo runs on its own threads and asks the UI thread to run
+it; `teksilo-app` answers with `WebViewRegistry::pump`.
 Each new frame is read back from the GPU without stalling the UI thread and
 committed to the `WebView`'s picture through a diffing writer, so a frame
-identical to the last costs no upload and wakes no window. Measured on a
-Radeon 890M: a median 1.9 ms of the UI thread per 1920 x 1080 frame. The page
-therefore clips, sits under popovers and dialogs, and scrolls inside a
-`ScrollArea` like any other widget.
+identical to the last costs no upload and wakes no window. The page therefore
+clips, sits under popovers and dialogs, and scrolls inside a `ScrollArea` like
+any other widget, and it is in automation screenshots. Measured on a Radeon
+890M: a median 1.9 ms of the UI thread per 1920 x 1080 frame.
 
 **Idle.** A page that is dormant (a parked tab) or scrolled out of view is
 hidden and throttled in Servo and reads nothing back. Measured in
-`web-view-demo --features servo` (a debug build, in a private KWin session):
+`web-view-demo --features servo` (a debug build, in a nested KWin session):
 a page whose counter changes once a second costs one rendered frame a second,
 the frame its picture asks for, and the same page parked in the demo's other
 tab costs none. Servo's animation frames
@@ -195,8 +196,13 @@ tree to read: Servo takes no accessibility actions back, so the page is entered
 and operated through the frame (Enter, or the frame's `Click`) and the input
 the widget forwards.
 
-**What does not work yet.** A page loaded with
-`.html(...)` travels as a `data:` URL, so a `base_url` does not apply to it.
+**Inline HTML.** A page loaded with `.html(...)` or `load_html` travels as a
+`data:` URL, so a `base_url` does not apply to it, and the widget reports its
+URL as `about:blank`, as wry does.
+
+**One engine per process.** Servo allows one engine per process, so every web
+view a `ServoBackend` opens shares it. A second `ServoBackend` in the same
+process shows the error state.
 
 **Build requirements (Linux).** Servo pulls a large native toolchain on top of
 the wry/WebKitGTK deps above. Expect to install (Debian/Ubuntu names; exact set
@@ -215,6 +221,14 @@ Servo's own [build setup docs](https://book.servo.org/hacking/setting-up-your-en
 are authoritative; `./mach bootstrap` in a Servo checkout lists the current
 system packages for your distro. The first build also downloads and compiles the
 **entire Servo tree**, many GB and a long compile.
+
+**Pin `pkcs1`.** The `rsa` release in Servo's dependencies does not compile
+against `pkcs1` 0.8.0-rc.5, which its requirement allows, so a fresh lockfile
+fails to build. Pin the release this repository's lockfile holds:
+
+```bash
+cargo update -p pkcs1 --precise 0.8.0-rc.4
+```
 
 A smoke test renders a real page through the whole path with no window:
 `cargo test -p teksilo-webview --features servo-backend --test servo_smoke --release -- --ignored`
@@ -345,8 +359,10 @@ wash (loading / error / transparent-when-ready). Override per-call with
 `.style(...)` or theme-wide via `theme.style_slots.web_view`.
 
 **Accessibility.** The widget emits a single `Role::WebView` node named from the
-title binding; the page's own AT tree is published to the OS by the engine, so
-Teksilo does not duplicate it.
+title binding. A native engine publishes the page's own AT tree to the OS, so
+Teksilo does not duplicate it; Servo hands it to the backend instead, and the
+widget mirrors it under its node (see
+[the Servo section](#servo-backend-requirements--status)).
 
 **Keyboard: the frame, then the page.** The web view is `focusable`, so Tab
 reaches it and the style paints a focus ring around the frame, necessary
@@ -362,6 +378,8 @@ hand-off on Tab would therefore be a one-way door out of the app's own focus
 cycle. Getting back out of an entered page is the engine's and the OS's business,
 not something the toolkit can guarantee; this is the same reason the web
 platform treats an `<iframe>` as a focus scope you enter rather than fall into.
+A surface page is different: Teksilo keeps receiving the keys and forwards them,
+so Ctrl+Tab always leaves it.
 
 Apps whose web view **is** the window content can take the one-step form with
 `.enter_page_on_focus(true)`. `.focus_page()` is the programmatic equivalent of
@@ -373,6 +391,12 @@ application cannot inherit the toolkit's 2.1.1 or 4.1.2 posture for the page. It
 must scope the embedded content separately.
 
 ## The dormancy / visibility bridge
+
+This section and the next are about a native subview. A surface page is painted
+like any other content, so the invariant below holds for it; the widget still
+tells the engine when the page is dormant or scrolled out of view, so that it
+stops rendering, and gives it the widget's whole box rather than the visible
+strip.
 
 This is the one place `WebView` breaks a framework invariant, and it is handled
 automatically, but worth understanding.
@@ -476,10 +500,17 @@ download-event delivery to the callbacks, and the runtime devtools toggle.
 covers the input model (both modes, by mouse and by finger, against a fixture
 with a tappable ancestor over the page, the only shape in which the two modes
 give different answers), the pointer teardown, the clip chain, the overlay yield
-and the engine-focus hand-off. Both run on the crate's **default** features,
-i.e. with no engine at all, so what they assert is the framework half of each
+and the engine-focus hand-off.
+[tests/surface.rs](../crates/teksilo-webview/tests/surface.rs) covers surface
+mode on `MemoryWebViewBackend::surface()`: the picture, input forwarded at the
+page pixel, the keyboard shared with the app, a clipped and a scrolled-out
+page, overlays, the cursor, and where the page's dialogs go. All three run on
+the crate's **default** features, i.e. with no engine at all, so what they
+assert is the framework half of each
 mechanism: whether a real engine honours `set_input_passthrough` is a property of
-that engine and no headless test can reach it.
+that engine and no headless test can reach it. The Servo smoke test (above) and
+[crates/teksilo/tests/webview_controls.rs](../crates/teksilo/tests/webview_controls.rs)
+(the dialogs `WidgetsControlPresenter` shows) cover the rest.
 Install it with
 `install_web_view(MemoryWebViewBackend::new().0)` (or the `memory_registry()`
 one-liner) and pump post-mount opens with `tree.run_mount_actions(&mut NoopWindowOps)`.
@@ -495,17 +526,22 @@ one-liner) and pump post-mount opens with `tree.run_mount_actions(&mut NoopWindo
   [Servo backend: requirements & status](#servo-backend-requirements--status).
 - **`load_html` `base_url`** is ignored on wry: wry's own `load_html` takes
   none, so relative URLs in the page have no base to resolve against.
+- **Console messages are not passed on.** A page's console output, and the
+  reports a backend posts through the same channel (an operation it cannot
+  perform, Servo falling back to its software renderer), arrive as
+  `WebViewEvent::ConsoleMessage`, which the widget drops: there is no
+  `WebView` callback for them yet.
 - **HiDPI / monitor moves** mid-flight: wry handles its native engines; Servo
   renders at the widget's size times the window's scale, one frame pixel per
   device pixel, and follows a scale change.
 - **Memory** of an open WebView with heavy content is non-trivial (~50–150 MB
   for WebView2 / WKWebView); a `WebView` is not a cheap widget.
-- **Leaving an entered page** is not under Teksilo's control. Once
-  `set_focus()` has handed the keyboard to the engine subview, the toolkit sees
-  no further keystrokes, so it cannot offer an escape chord the way a
-  `keyboard_capture` surface can. Whether Tab at the end of the document returns
-  focus to the host window is engine- and platform-dependent and is **not**
-  verified here.
+- **Leaving an entered page** is not under Teksilo's control for a native
+  subview. Once `set_focus()` has handed the keyboard to the engine subview,
+  the toolkit sees no further keystrokes, so it cannot offer an escape chord
+  the way a `keyboard_capture` surface can. Whether Tab at the end of the
+  document returns focus to the host window is engine- and platform-dependent
+  and is **not** verified here.
 - **Engine focus is reported by the page, not by the engine.** A click inside the
   page takes the OS keyboard, and Teksilo's own focus follows it onto the frame,
   otherwise whatever held focus goes on believing it still does, caret blinking.

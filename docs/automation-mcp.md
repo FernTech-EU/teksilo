@@ -720,11 +720,14 @@ landing in WARP rather than anywhere we could catch it. Each caller still gets
 its own `Renderer`, and therefore its own glyph and path atlases, so nothing
 leaks between them.
 
-**WebView blind spot:** a native `WebView` subview composites *on top of* the
-wgpu surface and is invisible to the readback (a transparent hole). When the
-AT tree contains a `WebView` node the `screenshot` reply adds
+**WebView blind spot:** a native `WebView` subview (wry's engines) composites
+*on top of* the wgpu surface and is invisible to the readback (a transparent
+hole). When the AT tree contains a `WebView` node and the installed backend is
+a native one, the `screenshot` reply adds
 `warnings: ["webview_hole_possible"]`. There is no platform-capture workaround
-in scope.
+in scope. A surface engine's page (Servo) is drawn into the frame, so it is in
+the capture and carries no warning. The headless server cannot tell the two
+apart and warns for any `WebView` node.
 
 ## Security model
 
@@ -867,7 +870,8 @@ as `raw_label`, and only when the two differ.
 
 ## Documented limitations
 
-- **WebView pixels** in screenshots (compositor hole, warned, not captured).
+- **Native WebView pixels** in screenshots (compositor hole, warned, not
+  captured). A Servo page is captured.
 - **Release-build automation**: debug-gated by design.
 - **Golden screenshots are Linux-only**: font rasterisation differs per OS, so
   cross-platform screenshot assertions are structural (size, scale, non-blank),

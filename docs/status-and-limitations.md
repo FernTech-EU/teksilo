@@ -31,8 +31,11 @@ Project. Architecture, design reviews, code review and final acceptance were hum
 ## WebView prototype
 
 The wry backend is functional. On Linux it requires WebKitGTK and uses XWayland
-in a Wayland session. The Servo backend is work in progress and is not yet
-frame-driven. See [WebView](web-view.md) for backend requirements and restrictions.
+in a Wayland session. The Servo backend, used in a Wayland session, renders
+pages inside the window and takes input, `window.ipc` messages and the page's
+dialogs; its page's accessibility tree can be read but not acted on, it shows no
+file or colour picker or context menu, and a page sees no physical key codes.
+See [WebView](web-view.md) for backend requirements and restrictions.
 
 ## Accessibility verification
 
