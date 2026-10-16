@@ -26,8 +26,8 @@ use teksilo_core::window::TeksiloWindowId;
 use teksilo_widgets::primitives::Switcher;
 
 use teksilo_webview::{
-    MemoryWebViewRecords, WebView, WebViewEvent, WebViewEventPayload, WebViewOp, WebViewRegistry,
-    memory_registry,
+    ConsoleLevel, MemoryWebViewRecords, WebView, WebViewEvent, WebViewEventPayload, WebViewOp,
+    WebViewRegistry, memory_registry,
 };
 
 /// Build a tree with the `WebViewRegistry` installed in app-state (mirrors how
@@ -277,6 +277,51 @@ fn download_events_reach_callbacks() {
 
     assert_eq!(&*started.borrow(), &["https://x/file.zip".to_string()]);
     assert_eq!(&*finished.borrow(), &[true]);
+}
+
+/// A console message delivered by a backend reaches `on_console_message`
+/// with its level and text.
+#[test]
+fn console_messages_reach_the_callback() {
+    let (registry, _records) = memory_registry();
+    let mut tree = tree_with_registry(registry.clone());
+
+    let seen: Rc<RefCell<Vec<(ConsoleLevel, String)>>> = Rc::new(RefCell::new(Vec::new()));
+    let seen_cb = seen.clone();
+    let webview = WebView::new()
+        .url("about:blank")
+        .on_console_message(move |level, text, _ctx| seen_cb.borrow_mut().push((level, text)));
+    let wv_id = webview.id();
+    tree.add(webview);
+    layout(&mut tree);
+
+    let win = TeksiloWindowId::new(0);
+    for (level, text) in [
+        (ConsoleLevel::Log, "hello"),
+        (ConsoleLevel::Warn, "careful"),
+    ] {
+        tree.run_with_event_context(&mut NoopWindowOps, |ctx| {
+            registry.deliver(
+                WebViewEventPayload {
+                    window_id_owner: win,
+                    web_view_id: wv_id,
+                    event: WebViewEvent::ConsoleMessage {
+                        level,
+                        text: text.into(),
+                    },
+                },
+                ctx,
+            );
+        });
+    }
+
+    assert_eq!(
+        &*seen.borrow(),
+        &[
+            (ConsoleLevel::Log, "hello".to_string()),
+            (ConsoleLevel::Warn, "careful".to_string())
+        ]
+    );
 }
 
 /// The imperative devtools toggle reaches the engine handle (recorded by the

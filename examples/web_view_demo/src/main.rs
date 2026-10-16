@@ -83,6 +83,10 @@ fn main() {
                         .on_message(|msg, _ctx| {
                             println!("JS → Rust: {msg}");
                         })
+                        // The page's console (Servo) and the backend's own reports.
+                        .on_console_message(|level, text, _ctx| {
+                            println!("console {level:?}: {text}");
+                        })
                         .on_page_load(move |state, _ctx| {
                             loading_cb.set(state == PageLoadState::Started);
                         })

@@ -34,8 +34,9 @@ by crate for clarity, not because crates version independently.
   UI thread without redrawing any window.
 - **The Servo backend renders pages.** `ServoBackend` is now a surface
   backend: each page renders offscreen into an OpenGL context of its own, on
-  the hardware adapter, or on the software one where there is none. It needs no window of its own, so it works under Wayland. A
-  frame identical to the previous one costs no upload, a dormant or
+  the hardware adapter, or on the software one where there is none, with a
+  console warning. It needs no window of its own, so it works under Wayland.
+  A frame identical to the previous one costs no upload, a dormant or
   scrolled-out page is throttled in Servo, and animated pages run at most 60
   frames a second, only while they animate. The page is in automation
   screenshots, with no `webview_hole_possible` warning. Inline HTML
@@ -55,9 +56,8 @@ by crate for clarity, not because crates version independently.
 - **Servo pages report their events.** Navigations (`on_navigation`), URL
   changes with no load behind them (`url_signal`) and the page taking or
   giving up the keyboard (`page_focused_signal`) now reach the widget, beside
-  the load and title events it already had. Console messages are posted as
-  `WebViewEvent::ConsoleMessage`, which the widget does not pass on to the
-  application yet.
+  the load and title events it already had, and its console messages reach
+  `on_console_message`.
 - **`window.ipc` on Servo.** `window.ipc.postMessage(m)` in a Servo page now
   reaches `on_message`, as on wry. Two messages posted back to back may arrive
   out of order.
@@ -74,6 +74,10 @@ by crate for clarity, not because crates version independently.
   `PageAccessibilityUpdate`), for a screen reader to read. Servo takes no
   accessibility actions back, so the page is still operated through the frame
   and forwarded input.
+- **`WebView::on_console_message`.** Receives each console message with its
+  level and text: a Servo page's own console output, and the reports a backend
+  posts about itself (an operation it cannot perform, Servo falling back to its
+  software renderer). They were dropped before.
 - **`MemoryWebViewBackend::surface` and `memory_surface_registry`.** A surface
   test backend that commits one frame of the bounds' device-pixel size on every
   `set_bounds` and records forwarded input (`WebViewOp::Input`,

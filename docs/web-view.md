@@ -142,9 +142,10 @@ reparenting problem, nothing on the window wgpu presents to. Building
 [`is_wayland`](../crates/teksilo-webview/src/lib.rs)).
 
 **How it renders.** Each page renders into an OpenGL context of the backend's
-own, on the GPU's hardware adapter (the software one where there is none),
-with no window. Servo runs on its own threads and asks the UI thread to run
-it; `teksilo-app` answers with `WebViewRegistry::pump`.
+own, on the GPU's hardware adapter (the software one where there is none, with
+a warning through `on_console_message`), with no window. Servo runs on its own
+threads and asks the UI thread to run it; `teksilo-app` answers with
+`WebViewRegistry::pump`.
 Each new frame is read back from the GPU without stalling the UI thread and
 committed to the `WebView`'s picture through a diffing writer, so a frame
 identical to the last costs no upload and wakes no window. The page therefore
@@ -267,6 +268,7 @@ WebView::new()
     .on_page_load(|state, ctx| { … })            // PageLoadState::{Started, Finished}
     .on_download_started(|d, ctx| { … })         // DownloadStart { url, suggested_path }
     .on_download_finished(|o, ctx| { … })        // DownloadOutcome { path, success }
+    .on_console_message(|level, text, ctx| { … }) // the page's console, the backend's reports
     .style(MyWebViewStyle)            // Tier-3 overlay chrome override
 ```
 
@@ -526,11 +528,9 @@ one-liner) and pump post-mount opens with `tree.run_mount_actions(&mut NoopWindo
   [Servo backend: requirements & status](#servo-backend-requirements--status).
 - **`load_html` `base_url`** is ignored on wry: wry's own `load_html` takes
   none, so relative URLs in the page have no base to resolve against.
-- **Console messages are not passed on.** A page's console output, and the
-  reports a backend posts through the same channel (an operation it cannot
-  perform, Servo falling back to its software renderer), arrive as
-  `WebViewEvent::ConsoleMessage`, which the widget drops: there is no
-  `WebView` callback for them yet.
+- **A wry page's own console output stays in the engine.** Its developer
+  tools show it; `on_console_message` receives only the wry backend's own
+  reports. On Servo it receives the page's console too.
 - **HiDPI / monitor moves** mid-flight: wry handles its native engines; Servo
   renders at the widget's size times the window's scale, one frame pixel per
   device pixel, and follows a scale change.

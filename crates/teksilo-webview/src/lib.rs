@@ -156,6 +156,7 @@ type NavigationCallback = Rc<RefCell<dyn FnMut(NavigationInfo, &mut EventContext
 type PageLoadCallback = Rc<RefCell<dyn FnMut(PageLoadState, &mut EventContext)>>;
 type DownloadStartCallback = Rc<RefCell<dyn FnMut(DownloadStart, &mut EventContext)>>;
 type DownloadFinishCallback = Rc<RefCell<dyn FnMut(DownloadOutcome, &mut EventContext)>>;
+type ConsoleCallback = Rc<RefCell<dyn FnMut(ConsoleLevel, String, &mut EventContext)>>;
 
 /// Page-load lifecycle phase, passed to [`WebView::on_page_load`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -481,6 +482,7 @@ pub struct WebView {
     on_page_load: Option<PageLoadCallback>,
     on_download_started: Option<DownloadStartCallback>,
     on_download_finished: Option<DownloadFinishCallback>,
+    on_console_message: Option<ConsoleCallback>,
 }
 
 impl std::fmt::Debug for WebView {
@@ -534,6 +536,7 @@ impl WebView {
             on_page_load: None,
             on_download_started: None,
             on_download_finished: None,
+            on_console_message: None,
         }
     }
 
@@ -656,6 +659,22 @@ impl WebView {
         cb: impl FnMut(DownloadOutcome, &mut EventContext) + 'static,
     ) -> Self {
         self.on_download_finished = Some(Rc::new(RefCell::new(cb)));
+        self
+    }
+
+    /// Called for each console message, with its level and text.
+    ///
+    /// Two sources share this channel: the page's own console output
+    /// (`console.log`, `console.warn`, `console.error`), which Servo hands
+    /// over and wry's engines keep in their developer tools; and the reports
+    /// a backend posts about itself, such as an operation it cannot perform
+    /// or Servo falling back to its software renderer. With no callback set,
+    /// both are dropped.
+    pub fn on_console_message(
+        mut self,
+        cb: impl FnMut(ConsoleLevel, String, &mut EventContext) + 'static,
+    ) -> Self {
+        self.on_console_message = Some(Rc::new(RefCell::new(cb)));
         self
     }
 
@@ -829,6 +848,7 @@ impl WebView {
         let on_page_load = self.on_page_load.clone();
         let on_download_started = self.on_download_started.clone();
         let on_download_finished = self.on_download_finished.clone();
+        let on_console_message = self.on_console_message.clone();
         let surface = self.surface.clone();
         let control_handle = self.handle.clone();
         let page_tree = self.page_tree.clone();
@@ -904,9 +924,10 @@ impl WebView {
                     (cb.borrow_mut())(DownloadOutcome { path, success }, ctx);
                 }
             }
-            WebViewEvent::ConsoleMessage { .. } => {
-                // Diagnostics only (backend init / unsupported-op reports);
-                // not surfaced to a dedicated app callback today.
+            WebViewEvent::ConsoleMessage { level, text } => {
+                if let Some(cb) = &on_console_message {
+                    (cb.borrow_mut())(level, text, ctx);
+                }
             }
             WebViewEvent::CursorChanged(cursor) => {
                 if let Some(surface) = &surface {
