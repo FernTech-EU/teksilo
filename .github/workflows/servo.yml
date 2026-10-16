@@ -55,6 +55,15 @@ jobs:
       # a software adapter, on the surfaceless EGL platform since no display
       # is set.
       LIBGL_ALWAYS_SOFTWARE: "1"
+      # `cargo test --release` builds with the bench profile, which inherits
+      # the workspace's release profile: fat LTO in one codegen unit, run over
+      # all of Servo and SpiderMonkey once per test binary. On the runner's
+      # 16 GB that was killed (exit 143) after four and a half minutes in
+      # teksilo-webview's link. The smoke test needs an optimised Servo, not
+      # a shipping one, so this job builds release without LTO. Job-level, so
+      # the build step and the test step agree and the second rebuilds nothing.
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
