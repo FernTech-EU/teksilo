@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+# The Servo web-view backend, built and run.
+#
+# `teksilo-webview`'s `servo-backend` feature is off everywhere else in CI: no
+# workspace member enables it, because it pulls the whole Servo engine (and a
+# SpiderMonkey build) into the graph. It went uncompiled for long enough that a
+# lockfile update broke it without anyone noticing, so this job builds it
+# whenever the crate, the lockfile or this file changes, and once a week
+# besides, since a dependency update elsewhere can break it too.
+#
+# The smoke test (`tests/servo_smoke.rs`, `#[ignore]`d in an ordinary run)
+# starts a real Servo with no window, on Mesa's software rasteriser, and checks
+# a page renders, takes a click, posts a message and answers a dialog.
+
+name: Servo
+
+on:
+  pull_request:
+    paths:
+      - "crates/teksilo-webview/**"
+      - "Cargo.lock"
+      - ".github/workflows/servo.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "crates/teksilo-webview/**"
+      - "Cargo.lock"
+      - ".github/workflows/servo.yml"
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  servo:
+    name: Servo backend (linux)
+    runs-on: ubuntu-latest
+    # A cold build compiles Servo in release; it takes most of an hour.
+    timeout-minutes: 120
+    env:
+      # The runner has no GPU. Mesa's llvmpipe gives the backend's GL context
+      # a software adapter, on the surfaceless EGL platform since no display
+      # is set.
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Free disk space
+        uses: ./.github/actions/free-disk-space
+
+      - name: Install Linux system dependencies
+        uses: ./.github/actions/install-linux-deps
+
+      - name: Install Servo's build and runtime dependencies
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            clang libclang-dev llvm \
+            libfontconfig1-dev libfreetype-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libegl-mesa0 libgl1-mesa-dri
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: servo
+
+      - name: Clippy (servo-backend)
+        run: cargo clippy -p teksilo-webview --features servo-backend --all-targets -- -D warnings -A deprecated
+
+      # Release: a debug Servo renders too slowly for the smoke test's
+      # deadlines on a software rasteriser.
+      - name: Build tests
+        run: cargo test --release -p teksilo-webview --features servo-backend --no-run
+
+      - name: Test, the smoke test included
+        run: cargo test --release -p teksilo-webview --features servo-backend -- --include-ignored

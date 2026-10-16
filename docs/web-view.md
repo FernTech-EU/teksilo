@@ -210,7 +210,9 @@ system packages for your distro. The first build also downloads and compiles the
 
 A smoke test renders a real page through the whole path with no window:
 `cargo test -p teksilo-webview --features servo-backend --test servo_smoke --release -- --ignored`
-(it needs OpenGL; `LIBGL_ALWAYS_SOFTWARE=1` runs it on llvmpipe).
+(it needs OpenGL; `LIBGL_ALWAYS_SOFTWARE=1` runs it on llvmpipe). The `Servo`
+workflow ([`.github/workflows/servo.yml`](../.github/workflows/servo.yml)) runs it
+on every change to the crate or the lockfile, and weekly.
 
 ## Installing the subsystem
 
