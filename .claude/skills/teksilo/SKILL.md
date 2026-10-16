@@ -46,7 +46,7 @@ theme presets, and the separate `teksilo-charts` and `teksilo-scene` crates.
 2. **Live API extraction** — `cargo teksilo symbol <Name>`, `cargo doc`, or
    docs.rs, all read from the version the app actually pins.
 3. **The bundled reference prose** — the files under `reference/`. A *map*, not
-   the territory. This copy ships with teksilo **0.18.0**, and that stamp is
+   the territory. This copy ships with teksilo **0.19.0**, and that stamp is
    the only freshness claim in it. Where the prose names an older version, it
    says when something changed, not when the prose was last checked. Any of it
    MAY lag the version this app pins. Never let it override the compiler or
