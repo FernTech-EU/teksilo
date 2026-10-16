@@ -1,0 +1,11 @@
+breeze	4:6.8.0-0zneon+24.04+noble+release+build80
+fonts-hack	3.003-3
+fonts-noto-core	20201225-2
+kde-style-breeze	4:6.8.0-0zneon+24.04+noble+release+build80
+kde-style-oxygen	4:6.8.0-0zneon+24.04+noble+release+build59
+kf6-kcolorscheme	6.31.0-0zneon+24.04+noble+release+build47
+kf6-kconfig	6.31.0-0zneon+24.04+noble+release+build36
+kf6-kguiaddons	6.31.0-0zneon+24.04+noble+release+build59
+libkf6colorscheme-dev	6.31.0-0zneon+24.04+noble+release+build47
+plasma-workspace	4:6.8.0-0zneon+24.04+noble+release+build99
+qt6-base	6.11.1-0zneon+24.04+noble+release+build162
