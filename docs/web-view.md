@@ -493,8 +493,8 @@ one-liner) and pump post-mount opens with `tree.run_mount_actions(&mut NoopWindo
   page's accessibility tree can be read but not acted on, and a page sees no
   physical key codes. See
   [Servo backend: requirements & status](#servo-backend-requirements--status).
-- **`load_html` `base_url`** is ignored on wry (no runtime load-HTML API;
-  emulated via `document.write`).
+- **`load_html` `base_url`** is ignored on wry: wry's own `load_html` takes
+  none, so relative URLs in the page have no base to resolve against.
 - **HiDPI / monitor moves** mid-flight: wry handles its native engines; Servo
   renders at the widget's size times the window's scale, one frame pixel per
   device pixel, and follows a scale change.

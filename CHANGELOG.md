@@ -110,6 +110,11 @@ by crate for clarity, not because crates version independently.
   needs to run on the UI thread posts the payload, and the registry passes the
   pump on to `WebViewBackend::pump`. `teksilo-app` answers the payload on
   the UI thread.
+- **On wry, `load_html` loads a new page.** It used to rewrite the current
+  document in place; it now navigates to the HTML, with the load and
+  navigation events a navigation brings. Back and forward call the engine's
+  own history instead of running `history.back()` and `history.forward()` in
+  the page.
 
 ### Fixed
 

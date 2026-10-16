@@ -43,8 +43,8 @@
 //!
 //! **Known gaps (tracked):** custom-protocol *handlers* are not yet plumbed
 //! through `WebViewAttributes` (only scheme names are carried), so `app://`
-//! style local serving is not wired here; `go_back`/`go_forward` are driven
-//! via `history.back()/forward()` (wry 0.55 exposes no direct history API).
+//! style local serving is not wired here, and `load_html`'s `base_url` is
+//! ignored (wry's `load_html` takes none).
 
 use std::sync::Arc;
 
@@ -209,8 +209,8 @@ impl WebViewBackend for WryBackend {
                 };
                 post_event(&poster, window_id, web_view_id, ev);
                 // Surface a NavigationFinished on load completion so the
-                // url/Ready bindings settle even without a separate nav-finish
-                // callback in wry 0.55.
+                // url/Ready bindings settle: wry has no separate nav-finish
+                // callback.
                 if matches!(event, PageLoadEvent::Finished) {
                     post_event(
                         &poster,
@@ -349,12 +349,7 @@ impl WebViewHandle for WryHandle {
         let _ = self.webview.load_url(url);
     }
     fn load_html(&self, html: &str, _base_url: Option<&str>) {
-        // wry 0.55 has no runtime load_html; emulate via document.write so a
-        // post-open HTML swap still works.
-        let _ = self.webview.evaluate_script(&format!(
-            "document.open();document.write({});document.close();",
-            js_string(html)
-        ));
+        let _ = self.webview.load_html(html);
     }
     fn eval(&self, script: &str) {
         let _ = self.webview.evaluate_script(script);
@@ -370,10 +365,10 @@ impl WebViewHandle for WryHandle {
         let _ = self.webview.reload();
     }
     fn go_back(&self) {
-        let _ = self.webview.evaluate_script("history.back()");
+        let _ = self.webview.go_back();
     }
     fn go_forward(&self) {
-        let _ = self.webview.evaluate_script("history.forward()");
+        let _ = self.webview.go_forward();
     }
     fn stop(&self) {
         let _ = self.webview.evaluate_script("window.stop()");
