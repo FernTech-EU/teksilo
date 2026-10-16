@@ -55,6 +55,7 @@
 //! [`Switcher`]: https://docs.rs/teksilo-widgets
 
 mod backend;
+pub mod controls;
 
 #[path = "styles/recipe_web_view_style.rs"]
 mod recipe_web_view_style;
@@ -75,6 +76,10 @@ pub use backend::{
     WebViewEvent, WebViewEventPayload, WebViewHandle, WebViewId, WebViewInputEvent, WebViewOp,
     WebViewPumpPayload, WebViewRegistry, WebViewRendering, WebViewTouchPhase, memory_registry,
     memory_surface_registry,
+};
+pub use controls::{
+    SharedWebViewControlPresenter, WebViewControl, WebViewControlAnswer, WebViewControlPresenter,
+    WebViewSelectOption,
 };
 pub use recipe_web_view_style::RecipeWebViewStyle;
 
@@ -819,6 +824,7 @@ impl WebView {
         let on_download_started = self.on_download_started.clone();
         let on_download_finished = self.on_download_finished.clone();
         let surface = self.surface.clone();
+        let control_handle = self.handle.clone();
 
         move |event, ctx| match event {
             WebViewEvent::PageLoadStarted => {
@@ -898,6 +904,25 @@ impl WebView {
             WebViewEvent::CursorChanged(cursor) => {
                 if let Some(surface) = &surface {
                     surface.cursor.set(Some(cursor));
+                }
+            }
+            WebViewEvent::ControlRequested { key, mut control } => {
+                if let WebViewControl::Select { area, .. } = &mut control
+                    && let Some(window) = surface.as_ref().and_then(|s| s.window_rect(*area))
+                {
+                    *area = window;
+                }
+                let answer_handle = control_handle.clone();
+                let reply: controls::WebViewControlReply = Box::new(move |answer| {
+                    if let Some(h) = answer_handle.borrow().as_ref() {
+                        h.answer_control(key, answer);
+                    }
+                });
+                match ctx.app_state::<SharedWebViewControlPresenter>().cloned() {
+                    Some(presenter) => presenter.0.present(control, ctx, reply),
+                    // No presenter: the default answer, now, so the page does
+                    // not wait.
+                    None => reply(WebViewControlAnswer::Dismissed),
                 }
             }
             WebViewEvent::InputMethodArea(area) => {

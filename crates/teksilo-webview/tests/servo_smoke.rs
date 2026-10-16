@@ -138,7 +138,8 @@ fn servo_renders_a_page_into_the_web_views_picture() {
         "<body style='margin:0'><script>console.warn('from the page');",
         "window.ipc.postMessage('hello \\u00e9\\n\\u2028+%');",
         "addEventListener('mousedown',e=>{if(e.button===0){document.body.innerHTML='';",
-        "document.body.style.background='rgb(0,255,0)'}})</script>",
+        "document.body.style.background='rgb(0,255,0)'}});",
+        "setTimeout(()=>console.log('confirm:'+confirm('Proceed?')),0)</script>",
         "<div style='position:fixed;left:0;top:0;width:100%;height:50%;background:rgb(255,0,0)'></div>",
         "<div style='position:fixed;left:0;top:50%;width:100%;height:50%;background:rgb(0,0,255)'></div>",
         "</body></html>"
@@ -226,6 +227,12 @@ fn servo_renders_a_page_into_the_web_views_picture() {
     assert!(
         !loading.get(),
         "the loading signal fell when the page finished"
+    );
+    assert!(
+        seen.console.iter().any(|(_, text)| text == "confirm:false"),
+        "a confirm() with no presenter installed was answered with its default, \
+         through the widget and back: {:?}",
+        seen.console
     );
     assert!(
         seen.console

@@ -41,6 +41,8 @@ use teksilo_core::event::{Key, Modifiers, PointerButton, ScrollDelta};
 use teksilo_core::pointer::PointerId;
 use teksilo_core::raw_handle::ParentHandle;
 use teksilo_core::widget::CursorIcon;
+
+use crate::controls::{WebViewControl, WebViewControlAnswer};
 use teksilo_core::widget::EventContext;
 use teksilo_core::window::TeksiloWindowId;
 
@@ -288,6 +290,10 @@ pub trait WebViewHandle: 'static {
     /// Only a [`WebViewRendering::Surface`] engine needs telling; a native
     /// subview loses the OS focus with the frame.
     fn blur(&self) {}
+    /// Answer the control [`WebViewEvent::ControlRequested`] carried `key`
+    /// for. A key answered already, or one the page has since closed, is
+    /// ignored.
+    fn answer_control(&self, _key: u64, _answer: WebViewControlAnswer) {}
     /// Pass input to the page. Only a [`WebViewRendering::Surface`] engine
     /// receives this: a native subview gets its input from the OS. See
     /// [`WebViewInputEvent`] for the coordinate space.
@@ -339,6 +345,11 @@ pub enum WebViewEvent {
     /// element in it has focus (`None` once none has), so the input method's
     /// candidate window opens beside it. Sent by a surface engine.
     InputMethodArea(Option<Rect>),
+    /// The page opened a dialog or a picker for the application to present
+    /// (see [`crate::controls`]). Answer it with
+    /// [`WebViewHandle::answer_control`] and the same `key`. A `Select`'s
+    /// `area` is in page pixels here; the widget maps it to the window.
+    ControlRequested { key: u64, control: WebViewControl },
 }
 
 /// Boxed inside `AppEvent::External` when a backend produces an event.
@@ -701,6 +712,11 @@ pub enum WebViewOp {
     Blur {
         web_view_id: WebViewId,
     },
+    AnswerControl {
+        web_view_id: WebViewId,
+        key: u64,
+        answer: WebViewControlAnswer,
+    },
     /// Input forwarded with [`WebViewHandle::send_input`].
     Input {
         web_view_id: WebViewId,
@@ -802,6 +818,7 @@ fn op_web_view_id(op: &WebViewOp) -> WebViewId {
         | WebViewOp::OpenDevtools { web_view_id }
         | WebViewOp::CloseDevtools { web_view_id }
         | WebViewOp::Blur { web_view_id }
+        | WebViewOp::AnswerControl { web_view_id, .. }
         | WebViewOp::Input { web_view_id, .. }
         | WebViewOp::Dropped { web_view_id } => *web_view_id,
     }
@@ -951,6 +968,13 @@ impl WebViewHandle for MemoryWebViewHandle {
     fn blur(&self) {
         self.records.push(WebViewOp::Blur {
             web_view_id: self.web_view_id,
+        });
+    }
+    fn answer_control(&self, key: u64, answer: WebViewControlAnswer) {
+        self.records.push(WebViewOp::AnswerControl {
+            web_view_id: self.web_view_id,
+            key,
+            answer,
         });
     }
     fn send_input(&self, event: &WebViewInputEvent) {

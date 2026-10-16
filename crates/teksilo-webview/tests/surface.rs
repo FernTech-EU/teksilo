@@ -429,3 +429,92 @@ fn the_pages_cursor_shows_over_it() {
     tree.pointer_move(Point::new(60.0, 60.0));
     assert_eq!(tree.current_cursor(), CursorIcon::Text);
 }
+
+#[test]
+fn a_page_control_with_no_presenter_gets_its_default_answer() {
+    use teksilo_webview::{WebViewControl, WebViewControlAnswer};
+    let (registry, records) = memory_surface_registry();
+    let mut tree = tree_with_registry(registry.clone());
+    let webview = WebView::new().url("about:blank");
+    let id = webview.id();
+    tree.add(webview);
+    settle(&mut tree);
+    deliver(
+        &mut tree,
+        &registry,
+        id,
+        WebViewEvent::ControlRequested {
+            key: 3,
+            control: WebViewControl::Confirm {
+                message: "Leave?".into(),
+            },
+        },
+    );
+    assert!(records.ops_for(id).contains(&WebViewOp::AnswerControl {
+        web_view_id: id,
+        key: 3,
+        answer: WebViewControlAnswer::Dismissed,
+    }));
+}
+
+/// Answers every control with `Confirmed`, and keeps what it was shown.
+struct Recorder(Rc<std::cell::RefCell<Vec<teksilo_webview::WebViewControl>>>);
+
+impl teksilo_webview::WebViewControlPresenter for Recorder {
+    fn present(
+        &self,
+        control: teksilo_webview::WebViewControl,
+        _ctx: &mut teksilo_core::widget::EventContext,
+        reply: teksilo_webview::controls::WebViewControlReply,
+    ) {
+        self.0.borrow_mut().push(control);
+        reply(teksilo_webview::WebViewControlAnswer::Confirmed);
+    }
+}
+
+#[test]
+fn a_page_control_goes_to_the_installed_presenter_with_its_area_in_the_window() {
+    use teksilo_webview::{SharedWebViewControlPresenter, WebViewControl, WebViewControlAnswer};
+    let (registry, records) = memory_surface_registry();
+    let shown = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut map: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
+    map.insert(TypeId::of::<WebViewRegistry>(), Box::new(registry.clone()));
+    map.insert(
+        TypeId::of::<SharedWebViewControlPresenter>(),
+        Box::new(SharedWebViewControlPresenter::new(Recorder(shown.clone()))),
+    );
+    let mut tree = WidgetTree::new().with_theme(intui::light());
+    tree.set_app_context(Rc::new(TreeAppContext::empty().with_app_state(map)));
+    tree.set_device_scale_factor(2.0);
+    let webview = WebView::new().url("about:blank");
+    let id = webview.id();
+    tree.add(webview);
+    settle(&mut tree);
+    deliver(
+        &mut tree,
+        &registry,
+        id,
+        WebViewEvent::ControlRequested {
+            key: 1,
+            control: WebViewControl::Select {
+                options: Vec::new(),
+                selected: None,
+                area: Rect::new(20.0, 40.0, 10.0, 6.0),
+            },
+        },
+    );
+    assert_eq!(
+        *shown.borrow(),
+        vec![WebViewControl::Select {
+            options: Vec::new(),
+            selected: None,
+            area: Rect::new(10.0, 20.0, 5.0, 3.0),
+        }],
+        "page pixels at 2x become window-logical pixels"
+    );
+    assert!(records.ops_for(id).contains(&WebViewOp::AnswerControl {
+        web_view_id: id,
+        key: 1,
+        answer: WebViewControlAnswer::Confirmed,
+    }));
+}

@@ -64,11 +64,14 @@ use euclid::Scale;
 use servo::protocol_handler::ProtocolRegistry;
 use servo::{
     ConsoleLogLevel, Cursor, EmbedderControl, EmbedderControlId, EventLoopWaker, LoadStatus,
-    NavigationRequest, RenderingContext, Servo, ServoBuilder, UserContentManager, UserScript,
-    WebView as ServoWebView, WebViewBuilder, WebViewDelegate,
+    NavigationRequest, RenderingContext, SelectElement, SelectElementOptionOrOptgroup, Servo,
+    ServoBuilder, SimpleDialog, UserContentManager, UserScript, WebView as ServoWebView,
+    WebViewBuilder, WebViewDelegate,
 };
 use teksilo_core::widget::CursorIcon;
 use url::Url;
+
+use crate::controls::{WebViewControl, WebViewControlAnswer, WebViewSelectOption};
 
 use crate::backend::{
     ConsoleLevel, NoopWebViewHandle, WebSource, WebViewAttributes, WebViewBackend, WebViewEvent,
@@ -284,6 +287,16 @@ struct View {
     /// The context's size, in device pixels.
     size: Cell<PhysicalSize<u32>>,
     scale: Cell<f32>,
+    /// The dialogs and lists the page opened and the application has not
+    /// answered yet. Dropping one answers it with its default.
+    controls: RefCell<std::collections::HashMap<u64, PendingControl>>,
+    next_control: Cell<u64>,
+}
+
+/// A control the page is waiting on.
+enum PendingControl {
+    Dialog(SimpleDialog),
+    Select(SelectElement),
 }
 
 impl View {
@@ -388,20 +401,61 @@ impl WebViewDelegate for ServoEventDelegate {
         self.post(WebViewEvent::CursorChanged(cursor_icon(cursor)));
     }
 
-    /// An editable element took focus: say where its caret is. Every other
-    /// control (a dialog, a `<select>`, a picker) is dropped, which answers it
-    /// with its default (an alert acknowledged, a confirm or prompt
-    /// cancelled, a picker closed), so no page waits on one.
+    /// An editable element took focus: say where its caret is. A dialog or a
+    /// `<select>` is kept and handed to the application to present. Every
+    /// other control (a file or colour picker, a context menu) is dropped,
+    /// which answers it with its default, so no page waits on one.
     fn show_embedder_control(&self, _webview: ServoWebView, control: EmbedderControl) {
-        if let EmbedderControl::InputMethod(input) = control {
-            let caret = input.position();
-            self.post(WebViewEvent::InputMethodArea(Some(Rect::new(
-                caret.min.x as f32,
-                caret.min.y as f32,
-                caret.width() as f32,
-                caret.height() as f32,
-            ))));
-        }
+        let device_rect = |r: servo::DeviceIntRect| {
+            Rect::new(
+                r.min.x as f32,
+                r.min.y as f32,
+                r.width() as f32,
+                r.height() as f32,
+            )
+        };
+        let (pending, described) = match control {
+            EmbedderControl::InputMethod(input) => {
+                self.post(WebViewEvent::InputMethodArea(Some(device_rect(
+                    input.position(),
+                ))));
+                return;
+            }
+            EmbedderControl::SimpleDialog(dialog) => {
+                let described = match &dialog {
+                    SimpleDialog::Alert(alert) => WebViewControl::Alert {
+                        message: alert.message().to_string(),
+                    },
+                    SimpleDialog::Confirm(confirm) => WebViewControl::Confirm {
+                        message: confirm.message().to_string(),
+                    },
+                    SimpleDialog::Prompt(prompt) => WebViewControl::Prompt {
+                        message: prompt.message().to_string(),
+                        default: prompt.current_value().to_string(),
+                    },
+                };
+                (PendingControl::Dialog(dialog), described)
+            }
+            EmbedderControl::SelectElement(select) => {
+                let described = WebViewControl::Select {
+                    options: select_options(select.options()),
+                    selected: select.selected_options().first().copied(),
+                    area: device_rect(select.position()),
+                };
+                (PendingControl::Select(select), described)
+            }
+            _ => return,
+        };
+        let Some(view) = self.view.upgrade() else {
+            return;
+        };
+        let key = view.next_control.get();
+        view.next_control.set(key + 1);
+        view.controls.borrow_mut().insert(key, pending);
+        self.post(WebViewEvent::ControlRequested {
+            key,
+            control: described,
+        });
     }
 
     fn hide_embedder_control(&self, _webview: ServoWebView, _id: EmbedderControlId) {
@@ -414,6 +468,30 @@ impl WebViewDelegate for ServoEventDelegate {
             text,
         });
     }
+}
+
+/// A `<select>`'s options, its groups flattened into a label on each option.
+fn select_options(options: &[SelectElementOptionOrOptgroup]) -> Vec<WebViewSelectOption> {
+    let mut out = Vec::new();
+    for entry in options {
+        match entry {
+            SelectElementOptionOrOptgroup::Option(option) => out.push(WebViewSelectOption {
+                id: option.id,
+                label: option.label.clone(),
+                disabled: option.is_disabled,
+                group: None,
+            }),
+            SelectElementOptionOrOptgroup::Optgroup { label, options } => {
+                out.extend(options.iter().map(|option| WebViewSelectOption {
+                    id: option.id,
+                    label: option.label.clone(),
+                    disabled: option.is_disabled,
+                    group: Some(label.clone()),
+                }));
+            }
+        }
+    }
+    out
 }
 
 /// The nearest of Teksilo's cursors to the one the page asked for.
@@ -529,6 +607,8 @@ impl WebViewBackend for ServoBackend {
             shown: Cell::new(true),
             size: Cell::new(size),
             scale: Cell::new(1.0),
+            controls: RefCell::new(std::collections::HashMap::new()),
+            next_control: Cell::new(0),
         });
         let delegate: Rc<dyn WebViewDelegate> = Rc::new(ServoEventDelegate {
             view: Rc::downgrade(&view),
@@ -702,6 +782,33 @@ impl WebViewHandle for ServoHandle {
     }
     fn blur(&self) {
         self.with_webview(|w| w.blur());
+    }
+    fn answer_control(&self, key: u64, answer: WebViewControlAnswer) {
+        let Some(control) = self.view.controls.borrow_mut().remove(&key) else {
+            return;
+        };
+        match (control, answer) {
+            (PendingControl::Dialog(SimpleDialog::Alert(alert)), _) => alert.confirm(),
+            (
+                PendingControl::Dialog(SimpleDialog::Confirm(confirm)),
+                WebViewControlAnswer::Confirmed,
+            ) => confirm.confirm(),
+            (
+                PendingControl::Dialog(SimpleDialog::Prompt(mut prompt)),
+                WebViewControlAnswer::Text(text),
+            ) => {
+                prompt.set_current_value(&text);
+                prompt.confirm();
+            }
+            (PendingControl::Select(mut select), WebViewControlAnswer::Selected(id)) => {
+                select.select(vec![id]);
+                select.submit();
+            }
+            // Anything else is a cancel: dropping the control answers it so.
+            (PendingControl::Dialog(SimpleDialog::Confirm(confirm)), _) => confirm.dismiss(),
+            (PendingControl::Dialog(SimpleDialog::Prompt(prompt)), _) => prompt.dismiss(),
+            (PendingControl::Select(_), _) => {}
+        }
     }
     fn set_input_passthrough(&self, _passthrough: bool) {
         // A surface engine takes no input but what the widget forwards, and
