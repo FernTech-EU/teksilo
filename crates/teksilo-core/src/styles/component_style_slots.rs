@@ -94,12 +94,13 @@ pub struct ComponentStyleSlots {
 
 /// Every slot's name, written **once**, expanded through by each probe below.
 ///
-/// Two hand-maintained copies of a forty-two-name list is how one of them loses
-/// a slot, which for [`ComponentStyleSlots::installed`] and
-/// [`ComponentStyleSlots::unchanged_against`] means an override that is silently
-/// never reported. The `Self { .. }`-less destructure inside each probe still
-/// makes a slot added to the struct a compile error; this makes a slot added
-/// *here* reach both askers at once.
+/// [`ComponentStyleSlots::NAMES`], [`ComponentStyleSlots::installed`],
+/// [`ComponentStyleSlots::unchanged_against`] and the `Debug` and `PartialEq`
+/// impls all expand this one roster, so none of them can be the copy that fell
+/// behind: a hand-written list per asker is how one of them loses a slot, which
+/// for `installed` means an override that is silently never reported. Every
+/// probe except `NAMES` also destructures `Self` without a `..` rest pattern, so
+/// a slot added to the struct and not to this roster is a compile error.
 macro_rules! for_every_slot {
     ($probe:ident) => {
         $probe!(
@@ -150,6 +151,22 @@ macro_rules! for_every_slot {
 }
 
 impl ComponentStyleSlots {
+    /// Every slot's name, in declaration order: the roster that
+    /// [`installed`](Self::installed) and
+    /// [`unchanged_against`](Self::unchanged_against) answer from.
+    ///
+    /// For a test that wants to say which slots a preset fills and which it
+    /// deliberately leaves to the widget's default, as set equality against
+    /// this list rather than against a hand-copied one.
+    pub const NAMES: &'static [&'static str] = {
+        macro_rules! probe {
+            ($($name:ident),* $(,)?) => {
+                &[$(stringify!($name)),*]
+            };
+        }
+        for_every_slot!(probe)
+    };
+
     /// The names of the slots that carry an override, in declaration order.
     ///
     /// The direct "what is installed here" question, kept for diagnostics and
@@ -226,52 +243,18 @@ impl ComponentStyleSlots {
 impl std::fmt::Debug for ComponentStyleSlots {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Hand-rolled because `Rc<dyn FooStyle>` doesn't impl Debug.
-        // Show which slots are populated (Some/None) — the actual
+        // Show which slots are populated (Some/None): the actual
         // chrome behaviour isn't introspectable.
-        f.debug_struct("ComponentStyleSlots")
-            .field("button", &self.button.is_some())
-            .field("split_button", &self.split_button.is_some())
-            .field("splitter", &self.splitter.is_some())
-            .field("icon_button", &self.icon_button.is_some())
-            .field("toggle", &self.toggle.is_some())
-            .field("checkbox", &self.checkbox.is_some())
-            .field("radio", &self.radio.is_some())
-            .field("radio_tile", &self.radio_tile.is_some())
-            .field("slider", &self.slider.is_some())
-            .field("text_input", &self.text_input.is_some())
-            .field("combo_box", &self.combo_box.is_some())
-            .field("menu_item", &self.menu_item.is_some())
-            .field("panel", &self.panel.is_some())
-            .field("card", &self.card.is_some())
-            .field("chart", &self.chart.is_some())
-            .field("popover", &self.popover.is_some())
-            .field("tooltip", &self.tooltip.is_some())
-            .field("scroll_bar", &self.scroll_bar.is_some())
-            .field("standard_item", &self.standard_item.is_some())
-            .field("tab", &self.tab.is_some())
-            .field("dialog", &self.dialog.is_some())
-            .field("snackbar", &self.snackbar.is_some())
-            .field("toast", &self.toast.is_some())
-            .field("banner", &self.banner.is_some())
-            .field("badge", &self.badge.is_some())
-            .field("progress_bar", &self.progress_bar.is_some())
-            .field("link", &self.link.is_some())
-            .field("segmented_control", &self.segmented_control.is_some())
-            .field("avatar", &self.avatar.is_some())
-            .field("calendar", &self.calendar.is_some())
-            .field("color_picker", &self.color_picker.is_some())
-            .field("spin_box", &self.spin_box.is_some())
-            .field("date_edit", &self.date_edit.is_some())
-            .field("search_field", &self.search_field.is_some())
-            .field("rich_text_editor", &self.rich_text_editor.is_some())
-            .field("table", &self.table.is_some())
-            .field("list_container", &self.list_container.is_some())
-            .field("drop_zone", &self.drop_zone.is_some())
-            .field("drop_target", &self.drop_target.is_some())
-            .field("grid_view", &self.grid_view.is_some())
-            .field("web_view", &self.web_view.is_some())
-            .field("text_selection", &self.text_selection.is_some())
-            .finish()
+        macro_rules! probe {
+            ($($name:ident),* $(,)?) => {{
+                // No `..`: a slot missing from the roster fails to compile.
+                let Self { $($name),* } = self;
+                f.debug_struct("ComponentStyleSlots")
+                    $(.field(stringify!($name), &$name.is_some()))*
+                    .finish()
+            }};
+        }
+        for_every_slot!(probe)
     }
 }
 
@@ -287,47 +270,19 @@ impl PartialEq for ComponentStyleSlots {
                 _ => false,
             }
         }
-        rc_eq(&self.button, &other.button)
-            && rc_eq(&self.radio_tile, &other.radio_tile)
-            && rc_eq(&self.split_button, &other.split_button)
-            && rc_eq(&self.splitter, &other.splitter)
-            && rc_eq(&self.icon_button, &other.icon_button)
-            && rc_eq(&self.toggle, &other.toggle)
-            && rc_eq(&self.checkbox, &other.checkbox)
-            && rc_eq(&self.radio, &other.radio)
-            && rc_eq(&self.slider, &other.slider)
-            && rc_eq(&self.text_input, &other.text_input)
-            && rc_eq(&self.combo_box, &other.combo_box)
-            && rc_eq(&self.menu_item, &other.menu_item)
-            && rc_eq(&self.panel, &other.panel)
-            && rc_eq(&self.card, &other.card)
-            && rc_eq(&self.chart, &other.chart)
-            && rc_eq(&self.popover, &other.popover)
-            && rc_eq(&self.tooltip, &other.tooltip)
-            && rc_eq(&self.scroll_bar, &other.scroll_bar)
-            && rc_eq(&self.standard_item, &other.standard_item)
-            && rc_eq(&self.tab, &other.tab)
-            && rc_eq(&self.dialog, &other.dialog)
-            && rc_eq(&self.snackbar, &other.snackbar)
-            && rc_eq(&self.toast, &other.toast)
-            && rc_eq(&self.banner, &other.banner)
-            && rc_eq(&self.badge, &other.badge)
-            && rc_eq(&self.progress_bar, &other.progress_bar)
-            && rc_eq(&self.link, &other.link)
-            && rc_eq(&self.segmented_control, &other.segmented_control)
-            && rc_eq(&self.avatar, &other.avatar)
-            && rc_eq(&self.calendar, &other.calendar)
-            && rc_eq(&self.color_picker, &other.color_picker)
-            && rc_eq(&self.spin_box, &other.spin_box)
-            && rc_eq(&self.date_edit, &other.date_edit)
-            && rc_eq(&self.search_field, &other.search_field)
-            && rc_eq(&self.rich_text_editor, &other.rich_text_editor)
-            && rc_eq(&self.table, &other.table)
-            && rc_eq(&self.list_container, &other.list_container)
-            && rc_eq(&self.drop_zone, &other.drop_zone)
-            && rc_eq(&self.drop_target, &other.drop_target)
-            && rc_eq(&self.grid_view, &other.grid_view)
-            && rc_eq(&self.web_view, &other.web_view)
-            && rc_eq(&self.text_selection, &other.text_selection)
+        macro_rules! probe {
+            ($($name:ident),* $(,)?) => {{
+                // No `..`: a slot missing from the roster fails to compile.
+                let Self { $($name),* } = self;
+                true $(&& rc_eq($name, &other.$name))*
+            }};
+        }
+        for_every_slot!(probe)
     }
 }
+
+// `styles.rs` declares this module with `#[path]`, so a child module resolves
+// from `styles/`, not from a directory named after this file.
+#[cfg(test)]
+#[path = "component_style_slots/tests.rs"]
+mod tests;

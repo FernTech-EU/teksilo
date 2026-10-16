@@ -240,6 +240,8 @@ fn install_styles(theme: &mut Theme) {
 mod tests {
     use super::*;
     use crate::palette::argb;
+    use std::collections::BTreeSet;
+    use teksilo_core::styles::ComponentStyleSlots;
 
     #[test]
     fn light_reports_light_appearance() {
@@ -329,39 +331,111 @@ mod tests {
         assert_eq!(d.control_fill_input_active, argb("#B31E1E1E"));
     }
 
+    /// The slots Fluent deliberately leaves to the widget's default
+    /// `Recipe*Style`, each with the reason it is inherited rather than filled.
+    const FLUENT_UNFILLED: &[(&str, &str)] = &[
+        (
+            "split_button",
+            "WinUI SplitButton is not transcribed; the recipe frame paints from the theme surface and border roles",
+        ),
+        (
+            "splitter",
+            "WinUI ships no splitter; the recipe's thin resting divider reads the theme border role",
+        ),
+        (
+            "radio_tile",
+            "WinUI ships no selectable card; the recipe surface reads the preset's surface and accent roles",
+        ),
+        (
+            "chart",
+            "WinUI ships no chart; the teksilo-charts default reads the series colours and the theme border role",
+        ),
+        (
+            "color_picker",
+            "WinUI ColorPicker is not transcribed; the recipe panel reads the theme roles",
+        ),
+        (
+            "spin_box",
+            "WinUI NumberBox spin buttons are not transcribed; the recipe frames the widget's field and step buttons in theme roles",
+        ),
+        (
+            "date_edit",
+            "the recipe is a passthrough around the TextInput, which the text_input slot already styles",
+        ),
+        (
+            "rich_text_editor",
+            "the recipe frames the viewport in theme border and surface roles; the text is document content",
+        ),
+        (
+            "list_container",
+            "the recipe is only the drag-insertion line, drawn in the accent role this preset maps",
+        ),
+        (
+            "drop_zone",
+            "WinUI ships no drop-zone control; the recipe tints its region from the theme roles",
+        ),
+        (
+            "drop_target",
+            "WinUI ships no drop-target control; the recipe border reads the theme roles and its hints are cards, which the card slot styles",
+        ),
+        (
+            "grid_view",
+            "the recipe's focus ring, marquee and insertion bar use the focused and accent roles this preset maps",
+        ),
+        (
+            "web_view",
+            "the page paints itself; the recipe only tints the overlay shown over it, from theme roles",
+        ),
+        (
+            "text_selection",
+            "its geometry is teksilo_core::text_touch's, shared with hit testing, and its colours follow the accent role",
+        ),
+        (
+            "calendar",
+            "WinUI CalendarView is not transcribed; the recipe's day cells read the accent and selection roles this preset maps",
+        ),
+        (
+            "search_field",
+            "its field is a TextInput, which resolves the text_input slot, and its suggestion popup resolves the popover slot, both filled",
+        ),
+        (
+            "avatar",
+            "WinUI PersonPicture is not transcribed; the recipe's initials disc and focus ring read the theme roles",
+        ),
+    ];
+
+    /// Whether the installed slots and [`FLUENT_UNFILLED`] are exactly
+    /// [`ComponentStyleSlots::NAMES`], with no slot in both: a slot added to the
+    /// framework must be either filled by this preset or listed with a reason.
     #[test]
-    fn every_installed_style_slot_is_populated() {
-        for t in [light(), dark()] {
-            let s = &t.style_slots;
-            for (name, present) in [
-                ("button", s.button.is_some()),
-                ("toggle", s.toggle.is_some()),
-                ("checkbox", s.checkbox.is_some()),
-                ("radio", s.radio.is_some()),
-                ("text_input", s.text_input.is_some()),
-                ("slider", s.slider.is_some()),
-                ("menu_item", s.menu_item.is_some()),
-                ("standard_item", s.standard_item.is_some()),
-                ("card", s.card.is_some()),
-                ("panel", s.panel.is_some()),
-                ("popover", s.popover.is_some()),
-                ("tooltip", s.tooltip.is_some()),
-                ("dialog", s.dialog.is_some()),
-                ("snackbar", s.snackbar.is_some()),
-                ("toast", s.toast.is_some()),
-                ("banner", s.banner.is_some()),
-                ("combo_box", s.combo_box.is_some()),
-                ("icon_button", s.icon_button.is_some()),
-                ("link", s.link.is_some()),
-                ("segmented_control", s.segmented_control.is_some()),
-                ("badge", s.badge.is_some()),
-                ("progress_bar", s.progress_bar.is_some()),
-                ("scroll_bar", s.scroll_bar.is_some()),
-                ("tab", s.tab.is_some()),
-                ("table", s.table.is_some()),
-            ] {
-                assert!(present, "{name} slot not installed");
-            }
+    fn installed_and_unfilled_slots_partition_the_roster() {
+        let unfilled: BTreeSet<&str> = FLUENT_UNFILLED.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            unfilled.len(),
+            FLUENT_UNFILLED.len(),
+            "a slot is listed twice"
+        );
+        for (name, reason) in FLUENT_UNFILLED {
+            assert!(
+                !reason.trim().is_empty(),
+                "{name} is listed without a reason"
+            );
+        }
+        let names: BTreeSet<&str> = ComponentStyleSlots::NAMES.iter().copied().collect();
+        for t in [light(), dark(), light().with_density(TargetDensity::Touch)] {
+            let installed: BTreeSet<&str> = t.style_slots.installed().into_iter().collect();
+            let both: Vec<_> = installed.intersection(&unfilled).collect();
+            assert!(
+                both.is_empty(),
+                "installed yet listed as unfilled: {both:?}"
+            );
+            let covered: BTreeSet<&str> = installed.union(&unfilled).copied().collect();
+            let missing: Vec<_> = names.difference(&covered).collect();
+            let unknown: Vec<_> = covered.difference(&names).collect();
+            assert!(
+                missing.is_empty() && unknown.is_empty(),
+                "neither installed nor listed: {missing:?}; not a slot: {unknown:?}"
+            );
         }
     }
 

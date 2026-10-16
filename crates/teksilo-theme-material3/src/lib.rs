@@ -191,6 +191,8 @@ pub fn font_registrar() -> impl teksilo_text::FontRegistrar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
+    use teksilo_core::styles::ComponentStyleSlots;
     use teksilo_tokens::Color;
 
     #[test]
@@ -276,12 +278,102 @@ mod tests {
         assert_eq!(p.tertiary, Color::from_hex("#EFB8C8"));
     }
 
+    /// A Material 3 component this preset has not transcribed: the widget's
+    /// default recipe paints it, with the M3-mapped colour roles.
+    const NOT_TRANSCRIBED: &str =
+        "the M3 component is not transcribed; the recipe paints with the M3-mapped colour roles";
+    /// A slot Material 3 specifies no component for.
+    const NO_M3_COMPONENT: &str =
+        "M3 specifies no such component; the recipe paints with the M3-mapped colour roles";
+
+    /// The slots Material 3 deliberately leaves to the widget's default
+    /// `Recipe*Style`, each with the reason it is inherited rather than filled.
+    const MATERIAL3_UNFILLED: &[(&str, &str)] = &[
+        ("split_button", NOT_TRANSCRIBED),
+        ("splitter", NO_M3_COMPONENT),
+        ("icon_button", NOT_TRANSCRIBED),
+        ("checkbox", NOT_TRANSCRIBED),
+        ("radio", NOT_TRANSCRIBED),
+        ("radio_tile", NO_M3_COMPONENT),
+        ("slider", NOT_TRANSCRIBED),
+        ("text_input", NOT_TRANSCRIBED),
+        ("combo_box", NOT_TRANSCRIBED),
+        ("menu_item", NOT_TRANSCRIBED),
+        ("panel", NO_M3_COMPONENT),
+        ("chart", NO_M3_COMPONENT),
+        ("popover", NOT_TRANSCRIBED),
+        ("tooltip", NOT_TRANSCRIBED),
+        ("scroll_bar", NO_M3_COMPONENT),
+        ("standard_item", NOT_TRANSCRIBED),
+        ("tab", NOT_TRANSCRIBED),
+        ("dialog", NOT_TRANSCRIBED),
+        ("snackbar", NOT_TRANSCRIBED),
+        ("toast", NO_M3_COMPONENT),
+        ("banner", NO_M3_COMPONENT),
+        ("badge", NOT_TRANSCRIBED),
+        ("progress_bar", NOT_TRANSCRIBED),
+        ("link", NO_M3_COMPONENT),
+        ("segmented_control", NOT_TRANSCRIBED),
+        ("avatar", NO_M3_COMPONENT),
+        ("calendar", NOT_TRANSCRIBED),
+        ("color_picker", NO_M3_COMPONENT),
+        ("spin_box", NO_M3_COMPONENT),
+        (
+            "date_edit",
+            "the recipe is a passthrough around the TextInput, so it follows whatever the text_input slot paints",
+        ),
+        ("search_field", NOT_TRANSCRIBED),
+        ("rich_text_editor", NO_M3_COMPONENT),
+        ("table", NO_M3_COMPONENT),
+        (
+            "list_container",
+            "the recipe is only the drag-insertion line, drawn in the M3-mapped accent role",
+        ),
+        ("drop_zone", NO_M3_COMPONENT),
+        ("drop_target", NO_M3_COMPONENT),
+        ("grid_view", NO_M3_COMPONENT),
+        (
+            "web_view",
+            "the page paints itself; the recipe only tints the overlay shown over it, from theme roles",
+        ),
+        (
+            "text_selection",
+            "its geometry is teksilo_core::text_touch's, shared with hit testing, and its colours follow the M3-mapped accent role",
+        ),
+    ];
+
+    /// Whether the installed slots and [`MATERIAL3_UNFILLED`] are exactly
+    /// [`ComponentStyleSlots::NAMES`], with no slot in both: a slot added to the
+    /// framework must be either filled by this preset or listed with a reason.
     #[test]
-    fn widget_style_slots_installed() {
-        for t in [light(), dark()] {
-            assert!(t.style_slots.button.is_some(), "button slot");
-            assert!(t.style_slots.toggle.is_some(), "toggle slot");
-            assert!(t.style_slots.card.is_some(), "card slot");
+    fn installed_and_unfilled_slots_partition_the_roster() {
+        let unfilled: BTreeSet<&str> = MATERIAL3_UNFILLED.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            unfilled.len(),
+            MATERIAL3_UNFILLED.len(),
+            "a slot is listed twice"
+        );
+        for (name, reason) in MATERIAL3_UNFILLED {
+            assert!(
+                !reason.trim().is_empty(),
+                "{name} is listed without a reason"
+            );
+        }
+        let names: BTreeSet<&str> = ComponentStyleSlots::NAMES.iter().copied().collect();
+        for t in [light(), dark(), light().with_density(TargetDensity::Touch)] {
+            let installed: BTreeSet<&str> = t.style_slots.installed().into_iter().collect();
+            let both: Vec<_> = installed.intersection(&unfilled).collect();
+            assert!(
+                both.is_empty(),
+                "installed yet listed as unfilled: {both:?}"
+            );
+            let covered: BTreeSet<&str> = installed.union(&unfilled).copied().collect();
+            let missing: Vec<_> = names.difference(&covered).collect();
+            let unknown: Vec<_> = covered.difference(&names).collect();
+            assert!(
+                missing.is_empty() && unknown.is_empty(),
+                "neither installed nor listed: {missing:?}; not a slot: {unknown:?}"
+            );
         }
     }
 

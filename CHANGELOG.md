@@ -13,6 +13,16 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Theming
+
+- **`ComponentStyleSlots::NAMES`.** The name of every theme-wide style slot,
+  in declaration order, the same names `installed()` reports. A test can say
+  which slots a theme fills and which it leaves to the widget's default as set
+  equality against it, so a slot added to the framework later cannot be
+  overlooked.
+
 ### Fixed
 
 - **Builds without link-time optimisation embed each bundled font once.** A
