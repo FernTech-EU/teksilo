@@ -160,6 +160,21 @@ impl HeadlessGlContext {
         })
     }
 
+    /// The largest width or height a surface of this context can have: past
+    /// it, its framebuffer cannot be complete.
+    pub(super) fn max_surface_size(&self) -> u32 {
+        let _ = self.make_current();
+        let mut texture = [0];
+        let mut renderbuffer = [0];
+        // SAFETY: each query writes one integer into a one-element array.
+        unsafe {
+            self.gleam.get_integer_v(gl::MAX_TEXTURE_SIZE, &mut texture);
+            self.gleam
+                .get_integer_v(gl::MAX_RENDERBUFFER_SIZE, &mut renderbuffer);
+        }
+        texture[0].min(renderbuffer[0]).max(1) as u32
+    }
+
     /// The adapter this context runs on.
     pub(super) fn adapter(&self) -> AdapterKind {
         self.adapter
@@ -389,6 +404,10 @@ impl RenderingContext for HeadlessGlContext {
             return;
         }
         self.size.set(size);
+        // The swap chain makes its new surfaces' framebuffers with whatever
+        // context is current on this thread. Servo resizes from layout, when
+        // another view's context, or another library's, may be.
+        let _ = self.make_current();
         let device = &mut self.device.borrow_mut();
         let context = &mut self.context.borrow_mut();
         let _ = self.swap_chain.resize(
@@ -399,6 +418,7 @@ impl RenderingContext for HeadlessGlContext {
     }
 
     fn present(&self) {
+        let _ = self.make_current();
         let device = &mut self.device.borrow_mut();
         let context = &mut self.context.borrow_mut();
         let _ = self

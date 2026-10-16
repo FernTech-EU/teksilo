@@ -287,6 +287,10 @@ struct View {
     /// The context's size, in device pixels.
     size: Cell<PhysicalSize<u32>>,
     scale: Cell<f32>,
+    /// The `data:` URL the backend made for inline HTML, reported to the
+    /// widget as `about:blank`: as wry reports such a page, and short enough
+    /// for a URL bar.
+    inline_url: RefCell<Option<String>>,
     /// The dialogs and lists the page opened and the application has not
     /// answered yet. Dropping one answers it with its default.
     controls: RefCell<std::collections::HashMap<u64, PendingControl>>,
@@ -345,6 +349,20 @@ impl ServoEventDelegate {
     fn post(&self, event: WebViewEvent) {
         post_event(&self.poster, self.window_id, self.web_view_id, event);
     }
+
+    /// `url` as the widget is told it: the backend's own inline-HTML `data:`
+    /// URL as `about:blank`.
+    fn reported(&self, url: String) -> String {
+        let inline = self
+            .view
+            .upgrade()
+            .is_some_and(|view| view.inline_url.borrow().as_deref() == Some(url.as_str()));
+        if inline {
+            "about:blank".to_string()
+        } else {
+            url
+        }
+    }
 }
 
 impl WebViewDelegate for ServoEventDelegate {
@@ -363,7 +381,7 @@ impl WebViewDelegate for ServoEventDelegate {
             LoadStatus::Complete => {
                 self.post(WebViewEvent::PageLoadFinished);
                 self.post(WebViewEvent::NavigationFinished {
-                    url: webview.url().map(|u| u.to_string()).unwrap_or_default(),
+                    url: self.reported(webview.url().map(|u| u.to_string()).unwrap_or_default()),
                     success: true,
                 });
             }
@@ -376,7 +394,7 @@ impl WebViewDelegate for ServoEventDelegate {
 
     fn request_navigation(&self, _webview: ServoWebView, request: NavigationRequest) {
         self.post(WebViewEvent::NavigationStarted {
-            url: request.url.to_string(),
+            url: self.reported(request.url.to_string()),
             can_cancel: false,
         });
         // Dropping the request allows the navigation: the widget observes
@@ -388,7 +406,7 @@ impl WebViewDelegate for ServoEventDelegate {
     /// finishes a navigation as far as the widget's URL binding is concerned.
     fn notify_url_changed(&self, _webview: ServoWebView, url: Url) {
         self.post(WebViewEvent::NavigationFinished {
-            url: url.to_string(),
+            url: self.reported(url.to_string()),
             success: true,
         });
     }
@@ -607,6 +625,7 @@ impl WebViewBackend for ServoBackend {
             shown: Cell::new(true),
             size: Cell::new(size),
             scale: Cell::new(1.0),
+            inline_url: RefCell::new(None),
             controls: RefCell::new(std::collections::HashMap::new()),
             next_control: Cell::new(0),
         });
@@ -621,6 +640,9 @@ impl WebViewBackend for ServoBackend {
             .user_content_manager(engine.user_content.clone())
             .hidpi_scale_factor(Scale::new(1.0));
         if let Some(url) = attrs.source.as_ref().and_then(source_url) {
+            if matches!(attrs.source, Some(WebSource::Html { .. })) {
+                *view.inline_url.borrow_mut() = Some(url.to_string());
+            }
             builder = builder.url(url);
         }
         let webview = builder.build();
@@ -717,6 +739,10 @@ impl WebViewHandle for ServoHandle {
             view.scale.set(scale);
             self.with_webview(|w| w.set_hidpi_scale_factor(Scale::new(scale)));
         }
+        // Past the GL's largest surface, a framebuffer cannot be complete. A
+        // box that wide shows the page's leading part, unscaled.
+        let limit = view.gl.max_surface_size();
+        let size = PhysicalSize::new(size.width.min(limit), size.height.min(limit));
         if view.size.get() != size {
             view.size.set(size);
             self.with_webview(|w| w.resize(size));
@@ -729,6 +755,7 @@ impl WebViewHandle for ServoHandle {
     }
     fn load_html(&self, html: &str, _base_url: Option<&str>) {
         if let Some(url) = html_url(html) {
+            *self.view.inline_url.borrow_mut() = Some(url.to_string());
             self.with_webview(|w| w.load(url));
         }
     }
