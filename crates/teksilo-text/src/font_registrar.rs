@@ -90,20 +90,20 @@ pub struct EmbeddedInterRegistrar {
 impl EmbeddedInterRegistrar {
     pub const fn new() -> Self {
         Self {
-            data: include_bytes!("../fonts/InterVariable.ttf"),
-            data_italic: include_bytes!("../fonts/InterVariable-Italic.ttf"),
-            mono_data: include_bytes!("../fonts/JetBrainsMono.ttf"),
-            mono_data_italic: include_bytes!("../fonts/JetBrainsMono-Italic.ttf"),
+            data: crate::embedded_fonts::INTER,
+            data_italic: crate::embedded_fonts::INTER_ITALIC,
+            mono_data: crate::embedded_fonts::JETBRAINS_MONO,
+            mono_data_italic: crate::embedded_fonts::JETBRAINS_MONO_ITALIC,
             default_size_px: 14.0,
         }
     }
 
     pub const fn with_size(size_px: f32) -> Self {
         Self {
-            data: include_bytes!("../fonts/InterVariable.ttf"),
-            data_italic: include_bytes!("../fonts/InterVariable-Italic.ttf"),
-            mono_data: include_bytes!("../fonts/JetBrainsMono.ttf"),
-            mono_data_italic: include_bytes!("../fonts/JetBrainsMono-Italic.ttf"),
+            data: crate::embedded_fonts::INTER,
+            data_italic: crate::embedded_fonts::INTER_ITALIC,
+            mono_data: crate::embedded_fonts::JETBRAINS_MONO,
+            mono_data_italic: crate::embedded_fonts::JETBRAINS_MONO_ITALIC,
             default_size_px: size_px,
         }
     }

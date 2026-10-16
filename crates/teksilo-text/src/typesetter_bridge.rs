@@ -10,6 +10,7 @@ use teksilo_canvas::text_backend::{
 };
 use teksilo_tokens::TextStyle;
 
+use crate::embedded_fonts;
 use crate::font_registrar::shared_static;
 use text_typeset::atlas::cache::GlyphCacheKey;
 use text_typeset::{
@@ -267,11 +268,11 @@ impl TypesetterBridge {
         // face as the default, then the italic variable face so italic
         // UI text shapes from real italic outlines instead of falling
         // back to the upright (an italic request would otherwise miss).
-        let inter_data = include_bytes!("../fonts/InterVariable.ttf");
+        let inter_data = embedded_fonts::INTER;
         let face_id = self.service.register_font_shared(shared_static(inter_data));
         self.service.set_default_font(face_id, 14.0);
         self.default_font = Some(face_id);
-        let inter_italic = include_bytes!("../fonts/InterVariable-Italic.ttf");
+        let inter_italic = embedded_fonts::INTER_ITALIC;
         let _ = self
             .service
             .register_font_shared(shared_static(inter_italic));
@@ -290,46 +291,46 @@ impl TypesetterBridge {
         // upright and italic variable faces (both under the family name
         // "JetBrains Mono"), so the theme's request — upright or italic —
         // resolves directly.
-        let mono_data = include_bytes!("../fonts/JetBrainsMono.ttf");
+        let mono_data = embedded_fonts::JETBRAINS_MONO;
         let _ = self.service.register_font_shared(shared_static(mono_data));
-        let mono_italic = include_bytes!("../fonts/JetBrainsMono-Italic.ttf");
+        let mono_italic = embedded_fonts::JETBRAINS_MONO_ITALIC;
         let _ = self
             .service
             .register_font_shared(shared_static(mono_italic));
 
         #[cfg(font_arabic)]
         {
-            let data = include_bytes!("../fonts/NotoSansArabic-VariableFont_wdth,wght.ttf");
+            let data = embedded_fonts::NOTO_SANS_ARABIC;
             let _ = self.service.register_font_shared(shared_static(data));
         }
         #[cfg(font_hebrew)]
         {
-            let data = include_bytes!("../fonts/NotoSansHebrew-VariableFont_wdth,wght.ttf");
+            let data = embedded_fonts::NOTO_SANS_HEBREW;
             let _ = self.service.register_font_shared(shared_static(data));
         }
         #[cfg(font_thai)]
         {
-            let data = include_bytes!("../fonts/NotoSansThai-VariableFont_wdth,wght.ttf");
+            let data = embedded_fonts::NOTO_SANS_THAI;
             let _ = self.service.register_font_shared(shared_static(data));
         }
         #[cfg(font_devanagari)]
         {
-            let data = include_bytes!("../fonts/NotoSansDevanagari-VariableFont_wdth,wght.ttf");
+            let data = embedded_fonts::NOTO_SANS_DEVANAGARI;
             let _ = self.service.register_font_shared(shared_static(data));
         }
         #[cfg(font_cjk_sc)]
         {
-            let data = include_bytes!("../fonts/NotoSansSC-VariableFont_wght.ttf");
+            let data = embedded_fonts::NOTO_SANS_SC;
             let _ = self.service.register_font_shared(shared_static(data));
         }
         #[cfg(font_cjk_jp)]
         {
-            let data = include_bytes!("../fonts/NotoSansJP-VariableFont_wght.ttf");
+            let data = embedded_fonts::NOTO_SANS_JP;
             let _ = self.service.register_font_shared(shared_static(data));
         }
         #[cfg(font_cjk_kr)]
         {
-            let data = include_bytes!("../fonts/NotoSansKR-VariableFont_wght.ttf");
+            let data = embedded_fonts::NOTO_SANS_KR;
             let _ = self.service.register_font_shared(shared_static(data));
         }
 

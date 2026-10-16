@@ -13,6 +13,13 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Builds without link-time optimisation embed each bundled font once.** A
+  debug build, or a release profile without LTO, of an application with text
+  input carried Inter and JetBrains Mono three times over, 4.8 MB more than
+  needed.
+
 ## [0.19.0] - 2026-10-16
 
 ### Added
