@@ -427,6 +427,10 @@ fn screenshot(
 /// If the AT tree contains a `WebView` node, the readback can't see it (a
 /// native subview composites on top of wgpu) — warn the caller.
 fn webview_warnings(tree: &mut WidgetTree) -> Vec<String> {
+    // `sync_accessibility`, where the live bridge takes a snapshot: there an
+    // update the screenshot dropped would never reach the platform adapter,
+    // but this tree has no adapter, and the announcement ring
+    // `pull_announcements` reads records the update inside the call.
     let update = tree.sync_accessibility();
     let has_webview = update
         .nodes
