@@ -14,18 +14,34 @@
         background: #fafafa;
         color: #222;
       }
+      section {
+        margin-top: 1.5rem;
+      }
       #counter {
         font-size: 4rem;
         font-weight: 700;
         font-variant-numeric: tabular-nums;
       }
-      button {
+      button,
+      select,
+      input {
         font-size: 1rem;
         padding: 0.5rem 1rem;
-        margin-top: 1rem;
+        margin: 0.5rem 0.5rem 0 0;
+      }
+      input {
+        width: 20rem;
       }
       #log {
-        margin-top: 1rem;
+        position: fixed;
+        top: 1rem;
+        right: 1rem;
+        width: 22rem;
+        max-width: 40%;
+        min-height: 4rem;
+        padding: 0.5rem;
+        border: 1px solid #ccc;
+        background: #fff;
         font-family: ui-monospace, monospace;
         white-space: pre-wrap;
       }
@@ -35,15 +51,49 @@
     <h1>Teksilo WebView</h1>
 
     <!-- The counter increments on a timer. Tab away in the host app and back:
-         on return it continues from where it was — proof the native subview
-         was hidden, not reloaded. -->
-    <div>Counter (proves "hidden, not reloaded"):</div>
-    <div id="counter">0</div>
+         on return it continues from where it was, proof the page was hidden,
+         not reloaded. -->
+    <section>
+      <div>Counter (proves "hidden, not reloaded"):</div>
+      <div id="counter">0</div>
+    </section>
 
-    <!-- JS → Rust: posts a message the host appends to its log pane. -->
-    <button onclick="sendHello()">Send message to Rust</button>
+    <!-- JS → Rust: posts a message the host prints. Rust → JS: the host
+         dispatches a 'teksilo-message' event, shown in the log below. -->
+    <section>
+      <h2>Messages</h2>
+      <button onclick="sendHello()">Send message to Rust</button>
+    </section>
 
-    <!-- Rust → JS: the host dispatches a 'teksilo-message' event we display. -->
+    <!-- On Servo, the application shows these with its own dialogs and lists.
+         On wry, the platform engine shows its own. -->
+    <section>
+      <h2>Dialogs</h2>
+      <button onclick="log('alert closed', alert('Hello from the page'))">alert()</button>
+      <button onclick="log('confirm', confirm('Keep going?'))">confirm()</button>
+      <button onclick="log('prompt', prompt('Your name?', 'Ada'))">prompt()</button>
+      <select onchange="log('select', this.value)">
+        <option>Red</option>
+        <option>Green</option>
+        <option>Blue</option>
+      </select>
+    </section>
+
+    <!-- Click in the field to give the page the keyboard. The application's
+         Copy, Cut and Paste act on the page's selection; Ctrl+Tab leaves the
+         page. -->
+    <section>
+      <h2>Keyboard</h2>
+      <input placeholder="Type here, then copy and paste" />
+    </section>
+
+    <!-- A link shows the pointer cursor over it; following it, then Back in the
+         host's toolbar, walks the engine's history. -->
+    <section>
+      <h2>Navigation</h2>
+      <a href="https://example.com">Go to example.com</a>
+    </section>
+
     <div id="log"></div>
 
     <script>
@@ -52,6 +102,12 @@
         n += 1;
         document.getElementById("counter").textContent = n;
       }, 1000);
+
+      function log(what, value) {
+        const text = value === undefined ? what : what + ": " + JSON.stringify(value);
+        document.getElementById("log").textContent += text + "\n";
+        console.log(text);
+      }
 
       function sendHello() {
         if (window.ipc && window.ipc.postMessage) {
@@ -62,8 +118,7 @@
       }
 
       window.addEventListener("teksilo-message", (e) => {
-        const log = document.getElementById("log");
-        log.textContent += "From Rust: " + JSON.stringify(e.data) + "\n";
+        log("From Rust", e.data);
       });
     </script>
   </body>
