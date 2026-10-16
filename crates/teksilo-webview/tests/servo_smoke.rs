@@ -126,13 +126,17 @@ fn servo_renders_a_page_into_the_web_views_picture() {
 
     let title = Signal::new(String::new());
     let loading = Signal::new(true);
+    let messages = Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let received = messages.clone();
     tree.add(
         WebView::new()
             .title_signal(title.clone())
             .loading_signal(loading.clone())
+            .on_message(move |message, _ctx| received.borrow_mut().push(message))
             .html(concat!(
         "<html><head><title>Two halves</title></head>",
         "<body style='margin:0'><script>console.warn('from the page');",
+        "window.ipc.postMessage('hello \\u00e9\\n\\u2028+%');",
         "addEventListener('mousedown',e=>{if(e.button===0){document.body.innerHTML='';",
         "document.body.style.background='rgb(0,255,0)'}})</script>",
         "<div style='position:fixed;left:0;top:0;width:100%;height:50%;background:rgb(255,0,0)'></div>",
@@ -209,6 +213,11 @@ fn servo_renders_a_page_into_the_web_views_picture() {
 
     // The page's events reached the widget, through the same posts.
     assert!(seen.pumps > 0, "the engine asked to run, and was run");
+    assert_eq!(
+        *messages.borrow(),
+        vec!["hello \u{e9}\n\u{2028}+%".to_string()],
+        "window.ipc.postMessage reached on_message, whole"
+    );
     assert_eq!(
         title.get(),
         "Two halves",

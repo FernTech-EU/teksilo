@@ -37,6 +37,9 @@ by crate for clarity, not because crates version independently.
   keyboard from the page (`WebViewHandle::blur`). The page's cursor shows over
   it and the input method's candidate window opens at its caret
   (`WebViewEvent::CursorChanged`, `WebViewEvent::InputMethodArea`).
+- **`window.ipc` on Servo.** `window.ipc.postMessage(m)` in a Servo page now
+  reaches `on_message`, as on wry. Two messages posted back to back may arrive
+  out of order.
 - **Servo pages report their events.** Navigations (`on_navigation`), URL
   changes with no load behind them (`url_signal`), console messages and the
   page taking or giving up the keyboard (`page_focused_signal`) now reach the

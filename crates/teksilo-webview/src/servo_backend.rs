@@ -35,15 +35,17 @@
 //! [`input`] passes it to Servo; see there for the two things that do not
 //! carry over exactly.
 //!
-//! # What is not here yet
+//! # Messages
 //!
-//! JS→Rust messages (`window.ipc`) are not delivered.
+//! `window.ipc.postMessage(m)` in a page reaches the widget's `on_message`
+//! ([`ipc`]); `post_message` dispatches a `teksilo-message` event in the page.
 //!
 //! [`WebViewPumpPayload`]: crate::WebViewPumpPayload
 
 mod frame_clock;
 mod gl_context;
 mod input;
+mod ipc;
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -59,10 +61,11 @@ use teksilo_core::window::TeksiloWindowId;
 
 use dpi::PhysicalSize;
 use euclid::Scale;
+use servo::protocol_handler::ProtocolRegistry;
 use servo::{
     ConsoleLogLevel, Cursor, EmbedderControl, EmbedderControlId, EventLoopWaker, LoadStatus,
-    NavigationRequest, RenderingContext, Servo, ServoBuilder, WebView as ServoWebView,
-    WebViewBuilder, WebViewDelegate,
+    NavigationRequest, RenderingContext, Servo, ServoBuilder, UserContentManager, UserScript,
+    WebView as ServoWebView, WebViewBuilder, WebViewDelegate,
 };
 use teksilo_core::widget::CursorIcon;
 use url::Url;
@@ -216,6 +219,10 @@ struct Engine {
     clock: FrameClock,
     /// Every open web view; dead entries are dropped as the engine runs.
     views: RefCell<Vec<Weak<View>>>,
+    /// Where each web view's `window.ipc` messages go.
+    routes: ipc::Routes,
+    /// The script every page runs first: `window.ipc`.
+    user_content: Rc<UserContentManager>,
 }
 
 impl Engine {
@@ -223,14 +230,28 @@ impl Engine {
         let waker = ServoWaker::new(poster);
         let clock_waker = waker.clone();
         let clock = FrameClock::start(move || clock_waker.wake());
+        let routes = ipc::Routes::default();
+        // Servo takes its protocol handlers once, as it starts.
+        let mut protocols = ProtocolRegistry::default();
+        let _ = protocols.register(
+            ipc::IPC_SCHEME,
+            ipc::IpcHandler {
+                routes: routes.clone(),
+            },
+        );
         let servo = ServoBuilder::default()
             .event_loop_waker(Box::new(waker.clone()))
+            .protocol_registry(protocols)
             .build();
+        let user_content = Rc::new(UserContentManager::new(&servo));
+        user_content.add_script(Rc::new(UserScript::new(ipc::IPC_SCRIPT.to_string(), None)));
         Rc::new(Self {
             servo,
             waker,
             clock,
             views: RefCell::new(Vec::new()),
+            routes,
+            user_content,
         })
     }
 
@@ -517,11 +538,25 @@ impl WebViewBackend for ServoBackend {
         });
         let mut builder = WebViewBuilder::new(&engine.servo, gl as Rc<dyn RenderingContext>)
             .delegate(delegate)
+            .user_content_manager(engine.user_content.clone())
             .hidpi_scale_factor(Scale::new(1.0));
         if let Some(url) = attrs.source.as_ref().and_then(source_url) {
             builder = builder.url(url);
         }
-        *view.webview.borrow_mut() = Some(builder.build());
+        let webview = builder.build();
+        engine
+            .routes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(
+                webview.id(),
+                ipc::Route {
+                    web_view_id,
+                    window_id,
+                    poster: poster.clone(),
+                },
+            );
+        *view.webview.borrow_mut() = Some(webview);
         engine.views.borrow_mut().push(Rc::downgrade(&view));
         // The page starts loading on Servo's threads, which wake the engine
         // when there is something to run.
@@ -564,6 +599,18 @@ fn html_url(html: &str) -> Option<Url> {
 struct ServoHandle {
     engine: Rc<Engine>,
     view: Rc<View>,
+}
+
+impl Drop for ServoHandle {
+    fn drop(&mut self) {
+        if let Some(webview) = self.view.webview.borrow().as_ref() {
+            self.engine
+                .routes
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&webview.id());
+        }
+    }
 }
 
 impl ServoHandle {

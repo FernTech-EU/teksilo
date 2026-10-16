@@ -6,8 +6,8 @@
 > **Status: prototype.** The **wry** backend (the default) is functional on
 > macOS / Windows / Linux-X11 and, via XWayland, on Linux/Wayland. The **Servo**
 > backend (the native Wayland path) renders pages inside the window and takes
-> pointer, touch, wheel and keyboard input; page dialogs, `window.ipc` and the
-> page's accessibility tree are still missing. See
+> pointer, touch, wheel and keyboard input and `window.ipc` messages; page
+> dialogs and the page's accessibility tree are still missing. See
 > [Servo backend: requirements & status](#servo-backend-requirements--status).
 
 `WebView` embeds HTML / web content in a Teksilo window, for documentation
@@ -174,7 +174,11 @@ input method's candidate window opens beside its caret. Teksilo's key events
 carry the logical key and the text it produced, not the physical key, so a page
 sees `KeyboardEvent.code` as `"Unidentified"`.
 
-**What does not work yet.** JS→Rust messages (`window.ipc`) are not delivered. Dialogs and
+**Messages.** `window.ipc.postMessage(m)` reaches `on_message` as on wry. It
+travels as a `fetch` of a private `teksilo-ipc:` URL, answered on Servo's
+network threads, so two messages posted back to back may arrive out of order.
+
+**What does not work yet.** Dialogs and
 pickers a page opens (`alert`, `<select>`, file inputs) are not shown. The
 page's accessibility tree is not published. A page loaded with
 `.html(...)` travels as a `data:` URL, so a `base_url` does not apply to it.
@@ -401,7 +405,8 @@ rects, so the check lives in `Widget::after_paint`.
 ## JS ↔ Rust messaging
 
 - **JS → Rust:** the page calls `window.ipc.postMessage("…")`; it surfaces as
-  `on_message(|msg, ctx| …)`. (wry built-in; on Servo this is best-effort.)
+  `on_message(|msg, ctx| …)`. (wry built-in; on Servo through a private URL
+  scheme, see [the Servo section](#servo-backend-requirements--status).)
 - **Rust → JS:** `webview.post_message("…")` dispatches a `teksilo-message`
   `MessageEvent`; the page listens with
   `addEventListener('teksilo-message', e => …)`. `e.data` is the opaque string
@@ -467,7 +472,7 @@ one-liner) and pump post-mount opens with `tree.run_mount_actions(&mut NoopWindo
 - **Custom-protocol handlers** (`app://` serving local SPAs) are not yet plumbed
   through `WebViewAttributes`, only scheme *names* are carried, no dispatch
   closure. Load local content inline with `.html(...)` for now.
-- **The Servo backend has no `window.ipc`, page dialogs or page
+- **The Servo backend has no page dialogs or page
   accessibility tree yet**, and a page sees no physical key codes. See
   [Servo backend: requirements & status](#servo-backend-requirements--status).
 - **`load_html` `base_url`** is ignored on wry (no runtime load-HTML API;
