@@ -151,6 +151,18 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # teksilo-theme-kde's two font features are off by default and nothing
+      # in the workspace turns them on, so the workspace steps above build and
+      # test only the build without them. `bundled-fonts` embeds the faces and
+      # adds `font_registrar()`, `system-fonts` only names the families. With
+      # both on, every item and test gated on either feature compiles and
+      # runs (tests/fonts.rs checks the registrar's faces under the first);
+      # the workspace steps cover the ones gated on neither.
+      - name: Check and test teksilo-theme-kde (bundled-fonts, system-fonts)
+        run: |
+          cargo check -p teksilo-theme-kde --all-targets --features bundled-fonts,system-fonts
+          cargo test -p teksilo-theme-kde --features bundled-fonts,system-fonts
+
       # cargo-teksilo's `semantic` feature (search embeddings) pulls in
       # fastembed -> ort (ONNX Runtime) plus the onig_sys / esaxx-rs C/C++ sys
       # crates. If that build ever breaks on some platform, `cargo install
@@ -665,6 +677,96 @@ jobs:
             exit 1
           fi
           echo "package size within guard"
+
+      # The same guard for the two KDE crates. teksilo-theme-kde embeds
+      # Plasma's Noto Sans and Hack under `fonts/` (about 5.6 MB of faces,
+      # 3.2 MiB packaged), so a face added there moves it towards crates.io's
+      # 10 MB limit; the fallback, should it ever pass the guard, is Latin
+      # subsets of the faces. teksilo-kde-scheme is small, and is measured
+      # because it is packaged here anyway: teksilo-theme-kde depends on it at
+      # the same version, which crates.io has only once it is published, so
+      # the two are packaged together.
+      #
+      # `--exclude-lockfile`: cargo resolves a package's Cargo.lock against
+      # the crates.io index, with only the packages named on the command line
+      # supplied locally. On a release tag, where the Release workflow runs
+      # this file before publishing, teksilo-core and the other workspace
+      # crates at the new version are not on crates.io yet, so the resolution
+      # would fail and block every release. The lockfile adds about 40 KB to
+      # the compressed teksilo-theme-kde package, far inside the margin
+      # between the 9 MiB guard and the 10 MB limit.
+      #
+      # The listing then checks what the package holds: every tracked file
+      # under teksilo-theme-kde's `fonts/` (the faces and their licences, which
+      # the OFL and the Hack licence require to travel with the faces), and,
+      # in either crate, no test fixture (teksilo-kde-scheme's vendored Breeze
+      # schemes are LGPL and test-only), no `tools/` and no golden `vectors/`.
+      - name: KDE crates package guard
+        if: matrix.name == 'debug'
+        run: |
+          rm -f target/package/teksilo-theme-kde-*.crate target/package/teksilo-kde-scheme-*.crate
+          cargo package -p teksilo-theme-kde -p teksilo-kde-scheme --no-verify --allow-dirty --exclude-lockfile
+
+          shopt -s nullglob
+          guard_mib=9
+          guard=$((guard_mib * 1024 * 1024))
+          failed=0
+          for name in teksilo-theme-kde teksilo-kde-scheme; do
+            crates=(target/package/"$name"-*.crate)
+            if [ "${#crates[@]}" -ne 1 ]; then
+              echo "::error::expected exactly one $name .crate, found ${#crates[@]}: ${crates[*]}"
+              ls -la target/package/ || true
+              exit 1
+            fi
+            crate="${crates[0]}"
+            bytes=$(( $(wc -c < "$crate") ))
+            mib=$(awk -v b="$bytes" 'BEGIN { printf "%.2f", b / 1048576 }')
+            echo "$crate is ${bytes} bytes (${mib} MiB); guard ${guard_mib} MiB, crates.io limit 10 MB"
+            if [ "$bytes" -gt "$guard" ]; then
+              echo "::error::$name .crate is ${mib} MiB, over the ${guard_mib} MiB guard"
+              failed=1
+            fi
+          done
+
+          theme_list=$(cargo package -p teksilo-theme-kde --list --allow-dirty)
+          scheme_list=$(cargo package -p teksilo-kde-scheme --list --allow-dirty)
+
+          # The expected font files are the tracked ones, so adding or
+          # renaming a face needs no edit here; an emptied `fonts/` would pass
+          # that vacuously, hence the two counts.
+          mapfile -t fonts < <(git ls-files -- crates/teksilo-theme-kde/fonts | sed 's|^crates/teksilo-theme-kde/||')
+          faces=0
+          licences=0
+          for f in "${fonts[@]}"; do
+            case "$f" in
+              *.ttf) faces=$((faces + 1)) ;;
+              *LICENSE*) licences=$((licences + 1)) ;;
+            esac
+            if ! grep -qxF -- "$f" <<< "$theme_list"; then
+              echo "::error::teksilo-theme-kde's package is missing $f"
+              failed=1
+            fi
+          done
+          if [ "$faces" -eq 0 ] || [ "$licences" -eq 0 ]; then
+            echo "::error::crates/teksilo-theme-kde/fonts tracks ${faces} faces and ${licences} licences; expected at least one of each"
+            failed=1
+          fi
+          echo "teksilo-theme-kde packages ${faces} faces and ${licences} licences"
+
+          for name in teksilo-theme-kde teksilo-kde-scheme; do
+            if [ "$name" = teksilo-theme-kde ]; then list=$theme_list; else list=$scheme_list; fi
+            stray=$(grep -E '(^|/)(fixtures|tools|vectors)(/|$)' <<< "$list" || true)
+            if [ -n "$stray" ]; then
+              echo "::error::$name's package carries files that must stay in the repository:"
+              echo "$stray"
+              failed=1
+            fi
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "KDE packages within guard, with their fonts and licences and without fixtures, tools or vectors"
 
       # cargo-teksilo embeds two copies of files that also live elsewhere in
       # the repo, so an app that only depends on the `teksilo` crate — not
