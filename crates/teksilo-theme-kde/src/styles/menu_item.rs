@@ -27,7 +27,9 @@
 //! The style stores the recipe it was built with from the theme's input
 //! tokens and typography, so [`MenuItemStyle::metrics`], which `MenuItem`
 //! and `MenuSeparator` read for the parts they build themselves, follows
-//! the density the theme was projected to.
+//! the density the theme was projected to. The `H` of the row is the line
+//! box of the desktop's menu font when the theme carries one taller than
+//! the body style ([`menu_row_typography`]).
 //!
 //! ## Where this departs from Breeze
 //!
@@ -61,7 +63,7 @@ use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, 
 use teksilo_core::widget_id::WidgetId;
 use teksilo_kde_scheme::math::lift_luma_until;
 use teksilo_kde_scheme::{ColorState, KdeColor};
-use teksilo_tokens::{Color, CornerRadius, InputTokens, TextRole, TypographyTokens};
+use teksilo_tokens::{Color, CornerRadius, InputTokens, TextRole, TextStyle, TypographyTokens};
 use teksilo_widgets::primitives::{MinSize, ZStack};
 use teksilo_widgets::styles::{MenuItemRecipe, RecipeMenuItemStyle};
 
@@ -69,6 +71,7 @@ use crate::color::{AA, ENHANCED};
 use crate::palette::KdePalette;
 use crate::shape::BREEZE_STROKED_FRAME_RADIUS;
 use crate::styles::metrics::{MENU_HIGHLIGHT_ALPHA, breeze_menu_metrics_for};
+use crate::typography::KdeFontRoles;
 
 /// The Breeze [`MenuItemRecipe`] at the density of `tokens`, for
 /// `typography`: the row arithmetic of [`RecipeMenuItemStyle`] with the
@@ -119,10 +122,32 @@ impl BreezeMenuItemStyle {
         Self { recipe }
     }
 
-    /// The style at the density and typography of `theme`.
+    /// The style at the density and typography of `theme`, its rows sized
+    /// for the theme's menu font ([`menu_row_typography`]).
     pub fn for_theme(theme: &Theme) -> Self {
-        Self::new(breeze_menu_item_recipe_for(&theme.input, &theme.typography))
+        Self::new(breeze_menu_item_recipe_for(
+            &theme.input,
+            &menu_row_typography(theme),
+        ))
     }
+}
+
+/// The typography a menu row of `theme` is sized for.
+///
+/// `[qt]` A Qt menu lays its rows out in the desktop's menu font, which
+/// [`KdeFontRoles::menu`] carries; `[derived]` `MenuItem` writes its label
+/// in the body style, so the row is sized for whichever of the two has the
+/// taller line box, and the label always fits it. A theme without
+/// [`KdeFontRoles`] sizes its rows for its body style.
+pub fn menu_row_typography(theme: &Theme) -> TypographyTokens {
+    let mut typography = theme.typography.clone();
+    if let Some(roles) = theme.extension::<KdeFontRoles>() {
+        let line_box = |s: &TextStyle| s.size * s.line_height;
+        if line_box(&roles.menu) > line_box(&typography.body) {
+            typography.body = roles.menu.clone();
+        }
+    }
+    typography
 }
 
 impl Default for BreezeMenuItemStyle {

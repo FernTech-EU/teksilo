@@ -18,7 +18,8 @@
 //! 800 ms, linearly and looping. The style paints this itself
 //! ([`ProgressBarStyle::paints_busy_indicator`]), so the bar draws no sweep
 //! of its own; under the reduced-motion preference the stripes stand still.
-//! The desktop's animation speed does not change the period, as in Breeze.
+//! The desktop's animation speed does not change the period, as in Breeze;
+//! its `breezerc` can, and can stop the stripes ([`busy_step`]).
 //!
 //! The bar is 26 px thick at Plasma's default font, Qt's size hint, the
 //! groove centred in it ([`BreezeProgressMetrics`]); a thickness the app
@@ -46,7 +47,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_kde_scheme::{ColorState, PaletteRole};
 use teksilo_tokens::{Color, CornerRadius, InputTokens, Orientation, TypographyTokens};
 
-use crate::motion::BREEZE_BUSY_STEP_MS;
+use crate::breeze_config::BreezeStyleConfig;
 use crate::palette::KdePalette;
 use crate::styles::chrome::kde_mix;
 use crate::styles::metrics::{
@@ -90,13 +91,11 @@ impl ProgressBarStyle for BreezeProgressBarStyle {
             ProgressKind::Determinate(p) => (Some(p.clone()), None),
             ProgressKind::Indeterminate => {
                 let phase = ctx.animated_signal(0.0);
-                let spec = ctx
-                    .animate()
-                    .duration(Duration::from_millis(BREEZE_BUSY_STEP_MS))
-                    .linear()
-                    .looping();
-                if !spec.reduced_motion() {
-                    spec.to(&phase, 1.0);
+                if let Some(step) = busy_step(ctx.theme()) {
+                    let spec = ctx.animate().duration(step).linear().looping();
+                    if !spec.reduced_motion() {
+                        spec.to(&phase, 1.0);
+                    }
                 }
                 (None, Some(phase))
             }
@@ -120,6 +119,23 @@ impl ProgressBarStyle for BreezeProgressBarStyle {
     fn paints_busy_indicator(&self) -> bool {
         true
     }
+}
+
+/// The period a busy bar's stripes move in under `theme`, or `None` when
+/// they stand still.
+///
+/// `[S]` The desktop's `breezerc` decides whether they move
+/// ([`BreezeStyleConfig::busy_step`]); the period is the theme's
+/// `duration_indeterminate_sweep`, which the preset sets to
+/// `ProgressBarBusyStepDuration`, 800 ms by default. A theme without the
+/// config moves them with its sweep duration; a sweep of no length stands
+/// still.
+pub fn busy_step(theme: &Theme) -> Option<Duration> {
+    let moves = theme
+        .extension::<BreezeStyleConfig>()
+        .is_none_or(|config| config.busy_step().is_some());
+    let step = theme.motion.duration_indeterminate_sweep;
+    (moves && !step.is_zero()).then_some(step)
 }
 
 /// The colours a Breeze progress bar is painted in, in one paint state.

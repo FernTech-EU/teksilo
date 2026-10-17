@@ -9,8 +9,9 @@
 //! menu's frame has no padding of its own: `MenuList` puts its rows 4 px
 //! inside it, Breeze's menu margin, and the highlight of a row fills the row
 //! up to that margin. Any other popup's content lies 4 px inside the frame,
-//! the same margin, scaled by the density's spacing. The `Tooltip` variant
-//! is drawn in the tooltip's colours.
+//! the same margin, scaled by the density's spacing. The `Menu` variant
+//! follows the desktop's menu opacity ([`BreezePopupKind::Menu`]), and the
+//! `Tooltip` variant is drawn in the tooltip's colours.
 //!
 //! ## Where this departs from Breeze
 //!
@@ -58,7 +59,7 @@ impl PopoverStyle for BreezePopoverStyle {
         let (kind, padding, node) = match cfg.variant {
             // The menu's owner carries the container role, and its rows
             // their own margin.
-            PopoverVariant::Menu => (BreezePopupKind::Panel, 0.0, PopupNode::Container),
+            PopoverVariant::Menu => (BreezePopupKind::Menu, 0.0, PopupNode::Container),
             PopoverVariant::Default => (
                 BreezePopupKind::Panel,
                 self.padding,

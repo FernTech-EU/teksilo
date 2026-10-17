@@ -59,6 +59,11 @@ teksilo-data = { workspace = true }
 # version): the crate is `publish = false`, and cargo strips versionless
 # path dev-dependencies at publish time.
 teksilo-target-conformance = { path = "../teksilo-target-conformance" }
+# `tests/native.rs` hands `native_theme` to the app's native-theme seam,
+# `resolve_native_theme`, with the desktop report the platform builds.
+# Neither crate depends on this one, so this is acyclic.
+teksilo-app = { workspace = true }
+teksilo-platform = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true

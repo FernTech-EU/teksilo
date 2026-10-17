@@ -12235,11 +12235,13 @@ version = "0.19.0"
 dependencies = [
  "proptest",
  "serde_json",
+ "teksilo-app",
  "teksilo-canvas",
  "teksilo-core",
  "teksilo-data",
  "teksilo-i18n",
  "teksilo-kde-scheme",
+ "teksilo-platform",
  "teksilo-target-conformance",
  "teksilo-tokens",
  "teksilo-widgets",

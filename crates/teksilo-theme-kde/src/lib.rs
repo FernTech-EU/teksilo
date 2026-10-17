@@ -87,6 +87,29 @@
 //!   field the line plus 14: 34 and 32 px at Plasma's default font, and
 //!   they grow with it ([`geometry`]).
 //!
+//! ## The live desktop
+//!
+//! [`from_desktop`] builds the theme of a KDE desktop as it is configured,
+//! read by the platform or by [`scheme`] ([`scheme::KdeDesktop`]): its
+//! colour scheme with the user's accent, its fonts, its animation speed and
+//! its `breezerc`. [`native_theme`] is the same theme for a desktop styled
+//! with Breeze and `None` for one styled otherwise, the shape
+//! `teksilo-app`'s native-theme factory takes:
+//!
+//! ```
+//! use teksilo_theme_kde::{self as kde, scheme::KdeColorScheme, scheme::KdeDesktop};
+//! use teksilo_tokens::TargetDensity;
+//!
+//! let mut desktop = KdeDesktop::new(KdeColorScheme::breeze_light());
+//! assert!(kde::native_theme(&desktop, TargetDensity::Compact).is_some());
+//! desktop.widget_style = Some("Fusion".to_owned());
+//! assert!(kde::native_theme(&desktop, TargetDensity::Compact).is_none());
+//! ```
+//!
+//! Every theme carries the desktop's `breezerc` settings as a
+//! [`BreezeStyleConfig`] and its menu and toolbar fonts as
+//! [`KdeFontRoles`], at Plasma's defaults for the stock themes.
+//!
 //! ## Accent colour
 //!
 //! [`light_with_accent`] and [`dark_with_accent`] apply an accent the way
@@ -158,9 +181,10 @@
 //!   colour, so the text on it is readable (D1); the two are the same colour
 //!   in the stock Breeze schemes. A highlighted row's outline is lifted to
 //!   3:1 (D5, [`styles::menu_item`]).
-//! - **A popup has no caret and a shadow on every side**, and is rounded and
-//!   opaque whatever the desktop's compositing and menu opacity
-//!   ([`styles::popup`]).
+//! - **A popup has no caret and a shadow on every side**, and is rounded
+//!   whatever the desktop's compositing; a menu translucent under
+//!   `breezerc`'s `MenuOpacity` has nothing blurred behind it, where Plasma's
+//!   compositor blurs what lies under it ([`styles::popup`]).
 //! - **A plain tooltip is shorter than Plasma's.** `TooltipWidget` writes its
 //!   text in the small text style, where Breeze uses the body font, so a
 //!   one-line tooltip is the small line box plus 8 px rather than 26 px
@@ -226,9 +250,25 @@
 //!   its style no say, so they are framed in the accent rather than as
 //!   Breeze's default button, whose light fill would not carry that text in
 //!   a dark scheme ([`styles::split_button`]).
-//! - **The fonts are not Plasma's.** The text sizes and line boxes are Noto
-//!   Sans and Hack's at Plasma's default sizes, drawn in Teksilo's bundled
-//!   Inter and JetBrains Mono.
+//! - **The stock themes' fonts are not Plasma's.** The text sizes and line
+//!   boxes are Noto Sans and Hack's at Plasma's default sizes, drawn in
+//!   Teksilo's bundled Inter and JetBrains Mono. [`from_desktop`] names the
+//!   desktop's own families instead, which the text engine finds among the
+//!   installed fonts or replaces with the bundled ones.
+//! - **A desktop's fonts keep the text styles' weights**, 400 and 600, and
+//!   a family other than Noto Sans and Hack gets a line box from Noto
+//!   Sans's proportions, which can be a pixel off: the preset measures no
+//!   font ([`typography`]). A menu's label is written in the general font,
+//!   its row sized for the taller of the general and menu fonts, and a
+//!   toolbar's buttons in the general font: Teksilo has no text style for
+//!   either, and [`KdeFontRoles`] carries them for an app to apply.
+//! - **Some `breezerc` settings change nothing.** The menu opacity, the
+//!   window shadow and the busy progress bar follow `breezerc`; the keys
+//!   that time Breeze's own style animations, draw its other focus
+//!   indicators, or change parts the widgets build themselves (scroll-bar
+//!   buttons, tick marks, tree lines, centred tabs, toolbar separators,
+//!   mnemonic underlines) are carried and not drawn ([`BreezeStyleConfig`]
+//!   lists each).
 //! - **The high-contrast selection is light on a light window.** Under the
 //!   OS high-contrast preference the selection fill carries the window's
 //!   text at 7:1, which keeps it below 4.5:1 on the window (about 1.9:1 for
@@ -237,6 +277,7 @@
 //!   another preset at runtime re-tints instantly but keeps the shapes the
 //!   tree was built with, a property of the styling system.
 
+mod breeze_config;
 mod color;
 pub mod geometry;
 pub mod motion;
@@ -245,15 +286,20 @@ pub mod shape;
 pub mod styles;
 pub mod typography;
 
+pub use breeze_config::BreezeStyleConfig;
 pub use palette::{BreezeColors, KdePalette, PlasmaAccent, UnknownPlasmaAccent};
 pub use teksilo_kde_scheme as scheme;
+pub use typography::KdeFontRoles;
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use teksilo_core::presets::intui;
 use teksilo_core::styles::{DensityProjection, PaintProjection, PaintState, Theme};
-use teksilo_kde_scheme::KdeColorScheme;
-use teksilo_tokens::{Color, InputTokens, LayoutTokens, TargetDensity};
+use teksilo_kde_scheme::{KdeColorScheme, KdeDesktop};
+use teksilo_tokens::{
+    Color, InputTokens, LayoutTokens, MotionTokens, ShapeTokens, TargetDensity, TypographyTokens,
+};
 
 /// The Plasma release whose Breeze style this preset transcribes.
 pub const BREEZE_VERSION: &str = "6.8.0";
@@ -296,10 +342,140 @@ pub fn dark_with_accent(accent: Color) -> Theme {
 /// contrast and inactive and disabled effects all come through; geometry,
 /// typography and motion are Breeze's.
 pub fn from_scheme(scheme: &KdeColorScheme) -> Theme {
-    build(KdePalette::from_scheme(scheme))
+    build(KdePalette::from_scheme(scheme), Desktop::breeze_default())
 }
 
-fn build(palette: KdePalette) -> Theme {
+/// The Breeze theme of a KDE desktop as it is configured, at `density`.
+///
+/// Everything the desktop sets that the preset can follow comes through:
+///
+/// - **Colours**: the desktop's scheme, as [`from_scheme`] takes it, with
+///   the accent the user chose already applied ([`KdeDesktop::scheme`]).
+/// - **Fonts**: the general, smallest readable and fixed fonts become the
+///   six text styles, in the desktop's own families, at the whole pixel
+///   sizes Qt draws them at and on Qt's line boxes
+///   ([`typography::desktop_typography`]); the control heights follow the
+///   general font's line box ([`geometry`]). The menu and toolbar fonts
+///   are carried as [`KdeFontRoles`], and the menu rows are sized for the
+///   menu font.
+/// - **Animation speed**: `AnimationDurationFactor` scales the motion
+///   tokens as Kirigami scales its units, with the tooltip delays and the
+///   busy progress period left alone ([`motion::desktop_motion`]). A factor
+///   of 0 is the desktop asking for reduced motion: the transitions are
+///   then 0 or 1 ms long, and [`BreezeStyleConfig::prefers_reduced_motion`]
+///   reports it, as the platform does from the same factor.
+/// - **`breezerc`**: the menu opacity, the window shadow's size, colour and
+///   strength and the busy progress bar's animation; the theme carries all
+///   of it as a [`BreezeStyleConfig`], which lists what each key does.
+///
+/// The theme's id is `kde.light` or `kde.dark`, as KDE judges the scheme,
+/// whatever the desktop's widget style; [`native_theme`] is the form that
+/// answers only for a Breeze desktop.
+///
+/// ```
+/// use teksilo_theme_kde::{self as kde, scheme::KdeColorScheme, scheme::KdeDesktop};
+/// use teksilo_tokens::TargetDensity;
+///
+/// let mut desktop = KdeDesktop::new(KdeColorScheme::breeze_dark());
+/// desktop.animation_duration_factor = Some(2.0);
+/// let theme = kde::from_desktop(&desktop, TargetDensity::Touch);
+/// assert!(theme.is_dark());
+/// assert_eq!(theme.motion.duration_normal.as_millis(), 400);
+/// assert_eq!(theme.input.density, TargetDensity::Touch);
+/// ```
+pub fn from_desktop(desktop: &KdeDesktop, density: TargetDensity) -> Theme {
+    build(
+        KdePalette::from_scheme(&desktop.scheme),
+        Desktop::from_desktop(desktop),
+    )
+    .with_density(density)
+}
+
+/// The Breeze theme of a KDE desktop for `teksilo-app`'s native-theme
+/// seam, or `None` when the desktop does not use the Breeze widget style.
+///
+/// `Some(`[`from_desktop`]`)` when `kdeglobals [KDE] widgetStyle` is absent,
+/// empty or `Breeze` in any ASCII case ([`KdeDesktop::uses_breeze_style`]).
+/// A desktop styled with Fusion, Oxygen, Kvantum or any other style gets
+/// `None`: its applications do not draw Breeze's shapes, so a Teksilo
+/// application keeps the framework's default geometry, coloured by the
+/// desktop.
+///
+/// Meant as `TeksiloAppBuilder::native_theme`'s factory, which is asked
+/// with the desktop's report and a density:
+///
+/// ```no_run
+/// use teksilo_app::{TeksiloAppBuilder, ThemeMode};
+///
+/// TeksiloAppBuilder::new()
+///     .theme_mode(ThemeMode::Native)
+///     .native_theme(|request| {
+///         let desktop = request.desktop.kde.as_ref()?;
+///         teksilo_theme_kde::native_theme(desktop, request.density)
+///     })
+///     .run();
+/// ```
+///
+/// The seam's contract is that a factory's theme is used as it comes:
+/// `resolve_native_theme` sets no id and applies no density, and the window
+/// manager, which resolves every theme that follows the OS, then gives it
+/// the id `system` and projects it onto the density of the window it is
+/// for. So the theme this returns carries `kde.light` or `kde.dark` and
+/// `density`, and a window in Native mode shows it as `system`. A `None`
+/// makes the seam fall back to the framework's IntUI coloured by the
+/// desktop's report, which on a KDE session is the same scheme's colours.
+pub fn native_theme(desktop: &KdeDesktop, density: TargetDensity) -> Option<Theme> {
+    desktop
+        .uses_breeze_style()
+        .then(|| from_desktop(desktop, density))
+}
+
+/// What a theme takes from a desktop besides its colours.
+struct Desktop {
+    typography: TypographyTokens,
+    fonts: KdeFontRoles,
+    shape: ShapeTokens,
+    motion: MotionTokens,
+    config: BreezeStyleConfig,
+}
+
+impl Desktop {
+    /// A desktop at Plasma's defaults, drawn in the bundled faces.
+    fn breeze_default() -> Desktop {
+        Desktop {
+            typography: typography::breeze_typography(),
+            fonts: KdeFontRoles::breeze_default(),
+            shape: shape::breeze_shape(),
+            motion: motion::breeze_motion(),
+            config: BreezeStyleConfig::default(),
+        }
+    }
+
+    /// What `desktop` configures.
+    fn from_desktop(desktop: &KdeDesktop) -> Desktop {
+        let config = BreezeStyleConfig::from_desktop(desktop);
+        let breeze = &config.settings;
+        let busy = match breeze.progress_bar_busy_step_duration_ms {
+            ms if ms > 0 => Duration::from_millis(u64::try_from(ms).unwrap_or(u64::MAX)),
+            // `[unpublished]` A period of no length cannot move; the bar
+            // stands still and the token keeps Breeze's default.
+            _ => Duration::from_millis(motion::BREEZE_BUSY_STEP_MS),
+        };
+        Desktop {
+            typography: typography::desktop_typography(&desktop.fonts),
+            fonts: KdeFontRoles::from_fonts(&desktop.fonts),
+            shape: shape::breeze_shape_for(
+                breeze.shadow_size,
+                breeze.shadow_color.to_color(),
+                config.shadow_strength(),
+            ),
+            motion: motion::desktop_motion(desktop.animation_factor(), busy),
+            config,
+        }
+    }
+}
+
+fn build(palette: KdePalette, desktop: Desktop) -> Theme {
     // Starting from Int UI keeps the input tokens, the density ladder, at
     // the framework's Compact baseline; every other token group is replaced.
     let mut theme = if palette.is_dark() {
@@ -312,10 +488,12 @@ fn build(palette: KdePalette) -> Theme {
         control_gap: BREEZE_CONTROL_GAP,
         section_gap: BREEZE_SECTION_GAP,
     };
-    theme.typography = typography::breeze_typography();
-    theme.shape = shape::breeze_shape();
-    theme.motion = motion::breeze_motion();
+    theme.typography = desktop.typography;
+    theme.shape = desktop.shape;
+    theme.motion = desktop.motion;
     theme.extensions.insert(palette);
+    theme.extensions.insert(desktop.fonts);
+    theme.extensions.insert(desktop.config);
     install_styles(&mut theme);
     theme.extensions.insert(DensityProjection(reproject));
     theme.extensions.insert(PaintProjection(project));
@@ -489,6 +667,16 @@ mod tests {
             b.extension::<KdePalette>(),
             "KDE palette"
         );
+        assert_eq!(
+            extensions.get::<KdeFontRoles>(),
+            b.extension::<KdeFontRoles>(),
+            "KDE font roles"
+        );
+        assert_eq!(
+            extensions.get::<BreezeStyleConfig>(),
+            b.extension::<BreezeStyleConfig>(),
+            "Breeze style config"
+        );
     }
 
     fn paint(theme: &Theme, window_active: bool, high_contrast: bool) -> Theme {
@@ -537,6 +725,53 @@ mod tests {
     fn from_scheme_of_breeze_light_is_light() {
         assert_same_theme(&from_scheme(&KdeColorScheme::breeze_light()), &light());
         assert_same_theme(&from_scheme(&KdeColorScheme::breeze_dark()), &dark());
+    }
+
+    #[test]
+    fn every_theme_carries_the_desktop_extensions_at_their_defaults() {
+        for t in [
+            light(),
+            dark(),
+            light_with_accent(PlasmaAccent::Red.color()),
+        ] {
+            assert_eq!(
+                t.extension::<BreezeStyleConfig>(),
+                Some(&BreezeStyleConfig::default())
+            );
+            assert_eq!(
+                t.extension::<KdeFontRoles>(),
+                Some(&KdeFontRoles::breeze_default())
+            );
+        }
+    }
+
+    /// The default desktop is the stock theme but for the families, which
+    /// a desktop names and the stock theme leaves to the bundled faces.
+    #[test]
+    fn a_desktop_at_plasmas_defaults_is_the_stock_theme_in_its_own_faces() {
+        let desktop = from_desktop(
+            &KdeDesktop::new(KdeColorScheme::breeze_light()),
+            TargetDensity::Compact,
+        );
+        let stock = light();
+        let mut renamed = stock.clone();
+        renamed.typography = desktop.typography.clone();
+        renamed
+            .extensions
+            .insert(desktop.extension::<KdeFontRoles>().unwrap().clone());
+        assert_same_theme(&desktop, &renamed);
+        assert_eq!(desktop.typography.body.family, "Noto Sans");
+        assert_eq!(desktop.typography.mono.family, "Hack");
+        for (a, b) in [
+            (&desktop.typography.body, &stock.typography.body),
+            (&desktop.typography.small, &stock.typography.small),
+            (&desktop.typography.mono, &stock.typography.mono),
+        ] {
+            assert_eq!(
+                (a.size, a.line_height, a.weight),
+                (b.size, b.line_height, b.weight)
+            );
+        }
     }
 
     #[test]

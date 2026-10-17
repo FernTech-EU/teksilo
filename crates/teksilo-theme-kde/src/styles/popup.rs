@@ -23,11 +23,16 @@
 //!
 //! ## Where this departs from Breeze
 //!
-//! - **The panel is always rounded and opaque.** Breeze rounds a popup only
-//!   on a compositing desktop, and makes a menu translucent when
-//!   `breezerc`'s `MenuOpacity` is below 100; a Teksilo popup is drawn in
-//!   its window's own pass, so it is the composited form at Breeze's
-//!   default opacity.
+//! - **The panel is always rounded.** Breeze rounds a popup only on a
+//!   compositing desktop; a Teksilo popup is drawn in its window's own
+//!   pass, so it is always the composited form.
+//! - **A translucent menu has nothing blurred behind it.** When
+//!   `breezerc`'s `MenuOpacity` is below 100 a menu's panel is filled at
+//!   that opacity and outlined in the window text at 25 %, as Breeze paints
+//!   it ([`BreezePopupKind::Menu`], [`crate::BreezeStyleConfig`]); on a
+//!   Plasma desktop the compositor blurs what lies behind such a menu, and
+//!   Teksilo draws the panel over its window's content as it is. The other
+//!   popups stay opaque.
 //! - **The shadow is drawn on every side.** The framework's popover cuts
 //!   the shadow on the side that meets the control that opened it; a Breeze
 //!   popup is a window, and its shadow surrounds it.
@@ -45,12 +50,20 @@ use teksilo_core::widget::{
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{Color, CornerRadius};
 
+use crate::breeze_config::BreezeStyleConfig;
 use crate::styles::chrome::frame_radius;
+
+/// `[S]` The alpha of a translucent menu's outline: the window text at
+/// 25 %, where an opaque panel is outlined in the frame outline.
+pub const TRANSLUCENT_MENU_OUTLINE_ALPHA: f32 = 0.25;
 
 /// Which Breeze popup a frame is painted as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BreezePopupKind {
-    /// A menu, a combo box's list or any other popup panel.
+    /// A menu, a combo box's list or a search field's suggestions: a panel
+    /// that follows the desktop's menu opacity.
+    Menu,
+    /// Any other popup panel, such as a popover.
     Panel,
     /// A tooltip.
     Tooltip,
@@ -68,13 +81,28 @@ pub struct BreezePopupColors {
 impl BreezePopupColors {
     /// `[Hp]` The colours of a `kind` popup in `theme`, the theme the paint
     /// walker hands a widget.
+    ///
+    /// A menu whose theme carries a [`BreezeStyleConfig`] with a
+    /// `MenuOpacity` below 100 is filled at that opacity and outlined in
+    /// the window text at [`TRANSLUCENT_MENU_OUTLINE_ALPHA`] (`[S]`);
+    /// otherwise it is the panel.
     pub fn resolve(theme: &Theme, kind: BreezePopupKind) -> BreezePopupColors {
         let c = &theme.colors;
+        let panel = BreezePopupColors {
+            fill: c.surface_raised,
+            outline: c.border,
+        };
         match kind {
-            BreezePopupKind::Panel => BreezePopupColors {
-                fill: c.surface_raised,
-                outline: c.border,
+            BreezePopupKind::Menu => match theme.extension::<BreezeStyleConfig>() {
+                Some(config) if config.menu_is_translucent() => BreezePopupColors {
+                    fill: c
+                        .surface_raised
+                        .with_alpha(c.surface_raised.a() * config.menu_opacity()),
+                    outline: c.text_primary.with_alpha(TRANSLUCENT_MENU_OUTLINE_ALPHA),
+                },
+                _ => panel,
             },
+            BreezePopupKind::Panel => panel,
             BreezePopupKind::Tooltip => BreezePopupColors {
                 fill: c.tooltip_bg,
                 outline: c.tooltip_border,
@@ -263,6 +291,36 @@ mod tests {
         let tip = BreezePopupColors::resolve(&dark, BreezePopupKind::Tooltip);
         assert_eq!(rgba8(tip.fill), [41, 44, 48, 255]);
         assert_eq!(rgba8(tip.outline), [83, 86, 89, 255]);
+    }
+
+    /// A menu is the panel at the default menu opacity, and translucent
+    /// below it; other popups never are.
+    #[test]
+    fn a_menu_follows_the_menu_opacity() {
+        let opaque = crate::light();
+        assert_eq!(
+            BreezePopupColors::resolve(&opaque, BreezePopupKind::Menu),
+            BreezePopupColors::resolve(&opaque, BreezePopupKind::Panel)
+        );
+        let mut t = crate::light();
+        let mut config = BreezeStyleConfig::default();
+        config.settings.menu_opacity = 60;
+        t.extensions.insert(config);
+        let menu = BreezePopupColors::resolve(&t, BreezePopupKind::Menu);
+        assert_eq!(rgba8(menu.fill), [244, 245, 245, 153]);
+        assert_eq!(menu.outline, t.colors.text_primary.with_alpha(0.25));
+        let panel = BreezePopupColors::resolve(&t, BreezePopupKind::Panel);
+        assert_eq!(panel.fill.a(), 1.0);
+        assert_eq!(panel.outline, t.colors.border);
+        // Without the extension a menu is opaque.
+        let mut bare = t.clone();
+        bare.extensions.remove::<BreezeStyleConfig>();
+        assert_eq!(
+            BreezePopupColors::resolve(&bare, BreezePopupKind::Menu)
+                .fill
+                .a(),
+            1.0
+        );
     }
 
     /// The frame is painted from the projected tokens, so the high-contrast

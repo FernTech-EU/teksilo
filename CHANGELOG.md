@@ -220,7 +220,21 @@ by crate for clarity, not because crates version independently.
   ringed by Breeze's 2 px focus frame, from 1 px inside it to 1 px outside,
   and a `SearchField`'s suggestions are laid out as the items of a Breeze
   menu without icons. Other widgets draw Teksilo's own chrome in these
-  colours and shapes.
+  colours and shapes. `from_desktop` gives the theme of a KDE desktop as it
+  is configured: its colour scheme with the accent the user chose; its
+  general, smallest readable and fixed fonts as the text styles, in the
+  desktop's own families at the sizes and line heights Qt gives them, so
+  the controls grow with the font; its menu font sizing the menu rows, and
+  its menu and toolbar fonts carried as `KdeFontRoles`; its animation
+  speed, which slows or quickens the transitions as it does Plasma's, a
+  factor of 0 meaning reduced motion; and its `breezerc`, carried as
+  `BreezeStyleConfig`: menus translucent under `MenuOpacity`, the window
+  shadow's size, colour and strength, and the busy progress bar's period,
+  or its stripes standing still. `native_theme` gives that theme for a
+  desktop using the Breeze widget style and nothing for Fusion, Oxygen,
+  Kvantum or any other, which keep Teksilo's default shapes in the
+  desktop's colours; it is what `TeksiloAppBuilder::native_theme` asks
+  for, so a window in `ThemeMode::Native` shows Breeze on a Breeze desktop.
 
 #### Platform
 

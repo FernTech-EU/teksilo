@@ -24,8 +24,28 @@
 //! | `duration_indeterminate_sweep` | 800 | Breeze busy progress step |
 //! | `tooltip_delay`, `tooltip_delay_heavy` | 700 | Kirigami tooltip delay |
 //!
-//! The desktop's animation speed (`AnimationDurationFactor`) is applied by
-//! the desktop reader, not here: these are the factor-1 values.
+//! These are the values at the desktop's default animation speed.
+//!
+//! ## The desktop's animation speed
+//!
+//! Plasma's animation speed setting is `kdeglobals [KDE]
+//! AnimationDurationFactor`, a real, 1 when absent, 2 for twice as slow.
+//! [`desktop_motion`] applies it as Kirigami applies it to its units,
+//! which drive the controls whose timing the preset reproduces (spec j.2,
+//! `[derived]`): the long duration is `max(1, round(200 f))` ms with `f`
+//! the factor (0 for a negative one), the short half of it rounded down and
+//! the very long twice it. So `duration_normal` and `duration_collapse` are
+//! that long duration, `duration_fast` its half and `duration_slow` its
+//! double. The busy progress bar's period is `breezerc`'s
+//! `ProgressBarBusyStepDuration` and the factor does not scale it, nor the
+//! tooltip delays, which are dwell times rather than animations.
+//!
+//! A factor of 0 is the desktop asking for reduced motion: the long
+//! duration is 1 ms and the short one 0, which the framework plays as no
+//! animation, and the platform reports the preference from the same factor.
+//! This is not [`MotionTokens::scaled`], which would scale every duration
+//! by the factor itself: Kirigami derives the short duration from the long
+//! one, and Breeze does not scale the busy bar.
 //!
 //! ## The switch curves
 //!
@@ -105,9 +125,127 @@ pub fn breeze_motion() -> MotionTokens {
     }
 }
 
+/// `[derived]` Breeze motion tokens at the desktop animation speed `factor`
+/// (`kdeglobals [KDE] AnimationDurationFactor`, 1 when the desktop sets
+/// none), with the busy progress bar's stripes moving one period every
+/// `busy_step` (`breezerc` `ProgressBarBusyStepDuration`, 800 ms by
+/// default).
+///
+/// The long duration is `max(1, round(200 x max(0, factor)))` ms, rounded
+/// half up: `duration_normal` and `duration_collapse` are it,
+/// `duration_fast` half of it rounded down, `duration_slow` twice it. The
+/// busy period and the tooltip delays are not scaled. A factor that is not
+/// finite is read as 1. See the [module documentation](self).
+pub fn desktop_motion(factor: f64, busy_step: Duration) -> MotionTokens {
+    let factor = if factor.is_finite() {
+        factor.max(0.0)
+    } else {
+        1.0
+    };
+    // Capped so that twice the long duration still fits a `u64` of
+    // milliseconds.
+    let long = (BREEZE_NORMAL_MS as f64 * factor + 0.5)
+        .floor()
+        .clamp(1.0, f64::from(u32::MAX)) as u64;
+    MotionTokens {
+        duration_fast: Duration::from_millis(long / 2),
+        duration_normal: Duration::from_millis(long),
+        duration_slow: Duration::from_millis(2 * long),
+        duration_collapse: Duration::from_millis(long),
+        duration_indeterminate_sweep: busy_step,
+        ..breeze_motion()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ms(d: Duration) -> u128 {
+        d.as_millis()
+    }
+
+    #[test]
+    fn the_default_speed_is_the_default_motion() {
+        assert_eq!(
+            desktop_motion(1.0, Duration::from_millis(BREEZE_BUSY_STEP_MS)),
+            breeze_motion()
+        );
+    }
+
+    #[test]
+    fn the_factor_scales_kirigamis_long_duration() {
+        for (factor, fast, normal, slow) in [
+            (2.0, 200, 400, 800),
+            (0.5, 50, 100, 200),
+            (0.25, 25, 50, 100),
+            // Half of the long duration is rounded down: 67 / 2.
+            (0.335, 33, 67, 134),
+            // Rounded half up: 200 x 0.0125 is 2.5.
+            (0.0125, 1, 3, 6),
+        ] {
+            let m = desktop_motion(factor, Duration::from_millis(800));
+            assert_eq!(ms(m.duration_fast), fast, "{factor}");
+            assert_eq!(ms(m.duration_normal), normal, "{factor}");
+            assert_eq!(ms(m.duration_slow), slow, "{factor}");
+            assert_eq!(m.duration_collapse, m.duration_normal, "{factor}");
+            assert_eq!(m.duration_instant, Duration::ZERO);
+            assert_eq!(m.easing_standard, Easing::Linear);
+        }
+    }
+
+    #[test]
+    fn the_busy_period_and_the_tooltip_delays_are_not_scaled() {
+        let m = desktop_motion(3.0, Duration::from_millis(500));
+        assert_eq!(ms(m.duration_indeterminate_sweep), 500);
+        assert_eq!(ms(m.tooltip_delay), 700);
+        assert_eq!(ms(m.tooltip_delay_heavy), 700);
+        assert_eq!(
+            m.tooltip_reshow_delay,
+            MotionTokens::default().tooltip_reshow_delay
+        );
+    }
+
+    #[test]
+    fn a_factor_of_zero_leaves_a_one_millisecond_long_duration() {
+        for factor in [0.0, -1.0] {
+            let m = desktop_motion(factor, Duration::from_millis(800));
+            assert_eq!(ms(m.duration_fast), 0, "{factor}");
+            assert_eq!(ms(m.duration_normal), 1, "{factor}");
+            assert_eq!(ms(m.duration_slow), 2, "{factor}");
+            assert_eq!(ms(m.duration_collapse), 1, "{factor}");
+            assert_eq!(ms(m.duration_indeterminate_sweep), 800, "{factor}");
+        }
+    }
+
+    #[test]
+    fn a_factor_that_is_not_finite_is_the_default_speed() {
+        for factor in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                desktop_motion(factor, Duration::from_millis(800)),
+                breeze_motion(),
+                "{factor}"
+            );
+        }
+        // A huge finite factor is capped rather than overflowing.
+        let m = desktop_motion(1e300, Duration::from_millis(800));
+        assert_eq!(ms(m.duration_normal), u128::from(u32::MAX));
+    }
+
+    #[test]
+    fn kirigamis_rule_is_not_the_frameworks_uniform_scale() {
+        // Pins why `desktop_motion` does not call `MotionTokens::scaled`:
+        // the uniform scale rounds the short duration on its own and
+        // scales the busy period.
+        let scaled = breeze_motion().scaled(0.335);
+        let kirigami = desktop_motion(0.335, Duration::from_millis(800));
+        assert_eq!(ms(scaled.duration_fast), 34);
+        assert_eq!(ms(kirigami.duration_fast), 33);
+        assert_ne!(
+            scaled.duration_indeterminate_sweep,
+            kirigami.duration_indeterminate_sweep
+        );
+    }
 
     /// The largest distance between two curves, sampled every 1/1000.
     fn max_deviation(a: impl Fn(f32) -> f32, b: impl Fn(f32) -> f32) -> f32 {

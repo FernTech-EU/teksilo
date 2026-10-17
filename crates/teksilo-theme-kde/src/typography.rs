@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! Breeze typography: Plasma's default fonts mapped onto Teksilo's six
-//! [`TextStyle`](teksilo_tokens::TextStyle) slots.
+//! [`TextStyle`] slots.
 //!
 //! | Slot | Plasma font | Glyph size | Line box | Weight |
 //! | --- | --- | --- | --- | --- |
@@ -34,12 +34,28 @@
 //!
 //! ## Families
 //!
-//! Plasma's faces are Noto Sans and Hack. This preset does not ship or name
-//! them: it keeps Teksilo's bundled Inter and JetBrains Mono at the sizes and
-//! line boxes above, which are computed from the Noto Sans and Hack metrics
-//! whichever family draws them.
+//! Plasma's faces are Noto Sans and Hack. The stock themes do not ship or
+//! name them: they keep Teksilo's bundled Inter and JetBrains Mono at the
+//! sizes and line boxes above, which are computed from the Noto Sans and
+//! Hack metrics whichever family draws them.
+//!
+//! ## The desktop's fonts
+//!
+//! [`desktop_typography`] maps a desktop's own fonts onto the six slots:
+//! the general font onto `body` and `body_bold`, the smallest readable
+//! font onto `small`, `small_bold` and `tiny`, the fixed font onto `mono`.
+//! Each takes the font's family as Plasma names it and its size by Qt's
+//! rule above (a font stored in pixels keeps its pixel size); the weights
+//! stay the slots' own, 400 and 600. The line box is Qt's for Noto Sans and
+//! Hack, whose metrics are known, and `round(P x 1.362)` for any other
+//! family ([`desktop_line_height`]), Noto Sans's natural line height, which
+//! can be a pixel off for a face with other metrics: the preset measures no
+//! font. Teksilo has no slot for the menu and toolbar fonts, so
+//! [`KdeFontRoles`] carries them on the theme; the menu rows are sized for
+//! the menu font ([`crate::styles::menu_item`]).
 
-use teksilo_tokens::{FontWeight, TypographyTokens};
+use teksilo_kde_scheme::{KdeFont, KdeFonts};
+use teksilo_tokens::{FontWeight, TextStyle, TypographyTokens};
 
 /// The vertical metrics of a font face that its line height is computed
 /// from: the `hhea` ascender and the absolute descender, in font units.
@@ -131,6 +147,123 @@ pub fn breeze_typography() -> TypographyTokens {
     set(&mut t.tiny, small_px, small_line, FontWeight::REGULAR);
     set(&mut t.mono, mono_px, mono_line, FontWeight::REGULAR);
     t
+}
+
+/// `[derived]` The line height of a family whose metrics the preset does
+/// not know, in em: Noto Sans's natural line height, its ascender and
+/// descender over its units per em, rounded to three places.
+pub const NATURAL_LINE_HEIGHT_EM: f64 = 1.362;
+
+/// The metrics of `family` when the preset knows them: Noto Sans and Hack,
+/// named in any ASCII case.
+pub fn known_metrics(family: &str) -> Option<FaceMetrics> {
+    if family.eq_ignore_ascii_case("Noto Sans") {
+        Some(NOTO_SANS_METRICS)
+    } else if family.eq_ignore_ascii_case("Hack") {
+        Some(HACK_METRICS)
+    } else {
+        None
+    }
+}
+
+/// `[measured-qt]` The whole pixel size Qt draws `font` at: its pixel size
+/// when it is stored in pixels, otherwise its point size by [`face_px`],
+/// otherwise `default`'s. At least 1.
+pub fn desktop_face_px(font: &KdeFont, default: &KdeFont) -> u32 {
+    let points = |f: &KdeFont| f.point_size.map(|pt| face_px(pt as f32));
+    let pixels = |f: &KdeFont| f.pixel_size.map(|px| px.max(0) as u32);
+    pixels(font)
+        .or_else(|| points(font))
+        .or_else(|| pixels(default))
+        .or_else(|| points(default))
+        .unwrap_or_else(|| face_px(BREEZE_BODY_PT))
+        .max(1)
+}
+
+/// The line height of a `face_px` face of `family`: [`qt_line_height`]
+/// with its metrics when the preset knows them ([`known_metrics`]), and
+/// `[derived]` `round(face_px x 1.362)`, rounded half up, otherwise.
+pub fn desktop_line_height(face_px: u32, family: &str) -> u32 {
+    match known_metrics(family) {
+        Some(metrics) => qt_line_height(face_px, metrics),
+        None => (f64::from(face_px) * NATURAL_LINE_HEIGHT_EM + 0.5).floor() as u32,
+    }
+}
+
+/// The text style of a desktop `font` at `weight`: its family (`default`'s
+/// when it names none, `[unpublished]`), the whole pixel size Qt draws it
+/// at ([`desktop_face_px`]) and the line box of [`desktop_line_height`],
+/// with no tracking.
+pub fn desktop_text_style(font: &KdeFont, default: &KdeFont, weight: FontWeight) -> TextStyle {
+    let family = if font.family.trim().is_empty() {
+        default.family.clone()
+    } else {
+        font.family.clone()
+    };
+    let px = desktop_face_px(font, default);
+    let line = desktop_line_height(px, &family);
+    TextStyle {
+        family,
+        size: px as f32,
+        weight,
+        line_height: line as f32 / px as f32,
+        letter_spacing: 0.0,
+    }
+}
+
+/// Breeze typography tokens for a desktop's `fonts`. See [the module
+/// documentation](self#the-desktops-fonts).
+pub fn desktop_typography(fonts: &KdeFonts) -> TypographyTokens {
+    let defaults = KdeFonts::default();
+    let general = |weight| desktop_text_style(&fonts.general, &defaults.general, weight);
+    let small = |weight| desktop_text_style(&fonts.small, &defaults.small, weight);
+    TypographyTokens {
+        body: general(FontWeight::REGULAR),
+        body_bold: general(BREEZE_BOLD_WEIGHT),
+        small: small(FontWeight::REGULAR),
+        small_bold: small(BREEZE_BOLD_WEIGHT),
+        // `[derived]` KDE has no role below the smallest readable font.
+        tiny: small(FontWeight::REGULAR),
+        mono: desktop_text_style(&fonts.fixed, &defaults.fixed, FontWeight::REGULAR),
+    }
+}
+
+/// The two KDE font roles Teksilo's six text styles have no slot for, as
+/// text styles: the menu font and the toolbar font.
+///
+/// A [`teksilo_core::styles::Theme`] extension. The menu rows the preset
+/// installs are sized for [`menu`](Self::menu); `MenuItem` still writes its
+/// label in the body style unless an app hands it this one, and a toolbar's
+/// buttons write in the body style, so an app that wants the desktop's
+/// toolbar font passes [`toolbar`](Self::toolbar) to the labels it builds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KdeFontRoles {
+    /// `[General] menuFont`: Plasma's default, Noto Sans 10 pt.
+    pub menu: TextStyle,
+    /// `[General] toolBarFont`: Plasma's default, Noto Sans 10 pt.
+    pub toolbar: TextStyle,
+}
+
+impl KdeFontRoles {
+    /// The stock themes' roles: both are the body style of
+    /// [`breeze_typography`], as Plasma's defaults are the general font.
+    pub fn breeze_default() -> KdeFontRoles {
+        let body = breeze_typography().body;
+        KdeFontRoles {
+            menu: body.clone(),
+            toolbar: body,
+        }
+    }
+
+    /// The roles of a desktop's `fonts`, regular weight, as
+    /// [`desktop_text_style`] maps them.
+    pub fn from_fonts(fonts: &KdeFonts) -> KdeFontRoles {
+        let defaults = KdeFonts::default();
+        KdeFontRoles {
+            menu: desktop_text_style(&fonts.menu, &defaults.menu, FontWeight::REGULAR),
+            toolbar: desktop_text_style(&fonts.toolbar, &defaults.toolbar, FontWeight::REGULAR),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -225,6 +358,70 @@ mod tests {
         ] {
             assert_eq!(s.letter_spacing, 0.0);
         }
+    }
+
+    #[test]
+    fn plasmas_default_fonts_give_the_breeze_sizes_and_line_boxes() {
+        let t = desktop_typography(&KdeFonts::default());
+        let b = breeze_typography();
+        for (desktop, stock) in [
+            (&t.body, &b.body),
+            (&t.body_bold, &b.body_bold),
+            (&t.small, &b.small),
+            (&t.small_bold, &b.small_bold),
+            (&t.tiny, &b.tiny),
+            (&t.mono, &b.mono),
+        ] {
+            assert_eq!(desktop.size, stock.size);
+            assert_eq!(desktop.line_height, stock.line_height);
+            assert_eq!(desktop.weight, stock.weight);
+            assert_eq!(desktop.letter_spacing, 0.0);
+        }
+        assert_eq!(t.body.family, "Noto Sans");
+        assert_eq!(t.small.family, "Noto Sans");
+        assert_eq!(t.mono.family, "Hack");
+        let roles = KdeFontRoles::from_fonts(&KdeFonts::default());
+        assert_eq!(roles.menu, t.body);
+        assert_eq!(roles.toolbar, t.body);
+    }
+
+    #[test]
+    fn a_family_without_known_metrics_takes_noto_sans_natural_line_height() {
+        // 11 pt is a 15 px face: 15 x 1.362 is 20.43.
+        assert_eq!(desktop_line_height(15, "Cantarell"), 20);
+        // 16 x 1.362 is 21.79, and 22 for Noto Sans by Qt's rule as well.
+        assert_eq!(desktop_line_height(16, "Inter"), 22);
+        assert_eq!(desktop_line_height(16, "noto sans"), 22);
+        // Hack's own metrics: 15 at 13 px, where the rule would say 18.
+        assert_eq!(desktop_line_height(13, "HACK"), 15);
+        assert_eq!(desktop_line_height(13, "Fira Code"), 18);
+    }
+
+    #[test]
+    fn a_font_stored_in_pixels_keeps_its_pixel_size() {
+        let defaults = KdeFonts::default();
+        let mut font = KdeFont::new("Noto Sans", 0.0);
+        font.point_size = None;
+        font.pixel_size = Some(17);
+        assert_eq!(desktop_face_px(&font, &defaults.general), 17);
+        // Neither stored: the default's 10 pt.
+        font.pixel_size = None;
+        assert_eq!(desktop_face_px(&font, &defaults.general), 13);
+        // A tiny point size still draws a pixel.
+        font.point_size = Some(0.1);
+        assert_eq!(desktop_face_px(&font, &defaults.general), 1);
+    }
+
+    #[test]
+    fn a_font_without_a_family_takes_the_roles_default() {
+        let defaults = KdeFonts::default();
+        let style = desktop_text_style(
+            &KdeFont::new("", 12.0),
+            &defaults.fixed,
+            FontWeight::REGULAR,
+        );
+        assert_eq!(style.family, "Hack");
+        assert_eq!(style.size, 16.0);
     }
 
     #[test]

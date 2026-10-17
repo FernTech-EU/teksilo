@@ -32,7 +32,9 @@
 //! table is the size's offset plus the layer's, and the blur is Breeze's
 //! radius, a CSS blur radius. The colour is black, at each layer's opacity.
 //! Breeze's shadows do not change with the colour scheme, so light and dark
-//! share one set of shape tokens.
+//! share one set of shape tokens. A desktop that changes the shadow's size,
+//! colour or strength in `breezerc` gets its own window shadow through
+//! [`breeze_shape_for`], which [`crate::from_desktop`] uses.
 
 use teksilo_kde_scheme::ShadowSize;
 use teksilo_tokens::{Color, Shadow, ShapeTokens};
@@ -124,18 +126,42 @@ pub fn shadow_token(layer: ShadowLayer, color: Color, strength: f32) -> Shadow {
     }
 }
 
-/// Breeze shape tokens, for both colour schemes.
+/// Breeze shape tokens, for both colour schemes, at Breeze's default
+/// window shadow: Large, black, at full strength.
 pub fn breeze_shape() -> ShapeTokens {
+    breeze_shape_for(ShadowSize::Large, Color::BLACK, 1.0)
+}
+
+/// Breeze shape tokens with the window shadow a desktop configures:
+/// `breezerc`'s `ShadowSize` as `window`, `ShadowColor` as `color` and
+/// `ShadowStrength / 255` as `strength`.
+///
+/// `shadow_lg` and `shadow_inner_lg` are the window shadow the popups
+/// paint, so they carry `window`'s two layers, and nothing at all for
+/// [`ShadowSize::None`]; `shadow_sm` and `shadow_md` stay the Small and
+/// Medium layers. All of them take `color` at each layer's opacity times
+/// `strength`. The push button's own shadow, `shadow_xs`, is not a window
+/// shadow and does not change.
+pub fn breeze_shape_for(window: ShadowSize, color: Color, strength: f32) -> ShapeTokens {
+    let none = Shadow {
+        offset_x: 0.0,
+        offset_y: 0.0,
+        blur: 0.0,
+        spread: 0.0,
+        color: Color::TRANSPARENT,
+    };
     let pair = |size: ShadowSize| -> (Shadow, Shadow) {
-        let [outer, inner] = window_shadow_layers(size).expect("a sized shadow has two layers");
-        (
-            shadow_token(outer, Color::BLACK, 1.0),
-            shadow_token(inner, Color::BLACK, 1.0),
-        )
+        match window_shadow_layers(size) {
+            Some([outer, inner]) => (
+                shadow_token(outer, color, strength),
+                shadow_token(inner, color, strength),
+            ),
+            None => (none, none),
+        }
     };
     let (sm, inner_sm) = pair(ShadowSize::Small);
     let (md, inner_md) = pair(ShadowSize::Medium);
-    let (lg, inner_lg) = pair(ShadowSize::Large);
+    let (lg, inner_lg) = pair(window);
     ShapeTokens {
         radius_control: BREEZE_CONTROL_RADIUS,
         radius_popup: BREEZE_POPUP_RADIUS,
@@ -231,6 +257,37 @@ mod tests {
         assert!((half.color.a() - 0.10).abs() < 1e-6);
         // A strength outside 0..=1 is clamped rather than amplifying.
         assert!((shadow_token(outer, Color::BLACK, 3.0).color.a() - 0.20).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_desktops_window_shadow_is_the_popups() {
+        let red = Color::from_hex("#FF0000");
+        let s = breeze_shape_for(ShadowSize::Small, red, 0.5);
+        // The window shadow is the Small pair, in the colour, at half the
+        // opacity.
+        assert_eq!((s.shadow_lg.offset_y, s.shadow_lg.blur), (3.0, 12.0));
+        assert!((s.shadow_lg.color.a() - 0.13).abs() < 1e-6);
+        assert_eq!(s.shadow_lg.color.with_alpha(1.0), red);
+        assert_eq!(
+            (s.shadow_inner_lg.offset_y, s.shadow_inner_lg.blur),
+            (1.0, 6.0)
+        );
+        assert!((s.shadow_inner_lg.color.a() - 0.08).abs() < 1e-6);
+        // The Small and Medium tokens keep their sizes in the same colour.
+        assert_eq!((s.shadow_md.offset_y, s.shadow_md.blur), (4.0, 16.0));
+        assert_eq!(s.shadow_md.color.with_alpha(1.0), red);
+        // The button's shadow is not a window shadow.
+        assert_eq!(s.shadow_xs, breeze_shape().shadow_xs);
+        // No window shadow at all.
+        let bare = breeze_shape_for(ShadowSize::None, Color::BLACK, 1.0);
+        assert_eq!(bare.shadow_lg.color.a(), 0.0);
+        assert_eq!(bare.shadow_inner_lg.color.a(), 0.0);
+        assert_eq!(bare.shadow_sm, breeze_shape().shadow_sm);
+        // The defaults are Large, black, at full strength.
+        assert_eq!(
+            breeze_shape_for(ShadowSize::Large, Color::BLACK, 1.0),
+            breeze_shape()
+        );
     }
 
     #[test]
