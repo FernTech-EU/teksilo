@@ -14,10 +14,11 @@ description = "KDE Plasma theme preset for Teksilo: the Breeze design language a
 documentation = "https://docs.rs/teksilo-theme-kde"
 keywords = ["kde", "plasma", "breeze", "theme", "gui"]
 categories = ["gui"]
-# `tests/contrast.rs` reads the golden vectors under `tools/kde_golden` for
-# the Oxygen schemes; left in, it would not compile from the package and
-# `cargo test` there would fail.
-exclude = ["tests/contrast.rs"]
+# `tests/contrast.rs`, `tests/mount.rs` and `tests/preset_metrics.rs` read
+# the golden vectors under `tools/kde_golden` (the Oxygen schemes, Plasma's
+# painted pixels and its control sizes); left in, they would not compile
+# from the package and `cargo test` there would fail.
+exclude = ["tests/contrast.rs", "tests/mount.rs", "tests/preset_metrics.rs"]
 
 [dependencies]
 teksilo-core = { workspace = true }
@@ -39,8 +40,17 @@ thiserror = { workspace = true }
 # toolchain, which is not a guaranteed CI dependency; proptest gives the same
 # coverage plus shrinking on stable (see the workspace `Cargo.toml`).
 proptest = { workspace = true }
-# Reads the Oxygen schemes in `tools/kde_golden/vectors/resolve.json`.
+# Reads the golden vectors in `tools/kde_golden/vectors`.
 serde_json = { workspace = true }
+# `tests/mount.rs` and `tests/preset_metrics.rs` build real widget trees;
+# `lit!` supplies the untranslated labels those constructors take.
+teksilo-i18n = { workspace = true }
+# `tests/preset_metrics.rs` reuses the conformance harness's
+# `in_tappable_row`, the row geometry that denies the miss-only slop pass,
+# rather than a copy that could drift from the gate's. Path-only (no
+# version): the crate is `publish = false`, and cargo strips versionless
+# path dev-dependencies at publish time.
+teksilo-target-conformance = { path = "../teksilo-target-conformance" }
 
 [package.metadata.docs.rs]
 all-features = true

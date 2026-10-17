@@ -144,9 +144,19 @@ by crate for clarity, not because crates version independently.
   colours, the focus colour, strong outlines, the scroll-bar thumb and the
   text on the accent) are made readable, keeping their hue. Every theme
   carries a `KdePalette` with the whole resolved scheme and the colours
-  Breeze combines from it, and `geometry::BreezeGeometry` gives the Breeze
-  control heights for any font size. Widgets draw Teksilo's own chrome in
-  these colours and shapes: no Breeze widget style is installed.
+  Breeze combines from it (`breeze_colors` gives them for the high-contrast
+  colours too), and `geometry::BreezeGeometry` gives the Breeze control
+  heights for any font size. Buttons are Breeze's: a `Button` is the push
+  button, 34 px tall and at least 84 px wide at Plasma's default font, its
+  outline turning to the highlight under the pointer or keyboard focus and a
+  1 px shadow below it in an active window; its `Filled` variant is the
+  default button, tinted toward the highlight, and `Ghost` and `Link` are
+  the flat button, which shows nothing until hovered. An `IconButton` is the
+  toolbar's tool button, 28 px around a 16 px icon and 34 px around a
+  toolbar one, and a `SplitButton` has the push button's frame, its `Filled`
+  and `Destructive` variants filled with the accent so their label stays
+  readable. All three grow to the density's target size. Other widgets draw
+  Teksilo's own chrome in these colours and shapes.
 
 #### Platform
 

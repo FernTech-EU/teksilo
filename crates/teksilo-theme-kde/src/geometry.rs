@@ -124,6 +124,10 @@ pub const GROUP_BOX_TITLE_MARGIN: f32 = 4.0;
 pub const SMALL_ICON_SIZE: f32 = 16.0;
 /// `[K]` The small-medium icon size, used by larger tool buttons.
 pub const SMALL_MEDIUM_ICON_SIZE: f32 = 22.0;
+/// `[K]` The medium icon size.
+pub const MEDIUM_ICON_SIZE: f32 = 32.0;
+/// `[K]` The large icon size.
+pub const LARGE_ICON_SIZE: f32 = 48.0;
 
 /// Every Breeze control height that follows the font, for one body line
 /// height.

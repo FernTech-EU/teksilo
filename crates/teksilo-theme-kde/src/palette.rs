@@ -70,6 +70,10 @@ pub struct BreezeColors {
     pub focus_outline: Color,
     /// `[Hp]` The hover colour moved 15 % toward the window text.
     pub hover_outline: Color,
+    /// `[qt]` The button colour, a push button's face.
+    pub button: Color,
+    /// `[qt]` The text of a button.
+    pub button_text: Color,
     /// `[Hp]` A push button's outline: the button colour moved toward the
     /// button text by `fc`.
     pub button_outline: Color,
@@ -100,6 +104,8 @@ impl BreezeColors {
             hover: hover.to_color(),
             focus_outline: mix(focus, window_text, OUTLINE_TOWARD_TEXT).to_color(),
             hover_outline: mix(hover, window_text, OUTLINE_TOWARD_TEXT).to_color(),
+            button: button.to_color(),
+            button_text: button_text.to_color(),
             button_outline,
             slider_outline: button_outline,
             shadow: Color::BLACK.with_alpha(CONTROL_SHADOW_ALPHA),
@@ -123,6 +129,8 @@ pub struct KdePalette {
     dark: bool,
     /// Indexed by [`ColorState::index`].
     colors: [BreezeColors; 3],
+    /// The same for the high-contrast scheme, indexed alike.
+    high_contrast_colors: [BreezeColors; 3],
     active: ColorTokens,
     inactive: ColorTokens,
     high_contrast: ColorTokens,
@@ -172,6 +180,8 @@ impl KdePalette {
         KdePalette {
             colors: ColorState::ALL
                 .map(|state| BreezeColors::compute(&resolved, state, frame_contrast)),
+            high_contrast_colors: ColorState::ALL
+                .map(|state| BreezeColors::compute(&enhanced_resolved, state, 1.0)),
             resolved: Arc::new(resolved),
             frame_contrast,
             dark,
@@ -205,6 +215,18 @@ impl KdePalette {
     /// Breeze's colour combinations for `state`.
     pub fn colors(&self, state: ColorState) -> &BreezeColors {
         &self.colors[state.index()]
+    }
+
+    /// Breeze's colour combinations for `state`, from the high-contrast
+    /// scheme when `high_contrast` is set: the scheme at a frame contrast of
+    /// 1 and a contrast of 10, the one the high-contrast tokens come from,
+    /// where an outline is the text colour itself.
+    pub fn breeze_colors(&self, state: ColorState, high_contrast: bool) -> &BreezeColors {
+        if high_contrast {
+            &self.high_contrast_colors[state.index()]
+        } else {
+            &self.colors[state.index()]
+        }
     }
 
     /// The colour tokens a window paints with in `state`.
@@ -402,7 +424,25 @@ mod tests {
             mix(r(PaletteRole::Button), r(PaletteRole::ButtonText), 0.2).to_color()
         );
         assert_eq!(c.slider_outline, c.button_outline);
+        assert_eq!(c.button, r(PaletteRole::Button).to_color());
+        assert_eq!(c.button_text, r(PaletteRole::ButtonText).to_color());
         assert!((c.shadow.a() - 0.125).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_high_contrast_combinations_outline_in_the_text_colour() {
+        let p = KdePalette::from_scheme(&KdeColorScheme::breeze_light());
+        for state in ColorState::ALL {
+            assert_eq!(p.breeze_colors(state, false), p.colors(state));
+            let hc = p.breeze_colors(state, true);
+            // At a frame contrast of 1 the outline is the text itself.
+            assert_eq!(hc.button_outline, hc.button_text);
+            assert_eq!(hc.frame_outline, p.role(state, PaletteRole::WindowText));
+        }
+        assert_ne!(
+            p.breeze_colors(ColorState::Active, true).button_outline,
+            p.colors(ColorState::Active).button_outline
+        );
     }
 
     #[test]

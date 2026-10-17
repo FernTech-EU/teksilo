@@ -36,16 +36,20 @@
 //! - **One radius.** Controls and floating surfaces share Breeze's 5 px
 //!   frame radius (4.5 where a 1 px outline is stroked), between Fluent's 4
 //!   and macOS's 6 and 10.
-//! - **Breeze's outline colours.** A Breeze control is outlined in the
-//!   window colour moved a fifth of the way to the text (the frame
-//!   contrast), the `border` token. The highlight-based outlines Breeze
-//!   turns to under the pointer or keyboard focus are in [`BreezeColors`];
-//!   the recipe styles this version keeps draw the plain outline only.
+//! - **Breeze's buttons.** A push button is a flat fill outlined in the
+//!   button colour moved a fifth of the way to its text (the frame
+//!   contrast), with an outline that turns to the highlight under the
+//!   pointer or keyboard focus and a 1 px shadow below it in an active
+//!   window; the default button's fill moves toward the highlight, and a
+//!   tool button shows nothing until it is hovered ([`styles`]). Other
+//!   controls are outlined in the window colour moved the same way toward
+//!   the text, the `border` token; the highlight-based outlines are in
+//!   [`BreezeColors`].
 //! - **Breeze's focus ring geometry.** Keyboard focus is a 2 px band, half
 //!   inside the control and half outside, in the scheme's focus colour.
 //!   Breeze paints it at 30 % ([`shape::BREEZE_FOCUS_RING_ALPHA`]); the
-//!   `focus_ring` token is opaque, lifted to 3:1, and the recipe styles
-//!   draw it as it is.
+//!   `focus_ring` token is opaque, lifted to 3:1, and the styles draw it as
+//!   it is.
 //! - **Linear, quick motion.** Style transitions run 100 ms, linearly.
 //! - **Text-driven heights.** A push button is the text line plus 16 px, a
 //!   field the line plus 14: 34 and 32 px at Plasma's default font, and
@@ -90,9 +94,15 @@
 //!
 //! ## Known limitations
 //!
-//! - **Widget chrome is the framework's.** This version installs no Breeze
-//!   widget styles: every widget keeps Teksilo's recipe style, painted in
-//!   the Breeze colours, radii, focus ring, typography and motion.
+//! - **Most widget chrome is the framework's.** This version installs
+//!   Breeze styles for `Button`, `IconButton` and `SplitButton` only: every
+//!   other widget keeps Teksilo's recipe style, painted in the Breeze
+//!   colours, radii, focus ring, typography and motion.
+//! - **A filled `SplitButton` is filled with the accent.** The widget labels
+//!   its `Filled` and `Destructive` variants in the on-accent text and gives
+//!   its style no say, so they are framed in the accent rather than as
+//!   Breeze's default button, whose light fill would not carry that text in
+//!   a dark scheme ([`styles::split_button`]).
 //! - **The fonts are not Plasma's.** The text sizes and line boxes are Noto
 //!   Sans and Hack's at Plasma's default sizes, drawn in Teksilo's bundled
 //!   Inter and JetBrains Mono.
@@ -109,10 +119,13 @@ pub mod geometry;
 pub mod motion;
 pub mod palette;
 pub mod shape;
+pub mod styles;
 pub mod typography;
 
 pub use palette::{BreezeColors, KdePalette, PlasmaAccent, UnknownPlasmaAccent};
 pub use teksilo_kde_scheme as scheme;
+
+use std::rc::Rc;
 
 use teksilo_core::presets::intui;
 use teksilo_core::styles::{DensityProjection, PaintProjection, PaintState, Theme};
@@ -243,11 +256,17 @@ fn project(theme: &Theme, state: PaintState) -> Theme {
 
 /// Install the Breeze Tier-3 chrome.
 ///
-/// This version installs none: every slot is left to the widget's recipe
-/// style, which paints from the Breeze tokens, and the crate's tests list
-/// the reason for each slot. Every slot this installs reads its metrics
-/// from `theme.input`, so [`reproject`] can rerun it alone.
-fn install_styles(_theme: &mut Theme) {}
+/// The buttons are Breeze's own ([`styles`]); every other slot is left to
+/// the widget's recipe style, which paints from the Breeze tokens, and the
+/// crate's tests list the reason for each. Every style installed here reads
+/// its metrics from the theme it builds under, `theme.input` included, so
+/// [`reproject`] can rerun this alone.
+fn install_styles(theme: &mut Theme) {
+    let slots = &mut theme.style_slots;
+    slots.button = Some(Rc::new(styles::button::BreezeButtonStyle));
+    slots.icon_button = Some(Rc::new(styles::icon_button::BreezeIconButtonStyle));
+    slots.split_button = Some(Rc::new(styles::split_button::BreezeSplitButtonStyle));
+}
 
 #[cfg(test)]
 mod tests {
@@ -443,20 +462,8 @@ mod tests {
     /// the reason it is inherited rather than filled.
     const KDE_UNFILLED: &[(&str, &str)] = &[
         (
-            "button",
-            "no Breeze push-button frame is installed; the recipe button paints from the Breeze accent, surface and border tokens",
-        ),
-        (
-            "split_button",
-            "no Breeze split-button frame is installed; the recipe frame paints from the Breeze surface and border roles",
-        ),
-        (
             "splitter",
             "the recipe's thin divider in the border role reads as Breeze's 1 px splitter handle",
-        ),
-        (
-            "icon_button",
-            "no Breeze tool-button frame is installed; the recipe paints its hover and press from the Breeze surface tokens",
         ),
         (
             "toggle",
