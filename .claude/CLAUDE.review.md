@@ -86,6 +86,11 @@ These are the explicit rules the codebase is meant to follow. Flag deviations.
 - **Error types:** `thiserror` (`#[derive(thiserror::Error)]` with `#[error("...")]` per variant;
   `#[from]` for transparent conversions, `#[source]` for nested chains). Do not hand-roll
   `Display` / `std::error::Error` / `From`.
+- **Clean-room KDE code:** `teksilo-kde-scheme` is written from
+  `engineering/docs/kde-breeze-spec.md` only, never from KDE or Qt source.
+  `crates/teksilo-kde-scheme/tests/clean_room_vocabulary.rs` fails on upstream identifiers in
+  the scanned directories; flag a new KDE crate missing from its `SCANNED` list, a word removed
+  from its list, and code whose structure mirrors upstream rather than the specification.
 
 ---
 

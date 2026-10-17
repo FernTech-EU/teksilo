@@ -18,8 +18,15 @@ categories = ["gui", "config", "parser-implementations"]
 # vendored verbatim so the tests can compare against them. They are not part
 # of the published crate, and neither is `tests/breeze_files.rs`, the one
 # test target that reads them: left in, it would not compile from the
-# package and `cargo test` there would fail.
-exclude = ["tests/fixtures/**", "tests/breeze_files.rs"]
+# package and `cargo test` there would fail. The same holds for the tests
+# that read the golden vectors under `tools/kde_golden` and the clean-room
+# vocabulary scan, which reads the repository's source tree.
+exclude = [
+    "tests/fixtures/**",
+    "tests/breeze_files.rs",
+    "tests/golden_math.rs",
+    "tests/clean_room_vocabulary.rs",
+]
 
 [dependencies]
 teksilo-tokens = { workspace = true }
@@ -31,3 +38,5 @@ thiserror = { workspace = true }
 # not a guaranteed CI dependency; proptest gives the same coverage plus
 # shrinking on stable (see the workspace `Cargo.toml`).
 proptest = { workspace = true }
+# Reads the golden vectors in `tools/kde_golden/vectors`.
+serde_json = { workspace = true }

@@ -8,7 +8,9 @@
 //! ([`config`]), where those files live ([`locations`]), the colour values
 //! they store ([`color`]), the colour-scheme model of a `.colors` file or of
 //! `kdeglobals` ([`scheme`]), Qt's font descriptions ([`fonts`]) and the
-//! desktop settings built from all of them ([`desktop`]).
+//! desktop settings built from all of them ([`desktop`]). [`math`] holds
+//! the colour arithmetic KDE derives its palettes with, reproduced to the
+//! byte KDE writes.
 //!
 //! It does no I/O. The environment is passed in as a getter and files are
 //! passed in as text, so everything here runs the same in a test as on a
@@ -48,6 +50,7 @@ pub mod config;
 pub mod desktop;
 pub mod fonts;
 pub mod locations;
+pub mod math;
 pub mod scheme;
 
 pub use color::KdeColor;
@@ -58,6 +61,7 @@ pub use desktop::{
 };
 pub use fonts::{FontStyle, KdeFont};
 pub use locations::{ConfigLayerPath, KdeConfigLocations, is_kde_session};
+pub use math::{FloatColor, Hcy, ShadeRole};
 pub use scheme::{
     ColorEffect, ColorRole, ColorSet, ColorState, ContrastEffect, IntensityEffect, KdeColorScheme,
     SetColors, StateEffect, WmColors,

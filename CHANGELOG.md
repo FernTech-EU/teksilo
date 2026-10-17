@@ -103,6 +103,13 @@ by crate for clarity, not because crates version independently.
   schemes. `KdeFont` reads Qt 5 and Qt 6 font strings, and `KdeDesktop`
   gathers the scheme, the user's accent, the five desktop fonts, the
   animation speed, the widget style and the Breeze style settings.
+  `teksilo_kde_scheme::math` is KDE's colour arithmetic, giving the same
+  8-bit values KDE writes: the HCY colour space, luma and KDE's luma
+  contrast, mix, tint, lighten, darken and shade, the five 3D shades of a
+  palette, Qt's `lighter` and `darker`, the selection fill and black or
+  white text KDE derives from an accent, and Plasma's OKLab accent tint.
+  `lift_luma_until` moves a colour's luma, keeping its hue, until it meets a
+  WCAG contrast floor on the given backgrounds.
 
 ### Changed
 
