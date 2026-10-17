@@ -2293,8 +2293,13 @@ Easing facts:
   out quadratic; the preset approximates it by
   `CubicBezier(0.455, 0.03, 0.515, 0.955)` **[derived]** with a test
   bounding the maximum deviation from the quadratic ease-in-out at 0.02.
-- The switch handle colour uses an ease-in cubic; approximated by
-  `CubicBezier(0.55, 0.055, 0.675, 0.19)` **[derived]**.
+- The switch handle colour uses an ease-in cubic, `t` cubed. The preset
+  writes it exactly as `CubicBezier(1/3, 0, 2/3, 0)` **[derived]**: with
+  its control points at one and two thirds along and none of the way up,
+  a cubic Bezier's horizontal coordinate is its parameter and its vertical
+  one the parameter cubed. The common approximation
+  `CubicBezier(0.55, 0.055, 0.675, 0.19)` strays 0.03 from it and is not
+  used.
 - An ease-out cubic appears in the QtQuick **Breeze** style (a different
   style package) for its switch border colour; the desktop style that
   Kirigami desktop apps use does not use it. Teksilo does not use

@@ -40,7 +40,7 @@ More generally, don't do anything with the name or FernTech's branding that woul
 
 ## Third-party trademarks
 
-Teksilo ships theme presets that reproduce the look of design languages published by other vendors, and each is named for what it reproduces: `macos`, `fluent`, `material3`, and the `intui` default. The name is there to say which design language a preset imitates — a theme reproducing Apple's Aqua cannot be identified without naming it. We use the word and nothing else: no logo, no wordmark, no icon set, and no proprietary font is redistributed. See [NOTICE](NOTICE) for what each preset actually derives from and on what terms.
+Teksilo ships theme presets that reproduce the look of design languages published by other vendors, and each is named for what it reproduces: `macos`, `fluent`, `material3`, `kde`, and the `intui` default. The name is there to say which design language a preset imitates: a theme reproducing Apple's Aqua cannot be identified without naming it. We use the word and nothing else: no logo, no wordmark, no icon set, and no proprietary font is redistributed. See [NOTICE](NOTICE) for what each preset actually derives from and on what terms.
 
 The marks belong to their owners:
 
@@ -48,7 +48,7 @@ The marks belong to their owners:
 - **Fluent**, **WinUI**, **Windows**, **Segoe UI**, **Consolas** — Microsoft Corporation.
 - **Material Design**, **Noto**, **Roboto** — Google LLC.
 - **Int UI**, **JetBrains**, **JetBrains Mono** — JetBrains s.r.o.
-- **KDE**, **KDE Plasma**, **Plasma**, **Breeze**: KDE e.V. (KDE is a registered trademark of KDE e.V.). The `teksilo-kde-scheme` crate uses these names only to say which desktop's configuration files it reads and which design language they describe.
+- **KDE**, **KDE Plasma**, **Plasma**, **Breeze**: KDE e.V. (KDE is a registered trademark of KDE e.V.). The `teksilo-kde-scheme` crate uses these names only to say which desktop's configuration files it reads and which design language they describe, and the `teksilo-theme-kde` preset only to say which design language it reproduces.
 
 Teksilo is not affiliated with, endorsed by, sponsored by, or certified by any of them. The presets are independent implementations by FernTech, built from published specifications and — where a vendor publishes nothing — from measurement. They are not vendor-supplied, not vendor-reviewed, and not guaranteed to match any vendor's current design.
 

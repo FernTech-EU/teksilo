@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-theme-kde"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "KDE Plasma theme preset for Teksilo: the Breeze design language and its colour schemes and accents, as tokens. Not affiliated with or endorsed by KDE e.V."
+documentation = "https://docs.rs/teksilo-theme-kde"
+keywords = ["kde", "plasma", "breeze", "theme", "gui"]
+categories = ["gui"]
+# `tests/contrast.rs` reads the golden vectors under `tools/kde_golden` for
+# the Oxygen schemes; left in, it would not compile from the package and
+# `cargo test` there would fail.
+exclude = ["tests/contrast.rs"]
+
+[dependencies]
+teksilo-core = { workspace = true }
+teksilo-tokens = { workspace = true }
+# The Tier-3 widget styles this preset installs in `style_slots` are built
+# from the `Recipe*Style` defaults and layout primitives of teksilo-widgets,
+# drawing through teksilo-canvas. teksilo-widgets does not depend on the
+# theme crates, so this is acyclic.
+teksilo-canvas = { workspace = true }
+teksilo-widgets = { workspace = true }
+# The KDE colour-scheme model: the stock Breeze schemes, the resolved
+# palette, Plasma's accent application and the colour arithmetic.
+teksilo-kde-scheme = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# Property-based testing: `tests/contrast.rs` checks every declared text and
+# backdrop pair over random coherent schemes. `cargo-fuzz` needs a nightly
+# toolchain, which is not a guaranteed CI dependency; proptest gives the same
+# coverage plus shrinking on stable (see the workspace `Cargo.toml`).
+proptest = { workspace = true }
+# Reads the Oxygen schemes in `tools/kde_golden/vectors/resolve.json`.
+serde_json = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

@@ -98,7 +98,7 @@ resource file, or artwork is included, and no token value is transcribed
 from one.
 
 
-1.5  KDE Plasma / Breeze  --  crates/teksilo-kde-scheme
+1.5  KDE Plasma / Breeze  --  crates/teksilo-kde-scheme, crates/teksilo-theme-kde
 ---------------------------------------------------------------------------
 
 teksilo-kde-scheme reads the files a KDE Plasma desktop keeps its look in:
@@ -112,6 +112,17 @@ upstream sources by one author, and the code is written from the
 specification alone. Values such as default colours and numeric constants
 are facts; the specification's ledger records, for each one, the upstream
 file and line it was observed in.
+
+teksilo-theme-kde, the KDE Plasma theme preset, builds Teksilo themes from
+those colour schemes and transcribes the Breeze design language from the
+same specification: the widget style's metrics, painting rules and motion,
+and the Kirigami units it relies on. Each value is tagged at its definition
+with where it was observed ([M], [S] and [Hp] for the Breeze widget style,
+[K] for Kirigami, [Qd] for the desktop QtQuick style, [qt] for Qt's public
+documentation, [measured-qt] for the Qt runtime) or how Teksilo derived it
+([derived], [wcag], [unpublished]). Where a stock Breeze colour falls short
+of WCAG, the theme lifts it by a stated rule and says so. No KDE or Qt
+source code, artwork, icon or font is included in it.
 
 The specification describes these upstream releases:
 
@@ -159,8 +170,8 @@ are credited to him.
 KDE(R) and the K Desktop Environment(R) logo are registered trademarks of
 KDE e.V. Teksilo is not affiliated with, endorsed by or sponsored by KDE
 e.V.; the names KDE, Plasma and Breeze are used only to say which desktop's
-files the crate reads and which design language the specification
-describes. See TRADEMARKS.md.
+files teksilo-kde-scheme reads and which design language the specification
+describes and teksilo-theme-kde reproduces. See TRADEMARKS.md.
 
 
 ===========================================================================

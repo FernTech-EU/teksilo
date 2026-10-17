@@ -12230,6 +12230,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "teksilo-theme-kde"
+version = "0.19.0"
+dependencies = [
+ "proptest",
+ "serde_json",
+ "teksilo-canvas",
+ "teksilo-core",
+ "teksilo-kde-scheme",
+ "teksilo-tokens",
+ "teksilo-widgets",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "teksilo-theme-macos"
 version = "0.19.0"
 dependencies = [

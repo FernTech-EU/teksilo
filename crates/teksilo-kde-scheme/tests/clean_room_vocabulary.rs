@@ -29,6 +29,8 @@ use std::path::{Path, PathBuf};
 const SCANNED: &[&str] = &[
     "crates/teksilo-kde-scheme/src",
     "crates/teksilo-kde-scheme/tests",
+    "crates/teksilo-theme-kde/src",
+    "crates/teksilo-theme-kde/tests",
 ];
 
 /// Directories inside [`SCANNED`] that hold verbatim upstream files.

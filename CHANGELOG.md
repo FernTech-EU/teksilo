@@ -128,6 +128,25 @@ by crate for clarity, not because crates version independently.
   accent swatches. When `kdeglobals` holds no colours of its own,
   `KdeDesktop` applies the user's chosen accent to the scheme it reads in
   their place, which KDE itself does not.
+- **New crate `teksilo-theme-kde`, the KDE Plasma theme preset.** `light()`
+  and `dark()` are Breeze Light and Breeze Dark; `light_with_accent` and
+  `dark_with_accent` apply an accent colour the way Plasma's colour settings
+  do, and `PlasmaAccent` lists Plasma's ten accent swatches with stable names
+  for saving a choice; `from_scheme` gives the theme of any KDE colour
+  scheme, light or dark as KDE judges it. The themes carry the ids
+  `kde.light` and `kde.dark`. Each has Breeze's colours, its 5 px corner
+  radius, the geometry of its 2 px focus ring drawn half inside the control,
+  Plasma's default text sizes and line heights (13 px text on an 18 px line),
+  its spacing and its 100 ms linear transitions. An inactive window shows the
+  scheme's muted selection and accent, as Plasma does, and the OS increase
+  contrast preference gets the preset's own colours, with 7:1 text. Stock
+  Breeze colours that fall short of WCAG (secondary text, links, status
+  colours, the focus colour, strong outlines, the scroll-bar thumb and the
+  text on the accent) are made readable, keeping their hue. Every theme
+  carries a `KdePalette` with the whole resolved scheme and the colours
+  Breeze combines from it, and `geometry::BreezeGeometry` gives the Breeze
+  control heights for any font size. Widgets draw Teksilo's own chrome in
+  these colours and shapes: no Breeze widget style is installed.
 
 #### Platform
 
