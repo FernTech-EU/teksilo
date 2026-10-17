@@ -483,6 +483,8 @@ Scroll-bar chrome is a Tier-3 style protocol,
 ```rust
 pub trait ScrollBarStyle: 'static {
     fn make_body(&self, cfg: &ScrollBarStyleConfig, ctx: &mut BuildContext) -> WidgetId;
+    // Defaulted: 24 at the compact density, 32 comfortable, 44 touch.
+    fn min_thumb_length(&self, tokens: &InputTokens) -> f32 { /* ... */ }
 }
 ```
 
@@ -492,6 +494,13 @@ pub trait ScrollBarStyle: 'static {
 override. The default `RecipeScrollBarStyle`
 ([recipe](../crates/teksilo-widgets/src/styles/recipe_scroll_bar_style.rs))
 paints all three variants from IntUI tokens.
+
+`min_thumb_length` is the shortest the thumb may get on a long document. The
+bar asks its style for it at build time, sizes its thumb from the answer, and
+takes its hit test and its drag from the same thumb, so the config's
+`min_thumb_length` is that answer. The macOS preset floors the thumb at 28 and
+Fluent at 30 at the compact density, both raised to the density's target size
+above it. A bar's own `.min_thumb_length(..)` wins over the style.
 
 Install it theme-wide:
 

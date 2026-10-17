@@ -54,6 +54,9 @@ by crate for clarity, not because crates version independently.
   tall a `TabBar` or `TabWidget` tab is and how far its title sits from the
   tab's edges at the active density. Both have defaults, so an existing style
   keeps Int UI's 50 px tabs.
+- **`ScrollBarStyle::min_thumb_length`.** A scroll-bar style says how short a
+  `ScrollBar` thumb may get on a long document at the active density. It has
+  a default, so an existing style keeps the shipped floor.
 
 ### Removed
 
@@ -111,6 +114,14 @@ by crate for clarity, not because crates version independently.
   with 12 px of padding whatever the theme. Under Int UI tabs stay 50 px tall,
   and their padding now grows with the density: 13.8 px at the comfortable
   density and 15.6 px at the touch density, so tabs there are wider.
+- **Scroll-bar thumbs are as long as the active style says.**
+  **Behaviour change:** on a long document, a `ScrollBar` (and every scroll
+  bar a `ScrollArea`, a list, a table or a text editor shows) with no
+  `min_thumb_length` of its own now keeps its thumb at the minimum length its
+  style declares: 28 px under the macOS preset and 30 px under Fluent at the
+  compact density. Before, every thumb was held at 24 px whatever the theme.
+  Above the compact density nothing changes: the floor is 32 px at the
+  comfortable density and 44 px at the touch density under every theme.
 - **Accent chrome a recipe builds follows the high-contrast preference.**
   **Behaviour change:** under the OS increase contrast preference, a `Filled`
   button's fill and a button's focus border now take the high-contrast

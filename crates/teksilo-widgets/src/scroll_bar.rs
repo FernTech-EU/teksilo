@@ -30,8 +30,10 @@
 //! about whether a press is on the thumb is taken **along the axis only** — a
 //! finger 15 dp inboard of an 8 dp bar is beside the thumb, not past it.
 //!
-//! The minimum thumb length follows the density (24 dp Compact, 44 dp Touch),
-//! so a short thumb on a long document is still something a finger can land on.
+//! The minimum thumb length is the active style's
+//! [`ScrollBarStyle::min_thumb_length`], which follows the density (24 dp
+//! Compact, 44 dp Touch under the shipped style), so a short thumb on a long
+//! document is still something a finger can land on.
 //!
 //! ## Accessibility
 //!
@@ -65,12 +67,11 @@ use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
 use teksilo_core::gesture::DragPhase;
 use teksilo_core::partition::TargetRegion;
 use teksilo_core::signal::Signal;
-use teksilo_core::styles::density::dp;
 use teksilo_core::styles::{ScrollBarStyle, ScrollBarStyleConfig, SharedScrollBarStyle};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{RevealPolicy, TargetRole};
+use teksilo_tokens::RevealPolicy;
 
 use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
 
@@ -89,9 +90,16 @@ pub use teksilo_core::styles::ScrollBarVariant as ScrollBarVisual;
 /// [`Widget::hit_outset`], which moves nothing and repaints nothing.
 pub const SCROLLBAR_COARSE_TARGET: f32 = 48.0;
 
-/// The shipped minimum thumb length, at Compact. Raised to the density's
-/// `target_size` (44 dp at Touch) at build time; a
-/// [`min_thumb_length`](ScrollBar::min_thumb_length) override wins over both.
+/// The shipped minimum thumb length, at Compact.
+///
+/// A bar takes its floor from the active style's
+/// [`ScrollBarStyle::min_thumb_length`] at build time: the shipped style and
+/// the trait default both answer this value raised to the density's
+/// `target_size` (32 dp at Comfortable, 44 dp at Touch), and a preset answers
+/// its own (28 dp under macOS, 30 dp under Fluent, at Compact). Before its
+/// first build a bar uses this value. A
+/// [`min_thumb_length`](ScrollBar::min_thumb_length) override wins over all of
+/// them.
 pub const SCROLLBAR_MIN_THUMB_LENGTH: f32 = 24.0;
 
 /// Which part of the bar a [`TargetRegion`] describes.
@@ -140,10 +148,11 @@ pub struct ScrollBar {
     // --- visual tuning ---
     /// Thickness of the scroll bar (width for vertical, height for horizontal).
     thickness: f32,
-    /// Minimum thumb length in pixels, or `None` to follow the density.
+    /// Minimum thumb length in pixels, or `None` to follow the active style.
     min_thumb_length: Option<f32>,
-    /// The density floor [`Self::min_thumb_length`] falls back to, resolved at
-    /// the last `build`. Shared with the event closures and read by the
+    /// The style's floor [`Self::min_thumb_length`] falls back to, resolved at
+    /// the last `build` from [`ScrollBarStyle::min_thumb_length`] at the tree's
+    /// density. Shared with the event closures and read by the
     /// geometry helpers, which run outside a build and have no tokens in scope.
     /// An explicit floor does not go through it — it is known from the moment
     /// it is set, so the geometry is right before the first build too.
@@ -219,11 +228,13 @@ impl ScrollBar {
         self
     }
 
-    /// Set the minimum thumb length in pixels, overriding the density.
+    /// Set the minimum thumb length in pixels, overriding the active style.
     ///
-    /// Left unset the floor is [`SCROLLBAR_MIN_THUMB_LENGTH`] raised to the
-    /// density's target size — 24 dp at Compact, 44 dp at Touch — so a short
-    /// thumb on a long document stays something a finger can land on.
+    /// Left unset the floor is the active style's
+    /// [`ScrollBarStyle::min_thumb_length`] at the tree's density: under the
+    /// shipped style [`SCROLLBAR_MIN_THUMB_LENGTH`] raised to the density's
+    /// target size (24 dp at Compact, 44 dp at Touch), so a short thumb on a
+    /// long document stays something a finger can land on.
     pub fn min_thumb_length(mut self, len: f32) -> Self {
         self.min_thumb_length = Some(len);
         self
@@ -349,18 +360,14 @@ impl Widget for ScrollBar {
                 ))
             });
 
-        // The minimum thumb length follows the density unless the caller named
-        // one. 24 dp at Compact is exactly today's constant, so `dp` here
-        // raises nothing at the density CI runs at — the P20 rule that a
-        // dimension may go through `dp` only when its Compact value already
-        // clears the conformance floor, which 24 dp does by being it.
-        let min_thumb_length = self.min_thumb_length.unwrap_or_else(|| {
-            dp(
-                SCROLLBAR_MIN_THUMB_LENGTH,
-                TargetRole::Target,
-                &ctx.theme().input,
-            )
-        });
+        // The minimum thumb length is the one the resolved style declares at
+        // the tree's density, unless the caller named one. The same number
+        // sizes the painted thumb (through the config) and this widget's own
+        // thumb geometry (hit test, drag, reported target), so the thumb drawn
+        // and the thumb a press lands on cannot disagree.
+        let min_thumb_length = self
+            .min_thumb_length
+            .unwrap_or_else(|| style.min_thumb_length(&ctx.theme().input));
         self.resolved_min_thumb_length.set(min_thumb_length);
 
         // A density that reveals every affordance (Touch) shows the bar without
@@ -1521,7 +1528,7 @@ mod touch_tests {
     use teksilo_core::event::{Modifiers, WidgetEvent};
     use teksilo_core::widget::{LayoutContext, Widget};
     use teksilo_core::widget_tree::WidgetTree;
-    use teksilo_tokens::{InputTokens, PenKind, PointerKind, TargetDensity};
+    use teksilo_tokens::{InputTokens, PenKind, PointerKind, TargetDensity, TargetRole};
 
     /// A 12 dp vertical bar over 400 dp of track, content twice the viewport —
     /// so the thumb is half the track and starts at the top.
@@ -1782,6 +1789,115 @@ mod touch_tests {
             .find(|r| r.part == SCROLLBAR_PART_THUMB)
             .expect("the thumb");
         assert_eq!(thumb.rect.height, 44.0);
+    }
+
+    /// A style that declares its own floor, records the floor `make_body` was
+    /// handed, and paints nothing.
+    struct FloorStyle {
+        floor: f32,
+        seen: std::rc::Rc<std::cell::Cell<f32>>,
+    }
+
+    impl ScrollBarStyle for FloorStyle {
+        fn make_body(
+            &self,
+            cfg: &ScrollBarStyleConfig,
+            ctx: &mut teksilo_core::build_context::BuildContext,
+        ) -> WidgetId {
+            self.seen.set(cfg.min_thumb_length);
+            ctx.add(crate::primitives::Spacer::new())
+        }
+
+        fn min_thumb_length(&self, _tokens: &InputTokens) -> f32 {
+            self.floor
+        }
+    }
+
+    /// A long document's bar (viewport ratio 0.02, so the unfloored thumb is
+    /// 8 dp of a 400 dp track) mounted at `density`, with `style` installed
+    /// either per call or in the theme slot, and an optional explicit floor.
+    /// Returns the floor `make_body` saw and the height of the thumb the
+    /// mounted bar reports, which is the rectangle its hit test and drag use.
+    fn floor_and_thumb(
+        density: TargetDensity,
+        floor: f32,
+        in_theme_slot: bool,
+        explicit: Option<f32>,
+    ) -> (f32, f32) {
+        let seen = Rc::new(Cell::new(f32::NAN));
+        let style = FloorStyle {
+            floor,
+            seen: seen.clone(),
+        };
+        let mut bar = ScrollBar::new(
+            ScrollBarOrientation::Vertical,
+            Signal::new(0.0),
+            Signal::new(500.0),
+            Signal::new(0.02),
+        );
+        let mut theme = teksilo_core::presets::intui::light().with_density(density);
+        if in_theme_slot {
+            theme.style_slots.scroll_bar = Some(Rc::new(style));
+        } else {
+            bar = bar.style(style);
+        }
+        if let Some(explicit) = explicit {
+            bar = bar.min_thumb_length(explicit);
+        }
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let id = tree.add(bar);
+        tree.layout(SizeProposal::exact(12.0, 400.0));
+        let thumb = tree
+            .widget_target_regions(id)
+            .into_iter()
+            .find(|r| r.part == SCROLLBAR_PART_THUMB)
+            .expect("the thumb is reported");
+        (seen.get(), thumb.rect.height)
+    }
+
+    /// The floor is the one the active style declares, per call or from the
+    /// theme slot, at every density: the style's answer reaches the painters
+    /// through the config and the bar's own thumb geometry alike. A style that
+    /// declares 37 dp gets a 37 dp thumb, where the bar used to recompute the
+    /// shipped 24 dp ladder whatever the style said.
+    #[test]
+    fn the_minimum_thumb_is_the_one_the_style_declares() {
+        for density in [
+            TargetDensity::Compact,
+            TargetDensity::Comfortable,
+            TargetDensity::Touch,
+        ] {
+            for in_theme_slot in [false, true] {
+                assert_eq!(
+                    floor_and_thumb(density, 37.0, in_theme_slot, None),
+                    (37.0, 37.0),
+                    "{density:?}, theme slot: {in_theme_slot}",
+                );
+            }
+        }
+    }
+
+    /// An app's own floor still wins over the style's, in the config and in
+    /// the geometry.
+    #[test]
+    fn an_explicit_minimum_thumb_wins_over_the_style() {
+        assert_eq!(
+            floor_and_thumb(TargetDensity::Compact, 37.0, false, Some(60.0)),
+            (60.0, 60.0),
+        );
+        assert_eq!(
+            floor_and_thumb(TargetDensity::Touch, 37.0, true, Some(20.0)),
+            (20.0, 20.0),
+        );
+    }
+
+    /// The floor still never makes the thumb longer than its track.
+    #[test]
+    fn a_style_floor_longer_than_the_track_is_clamped_to_it() {
+        assert_eq!(
+            floor_and_thumb(TargetDensity::Compact, 900.0, false, None),
+            (900.0, 400.0),
+        );
     }
 
     // -- grabbing and paging ----------------------------------------------

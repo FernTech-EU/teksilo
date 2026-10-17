@@ -8,7 +8,7 @@ struct, and `for_tokens(&InputTokens)` projects each one onto the active density
 — `dp` for a target, `spacing` for a gap, `density_min_size` for a minimum box.
 A theme preset then builds that same struct with its own numbers.
 
-**Forty-two of those projected fields have no reader.** The widget composes the
+**Forty-one of those projected fields have no reader.** The widget composes the
 dimension from the raw `pub const` in the recipe's module instead, so the
 projected field is written by `for_tokens`, written again by every preset, and
 consulted by nothing. Retuning one changes nothing on screen.
@@ -48,11 +48,11 @@ and is therefore inside the scope; the rule finds both its projected fields read
 | | |
 |---|---|
 | projected fields in scope | 102 |
-| of those, unread by the rule | 44 |
+| of those, unread by the rule | 43 |
 | false positives of the rule (§4) | 2 |
-| **real gap** | **42** |
+| **real gap** | **41** |
 | of which inert even if wired (§1) | 10 |
-| of which a shipped preset already sets a different value (§2) | 7 |
+| of which a shipped preset already sets a different value (§2) | 6 |
 | of which a preset sets the same value the constant carries (§3a) | 3 |
 | of which density only, no preset (§3b) | 22 |
 
@@ -62,18 +62,19 @@ those cost a test failure would discourage the one change it invites: the tables
 are the record, the guard keeps their *membership* honest, and the arithmetic is
 a snapshot of the day it was taken.
 
-Eleven further fields were on this list until a metrics accessor wired them,
+Twelve further fields were on this list until a metrics accessor wired them,
 and they are the worked examples for what wiring one looks like:
 `TableRecipe::cell_padding_horizontal` / `cell_padding_vertical`
 (`TableStyle`), `CalendarRecipe::nav_arrow_size` (`CalendarStyle`),
 `SearchFieldRecipe::row_padding_horizontal` / `row_padding_vertical`
 (`SearchFieldStyle`), `StandardItemRecipe::min_height_single_line` /
 `min_height_two_line` (`StandardItemStyle`), `TableRecipe::row_height` /
-`header_height` (`TableStyle`) and `TabRecipe::editor_height` /
-`padding_horizontal` (`TabStyle`): a defaulted metrics accessor on
+`header_height` (`TableStyle`), `TabRecipe::editor_height` /
+`padding_horizontal` (`TabStyle`) and `ScrollBarRecipe::min_thumb_length`
+(`ScrollBarStyle`): a defaulted metrics accessor on
 the style trait, defaulted so an out-of-tree style keeps compiling, overridden
 by the `Recipe*Style` from its own recipe so a preset's number takes effect.
-A twelfth, `TabRecipe::tool_window_height`, was deleted instead: neither it nor
+A thirteenth, `TabRecipe::tool_window_height`, was deleted instead: neither it nor
 its constant had a reader, and no tab strip has a tool-window height to give it.
 
 **A verdict of "safe to wire" means the mechanism is available and the change is
@@ -115,7 +116,7 @@ unwired one.
 
 ## 2. A shipped preset already sets a different value
 
-The seven that cost something today. Each is written by Fluent or macOS with
+The six that cost something today. Each is written by Fluent or macOS with
 a number chosen for that design language, and each renders the IntUI constant
 instead. The **renders** column is what a user sees under any theme.
 
@@ -123,7 +124,6 @@ instead. The **renders** column is what a user sees under any theme.
 |---|---|---|---|---|---|
 | `CalendarRecipe` | `cell_size` | 32 | — | 28 | `calendar.rs` → `Calendar::build`, `build_weekday_row` |
 | `CalendarRecipe` | `header_height` | 28 | — | 26 | none — see below |
-| `ScrollBarRecipe` | `min_thumb_length` | 24 | 30 | 28 | `scroll_bar.rs` → `ScrollBar::build` |
 | `SearchFieldRecipe` | `row_height` | 26 | — | 22 | `search_field.rs` → `SuggestionPanel::build` |
 | `SegmentedControlRecipe` | `height` | 24 | 32 | 22 | `segmented_control.rs` → `layout_response` |
 | `SegmentedControlRecipe` | `padding_horizontal` | 12 | — | 10 | `segmented_control.rs` → `layout_response`; `segmented_control/cell.rs` → `layout_response` |
@@ -131,17 +131,15 @@ instead. The **renders** column is what a user sees under any theme.
 
 Ladders, for the ones whose density projection also moves (Compact / Comfortable
 / Touch): `cell_size` 32/32/44, `CalendarRecipe::header_height` 28/32/44,
-`min_thumb_length` 24/32/44, `SearchFieldRecipe::row_height` 26/32/44,
-`SegmentedControlRecipe::height` 24/32/44 and `padding_horizontal` 12/13.8/15.6
-and `padding_vertical` 6/6.9/7.8.
+`SearchFieldRecipe::row_height` 26/32/44, `SegmentedControlRecipe::height`
+24/32/44 and `padding_horizontal` 12/13.8/15.6 and `padding_vertical`
+6/6.9/7.8.
 
 ### Verdicts
 
-**Safe to wire, one accessor each.** `ScrollBarRecipe::min_thumb_length` —
-`ScrollBar::build` already resolves the style and then *recomputes* the floor
-from the constant three lines later, so the value is already in hand.
-`SearchFieldRecipe::row_height` — the same `SuggestionPanel::build` that now
-takes its row gutters from `SearchFieldStyle`.
+**Safe to wire, one accessor.** `SearchFieldRecipe::row_height`, read by the
+same `SuggestionPanel::build` that now takes its row gutters from
+`SearchFieldStyle`.
 
 **Needs care — the widget owns a composition the field cannot express.**
 `SegmentedControlRecipe::height` / `padding_horizontal` / `padding_vertical`:

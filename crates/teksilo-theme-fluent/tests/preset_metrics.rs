@@ -424,3 +424,78 @@ fn a_tab_bar_measures_the_fluent_tab_height_and_padding_at_every_density() {
         assert!((slot.padding_horizontal(&theme.input) - fluent.2).abs() < 1e-3);
     }
 }
+
+// ── ScrollBar minimum thumb length ─────────────────────────────────────
+
+/// The laid-out thumb length of a vertical `ScrollBar` over a 400 dp track
+/// built at `density` under `theme`, with no floor of its own. The content is
+/// fifty viewports long (viewport ratio 0.02), so the unfloored thumb would be
+/// 8 dp and the length measured is the floor alone. Read from the mounted bar's
+/// reported thumb, which is the rectangle its hit test and its drag use.
+///
+/// Built *at* the density, never switched into it: a bar reads its style's
+/// floor when it builds.
+fn scroll_thumb_length(theme: &Theme, density: TargetDensity) -> f32 {
+    use teksilo_core::signal::Signal;
+    use teksilo_widgets::scroll_bar::{SCROLLBAR_PART_THUMB, ScrollBar, ScrollBarOrientation};
+
+    let mut tree = WidgetTree::new()
+        .with_theme(theme.with_density(density))
+        .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+    let bar = tree.add(
+        ScrollBar::new(
+            ScrollBarOrientation::Vertical,
+            Signal::new(0.0),
+            Signal::new(500.0),
+            Signal::new(0.02),
+        )
+        .thickness(12.0),
+    );
+    tree.layout(SizeProposal::exact(12.0, 400.0));
+    tree.widget_target_regions(bar)
+        .into_iter()
+        .find(|r| r.part == SCROLLBAR_PART_THUMB)
+        .expect("the bar reports its thumb")
+        .rect
+        .height
+}
+
+/// WinUI's `ScrollBarHorizontalThumbMinWidth` is 30 dp in the Fluent recipe,
+/// and a laid-out bar must measure it. The bar used to recompute the shipped
+/// 24 dp floor whatever the style declared, so every Fluent thumb on a long
+/// document rendered 6 dp shorter than its recipe.
+///
+/// Above Compact the 30 rises to the density's target size (32 at
+/// Comfortable, 44 at Touch). The IntUI arm is the control: its 24 dp floor
+/// walks the same ladder.
+#[test]
+fn a_scroll_bar_floors_its_thumb_at_the_fluent_minimum_at_every_density() {
+    let expected = [
+        (TargetDensity::Compact, 30.0, 24.0),
+        (TargetDensity::Comfortable, 32.0, 32.0),
+        (TargetDensity::Touch, 44.0, 44.0),
+    ];
+    for (density, preset, intui) in expected {
+        let got = scroll_thumb_length(&teksilo_core::presets::intui::light(), density);
+        assert!(
+            (got - intui).abs() < 1e-3,
+            "{density:?}: IntUI thumb {got}, want {intui}",
+        );
+        for theme in [teksilo_theme_fluent::light(), teksilo_theme_fluent::dark()] {
+            let got = scroll_thumb_length(&theme, density);
+            assert!(
+                (got - preset).abs() < 1e-3,
+                "{density:?}: the Fluent recipe's thumb floor must reach the bar: \
+                 {got}, want {preset}",
+            );
+        }
+        // The accessor half: what the installed slot tells a bar asking it.
+        let theme = teksilo_theme_fluent::light().with_density(density);
+        let slot = theme
+            .style_slots
+            .scroll_bar
+            .clone()
+            .expect("the preset installs a scroll bar slot");
+        assert!((slot.min_thumb_length(&theme.input) - preset).abs() < 1e-3);
+    }
+}

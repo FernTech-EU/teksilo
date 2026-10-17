@@ -64,8 +64,10 @@ Because the outset widens the bar *across* the scroll axis, every decision
 about whether a press is on the thumb is taken **along the axis only** — a
 finger 15 dp inboard of an 8 dp bar is beside the thumb, not past it.
 
-The minimum thumb length follows the density (24 dp Compact, 44 dp Touch),
-so a short thumb on a long document is still something a finger can land on.
+The minimum thumb length is the active style's
+`ScrollBarStyle::min_thumb_length`, which follows the density (24 dp
+Compact, 44 dp Touch under the shipped style), so a short thumb on a long
+document is still something a finger can land on.
 
 #### Accessibility
 
@@ -123,9 +125,16 @@ pub const SCROLLBAR_COARSE_TARGET: f32 = 48.0;
 
 **Import:** `use teksilo::widgets::scroll_bar::SCROLLBAR_MIN_THUMB_LENGTH;`
 
-The shipped minimum thumb length, at Compact. Raised to the density's
-`target_size` (44 dp at Touch) at build time; a
-`min_thumb_length` override wins over both.
+The shipped minimum thumb length, at Compact.
+
+A bar takes its floor from the active style's
+`ScrollBarStyle::min_thumb_length` at build time: the shipped style and
+the trait default both answer this value raised to the density's
+`target_size` (32 dp at Comfortable, 44 dp at Touch), and a preset answers
+its own (28 dp under macOS, 30 dp under Fluent, at Compact). Before its
+first build a bar uses this value. A
+`min_thumb_length` override wins over all of
+them.
 
 ```rust
 pub const SCROLLBAR_MIN_THUMB_LENGTH: f32 = 24.0;
@@ -195,11 +204,13 @@ Set the bar thickness (width for vertical, height for horizontal).
 
 #### `pub fn min_thumb_length(mut self, len: f32) -> Self` (default: `None`)
 
-Set the minimum thumb length in pixels, overriding the density.
+Set the minimum thumb length in pixels, overriding the active style.
 
-Left unset the floor is `SCROLLBAR_MIN_THUMB_LENGTH` raised to the
-density's target size — 24 dp at Compact, 44 dp at Touch — so a short
-thumb on a long document stays something a finger can land on.
+Left unset the floor is the active style's
+`ScrollBarStyle::min_thumb_length` at the tree's density: under the
+shipped style `SCROLLBAR_MIN_THUMB_LENGTH` raised to the density's
+target size (24 dp at Compact, 44 dp at Touch), so a short thumb on a
+long document stays something a finger can land on.
 
 <a id="scrollbar-reveal"></a>
 

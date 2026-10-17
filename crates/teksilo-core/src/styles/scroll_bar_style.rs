@@ -2,13 +2,20 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! Tier-3 style protocol for `ScrollBar`. See `docs/styling-system.md`.
+//!
+//! One defaulted metrics accessor, [`ScrollBarStyle::min_thumb_length`], says
+//! how short the thumb may get. The bar sizes its thumb, and decides whether a
+//! press lands on it, from that one number, so a preset's floor is the one laid
+//! out.
 
 use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
+use teksilo_tokens::{InputTokens, TargetRole};
 
 use crate::build_context::BuildContext;
 use crate::signal::Signal;
+use crate::styles::density::dp;
 use crate::widget_id::WidgetId;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
@@ -53,9 +60,11 @@ pub struct ScrollBarStyleConfig {
     pub is_idle: Signal<bool>,
     pub orientation: ScrollBarOrientation,
     pub variant: ScrollBarVariant,
-    /// Minimum thumb length in logical pixels. Sourced from
-    /// `teksilo_widgets::styles::recipe_scroll_bar_style` constants by
-    /// default; apps override per-instance via `ScrollBar::min_thumb_length(...)`.
+    /// Minimum thumb length in logical pixels: the active style's
+    /// [`ScrollBarStyle::min_thumb_length`] at the tree's density, unless the
+    /// app named one per instance via `ScrollBar::min_thumb_length(...)`. The
+    /// widget resolves it before `make_body` runs and sizes its own thumb
+    /// geometry (hit test, drag, reported target) from the same value.
     pub min_thumb_length: f32,
     /// Optional thumb tint override (`ScrollBar::thumb_color` /
     /// `ScrollArea::scroll_bar_thumb_color`). `None` (the default) means the
@@ -86,6 +95,30 @@ pub trait ScrollBarStyle: 'static {
     /// an RTL locale — the same obligation
     /// [`SliderStyle::make_body`](super::SliderStyle::make_body) carries.
     fn make_body(&self, cfg: &ScrollBarStyleConfig, ctx: &mut BuildContext) -> WidgetId;
+
+    /// The shortest the thumb may get along the scroll axis, in logical
+    /// pixels, at the density `tokens` describe. A long document's thumb is
+    /// held at this length rather than shrinking with the viewport ratio, so it
+    /// stays something a pointer can land on.
+    ///
+    /// A metrics accessor because the bar, not the chrome, owns the thumb's
+    /// geometry: its hit test, its drag and the target it reports all need the
+    /// floor outside `make_body`. The widget resolves it once per build and
+    /// hands the answer to `make_body` as
+    /// [`ScrollBarStyleConfig::min_thumb_length`]. A bar's own
+    /// `min_thumb_length(..)` wins over it.
+    ///
+    /// **Defaulted**, so a `ScrollBarStyle` implemented outside this workspace
+    /// keeps compiling. The default is
+    /// `teksilo_widgets::styles::recipe_scroll_bar_style::SCROLLBAR_MIN_THUMB_LENGTH`
+    /// put through [`dp`] as a target (24 at Compact, 32 at Comfortable, 44 at
+    /// Touch), which is the shipped recipe's own answer at every density,
+    /// restated as a literal because `teksilo-core` cannot name a
+    /// `teksilo-widgets` constant, and pinned equal to it by
+    /// `the_scroll_bar_trait_default_restates_the_module_constant`.
+    fn min_thumb_length(&self, tokens: &InputTokens) -> f32 {
+        dp(24.0, TargetRole::Target, tokens)
+    }
 }
 
 pub type SharedScrollBarStyle = Rc<dyn ScrollBarStyle>;

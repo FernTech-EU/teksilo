@@ -90,14 +90,13 @@ fn resolve_thumb_color(
 pub struct ScrollBarRecipe {
     pub thickness_idle: f32,
     pub thickness_hover: f32,
-    /// The density-resolved floor a thumb may not be shorter than.
+    /// The density-resolved floor a thumb may not be shorter than. Read
+    /// through [`ScrollBarStyle::min_thumb_length`].
     ///
-    /// The **widget** decides the number the painters actually use — it resolves
-    /// the same `dp(SCROLLBAR_MIN_THUMB_LENGTH, Target, ..)` unless the caller
-    /// named a floor of their own, and passes the answer down as
-    /// `ScrollBarStyleConfig::min_thumb_length`. This field is the same value,
-    /// kept here so a custom style building its own painters has it in hand
-    /// without reaching for the tokens again.
+    /// The **widget** decides the number the painters actually use: it asks
+    /// the active style for this floor unless the caller named one of their
+    /// own, sizes its thumb geometry from the answer, and passes the same
+    /// answer down as `ScrollBarStyleConfig::min_thumb_length`.
     pub min_thumb_length: f32,
     pub corner_radius: f32,
 }
@@ -250,6 +249,15 @@ impl ScrollBarStyle for RecipeScrollBarStyle {
                 ctx.add(ZStack::new().child(thin_id).child(full_id))
             }
         }
+    }
+
+    /// This style's own thumb floor, so a preset's (macOS's 28 dp, Fluent's
+    /// 30 dp `ScrollBarHorizontalThumbMinWidth`) is the one a bar lays out.
+    /// `tokens` is unused: the recipe was already resolved against a density
+    /// when the style was made (`for_tokens`, or a preset's own factory), and
+    /// a second projection would apply the ladder twice.
+    fn min_thumb_length(&self, _tokens: &InputTokens) -> f32 {
+        self.recipe.min_thumb_length
     }
 }
 

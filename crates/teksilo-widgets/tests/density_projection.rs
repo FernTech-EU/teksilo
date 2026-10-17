@@ -491,11 +491,12 @@ fn every_fixed_row_says_it_is_fixed() {
 // 5. The style traits' metric defaults restate the module constants
 // ───────────────────────────────────────────────────────────────────────────
 //
-// Five style traits carry a defaulted metrics accessor for a dimension the
+// Six style traits carry a defaulted metrics accessor for a dimension the
 // widget composes itself and the trait's `make_*` hooks never see: a table
 // cell's gutter, a calendar nav arrow's footprint, a search suggestion row's
 // gutter, a list row's height floor, a table's row and header heights, a
-// tab's height and its header padding. Each
+// tab's height and its header padding, a scroll-bar thumb's minimum length.
+// Each
 // default is the module constant put through the same helper `for_tokens`
 // uses, restated as a literal because `teksilo-core` sits below
 // `teksilo-widgets` and cannot name the constant. A literal in one crate and a
@@ -761,6 +762,53 @@ fn the_tab_trait_defaults_restate_the_module_constants() {
     );
 }
 
+/// The `ScrollBarStyle` thumb-floor default equals
+/// `recipe_scroll_bar_style::SCROLLBAR_MIN_THUMB_LENGTH`, and the widget's own
+/// `scroll_bar::SCROLLBAR_MIN_THUMB_LENGTH` (the floor before a first build),
+/// at every density.
+#[test]
+fn the_scroll_bar_trait_default_restates_the_module_constant() {
+    use teksilo_core::styles::ScrollBarStyle;
+    use teksilo_widgets::styles::recipe_scroll_bar_style as bar;
+
+    /// A `ScrollBarStyle` that overrides nothing but its `make_body` hook.
+    struct BareScrollBarStyle;
+    impl ScrollBarStyle for BareScrollBarStyle {
+        fn make_body(
+            &self,
+            _cfg: &teksilo_core::styles::ScrollBarStyleConfig,
+            ctx: &mut teksilo_core::BuildContext,
+        ) -> teksilo_core::WidgetId {
+            ctx.add(teksilo_widgets::primitives::Spacer::new())
+        }
+    }
+
+    assert_eq!(
+        bar::SCROLLBAR_MIN_THUMB_LENGTH,
+        teksilo_widgets::scroll_bar::SCROLLBAR_MIN_THUMB_LENGTH,
+        "the recipe's constant and the widget's pre-build floor drifted apart",
+    );
+    for t in [compact(), comfortable(), touch()] {
+        assert_eq!(
+            BareScrollBarStyle.min_thumb_length(&t),
+            dp(bar::SCROLLBAR_MIN_THUMB_LENGTH, TargetRole::Target, &t),
+            "the ScrollBarStyle default drifted from SCROLLBAR_MIN_THUMB_LENGTH",
+        );
+        // And the shipped recipe at that density agrees with the default, so
+        // an out-of-tree style and the shipped one floor the same thumb.
+        assert_eq!(
+            RecipeScrollBarStyle::for_tokens(&t).min_thumb_length(&t),
+            BareScrollBarStyle.min_thumb_length(&t),
+        );
+    }
+    // At Compact the default is the module constant itself, so a Compact bar
+    // floors its thumb exactly where it did before the accessor existed.
+    assert_eq!(
+        BareScrollBarStyle.min_thumb_length(&compact()),
+        bar::SCROLLBAR_MIN_THUMB_LENGTH
+    );
+}
+
 /// The shipped `Recipe*Style` answers from *its own recipe*, not from the
 /// trait default — which is the half of the mechanism that lets a preset's
 /// number reach the screen at all.
@@ -771,7 +819,7 @@ fn the_tab_trait_defaults_restate_the_module_constants() {
 #[test]
 fn a_recipe_style_answers_from_its_own_recipe() {
     use teksilo_core::styles::{
-        CalendarStyle, SearchFieldStyle, StandardItemStyle, TabStyle, TableStyle,
+        CalendarStyle, ScrollBarStyle, SearchFieldStyle, StandardItemStyle, TabStyle, TableStyle,
     };
 
     let t = compact();
@@ -807,6 +855,12 @@ fn a_recipe_style_answers_from_its_own_recipe() {
     });
     assert_eq!(tab.editor_height(&t), 31.0);
     assert_eq!(tab.padding_horizontal(&t), 9.0);
+
+    let bar = RecipeScrollBarStyle::new(ScrollBarRecipe {
+        min_thumb_length: 19.0,
+        ..ScrollBarRecipe::for_tokens(&t)
+    });
+    assert_eq!(bar.min_thumb_length(&t), 19.0);
 
     let calendar = RecipeCalendarStyle::new(CalendarRecipe {
         nav_arrow_size: 20.0,
