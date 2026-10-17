@@ -34,8 +34,8 @@ use teksilo_theme_kde::{self as kde};
 use teksilo_tokens::TargetDensity;
 use teksilo_widgets::primitives::IconWidget;
 use teksilo_widgets::{
-    Button, ButtonVariant, Checkbox, IconButton, IconButtonSize, MenuItem, RadioButton,
-    SplitButton, TextInput, Toggle,
+    Button, ButtonVariant, Checkbox, ComboBox, IconButton, IconButtonSize, MenuItem, RadioButton,
+    Slider, SpinBox, SplitButton, TextInput, Toggle,
 };
 
 const SIZES_JSON: &str = include_str!(concat!(
@@ -481,6 +481,162 @@ fn a_text_field_measures_breezes_line_edit_at_every_density() {
                 0,
                 "{density:?}: a conformance failure"
             );
+        }
+    }
+}
+
+// ── Combo boxes ────────────────────────────────────────────────────────
+
+/// A combo box is 32 px tall at Compact, Qt's Breeze combo box, rising to
+/// the density's target size above it, with its arrow box 2 px inside the
+/// trailing edge and its label 6 px inside the leading one (more at the
+/// denser ladders, by their spacing).
+#[test]
+fn a_combo_box_measures_breezes_at_every_density() {
+    assert_eq!(qt_size("combo_box", None).1, 32.0);
+    let g = BreezeGeometry::breeze_default();
+    assert_eq!(g.combo_box_height, 32.0);
+    for (density, height, leading) in [
+        (TargetDensity::Compact, 32.0, 6.0),
+        (TargetDensity::Comfortable, 32.0, 6.9),
+        (TargetDensity::Touch, 44.0, 7.8),
+    ] {
+        for theme in themes() {
+            let (tree, root) = in_a_row(
+                &theme,
+                density,
+                ComboBox::new(["Item", "Other"], Signal::new(Some("Item".to_string()))),
+            );
+            let layout = nodes_named(&tree, root, "BreezeComboLayout");
+            assert_eq!(layout.len(), 1);
+            let b = tree.bounds(layout[0]);
+            assert_eq!(b.height, height, "{density:?}");
+            let arrow = nodes_named(&tree, layout[0], "BreezeComboArrow");
+            let a = tree.bounds(arrow[0]);
+            assert_eq!(
+                [b.x + b.width - (a.x + a.width), a.width, a.height],
+                [2.0, 20.0, 20.0],
+                "{density:?}: the arrow box"
+            );
+            assert_eq!(a.y - b.y, (height - 20.0) * 0.5, "{density:?}: centred");
+            let label = nodes_named(&tree, layout[0], "TextWidget");
+            assert!(
+                (tree.bounds(label[0]).x - b.x - leading).abs() < 1e-3,
+                "{density:?}: the label"
+            );
+            assert_eq!(
+                target_audit(&tree, density)
+                    .into_iter()
+                    .filter(|v| v.rule.is_conformance_failure())
+                    .count(),
+                0,
+                "{density:?}: a conformance failure"
+            );
+        }
+    }
+}
+
+// ── Spin boxes ─────────────────────────────────────────────────────────
+
+/// A spin box's frame is 32 px at Compact, Qt's Breeze spin box, rising to
+/// the density's target size, and its arrow column is Breeze's at every
+/// density: 20 px wide, 2 px inside the trailing edge, two 10 px halves
+/// centred in the frame, where the step buttons press.
+///
+/// The halves are under the target size, at every density; the value has
+/// keyboard, wheel and assistive-action equivalents, so they are the only
+/// conformance failures the row reports, one per half.
+#[test]
+fn a_spin_box_measures_breezes_at_every_density() {
+    assert_eq!(qt_size("spin_box.0_99", None).1, 32.0);
+    let g = BreezeGeometry::breeze_default();
+    assert_eq!(g.spin_box_height, 32.0);
+    for (density, height) in [
+        (TargetDensity::Compact, 32.0),
+        (TargetDensity::Comfortable, 32.0),
+        (TargetDensity::Touch, 44.0),
+    ] {
+        for theme in themes() {
+            let (tree, root) = in_a_row(&theme, density, SpinBox::new(Signal::new(3_i32), 0, 10));
+            let layout = nodes_named(&tree, root, "BreezeSpinLayout");
+            assert_eq!(layout.len(), 1);
+            let b = tree.bounds(layout[0]);
+            assert_eq!(b.height, height, "{density:?}");
+            let steps = nodes_named(&tree, layout[0], "StepButton");
+            assert_eq!(steps.len(), 2);
+            let top = (height - 20.0) * 0.5;
+            for (step, y) in steps.iter().zip([top, top + 10.0]) {
+                let s = tree.bounds(*step);
+                assert_eq!(
+                    [
+                        b.x + b.width - (s.x + s.width),
+                        s.y - b.y,
+                        s.width,
+                        s.height
+                    ],
+                    [2.0, y, 20.0, 10.0],
+                    "{density:?}: a half"
+                );
+            }
+            let failures: Vec<_> = target_audit(&tree, density)
+                .into_iter()
+                .filter(|v| v.rule.is_conformance_failure())
+                .collect();
+            assert_eq!(failures.len(), 2, "{density:?}: {failures:?}");
+            assert!(
+                failures.iter().all(|v| v.widget.ends_with("StepButton")),
+                "{density:?}: {failures:?}"
+            );
+        }
+    }
+}
+
+// ── Sliders ────────────────────────────────────────────────────────────
+
+/// A slider is 84 px long when nothing proposes a length, Qt's size hint,
+/// and 20 px thick (23 with a row of ticks), raised to the density's target
+/// size across the groove: 24, 32 and 44.
+#[test]
+fn a_slider_measures_breezes_at_every_density() {
+    assert_eq!(qt_size("slider.horizontal", None), (84.0, 20.0));
+    assert_eq!(qt_size("slider.horizontal.ticks_below", None), (84.0, 23.0));
+    assert_eq!(qt_size("slider.vertical", None), (20.0, 84.0));
+    use teksilo_tokens::Orientation;
+    for (density, cross) in [
+        (TargetDensity::Compact, 24.0),
+        (TargetDensity::Comfortable, 32.0),
+        (TargetDensity::Touch, 44.0),
+    ] {
+        for theme in themes() {
+            for ticks in [None, Some(5)] {
+                for orientation in [Orientation::Horizontal, Orientation::Vertical] {
+                    let mut slider =
+                        Slider::new(Signal::new(0.5), 0.0, 1.0).orientation(orientation);
+                    if let Some(n) = ticks {
+                        slider = slider.tick_count(n);
+                    }
+                    let (tree, root) = in_a_row(&theme, density, slider);
+                    let body = nodes_named(&tree, root, "BreezeSliderBody");
+                    assert_eq!(body.len(), 1);
+                    let b = tree.bounds(body[0]);
+                    let (along, across) = match orientation {
+                        Orientation::Horizontal => (b.width, b.height),
+                        Orientation::Vertical => (b.height, b.width),
+                    };
+                    assert_eq!(across, cross, "{density:?} {orientation:?} {ticks:?}");
+                    if orientation == Orientation::Horizontal {
+                        assert_eq!(along, 84.0, "{density:?} {ticks:?}");
+                    }
+                    assert_eq!(
+                        target_audit(&tree, density)
+                            .into_iter()
+                            .filter(|v| v.rule.is_conformance_failure())
+                            .count(),
+                        0,
+                        "{density:?} {orientation:?}: a conformance failure"
+                    );
+                }
+            }
         }
     }
 }

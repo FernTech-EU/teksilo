@@ -47,7 +47,11 @@
 //!   marked in the view's text when checked, its label 24 px from its
 //!   leading edge; a switch is a handle as tall as its 36 x 18 indicator
 //!   riding a 12 px track; a text field is a flat view-coloured frame whose
-//!   1 px outline turns to the focus colour while it has focus. Other
+//!   1 px outline turns to the focus colour while it has focus. A combo box
+//!   is the push button with a chevron 2 px inside its trailing edge, a
+//!   spin box the line edit with a column of two chevrons and no buttons
+//!   drawn, and a slider a 6 px groove filled toward the highlight up to a
+//!   17 px round handle in the button colour. Other
 //!   controls are outlined in the window colour moved the same way toward
 //!   the text, the `border` token; the highlight-based outlines are in
 //!   [`BreezeColors`].
@@ -102,9 +106,24 @@
 //!
 //! - **Most widget chrome is the framework's.** This version installs
 //!   Breeze styles for `Button`, `IconButton`, `SplitButton`, `Toggle`,
-//!   `Checkbox`, `RadioButton` and `TextInput` only: every other widget
-//!   keeps Teksilo's recipe style, painted in the Breeze colours, radii,
-//!   focus ring, typography and motion.
+//!   `Checkbox`, `RadioButton`, `TextInput`, `ComboBox`, `SpinBox` and
+//!   `Slider` only: every other widget keeps Teksilo's recipe style, painted
+//!   in the Breeze colours, radii, focus ring, typography and motion.
+//! - **A spin box's arrows keep their colour at the limit**, and an empty
+//!   combo box's arrow is not greyed: the styles are not told the value's
+//!   limits or the item count ([`styles::spin_box`],
+//!   [`styles::combo_box`]).
+//! - **A spin box's two arrow halves are 20 x 10**, Breeze's geometry,
+//!   under WCAG 2.2 SC 2.5.8's 24 px at every density; the value is also
+//!   reachable with the arrow and page keys, the mouse wheel and the
+//!   assistive Increment and Decrement actions ([`styles::spin_box`]).
+//! - **A slider's tick marks are on a fixed side**, below a horizontal
+//!   slider and to the right of a vertical one: Breeze draws them on the
+//!   side the application asks for, and a `Slider` names none
+//!   ([`styles::slider`]).
+//! - **A slider's handle is outlined in the hover colour while the pointer
+//!   is anywhere on the slider**, not only over the handle, and is
+//!   outlined at 3:1 at rest (D6, [`styles::slider`]).
 //! - **A check box or radio button row is 24 px, not 22.** Breeze's row is
 //!   the label's line box plus 4 px; the widgets keep their 24 px minimum,
 //!   WCAG 2.2's target size, and paint the 20 px indicator unchanged in it
@@ -278,8 +297,9 @@ fn project(theme: &Theme, state: PaintState) -> Theme {
 
 /// Install the Breeze Tier-3 chrome.
 ///
-/// The buttons, the check box, the radio button, the switch and the line
-/// edit are Breeze's own ([`styles`]); every other slot is left to
+/// The buttons, the check box, the radio button, the switch, the line edit,
+/// the combo box, the spin box and the slider are Breeze's own
+/// ([`styles`]); every other slot is left to
 /// the widget's recipe style, which paints from the Breeze tokens, and the
 /// crate's tests list the reason for each. Every style installed here reads
 /// its metrics from the theme it builds under, `theme.input` included, so
@@ -293,6 +313,9 @@ fn install_styles(theme: &mut Theme) {
     slots.checkbox = Some(Rc::new(styles::checkbox::BreezeCheckboxStyle));
     slots.radio = Some(Rc::new(styles::radio::BreezeRadioStyle));
     slots.text_input = Some(Rc::new(styles::text_input::BreezeTextInputStyle));
+    slots.combo_box = Some(Rc::new(styles::combo_box::BreezeComboBoxStyle));
+    slots.spin_box = Some(Rc::new(styles::spin_box::BreezeSpinBoxStyle));
+    slots.slider = Some(Rc::new(styles::slider::BreezeSliderStyle));
 }
 
 #[cfg(test)]
@@ -497,14 +520,6 @@ mod tests {
             "Breeze has no selectable card; the recipe surface reads the preset's surface and accent roles",
         ),
         (
-            "slider",
-            "no Breeze slider is installed; the recipe track and knob read the Breeze accent and border tokens",
-        ),
-        (
-            "combo_box",
-            "no Breeze combo box is installed; the recipe paints from the Breeze field and border tokens",
-        ),
-        (
             "menu_item",
             "no Breeze menu row is installed; the recipe row paints its highlight from the Breeze selection tokens",
         ),
@@ -583,10 +598,6 @@ mod tests {
         (
             "color_picker",
             "Breeze has no in-window colour picker chrome; the recipe reads the theme roles",
-        ),
-        (
-            "spin_box",
-            "no Breeze spin box is installed; the recipe frames the field and step buttons in the Breeze roles",
         ),
         (
             "date_edit",

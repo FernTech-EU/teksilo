@@ -36,8 +36,8 @@ use teksilo_theme_kde::{self as kde, KdePalette, PlasmaAccent};
 use teksilo_tokens::Color;
 use teksilo_widgets::primitives::{HStack, IconWidget};
 use teksilo_widgets::{
-    Button, ButtonVariant, CheckState, Checkbox, IconButton, IconButtonSize, MenuItem, RadioButton,
-    SplitButton, TextInput, Toggle, VStack,
+    Button, ButtonVariant, CheckState, Checkbox, ComboBox, IconButton, IconButtonSize, MenuItem,
+    RadioButton, Slider, SpinBox, SplitButton, TextInput, Toggle, VStack,
 };
 
 const PIXELS_JSON: &str = include_str!(concat!(
@@ -328,6 +328,60 @@ fn indicators_and_fields_mount_in_every_state_and_variant() {
     }
 }
 
+#[test]
+fn combo_boxes_spin_boxes_and_sliders_mount_in_every_state_and_variant() {
+    use teksilo_core::styles::{ComboBoxVariant, SliderVariant};
+    use teksilo_tokens::Orientation;
+    use teksilo_widgets::SpinButtonLayout;
+    for (_, theme) in themes() {
+        for variant in [
+            ComboBoxVariant::Outlined,
+            ComboBoxVariant::Filled,
+            ComboBoxVariant::Underline,
+            ComboBoxVariant::Plain,
+        ] {
+            for enabled in [true, false] {
+                let drawn = mount(
+                    theme.clone(),
+                    ComboBox::new(["Item", "Other"], Signal::new(Some("Item".to_string())))
+                        .variant(variant)
+                        .enabled(enabled),
+                );
+                assert!(drawn > 0, "{variant:?} painted nothing");
+            }
+        }
+        for layout in [SpinButtonLayout::Stacked, SpinButtonLayout::Hidden] {
+            for enabled in [true, false] {
+                let drawn = mount(
+                    theme.clone(),
+                    SpinBox::new(Signal::new(3_i32), 0, 10)
+                        .button_layout(layout)
+                        .enabled(enabled),
+                );
+                assert!(drawn > 0, "{layout:?} painted nothing");
+            }
+        }
+        for orientation in [Orientation::Horizontal, Orientation::Vertical] {
+            for (variant, ticks) in [
+                (SliderVariant::Continuous, None),
+                (SliderVariant::Discrete, Some(5)),
+            ] {
+                for enabled in [true, false] {
+                    let mut slider = Slider::new(Signal::new(0.4), 0.0, 1.0)
+                        .orientation(orientation)
+                        .variant(variant)
+                        .enabled(enabled);
+                    if let Some(n) = ticks {
+                        slider = slider.tick_count(n);
+                    }
+                    let drawn = mount(theme.clone(), slider);
+                    assert!(drawn > 0, "{orientation:?} {variant:?} painted nothing");
+                }
+            }
+        }
+    }
+}
+
 /// The styles read the theme at paint time, so a tree built under Breeze
 /// survives a live swap to the other scheme, out to another design language
 /// and back.
@@ -343,7 +397,13 @@ fn a_mounted_tree_survives_a_theme_swap() {
             .child(Toggle::new(Signal::new(true)))
             .child(Checkbox::new(Signal::new(true)).label(lit!("On")))
             .child(RadioButton::new(0, Signal::new(0_usize)).label(lit!("One")))
-            .child(TextInput::new(Signal::new("text".to_string()))),
+            .child(TextInput::new(Signal::new("text".to_string())))
+            .child(ComboBox::new(
+                ["A", "B"],
+                Signal::new(Some("A".to_string())),
+            ))
+            .child(SpinBox::new(Signal::new(3_i32), 0, 10))
+            .child(Slider::new(Signal::new(0.4), 0.0, 1.0).tick_count(5)),
     );
     for theme in [
         kde::light(),
@@ -378,6 +438,19 @@ fn the_styles_degrade_without_the_palette() {
     assert!(mount(bare.clone(), Checkbox::new(Signal::new(true))) > 0);
     assert!(mount(bare.clone(), RadioButton::new(0, Signal::new(0_usize))) > 0);
     assert!(mount(bare.clone(), TextInput::new(Signal::new(String::new()))) > 0);
+    assert!(
+        mount(
+            bare.clone(),
+            ComboBox::new(["A", "B"], Signal::new(Some("A".to_string())))
+        ) > 0
+    );
+    assert!(mount(bare.clone(), SpinBox::new(Signal::new(3_i32), 0, 10)) > 0);
+    assert!(
+        mount(
+            bare.clone(),
+            Slider::new(Signal::new(0.5), 0.0, 1.0).tick_count(3)
+        ) > 0
+    );
     // The push button still has a face and an outline, from the roles.
     let (mut tree, _) = placed(bare.clone(), Button::new(lit!("Save")));
     let frame = rerender(&mut tree);
@@ -406,7 +479,13 @@ fn every_swatch_mounts() {
                     .child(Toggle::new(Signal::new(true)))
                     .child(Checkbox::new(Signal::new(true)).label(lit!("On")))
                     .child(RadioButton::new(0, Signal::new(0_usize)).label(lit!("One")))
-                    .child(TextInput::new(Signal::new(String::new()))),
+                    .child(TextInput::new(Signal::new(String::new())))
+                    .child(ComboBox::new(
+                        ["A", "B"],
+                        Signal::new(Some("A".to_string())),
+                    ))
+                    .child(SpinBox::new(Signal::new(3_i32), 0, 10))
+                    .child(Slider::new(Signal::new(0.5), 0.0, 1.0)),
             );
             assert!(drawn > 0, "{accent:?} painted nothing");
         }
@@ -1833,4 +1912,663 @@ fn reduced_motion_snaps_every_indicator() {
         let d = dot_diameter(&tick(&mut tree, 0), text).expect("a dot");
         assert!((d - 6.0).abs() < 0.01, "{scheme}: the dot, {d}");
     }
+}
+
+// ── Combo boxes, spin boxes and sliders ─────────────────────────────────
+
+/// Every stroked path in `frame`: its colour and its points.
+fn stroked_paths(frame: &RenderFrame) -> Vec<([u8; 4], Vec<[f32; 2]>)> {
+    frame
+        .paths
+        .iter()
+        .filter(|p| p.stroke_style.width > 0.0)
+        .map(|p| {
+            let points = p
+                .path
+                .commands()
+                .iter()
+                .filter_map(|c| match c {
+                    teksilo_canvas::PathCommand::MoveTo(q)
+                    | teksilo_canvas::PathCommand::LineTo(q) => Some([q.x, q.y]),
+                    _ => None,
+                })
+                .collect();
+            (rgba8(p.color), points)
+        })
+        .collect()
+}
+
+/// The points of a Breeze arrow pointing `direction` in `rect`.
+fn arrow_at(
+    rect: teksilo_canvas::Rect,
+    direction: teksilo_theme_kde::styles::arrow::ArrowDirection,
+) -> Vec<[f32; 2]> {
+    teksilo_theme_kde::styles::arrow::arrow_points(rect, direction)
+        .iter()
+        .map(|p| [p.x, p.y])
+        .collect()
+}
+
+/// The one node of type `name` under `root`, and its bounds.
+fn the_node(tree: &WidgetTree, root: WidgetId, name: &str) -> (WidgetId, teksilo_canvas::Rect) {
+    let nodes = nodes_named(tree, root, name);
+    assert_eq!(nodes.len(), 1, "one {name}");
+    (nodes[0], tree.bounds(nodes[0]))
+}
+
+fn combo() -> ComboBox<String> {
+    ComboBox::new(
+        ["Item", "Longer item text"],
+        Signal::new(Some("Item".to_string())),
+    )
+}
+
+/// A combo box at rest is Plasma's push button, face, outline and shadow,
+/// 32 px tall, with its arrow in the 20 px box 2 px inside the trailing
+/// edge, in the arrow colour of the button text.
+#[test]
+fn a_combo_box_is_a_push_button_with_breezes_arrow() {
+    use teksilo_theme_kde::styles::arrow::ArrowDirection;
+    use teksilo_theme_kde::styles::combo_box::combo_arrow_color;
+    for (scheme, theme) in themes() {
+        let (mut tree, id) = placed(theme.clone(), combo());
+        let frame = rerender(&mut tree);
+        let b = tree.bounds(id);
+        assert_eq!(b.height, 32.0, "{scheme}");
+        assert!(
+            fills(&frame).contains(&sample(scheme, "combo_box.normal", 40, 16)),
+            "{scheme}: no face in {:?}",
+            fills(&frame)
+        );
+        let outline = sample(scheme, "combo_box.normal", 1, 16);
+        let stroke = painted(&frame)
+            .into_iter()
+            .find(|p| p.stroke > 0.0 && p.color == outline)
+            .unwrap_or_else(|| panic!("{scheme}: no outline in {:?}", painted(&frame)));
+        assert_eq!(
+            stroke.screen,
+            [b.x + 1.5, b.y + 1.5, b.width - 3.0, b.height - 3.0]
+        );
+        assert!(has_shadow(&frame), "{scheme}: no shadow");
+        assert!(near(
+            over(SHADOW, rgba8_of(theme.colors.surface_main)),
+            sample(scheme, "combo_box.normal", 40, 31)
+        ));
+        let arrow_box = teksilo_canvas::Rect::new(b.x + b.width - 22.0, b.y + 6.0, 20.0, 20.0);
+        let rest = rgba8_of(combo_arrow_color(&theme, true, false, false, false));
+        assert!(
+            stroked_paths(&frame).contains(&(rest, arrow_at(arrow_box, ArrowDirection::Down))),
+            "{scheme}: no arrow in {:?}",
+            stroked_paths(&frame)
+        );
+    }
+}
+
+/// Under the pointer the outline turns to the highlight and the arrow keeps
+/// its colour; with keyboard focus the outline is the highlight, the arrow
+/// the window text, and the focus frame is drawn around the node.
+#[test]
+fn a_hovered_or_focused_combo_box_is_outlined_in_the_highlight() {
+    use teksilo_theme_kde::styles::combo_box::combo_arrow_color;
+    for (scheme, theme) in themes() {
+        let (mut tree, id) = placed(theme.clone(), combo());
+        let b = tree.bounds(id);
+        tree.pointer_move(b.center());
+        let frame = rerender(&mut tree);
+        assert!(
+            strokes(&frame).contains(&sample(scheme, "combo_box.hover", 1, 16)),
+            "{scheme}: hovered"
+        );
+        let rest = rgba8_of(combo_arrow_color(&theme, true, false, false, false));
+        assert!(
+            stroked_paths(&frame).iter().any(|(c, _)| *c == rest),
+            "{scheme}: the arrow keeps its colour under the pointer"
+        );
+
+        let (mut tree, id) = placed(theme.clone(), combo());
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        let frame = rerender(&mut tree);
+        let b = tree.bounds(id);
+        assert!(
+            strokes(&frame).contains(&sample(scheme, "combo_box.focus", 1, 16)),
+            "{scheme}: focused"
+        );
+        let text = rgba8_of(theme.colors.text_primary);
+        assert!(
+            stroked_paths(&frame).iter().any(|(c, _)| *c == text),
+            "{scheme}: the focused arrow is the window text"
+        );
+        let ring = rgba8_of(theme.colors.focus_ring);
+        let focus = painted(&frame)
+            .into_iter()
+            .find(|p| p.color == ring && p.stroke == 2.0)
+            .unwrap_or_else(|| panic!("{scheme}: no focus frame"));
+        assert_eq!(focus.screen, [b.x, b.y, b.width, b.height]);
+    }
+}
+
+/// Right to left, the arrow box is 2 px inside the left edge and the label
+/// starts 6 px inside the right one.
+#[test]
+fn right_to_left_mirrors_the_combo_box() {
+    use teksilo_core::environment::LayoutDirection;
+    use teksilo_theme_kde::styles::arrow::ArrowDirection;
+    for (scheme, theme) in themes() {
+        let mut tree = tree_with(theme.clone());
+        tree.set_layout_direction(LayoutDirection::RightToLeft);
+        let root = tree.add(VStack::new().child(HStack::new().child(combo())));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let (node, b) = the_node(&tree, root, "BreezeComboLayout");
+        let frame = rerender(&mut tree);
+        let arrow_box = teksilo_canvas::Rect::new(b.x + 2.0, b.y + 6.0, 20.0, 20.0);
+        let expected = arrow_at(arrow_box, ArrowDirection::Down);
+        assert!(
+            stroked_paths(&frame).iter().any(|(_, p)| *p == expected),
+            "{scheme}: no mirrored arrow in {:?}",
+            stroked_paths(&frame)
+        );
+        let (_, label) = the_node(&tree, node, "TextWidget");
+        assert_eq!(b.x + b.width - (label.x + label.width), 6.0, "{scheme}");
+    }
+}
+
+/// A spin box is the line edit, 32 px tall, with its two arrows in the 20 x
+/// 10 halves of the column 2 px inside the trailing edge, in the arrow
+/// colour of the view's text; the step buttons paint nothing of their own.
+#[test]
+fn a_spin_box_is_a_line_edit_with_two_arrows() {
+    use teksilo_theme_kde::styles::arrow::ArrowDirection;
+    use teksilo_theme_kde::styles::spin_box::BreezeSpinArrowColors;
+    for (scheme, theme) in themes() {
+        let (mut tree, id) = placed(theme.clone(), SpinBox::new(Signal::new(3_i32), 0, 10));
+        let (_, b) = the_node(&tree, id, "BreezeSpinLayout");
+        assert_eq!(b.height, 32.0, "{scheme}");
+        let frame = rerender(&mut tree);
+        let rest = rgba8_of(theme.colors.border_strong);
+        let outline = painted(&frame)
+            .into_iter()
+            .find(|p| p.stroke > 0.0 && p.color == rest)
+            .unwrap_or_else(|| panic!("{scheme}: no lifted outline in {:?}", painted(&frame)));
+        assert_eq!(
+            outline.screen,
+            [b.x + 0.5, b.y + 0.5, b.width - 1.0, b.height - 1.0]
+        );
+        assert!(
+            painted(&frame).iter().any(|p| p.stroke == 0.0
+                && p.color == sample(scheme, "spin_box.normal", 50, 16)
+                && p.screen == outline.screen),
+            "{scheme}: no view fill on the frame"
+        );
+        assert_ne!(
+            sample(scheme, "spin_box.normal", 0, 16),
+            rest,
+            "{scheme}: the premise of D6"
+        );
+        let arrow = rgba8_of(BreezeSpinArrowColors::resolve(&theme, true, false, false).arrow);
+        let x = b.x + b.width - 22.0;
+        let up = teksilo_canvas::Rect::new(x, b.y + 6.0, 20.0, 10.0);
+        let down = teksilo_canvas::Rect::new(x, b.y + 16.0, 20.0, 10.0);
+        let paths = stroked_paths(&frame);
+        assert_eq!(
+            paths,
+            vec![
+                (arrow, arrow_at(up, ArrowDirection::Up)),
+                (arrow, arrow_at(down, ArrowDirection::Down)),
+            ],
+            "{scheme}: only Breeze's two arrows"
+        );
+        // The step buttons press on Breeze's halves.
+        let steps = nodes_named(&tree, id, "StepButton");
+        assert_eq!(steps.len(), 2, "{scheme}");
+        assert_eq!(tree.bounds(steps[0]), up, "{scheme}: the up half");
+        assert_eq!(tree.bounds(steps[1]), down, "{scheme}: the down half");
+    }
+}
+
+/// Under the pointer the frame is outlined in the hover colour and the
+/// arrow of the half under it turns to the hover colour; a press there
+/// still steps the value.
+#[test]
+fn a_hovered_spin_box_half_turns_to_the_hover_colour() {
+    use teksilo_theme_kde::styles::spin_box::BreezeSpinArrowColors;
+    for (scheme, theme) in themes() {
+        let value = Signal::new(3_i32);
+        let (mut tree, id) = placed(theme.clone(), SpinBox::new(value.clone(), 0, 10));
+        let steps = nodes_named(&tree, id, "StepButton");
+        let up = tree.bounds(steps[0]);
+        tree.pointer_move(up.center());
+        let frame = rerender(&mut tree);
+        let c = BreezeSpinArrowColors::resolve(&theme, true, false, false);
+        let paths = stroked_paths(&frame);
+        assert_eq!(paths.len(), 2, "{scheme}");
+        assert_eq!(paths[0].0, rgba8_of(c.hover), "{scheme}: the up arrow");
+        assert_eq!(paths[1].0, rgba8_of(c.arrow), "{scheme}: the down arrow");
+        assert!(
+            strokes(&frame).contains(&sample(scheme, "spin_box.hover", 0, 16)),
+            "{scheme}: the hover outline in {:?}",
+            strokes(&frame)
+        );
+        tree.pointer_down_button(up.center(), PointerButton::Primary);
+        tree.pointer_up_button(up.center(), PointerButton::Primary);
+        assert_eq!(value.get(), 4, "{scheme}: the up half steps");
+    }
+}
+
+/// Right to left, the column is 2 px inside the left edge.
+#[test]
+fn right_to_left_mirrors_the_spin_box() {
+    use teksilo_core::environment::LayoutDirection;
+    for (scheme, theme) in themes() {
+        let mut tree = tree_with(theme.clone());
+        tree.set_layout_direction(LayoutDirection::RightToLeft);
+        let root = tree.add(VStack::new().child(HStack::new().child(SpinBox::new(
+            Signal::new(3_i32),
+            0,
+            10,
+        ))));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let (_, b) = the_node(&tree, root, "BreezeSpinLayout");
+        let steps = nodes_named(&tree, root, "StepButton");
+        assert_eq!(
+            tree.bounds(steps[0]),
+            teksilo_canvas::Rect::new(b.x + 2.0, b.y + 6.0, 20.0, 10.0),
+            "{scheme}"
+        );
+    }
+}
+
+/// A disabled spin box: the disabled view fill in the disabled outline, its
+/// arrows in the arrow colour of the disabled view's text.
+#[test]
+fn a_disabled_spin_box_paints_the_disabled_colours() {
+    use teksilo_theme_kde::styles::spin_box::BreezeSpinArrowColors;
+    for (scheme, theme) in themes() {
+        let (mut tree, _) = placed(
+            theme.clone(),
+            SpinBox::new(Signal::new(3_i32), 0, 10).enabled(false),
+        );
+        let frame = rerender(&mut tree);
+        assert!(
+            fills(&frame).contains(&sample(scheme, "line_edit.disabled", 75, 16)),
+            "{scheme}"
+        );
+        assert!(strokes(&frame).contains(&rgba8_of(theme.colors.border_disabled)));
+        let arrow = rgba8_of(BreezeSpinArrowColors::resolve(&theme, true, false, true).arrow);
+        assert!(
+            stroked_paths(&frame).iter().all(|(c, _)| *c == arrow),
+            "{scheme}"
+        );
+    }
+}
+
+/// A slider at 30 % in a 200 px node, as Plasma's: the groove's two parts,
+/// the handle's face, its D6 outline, its shadow ring.
+fn slider_at(
+    theme: &Theme,
+    value: f32,
+    direction: teksilo_core::environment::LayoutDirection,
+    slider: impl FnOnce(Signal<f32>) -> Slider,
+) -> (WidgetTree, WidgetId, Signal<f32>) {
+    let value = Signal::new(value);
+    let mut tree = tree_with(theme.clone());
+    tree.set_layout_direction(direction);
+    let root = tree.add(
+        VStack::new().child(
+            teksilo_widgets::primitives::FixedSize::new()
+                .width(200.0)
+                .child(slider(value.clone())),
+        ),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    (tree, root, value)
+}
+
+fn slider_parts(
+    tree: &WidgetTree,
+    root: WidgetId,
+    value: f32,
+    direction: teksilo_core::environment::LayoutDirection,
+) -> (
+    teksilo_canvas::Rect,
+    teksilo_theme_kde::styles::slider::SliderGeometry,
+) {
+    use teksilo_core::styles::SliderOrientation;
+    let (_, b) = the_node(tree, root, "BreezeSliderBody");
+    let g = teksilo_theme_kde::styles::slider::slider_geometry(
+        b,
+        value,
+        SliderOrientation::Horizontal,
+        direction,
+        false,
+    );
+    (b, g)
+}
+
+fn inset(r: teksilo_canvas::Rect) -> [f32; 4] {
+    [r.x + 0.5, r.y + 0.5, r.width - 1.0, r.height - 1.0]
+}
+
+#[test]
+fn a_slider_is_breezes_groove_and_handle() {
+    use teksilo_core::environment::LayoutDirection;
+    let ltr = LayoutDirection::LeftToRight;
+    for (scheme, theme) in themes() {
+        let (mut tree, root, _) = slider_at(&theme, 0.3, ltr, |v| Slider::new(v, 0.0, 1.0));
+        let (b, g) = slider_parts(&tree, root, 0.3, ltr);
+        assert_eq!(b.height, 24.0, "{scheme}: raised to the target");
+        assert_eq!(g.handle.width, 20.0);
+        let frame = rerender(&mut tree);
+        let all = painted(&frame);
+        let groove = all
+            .iter()
+            .find(|p| p.stroke == 0.0 && p.screen == inset(g.groove))
+            .unwrap_or_else(|| panic!("{scheme}: no groove in {all:?}"));
+        assert!(
+            near(groove.color, sample(scheme, "slider.normal", 190, 10)),
+            "{scheme}: the groove {:?}",
+            groove.color
+        );
+        // Breeze's radius 3, which the canvas holds to half the thickness of
+        // the 5 px groove (6, inset by half the pen).
+        assert_eq!(groove.radius, 2.5);
+        let fill = all
+            .iter()
+            .find(|p| p.stroke == 0.0 && p.screen == inset(g.fill))
+            .unwrap_or_else(|| panic!("{scheme}: no fill in {all:?}"));
+        assert!(
+            near(fill.color, sample(scheme, "slider.normal", 10, 10)),
+            "{scheme}: the fill {:?}",
+            fill.color
+        );
+        let circles: Vec<_> = all
+            .iter()
+            .filter(|p| p.kind == ShapeKind::Circle && p.screen[2] == 17.0)
+            .collect();
+        let face = circles
+            .iter()
+            .find(|p| p.stroke == 0.0)
+            .unwrap_or_else(|| panic!("{scheme}: no handle face"));
+        assert_eq!(
+            face.color,
+            sample(scheme, "slider.normal", 63, 10),
+            "{scheme}"
+        );
+        assert_eq!(
+            [face.screen[0], face.screen[1]],
+            [g.handle.x + 1.5, g.handle.y + 1.5],
+            "{scheme}: the box inset by 1, then stroked"
+        );
+        let outline = rgba8_of(theme.colors.border_strong);
+        assert!(
+            circles
+                .iter()
+                .any(|p| p.stroke == 1.0 && p.color == outline),
+            "{scheme}: no lifted outline in {circles:?}"
+        );
+        assert_ne!(
+            sample(scheme, "slider.normal", 63, 1),
+            outline,
+            "{scheme}: the premise of D6"
+        );
+        assert!(
+            circles.iter().any(|p| p.stroke == 1.0 && p.color == SHADOW),
+            "{scheme}: no shadow ring"
+        );
+    }
+}
+
+/// Hovered, the handle is outlined in the hover colour; focused from the
+/// keyboard, in the lifted focus colour, with the focus frame around it;
+/// dragged, it casts no shadow.
+#[test]
+fn a_slider_handle_shows_hover_focus_and_press() {
+    use teksilo_core::environment::LayoutDirection;
+    let ltr = LayoutDirection::LeftToRight;
+    for (scheme, theme) in themes() {
+        let hover = theme
+            .extension::<KdePalette>()
+            .unwrap()
+            .colors(teksilo_theme_kde::scheme::ColorState::Active)
+            .hover;
+        let (mut tree, root, _) = slider_at(&theme, 0.3, ltr, |v| Slider::new(v, 0.0, 1.0));
+        let (_, g) = slider_parts(&tree, root, 0.3, ltr);
+        tree.pointer_move(g.handle.center());
+        let frame = rerender(&mut tree);
+        assert!(
+            painted(&frame).iter().any(|p| p.kind == ShapeKind::Circle
+                && p.stroke == 1.0
+                && p.color == rgba8_of(hover)),
+            "{scheme}: no hover outline"
+        );
+        tree.pointer_down_button(g.handle.center(), PointerButton::Primary);
+        let c = g.handle.center();
+        tree.pointer_move(teksilo_canvas::Point::new(c.x + 12.0, c.y));
+        let frame = rerender(&mut tree);
+        assert!(
+            !strokes(&frame).contains(&SHADOW),
+            "{scheme}: a dragged handle casts no shadow"
+        );
+        tree.pointer_up_button(g.handle.center(), PointerButton::Primary);
+
+        let (mut tree, root, _) = slider_at(&theme, 0.3, ltr, |v| Slider::new(v, 0.0, 1.0));
+        let (_, g) = slider_parts(&tree, root, 0.3, ltr);
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        let frame = rerender(&mut tree);
+        let focus = rgba8_of(theme.colors.border_focused);
+        assert!(
+            painted(&frame)
+                .iter()
+                .any(|p| p.kind == ShapeKind::Circle && p.stroke == 1.0 && p.color == focus),
+            "{scheme}: no focus outline"
+        );
+        let ring = rgba8_of(theme.colors.focus_ring);
+        let frame_ring = painted(&frame)
+            .into_iter()
+            .find(|p| p.color == ring && p.stroke == 2.0)
+            .unwrap_or_else(|| panic!("{scheme}: no focus frame"));
+        assert_eq!(
+            frame_ring.screen,
+            [g.handle.x, g.handle.y, 20.0, 20.0],
+            "{scheme}: from 1 px inside the box to 1 px outside it"
+        );
+    }
+}
+
+/// Disabled, only the groove's background part is painted, in the disabled
+/// colours, and the handle is the disabled button colour.
+#[test]
+fn a_disabled_slider_paints_only_the_groove_in_the_disabled_colours() {
+    use teksilo_core::environment::LayoutDirection;
+    let ltr = LayoutDirection::LeftToRight;
+    for (scheme, theme) in themes() {
+        let (mut tree, root, _) = slider_at(&theme, 0.3, ltr, |v| {
+            Slider::new(v, 0.0, 1.0).enabled(false)
+        });
+        let (_, g) = slider_parts(&tree, root, 0.3, ltr);
+        let frame = rerender(&mut tree);
+        let all = painted(&frame);
+        assert!(
+            !all.iter().any(|p| p.screen == inset(g.fill)),
+            "{scheme}: no fill part"
+        );
+        let groove = all
+            .iter()
+            .find(|p| p.stroke == 0.0 && p.screen == inset(g.groove))
+            .unwrap_or_else(|| panic!("{scheme}: no groove"));
+        assert!(
+            near(groove.color, sample(scheme, "slider.disabled", 190, 10)),
+            "{scheme}: {:?}",
+            groove.color
+        );
+        assert!(
+            all.iter().any(|p| p.kind == ShapeKind::Circle
+                && p.stroke == 0.0
+                && p.color == sample(scheme, "slider.disabled", 63, 10)),
+            "{scheme}: the disabled handle"
+        );
+    }
+}
+
+/// A vertical slider has its minimum at the bottom, and its groove is
+/// filled from the top down to the handle's centre, as Breeze fills a
+/// vertical slider that is not inverted (spec k.5.10); a press puts the
+/// value where the handle is then painted.
+#[test]
+fn a_vertical_slider_fills_from_the_top_to_the_handle() {
+    use teksilo_core::environment::LayoutDirection;
+    use teksilo_core::styles::SliderOrientation;
+    use teksilo_tokens::Orientation;
+    let ltr = LayoutDirection::LeftToRight;
+    for (scheme, theme) in themes() {
+        let value = Signal::new(0.25_f32);
+        let mut tree = tree_with(theme.clone());
+        let root = tree.add(
+            VStack::new().child(
+                teksilo_widgets::primitives::FixedSize::new()
+                    .height(200.0)
+                    .child(
+                        Slider::new(value.clone(), 0.0, 1.0)
+                            .orientation(Orientation::Vertical)
+                            .jump_on_press(true),
+                    ),
+            ),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let (_, b) = the_node(&tree, root, "BreezeSliderBody");
+        assert_eq!(b.height, 200.0, "{scheme}");
+        assert_eq!(b.width, 24.0, "{scheme}: raised to the target");
+        let g = teksilo_theme_kde::styles::slider::slider_geometry(
+            b,
+            0.25,
+            SliderOrientation::Vertical,
+            ltr,
+            false,
+        );
+        assert_eq!(
+            g.handle.center().y,
+            b.y + b.height - 10.0 - 180.0 * 0.25,
+            "{scheme}: a quarter up from the bottom"
+        );
+        let frame = rerender(&mut tree);
+        let fill = painted(&frame)
+            .into_iter()
+            .find(|p| p.stroke == 0.0 && p.screen == inset(g.fill))
+            .unwrap_or_else(|| panic!("{scheme}: no fill"));
+        assert_eq!(fill.screen[1], b.y + 0.5, "{scheme}: from the top");
+        assert_eq!(
+            fill.screen[1] + fill.screen[3],
+            g.handle.center().y - 0.5,
+            "{scheme}: down to the handle's centre"
+        );
+        assert!(
+            near(fill.color, sample(scheme, "slider.normal", 10, 10)),
+            "{scheme}: the fill {:?}",
+            fill.color
+        );
+
+        // 55 px down from the top, a quarter of the 180 px travel past the
+        // handle's half from the maximum: 75 %.
+        let at = teksilo_canvas::Point::new(b.x + b.width * 0.5, b.y + 55.0);
+        tree.pointer_down_button(at, PointerButton::Primary);
+        tree.pointer_up_button(at, PointerButton::Primary);
+        let v = value.get();
+        assert!(
+            (v - 0.75).abs() < 1e-4,
+            "{scheme}: the top is the high end, {v}"
+        );
+        let frame = rerender(&mut tree);
+        let face = painted(&frame)
+            .into_iter()
+            .find(|p| p.kind == ShapeKind::Circle && p.stroke == 0.0 && p.screen[2] == 17.0)
+            .unwrap_or_else(|| panic!("{scheme}: no handle"));
+        assert!(
+            (face.screen[1] + 8.5 - at.y).abs() < 0.01,
+            "{scheme}: the handle is under the pointer"
+        );
+        let g = teksilo_theme_kde::styles::slider::slider_geometry(
+            b,
+            v,
+            SliderOrientation::Vertical,
+            ltr,
+            false,
+        );
+        let fill = painted(&frame)
+            .into_iter()
+            .find(|p| p.stroke == 0.0 && p.screen == inset(g.fill))
+            .unwrap_or_else(|| panic!("{scheme}: no fill at {v}"));
+        assert_eq!(fill.screen[3], 55.0 - 1.0, "{scheme}: the top 55 px, inset");
+    }
+}
+
+/// Right to left, the handle, the fill and the ticks run from the right,
+/// and a press puts the value where the handle is then painted: the paint
+/// and the `Slider`'s pointer mapping agree.
+#[test]
+fn right_to_left_mirrors_the_slider_and_keeps_the_handle_under_the_pointer() {
+    use teksilo_core::environment::LayoutDirection;
+    let rtl = LayoutDirection::RightToLeft;
+    for (scheme, theme) in themes() {
+        let (mut tree, root, value) = slider_at(&theme, 0.25, rtl, |v| {
+            Slider::new(v, 0.0, 1.0).jump_on_press(true)
+        });
+        let (b, g) = slider_parts(&tree, root, 0.25, rtl);
+        assert_eq!(
+            g.handle.x,
+            b.x + b.width - 20.0 - (b.width - 20.0) * 0.25,
+            "{scheme}: a quarter in from the right"
+        );
+        let frame = rerender(&mut tree);
+        let fill = painted(&frame)
+            .into_iter()
+            .find(|p| p.stroke == 0.0 && p.screen == inset(g.fill))
+            .unwrap_or_else(|| panic!("{scheme}: no mirrored fill"));
+        assert_eq!(fill.screen[0] + fill.screen[2], b.x + b.width - 0.5);
+
+        // 55 px in from the left, a quarter of the 180 px travel past the
+        // handle's half: 75 %, on the slider's step.
+        let at = teksilo_canvas::Point::new(b.x + 55.0, b.y + b.height * 0.5);
+        tree.pointer_down_button(at, PointerButton::Primary);
+        tree.pointer_up_button(at, PointerButton::Primary);
+        let v = value.get();
+        assert!(
+            (v - 0.75).abs() < 1e-4,
+            "{scheme}: the left is the high end, {v}"
+        );
+        let frame = rerender(&mut tree);
+        let (_, g) = slider_parts(&tree, root, v, rtl);
+        let face = painted(&frame)
+            .into_iter()
+            .find(|p| p.kind == ShapeKind::Circle && p.stroke == 0.0 && p.screen[2] == 17.0)
+            .unwrap_or_else(|| panic!("{scheme}: no handle"));
+        assert!(
+            (face.screen[0] + 8.5 - at.x).abs() < 0.01,
+            "{scheme}: the handle is under the pointer"
+        );
+        assert!((g.handle.center().x - at.x).abs() < 0.01);
+    }
+
+    // The ticks of a discrete slider mirror with it: the minimum's tick is at
+    // the right, in the highlight up to the value.
+    let theme = kde::light();
+    let (mut tree, root, _) =
+        slider_at(&theme, 0.5, rtl, |v| Slider::new(v, 0.0, 1.0).tick_count(3));
+    let (_, b) = the_node(&tree, root, "BreezeSliderBody");
+    let frame = rerender(&mut tree);
+    let colors =
+        teksilo_theme_kde::styles::slider::BreezeSliderColors::resolve(&theme, true, false, false);
+    let mut ticks: Vec<([u8; 4], f32)> = frame
+        .decorations
+        .iter()
+        .filter(|d| d.rect[2] == 1.0 && d.rect[3] == 8.0)
+        .map(|d| (rgba8(d.color), d.rect[0] + 0.5 - b.x))
+        .collect();
+    ticks.sort_by(|a, b| a.1.total_cmp(&b.1));
+    assert_eq!(
+        ticks,
+        vec![
+            (rgba8_of(colors.tick_off), 10.0),
+            (rgba8_of(colors.tick_on), 100.0),
+            (rgba8_of(colors.tick_on), 190.0),
+        ]
+    );
 }

@@ -164,10 +164,18 @@ by crate for clarity, not because crates version independently.
   a 36 px track, moving and changing colour on the curves KDE uses. A
   `TextInput` is the line edit, 32 px tall at Plasma's default font, its
   1 px outline turning to the focus colour while it has focus, and it
-  honours `TextInput::min_height`. The outlines of an empty check box,
-  radio button and field, and of a switch on or off, are strengthened to a
-  3:1 contrast, keeping their hue. Other widgets draw Teksilo's own chrome
-  in these colours and shapes.
+  honours `TextInput::min_height`. A `ComboBox` is the push button with a
+  chevron at its trailing edge, 32 px tall at Plasma's default font, filled
+  toward the highlight while its list is open. A `SpinBox` is the line edit
+  with a 20 px column of two arrows and no buttons drawn, each arrow taking
+  the hover colour under the pointer. A `Slider` is Breeze's 6 px groove,
+  filled toward the highlight up to a 17 px round handle in the button
+  colour, with tick marks below it when it has a tick count, mirrored right
+  to left; its node grows to the density's target size. The outlines of an
+  empty check box, radio button and field, of a switch on or off and of a
+  slider's handle, and a slider's tick marks, are strengthened to a 3:1
+  contrast, keeping their hue. Other widgets draw Teksilo's own chrome in
+  these colours and shapes.
 
 #### Platform
 

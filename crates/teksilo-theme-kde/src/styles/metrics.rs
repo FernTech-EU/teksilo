@@ -17,7 +17,9 @@ use teksilo_tokens::{InputTokens, TargetRole, TypographyTokens};
 
 use crate::geometry::{
     BUTTON_MARGIN_WIDTH, BreezeGeometry, CHECKBOX_FOCUS_MARGIN, CHECKBOX_ITEM_SPACING,
-    CHECKBOX_SIZE, FRAME_WIDTH, LARGE_ICON_SIZE, LINE_EDIT_FRAME_WIDTH, MEDIUM_ICON_SIZE,
+    CHECKBOX_SIZE, COMBO_BOX_FRAME_WIDTH, FRAME_WIDTH, LARGE_ICON_SIZE, LINE_EDIT_FRAME_WIDTH,
+    MEDIUM_ICON_SIZE, SLIDER_CONTROL_THICKNESS, SLIDER_GROOVE_THICKNESS, SLIDER_TICK_LENGTH,
+    SLIDER_TICK_MARGIN, SPIN_BOX_ARROW_BUTTON_WIDTH, SPIN_BOX_FRAME_WIDTH,
     TOOL_BUTTON_MARGIN_WIDTH,
 };
 use crate::shape::BREEZE_PEN_WIDTH;
@@ -221,6 +223,150 @@ pub fn breeze_tool_button_sizes() -> BreezeToolButtonSizes {
     breeze_tool_button_sizes_for(&InputTokens::default())
 }
 
+/// `[S]` The square a combo box's arrow is centred in, at the trailing edge
+/// inside the 2 px frame margin.
+pub const COMBO_ARROW_BOX: f32 = 20.0;
+/// `[S]` What a combo box adds to its label's width: the 6 px frame on both
+/// sides of the label, the arrow box, and 2 and 4 more. 38.
+pub const COMBO_CHROME_WIDTH: f32 = 2.0 * COMBO_BOX_FRAME_WIDTH + COMBO_ARROW_BOX + 2.0 + 4.0;
+/// `[derived]` The space between a combo box's label and its arrow box: the
+/// chrome width less the leading frame, the arrow box and the trailing frame
+/// margin. 10.
+pub const COMBO_ARROW_GAP: f32 =
+    COMBO_CHROME_WIDTH - COMBO_BOX_FRAME_WIDTH - COMBO_ARROW_BOX - FRAME_WIDTH;
+/// `[S]` The tallest a spin box's arrow column is, centred in the frame.
+pub const SPIN_ARROW_MAX_HEIGHT: f32 = 20.0;
+
+/// `[Hp]` The radius of a slider's groove, on the groove inset by half the
+/// pen.
+pub const SLIDER_GROOVE_RADIUS: f32 = 3.0;
+/// `[Hp]` How much of the window text a slider's groove is filled with over
+/// the window: 0.2 times 0.7.
+pub const SLIDER_GROOVE_ALPHA: f64 = 0.2 * 0.7;
+/// `[Hp]` How much of the highlight fills the groove up to the handle, over
+/// the window.
+pub const SLIDER_FILL_ALPHA: f64 = 0.7;
+/// `[measured-qt]` A slider's length when nothing proposes one: Qt's size
+/// hint for a Breeze slider, 84 at every font size.
+pub const SLIDER_DEFAULT_LENGTH: f32 = 84.0;
+/// `[derived]` How far a row of tick marks reaches past the handle box:
+/// the groove's half thickness, the 2 px gap and the 8 px tick, less half
+/// the handle box. 3, the step Qt measures for each side with ticks.
+pub const SLIDER_TICK_OVERHANG: f32 =
+    SLIDER_GROOVE_THICKNESS * 0.5 + SLIDER_TICK_MARGIN + SLIDER_TICK_LENGTH
+        - SLIDER_CONTROL_THICKNESS * 0.5;
+
+// The groove fits inside the handle box, and the ticks clear the groove.
+const _: () = assert!(SLIDER_GROOVE_THICKNESS < SLIDER_CONTROL_THICKNESS);
+const _: () = assert!(SLIDER_TICK_OVERHANG == 3.0);
+const _: () = assert!(COMBO_CHROME_WIDTH == 38.0);
+const _: () = assert!(COMBO_ARROW_GAP == 10.0);
+
+/// The dimensions of a combo box, a push-button frame holding the selected
+/// item and an arrow.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BreezeComboMetrics {
+    /// `[S]` The combo box's height, at least: `max(H, 20) + 2 x 6`, through
+    /// the density ladder. 32 at Compact for the Breeze typography.
+    pub height: f32,
+    /// `[S]` The space before the label: the 6 px combo-box frame, scaled by
+    /// the density's spacing.
+    pub padding_leading: f32,
+    /// `[derived]` The space between the label and the arrow box,
+    /// [`COMBO_ARROW_GAP`], scaled by the density's spacing.
+    pub arrow_gap: f32,
+    /// `[S]` The arrow box, [`COMBO_ARROW_BOX`]. Painted, so it does not
+    /// scale.
+    pub arrow_box: f32,
+    /// `[M]` The space after the arrow box: the 2 px frame margin. It holds
+    /// the frame, so it does not scale.
+    pub padding_trailing: f32,
+}
+
+impl BreezeComboMetrics {
+    /// Everything the combo box adds to its label's width.
+    pub fn chrome_width(&self) -> f32 {
+        self.padding_leading + self.arrow_gap + self.arrow_box + self.padding_trailing
+    }
+}
+
+/// The combo box dimensions at the density of `tokens`, for `typography`.
+pub fn breeze_combo_metrics_for(
+    tokens: &InputTokens,
+    typography: &TypographyTokens,
+) -> BreezeComboMetrics {
+    let g = geometry_of(typography);
+    BreezeComboMetrics {
+        height: dp(g.combo_box_height, TargetRole::Target, tokens),
+        padding_leading: spacing(COMBO_BOX_FRAME_WIDTH, tokens),
+        arrow_gap: spacing(COMBO_ARROW_GAP, tokens),
+        arrow_box: COMBO_ARROW_BOX,
+        padding_trailing: FRAME_WIDTH,
+    }
+}
+
+/// [`breeze_combo_metrics_for`] at the Compact density and the Breeze
+/// typography.
+pub fn breeze_combo_metrics() -> BreezeComboMetrics {
+    breeze_combo_metrics_for(
+        &InputTokens::default(),
+        &crate::typography::breeze_typography(),
+    )
+}
+
+/// The dimensions of a spin box: a line-edit frame holding the field and a
+/// column of two arrows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BreezeSpinMetrics {
+    /// `[S]` The spin box's height, at least: the line edit's inner height
+    /// `max(H, 14) + 2` and the 6 px frame on each side, at least 20,
+    /// through the density ladder. 32 at Compact for the Breeze typography.
+    pub height: f32,
+    /// `[M]` The space before the field: the 6 px spin-box frame, scaled by
+    /// the density's spacing.
+    pub padding_leading: f32,
+    /// `[M]` The width of the arrow column, [`SPIN_BOX_ARROW_BUTTON_WIDTH`].
+    /// Painted, so it does not scale.
+    pub arrow_width: f32,
+    /// `[M]` The space after the arrow column: the 2 px frame margin.
+    pub padding_trailing: f32,
+}
+
+impl BreezeSpinMetrics {
+    /// `[S]` The two halves of the arrow column in a frame `height` tall:
+    /// the column is `min(inner height, 20)` tall, the inner height being the
+    /// frame less the 6 px frame above and below, and each half is the
+    /// column halved and rounded down. 10 and 10 at every density for the
+    /// Breeze typography.
+    pub fn arrow_half(height: f32) -> f32 {
+        let inner = (height - 2.0 * SPIN_BOX_FRAME_WIDTH).max(0.0);
+        (inner.min(SPIN_ARROW_MAX_HEIGHT) * 0.5).floor()
+    }
+}
+
+/// The spin box dimensions at the density of `tokens`, for `typography`.
+pub fn breeze_spin_metrics_for(
+    tokens: &InputTokens,
+    typography: &TypographyTokens,
+) -> BreezeSpinMetrics {
+    let g = geometry_of(typography);
+    BreezeSpinMetrics {
+        height: dp(g.spin_box_height, TargetRole::Target, tokens),
+        padding_leading: spacing(SPIN_BOX_FRAME_WIDTH, tokens),
+        arrow_width: SPIN_BOX_ARROW_BUTTON_WIDTH,
+        padding_trailing: FRAME_WIDTH,
+    }
+}
+
+/// [`breeze_spin_metrics_for`] at the Compact density and the Breeze
+/// typography.
+pub fn breeze_spin_metrics() -> BreezeSpinMetrics {
+    breeze_spin_metrics_for(
+        &InputTokens::default(),
+        &crate::typography::breeze_typography(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,6 +478,48 @@ mod tests {
             "never narrower than the box"
         );
         assert_eq!(indicator_body_width(0.0), 24.0);
+    }
+
+    #[test]
+    fn the_combo_box_is_breezes_and_grows_with_the_density() {
+        let m = breeze_combo_metrics();
+        assert_eq!(m.height, 32.0);
+        assert_eq!(m.padding_leading, 6.0);
+        assert_eq!(m.arrow_gap, 10.0);
+        assert_eq!(m.arrow_box, 20.0);
+        assert_eq!(m.padding_trailing, 2.0);
+        // Breeze's width rule: the label plus 12 + 20 + 2 + 4.
+        assert_eq!(m.chrome_width(), 38.0);
+        let t = crate::typography::breeze_typography();
+        let comfortable = breeze_combo_metrics_for(&at(TargetDensity::Comfortable), &t);
+        let touch = breeze_combo_metrics_for(&at(TargetDensity::Touch), &t);
+        assert_eq!(comfortable.height, 32.0, "32 already clears 32");
+        assert_eq!(touch.height, 44.0);
+        for m in [comfortable, touch] {
+            assert_eq!(m.arrow_box, 20.0, "the painted box does not scale");
+            assert_eq!(m.padding_trailing, 2.0);
+            assert!(m.padding_leading > 6.0 && m.arrow_gap > 10.0);
+        }
+    }
+
+    #[test]
+    fn the_spin_box_has_a_twenty_pixel_column_of_two_ten_pixel_halves() {
+        let m = breeze_spin_metrics();
+        assert_eq!(m.height, 32.0);
+        assert_eq!(m.padding_leading, 6.0);
+        assert_eq!(m.arrow_width, 20.0);
+        assert_eq!(m.padding_trailing, 2.0);
+        assert_eq!(BreezeSpinMetrics::arrow_half(32.0), 10.0);
+        let t = crate::typography::breeze_typography();
+        let touch = breeze_spin_metrics_for(&at(TargetDensity::Touch), &t);
+        assert_eq!(touch.height, 44.0);
+        assert_eq!(touch.arrow_width, 20.0);
+        // The column stops at 20, so a taller frame keeps the halves.
+        assert_eq!(BreezeSpinMetrics::arrow_half(touch.height), 10.0);
+        // A frame too short for a 20 px column halves what is left, rounded
+        // down: 29 tall leaves 17, two 8 px halves.
+        assert_eq!(BreezeSpinMetrics::arrow_half(29.0), 8.0);
+        assert_eq!(BreezeSpinMetrics::arrow_half(4.0), 0.0);
     }
 
     #[test]

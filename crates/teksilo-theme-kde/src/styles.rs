@@ -16,18 +16,27 @@
 //!   switch, a handle as tall as its track's indicator, which share their
 //!   colours through [`indicator`];
 //! - the line edit, a view-coloured frame whose outline turns to the focus
-//!   colour, in [`text_input`].
+//!   colour, in [`text_input`];
+//! - the combo box, a push button with a chevron at its trailing edge, and
+//!   the spin box, a line edit with a column of two chevrons, which share
+//!   the chevron, [`arrow`];
+//! - the slider, a 6 px groove filled toward the highlight up to a 17 px
+//!   round handle, in [`slider`].
 //!
 //! The dimensions they are built with, all derived from [`crate::geometry`]
 //! and the density ladder, are collected in [`metrics`].
 
+pub mod arrow;
 pub mod button;
 pub mod checkbox;
 pub mod chrome;
+pub mod combo_box;
 pub mod icon_button;
 pub mod indicator;
 pub mod metrics;
 pub mod radio;
+pub mod slider;
+pub mod spin_box;
 pub mod split_button;
 pub mod text_input;
 pub mod toggle;

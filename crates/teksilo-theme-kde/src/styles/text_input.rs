@@ -75,13 +75,13 @@ impl TextInputStyle for BreezeTextInputStyle {
         }
         let theme = ctx.theme();
         let m = breeze_field_metrics_for(&theme.input, &theme.typography);
-        let chrome = ctx.add(BreezeFieldChrome {
-            is_focused: cfg.is_focused.clone(),
-            is_hovered: cfg.is_hovered.clone(),
-            is_disabled: cfg.is_disabled.clone(),
-            validation: cfg.validation.clone(),
-            underline: cfg.variant == TextInputVariant::Underline,
-        });
+        let chrome = ctx.add(BreezeFieldChrome::new(
+            cfg.is_focused.clone(),
+            cfg.is_hovered.clone(),
+            cfg.is_disabled.clone(),
+            cfg.validation.clone(),
+            cfg.variant == TextInputVariant::Underline,
+        ));
         let padded = ctx.add(
             Padding::new(0.0, m.padding_horizontal, 0.0, m.padding_horizontal).child(cfg.editor),
         );
@@ -204,6 +204,29 @@ pub struct BreezeFieldChrome {
     is_disabled: Signal<bool>,
     validation: Signal<TextInputValidationLevel>,
     underline: bool,
+}
+
+impl BreezeFieldChrome {
+    /// A field frame outlined by the focus, hover and disabled states and a
+    /// validation level; with `underline`, only its bottom edge is outlined.
+    ///
+    /// The spin box frames its field with it, and a combo box's `Underline`
+    /// variant draws its bottom edge.
+    pub fn new(
+        is_focused: Signal<bool>,
+        is_hovered: Signal<bool>,
+        is_disabled: Signal<bool>,
+        validation: Signal<TextInputValidationLevel>,
+        underline: bool,
+    ) -> Self {
+        Self {
+            is_focused,
+            is_hovered,
+            is_disabled,
+            validation,
+            underline,
+        }
+    }
 }
 
 impl std::fmt::Debug for BreezeFieldChrome {
