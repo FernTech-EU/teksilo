@@ -463,7 +463,7 @@ fn the_menu_row_declares_an_on_accent_highlight() {
     use teksilo_core::styles::MenuItemStyle;
     use teksilo_tokens::TextRole;
 
-    let style = teksilo_theme_macos::styles::menu_item::MacOsMenuItemStyle;
+    let style = teksilo_theme_macos::styles::menu_item::MacOsMenuItemStyle::default();
     assert_eq!(style.highlighted_label_role(), Some(TextRole::OnAccent));
     // …and the theme actually installs that style rather than a recipe.
     for theme in themes() {

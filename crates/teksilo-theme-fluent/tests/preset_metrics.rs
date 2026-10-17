@@ -499,3 +499,135 @@ fn a_scroll_bar_floors_its_thumb_at_the_fluent_minimum_at_every_density() {
         assert!((slot.min_thumb_length(&theme.input) - preset).abs() < 1e-3);
     }
 }
+
+// ── Menu rows ──────────────────────────────────────────────────────────
+
+// The tappable row around the menu, which denies the miss-only slop pass so
+// the conformance verdict below is the row's own, is
+// `teksilo_target_conformance::in_tappable_row`, imported rather than copied.
+use teksilo_target_conformance::in_tappable_row;
+
+/// A `MenuList` at `density` under `theme`, in a tappable row: the laid-out
+/// height of each of its four `MenuItem` rows, of its separator, and the
+/// `(width, right edge minus the row's right edge)` of the submenu row's
+/// chevron column, the trailing column `MenuItem` builds from the style's
+/// metrics. Also the number of conformance failures the gate reports for
+/// the row.
+///
+/// Built *at* the density, never switched into it: a row reads its style in
+/// `build()`.
+fn menu_geometry(theme: &Theme, density: TargetDensity) -> (Vec<f32>, f32, (f32, f32), usize) {
+    use teksilo_core::accessibility::target_audit::target_audit;
+    use teksilo_core::signal::Signal;
+    use teksilo_widgets::primitives::FixedSize;
+    use teksilo_widgets::{MenuItem, MenuList};
+
+    let theme = theme.with_density(density);
+    let icon_column = theme
+        .style_slots
+        .menu_item
+        .as_ref()
+        .expect("the preset installs a menu-item slot")
+        .metrics()
+        .icon_column_width;
+    let mut tree = WidgetTree::new()
+        .with_theme(theme)
+        .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+    let menu = MenuList::new()
+        .item(MenuItem::new(lit!("Open")))
+        .item(MenuItem::new(lit!("Save")).shortcut_label("Ctrl+S"))
+        .separator()
+        .item(MenuItem::new(lit!("Checkable")).checked(Signal::new(true)))
+        .item(MenuItem::submenu(lit!("Submenu"), || {
+            Box::new(MenuList::new().item(MenuItem::new(lit!("Inner"))))
+        }));
+    let root = in_tappable_row(&mut tree, FixedSize::new().width(240.0).child(menu));
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+
+    let rows = nodes_named(&tree, root, "MenuItem");
+    assert_eq!(rows.len(), 4, "four rows");
+    let heights = rows.iter().map(|r| tree.bounds(*r).height).collect();
+    let separators = nodes_named(&tree, root, "MenuSeparator");
+    assert_eq!(separators.len(), 1, "one separator");
+    let separator = tree.bounds(separators[0]).height;
+
+    let submenu = tree.bounds(rows[3]);
+    let chevron = nodes_named(&tree, rows[3], "FixedSize")
+        .into_iter()
+        .map(|id| tree.bounds(id))
+        .filter(|b| (b.height - icon_column).abs() < 1e-4)
+        .max_by(|a, b| a.x.total_cmp(&b.x))
+        .expect("the submenu row has a chevron column");
+    let failures = target_audit(&tree, density)
+        .into_iter()
+        .filter(|v| v.rule.is_conformance_failure())
+        .count();
+    (
+        heights,
+        separator,
+        (chevron.width, chevron.right() - submenu.right()),
+        failures,
+    )
+}
+
+/// The line `MockTextBackend` measures for any text, whatever the theme's
+/// line height asks.
+const MOCK_LINE: f32 = 16.0;
+
+/// A Fluent menu row is WinUI's 37 dp at Compact and Comfortable, whose
+/// 32 dp target it already clears, and the 44 dp Touch target at Touch; the
+/// separator, 3 dp, and the trailing column, 11 dp, are scaled by the
+/// density's spacing factor (1.15 at Comfortable, 1.3 at Touch). No row
+/// fails the conformance gate. The menu style used to report its Compact
+/// metrics at every density, so a Touch separator and chevron column kept
+/// their Compact sizes inside rows laid out for Touch, and `MenuList` capped
+/// its height by the 37 dp row.
+///
+/// The laid-out row is the item height less the difference between the
+/// Body line box the shipped row arithmetic pads around (20 dp) and the
+/// line the mock backend measures ([`MOCK_LINE`]): the recipe derives its
+/// vertical padding from the nominal line box, a finding the conformance
+/// gate records against the menu row, not something this preset decides.
+#[test]
+fn a_menu_measures_the_fluent_rows_at_every_density() {
+    let expected = [
+        (TargetDensity::Compact, 37.0, 3.0, 11.0),
+        (TargetDensity::Comfortable, 37.0, 3.45, 12.65),
+        (TargetDensity::Touch, 44.0, 3.9, 14.3),
+    ];
+    for (density, item, separator, trailing) in expected {
+        for theme in [teksilo_theme_fluent::light(), teksilo_theme_fluent::dark()] {
+            let (rows, sep, (chevron, chevron_offset), failures) = menu_geometry(&theme, density);
+            let body = &theme.typography.body;
+            let short = body.size * body.line_height - MOCK_LINE;
+            assert_eq!(rows, vec![item - short; 4], "{density:?}: the row height");
+            assert!(
+                (sep - separator).abs() < 1e-3,
+                "{density:?}: the separator is {sep}, want {separator}"
+            );
+            assert!(
+                (chevron - trailing).abs() < 1e-3,
+                "{density:?}: the chevron column is {chevron}, want {trailing}"
+            );
+            assert!(
+                chevron_offset.abs() < 1e-3,
+                "{density:?}: the chevron column ends {chevron_offset} from the row's edge"
+            );
+            assert_eq!(failures, 0, "{density:?}: a conformance failure");
+        }
+        // The accessor half: what the installed slot tells a row asking it.
+        let theme = teksilo_theme_fluent::light().with_density(density);
+        let m = theme
+            .style_slots
+            .menu_item
+            .clone()
+            .expect("the preset installs a menu-item slot")
+            .metrics();
+        assert_eq!(m.item_height, item, "{density:?}");
+        assert!((m.separator_height - separator).abs() < 1e-3, "{density:?}");
+        assert!(
+            (m.trailing_column_width - trailing).abs() < 1e-3,
+            "{density:?}"
+        );
+    }
+}

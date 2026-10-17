@@ -923,12 +923,12 @@ are not a dimension.
 | `crates/teksilo-theme-fluent/src/styles/checkbox.rs` | 37 | `BOX_SIZE` | `20.0` | Target | visual fixed at `[WinUI]` 20 dp (below the floor); coarse hit via `hit_outset` |
 | `crates/teksilo-theme-fluent/src/styles/checkbox.rs` | 39 | `GLYPH_SIZE` | `12.0` | Decoration | fixed — glyph metric; follows text scale, not target density |
 | `crates/teksilo-theme-fluent/src/styles/checkbox.rs` | 41 | `STROKE` | `1.0` | Decoration | fixed — hairline stroke; scaling it thickens the design language |
-| `crates/teksilo-theme-fluent/src/styles/menu_item.rs` | 36 | `ITEM_HEIGHT` | `8.0 + 20.0 + 9.0` | Target | scales with `target_size` — `fluent_menu_item_recipe_for(&InputTokens)` |
-| `crates/teksilo-theme-fluent/src/styles/menu_item.rs` | 38 | `PADDING_H` | `11.0` | Spacing | scales with `spacing_factor` — `fluent_menu_item_recipe_for(&InputTokens)` |
-| `crates/teksilo-theme-fluent/src/styles/menu_item.rs` | 40 | `ICON_COLUMN` | `16.0` | Decoration | fixed — decorative geometry, no hit consequence |
-| `crates/teksilo-theme-fluent/src/styles/menu_item.rs` | 43 | `ICON_LABEL_GAP` | `12.0` | Spacing | scales with `spacing_factor` — `fluent_menu_item_recipe_for(&InputTokens)` |
-| `crates/teksilo-theme-fluent/src/styles/menu_item.rs` | 45 | `SHORTCUT_GAP` | `24.0` | Spacing | scales with `spacing_factor` — `fluent_menu_item_recipe_for(&InputTokens)` |
-| `crates/teksilo-theme-fluent/src/styles/menu_item.rs` | 47 | `SEPARATOR_HEIGHT` | `3.0` | Spacing | scales with `spacing_factor` — `fluent_menu_item_recipe_for(&InputTokens)` |
+| `crates/teksilo-theme-fluent/src/styles/menu_item.rs` | 43 | `ITEM_HEIGHT` | `8.0 + 20.0 + 9.0` | Target | scales with `target_size`: `fluent_menu_item_recipe_for(&InputTokens)` |
+| `crates/teksilo-theme-fluent/src/styles/menu_item.rs` | 45 | `PADDING_H` | `11.0` | Spacing | scales with `spacing_factor`: `fluent_menu_item_recipe_for(&InputTokens)` |
+| `crates/teksilo-theme-fluent/src/styles/menu_item.rs` | 47 | `ICON_COLUMN` | `16.0` | Decoration | fixed: decorative geometry, no hit consequence |
+| `crates/teksilo-theme-fluent/src/styles/menu_item.rs` | 50 | `ICON_LABEL_GAP` | `12.0` | Spacing | scales with `spacing_factor`: `fluent_menu_item_recipe_for(&InputTokens)` |
+| `crates/teksilo-theme-fluent/src/styles/menu_item.rs` | 52 | `SHORTCUT_GAP` | `24.0` | Spacing | scales with `spacing_factor`: `fluent_menu_item_recipe_for(&InputTokens)` |
+| `crates/teksilo-theme-fluent/src/styles/menu_item.rs` | 54 | `SEPARATOR_HEIGHT` | `3.0` | Spacing | scales with `spacing_factor`: `fluent_menu_item_recipe_for(&InputTokens)` |
 | `crates/teksilo-theme-fluent/src/styles/metrics.rs` | 50 | `FLUENT_CONTROL_HEIGHT` | `32.0` | Target | scales with `target_size` — the preset's `fluent_*_style_for(&InputTokens)` factories |
 | `crates/teksilo-theme-fluent/src/styles/radio.rs` | 45 | `OUTER` | `20.0` | Target | visual fixed at `[WinUI]` 20 dp (below the floor); coarse hit via `hit_outset` |
 | `crates/teksilo-theme-fluent/src/styles/radio.rs` | 47 | `STROKE` | `1.0` | Decoration | fixed — hairline stroke; scaling it thickens the design language |
@@ -1107,14 +1107,14 @@ are not a dimension.
 | `crates/teksilo-theme-macos/src/styles/chrome.rs` | 62 | `CONTROL_SHADOW_OFFSET_Y` | `0.5` | Decoration | fixed — elevation, not geometry |
 | `crates/teksilo-theme-macos/src/styles/chrome.rs` | 66 | `CONTROL_SHADOW_BLUR` | `1.5` | Decoration | fixed — elevation, not geometry |
 | `crates/teksilo-theme-macos/src/styles/chrome.rs` | 68 | `CATCH_LIGHT_THICKNESS` | `1.0` | Decoration | fixed — hairline rule |
-| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 41 | `ITEM_HEIGHT` | `22.0` | Target | visual fixed at AppKit's `[measured]` 22 dp; coarse hit via `hit_outset` — the gaps around it scale, `macos_menu_item_recipe_for` |
-| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 43 | `PADDING_H` | `10.0` | Spacing | scales with `spacing_factor` — `macos_menu_item_recipe_for(&InputTokens)` |
-| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 45 | `ICON_COLUMN` | `14.0` | Decoration | fixed — decorative geometry, no hit consequence |
-| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 48 | `ICON_LABEL_GAP` | `8.0` | Spacing | scales with `spacing_factor` — `macos_menu_item_recipe_for(&InputTokens)` |
-| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 51 | `SHORTCUT_GAP` | `32.0` | Spacing | scales with `spacing_factor` — `macos_menu_item_recipe_for(&InputTokens)` |
-| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 53 | `SEPARATOR_HEIGHT` | `11.0` | Spacing | scales with `spacing_factor` — `macos_menu_item_recipe_for(&InputTokens)` |
-| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 55 | `HIGHLIGHT_RADIUS` | `4.0` | Decoration | fixed — corner radius is shape identity, not a hit target |
-| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 57 | `HIGHLIGHT_INSET` | `5.0` | Spacing | scales with `spacing_factor` — `macos_menu_item_recipe_for(&InputTokens)` |
+| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 48 | `ITEM_HEIGHT` | `22.0` | Target | visual fixed at AppKit's `[measured]` 22 dp; coarse hit via `hit_outset`; the gaps around it scale: `macos_menu_item_recipe_for` |
+| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 50 | `PADDING_H` | `10.0` | Spacing | scales with `spacing_factor`: `macos_menu_item_recipe_for(&InputTokens)` |
+| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 52 | `ICON_COLUMN` | `14.0` | Decoration | fixed: decorative geometry, no hit consequence |
+| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 55 | `ICON_LABEL_GAP` | `8.0` | Spacing | scales with `spacing_factor`: `macos_menu_item_recipe_for(&InputTokens)` |
+| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 58 | `SHORTCUT_GAP` | `32.0` | Spacing | scales with `spacing_factor`: `macos_menu_item_recipe_for(&InputTokens)` |
+| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 60 | `SEPARATOR_HEIGHT` | `11.0` | Spacing | scales with `spacing_factor`: `macos_menu_item_recipe_for(&InputTokens)` |
+| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 62 | `HIGHLIGHT_RADIUS` | `4.0` | Decoration | fixed: corner radius is shape identity, not a hit target |
+| `crates/teksilo-theme-macos/src/styles/menu_item.rs` | 64 | `HIGHLIGHT_INSET` | `5.0` | Spacing | scales with `spacing_factor`: `macos_menu_item_recipe_for(&InputTokens)` |
 | `crates/teksilo-theme-macos/src/styles/metrics.rs` | 368 | `FLUENT_CONTROL_HEIGHT` | `32.0` | Target | scales with `target_size` — the preset's `macos_*_style_for(&InputTokens)` factories |
 | `crates/teksilo-theme-macos/src/styles/metrics.rs` | 52 | `MACOS_HELP_TAG_CORNER_RADIUS` | `5.0` | Decoration | fixed — corner radius is shape identity, not a hit target |
 | `crates/teksilo-theme-macos/src/styles/metrics.rs` | 56 | `MACOS_ROW_HEIGHT` | `24.0` | Target | scales with `target_size` — the preset's `macos_*_style_for(&InputTokens)` factories |

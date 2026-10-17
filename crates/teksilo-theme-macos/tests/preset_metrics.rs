@@ -967,3 +967,114 @@ fn a_scroll_bar_floors_its_thumb_at_the_macos_minimum_at_every_density() {
         assert!((slot.min_thumb_length(&theme.input) - preset).abs() < 1e-3);
     }
 }
+
+// ── Menu rows ──────────────────────────────────────────────────────────
+
+/// A `MenuList` at `density` under `theme`, in a tappable row: the laid-out
+/// height of each of its four `MenuItem` rows, of its separator, and the
+/// `(width, right edge minus the row's right edge)` of the submenu row's
+/// chevron column, the trailing column `MenuItem` builds from the style's
+/// metrics.
+///
+/// Built *at* the density, never switched into it: a row reads its style in
+/// `build()`.
+fn menu_geometry(theme: &Theme, density: TargetDensity) -> (Vec<f32>, f32, (f32, f32)) {
+    use teksilo_i18n::lit;
+    use teksilo_widgets::primitives::FixedSize;
+    use teksilo_widgets::{MenuItem, MenuList};
+
+    let theme = theme.with_density(density);
+    let icon_column = theme
+        .style_slots
+        .menu_item
+        .as_ref()
+        .expect("the preset installs a menu-item slot")
+        .metrics()
+        .icon_column_width;
+    let mut tree = WidgetTree::new()
+        .with_theme(theme)
+        .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+    let menu = MenuList::new()
+        .item(MenuItem::new(lit!("Open")))
+        .item(MenuItem::new(lit!("Save")).shortcut_label("Cmd+S"))
+        .separator()
+        .item(MenuItem::new(lit!("Checkable")).checked(Signal::new(true)))
+        .item(MenuItem::submenu(lit!("Submenu"), || {
+            Box::new(MenuList::new().item(MenuItem::new(lit!("Inner"))))
+        }));
+    let root = in_tappable_row(&mut tree, FixedSize::new().width(240.0).child(menu));
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+
+    let rows = nodes_named(&tree, root, "MenuItem");
+    assert_eq!(rows.len(), 4, "four rows");
+    let heights = rows.iter().map(|r| tree.bounds(*r).height).collect();
+    let separators = nodes_named(&tree, root, "MenuSeparator");
+    assert_eq!(separators.len(), 1, "one separator");
+    let separator = tree.bounds(separators[0]).height;
+
+    let submenu = tree.bounds(rows[3]);
+    let chevron = nodes_named(&tree, rows[3], "FixedSize")
+        .into_iter()
+        .map(|id| tree.bounds(id))
+        .filter(|b| (b.height - icon_column).abs() < 1e-4)
+        .max_by(|a, b| a.x.total_cmp(&b.x))
+        .expect("the submenu row has a chevron column");
+    (
+        heights,
+        separator,
+        (chevron.width, chevron.right() - submenu.right()),
+    )
+}
+
+/// A macOS menu row is AppKit's `[measured]` 22 dp at every density, the
+/// preset's decision (the conformance gate pins it); what follows the
+/// density is the gaps around it: the separator, 11 dp at Compact, and the
+/// trailing column, 10 dp, both scaled by the density's spacing factor
+/// (1.15 at Comfortable, 1.3 at Touch). The menu style used to report its
+/// Compact metrics at every density, so a Touch separator and chevron
+/// column kept their Compact sizes inside rows laid out for Touch.
+#[test]
+fn a_menu_measures_the_macos_rows_at_every_density() {
+    let expected = [
+        (TargetDensity::Compact, 11.0, 10.0),
+        (TargetDensity::Comfortable, 12.65, 11.5),
+        (TargetDensity::Touch, 14.3, 13.0),
+    ];
+    assert_eq!(
+        expected.len(),
+        ALL_DENSITIES.len(),
+        "every density is listed"
+    );
+    for (density, separator, trailing) in expected {
+        for theme in [teksilo_theme_macos::light(), teksilo_theme_macos::dark()] {
+            let (rows, sep, (chevron, chevron_offset)) = menu_geometry(&theme, density);
+            assert_eq!(rows, vec![22.0; 4], "{density:?}: AppKit's row");
+            assert!(
+                (sep - separator).abs() < 1e-3,
+                "{density:?}: the separator is {sep}, want {separator}"
+            );
+            assert!(
+                (chevron - trailing).abs() < 1e-3,
+                "{density:?}: the chevron column is {chevron}, want {trailing}"
+            );
+            assert!(
+                chevron_offset.abs() < 1e-3,
+                "{density:?}: the chevron column ends {chevron_offset} from the row's edge"
+            );
+        }
+        // The accessor half: what the installed slot tells a row asking it.
+        let theme = teksilo_theme_macos::light().with_density(density);
+        let m = theme
+            .style_slots
+            .menu_item
+            .clone()
+            .expect("the preset installs a menu-item slot")
+            .metrics();
+        assert_eq!(m.item_height, 22.0, "{density:?}");
+        assert!((m.separator_height - separator).abs() < 1e-3, "{density:?}");
+        assert!(
+            (m.trailing_column_width - trailing).abs() < 1e-3,
+            "{density:?}"
+        );
+    }
+}

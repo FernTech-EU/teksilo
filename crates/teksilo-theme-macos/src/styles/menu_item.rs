@@ -27,6 +27,12 @@
 //! macOS metrics. The delegate's own interaction tint is suppressed by
 //! handing it signals that never fire, exactly as the Fluent menu row
 //! does, so the highlight painted here is the only one.
+//!
+//! The style stores the recipe it lays out, built from the theme's input
+//! tokens ([`MacOsMenuItemStyle::for_tokens`]), so
+//! [`MenuItemStyle::metrics`], which `MenuItem` and `MenuSeparator` read for
+//! the parts they build themselves, follows the density the theme was
+//! projected to, as the painted row does.
 
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
@@ -88,8 +94,33 @@ pub fn macos_menu_item_recipe_for(tokens: &InputTokens) -> MenuItemRecipe {
 }
 
 /// macOS `MenuItemStyle`.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct MacOsMenuItemStyle;
+///
+/// [`Default`] is the Compact density; the preset installs
+/// [`MacOsMenuItemStyle::for_tokens`] of the theme it builds, and builds it
+/// again when the theme is projected to another density.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MacOsMenuItemStyle {
+    /// The row dimensions this style lays out and reports.
+    pub recipe: MenuItemRecipe,
+}
+
+impl MacOsMenuItemStyle {
+    /// The style with `recipe`'s dimensions.
+    pub fn new(recipe: MenuItemRecipe) -> Self {
+        Self { recipe }
+    }
+
+    /// The style at the density of `tokens`: [`macos_menu_item_recipe_for`].
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self::new(macos_menu_item_recipe_for(tokens))
+    }
+}
+
+impl Default for MacOsMenuItemStyle {
+    fn default() -> Self {
+        Self::new(macos_menu_item_recipe())
+    }
+}
 
 impl MenuItemStyle for MacOsMenuItemStyle {
     fn make_body(&self, cfg: &MenuItemStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -131,18 +162,19 @@ impl MenuItemStyle for MacOsMenuItemStyle {
             is_disabled: cfg.is_disabled.clone(),
             is_highlighted: quiet,
         };
-        let row = RecipeMenuItemStyle::new(macos_menu_item_recipe_for(&ctx.theme().input))
-            .make_body(&inner_cfg, ctx);
+        let row = RecipeMenuItemStyle::new(self.recipe).make_body(&inner_cfg, ctx);
 
         ctx.add(ZStack::new().child(inset_backdrop).child(row))
     }
 
-    /// Delegate the metrics alongside the row. `MenuItem` builds the icon and
-    /// chevron columns before any style runs and `MenuSeparator` is a
-    /// different widget entirely, so without this the slots would keep the
-    /// IntUI sizes while the row around them used ours.
+    /// Delegate the metrics alongside the row, from the same recipe.
+    /// `MenuItem` builds the icon and chevron columns before any style runs
+    /// and `MenuSeparator` is a different widget entirely, so without this
+    /// the slots would keep the IntUI sizes while the row around them used
+    /// ours, and a metric read at Compact would sit in a row laid out at
+    /// another density.
     fn metrics(&self) -> MenuItemMetrics {
-        RecipeMenuItemStyle::new(macos_menu_item_recipe()).metrics()
+        RecipeMenuItemStyle::new(self.recipe).metrics()
     }
 
     fn highlighted_label_role(&self) -> Option<TextRole> {
@@ -194,6 +226,37 @@ mod tests {
         assert_eq!(r.item_corner_radius, HIGHLIGHT_RADIUS);
     }
 
+    /// The metrics `MenuItem` and `MenuSeparator` read are the stored
+    /// recipe's, at the density it was built for: the row keeps AppKit's
+    /// 22 dp, the gutters and the separator follow the spacing factor, and
+    /// Compact is the recipe this module documents.
+    #[test]
+    fn the_metrics_are_the_recipes_at_every_density() {
+        use teksilo_tokens::TargetDensity;
+
+        assert_eq!(
+            MacOsMenuItemStyle::default().recipe,
+            macos_menu_item_recipe()
+        );
+        for (density, separator, trailing) in [
+            (TargetDensity::Compact, 11.0, 10.0),
+            (TargetDensity::Comfortable, 12.65, 11.5),
+            (TargetDensity::Touch, 14.3, 13.0),
+        ] {
+            let tokens = InputTokens::for_density(density);
+            let style = MacOsMenuItemStyle::for_tokens(&tokens);
+            assert_eq!(style.recipe, macos_menu_item_recipe_for(&tokens));
+            let m = style.metrics();
+            assert_eq!(m.item_height, ITEM_HEIGHT, "{density:?}");
+            assert!((m.separator_height - separator).abs() < 1e-4, "{density:?}");
+            assert!(
+                (m.trailing_column_width - trailing).abs() < 1e-4,
+                "{density:?}"
+            );
+            assert_eq!(m.icon_column_width, ICON_COLUMN, "{density:?}");
+        }
+    }
+
     /// A macOS menu is *tighter* than a Fluent one (37 dp) and near the
     /// IntUI default — density is the whole point of the platform's menus.
     #[test]
@@ -241,7 +304,7 @@ mod tests {
     #[test]
     fn the_highlighted_label_clears_contrast_on_the_fill() {
         assert_eq!(
-            MacOsMenuItemStyle.highlighted_label_role(),
+            MacOsMenuItemStyle::default().highlighted_label_role(),
             Some(TextRole::OnAccent)
         );
         for theme in [crate::light(), crate::dark()] {

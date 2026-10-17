@@ -236,7 +236,9 @@ fn install_styles(theme: &mut Theme) {
     slots.radio = Some(Rc::new(styles::radio::MacOsRadioStyle));
     slots.text_input = Some(Rc::new(styles::text_input::MacOsTextInputStyle));
     slots.slider = Some(Rc::new(styles::slider::MacOsSliderStyle));
-    slots.menu_item = Some(Rc::new(styles::menu_item::MacOsMenuItemStyle));
+    slots.menu_item = Some(Rc::new(styles::menu_item::MacOsMenuItemStyle::for_tokens(
+        &tokens,
+    )));
     slots.standard_item = Some(Rc::new(styles::standard_item::MacOsStandardItemStyle));
 
     // macOS metrics over the shipped composition.
@@ -573,5 +575,47 @@ mod tests {
         assert_eq!(touch.id, base.id);
         assert_eq!(touch.colors, base.colors);
         assert!(touch.extension::<MacOsPalette>().is_some());
+    }
+
+    /// The menu slot is rebuilt for the density too, so the metrics
+    /// `MenuItem` and `MenuSeparator` read follow it, and switching back to
+    /// Compact gives the Compact metrics again.
+    #[test]
+    fn a_density_switch_reprojects_the_menu_metrics() {
+        use teksilo_core::styles::MenuItemStyle;
+
+        let base = light();
+        let metrics = |t: &Theme| {
+            t.style_slots
+                .menu_item
+                .as_ref()
+                .expect("slot installed")
+                .metrics()
+        };
+        for density in [
+            TargetDensity::Compact,
+            TargetDensity::Comfortable,
+            TargetDensity::Touch,
+        ] {
+            let t = base.with_density(density);
+            assert_eq!(
+                metrics(&t),
+                styles::menu_item::MacOsMenuItemStyle::for_tokens(&InputTokens::for_density(
+                    density
+                ))
+                .metrics(),
+                "{density:?}",
+            );
+        }
+        let touch = metrics(&base.with_density(TargetDensity::Touch));
+        let compact = metrics(&base);
+        assert!(touch.separator_height > compact.separator_height);
+        assert!(touch.trailing_column_width > compact.trailing_column_width);
+        // AppKit's 22 dp row is the preset's decision at every density.
+        assert_eq!(touch.item_height, compact.item_height);
+        let back = base
+            .with_density(TargetDensity::Touch)
+            .with_density(TargetDensity::Compact);
+        assert_eq!(metrics(&back), compact);
     }
 }

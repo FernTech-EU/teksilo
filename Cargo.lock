@@ -12226,6 +12226,7 @@ dependencies = [
  "teksilo-core",
  "teksilo-data",
  "teksilo-i18n",
+ "teksilo-target-conformance",
  "teksilo-tokens",
  "teksilo-widgets",
 ]

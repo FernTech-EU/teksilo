@@ -293,6 +293,12 @@ by crate for clarity, not because crates version independently.
 
 #### Theming
 
+- **Breaking.** **`MacOsMenuItemStyle` and `FluentMenuItemStyle` hold their
+  dimensions.** Each now carries the `MenuItemRecipe` it lays out in a public
+  `recipe` field, so a style built for one density keeps that density's
+  sizes. The unit value `MacOsMenuItemStyle` or `FluentMenuItemStyle` no
+  longer compiles: use `::default()` for the compact sizes, `::for_tokens`
+  for a density's, or `::new` with a recipe of your own.
 - **Breaking.** **`OsThemeColors` is `#[non_exhaustive]`.** Outside
   `teksilo-tokens` it can no longer be built with a struct literal: start from
   `OsThemeColors::new(scheme)` or `OsThemeColors::default()` and assign the
@@ -426,6 +432,15 @@ by crate for clarity, not because crates version independently.
   under a pointer dragging it and moves the way the arrow keys point. Before,
   both presets painted the slider from the left, mirrored from where the
   value actually was. Vertical sliders are unchanged.
+- **macOS and Fluent menus at touch densities.**
+  **Behaviour change:** at the comfortable and touch densities, a menu under
+  the macOS or Fluent preset now sizes its separators and the column that
+  holds the shortcut and the submenu arrow for the active density, as its
+  rows already were, and a Fluent menu with `max_visible_items` caps its
+  height by its 44 px touch rows. Before, both presets reported their compact
+  menu sizes at every density, so those parts kept their compact sizes inside
+  rows laid out for touch. Compact menus are unchanged, and macOS menu rows
+  stay AppKit's 22 px at every density.
 
 #### Platform
 

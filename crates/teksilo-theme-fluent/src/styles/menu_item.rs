@@ -21,6 +21,12 @@
 //! delegated body is stacked *over* a Fluent background rect and the
 //! delegate's own tint is suppressed by giving it interaction signals that
 //! never fire. That keeps the slot/gap/padding arithmetic in one place.
+//!
+//! The style stores the recipe it lays out, built from the theme's input
+//! tokens ([`FluentMenuItemStyle::for_tokens`]), so
+//! [`MenuItemStyle::metrics`], which `MenuItem` and `MenuSeparator` read for
+//! the parts they build themselves and `MenuList` reads to cap its height,
+//! follows the density the theme was projected to, as the painted row does.
 
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
@@ -72,8 +78,33 @@ pub fn fluent_menu_item_recipe_for(tokens: &InputTokens) -> MenuItemRecipe {
 }
 
 /// Fluent `MenuItemStyle`.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct FluentMenuItemStyle;
+///
+/// [`Default`] is the Compact density; the preset installs
+/// [`FluentMenuItemStyle::for_tokens`] of the theme it builds, and builds it
+/// again when the theme is projected to another density.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FluentMenuItemStyle {
+    /// The row dimensions this style lays out and reports.
+    pub recipe: MenuItemRecipe,
+}
+
+impl FluentMenuItemStyle {
+    /// The style with `recipe`'s dimensions.
+    pub fn new(recipe: MenuItemRecipe) -> Self {
+        Self { recipe }
+    }
+
+    /// The style at the density of `tokens`: [`fluent_menu_item_recipe_for`].
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self::new(fluent_menu_item_recipe_for(tokens))
+    }
+}
+
+impl Default for FluentMenuItemStyle {
+    fn default() -> Self {
+        Self::new(fluent_menu_item_recipe())
+    }
+}
 
 impl MenuItemStyle for FluentMenuItemStyle {
     fn make_body(&self, cfg: &MenuItemStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -104,18 +135,19 @@ impl MenuItemStyle for FluentMenuItemStyle {
             is_disabled: cfg.is_disabled.clone(),
             is_highlighted: quiet,
         };
-        let row = RecipeMenuItemStyle::new(fluent_menu_item_recipe_for(&ctx.theme().input))
-            .make_body(&inner_cfg, ctx);
+        let row = RecipeMenuItemStyle::new(self.recipe).make_body(&inner_cfg, ctx);
 
         ctx.add(ZStack::new().child(backdrop).child(row))
     }
 
-    /// Delegate the metrics alongside the row. `MenuItem` builds the icon and
-    /// chevron columns before any style runs and `MenuSeparator` is a
-    /// different widget entirely, so without this the slots would keep the
-    /// IntUI sizes while the row around them used ours.
+    /// Delegate the metrics alongside the row, from the same recipe.
+    /// `MenuItem` builds the icon and chevron columns before any style runs
+    /// and `MenuSeparator` is a different widget entirely, so without this
+    /// the slots would keep the IntUI sizes while the row around them used
+    /// ours, and a metric read at Compact would sit in a row laid out at
+    /// another density.
     fn metrics(&self) -> MenuItemMetrics {
-        RecipeMenuItemStyle::new(fluent_menu_item_recipe()).metrics()
+        RecipeMenuItemStyle::new(self.recipe).metrics()
     }
 }
 
@@ -164,6 +196,37 @@ mod tests {
         // label of an icon-less row lines up with one that has an icon.
         let r = fluent_menu_item_recipe();
         assert_eq!(r.icon_column_width + r.icon_label_gap, 28.0);
+    }
+
+    /// The metrics `MenuItem`, `MenuSeparator` and `MenuList` read are the
+    /// stored recipe's, at the density it was built for: the row rises to
+    /// the Touch target, the gutters and the separator follow the spacing
+    /// factor, and Compact is the recipe this module documents.
+    #[test]
+    fn the_metrics_are_the_recipes_at_every_density() {
+        use teksilo_tokens::TargetDensity;
+
+        assert_eq!(
+            FluentMenuItemStyle::default().recipe,
+            fluent_menu_item_recipe()
+        );
+        for (density, item, separator, trailing) in [
+            (TargetDensity::Compact, 37.0, 3.0, 11.0),
+            (TargetDensity::Comfortable, 37.0, 3.45, 12.65),
+            (TargetDensity::Touch, 44.0, 3.9, 14.3),
+        ] {
+            let tokens = InputTokens::for_density(density);
+            let style = FluentMenuItemStyle::for_tokens(&tokens);
+            assert_eq!(style.recipe, fluent_menu_item_recipe_for(&tokens));
+            let m = style.metrics();
+            assert_eq!(m.item_height, item, "{density:?}");
+            assert!((m.separator_height - separator).abs() < 1e-4, "{density:?}");
+            assert!(
+                (m.trailing_column_width - trailing).abs() < 1e-4,
+                "{density:?}"
+            );
+            assert_eq!(m.icon_column_width, ICON_COLUMN, "{density:?}");
+        }
     }
 
     #[test]
