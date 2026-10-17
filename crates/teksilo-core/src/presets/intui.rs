@@ -16,7 +16,8 @@
 //! `style_slots: ComponentStyleSlots`.
 
 use teksilo_tokens::{
-    ColorTokens, InputTokens, LayoutTokens, MotionTokens, ShapeTokens, TypographyTokens,
+    ColorTokens, InputTokens, LayoutTokens, MotionTokens, OsThemeColors, ShapeTokens,
+    TypographyTokens,
 };
 
 use crate::styles::{ComponentStyleSlots, Theme, ThemeAppearance, ThemeExtensions, ThemeId};
@@ -54,6 +55,27 @@ pub fn dark() -> Theme {
     }
 }
 
+/// IntUI coloured by the desktop: the [`light`] or [`dark`] theme, chosen by
+/// `dark`, with its colours replaced by
+/// [`ColorTokens::from_os_colors`] over `os`.
+///
+/// This is the theme `ThemeMode::Native` falls back to when the app gives it
+/// no theme of its own. Everything but the colours (geometry, typography,
+/// motion, input, style slots, extensions, id) is the chosen preset's, so the
+/// id stays `intui.light` or `intui.dark` until the caller sets another.
+///
+/// `dark` picks only the preset under the colours. The colours follow
+/// `os.color_scheme`: [`ColorTokens::from_os_colors`] starts from the light
+/// or dark defaults that preference names (light when it states none), so a
+/// caller normally passes `dark` as `os.color_scheme.is_dark()`.
+pub fn from_os(os: &OsThemeColors, dark: bool) -> Theme {
+    let base = if dark { self::dark() } else { light() };
+    Theme {
+        colors: ColorTokens::from_os_colors(os),
+        ..base
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +105,26 @@ mod tests {
         let l = light();
         let d = dark();
         assert!(d.shape.shadow_lg.color.a() > l.shape.shadow_lg.color.a());
+    }
+
+    #[test]
+    fn from_os_keeps_the_preset_and_takes_the_report_colours() {
+        use teksilo_tokens::{Color, ColorSchemePreference};
+
+        let mut os = OsThemeColors::new(ColorSchemePreference::Dark);
+        os.window_bg = Some(Color::from_rgb(0.1, 0.2, 0.3));
+        let theme = from_os(&os, true);
+        assert_eq!(theme.colors, ColorTokens::from_os_colors(&os));
+        assert_eq!(
+            Theme {
+                colors: dark().colors,
+                ..theme
+            },
+            dark()
+        );
+
+        // A report with no colours is the preset itself.
+        let plain = OsThemeColors::new(ColorSchemePreference::Light);
+        assert_eq!(from_os(&plain, false), light());
     }
 }

@@ -109,31 +109,36 @@ impl CanvasTheme {
     /// pickers used to — silently drops the previewer back to `Compact` on the
     /// next theme click.
     pub fn theme_at(self, density: teksilo_tokens::TargetDensity) -> teksilo_core::Theme {
-        self.theme().with_density(density)
+        self.resolve(density).with_density(density)
     }
 
-    /// Resolve to a concrete theme. For `Native`, builds a theme that
-    /// *adopts* the OS palette rather than picking between Teksilo's
-    /// built-in Int UI light/dark — this is what gives a visibly
-    /// distinct result from clicking Light/Dark on most desktops.
-    pub fn theme(self) -> teksilo_core::Theme {
+    /// Resolve to a concrete theme, before `density` is applied. For
+    /// `Native`, builds a theme that *adopts* the OS palette rather than
+    /// picking between Teksilo's built-in Int UI light/dark, which is what
+    /// gives a visibly distinct result from clicking Light/Dark on most
+    /// desktops. It goes through the framework's one Native-mode resolution,
+    /// with no app factory, asking at `density`.
+    fn resolve(self, density: teksilo_tokens::TargetDensity) -> teksilo_core::Theme {
         match self {
             CanvasTheme::Native => {
-                let os = teksilo_platform::os_theme::query_os_theme_colors();
-                let base = if os.color_scheme.is_dark() {
-                    teksilo_core::presets::intui::dark()
-                } else {
-                    teksilo_core::presets::intui::light()
-                };
-                teksilo_core::Theme {
-                    colors: teksilo_tokens::ColorTokens::from_os_colors(&os),
-                    ..base
-                }
+                native_canvas_theme(&teksilo_platform::os_theme::query_native_desktop(), density)
             }
             CanvasTheme::Light => teksilo_core::presets::intui::light(),
             CanvasTheme::Dark => teksilo_core::presets::intui::dark(),
         }
     }
+}
+
+/// The `Native` canvas theme over `desktop`: dark exactly when the desktop
+/// states a dark preference, with no id or density applied.
+fn native_canvas_theme(
+    desktop: &teksilo_platform::os_theme::NativeDesktop,
+    density: teksilo_tokens::TargetDensity,
+) -> teksilo_core::Theme {
+    teksilo_app::resolve_native_theme(
+        None,
+        &teksilo_app::NativeThemeRequest::new(desktop, desktop.os.color_scheme.is_dark(), density),
+    )
 }
 
 /// Cache key — `(widget_id, variant_name)`.
@@ -473,5 +478,68 @@ impl Widget for PreviewerRoot {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::Window);
         builder.set_name("Teksilo Widget Previewer");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use teksilo_platform::os_theme::NativeDesktop;
+    use teksilo_tokens::{Color, ColorSchemePreference, ColorTokens, OsThemeColors, TargetDensity};
+
+    /// `CanvasTheme::Native` as it was resolved before the framework's
+    /// Native-mode resolution existed.
+    fn old_native(os: &OsThemeColors) -> teksilo_core::Theme {
+        let base = if os.color_scheme.is_dark() {
+            teksilo_core::presets::intui::dark()
+        } else {
+            teksilo_core::presets::intui::light()
+        };
+        teksilo_core::Theme {
+            colors: ColorTokens::from_os_colors(os),
+            ..base
+        }
+    }
+
+    #[test]
+    fn the_native_canvas_theme_resolves_as_before() {
+        for scheme in [
+            ColorSchemePreference::Light,
+            ColorSchemePreference::Dark,
+            ColorSchemePreference::NoPreference,
+        ] {
+            let bare = OsThemeColors::new(scheme);
+            let mut legacy = OsThemeColors::new(scheme);
+            legacy.accent = Some(Color::from_rgb(0.24, 0.68, 0.91));
+            legacy.window_bg = Some(Color::from_rgb(0.94, 0.94, 0.95));
+            legacy.window_fg = Some(Color::from_rgb(0.14, 0.15, 0.16));
+            legacy.selection_bg = Some(Color::from_rgb(0.24, 0.68, 0.91));
+            let mut full = legacy.clone();
+            full.view_bg = Some(Color::WHITE);
+            full.view_fg = Some(Color::from_rgb(0.12, 0.12, 0.12));
+            full.link = Some(Color::from_rgb(0.16, 0.5, 0.73));
+            full.error = Some(Color::from_rgb(0.85, 0.27, 0.33));
+            full.focus = Some(Color::from_rgb(0.24, 0.68, 0.91));
+
+            for os in [bare, legacy, full] {
+                let desktop = NativeDesktop::new(os.clone());
+                for density in [
+                    TargetDensity::Compact,
+                    TargetDensity::Comfortable,
+                    TargetDensity::Touch,
+                ] {
+                    let new = native_canvas_theme(&desktop, density).with_density(density);
+                    let old = old_native(&os).with_density(density);
+                    assert_eq!(new.id, old.id, "{os:?} at {density:?}: id");
+                    assert_eq!(new.colors, old.colors, "{os:?} at {density:?}: colours");
+                    assert_eq!(new, old, "{os:?} at {density:?}");
+                }
+                assert_eq!(
+                    native_canvas_theme(&desktop, TargetDensity::default()),
+                    old_native(&os),
+                    "{os:?}"
+                );
+            }
+        }
     }
 }

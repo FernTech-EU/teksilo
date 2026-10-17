@@ -23,12 +23,13 @@ use teksilo_platform::AccessibilityPreferences;
 use teksilo_platform::PlatformWindow;
 use teksilo_platform::create_title_bar_host;
 use teksilo_platform::event_translation::TranslationState;
-use teksilo_tokens::{ColorSchemePreference, ColorTokens};
+use teksilo_tokens::ColorSchemePreference;
 #[allow(unused_imports)]
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::WindowLevel;
 
 use crate::app::{AppEventProxy, CloseWindowRequest, ThemeMode};
+use crate::native_theme::NativeThemeFactory;
 
 use crate::window_config::{TeksiloWindowId, WindowConfig};
 
@@ -490,6 +491,10 @@ pub struct WindowManager {
     /// How the app resolves its theme (Manual, FollowSystem, Native).
     theme_mode: ThemeMode,
     pen_batching: teksilo_platform::PenBatching,
+    /// The app's own [`ThemeMode::Native`] theme, asked before the default
+    /// (IntUI coloured by the desktop). See
+    /// [`TeksiloAppBuilder::native_theme`](crate::TeksiloAppBuilder::native_theme).
+    native_theme: Option<NativeThemeFactory>,
     /// Whether each window's tree records what the platform adapters
     /// announce ([`WidgetTree::set_records_announcements`]). Off unless the
     /// automation bridge is installed: nothing else in a running application
@@ -557,6 +562,7 @@ impl WindowManager {
             user_text_scale: 1.0,
             theme_mode: ThemeMode::Manual,
             pen_batching: teksilo_platform::PenBatching::default(),
+            native_theme: None,
             records_announcements: false,
             app_context_template: None,
             event_proxy: None,
@@ -590,6 +596,13 @@ impl WindowManager {
     /// [`PenBatching`](teksilo_platform::PenBatching).
     pub fn set_pen_batching(&mut self, mode: teksilo_platform::PenBatching) {
         self.pen_batching = mode;
+    }
+
+    /// The app's own [`ThemeMode::Native`] theme, asked before the default
+    /// whenever Native mode resolves a theme. See
+    /// [`resolve_native_theme`](crate::resolve_native_theme).
+    pub(crate) fn set_native_theme(&mut self, factory: Option<NativeThemeFactory>) {
+        self.native_theme = factory;
     }
 
     /// Whether the windows opened from now on record announcements. See
@@ -714,9 +727,11 @@ impl WindowManager {
 
     /// Recompute and broadcast the theme from the **current OS appearance**,
     /// per the active theme mode. A no-op under `Manual`. Under `Native` it
-    /// adopts the OS's actual colours (GNOME/KDE/Cinnamon on Linux); under
-    /// `FollowSystem` it picks the built-in light/dark preset. Both results
-    /// carry the id `"system"`.
+    /// resolves the desktop's report through
+    /// [`resolve_native_theme`](crate::resolve_native_theme): the app's own
+    /// native theme, else IntUI in the OS's actual colours (GNOME/KDE/Cinnamon
+    /// on Linux); under `FollowSystem` it picks the built-in light/dark
+    /// preset. Both results carry the id `"system"`.
     ///
     /// `os_dark_hint` is the OS light/dark state as reported by winit (e.g.
     /// from a `WindowEvent::ThemeChanged`), used as the authoritative source on
@@ -753,28 +768,13 @@ impl WindowManager {
                 .with_id("system")
             }
             ThemeMode::Native => {
-                let os = teksilo_platform::os_theme::query_os_theme_colors();
-                match os.color_scheme {
-                    // Real OS scheme (Linux): adopt the OS's actual colours.
-                    ColorSchemePreference::Dark => Theme {
-                        colors: ColorTokens::from_os_colors(&os),
-                        ..teksilo_core::presets::intui::dark()
-                    },
-                    ColorSchemePreference::Light => Theme {
-                        colors: ColorTokens::from_os_colors(&os),
-                        ..teksilo_core::presets::intui::light()
-                    },
-                    // No OS-colour support (macOS/Windows): follow the winit
-                    // light/dark hint using the built-in presets.
-                    ColorSchemePreference::NoPreference => {
-                        if hint.unwrap_or(false) {
-                            teksilo_core::presets::intui::dark()
-                        } else {
-                            teksilo_core::presets::intui::light()
-                        }
-                    }
-                }
-                .with_id("system")
+                // A desktop stating a light or dark preference decides; one
+                // stating none (macOS, Windows) follows the winit hint.
+                crate::native_theme::theme_for_appearance_change(
+                    self.native_theme.as_ref(),
+                    &teksilo_platform::os_theme::query_native_desktop(),
+                    hint,
+                )
             }
         };
         self.set_theme(theme);
@@ -1082,19 +1082,10 @@ impl WindowManager {
                 _ => teksilo_core::presets::intui::light(),
             }
             .with_id("system"),
-            ThemeMode::Native => {
-                let os = teksilo_platform::os_theme::query_os_theme_colors();
-                let base = if os.color_scheme.is_dark() {
-                    teksilo_core::presets::intui::dark()
-                } else {
-                    teksilo_core::presets::intui::light()
-                };
-                Theme {
-                    colors: ColorTokens::from_os_colors(&os),
-                    ..base
-                }
-                .with_id("system")
-            }
+            ThemeMode::Native => crate::native_theme::theme_for_new_window(
+                self.native_theme.as_ref(),
+                &teksilo_platform::os_theme::query_native_desktop(),
+            ),
         };
         // Update the shared theme so all subsequent windows use the same base
         if self.theme_mode != ThemeMode::Manual {

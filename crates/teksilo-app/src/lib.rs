@@ -9,6 +9,7 @@ pub mod automation_bridge;
 pub mod default_post_root;
 pub(crate) mod input_loop;
 pub(crate) mod input_routing;
+pub mod native_theme;
 pub(crate) mod redraw_gate;
 pub mod window_config;
 pub mod window_manager;
@@ -22,6 +23,7 @@ pub use app_event_observers::AppEventObservers;
 #[cfg(feature = "automation")]
 pub use automation_bridge::TeksiloAppBuilderAutomationExt;
 pub use default_post_root::DefaultPostRoot;
+pub use native_theme::{NativeThemeFactory, NativeThemeRequest, resolve_native_theme};
 pub use window_config::{
     ModalConfig, PostRootBuilder, RootBuilder, TeksiloWindowId, WindowConfig,
     WindowRemovedCallback, WindowRemovedEvent,

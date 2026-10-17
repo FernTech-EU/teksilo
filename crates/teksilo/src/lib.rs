@@ -198,7 +198,9 @@ pub mod prelude {
     pub use teksilo_core::color_prop::{ColorProp, TextStyleProp};
 
     // App
-    pub use teksilo_app::{TeksiloAppBuilder, ThemeMode};
+    pub use teksilo_app::{
+        NativeThemeFactory, NativeThemeRequest, TeksiloAppBuilder, ThemeMode, resolve_native_theme,
+    };
 
     // Settings (persistence layer)
     pub use teksilo_settings::{

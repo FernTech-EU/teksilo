@@ -3981,6 +3981,10 @@ impl AppEventPoster for AppEventProxy {
 pub struct TeksiloAppBuilder {
     theme: Theme,
     theme_mode: ThemeMode,
+    /// The app's own `ThemeMode::Native` theme, set via
+    /// [`native_theme`](Self::native_theme) and handed to the window manager
+    /// at `run`.
+    native_theme: Option<crate::native_theme::NativeThemeFactory>,
     pen_batching: teksilo_platform::PenBatching,
     typesetter: Option<SharedTypesetter>,
     font_registrars: Vec<Box<dyn teksilo_text::FontRegistrar>>,
@@ -4044,6 +4048,7 @@ impl TeksiloAppBuilder {
         Self {
             theme: teksilo_core::presets::intui::light(),
             theme_mode: ThemeMode::Manual,
+            native_theme: None,
             pen_batching: teksilo_platform::PenBatching::default(),
             typesetter: None,
             font_registrars: Vec::new(),
@@ -4417,6 +4422,31 @@ impl TeksiloAppBuilder {
     /// - `ThemeMode::Native` — read colors from OS desktop environment config.
     pub fn theme_mode(mut self, mode: ThemeMode) -> Self {
         self.theme_mode = mode;
+        self
+    }
+
+    /// Give `ThemeMode::Native` a theme of the app's own.
+    ///
+    /// Whenever Native mode needs a theme (a window opening, the desktop's
+    /// light or dark state changing, a switch to Native mode at runtime), `f`
+    /// is asked first with a [`NativeThemeRequest`](crate::NativeThemeRequest)
+    /// carrying what the desktop reports, whether the theme is to be dark and
+    /// the density wanted. Answer `Some(theme)` to use it, for example a
+    /// design-language preset rebuilt over the desktop's colours so Native
+    /// mode brings that preset's geometry and chrome; answer `None` to keep
+    /// the default, IntUI coloured by the desktop
+    /// ([`presets::intui::from_os`](teksilo_core::presets::intui::from_os)).
+    ///
+    /// The theme the app answers with is given the id `"system"`, like every
+    /// theme that follows the OS, so a `ThemeSwitcher` shows it as "follow
+    /// OS". Setting a factory does not select Native mode; combine it with
+    /// [`theme_mode`](Self::theme_mode). See
+    /// [`resolve_native_theme`](crate::resolve_native_theme).
+    pub fn native_theme(
+        mut self,
+        f: impl Fn(&crate::NativeThemeRequest<'_>) -> Option<Theme> + 'static,
+    ) -> Self {
+        self.native_theme = Some(Box::new(f));
         self
     }
 
@@ -5003,6 +5033,7 @@ impl TeksiloAppBuilder {
         // rather than threaded through `TeksiloAppHandler::new`'s already long
         // parameter list.
         app.wm.set_pen_batching(self.pen_batching);
+        app.wm.set_native_theme(self.native_theme);
         app.wm.set_records_announcements(self.records_announcements);
         app.external_ctx_handler = self.external_ctx_handler;
         // Hand over any registered loop-tick hook (e.g. the `teksilo-async`

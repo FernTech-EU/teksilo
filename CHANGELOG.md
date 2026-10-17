@@ -140,6 +140,19 @@ by crate for clarity, not because crates version independently.
   `NativeDesktop::new` builds one from a colour report alone, and it
   implements `PartialEq`, so a caller can tell whether the desktop changed.
 
+#### App
+
+- **`TeksiloAppBuilder::native_theme`.** An app can give `ThemeMode::Native`
+  a theme of its own: the closure is asked with a `NativeThemeRequest` (what
+  the desktop reports, whether the theme is to be dark, the density wanted)
+  whenever Native mode needs a theme, and answers with a theme, for example a
+  design-language preset rebuilt over the desktop's colours so Native mode
+  keeps that preset's geometry and chrome, or with `None` to keep IntUI in
+  the desktop's colours. `resolve_native_theme` gives the theme Native mode
+  uses for a request, and `presets::intui::from_os` is the IntUI default on
+  its own. The window manager and the widget previewer's Native canvas theme
+  now resolve through it, with the same themes as before.
+
 ### Changed
 
 #### Theming
