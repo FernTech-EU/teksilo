@@ -12147,6 +12147,7 @@ dependencies = [
  "teksilo-i18n",
  "teksilo-text",
  "teksilo-theme-fluent",
+ "teksilo-theme-kde",
  "teksilo-theme-macos",
  "teksilo-theme-material3",
  "teksilo-tokens",

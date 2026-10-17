@@ -3,7 +3,7 @@
 
 # Density inventory
 
-Every dp dimension that `teksilo-widgets`, the three theme presets and
+Every dp dimension that `teksilo-widgets`, the four theme presets and
 `teksilo-preview-ui` bake in, with the density treatment package **P20** applied to
 each — the route by which that dimension reaches a density, or the reason it has
 none. This is the artifact to audit conformance against, and the fixture list P40's
@@ -153,7 +153,7 @@ grep -rnE '^\s*const [A-Z_0-9]+: f32' --include=*.rs . \
 
 # §4 — theme presets and the previewer UI
 grep -rnE '^\s*(pub )?const [A-Z_0-9]+: f32' --include=*.rs \
-     crates/teksilo-theme-{fluent,macos,material3}/src \
+     crates/teksilo-theme-{fluent,kde,macos,material3}/src \
      crates/teksilo-preview-ui/src | grep -v tests.rs | wc -l                 # 133
 ```
 
@@ -164,6 +164,11 @@ grep -rnE '^\s*(pub )?const [A-Z_0-9]+: f32' --include=*.rs \
 > preset + previewer constants. A row that no longer matches the code is drift in this
 > record, not a claim about the current tree; `tests/density_projection.rs` holds the
 > rows that *are* here to their class rules, not the tables to completeness.
+>
+> **Note (2026-10-17).** The §4 grep now sweeps `teksilo-theme-kde` as well, and
+> returns **257** with it (136 without). Its 121 constants were added to §4 as of
+> that date, and its four `MinSize::new` sites to §1; the counts above and the
+> totals below stay the P02 figures, and the KDE rows are counted apart under them.
 
 ## Totals
 
@@ -184,6 +189,12 @@ smaller than the P02 pass reported).
 Of those, **228 rows carry a live density route** (97 through `dp(.., Target, ..)`
 or `density_min_size`, 128 through `spacing(..)`, plus the three `MinSize` floor
 sites); the rest are fixed, each with its reason in its own row.
+
+The KDE preset's rows, added on 2026-10-17, are not in that table. §4 holds 121 of
+them (Target 12, Grab 4, Spacing 37, Decoration 68), of which 26 carry a live density
+route (2 through `dp(.., Target, ..)`, 1 through `dp(.., Grab, ..)`, 23 through
+`spacing(..)`), and §1 holds its four `MinSize::new` sites, all at or above the floor
+at Compact.
 
 The §2 and §3b row counts are one below their grep counts (233 and 113): each table
 drops a single-letter local alias declared inside a function body —
@@ -308,6 +319,10 @@ change marks the tree at `BindingLevel::Rebuild`. It is not a fixed 24 dp.
 | `crates/teksilo-preview-ui/src/navigator.rs` | 192 | `MinSize::new(0.0, 22.0)` | 22 | Target | scales with `target_size` — **below the 24 dp AA floor today** |
 | `crates/teksilo-theme-fluent/src/styles/button.rs` | 96 | `MinSize::new(0.0, MIN_HEIGHT)` | 32 | Target | scales with `target_size` — `density_min_size(.., &InputTokens)` |
 | `crates/teksilo-theme-fluent/src/styles/text_input.rs` | 83 | `MinSize::new(0.0, MIN_HEIGHT)` | 32 | Target | scales with `target_size` — `density_min_size(.., &InputTokens)` |
+| `crates/teksilo-theme-kde/src/styles/button.rs` | 96 | `MinSize::new(m.min_width, m.height)` | 84 × 34 | Target | scales with `target_size`: the height through `dp(.., Target)` in `breeze_button_metrics_for(&InputTokens)`; the width is Breeze's 84 at every density |
+| `crates/teksilo-theme-kde/src/styles/menu_item.rs` | 185 | `MinSize::new(0.0, self.recipe.item_height)` | 29 | Target | scales with `target_size`: `dp(.., Target)` in `breeze_menu_metrics_for(&InputTokens)` |
+| `crates/teksilo-theme-kde/src/styles/split_button.rs` | 77 | `MinSize::new(m.min_width, m.height)` | 84 × 34 | Target | scales with `target_size`: the height through `dp(.., Target)` in `breeze_button_metrics_for(&InputTokens)`; the width is Breeze's 84 at every density |
+| `crates/teksilo-theme-kde/src/styles/text_input.rs` | 90 | `MinSize::new(0.0, cfg.min_height.unwrap_or(m.height))` | 32 | Target | scales with `target_size`: `dp(.., Target)` in `breeze_field_metrics_for(&InputTokens)`, unless the widget asks for its own minimum height |
 | `crates/teksilo-theme-macos/src/styles/button.rs` | 107 | `MinSize::new(0.0, MACOS_CONTROL_HEIGHT)` | 22 | Target | scales with `target_size` — **below the 24 dp AA floor today** |
 | `crates/teksilo-theme-macos/src/styles/text_input.rs` | 81 | `MinSize::new(0.0, MACOS_CONTROL_HEIGHT)` | 22 | Target | scales with `target_size` — **below the 24 dp AA floor today** |
 | `crates/teksilo-widgets/src/accordion.rs` | 464 | `MinSize::new(ACCORDION_FILL_HEADER_EXTENT, 0.0)` | 30 | Target | scales with `target_size` (horizontal dock strip) — `accordion_fill_header_extent(&InputTokens)` |
@@ -854,8 +869,8 @@ from its *items* — `DockRailItemSize` resolves through `IconButtonRecipe`, whi
 
 ## §4 — theme presets and the previewer UI
 
-`teksilo-theme-fluent`, `teksilo-theme-macos` and `teksilo-theme-material3` install
-their own Tier-3 styles with their own constants, so P20's projection has to reach
+`teksilo-theme-fluent`, `teksilo-theme-kde`, `teksilo-theme-macos` and
+`teksilo-theme-material3` install their own Tier-3 styles with their own constants, so P20's projection has to reach
 them or a preset silently stays Compact under Touch. `teksilo-preview-ui` is included
 because its navigator rows (22 / 28 dp) are the smallest interactive rows in the
 workspace.
@@ -878,6 +893,19 @@ too, and its `[unpublished]` 22 dp control height and `[measured]` 14 dp glyph
 controls stay at Apple's numbers **in the paint** at every density: growing them
 would falsify a preset whose whole purpose is to reproduce those numbers. What rises
 on macOS is the minimum *hit box* around a control — the two `MinSize` sites in §1.
+
+**KDE**, added after the three, has no published touch ladder either
+(`[unpublished]`), so its projection takes the generic one. Every Breeze control
+height that is a target goes through `dp(.., Target, ..)` in `styles/metrics.rs`
+and is Breeze's own at Compact (the progress bar's 26 dp is not a target and stays);
+most gaps and paddings go through `spacing(..)`, and the rows say which do not. The parts
+Breeze paints under 24 dp stay at Breeze's numbers at every density: the 20 dp check
+box and radio indicator (whose node the widget's own `MinSize` floors to 24), the
+18 dp switch and the 20 dp slider handle box (whose nodes the styles raise with
+`density_min_size`), and the spin box's 20 dp arrow column, whose two 20 x 10 halves
+the conformance gate pins under SC 2.5.8 *Equivalent*. The rows class the preset's
+unitless constants (alphas, a speed) as Decoration, with a treatment that says they
+are not a dimension.
 
 | File | Line | Identifier | Value | Class | P20 treatment |
 | --- | ---: | --- | ---: | --- | --- |
@@ -937,6 +965,127 @@ on macOS is the minimum *hit box* around a control — the two `MinSize` sites i
 | `crates/teksilo-theme-fluent/src/styles/toggle.rs` | 65 | `ROW_H` | `32.0` | Target | scales with `target_size` — the style's own `make_body`, from `ctx.theme().input` |
 | `crates/teksilo-theme-fluent/src/typography.rs` | 54 | `FLUENT_BODY_SIZE` | `14.0` | Decoration | fixed — decorative geometry, no hit consequence |
 | `crates/teksilo-theme-fluent/src/typography.rs` | 56 | `FLUENT_CAPTION_SIZE` | `12.0` | Decoration | fixed — decorative geometry, no hit consequence |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 22 | `FRAME_WIDTH` | `2.0` | Spacing | scales with `spacing_factor` in the button's horizontal padding (`breeze_button_metrics_for(&InputTokens)`); fixed where it holds a frame (the combo and spin boxes' trailing margin) and inside the font-driven height rules |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 24 | `LAYOUT_TOP_LEVEL_MARGIN` | `10.0` | Spacing | scales with `spacing_factor`: `spacing(..)` in the preset's recipe factories, `styles/recipes.rs` |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 26 | `LAYOUT_CHILD_MARGIN` | `6.0` | Spacing | scales with `spacing_factor`: `spacing(..)` in the preset's recipe factories, `styles/recipes.rs` |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 28 | `LAYOUT_SPACING` | `6.0` | Spacing | scales with `spacing_factor`: `spacing(..)` in the preset's recipe factories, `styles/recipes.rs` |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 30 | `LINE_EDIT_FRAME_WIDTH` | `6.0` | Spacing | scales with `spacing_factor` as the field's horizontal padding (`breeze_field_metrics_for(&InputTokens)`); inside the 32 dp height rule it is part of the field's target floor |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 32 | `COMBO_BOX_FRAME_WIDTH` | `6.0` | Spacing | scales with `spacing_factor` as the leading padding (`breeze_combo_metrics_for(&InputTokens)`); inside the 32 dp height rule it is part of the combo box's target floor |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 34 | `SPIN_BOX_FRAME_WIDTH` | `6.0` | Spacing | scales with `spacing_factor` as the leading padding (`breeze_spin_metrics_for(&InputTokens)`); inside the 32 dp height rule it is part of the spin box's target floor |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 36 | `SPIN_BOX_ARROW_BUTTON_WIDTH` | `20.0` | Target | fixed: visual Breeze 20 dp arrow column, painted without button chrome at every density; its two halves are below the floor under SC 2.5.8 *Equivalent* (the conformance gate's `StepButton` pin, 20 x 10) |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 38 | `BUTTON_MIN_WIDTH` | `80.0` | Target | fixed: Breeze's minimum width (84 with the frame margins) at every density; the height carries the target (`breeze_button_metrics_for(&InputTokens)`) |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 40 | `BUTTON_MARGIN_WIDTH` | `6.0` | Spacing | scales with `spacing_factor` in the horizontal padding (`breeze_button_metrics_for(&InputTokens)`); fixed above and below, inside the height rule, whose floor rises with the density instead |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 42 | `BUTTON_ITEM_SPACING` | `4.0` | Spacing | fixed: recorded from Breeze, read by no style |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 44 | `TOOL_BUTTON_MARGIN_WIDTH` | `6.0` | Spacing | fixed: part of the icon-button squares, which rise with the density's target size as a whole (`breeze_tool_button_sizes_for(&InputTokens)`) |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 46 | `MENU_BUTTON_INDICATOR_WIDTH` | `20.0` | Decoration | fixed: recorded from Breeze, read by no style |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 48 | `CHECKBOX_SIZE` | `20.0` | Target | fixed: visual Breeze 20 dp, node floored to 24 by the widget's own `MinSize` |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 50 | `CHECKBOX_ITEM_SPACING` | `4.0` | Spacing | fixed: places the label at `INDICATOR_LABEL_X`, where Breeze puts it (`indicator_body_width`) |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 52 | `CHECKBOX_FOCUS_MARGIN` | `2.0` | Decoration | fixed: the box's inset inside the indicator, painted geometry |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 54 | `MENU_ITEM_MARGIN` | `4.0` | Spacing | scales with `spacing_factor` in the menu row's paddings (`breeze_menu_metrics_for(&InputTokens)`) and the suggestion rows; fixed as the menu's popup margin and inside the row height rule |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 56 | `MENU_ITEM_TEXT_LEFT_MARGIN` | `8.0` | Spacing | scales with `spacing_factor`: the menu row's leading padding (`breeze_menu_metrics_for(&InputTokens)`) and the suggestion rows' inset |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 58 | `MENU_ITEM_EXTRA_LEFT_MARGIN` | `4.0` | Spacing | scales with `spacing_factor` inside the suggestion rows' inset (`SUGGESTION_TEXT_INSET`) |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 60 | `MENU_ITEM_ACCELERATOR_SPACE` | `16.0` | Spacing | scales with `spacing_factor`: the shortcut gap (`breeze_menu_metrics_for(&InputTokens)`) |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 62 | `MENU_BAR_ITEM_MARGIN_WIDTH` | `10.0` | Spacing | fixed: recorded from Breeze, read by no style |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 64 | `MENU_BAR_ITEM_MARGIN_HEIGHT` | `6.0` | Spacing | fixed: recorded in the menu-bar item height rule, which no style reads |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 66 | `SCROLL_BAR_EXTENT` | `21.0` | Target | fixed: recorded, not laid out: the widgets choose a scroll bar's thickness themselves (`BreezeScrollBarMetrics::extent`) |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 68 | `SCROLL_BAR_HANDLE_WIDTH` | `8.0` | Grab | fixed: the painted handle width; the `ScrollBar`'s own hit geometry carries the target |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 70 | `SCROLL_BAR_MIN_HANDLE_LENGTH` | `20.0` | Grab | scales with `grab_size` through `dp(.., Grab)` in `breeze_scroll_bar_metrics_for(&InputTokens)`, which 20 clears at every density, so it is 20 at all three |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 72 | `PROGRESS_BAR_THICKNESS` | `6.0` | Decoration | fixed: the painted groove; a progress bar is not a target |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 74 | `PROGRESS_BAR_BUSY_INDICATOR_SIZE` | `14.0` | Decoration | fixed: recorded from Breeze, read by no style |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 76 | `PROGRESS_BAR_BUSY_PERIOD` | `28.0` | Decoration | fixed: the busy bar's stripe period, painted geometry |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 78 | `SLIDER_GROOVE_THICKNESS` | `6.0` | Grab | fixed: the groove is decoration; the handle box carries the target |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 80 | `SLIDER_CONTROL_THICKNESS` | `20.0` | Grab | fixed: visual Breeze 20 dp handle box, `thumb_diameter_for` at every density; the node is raised to the density's target size across the groove by `density_min_size` |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 82 | `SLIDER_TICK_LENGTH` | `8.0` | Decoration | fixed: painted geometry, no hit consequence |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 84 | `SLIDER_TICK_MARGIN` | `2.0` | Decoration | fixed: painted geometry, no hit consequence |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 87 | `SLIDER_HANDLE_PAINTED` | `17.0` | Decoration | fixed: the handle as painted inside its 20 dp box, no hit consequence |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 89 | `TAB_MARGIN_HEIGHT` | `4.0` | Spacing | fixed: part of the tab height rule, which rises with the density's target size as a whole |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 91 | `TAB_MARGIN_WIDTH` | `8.0` | Spacing | scales with `spacing_factor`: the tab's horizontal padding (`breeze_tab_metrics_for(&InputTokens)`) |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 93 | `TAB_MIN_WIDTH` | `80.0` | Target | fixed: recorded, not laid out: the bar applies its own minimum tab width |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 95 | `TAB_MIN_HEIGHT` | `30.0` | Target | scales with `target_size`: the tab height `max(H + 8, 30)` through `dp(.., Target)` in `breeze_tab_metrics_for(&InputTokens)` |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 98 | `STATIC_TAB_MIN_HEIGHT` | `34.0` | Target | scales with `target_size` through `dp(.., Target)` in `breeze_tab_metrics_for(&InputTokens)`; recorded, not laid out (a `TabStyle` is not told whether its bar is static) |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 100 | `TAB_ITEM_SPACING` | `8.0` | Spacing | fixed: recorded from Breeze, read by no style |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 102 | `TAB_ACTIVE_INDICATOR` | `3.0` | Decoration | fixed: the painted highlight bar, no hit consequence |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 104 | `HEADER_MARGIN` | `6.0` | Spacing | scales with `spacing_factor`: the header padding (`breeze_table_metrics_for(&InputTokens)`); inside the header height rule it is part of the header's target floor |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 106 | `HEADER_ARROW_SIZE` | `10.0` | Decoration | fixed: glyph metric, the header's sort arrow |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 108 | `ARROW_SIZE` | `10.0` | Decoration | fixed: glyph metric, the chevron every arrow is drawn at |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 110 | `ITEM_VIEW_MARGIN_WIDTH` | `2.0` | Spacing | scales with `spacing_factor` inside the row's content inset (`ROW_CONTENT_INSET`); fixed as the selection's inset, which is painted |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 112 | `ITEM_VIEW_MARGIN_HEIGHT` | `1.0` | Spacing | fixed: holds the selection's outline above and below the row; the row's height floor rises with the density instead (`breeze_row_metrics_for(&InputTokens)`) |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 114 | `ITEM_VIEW_FIRST_ITEM_TOP_MARGIN` | `2.0` | Spacing | fixed: recorded in the first-row rule, which no style reads |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 116 | `ITEM_VIEW_PADDING` | `2.0` | Spacing | scales with `spacing_factor` inside the row's content inset (`ROW_CONTENT_INSET`); inside the row height rule it is part of the row's target floor |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 118 | `TOOLTIP_FRAME_WIDTH` | `3.0` | Spacing | scales with `spacing_factor`: the tooltip's padding, `spacing(..)` in `styles/tooltip.rs` |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 120 | `SPLITTER_WIDTH` | `1.0` | Decoration | fixed: hairline stroke; scaling it thickens the design language |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 122 | `GROUP_BOX_TITLE_MARGIN` | `4.0` | Spacing | fixed: recorded from Breeze, read by no style |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 124 | `SMALL_ICON_SIZE` | `16.0` | Decoration | fixed: icon size; the menu's icon column and a row's icon are painted at it, and the icon-button squares are built around it |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 126 | `SMALL_MEDIUM_ICON_SIZE` | `22.0` | Decoration | fixed: icon size; the toolbar icon-button square is built around it |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 128 | `MEDIUM_ICON_SIZE` | `32.0` | Decoration | fixed: icon size; the large icon-button square is built around it |
+| `crates/teksilo-theme-kde/src/geometry.rs` | 130 | `LARGE_ICON_SIZE` | `48.0` | Decoration | fixed: icon size; the hero icon-button square is built around it |
+| `crates/teksilo-theme-kde/src/lib.rs` | 347 | `BREEZE_CONTROL_GAP` | `6.0` | Spacing | fixed: `LayoutTokens::control_gap`, which no density projection touches |
+| `crates/teksilo-theme-kde/src/lib.rs` | 349 | `BREEZE_SECTION_GAP` | `8.0` | Spacing | fixed: `LayoutTokens::section_gap`, which no density projection touches |
+| `crates/teksilo-theme-kde/src/palette.rs` | 49 | `CONTROL_SHADOW_ALPHA` | `0.125` | Decoration | fixed: unitless (ratio / alpha / speed), not a dimension |
+| `crates/teksilo-theme-kde/src/shape.rs` | 44 | `BREEZE_CONTROL_RADIUS` | `5.0` | Decoration | fixed: corner radius is shape identity, not a hit target |
+| `crates/teksilo-theme-kde/src/shape.rs` | 47 | `BREEZE_POPUP_RADIUS` | `5.0` | Decoration | fixed: corner radius is shape identity, not a hit target |
+| `crates/teksilo-theme-kde/src/shape.rs` | 51 | `BREEZE_STROKED_FRAME_RADIUS` | `4.5` | Decoration | fixed: corner radius is shape identity, not a hit target |
+| `crates/teksilo-theme-kde/src/shape.rs` | 53 | `BREEZE_CHECKBOX_RADIUS` | `4.0` | Decoration | fixed: corner radius is shape identity, not a hit target |
+| `crates/teksilo-theme-kde/src/shape.rs` | 55 | `BREEZE_GROOVE_RADIUS` | `3.0` | Decoration | fixed: corner radius is shape identity, not a hit target |
+| `crates/teksilo-theme-kde/src/shape.rs` | 57 | `BREEZE_SCROLL_HANDLE_RADIUS` | `4.0` | Decoration | fixed: corner radius is shape identity, not a hit target |
+| `crates/teksilo-theme-kde/src/shape.rs` | 60 | `BREEZE_PEN_WIDTH` | `1.0` | Decoration | fixed: hairline stroke; scaling it thickens the design language |
+| `crates/teksilo-theme-kde/src/shape.rs` | 62 | `BREEZE_FOCUS_RING_WIDTH` | `2.0` | Decoration | fixed: decorative geometry, no hit consequence |
+| `crates/teksilo-theme-kde/src/shape.rs` | 65 | `BREEZE_FOCUS_RING_OFFSET` | `-1.0` | Decoration | fixed: decorative geometry, no hit consequence |
+| `crates/teksilo-theme-kde/src/shape.rs` | 67 | `BREEZE_FOCUS_RING_ALPHA` | `0.3` | Decoration | fixed: unitless (ratio / alpha / speed), not a dimension |
+| `crates/teksilo-theme-kde/src/shape.rs` | 70 | `BREEZE_FOCUS_RING_OUTER_RADIUS` | `7.0` | Decoration | fixed: corner radius is shape identity, not a hit target |
+| `crates/teksilo-theme-kde/src/shape.rs` | 74 | `BREEZE_BUTTON_SHADOW_ALPHA` | `0.125` | Decoration | fixed: unitless (ratio / alpha / speed), not a dimension |
+| `crates/teksilo-theme-kde/src/shape.rs` | 77 | `BREEZE_SHADOW_OVERLAP` | `2.0` | Decoration | fixed: elevation, not geometry |
+| `crates/teksilo-theme-kde/src/styles/arrow.rs` | 29 | `ARROW_PEN` | `1.0` | Decoration | fixed: hairline stroke; scaling it thickens the design language |
+| `crates/teksilo-theme-kde/src/styles/checkbox.rs` | 74 | `ROUNDED_RADIUS` | `6.0` | Decoration | fixed: corner radius is shape identity, not a hit target |
+| `crates/teksilo-theme-kde/src/styles/chrome.rs` | 86 | `FLAT_PRESSED_ALPHA` | `0.3` | Decoration | fixed: unitless (ratio / alpha / speed), not a dimension |
+| `crates/teksilo-theme-kde/src/styles/chrome.rs` | 89 | `CHECKED_FILL` | `0.125` | Decoration | fixed: unitless (ratio / alpha / speed), not a dimension |
+| `crates/teksilo-theme-kde/src/styles/chrome.rs` | 92 | `SHADOW_INSET` | `1.0` | Decoration | fixed: elevation, not geometry |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 31 | `INDICATOR_SIZE` | `CHECKBOX_SIZE` | Target | fixed: visual Breeze 20 dp, node floored to 24 by the widget's own `MinSize` |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 34 | `INDICATOR_BOX_INSET` | `CHECKBOX_FOCUS_MARGIN` | Decoration | fixed: the box's inset inside the indicator, painted geometry |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 37 | `INDICATOR_BOX_STROKED` | `INDICATOR_SIZE - 2.0 * INDICATOR_BOX_INSET - BREEZE_PEN_WIDTH` | Decoration | fixed: visual Breeze 20 dp indicator (the 15 dp box inside it), node floored to 24 by the widget's own `MinSize` |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 41 | `INDICATOR_LABEL_X` | `CHECKBOX_SIZE + CHECKBOX_ITEM_SPACING` | Spacing | fixed: where Breeze starts the label, from the indicator's leading edge (`indicator_body_width`) |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 43 | `CHECK_MARK_PEN` | `2.0` | Decoration | fixed: stroke width of the check mark, painted geometry |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 45 | `PARTIAL_DOT_SIZE` | `2.0` | Decoration | fixed: painted geometry, no hit consequence |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 47 | `PARTIAL_DOT_SPACING` | `4.0` | Decoration | fixed: painted geometry, no hit consequence |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 50 | `RADIO_DOT_RADIUS` | `3.0` | Decoration | fixed: visual Breeze 20 dp indicator (the 6 dp dot inside it), node floored to 24 by the widget's own `MinSize` |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 53 | `INDICATOR_CHECKED_WASH` | `0.3` | Decoration | fixed: unitless (ratio / alpha / speed), not a dimension |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 59 | `SWITCH_HEIGHT` | `18.0` | Target | fixed: visual Breeze 18 dp switch, Kirigami's grid unit; the node is raised to the density's target size on both axes by `density_min_size` in the style's `layout_response` |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 61 | `SWITCH_WIDTH` | `2.0 * SWITCH_HEIGHT` | Target | fixed: visual Breeze 36 dp, twice the height (`const _: () = assert!` ties them); the node is floored to the density's target size by `density_min_size` |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 64 | `SWITCH_TRACK_INSET` | `3.0` | Decoration | fixed: part of the one coupled switch shape (`const _: () = assert!` ties track to height) |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 66 | `SWITCH_TRACK_RADIUS` | `6.0` | Decoration | fixed: corner radius is shape identity, not a hit target |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 69 | `SWITCH_HANDLE_RADIUS` | `9.0` | Decoration | fixed: the handle is a circle of the switch's full height, part of the one coupled shape |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 75 | `SWITCH_CHECKED_ALPHA` | `0.5` | Decoration | fixed: unitless (ratio / alpha / speed), not a dimension |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 79 | `SWITCH_HANDLE_VELOCITY` | `200.0` | Decoration | fixed: unitless (ratio / alpha / speed), not a dimension |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 231 | `COMBO_ARROW_BOX` | `20.0` | Decoration | fixed: the painted arrow box; the whole combo box is the target |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 234 | `COMBO_CHROME_WIDTH` | `2.0 * COMBO_BOX_FRAME_WIDTH + COMBO_ARROW_BOX + 2.0 + 4.0` | Spacing | fixed: the Compact sum of the combo box's chrome; laid out through `BreezeComboMetrics::chrome_width`, whose gaps scale with `spacing_factor` |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 238 | `COMBO_ARROW_GAP` | `COMBO_CHROME_WIDTH - COMBO_BOX_FRAME_WIDTH - COMBO_ARROW_BOX - FRAME_WIDTH` | Spacing | scales with `spacing_factor`: the arrow gap (`breeze_combo_metrics_for(&InputTokens)`) |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 241 | `SPIN_ARROW_MAX_HEIGHT` | `20.0` | Target | fixed: visual Breeze 20 dp arrow column height, split 10 + 10 by `BreezeSpinMetrics::arrow_half` at every density; the halves are below the floor under SC 2.5.8 *Equivalent* (the conformance gate's `StepButton` pin, 20 x 10) |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 245 | `SLIDER_GROOVE_RADIUS` | `3.0` | Decoration | fixed: corner radius is shape identity, not a hit target |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 254 | `SLIDER_DEFAULT_LENGTH` | `84.0` | Target | fixed: Qt's size hint along the groove, used only when nothing proposes a length |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 258 | `SLIDER_TICK_OVERHANG` | `SLIDER_GROOVE_THICKNESS * 0.5 + SLIDER_TICK_MARGIN + SLIDER_TICK_LENGTH - SLIDER_CONTROL_THICKNESS * 0.5` | Decoration | fixed: painted geometry, no hit consequence |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 375 | `MENU_ICON_TEXT_GAP` | `3.0` | Spacing | scales with `spacing_factor`: the icon-label gap (`breeze_menu_metrics_for(&InputTokens)`) |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 378 | `MENU_ARROW_BOX` | `20.0` | Decoration | fixed: the painted submenu arrow box; the row is the target |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 381 | `MENU_ARROW_TEXT_GAP` | `3.0` | Spacing | scales with `spacing_factor` inside the trailing column (`breeze_menu_metrics_for(&InputTokens)`) |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 384 | `MENU_HIGHLIGHT_ALPHA` | `0.3` | Decoration | fixed: unitless (ratio / alpha / speed), not a dimension |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 387 | `POPUP_PADDING` | `MENU_ITEM_MARGIN` | Spacing | scales with `spacing_factor`: the popover's padding, `spacing(..)` in `styles/popover.rs` |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 391 | `TOOLTIP_MAX_WIDTH` | `320.0` | Decoration | fixed: a wrap width, no hit consequence |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 467 | `ROW_CONTENT_INSET` | `ITEM_VIEW_MARGIN_WIDTH + ITEM_VIEW_PADDING + 3.0` | Spacing | scales with `spacing_factor`: the row's horizontal padding (`breeze_row_metrics_for(&InputTokens)`) |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 470 | `ROW_HOVER_ALPHA` | `0.3` | Decoration | fixed: unitless (ratio / alpha / speed), not a dimension |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 473 | `ROW_HOVER_OUTLINE_ALPHA` | `0.8` | Decoration | fixed: unitless (ratio / alpha / speed), not a dimension |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 593 | `TAB_BAR_RADIUS` | `5.0` | Decoration | fixed: corner radius is shape identity, not a hit target |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 597 | `TAB_OUTLINE_RADIUS` | `4.5` | Decoration | fixed: corner radius is shape identity, not a hit target |
+| `crates/teksilo-theme-kde/src/styles/metrics.rs` | 646 | `SCROLL_BAR_SEPARATOR` | `1.0` | Decoration | fixed: hairline stroke; scaling it thickens the design language |
+| `crates/teksilo-theme-kde/src/styles/popup.rs` | 58 | `TRANSLUCENT_MENU_OUTLINE_ALPHA` | `0.25` | Decoration | fixed: unitless (ratio / alpha / speed), not a dimension |
+| `crates/teksilo-theme-kde/src/styles/recipes.rs` | 97 | `SUGGESTION_TEXT_INSET` | `MENU_ITEM_MARGIN + MENU_ITEM_TEXT_LEFT_MARGIN + MENU_ITEM_EXTRA_LEFT_MARGIN` | Spacing | scales with `spacing_factor`: the suggestion row's horizontal padding, `spacing(..)` in `styles/recipes.rs` |
+| `crates/teksilo-theme-kde/src/styles/recipes.rs` | 107 | `LINK_FOCUS_RING_RADIUS` | `BREEZE_CONTROL_RADIUS + BREEZE_FOCUS_RING_WIDTH / 2.0` | Decoration | fixed: corner radius is shape identity, not a hit target |
+| `crates/teksilo-theme-kde/src/styles/slider.rs` | 97 | `HANDLE_INSET` | `1.0` | Decoration | fixed: painted geometry, no hit consequence |
+| `crates/teksilo-theme-kde/src/styles/slider.rs` | 102 | `SHADOW_OFFSET` | `0.5` | Decoration | fixed: elevation, not geometry |
+| `crates/teksilo-theme-kde/src/styles/slider.rs` | 104 | `TICK_PEN` | `1.0` | Decoration | fixed: hairline stroke; scaling it thickens the design language |
+| `crates/teksilo-theme-kde/src/styles/table.rs` | 65 | `HEADER_LINE_WIDTH` | `1.0` | Decoration | fixed: hairline stroke; scaling it thickens the design language |
+| `crates/teksilo-theme-kde/src/styles/toggle.rs` | 84 | `TRAVEL` | `SWITCH_WIDTH - SWITCH_HEIGHT` | Decoration | fixed: the handle's travel, the switch's width less its height, part of the one coupled switch shape |
+| `crates/teksilo-theme-kde/src/typography.rs` | 94 | `BREEZE_BODY_PT` | `10.0` | Decoration | fixed: a font size in points; follows the desktop font and the text scale, not target density |
+| `crates/teksilo-theme-kde/src/typography.rs` | 96 | `BREEZE_SMALL_PT` | `8.0` | Decoration | fixed: a font size in points; follows the desktop font and the text scale, not target density |
+| `crates/teksilo-theme-kde/src/typography.rs` | 98 | `BREEZE_MONO_PT` | `10.0` | Decoration | fixed: a font size in points; follows the desktop font and the text scale, not target density |
 | `crates/teksilo-theme-macos/src/palette.rs` | 104 | `SECONDARY_LABEL_ALPHA_LIGHT` | `0.50` | — not a dimension | fixed — unitless (ratio / alpha / duration / epsilon) |
 | `crates/teksilo-theme-macos/src/palette.rs` | 109 | `SECONDARY_LABEL_ALPHA_DARK` | `0.55` | — not a dimension | fixed — unitless (ratio / alpha / duration / epsilon) |
 | `crates/teksilo-theme-macos/src/palette.rs` | 298 | `FLOOR` | `4.5` | — not a dimension | fixed — unitless (ratio / alpha / duration / epsilon) |

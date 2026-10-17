@@ -45,8 +45,8 @@
 //! preset lives *above* teksilo-widgets in the crate graph, so no test binary
 //! inside teksilo-widgets can install one; and four copies of one list is how
 //! two of them drift. So the list, the allow-list and every gate live here, in
-//! an unpublished crate that dev-depends on all three presets — and nothing in
-//! a published manifest changes at all.
+//! an unpublished crate that dev-depends on all four sibling presets, and
+//! nothing in a published manifest changes at all.
 //!
 //! **What that costs, recorded rather than papered over:** `cargo test -p
 //! teksilo-widgets` no longer catches an undersized control. `cargo test

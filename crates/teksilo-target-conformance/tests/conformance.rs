@@ -42,17 +42,24 @@ const ABOVE_COMPACT: &[TargetDensity] = &[TargetDensity::Comfortable, TargetDens
 
 /// The presets the gate measures, one **family representative** each.
 ///
-/// Four ids, not eight: light and dark are geometrically identical in every
+/// Five ids, not ten: light and dark are geometrically identical in every
 /// shipped preset — a claim [`light_and_dark_are_the_same_geometry_in_every_preset`]
 /// turns from an assumption into an assertion, and which halves the sweep.
 const INTUI: &str = "intui.light";
 const MACOS: &str = "macos.light";
 const FLUENT: &str = "fluent.light";
 const M3: &str = "material3.light";
+const KDE: &str = "kde.light";
 
 /// Every theme id in the roster — what a pin writes when a geometry is
 /// preset-independent, which most of them are.
-const ALL_THEMES: &[&str] = &[INTUI, MACOS, FLUENT, M3];
+const ALL_THEMES: &[&str] = &[INTUI, MACOS, FLUENT, M3, KDE];
+
+/// The presets whose `SpinBox` comes out at the shipped recipe's geometry. KDE
+/// is not one of them: its Breeze spin box is a line-edit frame with its own
+/// arrow column, so its halves are pinned on their own and its field clears
+/// the floor.
+const RECIPE_SPIN_BOX: &[&str] = &[INTUI, MACOS, FLUENT, M3];
 
 static ROSTER: gate::Roster = gate::Roster {
     themes: &[
@@ -72,6 +79,10 @@ static ROSTER: gate::Roster = gate::Roster {
             id: M3,
             theme: teksilo_theme_material3::light,
         },
+        gate::ThemeSubject {
+            id: KDE,
+            theme: teksilo_theme_kde::light,
+        },
     ],
     allow: ALLOW_LIST,
 };
@@ -79,7 +90,7 @@ static ROSTER: gate::Roster = gate::Roster {
 /// Every conformance failure the fixture list produces under every preset,
 /// computed **once** per test binary.
 ///
-/// The sweep is four presets x three densities x the whole fixture list, so a
+/// The sweep is five presets x three densities x the whole fixture list, so a
 /// gate that recomputed it per test would pay for it four times over. The memo
 /// is a `OnceLock` rather than a `lazy_static`-style cell because the tests run
 /// as threads in one process and each of them wants the same answer.
@@ -115,12 +126,29 @@ fn census() -> &'static [TargetViolation] {
 const ALLOW_LIST: &[AllowedViolation] = &[
     AllowedViolation {
         path: "StepButton",
-        measured: &[PinnedGeometry {
-            densities: ALL_DENSITIES,
-            themes: ALL_THEMES,
-            paints: (Is(18.0), Is(13.0)),
-            reaches: (Is(18.0), Is(13.0)),
-        }],
+        measured: &[
+            PinnedGeometry {
+                densities: ALL_DENSITIES,
+                themes: RECIPE_SPIN_BOX,
+                paints: (Is(18.0), Is(13.0)),
+                reaches: (Is(18.0), Is(13.0)),
+            },
+            // KDE: Breeze's own halves, the same at every density.
+            PinnedGeometry {
+                densities: ALL_DENSITIES,
+                themes: &[KDE],
+                paints: (Is(20.0), Is(10.0)),
+                reaches: (Is(20.0), Is(10.0)),
+            },
+            // KDE, two halves of the ColorPicker's spin boxes at Comfortable:
+            // the miss-only pass widens them, and the height stays 10.
+            PinnedGeometry {
+                densities: AT_COMFORTABLE,
+                themes: &[KDE],
+                paints: (Is(20.0), Is(10.0)),
+                reaches: (Is(28.0), Is(10.0)),
+            },
+        ],
         owner: Owner::Named("whoever revisits SpinBox's step geometry"),
         exception: Some("Equivalent"),
         why: "A SpinBox's two step buttons are stacked halves of the field's \
@@ -135,7 +163,13 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               partition_targets as this row's mechanism, which cannot be right \
               -- the step buttons are their own nodes beside their own sibling, \
               the same error P25 corrected for the SplitButton chevron; that \
-              row is corrected.",
+              row is corrected. Under KDE the halves are Breeze's own: an arrow \
+              column 20 dp wide at the field's trailing edge and at most 20 dp \
+              tall whatever the field's height, split into two 10 dp halves \
+              with no button chrome, at every density. They reach their paint, \
+              except two of the ColorPicker's at Comfortable, which the \
+              miss-only pass widens to 28 dp and leaves 10 dp tall; the same \
+              *Equivalent* stands for them.",
     },
     AllowedViolation {
         path: "ColorSwatch",
@@ -196,7 +230,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
         path: "Expand > Padding > TextInputField",
         measured: &[PinnedGeometry {
             densities: AT_COMPACT,
-            themes: ALL_THEMES,
+            themes: RECIPE_SPIN_BOX,
             paints: (ClearsFloor, Is(20.0)),
             reaches: (ClearsFloor, Is(20.0)),
         }],
@@ -216,7 +250,8 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               inset from. A real AA shortfall with no exception behind it -- \
               the field IS the target for placing a caret, and no conforming \
               control does that job. The remedy is a taller field at Compact, \
-              which the invariant forbids.",
+              which the invariant forbids. Not under KDE, whose Breeze spin box \
+              is 32 dp tall at Compact and whose field clears the floor.",
     },
     AllowedViolation {
         // Scoped to the fixture, deliberately: the POPULATED field's clear slot
@@ -225,7 +260,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
         // signature `an_outsets_claim_survives_the_slop_pass_in_the_shipped_controls`
         // exists to refuse — that test runs under Int UI alone, so an unscoped
         // entry would pre-excuse the populated slot's regression under the
-        // other three presets.
+        // other four presets.
         path: "search_field/empty:",
         measured: &[PinnedGeometry {
             densities: AT_COMPACT,
@@ -269,10 +304,10 @@ const ALLOW_LIST: &[AllowedViolation] = &[
             // not literal equality. The walk reports an extent up to two
             // refinement quanta (0.031 dp each) short of itself, and these rows
             // land there: 15.96875 under every theme and density except Fluent
-            // at Touch, where it is 15.9375. `PIN_TOLERANCE` is three quanta
-            // wide for exactly this, and `PROBE_EPSILON` is why the Fluent Touch
-            // four are judged at all rather than filed as shadowed by something
-            // on top of them.
+            // at Touch and KDE at Comfortable and Touch, where it is 15.9375.
+            // `PIN_TOLERANCE` is three quanta wide for exactly this, and
+            // `PROBE_EPSILON` is why those twelve are judged at all rather than
+            // filed as shadowed by something on top of them.
             PinnedGeometry {
                 densities: ALL_DENSITIES,
                 themes: ALL_THEMES,
@@ -515,7 +550,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
                 reaches: (ClearsFloor, Is(22.0)),
             },
             // Material 3: the stock recipe under M3 typography, whose nominal
-            // line box is the widest of the four.
+            // line box is the widest of the five.
             PinnedGeometry {
                 densities: AT_COMPACT,
                 themes: &[M3],
@@ -577,7 +612,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               It is NOT a Material 3 defect. The identical geometry is present \
               under every preset -- Int UI's button in this fixture reaches \
               44.7 x 24.0 of its own 124 x 44, Fluent's 44.8 x 24.0 of 116 x \
-              44 -- and the audit files those two as \
+              44, KDE's 44.9 x 24.0 of 109 x 44 -- and the audit files those as \
               `ShadowedByAnotherTarget` rather than judging them, because a \
               target whose reach falls short of its own paint is limited by \
               another target rather than by its size. Material 3 is the preset \
@@ -585,7 +620,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               both the ring's reach and the button's centre, and the centre \
               ends up inside the ring, which is the point at which the audit \
               stops calling it shadowed and starts calling it unreachable. So \
-              the gate reports one preset and the defect belongs to all four. \
+              the gate reports one preset and the defect belongs to all five. \
               No SC 2.5.8 exception is claimed: a button a finger cannot press \
               has no equivalent.",
     },
@@ -610,8 +645,8 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               ends at 11.2 dp. This is NOT the fixture's viewport, which is the \
               first thing it looks like -- the same 11.2 dp is measured at 440, \
               480 and 520 dp, because none of that width reaches the calendar. \
-              Under Int UI and Fluent the same node is 27.2 dp, clearing the \
-              floor by 3.2, which is how close the other three presets are to \
+              Under Int UI, Fluent and KDE the same node is 27.2 dp, clearing \
+              the floor by 3.2, which is how close the other presets are to \
               the same failure. Neither hit mechanism helps: the arrows beside \
               it are targets of their own kind, so the miss-only pass is denied \
               at distance zero. The remedies are all header-layout decisions -- \
@@ -621,12 +656,20 @@ const ALLOW_LIST: &[AllowedViolation] = &[
     },
     AllowedViolation {
         path: "TableView > ScrollBar",
-        measured: &[PinnedGeometry {
-            densities: AT_COMPACT,
-            themes: &[MACOS],
-            paints: (Is(12.0), Is(11.5)),
-            reaches: (Is(31.0), Is(11.5)),
-        }],
+        measured: &[
+            PinnedGeometry {
+                densities: AT_COMPACT,
+                themes: &[MACOS],
+                paints: (Is(12.0), Is(11.5)),
+                reaches: (Is(31.0), Is(11.5)),
+            },
+            PinnedGeometry {
+                densities: AT_COMPACT,
+                themes: &[KDE],
+                paints: (Is(12.0), Is(16.875)),
+                reaches: (Is(31.0), Is(16.875)),
+            },
+        ],
         owner: Owner::Named("whoever revisits ScrollBar's track regions"),
         exception: Some("Equivalent"),
         why: "The part of a table's vertical scroll-bar track below the thumb, \
@@ -634,7 +677,9 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               is as tall as the content overflow leaves it: the fixture's twelve \
               rows at macOS's 24 dp `NSTableView` row height overflow the 276 dp \
               viewport by 12 dp, so the thumb fills all but 11.5 dp of the track \
-              at the top of the range. Under the other presets the same twelve \
+              at the top of the range. KDE's rows are 24 dp as well and its \
+              30 dp header leaves a 270 dp viewport, which they overflow by \
+              18 dp: 16.875 dp of track. Under the other presets the same twelve \
               rows are taller and the remainder clears the floor, which is all \
               that separates them; any scroll bar whose content barely \
               overflows, or whose thumb sits near an end of its range, leaves a \
@@ -750,12 +795,12 @@ fn the_allow_lists_roster_is_what_it_says_it_is() {
     );
 }
 
-/// **The roster's four ids stand for eight.** Light and dark are the same
+/// **The roster's five ids stand for ten.** Light and dark are the same
 /// geometry in every shipped preset.
 ///
 /// This is a **guard**, not a discriminator: it exists to turn the assumption
 /// that halves the sweep into an assertion. If it ever reddens, the answer is
-/// not to widen a tolerance — it is that the gate must run all eight ids, and
+/// not to widen a tolerance: it is that the gate must run all ten ids, and
 /// every pin in the list has to be re-read against the appearance it was
 /// measured under.
 ///
@@ -781,6 +826,10 @@ fn light_and_dark_are_the_same_geometry_in_every_preset() {
             gate::ThemeSubject {
                 id: "material3.dark",
                 theme: teksilo_theme_material3::dark,
+            },
+            gate::ThemeSubject {
+                id: "kde.dark",
+                theme: teksilo_theme_kde::dark,
             },
         ],
         allow: &[],
@@ -878,16 +927,17 @@ fn no_entry_names_a_theme_owned_wrapper_in_its_path() {
 /// really produces it — so the assertion is not a restatement of the matcher.
 #[test]
 fn the_allow_list_excuses_only_the_geometry_it_pinned() {
-    // Per preset: four size seeds and three theme seeds for each covered
-    // violation — so seven times that preset's own census, and the figure below
-    // is the smallest of the four **exactly**. Exactly, not comfortably under:
-    // this number is the only thing standing between "every geometry in the list
-    // was seeded against" and "the census quietly collapsed and the seeding
-    // proved nothing", and a slack figure buys a silent collapse the room to
-    // hide in. It reddens when the census shrinks — re-measure with `zz_census`
-    // (the CENSUS-TOTAL lines), take the smallest preset's total, and multiply
-    // by seven.
-    let findings = gate::non_narrowing(census(), &ROSTER, 7 * 114);
+    // Per preset: four size seeds, and one theme seed per other preset in the
+    // roster, for each covered violation. So the floor is that many times the
+    // preset's own census, and the figure below is the smallest preset's
+    // **exactly**. Exactly, not comfortably under: this number is the only
+    // thing standing between "every geometry in the list was seeded against"
+    // and "the census quietly collapsed and the seeding proved nothing", and a
+    // slack figure buys a silent collapse the room to hide in. It reddens when
+    // the census shrinks: re-measure with `zz_census` (the CENSUS-TOTAL lines)
+    // and take the smallest preset's total, KDE's 107 today.
+    let seeds_per_violation = 4 + (ROSTER.themes.len() - 1);
+    let findings = gate::non_narrowing(census(), &ROSTER, seeds_per_violation * 107);
     assert!(findings.is_empty(), "{}", findings.join("\n"));
 
     // And the seed floor above is a floor: it cannot see a census that GREW,
@@ -900,7 +950,7 @@ fn the_allow_list_excuses_only_the_geometry_it_pinned() {
     // region the new rows fall into.
     assert_eq!(
         census().len(),
-        477,
+        584,
         "the (theme x density) census moved — this test is proving something \
          else until the figure, the per-preset seed floor above, and the \
          entries covering any new rows are re-derived together",
@@ -1087,7 +1137,7 @@ fn a_deliberately_undersized_fixture_fails() {
     }
 
     // The second half. The same fixture, through the gate's own path: the
-    // census it computes over all four presets, and the matcher it hands that
+    // census it computes over all five presets, and the matcher it hands that
     // census to. Nothing in the real allow-list names this fixture, so every
     // row of it must come back out.
     let reported = gate::reported_failures(&undersized, &ROSTER);
@@ -1139,8 +1189,8 @@ fn an_app_installed_style_slot_is_reported() {
 
     // And the same under every preset in the roster, which is the leg that used
     // to be Int UI's alone: the function early-returned empty for any theme
-    // carrying a `DensityProjection`, and all three sibling presets carry one,
-    // so an app style installed on top of macOS, Fluent or Material 3 was
+    // carrying a `DensityProjection`, and all four sibling presets carry one,
+    // so an app style installed on top of macOS, Fluent, Material 3 or KDE was
     // reported as following a ladder it does not follow. `grid_view` is the
     // probe because no shipped preset installs it — a slot a preset DOES own is
     // overwritten by that preset's own projection at the next density change,
