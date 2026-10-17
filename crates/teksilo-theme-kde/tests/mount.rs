@@ -6,7 +6,8 @@
 //! the check box, the radio button, the switch, the line edit, the combo
 //! box, the spin box, the slider, the menu, the popup frame, the tooltip,
 //! the list and tree rows, the table, the tab, the scroll bar and the
-//! progress bar.
+//! progress bar, and the widgets whose stock recipe style the preset builds
+//! with Breeze's metrics.
 //!
 //! The unit tests beside each style check its rules. This checks that the
 //! styles run: a Tier-3 style is only exercised when its widget is built,
@@ -501,6 +502,159 @@ fn every_swatch_mounts() {
             );
             assert!(drawn > 0, "{accent:?} painted nothing");
         }
+    }
+}
+
+/// The widgets whose Breeze styling is the stock recipe style built with
+/// Breeze's metrics ([`kde::styles::recipes`]): each mounts and paints in
+/// both schemes and without the palette. A recipe field that stops existing
+/// is a compile error, but a nonsensical dimension still compiles and can
+/// make a widget paint nothing.
+#[test]
+fn recipe_styled_widgets_mount() {
+    use teksilo_widgets::splitter::{Splitter, SplitterModel};
+    use teksilo_widgets::{
+        Avatar, Badge, Banner, Calendar, Card, Link, ListView, ModalContainer, Panel, SearchField,
+        SegmentedControl,
+    };
+    let leaf = || FixedSize::new().width(120.0).height(40.0);
+    let mut bare = kde::light();
+    bare.extensions.remove::<KdePalette>();
+    let mut all: Vec<(&str, Theme)> = themes().into_iter().collect();
+    all.push(("no palette", bare));
+    for (scheme, theme) in all {
+        for (name, drawn) in [
+            ("card", mount(theme.clone(), Card::new().content(leaf()))),
+            ("panel", mount(theme.clone(), Panel::new().child(leaf()))),
+            ("dialog", mount(theme.clone(), ModalContainer::new(leaf()))),
+            (
+                "banner",
+                mount(
+                    theme.clone(),
+                    Banner::warning(lit!("Low disk")).description(lit!("Free some space")),
+                ),
+            ),
+            ("link", mount(theme.clone(), Link::new(lit!("Docs")))),
+            ("badge", mount(theme.clone(), Badge::new(lit!("9")))),
+            (
+                "calendar",
+                mount(theme.clone(), Calendar::single(Signal::new(None))),
+            ),
+            (
+                "search_field",
+                mount(theme.clone(), SearchField::new(Signal::new(String::new()))),
+            ),
+            (
+                "avatar",
+                mount(theme.clone(), Avatar::with_name(lit!("Jane Doe"))),
+            ),
+            (
+                "segmented_control",
+                mount(
+                    theme.clone(),
+                    SegmentedControl::indexed(Signal::new(0_usize))
+                        .segment(lit!("One"))
+                        .segment(lit!("Two")),
+                ),
+            ),
+            (
+                "splitter",
+                mount(
+                    theme.clone(),
+                    Splitter::new(SplitterModel::new(2, Orientation::Horizontal))
+                        .pane(leaf())
+                        .pane(leaf()),
+                ),
+            ),
+            (
+                "list_container",
+                mount(
+                    theme.clone(),
+                    ListView::new(ListModel::from_vec(vec!["A", "B"]), |_, item, _| {
+                        Box::new(StandardListItem::new(lit!(*item)))
+                    }),
+                ),
+            ),
+            ("snackbar", snackbar_drawn(theme.clone())),
+            ("toast", mount(theme.clone(), toast_surface())),
+        ] {
+            assert!(drawn > 0, "{scheme}: {name} painted nothing");
+        }
+    }
+}
+
+/// A toast's surface as the toast host builds it for one entry: an
+/// information toast titled "Saved", with a body and a close button.
+fn toast_surface() -> teksilo_widgets::toast::ToastSurface {
+    use teksilo_widgets::toast::surface::ToastSurfaceData;
+    use teksilo_widgets::toast::{ToastInstallOptions, ToastRegistry, ToastSeverity};
+    let data = ToastSurfaceData {
+        entry_id: 1,
+        severity: ToastSeverity::Info,
+        priority: teksilo_core::styles::ToastPriority::Normal,
+        title: lit!("Saved"),
+        body: Some(lit!("The file is on disk")),
+        announcement: None,
+        actions: Rc::new(Vec::new()),
+        show_close_button: true,
+        on_click: None,
+        style_override: None,
+        body_state: Signal::new(0),
+    };
+    teksilo_widgets::toast::ToastSurface::new(
+        data,
+        None,
+        ToastRegistry::new(ToastInstallOptions::default()),
+        false,
+    )
+}
+
+/// Open a snackbar under `theme` through its trigger and render it: the
+/// number of shapes painted at the bounds of its surface's frame, which the
+/// snackbar style builds.
+fn snackbar_drawn(theme: Theme) -> usize {
+    use teksilo_core::event::WidgetEvent;
+    use teksilo_widgets::Snackbar;
+    let mut tree = tree_with(theme);
+    tree.add(Snackbar::new(lit!("Show")).content(TextWidget::new(lit!("File deleted"))));
+    let proposal = SizeProposal::exact(400.0, 300.0);
+    tree.layout(proposal);
+    let trigger = tree.find_by_label("Show").expect("the snackbar's trigger");
+    tree.dispatch_event(WidgetEvent::AccessAction {
+        action: teksilo_core::accesskit::Action::Click,
+        target: Some(trigger),
+        target_node: teksilo_core::accessibility::root_node_id(),
+        data: None,
+    });
+    // Past the fade-in, so the surface paints at full opacity.
+    tree.advance_time(Duration::from_secs(1));
+    tree.layout(proposal);
+    let frame = tree.render();
+    let surfaces: Vec<WidgetId> = tree
+        .roots()
+        .into_iter()
+        .flat_map(|root| nodes_named(&tree, root, "SnackbarFrame"))
+        .collect();
+    assert_eq!(surfaces.len(), 1, "the snackbar is open");
+    let at = tree.bounds(surfaces[0]).to_array();
+    frame.shapes.iter().filter(|s| s.screen == at).count()
+}
+
+/// A badge rounds at the 5 px frame radius rather than as a pill: Breeze
+/// draws no pill.
+#[test]
+fn a_badge_rounds_at_the_frame_radius() {
+    use teksilo_widgets::Badge;
+    for (scheme, theme) in themes() {
+        let (mut tree, _) = placed(theme, Badge::new(lit!("12")));
+        let frame = rerender(&mut tree);
+        assert!(
+            frame
+                .shapes
+                .iter()
+                .any(|s| s.stroke_width == 0.0 && s.corner_radii == [5.0; 4]),
+            "{scheme}: no fill at the frame radius"
+        );
     }
 }
 

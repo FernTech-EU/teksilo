@@ -16,9 +16,15 @@ keywords = ["kde", "plasma", "breeze", "theme", "gui"]
 categories = ["gui"]
 # `tests/contrast.rs`, `tests/mount.rs` and `tests/preset_metrics.rs` read
 # the golden vectors under `tools/kde_golden` (the Oxygen schemes, Plasma's
-# painted pixels and its control sizes); left in, they would not compile
-# from the package and `cargo test` there would fail.
-exclude = ["tests/contrast.rs", "tests/mount.rs", "tests/preset_metrics.rs"]
+# painted pixels and its control sizes), and `tests/density_gaps.rs` reads
+# `engineering/docs/density-projection-gaps.md`; left in, they would not
+# compile from the package and `cargo test` there would fail.
+exclude = [
+    "tests/contrast.rs",
+    "tests/density_gaps.rs",
+    "tests/mount.rs",
+    "tests/preset_metrics.rs",
+]
 
 [dependencies]
 teksilo-core = { workspace = true }

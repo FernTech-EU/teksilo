@@ -209,8 +209,18 @@ by crate for clarity, not because crates version independently.
   separator, with a thumb at least 20 px long, its colours strengthened to a
   3:1 contrast. A `ProgressBar` is 26 px thick around Breeze's 6 px groove,
   filled toward the highlight, and an indeterminate one shows Breeze's
-  moving stripes. Other widgets draw Teksilo's own chrome in these colours
-  and shapes.
+  moving stripes. A `Card`, a `Panel` and a `Banner` are framed as Breeze
+  frames a group, at the 5 px radius in a 1 px outline with their content
+  6 px inside, and a `Dialog`'s content lies 10 px inside it, Breeze's
+  dialog margin; these gaps grow with the density. A `Snackbar`, a `Toast`
+  and a `Badge` are rounded at the 5 px radius, the badge rather than as a
+  pill, a toast's glyph, text and close button stand 6 px apart, and a
+  `SegmentedControl`'s frame is a 5 px radius in a 1 px outline. A
+  `Calendar`'s selected day is rounded at 5 px too, a focused `Link` is
+  ringed by Breeze's 2 px focus frame, from 1 px inside it to 1 px outside,
+  and a `SearchField`'s suggestions are laid out as the items of a Breeze
+  menu without icons. Other widgets draw Teksilo's own chrome in these
+  colours and shapes.
 
 #### Platform
 

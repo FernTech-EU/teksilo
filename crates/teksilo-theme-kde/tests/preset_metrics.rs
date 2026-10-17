@@ -32,7 +32,7 @@ use teksilo_target_conformance::in_tappable_row;
 use teksilo_theme_kde::geometry::BreezeGeometry;
 use teksilo_theme_kde::{self as kde};
 use teksilo_tokens::TargetDensity;
-use teksilo_widgets::primitives::{FixedSize, IconWidget};
+use teksilo_widgets::primitives::{FixedSize, HStack, IconWidget, VStack};
 use teksilo_widgets::{
     Button, ButtonVariant, Checkbox, ComboBox, IconButton, IconButtonSize, MenuItem, MenuList,
     RadioButton, Slider, SpinBox, SplitButton, TextInput, Toggle,
@@ -1060,5 +1060,462 @@ fn a_progress_bar_is_qts_hint_around_breezes_groove() {
             );
             assert_eq!(h, 6.0, "{density:?}: the app's thickness");
         }
+    }
+}
+
+// ── Recipe slots built with Breeze's metrics ──────────────────────────
+
+/// The spacing factor of each density's ladder, which every Breeze gap the
+/// recipe slots set is scaled by.
+const SPACING: [(TargetDensity, f32); 3] = [
+    (TargetDensity::Compact, 1.0),
+    (TargetDensity::Comfortable, 1.15),
+    (TargetDensity::Touch, 1.3),
+];
+
+fn near(a: f32, b: f32) -> bool {
+    (a - b).abs() < 1e-3
+}
+
+/// A tree under `theme` at `density` holding `w` at its natural size, laid
+/// out and rendered: the tree, the widget's root and the render frame.
+fn natural(
+    theme: &Theme,
+    density: TargetDensity,
+    w: impl Widget + 'static,
+) -> (WidgetTree, WidgetId, Rc<teksilo_canvas::RenderFrame>) {
+    natural_in(theme.with_density(density), w)
+}
+
+/// [`natural`] under `theme` as it is, already at its density.
+fn natural_in(
+    theme: Theme,
+    w: impl Widget + 'static,
+) -> (WidgetTree, WidgetId, Rc<teksilo_canvas::RenderFrame>) {
+    let mut tree = WidgetTree::new()
+        .with_theme(theme)
+        .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+    let root = tree.add(VStack::new().child(HStack::new().child(w)));
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+    let frame = tree.render();
+    (tree, root, frame)
+}
+
+/// The one `name` node under `root`.
+fn the(tree: &WidgetTree, root: WidgetId, name: &str) -> WidgetId {
+    let nodes = nodes_named(tree, root, name);
+    assert_eq!(nodes.len(), 1, "one {name}, found {}", nodes.len());
+    nodes[0]
+}
+
+/// How far `inner` lies inside `outer` on each side: leading, top,
+/// trailing, bottom.
+fn insets(tree: &WidgetTree, outer: WidgetId, inner: WidgetId) -> [f32; 4] {
+    let o = tree.bounds(outer);
+    let i = tree.bounds(inner);
+    [
+        i.x - o.x,
+        i.y - o.y,
+        (o.x + o.width) - (i.x + i.width),
+        (o.y + o.height) - (i.y + i.height),
+    ]
+}
+
+/// Whether the frame strokes a rounded rectangle at `radius` in a pen of
+/// `pen`.
+fn strokes_at(frame: &teksilo_canvas::RenderFrame, radius: f32, pen: f32) -> bool {
+    frame
+        .shapes
+        .iter()
+        .any(|s| s.stroke_width == pen && s.corner_radii == [radius; 4])
+}
+
+/// A leaf of a fixed size, the content the frames are measured around.
+fn leaf() -> FixedSize {
+    FixedSize::new().width(300.0).height(40.0)
+}
+
+/// A `Panel` and an outlined `Card` are Breeze's group box: their content
+/// 6 px inside the frame, the margin of a nested layout, scaled by the
+/// density's spacing, and the frame stroked at the 5 px radius in the 1 px
+/// pen.
+#[test]
+fn a_panel_and_a_card_frame_their_content_as_a_group_box_at_every_density() {
+    use teksilo_core::styles::CardVariant;
+    use teksilo_widgets::{Card, Panel};
+    for (density, factor) in SPACING {
+        for theme in themes() {
+            let (tree, root, frame) = natural(&theme, density, Panel::new().child(leaf()));
+            let pad = insets(
+                &tree,
+                the(&tree, root, "PanelFrame"),
+                the(&tree, root, "FixedSize"),
+            );
+            assert!(
+                pad.iter().all(|p| near(*p, 6.0 * factor)),
+                "{density:?}: the panel's content lies {pad:?} inside it"
+            );
+            assert!(strokes_at(&frame, 5.0, 1.0), "{density:?}: the panel frame");
+
+            let (tree, root, frame) = natural(
+                &theme,
+                density,
+                Card::new().variant(CardVariant::Outlined).content(leaf()),
+            );
+            let pad = insets(
+                &tree,
+                the(&tree, root, "CardFrame"),
+                the(&tree, root, "FixedSize"),
+            );
+            assert!(
+                pad.iter().all(|p| near(*p, 6.0 * factor)),
+                "{density:?}: the card's content lies {pad:?} inside it"
+            );
+            assert!(strokes_at(&frame, 5.0, 1.0), "{density:?}: the card frame");
+        }
+    }
+}
+
+/// A dialog's content lies Breeze's 10 px dialog margin inside its panel,
+/// the top-level layout margin, scaled by the density's spacing, and the
+/// panel is rounded at the 5 px window radius.
+#[test]
+fn a_dialog_holds_its_content_inside_breezes_dialog_margin_at_every_density() {
+    use teksilo_widgets::ModalContainer;
+    for (density, factor) in SPACING {
+        for theme in themes() {
+            let (tree, root, frame) = natural(&theme, density, ModalContainer::new(leaf()));
+            let pad = insets(
+                &tree,
+                the(&tree, root, "DialogPanel"),
+                the(&tree, root, "FixedSize"),
+            );
+            assert!(
+                pad.iter().all(|p| near(*p, 10.0 * factor)),
+                "{density:?}: the dialog's content lies {pad:?} inside it"
+            );
+            assert!(
+                strokes_at(&frame, 5.0, 1.0),
+                "{density:?}: the dialog panel"
+            );
+        }
+    }
+}
+
+/// A banner lays its glyph and text out 6 px inside its frame and 6 px
+/// apart, Breeze's child margin and layout spacing, scaled by the density's
+/// spacing.
+#[test]
+fn a_banner_lays_out_on_breezes_margin_and_spacing_at_every_density() {
+    use teksilo_widgets::Banner;
+    for (density, factor) in SPACING {
+        for theme in themes() {
+            let (tree, root, _) = natural(&theme, density, Banner::info(lit!("Saved")));
+            let padding = nodes_named(&tree, root, "Padding")
+                .into_iter()
+                .find(|p| {
+                    tree.children(*p).first().is_some_and(|c| {
+                        tree.widget_type_name(*c)
+                            .is_some_and(|t| t.ends_with("HStack"))
+                    })
+                })
+                .expect("the banner pads its row");
+            let row = tree.children(padding)[0];
+            let pad = insets(&tree, padding, row);
+            assert!(
+                pad.iter().all(|p| near(*p, 6.0 * factor)),
+                "{density:?}: the banner's row lies {pad:?} inside it"
+            );
+            let items = tree.children(row);
+            assert_eq!(items.len(), 2, "the glyph and the text");
+            let glyph = tree.bounds(items[0]);
+            let gap = tree.bounds(items[1]).x - (glyph.x + glyph.width);
+            assert!(near(gap, 6.0 * factor), "{density:?}: a gap of {gap}");
+        }
+    }
+}
+
+/// The `(horizontal, vertical)` gutter inside a suggestion row of a search
+/// field under `theme` at `density`, measured on the open suggestion list.
+fn suggestion_row_gutters(theme: &Theme, density: TargetDensity) -> (f32, f32) {
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_widgets::SearchField;
+    let mut tree = WidgetTree::new()
+        .with_theme(theme.with_density(density))
+        .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+    let query = Signal::new(String::new());
+    tree.add(
+        SearchField::new(query.clone())
+            .with_suggestions(|_| vec!["alpha".to_string(), "apricot".to_string()]),
+    );
+    let proposal = SizeProposal::exact(400.0, 300.0);
+    tree.layout(proposal);
+    // The provider runs off the query, so the list is empty until it
+    // changes.
+    query.set("a".to_string());
+    tree.layout(proposal);
+    let mut fields = Vec::new();
+    for root in tree.roots() {
+        fields.extend(nodes_named(&tree, root, "TextInputField"));
+    }
+    tree.focus(*fields.first().expect("the field's editable surface"));
+    tree.press_key(Key::ArrowDown, Modifiers::default());
+    tree.layout(proposal);
+    let mut rows = Vec::new();
+    for root in tree.roots() {
+        rows.extend(nodes_named(&tree, root, "SuggestionRow"));
+    }
+    assert_eq!(rows.len(), 2, "two suggestions, two rows");
+    let padding = the(&tree, rows[0], "Padding");
+    let pad = tree.bounds(padding);
+    let label = tree.bounds(tree.children(padding)[0]);
+    (
+        (pad.width - label.width) / 2.0,
+        (pad.height - label.height) / 2.0,
+    )
+}
+
+/// A suggestion's text lies where Breeze puts the text of a menu item
+/// without icons: 16 px across and the 4 px item margin down, scaled by the
+/// density's spacing.
+#[test]
+fn a_search_field_lays_its_suggestions_out_as_menu_items_at_every_density() {
+    for (density, factor) in SPACING {
+        let (h, v) = suggestion_row_gutters(&kde::light(), density);
+        assert!(
+            near(h, 16.0 * factor) && near(v, 4.0 * factor),
+            "{density:?}: ({h}, {v})"
+        );
+    }
+}
+
+/// A calendar marks today with a ring in the 1 px pen at the 5 px frame
+/// radius, at every density. Its header keeps the recipe's gap between the
+/// arrows, so the month title between them stays a target: no part of the
+/// calendar is a conformance failure.
+#[test]
+fn a_calendar_rings_today_in_the_pen_and_keeps_its_targets_at_every_density() {
+    use teksilo_widgets::Calendar;
+    use teksilo_widgets::styles::CalendarRecipe;
+    for (density, _) in SPACING {
+        for theme in themes() {
+            let (tree, root, frame) = natural(&theme, density, Calendar::single(Signal::new(None)));
+            assert!(strokes_at(&frame, 5.0, 1.0), "{density:?}: today's ring");
+            let arrows = nodes_named(&tree, root, "NavArrow");
+            assert_eq!(arrows.len(), 4, "prev-year / prev / next / next-year");
+            let a = tree.bounds(arrows[0]);
+            let gap = tree.bounds(arrows[1]).x - (a.x + a.width);
+            let stock = CalendarRecipe::for_tokens(&theme.with_density(density).input).header_gap;
+            assert!(near(gap, stock), "{density:?}: a gap of {gap}");
+            let failures: Vec<_> = target_audit(&tree, density)
+                .into_iter()
+                .filter(|v| v.rule.is_conformance_failure())
+                .collect();
+            assert!(failures.is_empty(), "{density:?}: {failures:#?}");
+        }
+    }
+}
+
+/// A segmented control's frame is a Breeze button's, at the 5 px radius in
+/// the 1 px pen. Its height is the one the stock recipe gives under the same
+/// theme, at every density: the control lays it out from the recipe
+/// module's constants, which the preset therefore leaves alone, around
+/// Breeze's 18 px line, 30 px at every density.
+#[test]
+fn a_segmented_control_takes_breezes_frame_and_keeps_its_height() {
+    use teksilo_widgets::SegmentedControl;
+    use teksilo_widgets::styles::RecipeSegmentedControlStyle;
+    let control = || {
+        SegmentedControl::indexed(Signal::new(0_usize))
+            .segment(lit!("One"))
+            .segment(lit!("Two"))
+    };
+    for (density, _) in SPACING {
+        for theme in themes() {
+            let (tree, root, frame) = natural(&theme, density, control());
+            let got = tree.bounds(the(&tree, root, "SegmentedControl")).height;
+            assert!(strokes_at(&frame, 5.0, 1.0), "{density:?}: the frame");
+            let mut stock = theme.with_density(density);
+            stock.style_slots.segmented_control = Some(Rc::new(
+                RecipeSegmentedControlStyle::for_tokens(&stock.input),
+            ));
+            let (tree, root, _) = natural_in(stock, control());
+            let want = tree.bounds(the(&tree, root, "SegmentedControl")).height;
+            assert_eq!(got, want, "{density:?}: the stock recipe's height");
+            assert_eq!(got, 30.0, "{density:?}");
+        }
+    }
+}
+
+/// A focused link is ringed as Breeze frames keyboard focus (spec k.5.8):
+/// a 2 px ring from 1 px inside the link to 1 px outside it, its inner edge
+/// rounded at the 5 px frame radius and its outer edge at 7. The recipe
+/// strokes it centred on the link's bounds, so the stroke's centre line is
+/// the bounds, rounded at 6. An unfocused link draws no ring.
+#[test]
+fn a_focused_links_ring_is_breezes_focus_frame_at_every_density() {
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_widgets::Link;
+    for (density, _) in SPACING {
+        for theme in themes() {
+            let (mut tree, root, frame) = natural(&theme, density, Link::new(lit!("Docs")));
+            let ring_width = theme.shape.focus_ring_width;
+            assert_eq!(ring_width, 2.0, "Breeze's ring is 2 px wide");
+            assert!(
+                !frame.shapes.iter().any(|s| s.stroke_width == ring_width),
+                "{density:?}: a ring before focus"
+            );
+            let link = the(&tree, root, "Link");
+            // Tab, as a keyboard user does: the ring shows on keyboard focus.
+            tree.press_key(Key::Tab, Modifiers::NONE);
+            assert_eq!(
+                tree.focused(),
+                Some(link),
+                "{density:?}: Tab reaches the link"
+            );
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+            let frame = tree.render();
+            let rings: Vec<_> = frame
+                .shapes
+                .iter()
+                .filter(|s| s.stroke_width == ring_width)
+                .collect();
+            assert_eq!(rings.len(), 1, "{density:?}: one focus ring");
+            let ring = rings[0];
+            assert_eq!(
+                ring.screen,
+                tree.bounds(link).to_array(),
+                "{density:?}: the ring is centred on the link's bounds"
+            );
+            let half = ring_width / 2.0;
+            for r in ring.corner_radii {
+                assert!(
+                    near(r - half, 5.0) && near(r + half, 7.0),
+                    "{density:?}: a ring rounded at {r}, edges at {} and {}",
+                    r - half,
+                    r + half
+                );
+            }
+        }
+    }
+}
+
+/// A snackbar's surface rounds at the 5 px window radius, as every Breeze
+/// window does, at every density.
+#[test]
+fn a_snackbar_rounds_at_the_window_radius_at_every_density() {
+    use teksilo_core::event::WidgetEvent;
+    use teksilo_widgets::Snackbar;
+    for (density, _) in SPACING {
+        for theme in themes() {
+            let mut tree = WidgetTree::new()
+                .with_theme(theme.with_density(density))
+                .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+            tree.add(Snackbar::new(lit!("Show")).content(leaf()));
+            let proposal = SizeProposal::exact(800.0, 600.0);
+            tree.layout(proposal);
+            let trigger = tree.find_by_label("Show").expect("the snackbar's trigger");
+            tree.dispatch_event(WidgetEvent::AccessAction {
+                action: teksilo_core::accesskit::Action::Click,
+                target: Some(trigger),
+                target_node: teksilo_core::accessibility::root_node_id(),
+                data: None,
+            });
+            // Past the fade-in, so the surface paints at full opacity.
+            tree.advance_time(std::time::Duration::from_secs(1));
+            tree.layout(proposal);
+            let frame = tree.render();
+            let surfaces: Vec<WidgetId> = tree
+                .roots()
+                .into_iter()
+                .flat_map(|root| nodes_named(&tree, root, "SnackbarFrame"))
+                .collect();
+            assert_eq!(surfaces.len(), 1, "{density:?}: the snackbar is open");
+            let at = tree.bounds(surfaces[0]).to_array();
+            let fill = frame
+                .shapes
+                .iter()
+                .find(|s| s.screen == at && s.stroke_width == 0.0)
+                .unwrap_or_else(|| panic!("{density:?}: no snackbar surface"));
+            assert_eq!(fill.corner_radii, [5.0; 4], "{density:?}: the surface");
+            assert!(
+                frame
+                    .shapes
+                    .iter()
+                    .any(|s| s.screen == at && s.stroke_width == 1.0 && s.corner_radii == [5.0; 4]),
+                "{density:?}: the surface's outline"
+            );
+        }
+    }
+}
+
+/// A toast's surface rounds at the 5 px window radius, and its glyph, its
+/// text and its close button stand Breeze's 6 px layout spacing apart,
+/// scaled by the density's spacing.
+#[test]
+fn a_toast_rounds_at_the_window_radius_and_spaces_its_row_at_every_density() {
+    use teksilo_widgets::toast::surface::ToastSurfaceData;
+    use teksilo_widgets::toast::{ToastInstallOptions, ToastRegistry, ToastSeverity, ToastSurface};
+    for (density, factor) in SPACING {
+        for theme in themes() {
+            let data = ToastSurfaceData {
+                entry_id: 1,
+                severity: ToastSeverity::Info,
+                priority: teksilo_core::styles::ToastPriority::Normal,
+                title: lit!("Saved"),
+                body: None,
+                announcement: None,
+                actions: Rc::new(Vec::new()),
+                show_close_button: true,
+                on_click: None,
+                style_override: None,
+                body_state: Signal::new(0),
+            };
+            let surface = ToastSurface::new(
+                data,
+                None,
+                ToastRegistry::new(ToastInstallOptions::default()),
+                false,
+            );
+            let (tree, root, frame) = natural(&theme, density, surface);
+            let toast = the(&tree, root, "ToastSurface");
+            let body = tree.children(toast)[0];
+            let background = tree.children(body)[0];
+            assert_eq!(
+                tree.widget_type_name(background)
+                    .and_then(|t| t.rsplit("::").next()),
+                Some("RectWidget"),
+                "the surface's background"
+            );
+            let at = tree.bounds(background).to_array();
+            let fill = frame
+                .shapes
+                .iter()
+                .find(|s| s.screen == at && s.stroke_width == 0.0)
+                .unwrap_or_else(|| panic!("{density:?}: no toast surface"));
+            assert_eq!(fill.corner_radii, [5.0; 4], "{density:?}: the surface");
+
+            let padding = tree.children(body)[1];
+            let row = tree.children(padding)[0];
+            let items = tree.children(row);
+            assert_eq!(items.len(), 3, "the glyph, the text and the close button");
+            for pair in items.windows(2) {
+                let before = tree.bounds(pair[0]);
+                let gap = tree.bounds(pair[1]).x - (before.x + before.width);
+                assert!(near(gap, 6.0 * factor), "{density:?}: a gap of {gap}");
+            }
+        }
+    }
+}
+
+/// A link's underline is the 1 px pen at every density.
+#[test]
+fn a_links_underline_is_the_pen_at_every_density() {
+    use teksilo_widgets::Link;
+    for (density, _) in SPACING {
+        let (tree, root, _) = natural(&kde::light(), density, Link::new(lit!("Docs")));
+        let underline = nodes_named(&tree, root, "FixedSize");
+        assert_eq!(underline.len(), 1, "one underline");
+        assert_eq!(tree.bounds(underline[0]).height, 1.0, "{density:?}");
     }
 }

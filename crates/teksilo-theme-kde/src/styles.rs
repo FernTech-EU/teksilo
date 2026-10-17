@@ -37,6 +37,12 @@
 //!
 //! The dimensions they are built with, all derived from [`crate::geometry`]
 //! and the density ladder, are collected in [`metrics`].
+//!
+//! Widgets whose shipped recipe style already paints Breeze's shape get that
+//! style built with Breeze's numbers instead, in [`recipes`]: the card, the
+//! panel, the dialog, the snackbar, the toast, the banner, the link, the
+//! badge, the calendar, the search field, the avatar, the splitter, the list
+//! container and the segmented control.
 
 pub mod arrow;
 pub mod button;
@@ -51,6 +57,7 @@ pub mod popover;
 pub mod popup;
 pub mod progress_bar;
 pub mod radio;
+pub mod recipes;
 pub mod scroll_bar;
 pub mod slider;
 pub mod spin_box;

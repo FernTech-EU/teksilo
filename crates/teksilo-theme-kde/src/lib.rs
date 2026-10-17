@@ -78,6 +78,11 @@
 //!   `focus_ring` token is opaque, lifted to 3:1, and the styles draw it as
 //!   it is.
 //! - **Linear, quick motion.** Style transitions run 100 ms, linearly.
+//! - **Breeze's frames and margins.** A card, a panel and a banner are
+//!   framed at the 5 px radius in the 1 px pen with their content 6 px
+//!   inside, the margin of a nested layout; a dialog's content lies 10 px
+//!   inside it, Breeze's dialog margin; a suggestion list lays its rows out
+//!   as a menu without icons ([`styles::recipes`]).
 //! - **Text-driven heights.** A push button is the text line plus 16 px, a
 //!   field the line plus 14: 34 and 32 px at Plasma's default font, and
 //!   they grow with it ([`geometry`]).
@@ -121,14 +126,21 @@
 //!
 //! ## Known limitations
 //!
-//! - **Most widget chrome is the framework's.** This version installs
+//! - **Some widget chrome is the framework's.** This version installs
 //!   Breeze styles for `Button`, `IconButton`, `SplitButton`, `Toggle`,
 //!   `Checkbox`, `RadioButton`, `TextInput`, `ComboBox`, `SpinBox`,
 //!   `Slider`, `MenuItem`, the popup frame, the tooltip, `StandardListItem`
 //!   and `StandardTreeItem`, `TableView` and `TreeTableView`, `TabBar` and
-//!   `TabWidget`, `ScrollBar` and `ProgressBar` only: every other widget
-//!   keeps Teksilo's recipe style, painted in the Breeze colours, radii,
-//!   focus ring, typography and motion.
+//!   `TabWidget`, `ScrollBar` and `ProgressBar`. `Card`, `Panel`, `Dialog`,
+//!   `Snackbar`, `Toast`, `Banner`, `Link`, `Badge`, `Calendar`,
+//!   `SearchField`, `Avatar`, `Splitter`, the list containers and
+//!   `SegmentedControl` keep Teksilo's recipe style built with Breeze's
+//!   radius, pen and margins, and the dimensions Breeze has no number for,
+//!   or that the widget does not take from its style (a segmented control's
+//!   height, a calendar's cell size), stay the framework's
+//!   ([`styles::recipes`]). Every other widget keeps Teksilo's recipe style
+//!   as it ships, painted in the Breeze colours, radii, focus ring,
+//!   typography and motion.
 //! - **A menu's shortcuts, separators, section titles and check marks are
 //!   the framework's.** `MenuItem` writes a shortcut in the shortcut text
 //!   role, where Breeze writes the window text at 70 % opacity, and gives
@@ -370,9 +382,13 @@ fn project(theme: &Theme, state: PaintState) -> Theme {
 /// The buttons, the check box, the radio button, the switch, the line edit,
 /// the combo box, the spin box, the slider, the menu item, the popup frame,
 /// the tooltip, the list row, the table, the tab, the scroll bar and the
-/// progress bar are Breeze's own ([`styles`]); every other slot is left to
-/// the widget's recipe style, which paints from the Breeze tokens, and the
-/// crate's tests list the reason for each. Every style installed here reads
+/// progress bar are Breeze's own ([`styles`]); the card, the panel, the
+/// dialog, the snackbar, the toast, the banner, the link, the badge, the
+/// calendar, the search field, the avatar, the splitter, the list container
+/// and the segmented control are the stock recipe styles built with Breeze's
+/// metrics ([`styles::recipes`]); every other slot is left to the widget's
+/// recipe style, which paints from the Breeze tokens, and the crate's tests
+/// list the reason for each. Every style installed here reads
 /// its metrics from the theme it builds under, `theme.input` included, so
 /// [`reproject`] can rerun this alone.
 fn install_styles(theme: &mut Theme) {
@@ -403,6 +419,23 @@ fn install_styles(theme: &mut Theme) {
     slots.tab = Some(Rc::new(tab));
     slots.scroll_bar = Some(Rc::new(scroll_bar));
     slots.progress_bar = Some(Rc::new(progress_bar));
+    let t = &theme.input;
+    slots.card = Some(Rc::new(styles::recipes::breeze_card_style_for(t)));
+    slots.panel = Some(Rc::new(styles::recipes::breeze_panel_style_for(t)));
+    slots.dialog = Some(Rc::new(styles::recipes::breeze_dialog_style_for(t)));
+    slots.snackbar = Some(Rc::new(styles::recipes::breeze_snackbar_style_for(t)));
+    slots.toast = Some(Rc::new(styles::recipes::breeze_toast_style_for(t)));
+    slots.banner = Some(Rc::new(styles::recipes::breeze_banner_style_for(t)));
+    slots.link = Some(Rc::new(styles::recipes::breeze_link_style_for(t)));
+    slots.badge = Some(Rc::new(styles::recipes::breeze_badge_style_for(t)));
+    slots.calendar = Some(Rc::new(styles::recipes::breeze_calendar_style_for(t)));
+    slots.search_field = Some(Rc::new(styles::recipes::breeze_search_field_style_for(t)));
+    slots.avatar = Some(Rc::new(styles::recipes::breeze_avatar_style_for(t)));
+    slots.splitter = Some(Rc::new(styles::recipes::breeze_splitter_style_for(t)));
+    slots.list_container = Some(Rc::new(styles::recipes::breeze_list_container_style_for(t)));
+    slots.segmented_control = Some(Rc::new(
+        styles::recipes::breeze_segmented_control_style_for(t),
+    ));
 }
 
 #[cfg(test)]
@@ -595,68 +628,26 @@ mod tests {
         assert!((lp.frame_contrast() - 0.2).abs() < 1e-12);
     }
 
-    /// Every slot this commit leaves to the widget's own recipe style, with
-    /// the reason it is inherited rather than filled.
+    /// Every slot the preset deliberately leaves to the widget's own recipe
+    /// style, with the reason it is inherited rather than filled. Each is a
+    /// widget Breeze has no counterpart or no metric for, or one whose
+    /// dimensions the style cannot set; its recipe paints from the Breeze
+    /// tokens all the same.
     const KDE_UNFILLED: &[(&str, &str)] = &[
         (
-            "splitter",
-            "the recipe's thin divider in the border role reads as Breeze's 1 px splitter handle",
-        ),
-        (
             "radio_tile",
-            "Breeze has no selectable card; the recipe surface reads the preset's surface and accent roles",
-        ),
-        (
-            "panel",
-            "the recipe panel paints the Breeze surface and border tokens with the Breeze radius",
-        ),
-        (
-            "card",
-            "Breeze has no card; the recipe card paints the Breeze raised surface and border tokens",
+            "Breeze has no selectable card, so there is no Breeze metric to build it with; \
+             the recipe frame paints the Breeze surface, accent, border and focus roles",
         ),
         (
             "chart",
-            "Breeze has no chart chrome; the teksilo-charts default reads the series colours and the Breeze border role",
-        ),
-        (
-            "dialog",
-            "the recipe dialog paints the Breeze surfaces, radius and shadow tokens",
-        ),
-        (
-            "snackbar",
-            "Breeze has no snackbar; the recipe paints the Breeze raised surface and text tokens",
-        ),
-        (
-            "toast",
-            "Breeze has no toast; the recipe paints the Breeze raised surface and status tokens",
-        ),
-        (
-            "banner",
-            "the recipe banner paints the Breeze status foregrounds and their computed backgrounds",
-        ),
-        (
-            "badge",
-            "Breeze has no badge; the recipe badge paints the Breeze accent and status tokens",
-        ),
-        (
-            "link",
-            "the recipe link paints the Breeze link tokens, lifted to the text floor",
-        ),
-        (
-            "segmented_control",
-            "Breeze has no segmented control; the recipe paints the Breeze surface, accent and border tokens",
-        ),
-        (
-            "avatar",
-            "Breeze has no avatar; the recipe paints the Breeze accent and surface tokens",
-        ),
-        (
-            "calendar",
-            "the recipe calendar paints the Breeze selection, hover and text tokens",
+            "Breeze has no chart chrome, and the default ChartStyle lives in teksilo-charts, \
+             which this preset does not depend on; it reads the series colours and the Breeze border role",
         ),
         (
             "color_picker",
-            "Breeze has no in-window colour picker chrome; the recipe reads the theme roles",
+            "Breeze specifies no colour-picker geometry; the canvas, strips and swatches are \
+             colour-space renderers that read the recipe's own dimensions, drawn in the theme roles",
         ),
         (
             "date_edit",
@@ -664,23 +655,23 @@ mod tests {
         ),
         (
             "rich_text_editor",
-            "the recipe frames the viewport in the Breeze border and surface roles; the text is document content",
-        ),
-        (
-            "list_container",
-            "the recipe is only the drag-insertion line, drawn in the Breeze accent",
+            "a read-only viewer is frameless, and an editable one takes its frame's radius, pen and \
+             insets from the stock line-edit recipe rather than the slot, painted in the Breeze roles",
         ),
         (
             "drop_zone",
-            "Breeze has no drop-zone control; the recipe tints its region from the theme roles",
+            "Breeze has no drop-zone control, so there is no Breeze metric to build it with; \
+             the recipe tints its region from the theme roles",
         ),
         (
             "drop_target",
-            "Breeze has no drop-target control; the recipe border reads the theme roles",
+            "Breeze has no drop-target control, so there is no Breeze metric to build it with; \
+             the recipe border reads the theme roles",
         ),
         (
             "grid_view",
-            "the recipe's focus ring, marquee and insertion bar use the focus and accent roles this preset maps",
+            "Breeze specifies no grid view; the recipe's focus ring, marquee, insertion bar and \
+             pinned header are the trait's default decorations, drawn in the roles this preset maps",
         ),
         (
             "web_view",
@@ -688,11 +679,8 @@ mod tests {
         ),
         (
             "text_selection",
-            "touch chrome Breeze does not define; its geometry is teksilo_core::text_touch's, shared with hit testing",
-        ),
-        (
-            "search_field",
-            "the recipe is a passthrough around the TextInput, which this preset frames as Breeze's line edit",
+            "Breeze defines no touch selection handles or magnifier, so there is no Breeze \
+             metric to build it with; the recipe paints them in the theme roles",
         ),
     ];
 
@@ -961,6 +949,49 @@ mod tests {
                 height: None,
             });
             assert_eq!(tree.bounds(id).height, row, "{density:?}: the rendered row");
+        }
+    }
+
+    /// The recipe slots built with Breeze's metrics are rebuilt for the
+    /// density a theme is projected to: what a widget asking the installed
+    /// style is told follows the projected input tokens.
+    #[test]
+    fn a_density_switch_reprojects_the_recipe_slots() {
+        let base = light();
+        for (density, factor, arrow) in [
+            (TargetDensity::Compact, 1.0, 24.0),
+            (TargetDensity::Comfortable, 1.15, 32.0),
+            (TargetDensity::Touch, 1.3, 44.0),
+        ] {
+            let t = base.with_density(density);
+            let slots = &t.style_slots;
+            let search = slots.search_field.as_ref().expect("a search-field style");
+            assert!(
+                (search.row_padding_horizontal(&t.input) - 16.0 * factor).abs() < 1e-4,
+                "{density:?}"
+            );
+            assert!(
+                (search.row_padding_vertical(&t.input) - 4.0 * factor).abs() < 1e-4,
+                "{density:?}"
+            );
+            let calendar = slots.calendar.as_ref().expect("a calendar style");
+            assert_eq!(calendar.nav_arrow_size(&t.input), arrow, "{density:?}");
+            for (name, installed) in [
+                ("card", slots.card.is_some()),
+                ("panel", slots.panel.is_some()),
+                ("dialog", slots.dialog.is_some()),
+                ("snackbar", slots.snackbar.is_some()),
+                ("toast", slots.toast.is_some()),
+                ("banner", slots.banner.is_some()),
+                ("link", slots.link.is_some()),
+                ("badge", slots.badge.is_some()),
+                ("avatar", slots.avatar.is_some()),
+                ("splitter", slots.splitter.is_some()),
+                ("list_container", slots.list_container.is_some()),
+                ("segmented_control", slots.segmented_control.is_some()),
+            ] {
+                assert!(installed, "{density:?}: no {name} style");
+            }
         }
     }
 
