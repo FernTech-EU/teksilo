@@ -19,7 +19,8 @@
 //! `make_header_cell` — the shared `table_view::header::HeaderCell`,
 //! used by both views — and their gutter comes from
 //! `cell_padding_horizontal` / `cell_padding_vertical` rather than from
-//! the module constants. Wiring `make_row_background` and
+//! the module constants, and both views take their default row and header
+//! heights from `row_height` / `header_height`. Wiring `make_row_background` and
 //! `make_sort_indicator` is intentionally deferred: the widgets still
 //! own their cell / row / grid-line chrome directly, and those
 //! dimensions live on `teksilo_widgets::styles::recipe_table_style` as
@@ -27,11 +28,11 @@
 
 use std::rc::Rc;
 
-use teksilo_tokens::{BorderRole, InputTokens};
+use teksilo_tokens::{BorderRole, InputTokens, TargetRole};
 
 use crate::build_context::BuildContext;
 use crate::signal::Signal;
-use crate::styles::density::spacing;
+use crate::styles::density::{dp, spacing};
 use crate::widget_id::WidgetId;
 
 /// Sort direction for header cells.
@@ -124,6 +125,36 @@ pub trait TableStyle: 'static {
     /// same terms as [`cell_padding_horizontal`](Self::cell_padding_horizontal).
     fn cell_padding_vertical(&self, tokens: &InputTokens) -> f32 {
         spacing(4.0, tokens)
+    }
+
+    /// The height of a body row in a uniform-height table, in logical pixels,
+    /// at the density `tokens` describe.
+    ///
+    /// A metrics accessor because the views lay their rows out arithmetically
+    /// (the virtualization offsets, the scroll step, the visible range) from
+    /// one number, long after the chrome is built, and hold an
+    /// `Rc<dyn TableStyle>` that cannot reach a recipe field. Without it a
+    /// preset's row height is written and never rendered. A view's own
+    /// `row_height(..)`, `row_height_fn(..)` or `auto_row_height(..)` wins over
+    /// it.
+    ///
+    /// **Defaulted**, so a `TableStyle` implemented outside this workspace
+    /// keeps compiling. The default is
+    /// `teksilo_widgets::styles::recipe_table_style::ROW_HEIGHT` put through
+    /// [`dp`] as a target, which is the shipped recipe's own answer at every
+    /// density, restated as a literal because `teksilo-core` cannot name a
+    /// `teksilo-widgets` constant, and pinned equal to it by
+    /// `the_table_trait_defaults_restate_the_module_constants`.
+    fn row_height(&self, tokens: &InputTokens) -> f32 {
+        dp(28.0, TargetRole::Target, tokens)
+    }
+
+    /// The height of the column header row, in logical pixels, at the density
+    /// `tokens` describe. A view's own `header_height(..)` wins over it.
+    /// Defaulted on the same terms as [`row_height`](Self::row_height), from
+    /// `teksilo_widgets::styles::recipe_table_style::HEADER_HEIGHT`.
+    fn header_height(&self, tokens: &InputTokens) -> f32 {
+        dp(32.0, TargetRole::Target, tokens)
     }
 }
 

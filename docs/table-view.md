@@ -92,7 +92,10 @@ Three mutually exclusive modes (the last builder call wins), identical on
 
 - **Uniform** (`row_height`), every row is the same height. Pure
   arithmetic, no allocation; this is the historical behavior and stays
-  the default (28 px from the table style).
+  the default, at the active `TableStyle`'s `row_height` (28 px under
+  IntUI at Compact, raised to the density's target size above it; 24 px
+  under macOS and 40 px under Fluent at Compact). A `row_height(..)` the
+  app sets wins over the style.
 - **Exact** (`row_height_fn`), a pure callback `fn(visible_index) -> f32`
   seeds a prefix-sum offset table (O(log n) row↔y lookups). No
   measurement pass, exact scrollbar, zero jitter. The callback is
@@ -541,8 +544,8 @@ header by a frame, and a headless test needs a second `layout()` before it
 lines up.
 
 On its own the header resolves its widths
-against its own bounds, clips its cells to them, takes `HEADER_HEIGHT` when its
-parent leaves the height free, and paints the `ColumnResizePolicy::OnRelease`
+against its own bounds, clips its cells to them, takes the active
+`TableStyle`'s `header_height` when its parent leaves the height free, and paints the `ColumnResizePolicy::OnRelease`
 guide line within the strip only.
 
 **Accessibility.** The strip is the `Role::Row` with row index 1 and its cells
@@ -1021,7 +1024,10 @@ PgDn handler uses.
 Static numbers (`ROW_HEIGHT`, `HEADER_HEIGHT`, `RESIZE_HANDLE_WIDTH`,
 `GRID_LINE_THICKNESS`, `TREE_INDENT_PER_LEVEL`, …) are `pub const`s in
 [`recipe_table_style`](../crates/teksilo-widgets/src/styles/recipe_table_style.rs)
-They are snapshot at build time, like every other widget.
+They are snapshot at build time, like every other widget. The row and header
+heights a view lays out come from the active `TableStyle`'s `row_height` and
+`header_height`, which `RecipeTableStyle` answers from its `TableRecipe`;
+`ROW_HEIGHT` and `HEADER_HEIGHT` are the IntUI values that recipe starts from.
 
 ---
 

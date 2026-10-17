@@ -322,7 +322,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
                 densities: AT_COMFORTABLE,
                 themes: ALL_THEMES,
                 paints: (Is(12.0), Is(12.0)),
-                reaches: (Is(22.0), Is(28.0)),
+                reaches: (Is(22.0), Is(32.0)),
             },
         ],
         owner: Owner::Named(
@@ -619,6 +619,31 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               two-row header, or arrows that do not follow the target ladder -- \
               and each of them changes what a calendar looks like.",
     },
+    AllowedViolation {
+        path: "TableView > ScrollBar",
+        measured: &[PinnedGeometry {
+            densities: AT_COMPACT,
+            themes: &[MACOS],
+            paints: (Is(12.0), Is(11.5)),
+            reaches: (Is(31.0), Is(11.5)),
+        }],
+        owner: Owner::Named("whoever revisits ScrollBar's track regions"),
+        exception: Some("Equivalent"),
+        why: "The part of a table's vertical scroll-bar track below the thumb, \
+              which `ScrollBar::target_regions` reports as a paging target. It \
+              is as tall as the content overflow leaves it: the fixture's twelve \
+              rows at macOS's 24 dp `NSTableView` row height overflow the 276 dp \
+              viewport by 12 dp, so the thumb fills all but 11.5 dp of the track \
+              at the top of the range. Under the other presets the same twelve \
+              rows are taller and the remainder clears the floor, which is all \
+              that separates them; any scroll bar whose content barely \
+              overflows, or whose thumb sits near an end of its range, leaves a \
+              remainder this short. The width earns its ring, the height cannot, \
+              because the thumb is flush above it. WCAG 2.2 SC 2.5.8 \
+              *Equivalent*: the page a tap on the track scrolls is reached by \
+              dragging the thumb, which reaches far past the floor, by the \
+              wheel, and by PageDown on the focused table.",
+    },
 ];
 
 #[test]
@@ -697,12 +722,12 @@ fn the_allow_lists_roster_is_what_it_says_it_is() {
     let findings = gate::roster_defects(census(), &ROSTER);
     assert!(findings.is_empty(), "{}", findings.join("\n"));
 
-    assert_eq!(ALLOW_LIST.len(), 14, "fourteen written findings");
+    assert_eq!(ALLOW_LIST.len(), 15, "fifteen written findings");
     let on_an_exception = ALLOW_LIST.iter().filter(|e| e.exception.is_some()).count();
     assert_eq!(
         on_an_exception,
-        5,
-        "five rest on an SC 2.5.8 exception: {:?}",
+        6,
+        "six rest on an SC 2.5.8 exception: {:?}",
         ALLOW_LIST
             .iter()
             .filter(|e| e.exception.is_some())
@@ -862,7 +887,7 @@ fn the_allow_list_excuses_only_the_geometry_it_pinned() {
     // hide in. It reddens when the census shrinks — re-measure with `zz_census`
     // (the CENSUS-TOTAL lines), take the smallest preset's total, and multiply
     // by seven.
-    let findings = gate::non_narrowing(census(), &ROSTER, 7 * 116);
+    let findings = gate::non_narrowing(census(), &ROSTER, 7 * 114);
     assert!(findings.is_empty(), "{}", findings.join("\n"));
 
     // And the seed floor above is a floor: it cannot see a census that GREW,
@@ -875,7 +900,7 @@ fn the_allow_list_excuses_only_the_geometry_it_pinned() {
     // region the new rows fall into.
     assert_eq!(
         census().len(),
-        481,
+        477,
         "the (theme x density) census moved — this test is proving something \
          else until the figure, the per-preset seed floor above, and the \
          entries covering any new rows are re-derived together",
@@ -1660,6 +1685,14 @@ fn the_allow_lists_discriminators_narrow_by_size_and_by_density() {
 /// because `up_to` 44 turns a 28 dp table row into a candidate that a 24 dp
 /// `up_to` left inert. A test that measured only one of them would report half
 /// the mechanism.
+///
+/// The table half builds its own fixture with an app-chosen
+/// `row_height(28.0)` and `header_height(32.0)`, the geometry every table had
+/// before its heights came from its style. The shared `table_view` fixture
+/// takes them from the active `TableStyle`, which every shipped preset raises
+/// to 44 dp at Touch, and there the bar reaches 32 dp with and without the
+/// mechanism (measured), so it would pass the mechanism's deletion. An app
+/// that sets its own 28 dp rows is the configuration the mechanism protects.
 #[test]
 fn an_outsets_claim_survives_the_slop_pass_in_the_shipped_controls() {
     let clear = measurements_of("search_field", "HitTarget", TargetDensity::Compact);
@@ -1679,7 +1712,27 @@ fn an_outsets_claim_survives_the_slop_pass_in_the_shipped_controls() {
     assert!(clear[0].sources.outset, "and the outset must be credited");
     assert_eq!(clear[0].rule, None, "so it carries no verdict");
 
-    let bar = measurements_of("table_view", "ScrollBar", TargetDensity::Touch);
+    let rows_28 = TargetFixture::sized("table_view_28dp_rows", 500.0, 300.0, |t| {
+        let model = teksilo_data::ListModel::from_vec(
+            (0..12)
+                .map(|i| format!("Item {i}"))
+                .collect::<Vec<String>>(),
+        );
+        t.add(
+            TableView::new(model)
+                .add_column(teksilo_widgets::table_view::Column::new(
+                    "name",
+                    lit!("Name"),
+                    |item: &String, _cx| Box::new(TextWidget::new(lit!(item.clone()))),
+                ))
+                .row_height(28.0)
+                .header_height(32.0),
+        )
+    });
+    let bar: Vec<_> = measure_fixtures(&[rows_28], TargetDensity::Touch)
+        .into_iter()
+        .filter(|m| measured_leaf(&m.path) == "ScrollBar")
+        .collect();
     let node = bar
         .iter()
         .find(|m| m.part.is_none() && m.size.width > 0.0)

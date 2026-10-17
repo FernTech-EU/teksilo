@@ -303,6 +303,11 @@ pub struct TableView<T: 'static> {
     /// Row geometry — shared with `BodyPane` and the keyboard handler.
     row_metrics: SharedRowMetrics,
     header_height: Option<f32>,
+    /// The active `TableStyle`'s row and header heights at the density
+    /// in force, read at build by `adopt_style_heights`. Until then they
+    /// hold IntUI's Compact values, the module constants.
+    style_row_height: f32,
+    style_header_height: f32,
     show_header: bool,
     selection_mode: TableSelectionMode,
     /// Row selection — index-based `SelectionModel` or keyed
@@ -646,6 +651,8 @@ impl<T: 'static> TableView<T> {
             height_source: HeightSource::Uniform,
             row_metrics: Rc::new(RefCell::new(RowMetrics::uniform(cp::ROW_HEIGHT, 0.0))),
             header_height: None,
+            style_row_height: cp::ROW_HEIGHT,
+            style_header_height: cp::HEADER_HEIGHT,
             show_header: true,
             selection_mode: TableSelectionMode::default(),
             row_selection: None,
@@ -802,8 +809,30 @@ impl<T: 'static> TableView<T> {
             .make_metrics(self.effective_row_height(), 0.0);
     }
 
-    /// Fixed row height (default: the table style's 28 px) — the
-    /// uniform fast path. Mutually exclusive with
+    /// Read the active `TableStyle`'s row and header heights at the density
+    /// in force. Called first thing in `build`, so every height the build and
+    /// the later layout passes read is the style's, unless the app set its
+    /// own through [`row_height`](Self::row_height) /
+    /// [`header_height`](Self::header_height), which win. A uniform-height
+    /// view with no row height of its own re-materializes its metrics when
+    /// the style's row height differs from the one they were made with.
+    fn adopt_style_heights(&mut self, ctx: &BuildContext) {
+        let style = crate::styles::recipe_table_style::resolve_table_style(ctx);
+        let tokens = &ctx.theme().input;
+        self.style_header_height = style.header_height(tokens);
+        let row = style.row_height(tokens);
+        if row != self.style_row_height {
+            self.style_row_height = row;
+            if self.row_height.is_none() && matches!(self.height_source, HeightSource::Uniform) {
+                self.remake_metrics();
+            }
+        }
+    }
+
+    /// Fixed row height, the uniform fast path. Default: the active
+    /// `TableStyle`'s
+    /// [`row_height`](teksilo_core::styles::TableStyle::row_height), 28 px
+    /// under IntUI at the Compact density. Mutually exclusive with
     /// [`row_height_fn`](Self::row_height_fn) and
     /// [`auto_row_height`](Self::auto_row_height); the last mode setter
     /// wins.
@@ -838,7 +867,10 @@ impl<T: 'static> TableView<T> {
         self
     }
 
-    /// Override the column header row height in logical pixels. Default: the table style's `HEADER_HEIGHT`.
+    /// Override the column header row height in logical pixels. Default: the
+    /// active `TableStyle`'s
+    /// [`header_height`](teksilo_core::styles::TableStyle::header_height),
+    /// 32 px under IntUI at the Compact density.
     pub fn header_height(mut self, height: f32) -> Self {
         self.header_height = Some(height);
         self
@@ -1505,18 +1537,18 @@ impl<T: 'static> TableView<T> {
         });
     }
 
-    /// The configured row height (override) or the table style's 28 px
-    /// fallback. In the non-uniform modes this is the seed estimate;
-    /// real geometry lives in `row_metrics`.
+    /// The configured row height (override) or the active table style's
+    /// (see `adopt_style_heights`). In the non-uniform modes this is only the
+    /// scroll step; real geometry lives in `row_metrics`.
     fn effective_row_height(&self) -> f32 {
-        self.row_height.unwrap_or(cp::ROW_HEIGHT)
+        self.row_height.unwrap_or(self.style_row_height)
     }
 
     fn effective_header_height(&self) -> f32 {
         if !self.show_header {
             0.0
         } else {
-            self.header_height.unwrap_or(cp::HEADER_HEIGHT)
+            self.header_height.unwrap_or(self.style_header_height)
         }
     }
 

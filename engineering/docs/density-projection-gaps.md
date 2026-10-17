@@ -8,7 +8,7 @@ struct, and `for_tokens(&InputTokens)` projects each one onto the active density
 — `dp` for a target, `spacing` for a gap, `density_min_size` for a minimum box.
 A theme preset then builds that same struct with its own numbers.
 
-**Forty-seven of those projected fields have no reader.** The widget composes the
+**Forty-five of those projected fields have no reader.** The widget composes the
 dimension from the raw `pub const` in the recipe's module instead, so the
 projected field is written by `for_tokens`, written again by every preset, and
 consulted by nothing. Retuning one changes nothing on screen.
@@ -48,11 +48,11 @@ and is therefore inside the scope; the rule finds both its projected fields read
 | | |
 |---|---|
 | projected fields in scope | 103 |
-| of those, unread by the rule | 49 |
+| of those, unread by the rule | 47 |
 | false positives of the rule (§4) | 2 |
-| **real gap** | **47** |
+| **real gap** | **45** |
 | of which inert even if wired (§1) | 10 |
-| of which a shipped preset already sets a different value (§2) | 12 |
+| of which a shipped preset already sets a different value (§2) | 10 |
 | of which a preset sets the same value the constant carries (§3a) | 3 |
 | of which density only, no preset (§3b) | 22 |
 
@@ -62,13 +62,14 @@ those cost a test failure would discourage the one change it invites: the tables
 are the record, the guard keeps their *membership* honest, and the arithmetic is
 a snapshot of the day it was taken.
 
-Seven further fields were on this list until a metrics accessor wired them,
+Nine further fields were on this list until a metrics accessor wired them,
 and they are the worked examples for what wiring one looks like:
 `TableRecipe::cell_padding_horizontal` / `cell_padding_vertical`
 (`TableStyle`), `CalendarRecipe::nav_arrow_size` (`CalendarStyle`),
 `SearchFieldRecipe::row_padding_horizontal` / `row_padding_vertical`
-(`SearchFieldStyle`) and `StandardItemRecipe::min_height_single_line` /
-`min_height_two_line` (`StandardItemStyle`): a defaulted metrics accessor on
+(`SearchFieldStyle`), `StandardItemRecipe::min_height_single_line` /
+`min_height_two_line` (`StandardItemStyle`) and `TableRecipe::row_height` /
+`header_height` (`TableStyle`): a defaulted metrics accessor on
 the style trait, defaulted so an out-of-tree style keeps compiling, overridden
 by the `Recipe*Style` from its own recipe so a preset's number takes effect.
 
@@ -111,7 +112,7 @@ unwired one.
 
 ## 2. A shipped preset already sets a different value
 
-The twelve that cost something today. Each is written by Fluent or macOS with
+The ten that cost something today. Each is written by Fluent or macOS with
 a number chosen for that design language, and each renders the IntUI constant
 instead. The **renders** column is what a user sees under any theme.
 
@@ -127,28 +128,17 @@ instead. The **renders** column is what a user sees under any theme.
 | `TabRecipe` | `editor_height` | 50 | 32 | 26 | `tab_widget/bar.rs` → `build`; `tab_widget/header.rs` → `intrinsic_height` |
 | `TabRecipe` | `padding_horizontal` | 12 | 8 | 12 | `tab_widget/header.rs` → `build`, `estimate_natural_width` |
 | `TabRecipe` | `tool_window_height` | 28 | 32 | 22 | none — see below |
-| `TableRecipe` | `header_height` | 32 | 40 | 24 | `table_view.rs` → `effective_header_height`; `tree_table_view.rs` → `effective_header_height` |
-| `TableRecipe` | `row_height` | 28 | 40 | 24 | `table_view.rs` → `effective_row_height`; `tree_table_view.rs` → `effective_row_height` |
 
 Ladders, for the ones whose density projection also moves (Compact / Comfortable
 / Touch): `cell_size` 32/32/44, `CalendarRecipe::header_height` 28/32/44,
 `min_thumb_length` 24/32/44, `SearchFieldRecipe::row_height` 26/32/44,
 `SegmentedControlRecipe::height` 24/32/44 and `padding_horizontal` 12/13.8/15.6
 and `padding_vertical` 6/6.9/7.8, `TabRecipe::padding_horizontal`
-12/13.8/15.6, `tool_window_height` 28/32/44,
-`TableRecipe::header_height` 32/32/44, `row_height` 28/32/44.
+12/13.8/15.6, `tool_window_height` 28/32/44.
 `TabRecipe::editor_height` (50) is flat: its cost is the preset alone, not the
 density.
 
 ### Verdicts
-
-**Safe to wire, `TableStyle` already has the seam.** `TableRecipe::row_height`
-and `header_height` — both already flow through an `Option<f32>` override
-(`effective_row_height` / `effective_header_height`), so the change is swapping
-the `unwrap_or` default for a style accessor at one site each, in the same shape
-`cell_padding_horizontal` just took. Note they feed the virtualization
-arithmetic, so a test should assert a laid-out row band and not only the
-accessor.
 
 **Safe to wire, one accessor each.** `ScrollBarRecipe::min_thumb_length` —
 `ScrollBar::build` already resolves the style and then *recomputes* the floor

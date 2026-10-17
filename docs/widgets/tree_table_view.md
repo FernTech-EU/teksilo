@@ -609,8 +609,10 @@ inside it shows on the next frame.
 
 #### `pub fn row_height(mut self, height: f32) -> Self`
 
-Fixed row height (default: the table style's 28 px) — the
-uniform fast path. Mutually exclusive with
+Fixed row height, the uniform fast path. Default: the active
+`TableStyle`'s
+`row_height`, 28 px
+under IntUI at the Compact density. Mutually exclusive with
 `row_height_fn` and
 `auto_row_height`; the last mode setter
 wins.
@@ -641,7 +643,10 @@ frame after a measurement change.
 
 #### `pub fn header_height(mut self, height: f32) -> Self`
 
-Override the header row height in logical pixels.
+Override the header row height in logical pixels. Default: the active
+`TableStyle`'s
+`header_height`,
+32 px under IntUI at the Compact density.
 
 <a id="treetableview-show_header"></a>
 

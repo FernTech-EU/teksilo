@@ -646,3 +646,123 @@ fn a_standard_tree_row_measures_the_macos_row_height_at_every_density() {
         }
     }
 }
+
+// ── TableView / TreeTableView row and header heights ───────────────────
+
+/// The laid-out `(header height, row height)` of a `TableView` and of a
+/// `TreeTableView` over the same three rows, built at `density` under `theme`
+/// with no row or header height of their own. Each pair is measured on the
+/// hosted `TableHeader` and on the first realized `BodyRow`, and the first
+/// row must start where the header ends, so the band the virtualization
+/// arithmetic steps by is the one painted.
+///
+/// Built *at* the density, never switched into it: a view reads its style's
+/// heights in `build()`.
+fn table_bands(theme: &Theme, density: TargetDensity) -> [(f32, f32); 2] {
+    use teksilo_data::{ListModel, TreeModel};
+    use teksilo_i18n::lit;
+    use teksilo_widgets::TableView;
+    use teksilo_widgets::TreeTableView;
+    use teksilo_widgets::table_view::{Column, ColumnWidth};
+
+    fn bands(tree: &WidgetTree, root: WidgetId) -> (f32, f32) {
+        let header = nodes_named(tree, root, "TableHeader");
+        assert_eq!(header.len(), 1, "one hosted header");
+        let mut rows = nodes_named(tree, root, "BodyRow");
+        rows.sort_by(|a, b| tree.bounds(*a).y.total_cmp(&tree.bounds(*b).y));
+        assert!(rows.len() >= 2, "at least two realized rows");
+        let h = tree.bounds(header[0]);
+        let first = tree.bounds(rows[0]);
+        assert_eq!(
+            first.y,
+            h.y + h.height,
+            "the first row starts under the header"
+        );
+        assert_eq!(
+            tree.bounds(rows[1]).y - first.y,
+            first.height,
+            "the row pitch is the row height",
+        );
+        (h.height, first.height)
+    }
+    fn column<T: 'static>(label: fn(&T) -> String) -> Column<T> {
+        Column::new("name", lit!("Name"), move |row: &T, _| {
+            Box::new(teksilo_widgets::primitives::TextWidget::new(lit!(label(
+                row
+            ))))
+        })
+        .width(ColumnWidth::Fixed(200.0))
+    }
+    let theme = theme.with_density(density);
+
+    let model = ListModel::from_vec(vec!["alpha".to_string(), "beta".into(), "gamma".into()]);
+    let (tree, root) = mounted(
+        theme.clone(),
+        TableView::new(model).add_column(column(|s: &String| s.clone())),
+        (400.0, 300.0),
+    );
+    let flat = bands(&tree, root);
+
+    let model: TreeModel<String> = TreeModel::new();
+    for (i, name) in ["alpha", "beta", "gamma"].into_iter().enumerate() {
+        model.insert_root(i, name.to_string());
+    }
+    let (tree, root) = mounted(
+        theme,
+        TreeTableView::new(model).add_column(column(|s: &String| s.clone())),
+        (400.0, 300.0),
+    );
+    [flat, bands(&tree, root)]
+}
+
+/// `NSTableView.rowHeight` is 24 dp, and the macOS recipe writes it for a
+/// table row and its header; a laid-out `TableView` and `TreeTableView` must
+/// measure it. Both views used to read the shipped 28 dp row and 32 dp header
+/// constants whatever the style declared.
+///
+/// Above Compact the 24 rises to the density's target size (32 at
+/// Comfortable, 44 at Touch), as the list row it shares a rhythm with does.
+/// The IntUI arm is the control: 32 / 28 at Compact, which is what the views
+/// laid out before the style was consulted, then the recipe's own ladder.
+#[test]
+fn a_table_measures_the_macos_row_and_header_heights_at_every_density() {
+    let expected = [
+        (TargetDensity::Compact, (24.0, 24.0), (32.0, 28.0)),
+        (TargetDensity::Comfortable, (32.0, 32.0), (32.0, 32.0)),
+        (TargetDensity::Touch, (44.0, 44.0), (44.0, 44.0)),
+    ];
+    assert_eq!(
+        expected.len(),
+        ALL_DENSITIES.len(),
+        "every density is listed"
+    );
+    for (density, macos, intui) in expected {
+        assert_eq!(
+            table_bands(&teksilo_core::presets::intui::light(), density),
+            [intui; 2],
+            "{density:?}: IntUI follows its recipe",
+        );
+        for theme in [teksilo_theme_macos::light(), teksilo_theme_macos::dark()] {
+            assert_eq!(
+                table_bands(&theme, density),
+                [macos; 2],
+                "{density:?}: the macOS recipe's heights must reach both views",
+            );
+        }
+        // The accessor half: what the installed slot tells a view asking it.
+        let theme = teksilo_theme_macos::light().with_density(density);
+        let slot = theme
+            .style_slots
+            .table
+            .clone()
+            .expect("the preset installs a table slot");
+        assert_eq!(
+            (
+                slot.header_height(&theme.input),
+                slot.row_height(&theme.input)
+            ),
+            macos,
+            "{density:?}: the installed slot reports the macOS heights",
+        );
+    }
+}

@@ -274,15 +274,32 @@ impl TableStyle for RecipeTableStyle {
     fn cell_padding_vertical(&self, _tokens: &InputTokens) -> f32 {
         self.recipe.cell_padding_vertical
     }
+
+    /// This style's own body row height, so a preset's row (macOS's 24 dp
+    /// `NSTableView` row, Fluent's 40 dp `ListViewItem`) is the one a
+    /// uniform-height table lays out. See
+    /// [`cell_padding_horizontal`](Self::cell_padding_horizontal) for why
+    /// `tokens` is unused.
+    fn row_height(&self, _tokens: &InputTokens) -> f32 {
+        self.recipe.row_height
+    }
+
+    /// This style's own column header height. See
+    /// [`row_height`](Self::row_height).
+    fn header_height(&self, _tokens: &InputTokens) -> f32 {
+        self.recipe.header_height
+    }
 }
 
 /// The `TableStyle` a `TableView` / `TreeTableView` builds against: the
 /// theme-wide `style_slots.table` if an app or a preset installed one, else
 /// this module's default resolved against the active density.
 ///
-/// Shared by the three sites that need it — the header cell's chrome and its
-/// gutter, and the two views' filter-zone arithmetic — so the gutter the cell
-/// pads by and the gutter the hit zone is measured from cannot disagree.
+/// Shared by every site that needs it (the header cell's chrome and its
+/// gutter, the two views' filter-zone arithmetic, and the row and header
+/// heights the views and a standalone `TableHeader` lay out), so the gutter
+/// the cell pads by and the gutter the hit zone is measured from cannot
+/// disagree.
 pub fn resolve_table_style(ctx: &BuildContext) -> SharedTableStyle {
     ctx.theme().style_slots.table.clone().unwrap_or_else(|| {
         std::rc::Rc::new(RecipeTableStyle::for_tokens(&ctx.theme().input)) as SharedTableStyle

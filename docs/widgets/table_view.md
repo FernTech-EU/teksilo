@@ -463,8 +463,10 @@ Append multiple `Column<T>` definitions from an iterator.
 
 #### `pub fn row_height(mut self, height: f32) -> Self`
 
-Fixed row height (default: the table style's 28 px) — the
-uniform fast path. Mutually exclusive with
+Fixed row height, the uniform fast path. Default: the active
+`TableStyle`'s
+`row_height`, 28 px
+under IntUI at the Compact density. Mutually exclusive with
 `row_height_fn` and
 `auto_row_height`; the last mode setter
 wins.
@@ -495,7 +497,10 @@ measurement change.
 
 #### `pub fn header_height(mut self, height: f32) -> Self`
 
-Override the column header row height in logical pixels. Default: the table style's `HEADER_HEIGHT`.
+Override the column header row height in logical pixels. Default: the
+active `TableStyle`'s
+`header_height`,
+32 px under IntUI at the Compact density.
 
 <a id="tableview-show_header"></a>
 

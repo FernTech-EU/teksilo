@@ -276,10 +276,12 @@ pub fn macos_tab_style_for(tokens: &InputTokens) -> RecipeTabStyle {
 
 /// `TableView` / `TreeTableView` — rows and header on the 24 dp
 /// `NSTableView` rhythm, with the same 8 dp cell gutter the row styles use.
+/// Both heights are raised to the density's target size, as the list row
+/// they share a rhythm with is.
 pub fn macos_table_style_for(tokens: &InputTokens) -> RecipeTableStyle {
     RecipeTableStyle::new(TableRecipe {
-        row_height: MACOS_ROW_HEIGHT,
-        header_height: MACOS_ROW_HEIGHT,
+        row_height: dp(MACOS_ROW_HEIGHT, TargetRole::Target, tokens),
+        header_height: dp(MACOS_ROW_HEIGHT, TargetRole::Target, tokens),
         cell_padding_horizontal: 8.0,
         corner_radius: R_CONTROL,
         tree_indent_per_level: 16.0,
@@ -513,11 +515,19 @@ mod tests {
         let t = macos_table_style().recipe;
         assert_eq!(t.row_height, MACOS_ROW_HEIGHT);
         assert_eq!(t.header_height, t.row_height);
-        assert_eq!(
-            t.row_height,
-            crate::styles::standard_item::macos_standard_item_recipe().min_height_single_line,
-            "a TableView row and a ListView row must share one rhythm"
-        );
+        for density in [
+            teksilo_tokens::TargetDensity::Compact,
+            teksilo_tokens::TargetDensity::Comfortable,
+            teksilo_tokens::TargetDensity::Touch,
+        ] {
+            let tokens = InputTokens::for_density(density);
+            assert_eq!(
+                macos_table_style_for(&tokens).recipe.row_height,
+                crate::styles::standard_item::macos_standard_item_recipe_for(&tokens)
+                    .min_height_single_line,
+                "{density:?}: a TableView row and a ListView row must share one rhythm"
+            );
+        }
         assert_eq!(
             t.tree_indent_per_level,
             crate::styles::standard_item::macos_standard_item_recipe().tree_indent_step,

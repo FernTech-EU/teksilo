@@ -494,15 +494,17 @@ fn every_fixed_row_says_it_is_fixed() {
 // Four style traits carry a defaulted metrics accessor for a dimension the
 // widget composes itself and the trait's `make_*` hooks never see: a table
 // cell's gutter, a calendar nav arrow's footprint, a search suggestion row's
-// gutter, a list row's height floor. Each default is the module constant put
-// through the same helper `for_tokens` uses, restated as a literal because `teksilo-core` sits below
+// gutter, a list row's height floor, a table's row and header heights. Each
+// default is the module constant put through the same helper `for_tokens`
+// uses, restated as a literal because `teksilo-core` sits below
 // `teksilo-widgets` and cannot name the constant. A literal in one crate and a
 // constant in another is exactly the shape that drifts, so it is pinned here —
 // and the tests are named in the trait doc comments, so a reader who finds the
 // literal finds the pin.
 
-/// The `TableStyle` gutter defaults equal
-/// `recipe_table_style::CELL_PADDING_{HORIZONTAL,VERTICAL}` at every density.
+/// The `TableStyle` gutter and height defaults equal
+/// `recipe_table_style::CELL_PADDING_{HORIZONTAL,VERTICAL}` and
+/// `ROW_HEIGHT` / `HEADER_HEIGHT` at every density.
 #[test]
 fn the_table_trait_defaults_restate_the_module_constants() {
     use teksilo_core::styles::TableStyle;
@@ -549,7 +551,27 @@ fn the_table_trait_defaults_restate_the_module_constants() {
             spacing(cp::CELL_PADDING_VERTICAL, &t),
             "the TableStyle default drifted from CELL_PADDING_VERTICAL",
         );
+        assert_eq!(
+            BareTableStyle.row_height(&t),
+            dp(cp::ROW_HEIGHT, TargetRole::Target, &t),
+            "the TableStyle default drifted from ROW_HEIGHT",
+        );
+        assert_eq!(
+            BareTableStyle.header_height(&t),
+            dp(cp::HEADER_HEIGHT, TargetRole::Target, &t),
+            "the TableStyle default drifted from HEADER_HEIGHT",
+        );
+        // And the shipped recipe at that density agrees with the default, so
+        // an out-of-tree style and the shipped one lay out the same rows.
+        let shipped = RecipeTableStyle::for_tokens(&t);
+        assert_eq!(shipped.row_height(&t), BareTableStyle.row_height(&t));
+        assert_eq!(shipped.header_height(&t), BareTableStyle.header_height(&t));
     }
+    // At Compact the defaults are the module constants themselves, so a
+    // Compact table lays out exactly what it did before the accessors existed.
+    let t = compact();
+    assert_eq!(BareTableStyle.row_height(&t), cp::ROW_HEIGHT);
+    assert_eq!(BareTableStyle.header_height(&t), cp::HEADER_HEIGHT);
 }
 
 /// The `CalendarStyle` arrow default equals
@@ -709,6 +731,14 @@ fn a_recipe_style_answers_from_its_own_recipe() {
     });
     assert_eq!(table.cell_padding_horizontal(&t), 12.0);
     assert_eq!(table.cell_padding_vertical(&t), 7.0);
+
+    let table = RecipeTableStyle::new(TableRecipe {
+        row_height: 23.0,
+        header_height: 27.0,
+        ..TableRecipe::for_tokens(&t)
+    });
+    assert_eq!(table.row_height(&t), 23.0);
+    assert_eq!(table.header_height(&t), 27.0);
 
     let calendar = RecipeCalendarStyle::new(CalendarRecipe {
         nav_arrow_size: 20.0,

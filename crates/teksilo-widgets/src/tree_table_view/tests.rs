@@ -6516,3 +6516,91 @@ mod full_width_and_pinned {
         );
     }
 }
+
+// -- Row and header heights come from the style -------------------------------
+
+/// `(header height, first row's offset below the view's top, the first three
+/// row heights)`, as laid out, for a tree table over [`sample_tree`] with every
+/// row expanded.
+fn tree_table_band_geometry(
+    theme: teksilo_core::styles::Theme,
+    explicit: bool,
+) -> (f32, f32, Vec<f32>) {
+    fn typed_by_y(tree: &WidgetTree, root: WidgetId, name: &str) -> Vec<WidgetId> {
+        let mut out = Vec::new();
+        let mut walker = vec![root];
+        while let Some(id) = walker.pop() {
+            if tree
+                .widget_type_name(id)
+                .is_some_and(|t| t.rsplit("::").next() == Some(name))
+            {
+                out.push(id);
+            }
+            walker.extend(tree.children(id));
+        }
+        out.sort_by(|a, b| tree.bounds(*a).y.total_cmp(&tree.bounds(*b).y));
+        out
+    }
+    let mut tree = WidgetTree::new().with_theme(theme);
+    let mut view = TreeTableView::new(sample_tree())
+        .add_column(name_col())
+        .add_column(size_col());
+    if explicit {
+        view = view.row_height(20.0).header_height(30.0);
+    }
+    let view = tree.add(view);
+    tree.layout(SizeProposal::exact(400.0, 400.0));
+    let top = tree.bounds(view).y;
+    let headers = typed_by_y(&tree, view, "TableHeader");
+    assert_eq!(headers.len(), 1, "one hosted header");
+    let rows = typed_by_y(&tree, view, "BodyRow");
+    assert!(rows.len() >= 2, "at least the two roots are realized");
+    (
+        tree.bounds(headers[0]).height,
+        tree.bounds(rows[0]).y - top,
+        rows[..2].iter().map(|r| tree.bounds(*r).height).collect(),
+    )
+}
+
+/// A tree table with no row or header height of its own lays out the ones
+/// its style declares, and its own `row_height(..)` / `header_height(..)` win
+/// over them.
+#[test]
+fn a_tree_table_lays_out_the_row_and_header_heights_its_style_declares() {
+    use crate::styles::recipe_table_style::{RecipeTableStyle, TableRecipe};
+    let mut theme = teksilo_core::presets::intui::light();
+    theme.style_slots.table = Some(std::rc::Rc::new(RecipeTableStyle::new(TableRecipe {
+        row_height: 37.0,
+        header_height: 41.0,
+        ..TableRecipe::default()
+    })));
+    assert_eq!(
+        tree_table_band_geometry(theme.clone(), false),
+        (41.0, 41.0, vec![37.0; 2]),
+        "the style's heights",
+    );
+    assert_eq!(
+        tree_table_band_geometry(theme, true),
+        (30.0, 30.0, vec![20.0; 2]),
+        "the view's own heights win",
+    );
+}
+
+/// Under IntUI the default tree table follows the recipe's density ladder,
+/// unchanged at Compact.
+#[test]
+fn an_int_ui_tree_table_follows_the_density_ladder() {
+    use teksilo_tokens::TargetDensity;
+    for (density, row, header) in [
+        (TargetDensity::Compact, 28.0, 32.0),
+        (TargetDensity::Comfortable, 32.0, 32.0),
+        (TargetDensity::Touch, 44.0, 44.0),
+    ] {
+        let theme = teksilo_core::presets::intui::light().with_density(density);
+        assert_eq!(
+            tree_table_band_geometry(theme, false),
+            (header, header, vec![row; 2]),
+            "{density:?}",
+        );
+    }
+}

@@ -193,3 +193,113 @@ fn a_standard_list_row_measures_the_fluent_row_height_at_every_density() {
         );
     }
 }
+
+// ── TableView / TreeTableView row and header heights ───────────────────
+
+/// The laid-out `(header height, row height)` of a `TableView` and of a
+/// `TreeTableView` over the same three rows, built at `density` under `theme`
+/// with no row or header height of their own. Each pair is measured on the
+/// hosted `TableHeader` and on the first realized `BodyRow`, and the first
+/// row must start where the header ends, so the band the virtualization
+/// arithmetic steps by is the one painted.
+///
+/// Built *at* the density, never switched into it: a view reads its style's
+/// heights in `build()`.
+fn table_bands(theme: &Theme, density: TargetDensity) -> [(f32, f32); 2] {
+    use teksilo_data::TreeModel;
+    use teksilo_widgets::TreeTableView;
+
+    fn bands(tree: &WidgetTree, root: WidgetId) -> (f32, f32) {
+        let header = nodes_named(tree, root, "TableHeader");
+        assert_eq!(header.len(), 1, "one hosted header");
+        let mut rows = nodes_named(tree, root, "BodyRow");
+        rows.sort_by(|a, b| tree.bounds(*a).y.total_cmp(&tree.bounds(*b).y));
+        assert!(rows.len() >= 2, "at least two realized rows");
+        let h = tree.bounds(header[0]);
+        let first = tree.bounds(rows[0]);
+        assert_eq!(
+            first.y,
+            h.y + h.height,
+            "the first row starts under the header"
+        );
+        assert_eq!(
+            tree.bounds(rows[1]).y - first.y,
+            first.height,
+            "the row pitch is the row height",
+        );
+        (h.height, first.height)
+    }
+    fn column<T: 'static>(label: fn(&T) -> String) -> Column<T> {
+        Column::new("name", lit!("Name"), move |row: &T, _| {
+            Box::new(teksilo_widgets::primitives::TextWidget::new(lit!(label(
+                row
+            ))))
+        })
+        .width(ColumnWidth::Fixed(200.0))
+    }
+    let theme = theme.with_density(density);
+
+    let model = ListModel::from_vec(vec!["alpha".to_string(), "beta".into(), "gamma".into()]);
+    let (tree, root) = mounted(
+        theme.clone(),
+        TableView::new(model).add_column(column(|s: &String| s.clone())),
+    );
+    let flat = bands(&tree, root);
+
+    let model: TreeModel<String> = TreeModel::new();
+    for (i, name) in ["alpha", "beta", "gamma"].into_iter().enumerate() {
+        model.insert_root(i, name.to_string());
+    }
+    let (tree, root) = mounted(
+        theme,
+        TreeTableView::new(model).add_column(column(|s: &String| s.clone())),
+    );
+    [flat, bands(&tree, root)]
+}
+
+/// Fluent's `ListViewItem` rhythm is 40 dp, which is what the Fluent recipe
+/// writes for a table row and its header, and a laid-out `TableView` and
+/// `TreeTableView` must measure it. Both views used to read the shipped 28 dp
+/// row and 32 dp header constants whatever the style declared.
+///
+/// Above Compact the 40 rises to the density's target size (44 at Touch), as
+/// the list row does. The IntUI arm is the control: 32 / 28 at Compact, which
+/// is what the views laid out before the style was consulted, then the
+/// recipe's own ladder.
+#[test]
+fn a_table_measures_the_fluent_row_and_header_heights_at_every_density() {
+    let expected = [
+        (TargetDensity::Compact, (40.0, 40.0), (32.0, 28.0)),
+        (TargetDensity::Comfortable, (40.0, 40.0), (32.0, 32.0)),
+        (TargetDensity::Touch, (44.0, 44.0), (44.0, 44.0)),
+    ];
+    for (density, fluent, intui) in expected {
+        assert_eq!(
+            table_bands(&teksilo_core::presets::intui::light(), density),
+            [intui; 2],
+            "{density:?}: IntUI follows its recipe",
+        );
+        for theme in [teksilo_theme_fluent::light(), teksilo_theme_fluent::dark()] {
+            assert_eq!(
+                table_bands(&theme, density),
+                [fluent; 2],
+                "{density:?}: the Fluent recipe's heights must reach both views",
+            );
+        }
+        // The accessor half: what the installed slot tells a view asking it.
+        let theme = teksilo_theme_fluent::light().with_density(density);
+        let slot = theme
+            .style_slots
+            .table
+            .clone()
+            .expect("the preset installs a table slot");
+        assert_eq!(
+            (
+                slot.header_height(&theme.input),
+                slot.row_height(&theme.input)
+            ),
+            fluent,
+            "{density:?}: the installed slot reports the Fluent heights",
+        );
+    }
+}

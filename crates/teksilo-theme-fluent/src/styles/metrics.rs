@@ -241,11 +241,13 @@ pub fn fluent_tab_style_for(tokens: &InputTokens) -> RecipeTabStyle {
 }
 
 /// `TableView` / `TreeTableView` — rows and header on the `ListViewItem`
-/// 40 dp rhythm, 12 dp cell gutters, 4 dp corners.
+/// 40 dp rhythm, 12 dp cell gutters, 4 dp corners. Both heights are raised
+/// to the density's target size, as the list row they share a rhythm with
+/// is.
 pub fn fluent_table_style_for(tokens: &InputTokens) -> RecipeTableStyle {
     RecipeTableStyle::new(TableRecipe {
-        row_height: 40.0,
-        header_height: 40.0,
+        row_height: dp(40.0, TargetRole::Target, tokens),
+        header_height: dp(40.0, TargetRole::Target, tokens),
         cell_padding_horizontal: 12.0,
         corner_radius: R_CONTROL,
         tree_indent_per_level: 16.0,
@@ -378,5 +380,18 @@ mod tests {
         let t = fluent_table_style().recipe;
         assert_eq!(t.row_height, 40.0);
         assert_eq!(t.header_height, t.row_height);
+        for density in [
+            teksilo_tokens::TargetDensity::Compact,
+            teksilo_tokens::TargetDensity::Comfortable,
+            teksilo_tokens::TargetDensity::Touch,
+        ] {
+            let tokens = InputTokens::for_density(density);
+            assert_eq!(
+                fluent_table_style_for(&tokens).recipe.row_height,
+                crate::styles::standard_item::fluent_standard_item_recipe_for(&tokens)
+                    .min_height_single_line,
+                "{density:?}: a TableView row and a ListView row must share one rhythm"
+            );
+        }
     }
 }

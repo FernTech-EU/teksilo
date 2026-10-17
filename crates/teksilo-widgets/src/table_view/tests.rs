@@ -6538,6 +6538,26 @@ mod standalone_header {
         );
     }
 
+    /// A standalone header given a free height takes the one the active
+    /// `TableStyle` declares, not the IntUI constant.
+    #[test]
+    fn a_standalone_header_takes_its_styles_header_height_in_a_stack() {
+        use crate::styles::recipe_table_style::{RecipeTableStyle, TableRecipe};
+        let mut theme = teksilo_core::presets::intui::light();
+        theme.style_slots.table = Some(std::rc::Rc::new(RecipeTableStyle::new(TableRecipe {
+            header_height: 41.0,
+            ..TableRecipe::default()
+        })));
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let header = tree.add(TableHeader::new(vec![fixed("a", 100.0), fixed("b", 100.0)]));
+        let _root = tree.add(VStack::new().child(header));
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(300.0),
+        });
+        assert_eq!(tree.bounds(header).height, 41.0);
+    }
+
     #[test]
     fn a_click_on_a_sortable_header_cycles_the_headers_own_sort() {
         // No `.sort(..)`: the header owns the signal, and the getter hands it
@@ -6891,6 +6911,119 @@ mod standalone_header {
         assert_eq!(
             announced(&tree, header)[1],
             ("name".to_string(), Some(AtSort::Ascending), 1)
+        );
+    }
+}
+
+// -- Row and header heights come from the style -------------------------------
+
+/// Every node under `root` whose type name ends in `name`, sorted top to
+/// bottom.
+fn nodes_typed_by_y(tree: &WidgetTree, root: WidgetId, name: &str) -> Vec<WidgetId> {
+    let mut out = Vec::new();
+    let mut walker = vec![root];
+    while let Some(id) = walker.pop() {
+        if tree
+            .widget_type_name(id)
+            .is_some_and(|t| t.rsplit("::").next() == Some(name))
+        {
+            out.push(id);
+        }
+        walker.extend(tree.children(id));
+    }
+    out.sort_by(|a, b| tree.bounds(*a).y.total_cmp(&tree.bounds(*b).y));
+    out
+}
+
+/// `(header height, first row's offset below the table's top, the first
+/// three row heights, the pitch between the first two rows)`, as laid out.
+fn table_band_geometry(tree: &WidgetTree, table: WidgetId) -> (f32, f32, Vec<f32>, f32) {
+    let top = tree.bounds(table).y;
+    let headers = nodes_typed_by_y(tree, table, "TableHeader");
+    assert_eq!(headers.len(), 1, "one hosted header");
+    let rows = nodes_typed_by_y(tree, table, "BodyRow");
+    assert!(rows.len() >= 3, "at least three realized rows");
+    let heights = rows[..3].iter().map(|r| tree.bounds(*r).height).collect();
+    (
+        tree.bounds(headers[0]).height,
+        tree.bounds(rows[0]).y - top,
+        heights,
+        tree.bounds(rows[1]).y - tree.bounds(rows[0]).y,
+    )
+}
+
+/// A theme whose table style declares heights no constant carries.
+fn theme_with_table_heights(row: f32, header: f32) -> teksilo_core::styles::Theme {
+    use crate::styles::recipe_table_style::{RecipeTableStyle, TableRecipe};
+    let mut theme = teksilo_core::presets::intui::light();
+    theme.style_slots.table = Some(std::rc::Rc::new(RecipeTableStyle::new(TableRecipe {
+        row_height: row,
+        header_height: header,
+        ..TableRecipe::default()
+    })));
+    theme
+}
+
+/// A table with no row or header height of its own lays out the ones its
+/// style declares: the header band, the first row's offset below it, every
+/// row's height and the pitch the virtualization arithmetic steps by.
+#[test]
+fn a_table_lays_out_the_row_and_header_heights_its_style_declares() {
+    let mut tree = WidgetTree::new().with_theme(theme_with_table_heights(37.0, 41.0));
+    let table = tree.add(
+        TableView::new(rows(20))
+            .add_column(id_col())
+            .add_column(name_col()),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(
+        table_band_geometry(&tree, table),
+        (41.0, 41.0, vec![37.0; 3], 37.0)
+    );
+}
+
+/// The view's own `row_height(..)` and `header_height(..)` win over the
+/// style.
+#[test]
+fn a_tables_own_row_and_header_heights_win_over_the_style() {
+    let mut tree = WidgetTree::new().with_theme(theme_with_table_heights(37.0, 41.0));
+    let table = tree.add(
+        TableView::new(rows(20))
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .header_height(30.0),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(
+        table_band_geometry(&tree, table),
+        (30.0, 30.0, vec![20.0; 3], 20.0)
+    );
+}
+
+/// Under IntUI the default table follows the recipe's density ladder: 28 / 32
+/// / 44 for a row and 32 / 32 / 44 for the header. Compact is what the table
+/// laid out before its style was consulted.
+#[test]
+fn an_int_ui_table_follows_the_density_ladder() {
+    use teksilo_tokens::TargetDensity;
+    for (density, row, header) in [
+        (TargetDensity::Compact, 28.0, 32.0),
+        (TargetDensity::Comfortable, 32.0, 32.0),
+        (TargetDensity::Touch, 44.0, 44.0),
+    ] {
+        let theme = teksilo_core::presets::intui::light().with_density(density);
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let table = tree.add(
+            TableView::new(rows(20))
+                .add_column(id_col())
+                .add_column(name_col()),
+        );
+        tree.layout(SizeProposal::exact(400.0, 400.0));
+        assert_eq!(
+            table_band_geometry(&tree, table),
+            (header, header, vec![row; 3], row),
+            "{density:?}",
         );
     }
 }

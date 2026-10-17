@@ -11,6 +11,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
         let self_id = ctx.self_id();
         ctx.enabled_when(self_id, self.enabled.clone());
 
+        self.adopt_style_heights(ctx);
         let row_h = self.effective_row_height();
         let header_h = self.effective_header_height();
         let indent_per_level = self.effective_indent();

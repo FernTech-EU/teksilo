@@ -170,6 +170,9 @@ pub struct TableHeader {
     /// module docs for why the split exists).
     bands: Option<[Option<WidgetId>; 3]>,
     boundaries: PaneBoundaries,
+    /// The active `TableStyle`'s header height, read at build: the height a
+    /// standalone header takes when its parent leaves the height free.
+    style_height: f32,
 }
 
 impl TableHeader {
@@ -192,6 +195,7 @@ impl TableHeader {
             cells: Vec::new(),
             bands: None,
             boundaries: PaneBoundaries::default(),
+            style_height: cp::HEADER_HEIGHT,
         }
     }
 
@@ -503,6 +507,8 @@ impl std::fmt::Debug for TableHeader {
 impl Widget for TableHeader {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
+        self.style_height = crate::styles::recipe_table_style::resolve_table_style(ctx)
+            .header_height(&ctx.theme().input);
         // `paint` draws the column separators from the widths and `scroll_x`,
         // but neither a column resize nor a horizontal scroll changes the
         // strip's own bounds — and the render walker replays a clean node's
@@ -689,7 +695,7 @@ impl Widget for TableHeader {
                 self.resolve_widths(0.0).iter().sum()
             }
         });
-        let height = proposal.height.unwrap_or(cp::HEADER_HEIGHT);
+        let height = proposal.height.unwrap_or(self.style_height);
         Size::new(width, height).into()
     }
 

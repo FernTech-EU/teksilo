@@ -46,6 +46,10 @@ by crate for clarity, not because crates version independently.
   A row style says how tall a `StandardListItem` or `StandardTreeItem` row is
   at the active density, with and without a subtitle. Both have defaults, so
   an existing style keeps its row heights.
+- **`TableStyle::row_height` and `header_height`.** A table style says how
+  tall a `TableView` or `TreeTableView` body row and column header row are at
+  the active density. Both have defaults, the shipped table heights raised to
+  the density's target size.
 
 ### Fixed
 
@@ -73,6 +77,18 @@ by crate for clarity, not because crates version independently.
   without `auto_item_height` keeps its own row height, whether that is its
   default or an `item_height` the app set. The notification log's minimum
   height follows the same two-line row height.
+- **Table rows and headers are as tall as the active style says.**
+  **Behaviour change:** a `TableView` or `TreeTableView` with no row or
+  header height of its own, and a standalone `TableHeader`, now lay out the
+  heights their style declares: 24 px rows and headers under the macOS preset
+  and 40 px under Fluent at the compact density. Above the compact density a
+  row or header rises to the density's target size where the style's height
+  is below it: at the comfortable density macOS goes from 24 to 32 px and
+  Int UI rows from 28 to 32 px, while Fluent stays at 40 px; at the touch
+  density every theme's rows and headers are 44 px. Before, every table laid
+  out 28 px rows and a 32 px header whatever the theme and the density.
+  A `row_height`, `row_height_fn`, `auto_row_height` or `header_height` the
+  app set still wins.
 - **Accent chrome a recipe builds follows the high-contrast preference.**
   **Behaviour change:** under the OS increase contrast preference, a `Filled`
   button's fill and a button's focus border now take the high-contrast
