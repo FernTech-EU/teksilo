@@ -69,6 +69,41 @@ by crate for clarity, not because crates version independently.
   `MenuItem`'s label and shortcut take while the row is pressed, for a design
   whose pressed row is a solid fill while its hover is a pale wash. It
   defaults to `None`, so an existing style keeps its pressed labels.
+- **Content-view and semantic colours in `OsThemeColors`.** A desktop report
+  can carry ten more colours: `view_bg`, `view_fg`, `alternate_bg`,
+  `inactive_fg`, `link`, `link_visited`, `error`, `warning`, `success` and
+  `focus`. `ColorTokens::from_os_colors` uses each one it is given (the
+  content surface and editor colours, the alternate row, secondary text,
+  links, the error, warning and success text and status colours, and the
+  focus ring), raising a supplied text colour to 4.5:1 and a focus or status
+  colour to 3:1 against the surfaces it sits on. A report without them gives
+  the same tokens as before. `OsThemeColors::new` builds a report from the
+  light or dark preference, and `OsThemeColors` now implements `PartialEq`.
+- **`teksilo_tokens::contrast`.** `composite_contrast` gives the WCAG contrast
+  of a translucent colour as painted over its backdrop, and
+  `lift_until_readable` moves a colour toward black or white just far enough
+  to reach a contrast floor against every backdrop it is given.
+- **`MotionTokens::scaled`.** The same motion tokens with every animation
+  duration multiplied by a factor, as a desktop's animation-speed setting
+  asks; the tooltip delays are kept, and a factor of 0 turns animation off.
+
+### Changed
+
+#### Theming
+
+- **Breaking.** **`OsThemeColors` is `#[non_exhaustive]`.** Outside
+  `teksilo-tokens` it can no longer be built with a struct literal: start from
+  `OsThemeColors::new(scheme)` or `OsThemeColors::default()` and assign the
+  fields the desktop reports.
+- **The native theme takes more of a GTK theme's colours.**
+  **Behaviour change:** under `ThemeMode::Native` on a GNOME, Cinnamon or
+  other GTK desktop whose GTK theme ships its CSS (Breeze GTK, for example),
+  the content surface, editor text, links, error, warning and success colours
+  and, for Breeze GTK, the focus ring now follow the theme's
+  `theme_base_color`, `theme_text_color`, `link_color`, `error_color`,
+  `warning_color`, `success_color` and focus colour, raised to a readable
+  contrast where they fall short. Before, only the window, selection, button
+  and tooltip colours were read.
 
 ### Removed
 

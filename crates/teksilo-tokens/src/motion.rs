@@ -188,6 +188,58 @@ impl Default for MotionTokens {
     }
 }
 
+impl MotionTokens {
+    /// These tokens with every animation duration multiplied by `factor`:
+    /// the shape of a desktop's global animation-speed setting (KDE's
+    /// `AnimationDurationFactor`, where 2 is twice as slow and 0.5 twice as
+    /// fast).
+    ///
+    /// Scales `duration_instant`, `duration_fast`, `duration_normal`,
+    /// `duration_slow`, `duration_collapse` and
+    /// `duration_indeterminate_sweep`. The three tooltip delays are **not**
+    /// scaled: they are how long the pointer must rest before a tip shows, a
+    /// dwell rather than an animation, and slowing animations must not make
+    /// tooltips harder to summon. The easing is kept.
+    ///
+    /// A scaled duration is rounded to the millisecond, and a duration that
+    /// was not zero stays at least 1 ms, so a fast factor never turns a
+    /// tween into a snap by rounding. A zero duration stays zero.
+    ///
+    /// `factor` 0 (or a negative one) makes every scaled duration zero,
+    /// which is how the framework already reads "no animation": a
+    /// zero-duration tween snaps to its target, and the looping consumers
+    /// of `duration_indeterminate_sweep` clamp a zero period rather than
+    /// divide by it. A factor that is not finite (NaN or infinity) leaves
+    /// the tokens unchanged. Durations are capped at `u32::MAX` ms.
+    pub fn scaled(&self, factor: f32) -> MotionTokens {
+        if !factor.is_finite() {
+            return self.clone();
+        }
+        let factor = f64::from(factor.max(0.0));
+        let scale = |d: Duration| -> Duration {
+            if factor == 0.0 || d.is_zero() {
+                return Duration::ZERO;
+            }
+            let ms = (d.as_secs_f64() * 1000.0 * factor)
+                .round()
+                .clamp(1.0, f64::from(u32::MAX));
+            Duration::from_millis(ms as u64)
+        };
+        MotionTokens {
+            duration_instant: scale(self.duration_instant),
+            duration_fast: scale(self.duration_fast),
+            duration_normal: scale(self.duration_normal),
+            duration_slow: scale(self.duration_slow),
+            duration_collapse: scale(self.duration_collapse),
+            duration_indeterminate_sweep: scale(self.duration_indeterminate_sweep),
+            tooltip_delay: self.tooltip_delay,
+            tooltip_delay_heavy: self.tooltip_delay_heavy,
+            tooltip_reshow_delay: self.tooltip_reshow_delay,
+            easing_standard: self.easing_standard,
+        }
+    }
+}
+
 mod duration_millis {
     use std::time::Duration;
 
@@ -226,6 +278,78 @@ mod tests {
         assert_eq!(m.tooltip_delay, Duration::from_millis(500));
         assert_eq!(m.tooltip_delay_heavy, Duration::from_millis(700));
         assert_eq!(m.tooltip_reshow_delay, Duration::from_millis(100));
+    }
+
+    #[test]
+    fn scaled_by_one_is_identity() {
+        let m = MotionTokens::default();
+        assert_eq!(m.scaled(1.0), m);
+    }
+
+    #[test]
+    fn scaled_multiplies_every_animation_duration() {
+        let m = MotionTokens::default();
+        let s = m.scaled(2.0);
+        assert_eq!(s.duration_fast, Duration::from_millis(240));
+        assert_eq!(s.duration_normal, Duration::from_millis(400));
+        assert_eq!(s.duration_slow, Duration::from_millis(600));
+        assert_eq!(s.duration_collapse, Duration::from_millis(400));
+        assert_eq!(s.duration_indeterminate_sweep, Duration::from_millis(1800));
+        let h = m.scaled(0.5);
+        assert_eq!(h.duration_fast, Duration::from_millis(60));
+        assert_eq!(h.duration_indeterminate_sweep, Duration::from_millis(450));
+        assert_eq!(h.easing_standard, m.easing_standard);
+    }
+
+    #[test]
+    fn scaled_leaves_the_tooltip_delays_alone() {
+        let m = MotionTokens::default();
+        for f in [0.0, 0.25, 2.0, 10.0] {
+            let s = m.scaled(f);
+            assert_eq!(s.tooltip_delay, m.tooltip_delay);
+            assert_eq!(s.tooltip_delay_heavy, m.tooltip_delay_heavy);
+            assert_eq!(s.tooltip_reshow_delay, m.tooltip_reshow_delay);
+        }
+    }
+
+    #[test]
+    fn scaled_rounds_and_keeps_a_non_zero_duration_non_zero() {
+        let m = MotionTokens {
+            duration_fast: Duration::from_millis(3),
+            duration_normal: Duration::from_micros(2500),
+            ..MotionTokens::default()
+        };
+        let s = m.scaled(0.01);
+        assert_eq!(s.duration_fast, Duration::from_millis(1));
+        assert_eq!(s.duration_slow, Duration::from_millis(3));
+        // Rounded to the millisecond, half away from zero: 2.5 ms gives 3.
+        assert_eq!(m.scaled(1.0).duration_normal, Duration::from_millis(3));
+        // A zero duration stays zero at any factor.
+        assert_eq!(m.scaled(4.0).duration_instant, Duration::ZERO);
+    }
+
+    #[test]
+    fn scaled_by_zero_disables_animation() {
+        let s = MotionTokens::default().scaled(0.0);
+        for d in [
+            s.duration_instant,
+            s.duration_fast,
+            s.duration_normal,
+            s.duration_slow,
+            s.duration_collapse,
+            s.duration_indeterminate_sweep,
+        ] {
+            assert_eq!(d, Duration::ZERO);
+        }
+        assert_eq!(MotionTokens::default().scaled(-3.0), s);
+    }
+
+    #[test]
+    fn scaled_by_a_non_finite_factor_is_identity() {
+        let m = MotionTokens::default();
+        assert_eq!(m.scaled(f32::NAN), m);
+        assert_eq!(m.scaled(f32::INFINITY), m);
+        assert_eq!(m.scaled(f32::NEG_INFINITY), m);
     }
 
     #[test]

@@ -90,10 +90,7 @@ mod platform {
     }
 
     pub(super) fn query_os_theme_colors() -> OsThemeColors {
-        let mut colors = OsThemeColors {
-            color_scheme: query_color_scheme(),
-            ..Default::default()
-        };
+        let mut colors = OsThemeColors::new(query_color_scheme());
 
         match detect_desktop() {
             Desktop::Kde => query_kde(&mut colors),
@@ -310,6 +307,7 @@ mod platform {
         if colors.tooltip_fg.is_none() {
             colors.tooltip_fg = resolve(&["tooltip_fg_color"]);
         }
+        fill_gtk_view_colors(colors, resolve);
 
         // Derive accent from selection color if not already set
         if colors.accent.is_none()
@@ -317,6 +315,35 @@ mod platform {
         {
             colors.accent = Some(sel);
         }
+    }
+
+    /// Fill the content-view and semantic colours from the GTK names that
+    /// carry them, leaving any a desktop reader already set. GTK themes
+    /// publish no alternate-row or secondary-text colour (its
+    /// `insensitive_fg_color` is disabled text, not secondary), so
+    /// `alternate_bg` and `inactive_fg` stay `None` here. Breeze GTK names its
+    /// links and its focus decoration only with a `_breeze` suffix, hence the
+    /// second name in those lists.
+    fn fill_gtk_view_colors(
+        colors: &mut OsThemeColors,
+        resolve: impl Fn(&[&str]) -> Option<Color>,
+    ) {
+        let fill = |slot: &mut Option<Color>, names: &[&str]| {
+            if slot.is_none() {
+                *slot = resolve(names);
+            }
+        };
+        fill(&mut colors.view_bg, &["theme_base_color", "view_bg_color"]);
+        fill(&mut colors.view_fg, &["theme_text_color", "view_fg_color"]);
+        fill(&mut colors.link, &["link_color", "link_color_breeze"]);
+        fill(
+            &mut colors.link_visited,
+            &["link_visited_color", "link_visited_color_breeze"],
+        );
+        fill(&mut colors.error, &["error_color"]);
+        fill(&mut colors.warning, &["warning_color"]);
+        fill(&mut colors.success, &["success_color"]);
+        fill(&mut colors.focus, &["theme_button_decoration_focus_breeze"]);
     }
 
     /// Load GTK CSS for a theme. Tries gtk-4.0 first, falls back to gtk-3.0.
@@ -477,6 +504,52 @@ mod platform {
         }
 
         #[test]
+        fn gtk_view_colors_come_from_their_css_names() {
+            // A cut-down Breeze GTK theme: the bare names reference the
+            // `_breeze` ones, and links and focus exist only suffixed.
+            let css = r#"
+@define-color theme_base_color_breeze #ffffff;
+@define-color theme_text_color_breeze #232629;
+@define-color link_color_breeze #2980b9;
+@define-color link_visited_color_breeze #9b59b6;
+@define-color error_color_breeze #da4453;
+@define-color warning_color_breeze #f67400;
+@define-color success_color_breeze #27ae60;
+@define-color theme_button_decoration_focus_breeze  #3daee9;
+@define-color theme_base_color @theme_base_color_breeze;
+@define-color theme_text_color @theme_text_color_breeze;
+@define-color error_color @error_color_breeze;
+@define-color warning_color @warning_color_breeze;
+@define-color success_color @success_color_breeze;
+"#;
+            let defined = parse_define_colors(css);
+            let resolve = |names: &[&str]| names.iter().find_map(|n| resolve_color(&defined, n));
+            let mut colors = OsThemeColors::new(ColorSchemePreference::Light);
+            // A colour a desktop reader already set is kept.
+            colors.success = Some(Color::BLACK);
+            fill_gtk_view_colors(&mut colors, resolve);
+            assert_eq!(colors.view_bg, Some(Color::from_hex("#ffffff")));
+            assert_eq!(colors.view_fg, Some(Color::from_hex("#232629")));
+            assert_eq!(colors.link, Some(Color::from_hex("#2980b9")));
+            assert_eq!(colors.link_visited, Some(Color::from_hex("#9b59b6")));
+            assert_eq!(colors.error, Some(Color::from_hex("#da4453")));
+            assert_eq!(colors.warning, Some(Color::from_hex("#f67400")));
+            assert_eq!(colors.success, Some(Color::BLACK));
+            assert_eq!(colors.focus, Some(Color::from_hex("#3daee9")));
+            // GTK carries neither of these.
+            assert_eq!(colors.alternate_bg, None);
+            assert_eq!(colors.inactive_fg, None);
+
+            // A theme without the names leaves every field absent.
+            let empty = std::collections::HashMap::new();
+            let mut colors = OsThemeColors::new(ColorSchemePreference::Dark);
+            fill_gtk_view_colors(&mut colors, |names: &[&str]| {
+                names.iter().find_map(|n| resolve_color(&empty, n))
+            });
+            assert_eq!(colors, OsThemeColors::new(ColorSchemePreference::Dark));
+        }
+
+        #[test]
         fn parse_css_color_hex() {
             let c = parse_css_color("#3584e4").unwrap();
             assert!((c.r() - 0x35 as f32 / 255.0).abs() < 0.01);
@@ -561,10 +634,7 @@ mod platform {
     }
 
     pub(super) fn query_os_theme_colors() -> OsThemeColors {
-        OsThemeColors {
-            color_scheme: query_color_scheme(),
-            ..Default::default()
-        }
+        OsThemeColors::new(query_color_scheme())
     }
 }
 
@@ -596,10 +666,7 @@ mod platform {
     }
 
     pub(super) fn query_os_theme_colors() -> OsThemeColors {
-        OsThemeColors {
-            color_scheme: query_color_scheme(),
-            ..Default::default()
-        }
+        OsThemeColors::new(query_color_scheme())
     }
 }
 

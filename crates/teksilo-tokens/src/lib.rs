@@ -3,6 +3,7 @@
 
 pub mod alignment;
 pub mod color;
+pub mod contrast;
 pub mod input;
 pub mod layout;
 pub mod motion;

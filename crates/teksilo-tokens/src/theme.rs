@@ -559,6 +559,21 @@ impl ColorTokens {
     /// Starts from the matching built-in theme (light or dark) based on
     /// `color_scheme`, then overlays any color fields actually reported by
     /// the OS. Missing fields keep their built-in default values.
+    ///
+    /// The content-view and semantic fields map as follows, each lifted to
+    /// WCAG's floor on `surface_main` and `surface_content` when the OS
+    /// colour falls short:
+    ///
+    /// | Field | Tokens |
+    /// |---|---|
+    /// | `view_bg` | `surface_content`, `editor_bg` (and the editor's current-line and code-block tints) |
+    /// | `view_fg` | `editor_fg`, `editor_caret` |
+    /// | `alternate_bg` | `surface_alt_row` |
+    /// | `inactive_fg` | `text_secondary` (4.5:1) |
+    /// | `link` | `text_link`, `text_link_hover` (4.5:1) |
+    /// | `link_visited` | `text_link_visited` (4.5:1) |
+    /// | `error`, `warning`, `success` | `text_error` / `_warning` / `_success` (4.5:1), and `status_*_fg` (3:1, also on its `status_*_bg`) |
+    /// | `focus` | `focus_ring`, `border_focused` (3:1) |
     pub fn from_os_colors(os: &OsThemeColors) -> Self {
         let is_dark = os.color_scheme.is_dark();
         let mut tokens = if is_dark {
@@ -724,7 +739,112 @@ impl ColorTokens {
             tokens.scrim = Color::new(0.0, 0.0, 0.0, if is_dark { 0.64 } else { 0.32 });
         }
 
+        tokens.apply_os_view_colors(os, is_dark);
         tokens
+    }
+
+    /// Overlay the content-view and semantic colours of an OS report, after
+    /// the window, selection and accent families are in place (they win
+    /// over the derivations above, which they refine).
+    ///
+    /// Each field is used only when present, so a report without them leaves
+    /// the tokens exactly as before. A foreground the desktop supplies is
+    /// checked against the surfaces it is painted on and lifted to WCAG's
+    /// floor when it falls short (4.5:1 for text, 3:1 for the focus ring and
+    /// the status glyphs): a desktop scheme was tuned for its own widgets,
+    /// not for every Teksilo surface.
+    fn apply_os_view_colors(&mut self, os: &OsThemeColors, is_dark: bool) {
+        use crate::contrast::lift_until_readable;
+        const TEXT: f32 = 4.5;
+        const NON_TEXT: f32 = 3.0;
+
+        if let Some(bg) = os.view_bg {
+            self.surface_content = bg;
+            self.editor_bg = bg;
+            // The current-line and code-block tints follow the editor
+            // surface, as they do from the window background.
+            self.editor_current_line_bg = if is_dark {
+                bg.lighten(0.06)
+            } else {
+                bg.darken(0.03)
+            };
+            self.editor_code_block_bg = if is_dark {
+                bg.lighten(0.08)
+            } else {
+                bg.darken(0.05)
+            };
+        }
+        if let Some(fg) = os.view_fg {
+            self.editor_fg = fg;
+            self.editor_caret = fg;
+        }
+        if let Some(alt) = os.alternate_bg {
+            self.surface_alt_row = alt;
+        }
+
+        let surfaces = [self.surface_main, self.surface_content];
+        if let Some(fg) = os.inactive_fg {
+            self.text_secondary = lift_until_readable(fg, &surfaces, TEXT);
+        }
+        if let Some(link) = os.link {
+            let link = lift_until_readable(link, &surfaces, TEXT);
+            self.text_link = link;
+            // Hover moves away from the surface, so it reads at least as
+            // well as the link itself.
+            self.text_link_hover = lift_until_readable(
+                if is_dark {
+                    link.lighten(0.10)
+                } else {
+                    link.darken(0.10)
+                },
+                &surfaces,
+                TEXT,
+            );
+        }
+        if let Some(visited) = os.link_visited {
+            self.text_link_visited = lift_until_readable(visited, &surfaces, TEXT);
+        }
+        if let Some(error) = os.error {
+            self.text_error = lift_until_readable(error, &surfaces, TEXT);
+            self.status_error_fg = lift_until_readable(
+                error,
+                &[
+                    self.status_error_bg,
+                    self.surface_main,
+                    self.surface_content,
+                ],
+                NON_TEXT,
+            );
+        }
+        if let Some(warning) = os.warning {
+            self.text_warning = lift_until_readable(warning, &surfaces, TEXT);
+            self.status_warning_fg = lift_until_readable(
+                warning,
+                &[
+                    self.status_warning_bg,
+                    self.surface_main,
+                    self.surface_content,
+                ],
+                NON_TEXT,
+            );
+        }
+        if let Some(success) = os.success {
+            self.text_success = lift_until_readable(success, &surfaces, TEXT);
+            self.status_success_fg = lift_until_readable(
+                success,
+                &[
+                    self.status_success_bg,
+                    self.surface_main,
+                    self.surface_content,
+                ],
+                NON_TEXT,
+            );
+        }
+        if let Some(focus) = os.focus {
+            let ring = lift_until_readable(focus, &surfaces, NON_TEXT);
+            self.focus_ring = ring;
+            self.border_focused = ring;
+        }
     }
 }
 
@@ -1051,6 +1171,227 @@ mod tests {
     fn chart_palette_has_eight_colors() {
         assert_eq!(ColorTokens::light_default().chart_palette.len(), 8);
         assert_eq!(ColorTokens::dark_default().chart_palette.len(), 8);
+    }
+
+    use crate::contrast::composite_contrast;
+    use crate::os_theme_colors::ColorSchemePreference as Scheme;
+
+    fn os(color_scheme: Scheme) -> OsThemeColors {
+        OsThemeColors::new(color_scheme)
+    }
+
+    /// The names of the tokens that differ between `a` and `b`, sorted, so
+    /// a test pins both what a field changes and that it changes nothing
+    /// else.
+    fn changed_fields(a: &ColorTokens, b: &ColorTokens) -> Vec<String> {
+        let a = serde_json::to_value(a).unwrap();
+        let b = serde_json::to_value(b).unwrap();
+        let (a, b) = (a.as_object().unwrap(), b.as_object().unwrap());
+        let mut out: Vec<String> = a
+            .iter()
+            .filter(|(k, v)| b.get(k.as_str()) != Some(v))
+            .map(|(k, _)| k.clone())
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
+    #[test]
+    fn from_os_colors_view_bg_overrides_the_content_surface() {
+        for scheme in [Scheme::Light, Scheme::Dark] {
+            let base = ColorTokens::from_os_colors(&os(scheme));
+            let bg = Color::from_hex("#FCFCFC");
+            let mut report = os(scheme);
+            report.view_bg = Some(bg);
+            let t = ColorTokens::from_os_colors(&report);
+            assert_eq!(t.surface_content, bg);
+            assert_eq!(t.editor_bg, bg);
+            assert_ne!(t.editor_current_line_bg, bg);
+            assert_eq!(
+                changed_fields(&t, &base),
+                [
+                    "editor_bg",
+                    "editor_code_block_bg",
+                    "editor_current_line_bg",
+                    "surface_content"
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn from_os_colors_view_bg_wins_over_the_window_derivation() {
+        let mut report = os(Scheme::Light);
+        report.window_bg = Some(Color::from_hex("#EFF0F1"));
+        report.view_bg = Some(Color::from_hex("#FFFFFF"));
+        let t = ColorTokens::from_os_colors(&report);
+        assert_eq!(t.surface_main, Color::from_hex("#EFF0F1"));
+        assert_eq!(t.surface_content, Color::from_hex("#FFFFFF"));
+        assert_eq!(t.editor_bg, Color::from_hex("#FFFFFF"));
+    }
+
+    #[test]
+    fn from_os_colors_view_fg_overrides_the_editor_text() {
+        let base = ColorTokens::from_os_colors(&os(Scheme::Dark));
+        let fg = Color::from_hex("#FCFCFC");
+        let mut report = os(Scheme::Dark);
+        report.view_fg = Some(fg);
+        let t = ColorTokens::from_os_colors(&report);
+        assert_eq!(t.editor_fg, fg);
+        assert_eq!(t.editor_caret, fg);
+        assert_eq!(changed_fields(&t, &base), ["editor_caret", "editor_fg"]);
+    }
+
+    #[test]
+    fn from_os_colors_alternate_bg_overrides_the_alt_row() {
+        let base = ColorTokens::from_os_colors(&os(Scheme::Light));
+        let alt = Color::from_hex("#F7F7F7");
+        let mut report = os(Scheme::Light);
+        report.alternate_bg = Some(alt);
+        let t = ColorTokens::from_os_colors(&report);
+        assert_eq!(t.surface_alt_row, alt);
+        assert_eq!(changed_fields(&t, &base), ["surface_alt_row"]);
+    }
+
+    #[test]
+    fn from_os_colors_inactive_fg_overrides_secondary_text_and_is_lifted() {
+        let base = ColorTokens::from_os_colors(&os(Scheme::Light));
+        // Readable already: taken as is.
+        let mut report = os(Scheme::Light);
+        report.inactive_fg = Some(Color::from_hex("#4D4F52"));
+        let t = ColorTokens::from_os_colors(&report);
+        assert_eq!(t.text_secondary, Color::from_hex("#4D4F52"));
+        assert_eq!(changed_fields(&t, &base), ["text_secondary"]);
+        // Breeze's #707D8A on a white view is about 4.3:1: lifted.
+        report.view_bg = Some(Color::WHITE);
+        report.inactive_fg = Some(Color::from_hex("#707D8A"));
+        let t = ColorTokens::from_os_colors(&report);
+        assert_ne!(t.text_secondary, Color::from_hex("#707D8A"));
+        for bg in [t.surface_main, t.surface_content] {
+            assert!(composite_contrast(t.text_secondary, bg) >= 4.5);
+        }
+    }
+
+    #[test]
+    fn from_os_colors_links_override_and_are_lifted() {
+        for scheme in [Scheme::Light, Scheme::Dark] {
+            let base = ColorTokens::from_os_colors(&os(scheme));
+            let mut report = os(scheme);
+            report.link = Some(Color::from_hex("#2980B9"));
+            report.link_visited = Some(Color::from_hex("#9B59B6"));
+            let t = ColorTokens::from_os_colors(&report);
+            assert_eq!(
+                changed_fields(&t, &base),
+                ["text_link", "text_link_hover", "text_link_visited"]
+            );
+            for c in [t.text_link, t.text_link_hover, t.text_link_visited] {
+                for bg in [t.surface_main, t.surface_content] {
+                    assert!(composite_contrast(c, bg) >= 4.5, "{scheme:?} {c:?}");
+                }
+            }
+            assert_ne!(t.text_link, t.text_link_hover);
+        }
+        // A readable link is taken exactly.
+        let mut report = os(Scheme::Light);
+        report.link = Some(Color::from_hex("#1D5E8A"));
+        let t = ColorTokens::from_os_colors(&report);
+        assert_eq!(t.text_link, Color::from_hex("#1D5E8A"));
+    }
+
+    #[test]
+    fn from_os_colors_semantic_colours_override_text_and_status() {
+        for scheme in [Scheme::Light, Scheme::Dark] {
+            let base = ColorTokens::from_os_colors(&os(scheme));
+            let mut report = os(scheme);
+            report.error = Some(Color::from_hex("#DA4453"));
+            report.warning = Some(Color::from_hex("#F67400"));
+            report.success = Some(Color::from_hex("#27AE60"));
+            let t = ColorTokens::from_os_colors(&report);
+            assert_eq!(
+                changed_fields(&t, &base),
+                [
+                    "status_error_fg",
+                    "status_success_fg",
+                    "status_warning_fg",
+                    "text_error",
+                    "text_success",
+                    "text_warning"
+                ]
+            );
+            for (text, status, status_bg) in [
+                (t.text_error, t.status_error_fg, t.status_error_bg),
+                (t.text_warning, t.status_warning_fg, t.status_warning_bg),
+                (t.text_success, t.status_success_fg, t.status_success_bg),
+            ] {
+                for bg in [t.surface_main, t.surface_content] {
+                    assert!(composite_contrast(text, bg) >= 4.5, "{scheme:?} {text:?}");
+                    assert!(
+                        composite_contrast(status, bg) >= 3.0,
+                        "{scheme:?} {status:?}"
+                    );
+                }
+                assert!(composite_contrast(status, status_bg) >= 3.0);
+            }
+        }
+        // Readable values are taken exactly.
+        let mut report = os(Scheme::Light);
+        report.error = Some(Color::from_hex("#A0202C"));
+        let t = ColorTokens::from_os_colors(&report);
+        assert_eq!(t.text_error, Color::from_hex("#A0202C"));
+        assert_eq!(t.status_error_fg, Color::from_hex("#A0202C"));
+    }
+
+    #[test]
+    fn from_os_colors_focus_overrides_the_ring_and_is_lifted() {
+        for scheme in [Scheme::Light, Scheme::Dark] {
+            let base = ColorTokens::from_os_colors(&os(scheme));
+            let mut report = os(scheme);
+            report.focus = Some(Color::from_hex("#3DAEE9"));
+            let t = ColorTokens::from_os_colors(&report);
+            assert_eq!(changed_fields(&t, &base), ["border_focused", "focus_ring"]);
+            assert_eq!(t.focus_ring, t.border_focused);
+            for bg in [t.surface_main, t.surface_content] {
+                assert!(composite_contrast(t.focus_ring, bg) >= 3.0);
+            }
+        }
+        // The focus field wins over the accent's ring.
+        let mut report = os(Scheme::Dark);
+        report.accent = Some(Color::from_hex("#FF5500"));
+        report.focus = Some(Color::from_hex("#3DAEE9"));
+        let t = ColorTokens::from_os_colors(&report);
+        assert_eq!(t.accent, Color::from_hex("#FF5500"));
+        assert_eq!(t.focus_ring, Color::from_hex("#3DAEE9"));
+    }
+
+    #[test]
+    fn from_os_colors_without_the_new_fields_is_unchanged() {
+        // The pre-existing fields alone give the same tokens whether the
+        // report is built with `new` or as a literal: no new field leaks in.
+        let mut report = os(Scheme::Dark);
+        report.window_bg = Some(Color::from_hex("#202326"));
+        report.window_fg = Some(Color::from_hex("#FCFCFC"));
+        report.selection_bg = Some(Color::from_hex("#3DAEE9"));
+        report.accent = Some(Color::from_hex("#3DAEE9"));
+        let literal = OsThemeColors {
+            color_scheme: Scheme::Dark,
+            accent: Some(Color::from_hex("#3DAEE9")),
+            window_bg: Some(Color::from_hex("#202326")),
+            window_fg: Some(Color::from_hex("#FCFCFC")),
+            selection_bg: Some(Color::from_hex("#3DAEE9")),
+            ..Default::default()
+        };
+        assert_eq!(
+            ColorTokens::from_os_colors(&report),
+            ColorTokens::from_os_colors(&literal)
+        );
+        assert_eq!(
+            ColorTokens::from_os_colors(&os(Scheme::Light)),
+            ColorTokens::light_default()
+        );
+        assert_eq!(
+            ColorTokens::from_os_colors(&os(Scheme::Dark)),
+            ColorTokens::dark_default()
+        );
     }
 
     #[test]
