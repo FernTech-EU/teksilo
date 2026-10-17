@@ -418,6 +418,14 @@ by crate for clarity, not because crates version independently.
   lighter, its dark accent stays its own teal instead of a brighter one, and
   its selections are a shade of its own selection colour. Themes that bring
   their own high-contrast colours, such as KDE Plasma, are unchanged.
+- **macOS and Fluent sliders under right-to-left layout.**
+  **Behaviour change:** in a right-to-left window, a horizontal `Slider`
+  under the macOS or Fluent preset now runs from the right, as it does under
+  Int UI and KDE Plasma: the knob sits at the value measured from the right
+  end and the accent fill grows from the right end to it, so the knob stays
+  under a pointer dragging it and moves the way the arrow keys point. Before,
+  both presets painted the slider from the left, mirrored from where the
+  value actually was. Vertical sliders are unchanged.
 
 #### Platform
 

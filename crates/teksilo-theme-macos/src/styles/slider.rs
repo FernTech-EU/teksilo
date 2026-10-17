@@ -18,11 +18,17 @@
 //!
 //! Discrete sliders get tick marks on the far side of the track, as AppKit
 //! draws them for an `NSSlider` with `numberOfTickMarks` set.
+//!
+//! Right to left, a horizontal slider runs from the right: its minimum is at
+//! the leading edge, so the knob, the fill and the ticks are mirrored, as
+//! the `Slider` mirrors its pointer and arrow keys. A vertical slider is laid
+//! out the same way in either direction.
 
 use teksilo_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::environment::LayoutDirection;
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{SliderOrientation, SliderStyle, SliderStyleConfig};
@@ -103,11 +109,25 @@ struct SliderAxis {
 /// The track is inset by the knob's radius at both ends so its travel
 /// never overhangs the control — the same inset `Slider` subtracts when it
 /// maps a position to a value, which is what keeps the two in step.
-fn slider_axis(orientation: SliderOrientation, bounds: Rect) -> SliderAxis {
+///
+/// **A horizontal axis follows `direction`**: its minimum is at the leading
+/// edge, the right one under right to left, so there `start` is the right
+/// end and `end` the left one, as `Slider` reads its pointer and arrow keys.
+/// The vertical axis does not depend on the direction.
+fn slider_axis(
+    orientation: SliderOrientation,
+    direction: LayoutDirection,
+    bounds: Rect,
+) -> SliderAxis {
     let half = THUMB * 0.5;
     match orientation {
         SliderOrientation::Horizontal => {
             let cy = bounds.y + bounds.height * 0.5;
+            let (left, right) = (bounds.x + half, bounds.x + bounds.width - half);
+            let (start, end) = match direction {
+                LayoutDirection::LeftToRight => (left, right),
+                LayoutDirection::RightToLeft => (right, left),
+            };
             SliderAxis {
                 track: Rect::new(
                     bounds.x + half,
@@ -115,8 +135,8 @@ fn slider_axis(orientation: SliderOrientation, bounds: Rect) -> SliderAxis {
                     (bounds.width - THUMB).max(0.0),
                     TRACK,
                 ),
-                start: bounds.x + half,
-                end: bounds.x + bounds.width - half,
+                start,
+                end,
                 centre_cross: cy,
             }
         }
@@ -207,7 +227,7 @@ impl Widget for MacOsSliderBody {
             start,
             end,
             centre_cross,
-        } = slider_axis(self.orientation, bounds);
+        } = slider_axis(self.orientation, ctx.layout_direction, bounds);
         let pill = CornerRadius::uniform(TRACK * 0.5);
         // No hairline on the rail, unlike the switch track and the
         // unchecked checkbox and radio, which all carry a `border_strong`
@@ -220,14 +240,16 @@ impl Widget for MacOsSliderBody {
         // deliberately faint.
         canvas.fill_rounded_rect(track, pill, rail);
 
-        // Filled portion, from the track's origin to the knob — rightward
-        // when horizontal, *downward* when vertical (see `slider_axis`).
+        // Filled portion, from the minimum's end of the track to the knob:
+        // from the leading edge when horizontal, *downward* when vertical
+        // (see `slider_axis`).
         match self.orientation {
             SliderOrientation::Horizontal => {
-                let w = track.width * t;
+                let knob = lerp(start, end, t);
+                let w = (knob - start).abs();
                 if w > 0.0 {
                     canvas.fill_rounded_rect(
-                        Rect::new(track.x, track.y, w, track.height),
+                        Rect::new(start.min(knob), track.y, w, track.height),
                         pill,
                         fill,
                     );
@@ -342,6 +364,9 @@ fn paint_knob(
 mod tests {
     use super::*;
 
+    const LTR: LayoutDirection = LayoutDirection::LeftToRight;
+    const RTL: LayoutDirection = LayoutDirection::RightToLeft;
+
     /// The bug this guards: a vertical slider whose paint ran bottom-to-top
     /// while `Slider`'s hit-testing ran top-to-bottom. Everything looked
     /// plausible until you grabbed the knob, which then slid the opposite
@@ -350,13 +375,38 @@ mod tests {
     fn the_value_axis_runs_the_same_way_the_widget_maps_the_pointer() {
         let bounds = Rect::new(10.0, 20.0, 200.0, 300.0);
         for orientation in [SliderOrientation::Horizontal, SliderOrientation::Vertical] {
-            let axis = slider_axis(orientation, bounds);
+            let axis = slider_axis(orientation, LTR, bounds);
             assert!(
                 axis.end > axis.start,
                 "{orientation:?}: value must grow with the coordinate, as \
                  Slider's own position→value mapping does"
             );
         }
+    }
+
+    /// Right to left, a horizontal axis runs from the right end to the left
+    /// one over the same track, as `Slider` reads its pointer from the other
+    /// end; a vertical axis is the same in both directions.
+    #[test]
+    fn right_to_left_mirrors_the_horizontal_axis_only() {
+        let bounds = Rect::new(10.0, 20.0, 200.0, 300.0);
+        let l = slider_axis(SliderOrientation::Horizontal, LTR, bounds);
+        let r = slider_axis(SliderOrientation::Horizontal, RTL, bounds);
+        assert_eq!((r.start, r.end), (l.end, l.start));
+        assert_eq!(r.track, l.track);
+        assert_eq!(r.centre_cross, l.centre_cross);
+        let mid = bounds.x + bounds.width * 0.5;
+        for t in [0.0, 0.25, 0.5, 1.0] {
+            let (a, b) = (lerp(l.start, l.end, t), lerp(r.start, r.end, t));
+            assert!(
+                (a - mid + (b - mid)).abs() < 1e-4,
+                "the knob at {t} is mirrored about the centre: {a} and {b}"
+            );
+        }
+
+        let lv = slider_axis(SliderOrientation::Vertical, LTR, bounds);
+        let rv = slider_axis(SliderOrientation::Vertical, RTL, bounds);
+        assert_eq!((rv.start, rv.end, rv.track), (lv.start, lv.end, lv.track));
     }
 
     /// `Slider` subtracts exactly one knob diameter from the extent when it
@@ -366,11 +416,11 @@ mod tests {
     fn painted_travel_matches_the_widgets_usable_extent() {
         let bounds = Rect::new(10.0, 20.0, 200.0, 300.0);
 
-        let h = slider_axis(SliderOrientation::Horizontal, bounds);
+        let h = slider_axis(SliderOrientation::Horizontal, LTR, bounds);
         assert!((h.end - h.start - (bounds.width - THUMB)).abs() < 1e-4);
         assert!((h.track.width - (bounds.width - THUMB)).abs() < 1e-4);
 
-        let v = slider_axis(SliderOrientation::Vertical, bounds);
+        let v = slider_axis(SliderOrientation::Vertical, LTR, bounds);
         assert!((v.end - v.start - (bounds.height - THUMB)).abs() < 1e-4);
         assert!((v.track.height - (bounds.height - THUMB)).abs() < 1e-4);
     }
@@ -379,11 +429,11 @@ mod tests {
     fn the_track_is_centred_on_the_cross_axis() {
         let bounds = Rect::new(10.0, 20.0, 200.0, 300.0);
 
-        let h = slider_axis(SliderOrientation::Horizontal, bounds);
+        let h = slider_axis(SliderOrientation::Horizontal, LTR, bounds);
         assert_eq!(h.centre_cross, bounds.y + bounds.height * 0.5);
         assert!((h.track.y + h.track.height * 0.5 - h.centre_cross).abs() < 1e-4);
 
-        let v = slider_axis(SliderOrientation::Vertical, bounds);
+        let v = slider_axis(SliderOrientation::Vertical, LTR, bounds);
         assert_eq!(v.centre_cross, bounds.x + bounds.width * 0.5);
         assert!((v.track.x + v.track.width * 0.5 - v.centre_cross).abs() < 1e-4);
     }
@@ -393,7 +443,7 @@ mod tests {
     fn a_slot_smaller_than_the_knob_clamps_to_zero() {
         let tiny = Rect::new(0.0, 0.0, 4.0, 4.0);
         for orientation in [SliderOrientation::Horizontal, SliderOrientation::Vertical] {
-            let axis = slider_axis(orientation, tiny);
+            let axis = slider_axis(orientation, LTR, tiny);
             assert!(axis.track.width >= 0.0 && axis.track.height >= 0.0);
         }
     }
