@@ -441,6 +441,15 @@ by crate for clarity, not because crates version independently.
   menu sizes at every density, so those parts kept their compact sizes inside
   rows laid out for touch. Compact menus are unchanged, and macOS menu rows
   stay AppKit's 22 px at every density.
+- **macOS and Fluent vertical sliders.**
+  **Behaviour change:** macOS and Fluent vertical sliders now show the value
+  where the pointer and the keyboard put it: the minimum is at the bottom and
+  the maximum at the top, as under Int UI and KDE Plasma, the accent fill
+  rises from the bottom to the knob, a press near the top sets a value near
+  the maximum with the knob under the pointer, and `ArrowUp` moves the knob
+  up. Before, both presets painted the minimum at the top with the fill
+  running down, so the knob sat opposite to the value and the arrow keys
+  moved it the wrong way. Horizontal sliders are unchanged.
 
 #### Platform
 

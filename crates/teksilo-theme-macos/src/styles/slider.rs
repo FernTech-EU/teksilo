@@ -22,7 +22,9 @@
 //! Right to left, a horizontal slider runs from the right: its minimum is at
 //! the leading edge, so the knob, the fill and the ticks are mirrored, as
 //! the `Slider` mirrors its pointer and arrow keys. A vertical slider is laid
-//! out the same way in either direction.
+//! out the same way in either direction, with its minimum at the bottom, as
+//! the `Slider` reads its pointer and `ArrowUp` raises the value: the fill
+//! rises from the bottom to the knob.
 
 use teksilo_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
@@ -96,18 +98,18 @@ struct SliderAxis {
 
 /// Resolve a slider's track geometry and value axis.
 ///
-/// **The vertical axis runs top → bottom**: `value == 0` is at the top and
-/// `value == 1` at the bottom, with the fill growing downward. That is not
-/// the visual convention one might reach for (a "level" that rises), and
-/// getting it backwards is invisible until you grab the knob — it then
-/// travels *away* from the pointer, because a style does not own the
-/// mapping. `Slider`'s own hit-testing computes
-/// `t = (y - thumb_radius) / usable` from the widget-local pointer
-/// position; a style that disagrees is simply wrong, however it looks
-/// standing still.
+/// **The vertical axis runs bottom to top**: `value == 0` is at the bottom
+/// and `value == 1` at the top, with the fill rising from the bottom.
+/// Getting it backwards is invisible until you grab the knob: it then sits
+/// opposite to where the press put the value, and `ArrowUp` moves it down,
+/// because a style does not own the mapping. `Slider`'s own hit-testing
+/// computes `t = 1 - (y - thumb_radius) / usable` from the widget-local
+/// pointer position, and its `thumb_rect` and the shipped
+/// `RecipeSliderStyle` put the thumb there; a style that disagrees is
+/// simply wrong, however it looks standing still.
 ///
 /// The track is inset by the knob's radius at both ends so its travel
-/// never overhangs the control — the same inset `Slider` subtracts when it
+/// never overhangs the control: the same inset `Slider` subtracts when it
 /// maps a position to a value, which is what keeps the two in step.
 ///
 /// **A horizontal axis follows `direction`**: its minimum is at the leading
@@ -149,8 +151,8 @@ fn slider_axis(
                     TRACK,
                     (bounds.height - THUMB).max(0.0),
                 ),
-                start: bounds.y + half,
-                end: bounds.y + bounds.height - half,
+                start: bounds.y + bounds.height - half,
+                end: bounds.y + half,
                 centre_cross: cx,
             }
         }
@@ -241,30 +243,20 @@ impl Widget for MacOsSliderBody {
         canvas.fill_rounded_rect(track, pill, rail);
 
         // Filled portion, from the minimum's end of the track to the knob:
-        // from the leading edge when horizontal, *downward* when vertical
-        // (see `slider_axis`).
-        match self.orientation {
-            SliderOrientation::Horizontal => {
-                let knob = lerp(start, end, t);
-                let w = (knob - start).abs();
-                if w > 0.0 {
-                    canvas.fill_rounded_rect(
-                        Rect::new(start.min(knob), track.y, w, track.height),
-                        pill,
-                        fill,
-                    );
+        // from the leading edge when horizontal, from the bottom when
+        // vertical (see `slider_axis`).
+        let knob = lerp(start, end, t);
+        let extent = (knob - start).abs();
+        if extent > 0.0 {
+            let filled = match self.orientation {
+                SliderOrientation::Horizontal => {
+                    Rect::new(start.min(knob), track.y, extent, track.height)
                 }
-            }
-            SliderOrientation::Vertical => {
-                let h = track.height * t;
-                if h > 0.0 {
-                    canvas.fill_rounded_rect(
-                        Rect::new(track.x, track.y, track.width, h),
-                        pill,
-                        fill,
-                    );
+                SliderOrientation::Vertical => {
+                    Rect::new(track.x, start.min(knob), track.width, extent)
                 }
-            }
+            };
+            canvas.fill_rounded_rect(filled, pill, fill);
         }
 
         // Discrete ticks, on the far side of the track.
@@ -302,10 +294,9 @@ impl Widget for MacOsSliderBody {
 
         // The knob: the same bezel a push button wears, at 18 dp and round.
         let half = THUMB * 0.5;
-        let pos = lerp(start, end, t);
         let centre = match self.orientation {
-            SliderOrientation::Horizontal => Point::new(pos, centre_cross),
-            SliderOrientation::Vertical => Point::new(centre_cross, pos),
+            SliderOrientation::Horizontal => Point::new(knob, centre_cross),
+            SliderOrientation::Vertical => Point::new(centre_cross, knob),
         };
         paint_knob(canvas, centre, half, state, ctx);
 
@@ -367,20 +358,60 @@ mod tests {
     const LTR: LayoutDirection = LayoutDirection::LeftToRight;
     const RTL: LayoutDirection = LayoutDirection::RightToLeft;
 
-    /// The bug this guards: a vertical slider whose paint ran bottom-to-top
-    /// while `Slider`'s hit-testing ran top-to-bottom. Everything looked
-    /// plausible until you grabbed the knob, which then slid the opposite
-    /// way to the pointer.
+    /// The bug this guards: a vertical slider painted with its minimum at
+    /// the top while `Slider` puts it at the bottom, so the knob sat
+    /// opposite to where a press put the value and `ArrowUp` moved it down.
+    ///
+    /// This mounts the real `Slider` under this style at several values, in
+    /// both orientations and both directions, and asks it where its thumb is
+    /// (`target_regions`, from the same `thumb_rect` its value readout uses
+    /// and that agrees with its pointer mapping). The axis has to put the
+    /// knob's centre there.
     #[test]
     fn the_value_axis_runs_the_same_way_the_widget_maps_the_pointer() {
-        let bounds = Rect::new(10.0, 20.0, 200.0, 300.0);
-        for orientation in [SliderOrientation::Horizontal, SliderOrientation::Vertical] {
-            let axis = slider_axis(orientation, LTR, bounds);
-            assert!(
-                axis.end > axis.start,
-                "{orientation:?}: value must grow with the coordinate, as \
-                 Slider's own position→value mapping does"
-            );
+        use teksilo_tokens::Orientation;
+        use teksilo_widgets::Slider;
+        use teksilo_widgets::slider::SLIDER_PART_THUMB;
+
+        for (orientation, widget_orientation) in [
+            (SliderOrientation::Horizontal, Orientation::Horizontal),
+            (SliderOrientation::Vertical, Orientation::Vertical),
+        ] {
+            for direction in [LTR, RTL] {
+                for value in [0.0_f32, 0.2, 0.5, 0.9, 1.0] {
+                    let mut tree = teksilo_core::widget_tree::WidgetTree::new()
+                        .with_theme(crate::light())
+                        .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                            teksilo_canvas::MockTextBackend::new(),
+                        )));
+                    tree.set_layout_direction(direction);
+                    let slider = tree.add(
+                        Slider::new(Signal::new(value), 0.0, 1.0)
+                            .orientation(widget_orientation)
+                            .style(MacOsSliderStyle),
+                    );
+                    tree.layout(SizeProposal::exact(200.0, 200.0));
+
+                    let bounds = tree.bounds(slider);
+                    let thumb = tree
+                        .widget_target_regions(slider)
+                        .into_iter()
+                        .find(|r| r.part == SLIDER_PART_THUMB)
+                        .expect("the slider reports its thumb")
+                        .rect;
+                    let axis = slider_axis(orientation, direction, bounds);
+                    let painted = lerp(axis.start, axis.end, value);
+                    let reported = match orientation {
+                        SliderOrientation::Horizontal => thumb.x + thumb.width * 0.5,
+                        SliderOrientation::Vertical => thumb.y + thumb.height * 0.5,
+                    };
+                    assert!(
+                        (painted - reported).abs() < 1e-3,
+                        "{orientation:?} {direction:?} at {value}: the knob is \
+                         painted at {painted}, the widget's thumb is at {reported}"
+                    );
+                }
+            }
         }
     }
 
@@ -421,7 +452,7 @@ mod tests {
         assert!((h.track.width - (bounds.width - THUMB)).abs() < 1e-4);
 
         let v = slider_axis(SliderOrientation::Vertical, LTR, bounds);
-        assert!((v.end - v.start - (bounds.height - THUMB)).abs() < 1e-4);
+        assert!((v.start - v.end - (bounds.height - THUMB)).abs() < 1e-4);
         assert!((v.track.height - (bounds.height - THUMB)).abs() < 1e-4);
     }
 
