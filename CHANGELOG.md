@@ -235,6 +235,15 @@ by crate for clarity, not because crates version independently.
   Kvantum or any other, which keep Teksilo's default shapes in the
   desktop's colours; it is what `TeksiloAppBuilder::native_theme` asks
   for, so a window in `ThemeMode::Native` shows Breeze on a Breeze desktop.
+  The stock themes write in Teksilo's bundled Inter and JetBrains Mono at
+  the sizes and line heights of Plasma's Noto Sans and Hack. Two features,
+  both off by default, write in Plasma's own faces instead:
+  `bundled-fonts` embeds Noto Sans 2.015 (upright and italic, every
+  weight) and Hack 3.003 (regular, bold and their italics), about 5.6 MB,
+  with `font_registrar()` to hand to `TeksiloAppBuilder::register_fonts`;
+  `system-fonts` uses the copies installed on the desktop and embeds
+  nothing. Neither changes a text size, a line height or a control's
+  height.
 
 #### Platform
 

@@ -183,8 +183,10 @@ beside the font file, at the path given with each entry. "Default" in the
 Embedded column means the face is compiled into any binary built with that
 crate's default features.
 
-None of these faces carries a Reserved Font Name, so the OFL's font-name
-restriction does not apply to them.
+None of the faces under the SIL Open Font License carries a Reserved Font
+Name, so the OFL's font-name restriction does not apply to them. Hack's
+Bitstream Vera licence has a naming condition of its own for modified
+copies; see 2.7.
 
 
 2.1  Inter  --  crates/teksilo-text/fonts/
@@ -247,21 +249,104 @@ restriction does not apply to them.
               feature, which is off by default
 
 
+2.6  Noto Sans  --  crates/teksilo-theme-kde/fonts/
+---------------------------------------------------------------------------
+    Copyright 2022 The Noto Project Authors
+    (https://github.com/notofonts/latin-greek-cyrillic)
+
+    Licence:  SIL Open Font License, Version 1.1
+    Text:     crates/teksilo-theme-kde/fonts/noto-sans-LICENSE.txt
+              (the release's OFL.txt, verbatim)
+    Files:    NotoSans-Variable.ttf, NotoSans-Italic-Variable.ttf
+    Embedded: only with the teksilo-theme-kde "bundled-fonts" feature,
+              which is off by default
+
+    Release:  NotoSans-v2.015, notofonts/latin-greek-cyrillic
+              https://github.com/notofonts/latin-greek-cyrillic/releases/tag/NotoSans-v2.015
+    Archive:  NotoSans-v2.015.zip
+              0c34df072a3fa7efbb7cbf34950e1f971a4447cffe365d3a359e2d4089b958f5
+
+    File (renamed from the archive path)                         sha256
+    NotoSans-Variable.ttf
+        NotoSans/full/variable-ttf/NotoSans[wdth,wght].ttf
+        ae80a5e79e4afbf493e9f4684ec4988e6a861b3598102ee48950b4b7a754cdff
+    NotoSans-Italic-Variable.ttf
+        NotoSans/full/variable-ttf/NotoSans-Italic[wdth,wght].ttf
+        8bcb0ae904c973257ec957ca92559d425469d92e0913d489fe80fbb49c3b6ded
+    noto-sans-LICENSE.txt
+        OFL.txt
+        cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a
+
+    Noto is a trademark of Google LLC.
+
+
+2.7  Hack  --  crates/teksilo-theme-kde/fonts/
+---------------------------------------------------------------------------
+    Copyright (c) 2018 Source Foundry Authors
+    (https://github.com/source-foundry/Hack)
+    Copyright (c) 2003 by Bitstream, Inc. All Rights Reserved.
+    The work in the DejaVu project was committed to the public domain.
+
+    Licence:  MIT License (the Hack project's work) and the Bitstream Vera
+              License (Bitstream Vera Sans Mono, which Hack derives from)
+    Text:     crates/teksilo-theme-kde/fonts/hack-LICENSE.txt
+              (the project's LICENSE.md at tag v3.003, verbatim; the
+              release archive carries no licence file)
+    Files:    Hack-Regular.ttf, Hack-Bold.ttf, Hack-Italic.ttf,
+              Hack-BoldItalic.ttf
+    Embedded: only with the teksilo-theme-kde "bundled-fonts" feature,
+              which is off by default
+
+    Release:  v3.003, source-foundry/Hack
+              https://github.com/source-foundry/Hack/releases/tag/v3.003
+    Archive:  Hack-v3.003-ttf.zip
+              0c2604631b1f055041c68a0e09ae4801acab6c5072ba2db6a822f53c3f8290ac
+
+    File                     sha256
+    Hack-Regular.ttf         15f55cc0c85a2988d2b4b3a8cdb5d77fdfbaf319e1bb5309d725db9818fb7125
+    Hack-Bold.ttf            5bbf531eff7f8a0c2559c9a0656718e2828a012a9b1f60b5f54006d59a4de8d4
+    Hack-Italic.ttf          096fb67a2b85f3c866e9cb3e965b27c2c10b977315f4d3d7f095674be35091c1
+    Hack-BoldItalic.ttf      64f74a079700b7dfe128551a1e28875d5ba980971e55f5e0f0596e37bdc6a6bc
+    hack-LICENSE.txt         1f61bb7c790c59b4b0ecdf304628b94e42ae4c8020094a8c3da73381ab212623
+
+    The Bitstream Vera License lets the fonts be modified only if they are
+    renamed to names containing neither "Bitstream" nor "Vera", and forbids
+    selling a copy of the fonts by itself. Teksilo redistributes them
+    unmodified, as part of a larger work. Bitstream Vera is a trademark of
+    Bitstream, Inc.
+
+The tests in crates/teksilo-theme-kde/tests/fonts.rs check every file in
+crates/teksilo-theme-kde/fonts/ against the sha256 values above.
+
+
 ===========================================================================
 3. FONTS NAMED BUT NOT REDISTRIBUTED
 ===========================================================================
 
-Two theme presets can ask the platform's text stack for a proprietary system
-face by name. Neither font is included in this repository or in any binary
-built from it, and no licence to either is granted or implied. The face
-resolves only on a machine that already has it installed; on any other, the
-text stack falls back to the bundled Inter and JetBrains Mono.
+Three theme presets can ask the platform's text stack for a system face by
+name, under their "system-fonts" feature. The face resolves only on a
+machine that already has it installed; on any other, the text stack falls
+back to the bundled Inter and JetBrains Mono.
+
+The Microsoft and Apple faces are proprietary. Neither is included in this
+repository or in any binary built from it, and no licence to either is
+granted or implied.
 
     Segoe UI Variable, Consolas    Microsoft Corporation
                                    teksilo-theme-fluent, "system-fonts"
 
     SF Pro Text, SF Mono           Apple Inc.
                                    teksilo-theme-macos, "system-fonts"
+
+Noto Sans and Hack, KDE Plasma's default faces, are free fonts, the
+releases in 2.6 and 2.7. Under "system-fonts" alone teksilo-theme-kde
+embeds neither and uses the copies installed on the machine, under the
+licences they were installed with; only its "bundled-fonts" feature
+embeds them.
+
+    Noto Sans, Hack                The Noto Project Authors; Source Foundry
+                                   Authors and Bitstream, Inc.
+                                   teksilo-theme-kde, "system-fonts"
 
 The same applies to the platform colour-emoji faces (Noto Color Emoji, Apple
 Color Emoji, Segoe UI Emoji) that the teksilo-text "system-emoji" feature

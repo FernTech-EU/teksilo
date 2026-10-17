@@ -110,6 +110,27 @@
 //! [`BreezeStyleConfig`] and its menu and toolbar fonts as
 //! [`KdeFontRoles`], at Plasma's defaults for the stock themes.
 //!
+//! ## Fonts
+//!
+//! Plasma writes in Noto Sans and Hack. By default the preset draws
+//! Teksilo's bundled Inter and JetBrains Mono at Noto Sans and Hack's sizes
+//! and line boxes; two Cargo features, both off by default, name Plasma's
+//! faces instead ([`fonts`]):
+//!
+//! - `bundled-fonts` embeds Noto Sans and Hack, about 5.6 MB, and
+//!   `font_registrar()` registers them for the app builder:
+//!
+//!   ```ignore
+//!   TeksiloAppBuilder::new()
+//!       .theme(kde::light())
+//!       .register_fonts(kde::font_registrar())
+//!       .run();
+//!   ```
+//! - `system-fonts` names them without embedding them, for a desktop that
+//!   has them installed.
+//!
+//! [`from_desktop`] names the desktop's own fonts either way.
+//!
 //! ## Accent colour
 //!
 //! [`light_with_accent`] and [`dark_with_accent`] apply an accent the way
@@ -145,7 +166,9 @@
 //! KDE e.V. This preset is not affiliated with, endorsed by or sponsored by
 //! KDE e.V.; the names KDE, Plasma and Breeze are used only to say which
 //! design language it reproduces. It contains no KDE code, artwork, icon or
-//! font. See `NOTICE` and `TRADEMARKS.md` in the Teksilo repository.
+//! font; the Noto Sans and Hack faces the `bundled-fonts` feature embeds
+//! are the Noto project's and Source Foundry's, under their own licences.
+//! See `NOTICE` and `TRADEMARKS.md` in the Teksilo repository.
 //!
 //! ## Known limitations
 //!
@@ -250,11 +273,13 @@
 //!   its style no say, so they are framed in the accent rather than as
 //!   Breeze's default button, whose light fill would not carry that text in
 //!   a dark scheme ([`styles::split_button`]).
-//! - **The stock themes' fonts are not Plasma's.** The text sizes and line
-//!   boxes are Noto Sans and Hack's at Plasma's default sizes, drawn in
-//!   Teksilo's bundled Inter and JetBrains Mono. [`from_desktop`] names the
-//!   desktop's own families instead, which the text engine finds among the
-//!   installed fonts or replaces with the bundled ones.
+//! - **Without a font feature, the stock themes' fonts are not Plasma's.**
+//!   The text sizes and line boxes are Noto Sans and Hack's at Plasma's
+//!   default sizes, drawn in Teksilo's bundled Inter and JetBrains Mono
+//!   unless `bundled-fonts` or `system-fonts` is on ([`fonts`]).
+//!   [`from_desktop`] names the desktop's own families instead, which the
+//!   text engine finds among the installed fonts or replaces with the
+//!   bundled ones.
 //! - **A desktop's fonts keep the text styles' weights**, 400 and 600, and
 //!   a family other than Noto Sans and Hack gets a line box from Noto
 //!   Sans's proportions, which can be a pixel off: the preset measures no
@@ -279,6 +304,7 @@
 
 mod breeze_config;
 mod color;
+pub mod fonts;
 pub mod geometry;
 pub mod motion;
 pub mod palette;
@@ -287,6 +313,8 @@ pub mod styles;
 pub mod typography;
 
 pub use breeze_config::BreezeStyleConfig;
+#[cfg(feature = "bundled-fonts")]
+pub use fonts::font_registrar;
 pub use palette::{BreezeColors, KdePalette, PlasmaAccent, UnknownPlasmaAccent};
 pub use teksilo_kde_scheme as scheme;
 pub use typography::KdeFontRoles;

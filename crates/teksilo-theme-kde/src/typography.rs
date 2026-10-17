@@ -34,10 +34,13 @@
 //!
 //! ## Families
 //!
-//! Plasma's faces are Noto Sans and Hack. The stock themes do not ship or
-//! name them: they keep Teksilo's bundled Inter and JetBrains Mono at the
-//! sizes and line boxes above, which are computed from the Noto Sans and
-//! Hack metrics whichever family draws them.
+//! Plasma's faces are Noto Sans and Hack. Under the `bundled-fonts` or the
+//! `system-fonts` feature the stock themes name them ([`crate::fonts`]);
+//! without either they keep Teksilo's bundled Inter and JetBrains Mono. The
+//! sizes and line boxes above are the same either way: they are computed
+//! from the Noto Sans and Hack metrics whichever family draws them, the
+//! monospace line box from Hack's `hhea` table (a natural line height of
+//! 1.1640625 em, 15 px by Qt's rule at the 13 px face).
 //!
 //! ## The desktop's fonts
 //!
@@ -56,6 +59,8 @@
 
 use teksilo_kde_scheme::{KdeFont, KdeFonts};
 use teksilo_tokens::{FontWeight, TextStyle, TypographyTokens};
+
+use crate::fonts::{HACK_FAMILY, NOTO_SANS_FAMILY};
 
 /// The vertical metrics of a font face that its line height is computed
 /// from: the `hhea` ascender and the absolute descender, in font units.
@@ -122,9 +127,26 @@ pub fn breeze_body_line_height() -> f32 {
 
 /// Breeze typography tokens at Plasma's default fonts.
 pub fn breeze_typography() -> TypographyTokens {
-    // `[unpublished]` Without bundled Noto Sans and Hack, the faces are
-    // Teksilo's bundled defaults, at the sizes Plasma uses.
+    // `[unpublished]` Without a font feature, the faces are Teksilo's
+    // bundled defaults, at the sizes Plasma uses.
     let mut t = TypographyTokens::default();
+
+    // Under either font feature, name Plasma's faces: embedded and
+    // registered by `crate::font_registrar` under `bundled-fonts`, found
+    // among the installed fonts under `system-fonts`.
+    #[cfg(any(feature = "bundled-fonts", feature = "system-fonts"))]
+    {
+        for style in [
+            &mut t.body,
+            &mut t.body_bold,
+            &mut t.small,
+            &mut t.small_bold,
+            &mut t.tiny,
+        ] {
+            style.family = NOTO_SANS_FAMILY.to_string();
+        }
+        t.mono.family = HACK_FAMILY.to_string();
+    }
 
     let body_px = face_px(BREEZE_BODY_PT);
     let body_line = qt_line_height(body_px, NOTO_SANS_METRICS);
@@ -157,9 +179,9 @@ pub const NATURAL_LINE_HEIGHT_EM: f64 = 1.362;
 /// The metrics of `family` when the preset knows them: Noto Sans and Hack,
 /// named in any ASCII case.
 pub fn known_metrics(family: &str) -> Option<FaceMetrics> {
-    if family.eq_ignore_ascii_case("Noto Sans") {
+    if family.eq_ignore_ascii_case(NOTO_SANS_FAMILY) {
         Some(NOTO_SANS_METRICS)
-    } else if family.eq_ignore_ascii_case("Hack") {
+    } else if family.eq_ignore_ascii_case(HACK_FAMILY) {
         Some(HACK_METRICS)
     } else {
         None
@@ -424,6 +446,7 @@ mod tests {
         assert_eq!(style.size, 16.0);
     }
 
+    #[cfg(not(any(feature = "bundled-fonts", feature = "system-fonts")))]
     #[test]
     fn the_families_are_the_bundled_defaults() {
         let t = breeze_typography();
@@ -431,5 +454,15 @@ mod tests {
         assert_eq!(t.body.family, base.body.family);
         assert_eq!(t.small.family, base.small.family);
         assert_eq!(t.mono.family, base.mono.family);
+    }
+
+    #[cfg(any(feature = "bundled-fonts", feature = "system-fonts"))]
+    #[test]
+    fn a_font_feature_names_plasmas_faces() {
+        let t = breeze_typography();
+        for style in [&t.body, &t.body_bold, &t.small, &t.small_bold, &t.tiny] {
+            assert_eq!(style.family, NOTO_SANS_FAMILY);
+        }
+        assert_eq!(t.mono.family, HACK_FAMILY);
     }
 }

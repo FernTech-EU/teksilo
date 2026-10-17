@@ -12235,6 +12235,7 @@ version = "0.19.0"
 dependencies = [
  "proptest",
  "serde_json",
+ "sha2 0.10.9",
  "teksilo-app",
  "teksilo-canvas",
  "teksilo-core",
@@ -12243,6 +12244,7 @@ dependencies = [
  "teksilo-kde-scheme",
  "teksilo-platform",
  "teksilo-target-conformance",
+ "teksilo-text",
  "teksilo-tokens",
  "teksilo-widgets",
  "thiserror 2.0.21",

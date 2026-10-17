@@ -26,6 +26,23 @@ exclude = [
     "tests/preset_metrics.rs",
 ]
 
+[features]
+# Both off by default. Plasma's faces are Noto Sans (text) and Hack
+# (monospace); without either feature the typography keeps Teksilo's bundled
+# Inter and JetBrains Mono, at the sizes and line boxes Noto Sans and Hack
+# have at Plasma's default fonts.
+#
+# `bundled-fonts` embeds Noto Sans v2.015 (variable, upright and italic,
+# OFL-1.1) and Hack v3.003 (regular, bold and their italics, MIT plus the
+# Bitstream Vera licence), about 5.6 MB in all, switches the families to
+# "Noto Sans" and "Hack", and exposes `font_registrar()`.
+bundled-fonts = ["dep:teksilo-text"]
+# `system-fonts` switches the families to "Noto Sans" and "Hack" without
+# embedding them, for a desktop that has them installed, as every Plasma
+# desktop does; the text engine finds them among the installed fonts, and
+# falls back to the bundled default on a machine without them.
+system-fonts = []
+
 [dependencies]
 teksilo-core = { workspace = true }
 teksilo-tokens = { workspace = true }
@@ -39,6 +56,10 @@ teksilo-widgets = { workspace = true }
 # palette, Plasma's accent application and the colour arithmetic.
 teksilo-kde-scheme = { workspace = true }
 thiserror = { workspace = true }
+# Only pulled in under `bundled-fonts`, for the `FontRegistrar` types.
+# Declared directly, with `default-features = false`, so it does not turn on
+# teksilo-text's Noto fallback fonts: which of those ship is the app's call.
+teksilo-text = { path = "../teksilo-text", version = "0.19.0", optional = true, default-features = false }
 
 [dev-dependencies]
 # Property-based testing: `tests/contrast.rs` checks every declared text and
@@ -46,6 +67,9 @@ thiserror = { workspace = true }
 # toolchain, which is not a guaranteed CI dependency; proptest gives the same
 # coverage plus shrinking on stable (see the workspace `Cargo.toml`).
 proptest = { workspace = true }
+# `tests/fonts.rs` checks every file under `fonts/` against the sha256
+# recorded for its upstream release.
+sha2 = { workspace = true }
 # Reads the golden vectors in `tools/kde_golden/vectors`.
 serde_json = { workspace = true }
 # `tests/mount.rs` and `tests/preset_metrics.rs` build real widget trees;

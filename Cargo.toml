@@ -91,6 +91,11 @@ tempfile = "3"
 # used in the sibling `text-typeset` / `text-document` repos. Never a
 # production dependency — `[dev-dependencies]` only.
 proptest = "1"
+# Test-only: `teksilo-theme-kde`'s `tests/fonts.rs` checks its bundled font
+# files against the sha256 recorded for their upstream releases. 0.10 is
+# already in the lockfile through `wry` and others. Never a production
+# dependency: `[dev-dependencies]` only.
+sha2 = "0.10"
 # Test-only: statistics-driven micro-benchmarking, behind the pointer-dispatch
 # performance budget (`crates/teksilo-core/benches/pointer_dispatch.rs`). The
 # default features pull `rayon` and `plotters` in for HTML reports; the budget
