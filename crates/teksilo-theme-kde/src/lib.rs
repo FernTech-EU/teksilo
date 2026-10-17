@@ -55,6 +55,12 @@
 //!   controls are outlined in the window colour moved the same way toward
 //!   the text, the `border` token; the highlight-based outlines are in
 //!   [`BreezeColors`].
+//! - **Breeze's menus and popups.** A menu row is 29 px at Plasma's default
+//!   font, washed with the focus colour at 30 % and outlined while it is
+//!   highlighted, and filled with the accent while it is held down; a menu,
+//!   a popover and a tooltip are framed at the 5 px radius in a 1 px
+//!   outline over Breeze's two-layer window shadow, and a tooltip's text
+//!   lies 4 px inside its frame.
 //! - **Breeze's focus ring geometry.** Keyboard focus is a 2 px band, half
 //!   inside the control and half outside, in the scheme's focus colour.
 //!   Breeze paints it at 30 % ([`shape::BREEZE_FOCUS_RING_ALPHA`]); the
@@ -106,9 +112,34 @@
 //!
 //! - **Most widget chrome is the framework's.** This version installs
 //!   Breeze styles for `Button`, `IconButton`, `SplitButton`, `Toggle`,
-//!   `Checkbox`, `RadioButton`, `TextInput`, `ComboBox`, `SpinBox` and
-//!   `Slider` only: every other widget keeps Teksilo's recipe style, painted
-//!   in the Breeze colours, radii, focus ring, typography and motion.
+//!   `Checkbox`, `RadioButton`, `TextInput`, `ComboBox`, `SpinBox`,
+//!   `Slider`, `MenuItem`, the popup frame and the tooltip only: every
+//!   other widget keeps Teksilo's recipe style, painted in the Breeze
+//!   colours, radii, focus ring, typography and motion.
+//! - **A menu's shortcuts, separators, section titles and check marks are
+//!   the framework's.** `MenuItem` writes a shortcut in the shortcut text
+//!   role, where Breeze writes the window text at 70 % opacity, and gives
+//!   its style no say over it; a `MenuSeparator` runs the width of the
+//!   rows, where Breeze stops its line 4 px short of either end; a section
+//!   title is the widget an app hands `MenuList::header`, which
+//!   [`styles::metrics::BreezeMenuMetrics::section_height`] can size; and
+//!   a checkable row shows the framework's check mark in its icon column,
+//!   not Breeze's check box ([`styles::menu_item`]).
+//! - **Every menu is laid out as one with icons.** `MenuItem` reserves its
+//!   icon column on every row, so a menu without icons keeps the column,
+//!   where Breeze moves the text 4 px past its 8 px margin instead
+//!   ([`styles::menu_item`]).
+//! - **A pressed menu row is filled with the accent**, not the focus
+//!   colour, so the text on it is readable (D1); the two are the same colour
+//!   in the stock Breeze schemes. A highlighted row's outline is lifted to
+//!   3:1 (D5, [`styles::menu_item`]).
+//! - **A popup has no caret and a shadow on every side**, and is rounded and
+//!   opaque whatever the desktop's compositing and menu opacity
+//!   ([`styles::popup`]).
+//! - **A plain tooltip is shorter than Plasma's.** `TooltipWidget` writes its
+//!   text in the small text style, where Breeze uses the body font, so a
+//!   one-line tooltip is the small line box plus 8 px rather than 26 px
+//!   ([`styles::tooltip`]).
 //! - **A spin box's arrows keep their colour at the limit**, and an empty
 //!   combo box's arrow is not greyed: the styles are not told the value's
 //!   limits or the item count ([`styles::spin_box`],
@@ -298,13 +329,16 @@ fn project(theme: &Theme, state: PaintState) -> Theme {
 /// Install the Breeze Tier-3 chrome.
 ///
 /// The buttons, the check box, the radio button, the switch, the line edit,
-/// the combo box, the spin box and the slider are Breeze's own
-/// ([`styles`]); every other slot is left to
+/// the combo box, the spin box, the slider, the menu item, the popup frame
+/// and the tooltip are Breeze's own ([`styles`]); every other slot is left to
 /// the widget's recipe style, which paints from the Breeze tokens, and the
 /// crate's tests list the reason for each. Every style installed here reads
 /// its metrics from the theme it builds under, `theme.input` included, so
 /// [`reproject`] can rerun this alone.
 fn install_styles(theme: &mut Theme) {
+    let menu_item = styles::menu_item::BreezeMenuItemStyle::for_theme(theme);
+    let popover = styles::popover::BreezePopoverStyle::for_tokens(&theme.input);
+    let tooltip = styles::tooltip::BreezeTooltipStyle::for_tokens(&theme.input);
     let slots = &mut theme.style_slots;
     slots.button = Some(Rc::new(styles::button::BreezeButtonStyle));
     slots.icon_button = Some(Rc::new(styles::icon_button::BreezeIconButtonStyle));
@@ -316,6 +350,9 @@ fn install_styles(theme: &mut Theme) {
     slots.combo_box = Some(Rc::new(styles::combo_box::BreezeComboBoxStyle));
     slots.spin_box = Some(Rc::new(styles::spin_box::BreezeSpinBoxStyle));
     slots.slider = Some(Rc::new(styles::slider::BreezeSliderStyle));
+    slots.menu_item = Some(Rc::new(menu_item));
+    slots.popover = Some(Rc::new(popover));
+    slots.tooltip = Some(Rc::new(tooltip));
 }
 
 #[cfg(test)]
@@ -520,10 +557,6 @@ mod tests {
             "Breeze has no selectable card; the recipe surface reads the preset's surface and accent roles",
         ),
         (
-            "menu_item",
-            "no Breeze menu row is installed; the recipe row paints its highlight from the Breeze selection tokens",
-        ),
-        (
             "panel",
             "the recipe panel paints the Breeze surface and border tokens with the Breeze radius",
         ),
@@ -534,14 +567,6 @@ mod tests {
         (
             "chart",
             "Breeze has no chart chrome; the teksilo-charts default reads the series colours and the Breeze border role",
-        ),
-        (
-            "popover",
-            "no Breeze popup frame is installed; the recipe popover paints the Breeze raised surface, outline and shadow tokens",
-        ),
-        (
-            "tooltip",
-            "no Breeze tooltip frame is installed; the recipe tooltip paints the Breeze tooltip tokens",
         ),
         (
             "scroll_bar",
@@ -803,6 +828,42 @@ mod tests {
             paint(&touch, false, false).colors,
             paint(&base, false, false).colors
         );
+    }
+
+    /// The menu metrics `MenuItem`, `MenuSeparator` and `MenuList` read
+    /// follow the density a theme is projected to: the installed style is
+    /// rebuilt from the projected input tokens.
+    #[test]
+    fn a_density_switch_reprojects_the_menu_metrics() {
+        use teksilo_core::styles::MenuItemStyle;
+        let base = light();
+        for (density, item, separator) in [
+            (TargetDensity::Compact, 29.0, 5.0),
+            (TargetDensity::Comfortable, 32.0, 5.75),
+            (TargetDensity::Touch, 44.0, 6.5),
+        ] {
+            let t = base.with_density(density);
+            let m = t
+                .style_slots
+                .menu_item
+                .as_ref()
+                .expect("a menu style")
+                .metrics();
+            assert_eq!(m.item_height, item, "{density:?}");
+            assert!((m.separator_height - separator).abs() < 1e-4, "{density:?}");
+            assert_eq!(m.icon_column_width, 16.0, "{density:?}");
+            assert_eq!(
+                m,
+                styles::menu_item::BreezeMenuItemStyle::for_theme(&t).metrics(),
+                "{density:?}"
+            );
+        }
+        // Projecting back to Compact gives Breeze's own numbers again.
+        let back = base
+            .with_density(TargetDensity::Touch)
+            .with_density(TargetDensity::Compact);
+        let m = back.style_slots.menu_item.as_ref().unwrap().metrics();
+        assert_eq!(m.item_height, 29.0);
     }
 
     /// Every colour token, pinned to its source in Breeze Light's resolved

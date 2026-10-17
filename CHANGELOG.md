@@ -171,11 +171,20 @@ by crate for clarity, not because crates version independently.
   the hover colour under the pointer. A `Slider` is Breeze's 6 px groove,
   filled toward the highlight up to a 17 px round handle in the button
   colour, with tick marks below it when it has a tick count, mirrored right
-  to left; its node grows to the density's target size. The outlines of an
-  empty check box, radio button and field, of a switch on or off and of a
-  slider's handle, and a slider's tick marks, are strengthened to a 3:1
-  contrast, keeping their hue. Other widgets draw Teksilo's own chrome in
-  these colours and shapes.
+  to left; its node grows to the density's target size. A `MenuItem` is
+  Breeze's menu row, 29 px tall at Plasma's default font and growing to the
+  density's target size, washed with the focus colour and outlined while it
+  is highlighted, and filled with the accent while it is held down, its
+  label then turning to the text on the accent; a `MenuSeparator` is 5 px.
+  Menus, combo box lists, popovers and tooltips are framed as Breeze's
+  popups, at the 5 px radius in a 1 px outline over Breeze's two-layer
+  window shadow, and a tooltip's text lies 4 px inside its frame.
+  `styles::metrics::BreezeMenuMetrics` gives the menu's dimensions at any
+  density and font, among them the height of a section title. The outlines
+  of an empty check box, radio button and field, of a switch on or off and
+  of a slider's handle, a slider's tick marks and a highlighted menu row's
+  outline, are strengthened to a 3:1 contrast, keeping their hue. Other
+  widgets draw Teksilo's own chrome in these colours and shapes.
 
 #### Platform
 

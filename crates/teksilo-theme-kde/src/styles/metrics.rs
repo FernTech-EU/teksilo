@@ -18,9 +18,9 @@ use teksilo_tokens::{InputTokens, TargetRole, TypographyTokens};
 use crate::geometry::{
     BUTTON_MARGIN_WIDTH, BreezeGeometry, CHECKBOX_FOCUS_MARGIN, CHECKBOX_ITEM_SPACING,
     CHECKBOX_SIZE, COMBO_BOX_FRAME_WIDTH, FRAME_WIDTH, LARGE_ICON_SIZE, LINE_EDIT_FRAME_WIDTH,
-    MEDIUM_ICON_SIZE, SLIDER_CONTROL_THICKNESS, SLIDER_GROOVE_THICKNESS, SLIDER_TICK_LENGTH,
-    SLIDER_TICK_MARGIN, SPIN_BOX_ARROW_BUTTON_WIDTH, SPIN_BOX_FRAME_WIDTH,
-    TOOL_BUTTON_MARGIN_WIDTH,
+    MEDIUM_ICON_SIZE, MENU_ITEM_ACCELERATOR_SPACE, MENU_ITEM_MARGIN, MENU_ITEM_TEXT_LEFT_MARGIN,
+    SLIDER_CONTROL_THICKNESS, SLIDER_GROOVE_THICKNESS, SLIDER_TICK_LENGTH, SLIDER_TICK_MARGIN,
+    SMALL_ICON_SIZE, SPIN_BOX_ARROW_BUTTON_WIDTH, SPIN_BOX_FRAME_WIDTH, TOOL_BUTTON_MARGIN_WIDTH,
 };
 use crate::shape::BREEZE_PEN_WIDTH;
 
@@ -367,6 +367,96 @@ pub fn breeze_spin_metrics() -> BreezeSpinMetrics {
     )
 }
 
+/// `[S]` The space a menu item's text starts after its icon column: Breeze's
+/// 2 px and Qt's 1.
+pub const MENU_ICON_TEXT_GAP: f32 = 3.0;
+/// `[Hp]` The square a submenu arrow is centred in, at the trailing edge of
+/// a menu item's contents.
+pub const MENU_ARROW_BOX: f32 = 20.0;
+/// `[Hp]` The space between the end of a menu item's text and its arrow
+/// box.
+pub const MENU_ARROW_TEXT_GAP: f32 = 3.0;
+/// `[Hp]` How much of the focus colour washes a highlighted menu item: the
+/// style's blend value.
+pub const MENU_HIGHLIGHT_ALPHA: f32 = 0.3;
+/// `[M]` How far a popup's content lies inside its frame: the menu margin,
+/// which Breeze gives every popup panel.
+pub const POPUP_PADDING: f32 = MENU_ITEM_MARGIN;
+/// `[unpublished]` The widest a tooltip's text is laid out before it wraps:
+/// Qt wraps a tooltip against the screen, which a tooltip in a Teksilo window
+/// has no use for, so this is Teksilo's own 320 px.
+pub const TOOLTIP_MAX_WIDTH: f32 = 320.0;
+
+/// The dimensions of a menu: its rows, separators and section titles.
+///
+/// A row is laid out as Breeze lays out the item of a menu that shows icons:
+/// `MenuItem` reserves its leading column on every row, the icon and the
+/// check mark's alike.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BreezeMenuMetrics {
+    /// `[S]` A row's height: `max(H, 20, 16) + 1` and the 4 px item margin
+    /// above and below, through the density ladder. 29 at Compact for the
+    /// Breeze typography.
+    pub item_height: f32,
+    /// `[S]` A separator's height: its 1 px line and the 4 px item margin,
+    /// scaled by the density's spacing. 5 at Compact.
+    pub separator_height: f32,
+    /// `[S]` A section title's height (a separator with text): `max(H, 20,
+    /// 16)` and the 4 px item margin above and below, through the density
+    /// ladder. 28 at Compact. `MenuList::header` shows a widget the app
+    /// builds, which the style never sees, so this is what an app sizes its
+    /// section titles with.
+    pub section_height: f32,
+    /// `[M]` The space before a row's icon column: the 4 px item margin and
+    /// Breeze's 8 px text margin, scaled by the density's spacing. 12 at
+    /// Compact.
+    pub padding_leading: f32,
+    /// `[K]` The icon column: the small icon size. Painted, so it does not
+    /// scale.
+    pub icon_column: f32,
+    /// `[S]` The space between the icon column and the text,
+    /// [`MENU_ICON_TEXT_GAP`], scaled by the density's spacing.
+    pub icon_label_gap: f32,
+    /// `[derived]` The column at a row's trailing edge: the 3 px gap after
+    /// the text, the 20 px arrow box and the 4 px item margin, the gaps
+    /// scaled by the density's spacing. 27 at Compact.
+    pub trailing_column: f32,
+    /// `[M]` The least space between a row's text and its shortcut: the
+    /// 16 px accelerator space, scaled by the density's spacing.
+    pub shortcut_gap: f32,
+    /// `[M]` The gap between a menu's frame and its rows on every side: the
+    /// 4 px menu margin, `MenuList`'s own inset.
+    pub popup_margin: f32,
+}
+
+/// The menu dimensions at the density of `tokens`, for `typography`.
+pub fn breeze_menu_metrics_for(
+    tokens: &InputTokens,
+    typography: &TypographyTokens,
+) -> BreezeMenuMetrics {
+    let g = geometry_of(typography);
+    BreezeMenuMetrics {
+        item_height: dp(g.menu_item_height, TargetRole::Target, tokens),
+        separator_height: spacing(g.menu_separator_height, tokens),
+        section_height: dp(g.menu_section_height, TargetRole::Target, tokens),
+        padding_leading: spacing(MENU_ITEM_MARGIN + MENU_ITEM_TEXT_LEFT_MARGIN, tokens),
+        icon_column: SMALL_ICON_SIZE,
+        icon_label_gap: spacing(MENU_ICON_TEXT_GAP, tokens),
+        trailing_column: spacing(MENU_ARROW_TEXT_GAP + MENU_ITEM_MARGIN, tokens) + MENU_ARROW_BOX,
+        shortcut_gap: spacing(MENU_ITEM_ACCELERATOR_SPACE, tokens),
+        popup_margin: MENU_ITEM_MARGIN,
+    }
+}
+
+/// [`breeze_menu_metrics_for`] at the Compact density and the Breeze
+/// typography.
+pub fn breeze_menu_metrics() -> BreezeMenuMetrics {
+    breeze_menu_metrics_for(
+        &InputTokens::default(),
+        &crate::typography::breeze_typography(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,6 +610,56 @@ mod tests {
         // down: 29 tall leaves 17, two 8 px halves.
         assert_eq!(BreezeSpinMetrics::arrow_half(29.0), 8.0);
         assert_eq!(BreezeSpinMetrics::arrow_half(4.0), 0.0);
+    }
+
+    #[test]
+    fn the_menu_is_breezes_and_grows_with_the_density() {
+        let m = breeze_menu_metrics();
+        assert_eq!(m.item_height, 29.0);
+        assert_eq!(m.separator_height, 5.0);
+        assert_eq!(m.section_height, 28.0);
+        assert_eq!(m.padding_leading, 12.0);
+        assert_eq!(m.icon_column, 16.0);
+        assert_eq!(m.icon_label_gap, 3.0);
+        assert_eq!(m.trailing_column, 27.0);
+        assert_eq!(m.shortcut_gap, 16.0);
+        assert_eq!(m.popup_margin, 4.0);
+        // The text starts where Breeze puts it in a menu with icons: the
+        // 4 px margin, the 8 px text margin, the icon and 3 px after it.
+        assert_eq!(m.padding_leading + m.icon_column + m.icon_label_gap, 31.0);
+        // And ends 3 px before a 20 px arrow box 4 px inside the row.
+        assert_eq!(
+            m.trailing_column,
+            MENU_ARROW_TEXT_GAP + MENU_ARROW_BOX + MENU_ITEM_MARGIN
+        );
+        let t = crate::typography::breeze_typography();
+        let comfortable = breeze_menu_metrics_for(&at(TargetDensity::Comfortable), &t);
+        let touch = breeze_menu_metrics_for(&at(TargetDensity::Touch), &t);
+        assert_eq!(comfortable.item_height, 32.0);
+        assert_eq!(touch.item_height, 44.0);
+        assert_eq!(comfortable.section_height, 32.0);
+        assert_eq!(touch.section_height, 44.0);
+        assert!((comfortable.separator_height - 5.75).abs() < 1e-4);
+        assert!((touch.separator_height - 6.5).abs() < 1e-4);
+        for m in [comfortable, touch] {
+            assert_eq!(m.icon_column, 16.0, "the painted column does not scale");
+            assert_eq!(m.popup_margin, 4.0, "MenuList's inset does not scale");
+            assert!(m.trailing_column > 27.0 && m.trailing_column - MENU_ARROW_BOX > 7.0);
+            assert!(m.padding_leading > 12.0 && m.shortcut_gap > 16.0);
+        }
+    }
+
+    #[test]
+    fn a_larger_body_font_makes_taller_menu_rows() {
+        let mut t = crate::typography::breeze_typography();
+        // Plasma's 12 pt: a 22 px line, which Qt makes a 31 px item and a
+        // 30 px section.
+        t.body.size = 16.0;
+        t.body.line_height = 22.0 / 16.0;
+        let m = breeze_menu_metrics_for(&InputTokens::default(), &t);
+        assert_eq!(m.item_height, 31.0);
+        assert_eq!(m.section_height, 30.0);
+        assert_eq!(m.separator_height, 5.0, "a separator has no text");
     }
 
     #[test]

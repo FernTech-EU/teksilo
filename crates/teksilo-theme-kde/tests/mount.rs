@@ -3,7 +3,8 @@
 
 //! Mount every widget the Breeze preset restyles, in both schemes, render
 //! it, and check the colours it paints against Plasma's own: the buttons,
-//! the check box, the radio button, the switch and the line edit.
+//! the check box, the radio button, the switch, the line edit, the combo
+//! box, the spin box, the slider, the menu, the popup frame and the tooltip.
 //!
 //! The unit tests beside each style check its rules. This checks that the
 //! styles run: a Tier-3 style is only exercised when its widget is built,
@@ -24,20 +25,22 @@ use std::time::Duration;
 
 use serde_json::Value;
 use teksilo_canvas::{MockTextBackend, RenderFrame, ShapeKind, SizeProposal};
+use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{Key, Modifiers, PointerButton};
+use teksilo_core::overlay::OverlayPlacement;
 use teksilo_core::signal::Signal;
-use teksilo_core::styles::Theme;
-use teksilo_core::widget::Widget;
+use teksilo_core::styles::{PopoverStyleConfig, PopoverVariant, Theme};
+use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_core::widget_tree::WidgetTree;
 use teksilo_i18n::lit;
 use teksilo_theme_kde::styles::indicator::BreezeIndicatorColors;
 use teksilo_theme_kde::{self as kde, KdePalette, PlasmaAccent};
 use teksilo_tokens::Color;
-use teksilo_widgets::primitives::{HStack, IconWidget};
+use teksilo_widgets::primitives::{FixedSize, HStack, IconWidget, TextWidget};
 use teksilo_widgets::{
     Button, ButtonVariant, CheckState, Checkbox, ComboBox, IconButton, IconButtonSize, MenuItem,
-    RadioButton, Slider, SpinBox, SplitButton, TextInput, Toggle, VStack,
+    MenuList, RadioButton, Slider, SpinBox, SplitButton, TextInput, Toggle, TooltipWidget, VStack,
 };
 
 const PIXELS_JSON: &str = include_str!(concat!(
@@ -2571,4 +2574,394 @@ fn right_to_left_mirrors_the_slider_and_keeps_the_handle_under_the_pointer() {
             (rgba8_of(colors.tick_on), 190.0),
         ]
     );
+}
+
+// ── Menus, popups and tooltips ──────────────────────────────────────────
+
+/// A menu of every kind of row Breeze has, in a 200 px column.
+fn menu() -> MenuList {
+    MenuList::new()
+        .item(MenuItem::new(lit!("Open")))
+        .item(MenuItem::new(lit!("Save")).shortcut_label("Ctrl+S"))
+        .separator()
+        .header(TextWidget::new(lit!("Section")))
+        .item(MenuItem::new(lit!("Checkable")).checked(Signal::new(true)))
+        .item(MenuItem::new(lit!("Option")).radio(0, Signal::new(0_usize)))
+        .item(MenuItem::submenu(lit!("More"), || {
+            Box::new(MenuList::new().item(MenuItem::new(lit!("Inner"))))
+        }))
+        .item(MenuItem::new(lit!("Unavailable")).enabled(false))
+}
+
+/// A tree holding [`menu`] 200 px wide, laid out: the tree, the menu's id
+/// and the ids of its rows, in order.
+fn menu_tree(theme: Theme) -> (WidgetTree, WidgetId, Vec<WidgetId>) {
+    let mut tree = tree_with(theme);
+    let column = tree.add(VStack::new().child(FixedSize::new().width(200.0).child(menu())));
+    tree.layout(SizeProposal::exact(400.0, 400.0));
+    let rows = nodes_named(&tree, column, "MenuItem");
+    (tree, column, rows)
+}
+
+/// Builds the theme's popover style around a label, as a popover does.
+#[derive(Debug)]
+struct PopoverProbe {
+    variant: PopoverVariant,
+    root: Option<WidgetId>,
+}
+
+impl Widget for PopoverProbe {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let content = ctx.add(TextWidget::new(lit!("Content")));
+        let style = ctx
+            .theme()
+            .style_slots
+            .popover
+            .clone()
+            .expect("the preset installs a popover style");
+        let root = style.make_body(
+            &PopoverStyleConfig {
+                content,
+                variant: self.variant,
+                name: "Probe".to_string(),
+                placement: OverlayPlacement::Below,
+                show_caret: true,
+                caret_size: 6.0,
+            },
+            ctx,
+        );
+        self.root = Some(root);
+        vec![root]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        self.root
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root.into_iter().collect()
+    }
+}
+
+fn popover(variant: PopoverVariant) -> PopoverProbe {
+    PopoverProbe {
+        variant,
+        root: None,
+    }
+}
+
+#[test]
+fn menus_popovers_and_tooltips_mount_in_every_variant() {
+    for (_, theme) in themes() {
+        assert!(mount(theme.clone(), menu()) > 0);
+        assert!(mount(theme.clone(), TooltipWidget::new(lit!("Tooltip text"))) > 0);
+        for variant in [
+            PopoverVariant::Default,
+            PopoverVariant::Menu,
+            PopoverVariant::Tooltip,
+        ] {
+            assert!(mount(theme.clone(), popover(variant)) > 0, "{variant:?}");
+        }
+        let (mut tree, _, rows) = menu_tree(theme.clone());
+        // Hover, then press, every row: none panics, each paints.
+        for row in rows {
+            let at = tree.bounds(row).center();
+            tree.pointer_move(at);
+            assert!(!rerender(&mut tree).draw_order.is_empty());
+            tree.pointer_down_button(at, PointerButton::Primary);
+            assert!(!rerender(&mut tree).draw_order.is_empty());
+            tree.pointer_up_button(at, PointerButton::Primary);
+        }
+    }
+}
+
+#[test]
+fn menus_and_tooltips_survive_a_theme_swap_and_a_missing_palette() {
+    let mut tree = tree_with(kde::light());
+    tree.add(
+        VStack::new()
+            .child(menu())
+            .child(TooltipWidget::new(lit!("Tooltip text")))
+            .child(popover(PopoverVariant::Default)),
+    );
+    let mut bare = kde::light();
+    bare.extensions.remove::<KdePalette>();
+    for theme in [
+        kde::light(),
+        kde::dark(),
+        teksilo_core::presets::intui::light(),
+        bare,
+        kde::light(),
+    ] {
+        tree.set_theme(theme);
+        assert!(!rerender(&mut tree).draw_order.is_empty());
+    }
+    for accent in PlasmaAccent::ALL {
+        for theme in [
+            kde::light_with_accent(accent.color()),
+            kde::dark_with_accent(accent.color()),
+        ] {
+            assert!(mount(theme, menu()) > 0, "{accent:?}");
+        }
+    }
+}
+
+/// The menu's frame is Plasma's: the frame background in the frame outline,
+/// over both layers of Breeze's Large window shadow on the 5 px window.
+#[test]
+fn a_menu_is_framed_as_breezes_popup_menu() {
+    for (scheme, theme) in themes() {
+        let (mut tree, column, _) = menu_tree(theme);
+        let (_, frame_bounds) = the_node(&tree, column, "BreezePopupFrame");
+        let frame = rerender(&mut tree);
+        let all = painted(&frame);
+        let panel = inset(frame_bounds);
+        let face = all
+            .iter()
+            .find(|p| p.stroke == 0.0 && p.screen == panel)
+            .unwrap_or_else(|| panic!("{scheme}: no panel face in {all:?}"));
+        assert_eq!(
+            face.color,
+            sample(scheme, "menu.panel", 100, 50),
+            "{scheme}"
+        );
+        assert_eq!(face.radius, 4.5);
+        let outline = all
+            .iter()
+            .find(|p| p.stroke == 1.0 && p.screen == panel)
+            .unwrap_or_else(|| panic!("{scheme}: no panel outline"));
+        assert_eq!(
+            outline.color,
+            sample(scheme, "menu.panel", 0, 50),
+            "{scheme}"
+        );
+        assert_window_shadow(&frame, frame_bounds, scheme);
+    }
+}
+
+/// Both layers of Breeze's Large shadow, on the 5 px window `bounds`.
+fn assert_window_shadow(frame: &RenderFrame, bounds: teksilo_canvas::Rect, scheme: &str) {
+    let window = [bounds.x, bounds.y, bounds.width, bounds.height];
+    let layers: Vec<_> = frame
+        .shadows
+        .iter()
+        .filter(|s| s.shape_rect == window)
+        .collect();
+    assert_eq!(layers.len(), 2, "{scheme}: two shadow layers");
+    for (layer, (offset, blur, alpha)) in layers.iter().zip([(5.0, 20.0, 0.22), (2.0, 10.0, 0.12)])
+    {
+        assert_eq!(layer.blur_radius, blur, "{scheme}");
+        assert!((layer.color[3] - alpha).abs() < 1e-6, "{scheme}");
+        assert_eq!(&layer.color[..3], &[0.0, 0.0, 0.0], "{scheme}: black");
+        assert_eq!(layer.corner_radii, [5.0; 4], "{scheme}");
+        // The quad covers the blur around the window moved down by the
+        // layer's offset.
+        assert_eq!(layer.screen[1], bounds.y + offset - blur, "{scheme}");
+        assert_eq!(layer.screen[0], bounds.x - blur, "{scheme}");
+    }
+}
+
+/// Every row sits 4 px inside the frame, Breeze's menu margin, and is 29 px
+/// tall; a separator is 5 px.
+#[test]
+fn a_menus_rows_sit_in_breezes_margin() {
+    let (tree, column, rows) = menu_tree(kde::light());
+    let (_, frame) = the_node(&tree, column, "BreezePopupFrame");
+    let first = tree.bounds(rows[0]);
+    assert_eq!((first.x - frame.x, first.y - frame.y), (4.0, 4.0));
+    assert_eq!(first.width, frame.width - 8.0);
+    for row in &rows {
+        assert_eq!(tree.bounds(*row).height, 29.0);
+    }
+    let (_, separator) = the_node(&tree, column, "MenuSeparator");
+    assert_eq!(separator.height, 5.0);
+    assert_eq!(separator.y, tree.bounds(rows[1]).bottom());
+}
+
+/// The highlighted row's rectangle and the shapes painted on it.
+fn row_shapes(frame: &RenderFrame, row: teksilo_canvas::Rect) -> Vec<Painted> {
+    painted(frame)
+        .into_iter()
+        .filter(|p| p.screen == inset(row))
+        .collect()
+}
+
+/// Under the pointer a row is washed with the focus colour at 30 % and
+/// outlined at radius 4.5 on the row inset by half the pen: Plasma's
+/// highlight. Breeze Dark's outline is Plasma's; Breeze Light's is lifted to
+/// 3:1 on the menu (D5), its own falling short.
+#[test]
+fn a_hovered_menu_row_is_breezes_highlight() {
+    for (scheme, theme) in themes() {
+        let window = sample(scheme, "menu_item.normal", 100, 14);
+        let (mut tree, _, rows) = menu_tree(theme.clone());
+        let row = tree.bounds(rows[0]);
+        assert!(
+            row_shapes(&rerender(&mut tree), row).is_empty(),
+            "{scheme}: at rest"
+        );
+
+        tree.pointer_move(row.center());
+        let frame = rerender(&mut tree);
+        let shapes = row_shapes(&frame, row);
+        let wash = shapes
+            .iter()
+            .find(|p| p.stroke == 0.0)
+            .unwrap_or_else(|| panic!("{scheme}: no wash in {shapes:?}"));
+        assert!(
+            near(
+                over(wash.color, window),
+                sample(scheme, "menu_item.selected", 100, 14)
+            ),
+            "{scheme}: the wash {:?}",
+            wash.color
+        );
+        assert_eq!(wash.radius, 4.5);
+        let outline = shapes
+            .iter()
+            .find(|p| p.stroke == 1.0)
+            .unwrap_or_else(|| panic!("{scheme}: no outline in {shapes:?}"));
+        assert_eq!(outline.radius, 4.5);
+        let plasma = sample(scheme, "menu_item.selected", 100, 0);
+        let panel = theme.colors.surface_raised;
+        let contrast = |c: [u8; 4]| {
+            teksilo_tokens::contrast::composite_contrast(
+                Color::new(
+                    f32::from(c[0]) / 255.0,
+                    f32::from(c[1]) / 255.0,
+                    f32::from(c[2]) / 255.0,
+                    f32::from(c[3]) / 255.0,
+                ),
+                panel,
+            )
+        };
+        if scheme == "BreezeDark" {
+            assert_eq!(outline.color, plasma, "{scheme}: Breeze's own outline");
+        } else {
+            assert!(contrast(plasma) < 3.0, "{scheme}: the premise of D5");
+            assert_ne!(outline.color, plasma);
+        }
+        assert!(contrast(outline.color) >= 3.0, "{scheme}");
+        // The label stays the window text while highlighted.
+        let text = rgba8_of(theme.colors.text_primary);
+        assert!(frame.glyphs.iter().any(|g| rgba8(g.color) == text));
+    }
+}
+
+/// Held down, the row is filled and outlined with the accent and its label
+/// turns to the text on it.
+#[test]
+fn a_pressed_menu_row_is_filled_and_its_label_flips() {
+    for (scheme, theme) in themes() {
+        let (mut tree, _, rows) = menu_tree(theme.clone());
+        let row = tree.bounds(rows[1]);
+        tree.pointer_move(row.center());
+        tree.pointer_down_button(row.center(), PointerButton::Primary);
+        let frame = rerender(&mut tree);
+        let shapes = row_shapes(&frame, row);
+        let accent = rgba8_of(theme.colors.accent);
+        assert!(
+            shapes.iter().any(|p| p.stroke == 0.0 && p.color == accent),
+            "{scheme}: {shapes:?}"
+        );
+        assert!(shapes.iter().any(|p| p.stroke == 1.0 && p.color == accent));
+        let on_accent = rgba8_of(theme.colors.text_on_accent);
+        let in_row: Vec<_> = frame
+            .glyphs
+            .iter()
+            .filter(|g| g.screen[1] >= row.y && g.screen[1] < row.bottom())
+            .map(|g| rgba8(g.color))
+            .collect();
+        assert!(!in_row.is_empty());
+        assert!(
+            in_row.iter().all(|c| *c == on_accent),
+            "{scheme}: the label and its shortcut on the fill, {in_row:?}"
+        );
+        tree.pointer_up_button(row.center(), PointerButton::Primary);
+    }
+}
+
+/// A disabled row is never highlighted.
+#[test]
+fn a_disabled_menu_row_is_not_highlighted() {
+    let (mut tree, _, rows) = menu_tree(kde::light());
+    let row = tree.bounds(*rows.last().unwrap());
+    tree.pointer_move(row.center());
+    assert!(row_shapes(&rerender(&mut tree), row).is_empty());
+}
+
+/// A tooltip is Plasma's: the tooltip background in its outline, over the
+/// window shadow, the text 4 px inside the frame.
+#[test]
+fn a_tooltip_is_framed_as_breezes() {
+    for (scheme, theme) in themes() {
+        let mut tree = tree_with(theme);
+        let root = tree.add(
+            VStack::new().child(HStack::new().child(TooltipWidget::new(lit!("Tooltip text")))),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let (frame_id, bounds) = the_node(&tree, root, "BreezePopupFrame");
+        let text = tree.bounds(tree.children(frame_id)[0]);
+        assert_eq!((text.x - bounds.x, text.y - bounds.y), (4.0, 4.0));
+        assert_eq!(bounds.height, text.height + 8.0);
+        let frame = rerender(&mut tree);
+        let all = painted(&frame);
+        let face = all
+            .iter()
+            .find(|p| p.stroke == 0.0 && p.screen == inset(bounds))
+            .unwrap_or_else(|| panic!("{scheme}: no face in {all:?}"));
+        assert_eq!(
+            face.color,
+            sample(scheme, "tooltip.panel", 50, 15),
+            "{scheme}"
+        );
+        assert_eq!(face.radius, 4.5);
+        let outline = all
+            .iter()
+            .find(|p| p.stroke == 1.0 && p.screen == inset(bounds))
+            .unwrap_or_else(|| panic!("{scheme}: no outline"));
+        assert_eq!(
+            outline.color,
+            sample(scheme, "tooltip.panel", 0, 15),
+            "{scheme}"
+        );
+        assert_window_shadow(&frame, bounds, scheme);
+    }
+}
+
+/// A popover that is not a menu pads its content 4 px and draws no caret;
+/// its `Tooltip` variant takes the tooltip's colours, and a menu's frame
+/// has no padding.
+#[test]
+fn a_popover_is_a_breeze_popup_with_no_caret() {
+    for (variant, padding, face) in [
+        (PopoverVariant::Default, 4.0, "menu.panel"),
+        (PopoverVariant::Tooltip, 4.0, "tooltip.panel"),
+        (PopoverVariant::Menu, 0.0, "menu.panel"),
+    ] {
+        for (scheme, theme) in themes() {
+            let (mut tree, root) = placed(theme, popover(variant));
+            let (frame_id, bounds) = the_node(&tree, root, "BreezePopupFrame");
+            let content = tree.bounds(tree.children(frame_id)[0]);
+            assert_eq!(content.x - bounds.x, padding, "{variant:?}");
+            assert_eq!(content.y - bounds.y, padding, "{variant:?}: no caret above");
+            let frame = rerender(&mut tree);
+            assert!(frame.paths.is_empty(), "{variant:?}: a caret was drawn");
+            let all = painted(&frame);
+            let fill_at = if face == "tooltip.panel" {
+                (50, 15)
+            } else {
+                (100, 50)
+            };
+            assert!(
+                all.iter().any(|p| p.stroke == 0.0
+                    && p.screen == inset(bounds)
+                    && p.color == sample(scheme, face, fill_at.0, fill_at.1)),
+                "{scheme} {variant:?}: {all:?}"
+            );
+        }
+    }
 }

@@ -32,10 +32,10 @@ use teksilo_target_conformance::in_tappable_row;
 use teksilo_theme_kde::geometry::BreezeGeometry;
 use teksilo_theme_kde::{self as kde};
 use teksilo_tokens::TargetDensity;
-use teksilo_widgets::primitives::IconWidget;
+use teksilo_widgets::primitives::{FixedSize, IconWidget};
 use teksilo_widgets::{
-    Button, ButtonVariant, Checkbox, ComboBox, IconButton, IconButtonSize, MenuItem, RadioButton,
-    Slider, SpinBox, SplitButton, TextInput, Toggle,
+    Button, ButtonVariant, Checkbox, ComboBox, IconButton, IconButtonSize, MenuItem, MenuList,
+    RadioButton, Slider, SpinBox, SplitButton, TextInput, Toggle,
 };
 
 const SIZES_JSON: &str = include_str!(concat!(
@@ -637,6 +637,109 @@ fn a_slider_measures_breezes_at_every_density() {
                     );
                 }
             }
+        }
+    }
+}
+
+// ── Menus ──────────────────────────────────────────────────────────────
+
+/// The rows Qt laid out for Breeze's menu with icons at Plasma's default
+/// font: each row's kind and its `(x, y, height)` in the menu.
+fn qt_menu_rows() -> Vec<(String, (f32, f32, f32))> {
+    let all: Value = serde_json::from_str(SIZES_JSON).expect("sizes.json parses");
+    let menu = all["widgets"]
+        .as_array()
+        .expect("the measured widgets")
+        .iter()
+        .find(|w| w["id"] == "menu.with_icon" && w["font"] == "Noto Sans 10")
+        .expect("sizes.json has the menu");
+    menu["rows"]
+        .as_array()
+        .expect("the menu's rows")
+        .iter()
+        .map(|r| {
+            let g = |i: usize| r["geometry"][i].as_f64().unwrap() as f32;
+            (r["kind"].as_str().unwrap().to_string(), (g(0), g(1), g(3)))
+        })
+        .collect()
+}
+
+/// A menu's rows are 29 px at Compact, Qt's height for every Breeze menu
+/// item, and rise to the density's target size above it; a separator is
+/// Breeze's 5 px, its gap scaled by the density's spacing; the rows sit
+/// 4 px inside the frame, the menu margin, and every label starts after
+/// the 12 px margin, the 16 px icon column and 3 px more. No row fails the
+/// conformance gate at any density.
+#[test]
+fn a_menu_measures_breezes_rows_at_every_density() {
+    let qt = qt_menu_rows();
+    let height_of = |kind: &str| {
+        qt.iter()
+            .find(|(k, _)| k == kind)
+            .unwrap_or_else(|| panic!("Qt measured no {kind} row"))
+            .1
+    };
+    for kind in ["item", "shortcut", "checkable", "submenu"] {
+        assert_eq!(height_of(kind).2, 29.0, "{kind}");
+    }
+    assert_eq!(height_of("separator").2, 5.0);
+    assert_eq!(height_of("section").2, 28.0);
+    let (x, y, _) = height_of("item");
+    assert_eq!((x, y), (4.0, 4.0), "Qt's menu margin");
+    let compact = teksilo_theme_kde::styles::metrics::breeze_menu_metrics();
+    assert_eq!(compact.section_height, height_of("section").2);
+
+    for (density, item, separator, spacing) in [
+        (TargetDensity::Compact, 29.0, 5.0, 1.0),
+        (TargetDensity::Comfortable, 32.0, 5.75, 1.15),
+        (TargetDensity::Touch, 44.0, 6.5, 1.3),
+    ] {
+        for theme in themes() {
+            let menu = MenuList::new()
+                .item(MenuItem::new(lit!("Open")))
+                .item(MenuItem::new(lit!("Save")).shortcut_label("Ctrl+S"))
+                .separator()
+                .item(MenuItem::new(lit!("Checkable")).checked(Signal::new(true)))
+                .item(MenuItem::submenu(lit!("Submenu"), || {
+                    Box::new(MenuList::new().item(MenuItem::new(lit!("Inner"))))
+                }));
+            let (mut tree, root) =
+                in_a_row(&theme, density, FixedSize::new().width(200.0).child(menu));
+            let rows = nodes_named(&tree, root, "MenuItem");
+            assert_eq!(rows.len(), 4);
+            for row in &rows {
+                assert_eq!(tree.bounds(*row).height, item, "{density:?}");
+            }
+            let sep = nodes_named(&tree, root, "MenuSeparator");
+            assert!(
+                (tree.bounds(sep[0]).height - separator).abs() < 1e-4,
+                "{density:?}"
+            );
+            let frame = nodes_named(&tree, root, "BreezePopupFrame");
+            let (f, first) = (tree.bounds(frame[0]), tree.bounds(rows[0]));
+            assert_eq!((first.x - f.x, first.y - f.y), (4.0, 4.0), "{density:?}");
+            // The first row's label.
+            let rendered = tree.render();
+            let label_x = rendered
+                .glyphs
+                .iter()
+                .filter(|g| g.screen[1] >= first.y && g.screen[1] < first.bottom())
+                .map(|g| g.screen[0])
+                .fold(f32::INFINITY, f32::min);
+            let expected = (12.0 + 3.0) * spacing + 16.0;
+            assert!(
+                (label_x - first.x - expected).abs() < 1e-3,
+                "{density:?}: the label at {}, want {expected}",
+                label_x - first.x
+            );
+            assert_eq!(
+                target_audit(&tree, density)
+                    .into_iter()
+                    .filter(|v| v.rule.is_conformance_failure())
+                    .count(),
+                0,
+                "{density:?}: a conformance failure"
+            );
         }
     }
 }
