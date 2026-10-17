@@ -98,6 +98,71 @@ resource file, or artwork is included, and no token value is transcribed
 from one.
 
 
+1.5  KDE Plasma / Breeze  --  crates/teksilo-kde-scheme
+---------------------------------------------------------------------------
+
+teksilo-kde-scheme reads the files a KDE Plasma desktop keeps its look in:
+the KConfig text format and its cascade, the KDE colour-scheme model, Qt's
+font descriptions and the related desktop settings. Its behaviour is
+re-implemented from Teksilo's own written specification,
+engineering/docs/kde-breeze-spec.md, which describes KDE's formats, rules
+and values in prose. No KDE or Qt source code is included in Teksilo, and
+none was copied or translated: the specification was written from the
+upstream sources by one author, and the code is written from the
+specification alone. Values such as default colours and numeric constants
+are facts; the specification's ledger records, for each one, the upstream
+file and line it was observed in.
+
+The specification describes these upstream releases:
+
+    plasma/breeze                   v6.8.0
+    plasma/plasma-workspace         v6.8.0
+    plasma/plasma-integration       v6.8.0
+    plasma/xdg-desktop-portal-kde   v6.8.0
+    frameworks/kconfig              v6.31.0
+    frameworks/kcolorscheme         v6.31.0
+    frameworks/kguiaddons           v6.31.0
+    frameworks/kirigami             v6.31.0
+    frameworks/qqc2-desktop-style   v6.31.0
+    qt/qtbase                       v6.11.1  (the Qt runtime observed)
+
+    Source: https://invent.kde.org/
+
+KDE publishes its colour and configuration libraries under the GNU Lesser
+General Public License (Plasma's colour-scheme settings under version 2.0
+only) and the Breeze widget style under the GNU General Public License,
+as stated in each upstream file. Teksilo takes no code under either
+licence.
+
+Test fixtures. Three stock Breeze colour schemes from plasma/breeze v6.8.0
+are vendored verbatim, so the tests can compare Teksilo's constants
+against them:
+
+    crates/teksilo-kde-scheme/tests/fixtures/breeze-v6.8.0/
+        BreezeLight.colors     c46470b75e7df3e1ebff344748b92347f8d5adfa306aef9c91c4d2edae2cd6df
+        BreezeDark.colors      11fce1d8ab97b529162e50eb200d1a93fab65c7612f9bebd0230a6a348d0cc21
+        BreezeClassic.colors   19dcbd1883c03d2d9e0176a39e3ec9df6c18d6e22f0474e6c886aa20aff76508
+
+BreezeLight.colors and BreezeDark.colors carry their own copyright and
+LGPL-2.0-or-later headers; BreezeClassic.colors carries none and comes from
+the same release. The GNU Library General Public License, version 2, sits
+beside them as LICENSE.txt. The fixtures, and tests/breeze_files.rs, the
+one test that reads them, are excluded from the published
+teksilo-kde-scheme crate (the "exclude" list in its Cargo.toml) and are
+never compiled into a library or binary.
+
+The specification describes Plasma's accent tint in OKLab, the colour space
+Björn Ottosson published at https://bottosson.github.io/posts/oklab/ with
+reference code under the MIT License. The space and its published matrices
+are credited to him.
+
+KDE(R) and the K Desktop Environment(R) logo are registered trademarks of
+KDE e.V. Teksilo is not affiliated with, endorsed by or sponsored by KDE
+e.V.; the names KDE, Plasma and Breeze are used only to say which desktop's
+files the crate reads and which design language the specification
+describes. See TRADEMARKS.md.
+
+
 ===========================================================================
 2. BUNDLED FONTS
 ===========================================================================

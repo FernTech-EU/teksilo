@@ -48,6 +48,7 @@ The marks belong to their owners:
 - **Fluent**, **WinUI**, **Windows**, **Segoe UI**, **Consolas** — Microsoft Corporation.
 - **Material Design**, **Noto**, **Roboto** — Google LLC.
 - **Int UI**, **JetBrains**, **JetBrains Mono** — JetBrains s.r.o.
+- **KDE**, **KDE Plasma**, **Plasma**, **Breeze**: KDE e.V. (KDE is a registered trademark of KDE e.V.). The `teksilo-kde-scheme` crate uses these names only to say which desktop's configuration files it reads and which design language they describe.
 
 Teksilo is not affiliated with, endorsed by, sponsored by, or certified by any of them. The presets are independent implementations by FernTech, built from published specifications and — where a vendor publishes nothing — from measurement. They are not vendor-supplied, not vendor-reviewed, and not guaranteed to match any vendor's current design.
 

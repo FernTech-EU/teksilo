@@ -87,6 +87,23 @@ by crate for clarity, not because crates version independently.
   duration multiplied by a factor, as a desktop's animation-speed setting
   asks; the tooltip delays are kept, and a factor of 0 turns animation off.
 
+#### KDE Plasma
+
+- **New crate `teksilo-kde-scheme`.** Reads a KDE Plasma desktop's look
+  without touching the file system or the environment: the caller hands it
+  the environment and the file contents. `KConfig` parses KDE's
+  configuration format, with nested groups, immutable (Kiosk) entries,
+  groups and files, deleted entries, `[$e]` environment expansion that never
+  runs a command, and diagnostics instead of failures, and merges system
+  and user files into one cascade. `KdeConfigLocations` lists the files KDE
+  reads, `kdedefaults` included, from the XDG variables. `KdeColorScheme`
+  holds a `.colors` file or the colour groups of `kdeglobals`, every
+  missing key filled from KDE's defaults, and writes it back as text;
+  `breeze_light`, `breeze_dark` and `breeze_classic` are the stock Breeze
+  schemes. `KdeFont` reads Qt 5 and Qt 6 font strings, and `KdeDesktop`
+  gathers the scheme, the user's accent, the five desktop fonts, the
+  animation speed, the widget style and the Breeze style settings.
+
 ### Changed
 
 #### Theming

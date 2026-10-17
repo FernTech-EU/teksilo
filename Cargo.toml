@@ -207,6 +207,7 @@ teksilo-preview-ui = { path = "crates/teksilo-preview-ui", version = "0.19.0" }
 teksilo-theme-material3 = { path = "crates/teksilo-theme-material3", version = "0.19.0" }
 teksilo-theme-macos = { path = "crates/teksilo-theme-macos", version = "0.19.0" }
 teksilo-theme-fluent = { path = "crates/teksilo-theme-fluent", version = "0.19.0" }
+teksilo-kde-scheme = { path = "crates/teksilo-kde-scheme", version = "0.19.0" }
 
 # Path only, no `version`: this crate is `publish = false`, so a versioned
 # dependency on it would have to resolve from crates.io the moment a
