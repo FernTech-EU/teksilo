@@ -22,6 +22,15 @@ by crate for clarity, not because crates version independently.
   which slots a theme fills and which it leaves to the widget's default as set
   equality against it, so a slot added to the framework later cannot be
   overlooked.
+- **`PaintProjection`: a theme's own inactive-window and high-contrast
+  colours.** A theme registers `with_paint_projection(fn(&Theme, PaintState)
+  -> Theme)` and every frame of an inactive window, or under the OS increase
+  contrast preference, paints the colours it returns instead of the generic
+  accent desaturation and high-contrast swap. `Theme::for_paint_state` and
+  `Theme::paint_colors` give the theme or palette for a `PaintState`; without
+  a hook they return what the paint walker painted before. The preference is
+  readable at build time through `BuildContext::prefers_high_contrast`,
+  `high_contrast_signal` and `paint_state`.
 
 ### Fixed
 
@@ -29,6 +38,14 @@ by crate for clarity, not because crates version independently.
   debug build, or a release profile without LTO, of an application with text
   input carried Inter and JetBrains Mono three times over, 4.8 MB more than
   needed.
+
+#### Theming
+
+- **Accent chrome a recipe builds follows the high-contrast preference.**
+  **Behaviour change:** under the OS increase contrast preference, a `Filled`
+  button's fill and a button's focus border now take the high-contrast
+  palette, as `Toggle`, `Checkbox` and the other accent controls already did;
+  before, they kept the normal colours.
 
 ## [0.19.0] - 2026-10-16
 

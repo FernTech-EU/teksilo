@@ -203,7 +203,7 @@ pub use text_input_style::{
 pub use text_selection_style::{
     SharedTextSelectionStyle, TextMagnifierRecipe, TextSelectionHandleRecipe, TextSelectionStyle,
 };
-pub use theme::{DensityProjection, Theme, ThemeId};
+pub use theme::{DensityProjection, PaintProjection, PaintState, Theme, ThemeId};
 pub use theme_appearance::ThemeAppearance;
 pub use theme_extension::ThemeExtensions;
 pub use toast_style::{SharedToastStyle, ToastPriority, ToastStyle, ToastStyleConfig};

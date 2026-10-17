@@ -118,31 +118,21 @@ impl WidgetTree {
 
         let mut frame = RenderFrame::new();
         // `effective_theme` carries the user/OS text-scale multiplier baked into
-        // its typography, so painted glyphs match the scaled layout sizes. When
-        // the window is inactive, paint against the accent-desaturated
-        // projection so every accent-coloured control (default button, Toggle,
-        // checked Checkbox/Radio, selected Tab/Segment, Slider fill,
-        // ProgressBar, focus rings) greys out — the Qt `QPalette::Inactive`
-        // model, resolved once theme-side instead of per widget. Colours only;
-        // typography is unchanged, so this is repaint-only (geometry stable).
-        let base_theme = if self.is_window_active() {
-            self.effective_theme.clone()
-        } else {
-            self.effective_theme.for_inactive_window()
-        };
-        // When the OS "increase contrast" preference is set, project the
-        // (already active/inactive-adjusted) palette into its high-contrast
-        // variant (WCAG 1.4.6 Enhanced / EN 301 549 11.7). Colours only, so
-        // this stays repaint-only like the inactive-window swap; the HC accent
-        // / focus overrides win over the inactive desaturation while it's on.
-        let base_theme = if self.prefers_high_contrast {
-            base_theme.for_high_contrast()
-        } else {
-            base_theme
-        };
+        // its typography, so painted glyphs match the scaled layout sizes. The
+        // palette is then projected for this window's paint state: an inactive
+        // window greys out every accent-coloured control (default button,
+        // Toggle, checked Checkbox/Radio, selected Tab/Segment, Slider fill,
+        // ProgressBar, focus rings), the Qt `QPalette::Inactive` model resolved
+        // once theme-side instead of per widget, and the OS "increase
+        // contrast" preference swaps in the high-contrast variant (WCAG 1.4.6
+        // Enhanced / EN 301 549 11.7). A theme's own `PaintProjection` decides
+        // both when it registers one; see `Theme::for_paint_state`. Colours
+        // only; typography is unchanged, so this is repaint-only (geometry
+        // stable).
+        let base_theme = self.effective_theme.for_paint_state(self.paint_state());
         let text_backend = self.text_backend.clone();
         let a11y_prefs = A11yPaintPrefs {
-            high_contrast: self.prefers_high_contrast,
+            high_contrast: self.prefers_high_contrast(),
             reduced_motion: self.prefers_reduced_motion,
             large_text: self.text_scale_factor > 1.0,
             text_scale: self.effective_text_scale,

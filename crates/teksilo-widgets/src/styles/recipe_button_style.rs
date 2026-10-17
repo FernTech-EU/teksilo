@@ -206,14 +206,11 @@ fn bind_fill(
         || recipe.disabled.as_ref().is_some_and(is_gradient);
     if any_gradient {
         // Gradient fills bake to a non-reactive PaintProp. Resolve against the
-        // window-active palette at build so a window that *starts* inactive is
-        // already desaturated; live flips of a gradient fill are a known gap
-        // (no IntUI / Material accent button uses a gradient fill).
-        let colors = if ctx.window_active() {
-            ctx.theme().colors.clone()
-        } else {
-            ctx.theme().colors.for_inactive_window()
-        };
+        // paint state at build so a window that *starts* inactive, or under
+        // high contrast, already paints the projected palette; live flips of
+        // a gradient fill are a known gap (no IntUI / Material accent button
+        // uses a gradient fill).
+        let colors = ctx.theme().paint_colors(ctx.paint_state());
         return PaintProp::from_fill(&recipe.idle, &colors);
     }
     let recipe = recipe.clone();

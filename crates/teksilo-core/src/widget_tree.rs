@@ -570,7 +570,10 @@ pub struct WidgetTree {
     /// dormant while still holding its handlers).
     gesture_owners: std::collections::HashSet<WidgetId>,
     /// OS-level accessibility preferences (high contrast, reduced motion, text scale).
-    prefers_high_contrast: bool,
+    /// High contrast is a signal so a colour baked at build time (a recipe's
+    /// `ColorProp::Bound`) can follow it the way it follows window activation;
+    /// mutated only by `set_accessibility_preferences`.
+    prefers_high_contrast: crate::signal::Signal<bool>,
     prefers_reduced_motion: bool,
     text_scale_factor: f64,
     /// Whether an assistive technology is reading the tree, as reported by the
@@ -1048,7 +1051,7 @@ impl WidgetTree {
             pending_delayed_overlays: Vec::new(),
             active_ids_scratch: Vec::new(),
             gesture_owners: std::collections::HashSet::new(),
-            prefers_high_contrast: false,
+            prefers_high_contrast: crate::signal::Signal::new(false),
             prefers_reduced_motion: false,
             text_scale_factor: 1.0,
             screen_reader: crate::environment::ScreenReaderState::default(),
@@ -3074,12 +3077,14 @@ impl WidgetTree {
         reduced_motion: bool,
         text_scale_factor: f64,
     ) {
-        let changed = self.prefers_high_contrast != high_contrast
+        let changed = self.prefers_high_contrast.get() != high_contrast
             || self.prefers_reduced_motion != reduced_motion
             || (self.text_scale_factor - text_scale_factor).abs() > f64::EPSILON;
 
         if changed {
-            self.prefers_high_contrast = high_contrast;
+            if self.prefers_high_contrast.get() != high_contrast {
+                self.prefers_high_contrast.set(high_contrast);
+            }
             self.prefers_reduced_motion = reduced_motion;
             self.text_scale_factor = text_scale_factor;
             // The OS factor feeds the effective text scale (multiplied with the
@@ -3091,7 +3096,27 @@ impl WidgetTree {
 
     /// Whether the OS has requested high-contrast mode.
     pub fn prefers_high_contrast(&self) -> bool {
-        self.prefers_high_contrast
+        self.prefers_high_contrast.get()
+    }
+
+    /// Reactive handle on the high-contrast preference. Fires when
+    /// [`set_accessibility_preferences`](Self::set_accessibility_preferences)
+    /// changes it. Bind at [`BindingLevel::RepaintOnly`]: the preference only
+    /// changes colours. Starts `false`.
+    ///
+    /// [`BindingLevel::RepaintOnly`]: crate::binding::BindingLevel::RepaintOnly
+    pub fn high_contrast_signal(&self) -> crate::signal::Signal<bool> {
+        self.prefers_high_contrast.clone()
+    }
+
+    /// The [`PaintState`](crate::styles::PaintState) this tree paints under:
+    /// its window-active state and the high-contrast preference. The paint
+    /// walker hands it to [`Theme::for_paint_state`](crate::styles::Theme::for_paint_state).
+    pub fn paint_state(&self) -> crate::styles::PaintState {
+        crate::styles::PaintState {
+            window_active: self.is_window_active(),
+            high_contrast: self.prefers_high_contrast(),
+        }
     }
 
     /// Whether the OS has requested reduced motion.

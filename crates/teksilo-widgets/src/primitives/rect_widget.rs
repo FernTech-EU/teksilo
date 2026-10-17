@@ -270,7 +270,14 @@ mod tests {
 
         let theme = teksilo_core::presets::intui::light();
         let accent = theme.colors.accent.to_array();
-        let inactive_accent = theme.colors.for_inactive_window().accent.to_array();
+        let inactive_accent = theme
+            .for_paint_state(teksilo_core::styles::PaintState {
+                window_active: false,
+                high_contrast: false,
+            })
+            .colors
+            .accent
+            .to_array();
         assert_ne!(accent, inactive_accent);
 
         let mut tree = WidgetTree::new().with_theme(theme);

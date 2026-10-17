@@ -43,7 +43,8 @@ These are correctness, not features, so they are **on by default**:
 
 - **Accent desaturation (theme-side, covers every control).** When the window is
   inactive, the paint walker swaps in a theme projection
-  (`ColorTokens::for_inactive_window`) whose **accent family and focus indicators
+  (`ColorTokens::for_inactive_window`, unless the theme registers its own
+  `PaintProjection`, see below) whose **accent family and focus indicators
   are desaturated toward graphite**,
   the macOS / Qt `QPalette::Inactive` model. Because every themed control
   resolves its accent from the live `ColorTokens` at paint time, this single
@@ -134,6 +135,48 @@ silently built `DimWhenInactive > b`. It was removed, and
 of that shape comes back. It is layout- and a11y-transparent, and the opacity
 **snaps** (no tween), correct under `prefers-reduced-motion`, since window
 activation is an OS state change, not a user-initiated motion.
+
+## A theme's own inactive and high-contrast colours: `PaintProjection`
+
+The accent desaturation above is a fixed transform of the tokens. It suits a
+palette that defines no inactive colours of its own, which is every palette
+built from tokens alone. A theme whose source palette does define them (a
+desktop colour scheme with an inactive colour group, say) registers a
+`PaintProjection` instead, and paints those colours:
+
+```rust
+use teksilo::core::styles::{PaintState, Theme};
+
+fn project(theme: &Theme, state: PaintState) -> Theme {
+    let mut out = theme.clone();
+    if !state.window_active {
+        out.colors = my_inactive_colors(theme);
+    }
+    if state.high_contrast {
+        out = out.for_high_contrast(); // keep the generic part it wants
+    }
+    out
+}
+
+let theme = my_theme().with_paint_projection(project);
+```
+
+The paint walker asks `Theme::for_paint_state(PaintState { window_active,
+high_contrast })` for the theme of each frame. With a `PaintProjection`
+registered, that is the hook's answer; without one it is the generic chain,
+`for_inactive_window` when the window is inactive and then `for_high_contrast`
+when the "increase contrast" preference is set, exactly the output of earlier
+releases. The hook receives the active theme and both flags at once, so it
+decides how they combine, and it replaces the generic chain entirely:
+`Theme::for_inactive_window` and `Theme::for_high_contrast` stay the generic
+transforms and do not consult it. Only change colours in a hook. The swap is
+repaint-only, so geometry a hook changes is not honoured.
+
+Colours a recipe bakes at build time (a `Filled` button's fill and focus
+border, held as a `ColorProp::Bound`) resolve through the same call,
+`Theme::paint_colors`, against `BuildContext::window_active_signal` and
+`BuildContext::high_contrast_signal`, so they follow the hook, and the
+high-contrast preference, like the colours resolved at paint.
 
 ## Keeping a widget vivid when inactive
 

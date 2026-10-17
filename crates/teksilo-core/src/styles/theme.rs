@@ -135,6 +135,52 @@ impl std::fmt::Debug for DensityProjection {
     }
 }
 
+/// The window and accessibility state a frame is painted under: the inputs of
+/// [`Theme::for_paint_state`].
+///
+/// A fresh tree paints with `window_active: true, high_contrast: false`,
+/// under which [`Theme::for_paint_state`] returns the theme unchanged when no
+/// [`PaintProjection`] is registered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaintState {
+    /// The host window is focused and not occluded.
+    pub window_active: bool,
+    /// The OS "increase contrast" preference is set.
+    pub high_contrast: bool,
+}
+
+/// How a theme re-colours itself for a [`PaintState`]: registered in the
+/// theme's [extension registry](ThemeExtensions) and consulted by
+/// [`Theme::for_paint_state`].
+///
+/// Absent, which is the default and what every raw-token theme and the IntUI
+/// preset get, means the generic chain: [`Theme::for_inactive_window`] when
+/// the window is inactive, then [`Theme::for_high_contrast`] when the
+/// high-contrast preference is set. That chain is a fixed transform of the
+/// tokens (desaturate the accent family, swap in a high-contrast accent and
+/// ring), which is right for a palette that defines no inactive or
+/// high-contrast colours of its own.
+///
+/// A preset whose source palette **does** define them (a desktop colour
+/// scheme with an inactive colour group, say) registers this to paint those
+/// colours instead. The function receives the *active* theme and the whole
+/// state at once, so it decides how the two flags combine; it replaces the
+/// generic chain entirely, and calling [`Theme::for_inactive_window`] or
+/// [`Theme::for_high_contrast`] from it is how it keeps a part of that chain.
+/// Only colours should change: the paint walker swaps the result in without a
+/// relayout, so geometry a hook changes is not honoured.
+///
+/// It lives in the extension registry for the reason [`DensityProjection`]
+/// does: it is optional, typed, non-serializable state only some themes carry.
+#[derive(Clone, Copy)]
+pub struct PaintProjection(pub fn(&Theme, PaintState) -> Theme);
+
+impl std::fmt::Debug for PaintProjection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PaintProjection(<fn>)")
+    }
+}
+
 impl Theme {
     /// Build a Theme from raw token data. Most apps go through a
     /// preset constructor (e.g. `teksilo_core::presets::intui::light`)
@@ -167,6 +213,12 @@ impl Theme {
     /// constructors call this; see [`DensityProjection`].
     pub fn with_density_projection(self, project: fn(&Theme, TargetDensity) -> Theme) -> Self {
         self.with_extension(DensityProjection(project))
+    }
+
+    /// Register how this theme re-colours itself for an inactive window and
+    /// the high-contrast preference; see [`PaintProjection`].
+    pub fn with_paint_projection(self, project: fn(&Theme, PaintState) -> Theme) -> Self {
+        self.with_extension(PaintProjection(project))
     }
 
     /// Set this theme's [`ThemeId`] and return self for chaining. Used by
@@ -205,6 +257,38 @@ impl Theme {
             colors: self.colors.for_high_contrast(),
             ..self.clone()
         }
+    }
+
+    /// The theme a frame is painted with under `state`: what the paint walker
+    /// swaps in, and what a recipe that bakes a colour at build time must
+    /// resolve against so it agrees with the paint-resolved controls.
+    ///
+    /// A theme that carries a [`PaintProjection`] gets that function's
+    /// answer. Otherwise this is the generic chain:
+    /// [`for_inactive_window`](Self::for_inactive_window) when
+    /// `!state.window_active`, then
+    /// [`for_high_contrast`](Self::for_high_contrast) when
+    /// `state.high_contrast` (so the high-contrast accent and ring win over
+    /// the inactive desaturation), and an unchanged copy when neither applies.
+    pub fn for_paint_state(&self, state: PaintState) -> Theme {
+        if let Some(PaintProjection(project)) = self.extension::<PaintProjection>().copied() {
+            return project(self, state);
+        }
+        Theme {
+            colors: generic_paint_colors(&self.colors, state),
+            ..self.clone()
+        }
+    }
+
+    /// The colours of [`for_paint_state`](Self::for_paint_state), without
+    /// cloning the rest of the theme when no [`PaintProjection`] is
+    /// registered. For a colour resolved on every paint (a recipe's
+    /// `ColorProp::Bound`), where only the palette is read.
+    pub fn paint_colors(&self, state: PaintState) -> ColorTokens {
+        if let Some(PaintProjection(project)) = self.extension::<PaintProjection>().copied() {
+            return project(self, state).colors;
+        }
+        generic_paint_colors(&self.colors, state)
     }
 
     /// A copy of this theme projected onto another [`TargetDensity`].
@@ -255,11 +339,218 @@ impl Theme {
     }
 }
 
+/// The generic chain behind [`Theme::for_paint_state`] when no
+/// [`PaintProjection`] is registered: the token halves of
+/// [`Theme::for_inactive_window`] and [`Theme::for_high_contrast`], which
+/// change only the colours.
+fn generic_paint_colors(colors: &ColorTokens, state: PaintState) -> ColorTokens {
+    match (state.window_active, state.high_contrast) {
+        (true, false) => colors.clone(),
+        (false, false) => colors.for_inactive_window(),
+        (true, true) => colors.for_high_contrast(),
+        (false, true) => colors.for_inactive_window().for_high_contrast(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::presets::intui;
     use teksilo_tokens::TargetDensity;
+
+    const ALL_PAINT_STATES: [PaintState; 4] = [
+        PaintState {
+            window_active: true,
+            high_contrast: false,
+        },
+        PaintState {
+            window_active: false,
+            high_contrast: false,
+        },
+        PaintState {
+            window_active: true,
+            high_contrast: true,
+        },
+        PaintState {
+            window_active: false,
+            high_contrast: true,
+        },
+    ];
+
+    /// The paint walker's projection as it was written before
+    /// `for_paint_state` existed, kept verbatim as the oracle.
+    fn pre_hook_chain(theme: &Theme, state: PaintState) -> Theme {
+        let base = if state.window_active {
+            theme.clone()
+        } else {
+            theme.for_inactive_window()
+        };
+        if state.high_contrast {
+            base.for_high_contrast()
+        } else {
+            base
+        }
+    }
+
+    const HOOK_INACTIVE: &str = "#FF00FF";
+    const HOOK_HIGH_CONTRAST: &str = "#00FF00";
+
+    /// A projection that marks each state with a colour no generic transform
+    /// produces, so a test can tell which path painted.
+    fn marking_projection(theme: &Theme, state: PaintState) -> Theme {
+        let mut out = theme.clone();
+        if !state.window_active {
+            out.colors.accent = teksilo_tokens::Color::from_hex(HOOK_INACTIVE);
+        }
+        if state.high_contrast {
+            out.colors.accent = teksilo_tokens::Color::from_hex(HOOK_HIGH_CONTRAST);
+        }
+        out
+    }
+
+    /// Without a hook, the default output is the old chain exactly, for every
+    /// state and both IntUI appearances.
+    #[test]
+    fn for_paint_state_without_a_hook_is_the_pre_hook_chain() {
+        for theme in [intui::light(), intui::dark()] {
+            assert!(theme.extension::<PaintProjection>().is_none());
+            for state in ALL_PAINT_STATES {
+                let expected = pre_hook_chain(&theme, state);
+                assert_eq!(theme.for_paint_state(state), expected, "{state:?}");
+                assert_eq!(theme.paint_colors(state), expected.colors, "{state:?}");
+            }
+            // Active and not high-contrast is the identity.
+            assert_eq!(theme.for_paint_state(ALL_PAINT_STATES[0]), theme);
+        }
+    }
+
+    /// A registered hook replaces the generic chain, in both entry points.
+    #[test]
+    fn a_paint_projection_replaces_the_generic_chain() {
+        let theme = intui::light().with_paint_projection(marking_projection);
+        for state in ALL_PAINT_STATES {
+            let expected = marking_projection(&theme, state);
+            assert_eq!(theme.for_paint_state(state), expected, "{state:?}");
+            assert_eq!(theme.paint_colors(state), expected.colors, "{state:?}");
+        }
+        assert_eq!(
+            format!("{:?}", theme.extension::<PaintProjection>().unwrap()),
+            "PaintProjection(<fn>)"
+        );
+    }
+
+    /// `for_inactive_window` and `for_high_contrast` stay the documented
+    /// generic transforms: colours only, and a hook does not reach them.
+    #[test]
+    fn the_named_projections_keep_their_documented_behaviour() {
+        let plain = intui::light();
+        let hooked = plain.clone().with_paint_projection(marking_projection);
+        for theme in [&plain, &hooked] {
+            let inactive = theme.for_inactive_window();
+            assert_eq!(inactive.colors, theme.colors.for_inactive_window());
+            assert_ne!(inactive.colors.accent, theme.colors.accent);
+            let high = theme.for_high_contrast();
+            assert_eq!(high.colors, theme.colors.for_high_contrast());
+            for projected in [inactive, high] {
+                assert_eq!(projected.id, theme.id);
+                assert_eq!(projected.appearance, theme.appearance);
+                assert_eq!(projected.layout, theme.layout);
+                assert_eq!(projected.typography, theme.typography);
+                assert_eq!(projected.shape, theme.shape);
+                assert_eq!(projected.motion, theme.motion);
+                assert_eq!(projected.input, theme.input);
+                assert_eq!(
+                    projected.extension::<PaintProjection>().is_some(),
+                    theme.extension::<PaintProjection>().is_some(),
+                );
+            }
+        }
+    }
+
+    /// A leaf painting the theme's accent, read from the paint context the
+    /// walker hands it.
+    #[derive(Debug)]
+    struct AccentProbe;
+
+    impl crate::widget::Widget for AccentProbe {
+        fn layout_response(
+            &self,
+            proposal: teksilo_canvas::SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn paint(
+            &self,
+            bounds: teksilo_canvas::Rect,
+            canvas: &mut teksilo_canvas::Canvas,
+            ctx: &crate::widget::PaintContext,
+        ) {
+            canvas.fill_rounded_rect(
+                bounds,
+                teksilo_tokens::CornerRadius::ZERO,
+                ctx.theme.colors.accent,
+            );
+        }
+    }
+
+    fn painted_accent(tree: &mut crate::widget_tree::WidgetTree) -> [f32; 4] {
+        let frame = tree.render();
+        assert_eq!(frame.shapes.len(), 1);
+        frame.shapes[0].color
+    }
+
+    /// The paint walker asks the theme's hook, for window activation and for
+    /// the high-contrast preference.
+    #[test]
+    fn the_paint_walker_paints_the_hooks_colours() {
+        let theme = intui::light().with_paint_projection(marking_projection);
+        let active = theme.colors.accent.to_array();
+        let mut tree = crate::widget_tree::WidgetTree::new().with_theme(theme);
+        tree.add(AccentProbe);
+        tree.layout(teksilo_canvas::SizeProposal::exact(40.0, 20.0));
+        assert_eq!(painted_accent(&mut tree), active);
+
+        tree.set_window_active(false);
+        assert_eq!(
+            painted_accent(&mut tree),
+            teksilo_tokens::Color::from_hex(HOOK_INACTIVE).to_array(),
+            "an inactive window paints the hook's colours, not the generic desaturation"
+        );
+
+        tree.set_window_active(true);
+        tree.set_accessibility_preferences(true, false, 1.0);
+        assert_eq!(
+            painted_accent(&mut tree),
+            teksilo_tokens::Color::from_hex(HOOK_HIGH_CONTRAST).to_array(),
+        );
+        assert_eq!(
+            tree.paint_state(),
+            PaintState {
+                window_active: true,
+                high_contrast: true,
+            }
+        );
+    }
+
+    /// Without a hook the walker paints what it painted before the hook.
+    #[test]
+    fn the_paint_walker_without_a_hook_paints_the_generic_chain() {
+        let theme = intui::dark();
+        let mut tree = crate::widget_tree::WidgetTree::new().with_theme(theme.clone());
+        tree.add(AccentProbe);
+        tree.layout(teksilo_canvas::SizeProposal::exact(40.0, 20.0));
+        tree.set_window_active(false);
+        tree.set_accessibility_preferences(true, false, 1.0);
+        assert_eq!(
+            painted_accent(&mut tree),
+            pre_hook_chain(&theme, ALL_PAINT_STATES[3])
+                .colors
+                .accent
+                .to_array()
+        );
+    }
 
     /// The whole point of `#[serde(default)]` on `input`: a theme serialized
     /// before the field existed must still load. The fixture is built the only

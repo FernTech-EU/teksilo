@@ -1413,7 +1413,14 @@ mod tests {
         // window-active palette to grey out like the paint-resolving controls.
         let theme = teksilo_core::presets::intui::light();
         let accent = theme.colors.accent.to_array();
-        let inactive_accent = theme.colors.for_inactive_window().accent.to_array();
+        let inactive_accent = theme
+            .for_paint_state(teksilo_core::styles::PaintState {
+                window_active: false,
+                high_contrast: false,
+            })
+            .colors
+            .accent
+            .to_array();
         assert_ne!(accent, inactive_accent);
 
         let mut tree = WidgetTree::new().with_theme(theme);
@@ -1441,6 +1448,72 @@ mod tests {
         // Reactivate: vivid accent returns.
         tree.set_window_active(true);
         assert!(frame_has_color(&tree.render(), accent));
+    }
+
+    #[test]
+    fn filled_button_fill_follows_the_high_contrast_preference() {
+        // The baked fill resolves through `Theme::paint_colors`, so it takes
+        // the high-contrast accent the paint walker gives every
+        // paint-resolving control. IntUI dark swaps its accent under high
+        // contrast; light keeps it.
+        use teksilo_core::styles::PaintState;
+        let theme = teksilo_core::presets::intui::dark();
+        let accent = theme.colors.accent.to_array();
+        let hc_accent = theme
+            .for_paint_state(PaintState {
+                window_active: true,
+                high_contrast: true,
+            })
+            .colors
+            .accent
+            .to_array();
+        assert_ne!(accent, hc_accent);
+
+        let mut tree = WidgetTree::new().with_theme(theme);
+        tree.add(Button::new(lit!("Save")).variant(ButtonVariant::Filled));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+        assert!(frame_has_color(&tree.render(), accent));
+
+        tree.set_accessibility_preferences(true, false, 1.0);
+        let frame = tree.render();
+        assert!(
+            frame_has_color(&frame, hc_accent),
+            "high contrast: the Filled button fill takes the high-contrast accent"
+        );
+        assert!(!frame_has_color(&frame, accent));
+
+        tree.set_accessibility_preferences(false, false, 1.0);
+        assert!(frame_has_color(&tree.render(), accent));
+    }
+
+    #[test]
+    fn filled_button_fill_follows_a_themes_paint_projection() {
+        // A theme's `PaintProjection` reaches the colours a recipe bakes at
+        // build time, not only the ones resolved at paint.
+        use teksilo_core::styles::{PaintState, Theme};
+        fn project(theme: &Theme, state: PaintState) -> Theme {
+            let mut out = theme.clone();
+            if !state.window_active {
+                out.colors.accent = teksilo_tokens::Color::from_hex("#FF00FF");
+            }
+            out
+        }
+        let theme = teksilo_core::presets::intui::light().with_paint_projection(project);
+        let accent = theme.colors.accent.to_array();
+        let hooked = teksilo_tokens::Color::from_hex("#FF00FF").to_array();
+
+        let mut tree = WidgetTree::new().with_theme(theme);
+        tree.add(Button::new(lit!("Save")).variant(ButtonVariant::Filled));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+        assert!(frame_has_color(&tree.render(), accent));
+
+        tree.set_window_active(false);
+        let frame = tree.render();
+        assert!(
+            frame_has_color(&frame, hooked),
+            "inactive window: the fill is the hook's colour"
+        );
+        assert!(!frame_has_color(&frame, accent));
     }
 
     #[test]

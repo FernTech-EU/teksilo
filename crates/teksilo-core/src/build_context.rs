@@ -535,6 +535,31 @@ impl<'a> BuildContext<'a> {
         self.tree.window_active_signal()
     }
 
+    /// Whether the OS "increase contrast" preference is set. One-shot read for
+    /// build-time use; for a value that follows the preference, bind
+    /// [`high_contrast_signal`](Self::high_contrast_signal).
+    pub fn prefers_high_contrast(&self) -> bool {
+        self.tree.prefers_high_contrast()
+    }
+
+    /// Reactive handle on the high-contrast preference, the companion of
+    /// [`window_active_signal`](Self::window_active_signal). A recipe that
+    /// bakes a colour at build time zips both into a
+    /// [`PaintState`](crate::styles::PaintState) and resolves against
+    /// [`Theme::for_paint_state`](crate::styles::Theme::for_paint_state), so
+    /// it paints what the paint walker paints. Starts `false`.
+    pub fn high_contrast_signal(&self) -> crate::signal::Signal<bool> {
+        self.tree.high_contrast_signal()
+    }
+
+    /// The [`PaintState`](crate::styles::PaintState) the host window paints
+    /// under right now. One-shot read; see
+    /// [`high_contrast_signal`](Self::high_contrast_signal) for the reactive
+    /// form.
+    pub fn paint_state(&self) -> crate::styles::PaintState {
+        self.tree.paint_state()
+    }
+
     /// Reactive handle on the current locale. Fires observers when
     /// `tree.set_locale(...)` is called.
     pub fn locale_signal(&self) -> crate::signal::Signal<Option<String>> {
