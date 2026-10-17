@@ -155,6 +155,13 @@ impl From<KdeColor> for Color {
     }
 }
 
+impl From<Color> for KdeColor {
+    /// The same as [`KdeColor::from_color`].
+    fn from(color: Color) -> KdeColor {
+        KdeColor::from_color(color)
+    }
+}
+
 impl fmt::Display for KdeColor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.to_kconfig_text())

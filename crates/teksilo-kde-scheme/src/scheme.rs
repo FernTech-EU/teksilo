@@ -453,7 +453,10 @@ impl StateEffect {
         }
     }
 
-    fn write(&self, out: &mut String) {
+    /// Writes the group's keys in sorted order. `Enable` is left out when
+    /// it equals `omitted_enable`, the value a reader assumes for an absent
+    /// key that the stock files rely on.
+    fn write(&self, out: &mut String, omitted_enable: Option<bool>) {
         push_entry(out, "Color", &self.color.to_kconfig_text());
         push_entry(out, "ColorAmount", &self.color_amount.to_string());
         push_entry(out, "ColorEffect", &self.color_effect.code().to_string());
@@ -463,7 +466,9 @@ impl StateEffect {
             "ContrastEffect",
             &self.contrast_effect.code().to_string(),
         );
-        push_entry(out, "Enable", bool_text(self.enabled));
+        if omitted_enable != Some(self.enabled) {
+            push_entry(out, "Enable", bool_text(self.enabled));
+        }
         push_entry(out, "IntensityAmount", &self.intensity_amount.to_string());
         push_entry(
             out,
@@ -1105,7 +1110,11 @@ impl KdeColorScheme {
     /// read from a 9- or 12-digit `#` form comes back rounded to 8 bits. `[KDE] contrast` and `frameContrast`
     /// are written only when they differ from their defaults, so a key the
     /// scheme leaves at its default still falls back to `kdeglobals` when
-    /// the text is cascaded over it, as a stock `.colors` file does.
+    /// the text is cascaded over it, as a stock `.colors` file does. For the
+    /// same reason `[ColorEffects:Disabled] Enable` is written only when it
+    /// is false: the stock files leave it out, and it reads as true when
+    /// absent. (`[ColorEffects:Inactive] Enable` is always written, as the
+    /// stock files write it.)
     ///
     /// A scheme without a Header group is written without one. Its Header
     /// colours follow the Window group key by key, falling back to the
@@ -1116,14 +1125,15 @@ impl KdeColorScheme {
         let mut out = String::new();
 
         push_group(&mut out, &["ColorEffects:Disabled"]);
-        self.disabled_effect.write(&mut out);
+        self.disabled_effect
+            .write(&mut out, Some(StateEffect::DISABLED_DEFAULT.enabled));
         push_group(&mut out, &["ColorEffects:Inactive"]);
         push_entry(
             &mut out,
             "ChangeSelectionColor",
             bool_text(self.change_selection_color),
         );
-        self.inactive_effect.write(&mut out);
+        self.inactive_effect.write(&mut out, None);
 
         let mut ordered = ColorSet::ALL;
         ordered.sort_by_key(|s| s.group_name());

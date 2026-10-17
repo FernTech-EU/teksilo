@@ -26,6 +26,7 @@ exclude = [
     "tests/breeze_files.rs",
     "tests/golden_math.rs",
     "tests/golden_resolve.rs",
+    "tests/golden_accent.rs",
     "tests/clean_room_vocabulary.rs",
 ]
 

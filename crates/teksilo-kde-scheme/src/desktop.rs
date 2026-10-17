@@ -20,10 +20,12 @@ pub enum SchemeOrigin {
     /// `[Colors:View]` group. Any accent the user chose is already in them.
     Kdeglobals,
     /// A scheme file read because `kdeglobals` has no `[Colors:View]`
-    /// group: the look-and-feel package's colours or the named scheme.
+    /// group: the look-and-feel package's colours or the named scheme, with
+    /// the user's accent applied to it when there is one.
     SchemeFile,
     /// Neither: `kdeglobals` has no colours and no scheme file was found,
-    /// so the built-in Breeze Light scheme was used.
+    /// so the built-in Breeze Light scheme was used, with the user's accent
+    /// applied to it when there is one.
     BuiltIn,
 }
 
@@ -378,13 +380,26 @@ impl KdeDesktop {
     /// Builds the desktop from already-read layers.
     ///
     /// When the merged `kdeglobals` has a `[Colors:View]` group the scheme
-    /// is read from it. Otherwise it is read from `layers.scheme_file`, or
-    /// from the built-in Breeze Light when there is none, with the
-    /// `kdeglobals` cascade below it, so a key the scheme file lacks still
-    /// comes from `kdeglobals`. String settings expand `[$e]` entries
-    /// through `env`.
+    /// is read from it, and any accent the user chose is already in its
+    /// colours. Otherwise it is read from `layers.scheme_file`, or from the
+    /// built-in Breeze Light when there is none, with the `kdeglobals`
+    /// cascade below it, so a key the scheme file lacks still comes from
+    /// `kdeglobals`. String settings expand `[$e]` entries through `env`.
+    ///
+    /// In that fallback, a `[General] AccentColor` that is a colour and not
+    /// fully transparent is applied to the scheme file with
+    /// [`KdeColorScheme::with_accent`], and what that application writes
+    /// takes the scheme file's place over `kdeglobals`. It writes `[KDE]
+    /// contrast` and `frameContrast` (7 and 0.2 when the scheme file lacks
+    /// them), so those then come from the scheme rather than from
+    /// `kdeglobals`. KDE itself ignores the accent in this fallback; Teksilo
+    /// honours it so that the accent the user chose still shows on a profile
+    /// whose colour groups were never written.
     pub fn from_layers(layers: &KdeDesktopLayers<'_>, env: &ExpansionEnv<'_>) -> KdeDesktop {
         let globals = KConfig::cascade(layers.kdeglobals);
+        let user_accent = globals
+            .read_color(&["General"], "AccentColor")
+            .filter(|c| !c.is_transparent_black());
         let (scheme, scheme_origin) = if globals.group_exists(&["Colors:View"]) {
             (
                 KdeColorScheme::from_config(&globals),
@@ -398,6 +413,10 @@ impl KdeDesktop {
                     SchemeOrigin::BuiltIn,
                 ),
             };
+            let file = match user_accent {
+                Some(accent) => KdeColorScheme::from_config(&file).accented_config(accent),
+                None => file,
+            };
             let merged = KConfig::cascade(&[globals.clone(), file.with_kind(LayerKind::Default)]);
             (KdeColorScheme::from_config(&merged), origin)
         };
@@ -410,9 +429,7 @@ impl KdeDesktop {
         KdeDesktop {
             scheme,
             scheme_origin,
-            user_accent: globals
-                .read_color(&["General"], "AccentColor")
-                .filter(|c| !c.is_transparent_black()),
+            user_accent,
             fonts: KdeFonts::read(&globals, env),
             animation_duration_factor,
             widget_style: globals.read_string(kde, "widgetStyle", env),

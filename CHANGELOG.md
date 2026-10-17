@@ -119,7 +119,15 @@ by crate for clarity, not because crates version independently.
   colours (`PaletteRole`). `is_dark` tells a dark scheme from a light one by
   its window background, the way KDE reports it to applications, and
   `os_theme_colors` gives the colour report Teksilo's native theme is built
-  from.
+  from. `KdeColorScheme::with_accent` applies an accent colour to a scheme
+  the way Plasma's colour settings do, writing the same values Plasma
+  writes: the accent on links, focus and hover, a selection and button fill
+  blended from it with black or white text, the scheme's colours tinted
+  toward it when the scheme asks for tinting, and an accent-coloured title
+  bar when the scheme asks for one. `ACCENT_SWATCHES` are Plasma's ten
+  accent swatches. When `kdeglobals` holds no colours of its own,
+  `KdeDesktop` applies the user's chosen accent to the scheme it reads in
+  their place, which KDE itself does not.
 
 ### Changed
 

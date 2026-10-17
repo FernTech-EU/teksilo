@@ -14,7 +14,10 @@
 //! built on it, and [`palette`] the resolved palette of every state and set
 //! ([`KdeColorScheme::resolve`]), the light or dark decision
 //! ([`KdeColorScheme::is_dark`]) and the colour report Teksilo's native
-//! theme reads ([`KdeColorScheme::os_theme_colors`]).
+//! theme reads ([`KdeColorScheme::os_theme_colors`]). [`accent`] applies
+//! an accent colour to a scheme the way Plasma's colour settings do
+//! ([`KdeColorScheme::with_accent`]) and lists Plasma's ten accent
+//! swatches ([`ACCENT_SWATCHES`]).
 //!
 //! It does no I/O. The environment is passed in as a getter and files are
 //! passed in as text, so everything here runs the same in a test as on a
@@ -54,6 +57,7 @@
 //! tests compare against are vendored as test fixtures only and are not
 //! part of the published crate.
 
+pub mod accent;
 pub mod color;
 pub mod config;
 pub mod desktop;
@@ -64,6 +68,7 @@ pub mod math;
 pub mod palette;
 pub mod scheme;
 
+pub use accent::ACCENT_SWATCHES;
 pub use color::KdeColor;
 pub use config::{DiagnosticKind, Entry, ExpansionEnv, KConfig, LayerKind, ParseDiagnostic};
 pub use desktop::{

@@ -461,9 +461,9 @@ fn a_desktop_without_colour_groups_reads_the_scheme_file_over_kdeglobals() {
     let var = env(&[]);
     let locations = KdeConfigLocations::from_env(env(&[]));
     let expansion = locations.expansion_env(&var);
-    let kdeglobals = [user(
-        "[KDE]\nframeContrast=0.5\n[General]\nAccentColor=233,61,61\n",
-    )];
+    // No accent: an accent would be applied to the scheme file, and the
+    // application writes its own frameContrast (see the next test).
+    let kdeglobals = [user("[KDE]\nframeContrast=0.5\n")];
     let scheme_file = layer("[Colors:Window]\nBackgroundNormal=10,20,30\n[KDE]\ncontrast=4\n");
     let desktop = KdeDesktop::from_layers(
         &KdeDesktopLayers {
@@ -481,10 +481,7 @@ fn a_desktop_without_colour_groups_reads_the_scheme_file_over_kdeglobals() {
         desktop.scheme.sets[1].background_normal,
         teksilo_kde_scheme::KdeColor::rgb8(10, 20, 30)
     );
-    assert_eq!(
-        desktop.user_accent,
-        Some(teksilo_kde_scheme::KdeColor::rgb8(233, 61, 61))
-    );
+    assert_eq!(desktop.user_accent, None);
 
     let builtin = KdeDesktop::from_layers(
         &KdeDesktopLayers {
@@ -500,4 +497,98 @@ fn a_desktop_without_colour_groups_reads_the_scheme_file_over_kdeglobals() {
         teksilo_kde_scheme::KdeColorScheme::breeze_light().sets
     );
     assert_eq!(builtin.scheme.frame_contrast, 0.5);
+}
+
+#[test]
+fn a_desktop_without_colour_groups_applies_the_user_accent_to_the_scheme_file() {
+    use teksilo_kde_scheme::{ColorSet, KdeColor, KdeColorScheme};
+
+    let var = env(&[]);
+    let locations = KdeConfigLocations::from_env(env(&[]));
+    let expansion = locations.expansion_env(&var);
+    let accent = KdeColor::rgb8(233, 61, 61);
+    let kdeglobals = [user(
+        "[KDE]\nframeContrast=0.5\n[General]\nAccentColor=233,61,61\n",
+    )];
+    let file_text = "[Colors:Window]\nBackgroundNormal=10,20,30\n[KDE]\ncontrast=4\n";
+    let scheme_file = layer(file_text);
+    let desktop = KdeDesktop::from_layers(
+        &KdeDesktopLayers {
+            kdeglobals: &kdeglobals,
+            breezerc: &[],
+            scheme_file: Some(&scheme_file),
+        },
+        &expansion,
+    );
+    assert_eq!(desktop.scheme_origin, SchemeOrigin::SchemeFile);
+    assert_eq!(desktop.user_accent, Some(accent));
+    let accented = KdeColorScheme::parse(file_text).0.with_accent(accent);
+    assert_eq!(desktop.scheme.sets, accented.sets);
+    assert_eq!(
+        desktop.scheme.set(ColorSet::Window).decoration_focus,
+        accent
+    );
+    assert_eq!(desktop.scheme.contrast, 4);
+    // The accent application writes frameContrast, 0.2 when the scheme file
+    // has none, over kdeglobals' 0.5.
+    assert_eq!(desktop.scheme.frame_contrast, 0.2);
+
+    let builtin = KdeDesktop::from_layers(
+        &KdeDesktopLayers {
+            kdeglobals: &kdeglobals,
+            breezerc: &[],
+            scheme_file: None,
+        },
+        &expansion,
+    );
+    assert_eq!(builtin.scheme_origin, SchemeOrigin::BuiltIn);
+    let light = KdeColorScheme::breeze_light().with_accent(accent);
+    assert_eq!(builtin.scheme.sets, light.sets);
+    assert_eq!(builtin.scheme.inactive_sets, light.inactive_sets);
+    assert_eq!(builtin.scheme.wm, light.wm);
+}
+
+#[test]
+fn colour_groups_in_kdeglobals_are_not_accented_again() {
+    use teksilo_kde_scheme::{ColorSet, KdeColor};
+
+    let var = env(&[]);
+    let locations = KdeConfigLocations::from_env(env(&[]));
+    let expansion = locations.expansion_env(&var);
+    let kdeglobals = [user(
+        "[Colors:View]\nDecorationFocus=1,2,3\n[General]\nAccentColor=233,61,61\n",
+    )];
+    let desktop = KdeDesktop::from_layers(
+        &KdeDesktopLayers {
+            kdeglobals: &kdeglobals,
+            breezerc: &[],
+            scheme_file: None,
+        },
+        &expansion,
+    );
+    assert_eq!(desktop.scheme_origin, SchemeOrigin::Kdeglobals);
+    assert_eq!(
+        desktop.scheme.set(ColorSet::View).decoration_focus,
+        KdeColor::rgb8(1, 2, 3)
+    );
+}
+
+#[test]
+fn a_transparent_user_accent_is_not_applied_in_the_fallback() {
+    let var = env(&[]);
+    let locations = KdeConfigLocations::from_env(env(&[]));
+    let expansion = locations.expansion_env(&var);
+    let kdeglobals = [user("[General]\nAccentColor=transparent\n")];
+    let desktop = KdeDesktop::from_layers(
+        &KdeDesktopLayers {
+            kdeglobals: &kdeglobals,
+            breezerc: &[],
+            scheme_file: None,
+        },
+        &expansion,
+    );
+    assert_eq!(desktop.user_accent, None);
+    let light = teksilo_kde_scheme::KdeColorScheme::breeze_light();
+    assert_eq!(desktop.scheme.sets, light.sets);
+    assert_eq!(desktop.scheme.wm, light.wm);
 }

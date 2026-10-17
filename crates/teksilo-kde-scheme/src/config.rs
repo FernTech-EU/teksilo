@@ -459,6 +459,24 @@ impl KConfig {
     pub fn read_color(&self, group: &[&str], key: &str) -> Option<KdeColor> {
         self.get(group, key).and_then(KdeColor::parse)
     }
+
+    /// Stores `value` for `key` in `group` as a plain entry (neither
+    /// immutable nor expanding), replacing whatever the group held for the
+    /// key. The group is created when it does not exist.
+    pub(crate) fn set(&mut self, group: &[&str], key: &str, value: impl Into<String>) {
+        self.groups
+            .entry(owned_path(group))
+            .or_default()
+            .entries
+            .insert(
+                key.to_owned(),
+                Entry {
+                    value: Some(value.into()),
+                    immutable: false,
+                    expand: false,
+                },
+            );
+    }
 }
 
 pub(crate) fn parse_bool(value: &str) -> bool {
