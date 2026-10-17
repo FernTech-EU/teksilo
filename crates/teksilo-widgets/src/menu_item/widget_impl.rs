@@ -30,6 +30,28 @@ fn is_highlight(state: MenuItemState) -> bool {
     matches!(state, MenuItemState::Hovered | MenuItemState::Pressed)
 }
 
+/// The roles a style asks a row's foregrounds to take in its interaction
+/// states, read once per build.
+#[derive(Clone, Copy)]
+pub(super) struct StateRoles {
+    /// [`MenuItemStyle::highlighted_label_role`](teksilo_core::styles::MenuItemStyle::highlighted_label_role).
+    pub(super) highlighted: Option<TextRole>,
+    /// [`MenuItemStyle::pressed_label_role`](teksilo_core::styles::MenuItemStyle::pressed_label_role).
+    pub(super) pressed: Option<TextRole>,
+}
+
+impl StateRoles {
+    /// The role a foreground reads in `state`: the pressed role while
+    /// pressed, else the highlighted role while highlighted (a pressed row
+    /// included), else `rest`, the row's own mapping for the state.
+    pub(super) fn resolve(self, state: MenuItemState, rest: TextRole) -> TextRole {
+        self.pressed
+            .filter(|_| state == MenuItemState::Pressed)
+            .or_else(|| self.highlighted.filter(|_| is_highlight(state)))
+            .unwrap_or(rest)
+    }
+}
+
 impl Widget for MenuItem {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
@@ -45,6 +67,30 @@ impl Widget for MenuItem {
         // leaves' role substitution.
         let interaction = ctx.signal(MenuItemState::Idle);
         self.interaction = interaction.clone();
+        // The row's pressed state, driven by the router's press record while
+        // a pointer holds the row. It was previously written by the keyboard
+        // path alone (and by `on_tap`, which runs on the release and resets
+        // to `Idle` in the same handler), so a style's pressed chrome and its
+        // `pressed_label_role` were unreachable for a mouse and for a finger.
+        // `hovered` is where the hover truth lives while `interaction` holds
+        // `Pressed`, so a press that ends without activating (it slid off)
+        // returns the row to where the pointer is.
+        let hovered = Rc::new(std::cell::Cell::new(false));
+        {
+            let hovered = hovered.clone();
+            crate::common::interaction::bind_press_state(
+                ctx,
+                interaction.clone(),
+                MenuItemState::Pressed,
+                move || {
+                    if hovered.get() {
+                        MenuItemState::Hovered
+                    } else {
+                        MenuItemState::Idle
+                    }
+                },
+            );
+        }
 
         // Resolved here rather than at `make_body` because the label is
         // built long before the chrome, and a style whose highlight is a
@@ -59,7 +105,10 @@ impl Widget for MenuItem {
                     &ctx.theme().input,
                 ))
             });
-        let highlighted_role = style.highlighted_label_role();
+        let state_roles = StateRoles {
+            highlighted: style.highlighted_label_role(),
+            pressed: style.pressed_label_role(),
+        };
         // The slot sizes the active style owns. `MenuItem` builds the leading
         // icon/check column and the trailing chevron column itself — they are
         // slot *contents*, handed to `make_body` already sized — so they have
@@ -77,9 +126,7 @@ impl Widget for MenuItem {
             if !*on {
                 TextRole::Disabled
             } else {
-                highlighted_role
-                    .filter(|_| is_highlight(*s))
-                    .unwrap_or_else(|| resolve_text_role(*s))
+                state_roles.resolve(*s, resolve_text_role(*s))
             }
         });
 
@@ -278,11 +325,8 @@ impl Widget for MenuItem {
             };
             let has_shortcut = shortcut.is_some();
             if let Some(shortcut) = shortcut {
-                let shortcut_role = interaction.map(move |s| {
-                    highlighted_role
-                        .filter(|_| is_highlight(*s))
-                        .unwrap_or_else(|| resolve_shortcut_role(*s))
-                });
+                let shortcut_role =
+                    interaction.map(move |s| state_roles.resolve(*s, resolve_shortcut_role(*s)));
                 trailing_row = trailing_row.child(
                     shortcut
                         .style(TextStyleRole::Body)
@@ -304,11 +348,8 @@ impl Widget for MenuItem {
                         crate::primitives::FixedSize::new().width(metrics.trailing_column_width),
                     );
                 }
-                let hint_role = interaction.map(move |s| {
-                    highlighted_role
-                        .filter(|_| is_highlight(*s))
-                        .unwrap_or_else(|| resolve_shortcut_role(*s))
-                });
+                let hint_role =
+                    interaction.map(move |s| state_roles.resolve(*s, resolve_shortcut_role(*s)));
                 trailing_row = trailing_row.child(
                     TextWidget::new(hint)
                         .style(TextStyleRole::Body)
@@ -622,7 +663,9 @@ impl Widget for MenuItem {
                 })
                 .on_hover({
                     let int_hover = int_hover.clone();
+                    let hovered = hovered.clone();
                     move |entered: bool, ctx: &mut EventContext| {
+                        hovered.set(entered);
                         if entered {
                             int_hover.set(MenuItemState::Hovered);
                             open_for_hover.set(true);
@@ -723,7 +766,9 @@ impl Widget for MenuItem {
                 })
                 .on_hover({
                     let safe_triangle_sibling = self.safe_triangle.clone();
+                    let hovered = hovered.clone();
                     move |entered: bool, ctx: &mut EventContext| {
+                        hovered.set(entered);
                         if entered {
                             // Safe-triangle gate: while a traversal
                             // toward an open submenu in this list is

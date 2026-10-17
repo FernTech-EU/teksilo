@@ -115,7 +115,9 @@ impl StandardItemStyle for MacOsStandardItemStyle {
             is_hovered: cfg.is_hovered.clone(),
             is_pressed: cfg.is_pressed.clone(),
             is_disabled: cfg.is_disabled.clone(),
-            emphasised: cfg.is_focused.and(&cfg.is_window_active),
+            emphasised: self
+                .selection_emphasis()
+                .emphasised(&cfg.is_focused, &cfg.is_window_active),
             show_ring: cfg
                 .is_selected
                 .zip3(&cfg.is_focused, &cfg.is_focus_visible)

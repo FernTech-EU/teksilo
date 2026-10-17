@@ -57,6 +57,18 @@ by crate for clarity, not because crates version independently.
 - **`ScrollBarStyle::min_thumb_length`.** A scroll-bar style says how short a
   `ScrollBar` thumb may get on a long document at the active density. It has
   a default, so an existing style keeps the shipped floor.
+- **`StandardItemStyle::selection_emphasis` and `SelectionEmphasis`.** A row
+  style says what mutes a selected `StandardListItem` or `StandardTreeItem`:
+  the view losing keyboard focus or the window going inactive
+  (`ViewFocusedAndWindowActive`, the default and the rule every row followed
+  before), or the window going inactive only (`WindowActive`, Qt's per-window
+  colour groups). The row's label, subtitle and chevron follow it, and
+  `SelectionEmphasis::emphasised` gives a style the same condition for its
+  own selection fill.
+- **`MenuItemStyle::pressed_label_role`.** A menu style gives the text role a
+  `MenuItem`'s label and shortcut take while the row is pressed, for a design
+  whose pressed row is a solid fill while its hover is a pale wash. It
+  defaults to `None`, so an existing style keeps its pressed labels.
 
 ### Removed
 
@@ -76,6 +88,13 @@ by crate for clarity, not because crates version independently.
 
 #### Theming
 
+- **A menu row shows its pressed state while the pointer holds it.**
+  **Behaviour change:** pressing a `MenuItem` with the mouse, a pen or a
+  finger now paints the style's pressed row (the pressed surface under Int UI
+  and Fluent, the deeper accent under macOS) from the pointer-down until the
+  release, and a style's `pressed_label_role` applies over the same span.
+  Before, a menu row showed its pressed state only after an Enter or Space
+  activation, so a pointer never saw it.
 - **A breadcrumb crumb shows its hover, focus and link colours.**
   **Behaviour change:** a navigable crumb now paints its hover and focus
   background, its focus ring and its accent link colour, and assistive

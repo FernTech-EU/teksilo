@@ -19,6 +19,9 @@ pub struct MenuItemStyleConfig {
     /// Optional trailing slot (shortcut chip, submenu chevron).
     pub trailing: Option<WidgetId>,
     pub is_hovered: Signal<bool>,
+    /// `true` while a pointer holds the row down (the framework press, from
+    /// the pointer-down until the release or until the press slides off), and
+    /// after an Enter or Space activation of a row that stays open.
     pub is_pressed: Signal<bool>,
     pub is_focused: Signal<bool>,
     pub is_disabled: Signal<bool>,
@@ -96,6 +99,25 @@ pub trait MenuItemStyle: 'static {
     /// and defaulted for the same reason: an existing style needs no
     /// change.
     fn highlighted_label_role(&self) -> Option<TextRole> {
+        None
+    }
+
+    /// The text role a menu row's label and shortcut take while the row is
+    /// **pressed**: held under the pointer, from the pointer-down until the
+    /// release, or activated from the keyboard.
+    /// `None` (the default) keeps whatever the row would read otherwise,
+    /// which for a pressed row is
+    /// [`highlighted_label_role`](Self::highlighted_label_role), since a
+    /// pressed row is still highlighted underneath the press.
+    ///
+    /// For a design language whose *pressed* row is a solid fill while its
+    /// hover is a pale wash: the style returns `None` from
+    /// `highlighted_label_role` and, say, [`TextRole::OnAccent`] here, so the
+    /// label keeps its contrast against the wash and flips only under the
+    /// press.
+    ///
+    /// Defaulted, so an existing style needs no change.
+    fn pressed_label_role(&self) -> Option<TextRole> {
         None
     }
 }

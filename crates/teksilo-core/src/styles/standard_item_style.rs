@@ -42,7 +42,55 @@ pub struct StandardItemStyleConfig {
     /// same desaturation a view-focus loss produces (macOS "unemphasized"
     /// selection serves both states). Populated from
     /// `BuildContext::window_active_signal`.
+    ///
+    /// Which of the two signals a style composes is its
+    /// [`StandardItemStyle::selection_emphasis`]; build the condition with
+    /// [`SelectionEmphasis::emphasised`] rather than by hand, so the chrome
+    /// and the row's label (which the row composes from the same hook) agree.
     pub is_window_active: Signal<bool>,
+}
+
+/// When a selected row is drawn **emphasised**: the vivid `Selected`
+/// surface (and [`StandardItemStyle::selected_label_role`] on its
+/// foregrounds) rather than the muted `SelectedInactive` one.
+///
+/// Design languages disagree on what mutes a selection. macOS, IntUI and
+/// Fluent mute it whenever the view loses keyboard focus, as well as when
+/// the window does. Qt picks a palette colour group per *window*: every
+/// view in an active window paints its selection with the active
+/// `Highlight`, whichever of them holds focus, so KDE's Breeze mutes a
+/// selection only when the window goes inactive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub enum SelectionEmphasis {
+    /// Emphasised while the row's view holds keyboard focus **and** its
+    /// window is active. The default, and the rule every shipped style
+    /// followed before the choice existed.
+    #[default]
+    ViewFocusedAndWindowActive,
+    /// Emphasised while the window is active, whether or not the view holds
+    /// keyboard focus: Qt's per-window colour groups.
+    WindowActive,
+}
+
+impl SelectionEmphasis {
+    /// The emphasis condition as a signal, from the view-focus signal (a
+    /// row's [`StandardItemStyleConfig::is_focused`]) and the window-active
+    /// signal ([`StandardItemStyleConfig::is_window_active`]).
+    ///
+    /// A selected row is emphasised while this reads `true`. Selection
+    /// itself is not part of it: the caller combines that, since the chrome
+    /// and the label each already hold it.
+    pub fn emphasised(
+        self,
+        view_focused: &Signal<bool>,
+        window_active: &Signal<bool>,
+    ) -> Signal<bool> {
+        match self {
+            Self::ViewFocusedAndWindowActive => view_focused.and(window_active),
+            Self::WindowActive => window_active.clone(),
+        }
+    }
 }
 
 pub trait StandardItemStyle: 'static {
@@ -67,6 +115,25 @@ pub trait StandardItemStyle: 'static {
     /// change.
     fn selected_label_role(&self) -> Option<TextRole> {
         None
+    }
+
+    /// When a selected row is drawn emphasised; see [`SelectionEmphasis`].
+    ///
+    /// The row reads this for its foregrounds (the label, the subtitle and
+    /// the tree chevron take [`selected_label_role`](Self::selected_label_role)
+    /// only while the row is emphasised), and a style reads it for its own
+    /// chrome through [`SelectionEmphasis::emphasised`], so a solid
+    /// selection fill and the text on it stay in step.
+    ///
+    /// **Defaulted** to [`SelectionEmphasis::ViewFocusedAndWindowActive`],
+    /// the rule every style followed before this existed, so an existing
+    /// style needs no change. The shipped `RecipeStandardItemStyle` consults
+    /// its own value, which is always the default: a style that returns
+    /// another value and delegates its chrome to the recipe gets the
+    /// recipe's muting, and has to paint its selection itself to follow its
+    /// own rule.
+    fn selection_emphasis(&self) -> SelectionEmphasis {
+        SelectionEmphasis::ViewFocusedAndWindowActive
     }
 
     /// The height floor of a row with no subtitle, in logical pixels, at the

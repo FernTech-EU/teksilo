@@ -529,9 +529,11 @@ struct RowRoles {
     /// language whose selection is a pale wash (IntUI, Fluent), which is
     /// also what keeps `emphasised` unbuilt.
     on_selected: Option<TextRole>,
-    /// Selected **and** view-focused **and** window-active — the same
-    /// condition the chrome uses to pick `SurfaceRole::Selected` over
-    /// `SelectedInactive`. `None` when no style asked for the flip.
+    /// The style's [`SelectionEmphasis`](teksilo_core::styles::SelectionEmphasis)
+    /// condition (view-focused and window-active by default, window-active
+    /// alone for a style that asks for it), the same condition the chrome
+    /// uses to pick `SurfaceRole::Selected` over `SelectedInactive`. `None`
+    /// when no style asked for the flip.
     emphasised: Option<Signal<bool>>,
 }
 
@@ -546,8 +548,9 @@ impl StandardListItem {
         });
         self.resolved_style = Some(style.clone());
         let on_selected = style.selected_label_role();
-        let emphasised =
-            on_selected.map(|_| ctx.view_focus_active().and(&ctx.window_active_signal()));
+        let emphasis = style.selection_emphasis();
+        let emphasised = on_selected
+            .map(|_| emphasis.emphasised(&ctx.view_focus_active(), &ctx.window_active_signal()));
         RowRoles {
             style,
             on_selected,
@@ -1643,6 +1646,131 @@ mod tests {
             "an inactive window's selected row kept its on-accent label"
         );
         assert!(!colors.contains(&on_accent));
+    }
+
+    /// A solid-selection style that follows Qt's per-window colour groups:
+    /// only the window mutes its selection.
+    #[derive(Debug, Default, Clone, Copy)]
+    struct WindowActiveEmphasisStyle;
+
+    impl StandardItemStyle for WindowActiveEmphasisStyle {
+        fn make_body(
+            &self,
+            cfg: &StandardItemStyleConfig,
+            ctx: &mut teksilo_core::build_context::BuildContext,
+        ) -> WidgetId {
+            crate::styles::RecipeStandardItemStyle::for_tokens(&ctx.theme().input)
+                .make_body(cfg, ctx)
+        }
+
+        fn selected_label_role(&self) -> Option<TextRole> {
+            Some(TextRole::OnAccent)
+        }
+
+        fn selection_emphasis(&self) -> teksilo_core::styles::SelectionEmphasis {
+            teksilo_core::styles::SelectionEmphasis::WindowActive
+        }
+    }
+
+    /// A focus scope that never takes focus, standing in for a data view
+    /// (a `ListView` opens its scope the same way around its rows).
+    #[derive(Debug)]
+    struct UnfocusedView {
+        row: Option<StandardListItem>,
+        child: Option<WidgetId>,
+    }
+
+    impl Widget for UnfocusedView {
+        fn build(&mut self, ctx: &mut teksilo_core::build_context::BuildContext) -> Vec<WidgetId> {
+            ctx.begin_view_focus();
+            let id = ctx.add(self.row.take().expect("built once"));
+            ctx.end_view_focus();
+            self.child = Some(id);
+            vec![id]
+        }
+
+        fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+            self.child
+                .and_then(|id| ctx.child_size(id, proposal))
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+                .into()
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            self.child.into_iter().collect()
+        }
+    }
+
+    /// The glyph colours of one selected row in a view that does not hold
+    /// focus, in a window that is active unless `window_active` says
+    /// otherwise.
+    fn unfocused_view_row_colors(
+        style: impl StandardItemStyle,
+        window_active: bool,
+    ) -> Vec<[u8; 4]> {
+        let mut tree = WidgetTree::new()
+            .with_theme(discriminating_theme())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )));
+        tree.add(UnfocusedView {
+            row: Some(
+                StandardListItem::new(lit!("Row"))
+                    .selected(Signal::new(true))
+                    .style(style),
+            ),
+            child: None,
+        });
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        if !window_active {
+            tree.set_window_active(false);
+            tree.layout(SizeProposal::exact(300.0, 40.0));
+        }
+        glyph_colors(&mut tree)
+    }
+
+    /// The default emphasis is unchanged: a selected row in a view that does
+    /// not hold focus is not emphasised, even in an active window. This also
+    /// proves the fixture's view really is unfocused.
+    #[test]
+    fn the_default_emphasis_mutes_a_selected_row_in_an_unfocused_view() {
+        let t = discriminating_theme();
+        let primary = rgba8(t.colors.text_primary);
+        let on_accent = rgba8(t.colors.text_on_accent);
+
+        let colors = unfocused_view_row_colors(OnAccentSelectionStyle, true);
+        assert!(colors.contains(&primary), "painted {colors:?}");
+        assert!(!colors.contains(&on_accent));
+    }
+
+    /// A style returning `SelectionEmphasis::WindowActive` emphasises the same
+    /// row: the view is unfocused, but its window is active.
+    #[test]
+    fn window_active_emphasis_emphasises_a_selected_row_in_an_unfocused_view() {
+        let on_accent = rgba8(discriminating_theme().colors.text_on_accent);
+        let colors = unfocused_view_row_colors(WindowActiveEmphasisStyle, true);
+        assert!(colors.contains(&on_accent), "painted {colors:?}");
+    }
+
+    /// …and still mutes it once the window goes inactive.
+    #[test]
+    fn window_active_emphasis_mutes_a_selected_row_in_an_inactive_window() {
+        let t = discriminating_theme();
+        let primary = rgba8(t.colors.text_primary);
+        let on_accent = rgba8(t.colors.text_on_accent);
+
+        let colors = unfocused_view_row_colors(WindowActiveEmphasisStyle, false);
+        assert!(colors.contains(&primary), "painted {colors:?}");
+        assert!(!colors.contains(&on_accent));
+    }
+
+    /// A style that does not override the hook keeps the rule it had.
+    #[test]
+    fn the_selection_emphasis_hook_defaults_to_view_focus_and_window_active() {
+        assert_eq!(
+            OnAccentSelectionStyle.selection_emphasis(),
+            teksilo_core::styles::SelectionEmphasis::ViewFocusedAndWindowActive
+        );
     }
 
     #[test]

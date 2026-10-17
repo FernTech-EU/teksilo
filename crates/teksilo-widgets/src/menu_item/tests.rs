@@ -122,6 +122,187 @@ fn the_hook_does_not_touch_an_idle_row() {
     assert!(!colors.contains(&on_accent));
 }
 
+// --- `MenuItemStyle::pressed_label_role` ---
+
+/// A style whose hover is a pale wash (no highlighted role) but whose press
+/// is a solid fill, so only the press flips the label.
+#[derive(Debug, Default, Clone, Copy)]
+struct OnAccentPressStyle;
+
+impl teksilo_core::styles::MenuItemStyle for OnAccentPressStyle {
+    fn make_body(
+        &self,
+        cfg: &MenuItemStyleConfig,
+        ctx: &mut teksilo_core::build_context::BuildContext,
+    ) -> WidgetId {
+        crate::styles::RecipeMenuItemStyle::for_tokens(&ctx.theme().input).make_body(cfg, ctx)
+    }
+
+    fn pressed_label_role(&self) -> Option<TextRole> {
+        Some(TextRole::OnAccent)
+    }
+}
+
+/// How a row is driven before its glyph colours are read.
+#[derive(Clone, Copy)]
+enum Drive {
+    Idle,
+    Hover,
+    /// Enter on the focused row: a plain row with no action stays pressed.
+    Press,
+    /// The primary button held down over the row, not yet released.
+    PointerHold,
+    /// The primary button pressed over the row and released over it.
+    PointerClick,
+}
+
+/// Build a menu row with a shortcut chip under `style`, drive it, and
+/// report the glyph colours it paints.
+fn driven_row_glyph_colors(styled: bool, drive: Drive) -> Vec<[u8; 4]> {
+    let mut t = WidgetTree::new()
+        .with_theme(discriminating_theme())
+        .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+            teksilo_canvas::MockTextBackend::new(),
+        )));
+    let mut item = MenuItem::new(lit!("Open")).shortcut_label("Ctrl+O");
+    if styled {
+        item = item.style(OnAccentPressStyle);
+    }
+    let id = t.add(item);
+    layout(&mut t);
+    match drive {
+        Drive::Idle => {}
+        Drive::Hover => {
+            t.pointer_move(t.bounds(id).center());
+            layout(&mut t);
+        }
+        Drive::Press => {
+            t.focus(id);
+            t.press_key(Key::Enter, Modifiers::NONE);
+            layout(&mut t);
+        }
+        Drive::PointerHold | Drive::PointerClick => {
+            let at = t.bounds(id).center();
+            t.pointer_move(at);
+            layout(&mut t);
+            t.pointer_down_button(at, teksilo_core::event::PointerButton::Primary);
+            layout(&mut t);
+            if matches!(drive, Drive::PointerClick) {
+                t.pointer_up_button(at, teksilo_core::event::PointerButton::Primary);
+                layout(&mut t);
+            }
+        }
+    }
+    glyph_colors(&mut t)
+}
+
+/// The default is `None`: a pressed row under a style without the hook
+/// keeps its own mapping.
+#[test]
+fn a_style_without_the_pressed_hook_leaves_the_pressed_label_alone() {
+    let on_accent = rgba8(discriminating_theme().colors.text_on_accent);
+    let colors = driven_row_glyph_colors(false, Drive::Press);
+    assert!(!colors.is_empty());
+    assert!(!colors.contains(&on_accent), "painted {colors:?}");
+}
+
+/// A style that declares the hook flips the label and the shortcut of a
+/// pressed row.
+#[test]
+fn the_pressed_hook_flips_the_label_of_a_pressed_row() {
+    let theme = discriminating_theme();
+    let primary = rgba8(theme.colors.text_primary);
+    let on_accent = rgba8(theme.colors.text_on_accent);
+    let colors = driven_row_glyph_colors(true, Drive::Press);
+    assert!(colors.contains(&on_accent), "painted {colors:?}");
+    assert!(
+        !colors.contains(&primary),
+        "the label kept its idle colour under the press; painted {colors:?}"
+    );
+}
+
+/// A row held under the pointer is pressed too: the press shows from the
+/// pointer-down, not only from the keyboard, so the hook reaches a mouse.
+#[test]
+fn the_pressed_hook_flips_the_label_of_a_row_held_under_the_pointer() {
+    let theme = discriminating_theme();
+    let primary = rgba8(theme.colors.text_primary);
+    let on_accent = rgba8(theme.colors.text_on_accent);
+    let colors = driven_row_glyph_colors(true, Drive::PointerHold);
+    assert!(colors.contains(&on_accent), "painted {colors:?}");
+    assert!(
+        !colors.contains(&primary),
+        "the label kept its idle colour under the pointer press; painted {colors:?}"
+    );
+    // A style without the hook keeps its own label under the same press.
+    let colors = driven_row_glyph_colors(false, Drive::PointerHold);
+    assert!(!colors.is_empty());
+    assert!(!colors.contains(&on_accent), "painted {colors:?}");
+}
+
+/// The pointer press ends with the release: a clicked row no longer reads
+/// as pressed.
+#[test]
+fn the_pressed_hook_lets_go_of_the_label_on_the_release() {
+    let theme = discriminating_theme();
+    let primary = rgba8(theme.colors.text_primary);
+    let on_accent = rgba8(theme.colors.text_on_accent);
+    let colors = driven_row_glyph_colors(true, Drive::PointerClick);
+    assert!(colors.contains(&primary), "painted {colors:?}");
+    assert!(!colors.contains(&on_accent), "painted {colors:?}");
+}
+
+/// The pressed role applies only while pressed: an idle row and a hovered
+/// one keep their normal label.
+#[test]
+fn the_pressed_hook_does_not_touch_an_idle_or_hovered_row() {
+    let theme = discriminating_theme();
+    let primary = rgba8(theme.colors.text_primary);
+    let on_accent = rgba8(theme.colors.text_on_accent);
+    for drive in [Drive::Idle, Drive::Hover] {
+        let colors = driven_row_glyph_colors(true, drive);
+        assert!(colors.contains(&primary), "painted {colors:?}");
+        assert!(!colors.contains(&on_accent), "painted {colors:?}");
+    }
+}
+
+/// The pressed role wins over the highlighted one on a pressed row, and the
+/// highlighted one still applies to a hovered row.
+#[test]
+fn the_pressed_role_takes_precedence_over_the_highlighted_role() {
+    let rest = TextRole::Primary;
+    use super::widget_impl::StateRoles;
+    let roles = StateRoles {
+        highlighted: Some(TextRole::Secondary),
+        pressed: Some(TextRole::OnAccent),
+    };
+    assert_eq!(
+        roles.resolve(MenuItemState::Pressed, rest),
+        TextRole::OnAccent
+    );
+    assert_eq!(
+        roles.resolve(MenuItemState::Hovered, rest),
+        TextRole::Secondary
+    );
+    assert_eq!(roles.resolve(MenuItemState::Idle, rest), rest);
+
+    let highlight_only = StateRoles {
+        highlighted: Some(TextRole::Secondary),
+        pressed: None,
+    };
+    assert_eq!(
+        highlight_only.resolve(MenuItemState::Pressed, rest),
+        TextRole::Secondary
+    );
+}
+
+/// The trait default is `None`.
+#[test]
+fn the_pressed_label_role_defaults_to_none() {
+    use teksilo_core::styles::MenuItemStyle as _;
+    assert_eq!(OnAccentHighlightStyle.pressed_label_role(), None);
+}
+
 // --- Role coverage ---
 
 fn a11y_node(

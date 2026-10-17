@@ -152,8 +152,9 @@ impl StandardItemStyle for RecipeStandardItemStyle {
             &cfg.is_pressed,
             &cfg.is_hovered,
             &cfg.is_disabled,
-            &cfg.is_focused,
-            &cfg.is_window_active,
+            &self
+                .selection_emphasis()
+                .emphasised(&cfg.is_focused, &cfg.is_window_active),
         );
 
         // Keyboard-focus ring: drawn on the *current* item (selected, in a
@@ -247,15 +248,14 @@ fn bg_signal(
     is_pressed: &Signal<bool>,
     is_hovered: &Signal<bool>,
     is_disabled: &Signal<bool>,
-    is_focused: &Signal<bool>,
-    is_window_active: &Signal<bool>,
+    emphasised: &Signal<bool>,
 ) -> Signal<SurfaceRole> {
-    // Effective focus = the view holds keyboard focus AND the host window is
-    // active. A selected row in an inactive window desaturates exactly as it
-    // does when focus moves elsewhere in the same window.
-    let effective_focus = is_focused.and(is_window_active);
+    // `emphasised` is the style's `SelectionEmphasis` condition; by default
+    // the view holds keyboard focus AND the host window is active, so a
+    // selected row in an inactive window desaturates exactly as it does when
+    // focus moves elsewhere in the same window.
     let combined = is_selected.zip3(is_pressed, is_hovered);
-    combined.zip3(is_disabled, &effective_focus).map(
+    combined.zip3(is_disabled, emphasised).map(
         |((selected, pressed, hovered), disabled, focused)| {
             if *disabled {
                 SurfaceRole::Transparent
@@ -281,6 +281,7 @@ fn bg_signal(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use teksilo_core::styles::SelectionEmphasis;
     use teksilo_tokens::SurfaceRole;
 
     #[test]
@@ -297,8 +298,7 @@ mod tests {
             &pressed,
             &hovered,
             &disabled,
-            &focused,
-            &window_active,
+            &SelectionEmphasis::default().emphasised(&focused, &window_active),
         );
 
         // Selected, view-focused, window-active → vivid.
@@ -315,6 +315,43 @@ mod tests {
 
         // Both satisfied again → vivid.
         focused.set(true);
+        assert_eq!(role.get(), SurfaceRole::Selected);
+    }
+
+    /// The default style keeps the rule it had before the hook existed.
+    #[test]
+    fn the_recipe_keeps_the_default_selection_emphasis() {
+        assert_eq!(
+            RecipeStandardItemStyle::default().selection_emphasis(),
+            SelectionEmphasis::ViewFocusedAndWindowActive
+        );
+    }
+
+    /// Under `WindowActive` only the window mutes a selection: a view that
+    /// loses keyboard focus inside an active window stays vivid.
+    #[test]
+    fn window_active_emphasis_ignores_view_focus() {
+        let selected = Signal::new(true);
+        let pressed = Signal::new(false);
+        let hovered = Signal::new(false);
+        let disabled = Signal::new(false);
+        let focused = Signal::new(false);
+        let window_active = Signal::new(true);
+
+        let role = bg_signal(
+            &selected,
+            &pressed,
+            &hovered,
+            &disabled,
+            &SelectionEmphasis::WindowActive.emphasised(&focused, &window_active),
+        );
+
+        assert_eq!(role.get(), SurfaceRole::Selected);
+        window_active.set(false);
+        assert_eq!(role.get(), SurfaceRole::SelectedInactive);
+        focused.set(true);
+        assert_eq!(role.get(), SurfaceRole::SelectedInactive);
+        window_active.set(true);
         assert_eq!(role.get(), SurfaceRole::Selected);
     }
 }

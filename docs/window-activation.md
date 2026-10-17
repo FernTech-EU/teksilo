@@ -77,6 +77,33 @@ Keyboard focus rings grey out (not hide) in an inactive window, uniformly, via
 the theme-side accent projection above, no per-widget check. `MenuList` is
 excluded by design, an open menu is always active.
 
+### A style chooses what mutes a list row's selection
+
+For `StandardListItem` / `StandardTreeItem` the "view focused **and** window
+active" rule above is the default of a style hook,
+`StandardItemStyle::selection_emphasis() -> SelectionEmphasis`:
+
+| `SelectionEmphasis` | A selected row is emphasised while | Used by |
+| --- | --- | --- |
+| `ViewFocusedAndWindowActive` (default) | its view holds keyboard focus and its window is active | IntUI, Fluent, macOS, Material 3 |
+| `WindowActive` | its window is active, whichever view holds focus | styles following Qt's per-window colour groups (KDE's Breeze) |
+
+Qt picks a palette colour group per *window*: in an active window every view
+paints its selection with the active `Highlight`, focused or not, so only the
+window going inactive mutes it. A style that returns `WindowActive` gets that.
+
+The row reads the hook for its foregrounds: the label, the subtitle and a tree
+row's chevron take `selected_label_role` only while the row is emphasised. A
+style reads the same hook for its chrome through
+`SelectionEmphasis::emphasised(&cfg.is_focused, &cfg.is_window_active)`, so a
+solid selection fill and the text on it change together. The shipped
+`RecipeStandardItemStyle` keeps the default, so a style that delegates its chrome
+to it and returns `WindowActive` has to paint its own selection to follow its
+rule.
+
+Tests that assume a selected row mutes when its view loses focus therefore hold
+for the presets on the default only; scope them per preset.
+
 ### Single-line fields hide their selection when *they* lose focus
 
 The table above is the **window** axis. On the **view-focus** axis the

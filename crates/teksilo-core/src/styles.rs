@@ -189,7 +189,7 @@ pub use spin_box_style::{ButtonLayout, SharedSpinBoxStyle, SpinBoxStyle, SpinBox
 pub use split_button_style::{SharedSplitButtonStyle, SplitButtonStyle, SplitButtonStyleConfig};
 pub use splitter_style::{SharedSplitterStyle, SplitterStyle, SplitterStyleConfig};
 pub use standard_item_style::{
-    SharedStandardItemStyle, StandardItemStyle, StandardItemStyleConfig,
+    SelectionEmphasis, SharedStandardItemStyle, StandardItemStyle, StandardItemStyleConfig,
 };
 pub use tab_style::{
     SharedTabStyle, TabBarChromeConfig, TabBarOrientation, TabIndicatorPosition, TabStyle,
