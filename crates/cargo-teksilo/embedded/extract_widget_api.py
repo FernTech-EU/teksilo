@@ -254,6 +254,10 @@ CRATE_SPECS: dict[str, CrateSpec] = {
     "theme-fluent": CrateSpec("teksilo-theme-fluent", "teksilo_theme_fluent", "theme-fluent", "Fluent Theme", "Themes", False, False),
     "theme-macos": CrateSpec("teksilo-theme-macos", "teksilo_theme_macos", "theme-macos", "macOS Theme", "Themes", False, False),
     "theme-material3": CrateSpec("teksilo-theme-material3", "teksilo_theme_material3", "theme-material3", "Material 3 Theme", "Themes", False, False),
+    "theme-kde": CrateSpec("teksilo-theme-kde", "teksilo_theme_kde", "theme-kde", "KDE Plasma Theme", "Themes", False, False),
+    # The KDE colour-scheme model the KDE preset and the platform reader share
+    # (`teksilo-theme-kde` re-exports it as `scheme`).
+    "kde-scheme": CrateSpec("teksilo-kde-scheme", "teksilo_kde_scheme", "kde-scheme", "KDE Colour Schemes", "Themes", False, False),
 
     # Storybook-equivalent previewer: trait/registry crate + reusable GUI library
     "preview": CrateSpec("teksilo-preview", "teksilo_preview", "preview", "Widget Previewer Core", "Preview", False, False),
@@ -263,7 +267,7 @@ CRATE_SPECS: dict[str, CrateSpec] = {
     "fmt": CrateSpec("teksilo-fmt", "teksilo_fmt", "fmt", "teksu! Formatter", "Tooling", False, False),
     "parse": CrateSpec("teksilo-parse", "teksilo_parse", "parse", "teksu! Parser", "Tooling", False, False),
 
-    # The umbrella crate's OWN files (its toast/webview install-hook extension
+    # The umbrella crate's OWN files (its toast/webview/KDE install-hook extension
     # traits — automation_install.rs only re-exports teksilo-app's, so it does
     # not add anything new here) — distinct from the crates it merely
     # re-exports, each of which already has its own entry above.
@@ -504,13 +508,15 @@ UMBRELLA_REEXPORTS: dict[str, str] = {
     # teksilo-inspector
     "TeksiloAppBuilderInspectorExt": "inspector",
 
-    # The umbrella crate's OWN files (toast_install.rs / webview_install.rs) —
-    # these two extension traits are teksilo's own code, not a re-export of
-    # another crate. `TeksiloAppBuilderAutomationExt`, by contrast, is genuinely
+    # The umbrella crate's OWN files (toast_install.rs, webview_install.rs and
+    # kde_native_install.rs): these three extension traits are teksilo's own
+    # code, not a re-export of another crate. `TeksiloAppBuilderAutomationExt`,
+    # by contrast, is genuinely
     # defined in teksilo-app (automation_bridge.rs) and merely re-exported
     # through automation_install.rs — see the "teksilo-app" group below.
     "TeksiloAppBuilderToastExt": "teksilo",
     "TeksiloAppBuilderWebViewExt": "teksilo",
+    "TeksiloAppBuilderKdeExt": "teksilo",
 
     # teksilo-widgets — the toast/notification surface re-exported in prelude
     "EventContextToastExt": "widgets",

@@ -17,7 +17,7 @@ cargo run -p simple-button                     # Milestone 1 demo
 cargo run -p text-and-layout                   # Milestone 2 demo
 cargo run -p text-and-layout --release         # Release mode (much faster rendering)
 cargo run -p widget-catalog                    # Browse all available widgets
-cargo run -p widget-catalog -- --theme macos-dark    # …in a preset's true chrome (also macos-light, fluent-{light,dark}, material3-{light,dark}, intui-{light,dark}); the title-bar ThemeSwitcher re-tints live but keeps the shapes the tree was built with
+cargo run -p widget-catalog -- --theme macos-dark    # …in a preset's true chrome (also macos-light, fluent-{light,dark}, kde-{light,dark}, material3-{light,dark}, intui-{light,dark}; `--theme system` starts in Native mode, Breeze's chrome on a KDE desktop); the title-bar ThemeSwitcher re-tints live but keeps the shapes the tree was built with
 cargo test -p teksilo-core                        # Test a specific crate
 cargo test -p teksilo-widgets                     # Includes layout integration tests
 cargo doc --no-deps --open                     # Generate docs

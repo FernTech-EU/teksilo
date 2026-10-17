@@ -246,6 +246,34 @@ by crate for clarity, not because crates version independently.
   `system-fonts` uses the copies installed on the desktop and embeds
   nothing. Neither changes a text size, a line height or a control's
   height.
+- **The `theme-kde` feature of `teksilo`.** Turns on the KDE Plasma preset,
+  reached as `teksilo::prelude::kde::{light, dark}` like the other presets
+  (`kde::from_desktop`, `kde::native_theme` and the rest of
+  `teksilo-theme-kde` come with it). The preset's font features are not
+  forwarded: an app that wants Plasma's own faces depends on
+  `teksilo-theme-kde` directly.
+- **`native_theme_kde()` on `TeksiloAppBuilder`.** One call, from the
+  `TeksiloAppBuilderKdeExt` trait in the prelude, makes a window built while
+  the app is in `ThemeMode::Native` (for example after
+  `.theme_mode(ThemeMode::Native)`) show Breeze's geometry and chrome in the
+  desktop's live colours on a KDE desktop that uses the Breeze style, at the
+  density of the window. On any other desktop the window keeps IntUI in the
+  desktop's colours. `ThemeMode::FollowSystem` is not affected, and
+  switching to Native mode at runtime re-tints with the desktop's colours and
+  keeps the shapes the windows were built with.
+- **`TeksiloAppBuilder::configured_native_theme()`** returns the native-theme
+  factory installed with `native_theme`, if any, so an install hook or a
+  test can see what was put there.
+
+#### Demos
+
+- **The widget catalog offers KDE.** The title-bar theme switcher lists KDE
+  Light and KDE Dark after the IntUI, Material 3, Fluent and macOS pairs, a
+  pick survives a restart, and `--theme kde-light` and `--theme kde-dark`
+  start the catalog in Breeze's own chrome. `--theme system` starts it in
+  Native mode on the switcher's System entry, which on a KDE desktop with
+  the Breeze style builds Breeze's chrome too and elsewhere IntUI in the
+  desktop's colours. Picking System in the switcher later only re-tints.
 
 #### Platform
 

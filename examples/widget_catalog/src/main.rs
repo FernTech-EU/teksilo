@@ -99,17 +99,23 @@ fn main() {
                 .with_default_mode(TelemetryMode::Anonymous)
                 .with_data_processor_name("FernTech"),
         )
+        // The factory Native mode asks for a theme: on a Breeze KDE desktop it
+        // answers Breeze's geometry over the live colours, anywhere else the
+        // seam keeps IntUI in the desktop's colours. It only matters to a
+        // window built in Native mode, which `--theme system` starts in (see
+        // `startup_theme_mode`); picking System in the switcher afterwards
+        // re-tints the tree and keeps the shapes it was built with.
+        .native_theme_kde()
         .theme(
-            options
-                .theme
-                .as_deref()
-                .and_then(theme_from_name)
+            startup_theme(options.theme.as_deref())
                 .unwrap_or_else(teksilo::presets::intui::light)
                 // `--density`. Projected here, once, so every tab is built at
                 // the rung the flag names — see `CliOptions::density` for why
                 // this is not an in-app switch.
                 .with_density(options.density),
         )
+        // After `.theme(..)`, which selects the Manual mode.
+        .theme_mode(startup_theme_mode(options.theme.as_deref()))
         .i18n(i18n)
         .install_native_menu()
         .initial_window(
@@ -164,9 +170,10 @@ fn main() {
                             tree.add(Expand::vertical().respect_intrinsic().child(catalog));
 
                         // Invisible: persists + restores the chosen theme.
-                        // `--theme` forces the startup theme and skips restore.
+                        // `--theme` forces the startup theme and skips restore;
+                        // `--theme system` makes the restore follow the OS.
                         let theme_persist = tree.add(ThemePersistenceSlot {
-                            skip_restore: opts.theme.is_some(),
+                            restore: ThemeRestore::for_flag(opts.theme.as_deref()),
                         });
                         let inner = tree.add(
                             VStack::new()
@@ -194,8 +201,9 @@ fn main() {
 /// Composite-tooltip body for the title-bar `ThemeSwitcher`. Spells out the
 /// one non-obvious thing about runtime theme switching: colours retint live,
 /// but widget *chrome* (shapes) is resolved at build time — so a live switch
-/// between the IntUI, Material 3 and Fluent families keeps the current shapes.
-/// Points the user at the `--theme` startup flag to see a preset's true chrome.
+/// between the IntUI, Material 3, Fluent, macOS and KDE families keeps the
+/// current shapes. Points the user at the `--theme` startup flag to see a
+/// preset's true chrome.
 /// (Demonstrates the new `ThemeSwitcher::composite_tooltip` setter.)
 fn theme_switch_caveat() -> impl Widget + 'static {
     // The tooltip body MUST use the tooltip text roles — `TooltipText` (full
@@ -225,8 +233,8 @@ fn theme_switch_caveat() -> impl Widget + 'static {
             .child(
                 TextWidget::new(lit!(
                     "Widget shapes (Material 3's pill buttons and switch, Fluent's \
-                     elevation edge and list selection pill, card radii) are chosen \
-                     when the UI is built. Switching theme family here changes only \
+                     elevation edge and list selection pill, KDE's Breeze frames and \
+                     indicators, card radii) are chosen when the UI is built. Switching theme family here changes only \
                      the colours — the shapes stay until the UI is rebuilt."
                 ))
                 .style(TextStyleRole::Small)
@@ -236,13 +244,37 @@ fn theme_switch_caveat() -> impl Widget + 'static {
                 TextWidget::new(lit!(
                     "To see a preset's true chrome, start the catalog with \
                      --theme macos-light (or macos-dark / fluent-light / \
-                     fluent-dark / material3-light / material3-dark / \
-                     intui-light / intui-dark)."
+                     fluent-dark / kde-light / kde-dark / material3-light / \
+                     material3-dark / intui-light / intui-dark). \
+                     --theme system starts in Native mode, which on a KDE \
+                     desktop with the Breeze style builds Breeze's chrome too; \
+                     picking System in this switcher later only re-tints."
                 ))
                 .style(TextStyleRole::Small)
                 .color(TextRole::TooltipText),
             ),
     )
+}
+
+/// The themes the title-bar `ThemeSwitcher` offers, in order: IntUI, Material 3,
+/// Fluent, macOS and KDE, each light then dark. The labels are the design
+/// languages' own names, shown as they are in every locale, like the rows
+/// before them.
+fn switcher_themes() -> Vec<(LocalizedString, Theme)> {
+    use teksilo::prelude::{fluent, kde, macos, material3};
+    use teksilo::presets::intui;
+    vec![
+        (lit!("IntUI Light"), intui::light()),
+        (lit!("IntUI Dark"), intui::dark()),
+        (lit!("Material 3 Light"), material3::light()),
+        (lit!("Material 3 Dark"), material3::dark()),
+        (lit!("Fluent Light"), fluent::light()),
+        (lit!("Fluent Dark"), fluent::dark()),
+        (lit!("macOS Light"), macos::light()),
+        (lit!("macOS Dark"), macos::dark()),
+        (lit!("KDE Light"), kde::light()),
+        (lit!("KDE Dark"), kde::dark()),
+    ]
 }
 
 /// Build the custom title bar. Uses role-driven background/border so
@@ -296,29 +328,18 @@ fn build_title_bar(
     // is reachable), so the chosen size persists and restores on restart.
     let scale_ctrl = TextScaleSlot::default();
 
-    // Theme switcher — IntUI Light/Dark plus the Material 3, Fluent and
-    // macOS presets, with the OS-follow "System" entry kept on. Selecting an
-    // entry re-tints the catalog live (colours, focus/scroll preserved). It
-    // does NOT change widget *chrome* at runtime: shapes (M3 pills and switch,
-    // Fluent's elevation edge and selection pill, macOS's bezels and selection
-    // capsule, card radii) are chosen when the UI is built, so a live family
-    // switch keeps the current shapes — start with `--theme macos-light` to
-    // see a preset's true chrome. The composite tooltip below spells this out
-    // for the user.
+    // Theme switcher: IntUI, Material 3, Fluent, macOS and KDE presets, each
+    // light then dark (`switcher_themes`), with the OS-follow "System" entry
+    // kept on. Selecting an entry re-tints the catalog live (colours,
+    // focus/scroll preserved). It does NOT change widget *chrome* at runtime:
+    // shapes (M3 pills and switch, Fluent's elevation edge and selection pill,
+    // macOS's bezels and selection capsule, KDE's Breeze frames and
+    // indicators, card radii) are chosen when the UI is built, so a live
+    // family switch keeps the current shapes. Start with `--theme kde-light`
+    // (or `macos-light`, ...) to see a preset's true chrome. The composite
+    // tooltip below spells this out for the user.
     let theme_switcher = teksilo::widgets::ThemeSwitcher::new()
-        .themes([
-            (lit!("IntUI Light"), teksilo::presets::intui::light()),
-            (lit!("IntUI Dark"), teksilo::presets::intui::dark()),
-            (
-                lit!("Material 3 Light"),
-                teksilo::prelude::material3::light(),
-            ),
-            (lit!("Material 3 Dark"), teksilo::prelude::material3::dark()),
-            (lit!("Fluent Light"), teksilo::prelude::fluent::light()),
-            (lit!("Fluent Dark"), teksilo::prelude::fluent::dark()),
-            (lit!("macOS Light"), teksilo::prelude::macos::light()),
-            (lit!("macOS Dark"), teksilo::prelude::macos::dark()),
-        ])
+        .themes(switcher_themes())
         .composite_tooltip(theme_switch_caveat());
 
     let trailing = HStack::new()
@@ -391,16 +412,96 @@ impl Widget for TextScaleSlot {
 /// binding lives in `build()` where `ctx.settings()` is reachable.
 #[derive(Debug, Default)]
 struct ThemePersistenceSlot {
-    /// When a `--theme` flag forced the startup theme, skip the restore so
-    /// the forced theme (set on the builder) wins; changes still persist.
-    skip_restore: bool,
+    /// What the restore does at startup; see [`ThemeRestore`].
+    restore: ThemeRestore,
+}
+
+/// What [`ThemePersistenceSlot`] does with the saved theme at startup.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum ThemeRestore {
+    /// Put back the theme saved by the last run (no `--theme` flag).
+    #[default]
+    Saved,
+    /// A `--theme NAME` flag forced the startup theme, set on the builder:
+    /// leave it. Changes still persist.
+    Keep,
+    /// `--theme system`: follow the OS whatever was saved, as the
+    /// switcher's System entry does.
+    FollowSystem,
+}
+
+/// The one thing a restore does after the window is mounted.
+#[derive(Debug, Clone, PartialEq)]
+enum RestoreAction {
+    /// `EventContext::follow_system_theme`.
+    FollowSystem,
+    /// `EventContext::set_theme`.
+    Set(Box<teksilo::core::Theme>),
+}
+
+impl ThemeRestore {
+    /// The restore a `--theme` value asks for (`None`: no flag). The value is
+    /// already lower case, as `cli::parse` leaves it.
+    fn for_flag(flag: Option<&str>) -> Self {
+        match flag {
+            None => ThemeRestore::Saved,
+            Some("system") => ThemeRestore::FollowSystem,
+            Some(_) => ThemeRestore::Keep,
+        }
+    }
+
+    /// What to do given the saved `ui.theme` value (empty: nothing saved).
+    fn action(self, saved: &str) -> Option<RestoreAction> {
+        match self {
+            ThemeRestore::Keep => None,
+            ThemeRestore::FollowSystem => Some(RestoreAction::FollowSystem),
+            ThemeRestore::Saved if saved.is_empty() => None,
+            ThemeRestore::Saved if saved == "system" => Some(RestoreAction::FollowSystem),
+            // An id this build no longer knows keeps the builder default.
+            ThemeRestore::Saved => {
+                theme_from_id(saved).map(|theme| RestoreAction::Set(Box::new(theme)))
+            }
+        }
+    }
 }
 
 const THEME_PREF_KEY: &str = "ui.theme";
 
-/// Resolve a `--theme NAME` value to a concrete `Theme`.
+/// The mode the app starts in for a `--theme` value: `system` starts in
+/// [`ThemeMode::Native`], so the first window is built from what the desktop
+/// reports (Breeze's chrome on a Breeze KDE desktop, through the factory
+/// `native_theme_kde` installs); every other value, and no flag, keeps the
+/// builder's fixed theme.
+///
+/// The builder's `.theme(..)` selects Manual, so this is applied after it.
+fn startup_theme_mode(flag: Option<&str>) -> ThemeMode {
+    match flag {
+        Some("system") => ThemeMode::Native,
+        _ => ThemeMode::Manual,
+    }
+}
+
+/// The theme `--theme` forces at startup, or `None` to keep the default.
+///
+/// `system` is the follow-OS entry, not a preset: it is answered here, before
+/// [`theme_from_name`], so it never reaches the unknown-theme warning, and the
+/// persistence slot makes it follow the OS ([`ThemeRestore::FollowSystem`]).
+fn startup_theme(flag: Option<&str>) -> Option<teksilo::core::Theme> {
+    match flag? {
+        "system" => None,
+        name => {
+            let theme = theme_from_name(name);
+            if theme.is_none() {
+                eprintln!("--theme: unknown theme `{name}`, using the default");
+            }
+            theme
+        }
+    }
+}
+
+/// Resolve a `--theme NAME` preset name to a concrete `Theme`.
 fn theme_from_name(name: &str) -> Option<teksilo::core::Theme> {
-    use teksilo::prelude::{fluent, macos, material3};
+    use teksilo::prelude::{fluent, kde, macos, material3};
     use teksilo::presets::intui;
     match name {
         "intui-light" => Some(intui::light()),
@@ -411,10 +512,9 @@ fn theme_from_name(name: &str) -> Option<teksilo::core::Theme> {
         "fluent-dark" => Some(fluent::dark()),
         "macos-light" => Some(macos::light()),
         "macos-dark" => Some(macos::dark()),
-        other => {
-            eprintln!("--theme: unknown theme `{other}` — using the default");
-            None
-        }
+        "kde-light" => Some(kde::light()),
+        "kde-dark" => Some(kde::dark()),
+        _ => None,
     }
 }
 
@@ -426,7 +526,7 @@ fn theme_from_name(name: &str) -> Option<teksilo::core::Theme> {
 /// [`theme_from_name`]. Every preset offered by the switcher must appear
 /// here or picking it persists fine and silently reverts on next launch.
 fn theme_from_id(id: &str) -> Option<teksilo::core::Theme> {
-    use teksilo::prelude::{fluent, macos, material3};
+    use teksilo::prelude::{fluent, kde, macos, material3};
     use teksilo::presets::intui;
     match id {
         "intui.light" => Some(intui::light()),
@@ -437,6 +537,8 @@ fn theme_from_id(id: &str) -> Option<teksilo::core::Theme> {
         "fluent.dark" => Some(fluent::dark()),
         "macos.light" => Some(macos::light()),
         "macos.dark" => Some(macos::dark()),
+        "kde.light" => Some(kde::light()),
+        "kde.dark" => Some(kde::dark()),
         // Unknown / custom id: keep the builder default.
         _ => None,
     }
@@ -461,15 +563,12 @@ impl Widget for ThemePersistenceSlot {
 
         // Restore the saved theme once, after mount (an `EventContext` — needed
         // for set_theme / follow_system_theme — is only reachable post-mount).
-        // Skipped when `--theme` forced the startup theme.
-        let saved = pref.get();
-        if !self.skip_restore && !saved.is_empty() {
-            ctx.run_after_mount(move |ectx| {
-                if saved == "system" {
-                    ectx.follow_system_theme();
-                } else if let Some(theme) = theme_from_id(&saved) {
-                    ectx.set_theme(theme);
-                }
+        // Skipped when `--theme NAME` forced the startup theme; forced to
+        // follow the OS by `--theme system`.
+        if let Some(action) = self.restore.action(&pref.get()) {
+            ctx.run_after_mount(move |ectx| match action {
+                RestoreAction::FollowSystem => ectx.follow_system_theme(),
+                RestoreAction::Set(theme) => ectx.set_theme(*theme),
             });
         }
 
@@ -809,8 +908,9 @@ mod tests {
 
     /// Every preset the title-bar switcher offers, as `(--theme name,
     /// persisted ThemeId)`. The switcher itself is built inside a
-    /// `BuildContext`, so this list is the testable stand-in — keep it in
-    /// step with `build_title_bar`'s `.themes([...])`.
+    /// `BuildContext`, so this list is the testable stand-in: it must hold
+    /// exactly what `switcher_themes()` offers, which
+    /// `switcher_offers_every_preset_light_and_dark` checks.
     const OFFERED: &[(&str, &str)] = &[
         ("intui-light", "intui.light"),
         ("intui-dark", "intui.dark"),
@@ -820,7 +920,113 @@ mod tests {
         ("fluent-dark", "fluent.dark"),
         ("macos-light", "macos.light"),
         ("macos-dark", "macos.dark"),
+        ("kde-light", "kde.light"),
+        ("kde-dark", "kde.dark"),
     ];
+
+    /// The switcher offers every preset, light then dark, in the order the
+    /// user reads them, and each row is one the catalog can restore.
+    #[test]
+    fn switcher_offers_every_preset_light_and_dark() {
+        use teksilo::core::styles::ThemeAppearance;
+        let rows = switcher_themes();
+        let ids: Vec<&str> = rows.iter().map(|(_, theme)| theme.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "intui.light",
+                "intui.dark",
+                "material3.light",
+                "material3.dark",
+                "fluent.light",
+                "fluent.dark",
+                "macos.light",
+                "macos.dark",
+                "kde.light",
+                "kde.dark",
+            ]
+        );
+        let mut unique = ids.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), ids.len(), "a theme is offered twice: {ids:?}");
+        for (label, theme) in &rows {
+            let id = theme.id.as_str();
+            assert!(
+                OFFERED.iter().any(|(_, offered)| *offered == id),
+                "`{id}` is offered by the switcher but not in OFFERED"
+            );
+            let restored = theme_from_id(id)
+                .unwrap_or_else(|| panic!("`{id}` is offered but has no restore arm"));
+            assert_eq!(restored.id.as_str(), id);
+            let label = label.resolve_now();
+            let expected = if label.ends_with(" Dark") {
+                ThemeAppearance::Dark
+            } else {
+                assert!(label.ends_with(" Light"), "`{label}` names neither");
+                ThemeAppearance::Light
+            };
+            assert_eq!(theme.appearance, expected, "`{label}` ({id})");
+        }
+        assert_eq!(OFFERED.len(), rows.len());
+    }
+
+    #[test]
+    fn kde_names_and_ids_resolve() {
+        for (name, id) in [("kde-light", "kde.light"), ("kde-dark", "kde.dark")] {
+            assert_eq!(theme_from_name(name).expect(name).id.as_str(), id);
+            assert_eq!(theme_from_id(id).expect(id).id.as_str(), id);
+        }
+    }
+
+    /// `--theme system` is not a preset: it asks for the follow-OS entry, so
+    /// it forces no startup theme, is not looked up as a name, and makes the
+    /// restore follow the OS whatever the last run saved.
+    #[test]
+    fn theme_system_follows_the_os_instead_of_naming_a_preset() {
+        assert!(theme_from_name("system").is_none());
+        assert!(startup_theme(Some("system")).is_none());
+        assert_eq!(startup_theme_mode(Some("system")), ThemeMode::Native);
+        assert_eq!(
+            ThemeRestore::for_flag(Some("system")),
+            ThemeRestore::FollowSystem
+        );
+        for saved in ["", "kde.dark", "intui.light", "system", "custom"] {
+            assert_eq!(
+                ThemeRestore::FollowSystem.action(saved),
+                Some(RestoreAction::FollowSystem),
+                "saved `{saved}`"
+            );
+        }
+    }
+
+    #[test]
+    fn a_named_flag_keeps_its_theme_and_no_flag_restores_the_saved_one() {
+        assert_eq!(
+            startup_theme(Some("kde-dark")).map(|t| t.id.as_str().to_string()),
+            Some("kde.dark".to_string())
+        );
+        assert!(startup_theme(Some("nope")).is_none());
+        assert!(startup_theme(None).is_none());
+
+        assert_eq!(startup_theme_mode(Some("kde-dark")), ThemeMode::Manual);
+        assert_eq!(startup_theme_mode(Some("nope")), ThemeMode::Manual);
+        assert_eq!(startup_theme_mode(None), ThemeMode::Manual);
+
+        assert_eq!(ThemeRestore::for_flag(Some("kde-dark")), ThemeRestore::Keep);
+        assert_eq!(ThemeRestore::for_flag(None), ThemeRestore::Saved);
+        assert_eq!(ThemeRestore::Keep.action("fluent.dark"), None);
+        assert_eq!(ThemeRestore::Saved.action(""), None);
+        assert_eq!(ThemeRestore::Saved.action("custom"), None);
+        assert_eq!(
+            ThemeRestore::Saved.action("system"),
+            Some(RestoreAction::FollowSystem)
+        );
+        match ThemeRestore::Saved.action("kde.dark") {
+            Some(RestoreAction::Set(theme)) => assert_eq!(theme.id.as_str(), "kde.dark"),
+            other => panic!("expected the saved KDE Dark theme, got {other:?}"),
+        }
+    }
 
     #[test]
     fn every_cli_theme_name_resolves() {

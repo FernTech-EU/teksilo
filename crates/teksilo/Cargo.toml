@@ -148,12 +148,17 @@ telemetry = ["teksilo-app/telemetry", "teksilo-widgets?/telemetry"]
 # preset (`teksilo::prelude::intui::{light, dark}`). Each exposes a
 # stable import path (`teksilo::prelude::material3::{light, dark}`,
 # etc.), so an app's call sites never change as a preset fills in.
-# `theme-material3`, `theme-fluent` and `theme-macos` are all complete
-# design languages: colour / shape / typography / motion tokens plus
-# Tier-3 widget chrome.
+# `theme-material3`, `theme-fluent`, `theme-macos` and `theme-kde` are all
+# complete design languages: colour / shape / typography / motion tokens
+# plus Tier-3 widget chrome. `theme-kde` is KDE Plasma's Breeze, and also
+# brings `native_theme_kde()`, which gives Native mode on a Breeze desktop
+# Breeze's geometry over the desktop's own colours. Like Material 3's, its
+# font features (`bundled-fonts`, `system-fonts`) are not forwarded: an app
+# that wants Plasma's faces depends on `teksilo-theme-kde` directly.
 theme-material3 = ["dep:teksilo-theme-material3"]
 theme-macos = ["dep:teksilo-theme-macos"]
 theme-fluent = ["dep:teksilo-theme-fluent"]
+theme-kde = ["dep:teksilo-theme-kde"]
 
 # Font bundle features — forwarded to `teksilo-text`'s own feature set.
 # Applications enable the scripts they ship for and disable the rest.
@@ -214,6 +219,7 @@ teksilo-resources = { workspace = true }
 teksilo-theme-material3 = { workspace = true, optional = true }
 teksilo-theme-macos = { workspace = true, optional = true }
 teksilo-theme-fluent = { workspace = true, optional = true }
+teksilo-theme-kde = { workspace = true, optional = true }
 
 [dev-dependencies]
 trybuild = "1"
@@ -225,7 +231,7 @@ tempfile = { workspace = true }
 # Everything except the WebView engine backends, which need
 # WebKitGTK / Servo system libraries docs.rs does not have.
 features = ["automation", "async", "terminal", "theme-fluent",
-            "theme-macos", "theme-material3", "web-view-headless"]
+            "theme-kde", "theme-macos", "theme-material3", "web-view-headless"]
 
 # The workspace has ONE changelog, at the repository root, so these run from
 # the umbrella crate rather than from `release.toml`: a root-level

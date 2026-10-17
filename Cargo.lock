@@ -11720,6 +11720,7 @@ dependencies = [
  "teksilo-terminal",
  "teksilo-text",
  "teksilo-theme-fluent",
+ "teksilo-theme-kde",
  "teksilo-theme-macos",
  "teksilo-theme-material3",
  "teksilo-tokens",

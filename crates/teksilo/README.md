@@ -52,7 +52,7 @@ State is reactive through `Signal<T>` and `Prop<T>`; a derived signal
 `widgets`, `i18n`, `inspector`, `toast`, `file-dialog`, `clipboard` and the
 Arabic and Hebrew fallback fonts (`fonts-arabic`, `fonts-hebrew`) are on by
 default. The text stack is not a feature: every build has it. Opt in to
-`theme-material3`, `theme-fluent`, `theme-macos`, `terminal`, `web-view`,
+`theme-material3`, `theme-fluent`, `theme-macos`, `theme-kde`, `terminal`, `web-view`,
 `async` (with `tokio` or `async-std`), `automation`, `telemetry`, and the
 other bundled script fonts (`fonts-*`).
 

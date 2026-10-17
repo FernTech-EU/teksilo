@@ -134,6 +134,12 @@ pub use teksilo_automation as automation;
 #[cfg(feature = "automation")]
 pub mod automation_install;
 
+/// KDE Plasma native-theme hook. The `native_theme_kde()` method comes from
+/// [`TeksiloAppBuilderKdeExt`](kde_native_install::TeksiloAppBuilderKdeExt),
+/// re-exported through [`prelude`]; the preset itself is `teksilo::prelude::kde`.
+#[cfg(feature = "theme-kde")]
+pub mod kde_native_install;
+
 pub mod prelude {
     // DSL entry point
     pub use teksilo_macros::teksu;
@@ -182,9 +188,9 @@ pub mod prelude {
 
     // Sibling preset crates — opt-in alternatives to the bundled IntUI
     // preset, each behind its own Cargo feature and reachable by a stable
-    // path (`material3::light()`, `fluent::dark()`, `macos::light()`, …).
-    // All three are complete design languages: tokens plus Tier-3 widget
-    // chrome.
+    // path (`material3::light()`, `fluent::dark()`, `macos::light()`,
+    // `kde::dark()`, …). All four are complete design languages: tokens plus
+    // Tier-3 widget chrome.
     #[cfg(feature = "theme-material3")]
     pub use teksilo_theme_material3 as material3;
 
@@ -193,6 +199,14 @@ pub mod prelude {
 
     #[cfg(feature = "theme-fluent")]
     pub use teksilo_theme_fluent as fluent;
+
+    #[cfg(feature = "theme-kde")]
+    pub use teksilo_theme_kde as kde;
+
+    // `native_theme_kde()`: Breeze geometry for Native mode on a Breeze
+    // desktop.
+    #[cfg(feature = "theme-kde")]
+    pub use crate::kde_native_install::TeksiloAppBuilderKdeExt;
 
     // Reactive color / style props — unified input types for widget builders.
     pub use teksilo_core::color_prop::{ColorProp, TextStyleProp};

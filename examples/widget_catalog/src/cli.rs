@@ -24,7 +24,11 @@ pub struct CliOptions {
     /// Force the startup theme, overriding the persisted selection. One of
     /// `intui-light` / `intui-dark` / `material3-light` / `material3-dark`
     /// (aliases `m3-light` / `m3-dark`) / `fluent-light` / `fluent-dark` /
-    /// `macos-light` / `macos-dark`. `None` → restore the saved theme.
+    /// `macos-light` / `macos-dark` / `kde-light` / `kde-dark`, or `system`,
+    /// which starts the app in Native mode and the title-bar switcher on its
+    /// System entry (follow the desktop; the window is built in Breeze's
+    /// chrome on a KDE desktop with the Breeze style).
+    /// `None` → restore the saved theme.
     pub theme: Option<String>,
     /// The target density the whole catalog is built at: `compact` (the
     /// default), `comfortable` or `touch`.
@@ -125,7 +129,7 @@ pub fn parse(tab_names: &[&str]) -> CliOptions {
                     eprintln!(
                         "--theme expects one of: intui-light, intui-dark, \
                          material3-light, material3-dark, fluent-light, fluent-dark, \
-                         macos-light, macos-dark"
+                         macos-light, macos-dark, kde-light, kde-dark, system"
                     );
                     continue;
                 };
@@ -171,7 +175,8 @@ fn print_help(tab_names: &[&str]) {
            --theme <NAME>       Force the startup theme, overriding the saved one.\n  \
                                 intui-light | intui-dark | material3-light | material3-dark\n  \
                                 | fluent-light | fluent-dark | macos-light | macos-dark\n  \
-                                (aliases m3-light / m3-dark).\n  \
+                                | kde-light | kde-dark, or `system` to follow the desktop.\n  \
+                                (m3-light / m3-dark are aliases for material3-*.)\n  \
            --help, -h           Show this help and exit.\n\
          \n\
          TABS:\n  \

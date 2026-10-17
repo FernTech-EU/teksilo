@@ -4149,6 +4149,13 @@ impl TeksiloAppBuilder {
         self.app_paths.as_ref()
     }
 
+    /// The native-theme factory installed with
+    /// [`native_theme`](Self::native_theme), if any. Builder-extension traits
+    /// and tests read it to see what an install hook put there.
+    pub fn configured_native_theme(&self) -> Option<&crate::NativeThemeFactory> {
+        self.native_theme.as_ref()
+    }
+
     /// Configure the persistence bundle. When `run`/`build_headless`
     /// fires, the bundle is opened against the configured `AppPaths`
     /// and every active service is registered in `app_state`, where
