@@ -329,7 +329,7 @@ pub enum TabSizing {
 | Orientation  | "Layout axis" | Default       | Meaning                                                           |
 |--------------|---------------|---------------|-------------------------------------------------------------------|
 | `Horizontal` | width         | `Shared`      | Uniform tab widths (Firefox / Chrome convention).                 |
-| `Vertical`   | height        | `Shared`      | Uniform pill heights, fixed at `editor_tab_height`.              |
+| `Vertical`   | height        | `Shared`      | Uniform pill heights, fixed at the style's `editor_height`.       |
 
 Pinned tabs are **always fixed-extent** (`pinned_tab_width`) regardless
 of `TabSizing`, that's what "pinned" means visually.
@@ -353,8 +353,8 @@ The two orientations apply Shared sizing differently:
   wheel remap, dropdown engage normally).
 
 - **Vertical does NOT divide the viewport.** Sidebar pills stay at
-  the intrinsic per-tab height (`TAB_EDITOR_HEIGHT`, default 50 dp)
-  regardless of how tall the bar is. A 800 dp bar with
+  the intrinsic per-tab height (the tab style's `editor_height`, 50 dp
+  under Int UI) regardless of how tall the bar is. A 800 dp bar with
   4 tabs gives 4 pills of 50 dp at the top, not 4 × 200 dp bands.
   This matches VS Code, IntelliJ tool-window tabs, and the user
   expectation of sidebar tabs being short pills. The `min_tab_width`
@@ -907,14 +907,24 @@ editor-strip convention); `idle_text_role` defaults to
 the default cascade reads with insufficient contrast. Disabled tabs
 always render at `TextRole::Disabled`.
 
-Static numbers are `pub const`s in
+The tab geometry comes from the active `TabStyle`, through two
+defaulted accessors a bar and its headers read at layout time:
+
+- `TabStyle::editor_height(tokens)`, the outer height of one tab: the
+  strip height of a horizontal bar and the pill height of a vertical one.
+  Int UI's `RecipeTabStyle` answers `TAB_EDITOR_HEIGHT` (50 dp at every
+  density); the macOS preset answers 26 dp and the Fluent preset 32 dp at
+  the compact density, both raised to the density's target size above it.
+  `TabWidget::tab_bar_height(dp)` / `compact_bar()` (38 dp) override it.
+- `TabStyle::padding_horizontal(tokens)`, the gap between a tab's edges
+  and its content along the bar. Int UI answers `TAB_PADDING_HORIZONTAL`
+  (12 dp at the compact density, scaled by the spacing factor above it);
+  Fluent answers 8 dp. Pinned tabs centre their icon and ignore it.
+
+A custom `impl TabStyle` that overrides neither gets the Int UI numbers.
+The remaining static number is a `pub const` in
 [`recipe_tab_style`](../crates/teksilo-widgets/src/styles/recipe_tab_style.rs):
 
-- `TAB_EDITOR_HEIGHT` (default 50 dp), height of horizontal bar tabs.
-- `TAB_TOOL_WINDOW_HEIGHT` (default 28 dp), reserved for future
-  tool-window tab variant; not currently consumed by vertical bars.
-  `TabWidget::tab_bar_height(dp)` / `compact_bar()` (38 dp) override the
-  50 dp strip height instead.
 - `TAB_UNDERLINE_ACTIVE` (default 2 dp), thickness of the selection
   indicator. The indicator's color comes from `theme.colors.accent`.
 
@@ -975,10 +985,8 @@ TabWidget::new(selected)
   hit the existing `ScrollDelta::Pixels` path with `Easing::EaseOut`
   animation; touch flicks would need `ScrollArea` ↔ `SwipeRecognizer`
   wiring, ~150 LOC, separate task)
-- `TabRecipe::tool_window_height` (`TAB_TOOL_WINDOW_HEIGHT`, 28 dp) is
-  reserved on the default `RecipeTabStyle` but not yet consumed by
-  vertical bars, they currently pick up the editor-tab height
-  (`TAB_EDITOR_HEIGHT`) like horizontal bars
+- a separate tool-window tab height: vertical bars use the same
+  `editor_height` as horizontal ones
 
 ---
 

@@ -247,7 +247,7 @@ pub struct TabWidget {
 
     // Bar configuration — forwarded to the inner TabBar.
     /// Optional tab-strip height override (the strip's cross-axis extent).
-    /// `None` keeps the style's `editor_tab_height`. Set via
+    /// `None` keeps the style's `editor_height`. Set via
     /// [`Self::tab_bar_height`] / [`Self::compact_bar`].
     tab_bar_height: Option<f32>,
     /// Reactive sizing strategy. `None` until `.tab_sizing(...)`
@@ -444,7 +444,7 @@ impl TabWidget {
     }
 
     /// Override the tab-strip height (its cross-axis extent). `None` /
-    /// unset keeps the style's `editor_tab_height` (50 dp). Use for a denser
+    /// unset keeps the style's `editor_height` (50 dp under Int UI). Use for a denser
     /// strip — e.g. dock side panels.
     pub fn tab_bar_height(mut self, dp: f32) -> Self {
         self.tab_bar_height = Some(dp.max(0.0));

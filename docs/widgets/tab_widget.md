@@ -291,7 +291,7 @@ resolves through to the mutable roots and never calls `observe`.
 #### `pub fn tab_bar_height(mut self, dp: f32) -> Self`
 
 Override the tab-strip height (its cross-axis extent). `None` /
-unset keeps the style's `editor_tab_height` (50 dp). Use for a denser
+unset keeps the style's `editor_height` (50 dp under Int UI). Use for a denser
 strip — e.g. dock side panels.
 
 <a id="tabwidget-compact_bar"></a>

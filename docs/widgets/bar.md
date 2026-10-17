@@ -350,7 +350,7 @@ In **vertical** orientation every tab is forced to the bar's
 cross-axis width, so the same knob defines the bar's minimum
 width — the sidebar adapts to the widest piece of bar content
 (tab labels or a slot widget) and never shrinks below this floor.
-Vertical pill heights stay at the tab style's `editor_tab_height`
+Vertical pill heights stay at the tab style's `editor_height`
 regardless of this knob.
 
 Under `TabSizing::Fill` a **vertical** bar takes the width it is
@@ -364,7 +364,7 @@ scroll rather than squeeze below it).
 
 Override the tab-strip cross-axis extent (the strip height for a
 horizontal bar; the per-tab pill height for a vertical one). `None`
-keeps the style's `editor_tab_height`. Use for a compact bar.
+keeps the style's `editor_height`. Use for a compact bar.
 
 <a id="tabbar-max_tab_width"></a>
 

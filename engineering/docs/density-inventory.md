@@ -396,7 +396,7 @@ alone.
 | `recipe_split_button_style.rs` | *(none — see §2.1)* | 0 |
 | `recipe_splitter_style.rs` | `SPLITTER_DIVIDER_LINE_THICKNESS`, `HOVER_DWELL_DELAY_FRAC` | 2 |
 | `recipe_standard_item_style.rs` | `STANDARD_ITEM_ICON_SIZE`, `STANDARD_ITEM_SUBTITLE_ICON_SIZE`, `STANDARD_ITEM_SLOT_GAP`, `STANDARD_ITEM_SUBTITLE_SLOT_GAP`, `STANDARD_ITEM_LABEL_SUBTITLE_GAP`, `STANDARD_ITEM_PADDING_HORIZONTAL`, `STANDARD_ITEM_PADDING_VERTICAL`, `STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE`, `STANDARD_ITEM_MIN_HEIGHT_TWO_LINE`, `STANDARD_ITEM_LABEL_COLUMN_MIN_WIDTH`, `STANDARD_ITEM_CHEVRON_COLUMN_WIDTH`, `STANDARD_ITEM_TREE_INDENT_STEP`, `STANDARD_ITEM_ITEM_CORNER_RADIUS`, `STANDARD_ITEM_BG_HORIZONTAL_INSET`, `STANDARD_ITEM_FOCUS_RING_WIDTH`, `STANDARD_ITEM_SELECTION_EDGE_WIDTH` | 16 |
-| `recipe_tab_style.rs` | `TAB_EDITOR_HEIGHT`, `TAB_TOOL_WINDOW_HEIGHT`, `TAB_PADDING_HORIZONTAL`, `TAB_UNDERLINE_ACTIVE`, `TAB_UNDERLINE_HOVER`, `TAB_CLOSE_BUTTON_SIZE`, `DROP_INDICATOR_WIDTH` | 7 |
+| `recipe_tab_style.rs` | `TAB_EDITOR_HEIGHT`, `TAB_TOOL_WINDOW_HEIGHT` (**deleted**, see §2.2), `TAB_PADDING_HORIZONTAL`, `TAB_UNDERLINE_ACTIVE`, `TAB_UNDERLINE_HOVER`, `TAB_CLOSE_BUTTON_SIZE`, `DROP_INDICATOR_WIDTH` | 7 |
 | `recipe_table_style.rs` | `ROW_HEIGHT`, `HEADER_HEIGHT`, `CELL_PADDING_HORIZONTAL`, `CELL_PADDING_VERTICAL`, `RESIZE_HANDLE_WIDTH`, `COLUMN_RESIZE_STEP`, `GRID_LINE_THICKNESS`, `CORNER_RADIUS`, `SORT_INDICATOR_SIZE`, `FILTER_INDICATOR_SIZE`, `HEADER_INTER_CELL_SPACING`, `FOCUS_RING_INSET`, `MIN_COLUMN_WIDTH_DEFAULT`, `TREE_INDENT_PER_LEVEL`, `TREE_TWIST_SIZE`, `TREE_TWIST_LABEL_GAP` | 16 |
 | `recipe_text_input_style.rs` | `TEXT_FIELD_HEIGHT`, `TEXT_FIELD_PADDING_HORIZONTAL`, `TEXT_FIELD_PADDING_VERTICAL`, `TEXT_FIELD_BORDER_WIDTH`, `TEXT_FIELD_CORNER_RADIUS`, `TEXT_FIELD_CARET_WIDTH`, `TEXT_FIELD_VALIDATION_STRIP_GAP` | 7 |
 | `recipe_toast_style.rs` | `TOAST_PADDING_HORIZONTAL`, `TOAST_PADDING_VERTICAL`, `TOAST_CORNER_RADIUS`, `TOAST_GLYPH_SIZE`, `TOAST_CONTENT_GAP`, `TOAST_TITLE_BODY_GAP`, `TOAST_BODY_ACTIONS_GAP` | 7 |
@@ -596,7 +596,7 @@ Five recipes carry no dimension constant of their own:
 | `crates/teksilo-widgets/src/styles/recipe_standard_item_style.rs` | 47 | `STANDARD_ITEM_FOCUS_RING_WIDTH` | `1.5` | Decoration | fixed — decorative geometry, no hit consequence |
 | `crates/teksilo-widgets/src/styles/recipe_standard_item_style.rs` | 54 | `STANDARD_ITEM_SELECTION_EDGE_WIDTH` | `1.0` | Decoration | fixed — decorative geometry, no hit consequence |
 | `crates/teksilo-widgets/src/styles/recipe_tab_style.rs` | 45 | `TAB_EDITOR_HEIGHT` | `50.0` | Target | scales with `target_size` — `TabRecipe::for_tokens` |
-| `crates/teksilo-widgets/src/styles/recipe_tab_style.rs` | 46 | `TAB_TOOL_WINDOW_HEIGHT` | `28.0` | Target | scales with `target_size` — `TabRecipe::for_tokens` |
+| `crates/teksilo-widgets/src/styles/recipe_tab_style.rs` | 46 | `TAB_TOOL_WINDOW_HEIGHT` | `28.0` | Target | **deleted**, with `TabRecipe::tool_window_height`: nothing read either, and no tab strip has a tool-window height to give them |
 | `crates/teksilo-widgets/src/styles/recipe_tab_style.rs` | 47 | `TAB_PADDING_HORIZONTAL` | `12.0` | Spacing | scales with `spacing_factor` — `TabRecipe::for_tokens` |
 | `crates/teksilo-widgets/src/styles/recipe_tab_style.rs` | 48 | `TAB_UNDERLINE_ACTIVE` | `2.0` | Decoration | fixed — decorative geometry, no hit consequence |
 | `crates/teksilo-widgets/src/styles/recipe_tab_style.rs` | 49 | `TAB_UNDERLINE_HOVER` | `2.0` | Decoration | fixed — decorative geometry, no hit consequence |

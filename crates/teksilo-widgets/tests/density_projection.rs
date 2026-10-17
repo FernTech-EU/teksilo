@@ -491,10 +491,11 @@ fn every_fixed_row_says_it_is_fixed() {
 // 5. The style traits' metric defaults restate the module constants
 // ───────────────────────────────────────────────────────────────────────────
 //
-// Four style traits carry a defaulted metrics accessor for a dimension the
+// Five style traits carry a defaulted metrics accessor for a dimension the
 // widget composes itself and the trait's `make_*` hooks never see: a table
 // cell's gutter, a calendar nav arrow's footprint, a search suggestion row's
-// gutter, a list row's height floor, a table's row and header heights. Each
+// gutter, a list row's height floor, a table's row and header heights, a
+// tab's height and its header padding. Each
 // default is the module constant put through the same helper `for_tokens`
 // uses, restated as a literal because `teksilo-core` sits below
 // `teksilo-widgets` and cannot name the constant. A literal in one crate and a
@@ -703,6 +704,63 @@ fn the_standard_item_trait_defaults_restate_the_module_constants() {
     }
 }
 
+/// The `TabStyle` height and padding defaults equal
+/// `recipe_tab_style::TAB_EDITOR_HEIGHT` and `TAB_PADDING_HORIZONTAL` at every
+/// density.
+#[test]
+fn the_tab_trait_defaults_restate_the_module_constants() {
+    use teksilo_core::styles::TabStyle;
+    use teksilo_widgets::styles::recipe_tab_style as tab;
+
+    /// A `TabStyle` that overrides nothing but its two `make_*` hooks.
+    struct BareTabStyle;
+    impl TabStyle for BareTabStyle {
+        fn make_body(
+            &self,
+            cfg: &teksilo_core::styles::TabStyleConfig,
+            _ctx: &mut teksilo_core::BuildContext,
+        ) -> teksilo_core::WidgetId {
+            cfg.label
+        }
+        fn make_bar(
+            &self,
+            cfg: &teksilo_core::styles::TabBarChromeConfig,
+            _ctx: &mut teksilo_core::BuildContext,
+        ) -> teksilo_core::WidgetId {
+            cfg.content
+        }
+    }
+
+    for t in [compact(), comfortable(), touch()] {
+        assert_eq!(
+            BareTabStyle.editor_height(&t),
+            dp(tab::TAB_EDITOR_HEIGHT, TargetRole::Target, &t),
+            "the TabStyle default drifted from TAB_EDITOR_HEIGHT",
+        );
+        assert_eq!(
+            BareTabStyle.padding_horizontal(&t),
+            spacing(tab::TAB_PADDING_HORIZONTAL, &t),
+            "the TabStyle default drifted from TAB_PADDING_HORIZONTAL",
+        );
+        // And the shipped recipe at that density agrees with the default, so
+        // an out-of-tree style and the shipped one lay out the same tabs.
+        let shipped = RecipeTabStyle::for_tokens(&t);
+        assert_eq!(shipped.editor_height(&t), BareTabStyle.editor_height(&t));
+        assert_eq!(
+            shipped.padding_horizontal(&t),
+            BareTabStyle.padding_horizontal(&t)
+        );
+    }
+    // At Compact the defaults are the module constants themselves, so a
+    // Compact bar lays out exactly what it did before the accessors existed.
+    let t = compact();
+    assert_eq!(BareTabStyle.editor_height(&t), tab::TAB_EDITOR_HEIGHT);
+    assert_eq!(
+        BareTabStyle.padding_horizontal(&t),
+        tab::TAB_PADDING_HORIZONTAL
+    );
+}
+
 /// The shipped `Recipe*Style` answers from *its own recipe*, not from the
 /// trait default — which is the half of the mechanism that lets a preset's
 /// number reach the screen at all.
@@ -712,7 +770,9 @@ fn the_standard_item_trait_defaults_restate_the_module_constants() {
 /// constant carries.
 #[test]
 fn a_recipe_style_answers_from_its_own_recipe() {
-    use teksilo_core::styles::{CalendarStyle, SearchFieldStyle, StandardItemStyle, TableStyle};
+    use teksilo_core::styles::{
+        CalendarStyle, SearchFieldStyle, StandardItemStyle, TabStyle, TableStyle,
+    };
 
     let t = compact();
 
@@ -739,6 +799,14 @@ fn a_recipe_style_answers_from_its_own_recipe() {
     });
     assert_eq!(table.row_height(&t), 23.0);
     assert_eq!(table.header_height(&t), 27.0);
+
+    let tab = RecipeTabStyle::new(TabRecipe {
+        editor_height: 31.0,
+        padding_horizontal: 9.0,
+        ..TabRecipe::for_tokens(&t)
+    });
+    assert_eq!(tab.editor_height(&t), 31.0);
+    assert_eq!(tab.padding_horizontal(&t), 9.0);
 
     let calendar = RecipeCalendarStyle::new(CalendarRecipe {
         nav_arrow_size: 20.0,

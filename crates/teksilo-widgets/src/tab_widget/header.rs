@@ -12,10 +12,14 @@
 //!   row forces a width (Shared-sizing path). When the parent leaves
 //!   width unspecified, the header reports its natural content width
 //!   clamped to `[min_tab_width, max_tab_width]` (Independent path).
-//! - Height is the tab style's `editor_tab_height` — the **outer**
-//!   measurement, with the focus-ring envelope reserved *inside* it
-//!   rather than added on top — and the row's place_children
-//!   uniforms the height across all headers.
+//! - Height is the tab style's
+//!   [`editor_height`](teksilo_core::styles::TabStyle::editor_height), the
+//!   **outer** measurement, with the focus-ring envelope reserved *inside*
+//!   it rather than added on top, and the row's place_children uniforms
+//!   the height across all headers. The content sits
+//!   [`padding_horizontal`](teksilo_core::styles::TabStyle::padding_horizontal)
+//!   in from both main-axis edges. Both come from the style the header
+//!   built its chrome with.
 //!
 //! Paint contract (Int UI / IntelliJ):
 //! - Selected: `text_primary` label, 2 dp accent bar at the top
@@ -259,6 +263,10 @@ pub(crate) struct TabHeader {
     /// `.style(impl TabStyle)` builder. `None` means "use the theme
     /// slot or the bundled `RecipeTabStyle`".
     pub(crate) style_override: Option<SharedTabStyle>,
+    /// The style this header was built with, kept so `layout_response` asks
+    /// the same style for its height and padding that built its chrome.
+    /// `None` until the first build, when the shipped recipe stands in.
+    resolved_style: Option<SharedTabStyle>,
 
     inner_root_id: Option<WidgetId>,
 }
@@ -359,6 +367,7 @@ impl TabHeader {
             idle_text_role: cfg.idle_text_role,
             active_indicator: cfg.active_indicator,
             style_override: cfg.style_override,
+            resolved_style: None,
             inner_root_id: None,
         }
     }
@@ -378,7 +387,10 @@ impl TabHeader {
     }
 
     fn estimate_natural_width(&self, ctx: &LayoutContext) -> f32 {
-        let pad_h = crate::styles::recipe_tab_style::TAB_PADDING_HORIZONTAL;
+        let pad_h = crate::styles::recipe_tab_style::tab_padding_horizontal(
+            self.resolved_style.as_ref(),
+            &ctx.theme.input,
+        );
         use crate::styles::recipe_button_style as btn;
 
         // Icon-only: a square-ish tab — the glyph + horizontal padding only (no
@@ -446,15 +458,16 @@ impl TabHeader {
         content.max(natural_min_width(&ctx.theme.input))
     }
 
-    pub(crate) fn intrinsic_height(_ctx: &LayoutContext) -> f32 {
-        // `editor_tab_height` is the **outer** measurement (the
+    fn intrinsic_height(&self, ctx: &LayoutContext) -> f32 {
+        // The style's `editor_height` is the **outer** measurement (the
         // total bounds height of one tab header). The focus-ring
-        // envelope is reserved *inside* this — not added on top —
-        // so the tab strip sits at exactly the token's value
-        // regardless of focus-ring tokens. The visible pill rect
-        // inside the bounds is `editor_tab_height - envelope*2`,
-        // which `place_children` and `paint` shrink to.
-        crate::styles::recipe_tab_style::TAB_EDITOR_HEIGHT
+        // envelope is reserved *inside* this, not added on top, so the
+        // tab strip sits at exactly the style's value regardless of
+        // focus-ring tokens.
+        crate::styles::recipe_tab_style::tab_editor_height(
+            self.resolved_style.as_ref(),
+            &ctx.theme.input,
+        )
     }
 }
 
@@ -645,7 +658,14 @@ impl Widget for TabHeader {
         //   The tab sizes to `icon + 2·pad_h`, so the lone icon fills the padded
         //   box exactly and the symmetric padding centres it (no extra `Center`
         //   wrapper — that layer broke the icon's paint).
-        let pad_h = crate::styles::recipe_tab_style::TAB_PADDING_HORIZONTAL;
+        // Resolve the active style: per-call override > theme slot >
+        // built-in `RecipeTabStyle` default. Resolved before the padding,
+        // which is the style's, and parked so `layout_response` measures
+        // the header with the style that builds its chrome below.
+        let style: SharedTabStyle =
+            crate::styles::recipe_tab_style::resolve_tab_style(self.style_override.as_ref(), ctx);
+        self.resolved_style = Some(style.clone());
+        let pad_h = style.padding_horizontal(&ctx.theme().input);
         let inner_id = if self.pinned {
             let centered = crate::primitives::Center::new().child(row);
             let padded = crate::Padding::symmetric(header_padding_v(&ctx.theme().input), 0.0)
@@ -683,21 +703,10 @@ impl Widget for TabHeader {
             }
         };
 
-        // Resolve the active style: per-call override > theme slot >
-        // built-in `RecipeTabStyle` default. The style wraps `inner_id`
-        // with the accent indicator + focus ring chrome; the
-        // per-state tab background (which the trait config doesn't
-        // carry through) stays as a RectWidget sibling underneath.
-        let style: SharedTabStyle = self
-            .style_override
-            .clone()
-            .or_else(|| ctx.theme().style_slots.tab.clone())
-            .unwrap_or_else(|| {
-                Rc::new(crate::styles::RecipeTabStyle::for_tokens(
-                    &ctx.theme().input,
-                ))
-            });
-
+        // The style resolved above wraps `inner_id` with the accent
+        // indicator + focus ring chrome; the per-state tab background
+        // (which the trait config doesn't carry through) stays as a
+        // RectWidget sibling underneath.
         let cfg = TabStyleConfig {
             label: inner_id,
             leading: None,
@@ -1151,7 +1160,7 @@ impl Widget for TabHeader {
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         let height = proposal
             .height
-            .unwrap_or_else(|| Self::intrinsic_height(ctx));
+            .unwrap_or_else(|| self.intrinsic_height(ctx));
         // Pinned tabs are always rendered at exactly `min_width`
         // (the bar's `pinned_tab_width`), regardless of any width
         // proposal — they're icon-only squares and shouldn't stretch.

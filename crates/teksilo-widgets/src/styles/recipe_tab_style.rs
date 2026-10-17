@@ -32,8 +32,8 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{
-    FocusRingStroke, TabBarChromeConfig, TabBarOrientation, TabIndicatorPosition, TabStyle,
-    TabStyleConfig,
+    FocusRingStroke, SharedTabStyle, TabBarChromeConfig, TabBarOrientation, TabIndicatorPosition,
+    TabStyle, TabStyleConfig,
 };
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
@@ -45,7 +45,6 @@ use teksilo_core::styles::density::{dp, spacing};
 // IntUI design tokens for Tab. The recipe and parent TabHeader own
 // their own dimensions.
 pub const TAB_EDITOR_HEIGHT: f32 = 50.0;
-pub const TAB_TOOL_WINDOW_HEIGHT: f32 = 28.0;
 pub const TAB_PADDING_HORIZONTAL: f32 = 12.0;
 pub const TAB_UNDERLINE_ACTIVE: f32 = 2.0;
 pub const TAB_UNDERLINE_HOVER: f32 = 2.0;
@@ -59,8 +58,12 @@ const DROP_INDICATOR_WIDTH: f32 = 2.0;
 /// [`RecipeTabStyle::default()`] reproduces the built-in IntUI look.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TabRecipe {
+    /// The outer height of one tab header: the strip height of a horizontal
+    /// bar, the pill height of a vertical one. Read through
+    /// [`TabStyle::editor_height`].
     pub editor_height: f32,
-    pub tool_window_height: f32,
+    /// The gap between a tab header's edges and its content along the bar's
+    /// main axis. Read through [`TabStyle::padding_horizontal`].
     pub padding_horizontal: f32,
     pub underline_active: f32,
     pub underline_hover: f32,
@@ -76,7 +79,6 @@ impl TabRecipe {
     pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
             editor_height: dp(TAB_EDITOR_HEIGHT, TargetRole::Target, tokens),
-            tool_window_height: dp(TAB_TOOL_WINDOW_HEIGHT, TargetRole::Target, tokens),
             padding_horizontal: spacing(TAB_PADDING_HORIZONTAL, tokens),
             underline_active: TAB_UNDERLINE_ACTIVE,
             underline_hover: TAB_UNDERLINE_HOVER,
@@ -177,6 +179,58 @@ impl TabStyle for RecipeTabStyle {
             layers,
             content: cfg.content,
         })
+    }
+
+    /// This style's own tab height, so a preset's header (macOS's 26 dp
+    /// `NSTabView` strip, Fluent's 32 dp `TabViewItem`) is the one a bar lays
+    /// out. `tokens` is unused: the recipe was already resolved against a
+    /// density when the style was made (`for_tokens`, or a preset's own
+    /// factory), and a second projection would apply the ladder twice.
+    fn editor_height(&self, _tokens: &InputTokens) -> f32 {
+        self.recipe.editor_height
+    }
+
+    /// This style's own header padding. See
+    /// [`editor_height`](Self::editor_height) for why `tokens` is unused.
+    fn padding_horizontal(&self, _tokens: &InputTokens) -> f32 {
+        self.recipe.padding_horizontal
+    }
+}
+
+/// The `TabStyle` a `TabBar` and its headers build against: the bar's
+/// per-call `.style(..)` if it has one, else the theme-wide `style_slots.tab`
+/// an app or a preset installed, else this module's default resolved against
+/// the active density.
+///
+/// Shared by the bar and every header it hosts, so the strip height the bar
+/// reserves and the height each header measures come from one style.
+pub(crate) fn resolve_tab_style(
+    style_override: Option<&SharedTabStyle>,
+    ctx: &BuildContext,
+) -> SharedTabStyle {
+    style_override
+        .cloned()
+        .or_else(|| ctx.theme().style_slots.tab.clone())
+        .unwrap_or_else(|| {
+            std::rc::Rc::new(RecipeTabStyle::for_tokens(&ctx.theme().input)) as SharedTabStyle
+        })
+}
+
+/// The tab height `style` declares at `tokens`, or the shipped recipe's when
+/// no style has been resolved yet (a header measured before its first build).
+pub(crate) fn tab_editor_height(style: Option<&SharedTabStyle>, tokens: &InputTokens) -> f32 {
+    match style {
+        Some(style) => style.editor_height(tokens),
+        None => TabRecipe::for_tokens(tokens).editor_height,
+    }
+}
+
+/// The header padding `style` declares at `tokens`, or the shipped recipe's
+/// when no style has been resolved yet.
+pub(crate) fn tab_padding_horizontal(style: Option<&SharedTabStyle>, tokens: &InputTokens) -> f32 {
+    match style {
+        Some(style) => style.padding_horizontal(tokens),
+        None => TabRecipe::for_tokens(tokens).padding_horizontal,
     }
 }
 

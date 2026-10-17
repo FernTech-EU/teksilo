@@ -50,6 +50,19 @@ by crate for clarity, not because crates version independently.
   tall a `TableView` or `TreeTableView` body row and column header row are at
   the active density. Both have defaults, the shipped table heights raised to
   the density's target size.
+- **`TabStyle::editor_height` and `padding_horizontal`.** A tab style says how
+  tall a `TabBar` or `TabWidget` tab is and how far its title sits from the
+  tab's edges at the active density. Both have defaults, so an existing style
+  keeps Int UI's 50 px tabs.
+
+### Removed
+
+#### Theming
+
+- **Breaking.** **`TabRecipe::tool_window_height` and
+  `recipe_tab_style::TAB_TOOL_WINDOW_HEIGHT`.** Nothing read either, so
+  setting them changed nothing. A `TabRecipe` struct literal that names
+  `tool_window_height` must drop it.
 
 ### Fixed
 
@@ -89,6 +102,15 @@ by crate for clarity, not because crates version independently.
   out 28 px rows and a 32 px header whatever the theme and the density.
   A `row_height`, `row_height_fn`, `auto_row_height` or `header_height` the
   app set still wins.
+- **Tabs are as tall and as padded as the active style says.**
+  **Behaviour change:** a `TabBar` or `TabWidget` with no `tab_bar_height` of
+  its own now lays out the tab height its style declares, and each tab pads
+  its title by the style's padding: 26 px tabs under the macOS preset and
+  32 px under Fluent at the compact density (44 px at the touch density for
+  both), and 8 px of padding under Fluent. Before, every tab was 50 px tall
+  with 12 px of padding whatever the theme. Under Int UI tabs stay 50 px tall,
+  and their padding now grows with the density: 13.8 px at the comfortable
+  density and 15.6 px at the touch density, so tabs there are wider.
 - **Accent chrome a recipe builds follows the high-contrast preference.**
   **Behaviour change:** under the OS increase contrast preference, a `Filled`
   button's fill and a button's focus border now take the high-contrast

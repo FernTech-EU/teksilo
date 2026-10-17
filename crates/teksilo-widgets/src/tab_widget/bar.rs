@@ -663,7 +663,7 @@ impl<T: 'static> TabBar<T> {
     /// cross-axis width, so the same knob defines the bar's minimum
     /// width — the sidebar adapts to the widest piece of bar content
     /// (tab labels or a slot widget) and never shrinks below this floor.
-    /// Vertical pill heights stay at the tab style's `editor_tab_height`
+    /// Vertical pill heights stay at the tab style's `editor_height`
     /// regardless of this knob.
     ///
     /// Under [`TabSizing::Fill`] a **vertical** bar takes the width it is
@@ -677,7 +677,7 @@ impl<T: 'static> TabBar<T> {
 
     /// Override the tab-strip cross-axis extent (the strip height for a
     /// horizontal bar; the per-tab pill height for a vertical one). `None`
-    /// keeps the style's `editor_tab_height`. Use for a compact bar.
+    /// keeps the style's `editor_height`. Use for a compact bar.
     pub fn tab_bar_height(mut self, dp: f32) -> Self {
         self.tab_height = Some(dp.max(0.0));
         self
@@ -1539,16 +1539,24 @@ impl<T: 'static> Widget for TabBar<T> {
         // headers reserve. Snapshot the theme values up front — we
         // don't want to hold a borrow on `ctx` while later code
         // mutates the arena.
+        //
+        // The active `TabStyle`: per-call override > theme slot >
+        // built-in `RecipeTabStyle`. Resolved here, once, because the
+        // strip height below, the header row's per-tab extent and the
+        // bar chrome further down all come from it; each header resolves
+        // the same style from the same override and theme.
+        let tab_style =
+            crate::styles::recipe_tab_style::resolve_tab_style(self.style_override.as_ref(), ctx);
         let (header_min_height, motion_duration_normal, motion_easing_standard) = {
             let theme = ctx.theme();
-            // `editor_tab_height` is the outer bounds height of a
-            // tab header — the focus-ring envelope is reserved
-            // inside (see `TabHeader::intrinsic_height`), so the
-            // bar's preferred row height is exactly the token (or the
-            // `tab_bar_height` override for a compact strip).
+            // The style's `editor_height` is the outer bounds height of
+            // a tab header (the focus-ring envelope is reserved inside,
+            // see `TabHeader::intrinsic_height`), so the bar's preferred
+            // row height is exactly the style's (or the `tab_bar_height`
+            // override for a compact strip).
             (
                 self.tab_height
-                    .unwrap_or(crate::styles::recipe_tab_style::TAB_EDITOR_HEIGHT),
+                    .unwrap_or_else(|| tab_style.editor_height(&theme.input)),
                 theme.motion.duration_normal,
                 theme.motion.easing_standard,
             )
@@ -1579,6 +1587,7 @@ impl<T: 'static> Widget for TabBar<T> {
             max_extent: self.max_tab_width,
             spacing: self.spacing,
             tab_height: self.tab_height,
+            style: RowTabStyle(tab_style.clone()),
             header_bounds_buf: header_bounds_buf.clone(),
             row_bounds_buf: row_bounds_buf.clone(),
             divider: divider_prop.clone().map(|c| (c, self.spacing)),
@@ -1801,20 +1810,11 @@ impl<T: 'static> Widget for TabBar<T> {
             }
         };
         self.outer_stack_id = Some(root_id);
-        // Resolve the active `TabStyle` and let it wrap the bar
+        // Let the active `TabStyle` (resolved above) wrap the bar
         // content with the strip chrome — backdrop fill, content-pane
-        // separator, drag-reorder drop indicator. Per-call override >
-        // theme slot > built-in `RecipeTabStyle`. This replaces the
+        // separator, drag-reorder drop indicator. This replaces the
         // old `TabBar::paint`: the bar is now pure composition.
-        let style: teksilo_core::styles::SharedTabStyle = self
-            .style_override
-            .clone()
-            .or_else(|| ctx.theme().style_slots.tab.clone())
-            .unwrap_or_else(|| {
-                Rc::new(crate::styles::RecipeTabStyle::for_tokens(
-                    &ctx.theme().input,
-                ))
-            });
+        let style = tab_style;
         let chrome_cfg = teksilo_core::styles::TabBarChromeConfig {
             content: root_id,
             orientation: self.orientation.into(),
@@ -2224,6 +2224,17 @@ impl<T: 'static> Widget for TabBar<T> {
 
 // ─── Internal: the headers row / column ─────────────────────────────
 
+/// The bar's resolved `TabStyle`, held by [`TabHeaderRow`]. A newtype only
+/// so the row can keep deriving `Debug`, which `dyn TabStyle` does not
+/// implement.
+struct RowTabStyle(teksilo_core::styles::SharedTabStyle);
+
+impl std::fmt::Debug for RowTabStyle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RowTabStyle(..)")
+    }
+}
+
 /// The headers run — a horizontal row in [`TabBarOrientation::Horizontal`]
 /// mode, a vertical column in [`TabBarOrientation::Vertical`] mode.
 /// Owns the `Shared`/`Independent` sizing math and exposes per-tab
@@ -2236,15 +2247,18 @@ struct TabHeaderRow {
     /// Min extent, in whichever sense the axis gives it: the per-tab
     /// width for a horizontal bar, and the *bar's own* minimum width
     /// for a vertical one (vertical pill extents come from the style's
-    /// `editor_tab_height`, never from this knob). Reuses the bar's
+    /// `editor_height`, never from this knob). Reuses the bar's
     /// `min_tab_width` in both cases.
     min_extent: f32,
     max_extent: f32,
     spacing: f32,
     /// Optional per-tab extent override along the bar's cross axis (the tab
     /// strip height for a horizontal bar; the per-tab pill height for a
-    /// vertical one). `None` → the style's `editor_tab_height`.
+    /// vertical one). `None` → the style's `editor_height`.
     tab_height: Option<f32>,
+    /// The bar's resolved `TabStyle`, asked for the per-tab extent when
+    /// `tab_height` is `None`.
+    style: RowTabStyle,
     /// Per-tab bounds in world coords, populated by `place_children`.
     /// Shared with the bar's drop handlers via `Rc<RefCell<...>>`;
     /// the bar reads this to compute drop-insertion position for an
@@ -2268,10 +2282,10 @@ struct TabHeaderRow {
 
 impl TabHeaderRow {
     /// The per-tab cross-axis extent: the explicit override (compact bars) or
-    /// the style's `editor_tab_height`.
+    /// the style's `editor_height`.
     fn tab_extent(&self, ctx: &LayoutContext) -> f32 {
         self.tab_height
-            .unwrap_or_else(|| TabHeader::intrinsic_height(ctx))
+            .unwrap_or_else(|| self.style.0.editor_height(&ctx.theme.input))
     }
 
     fn compute_extents(&self, viewport_main: Option<f32>, ctx: &LayoutContext) -> Vec<f32> {
@@ -2306,7 +2320,7 @@ impl TabHeaderRow {
                         // tab bands, which neither Firefox / Chrome
                         // (no native vertical mode) nor VS Code /
                         // IntelliJ do. Use the intrinsic per-tab
-                        // height (`editor_tab_height`) so vertical
+                        // height (`editor_height`) so vertical
                         // tabs match horizontal tabs in size. `Fill`
                         // is no different here: in a vertical bar it
                         // stretches the pill *width* (see
@@ -2451,7 +2465,7 @@ impl Widget for TabHeaderRow {
         match self.axis {
             TabBarOrientation::Horizontal => {
                 // Cap the row's height at one tab header's intrinsic
-                // height (= `editor_tab_height`). If the surrounding
+                // height (= `editor_height`). If the surrounding
                 // outer HStack proposes a taller height because a
                 // sibling (toolbar button, dropdown trigger) wants
                 // more room, the row should NOT stretch — it would

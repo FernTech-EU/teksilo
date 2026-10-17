@@ -8,14 +8,22 @@
 //! indicator, focus ring, …) and [`TabStyle::make_bar`] wraps the
 //! whole strip (backdrop fill, content-pane separator, drag-reorder
 //! drop indicator). A custom `impl TabStyle` provides both.
+//!
+//! Two defaulted metrics accessors, [`TabStyle::editor_height`] and
+//! [`TabStyle::padding_horizontal`], say how tall a tab header is and how far
+//! its content sits from its leading and trailing edges. The bar and its
+//! headers measure themselves from them, so a preset's tab geometry is the one
+//! laid out.
 
 use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
+use teksilo_tokens::{InputTokens, TargetRole};
 
 use crate::build_context::BuildContext;
 use crate::color_prop::ColorProp;
 use crate::signal::Signal;
+use crate::styles::density::{dp, spacing};
 use crate::widget_id::WidgetId;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
@@ -84,6 +92,41 @@ pub trait TabStyle: 'static {
     fn make_body(&self, cfg: &TabStyleConfig, ctx: &mut BuildContext) -> WidgetId;
     /// Chrome for the whole bar strip — wraps [`TabBarChromeConfig::content`].
     fn make_bar(&self, cfg: &TabBarChromeConfig, ctx: &mut BuildContext) -> WidgetId;
+
+    /// The outer height of one tab header, in logical pixels, at the density
+    /// `tokens` describe: the strip height of a horizontal bar, and the pill
+    /// height of a vertical one. The focus-ring envelope is reserved inside it,
+    /// never added on top.
+    ///
+    /// A metrics accessor because the bar sizes its scroll viewport and its
+    /// header row from one number, and each header measures itself in
+    /// `layout_response`, where the chrome `make_body` built is out of reach.
+    /// Without it a preset's tab height is written and never rendered. A bar's
+    /// own `tab_bar_height(..)` wins over it.
+    ///
+    /// **Defaulted**, so a `TabStyle` implemented outside this workspace keeps
+    /// compiling. The default is
+    /// `teksilo_widgets::styles::recipe_tab_style::TAB_EDITOR_HEIGHT` put
+    /// through [`dp`] as a target, which is the shipped recipe's own answer at
+    /// every density, restated as a literal because `teksilo-core` cannot name
+    /// a `teksilo-widgets` constant, and pinned equal to it by
+    /// `the_tab_trait_defaults_restate_the_module_constants`.
+    fn editor_height(&self, tokens: &InputTokens) -> f32 {
+        dp(50.0, TargetRole::Target, tokens)
+    }
+
+    /// The gap between a tab header's edges and its content (icon, label,
+    /// slots, close button) along the bar's main axis, in logical pixels, at
+    /// the density `tokens` describe. It counts twice in a header's natural
+    /// width. A pinned tab, which centres its icon in a fixed width, ignores
+    /// it.
+    ///
+    /// Defaulted on the same terms as [`editor_height`](Self::editor_height),
+    /// from `teksilo_widgets::styles::recipe_tab_style::TAB_PADDING_HORIZONTAL`
+    /// put through [`spacing`].
+    fn padding_horizontal(&self, tokens: &InputTokens) -> f32 {
+        spacing(12.0, tokens)
+    }
 }
 
 pub type SharedTabStyle = Rc<dyn TabStyle>;

@@ -103,7 +103,7 @@ pub enum TabSizing {
     /// - **Vertical:** every pill takes the bar's full proposed width
     ///   (the widest-label clamp is bypassed), so the tabs span the
     ///   sidebar. Pill height is unchanged (the intrinsic
-    ///   `editor_tab_height`, or the `tab_bar_height` override).
+    ///   `editor_height`, or the `tab_bar_height` override).
     ///
     /// With no width proposed at all (an unbounded measure — a
     /// `Center`, an `HStack` asking for the natural size), there is

@@ -766,3 +766,129 @@ fn a_table_measures_the_macos_row_and_header_heights_at_every_density() {
         );
     }
 }
+
+// ── TabBar tab height and header padding ───────────────────────────────
+
+/// The laid-out `(strip height, tab height, header padding)` of a horizontal
+/// two-tab `TabBar` built at `density` under `theme`, with no tab height of
+/// its own. The padding is the inset of each header's content row inside the
+/// `Padding` that wraps it, and it must be the same on both edges and on both
+/// headers, so the number measured is the one the header's natural width was
+/// sized from.
+///
+/// Built *at* the density, never switched into it: a bar reads its style's
+/// metrics when it builds.
+fn tab_metrics(theme: &Theme, density: TargetDensity) -> (f32, f32, f32) {
+    use teksilo_core::signal::Signal;
+    use teksilo_data::ListModel;
+    use teksilo_i18n::lit;
+    use teksilo_widgets::tab_widget::{TabBar, TabDelegate, TabId, TabSizing};
+
+    let model = ListModel::from_vec(vec![
+        (TabId::fresh(), "Documents"),
+        (TabId::fresh(), "Downloads"),
+    ]);
+    let delegate = TabDelegate::new(|_, t: &(TabId, &'static str)| lit!(t.1));
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let mut tree = WidgetTree::new()
+        .with_theme(theme.with_density(density))
+        .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+    let bar = tree.add(
+        TabBar::horizontal(model, delegate, selected, |_, t| t.0)
+            .tab_sizing(TabSizing::Independent)
+            .show_scroll_arrows(false)
+            .show_overflow_dropdown(false),
+    );
+    tree.layout(SizeProposal {
+        width: Some(800.0),
+        height: None,
+    });
+
+    let headers = nodes_named(&tree, bar, "TabHeader");
+    assert_eq!(headers.len(), 2, "two tab headers");
+    let tab_h = tree.bounds(headers[0]).height;
+    let mut pads = Vec::new();
+    for header in headers {
+        assert_eq!(tree.bounds(header).height, tab_h, "one tab height");
+        let padding = nodes_named(&tree, header, "Padding");
+        assert_eq!(padding.len(), 1, "one padded content row per header");
+        let outer = tree.bounds(padding[0]);
+        let row = tree.bounds(tree.children(padding[0])[0]);
+        let leading = row.x - outer.x;
+        let trailing = (outer.x + outer.width) - (row.x + row.width);
+        assert!(
+            (leading - trailing).abs() < 1e-3,
+            "{density:?}: the padding is symmetric ({leading} / {trailing})",
+        );
+        pads.push(leading);
+    }
+    assert!((pads[0] - pads[1]).abs() < 1e-3, "one padding: {pads:?}");
+    (tree.bounds(bar).height, tab_h, pads[0])
+}
+
+/// Assert `(strip, tab, padding)` measures `want` within float tolerance.
+fn assert_tab_metrics(got: (f32, f32, f32), want: (f32, f32, f32), what: &str) {
+    assert!(
+        (got.0 - want.0).abs() < 1e-3 && (got.1 - want.1).abs() < 1e-3,
+        "{what}: strip and tab heights {got:?}, want {want:?}",
+    );
+    assert!(
+        (got.2 - want.2).abs() < 1e-3,
+        "{what}: header padding {got:?}, want {want:?}",
+    );
+}
+
+/// `NSTabView`'s header strip is 26 dp in the macOS recipe and its titles sit
+/// 12 dp in from each edge, and a laid-out bar must measure both. The bar used
+/// to reserve the shipped 50 dp strip and pad by the shipped 12 dp whatever
+/// the style declared, so every macOS tab strip rendered 24 dp taller than
+/// its recipe.
+///
+/// Above Compact the 26 rises to the density's target size (32 at
+/// Comfortable, 44 at Touch) and the padding scales by the spacing factor
+/// (13.8, 15.6). The IntUI arm is the control: its 50 dp tab clears every
+/// target, and its padding walks the same spacing ladder.
+#[test]
+fn a_tab_bar_measures_the_macos_tab_height_and_padding_at_every_density() {
+    let expected = [
+        (
+            TargetDensity::Compact,
+            (26.0, 26.0, 12.0),
+            (50.0, 50.0, 12.0),
+        ),
+        (
+            TargetDensity::Comfortable,
+            (32.0, 32.0, 13.8),
+            (50.0, 50.0, 13.8),
+        ),
+        (TargetDensity::Touch, (44.0, 44.0, 15.6), (50.0, 50.0, 15.6)),
+    ];
+    assert_eq!(
+        expected.len(),
+        ALL_DENSITIES.len(),
+        "every density is listed"
+    );
+    for (density, macos, intui) in expected {
+        assert_tab_metrics(
+            tab_metrics(&teksilo_core::presets::intui::light(), density),
+            intui,
+            &format!("{density:?}: IntUI"),
+        );
+        for theme in [teksilo_theme_macos::light(), teksilo_theme_macos::dark()] {
+            assert_tab_metrics(
+                tab_metrics(&theme, density),
+                macos,
+                &format!("{density:?}: the macOS recipe's tab metrics must reach the bar"),
+            );
+        }
+        // The accessor half: what the installed slot tells a bar asking it.
+        let theme = teksilo_theme_macos::light().with_density(density);
+        let slot = theme
+            .style_slots
+            .tab
+            .clone()
+            .expect("the preset installs a tab slot");
+        assert!((slot.editor_height(&theme.input) - macos.1).abs() < 1e-3);
+        assert!((slot.padding_horizontal(&theme.input) - macos.2).abs() < 1e-3);
+    }
+}

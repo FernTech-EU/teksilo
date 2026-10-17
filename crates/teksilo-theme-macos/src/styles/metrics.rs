@@ -266,7 +266,6 @@ pub fn macos_scroll_bar_style_for(tokens: &InputTokens) -> RecipeScrollBarStyle 
 pub fn macos_tab_style_for(tokens: &InputTokens) -> RecipeTabStyle {
     RecipeTabStyle::new(TabRecipe {
         editor_height: dp(26.0, TargetRole::Target, tokens),
-        tool_window_height: H_CONTROL,
         padding_horizontal: spacing(12.0, tokens),
         underline_active: 2.0,
         underline_hover: 2.0,
@@ -459,7 +458,6 @@ mod tests {
         assert_eq!(macos_icon_button_style().recipe.size_default, H_CONTROL);
         assert_eq!(macos_segmented_control_style().recipe.height, H_CONTROL);
         assert_eq!(macos_search_field_style().recipe.row_height, H_CONTROL);
-        assert_eq!(macos_tab_style().recipe.tool_window_height, H_CONTROL);
     }
 
     /// The density claim, pinned against the sibling preset.
@@ -470,7 +468,7 @@ mod tests {
             macos_combo_box_style().recipe.height,
             macos_icon_button_style().recipe.size_default,
             macos_segmented_control_style().recipe.height,
-            macos_tab_style().recipe.tool_window_height,
+            macos_tab_style().recipe.editor_height,
             macos_table_style().recipe.row_height,
         ] {
             assert!(h < FLUENT_CONTROL_HEIGHT, "{h} is not denser than Fluent");

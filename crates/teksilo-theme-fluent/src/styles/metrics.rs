@@ -228,11 +228,11 @@ pub fn fluent_scroll_bar_style_for(tokens: &InputTokens) -> RecipeScrollBarStyle
 
 /// `TabBar` — `TabViewItemMinHeight` 32, `TabViewItemHeaderPadding` 8, and
 /// a 3 dp active indicator (the `NavigationViewSelectionIndicator`
-/// thickness Fluent uses wherever a selection underline appears).
+/// thickness Fluent uses wherever a selection underline appears). The
+/// height is raised to the density's target size, as macOS's tab strip is.
 pub fn fluent_tab_style_for(tokens: &InputTokens) -> RecipeTabStyle {
     RecipeTabStyle::new(TabRecipe {
-        editor_height: FLUENT_CONTROL_HEIGHT,
-        tool_window_height: FLUENT_CONTROL_HEIGHT,
+        editor_height: dp(FLUENT_CONTROL_HEIGHT, TargetRole::Target, tokens),
         padding_horizontal: 8.0,
         underline_active: 3.0,
         close_button_size: 16.0,

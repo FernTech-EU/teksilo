@@ -1960,12 +1960,12 @@ fn vertical_shared_sizing_uses_intrinsic_pill_height() {
         );
     }
     // Vertical Shared does NOT divide the viewport — sidebar pills
-    // stay at the intrinsic per-tab height (`editor_tab_height`)
+    // stay at the intrinsic per-tab height (`editor_height`)
     // regardless of bar height. A 800 dp bar with 4 tabs gives 4
     // pills of ~50 dp each, not 4 × ~200 dp bands.
     assert!(
         (target - intrinsic).abs() < 0.5,
-        "expected ~{intrinsic} dp per tab (editor_tab_height), got {target}"
+        "expected ~{intrinsic} dp per tab (editor_height), got {target}"
     );
 }
 
@@ -3308,4 +3308,206 @@ fn the_content_of_the_tab_on_show_reaches_a_screen_reader() {
         found.contains(&(accesskit::Role::Button, "Inside Alpha".to_string())),
         "the button inside it: {found:?}"
     );
+}
+
+// ─── The tab style's height and padding reach the layout ─────────────
+
+/// A tab style declaring a 37 dp tab and a 30 dp header padding, numbers no
+/// shipped constant carries, so a header that still read a constant would be
+/// told apart.
+fn tall_padded_tab_style() -> crate::styles::RecipeTabStyle {
+    crate::styles::RecipeTabStyle::new(crate::styles::TabRecipe {
+        editor_height: 37.0,
+        padding_horizontal: 30.0,
+        ..crate::styles::TabRecipe::default()
+    })
+}
+
+fn two_tab_model() -> ListModel<TabHandle> {
+    ListModel::from_vec(vec![
+        TabHandle::dynamic(
+            TabId::fresh(),
+            "doc",
+            TabInfo::new().title(label("Documents")),
+            (),
+        ),
+        TabHandle::dynamic(
+            TabId::fresh(),
+            "doc",
+            TabInfo::new().title(label("Downloads")),
+            (),
+        ),
+    ])
+}
+
+fn title_delegate() -> TabDelegate<TabHandle> {
+    TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")))
+}
+
+/// `(bar height, per-header (width, height))` of a horizontal, independently
+/// sized two-tab bar laid out at its natural height under `theme`, with
+/// `style` as its per-call style when given.
+fn horizontal_bar_geometry(
+    theme: teksilo_core::styles::Theme,
+    style: Option<crate::styles::RecipeTabStyle>,
+    tab_bar_height: Option<f32>,
+) -> (f32, Vec<(f32, f32)>) {
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let mut bar = TabBar::horizontal(two_tab_model(), title_delegate(), selected, |_, h| h.id)
+        .tab_sizing(TabSizing::Independent)
+        .tab_spacing(0.0)
+        .show_scroll_arrows(false)
+        .show_overflow_dropdown(false);
+    if let Some(style) = style {
+        bar = bar.style(style);
+    }
+    if let Some(h) = tab_bar_height {
+        bar = bar.tab_bar_height(h);
+    }
+    let mut tree = WidgetTree::new().with_theme(theme);
+    let bar_id = tree.add(bar);
+    tree.layout(SizeProposal {
+        width: Some(600.0),
+        height: None,
+    });
+    let row = data_source_header_row(&tree, bar_id);
+    let headers = tree
+        .children(row)
+        .into_iter()
+        .map(|h| {
+            let b = tree.bounds(h);
+            (b.width, b.height)
+        })
+        .collect();
+    (tree.bounds(bar_id).height, headers)
+}
+
+/// A bar with no tab height of its own lays out the height its style
+/// declares, and each header pads its content by the style's padding: a
+/// "Documents" header measures 9 × 8 dp of mock text, one 6 dp gap before the
+/// trailing spacer and twice the padding.
+#[test]
+fn a_tab_style_sets_the_strip_height_and_the_header_padding() {
+    let theme = teksilo_core::presets::intui::light();
+
+    let (bar_h, headers) = horizontal_bar_geometry(theme.clone(), None, None);
+    assert!(
+        (bar_h - 50.0).abs() < 0.5,
+        "Int UI strip is 50 dp, got {bar_h}"
+    );
+    for (w, h) in &headers {
+        assert!((h - 50.0).abs() < 0.5, "Int UI tab is 50 dp, got {h}");
+        assert!((w - (72.0 + 6.0 + 24.0)).abs() < 0.5, "got {w}");
+    }
+
+    let (bar_h, headers) = horizontal_bar_geometry(theme, Some(tall_padded_tab_style()), None);
+    assert!((bar_h - 37.0).abs() < 0.5, "the style's strip, got {bar_h}");
+    assert_eq!(headers.len(), 2);
+    for (w, h) in &headers {
+        assert!((h - 37.0).abs() < 0.5, "the style's tab height, got {h}");
+        assert!(
+            (w - (72.0 + 6.0 + 60.0)).abs() < 0.5,
+            "the style's padding, got {w}"
+        );
+    }
+}
+
+/// `tab_bar_height(..)` is the app's, and it still wins over the style's.
+#[test]
+fn a_bars_own_tab_height_wins_over_its_styles() {
+    let (bar_h, headers) = horizontal_bar_geometry(
+        teksilo_core::presets::intui::light(),
+        Some(tall_padded_tab_style()),
+        Some(44.0),
+    );
+    assert!((bar_h - 44.0).abs() < 0.5, "got {bar_h}");
+    for (_, h) in &headers {
+        assert!((h - 44.0).abs() < 0.5, "got {h}");
+    }
+}
+
+/// A vertical bar's pills take the style's tab height too.
+#[test]
+fn a_vertical_bars_pills_take_the_styles_tab_height() {
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let bar_id = tree.add(
+        TabBar::vertical(two_tab_model(), title_delegate(), selected, |_, h| h.id)
+            .tab_sizing(TabSizing::Shared)
+            .tab_spacing(0.0)
+            .show_scroll_arrows(false)
+            .show_overflow_dropdown(false)
+            .style(tall_padded_tab_style()),
+    );
+    tree.layout(SizeProposal::exact(200.0, 800.0));
+    let row = data_source_header_row(&tree, bar_id);
+    let heights: Vec<f32> = tree
+        .children(row)
+        .iter()
+        .map(|&h| tree.bounds(h).height)
+        .collect();
+    assert_eq!(heights.len(), 2);
+    for h in &heights {
+        assert!((h - 37.0).abs() < 0.5, "got {heights:?}");
+    }
+}
+
+/// A `TabWidget` reaches its style through the theme slot: the bar it hosts
+/// lays out the slot's tab height.
+#[test]
+fn a_tab_widget_takes_its_tab_height_from_the_theme_slot() {
+    let mut theme = teksilo_core::presets::intui::light();
+    theme.style_slots.tab = Some(Rc::new(tall_padded_tab_style()));
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let mut tree = WidgetTree::new().with_theme(theme);
+    let widget_id = tree.add(
+        TabWidget::new(selected)
+            .static_tab(TabInfo::new().title(label("A")), FixedLeaf(120.0, 48.0))
+            .static_tab(TabInfo::new().title(label("B")), FixedLeaf(120.0, 48.0))
+            .show_scroll_arrows(false)
+            .show_overflow_dropdown(false),
+    );
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+
+    fn tab_heights(tree: &WidgetTree, id: WidgetId, out: &mut Vec<f32>) {
+        if tree
+            .widget_type_name(id)
+            .is_some_and(|t| t.rsplit("::").next() == Some("TabHeader"))
+        {
+            out.push(tree.bounds(id).height);
+        }
+        for c in tree.children(id) {
+            tab_heights(tree, c, out);
+        }
+    }
+    let mut heights = Vec::new();
+    tab_heights(&tree, widget_id, &mut heights);
+    assert_eq!(heights.len(), 2, "two tab headers");
+    for h in &heights {
+        assert!((h - 37.0).abs() < 0.5, "got {heights:?}");
+    }
+}
+
+/// The shipped recipe's header padding follows the density ladder (12 / 13.8
+/// / 15.6 dp), and so does the inner gap, while the 50 dp tab clears every
+/// target already: a "Documents" header measures `72 + gap + 2 · padding`.
+#[test]
+fn the_int_ui_header_padding_follows_the_density_ladder() {
+    use teksilo_tokens::TargetDensity;
+    let expected = [
+        (TargetDensity::Compact, 72.0 + 6.0 + 24.0),
+        (TargetDensity::Comfortable, 72.0 + 6.9 + 27.6),
+        (TargetDensity::Touch, 72.0 + 7.8 + 31.2),
+    ];
+    for (density, width) in expected {
+        let theme = teksilo_core::presets::intui::light().with_density(density);
+        let (bar_h, headers) = horizontal_bar_geometry(theme, None, None);
+        assert!((bar_h - 50.0).abs() < 0.5, "{density:?}: got {bar_h}");
+        for (w, _) in &headers {
+            assert!(
+                (w - width).abs() < 0.01,
+                "{density:?}: got {w}, want {width}"
+            );
+        }
+    }
 }

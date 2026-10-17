@@ -8,7 +8,7 @@ struct, and `for_tokens(&InputTokens)` projects each one onto the active density
 — `dp` for a target, `spacing` for a gap, `density_min_size` for a minimum box.
 A theme preset then builds that same struct with its own numbers.
 
-**Forty-five of those projected fields have no reader.** The widget composes the
+**Forty-two of those projected fields have no reader.** The widget composes the
 dimension from the raw `pub const` in the recipe's module instead, so the
 projected field is written by `for_tokens`, written again by every preset, and
 consulted by nothing. Retuning one changes nothing on screen.
@@ -47,12 +47,12 @@ and is therefore inside the scope; the rule finds both its projected fields read
 
 | | |
 |---|---|
-| projected fields in scope | 103 |
-| of those, unread by the rule | 47 |
+| projected fields in scope | 102 |
+| of those, unread by the rule | 44 |
 | false positives of the rule (§4) | 2 |
-| **real gap** | **45** |
+| **real gap** | **42** |
 | of which inert even if wired (§1) | 10 |
-| of which a shipped preset already sets a different value (§2) | 10 |
+| of which a shipped preset already sets a different value (§2) | 7 |
 | of which a preset sets the same value the constant carries (§3a) | 3 |
 | of which density only, no preset (§3b) | 22 |
 
@@ -62,16 +62,19 @@ those cost a test failure would discourage the one change it invites: the tables
 are the record, the guard keeps their *membership* honest, and the arithmetic is
 a snapshot of the day it was taken.
 
-Nine further fields were on this list until a metrics accessor wired them,
+Eleven further fields were on this list until a metrics accessor wired them,
 and they are the worked examples for what wiring one looks like:
 `TableRecipe::cell_padding_horizontal` / `cell_padding_vertical`
 (`TableStyle`), `CalendarRecipe::nav_arrow_size` (`CalendarStyle`),
 `SearchFieldRecipe::row_padding_horizontal` / `row_padding_vertical`
 (`SearchFieldStyle`), `StandardItemRecipe::min_height_single_line` /
-`min_height_two_line` (`StandardItemStyle`) and `TableRecipe::row_height` /
-`header_height` (`TableStyle`): a defaulted metrics accessor on
+`min_height_two_line` (`StandardItemStyle`), `TableRecipe::row_height` /
+`header_height` (`TableStyle`) and `TabRecipe::editor_height` /
+`padding_horizontal` (`TabStyle`): a defaulted metrics accessor on
 the style trait, defaulted so an out-of-tree style keeps compiling, overridden
 by the `Recipe*Style` from its own recipe so a preset's number takes effect.
+A twelfth, `TabRecipe::tool_window_height`, was deleted instead: neither it nor
+its constant had a reader, and no tab strip has a tool-window height to give it.
 
 **A verdict of "safe to wire" means the mechanism is available and the change is
 local.** It never means the resulting dimension is right: a preset's number
@@ -112,7 +115,7 @@ unwired one.
 
 ## 2. A shipped preset already sets a different value
 
-The ten that cost something today. Each is written by Fluent or macOS with
+The seven that cost something today. Each is written by Fluent or macOS with
 a number chosen for that design language, and each renders the IntUI constant
 instead. The **renders** column is what a user sees under any theme.
 
@@ -125,18 +128,12 @@ instead. The **renders** column is what a user sees under any theme.
 | `SegmentedControlRecipe` | `height` | 24 | 32 | 22 | `segmented_control.rs` → `layout_response` |
 | `SegmentedControlRecipe` | `padding_horizontal` | 12 | — | 10 | `segmented_control.rs` → `layout_response`; `segmented_control/cell.rs` → `layout_response` |
 | `SegmentedControlRecipe` | `padding_vertical` | 6 | — | 3 | `segmented_control.rs` → `layout_response` |
-| `TabRecipe` | `editor_height` | 50 | 32 | 26 | `tab_widget/bar.rs` → `build`; `tab_widget/header.rs` → `intrinsic_height` |
-| `TabRecipe` | `padding_horizontal` | 12 | 8 | 12 | `tab_widget/header.rs` → `build`, `estimate_natural_width` |
-| `TabRecipe` | `tool_window_height` | 28 | 32 | 22 | none — see below |
 
 Ladders, for the ones whose density projection also moves (Compact / Comfortable
 / Touch): `cell_size` 32/32/44, `CalendarRecipe::header_height` 28/32/44,
 `min_thumb_length` 24/32/44, `SearchFieldRecipe::row_height` 26/32/44,
 `SegmentedControlRecipe::height` 24/32/44 and `padding_horizontal` 12/13.8/15.6
-and `padding_vertical` 6/6.9/7.8, `TabRecipe::padding_horizontal`
-12/13.8/15.6, `tool_window_height` 28/32/44.
-`TabRecipe::editor_height` (50) is flat: its cost is the preset alone, not the
-density.
+and `padding_vertical` 6/6.9/7.8.
 
 ### Verdicts
 
@@ -152,14 +149,10 @@ the segmented control's `layout_response` and its overflow planner compute cell
 extents from these three together, and the planner is also fed by
 `measure_intrinsic` on dormant cells. Wiring them means threading the style into
 the planner, not just into a `Padding`.
-`TabRecipe::editor_height` / `padding_horizontal`: the tab bar's header widths
-come from `estimate_natural_width`, which runs before a style is resolved in the
-bar's own build; the seam has to be chosen before the numbers can move.
 
 **Needs care — nothing applies the dimension at all.**
-`CalendarRecipe::header_height` and `TabRecipe::tool_window_height`: their
-constants have no reader either, so the calendar's header row and the
-tool-window tab strip take their height from their content. Wiring the field is
+`CalendarRecipe::header_height`: its constant has no reader either, so the
+calendar's header row takes its height from its content. Wiring the field is
 therefore not "read the style instead of the constant" but "give this row a
 fixed height", which is a design decision and not a mechanical one.
 
@@ -234,9 +227,9 @@ to — moving it at Touch changes what a drag can do, not only what is painted,
 so it wants a resize test rather than a layout one.
 
 **Nothing to wire.** `DateEditRecipe::calendar_button_width` and `segment_gap`,
-`SearchFieldRecipe::input_panel_gap`: like the two in §2, their constants have
-no reader either. The dimension is not applied anywhere, so there is nothing to
-route through a style.
+`SearchFieldRecipe::input_panel_gap`: like `CalendarRecipe::header_height` in
+§2, their constants have no reader either. The dimension is not applied
+anywhere, so there is nothing to route through a style.
 
 ## 4. The rule's false positives
 
