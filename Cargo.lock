@@ -12237,6 +12237,7 @@ dependencies = [
  "serde_json",
  "teksilo-canvas",
  "teksilo-core",
+ "teksilo-data",
  "teksilo-i18n",
  "teksilo-kde-scheme",
  "teksilo-target-conformance",

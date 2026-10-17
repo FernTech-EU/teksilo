@@ -65,6 +65,16 @@ by crate for clarity, not because crates version independently.
   colour groups). The row's label, subtitle and chevron follow it, and
   `SelectionEmphasis::emphasised` gives a style the same condition for its
   own selection fill.
+- **`StandardItemStyle::min_height_decorated`.** A row style says how tall a
+  `StandardListItem` or `StandardTreeItem` row with a check box or a leading
+  slot is at the active density, for a design whose rows grow with an icon.
+  It defaults to the single-line height, so an existing style keeps one
+  height for every row.
+- **`ProgressBarStyle::thickness` and `paints_busy_indicator`.** A progress
+  bar style says how thick a `ProgressBar` is when the app sets no
+  thickness, and whether it draws an indeterminate bar's motion itself, in
+  which case the bar shows the style alone instead of its own sweep. Both
+  have defaults, so an existing style keeps the 4 px bar and the sweep.
 - **`MenuItemStyle::pressed_label_role`.** A menu style gives the text role a
   `MenuItem`'s label and shortcut take while the row is pressed, for a design
   whose pressed row is a solid fill while its hover is a pale wash. It
@@ -183,8 +193,24 @@ by crate for clarity, not because crates version independently.
   density and font, among them the height of a section title. The outlines
   of an empty check box, radio button and field, of a switch on or off and
   of a slider's handle, a slider's tick marks and a highlighted menu row's
-  outline, are strengthened to a 3:1 contrast, keeping their hue. Other
-  widgets draw Teksilo's own chrome in these colours and shapes.
+  outline, are strengthened to a 3:1 contrast, keeping their hue. A
+  `StandardListItem` or `StandardTreeItem` row is Breeze's, 24 px at
+  Plasma's default font, 26 px with an icon or a check box and 42 px with a
+  subtitle, growing to the density's target size: a selected row is the
+  highlight inside the row's margins, its label in the text on it, a
+  hovered one a pale wash of the highlight, and a selection mutes only when
+  the window goes inactive. A `TableView` or `TreeTableView` row is 24 px,
+  rather than Breeze's 23, so it stays a WCAG target size, under a 30 px
+  header of Breeze's sections, where the column sorted in ascending order
+  is shown pressed, as in Plasma. A selected tab is the window colour under
+  a 3 px highlight bar, its outline turning through the bar's rounded
+  corners, and an unselected one the window colour darkened, 30 px tall. A
+  `ScrollBar` is Breeze's 8 px handle over no track, beside a 1 px
+  separator, with a thumb at least 20 px long, its colours strengthened to a
+  3:1 contrast. A `ProgressBar` is 26 px thick around Breeze's 6 px groove,
+  filled toward the highlight, and an indeterminate one shows Breeze's
+  moving stripes. Other widgets draw Teksilo's own chrome in these colours
+  and shapes.
 
 #### Platform
 

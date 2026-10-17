@@ -68,7 +68,12 @@ pub struct ProgressBar {
     value: Prop<f32>,
     indeterminate: bool,
     orientation: Orientation,
-    thickness: f32,
+    /// The app's thickness, if it set one.
+    thickness: Option<f32>,
+    /// The thickness the style resolved at the last build declares
+    /// ([`ProgressBarStyle::thickness`](teksilo_core::styles::ProgressBarStyle::thickness)),
+    /// used when the app set none.
+    style_thickness: Option<f32>,
     track_color: Option<ColorProp>,
     fill_color: Option<ColorProp>,
     label: Option<LocalizedString>,
@@ -84,7 +89,8 @@ impl ProgressBar {
             value: Prop::Static(value.clamp(0.0, 1.0)),
             indeterminate: false,
             orientation: Orientation::Horizontal,
-            thickness: DEFAULT_THICKNESS,
+            thickness: None,
+            style_thickness: None,
             track_color: None,
             fill_color: None,
             label: None,
@@ -99,7 +105,8 @@ impl ProgressBar {
             value: Prop::Static(0.0),
             indeterminate: true,
             orientation: Orientation::Horizontal,
-            thickness: DEFAULT_THICKNESS,
+            thickness: None,
+            style_thickness: None,
             track_color: None,
             fill_color: None,
             label: None,
@@ -123,10 +130,19 @@ impl ProgressBar {
     }
 
     /// Set the bar's narrow dimension in logical pixels. For horizontal bars
-    /// this is the height; for vertical bars this is the width. Default is 4.0.
+    /// this is the height; for vertical bars this is the width. Default is the
+    /// active style's thickness, 4.0 for the shipped style.
     pub fn thickness(mut self, thickness: f32) -> Self {
-        self.thickness = thickness;
+        self.thickness = Some(thickness);
         self
+    }
+
+    /// The narrow dimension laid out: the app's, else the style's, else the
+    /// shipped 4.0.
+    fn effective_thickness(&self) -> f32 {
+        self.thickness
+            .or(self.style_thickness)
+            .unwrap_or(DEFAULT_THICKNESS)
     }
 
     /// Override the track background. Default (unset) is `SurfaceRole::Sunken`.
@@ -164,7 +180,7 @@ impl ProgressBar {
 impl std::fmt::Debug for ProgressBar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ProgressBar")
-            .field("thickness", &self.thickness)
+            .field("thickness", &self.effective_thickness())
             .finish()
     }
 }
@@ -175,8 +191,6 @@ impl Widget for ProgressBar {
         // when reduced-motion is on, fall through to a static
         // signal-driven path that never animates (pos stays at 0).
         let reduced_motion = ctx.prefers_reduced_motion();
-        let animate = self.indeterminate && !reduced_motion;
-        let use_shader_path = animate && matches!(self.orientation, Orientation::Horizontal);
         let sweep_period = ctx.theme().motion.duration_indeterminate_sweep;
 
         let style: SharedProgressBarStyle = self
@@ -188,6 +202,12 @@ impl Widget for ProgressBar {
                     &ctx.theme().input,
                 ))
             });
+        self.style_thickness = style.thickness(&ctx.theme().input);
+        // A style that paints its own busy indicator takes the indeterminate
+        // bar whole, in either orientation: no sweep is drawn over it.
+        let style_owns_busy = self.indeterminate && style.paints_busy_indicator();
+        let animate = self.indeterminate && !reduced_motion && !style_owns_busy;
+        let use_shader_path = animate && matches!(self.orientation, Orientation::Horizontal);
         let cfg = ProgressBarStyleConfig {
             orientation: self.orientation,
             progress: if self.indeterminate {
@@ -226,6 +246,8 @@ impl Widget for ProgressBar {
                 fill_color: fill,
             });
             ctx.add(IndeterminateSweepLeaf::shader(handle))
+        } else if style_owns_busy {
+            style.make_body(&cfg, ctx)
         } else if self.indeterminate {
             let frame_id = style.make_body(&cfg, ctx);
             let pos = ctx.animated_signal(0.0);
@@ -270,11 +292,11 @@ impl Widget for ProgressBar {
         match self.orientation {
             Orientation::Horizontal => {
                 let width = proposal.width.unwrap_or(100.0);
-                Size::new(width, self.thickness)
+                Size::new(width, self.effective_thickness())
             }
             Orientation::Vertical => {
                 let height = proposal.height.unwrap_or(100.0);
-                Size::new(self.thickness, height)
+                Size::new(self.effective_thickness(), height)
             }
         }
         .into()
@@ -425,6 +447,7 @@ impl Widget for IndeterminateSweepLeaf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use teksilo_core::styles::ProgressBarStyle;
     use teksilo_core::widget_tree::WidgetTree;
 
     #[test]
@@ -533,5 +556,102 @@ mod tests {
             phase1, phase2,
             "animated-quad phase must advance between frames"
         );
+    }
+
+    /// A style that sizes its bar and paints its own busy indicator: a red
+    /// rectangle for an indeterminate bar, so the test can find it.
+    #[derive(Debug, Default, Clone, Copy)]
+    struct BusyStyle;
+
+    impl ProgressBarStyle for BusyStyle {
+        fn make_body(
+            &self,
+            cfg: &ProgressBarStyleConfig,
+            ctx: &mut teksilo_core::build_context::BuildContext,
+        ) -> WidgetId {
+            let color = match cfg.progress {
+                ProgressKind::Indeterminate => Color::RED,
+                ProgressKind::Determinate(_) => Color::BLUE,
+            };
+            ctx.add(crate::primitives::RectWidget::new().background(color))
+        }
+
+        fn thickness(&self, _tokens: &teksilo_tokens::InputTokens) -> Option<f32> {
+            Some(9.0)
+        }
+
+        fn paints_busy_indicator(&self) -> bool {
+            true
+        }
+    }
+
+    /// `bar` laid out 200 long with its narrow dimension left to it.
+    fn laid_out(bar: ProgressBar) -> (WidgetTree, WidgetId) {
+        let proposal = match bar.orientation {
+            Orientation::Horizontal => SizeProposal {
+                width: Some(200.0),
+                height: None,
+            },
+            Orientation::Vertical => SizeProposal {
+                width: None,
+                height: Some(200.0),
+            },
+        };
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(bar);
+        tree.layout(proposal);
+        (tree, id)
+    }
+
+    /// The style's thickness is the bar's when the app names none, across
+    /// either orientation, and the app's own thickness wins over it.
+    #[test]
+    fn the_styles_thickness_sizes_a_bar_the_app_did_not_size() {
+        let (tree, id) = laid_out(ProgressBar::new(0.5).style(BusyStyle));
+        assert_eq!(tree.bounds(id).height, 9.0);
+        let (tree, id) = laid_out(
+            ProgressBar::new(0.5)
+                .orientation(Orientation::Vertical)
+                .style(BusyStyle),
+        );
+        assert_eq!(tree.bounds(id).width, 9.0);
+        let (tree, id) = laid_out(ProgressBar::new(0.5).thickness(3.0).style(BusyStyle));
+        assert_eq!(tree.bounds(id).height, 3.0);
+        // The shipped style declares none, which keeps the widget's 4.
+        assert_eq!(
+            crate::styles::RecipeProgressBarStyle::default()
+                .thickness(&teksilo_tokens::InputTokens::default()),
+            None
+        );
+        let (tree, id) = laid_out(ProgressBar::new(0.5));
+        assert_eq!(tree.bounds(id).height, DEFAULT_THICKNESS);
+    }
+
+    /// A style that paints its own busy indicator is mounted alone for an
+    /// indeterminate bar in both orientations: no shader quad, no sweep.
+    #[test]
+    fn a_style_that_paints_the_busy_indicator_replaces_the_sweep() {
+        for orientation in [Orientation::Horizontal, Orientation::Vertical] {
+            let (mut tree, _) = laid_out(
+                ProgressBar::indeterminate()
+                    .orientation(orientation)
+                    .style(BusyStyle),
+            );
+            let frame = tree.render();
+            assert!(frame.animated_quads.is_empty(), "{orientation:?}");
+            let red: Vec<_> = frame
+                .shapes
+                .iter()
+                .filter(|s| s.color == Color::RED.to_array())
+                .collect();
+            assert_eq!(red.len(), 1, "{orientation:?}: the style's body");
+            assert_eq!(
+                frame.shapes.len(),
+                1,
+                "{orientation:?}: nothing painted over it"
+            );
+        }
+        // The shipped style keeps the widget's sweep.
+        assert!(!crate::styles::RecipeProgressBarStyle::default().paints_busy_indicator());
     }
 }

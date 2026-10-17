@@ -155,6 +155,21 @@ pub trait StandardItemStyle: 'static {
         dp(28.0, TargetRole::Target, tokens)
     }
 
+    /// The height floor of a row with no subtitle that carries a leading
+    /// decoration, a check box or a leading slot (an icon, typically), in
+    /// logical pixels, at the density `tokens` describe.
+    ///
+    /// Some design languages make such a row taller than a row of text
+    /// alone: Qt adds 2 px for an item's icon, so a KDE Breeze row is 24 px
+    /// with text only and 26 px with an icon or a check box.
+    ///
+    /// **Defaulted** to [`min_height_single_line`](Self::min_height_single_line),
+    /// so a style that does not tell the two apart keeps one floor and an
+    /// existing style needs no change.
+    fn min_height_decorated(&self, tokens: &InputTokens) -> f32 {
+        self.min_height_single_line(tokens)
+    }
+
     /// The height floor of a row carrying a subtitle, in logical pixels.
     /// Defaulted on the same terms as
     /// [`min_height_single_line`](Self::min_height_single_line), from

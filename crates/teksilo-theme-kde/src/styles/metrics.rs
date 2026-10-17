@@ -17,10 +17,13 @@ use teksilo_tokens::{InputTokens, TargetRole, TypographyTokens};
 
 use crate::geometry::{
     BUTTON_MARGIN_WIDTH, BreezeGeometry, CHECKBOX_FOCUS_MARGIN, CHECKBOX_ITEM_SPACING,
-    CHECKBOX_SIZE, COMBO_BOX_FRAME_WIDTH, FRAME_WIDTH, LARGE_ICON_SIZE, LINE_EDIT_FRAME_WIDTH,
+    CHECKBOX_SIZE, COMBO_BOX_FRAME_WIDTH, FRAME_WIDTH, HEADER_MARGIN, ITEM_VIEW_MARGIN_HEIGHT,
+    ITEM_VIEW_MARGIN_WIDTH, ITEM_VIEW_PADDING, LARGE_ICON_SIZE, LINE_EDIT_FRAME_WIDTH,
     MEDIUM_ICON_SIZE, MENU_ITEM_ACCELERATOR_SPACE, MENU_ITEM_MARGIN, MENU_ITEM_TEXT_LEFT_MARGIN,
-    SLIDER_CONTROL_THICKNESS, SLIDER_GROOVE_THICKNESS, SLIDER_TICK_LENGTH, SLIDER_TICK_MARGIN,
-    SMALL_ICON_SIZE, SPIN_BOX_ARROW_BUTTON_WIDTH, SPIN_BOX_FRAME_WIDTH, TOOL_BUTTON_MARGIN_WIDTH,
+    PROGRESS_BAR_THICKNESS, SCROLL_BAR_EXTENT, SCROLL_BAR_HANDLE_WIDTH,
+    SCROLL_BAR_MIN_HANDLE_LENGTH, SLIDER_CONTROL_THICKNESS, SLIDER_GROOVE_THICKNESS,
+    SLIDER_TICK_LENGTH, SLIDER_TICK_MARGIN, SMALL_ICON_SIZE, SPIN_BOX_ARROW_BUTTON_WIDTH,
+    SPIN_BOX_FRAME_WIDTH, TAB_MARGIN_WIDTH, TOOL_BUTTON_MARGIN_WIDTH,
 };
 use crate::shape::BREEZE_PEN_WIDTH;
 
@@ -457,6 +460,266 @@ pub fn breeze_menu_metrics() -> BreezeMenuMetrics {
     )
 }
 
+/// `[measured-qt]` How far a row's content lies inside its leading and
+/// trailing edges: the 2 px item margin, the 2 px item padding and Qt's 3 px
+/// text margin, where Qt puts a row's check box (7 px in, among the
+/// `item_view_item` sub-rectangles of `sizes.json`).
+pub const ROW_CONTENT_INSET: f32 = ITEM_VIEW_MARGIN_WIDTH + ITEM_VIEW_PADDING + 3.0;
+/// `[Hp]` How much of the highlight washes a hovered row that is not
+/// selected.
+pub const ROW_HOVER_ALPHA: f32 = 0.3;
+/// `[Hp]` The alpha of a hovered row's outline: the fill colour, at 0.8,
+/// where a selected row's is opaque.
+pub const ROW_HOVER_OUTLINE_ALPHA: f32 = 0.8;
+/// `[Hp]` How much a hovered selected row's highlight is lightened, in Qt's
+/// percent (d.11 of the specification).
+pub const ROW_SELECTED_HOVER_LIGHTER: i32 = 110;
+
+/// The dimensions of a list or tree row, `StandardListItem` and
+/// `StandardTreeItem`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BreezeRowMetrics {
+    /// `[S]` A row of text: `H + 1 + 1 + 2 x 2`, the line box and the 1 px
+    /// item margin and 2 px item padding above and below, through the
+    /// density ladder. 24 at Compact for the Breeze typography.
+    pub height: f32,
+    /// `[measured-qt]` A row with an icon or a check box: 26 at Compact, Qt
+    /// adding 2 px for an item's icon and making room for the 20 px check
+    /// box, through the density ladder.
+    pub height_decorated: f32,
+    /// `[derived]` A row with a subtitle: two body line boxes and the same
+    /// margins and padding, `2H + 6`, through the density ladder. 42 at
+    /// Compact. Qt sizes an item to its text and has no two-line row of its
+    /// own.
+    pub height_two_line: f32,
+    /// `[measured-qt]` [`ROW_CONTENT_INSET`], scaled by the density's
+    /// spacing.
+    pub padding_horizontal: f32,
+    /// `[M]` The space above and below the content: the 1 px item margin.
+    /// It holds the selection's outline, so it does not scale; the height
+    /// floor rises with the density instead.
+    pub padding_vertical: f32,
+    /// `[M]` How far the selection lies inside the row's leading and
+    /// trailing edges: the 2 px item margin. Painted, so it does not scale.
+    pub selection_inset_horizontal: f32,
+    /// `[M]` The same above and below: the 1 px item margin.
+    pub selection_inset_vertical: f32,
+}
+
+/// The row dimensions at the density of `tokens`, for `typography`.
+pub fn breeze_row_metrics_for(
+    tokens: &InputTokens,
+    typography: &TypographyTokens,
+) -> BreezeRowMetrics {
+    let g = geometry_of(typography);
+    let margins = 2.0 * (ITEM_VIEW_MARGIN_HEIGHT + ITEM_VIEW_PADDING);
+    BreezeRowMetrics {
+        height: dp(g.list_row_height, TargetRole::Target, tokens),
+        height_decorated: dp(
+            g.list_row_height_with_icon
+                .max(g.list_row_height_with_check),
+            TargetRole::Target,
+            tokens,
+        ),
+        height_two_line: dp(2.0 * g.line_height + margins, TargetRole::Target, tokens),
+        padding_horizontal: spacing(ROW_CONTENT_INSET, tokens),
+        padding_vertical: ITEM_VIEW_MARGIN_HEIGHT,
+        selection_inset_horizontal: ITEM_VIEW_MARGIN_WIDTH,
+        selection_inset_vertical: ITEM_VIEW_MARGIN_HEIGHT,
+    }
+}
+
+/// [`breeze_row_metrics_for`] at the Compact density and the Breeze
+/// typography.
+pub fn breeze_row_metrics() -> BreezeRowMetrics {
+    breeze_row_metrics_for(
+        &InputTokens::default(),
+        &crate::typography::breeze_typography(),
+    )
+}
+
+/// The dimensions of a `TableView` or `TreeTableView`: its rows and its
+/// column header.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BreezeTableMetrics {
+    /// `[wcag]` D7: a body row. Qt lays a Breeze table row out at `H + 2 x
+    /// (1 + 1)` and adds its 1 px grid line, 23 at Plasma's default font,
+    /// under WCAG 2.2 SC 2.5.8's 24 px; it is raised to 24, then through the
+    /// density ladder.
+    pub row_height: f32,
+    /// `[S]` The column header: `max(H, 10) + 2 x 6`, room for the sort
+    /// arrow, through the density ladder. 30 at Compact for the Breeze
+    /// typography.
+    pub header_height: f32,
+    /// `[M]` The space between a header section's edges and its label: the
+    /// 6 px header margin, scaled by the density's spacing.
+    pub header_padding: f32,
+}
+
+/// The table dimensions at the density of `tokens`, for `typography`.
+pub fn breeze_table_metrics_for(
+    tokens: &InputTokens,
+    typography: &TypographyTokens,
+) -> BreezeTableMetrics {
+    let g = geometry_of(typography);
+    BreezeTableMetrics {
+        row_height: dp(
+            g.table_row_height.max(tokens.min_target_conformance),
+            TargetRole::Target,
+            tokens,
+        ),
+        header_height: dp(g.header_height, TargetRole::Target, tokens),
+        header_padding: spacing(HEADER_MARGIN, tokens),
+    }
+}
+
+/// [`breeze_table_metrics_for`] at the Compact density and the Breeze
+/// typography.
+pub fn breeze_table_metrics() -> BreezeTableMetrics {
+    breeze_table_metrics_for(
+        &InputTokens::default(),
+        &crate::typography::breeze_typography(),
+    )
+}
+
+/// `[Hp]` How far a hovered unselected tab's fill moves from the window
+/// colour toward the hover colour.
+pub const TAB_HOVER_MIX: f64 = 0.2;
+/// `[Hp]` How much an unselected tab's window colour is darkened, in Qt's
+/// percent.
+pub const TAB_UNSELECTED_DARKER: i32 = 120;
+/// `[Hp]` The radius of the active tab's highlight bar at its outer
+/// corners: the frame radius.
+pub const TAB_BAR_RADIUS: f32 = 5.0;
+/// `[Hp]` The radius the selected tab's outline is stroked at, on the pen's
+/// centre line: with a 1 px pen its outer edge turns at 5 px, the bar's
+/// radius, and its inner edge at 4.
+pub const TAB_OUTLINE_RADIUS: f32 = 4.5;
+
+/// The dimensions of a tab in a `TabBar` or `TabWidget`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BreezeTabMetrics {
+    /// `[S]` A tab's height: `max(H + 2 x 4, 30)`, through the density
+    /// ladder. 30 at Compact for the Breeze typography.
+    pub height: f32,
+    /// `[S]` A static tab bar's tab: `max(H + 2 x 4, 34)`, through the
+    /// density ladder. Recorded, not laid out: a `TabStyle` is not told
+    /// whether its bar is one (see the crate's known limitations).
+    pub static_height: f32,
+    /// `[M]` The space between a tab's edges and its title: the 8 px tab
+    /// margin, scaled by the density's spacing.
+    pub padding_horizontal: f32,
+    /// `[M]` A tab's minimum width with a title. Recorded, not laid out: the
+    /// bar applies its own minimum tab width (see the crate's known
+    /// limitations).
+    pub min_width: f32,
+    /// `[M]` The thickness of the active tab's highlight bar. Painted, so it
+    /// does not scale.
+    pub indicator: f32,
+}
+
+/// The tab dimensions at the density of `tokens`, for `typography`.
+pub fn breeze_tab_metrics_for(
+    tokens: &InputTokens,
+    typography: &TypographyTokens,
+) -> BreezeTabMetrics {
+    let g = geometry_of(typography);
+    BreezeTabMetrics {
+        height: dp(g.tab_height, TargetRole::Target, tokens),
+        static_height: dp(g.static_tab_height, TargetRole::Target, tokens),
+        padding_horizontal: spacing(TAB_MARGIN_WIDTH, tokens),
+        min_width: crate::geometry::TAB_MIN_WIDTH,
+        indicator: crate::geometry::TAB_ACTIVE_INDICATOR,
+    }
+}
+
+/// [`breeze_tab_metrics_for`] at the Compact density and the Breeze
+/// typography.
+pub fn breeze_tab_metrics() -> BreezeTabMetrics {
+    breeze_tab_metrics_for(
+        &InputTokens::default(),
+        &crate::typography::breeze_typography(),
+    )
+}
+
+/// `[Hp]` The width of the separator line on a scroll bar's leading edge.
+pub const SCROLL_BAR_SEPARATOR: f32 = 1.0;
+
+/// The dimensions of a `ScrollBar`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BreezeScrollBarMetrics {
+    /// `[M]` Breeze's extent, its 1 px separator included. Recorded, not laid
+    /// out: the widgets choose a scroll bar's thickness themselves (see the
+    /// crate's known limitations).
+    pub extent: f32,
+    /// `[M]` The handle's width, centred across what the separator leaves.
+    /// Painted, so it does not scale.
+    pub handle_width: f32,
+    /// `[M]` The shortest the handle gets. The handle is a grab, which this
+    /// clears at every density, so it is Breeze's 20 at all three.
+    pub min_handle_length: f32,
+    /// `[Hp]` The separator line's width.
+    pub separator: f32,
+}
+
+/// The scroll-bar dimensions at the density of `tokens`.
+pub fn breeze_scroll_bar_metrics_for(tokens: &InputTokens) -> BreezeScrollBarMetrics {
+    BreezeScrollBarMetrics {
+        extent: SCROLL_BAR_EXTENT,
+        handle_width: SCROLL_BAR_HANDLE_WIDTH,
+        min_handle_length: dp(SCROLL_BAR_MIN_HANDLE_LENGTH, TargetRole::Grab, tokens),
+        separator: SCROLL_BAR_SEPARATOR,
+    }
+}
+
+/// [`breeze_scroll_bar_metrics_for`] at the Compact density.
+pub fn breeze_scroll_bar_metrics() -> BreezeScrollBarMetrics {
+    breeze_scroll_bar_metrics_for(&InputTokens::default())
+}
+
+/// `[Hp]` How much of the window text a progress bar's groove is filled with
+/// over the window: 0.2 times 0.7, as a slider's.
+pub const PROGRESS_GROOVE_ALPHA: f64 = 0.2 * 0.7;
+/// `[Hp]` How much of the highlight fills a determinate bar's contents over
+/// the window.
+pub const PROGRESS_CONTENTS_ALPHA: f64 = 0.7;
+/// `[Hp]` How far the busy bar's lighter stripes move from the highlight
+/// toward the window.
+pub const PROGRESS_BUSY_LIGHT_MIX: f64 = 0.7;
+
+/// The dimensions of a `ProgressBar`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BreezeProgressMetrics {
+    /// `[qt]` `[measured-qt]` The bar's thickness: Qt's size hint, `H + 8`,
+    /// 26 at Plasma's default font, the groove centred in it. A progress bar
+    /// is not a target, so it does not rise with the density.
+    pub thickness: f32,
+    /// `[M]` The groove's thickness.
+    pub groove: f32,
+    /// `[Hp]` The groove's radius, on the groove inset by half the pen.
+    pub radius: f32,
+    /// `[Hp]` The period of the busy bar's stripes: one highlight stripe and
+    /// one lighter stripe, each half of it.
+    pub busy_period: f32,
+}
+
+/// The progress-bar dimensions for `typography`. None of them follows the
+/// density.
+pub fn breeze_progress_metrics_for(typography: &TypographyTokens) -> BreezeProgressMetrics {
+    let g = geometry_of(typography);
+    BreezeProgressMetrics {
+        thickness: g.progress_bar_height,
+        groove: PROGRESS_BAR_THICKNESS,
+        radius: crate::shape::BREEZE_GROOVE_RADIUS,
+        busy_period: crate::geometry::PROGRESS_BAR_BUSY_PERIOD,
+    }
+}
+
+/// [`breeze_progress_metrics_for`] the Breeze typography.
+pub fn breeze_progress_metrics() -> BreezeProgressMetrics {
+    breeze_progress_metrics_for(&crate::typography::breeze_typography())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -660,6 +923,124 @@ mod tests {
         assert_eq!(m.item_height, 31.0);
         assert_eq!(m.section_height, 30.0);
         assert_eq!(m.separator_height, 5.0, "a separator has no text");
+    }
+
+    #[test]
+    fn the_rows_are_breezes_and_grow_with_the_density() {
+        let m = breeze_row_metrics();
+        assert_eq!(m.height, 24.0);
+        assert_eq!(m.height_decorated, 26.0);
+        assert_eq!(m.height_two_line, 42.0);
+        assert_eq!(m.padding_horizontal, 7.0);
+        assert_eq!(m.padding_vertical, 1.0);
+        assert_eq!(
+            (m.selection_inset_horizontal, m.selection_inset_vertical),
+            (2.0, 1.0)
+        );
+        let t = crate::typography::breeze_typography();
+        let comfortable = breeze_row_metrics_for(&at(TargetDensity::Comfortable), &t);
+        let touch = breeze_row_metrics_for(&at(TargetDensity::Touch), &t);
+        assert_eq!(
+            (
+                comfortable.height,
+                comfortable.height_decorated,
+                comfortable.height_two_line
+            ),
+            (32.0, 32.0, 42.0)
+        );
+        assert_eq!(
+            (touch.height, touch.height_decorated, touch.height_two_line),
+            (44.0, 44.0, 44.0)
+        );
+        for m in [comfortable, touch] {
+            assert_eq!(m.padding_vertical, 1.0, "holds the outline");
+            assert_eq!(m.selection_inset_horizontal, 2.0, "painted");
+            assert!(m.padding_horizontal > 7.0);
+        }
+    }
+
+    #[test]
+    fn a_larger_body_font_makes_taller_rows() {
+        let mut t = crate::typography::breeze_typography();
+        // Plasma's 12 pt: a 22 px line, a 28 px row and a 30 px row with an
+        // icon, as Qt measures them.
+        t.body.size = 16.0;
+        t.body.line_height = 22.0 / 16.0;
+        let m = breeze_row_metrics_for(&InputTokens::default(), &t);
+        assert_eq!((m.height, m.height_decorated), (28.0, 30.0));
+        assert_eq!(m.height_two_line, 50.0);
+    }
+
+    /// D7: Qt's table row is 23 px with its grid line; Teksilo's is 24.
+    #[test]
+    fn d7_the_table_row_is_raised_to_the_target_size() {
+        let g = BreezeGeometry::breeze_default();
+        assert_eq!(g.table_row_height, 23.0, "Qt's row, below the floor");
+        let m = breeze_table_metrics();
+        assert_eq!(m.row_height, 24.0);
+        assert_eq!(m.header_height, 30.0);
+        assert_eq!(m.header_padding, 6.0);
+        // The label's line box and the margin above and below fill the
+        // header exactly.
+        assert_eq!(g.line_height + 2.0 * m.header_padding, m.header_height);
+        let t = crate::typography::breeze_typography();
+        let touch = breeze_table_metrics_for(&at(TargetDensity::Touch), &t);
+        assert_eq!((touch.row_height, touch.header_height), (44.0, 44.0));
+        // A larger font's row is Qt's own once it clears the floor.
+        let mut big = t;
+        big.body.size = 16.0;
+        big.body.line_height = 22.0 / 16.0;
+        assert_eq!(
+            breeze_table_metrics_for(&InputTokens::default(), &big).row_height,
+            27.0
+        );
+    }
+
+    #[test]
+    fn the_tab_is_breezes_and_grows_with_the_density() {
+        let m = breeze_tab_metrics();
+        assert_eq!(m.height, 30.0);
+        assert_eq!(m.static_height, 34.0);
+        assert_eq!(m.padding_horizontal, 8.0);
+        assert_eq!(m.min_width, 80.0);
+        assert_eq!(m.indicator, 3.0);
+        let t = crate::typography::breeze_typography();
+        let comfortable = breeze_tab_metrics_for(&at(TargetDensity::Comfortable), &t);
+        let touch = breeze_tab_metrics_for(&at(TargetDensity::Touch), &t);
+        assert_eq!(comfortable.height, 32.0);
+        assert_eq!(touch.height, 44.0);
+        assert!((touch.padding_horizontal - 10.4).abs() < 1e-4);
+        assert_eq!(touch.indicator, 3.0, "the painted bar does not scale");
+    }
+
+    #[test]
+    fn the_scroll_bar_handle_is_breezes_at_every_density() {
+        for density in [
+            TargetDensity::Compact,
+            TargetDensity::Comfortable,
+            TargetDensity::Touch,
+        ] {
+            let tokens = at(density);
+            let m = breeze_scroll_bar_metrics_for(&tokens);
+            assert_eq!(m.extent, 21.0);
+            assert_eq!(m.handle_width, 8.0);
+            assert_eq!(m.min_handle_length, 20.0, "{density:?}");
+            assert!(m.min_handle_length >= tokens.grab_size);
+            assert_eq!(m.separator, 1.0);
+            // The handle centred in what the separator leaves is 6 px clear
+            // of it on either side.
+            assert_eq!((m.extent - m.separator - m.handle_width) / 2.0, 6.0);
+        }
+    }
+
+    #[test]
+    fn the_progress_bar_is_qts_hint_around_breezes_groove() {
+        let m = breeze_progress_metrics();
+        assert_eq!(m.thickness, 26.0);
+        assert_eq!(m.groove, 6.0);
+        assert_eq!(m.radius, 3.0);
+        assert_eq!(m.busy_period, 28.0);
+        assert!((PROGRESS_GROOVE_ALPHA - 0.14).abs() < 1e-12);
     }
 
     #[test]

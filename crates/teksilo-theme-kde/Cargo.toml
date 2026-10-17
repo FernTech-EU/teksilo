@@ -45,6 +45,8 @@ serde_json = { workspace = true }
 # `tests/mount.rs` and `tests/preset_metrics.rs` build real widget trees;
 # `lit!` supplies the untranslated labels those constructors take.
 teksilo-i18n = { workspace = true }
+# The models behind the tables and tab bars those tests mount.
+teksilo-data = { workspace = true }
 # `tests/preset_metrics.rs` reuses the conformance harness's
 # `in_tappable_row`, the row geometry that denies the miss-only slop pass,
 # rather than a copy that could drift from the gate's. Path-only (no

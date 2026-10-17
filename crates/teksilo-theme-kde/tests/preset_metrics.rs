@@ -743,3 +743,322 @@ fn a_menu_measures_breezes_rows_at_every_density() {
         }
     }
 }
+
+// ── List and tree rows ─────────────────────────────────────────────────
+
+/// The `size_hint_for_row` Qt reported for the Breeze item view `id` at
+/// Plasma's default font.
+fn qt_row(id: &str) -> f32 {
+    let all: Value = serde_json::from_str(SIZES_JSON).expect("sizes.json parses");
+    all["widgets"]
+        .as_array()
+        .expect("the measured widgets")
+        .iter()
+        .find(|w| w["id"] == id && w["font"] == "Noto Sans 10")
+        .unwrap_or_else(|| panic!("sizes.json has no {id}"))["size_hint_for_row"]
+        .as_f64()
+        .expect("a row height") as f32
+}
+
+/// The laid-out height of every `name` row under `root`.
+fn heights(tree: &WidgetTree, root: WidgetId, name: &str) -> Vec<f32> {
+    nodes_named(tree, root, name)
+        .into_iter()
+        .map(|id| tree.bounds(id).height)
+        .collect()
+}
+
+/// A column of list rows at `density`: text only, with an icon, with a check
+/// box, and with a subtitle; then the same as tree rows. Laid out with no
+/// height proposed, so each row takes its own.
+fn rows_at(theme: &Theme, density: TargetDensity) -> (Vec<f32>, Vec<f32>, usize) {
+    use teksilo_widgets::{StandardListItem, StandardTreeItem};
+    let icon = || IconWidget::checkmark(16.0);
+    let column = teksilo_widgets::VStack::new()
+        .child(StandardListItem::new(lit!("Text")))
+        .child(StandardListItem::new(lit!("Icon")).leading_slot(icon()))
+        .child(StandardListItem::new(lit!("Check")).checkbox(Signal::new(true)))
+        .child(StandardListItem::new(lit!("Two")).subtitle(lit!("Lines")))
+        .child(StandardTreeItem::new(lit!("Text")).depth(1))
+        .child(
+            StandardTreeItem::new(lit!("Icon"))
+                .depth(1)
+                .leading_slot(icon()),
+        )
+        .child(
+            StandardTreeItem::new(lit!("Check"))
+                .depth(1)
+                .checkbox(Signal::new(true)),
+        )
+        .child(
+            StandardTreeItem::new(lit!("Two"))
+                .depth(1)
+                .subtitle(lit!("Lines")),
+        );
+    let mut tree = WidgetTree::new()
+        .with_theme(theme.with_density(density))
+        .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+    let root = in_tappable_row(&mut tree, FixedSize::new().width(400.0).child(column));
+    tree.layout(SizeProposal {
+        width: Some(600.0),
+        height: None,
+    });
+    let failures = target_audit(&tree, density)
+        .into_iter()
+        .filter(|v| v.rule.is_conformance_failure())
+        .count();
+    (
+        heights(&tree, root, "StandardListItem"),
+        heights(&tree, root, "StandardTreeItem"),
+        failures,
+    )
+}
+
+/// A row is Qt's at Compact: 24 px of text, 26 with a 16 px icon or a check
+/// box, measured on the laid-out rows; a row with a subtitle is 42. Above
+/// Compact every row rises to the density's target size, and a check box
+/// row is its check box's node, itself at the target size, with the 1 px
+/// item margin above and below it: 34 and 46. A tree row lays out through
+/// the list row it wraps.
+#[test]
+fn a_row_measures_breezes_at_every_density() {
+    assert_eq!(qt_row("list_view"), 24.0);
+    assert_eq!(qt_row("list_view.icon"), 26.0);
+    assert_eq!(qt_row("list_view.check"), 26.0);
+    assert_eq!(qt_row("tree_view"), 24.0);
+    assert_eq!(qt_row("tree_view.icon"), 26.0);
+    let g = BreezeGeometry::breeze_default();
+    assert_eq!(g.list_row_height, qt_row("list_view"));
+    let expected = [
+        (TargetDensity::Compact, [24.0, 26.0, 26.0, 42.0]),
+        (TargetDensity::Comfortable, [32.0, 32.0, 34.0, 42.0]),
+        (TargetDensity::Touch, [44.0, 44.0, 46.0, 44.0]),
+    ];
+    assert_eq!(expected.len(), ALL_DENSITIES.len(), "every density");
+    for (density, rows) in expected {
+        for theme in themes() {
+            let (list, tree, failures) = rows_at(&theme, density);
+            assert_eq!(list, rows.to_vec(), "{density:?}: the list rows");
+            assert_eq!(tree, rows.to_vec(), "{density:?}: the tree rows");
+            assert_eq!(failures, 0, "{density:?}: a conformance failure");
+        }
+    }
+}
+
+/// The installed row style reports what the rows lay out.
+#[test]
+fn the_installed_row_style_reports_the_breeze_rows() {
+    for (density, floors) in [
+        (TargetDensity::Compact, (24.0, 26.0, 42.0)),
+        (TargetDensity::Comfortable, (32.0, 32.0, 42.0)),
+        (TargetDensity::Touch, (44.0, 44.0, 44.0)),
+    ] {
+        let theme = kde::light().with_density(density);
+        let slot = theme
+            .style_slots
+            .standard_item
+            .clone()
+            .expect("the preset installs a row style");
+        let t = &theme.input;
+        assert_eq!(
+            (
+                slot.min_height_single_line(t),
+                slot.min_height_decorated(t),
+                slot.min_height_two_line(t)
+            ),
+            floors,
+            "{density:?}"
+        );
+    }
+}
+
+// ── Tables ─────────────────────────────────────────────────────────────
+
+/// The laid-out `(header height, row height)` of a `TableView` and of a
+/// `TreeTableView` at `density`, each measured on its hosted header and its
+/// first two realized rows, the first starting under the header.
+fn table_bands(theme: &Theme, density: TargetDensity) -> [(f32, f32); 2] {
+    use teksilo_data::{ListModel, TreeModel};
+    use teksilo_widgets::table_view::{Column, ColumnWidth};
+    use teksilo_widgets::{TableView, TreeTableView};
+
+    fn bands(tree: &WidgetTree, root: WidgetId) -> (f32, f32) {
+        let header = nodes_named(tree, root, "TableHeader");
+        assert_eq!(header.len(), 1, "one hosted header");
+        let mut rows = nodes_named(tree, root, "BodyRow");
+        rows.sort_by(|a, b| tree.bounds(*a).y.total_cmp(&tree.bounds(*b).y));
+        assert!(rows.len() >= 2, "at least two realized rows");
+        let h = tree.bounds(header[0]);
+        let first = tree.bounds(rows[0]);
+        assert_eq!(
+            first.y,
+            h.y + h.height,
+            "the first row starts under the header"
+        );
+        assert_eq!(tree.bounds(rows[1]).y - first.y, first.height, "the pitch");
+        (h.height, first.height)
+    }
+    fn column<T: 'static>(label: fn(&T) -> String) -> Column<T> {
+        Column::new("name", lit!("Name"), move |row: &T, _| {
+            Box::new(teksilo_widgets::primitives::TextWidget::new(lit!(label(
+                row
+            ))))
+        })
+        .width(ColumnWidth::Fixed(200.0))
+    }
+    let mount = |w: Box<dyn Widget>| {
+        let mut tree = WidgetTree::new()
+            .with_theme(theme.with_density(density))
+            .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+        let root = tree.add_boxed(w);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        bands(&tree, root)
+    };
+    let model = ListModel::from_vec(vec!["alpha".to_string(), "beta".into(), "gamma".into()]);
+    let flat = mount(Box::new(
+        TableView::new(model).add_column(column(|s: &String| s.clone())),
+    ));
+    let model: TreeModel<String> = TreeModel::new();
+    for (i, name) in ["alpha", "beta", "gamma"].into_iter().enumerate() {
+        model.insert_root(i, name.to_string());
+    }
+    let nested = mount(Box::new(
+        TreeTableView::new(model).add_column(column(|s: &String| s.clone())),
+    ));
+    [flat, nested]
+}
+
+/// D7. Qt's Breeze table row is 23 px with its grid line, under the 24 px
+/// target size; the laid-out row is 24, the header Qt's 30, at Compact, and
+/// both rise to the density's target size above it.
+#[test]
+fn d7_a_table_row_is_raised_to_the_target_size() {
+    assert_eq!(qt_row("table_view"), 23.0, "Qt's row, with its grid line");
+    assert_eq!(qt_size("header.horizontal", None).1, 30.0);
+    let g = BreezeGeometry::breeze_default();
+    assert_eq!(g.table_row_height, qt_row("table_view"));
+    assert_eq!(g.header_height, 30.0);
+    for (density, bands) in [
+        (TargetDensity::Compact, (30.0, 24.0)),
+        (TargetDensity::Comfortable, (32.0, 32.0)),
+        (TargetDensity::Touch, (44.0, 44.0)),
+    ] {
+        for theme in themes() {
+            assert_eq!(table_bands(&theme, density), [bands; 2], "{density:?}");
+        }
+        let theme = kde::light().with_density(density);
+        let slot = theme.style_slots.table.clone().expect("a table style");
+        assert_eq!(
+            (
+                slot.header_height(&theme.input),
+                slot.row_height(&theme.input)
+            ),
+            bands,
+            "{density:?}: the installed slot"
+        );
+    }
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────
+
+/// A tab is Qt's 30 px at Compact, its title 8 px inside its edges, rising
+/// to the density's target size above it and its padding by the spacing.
+#[test]
+fn a_tab_measures_breezes_at_every_density() {
+    use teksilo_data::ListModel;
+    use teksilo_widgets::tab_widget::{TabBar, TabDelegate, TabId, TabSizing};
+    assert_eq!(qt_size("tab_bar", None).1, 30.0);
+    for (density, height, padding) in [
+        (TargetDensity::Compact, 30.0, 8.0),
+        (TargetDensity::Comfortable, 32.0, 9.2),
+        (TargetDensity::Touch, 44.0, 10.4),
+    ] {
+        for theme in themes() {
+            let model =
+                ListModel::from_vec(vec![(TabId::fresh(), "Tab"), (TabId::fresh(), "Third")]);
+            let delegate = TabDelegate::new(|_, t: &(TabId, &'static str)| lit!(t.1));
+            let mut tree = WidgetTree::new()
+                .with_theme(theme.with_density(density))
+                .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+            let bar = tree.add(
+                TabBar::horizontal(model, delegate, Signal::new(None), |_, t| t.0)
+                    .tab_sizing(TabSizing::Independent)
+                    .show_scroll_arrows(false)
+                    .show_overflow_dropdown(false),
+            );
+            tree.layout(SizeProposal {
+                width: Some(800.0),
+                height: None,
+            });
+            let headers = nodes_named(&tree, bar, "TabHeader");
+            assert_eq!(headers.len(), 2);
+            for header in headers {
+                assert_eq!(tree.bounds(header).height, height, "{density:?}");
+                let pad = nodes_named(&tree, header, "Padding");
+                let outer = tree.bounds(pad[0]);
+                let row = tree.bounds(tree.children(pad[0])[0]);
+                assert!(
+                    (row.x - outer.x - padding).abs() < 1e-3,
+                    "{density:?}: padding {}",
+                    row.x - outer.x
+                );
+            }
+            assert_eq!(tree.bounds(bar).height, height, "{density:?}: the strip");
+        }
+    }
+}
+
+// ── Scroll bars and progress bars ──────────────────────────────────────
+
+/// A scroll bar's handle is never shorter than Breeze's 20 px, at every
+/// density: measured on the thumb the mounted bar reports, the rectangle its
+/// hit test and its drag use, over a document fifty viewports long.
+#[test]
+fn a_scroll_bar_floors_its_handle_at_twenty_pixels_at_every_density() {
+    use teksilo_widgets::scroll_bar::{SCROLLBAR_PART_THUMB, ScrollBar, ScrollBarOrientation};
+    for density in ALL_DENSITIES.iter().copied() {
+        for theme in themes() {
+            let mut tree = WidgetTree::new()
+                .with_theme(theme.with_density(density))
+                .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+            let bar = tree.add(
+                ScrollBar::new(
+                    ScrollBarOrientation::Vertical,
+                    Signal::new(0.0),
+                    Signal::new(500.0),
+                    Signal::new(0.02),
+                )
+                .thickness(21.0),
+            );
+            tree.layout(SizeProposal::exact(21.0, 400.0));
+            let thumb = tree
+                .widget_target_regions(bar)
+                .into_iter()
+                .find(|r| r.part == SCROLLBAR_PART_THUMB)
+                .expect("the bar reports its thumb");
+            assert_eq!(thumb.rect.height, 20.0, "{density:?}");
+        }
+    }
+}
+
+/// A progress bar is Qt's 26 px at every density, its 6 px groove 10 px
+/// down, Qt's groove; a thickness the app sets wins.
+#[test]
+fn a_progress_bar_is_qts_hint_around_breezes_groove() {
+    use teksilo_widgets::ProgressBar;
+    assert_eq!(qt_size("progress_bar.no_text", None).1, 26.0);
+    assert_eq!(qt_size("progress_bar.vertical", None).0, 26.0);
+    for density in ALL_DENSITIES.iter().copied() {
+        for theme in themes() {
+            let ((_, h), _) = measured(&theme, density, "ProgressBar", ProgressBar::new(0.3));
+            assert_eq!(h, 26.0, "{density:?}");
+            let ((_, h), _) = measured(
+                &theme,
+                density,
+                "ProgressBar",
+                ProgressBar::new(0.3).thickness(6.0),
+            );
+            assert_eq!(h, 6.0, "{density:?}: the app's thickness");
+        }
+    }
+}

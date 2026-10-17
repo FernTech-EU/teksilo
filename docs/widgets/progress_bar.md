@@ -117,7 +117,8 @@ vertical indeterminate bars use the signal-driven path instead.
 #### `pub fn thickness(mut self, thickness: f32) -> Self`
 
 Set the bar's narrow dimension in logical pixels. For horizontal bars
-this is the height; for vertical bars this is the width. Default is 4.0.
+this is the height; for vertical bars this is the width. Default is the
+active style's thickness, 4.0 for the shipped style.
 
 <a id="progressbar-track_color"></a>
 

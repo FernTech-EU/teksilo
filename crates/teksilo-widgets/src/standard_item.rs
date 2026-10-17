@@ -160,6 +160,11 @@ pub struct StandardListItem {
     /// same style for its height floor that painted its chrome. `None` until
     /// the first build.
     resolved_style: Option<SharedStandardItemStyle>,
+    /// Whether the row was built with a check box or a leading slot, kept so
+    /// `layout_response` asks the style for the floor of a decorated row
+    /// ([`StandardItemStyle::min_height_decorated`](teksilo_core::styles::StandardItemStyle::min_height_decorated)).
+    /// The build takes both slots, so it records this first.
+    decorated: bool,
     root_child_id: Option<WidgetId>,
     /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
     /// with the rich / composite slots — every setter clears the other two so
@@ -198,6 +203,7 @@ impl StandardListItem {
             reveal: None,
             style_override: None,
             resolved_style: None,
+            decorated: false,
             root_child_id: None,
             tooltip_text: None,
             rich_tooltip_source: None,
@@ -596,6 +602,10 @@ impl StandardListItem {
     fn build_content(&mut self, ctx: &mut BuildContext, roles: &RowRoles) -> WidgetId {
         use crate::styles::recipe_standard_item_style as si;
 
+        // Recorded before the slots are taken below; a rebuild finds them
+        // gone and keeps what the first build saw.
+        self.decorated |= self.checkbox.is_some() || self.leading_slot.is_some();
+
         // A style whose selected row is a *solid* fill (macOS's accent
         // capsule) cannot recolour the label from `make_body` — the label
         // is already built by then — so it declares the role instead.
@@ -882,6 +892,7 @@ impl Widget for StandardListItem {
         let two_line = self.subtitle.is_some();
         let min_height = match self.resolved_style.as_ref() {
             Some(style) if two_line => style.min_height_two_line(input),
+            Some(style) if self.decorated => style.min_height_decorated(input),
             Some(style) => style.min_height_single_line(input),
             None => {
                 let fallback = crate::styles::RecipeStandardItemStyle::for_tokens(input);
@@ -2318,5 +2329,116 @@ mod tests {
             "tooltip should appear on hover"
         );
         assert!(tree.find_by_label("TreeTip").is_some());
+    }
+
+    /// A style whose decorated rows are taller than its rows of text.
+    #[derive(Debug, Default, Clone, Copy)]
+    struct DecoratedRowStyle;
+
+    impl StandardItemStyle for DecoratedRowStyle {
+        fn make_body(
+            &self,
+            cfg: &StandardItemStyleConfig,
+            ctx: &mut teksilo_core::build_context::BuildContext,
+        ) -> WidgetId {
+            crate::styles::RecipeStandardItemStyle::for_tokens(&ctx.theme().input)
+                .make_body(cfg, ctx)
+        }
+
+        fn min_height_single_line(&self, _tokens: &teksilo_tokens::InputTokens) -> f32 {
+            31.0
+        }
+
+        fn min_height_decorated(&self, _tokens: &teksilo_tokens::InputTokens) -> f32 {
+            37.0
+        }
+
+        fn min_height_two_line(&self, _tokens: &teksilo_tokens::InputTokens) -> f32 {
+            53.0
+        }
+    }
+
+    /// The laid-out height of `row` alone in a tree.
+    fn row_height(row: impl Widget + 'static) -> f32 {
+        let mut tree = WidgetTree::new()
+            .with_theme(theme())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )));
+        let id = tree.add(row);
+        tree.layout(SizeProposal {
+            width: Some(300.0),
+            height: None,
+        });
+        tree.bounds(id).height
+    }
+
+    /// A row with a check box or a leading slot takes the style's decorated
+    /// floor, a row of text alone the single-line one, and a row with a
+    /// subtitle the two-line one whatever it carries. A tree row lays out
+    /// through the list row it wraps, so it follows the same floors.
+    #[test]
+    fn a_decorated_row_takes_the_styles_decorated_floor() {
+        let icon = || crate::primitives::RectWidget::new();
+        assert_eq!(
+            row_height(StandardListItem::new(lit!("Row")).style(DecoratedRowStyle)),
+            31.0
+        );
+        assert_eq!(
+            row_height(
+                StandardListItem::new(lit!("Row"))
+                    .checkbox(Signal::new(false))
+                    .style(DecoratedRowStyle)
+            ),
+            37.0
+        );
+        assert_eq!(
+            row_height(
+                StandardListItem::new(lit!("Row"))
+                    .leading_slot(icon())
+                    .style(DecoratedRowStyle)
+            ),
+            37.0
+        );
+        assert_eq!(
+            row_height(
+                StandardListItem::new(lit!("Row"))
+                    .leading_slot(icon())
+                    .subtitle(lit!("Below"))
+                    .style(DecoratedRowStyle)
+            ),
+            53.0
+        );
+        assert_eq!(
+            row_height(
+                StandardTreeItem::new(lit!("Node"))
+                    .leading_slot(icon())
+                    .style(DecoratedRowStyle)
+            ),
+            37.0
+        );
+        assert_eq!(
+            row_height(StandardTreeItem::new(lit!("Node")).style(DecoratedRowStyle)),
+            31.0
+        );
+    }
+
+    /// The hook defaults to the single-line floor, so the shipped recipe
+    /// lays a decorated row out exactly as a row of text.
+    #[test]
+    fn the_decorated_floor_defaults_to_the_single_line_one() {
+        let recipe = crate::styles::RecipeStandardItemStyle::default();
+        let tokens = teksilo_tokens::InputTokens::default();
+        assert_eq!(
+            recipe.min_height_decorated(&tokens),
+            recipe.min_height_single_line(&tokens)
+        );
+        assert_eq!(
+            row_height(
+                StandardListItem::new(lit!("Row"))
+                    .leading_slot(crate::primitives::RectWidget::new())
+            ),
+            row_height(StandardListItem::new(lit!("Row"))),
+        );
     }
 }

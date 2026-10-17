@@ -25,7 +25,15 @@
 //! - the menu item, washed with the focus colour and outlined while it is
 //!   highlighted, in [`menu_item`], and the frame of every popup, a menu's,
 //!   a popover's and a tooltip's, over Breeze's two-layer window shadow,
-//!   painted by [`popup`] for [`popover`] and [`tooltip`].
+//!   painted by [`popup`] for [`popover`] and [`tooltip`];
+//! - the list and tree row, a rounded selection inside the item margins
+//!   filled with the highlight, in [`standard_item`], and the table's header
+//!   sections and rows, in [`table`];
+//! - the tab, the window colour with a 3 px highlight bar when selected and
+//!   the window colour darkened when not, in [`tab`];
+//! - the scroll bar, a separator and an 8 px handle over no track, in
+//!   [`scroll_bar`], and the progress bar, a 6 px groove filled toward the
+//!   highlight or striped while busy, in [`progress_bar`].
 //!
 //! The dimensions they are built with, all derived from [`crate::geometry`]
 //! and the density ladder, are collected in [`metrics`].
@@ -41,10 +49,15 @@ pub mod menu_item;
 pub mod metrics;
 pub mod popover;
 pub mod popup;
+pub mod progress_bar;
 pub mod radio;
+pub mod scroll_bar;
 pub mod slider;
 pub mod spin_box;
 pub mod split_button;
+pub mod standard_item;
+pub mod tab;
+pub mod table;
 pub mod text_input;
 pub mod toggle;
 pub mod tooltip;

@@ -61,6 +61,17 @@
 //!   a popover and a tooltip are framed at the 5 px radius in a 1 px
 //!   outline over Breeze's two-layer window shadow, and a tooltip's text
 //!   lies 4 px inside its frame.
+//! - **Breeze's rows, tabs and bars.** A list or tree row is 24 px at
+//!   Plasma's default font, 26 with an icon or a check box, its selection a
+//!   rounded rectangle inside the row's 2 px and 1 px margins, filled with
+//!   the highlight and written in the text on it, and muted only when the
+//!   window goes inactive; a table row is 24 px under a 30 px header of
+//!   button-coloured sections, the column sorted in ascending order shown
+//!   pressed. A selected tab is the window colour under a
+//!   3 px highlight bar, an unselected one the window colour darkened. A
+//!   scroll bar is an 8 px handle over no track beside a 1 px separator,
+//!   and a progress bar a 6 px groove filled toward the highlight, its busy
+//!   state moving stripes.
 //! - **Breeze's focus ring geometry.** Keyboard focus is a 2 px band, half
 //!   inside the control and half outside, in the scheme's focus colour.
 //!   Breeze paints it at 30 % ([`shape::BREEZE_FOCUS_RING_ALPHA`]); the
@@ -113,9 +124,11 @@
 //! - **Most widget chrome is the framework's.** This version installs
 //!   Breeze styles for `Button`, `IconButton`, `SplitButton`, `Toggle`,
 //!   `Checkbox`, `RadioButton`, `TextInput`, `ComboBox`, `SpinBox`,
-//!   `Slider`, `MenuItem`, the popup frame and the tooltip only: every
-//!   other widget keeps Teksilo's recipe style, painted in the Breeze
-//!   colours, radii, focus ring, typography and motion.
+//!   `Slider`, `MenuItem`, the popup frame, the tooltip, `StandardListItem`
+//!   and `StandardTreeItem`, `TableView` and `TreeTableView`, `TabBar` and
+//!   `TabWidget`, `ScrollBar` and `ProgressBar` only: every other widget
+//!   keeps Teksilo's recipe style, painted in the Breeze colours, radii,
+//!   focus ring, typography and motion.
 //! - **A menu's shortcuts, separators, section titles and check marks are
 //!   the framework's.** `MenuItem` writes a shortcut in the shortcut text
 //!   role, where Breeze writes the window text at 70 % opacity, and gives
@@ -166,6 +179,32 @@
 //!   the node is raised to the density's target on both axes, the 36 x 18
 //!   indicator painted unchanged in it; and a checked track is outlined in
 //!   the highlight lifted to 3:1 (D6) ([`styles::toggle`]).
+//! - **A table's selection band, alternate rows, grid lines and sort arrow
+//!   are the view's.** `TableView` and `TreeTableView` paint them
+//!   themselves, from the theme's tokens: the band is square and the
+//!   highlight, as Breeze's, but it mutes when the table loses keyboard
+//!   focus as well as when the window goes inactive, and a hovered row is
+//!   not washed. The style's own row background and sort arrow are
+//!   Breeze's, for a style that composes them ([`styles::table`]).
+//! - **A tab is at least 96 px wide, and always 30 px tall.** The bar
+//!   applies its own minimum tab width, where Breeze's is 80, and a
+//!   `TabStyle` is not told whether its bar is one Breeze makes 34 px tall
+//!   (a document-mode, static bar); both numbers are in
+//!   [`styles::metrics::BreezeTabMetrics`] ([`styles::tab`]).
+//! - **A scroll bar is as thick as the widget lays it out.** A
+//!   `ScrollArea`'s bars are 12 px and a `ScrollBar`'s 8 px unless the app
+//!   says otherwise, where Breeze's is 21; the handle keeps its 8 px width
+//!   and a permanent bar its 1 px separator in whatever thickness it is
+//!   given. The handle takes the hover colour while the pointer is over the
+//!   bar, not only over the handle, and is filled in the lifted thumb
+//!   colours (D9, [`styles::scroll_bar`]).
+//! - **A list row does not mark the current row apart from the selected
+//!   one.** Keyboard focus on a focused view adds the focus frame around the
+//!   selected row; Breeze outlines an unselected current row instead, which
+//!   a row is not told it is ([`styles::standard_item`]).
+//! - **A progress bar shows no text.** `ProgressBar` has none to show; the
+//!   bar is still Qt's 26 px, room for it, around the 6 px groove
+//!   ([`styles::progress_bar`]).
 //! - **A short text field keeps its frame.** Breeze paints only the fill of
 //!   a line edit shorter than the line box plus 12 px; the field keeps its
 //!   outline at every height, the field's only boundary (D6,
@@ -329,8 +368,9 @@ fn project(theme: &Theme, state: PaintState) -> Theme {
 /// Install the Breeze Tier-3 chrome.
 ///
 /// The buttons, the check box, the radio button, the switch, the line edit,
-/// the combo box, the spin box, the slider, the menu item, the popup frame
-/// and the tooltip are Breeze's own ([`styles`]); every other slot is left to
+/// the combo box, the spin box, the slider, the menu item, the popup frame,
+/// the tooltip, the list row, the table, the tab, the scroll bar and the
+/// progress bar are Breeze's own ([`styles`]); every other slot is left to
 /// the widget's recipe style, which paints from the Breeze tokens, and the
 /// crate's tests list the reason for each. Every style installed here reads
 /// its metrics from the theme it builds under, `theme.input` included, so
@@ -339,6 +379,11 @@ fn install_styles(theme: &mut Theme) {
     let menu_item = styles::menu_item::BreezeMenuItemStyle::for_theme(theme);
     let popover = styles::popover::BreezePopoverStyle::for_tokens(&theme.input);
     let tooltip = styles::tooltip::BreezeTooltipStyle::for_tokens(&theme.input);
+    let standard_item = styles::standard_item::BreezeStandardItemStyle::for_theme(theme);
+    let table = styles::table::BreezeTableStyle::for_theme(theme);
+    let tab = styles::tab::BreezeTabStyle::for_theme(theme);
+    let scroll_bar = styles::scroll_bar::BreezeScrollBarStyle::for_tokens(&theme.input);
+    let progress_bar = styles::progress_bar::BreezeProgressBarStyle::for_theme(theme);
     let slots = &mut theme.style_slots;
     slots.button = Some(Rc::new(styles::button::BreezeButtonStyle));
     slots.icon_button = Some(Rc::new(styles::icon_button::BreezeIconButtonStyle));
@@ -353,6 +398,11 @@ fn install_styles(theme: &mut Theme) {
     slots.menu_item = Some(Rc::new(menu_item));
     slots.popover = Some(Rc::new(popover));
     slots.tooltip = Some(Rc::new(tooltip));
+    slots.standard_item = Some(Rc::new(standard_item));
+    slots.table = Some(Rc::new(table));
+    slots.tab = Some(Rc::new(tab));
+    slots.scroll_bar = Some(Rc::new(scroll_bar));
+    slots.progress_bar = Some(Rc::new(progress_bar));
 }
 
 #[cfg(test)]
@@ -569,18 +619,6 @@ mod tests {
             "Breeze has no chart chrome; the teksilo-charts default reads the series colours and the Breeze border role",
         ),
         (
-            "scroll_bar",
-            "no Breeze scroll bar is installed; the recipe paints the Breeze thumb tokens over no track",
-        ),
-        (
-            "standard_item",
-            "no Breeze row highlight is installed; the recipe row paints the Breeze hover and selection tokens",
-        ),
-        (
-            "tab",
-            "no Breeze tab is installed; the recipe tab paints the Breeze surface and accent tokens",
-        ),
-        (
             "dialog",
             "the recipe dialog paints the Breeze surfaces, radius and shadow tokens",
         ),
@@ -599,10 +637,6 @@ mod tests {
         (
             "badge",
             "Breeze has no badge; the recipe badge paints the Breeze accent and status tokens",
-        ),
-        (
-            "progress_bar",
-            "no Breeze progress groove is installed; the recipe bar paints the Breeze accent token",
         ),
         (
             "link",
@@ -631,10 +665,6 @@ mod tests {
         (
             "rich_text_editor",
             "the recipe frames the viewport in the Breeze border and surface roles; the text is document content",
-        ),
-        (
-            "table",
-            "no Breeze table rows are installed; the recipe paints the Breeze selection, alternate-row and divider tokens",
         ),
         (
             "list_container",
@@ -864,6 +894,74 @@ mod tests {
             .with_density(TargetDensity::Compact);
         let m = back.style_slots.menu_item.as_ref().unwrap().metrics();
         assert_eq!(m.item_height, 29.0);
+    }
+
+    /// The rows a `StandardListItem` lays out follow the density a theme is
+    /// projected to: the installed row, table, tab, scroll-bar and
+    /// progress-bar styles are rebuilt from the projected input tokens, and
+    /// a row measured in a tree is the one the style reports.
+    #[test]
+    fn a_density_switch_reprojects_the_rows_and_bars() {
+        use std::cell::RefCell;
+        use teksilo_canvas::{MockTextBackend, SizeProposal};
+        use teksilo_core::widget_tree::WidgetTree;
+        let base = light();
+        for (density, row, table, tab) in [
+            (TargetDensity::Compact, 24.0, 24.0, 30.0),
+            (TargetDensity::Comfortable, 32.0, 32.0, 32.0),
+            (TargetDensity::Touch, 44.0, 44.0, 44.0),
+        ] {
+            let t = base.with_density(density);
+            let slots = &t.style_slots;
+            let input = &t.input;
+            let rows = slots.standard_item.as_ref().expect("a row style");
+            assert_eq!(rows.min_height_single_line(input), row, "{density:?}");
+            assert_eq!(
+                slots
+                    .table
+                    .as_ref()
+                    .expect("a table style")
+                    .row_height(input),
+                table,
+                "{density:?}"
+            );
+            assert_eq!(
+                slots
+                    .tab
+                    .as_ref()
+                    .expect("a tab style")
+                    .editor_height(input),
+                tab,
+                "{density:?}"
+            );
+            assert_eq!(
+                slots
+                    .scroll_bar
+                    .as_ref()
+                    .expect("a scroll-bar style")
+                    .min_thumb_length(input),
+                20.0
+            );
+            assert_eq!(
+                slots
+                    .progress_bar
+                    .as_ref()
+                    .expect("a progress-bar style")
+                    .thickness(input),
+                Some(26.0)
+            );
+            let mut tree = WidgetTree::new()
+                .with_theme(t.clone())
+                .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+            let id = tree.add(teksilo_widgets::StandardListItem::new(teksilo_i18n::lit!(
+                "Row"
+            )));
+            tree.layout(SizeProposal {
+                width: Some(300.0),
+                height: None,
+            });
+            assert_eq!(tree.bounds(id).height, row, "{density:?}: the rendered row");
+        }
     }
 
     /// Every colour token, pinned to its source in Breeze Light's resolved

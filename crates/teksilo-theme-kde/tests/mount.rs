@@ -4,7 +4,9 @@
 //! Mount every widget the Breeze preset restyles, in both schemes, render
 //! it, and check the colours it paints against Plasma's own: the buttons,
 //! the check box, the radio button, the switch, the line edit, the combo
-//! box, the spin box, the slider, the menu, the popup frame and the tooltip.
+//! box, the spin box, the slider, the menu, the popup frame, the tooltip,
+//! the list and tree rows, the table, the tab, the scroll bar and the
+//! progress bar.
 //!
 //! The unit tests beside each style check its rules. This checks that the
 //! styles run: a Tier-3 style is only exercised when its widget is built,
@@ -24,23 +26,30 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use serde_json::Value;
-use teksilo_canvas::{MockTextBackend, RenderFrame, ShapeKind, SizeProposal};
+use teksilo_canvas::{FillRule, MockTextBackend, Path, RenderFrame, ShapeKind, SizeProposal};
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{Key, Modifiers, PointerButton};
 use teksilo_core::overlay::OverlayPlacement;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::TabIndicatorPosition;
 use teksilo_core::styles::{PopoverStyleConfig, PopoverVariant, Theme};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_core::widget_tree::WidgetTree;
+use teksilo_data::{ListModel, TreeModel};
 use teksilo_i18n::lit;
 use teksilo_theme_kde::styles::indicator::BreezeIndicatorColors;
+use teksilo_theme_kde::styles::table::BreezeHeaderColors;
 use teksilo_theme_kde::{self as kde, KdePalette, PlasmaAccent};
-use teksilo_tokens::Color;
+use teksilo_tokens::{Color, Orientation};
 use teksilo_widgets::primitives::{FixedSize, HStack, IconWidget, TextWidget};
+use teksilo_widgets::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVariant};
+use teksilo_widgets::tab_widget::{TabBar, TabDelegate, TabId, TabSizing};
+use teksilo_widgets::table_view::{Column, ColumnWidth, SortDirection};
 use teksilo_widgets::{
     Button, ButtonVariant, CheckState, Checkbox, ComboBox, IconButton, IconButtonSize, MenuItem,
-    MenuList, RadioButton, Slider, SpinBox, SplitButton, TextInput, Toggle, TooltipWidget, VStack,
+    MenuList, ProgressBar, RadioButton, Slider, SpinBox, SplitButton, StandardListItem,
+    StandardTreeItem, TableView, TextInput, Toggle, TooltipWidget, TreeTableView, VStack,
 };
 
 const PIXELS_JSON: &str = include_str!(concat!(
@@ -2961,6 +2970,764 @@ fn a_popover_is_a_breeze_popup_with_no_caret() {
                     && p.screen == inset(bounds)
                     && p.color == sample(scheme, face, fill_at.0, fill_at.1)),
                 "{scheme} {variant:?}: {all:?}"
+            );
+        }
+    }
+}
+
+// ── Rows, tables, tabs, scroll bars and progress bars ───────────────────
+
+/// Every plain rectangle in `frame` (`Canvas::fill_rect`): its colour in 8
+/// bits and its rectangle.
+fn decorations(frame: &RenderFrame) -> Vec<([u8; 4], [f32; 4])> {
+    frame
+        .decorations
+        .iter()
+        .map(|d| (rgba8(d.color), d.rect))
+        .collect()
+}
+
+/// A two-tab bar, the first tab selected, laid out at its own height.
+fn tab_bar(vertical: bool) -> TabBar<(TabId, &'static str)> {
+    let first = TabId::fresh();
+    let model = ListModel::from_vec(vec![(first, "Tab"), (TabId::fresh(), "Second")]);
+    let delegate = TabDelegate::new(|_, t: &(TabId, &'static str)| lit!(t.1));
+    let selected: Signal<Option<TabId>> = Signal::new(Some(first));
+    let bar = if vertical {
+        TabBar::vertical(model, delegate, selected, |_, t| t.0)
+    } else {
+        TabBar::horizontal(model, delegate, selected, |_, t| t.0)
+    };
+    bar.tab_sizing(TabSizing::Independent)
+        .show_scroll_arrows(false)
+        .show_overflow_dropdown(false)
+}
+
+fn name_column<T: 'static>(label: fn(&T) -> String) -> Column<T> {
+    Column::new("name", lit!("Name"), move |row: &T, _| {
+        Box::new(TextWidget::new(lit!(label(row))))
+    })
+    .width(ColumnWidth::Fixed(160.0))
+}
+
+fn table() -> TableView<String> {
+    let model = ListModel::from_vec(vec!["alpha".to_string(), "beta".into(), "gamma".into()]);
+    TableView::new(model).add_column(name_column(|s: &String| s.clone()))
+}
+
+fn tree_table() -> TreeTableView<String> {
+    let model: TreeModel<String> = TreeModel::new();
+    for (i, name) in ["alpha", "beta"].into_iter().enumerate() {
+        model.insert_root(i, name.to_string());
+    }
+    TreeTableView::new(model).add_column(name_column(|s: &String| s.clone()))
+}
+
+fn scroll_bar(orientation: ScrollBarOrientation, variant: ScrollBarVariant) -> ScrollBar {
+    ScrollBar::new(
+        orientation,
+        Signal::new(0.0),
+        Signal::new(100.0),
+        Signal::new(0.16),
+    )
+    .thickness(21.0)
+    .variant(variant)
+}
+
+/// Every widget this section restyles, in a column, for the swap, the
+/// palette-less and the swatch tests.
+fn rows_and_bars() -> VStack {
+    VStack::new()
+        .child(
+            FixedSize::new()
+                .width(300.0)
+                .child(StandardListItem::new(lit!("Row"))),
+        )
+        .child(
+            FixedSize::new()
+                .width(300.0)
+                .child(StandardListItem::new(lit!("Picked")).selected(Signal::new(true))),
+        )
+        .child(
+            FixedSize::new()
+                .width(300.0)
+                .child(StandardTreeItem::new(lit!("Node")).depth(1)),
+        )
+        .child(FixedSize::new().width(300.0).height(120.0).child(table()))
+        .child(tab_bar(false))
+        .child(FixedSize::new().width(21.0).height(100.0).child(scroll_bar(
+            ScrollBarOrientation::Vertical,
+            ScrollBarVariant::Permanent,
+        )))
+        .child(FixedSize::new().width(200.0).child(ProgressBar::new(0.4)))
+        .child(
+            FixedSize::new()
+                .width(200.0)
+                .child(ProgressBar::indeterminate()),
+        )
+}
+
+#[test]
+fn rows_tables_tabs_and_bars_mount_in_every_state_and_variant() {
+    for (_, theme) in themes() {
+        for row in [
+            StandardListItem::new(lit!("Row")),
+            StandardListItem::new(lit!("Row")).selected(Signal::new(true)),
+            StandardListItem::new(lit!("Row")).checkbox(Signal::new(true)),
+            StandardListItem::new(lit!("Row"))
+                .leading_slot(IconWidget::checkmark(16.0))
+                .subtitle(lit!("Below")),
+            StandardListItem::new(lit!("Row"))
+                .selected(Signal::new(true))
+                .enabled(Signal::new(false)),
+        ] {
+            assert!(mount(theme.clone(), FixedSize::new().width(300.0).child(row)) > 0);
+        }
+        assert!(
+            mount(
+                theme.clone(),
+                FixedSize::new()
+                    .width(300.0)
+                    .child(StandardTreeItem::new(lit!("Node")).selected(Signal::new(true)))
+            ) > 0
+        );
+        assert!(mount(theme.clone(), table()) > 0);
+        assert!(mount(theme.clone(), tree_table()) > 0);
+        for vertical in [false, true] {
+            assert!(mount(theme.clone(), tab_bar(vertical)) > 0);
+            assert!(
+                mount(
+                    theme.clone(),
+                    tab_bar(vertical).active_indicator(TabIndicatorPosition::InnerEdge)
+                ) > 0
+            );
+        }
+        for orientation in [
+            ScrollBarOrientation::Vertical,
+            ScrollBarOrientation::Horizontal,
+        ] {
+            for variant in [
+                ScrollBarVariant::Permanent,
+                ScrollBarVariant::Overlay,
+                ScrollBarVariant::Thin,
+            ] {
+                assert!(mount(theme.clone(), scroll_bar(orientation, variant)) > 0);
+            }
+        }
+        for orientation in [Orientation::Horizontal, Orientation::Vertical] {
+            assert!(
+                mount(
+                    theme.clone(),
+                    ProgressBar::new(0.4).orientation(orientation)
+                ) > 0
+            );
+            assert!(
+                mount(
+                    theme.clone(),
+                    ProgressBar::indeterminate().orientation(orientation)
+                ) > 0
+            );
+        }
+    }
+}
+
+#[test]
+fn the_rows_and_bars_survive_a_theme_swap_and_every_swatch() {
+    let mut tree = tree_with(kde::light());
+    tree.add(rows_and_bars());
+    for theme in [
+        kde::light(),
+        kde::dark(),
+        teksilo_core::presets::intui::light(),
+        kde::light(),
+    ] {
+        tree.set_theme(theme);
+        assert!(!rerender(&mut tree).draw_order.is_empty());
+    }
+    for accent in PlasmaAccent::ALL {
+        for theme in [
+            kde::light_with_accent(accent.color()),
+            kde::dark_with_accent(accent.color()),
+        ] {
+            assert!(mount(theme, rows_and_bars()) > 0, "{accent:?}");
+        }
+    }
+    let mut bare = kde::light();
+    bare.extensions.remove::<KdePalette>();
+    assert!(mount(bare, rows_and_bars()) > 0);
+}
+
+/// A row of `width` holding `row`, alone at the top of a tree under `theme`.
+fn row_tree(theme: Theme, width: f32, row: StandardListItem) -> (WidgetTree, WidgetId) {
+    let mut tree = tree_with(theme);
+    let column = tree.add(VStack::new().child(FixedSize::new().width(width).child(row)));
+    tree.layout(SizeProposal::exact(600.0, 300.0));
+    let id = nodes_named(&tree, column, "StandardListItem")[0];
+    (tree, id)
+}
+
+/// The selection inside the row `b`: the row inset by the 2 px and 1 px
+/// item margins, then by half the pen.
+fn row_selection(b: teksilo_canvas::Rect) -> [f32; 4] {
+    [b.x + 2.5, b.y + 1.5, b.width - 5.0, b.height - 3.0]
+}
+
+/// A selected row is filled and outlined with Plasma's highlight inside its
+/// item margins, its label in the text on the accent, and the selection
+/// spans the whole width the row is given.
+#[test]
+fn a_selected_row_is_the_highlight_with_on_accent_glyphs() {
+    for (scheme, theme) in themes() {
+        let accent = rgba8_of(theme.colors.accent);
+        assert_eq!(accent, sample(scheme, "item_view_row.selected", 100, 12));
+        let on_accent = rgba8_of(theme.colors.text_on_accent);
+        let primary = rgba8_of(theme.colors.text_primary);
+        assert_ne!(on_accent, primary, "the flip is visible");
+        for width in [200.0, 480.0] {
+            let (mut tree, id) = row_tree(
+                theme.clone(),
+                width,
+                StandardListItem::new(lit!("Row")).selected(Signal::new(true)),
+            );
+            let b = tree.bounds(id);
+            assert_eq!((b.width, b.height), (width, 24.0), "{scheme}: the row");
+            let frame = rerender(&mut tree);
+            let all = painted(&frame);
+            let fill = all
+                .iter()
+                .find(|p| p.stroke == 0.0 && p.color == accent)
+                .unwrap_or_else(|| panic!("{scheme}: no highlight in {all:?}"));
+            assert_eq!(fill.screen, row_selection(b), "{scheme}: fills the row");
+            assert_eq!(fill.radius, 4.5);
+            assert!(
+                all.iter()
+                    .any(|p| p.stroke == 1.0 && p.color == accent && p.screen == fill.screen),
+                "{scheme}: the opaque outline"
+            );
+            let glyphs: Vec<_> = frame.glyphs.iter().map(|g| rgba8(g.color)).collect();
+            assert!(!glyphs.is_empty());
+            assert!(
+                glyphs.iter().all(|g| *g == on_accent),
+                "{scheme}: {glyphs:?}"
+            );
+        }
+    }
+}
+
+/// An unselected row at rest paints nothing but its label.
+#[test]
+fn an_unselected_row_paints_nothing() {
+    for (scheme, theme) in themes() {
+        let (mut tree, _) = row_tree(theme.clone(), 300.0, StandardListItem::new(lit!("Row")));
+        let frame = rerender(&mut tree);
+        assert!(
+            painted(&frame).iter().all(|p| p.color[3] == 0),
+            "{scheme}: {:?}",
+            painted(&frame)
+        );
+        assert!(
+            decorations(&frame).iter().all(|(c, _)| c[3] == 0),
+            "{scheme}: {:?}",
+            decorations(&frame)
+        );
+        assert!(frame.paths.is_empty());
+        let primary = rgba8_of(theme.colors.text_primary);
+        assert!(frame.glyphs.iter().all(|g| rgba8(g.color) == primary));
+    }
+}
+
+/// A hovered row is washed with the highlight at 30 % over the view and
+/// outlined in it at 80 %, as Plasma paints it.
+#[test]
+fn a_hovered_row_is_washed_and_outlined_in_the_highlight() {
+    for (scheme, theme) in themes() {
+        let (mut tree, id) = row_tree(theme.clone(), 200.0, StandardListItem::new(lit!("Row")));
+        tree.pointer_move(tree.bounds(id).center());
+        let frame = rerender(&mut tree);
+        let b = tree.bounds(id);
+        let all = painted(&frame);
+        let wash = all
+            .iter()
+            .find(|p| p.stroke == 0.0 && p.screen == row_selection(b))
+            .unwrap_or_else(|| panic!("{scheme}: no wash in {all:?}"));
+        assert!(
+            near(wash.color, sample(scheme, "item_view_row.hover", 100, 12)),
+            "{scheme}: {:?}",
+            wash.color
+        );
+        let outline = all
+            .iter()
+            .find(|p| p.stroke == 1.0 && p.screen == row_selection(b))
+            .expect("an outline");
+        let mut want = rgba8_of(theme.colors.accent);
+        want[3] = 204;
+        assert_eq!(outline.color, want, "{scheme}: the highlight at 80 %");
+    }
+}
+
+/// In a backdrop window a selected row is Plasma's inactive highlight, the
+/// window colour tinted toward the selection, and its label the window
+/// text.
+#[test]
+fn a_selected_row_in_a_backdrop_window_is_the_inactive_highlight() {
+    for (scheme, theme) in themes() {
+        let (mut tree, _) = row_tree(
+            theme.clone(),
+            200.0,
+            StandardListItem::new(lit!("Row")).selected(Signal::new(true)),
+        );
+        tree.set_window_active(false);
+        let frame = rerender(&mut tree);
+        let want = sample(scheme, "item_view_row.selected_inactive_window", 100, 12);
+        assert!(
+            fills(&frame).contains(&want),
+            "{scheme}: {:?}",
+            fills(&frame)
+        );
+        let primary = rgba8_of(theme.colors.text_primary);
+        assert!(frame.glyphs.iter().all(|g| rgba8(g.color) == primary));
+    }
+}
+
+/// Every filled path in `frame`: its colour in 8 bits and the path.
+fn filled_paths(frame: &RenderFrame) -> Vec<([u8; 4], Path)> {
+    frame
+        .paths
+        .iter()
+        .filter(|p| p.stroke_style.width == 0.0)
+        .map(|p| (rgba8(p.color), p.path.clone()))
+        .collect()
+}
+
+fn covers(path: &Path, x: f32, y: f32) -> bool {
+    path.contains_point(teksilo_canvas::Point::new(x, y), FillRule::Winding, 0.01)
+}
+
+/// Whether `r` is `[x, y, w, h]` to a hundredth of a pixel.
+fn about(r: teksilo_canvas::Rect, want: [f32; 4]) -> bool {
+    [r.x, r.y, r.width, r.height]
+        .iter()
+        .zip(want)
+        .all(|(a, b)| (a - b).abs() < 0.01)
+}
+
+/// The headers of a two-tab bar: the selected one first.
+fn tab_headers(theme: Theme, vertical: bool) -> (WidgetTree, Vec<teksilo_canvas::Rect>) {
+    let mut tree = tree_with(theme);
+    let bar = tree.add(tab_bar(vertical));
+    tree.layout(SizeProposal {
+        width: Some(800.0),
+        height: if vertical { Some(400.0) } else { None },
+    });
+    let headers = nodes_named(&tree, bar, "TabHeader")
+        .into_iter()
+        .map(|h| tree.bounds(h))
+        .collect();
+    (tree, headers)
+}
+
+/// The selected tab: the highlight in a 3 px bar along its top, its
+/// rounded outer corners at the frame radius, the window colour below it
+/// and the frame outline down its two sides, both still turning through the
+/// bar's corner in rows 3 and 4; the unselected tab the window darkened, and
+/// hovered washed toward the hover colour. Against Plasma's samples of an
+/// 80 x 30 tab.
+#[test]
+fn the_selected_tab_has_breezes_three_pixel_bar() {
+    for (scheme, theme) in themes() {
+        let (mut tree, headers) = tab_headers(theme, false);
+        let (sel, other) = (headers[0], headers[1]);
+        assert_eq!(sel.height, 30.0, "{scheme}");
+        let frame = tree.render();
+        let paths = filled_paths(&frame);
+        let rects = decorations(&frame);
+        let highlight = sample(scheme, "tab.selected", 40, 1);
+        let bar = &paths
+            .iter()
+            .find(|(color, _)| *color == highlight)
+            .unwrap_or_else(|| panic!("{scheme}: no bar in {paths:?}"))
+            .1;
+        let bb = bar.exact_bounds(0.01);
+        assert!((bb.y - sel.y).abs() < 0.01 && (bb.height - 3.0).abs() < 0.01);
+        assert!(bb.x > sel.x && bb.x < sel.x + 0.5, "{scheme}: {bb:?}");
+        assert!(covers(bar, sel.x + 40.0, sel.y + 1.5));
+        assert!(!covers(bar, sel.x + 0.3, sel.y + 0.3), "the outer corner");
+        let window = sample(scheme, "tab.selected", 40, 15);
+        let face = &paths
+            .iter()
+            .find(|(color, _)| *color == window)
+            .unwrap_or_else(|| panic!("{scheme}: no tab face in {paths:?}"))
+            .1;
+        assert!(
+            about(
+                face.bounds(),
+                [sel.x + 1.0, sel.y + 3.0, sel.width - 2.0, sel.height - 3.0]
+            ),
+            "{scheme}: the bar shows 3 px: {:?}",
+            face.bounds()
+        );
+        let outline = sample(scheme, "tab.selected", 0, 15);
+        let sides = &paths
+            .iter()
+            .find(|(color, _)| near(*color, outline))
+            .unwrap_or_else(|| panic!("{scheme}: no outline in {paths:?}"))
+            .1;
+        assert!(about(
+            sides.bounds(),
+            [sel.x, sel.y + 3.0, sel.width, sel.height - 3.0]
+        ));
+        for x in [sel.x + 0.5, sel.x + sel.width - 0.5] {
+            assert!(
+                covers(sides, x, sel.y + 15.0) && !covers(face, x, sel.y + 15.0),
+                "{scheme}: the outline down both sides"
+            );
+        }
+        // Rows 3 and 4: the corner is still turning, as Plasma's column 0
+        // is still blended there; the body is not square below the bar.
+        assert!(!covers(sides, sel.x + 0.1, sel.y + 3.1), "{scheme}");
+        assert!(covers(sides, sel.x + 0.5, sel.y + 4.5), "{scheme}");
+        assert!(!covers(face, sel.x + 0.9, sel.y + 4.5), "{scheme}");
+        assert_ne!(
+            sample(scheme, "tab.selected", 0, 4),
+            outline,
+            "{scheme}: Plasma's corner at row 4"
+        );
+        let other_rect = [other.x, other.y, other.width, other.height];
+        let unselected = rects
+            .iter()
+            .find(|(_, r)| *r == other_rect)
+            .unwrap_or_else(|| panic!("{scheme}: no unselected tab"));
+        assert!(near(unselected.0, sample(scheme, "tab.unselected", 40, 15)));
+        tree.pointer_move(other.center());
+        tree.layout(SizeProposal {
+            width: Some(800.0),
+            height: None,
+        });
+        let frame = tree.render();
+        let hovered = decorations(&frame)
+            .into_iter()
+            .find(|(_, r)| *r == other_rect)
+            .unwrap();
+        assert!(
+            near(hovered.0, sample(scheme, "tab.hover", 40, 15)),
+            "{scheme}: {:?}",
+            hovered.0
+        );
+    }
+}
+
+/// A vertical bar's selected tab carries its bar on the leading side, the
+/// left, and on the right in a right-to-left window.
+#[test]
+fn a_vertical_tabs_bar_is_on_its_leading_side() {
+    for rtl in [false, true] {
+        let mut tree = tree_with(kde::light());
+        if rtl {
+            tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+        }
+        let bar = tree.add(tab_bar(true));
+        tree.layout(SizeProposal::exact(400.0, 400.0));
+        let sel = tree.bounds(nodes_named(&tree, bar, "TabHeader")[0]);
+        let frame = tree.render();
+        let window = sample("BreezeLight", "tab.selected", 40, 15);
+        let (_, face) = filled_paths(&frame)
+            .into_iter()
+            .find(|(color, _)| *color == window)
+            .expect("a tab face");
+        let x = if rtl { sel.x } else { sel.x + 3.0 };
+        assert!(
+            about(
+                face.bounds(),
+                [x, sel.y + 1.0, sel.width - 3.0, sel.height - 2.0]
+            ),
+            "rtl {rtl}: {:?}",
+            face.bounds()
+        );
+    }
+}
+
+/// A 21 px scroll bar: the separator in its leading column in the view's
+/// text at the frame contrast, Plasma's pixels, and the handle 7 px from it
+/// in the lifted thumb colour, 8 px wide painted 7 at radius 4, turning to
+/// the lifted hover colour under the pointer. No track.
+#[test]
+fn the_scroll_bar_is_a_separator_and_a_handle_over_no_track() {
+    for (scheme, theme) in themes() {
+        let mut tree = tree_with(theme.clone());
+        let bar = tree.add(scroll_bar(
+            ScrollBarOrientation::Vertical,
+            ScrollBarVariant::Permanent,
+        ));
+        tree.layout(SizeProposal::exact(21.0, 200.0));
+        let frame = tree.render();
+        let all = painted(&frame);
+        let window = rgba8_of(theme.colors.surface_main);
+        let separator = decorations(&frame)
+            .into_iter()
+            .find(|(_, r)| *r == [0.0, 0.0, 1.0, 200.0])
+            .unwrap_or_else(|| panic!("{scheme}: no separator"));
+        assert!(near(
+            over(separator.0, window),
+            sample(scheme, "scroll_bar.normal", 0, 150)
+        ));
+        let thumb = rgba8_of(theme.colors.scrollbar_thumb);
+        let handle = all
+            .iter()
+            .find(|p| p.stroke == 0.0 && p.color == thumb)
+            .unwrap_or_else(|| panic!("{scheme}: no handle"));
+        assert_eq!(handle.screen, [7.5, 0.5, 7.0, 31.0], "{scheme}");
+        // Breeze's radius 4, which the renderer holds to half the painted
+        // width.
+        assert_eq!(handle.radius, 3.5);
+        assert!(
+            all.iter()
+                .any(|p| p.stroke == 1.0 && p.screen == handle.screen),
+            "{scheme}: the handle's outline"
+        );
+        assert_eq!(all.len(), 2, "{scheme}: no track: {all:?}");
+        assert_eq!(frame.decorations.len(), 1, "{scheme}: the separator alone");
+        tree.pointer_move(tree.bounds(bar).center());
+        tree.layout(SizeProposal::exact(21.0, 200.0));
+        let frame = tree.render();
+        let hover = rgba8_of(theme.colors.scrollbar_thumb_hover);
+        assert!(fills(&frame).contains(&hover), "{scheme}");
+    }
+}
+
+/// A determinate bar is Qt's 26 px, its 6 px groove 10 px down, the groove
+/// and the contents to the half way point in Plasma's colours; right to
+/// left the contents start at the right.
+#[test]
+fn the_progress_bar_is_breezes_groove_and_contents() {
+    for (scheme, theme) in themes() {
+        for rtl in [false, true] {
+            let mut tree = tree_with(theme.clone());
+            if rtl {
+                tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+            }
+            let column = tree.add(
+                VStack::new().child(FixedSize::new().width(200.0).child(ProgressBar::new(0.5))),
+            );
+            tree.layout(SizeProposal::exact(400.0, 300.0));
+            let bar = nodes_named(&tree, column, "ProgressBar")[0];
+            let b = tree.bounds(bar);
+            assert_eq!(b.height, 26.0, "{scheme}: Qt's hint");
+            let frame = rerender(&mut tree);
+            let all = painted(&frame);
+            let groove = all
+                .iter()
+                .find(|p| p.stroke == 0.0 && p.screen == [b.x + 0.5, b.y + 10.5, 199.0, 5.0])
+                .unwrap_or_else(|| panic!("{scheme}: no groove in {all:?}"));
+            if scheme == "BreezeLight" {
+                assert!(near(
+                    groove.color,
+                    sample(scheme, "progress_bar.half", 150, 9)
+                ));
+            }
+            // Breeze's radius 3, held to half the stroked groove.
+            assert_eq!(groove.radius, 2.5);
+            let x = if rtl { b.x + 100.5 } else { b.x + 0.5 };
+            let contents = all
+                .iter()
+                .find(|p| p.stroke == 0.0 && p.screen == [x, b.y + 10.5, 99.0, 5.0])
+                .unwrap_or_else(|| panic!("{scheme} rtl {rtl}: no contents in {all:?}"));
+            if scheme == "BreezeLight" {
+                assert!(near(
+                    contents.color,
+                    sample(scheme, "progress_bar.half", 50, 9)
+                ));
+            }
+            assert!(frame.animated_quads.is_empty());
+        }
+    }
+}
+
+/// A busy bar is the style's stripes, 14 px of the highlight every 28 px,
+/// which move forward 7 px in 200 ms and 14 px in 400 ms on the tree's clock and stand still under
+/// reduced motion. The bar draws no sweep of its own.
+#[test]
+fn a_busy_progress_bar_moves_its_stripes() {
+    let theme = kde::light();
+    let highlight = rgba8_of(theme.colors.accent);
+    let stripes = |frame: &RenderFrame| -> Vec<[f32; 4]> {
+        painted(frame)
+            .into_iter()
+            .filter(|p| p.stroke == 0.0 && p.color == highlight)
+            .map(|p| p.screen)
+            .collect()
+    };
+    let (mut tree, bar) = on_the_clock(
+        theme.clone(),
+        false,
+        FixedSize::new()
+            .width(200.0)
+            .child(ProgressBar::indeterminate()),
+    );
+    let x0 = tree.bounds(bar).x;
+    let first = stripes(&rerender(&mut tree));
+    assert!(rerender(&mut tree).animated_quads.is_empty());
+    assert_eq!(first[0][0] - x0, 0.0);
+    assert_eq!(first[0][2], 14.0);
+    assert_eq!(first[1][0] - first[0][0], 28.0);
+    // A quarter of a period on, the stripes have moved 7 px forward, toward
+    // the end of the groove: moving back would put a stripe at the start.
+    let quarter = stripes(&tick(&mut tree, 200));
+    assert!(
+        (quarter[0][0] - x0 - 7.0).abs() < 1.0,
+        "a quarter period on: {quarter:?}"
+    );
+    assert!((quarter[0][2] - 14.0).abs() < 1.0, "{quarter:?}");
+    let later = stripes(&tick(&mut tree, 200));
+    assert!(
+        (later[0][0] - x0 - 14.0).abs() < 1.0 || (later[1][0] - x0 - 14.0).abs() < 1.0,
+        "half a period on: {later:?}"
+    );
+    let (mut still, _) = on_the_clock(
+        theme,
+        true,
+        FixedSize::new()
+            .width(200.0)
+            .child(ProgressBar::indeterminate()),
+    );
+    let at_rest = stripes(&rerender(&mut still));
+    assert_eq!(stripes(&tick(&mut still, 400)), at_rest);
+}
+
+/// A table's header sections are the button colour, outlined at the bottom
+/// and trailing edge in the window text at the frame contrast, 30 px tall
+/// over 24 px rows; hovered and resized they are Plasma's hovered and
+/// sunken sections, and right to left the trailing line is on the left.
+#[test]
+fn a_table_header_is_breezes_section() {
+    for (scheme, theme) in themes() {
+        for rtl in [false, true] {
+            let mut tree = tree_with(theme.clone());
+            if rtl {
+                tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+            }
+            let root = tree.add(table());
+            tree.layout(SizeProposal::exact(400.0, 300.0));
+            let header = nodes_named(&tree, root, "BreezeHeaderSection");
+            assert_eq!(header.len(), 1);
+            let h = tree.bounds(header[0]);
+            assert_eq!(h.height, 30.0);
+            let frame = tree.render();
+            let rects = decorations(&frame);
+            let face = rects
+                .iter()
+                .find(|(_, r)| *r == [h.x, h.y, h.width, h.height])
+                .unwrap_or_else(|| panic!("{scheme}: no section face in {rects:?}"));
+            assert_eq!(face.0, sample(scheme, "header.normal", 50, 15), "{scheme}");
+            let line = rects
+                .iter()
+                .find(|(_, r)| *r == [h.x, h.y + 29.0, h.width, 1.0])
+                .expect("the bottom line");
+            assert!(near(
+                over(line.0, face.0),
+                sample(scheme, "header.normal", 50, 29)
+            ));
+            let x = if rtl { h.x } else { h.x + h.width - 1.0 };
+            let trailing = rects
+                .iter()
+                .find(|(_, r)| *r == [x, h.y, 1.0, 30.0])
+                .unwrap_or_else(|| panic!("{scheme} rtl {rtl}: no trailing line in {rects:?}"));
+            assert_eq!(trailing.0, line.0);
+        }
+    }
+}
+
+/// The face of the one header section of `root`.
+fn header_face(tree: &mut WidgetTree, root: WidgetId) -> [u8; 4] {
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let h = tree.bounds(nodes_named(tree, root, "BreezeHeaderSection")[0]);
+    let frame = tree.render();
+    decorations(&frame)
+        .into_iter()
+        .find(|(_, r)| *r == [h.x, h.y, h.width, h.height])
+        .unwrap_or_else(|| panic!("no section face at {h:?}"))
+        .0
+}
+
+/// Hover the section of a table in `theme`, then grab its trailing edge and
+/// drag it: the face hovered, and the face while the column resizes.
+fn hovered_and_resizing_faces(theme: Theme) -> ([u8; 4], [u8; 4]) {
+    use teksilo_core::event::WidgetEvent;
+    let mut tree = tree_with(theme);
+    let root = tree.add(table());
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let h = tree.bounds(nodes_named(&tree, root, "BreezeHeaderSection")[0]);
+    tree.pointer_move(h.center());
+    let hovered = header_face(&mut tree, root);
+    let grip = teksilo_canvas::Point::new(h.x + h.width - 1.0, h.y + h.height * 0.5);
+    let to = teksilo_canvas::Point::new(grip.x + 10.0, grip.y);
+    tree.pointer_move(grip);
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        grip,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(to));
+    let resizing = header_face(&mut tree, root);
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        to,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    (hovered, resizing)
+}
+
+/// Under the pointer the section is Plasma's hovered one; grabbed by its
+/// trailing edge to resize the column, Plasma's sunken one.
+#[test]
+fn a_hovered_or_resized_header_section_is_plasmas() {
+    for (scheme, theme) in themes() {
+        let (hovered, resizing) = hovered_and_resizing_faces(theme);
+        assert_eq!(hovered, sample(scheme, "header.hover", 50, 15), "{scheme}");
+        assert_eq!(
+            resizing,
+            sample(scheme, "header.sunken", 50, 15),
+            "{scheme}"
+        );
+    }
+}
+
+/// Breeze's schemes give the view's focus and hover decorations one
+/// colour, so Plasma's hovered and sunken sections match. In a scheme where
+/// they differ, the hovered section moves toward the hover colour and the
+/// one being resized toward the focus colour.
+#[test]
+fn a_resized_header_section_turns_toward_the_focus_colour() {
+    let (scheme, _) = teksilo_kde_scheme::KdeColorScheme::parse(
+        "[Colors:View]\nDecorationFocus=61,174,233\nDecorationHover=246,116,0\n",
+    );
+    let theme = kde::from_scheme(&scheme);
+    let colors = BreezeHeaderColors::resolve(&theme, true, false);
+    assert_ne!(colors.hovered, colors.pressed, "the premise");
+    let (hovered, resizing) = hovered_and_resizing_faces(theme);
+    assert_eq!(hovered, rgba8_of(colors.hovered));
+    assert_eq!(resizing, rgba8_of(colors.pressed));
+}
+
+/// The column sorted down, Qt's indicator for an ascending sort, is
+/// painted as Plasma's pressed section; a descending column is not.
+#[test]
+fn the_column_sorted_down_is_a_pressed_section() {
+    for (scheme, theme) in themes() {
+        for (direction, want) in [
+            (SortDirection::Ascending, "header.sunken"),
+            (SortDirection::Descending, "header.normal"),
+        ] {
+            let mut tree = tree_with(theme.clone());
+            let model = ListModel::from_vec(vec!["alpha".to_string(), "beta".into()]);
+            let root = tree.add(
+                TableView::new(model)
+                    .add_column(name_column(|s: &String| s.clone()).sortable(true))
+                    .bind_sort(Signal::new(Some(("name".to_string(), direction)))),
+            );
+            assert_eq!(
+                header_face(&mut tree, root),
+                sample(scheme, want, 50, 15),
+                "{scheme} {direction:?}"
             );
         }
     }
