@@ -302,6 +302,39 @@ by crate for clarity, not because crates version independently.
   `AccessibilityPreferences::reduced_motion`, even when the desktop portal
   does not report it.
 
+#### App
+
+- **A theme that follows the OS keeps the app's density.**
+  **Behaviour change:** under `ThemeMode::Native` and
+  `ThemeMode::FollowSystem`, the theme a window opens with, the theme an OS
+  light or dark change brings and the theme `follow_system_theme` switches to
+  are now at the density the app is at (the density of the window's tree, or
+  of the app's theme for a window opening), as `Theme::with_density` gives
+  it. Before, each of them reset the theme's input tokens to the compact
+  density, so an app at the comfortable or touch density opened its windows
+  with compact targets, hit slop and gesture thresholds, and after an OS
+  theme change kept widgets built for its own density under compact input
+  tokens.
+- **A window opening under `ThemeMode::Native` follows the window system's
+  light or dark state when the desktop states neither.**
+  **Behaviour change:** on macOS, on Windows and on a Linux desktop whose
+  portal reports no preference, a window now opens dark when the window
+  system says it is dark, as an OS theme change already made it. Before, it
+  always opened light.
+- **A Native theme keeps the desktop's colours when the desktop states no
+  light or dark preference.** **Behaviour change:** on a Linux desktop whose
+  portal reports no preference but whose accent or GTK colours can be read,
+  such as GNOME in its default style, an OS theme change and
+  `follow_system_theme` now keep those colours under the light or dark state
+  the window system reports, as a window opening already did. Before, they
+  dropped them for the plain IntUI preset.
+- **An OS theme re-read that changes nothing sets no theme.** When the
+  desktop's report, its light or dark state and a window's density are what
+  that window's theme was last made from, the window's theme is not set
+  again, so an OS theme event that changes none of them no longer relays out
+  and repaints every window. A theme the app set in between is replaced as
+  before.
+
 ## [0.19.0] - 2026-10-16
 
 ### Added

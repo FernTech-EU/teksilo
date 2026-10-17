@@ -29,7 +29,9 @@ use winit::raw_window_handle::HasWindowHandle;
 use winit::window::WindowLevel;
 
 use crate::app::{AppEventProxy, CloseWindowRequest, ThemeMode};
-use crate::native_theme::NativeThemeFactory;
+use crate::native_theme::{
+    NativeThemeFactory, OsQueries, OsThemeInputs, OsThemeSource, OsThemeUpdate, resolve_os_theme,
+};
 
 use crate::window_config::{TeksiloWindowId, WindowConfig};
 
@@ -221,6 +223,11 @@ pub(crate) struct ManagedWindow {
     /// observable on winit 0.30, so it can desync if Caps Lock was
     /// already on before the app gained focus.
     pub caps_lock_active: bool,
+    /// What the tree's theme was last resolved from while it followed the
+    /// OS ([`ThemeMode::FollowSystem`] or [`ThemeMode::Native`]); `None`
+    /// once any other theme was set. A re-read of the OS that gives the
+    /// same inputs at the tree's density sets no theme.
+    pub(crate) os_theme: Option<OsThemeInputs>,
     /// Last OS-IME enablement applied to the winit window (`None` = never
     /// set, forces the first apply). The post-dispatch reconcile compares
     /// the focused node's IME descriptor against this and calls
@@ -495,6 +502,10 @@ pub struct WindowManager {
     /// (IntUI coloured by the desktop). See
     /// [`TeksiloAppBuilder::native_theme`](crate::TeksiloAppBuilder::native_theme).
     native_theme: Option<NativeThemeFactory>,
+    /// What [`theme`](Self::theme) was last resolved from while it followed
+    /// the OS; `None` once any other theme was set. See
+    /// [`ManagedWindow::os_theme`].
+    os_theme: Option<OsThemeInputs>,
     /// Whether each window's tree records what the platform adapters
     /// announce ([`WidgetTree::set_records_announcements`]). Off unless the
     /// automation bridge is installed: nothing else in a running application
@@ -563,6 +574,7 @@ impl WindowManager {
             theme_mode: ThemeMode::Manual,
             pen_batching: teksilo_platform::PenBatching::default(),
             native_theme: None,
+            os_theme: None,
             records_announcements: false,
             app_context_template: None,
             event_proxy: None,
@@ -733,15 +745,27 @@ impl WindowManager {
     /// on Linux); under `FollowSystem` it picks the built-in light/dark
     /// preset. Both results carry the id `"system"`.
     ///
+    /// Each window keeps its target density: its theme is resolved at the
+    /// density its tree is at, and the theme new windows are built with at
+    /// the density of the manager's current theme. A window whose desktop
+    /// report, light or dark state and density are those its theme was last
+    /// resolved from is not given its theme again.
+    ///
     /// `os_dark_hint` is the OS light/dark state as reported by winit (e.g.
-    /// from a `WindowEvent::ThemeChanged`), used as the authoritative source on
-    /// platforms where Teksilo's own OS-colour query is unimplemented
-    /// (macOS / Windows, where `query_os_theme_colors()` returns
-    /// `NoPreference`). On Linux the query reports a real scheme and the hint
-    /// is unused. Pass `None` when no winit signal is available (e.g. a runtime
-    /// "follow system" request) — the current window's reported theme is used
-    /// where possible, otherwise it resolves to light.
+    /// from a `WindowEvent::ThemeChanged`), used where the desktop states no
+    /// light or dark preference itself (macOS / Windows, where
+    /// `query_os_theme_colors()` returns `NoPreference`). On a Linux desktop
+    /// that states one the hint is unused. Pass `None` when no winit signal is
+    /// available (e.g. a runtime "follow system" request): the current
+    /// window's reported theme is used where possible, otherwise it resolves
+    /// to light.
     pub fn apply_os_theme(&mut self, os_dark_hint: Option<bool>) {
+        self.apply_os_theme_from(os_dark_hint, OsQueries::PLATFORM);
+    }
+
+    /// [`apply_os_theme`](Self::apply_os_theme), reading the desktop through
+    /// `queries`.
+    fn apply_os_theme_from(&mut self, os_dark_hint: Option<bool>, queries: OsQueries) {
         // Fall back to a window's currently-reported winit theme when the
         // caller didn't supply a hint (so picking "System" on macOS/Windows
         // adopts the right light/dark immediately, not just on the next toggle).
@@ -752,32 +776,66 @@ impl WindowManager {
                 .and_then(|m| m.platform_window.window().theme())
                 .map(|t| matches!(t, winit::window::Theme::Dark))
         });
-        let theme = match self.theme_mode {
+        let source = match self.theme_mode {
             ThemeMode::Manual => return,
             ThemeMode::FollowSystem => {
-                let dark = match teksilo_platform::os_theme::query_color_scheme() {
+                OsThemeSource::follow_system(match (queries.color_scheme)() {
                     ColorSchemePreference::Dark => true,
                     ColorSchemePreference::Light => false,
                     ColorSchemePreference::NoPreference => hint.unwrap_or(false),
-                };
-                if dark {
-                    teksilo_core::presets::intui::dark()
-                } else {
-                    teksilo_core::presets::intui::light()
-                }
-                .with_id("system")
+                })
             }
-            ThemeMode::Native => {
-                // A desktop stating a light or dark preference decides; one
-                // stating none (macOS, Windows) follows the winit hint.
-                crate::native_theme::theme_for_appearance_change(
-                    self.native_theme.as_ref(),
-                    &teksilo_platform::os_theme::query_native_desktop(),
-                    hint,
-                )
-            }
+            // A desktop stating a light or dark preference decides; one
+            // stating none (macOS, Windows) follows the winit hint.
+            ThemeMode::Native => OsThemeSource::native((queries.native_desktop)(), hint),
         };
-        self.set_theme(theme);
+        self.apply_os_source(source);
+    }
+
+    /// Give every window, and the manager's own theme, the theme `source`
+    /// resolves to at its density, except where that is the theme it was
+    /// last given. Does not look at the theme mode: the caller has.
+    pub(crate) fn apply_os_source(&mut self, source: OsThemeSource) {
+        let mut update = OsThemeUpdate::new(self.native_theme.as_ref(), source);
+        for managed in self.windows.values_mut() {
+            if let Some(theme) =
+                update.theme_for(&mut managed.os_theme, managed.tree.input_density())
+            {
+                // As in `set_theme`: the translator holds the input tokens.
+                managed.translation_state.set_input_tokens(theme.input);
+                managed.tree.set_theme(theme);
+            }
+        }
+        if let Some(theme) = update.theme_for(&mut self.os_theme, self.theme.input.density) {
+            self.theme = theme;
+        }
+    }
+
+    /// The theme a window created now is built with, and, while the theme
+    /// follows the OS, what it was resolved from. `window_hint` is the new
+    /// window's winit light or dark state.
+    ///
+    /// Under `Manual` it is the manager's theme. Under `FollowSystem` it is
+    /// the IntUI preset the hint names, and under `Native` the theme the
+    /// desktop resolves to, with a desktop that states no preference
+    /// following the hint, as [`apply_os_theme`](Self::apply_os_theme) does.
+    /// Either is resolved at the density of the manager's theme and becomes
+    /// the manager's theme, which later windows start from.
+    fn new_window_theme(
+        &mut self,
+        window_hint: Option<bool>,
+        queries: OsQueries,
+    ) -> (Theme, Option<OsThemeInputs>) {
+        let source = match self.theme_mode {
+            ThemeMode::Manual => return (self.theme.clone(), None),
+            ThemeMode::FollowSystem => OsThemeSource::follow_system(window_hint.unwrap_or(false)),
+            ThemeMode::Native => OsThemeSource::native((queries.native_desktop)(), window_hint),
+        };
+        let inputs = source.at(self.theme.input.density);
+        let theme = resolve_os_theme(self.native_theme.as_ref(), &inputs);
+        self.theme = theme.clone();
+        self.os_theme = Some(inputs.clone());
+        (theme, Some(inputs))
     }
 
     /// Install the shared typesetter every window's tree will shape text
@@ -1072,25 +1130,15 @@ impl WindowManager {
         translation_state.set_scale_factor(scale_factor);
         translation_state.set_pen_batching(self.pen_batching);
 
-        // Resolve the initial theme from ThemeMode before building the tree
-        let initial_theme = match self.theme_mode {
-            ThemeMode::Manual => self.theme.clone(),
-            // OS-following modes carry the id "system" so a `ThemeSwitcher`
-            // recognizes the active theme as "follow OS", not a fixed pick.
-            ThemeMode::FollowSystem => match window.theme() {
-                Some(winit::window::Theme::Dark) => teksilo_core::presets::intui::dark(),
-                _ => teksilo_core::presets::intui::light(),
-            }
-            .with_id("system"),
-            ThemeMode::Native => crate::native_theme::theme_for_new_window(
-                self.native_theme.as_ref(),
-                &teksilo_platform::os_theme::query_native_desktop(),
-            ),
-        };
-        // Update the shared theme so all subsequent windows use the same base
-        if self.theme_mode != ThemeMode::Manual {
-            self.theme = initial_theme.clone();
-        }
+        // Resolve the initial theme from ThemeMode before building the tree.
+        // OS-following modes carry the id "system" so a `ThemeSwitcher`
+        // recognizes the active theme as "follow OS", not a fixed pick, and
+        // update the shared theme so all subsequent windows use the same base.
+        let window_hint = window
+            .theme()
+            .map(|theme| matches!(theme, winit::window::Theme::Dark));
+        let (initial_theme, initial_os_theme) =
+            self.new_window_theme(window_hint, OsQueries::PLATFORM);
 
         // Create with AccessKit adapter (shows window after adapter is ready)
         let mut pw = pollster::block_on(PlatformWindow::new_with_a11y(window, target));
@@ -1364,6 +1412,7 @@ impl WindowManager {
             occlusion_probed_at: None,
             session_away: self.session_away,
             caps_lock_active: false,
+            os_theme: initial_os_theme,
             ime_allowed: None,
             ime_purpose: None,
             last_ime_preedit_empty: false,
@@ -1894,7 +1943,9 @@ impl WindowManager {
     /// `Manual` (the default).
     pub fn set_theme(&mut self, theme: Theme) {
         self.theme = theme.clone();
+        self.os_theme = None;
         for managed in self.windows.values_mut() {
+            managed.os_theme = None;
             managed.tree.set_theme(theme.clone());
             // The translator holds the input tokens, not the theme, so a
             // theme swap has to re-install them or the touch kill switch and
@@ -2339,7 +2390,7 @@ impl WindowManager {
         if had_requests {
             // An explicit theme pick disables OS-following so a later OS
             // light/dark change won't override the chosen theme. (The
-            // internal `apply_os_theme` path calls `set_theme` directly, not
+            // internal `apply_os_theme` path sets its themes directly, not
             // through this drain, so it is unaffected.)
             self.theme_mode = ThemeMode::Manual;
         }
@@ -2359,12 +2410,18 @@ impl WindowManager {
             }
         }
         if requested {
-            self.theme_mode = ThemeMode::Native;
-            // No winit hint at request time; apply_os_theme falls back to the
-            // current window's reported theme.
-            self.apply_os_theme(None);
+            self.follow_system_theme(OsQueries::PLATFORM);
         }
         requested
+    }
+
+    /// Switch the app to [`ThemeMode::Native`] and apply the theme the
+    /// desktop, read through `queries`, resolves to.
+    fn follow_system_theme(&mut self, queries: OsQueries) {
+        self.theme_mode = ThemeMode::Native;
+        // No winit hint at request time; the current window's reported theme
+        // stands in for it.
+        self.apply_os_theme_from(None, queries);
     }
 
     /// Drain per-tree text-scale requests raised by handlers via
@@ -3120,5 +3177,233 @@ mod announcement_recording_tests {
         assert!(!wm.new_window_tree(theme.clone()).records_announcements());
         wm.set_records_announcements(true);
         assert!(wm.new_window_tree(theme).records_announcements());
+    }
+}
+
+#[cfg(test)]
+mod os_theme_tests {
+    use super::*;
+    use crate::native_theme::NativeThemeRequest;
+    use std::cell::Cell;
+    use teksilo_core::presets::intui;
+    use teksilo_platform::os_theme::NativeDesktop;
+    use teksilo_tokens::{Color, OsThemeColors, TargetDensity};
+
+    const DENSITIES: [TargetDensity; 2] = [TargetDensity::Compact, TargetDensity::Touch];
+
+    fn accented(scheme: ColorSchemePreference) -> NativeDesktop {
+        let mut os = OsThemeColors::new(scheme);
+        os.accent = Some(Color::from_rgb(0.9, 0.2, 0.1));
+        os.window_bg = Some(Color::from_rgb(0.94, 0.94, 0.95));
+        NativeDesktop::new(os)
+    }
+    fn light_desktop() -> NativeDesktop {
+        accented(ColorSchemePreference::Light)
+    }
+    fn dark_desktop() -> NativeDesktop {
+        accented(ColorSchemePreference::Dark)
+    }
+    fn silent_desktop() -> NativeDesktop {
+        NativeDesktop::new(OsThemeColors::new(ColorSchemePreference::NoPreference))
+    }
+    fn says_light() -> ColorSchemePreference {
+        ColorSchemePreference::Light
+    }
+    fn says_dark() -> ColorSchemePreference {
+        ColorSchemePreference::Dark
+    }
+    fn says_nothing() -> ColorSchemePreference {
+        ColorSchemePreference::NoPreference
+    }
+
+    fn queries(
+        native_desktop: fn() -> NativeDesktop,
+        color_scheme: fn() -> ColorSchemePreference,
+    ) -> OsQueries {
+        OsQueries {
+            native_desktop,
+            color_scheme,
+        }
+    }
+
+    /// Every pair of readings: each desktop with each light or dark answer.
+    fn all_queries() -> Vec<OsQueries> {
+        let mut out = Vec::new();
+        for desktop in [light_desktop, dark_desktop, silent_desktop] {
+            for scheme in [says_light, says_dark, says_nothing] {
+                out.push(queries(desktop, scheme));
+            }
+        }
+        out
+    }
+
+    /// A manager in `mode` whose theme is at `density`.
+    fn manager(mode: ThemeMode, density: TargetDensity) -> WindowManager {
+        let mut wm = WindowManager::new(intui::light().with_density(density));
+        wm.set_theme_mode(mode);
+        wm
+    }
+
+    /// The theme `source` resolves to at the presets' density, projected
+    /// onto `density`.
+    fn projected(source: OsThemeSource, density: TargetDensity) -> Theme {
+        resolve_os_theme(None, &source.at(TargetDensity::Compact)).with_density(density)
+    }
+
+    #[test]
+    fn a_window_opened_keeps_the_density() {
+        for density in DENSITIES {
+            for hint in [None, Some(false), Some(true)] {
+                let mut wm = manager(ThemeMode::Native, density);
+                let (theme, inputs) =
+                    wm.new_window_theme(hint, queries(dark_desktop, says_nothing));
+                assert_eq!(theme.input.density, density);
+                assert_eq!(
+                    theme,
+                    projected(OsThemeSource::native(dark_desktop(), hint), density)
+                );
+                assert_eq!(wm.theme, theme);
+                assert_eq!(inputs.as_ref().map(|i| i.density), Some(density));
+
+                let mut wm = manager(ThemeMode::FollowSystem, density);
+                let (theme, _) = wm.new_window_theme(hint, queries(dark_desktop, says_dark));
+                assert_eq!(theme.input.density, density);
+                assert_eq!(
+                    theme,
+                    projected(OsThemeSource::follow_system(hint.unwrap_or(false)), density)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_os_theme_change_keeps_the_density() {
+        for density in DENSITIES {
+            let mut wm = manager(ThemeMode::Native, density);
+            wm.apply_os_theme_from(Some(true), queries(light_desktop, says_light));
+            assert_eq!(wm.theme.input.density, density);
+            assert_eq!(
+                wm.theme,
+                projected(OsThemeSource::native(light_desktop(), Some(true)), density)
+            );
+
+            let mut wm = manager(ThemeMode::FollowSystem, density);
+            wm.apply_os_theme_from(None, queries(light_desktop, says_dark));
+            assert_eq!(wm.theme.input.density, density);
+            assert_eq!(
+                wm.theme,
+                projected(OsThemeSource::follow_system(true), density)
+            );
+        }
+    }
+
+    #[test]
+    fn following_the_system_theme_keeps_the_density() {
+        for density in DENSITIES {
+            let mut wm = manager(ThemeMode::Manual, density);
+            wm.follow_system_theme(queries(dark_desktop, says_light));
+            assert_eq!(wm.theme_mode(), ThemeMode::Native);
+            assert_eq!(wm.theme.input.density, density);
+            assert_eq!(
+                wm.theme,
+                projected(OsThemeSource::native(dark_desktop(), None), density)
+            );
+            assert!(wm.theme.is_dark());
+        }
+    }
+
+    #[test]
+    fn a_manual_theme_ignores_the_os() {
+        let theme = intui::dark().with_density(TargetDensity::Touch);
+        let mut wm = WindowManager::new(theme.clone());
+        wm.apply_os_theme_from(None, queries(light_desktop, says_light));
+        assert_eq!(wm.theme, theme);
+        assert_eq!(
+            wm.new_window_theme(Some(false), queries(light_desktop, says_light)),
+            (theme, None)
+        );
+    }
+
+    #[test]
+    fn a_window_opened_on_a_desktop_with_no_preference_follows_its_hint() {
+        for density in DENSITIES {
+            for (hint, dark) in [(Some(true), true), (Some(false), false), (None, false)] {
+                let mut wm = manager(ThemeMode::Native, density);
+                let (theme, _) = wm.new_window_theme(hint, queries(silent_desktop, says_nothing));
+                assert_eq!(theme.is_dark(), dark, "hint {hint:?}");
+                let preset = if dark { intui::dark() } else { intui::light() };
+                assert_eq!(theme, preset.with_density(density).with_id("system"));
+            }
+        }
+    }
+
+    #[test]
+    fn a_window_opened_and_a_live_change_agree() {
+        for mode in [ThemeMode::FollowSystem, ThemeMode::Native] {
+            for q in all_queries() {
+                // FollowSystem reads the light or dark answer only on a live
+                // change; a window opens on the hint alone. They read the same
+                // when the desktop gives no answer.
+                if mode == ThemeMode::FollowSystem
+                    && (q.color_scheme)() != ColorSchemePreference::NoPreference
+                {
+                    continue;
+                }
+                for hint in [None, Some(false), Some(true)] {
+                    for density in DENSITIES {
+                        let mut opened = manager(mode, density);
+                        let (theme, inputs) = opened.new_window_theme(hint, q);
+                        let mut live = manager(mode, density);
+                        live.apply_os_theme_from(hint, q);
+                        assert_eq!(theme, live.theme, "{mode:?}, hint {hint:?}, {density:?}");
+                        assert_eq!(inputs, live.os_theme);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_unchanged_reading_resolves_and_sets_nothing() {
+        let calls = Rc::new(Cell::new(0));
+        let count = calls.clone();
+        let mut wm = manager(ThemeMode::Native, TargetDensity::Touch);
+        wm.set_native_theme(Some(Box::new(move |_: &NativeThemeRequest<'_>| {
+            count.set(count.get() + 1);
+            None
+        })));
+
+        // A window opens, then the OS reports what it was built from.
+        let (opened, _) = wm.new_window_theme(None, queries(silent_desktop, says_nothing));
+        assert_eq!(calls.get(), 1);
+        wm.apply_os_theme_from(None, queries(silent_desktop, says_nothing));
+        wm.apply_os_theme_from(Some(false), queries(silent_desktop, says_nothing));
+        assert_eq!(calls.get(), 1, "the same desktop, state and density");
+        assert_eq!(wm.theme, opened);
+
+        // A changed light or dark state.
+        wm.apply_os_theme_from(Some(true), queries(silent_desktop, says_nothing));
+        assert_eq!(calls.get(), 2);
+        assert!(wm.theme.is_dark());
+        wm.apply_os_theme_from(Some(true), queries(silent_desktop, says_nothing));
+        assert_eq!(calls.get(), 2);
+
+        // A changed desktop.
+        wm.apply_os_theme_from(Some(true), queries(dark_desktop, says_nothing));
+        assert_eq!(calls.get(), 3);
+        wm.apply_os_theme_from(None, queries(dark_desktop, says_nothing));
+        assert_eq!(calls.get(), 3, "a stated preference ignores the hint");
+
+        // A changed density: a theme the app set at another density.
+        wm.set_theme(intui::light().with_density(TargetDensity::Comfortable));
+        wm.apply_os_theme_from(None, queries(dark_desktop, says_nothing));
+        assert_eq!(calls.get(), 4);
+        assert_eq!(wm.theme.input.density, TargetDensity::Comfortable);
+
+        // Any theme set in between is replaced, even at the same density.
+        wm.set_theme(intui::light().with_density(TargetDensity::Comfortable));
+        wm.apply_os_theme_from(None, queries(dark_desktop, says_nothing));
+        assert_eq!(calls.get(), 5);
+        assert!(wm.theme.is_dark());
     }
 }

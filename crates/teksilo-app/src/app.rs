@@ -3431,15 +3431,15 @@ impl TeksiloAppHandler {
         // is honoured here too. OS-following results carry the id "system".
         match self.wm.theme_mode() {
             ThemeMode::Manual => {} // ignore OS theme changes
+            // Trust winit's per-window signal (authoritative on
+            // macOS/Windows where OS-colour querying is unimplemented). Each
+            // window keeps its density, and an unchanged state sets nothing.
             ThemeMode::FollowSystem => {
-                // Trust winit's per-window signal (authoritative on
-                // macOS/Windows where OS-colour querying is unimplemented).
-                let theme = match winit_theme {
-                    winit::window::Theme::Dark => teksilo_core::presets::intui::dark(),
-                    winit::window::Theme::Light => teksilo_core::presets::intui::light(),
-                }
-                .with_id("system");
-                self.wm.set_theme(theme);
+                self.wm
+                    .apply_os_source(crate::native_theme::OsThemeSource::follow_system(matches!(
+                        winit_theme,
+                        winit::window::Theme::Dark
+                    )))
             }
             // Native adopts the OS's actual colours on Linux; on macOS/Windows
             // (no OS-colour query) it follows winit's authoritative light/dark
@@ -4439,7 +4439,9 @@ impl TeksiloAppBuilder {
     ///
     /// The theme the app answers with is given the id `"system"`, like every
     /// theme that follows the OS, so a `ThemeSwitcher` shows it as "follow
-    /// OS". Setting a factory does not select Native mode; combine it with
+    /// OS", and is projected onto the density it was asked at with
+    /// [`Theme::with_density`], which is the density of the window it is
+    /// for. Setting a factory does not select Native mode; combine it with
     /// [`theme_mode`](Self::theme_mode). See
     /// [`resolve_native_theme`](crate::resolve_native_theme).
     pub fn native_theme(
