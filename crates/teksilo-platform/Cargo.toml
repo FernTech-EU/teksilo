@@ -229,6 +229,10 @@ zbus = { version = "5.19", default-features = false, features = ["async-io"] }
 # The async-io zbus already links, so it adds no crate.
 async-io = "2.6"
 
+[dev-dependencies]
+# A scratch configuration directory for the theme watch's file-time check.
+tempfile = { workspace = true }
+
 [target.'cfg(all(unix, not(target_os = "macos")))'.dev-dependencies]
 # The X keysym constants, to check `key_report`'s hand-written keysym table
 # against. Already in the tree through winit's xkbcommon.

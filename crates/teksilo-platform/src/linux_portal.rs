@@ -350,7 +350,7 @@ impl Bus {
 }
 
 /// `future`'s output, or `None` when `limit` passes first.
-async fn within<T>(limit: Duration, future: impl Future<Output = T>) -> Option<T> {
+pub(crate) async fn within<T>(limit: Duration, future: impl Future<Output = T>) -> Option<T> {
     let mut future = pin!(future);
     let mut timer = pin!(async_io::Timer::after(limit));
     poll_fn(|cx| {
@@ -366,4 +366,4 @@ async fn within<T>(limit: Duration, future: impl Future<Output = T>) -> Option<T
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

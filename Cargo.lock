@@ -12037,6 +12037,7 @@ dependencies = [
  "teksilo-kde-scheme",
  "teksilo-render",
  "teksilo-tokens",
+ "tempfile",
  "thiserror 2.0.21",
  "wayland-backend",
  "wayland-client",

@@ -3353,6 +3353,12 @@ impl TeksiloAppHandler {
                 // back. `refresh_accessibility_preferences` applies any change
                 // to every window (marking them dirty for repaint).
                 if focused {
+                    // The same moment backstops the desktop watch: a
+                    // configuration file written while no signal reached us
+                    // (no bus, or a signal missed) is caught here.
+                    if self.wm.recheck_os_theme_files() {
+                        self.wm.request_redraw_all();
+                    }
                     self.wm.refresh_accessibility_preferences();
                 }
                 // The global native menu (macOS) follows window focus: make the
@@ -3439,7 +3445,7 @@ impl TeksiloAppHandler {
                     .apply_os_source(crate::native_theme::OsThemeSource::follow_system(matches!(
                         winit_theme,
                         winit::window::Theme::Dark
-                    )))
+                    )));
             }
             // Native adopts the OS's actual colours on Linux; on macOS/Windows
             // (no OS-colour query) it follows winit's authoritative light/dark
@@ -3461,6 +3467,8 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         // Before the first window, so that it is born knowing whether anything
         // on screen can be seen. A no-op once watching.
         self.wm.watch_session();
+        // Likewise for the desktop's appearance, while the theme follows it.
+        self.wm.sync_os_theme_watch();
 
         if !self.initial_created
             && let Some(config) = self.initial_window.take()
@@ -3511,18 +3519,29 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
                         self.wm.apply_session(Instant::now());
                         return;
                     }
-                    Err(payload) => {
-                        // A web-view engine asking to run. Answered here, with
-                        // no redraw: the frames it commits wake their windows
-                        // through their pictures, and the events it posts
-                        // arrive as payloads of their own.
-                        #[cfg(feature = "web-view")]
-                        if payload.is::<teksilo_webview::WebViewPumpPayload>() {
-                            self.pump_web_views();
+                    // The desktop's appearance changed: read it again, and
+                    // redraw every window when that set a theme or changed a
+                    // preference.
+                    Err(payload) => match self.wm.route_os_theme_payload(payload) {
+                        Ok(changed) => {
+                            if changed {
+                                self.wm.request_redraw_all();
+                            }
                             return;
                         }
-                        AppEvent::External(payload)
-                    }
+                        Err(payload) => {
+                            // A web-view engine asking to run. Answered here, with
+                            // no redraw: the frames it commits wake their windows
+                            // through their pictures, and the events it posts
+                            // arrive as payloads of their own.
+                            #[cfg(feature = "web-view")]
+                            if payload.is::<teksilo_webview::WebViewPumpPayload>() {
+                                self.pump_web_views();
+                                return;
+                            }
+                            AppEvent::External(payload)
+                        }
+                    },
                 },
             },
             event => event,

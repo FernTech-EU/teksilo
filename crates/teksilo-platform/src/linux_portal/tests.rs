@@ -132,8 +132,9 @@ fn a_silenced_name_is_quiet_until_its_instant_and_no_other_is() {
 
 /// Reads against a private `dbus-daemon` serving a fake portal and a fake
 /// AT-SPI status object. Opt-in, since it needs `dbus-daemon` installed:
-/// run with `TEKSILO_DBUS_TESTS=1`.
-mod real_bus {
+/// run with `TEKSILO_DBUS_TESTS=1`. The bus itself is shared with the
+/// theme watch's real-bus test.
+pub(crate) mod real_bus {
     use std::io::{BufRead, BufReader};
     use std::path::PathBuf;
     use std::process::{Child, Command, Stdio};
@@ -148,7 +149,7 @@ mod real_bus {
     /// A namespace whose reads the fake portal never answers in time.
     const HANG: &str = "test.hang";
 
-    fn enabled() -> bool {
+    pub(crate) fn enabled() -> bool {
         if std::env::var("TEKSILO_DBUS_TESTS").as_deref() == Ok("1") {
             return true;
         }
@@ -159,14 +160,14 @@ mod real_bus {
     /// A `dbus-daemon` of our own, on a configuration that activates no
     /// service (so nothing on the machine is started on it) and listens in
     /// a directory of its own. Killed and cleaned up on drop.
-    struct PrivateBus {
+    pub(crate) struct PrivateBus {
         child: Child,
         dir: PathBuf,
-        address: String,
+        pub(crate) address: String,
     }
 
     impl PrivateBus {
-        fn start() -> Self {
+        pub(crate) fn start() -> Self {
             static NEXT: AtomicUsize = AtomicUsize::new(0);
             let dir = std::env::temp_dir().join(format!(
                 "teksilo-dbus-test-{}-{}",

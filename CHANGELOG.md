@@ -139,8 +139,26 @@ by crate for clarity, not because crates version independently.
   animation speed, the widget style and the Breeze style settings).
   `NativeDesktop::new` builds one from a colour report alone, and it
   implements `PartialEq`, so a caller can tell whether the desktop changed.
+- **`os_theme::OsThemeWatch`.** Hears the desktop's appearance change while
+  the application runs: on Linux, the desktop portal's appearance and KDE
+  settings, KDE's global settings notification, and KDE writing
+  `kdeglobals` or `breezerc`. A change that arrives as several signals is
+  reported once, as an `os_theme::OsThemeChanged` posted through the
+  application's event poster 150 ms after the first. `files_changed` says
+  whether a KDE configuration file changed since it last looked, for a
+  session with no bus. On macOS and Windows there is nothing to watch, and
+  `OsThemeWatch::new` gives `None`.
 
 #### App
+
+- **Native and follow-system themes update live.** Under `ThemeMode::Native`
+  or `ThemeMode::FollowSystem`, every window takes the new theme when the
+  desktop's accent, colour scheme or light or dark setting changes, without
+  a restart, and the reduced-motion preference follows a change of the
+  desktop's animation speed. On a KDE Plasma session whose change signals
+  do not reach the application, such as one with no session bus, a change
+  to `kdeglobals` or `breezerc` is picked up the next time a window takes
+  focus. Under `ThemeMode::Manual` nothing is watched.
 
 - **`TeksiloAppBuilder::native_theme`.** An app can give `ThemeMode::Native`
   a theme of its own: the closure is asked with a `NativeThemeRequest` (what

@@ -13,9 +13,15 @@
 //! accent, read through `teksilo-kde-scheme`. [`query_native_desktop`]
 //! also hands over the KDE desktop's settings (fonts, animation speed,
 //! widget style, Breeze style settings) as a [`KdeDesktop`].
+//!
+//! An [`OsThemeWatch`] hears these change while the application runs; see
+//! [`watch`].
 
 #[cfg(target_os = "linux")]
 pub(crate) mod kde;
+pub mod watch;
+
+pub use watch::{OsThemeChanged, OsThemeWatch};
 
 use teksilo_kde_scheme::KdeDesktop;
 #[cfg(target_os = "linux")]
