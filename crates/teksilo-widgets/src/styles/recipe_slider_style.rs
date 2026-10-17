@@ -21,7 +21,9 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::environment::LayoutDirection;
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::Signal;
-use teksilo_core::styles::{SliderOrientation, SliderStyle, SliderStyleConfig, SliderVariant};
+use teksilo_core::styles::{
+    FocusRingStroke, SliderOrientation, SliderStyle, SliderStyleConfig, SliderVariant,
+};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{CornerRadius, InputTokens};
@@ -156,7 +158,7 @@ impl Widget for SliderBody {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
+        let envelope = ctx.theme.shape.focus_ring_envelope();
         let cross = (self.recipe.thumb_diameter + envelope * 2.0).max(MIN_CROSS_SIZE);
         match self.orientation {
             SliderOrientation::Horizontal => {
@@ -325,18 +327,10 @@ impl Widget for SliderBody {
         // Focus ring — keyboard-only, drawn outside the thumb in the
         // theme-defined gap.
         if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
-            let offset = shape.focus_ring_offset;
-            let half_stroke = shape.focus_ring_width * 0.5;
-            let ring_inset = offset + half_stroke;
-            let ring_rect = Rect::new(
-                thumb_rect.x - ring_inset,
-                thumb_rect.y - ring_inset,
-                thumb_rect.width + ring_inset * 2.0,
-                thumb_rect.height + ring_inset * 2.0,
-            );
+            let ring = FocusRingStroke::around(thumb_rect, thumb_radius, shape);
             canvas.stroke_rounded_rect(
-                ring_rect,
-                CornerRadius::uniform(thumb_radius + ring_inset),
+                ring.rect,
+                CornerRadius::uniform(ring.corner_radius),
                 colors.focus_ring,
                 shape.focus_ring_width,
             );

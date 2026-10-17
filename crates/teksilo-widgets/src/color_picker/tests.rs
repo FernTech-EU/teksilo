@@ -1074,3 +1074,38 @@ fn a_mouse_just_outside_a_swatch_lands_on_the_row() {
     );
     assert_eq!(row_taps.get(), 1);
 }
+
+/// The keyboard ring of a focused swatch under a theme whose
+/// `focus_ring_offset` is `offset` (width 2), plus the swatch bounds.
+fn swatch_focus_ring(offset: f32) -> (teksilo_canvas::Rect, [f32; 4]) {
+    let mut theme = teksilo_core::presets::intui::light();
+    theme.shape.focus_ring_offset = offset;
+    theme.shape.focus_ring_width = 2.0;
+    let mut tree = WidgetTree::new().with_theme(theme);
+    let id = tree.add(ColorSwatch::new(Color::RED).on_activate_fn(|_| {}));
+    tree.layout(SizeProposal::exact(40.0, 40.0));
+    tree.focus(id);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    tree.layout(SizeProposal::exact(40.0, 40.0));
+    let frame = tree.render();
+    // The unselected swatch strokes a 1 dp hairline; the ring is the
+    // only 2 dp stroke.
+    let ring = frame
+        .shapes
+        .iter()
+        .find(|s| s.stroke_width == 2.0)
+        .expect("a focused swatch strokes its focus ring");
+    (tree.bounds(id), ring.screen)
+}
+
+#[test]
+fn a_negative_focus_ring_offset_draws_the_swatch_ring_on_its_edge() {
+    let (bounds, inner) = swatch_focus_ring(-1.0);
+    let (_, outer) = swatch_focus_ring(2.0);
+    // Offset -1, width 2: the stroke is centred on the swatch edge.
+    assert_eq!(inner, bounds.to_array());
+    assert!(inner[2] < outer[2] && inner[3] < outer[3]);
+
+    let (_, deep) = swatch_focus_ring(-60.0);
+    assert!(deep[2] >= 0.0 && deep[3] >= 0.0, "ring inverted: {deep:?}");
+}

@@ -1109,6 +1109,55 @@ fn the_focused_selection_paints_with_the_accent() {
     assert!(frame.shapes.iter().any(|s| s.color == accent));
 }
 
+/// The keyboard ring and the outer frame of a focused control under a
+/// theme whose `focus_ring_offset` is `offset` (width 2), each as
+/// `[x, y, width, height]`.
+fn ring_and_frame(offset: f32) -> ([f32; 4], [f32; 4]) {
+    let mut theme = teksilo_core::presets::intui::light();
+    theme.shape.focus_ring_offset = offset;
+    theme.shape.focus_ring_width = 2.0;
+    let ring_color = theme.colors.focus_ring.to_array();
+    let frame_color = theme.colors.border_strong.to_array();
+    let mut t = WidgetTree::new()
+        .with_theme(theme)
+        .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+            teksilo_canvas::MockTextBackend::new(),
+        )));
+    let control = t.add(abc(Signal::new(Some(B))));
+    settle(&mut t, 300.0, 60.0);
+    t.focus(control);
+    t.press_key(Key::ArrowRight, Modifiers::NONE);
+    settle(&mut t, 300.0, 60.0);
+    let frame = t.render();
+    let stroke = |color: [f32; 4]| {
+        frame
+            .shapes
+            .iter()
+            .find(|s| s.color == color && s.stroke_width > 0.0)
+            .map(|s| s.screen)
+    };
+    (
+        stroke(ring_color).expect("the keyboard ring is stroked"),
+        stroke(frame_color).expect("the outer frame is stroked"),
+    )
+}
+
+#[test]
+fn a_negative_focus_ring_offset_draws_the_ring_on_the_frame() {
+    // Offset 2: the ring's centre line is 3 dp outside the frame.
+    let (outer, outer_frame) = ring_and_frame(2.0);
+    assert!((outer[2] - outer_frame[2] - 6.0).abs() < 1e-3);
+    // Offset -1, width 2: centred on the frame edge, so smaller than the
+    // outer ring around the same frame and never inverted.
+    let (inner, inner_frame) = ring_and_frame(-1.0);
+    assert!((inner[2] - inner_frame[2]).abs() < 1e-3);
+    assert!((inner[3] - inner_frame[3]).abs() < 1e-3);
+    assert!(inner[2] - inner_frame[2] < outer[2] - outer_frame[2]);
+
+    let (deep, _) = ring_and_frame(-200.0);
+    assert!(deep[2] >= 0.0 && deep[3] >= 0.0, "ring inverted: {deep:?}");
+}
+
 #[test]
 fn an_unfocused_selection_uses_the_inactive_surface() {
     let selected = Signal::new(Some(B));

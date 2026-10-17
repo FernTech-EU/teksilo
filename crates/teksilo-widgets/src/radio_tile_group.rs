@@ -39,11 +39,11 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::signal::{Prop, Signal};
-use teksilo_core::styles::SharedRadioTileStyle;
+use teksilo_core::styles::{FocusRingStroke, SharedRadioTileStyle};
 use teksilo_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::CornerRadius;
+use teksilo_tokens::{CornerRadius, ShapeTokens};
 
 use crate::radio_tile::RadioTile;
 use crate::styles::{RADIO_TILE_CORNER_RADIUS, RADIO_TILE_VERTICAL_ROW_HEIGHT};
@@ -79,7 +79,16 @@ pub enum TileLayout {
 /// Space (logical px) reserved around the tiles for the whole-group keyboard
 /// focus ring — the SegmentedControl envelope model.
 fn focus_ring_envelope(theme: &teksilo_core::Theme) -> f32 {
-    theme.shape.focus_ring_offset + theme.shape.focus_ring_width
+    theme.shape.focus_ring_envelope()
+}
+
+/// The whole-group ring's centre line: around the tiles' area (`bounds`
+/// inset by the envelope), `focus_ring_offset` from its edge. A negative
+/// offset lays the ring over the tiles' outer edge.
+fn group_focus_ring(bounds: Rect, shape: &ShapeTokens) -> FocusRingStroke {
+    let env = shape.focus_ring_envelope();
+    let tiles = bounds.inset(env, env, env, env);
+    FocusRingStroke::around(tiles, RADIO_TILE_CORNER_RADIUS, shape)
 }
 
 /// An N-ary, single-selection group of selectable-card radios. See the
@@ -579,20 +588,12 @@ impl Widget for RadioTileGroup {
         if !self.ring_visible.get() {
             return;
         }
-        let shape = &ctx.theme.shape;
-        let half = shape.focus_ring_width * 0.5;
-        let ring_rect = Rect::new(
-            bounds.x + half,
-            bounds.y + half,
-            (bounds.width - half * 2.0).max(0.0),
-            (bounds.height - half * 2.0).max(0.0),
-        );
-        let ring_radius = RADIO_TILE_CORNER_RADIUS + shape.focus_ring_offset + half;
+        let ring = group_focus_ring(bounds, &ctx.theme.shape);
         canvas.stroke_rounded_rect(
-            ring_rect,
-            CornerRadius::uniform(ring_radius),
+            ring.rect,
+            CornerRadius::uniform(ring.corner_radius),
             ctx.theme.colors.focus_ring,
-            shape.focus_ring_width,
+            ctx.theme.shape.focus_ring_width,
         );
     }
 
@@ -1024,5 +1025,33 @@ mod tests {
              ScrollArea (got {})",
             outer_y.get()
         );
+    }
+
+    #[test]
+    fn a_negative_focus_ring_offset_lays_the_group_ring_over_the_tiles_edge() {
+        let shape = |offset: f32| ShapeTokens {
+            focus_ring_offset: offset,
+            focus_ring_width: 2.0,
+            ..ShapeTokens::default()
+        };
+        let bounds = Rect::new(0.0, 0.0, 300.0, 120.0);
+        // Offset 2: envelope 4, ring 3 dp outside the tiles' area.
+        let outer = group_focus_ring(bounds, &shape(2.0));
+        assert_eq!(outer.rect, Rect::new(1.0, 1.0, 298.0, 118.0));
+        // Offset -1: envelope 1, ring centred on the tiles' edge.
+        let inner = group_focus_ring(bounds, &shape(-1.0));
+        assert_eq!(inner.rect, Rect::new(1.0, 1.0, 298.0, 118.0));
+        assert_eq!(inner.corner_radius, RADIO_TILE_CORNER_RADIUS);
+        assert!(inner.corner_radius < outer.corner_radius);
+
+        // Against the same tiles' area, the inner ring is the smaller one.
+        let tiles = Rect::new(4.0, 4.0, 292.0, 112.0);
+        let around_outer = FocusRingStroke::around(tiles, RADIO_TILE_CORNER_RADIUS, &shape(2.0));
+        let around_inner = FocusRingStroke::around(tiles, RADIO_TILE_CORNER_RADIUS, &shape(-1.0));
+        assert!(around_inner.rect.width < around_outer.rect.width);
+
+        let deep = group_focus_ring(bounds, &shape(-500.0));
+        assert!(deep.rect.width >= 0.0 && deep.rect.height >= 0.0);
+        assert!(deep.corner_radius >= 0.0);
     }
 }

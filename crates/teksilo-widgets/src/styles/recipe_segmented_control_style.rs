@@ -19,7 +19,9 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::density::{dp, spacing};
-use teksilo_core::styles::{SegmentSlots, SegmentedControlStyle, SegmentedControlStyleConfig};
+use teksilo_core::styles::{
+    FocusRingStroke, SegmentSlots, SegmentedControlStyle, SegmentedControlStyleConfig,
+};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{CornerRadius, InputTokens, TargetRole};
@@ -248,17 +250,15 @@ impl Widget for SegmentedControlChrome {
         //    envelope. Painted whether or not there are segments, so a
         //    focused empty control still shows where focus is.
         if keyboard_focused {
-            let half_stroke = shape.focus_ring_width * 0.5;
-            let ring_rect = Rect::new(
-                bounds.x + half_stroke,
-                bounds.y + half_stroke,
-                (bounds.width - half_stroke * 2.0).max(0.0),
-                (bounds.height - half_stroke * 2.0).max(0.0),
-            );
-            let ring_radius = self.recipe.corner_radius + shape.focus_ring_offset + half_stroke;
+            // Around the visual, not the bounds: under a negative offset
+            // the ring overlaps the frame, and when the offset is deep
+            // enough the envelope is zero and the visual fills the bounds.
+            let envelope = shape.focus_ring_envelope();
+            let visual = bounds.inset(envelope, envelope, envelope, envelope);
+            let ring = FocusRingStroke::around(visual, self.recipe.corner_radius, shape);
             canvas.stroke_rounded_rect(
-                ring_rect,
-                CornerRadius::uniform(ring_radius),
+                ring.rect,
+                CornerRadius::uniform(ring.corner_radius),
                 colors.focus_ring,
                 shape.focus_ring_width,
             );

@@ -1449,6 +1449,39 @@ mod tests {
             || frame.cosmetic_lines.iter().any(|l| l.color == color)
     }
 
+    /// The thumb's keyboard ring under a theme whose `focus_ring_offset` is
+    /// `offset` (width 2), as `[x, y, width, height]`.
+    fn thumb_ring(offset: f32) -> [f32; 4] {
+        let mut theme = teksilo_core::presets::intui::light();
+        theme.shape.focus_ring_offset = offset;
+        theme.shape.focus_ring_width = 2.0;
+        let ring = theme.colors.focus_ring.to_array();
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let s = tree.add(Slider::new(Signal::new(50.0_f32), 0.0, 100.0));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        tree.focus(s);
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        let frame = tree.render();
+        frame
+            .shapes
+            .iter()
+            .find(|s| s.color == ring && s.stroke_width > 0.0)
+            .expect("the keyboard ring is stroked")
+            .screen
+    }
+
+    #[test]
+    fn a_negative_focus_ring_offset_shrinks_the_thumb_ring_without_inverting() {
+        let outer = thumb_ring(2.0);
+        let inner = thumb_ring(-1.0);
+        assert!(inner[2] < outer[2] && inner[3] < outer[3]);
+        assert!(inner[2] >= 0.0 && inner[3] >= 0.0);
+
+        let deep = thumb_ring(-40.0);
+        assert!(deep[2] >= 0.0 && deep[3] >= 0.0, "ring inverted: {deep:?}");
+    }
+
     #[test]
     fn keyboard_adjusts_value() {
         let value = Signal::new(50.0_f32);

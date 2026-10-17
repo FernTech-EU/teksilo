@@ -31,6 +31,17 @@ by crate for clarity, not because crates version independently.
   a hook they return what the paint walker painted before. The preference is
   readable at build time through `BuildContext::prefers_high_contrast`,
   `high_contrast_signal` and `paint_state`.
+- **A negative `ShapeTokens::focus_ring_offset`.** A theme can draw its focus
+  ring partly or wholly inside the control: an offset of `-1` with a 2 dp
+  width runs from 1 dp inside the edge to 1 dp outside it. Every stock ring
+  (sliders, toggles, segmented controls, breadcrumbs, radio tile groups,
+  avatars, colour swatches, tabs and the Material 3 and macOS presets) follows
+  it without inverting on a small control, and a control reserves only the
+  ring's reach outside it. Tabs, which sit flush against each other, keep
+  their ring inside the tab: any offset at or below zero draws it flush with
+  the tab edge. `ShapeTokens::focus_ring_envelope` and
+  `focus_ring_stroke_distance` give those two distances, and
+  `FocusRingStroke` gives the rectangle and radius a ring is stroked on.
 
 ### Fixed
 
@@ -41,6 +52,12 @@ by crate for clarity, not because crates version independently.
 
 #### Theming
 
+- **A breadcrumb crumb shows its hover, focus and link colours.**
+  **Behaviour change:** a navigable crumb now paints its hover and focus
+  background, its focus ring and its accent link colour, and assistive
+  technology can activate and focus it again. Before, every built crumb
+  painted in the secondary text colour with no hover or focus state, and
+  advertised neither the Click nor the Focus action.
 - **Accent chrome a recipe builds follows the high-contrast preference.**
   **Behaviour change:** under the OS increase contrast preference, a `Filled`
   button's fill and a button's focus border now take the high-contrast

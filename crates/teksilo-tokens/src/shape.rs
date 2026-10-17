@@ -104,9 +104,24 @@ pub struct ShapeTokens {
     pub radius_pill: f32,
     /// 1 dp — universal border width. Int UI has no thicker variant.
     pub border_width: f32,
-    /// 2 dp — focus ring outline width, drawn outside the control.
+    /// 2 dp: focus ring outline width.
     pub focus_ring_width: f32,
-    /// 2 dp — gap between control edge and focus ring.
+    /// 2 dp: signed distance from the control edge to the inner edge of
+    /// the focus ring.
+    ///
+    /// Positive leaves a gap between the control and the ring. Zero puts
+    /// the ring flush against the control. A negative offset draws the
+    /// ring partly (or, below `-focus_ring_width`, wholly) inside the
+    /// control: `-1` with a 2 dp width runs from 1 dp inside the edge to
+    /// 1 dp outside it. Every focus-ring painter accepts a negative value;
+    /// the space a control reserves outside itself for the ring is
+    /// [`focus_ring_envelope`](Self::focus_ring_envelope), which never goes
+    /// below zero.
+    ///
+    /// Tabs are the exception: they sit flush against each other, so a tab
+    /// draws its ring inside itself, insets it by the offset, and clamps it
+    /// to the tab edge. Every offset at or below zero gives a tab the same
+    /// ring, flush with its edge.
     pub focus_ring_offset: f32,
     /// Tooltips — outer soft halo.
     pub shadow_xs: Shadow,
@@ -128,6 +143,24 @@ pub struct ShapeTokens {
 }
 
 impl ShapeTokens {
+    /// How far the focus ring reaches outside the control edge:
+    /// `focus_ring_offset + focus_ring_width`, floored at zero.
+    ///
+    /// This is the space a control reserves around its visual for the
+    /// ring. A ring drawn wholly inside the control (an offset at or below
+    /// `-focus_ring_width`) needs none, and a negative envelope would
+    /// shrink the control's frame instead.
+    pub fn focus_ring_envelope(&self) -> f32 {
+        (self.focus_ring_offset + self.focus_ring_width).max(0.0)
+    }
+
+    /// Signed distance from the control edge to the centre line of the
+    /// focus-ring stroke: `focus_ring_offset + focus_ring_width / 2`.
+    /// Negative when the ring's centre line lies inside the control.
+    pub fn focus_ring_stroke_distance(&self) -> f32 {
+        self.focus_ring_offset + self.focus_ring_width * 0.5
+    }
+
     /// Light-theme shadows.
     /// Outer alphas: xs 85%, sm 22%, md 28%, lg 36%.
     /// Inner alphas (density-1.0 max): xs 85%, sm 50%, md 55%, lg 60%.
@@ -247,5 +280,22 @@ mod tests {
         let s = ShapeTokens::default();
         assert!(s.focus_ring_offset > 0.0);
         assert!(s.focus_ring_width > 0.0);
+    }
+
+    #[test]
+    fn focus_ring_envelope_follows_a_negative_offset_and_stops_at_zero() {
+        let mut s = ShapeTokens::default();
+        assert_eq!(s.focus_ring_envelope(), 4.0);
+        assert_eq!(s.focus_ring_stroke_distance(), 3.0);
+
+        // Straddling the edge: 1 dp inside, 1 dp outside.
+        s.focus_ring_offset = -1.0;
+        assert_eq!(s.focus_ring_envelope(), 1.0);
+        assert_eq!(s.focus_ring_stroke_distance(), 0.0);
+
+        // Wholly inside: nothing to reserve outside the control.
+        s.focus_ring_offset = -5.0;
+        assert_eq!(s.focus_ring_envelope(), 0.0);
+        assert_eq!(s.focus_ring_stroke_distance(), -4.0);
     }
 }

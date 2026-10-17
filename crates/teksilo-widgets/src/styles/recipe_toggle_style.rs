@@ -25,10 +25,10 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::density::spacing;
-use teksilo_core::styles::{ToggleStyle, ToggleStyleConfig, ToggleVariant};
+use teksilo_core::styles::{FocusRingStroke, ToggleStyle, ToggleStyleConfig, ToggleVariant};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Color, CornerRadius, InputTokens};
+use teksilo_tokens::{Color, CornerRadius, InputTokens, ShapeTokens};
 
 // IntUI design tokens for the Toggle chrome — the `Default` source for
 // [`ToggleRecipe`]. Custom design languages either construct a
@@ -234,23 +234,10 @@ impl Widget for ToggleBody {
         // Focus ring — keyboard-only, drawn outside the track in the
         // theme-defined gap.
         if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
-            let offset = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width / 2.0;
-            let ring_rect = Rect::new(
-                track_rect.x - offset,
-                track_rect.y - offset,
-                track_rect.width + offset * 2.0,
-                track_rect.height + offset * 2.0,
-            );
-            let ring_corner = match self.variant {
-                ToggleVariant::Switch | ToggleVariant::Pill => {
-                    CornerRadius::uniform(track_h / 2.0 + offset)
-                }
-                ToggleVariant::Square => CornerRadius::uniform(offset),
-                ToggleVariant::Inset => CornerRadius::uniform(4.0 + offset),
-            };
+            let ring = focus_ring_stroke(self.variant, track_rect, &ctx.theme.shape);
             canvas.stroke_rounded_rect(
-                ring_rect,
-                ring_corner,
+                ring.rect,
+                CornerRadius::uniform(ring.corner_radius),
                 colors.focus_ring,
                 ctx.theme.shape.focus_ring_width,
             );
@@ -281,5 +268,59 @@ impl Widget for ToggleBody {
         // Accessibility lives on the parent Toggle widget, not the
         // body. The body is presentational — the AT walker reaches
         // the Toggle node directly.
+    }
+}
+
+/// The keyboard focus ring's centre line around the track, hugging the
+/// variant's corner shape. A negative `focus_ring_offset` draws it partly
+/// inside the track.
+fn focus_ring_stroke(
+    variant: ToggleVariant,
+    track_rect: Rect,
+    shape: &ShapeTokens,
+) -> FocusRingStroke {
+    let track_radius = match variant {
+        ToggleVariant::Switch | ToggleVariant::Pill => track_rect.height / 2.0,
+        ToggleVariant::Square => 0.0,
+        ToggleVariant::Inset => 4.0,
+    };
+    FocusRingStroke::around(track_rect, track_radius, shape)
+}
+
+#[cfg(test)]
+mod focus_ring_tests {
+    use super::*;
+
+    fn shape(offset: f32) -> ShapeTokens {
+        ShapeTokens {
+            focus_ring_offset: offset,
+            focus_ring_width: 2.0,
+            ..ShapeTokens::default()
+        }
+    }
+
+    #[test]
+    fn a_negative_focus_ring_offset_shrinks_the_ring_without_inverting() {
+        let track = Rect::new(0.0, 0.0, 40.0, 20.0);
+        for variant in [
+            ToggleVariant::Switch,
+            ToggleVariant::Pill,
+            ToggleVariant::Square,
+            ToggleVariant::Inset,
+        ] {
+            let outer = focus_ring_stroke(variant, track, &shape(2.0));
+            let inner = focus_ring_stroke(variant, track, &shape(-1.0));
+            assert!(inner.rect.width < outer.rect.width, "{variant:?}");
+            assert!(inner.rect.height < outer.rect.height, "{variant:?}");
+            assert!(inner.rect.width >= 0.0 && inner.rect.height >= 0.0);
+            // The square variant's ring at offset -1 is centred on the
+            // track edge, so its corners stay sharp instead of going
+            // negative.
+            assert!(inner.corner_radius >= 0.0, "{variant:?}");
+
+            let deep = focus_ring_stroke(variant, track, &shape(-30.0));
+            assert!(deep.rect.width >= 0.0 && deep.rect.height >= 0.0);
+            assert!(deep.corner_radius >= 0.0);
+        }
     }
 }

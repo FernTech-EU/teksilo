@@ -64,6 +64,7 @@ use crate::menu_item::MenuItem;
 use crate::menu_list::MenuList;
 use crate::popover_widget::PopoverButton;
 use crate::primitives::{HStack, IconWidget, Spacer};
+use teksilo_core::styles::FocusRingStroke;
 use teksilo_core::styles::density::spacing;
 use teksilo_i18n::LocalizedString;
 
@@ -285,7 +286,7 @@ impl BreadcrumbSegment {
 
     fn estimate_width(&self, ctx: &LayoutContext) -> f32 {
         let pad_h = breadcrumb_item_padding_horizontal(&ctx.theme.input);
-        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
+        let envelope = ctx.theme.shape.focus_ring_envelope();
         let resolved = self.label.resolve_now();
         let text_width = if let Some(backend) = ctx.text_backend {
             backend
@@ -424,7 +425,7 @@ impl Widget for BreadcrumbSegment {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
-        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
+        let envelope = ctx.theme.shape.focus_ring_envelope();
         let width = proposal.width.unwrap_or_else(|| self.estimate_width(ctx));
         let text_height = if let Some(backend) = ctx.text_backend {
             backend
@@ -462,17 +463,13 @@ impl Widget for BreadcrumbSegment {
         self.painted_size.set(bounds.size());
         let colors = &ctx.theme.colors;
         let shape = &ctx.theme.shape;
-        let envelope = shape.focus_ring_offset + shape.focus_ring_width;
+        let envelope = shape.focus_ring_envelope();
         let interaction = self.interaction.get();
-        let interactive = self.is_interactive();
+        // Not `is_interactive()`: `build` has moved the action out by now.
+        let interactive = self.navigates.get();
 
         // Visual bounds — inset by the focus-ring envelope.
-        let visual = Rect::new(
-            bounds.x + envelope,
-            bounds.y + envelope,
-            (bounds.width - envelope * 2.0).max(0.0),
-            (bounds.height - envelope * 2.0).max(0.0),
-        );
+        let visual = bounds.inset(envelope, envelope, envelope, envelope);
 
         if interactive {
             let background = if interaction == SegmentInteraction::Hovered {
@@ -489,19 +486,13 @@ impl Widget for BreadcrumbSegment {
                     background,
                 );
             }
-            // Focus ring — drawn outside the visual, inside the reserved envelope.
+            // Focus ring: drawn around the visual, inside the reserved
+            // envelope. A negative offset lays it over the visual's edge.
             if interaction == SegmentInteraction::Focused {
-                let half_stroke = shape.focus_ring_width * 0.5;
-                let ring_rect = Rect::new(
-                    bounds.x + half_stroke,
-                    bounds.y + half_stroke,
-                    (bounds.width - half_stroke * 2.0).max(0.0),
-                    (bounds.height - half_stroke * 2.0).max(0.0),
-                );
-                let ring_radius = BREADCRUMB_CORNER_RADIUS + shape.focus_ring_offset + half_stroke;
+                let ring = FocusRingStroke::around(visual, BREADCRUMB_CORNER_RADIUS, shape);
                 canvas.stroke_rounded_rect(
-                    ring_rect,
-                    CornerRadius::uniform(ring_radius),
+                    ring.rect,
+                    CornerRadius::uniform(ring.corner_radius),
                     colors.focus_ring,
                     shape.focus_ring_width,
                 );
@@ -544,7 +535,8 @@ impl Widget for BreadcrumbSegment {
         builder.set_name(self.label.resolve_now());
         if self.current {
             builder.set_aria_current(teksilo_core::accesskit::AriaCurrent::Page);
-        } else if self.is_interactive() {
+        } else if self.navigates.get() {
+            // Not `is_interactive()`: `build` has moved the action out by now.
             builder.add_action(teksilo_core::accesskit::Action::Click);
             builder.add_action(teksilo_core::accesskit::Action::Focus);
         }
@@ -1071,6 +1063,57 @@ mod tests {
         bc
     }
 
+    // ── focus ring ───────────────────────────────────────────────────────────
+
+    /// The focused crumb's ring and its visual (the focused background
+    /// fill) under a theme whose `focus_ring_offset` is `offset` (width 2),
+    /// each as `[x, y, width, height]`.
+    fn crumb_ring_and_visual(offset: f32) -> ([f32; 4], [f32; 4]) {
+        let mut theme = teksilo_core::presets::intui::light();
+        theme.shape.focus_ring_offset = offset;
+        theme.shape.focus_ring_width = 2.0;
+        let ring_color = theme.colors.focus_ring.to_array();
+        let fill_color = theme.colors.accent.with_alpha(0.12).to_array();
+        let mut tree = WidgetTree::new()
+            .with_theme(theme)
+            .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+        tree.add(trail(2));
+        tree.layout(SizeProposal::exact(400.0, 60.0));
+        let crumb = tree
+            .find_by_label("Crumb 0")
+            .expect("the first crumb renders");
+        tree.focus(crumb);
+        tree.layout(SizeProposal::exact(400.0, 60.0));
+        let frame = tree.render();
+        let ring = frame
+            .shapes
+            .iter()
+            .find(|s| s.color == ring_color && s.stroke_width > 0.0)
+            .expect("a focused crumb strokes its ring")
+            .screen;
+        let visual = frame
+            .shapes
+            .iter()
+            .find(|s| s.color == fill_color && s.stroke_width == 0.0)
+            .expect("a focused crumb fills its visual")
+            .screen;
+        (ring, visual)
+    }
+
+    #[test]
+    fn a_negative_focus_ring_offset_lays_the_ring_over_the_crumb_edge() {
+        let (outer, outer_visual) = crumb_ring_and_visual(2.0);
+        let (inner, inner_visual) = crumb_ring_and_visual(-1.0);
+        // Offset 2: centre line 3 dp outside the visual. Offset -1, width
+        // 2: centred on the visual's edge.
+        assert!((outer[2] - outer_visual[2] - 6.0).abs() < 1e-3);
+        assert!((inner[2] - inner_visual[2]).abs() < 1e-3);
+        assert!((inner[3] - inner_visual[3]).abs() < 1e-3);
+
+        let (deep, _) = crumb_ring_and_visual(-100.0);
+        assert!(deep[2] >= 0.0 && deep[3] >= 0.0, "ring inverted: {deep:?}");
+    }
+
     // ── tooltips ─────────────────────────────────────────────────────────────
 
     #[test]
@@ -1387,6 +1430,36 @@ mod tests {
             tree.widget_hit_outset(crumbs[1], PointerKind::Touch),
             teksilo_canvas::EdgeInsets::ZERO,
             "the current crumb navigates nowhere and must claim nothing",
+        );
+    }
+
+    /// A built crumb that navigates still offers AT a way to activate it, and
+    /// the current one offers none. Read off the **mounted** crumbs: `build`
+    /// moves the action out, so a check that asked for it would see none.
+    #[test]
+    fn a_built_navigating_crumb_advertises_click_and_focus() {
+        use teksilo_core::accesskit::Action;
+
+        let mut tree = themed_tree();
+        let trail = tree.add(trail(2));
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let _ = tree.render();
+
+        let crumbs = segment_ids(&tree, trail);
+        assert_eq!(crumbs.len(), 2, "two crumbs, got {crumbs:?}");
+        let navigating = tree.accessibility_node(crumbs[0]);
+        assert!(
+            navigating.actions().contains(&Action::Click),
+            "a navigating crumb must advertise Click, or AT cannot follow it",
+        );
+        assert!(
+            navigating.actions().contains(&Action::Focus),
+            "a navigating crumb must advertise Focus",
+        );
+        let current = tree.accessibility_node(crumbs[1]);
+        assert!(
+            !current.actions().contains(&Action::Click),
+            "the current crumb navigates nowhere and must not advertise Click",
         );
     }
 

@@ -636,13 +636,8 @@ impl SegmentedControl {
     /// `SegmentSlotGeometry::frame`, so children land where the chrome
     /// paints.
     fn compute_visual(bounds: Rect, theme: &teksilo_core::Theme) -> Rect {
-        let envelope = theme.shape.focus_ring_offset + theme.shape.focus_ring_width;
-        Rect::new(
-            bounds.x + envelope,
-            bounds.y + envelope,
-            (bounds.width - envelope * 2.0).max(0.0),
-            (bounds.height - envelope * 2.0).max(0.0),
-        )
+        let envelope = theme.shape.focus_ring_envelope();
+        bounds.inset(envelope, envelope, envelope, envelope)
     }
 
     /// The grid area inside the frame's stroke.
@@ -1193,7 +1188,7 @@ impl Widget for SegmentedControl {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
-        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
+        let envelope = ctx.theme.shape.focus_ring_envelope();
         let chrome = envelope * 2.0 + SEGMENTED_CONTROL_BORDER_WIDTH * 2.0;
 
         // Real measurement, not a per-character guess: this is what makes

@@ -35,6 +35,7 @@ use teksilo_core::accesskit::{Action, Role};
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::focus::FocusOrigin;
+use teksilo_core::styles::FocusRingStroke;
 use teksilo_core::widget::{
     CursorIcon, EventContext, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
 };
@@ -340,20 +341,14 @@ impl Widget for ColorSwatch {
 
         // Focus ring (keyboard).
         if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
-            let offset = ctx.theme.shape.focus_ring_offset;
-            let half = ctx.theme.shape.focus_ring_width * 0.5;
-            let inset = offset + half;
-            let ring = Rect::new(
-                bounds.x - inset,
-                bounds.y - inset,
-                bounds.width + inset * 2.0,
-                bounds.height + inset * 2.0,
+            let ring = FocusRingStroke::around(
+                bounds,
+                self.corner_radius.unwrap_or(cp::SWATCH_CORNER_RADIUS),
+                &ctx.theme.shape,
             );
             canvas.stroke_rounded_rect(
-                ring,
-                CornerRadius::uniform(
-                    self.corner_radius.unwrap_or(cp::SWATCH_CORNER_RADIUS) + inset,
-                ),
+                ring.rect,
+                CornerRadius::uniform(ring.corner_radius),
                 ctx.theme.colors.focus_ring,
                 ctx.theme.shape.focus_ring_width,
             );

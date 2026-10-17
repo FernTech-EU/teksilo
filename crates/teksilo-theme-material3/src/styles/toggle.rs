@@ -16,10 +16,10 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::Signal;
-use teksilo_core::styles::{ToggleStyle, ToggleStyleConfig};
+use teksilo_core::styles::{FocusRingStroke, ToggleStyle, ToggleStyleConfig};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Color, CornerRadius, lerp};
+use teksilo_tokens::{Color, CornerRadius, ShapeTokens, lerp};
 
 use crate::Material3Palette;
 
@@ -179,16 +179,10 @@ impl Widget for M3SwitchBody {
 
         // Keyboard focus ring, drawn outside the track.
         if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
-            let offset = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width / 2.0;
-            let ring_rect = Rect::new(
-                track_rect.x - offset,
-                track_rect.y - offset,
-                track_rect.width + offset * 2.0,
-                track_rect.height + offset * 2.0,
-            );
+            let ring = focus_ring_stroke(track_rect, &ctx.theme.shape);
             canvas.stroke_rounded_rect(
-                ring_rect,
-                CornerRadius::uniform(TRACK_H / 2.0 + offset),
+                ring.rect,
+                CornerRadius::uniform(ring.corner_radius),
                 ctx.theme.colors.focus_ring,
                 ctx.theme.shape.focus_ring_width,
             );
@@ -215,5 +209,38 @@ impl Widget for M3SwitchBody {
 
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {
         // The parent Toggle owns accessibility; this body is presentational.
+    }
+}
+
+/// The keyboard focus ring's centre line around the pill track. A negative
+/// `focus_ring_offset` draws it partly inside the track.
+fn focus_ring_stroke(track_rect: Rect, shape: &ShapeTokens) -> FocusRingStroke {
+    FocusRingStroke::around(track_rect, TRACK_H / 2.0, shape)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shape(offset: f32) -> ShapeTokens {
+        ShapeTokens {
+            focus_ring_offset: offset,
+            focus_ring_width: 2.0,
+            ..ShapeTokens::default()
+        }
+    }
+
+    #[test]
+    fn a_negative_focus_ring_offset_shrinks_the_ring_without_inverting() {
+        let track = Rect::new(0.0, 0.0, TRACK_W, TRACK_H);
+        let outer = focus_ring_stroke(track, &shape(2.0));
+        let inner = focus_ring_stroke(track, &shape(-1.0));
+        assert!(inner.rect.width < outer.rect.width);
+        assert!(inner.rect.height < outer.rect.height);
+        assert!(inner.rect.width >= 0.0 && inner.rect.height >= 0.0);
+
+        let deep = focus_ring_stroke(track, &shape(-40.0));
+        assert!(deep.rect.width >= 0.0 && deep.rect.height >= 0.0);
+        assert!(deep.corner_radius >= 0.0);
     }
 }

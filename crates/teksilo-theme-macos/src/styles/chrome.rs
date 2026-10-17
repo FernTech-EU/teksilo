@@ -49,6 +49,7 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::FocusRingStroke;
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{Color, CornerRadius, Shadow};
@@ -350,21 +351,38 @@ pub fn paint_ring(
 
     // Halo first, so the solid band lands on top of its inner edge and
     // the two read as one graded ring rather than two outlines.
-    let halo_center = offset + solid_w + MACOS_FOCUS_RING_HALO_WIDTH * 0.5;
+    // A negative offset pulls both bands inward; `FocusRingStroke` keeps
+    // the rectangles and radii from inverting on a small control.
+    let (halo, solid) = ring_bands(bounds, radius, offset, solid_w);
     canvas.stroke_rounded_rect(
-        inflate(bounds, halo_center),
-        CornerRadius::uniform(radius + halo_center),
+        halo.rect,
+        CornerRadius::uniform(halo.corner_radius),
         color.with_alpha(color.a() * MACOS_FOCUS_RING_HALO_ALPHA),
         MACOS_FOCUS_RING_HALO_WIDTH,
     );
 
-    let solid_center = offset + solid_w * 0.5;
     canvas.stroke_rounded_rect(
-        inflate(bounds, solid_center),
-        CornerRadius::uniform(radius + solid_center),
+        solid.rect,
+        CornerRadius::uniform(solid.corner_radius),
         color,
         solid_w,
     );
+}
+
+/// The halo and solid-band centre lines of [`paint_ring`]: the solid band's
+/// inner edge `offset` from the control, the halo just outside it.
+fn ring_bands(
+    bounds: Rect,
+    radius: f32,
+    offset: f32,
+    solid_w: f32,
+) -> (FocusRingStroke, FocusRingStroke) {
+    let halo_center = offset + solid_w + MACOS_FOCUS_RING_HALO_WIDTH * 0.5;
+    let solid_center = offset + solid_w * 0.5;
+    (
+        FocusRingStroke::at_distance(bounds, radius, halo_center),
+        FocusRingStroke::at_distance(bounds, radius, solid_center),
+    )
 }
 
 /// Paint the macOS focus ring in the accent — the usual case.
@@ -575,5 +593,24 @@ mod tests {
         let solid_outer_edge = MACOS_FOCUS_RING_WIDTH;
         let halo_inner_edge = MACOS_FOCUS_RING_WIDTH;
         assert!((solid_outer_edge - halo_inner_edge).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_negative_offset_pulls_both_bands_in_without_inverting() {
+        let control = Rect::new(10.0, 10.0, 40.0, 22.0);
+        let w = MACOS_FOCUS_RING_WIDTH;
+        let (out_halo, out_solid) = ring_bands(control, 6.0, 0.0, w);
+        let (in_halo, in_solid) = ring_bands(control, 6.0, -1.0, w);
+        assert!(in_solid.rect.width < out_solid.rect.width);
+        assert!(in_solid.rect.height < out_solid.rect.height);
+        assert!(in_halo.rect.width < out_halo.rect.width);
+        assert!(in_halo.rect.height < out_halo.rect.height);
+
+        // A tiny control under an offset deeper than it is wide.
+        let (halo, solid) = ring_bands(Rect::new(0.0, 0.0, 2.0, 2.0), 1.0, -8.0, w);
+        for band in [halo, solid] {
+            assert!(band.rect.width >= 0.0 && band.rect.height >= 0.0);
+            assert!(band.corner_radius >= 0.0);
+        }
     }
 }

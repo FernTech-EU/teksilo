@@ -25,6 +25,7 @@ use teksilo_core::signal::Signal;
 use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{
     AvatarCorner, AvatarPresence, AvatarShape, AvatarSize, AvatarStyle, AvatarStyleConfig,
+    FocusRingStroke,
 };
 use teksilo_core::widget::{
     LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget, WidgetPlacement,
@@ -118,15 +119,10 @@ pub fn paint_focus_ring(
     width: f32,
     color: Color,
 ) {
-    let outset = offset + width / 2.0;
-    let outer = Rect::new(
-        bounds.x - outset,
-        bounds.y - outset,
-        bounds.width + outset * 2.0,
-        bounds.height + outset * 2.0,
-    );
+    let ring = focus_ring_stroke(bounds, shape, rounded_radius_ratio, offset, width);
     match shape {
         AvatarShape::Circle => {
+            let outer = ring.rect;
             let radius = outer.width.min(outer.height) / 2.0;
             let center = Point::new(outer.x + outer.width / 2.0, outer.y + outer.height / 2.0);
             canvas.stroke_circle(
@@ -136,22 +132,40 @@ pub fn paint_focus_ring(
                 StrokeStyle::solid(width),
             );
         }
-        AvatarShape::RoundedSquare => {
-            let r = bounds.width.min(bounds.height) * rounded_radius_ratio + outset;
+        AvatarShape::RoundedSquare | AvatarShape::Square => {
             canvas.stroke_rounded_rect(
-                outer,
-                CornerRadius::uniform(r),
+                ring.rect,
+                CornerRadius::uniform(ring.corner_radius),
                 color,
                 StrokeStyle::solid(width),
             );
         }
-        AvatarShape::Square => {
-            canvas.stroke_rounded_rect(
-                outer,
-                CornerRadius::uniform(0.0),
-                color,
-                StrokeStyle::solid(width),
-            );
+    }
+}
+
+/// The centre line of [`paint_focus_ring`]: `offset + width / 2` outside
+/// `bounds`, hugging the avatar's shape. A negative `offset` draws the ring
+/// partly inside the avatar; the rectangle and radius never invert.
+fn focus_ring_stroke(
+    bounds: Rect,
+    shape: AvatarShape,
+    rounded_radius_ratio: f32,
+    offset: f32,
+    width: f32,
+) -> FocusRingStroke {
+    let distance = offset + width / 2.0;
+    match shape {
+        // A square ring keeps sharp corners at every distance.
+        AvatarShape::Square => FocusRingStroke {
+            corner_radius: 0.0,
+            ..FocusRingStroke::at_distance(bounds, 0.0, distance)
+        },
+        AvatarShape::RoundedSquare => {
+            let r = bounds.width.min(bounds.height) * rounded_radius_ratio;
+            FocusRingStroke::at_distance(bounds, r, distance)
+        }
+        AvatarShape::Circle => {
+            FocusRingStroke::at_distance(bounds, bounds.width.min(bounds.height) / 2.0, distance)
         }
     }
 }
@@ -458,5 +472,37 @@ impl Widget for AvatarChromeFrame {
 
     fn children(&self) -> Vec<WidgetId> {
         self.child_id.into_iter().collect()
+    }
+}
+
+#[cfg(test)]
+mod focus_ring_tests {
+    use super::*;
+
+    #[test]
+    fn a_negative_focus_ring_offset_shrinks_the_ring_without_inverting() {
+        let bounds = Rect::new(0.0, 0.0, 32.0, 32.0);
+        for shape in [
+            AvatarShape::Circle,
+            AvatarShape::RoundedSquare,
+            AvatarShape::Square,
+        ] {
+            let outer = focus_ring_stroke(bounds, shape, 0.25, 2.0, 2.0);
+            let inner = focus_ring_stroke(bounds, shape, 0.25, -1.0, 2.0);
+            assert!(inner.rect.width < outer.rect.width, "{shape:?}");
+            assert!(inner.rect.height < outer.rect.height, "{shape:?}");
+            assert!(inner.rect.width >= 0.0 && inner.rect.height >= 0.0);
+
+            let deep = focus_ring_stroke(bounds, shape, 0.25, -40.0, 2.0);
+            assert!(deep.rect.width >= 0.0 && deep.rect.height >= 0.0);
+            assert!(deep.corner_radius >= 0.0);
+        }
+    }
+
+    #[test]
+    fn a_square_ring_keeps_sharp_corners() {
+        let bounds = Rect::new(0.0, 0.0, 32.0, 32.0);
+        let ring = focus_ring_stroke(bounds, AvatarShape::Square, 0.25, 2.0, 2.0);
+        assert_eq!(ring.corner_radius, 0.0);
     }
 }

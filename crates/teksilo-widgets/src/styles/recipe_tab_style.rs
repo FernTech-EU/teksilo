@@ -32,7 +32,8 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{
-    TabBarChromeConfig, TabBarOrientation, TabIndicatorPosition, TabStyle, TabStyleConfig,
+    FocusRingStroke, TabBarChromeConfig, TabBarOrientation, TabIndicatorPosition, TabStyle,
+    TabStyleConfig,
 };
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
@@ -281,7 +282,7 @@ impl Widget for TabBarChromePainter {
             // the separator in its own column (the "tab merges into
             // content pane" effect).
             let border_width = ctx.theme.shape.border_width;
-            let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
+            let envelope = ctx.theme.shape.focus_ring_envelope();
             let separator = match self.orientation {
                 TabBarOrientation::Horizontal => Rect::new(
                     bounds.x,
@@ -453,19 +454,11 @@ impl Widget for TabBodyPainter {
         }
 
         // Focus ring — keyboard focus only. Drawn inside `bounds`
-        // (inset by `focus_ring_width / 2 + focus_ring_offset`) so
-        // adjacent tabs aren't visually overlapped by the ring.
+        // (see `focus_ring_rect`) so adjacent tabs aren't visually
+        // overlapped by the ring.
         if focused {
-            let half_stroke = shape.focus_ring_width * 0.5;
-            let inset = half_stroke + shape.focus_ring_offset;
-            let ring_rect = Rect::new(
-                bounds.x + inset,
-                bounds.y + inset,
-                (bounds.width - inset * 2.0).max(0.0),
-                (bounds.height - inset * 2.0).max(0.0),
-            );
             canvas.stroke_rounded_rect(
-                ring_rect,
+                focus_ring_rect(bounds, shape),
                 CornerRadius::uniform(shape.radius_control),
                 colors.focus_ring,
                 shape.focus_ring_width,
@@ -478,6 +471,19 @@ impl Widget for TabBodyPainter {
         // presentational only.
         builder.set_hidden();
     }
+}
+
+/// The centre line of a tab's focus ring: `bounds` inset by
+/// `focus_ring_width / 2 + focus_ring_offset`.
+///
+/// Tabs sit flush against each other, so the ring never leaves `bounds`:
+/// a negative `focus_ring_offset` brings it out to the tab's edge and no
+/// further (the inset is floored at half the stroke), and the rectangle
+/// never inverts on a tab narrower than the inset.
+fn focus_ring_rect(bounds: Rect, shape: &teksilo_tokens::ShapeTokens) -> Rect {
+    let half_stroke = shape.focus_ring_width * 0.5;
+    let inset = (half_stroke + shape.focus_ring_offset).max(half_stroke);
+    FocusRingStroke::at_distance(bounds, 0.0, -inset).rect
 }
 
 #[cfg(test)]
@@ -559,5 +565,64 @@ mod tests {
             p.indicator_rect(B, T, true),
             Rect::new(B.x, B.y, T, B.height)
         );
+    }
+
+    fn shape(offset: f32) -> teksilo_tokens::ShapeTokens {
+        teksilo_tokens::ShapeTokens {
+            focus_ring_offset: offset,
+            focus_ring_width: 2.0,
+            ..teksilo_tokens::ShapeTokens::default()
+        }
+    }
+
+    #[test]
+    fn the_focus_ring_follows_the_offset_inside_the_tab() {
+        // Offset 2: 3 dp in from the tab edge.
+        assert_eq!(
+            focus_ring_rect(B, &shape(2.0)),
+            Rect::new(13.0, 23.0, 94.0, 34.0)
+        );
+        // Offset 0: flush with the tab edge.
+        assert_eq!(
+            focus_ring_rect(B, &shape(0.0)),
+            Rect::new(11.0, 21.0, 98.0, 38.0)
+        );
+    }
+
+    #[test]
+    fn a_negative_focus_ring_offset_keeps_the_ring_inside_the_tab() {
+        for offset in [-1.0, -5.0, -100.0] {
+            let ring = focus_ring_rect(B, &shape(offset));
+            // Outer edge of the 2 dp stroke stays on or inside `bounds`.
+            assert!(
+                ring.x - 1.0 >= B.x && ring.y - 1.0 >= B.y,
+                "{offset}: {ring:?}"
+            );
+            assert!(ring.right() + 1.0 <= B.right(), "{offset}: {ring:?}");
+            assert!(ring.bottom() + 1.0 <= B.bottom(), "{offset}: {ring:?}");
+        }
+    }
+
+    /// The clamp is deliberate: below zero the offset no longer moves a
+    /// tab's ring, which stays flush with the tab edge rather than spilling
+    /// into the neighbouring tab.
+    #[test]
+    fn every_offset_at_or_below_zero_draws_the_same_tab_ring() {
+        let flush = focus_ring_rect(B, &shape(0.0));
+        for offset in [-1.0, -5.0, -100.0] {
+            assert_eq!(focus_ring_rect(B, &shape(offset)), flush, "{offset}");
+        }
+    }
+
+    #[test]
+    fn the_focus_ring_never_inverts_on_a_narrow_tab() {
+        let narrow = Rect::new(0.0, 0.0, 4.0, 3.0);
+        for offset in [-1.0, 2.0, 50.0] {
+            let ring = focus_ring_rect(narrow, &shape(offset));
+            assert!(
+                ring.width >= 0.0 && ring.height >= 0.0,
+                "{offset}: {ring:?}"
+            );
+        }
     }
 }
