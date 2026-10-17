@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::color::Color;
+use crate::contrast::{composite_contrast, composite_over, lift_until_readable};
 use crate::os_theme_colors::OsThemeColors;
 
 /// Semantic color tokens for a theme, structured around the JetBrains Int UI design system.
@@ -167,6 +168,50 @@ pub struct ColorTokens {
     pub chart_palette: Vec<Color>,
 }
 
+/// WCAG SC 1.4.6's floor for text, which [`ColorTokens::for_high_contrast`]
+/// holds every text pair it changes to.
+const HC_TEXT: f32 = 7.0;
+
+/// The floor [`ColorTokens::for_high_contrast`] holds the focus indicator and,
+/// where its text allows, the accent to on the surfaces: SC 1.4.6's 4.5:1,
+/// beyond SC 1.4.11's 3:1.
+const HC_NON_TEXT: f32 = 4.5;
+
+/// How far [`ColorTokens::for_high_contrast`] moves the selection fill off
+/// `surface_content`: farther than a default wash (IntUI's stands 1.19:1 off
+/// white), and no farther than leaves secondary text room to differ from the
+/// primary. On a fill 1.5:1 off white a text reaches 7:1 at a luminance of
+/// 0.05 and below; on one 3:1 off white only black does.
+const HC_SELECTION: f32 = 1.5;
+
+/// The steps [`ColorTokens::for_high_contrast`] takes where it walks a colour
+/// itself, as [`lift_until_readable`] does: 1 % of the way per step.
+const HC_STEPS: u32 = 100;
+
+/// `fg` lifted until it reaches `floor` on every colour in `on`, as
+/// [`lift_until_readable`] lifts it, gaining opacity in 1 % steps when no
+/// lift at its own alpha can get there (a 58 % black secondary text is
+/// already as dark as that alpha allows). Returns the most opaque attempt
+/// when even an opaque lift falls short.
+fn strengthen(fg: Color, on: &[Color], floor: f32) -> Color {
+    let reaches = |c: Color| on.iter().all(|&bg| composite_contrast(c, bg) >= floor);
+    let lifted = lift_until_readable(fg, on, floor);
+    // A NaN alpha composites as opaque (see `composite_contrast`).
+    let translucent = fg.a() < 1.0;
+    if reaches(lifted) || !translucent {
+        return lifted;
+    }
+    let mut attempt = lifted;
+    for step in 1..=HC_STEPS {
+        let alpha = fg.a() + (1.0 - fg.a()) * step as f32 / HC_STEPS as f32;
+        attempt = lift_until_readable(fg.with_alpha(alpha), on, floor);
+        if reaches(attempt) {
+            break;
+        }
+    }
+    attempt
+}
+
 impl ColorTokens {
     /// Fraction by which the accent family is desaturated toward graphite for
     /// an inactive window. `0.0` keeps the accent, `1.0` is fully gray. See
@@ -237,47 +282,135 @@ impl ColorTokens {
 
     /// Project this palette into a **high-contrast** variant for the OS
     /// "increase contrast" preference (WCAG SC 1.4.6 Enhanced tier / EN 301 549
-    /// §11.7). Targets >= 7:1 for text and >= 4.5:1 for non-text UI components —
-    /// beyond the AA floor the default theme already meets. Applied at paint
-    /// time when `prefers_high_contrast` is set (parallel to
-    /// [`for_inactive_window`](Self::for_inactive_window)).
+    /// §11.7), applied at paint time when `prefers_high_contrast` is set
+    /// (parallel to [`for_inactive_window`](Self::for_inactive_window)).
     ///
-    /// The light and dark bases need different overrides (detected from surface
-    /// luminance): in light mode `accent` and the focus indicator must diverge,
-    /// because no single hue clears >= 7:1 black-text AND >= 4.5:1 ring-on-white
-    /// at once. All values are verified against
-    /// [`Color::contrast_ratio`](crate::color::Color::contrast_ratio).
+    /// The projection keeps the palette's own colours and moves each one only
+    /// as far as a floor requires, so a preset keeps its accent's hue and its
+    /// ring's character (an accent ring stays the accent, a neutral ring stays
+    /// neutral). Every move is a [`lift_until_readable`] step toward black or
+    /// white in sRGB, which keeps the hue, and contrast is measured in WCAG
+    /// relative luminance with [`composite_contrast`], so a translucent token
+    /// is measured as the colour it paints. "The surfaces" below are
+    /// `surface_main`, `surface_content` and `surface_raised`. The pairs it
+    /// guarantees, and the only tokens it changes:
+    ///
+    /// - **Text on the accent, 7:1.** `text_on_accent` is the palette's own
+    ///   when it reaches 7:1 on `accent`, otherwise whichever of black and
+    ///   white contrasts more with it. `accent`, `accent_hover` and
+    ///   `accent_pressed` are each lifted until that text reaches 7:1 on them.
+    ///   Each is lifted further, until it reaches 4.5:1 on the surfaces, when
+    ///   the text still reaches 7:1 afterwards.
+    /// - **The focus indicator, 4.5:1.** `focus_ring` and `border_focused` are
+    ///   each lifted until they reach 4.5:1 on the surfaces. A translucent one
+    ///   gains opacity when no lift at its own alpha can get there.
+    /// - **The selection, 1.5:1, under text at 7:1.** `surface_selected` and
+    ///   `surface_selected_inactive` (the fill a row keeps while its view is
+    ///   unfocused or its window inactive) are each composited over
+    ///   `surface_content` into an opaque fill and moved away from
+    ///   `surface_content` until they stand 1.5:1 off it, stopping short of
+    ///   that where `text_primary` would fall below 7:1 on them. A palette
+    ///   whose selection already fails that text moves it toward
+    ///   `surface_content` instead, until the text reaches 7:1.
+    /// - **Secondary text, 7:1.** `text_secondary` is lifted, gaining opacity
+    ///   as the focus indicator does, until it reaches 7:1 on the surfaces and
+    ///   on both projected selections, so a selected row's subtitle stays
+    ///   readable whether its view has focus or not.
+    ///
+    /// The accent and the focus indicator stay separate tokens because one
+    /// colour cannot always serve both. Whether it can depends on the tone of
+    /// the accent's text against the surfaces: where they are alike (white
+    /// text in a light theme, black text in a dark one) the accent clears both
+    /// floors; where they are opposite, the usual light-theme case of black
+    /// text on a light accent, the accent must stay light for its text while
+    /// a ring on near-white surfaces must be dark (black text at 7:1 needs a
+    /// luminance of at least 0.30, a ring at 4.5:1 on white one of at most
+    /// 0.18), so the accent is held to its text and the ring alone carries
+    /// 4.5:1.
+    ///
+    /// Applied after [`for_inactive_window`](Self::for_inactive_window) by
+    /// the generic paint chain, so an inactive window's desaturated accent is
+    /// lifted to the same floors.
+    ///
+    /// [`lift_until_readable`]: crate::contrast::lift_until_readable
+    /// [`composite_contrast`]: crate::contrast::composite_contrast
     pub fn for_high_contrast(&self) -> ColorTokens {
-        if self.surface_main.relative_luminance() < 0.5 {
-            // Dark base: a brighter accent clears both text-on-accent and
-            // ring-on-surface against the dark surfaces.
-            ColorTokens {
-                accent: Color::from_hex("#4FCCE0"),
-                accent_hover: Color::from_hex("#4FCCE0"),
-                accent_pressed: Color::from_hex("#3FB8CC"),
-                border_focused: Color::from_hex("#4FCCE0"),
-                focus_ring: Color::from_hex("#4FCCE0"),
-                text_on_accent: Color::BLACK,
-                text_secondary: Color::from_hex("#C7CBD1"),
-                // Stronger selection fill than the default pale wash so
-                // low-vision users can clearly see the selection (still keeps
-                // the light `text_primary` readable on top).
-                surface_selected: Color::from_hex("#2E6575"),
-                ..self.clone()
-            }
+        let surfaces = [self.surface_main, self.surface_content, self.surface_raised];
+        // The accent family is a fill the text is read on: measure it as the
+        // opaque colour it paints over the content surface (unchanged when it
+        // is already opaque).
+        let opaque = |c: Color| composite_over(c, self.surface_content);
+        let accent = opaque(self.accent);
+        let text_on_accent = if composite_contrast(self.text_on_accent, accent) >= HC_TEXT {
+            self.text_on_accent
         } else {
-            // Light base: black text on the (unchanged) accent gives 8.5:1; the
-            // focus indicator moves to a much darker teal for >= 4.5:1 on white.
-            ColorTokens {
-                border_focused: Color::from_hex("#0A7B8B"),
-                focus_ring: Color::from_hex("#0A7B8B"),
-                text_on_accent: Color::BLACK,
-                text_secondary: Color::from_hex("#3A3D45"),
-                // Stronger selection fill (still light enough for black text).
-                surface_selected: Color::from_hex("#A8DDE5"),
-                ..self.clone()
+            accent.best_contrast_text()
+        };
+        let fill = |c: Color| {
+            let readable = lift_until_readable(opaque(c), &[text_on_accent], HC_TEXT);
+            let standing = lift_until_readable(readable, &surfaces, HC_NON_TEXT);
+            if composite_contrast(text_on_accent, standing) >= HC_TEXT {
+                standing
+            } else {
+                readable
             }
+        };
+        let surface_selected = self.high_contrast_selection(self.surface_selected);
+        let surface_selected_inactive =
+            self.high_contrast_selection(self.surface_selected_inactive);
+        let text_surfaces = [
+            self.surface_main,
+            self.surface_content,
+            self.surface_raised,
+            surface_selected,
+            surface_selected_inactive,
+        ];
+        ColorTokens {
+            accent: fill(self.accent),
+            accent_hover: fill(self.accent_hover),
+            accent_pressed: fill(self.accent_pressed),
+            border_focused: strengthen(self.border_focused, &surfaces, HC_NON_TEXT),
+            focus_ring: strengthen(self.focus_ring, &surfaces, HC_NON_TEXT),
+            text_on_accent,
+            text_secondary: strengthen(self.text_secondary, &text_surfaces, HC_TEXT),
+            surface_selected,
+            surface_selected_inactive,
+            ..self.clone()
         }
+    }
+
+    /// A selection fill of [`for_high_contrast`](Self::for_high_contrast)
+    /// (`surface_selected` or `surface_selected_inactive`):
+    /// `selected` made opaque over `surface_content` and moved toward
+    /// black or white, whichever is farther from `surface_content`, until it
+    /// stands [`HC_SELECTION`]:1 off it, never past the last step on which
+    /// `text_primary` keeps [`HC_TEXT`]:1. A fill on which that text already
+    /// falls short moves toward `surface_content` instead, until the text
+    /// reaches [`HC_TEXT`]:1 on it.
+    fn high_contrast_selection(&self, selected: Color) -> Color {
+        let content = self.surface_content.with_alpha(1.0);
+        let base = composite_over(selected, content);
+        let reads = |c: Color| composite_contrast(self.text_primary, c) >= HC_TEXT;
+        let step = |to: Color, i: u32| base.mix(to, i as f32 / HC_STEPS as f32);
+        if !reads(base) {
+            return (1..=HC_STEPS)
+                .map(|i| step(content, i))
+                .find(|&c| reads(c))
+                .unwrap_or(content);
+        }
+        let toward = content.best_contrast_text();
+        let mut chosen = base;
+        for i in 1..=HC_STEPS {
+            if chosen.contrast_ratio(content) >= HC_SELECTION {
+                break;
+            }
+            let candidate = step(toward, i);
+            if !reads(candidate) {
+                break;
+            }
+            chosen = candidate;
+        }
+        chosen
     }
 
     pub fn light_default() -> Self {
@@ -949,28 +1082,250 @@ mod tests {
         assert_ne!(light.surface_main, dark.surface_main);
     }
 
+    /// Every pair [`ColorTokens::for_high_contrast`] documents, below its
+    /// floor in `hc`, named with its ratio.
+    fn high_contrast_shortfalls(hc: &ColorTokens) -> Vec<String> {
+        use crate::contrast::composite_contrast;
+        let surfaces = [
+            ("surface_main", hc.surface_main),
+            ("surface_content", hc.surface_content),
+            ("surface_raised", hc.surface_raised),
+        ];
+        let mut out = Vec::new();
+        let mut check = |name: String, fg: Color, bg: Color, floor: f32| {
+            let r = composite_contrast(fg, bg);
+            if r < floor {
+                out.push(format!("{name} = {r:.2}, floor {floor}"));
+            }
+        };
+        for (fill, c) in [
+            ("accent", hc.accent),
+            ("accent_hover", hc.accent_hover),
+            ("accent_pressed", hc.accent_pressed),
+        ] {
+            check(
+                format!("text_on_accent on {fill}"),
+                hc.text_on_accent,
+                c,
+                7.0,
+            );
+        }
+        for (s, bg) in surfaces {
+            check(format!("focus_ring on {s}"), hc.focus_ring, bg, 4.5);
+            check(format!("border_focused on {s}"), hc.border_focused, bg, 4.5);
+            check(format!("text_secondary on {s}"), hc.text_secondary, bg, 7.0);
+        }
+        for (fill, c) in [
+            ("surface_selected", hc.surface_selected),
+            ("surface_selected_inactive", hc.surface_selected_inactive),
+        ] {
+            check(
+                format!("text_secondary on {fill}"),
+                hc.text_secondary,
+                c,
+                7.0,
+            );
+            check(format!("text_primary on {fill}"), hc.text_primary, c, 7.0);
+            check(
+                format!("{fill} on surface_content"),
+                c,
+                hc.surface_content,
+                1.5,
+            );
+        }
+        out
+    }
+
     #[test]
     fn high_contrast_variant_exceeds_aa_on_both_presets() {
         // Audit G13 (WCAG 1.4.6 Enhanced / EN 301 549 11.7): the opt-in
         // high-contrast projection clears >= 7:1 text and >= 4.5:1 non-text on
-        // both the light and dark bases.
+        // both the light and dark bases, for an active and an inactive window
+        // (the paint chain projects the inactive tokens).
         for (name, base) in [
             ("light", ColorTokens::light_default()),
             ("dark", ColorTokens::dark_default()),
         ] {
-            let hc = base.for_high_contrast();
-            let ta = hc.text_on_accent.contrast_ratio(hc.accent);
-            assert!(ta >= 7.0, "{name} HC: text_on_accent vs accent = {ta:.2}");
-            for (sname, s) in [
-                ("surface_content", hc.surface_content),
-                ("surface_main", hc.surface_main),
+            for (state, tokens) in [
+                ("active", base.clone()),
+                ("inactive", base.for_inactive_window()),
             ] {
-                let ts = hc.text_secondary.contrast_ratio(s);
-                assert!(ts >= 7.0, "{name} HC: text_secondary vs {sname} = {ts:.2}");
-                let fr = hc.focus_ring.contrast_ratio(s);
-                assert!(fr >= 4.5, "{name} HC: focus_ring vs {sname} = {fr:.2}");
+                let short = high_contrast_shortfalls(&tokens.for_high_contrast());
+                assert!(short.is_empty(), "{name} {state}: {short:#?}");
             }
         }
+    }
+
+    #[test]
+    fn high_contrast_keeps_an_accent_that_already_meets_its_floors() {
+        // IntUI's accents already carry their black text at 7:1 (8.50 light,
+        // 9.27 dark), and the dark one stands 4.5:1 on the dark surfaces, so
+        // neither moves. Before the projection read the palette, dark mode
+        // swapped in #4FCCE0 whatever the accent was.
+        for base in [ColorTokens::light_default(), ColorTokens::dark_default()] {
+            let hc = base.for_high_contrast();
+            assert_eq!(hc.accent, base.accent);
+            assert_eq!(hc.text_on_accent, base.text_on_accent);
+        }
+        // A token the projection does not document is never touched.
+        let base = ColorTokens::dark_default();
+        let hc = base.for_high_contrast();
+        assert_eq!(hc.text_primary, base.text_primary);
+        assert_eq!(hc.text_link, base.text_link);
+        assert_eq!(hc.accent_subtle_bg, base.accent_subtle_bg);
+        assert_eq!(hc.surface_main, base.surface_main);
+        assert_eq!(hc.chart_palette, base.chart_palette);
+    }
+
+    #[test]
+    fn high_contrast_lifts_a_short_accent_and_keeps_its_hue() {
+        // macOS's Aqua accent, #0063E1 under white text, measures 3.87:1 with
+        // the black text the old projection forced on it.
+        let base = ColorTokens {
+            accent: Color::from_hex("#0063E1"),
+            accent_hover: Color::from_hex("#005ED6"),
+            accent_pressed: Color::from_hex("#0054BF"),
+            text_on_accent: Color::WHITE,
+            ..ColorTokens::light_default()
+        };
+        let hc = base.for_high_contrast();
+        assert_eq!(hc.text_on_accent, Color::WHITE);
+        for (before, after) in [
+            (base.accent, hc.accent),
+            (base.accent_hover, hc.accent_hover),
+            (base.accent_pressed, hc.accent_pressed),
+        ] {
+            let ratio = Color::WHITE.contrast_ratio(after);
+            assert!((7.0..7.3).contains(&ratio), "lifted to {ratio:.2}");
+            let (h0, ..) = before.to_hsv();
+            let (h1, ..) = after.to_hsv();
+            assert!((h0 - h1).abs() < 0.5, "hue {h0} became {h1}");
+        }
+        // White text and light surfaces are alike in tone, so the accent
+        // also stands 4.5:1 on them.
+        for s in [hc.surface_main, hc.surface_content, hc.surface_raised] {
+            assert!(hc.accent.contrast_ratio(s) >= 4.5);
+        }
+    }
+
+    #[test]
+    fn high_contrast_holds_a_light_accent_to_its_black_text() {
+        // The documented divergence: black text on IntUI's light accent
+        // needs it at a luminance of 0.30 or more, a ring at 4.5:1 on white
+        // one of 0.18 or less, so the accent stays light and only the ring
+        // darkens.
+        let hc = ColorTokens::light_default().for_high_contrast();
+        assert!(hc.accent.relative_luminance() >= 0.30);
+        assert!(hc.focus_ring.relative_luminance() <= 0.183);
+        assert!(hc.accent.contrast_ratio(Color::WHITE) < 4.5);
+        assert!(hc.focus_ring.contrast_ratio(Color::WHITE) >= 4.5);
+    }
+
+    #[test]
+    fn high_contrast_keeps_a_neutral_ring_neutral() {
+        // Fluent's ring is 89 % black, never the accent: it already clears
+        // 4.5:1 and is kept as it is, alpha included.
+        let ring = Color::BLACK.with_alpha(0.89);
+        let base = ColorTokens {
+            focus_ring: ring,
+            border_focused: ring,
+            ..ColorTokens::light_default()
+        };
+        let hc = base.for_high_contrast();
+        assert_eq!(hc.focus_ring, ring);
+        assert_eq!(hc.border_focused, ring);
+    }
+
+    #[test]
+    fn high_contrast_gives_translucent_secondary_text_more_opacity() {
+        // macOS's secondary label is 58 % black, about 5.3:1 on white:
+        // already black, so only its alpha can carry it to 7:1.
+        let base = ColorTokens {
+            text_secondary: Color::BLACK.with_alpha(0.58),
+            ..ColorTokens::light_default()
+        };
+        let hc = base.for_high_contrast();
+        assert!(hc.text_secondary.a() > 0.58 && hc.text_secondary.a() < 1.0);
+        assert_eq!(
+            [
+                hc.text_secondary.r(),
+                hc.text_secondary.g(),
+                hc.text_secondary.b()
+            ],
+            [0.0, 0.0, 0.0]
+        );
+        assert!(high_contrast_shortfalls(&hc).is_empty());
+    }
+
+    #[test]
+    fn high_contrast_selection_moves_off_the_surface_and_keeps_its_text() {
+        use crate::contrast::composite_contrast;
+        let base = ColorTokens::light_default();
+        let hc = base.for_high_contrast();
+        // IntUI's wash stands 1.19:1 off white; the projection moves it to
+        // 1.5:1 and no farther than one step past.
+        let before = base.surface_selected.contrast_ratio(base.surface_content);
+        let after = hc.surface_selected.contrast_ratio(hc.surface_content);
+        assert!(before < 1.2, "{before}");
+        assert!((1.5..1.55).contains(&after), "{after}");
+        // A translucent wash (Fluent's 9 % black) becomes an opaque fill.
+        let wash = ColorTokens {
+            surface_selected: Color::BLACK.with_alpha(0.09),
+            ..ColorTokens::light_default()
+        }
+        .for_high_contrast();
+        assert_eq!(wash.surface_selected.a(), 1.0);
+        assert!(wash.surface_selected.contrast_ratio(wash.surface_content) >= 1.5);
+        // A selection the primary text already falls short on moves toward
+        // the surface until the text reads.
+        let dark = ColorTokens::dark_default();
+        let short = ColorTokens {
+            surface_selected: Color::from_hex("#3A6A7A"),
+            ..dark.clone()
+        };
+        assert!(composite_contrast(short.text_primary, short.surface_selected) < 7.0);
+        let hc = short.for_high_contrast();
+        let r = composite_contrast(hc.text_primary, hc.surface_selected);
+        assert!((7.0..7.3).contains(&r), "{r}");
+    }
+
+    #[test]
+    fn high_contrast_moves_the_inactive_selection_too() {
+        // A row in an unfocused view, or in an inactive window, paints
+        // `surface_selected_inactive`; it must stand off the page as the
+        // focused selection does. IntUI's light wash stands 1.24:1 off
+        // white, so it moves to 1.5:1 and no farther than one step past.
+        let light = ColorTokens::light_default();
+        let before = light
+            .surface_selected_inactive
+            .contrast_ratio(light.surface_content);
+        assert!(before < 1.25, "{before}");
+        for tokens in [light.clone(), light.for_inactive_window()] {
+            let hc = tokens.for_high_contrast();
+            let after = hc
+                .surface_selected_inactive
+                .contrast_ratio(hc.surface_content);
+            assert!((1.5..1.55).contains(&after), "{after}");
+            assert!(high_contrast_shortfalls(&hc).is_empty());
+        }
+        // The dark one already stands 1.74:1 off the dark content surface
+        // under text at 7:1, so it is kept.
+        let dark = ColorTokens::dark_default();
+        for tokens in [dark.clone(), dark.for_inactive_window()] {
+            let hc = tokens.for_high_contrast();
+            assert_eq!(hc.surface_selected_inactive, dark.surface_selected_inactive);
+            assert!(high_contrast_shortfalls(&hc).is_empty());
+        }
+        // A translucent inactive wash becomes an opaque fill, and the
+        // secondary text is lifted on it.
+        let wash = ColorTokens {
+            surface_selected_inactive: Color::BLACK.with_alpha(0.06),
+            text_secondary: Color::BLACK.with_alpha(0.58),
+            ..ColorTokens::light_default()
+        }
+        .for_high_contrast();
+        assert_eq!(wash.surface_selected_inactive.a(), 1.0);
+        assert!(high_contrast_shortfalls(&wash).is_empty());
     }
 
     #[test]

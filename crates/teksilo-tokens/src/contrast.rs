@@ -83,7 +83,7 @@ pub fn lift_until_readable(fg: Color, on: &[Color], floor: f32) -> Color {
 }
 
 /// `fg` composited over an opaque `bg`.
-fn composite_over(fg: Color, bg: Color) -> Color {
+pub(crate) fn composite_over(fg: Color, bg: Color) -> Color {
     // A NaN alpha would poison every channel; read it as opaque, the safest
     // meaning of an undefined alpha for a colour meant to be read.
     let a = if fg.a().is_nan() {

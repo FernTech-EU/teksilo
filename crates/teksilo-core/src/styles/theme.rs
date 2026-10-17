@@ -157,8 +157,9 @@ pub struct PaintState {
 /// preset get, means the generic chain: [`Theme::for_inactive_window`] when
 /// the window is inactive, then [`Theme::for_high_contrast`] when the
 /// high-contrast preference is set. That chain is a fixed transform of the
-/// tokens (desaturate the accent family, swap in a high-contrast accent and
-/// ring), which is right for a palette that defines no inactive or
+/// tokens (desaturate the accent family, then lift the accent, the ring, the
+/// secondary text and the selection until they reach the high-contrast
+/// floors), which is right for a palette that defines no inactive or
 /// high-contrast colours of its own.
 ///
 /// A preset whose source palette **does** define them (a desktop colour
@@ -268,8 +269,9 @@ impl Theme {
     /// [`for_inactive_window`](Self::for_inactive_window) when
     /// `!state.window_active`, then
     /// [`for_high_contrast`](Self::for_high_contrast) when
-    /// `state.high_contrast` (so the high-contrast accent and ring win over
-    /// the inactive desaturation), and an unchanged copy when neither applies.
+    /// `state.high_contrast` (so the desaturated accent and ring of an
+    /// inactive window are lifted to the high-contrast floors too), and an
+    /// unchanged copy when neither applies.
     pub fn for_paint_state(&self, state: PaintState) -> Theme {
         if let Some(PaintProjection(project)) = self.extension::<PaintProjection>().copied() {
             return project(self, state);

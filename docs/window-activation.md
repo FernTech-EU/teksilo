@@ -192,8 +192,10 @@ The paint walker asks `Theme::for_paint_state(PaintState { window_active,
 high_contrast })` for the theme of each frame. With a `PaintProjection`
 registered, that is the hook's answer; without one it is the generic chain,
 `for_inactive_window` when the window is inactive and then `for_high_contrast`
-when the "increase contrast" preference is set, exactly the output of earlier
-releases. The hook receives the active theme and both flags at once, so it
+when the "increase contrast" preference is set. That last step lifts the
+theme's own accent, focus ring, secondary text and selection fills (focused
+and unfocused) until they reach 7:1 for text and 4.5:1 for the ring, keeping
+their hue. The hook receives the active theme and both flags at once, so it
 decides how they combine, and it replaces the generic chain entirely:
 `Theme::for_inactive_window` and `Theme::for_high_contrast` stay the generic
 transforms and do not consult it. Only change colours in a hook. The swap is

@@ -178,7 +178,7 @@ The rightmost column records what the previous revision got wrong about each.
 | G9 | 1.3.1 / 3.3.2 — DateEdit collapses its redundant middle node | [date_edit.rs](../../crates/teksilo-widgets/src/date_edit.rs); test `date_edit_collapses_middle_container_node` | Line drift only |
 | G10 | 1.3.5 Input purpose → specialised AT roles | `InputPurpose` at [text_input_field.rs:120-149](../../crates/teksilo-widgets/src/primitives/text_input_field.rs) | Line drift, **and the stated blocker is wrong** — see §5.14 |
 | G12 | 1.4.13 Content on hover or focus | No-dismiss-on-anchor-leave at [overlay_impl.rs:1615-1645](../../crates/teksilo-core/src/widget_tree/overlay_impl.rs); 100 ms grace at `:486-494`; bounds check at [widget_tree.rs:1029-1055](../../crates/teksilo-core/src/widget_tree.rs) | **The verdict was wrong when written.** G12 closed *hoverable*; *dismissible* and *persistent* were both still broken and were fixed a month later by `55eb6de4` — see §7 |
-| G13 | 1.4.1 / 1.4.11 + high contrast | `for_high_contrast()` at [theme.rs:230-259](../../crates/teksilo-tokens/src/theme.rs); OS re-query in [window_manager.rs](../../crates/teksilo-app/src/window_manager.rs); list/tree selection boundary at [recipe_standard_item_style.rs:133-166](../../crates/teksilo-widgets/src/styles/recipe_standard_item_style.rs) | Line drift. **New problem:** `for_high_contrast()` hardcodes IntUI hexes and is applied to whatever preset is active — see §5.6 |
+| G13 | 1.4.1 / 1.4.11 + high contrast | `for_high_contrast()` at [theme.rs:230-259](../../crates/teksilo-tokens/src/theme.rs); OS re-query in [window_manager.rs](../../crates/teksilo-app/src/window_manager.rs); list/tree selection boundary at [recipe_standard_item_style.rs:133-166](../../crates/teksilo-widgets/src/styles/recipe_standard_item_style.rs) | Line drift. `for_high_contrast()` hardcoded IntUI hexes and applied them to whatever preset was active; it now lifts the active palette's own colours, see §5.6 |
 | G14 | 3.2.1 On focus — debug warning for context change | [focus_impl.rs](../../crates/teksilo-core/src/widget_tree/focus_impl.rs), [event_context.rs](../../crates/teksilo-core/src/widget/event_context.rs) | Line drift only |
 | G15 | 4.1.2 — bound `access_*` props at `AccessibilityOnly` | `register_access_prop_bindings` at [widget_tree.rs:2298-2314](../../crates/teksilo-core/src/widget_tree.rs); test `bound_access_label_change_dirties_accessibility_tree` in [pointer_router.rs](../../crates/teksilo-core/src/widget_tree/pointer_router.rs) | Line drift. G15 covered *override* props only — the editors' own caret signals had the identical defect and were fixed later (`2f305370`) |
 | G16 | 2.3.3 — overlay fades snap under reduced motion | [overlay_impl.rs](../../crates/teksilo-core/src/widget_tree/overlay_impl.rs) (`attach_overlay_fade`, `process_tooltips_impl`) | Previous revision cited a file `process_tooltips_impl.rs` that does not exist — it is a function inside `overlay_impl.rs` |
@@ -304,7 +304,7 @@ Chapter 5 applies to all ICT including software and is not subsumed by either.
 | 11.5.2.15 | State exposed to AT | 🟡 | Core reactive state is correct. Two residuals: `WidgetBuilder::access_disabled` takes a plain `bool`, not `impl Into<Prop<bool>>`, unlike every sibling override ([widget_builder.rs:1170, :1771](../../crates/teksilo-core/src/widget_builder.rs)); and until `ee3d406f`/`4769528f` the *visual* half was broken framework-wide — nine form fields and every ancestor-disabled widget rendered pixel-identical to enabled while correctly reporting `disabled` to AT |
 | 11.5.2.x | AT platform-API binding | ✅ | Real `accesskit_winit` bridges on AT-SPI, NSAccessibility and UIA. `accesskit_winit` 0.34.0, `accesskit` 0.25.0 |
 | 11.6.2 | Accessible end-user documentation | ➖ | Applies to shipped products, not the toolkit |
-| 11.7(a) | Contrast preference | 🟡 | Applied at both main and overlay paint passes — but `for_high_contrast()` substitutes literal IntUI hexes into whatever preset is active (§5.6) |
+| 11.7(a) | Contrast preference | ✅ | Applied at both main and overlay paint passes. `for_high_contrast()` lifts the active palette's own accent, ring, secondary text and both selection fills (focused and unfocused) to 7:1 text and 4.5:1 rings, and each preset crate measures its pairs (§5.6) |
 | 11.7(b) | Reduced motion preference | 🟡 | G16, and the unified `AccessibilityPreferences` pipeline. **The terminal visual bell is a motion path this pipeline does not reach** (2.3.1) |
 | 11.7(c) | Text scaling preference | ✅ | Applied at launch and on every focus-triggered refresh |
 | 11.7 | Re-query granularity | 🟡 | Focus-transition-triggered, not an OS push subscription — a deliberate zero-idle-cost choice. A user toggling "increase contrast" while the app holds focus continuously sees no change until a focus transition |
@@ -632,9 +632,9 @@ solve it to three different standards:
   navigation.
 - **`CommandPalette`** — solved. See §5.4.
 
-### 5.6 High contrast overwrites the active preset's palette — EN 11.7(a) · framework
+### 5.6 High contrast overwrote the active preset's palette: EN 11.7(a) · framework · **FIXED**
 
-`ColorTokens::for_high_contrast()`
+**As found.** `ColorTokens::for_high_contrast()`
 ([theme.rs:230-259](../../crates/teksilo-tokens/src/theme.rs)) branches only on
 `surface_main` luminance and substitutes literal IntUI hexes (`#4FCCE0`, `#0A7B8B`, …)
 for the accent family, focus indicators and selection surface. The paint walker applies
@@ -645,6 +645,19 @@ No preset crate overrides it, and no test covers high-contrast contrast for thos
 
 **Recommendation:** make it a per-preset hook (a style slot or theme extension), or
 derive the high-contrast values from the live tokens rather than hardcoding one preset's.
+
+**Fixed.** Both halves of the recommendation exist now. A preset whose source palette
+defines its own high-contrast colours registers a `PaintProjection` (KDE does). Every
+other theme gets a `for_high_contrast()` that derives from the live tokens: it lifts
+the theme's own accent family, focus indicators, secondary text and selection toward
+black or white, keeping their hue, until text on the accent reaches 7:1, the ring 4.5:1
+on the surfaces, the secondary text 7:1, and both selection fills (`surface_selected`,
+and the `surface_selected_inactive` a row keeps in an unfocused view or an inactive
+window) 1.5:1 off the content surface under primary text at 7:1. Measured before the fix: black text on macOS Aqua's accent
+3.87:1, on Fluent light's 3.70:1, a ring 4.21:1 on Aqua's window; every dark preset
+painted IntUI's teal. `tests/high_contrast.rs` in the macOS, Fluent and Material 3 crates
+measures each pair for both appearances, active and inactive, and `prop_color.rs`
+checks the rule over random accents.
 
 ### 5.7 `teksilo-theme-material3` has no contrast assertion of any kind — 1.4.3 / 1.4.11 · framework
 

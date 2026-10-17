@@ -403,6 +403,21 @@ by crate for clarity, not because crates version independently.
   button's fill and a button's focus border now take the high-contrast
   palette, as `Toggle`, `Checkbox` and the other accent controls already did;
   before, they kept the normal colours.
+- **High contrast keeps each theme's own colours and reaches its targets.**
+  **Behaviour change:** under the OS increase contrast preference, the Int UI,
+  macOS, Fluent and Material 3 themes now paint their own accent, focus ring,
+  secondary text and selection, made darker or lighter in their own hue until
+  text on the accent reaches 7:1, the focus ring 4.5:1 on the window and the
+  content surfaces, and secondary text 7:1, also on a selected row; the
+  selection stands 1.5:1 off the page with its text at 7:1, in a focused list
+  and in an unfocused list or inactive window alike. Before, every dark
+  theme took Int UI's teal accent and ring, and a light theme kept its accent
+  under black text: 3.87:1 on macOS's blue and 3.70:1 on Fluent's, with the
+  focus ring at 4.21:1 on the macOS window. Int UI changes too: its light
+  hover and pressed fills, whose black text measured 6.33:1 and 4.64:1, are
+  lighter, its dark accent stays its own teal instead of a brighter one, and
+  its selections are a shade of its own selection colour. Themes that bring
+  their own high-contrast colours, such as KDE Plasma, are unchanged.
 
 #### Platform
 

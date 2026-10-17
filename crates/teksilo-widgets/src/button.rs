@@ -1454,10 +1454,13 @@ mod tests {
     fn filled_button_fill_follows_the_high_contrast_preference() {
         // The baked fill resolves through `Theme::paint_colors`, so it takes
         // the high-contrast accent the paint walker gives every
-        // paint-resolving control. IntUI dark swaps its accent under high
-        // contrast; light keeps it.
+        // paint-resolving control. The projection keeps an accent that
+        // already carries its text at 7:1, as both IntUI accents do, so the
+        // theme gets one that does not: IntUI dark's pressed fill, whose
+        // black text measures 4.4:1, which the projection lifts.
         use teksilo_core::styles::PaintState;
-        let theme = teksilo_core::presets::intui::dark();
+        let mut theme = teksilo_core::presets::intui::dark();
+        theme.colors.accent = theme.colors.accent_pressed;
         let accent = theme.colors.accent.to_array();
         let hc_accent = theme
             .for_paint_state(PaintState {
