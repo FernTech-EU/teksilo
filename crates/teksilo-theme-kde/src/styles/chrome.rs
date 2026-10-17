@@ -278,7 +278,7 @@ impl BreezeButtonColors {
 }
 
 /// KDE's mix of two colours, in its 16-bit arithmetic.
-fn kde_mix(a: Color, b: Color, t: f64) -> Color {
+pub(crate) fn kde_mix(a: Color, b: Color, t: f64) -> Color {
     mix(KdeColor::from_color(a), KdeColor::from_color(b), t).to_color()
 }
 

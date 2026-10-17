@@ -41,7 +41,13 @@
 //!   contrast), with an outline that turns to the highlight under the
 //!   pointer or keyboard focus and a 1 px shadow below it in an active
 //!   window; the default button's fill moves toward the highlight, and a
-//!   tool button shows nothing until it is hovered ([`styles`]). Other
+//!   tool button shows nothing until it is hovered ([`styles`]).
+//! - **Breeze's indicators and fields.** A check box or radio button is a
+//!   15 px box or disc in the button colour, filled toward the highlight and
+//!   marked in the view's text when checked, its label 24 px from its
+//!   leading edge; a switch is a handle as tall as its 36 x 18 indicator
+//!   riding a 12 px track; a text field is a flat view-coloured frame whose
+//!   1 px outline turns to the focus colour while it has focus. Other
 //!   controls are outlined in the window colour moved the same way toward
 //!   the text, the `border` token; the highlight-based outlines are in
 //!   [`BreezeColors`].
@@ -95,9 +101,25 @@
 //! ## Known limitations
 //!
 //! - **Most widget chrome is the framework's.** This version installs
-//!   Breeze styles for `Button`, `IconButton` and `SplitButton` only: every
-//!   other widget keeps Teksilo's recipe style, painted in the Breeze
-//!   colours, radii, focus ring, typography and motion.
+//!   Breeze styles for `Button`, `IconButton`, `SplitButton`, `Toggle`,
+//!   `Checkbox`, `RadioButton` and `TextInput` only: every other widget
+//!   keeps Teksilo's recipe style, painted in the Breeze colours, radii,
+//!   focus ring, typography and motion.
+//! - **A check box or radio button row is 24 px, not 22.** Breeze's row is
+//!   the label's line box plus 4 px; the widgets keep their 24 px minimum,
+//!   WCAG 2.2's target size, and paint the 20 px indicator unchanged in it
+//!   (D8, [`styles::checkbox`]).
+//! - **The switch is not exactly the desktop style's.** Its label is the
+//!   `Toggle`'s, 6 px after the node, where the desktop style spaces it 4 px
+//!   after the indicator; keyboard focus adds the 2 px focus frame Breeze
+//!   draws around a check box, which the desktop style's switch has not;
+//!   the node is raised to the density's target on both axes, the 36 x 18
+//!   indicator painted unchanged in it; and a checked track is outlined in
+//!   the highlight lifted to 3:1 (D6) ([`styles::toggle`]).
+//! - **A short text field keeps its frame.** Breeze paints only the fill of
+//!   a line edit shorter than the line box plus 12 px; the field keeps its
+//!   outline at every height, the field's only boundary (D6,
+//!   [`styles::text_input`]).
 //! - **A filled `SplitButton` is filled with the accent.** The widget labels
 //!   its `Filled` and `Destructive` variants in the on-accent text and gives
 //!   its style no say, so they are framed in the accent rather than as
@@ -256,7 +278,8 @@ fn project(theme: &Theme, state: PaintState) -> Theme {
 
 /// Install the Breeze Tier-3 chrome.
 ///
-/// The buttons are Breeze's own ([`styles`]); every other slot is left to
+/// The buttons, the check box, the radio button, the switch and the line
+/// edit are Breeze's own ([`styles`]); every other slot is left to
 /// the widget's recipe style, which paints from the Breeze tokens, and the
 /// crate's tests list the reason for each. Every style installed here reads
 /// its metrics from the theme it builds under, `theme.input` included, so
@@ -266,6 +289,10 @@ fn install_styles(theme: &mut Theme) {
     slots.button = Some(Rc::new(styles::button::BreezeButtonStyle));
     slots.icon_button = Some(Rc::new(styles::icon_button::BreezeIconButtonStyle));
     slots.split_button = Some(Rc::new(styles::split_button::BreezeSplitButtonStyle));
+    slots.toggle = Some(Rc::new(styles::toggle::BreezeToggleStyle));
+    slots.checkbox = Some(Rc::new(styles::checkbox::BreezeCheckboxStyle));
+    slots.radio = Some(Rc::new(styles::radio::BreezeRadioStyle));
+    slots.text_input = Some(Rc::new(styles::text_input::BreezeTextInputStyle));
 }
 
 #[cfg(test)]
@@ -466,28 +493,12 @@ mod tests {
             "the recipe's thin divider in the border role reads as Breeze's 1 px splitter handle",
         ),
         (
-            "toggle",
-            "no Breeze switch is installed; the recipe switch reads the Breeze accent and border tokens",
-        ),
-        (
-            "checkbox",
-            "no Breeze check box is installed; the recipe box reads the Breeze accent and strong border tokens",
-        ),
-        (
-            "radio",
-            "no Breeze radio button is installed; the recipe ring reads the Breeze accent and strong border tokens",
-        ),
-        (
             "radio_tile",
             "Breeze has no selectable card; the recipe surface reads the preset's surface and accent roles",
         ),
         (
             "slider",
             "no Breeze slider is installed; the recipe track and knob read the Breeze accent and border tokens",
-        ),
-        (
-            "text_input",
-            "no Breeze line-edit frame is installed; the recipe field reads the Breeze content, border and focus tokens",
         ),
         (
             "combo_box",
@@ -579,7 +590,7 @@ mod tests {
         ),
         (
             "date_edit",
-            "the recipe is a passthrough around the TextInput, whose slot this preset leaves to its recipe",
+            "the recipe is a passthrough around the TextInput, which this preset frames as Breeze's line edit",
         ),
         (
             "rich_text_editor",
@@ -615,7 +626,7 @@ mod tests {
         ),
         (
             "search_field",
-            "the recipe field reads the Breeze content, border and focus tokens",
+            "the recipe is a passthrough around the TextInput, which this preset frames as Breeze's line edit",
         ),
     ];
 

@@ -22,6 +22,7 @@ use teksilo_canvas::{MockTextBackend, SizeProposal};
 use teksilo_core::accessibility::target_audit::{
     PIN_TOLERANCE, gate::ALL_DENSITIES, measure_targets, target_audit,
 };
+use teksilo_core::signal::Signal;
 use teksilo_core::styles::Theme;
 use teksilo_core::widget::Widget;
 use teksilo_core::widget_id::WidgetId;
@@ -32,7 +33,10 @@ use teksilo_theme_kde::geometry::BreezeGeometry;
 use teksilo_theme_kde::{self as kde};
 use teksilo_tokens::TargetDensity;
 use teksilo_widgets::primitives::IconWidget;
-use teksilo_widgets::{Button, ButtonVariant, IconButton, IconButtonSize, MenuItem, SplitButton};
+use teksilo_widgets::{
+    Button, ButtonVariant, Checkbox, IconButton, IconButtonSize, MenuItem, RadioButton,
+    SplitButton, TextInput, Toggle,
+};
 
 const SIZES_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -300,6 +304,183 @@ fn a_split_button_is_as_tall_as_a_push_button_at_every_density() {
                     "{density:?} {variant:?}: a conformance failure"
                 );
             }
+        }
+    }
+}
+
+// ── Check boxes and radio buttons ──────────────────────────────────────
+
+/// The row height a check box or radio button is raised to at `density`:
+/// the density's target size, which the widgets' own minimum gives them.
+const INDICATOR_ROWS: [(TargetDensity, f32); 3] = [
+    (TargetDensity::Compact, 24.0),
+    (TargetDensity::Comfortable, 32.0),
+    (TargetDensity::Touch, 44.0),
+];
+
+/// Measure the indicator control `name` in a row holding `w`: its node, the
+/// leading edge of its label from the node's, the painted 15 px box from the
+/// node's corner, and the number of conformance failures.
+///
+/// The row is laid out with no height proposed, so it takes its natural
+/// height: in a taller one the widget fills the height it is given, whatever
+/// the theme.
+fn indicator_row(
+    theme: &Theme,
+    density: TargetDensity,
+    name: &str,
+    w: impl Widget + 'static,
+) -> ((f32, f32), f32, [f32; 2], usize) {
+    let mut tree = WidgetTree::new()
+        .with_theme(theme.with_density(density))
+        .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+    let root = in_tappable_row(&mut tree, w);
+    tree.layout(SizeProposal {
+        width: Some(600.0),
+        height: None,
+    });
+    let node = nodes_named(&tree, root, name);
+    assert_eq!(node.len(), 1, "one {name} in the row");
+    let b = tree.bounds(node[0]);
+    let label = nodes_named(&tree, node[0], "TextWidget");
+    assert_eq!(label.len(), 1, "one label");
+    let label_x = tree.bounds(label[0]).x - b.x;
+    let failures = target_audit(&tree, density)
+        .into_iter()
+        .filter(|v| v.rule.is_conformance_failure())
+        .count();
+    let frame = tree.render();
+    let painted = frame
+        .shapes
+        .iter()
+        .find(|s| (s.screen[2] - 15.0).abs() < 0.01 && (s.screen[3] - 15.0).abs() < 0.01)
+        .unwrap_or_else(|| panic!("{density:?}: no 15 px box painted"));
+    let at = [painted.screen[0] - b.x, painted.screen[1] - b.y];
+    ((b.width, b.height), label_x, at, failures)
+}
+
+/// D8. Qt lays a labelled Breeze check box out in a 22 px row, its 20 px
+/// indicator 1 px down. The node here is the density's target size, 24 px at
+/// Compact, raised by the widget's own minimum; the indicator is still
+/// painted at 20 (its 15 px box at 2.5 inside it), now centred 2 px down, and
+/// the label starts 24 px from the leading edge, as Qt measures it, at every
+/// density.
+#[test]
+fn d8_a_check_box_row_is_raised_and_its_indicator_is_breezes() {
+    assert_eq!(qt_size("check_box", Some("Check")).1, 22.0, "Breeze's row");
+    assert_eq!(qt_size("check_box.no_text", None), (20.0, 20.0));
+    let qt_contents_x = 24.0;
+    for (density, row) in INDICATOR_ROWS {
+        for theme in themes() {
+            let ((_, h), label_x, at, failures) = indicator_row(
+                &theme,
+                density,
+                "Checkbox",
+                Checkbox::new(Signal::new(false)).label(lit!("Check")),
+            );
+            assert_eq!(h, row, "{density:?}");
+            assert_eq!(label_x, qt_contents_x, "{density:?}: the label");
+            assert_eq!(at, [2.5, (row - 20.0) * 0.5 + 2.5], "{density:?}: the box");
+            assert_eq!(failures, 0, "{density:?}: a conformance failure");
+        }
+    }
+}
+
+/// The radio button is the check box's twin: Qt's 22 px row raised the same
+/// way, the same indicator, the label at 24.
+#[test]
+fn d8_a_radio_button_row_is_raised_and_its_indicator_is_breezes() {
+    assert_eq!(qt_size("radio_button", Some("Radio")).1, 22.0);
+    assert_eq!(qt_size("radio_button.no_text", None), (20.0, 20.0));
+    for (density, row) in INDICATOR_ROWS {
+        for theme in themes() {
+            let ((_, h), label_x, at, failures) = indicator_row(
+                &theme,
+                density,
+                "RadioButton",
+                RadioButton::new(0, Signal::new(1_usize)).label(lit!("Radio")),
+            );
+            assert_eq!(h, row, "{density:?}");
+            assert_eq!(label_x, 24.0, "{density:?}: the label");
+            assert_eq!(at, [2.5, (row - 20.0) * 0.5 + 2.5], "{density:?}: the disc");
+            assert_eq!(failures, 0, "{density:?}: a conformance failure");
+        }
+    }
+}
+
+// ── Switches ───────────────────────────────────────────────────────────
+
+/// The switch's 36 x 18 indicator is painted unchanged, its 36 x 12 track
+/// centred, in a node raised to the density's target on both axes.
+#[test]
+fn a_switch_paints_its_indicator_in_a_node_at_the_target_size() {
+    for (density, node) in [
+        (TargetDensity::Compact, (36.0, 24.0)),
+        (TargetDensity::Comfortable, (36.0, 32.0)),
+        (TargetDensity::Touch, (44.0, 44.0)),
+    ] {
+        for theme in themes() {
+            let (mut tree, root) = in_a_row(&theme, density, Toggle::new(Signal::new(true)));
+            let toggle = nodes_named(&tree, root, "Toggle");
+            assert_eq!(toggle.len(), 1);
+            let b = tree.bounds(toggle[0]);
+            assert_eq!((b.width, b.height), node, "{density:?}");
+            assert_eq!(
+                target_audit(&tree, density)
+                    .into_iter()
+                    .filter(|v| v.rule.is_conformance_failure())
+                    .count(),
+                0,
+                "{density:?}: a conformance failure"
+            );
+            let frame = tree.render();
+            let track = frame
+                .shapes
+                .iter()
+                .find(|s| s.stroke_width == 0.0 && s.screen[2] == 36.0 && s.screen[3] == 12.0)
+                .unwrap_or_else(|| panic!("{density:?}: no 36 x 12 track"));
+            assert_eq!(
+                [track.screen[0] - b.x, track.screen[1] - b.y],
+                [(node.0 - 36.0) * 0.5, (node.1 - 12.0) * 0.5],
+                "{density:?}: centred"
+            );
+        }
+    }
+}
+
+// ── Text fields ────────────────────────────────────────────────────────
+
+/// A text field's frame is 32 px at Compact, Qt's line edit, rising to the
+/// density's target size above it (32 already clears Comfortable's 32, and
+/// Touch makes it 44).
+#[test]
+fn a_text_field_measures_breezes_line_edit_at_every_density() {
+    assert_eq!(qt_size("line_edit", None).1, 32.0);
+    let g = BreezeGeometry::breeze_default();
+    assert_eq!(g.line_edit_height, 32.0);
+    for (density, height) in [
+        (TargetDensity::Compact, 32.0),
+        (TargetDensity::Comfortable, 32.0),
+        (TargetDensity::Touch, 44.0),
+    ] {
+        for theme in themes() {
+            let (tree, root) =
+                in_a_row(&theme, density, TextInput::new(Signal::new(String::new())));
+            let input = nodes_named(&tree, root, "TextInput");
+            assert_eq!(input.len(), 1);
+            // The framed field is the first child of the composite's root,
+            // above the validation strip it reserves.
+            let composite = tree.children(input[0])[0];
+            let frame = tree.children(composite)[0];
+            assert_eq!(tree.bounds(frame).height, height, "{density:?}");
+            assert_eq!(
+                target_audit(&tree, density)
+                    .into_iter()
+                    .filter(|v| v.rule.is_conformance_failure())
+                    .count(),
+                0,
+                "{density:?}: a conformance failure"
+            );
         }
     }
 }

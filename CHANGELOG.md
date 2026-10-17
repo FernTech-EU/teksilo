@@ -155,8 +155,19 @@ by crate for clarity, not because crates version independently.
   toolbar's tool button, 28 px around a 16 px icon and 34 px around a
   toolbar one, and a `SplitButton` has the push button's frame, its `Filled`
   and `Destructive` variants filled with the accent so their label stays
-  readable. All three grow to the density's target size. Other widgets draw
-  Teksilo's own chrome in these colours and shapes.
+  readable. All three grow to the density's target size. A `Checkbox` and a
+  `RadioButton` are Breeze's: a 15 px box or disc in the button colour,
+  outlined, and when checked outlined in the highlight, washed with it and
+  marked in the text colour, with the label 24 px from the leading edge;
+  their row is 24 px rather than Breeze's 22, so it stays a WCAG target
+  size. A `Toggle` is the switch KDE applications show, an 18 px handle on
+  a 36 px track, moving and changing colour on the curves KDE uses. A
+  `TextInput` is the line edit, 32 px tall at Plasma's default font, its
+  1 px outline turning to the focus colour while it has focus, and it
+  honours `TextInput::min_height`. The outlines of an empty check box,
+  radio button and field, and of a switch on or off, are strengthened to a
+  3:1 contrast, keeping their hue. Other widgets draw Teksilo's own chrome
+  in these colours and shapes.
 
 #### Platform
 
