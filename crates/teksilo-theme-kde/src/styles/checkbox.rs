@@ -6,9 +6,11 @@
 //! A 20 px indicator holding a 16 px box, stroked as 15 px at 2.5 with a
 //! 4 px radius and filled with the button colour. Checked or partial, the
 //! box is outlined in the highlight and filled again with the highlight at
-//! 30 %, then marked in the view's text: a check drawn with a 2 px pen and
-//! mitred joins through (6, 10), (9, 13) and (14.5, 7.5) of the indicator,
-//! or three 2 px squares 4 px apart for the partial state. Pressed, the
+//! 30 % (painted as one fill, the highlight composited over the face as Qt
+//! composites it, [`BoxPaint::composited_fill`]), then marked in the view's
+//! text: a check drawn with a 2 px pen, square caps and mitred joins
+//! through (6, 10), (9, 13) and (14.5, 7.5) of the indicator, or three 2 px
+//! squares 4 px apart for the partial state. Pressed, the
 //! button colour darkens 110 %; under the pointer a 1 px ring of the focus
 //! colour lies on the outline. The mark draws itself along its length over
 //! the style's 100 ms, linearly, and the partial squares appear one at each
@@ -40,7 +42,9 @@
 //! 6 px and `Circle` makes it a disc (`[unpublished]`), with Breeze's fills,
 //! outline and mark.
 
-use teksilo_canvas::{Canvas, LineJoin, Path, Point, Rect, Size, SizeProposal, StrokeStyle};
+use teksilo_canvas::{
+    Canvas, LineCap, LineJoin, Path, Point, Rect, Size, SizeProposal, StrokeStyle,
+};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
@@ -50,6 +54,7 @@ use teksilo_core::styles::{
 };
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
+use teksilo_kde_scheme::KdeColor;
 use teksilo_tokens::{Color, CornerRadius};
 use teksilo_widgets::styles::recipe_checkbox_style::CHECKBOX_LABEL_GAP;
 
@@ -129,7 +134,8 @@ pub fn variant_radius(variant: CheckboxVariant) -> f32 {
 }
 
 /// What a box paints: a face, an optional highlight wash over it, an
-/// outline, and whether the hover ring lies on the outline.
+/// outline (laid twice when there is a wash, see [`paint_box`]), and
+/// whether the hover ring lies on the outline.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoxPaint {
     /// The button colour, darkened while pressed.
@@ -164,22 +170,68 @@ pub fn box_paint(
     }
 }
 
+impl BoxPaint {
+    /// `[measured-qt]` The box's fill, the wash composited over an opaque
+    /// face as Qt's raster painter composites it, or `None` when the face is
+    /// translucent and the two are painted as two layers.
+    ///
+    /// The renderer composites in linear light, Qt's painter in sRGB: left
+    /// to the renderer, the highlight at 30 % over Breeze Light's face is
+    /// #d9e8f7 where Plasma paints #c2e4f6 (`check_box.on` in the golden
+    /// pixel samples, `tests/breeze_reference.rs`). The face is the style's
+    /// own, so the composite is known and is painted instead.
+    pub fn composited_fill(&self) -> Option<Color> {
+        if self.face.a() < 1.0 {
+            return None;
+        }
+        Some(match self.wash {
+            Some(wash) if wash.a() > 0.0 => painter_over(wash, self.face),
+            _ => self.face,
+        })
+    }
+}
+
+/// `[measured-qt]` `top` composited over the opaque `bottom` in 8 bits, the
+/// alpha read as a byte and each channel rounded: Plasma's #c2e4f6 and
+/// #2f5368 for the highlight at 30 % over the Breeze Light and Breeze Dark
+/// faces. (KDE's colour arithmetic, which truncates, gives #2f5367 for the
+/// second.)
+fn painter_over(top: Color, bottom: Color) -> Color {
+    let [tr, tg, tb, ta] = KdeColor::from_color(top).to_rgba8();
+    let [br, bg, bb, _] = KdeColor::from_color(bottom).to_rgba8();
+    let a = u32::from(ta);
+    let ch = |t: u8, b: u8| ((u32::from(t) * a + u32::from(b) * (255 - a) + 127) / 255) as u8;
+    KdeColor::rgba8(ch(tr, br), ch(tg, bg), ch(tb, bb), 255).to_color()
+}
+
 /// Paint `paint` on the stroked box `rect` at `radius`.
 pub fn paint_box(canvas: &mut Canvas, rect: Rect, radius: f32, pen: f32, paint: &BoxPaint) {
     let corner = CornerRadius::uniform(radius);
-    if paint.face.a() > 0.0 {
-        canvas.fill_rounded_rect(rect, corner, paint.face);
-    }
-    if let Some(wash) = paint.wash
-        && wash.a() > 0.0
-    {
-        canvas.fill_rounded_rect(rect, corner, wash);
+    if let Some(fill) = paint.composited_fill() {
+        canvas.fill_rounded_rect(rect, corner, fill);
+    } else {
+        if paint.face.a() > 0.0 {
+            canvas.fill_rounded_rect(rect, corner, paint.face);
+        }
+        if let Some(wash) = paint.wash
+            && wash.a() > 0.0
+        {
+            canvas.fill_rounded_rect(rect, corner, wash);
+        }
     }
     if pen <= 0.0 {
         return;
     }
     if paint.outline.a() > 0.0 {
         canvas.stroke_rounded_rect(rect, corner, paint.outline, pen);
+        // `[measured-qt]` Breeze fills a marked box again with the outline
+        // pen still set, so the outline is laid twice and its antialiased
+        // edge is that much denser: the corner pixels of Plasma's checked
+        // box and selected disc fit two strokes to within 15 levels and one
+        // stroke no closer than 33 (`check_box.on`, `radio_button.on`).
+        if paint.wash.is_some_and(|w| w.a() > 0.0) {
+            canvas.stroke_rounded_rect(rect, corner, paint.outline, pen);
+        }
     }
     if let Some(ring) = paint.hover_ring
         && ring.a() > 0.0
@@ -326,6 +378,11 @@ impl Widget for BreezeCheckboxBody {
                     }
                     let mut style = StrokeStyle::solid(CHECK_MARK_PEN);
                     style.line_join = LineJoin::Miter;
+                    // `[measured-qt]` Square caps, Qt's default pen cap: the
+                    // mark runs half its width past both end points
+                    // (`check_box.on` covers (5, 10) of the indicator, 1 px
+                    // before the first point, at 0.83).
+                    style.line_cap = LineCap::Square;
                     canvas.stroke_path(&path, colors.text, style);
                 }
             }
@@ -386,6 +443,30 @@ mod tests {
         // A disabled box neither presses nor hovers.
         let d = box_paint(false, true, true, true, &c);
         assert_eq!((d.face, d.hover_ring), (c.button, None));
+    }
+
+    /// The wash is composited over the face in KDE's 8-bit blend, which is
+    /// what Plasma paints: #c2e4f6 for Breeze Light, #2f5368 for Breeze
+    /// Dark (`check_box.on` at (8, 5) in the golden pixel samples).
+    #[test]
+    fn the_wash_is_composited_over_the_face_as_plasma_paints_it() {
+        let rgba8 = |c: Color| KdeColor::from_color(c).to_rgba8();
+        for (theme, want) in [
+            (crate::light(), [194, 228, 246, 255]),
+            (crate::dark(), [47, 83, 104, 255]),
+        ] {
+            let c = BreezeIndicatorColors::resolve(&theme, true, false, false);
+            let on = box_paint(true, false, false, false, &c);
+            assert_eq!(on.composited_fill().map(rgba8), Some(want));
+            // Unmarked, the fill is the face.
+            let off = box_paint(false, false, false, false, &c);
+            assert_eq!(off.composited_fill(), Some(c.button));
+        }
+        // Over a translucent face the two layers are left to the renderer.
+        let c = c();
+        let mut on = box_paint(true, false, false, false, &c);
+        on.face = on.face.with_alpha(0.5);
+        assert_eq!(on.composited_fill(), None);
     }
 
     #[test]

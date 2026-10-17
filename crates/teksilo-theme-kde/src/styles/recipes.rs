@@ -217,16 +217,18 @@ pub fn breeze_list_container_style_for(tokens: &InputTokens) -> RecipeListContai
     RecipeListContainerStyle::for_tokens(tokens)
 }
 
-/// `Calendar`: a day is selected as an item-view row is, so its fill rounds
-/// at the frame radius the selection's outer edge has (spec k.5.16), and
-/// today's ring is the 1 px pen.
+/// `Calendar`: a selected day is filled as a Breeze frame is rounded, at
+/// the frame radius, and today's ring is the 1 px pen. (Breeze has no
+/// calendar; an item-view row's selection, the nearest part it has, is
+/// stroked at that radius, half a pixel rounder at its outer edge,
+/// [`crate::styles::standard_item::selection_radius`].)
 ///
 /// The header's gap stays the recipe's: Breeze's 6 px layout spacing between
 /// its four arrows would take the month title below a target's width at the
 /// Touch density, where the arrows are 44 px.
 pub fn breeze_calendar_style_for(tokens: &InputTokens) -> RecipeCalendarStyle {
     RecipeCalendarStyle::new(CalendarRecipe {
-        // `[derived]` The selection's outer radius: 4.5 stroked, 5 outside.
+        // `[derived]` The frame radius.
         cell_radius: BREEZE_CONTROL_RADIUS,
         // `[derived]` A month or a year is selected as a day is.
         zoom_cell_radius: BREEZE_CONTROL_RADIUS,

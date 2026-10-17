@@ -6,7 +6,8 @@
 //! A row at rest paints nothing. Its selection is a rounded rectangle 2 px
 //! inside the row's leading and trailing edges and 1 px inside its top and
 //! bottom, the item margins, stroked with a 1 px pen on that rectangle inset
-//! by half the pen at radius 4.5:
+//! by half the pen at radius 5, the frame radius itself
+//! ([`selection_radius`]):
 //!
 //! - **selected:** filled and outlined in the highlight, the row's label,
 //!   subtitle and chevron in the text on it
@@ -58,12 +59,12 @@ use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_kde_scheme::KdeColor;
 use teksilo_kde_scheme::math::hsv_lighter;
-use teksilo_tokens::{Color, CornerRadius, InputTokens, TextRole, TypographyTokens};
+use teksilo_tokens::{Color, CornerRadius, InputTokens, ShapeTokens, TextRole, TypographyTokens};
 use teksilo_widgets::styles::{RecipeStandardItemStyle, StandardItemRecipe};
 
 use crate::geometry::SMALL_ICON_SIZE;
 use crate::shape::{BREEZE_FOCUS_RING_WIDTH, BREEZE_STROKED_FRAME_RADIUS};
-use crate::styles::chrome::{frame_radius, paint_focus_frame};
+use crate::styles::chrome::paint_focus_frame;
 use crate::styles::metrics::{
     BreezeRowMetrics, ROW_HOVER_OUTLINE_ALPHA, ROW_SELECTED_HOVER_LIGHTER, breeze_row_metrics_for,
 };
@@ -369,6 +370,21 @@ pub fn selection_rect(bounds: Rect, inset_horizontal: f32, inset_vertical: f32) 
     )
 }
 
+/// `[measured-qt]` The radius a row's selection is stroked and filled at:
+/// the control radius, 5 for Breeze, not the 4.5 of a stroked control frame.
+///
+/// The specification gives 4.5, the frame radius less half the pen, as for
+/// the push button; Plasma 6.8's painted rows say otherwise. Their corner
+/// pixels (`item_view_row.selected` and `.hover` in the golden pixel
+/// samples, `tests/breeze_reference.rs`) fit a radius of 5 on the stroked
+/// rectangle to within 23 levels at every pixel, where 4.5 leaves up to 75:
+/// at 4.5 the pixel where the arc crosses the diagonal is 0.58 covered,
+/// where Plasma covers 0.22 of it. The push button's corners, painted by
+/// the same painter, fit 4.5.
+pub fn selection_radius(shape: &ShapeTokens) -> f32 {
+    shape.radius_control.max(0.0)
+}
+
 /// The selection layer of a Breeze row, painted behind the row's content.
 ///
 /// A leaf rather than a composition: a virtualized list realizes and
@@ -437,7 +453,7 @@ impl Widget for BreezeRowSelection {
             (area.width - pen).max(0.0),
             (area.height - pen).max(0.0),
         );
-        let corner = CornerRadius::uniform(frame_radius(&theme.shape));
+        let corner = CornerRadius::uniform(selection_radius(&theme.shape));
         if let Some(fill) = paint.fill
             && fill.a() > 0.0
         {

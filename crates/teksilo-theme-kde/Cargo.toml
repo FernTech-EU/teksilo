@@ -14,12 +14,14 @@ description = "KDE Plasma theme preset for Teksilo: the Breeze design language a
 documentation = "https://docs.rs/teksilo-theme-kde"
 keywords = ["kde", "plasma", "breeze", "theme", "gui"]
 categories = ["gui"]
-# `tests/contrast.rs`, `tests/mount.rs` and `tests/preset_metrics.rs` read
-# the golden vectors under `tools/kde_golden` (the Oxygen schemes, Plasma's
-# painted pixels and its control sizes), and `tests/density_gaps.rs` reads
+# `tests/breeze_reference.rs`, `tests/contrast.rs`, `tests/mount.rs` and
+# `tests/preset_metrics.rs` read the golden vectors under `tools/kde_golden`
+# (Plasma's painted pixels, the Oxygen schemes and its control sizes), and
+# `tests/density_gaps.rs` reads
 # `engineering/docs/density-projection-gaps.md`; left in, they would not
 # compile from the package and `cargo test` there would fail.
 exclude = [
+    "tests/breeze_reference.rs",
     "tests/contrast.rs",
     "tests/density_gaps.rs",
     "tests/mount.rs",
@@ -88,6 +90,13 @@ teksilo-target-conformance = { path = "../teksilo-target-conformance" }
 # Neither crate depends on this one, so this is acyclic.
 teksilo-app = { workspace = true }
 teksilo-platform = { workspace = true }
+# `tests/breeze_reference.rs` renders the styles through the production wgpu
+# renderer, with the text engine and the glyph atlas the previewer's
+# snapshots use, and compares the pixels with Plasma's.
+teksilo-render = { workspace = true }
+teksilo-text = { workspace = true }
+wgpu = { workspace = true }
+pollster = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true

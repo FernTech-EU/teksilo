@@ -12233,6 +12233,7 @@ dependencies = [
 name = "teksilo-theme-kde"
 version = "0.19.0"
 dependencies = [
+ "pollster 1.0.1",
  "proptest",
  "serde_json",
  "sha2 0.10.9",
@@ -12243,11 +12244,13 @@ dependencies = [
  "teksilo-i18n",
  "teksilo-kde-scheme",
  "teksilo-platform",
+ "teksilo-render",
  "teksilo-target-conformance",
  "teksilo-text",
  "teksilo-tokens",
  "teksilo-widgets",
  "thiserror 2.0.21",
+ "wgpu",
 ]
 
 [[package]]

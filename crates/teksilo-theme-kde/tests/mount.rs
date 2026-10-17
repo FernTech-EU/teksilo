@@ -1053,21 +1053,24 @@ fn a_checked_box_is_washed_in_the_highlight_and_marked_in_the_text() {
         );
         let frame = rerender(&mut tree);
         let shapes = box_shapes(&frame);
-        let face = sample(scheme, "check_box.off", 8, 8);
-        let wash = shapes
-            .iter()
-            .find(|p| p.stroke == 0.0 && p.color[3] == 77)
-            .unwrap_or_else(|| panic!("{scheme}: no wash in {shapes:?}"));
+        // The wash is painted composited over the face, as Plasma paints
+        // it: one opaque fill.
+        let fills: Vec<_> = shapes.iter().filter(|p| p.stroke == 0.0).collect();
+        assert_eq!(fills.len(), 1, "{scheme}: {shapes:?}");
         assert!(
-            near(over(wash.color, face), sample(scheme, "check_box.on", 8, 8)),
+            near(fills[0].color, sample(scheme, "check_box.on", 8, 8)),
             "{scheme}: {:?}",
-            over(wash.color, face)
+            fills[0].color
         );
-        assert!(
+        // The outline is laid twice.
+        let highlight = sample(scheme, "check_box.on", 2, 8);
+        assert_eq!(
             shapes
                 .iter()
-                .any(|p| p.stroke > 0.0 && p.color == sample(scheme, "check_box.on", 2, 8)),
-            "{scheme}: no highlight outline"
+                .filter(|p| p.stroke > 0.0 && p.color == highlight)
+                .count(),
+            2,
+            "{scheme}: {shapes:?}"
         );
         let mark = frame
             .paths
@@ -1249,20 +1252,24 @@ fn a_radio_button_is_breezes_disc_and_dot() {
         );
         let frame = rerender(&mut tree);
         let shapes = box_shapes(&frame);
-        let face = sample(scheme, "radio_button.off", 10, 10);
-        let wash = shapes
-            .iter()
-            .find(|p| p.stroke == 0.0 && p.color[3] == 77)
-            .unwrap_or_else(|| panic!("{scheme}: no wash"));
+        let fills: Vec<_> = shapes.iter().filter(|p| p.stroke == 0.0).collect();
+        assert_eq!(
+            fills.len(),
+            1,
+            "{scheme}: the wash over the face is one fill"
+        );
         assert!(near(
-            over(wash.color, face),
+            fills[0].color,
             sample(scheme, "radio_button.on", 5, 10)
         ));
-        assert!(
+        let highlight = sample(scheme, "radio_button.on", 2, 10);
+        assert_eq!(
             shapes
                 .iter()
-                .any(|p| p.stroke > 0.0 && p.color == sample(scheme, "radio_button.on", 2, 10)),
-            "{scheme}: no highlight outline"
+                .filter(|p| p.stroke > 0.0 && p.color == highlight)
+                .count(),
+            2,
+            "{scheme}: the highlight outline, laid twice"
         );
         let dot = painted(&frame)
             .into_iter()
@@ -1586,26 +1593,28 @@ fn disabled_indicators_paint_plasmas_disabled_colours() {
         );
         let frame = rerender(&mut tree);
         let shapes = box_shapes(&frame);
-        let face = shapes
+        // The disabled highlight's wash over the disabled face, painted as
+        // one fill.
+        let fill = shapes
             .iter()
-            .find(|p| p.stroke == 0.0 && p.color[3] == 255)
-            .unwrap_or_else(|| panic!("{scheme}: no face in {shapes:?}"));
-        assert_eq!(face.color, rgba8_of(c.button), "{scheme}");
-        let wash = shapes
-            .iter()
-            .find(|p| p.stroke == 0.0 && p.color[3] == 77)
-            .unwrap_or_else(|| panic!("{scheme}: no wash in {shapes:?}"));
+            .find(|p| p.stroke == 0.0)
+            .unwrap_or_else(|| panic!("{scheme}: no fill in {shapes:?}"));
         assert!(
-            near(over(wash.color, face.color), sample(scheme, id, 4, 12)),
+            near(fill.color, sample(scheme, id, 4, 12)),
             "{scheme}: {:?} against {:?}",
-            over(wash.color, face.color),
+            fill.color,
             sample(scheme, id, 4, 12)
         );
-        let outline = shapes
-            .iter()
-            .find(|p| p.stroke > 0.0)
-            .unwrap_or_else(|| panic!("{scheme}: no outline"));
-        assert_eq!(outline.color, highlight, "{scheme}");
+        assert!(
+            near(
+                over(rgba8_of(c.highlight.with_alpha(0.3)), rgba8_of(c.button)),
+                fill.color
+            ),
+            "{scheme}: the wash over the disabled face"
+        );
+        let outlines: Vec<_> = shapes.iter().filter(|p| p.stroke > 0.0).collect();
+        assert_eq!(outlines.len(), 2, "{scheme}: the outline, laid twice");
+        assert!(outlines.iter().all(|p| p.color == highlight), "{scheme}");
         let mark = frame
             .paths
             .iter()
@@ -1621,7 +1630,7 @@ fn disabled_indicators_paint_plasmas_disabled_colours() {
         let frame = rerender(&mut tree);
         assert_eq!(
             box_shapes(&frame).iter().filter(|p| p.stroke > 0.0).count(),
-            1,
+            2,
             "{scheme}: no hover ring on a disabled box"
         );
 
@@ -1634,18 +1643,14 @@ fn disabled_indicators_paint_plasmas_disabled_colours() {
         );
         let frame = rerender(&mut tree);
         let shapes = box_shapes(&frame);
-        let face = shapes
+        let fill = shapes
             .iter()
-            .find(|p| p.stroke == 0.0 && p.color[3] == 255)
-            .unwrap_or_else(|| panic!("{scheme}: no disc face in {shapes:?}"));
-        let wash = shapes
-            .iter()
-            .find(|p| p.stroke == 0.0 && p.color[3] == 77)
-            .unwrap_or_else(|| panic!("{scheme}: no disc wash"));
+            .find(|p| p.stroke == 0.0)
+            .unwrap_or_else(|| panic!("{scheme}: no disc fill in {shapes:?}"));
         assert!(
-            near(over(wash.color, face.color), sample(scheme, id, 4, 10)),
+            near(fill.color, sample(scheme, id, 4, 10)),
             "{scheme}: {:?} against {:?}",
-            over(wash.color, face.color),
+            fill.color,
             sample(scheme, id, 4, 10)
         );
         assert!(
@@ -3352,7 +3357,7 @@ fn a_selected_row_is_the_highlight_with_on_accent_glyphs() {
                 .find(|p| p.stroke == 0.0 && p.color == accent)
                 .unwrap_or_else(|| panic!("{scheme}: no highlight in {all:?}"));
             assert_eq!(fill.screen, row_selection(b), "{scheme}: fills the row");
-            assert_eq!(fill.radius, 4.5);
+            assert_eq!(fill.radius, 5.0, "{scheme}: Plasma's measured radius");
             assert!(
                 all.iter()
                     .any(|p| p.stroke == 1.0 && p.color == accent && p.screen == fill.screen),

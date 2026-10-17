@@ -167,8 +167,9 @@ by crate for clarity, not because crates version independently.
   and `Destructive` variants filled with the accent so their label stays
   readable. All three grow to the density's target size. A `Checkbox` and a
   `RadioButton` are Breeze's: a 15 px box or disc in the button colour,
-  outlined, and when checked outlined in the highlight, washed with it and
-  marked in the text colour, with the label 24 px from the leading edge;
+  outlined, and when checked outlined in the highlight, washed with it in
+  the colour Plasma paints and marked in the text colour with square-ended
+  strokes, with the label 24 px from the leading edge;
   their row is 24 px rather than Breeze's 22, so it stays a WCAG target
   size. A `Toggle` is the switch KDE applications show, an 18 px handle on
   a 36 px track, moving and changing colour on the curves KDE uses. A
@@ -197,7 +198,8 @@ by crate for clarity, not because crates version independently.
   `StandardListItem` or `StandardTreeItem` row is Breeze's, 24 px at
   Plasma's default font, 26 px with an icon or a check box and 42 px with a
   subtitle, growing to the density's target size: a selected row is the
-  highlight inside the row's margins, its label in the text on it, a
+  highlight inside the row's margins, rounded at 5 px as Plasma rounds it,
+  its label in the text on it, a
   hovered one a pale wash of the highlight, and a selection mutes only when
   the window goes inactive. A `TableView` or `TreeTableView` row is 24 px,
   rather than Breeze's 23, so it stays a WCAG target size, under a 30 px

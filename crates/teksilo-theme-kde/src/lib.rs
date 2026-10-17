@@ -256,7 +256,18 @@
 //!   and a permanent bar its 1 px separator in whatever thickness it is
 //!   given. The handle takes the hover colour while the pointer is over the
 //!   bar, not only over the handle, and is filled in the lifted thumb
-//!   colours (D9, [`styles::scroll_bar`]).
+//!   colours (D9). It runs to the bar's ends, where Breeze keeps 3 px free
+//!   at each end of a bar without buttons: the widget gives its style no say
+//!   over the track ([`styles::scroll_bar`]).
+//! - **A translucent paint over what lies behind a control is not Plasma's
+//!   shade.** The renderer composites in linear light and Qt's painter in
+//!   sRGB, so the push button's 1 px shadow, the scroll bar's separator, a
+//!   hovered row's outline, a highlighted menu row's wash and every other
+//!   paint laid at an alpha over a backdrop the style does not paint come
+//!   out a different shade of the same colour (Breeze Light's button shadow
+//!   is #e1e2e3 where Plasma's is #d1d2d3), and antialiased edges blend the
+//!   same way. Where the style paints the backdrop itself, as a check box's
+//!   wash over its face, it paints Plasma's composite.
 //! - **A list row does not mark the current row apart from the selected
 //!   one.** Keyboard focus on a focused view adds the focus frame around the
 //!   selected row; Breeze outlines an unselected current row instead, which

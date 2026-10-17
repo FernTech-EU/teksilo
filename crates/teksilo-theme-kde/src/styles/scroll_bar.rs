@@ -33,6 +33,11 @@
 //! - **The hover colour follows the bar, not the handle.** Breeze turns the
 //!   handle to the hover colour when the pointer is over the handle itself;
 //!   the style is told only that the pointer is over the bar.
+//! - **The handle runs to the bar's ends.** Breeze keeps 3 px free at each
+//!   end of a bar without buttons and runs the handle over what is left;
+//!   the widget hit-tests its thumb over the whole bar and gives its style
+//!   no say over the track, so the handle painted here starts at the top of
+//!   the bar, where a press finds it.
 //! - **The bar is as thick as the widget lays it out**, not Breeze's 21 px:
 //!   the handle keeps its 8 px width and the separator its 1 px in whatever
 //!   thickness the bar is given (see the crate's known limitations).
