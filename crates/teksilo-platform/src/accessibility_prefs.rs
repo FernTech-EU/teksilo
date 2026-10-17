@@ -12,7 +12,7 @@
 //! | Preference       | Linux (XDG portal / gsettings) | macOS (NSWorkspace)     | Windows (SystemParametersInfo / UISettings) |
 //! |------------------|-------------------------------|-------------------------|---------------------------------------------|
 //! | High contrast    | portal `contrast` key + GTK theme check | `accessibilityDisplayShouldIncreaseContrast` | `SPI_GETHIGHCONTRAST` |
-//! | Reduced motion   | portal `reduced-motion` key + `enable-animations` | `accessibilityDisplayShouldReduceMotion` | `UISettings.AnimationsEnabled` |
+//! | Reduced motion   | portal `reduced-motion` key + KDE `AnimationDurationFactor` + `enable-animations` | `accessibilityDisplayShouldReduceMotion` | `UISettings.AnimationsEnabled` |
 //! | Text scale       | gsettings `text-scaling-factor` | N/A (uses DPI scaling) | `UISettings.TextScaleFactor` |
 //! | Screen reader    | AT-SPI `org.a11y.Status.ScreenReaderEnabled` | `NSWorkspace.isVoiceOverEnabled` | `SPI_GETSCREENREADER` |
 //!
@@ -81,8 +81,10 @@ impl AccessibilityPreferences {
 #[cfg(target_os = "linux")]
 mod platform {
     use super::{AccessibilityPreferences, ScreenReaderState};
-    use crate::linux_helpers::read_gsettings;
+    use crate::linux_helpers::{Desktop, detect_desktop, read_gsettings};
     use crate::linux_portal::{read_bool_property, read_portal_u32};
+    use crate::os_theme::kde;
+    use teksilo_kde_scheme::KdeConfigLocations;
 
     pub(super) fn query() -> AccessibilityPreferences {
         let mut prefs = AccessibilityPreferences::default();
@@ -92,9 +94,11 @@ mod platform {
         if let Some(v) = read_portal_u32("org.freedesktop.appearance", "contrast") {
             prefs.high_contrast = v == 1;
         }
-        if let Some(v) = read_portal_u32("org.freedesktop.appearance", "reduced-motion") {
-            prefs.reduced_motion = v == 1;
-        }
+        prefs.reduced_motion = reduced_motion(
+            read_portal_u32("org.freedesktop.appearance", "reduced-motion"),
+            kde_reduced_motion,
+            || read_gsettings("org.gnome.desktop.interface", "enable-animations"),
+        );
 
         // High contrast fallback: check GTK theme name for "HighContrast"
         if !prefs.high_contrast
@@ -110,13 +114,6 @@ mod platform {
             prefs.high_contrast = val == "true";
         }
 
-        // Reduced motion fallback: GNOME enable-animations (false → reduced motion)
-        if !prefs.reduced_motion
-            && let Some(val) = read_gsettings("org.gnome.desktop.interface", "enable-animations")
-        {
-            prefs.reduced_motion = val == "false";
-        }
-
         // Text scaling (not in the portal, must use gsettings)
         if let Some(val) = read_gsettings("org.gnome.desktop.interface", "text-scaling-factor")
             && let Ok(scale) = val.parse::<f64>()
@@ -127,6 +124,36 @@ mod platform {
         prefs.screen_reader = query_screen_reader();
 
         prefs
+    }
+
+    /// Whether reduced motion is asked for. Any one source asking is
+    /// enough, read in this order and each read only while no earlier one
+    /// has asked:
+    ///
+    /// 1. the desktop portal's `reduced-motion`, when it is 1;
+    /// 2. on a KDE session, `kdeglobals [KDE] AnimationDurationFactor` of
+    ///    exactly 0, the value KDE's portal reports as reduced motion
+    ///    (`kde`, `None` when the session is not KDE or its `kdeglobals`
+    ///    cannot be read);
+    /// 3. GNOME's `enable-animations`, when it is `false`.
+    ///
+    /// A source that answers "no", or does not answer, leaves the next one
+    /// to decide.
+    pub(super) fn reduced_motion(
+        portal: Option<u32>,
+        kde: impl FnOnce() -> Option<bool>,
+        enable_animations: impl FnOnce() -> Option<String>,
+    ) -> bool {
+        portal == Some(1) || kde() == Some(true) || enable_animations().as_deref() == Some("false")
+    }
+
+    /// The KDE desktop's reduced-motion answer, on a KDE session only.
+    fn kde_reduced_motion() -> Option<bool> {
+        if !matches!(detect_desktop(), Desktop::Kde) {
+            return None;
+        }
+        let locations = KdeConfigLocations::from_env(kde::process_env);
+        kde::kde_prefers_reduced_motion(&locations, &kde::process_env, kde::read_file)
     }
 
     /// The AT-SPI status object's `ScreenReaderEnabled` flag, read off the
@@ -344,6 +371,41 @@ mod tests {
             prefs.screen_reader,
             ScreenReaderState::Unknown | ScreenReaderState::Inactive | ScreenReaderState::Active
         ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reduced_motion_is_asked_for_by_any_one_source() {
+        use platform::reduced_motion;
+        // No KDE session, KDE asking, KDE not asking; GNOME not answering.
+        let no_kde = || None;
+        let yes = || Some(true);
+        let kde_no = || Some(false);
+        let no_gnome = || None;
+        let animations = |value: &'static str| move || Some(value.to_owned());
+
+        // The portal alone.
+        assert!(reduced_motion(Some(1), no_kde, no_gnome));
+        assert!(!reduced_motion(Some(0), no_kde, no_gnome));
+        assert!(!reduced_motion(None, no_kde, no_gnome));
+        // A KDE animation factor of 0, whatever the portal said.
+        assert!(reduced_motion(None, yes, no_gnome));
+        assert!(reduced_motion(Some(0), yes, animations("true")));
+        assert!(!reduced_motion(None, kde_no, no_gnome));
+        // GNOME's switch, when nothing earlier asked.
+        assert!(reduced_motion(None, kde_no, animations("false")));
+        assert!(reduced_motion(Some(0), no_kde, animations("false")));
+        assert!(!reduced_motion(None, kde_no, animations("true")));
+
+        // A source that already asked stops the later reads.
+        assert!(reduced_motion(
+            Some(1),
+            || panic!("KDE is not read once the portal asked"),
+            || panic!("GNOME is not read once the portal asked"),
+        ));
+        assert!(reduced_motion(None, yes, || panic!(
+            "GNOME is not read once KDE asked"
+        )));
     }
 
     #[test]

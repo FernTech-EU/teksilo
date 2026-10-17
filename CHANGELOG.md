@@ -129,6 +129,17 @@ by crate for clarity, not because crates version independently.
   `KdeDesktop` applies the user's chosen accent to the scheme it reads in
   their place, which KDE itself does not.
 
+#### Platform
+
+- **`os_theme::query_native_desktop` and `NativeDesktop`.** What the desktop
+  reports for `ThemeMode::Native`, in one value: its colour report (`os`,
+  what `query_os_theme_colors` returns) and, on a KDE Plasma session, the KDE
+  desktop itself (`kde`, a `teksilo_kde_scheme::KdeDesktop`: the colour
+  scheme in effect, the accent the user chose, the five desktop fonts, the
+  animation speed, the widget style and the Breeze style settings).
+  `NativeDesktop::new` builds one from a colour report alone, and it
+  implements `PartialEq`, so a caller can tell whether the desktop changed.
+
 ### Changed
 
 #### Theming
@@ -157,6 +168,15 @@ by crate for clarity, not because crates version independently.
   up to 25 seconds. The settings are now also read on systems without
   `busctl` installed, and from portals older than version 2 of the settings
   interface.
+- **A Linux session is KDE Plasma only when it says so.**
+  **Behaviour change:** a session counts as KDE when `KDE` is one of the
+  colon-separated names of `XDG_CURRENT_DESKTOP` (ignoring case) or when
+  `KDE_FULL_SESSION` is `true`, the rule KDE itself uses, and this is now
+  checked before GNOME. A desktop name that only contains KDE, such as
+  `X-KDE-Other`, is no longer KDE, so under `ThemeMode::Native` it is read
+  like any other desktop and its `kdeglobals` is no longer read. A session
+  that lists both GNOME and KDE, or sets `KDE_FULL_SESSION=true` under GNOME,
+  is now KDE.
 
 ### Removed
 
@@ -234,6 +254,40 @@ by crate for clarity, not because crates version independently.
   button's fill and a button's focus border now take the high-contrast
   palette, as `Toggle`, `Checkbox` and the other accent controls already did;
   before, they kept the normal colours.
+
+#### Platform
+
+- **The native theme on KDE Plasma reads all of KDE's configuration.**
+  **Behaviour change:** under `ThemeMode::Native` on a KDE Plasma session the
+  colours now come from every `kdeglobals` file KDE reads, the system files
+  of `XDG_CONFIG_DIRS` and the session's `kdedefaults` included, and a
+  setting an administrator locked with `[$i]` is no longer overridden by the
+  user's own file. When `kdeglobals` holds no colours of its own, they come
+  from the look-and-feel package, else the colour scheme it names, else
+  Breeze Light, as in KDE. Before, only the user's own `kdeglobals` was read,
+  so a profile whose colour scheme is set only in `kdedefaults` or
+  `/etc/xdg` got the generic theme.
+- **The native theme on KDE Plasma takes the accent colour the user chose.**
+  **Behaviour change:** the accent is now KDE's selection colour, the one KDE
+  applications and the desktop portal report, instead of the window's focus
+  decoration, and on a profile whose colour groups were never written the
+  `AccentColor` the user picked is applied to the colour scheme. A
+  transparent or unreadable `AccentColor` is ignored, and the portal's accent
+  colour is used only when no `kdeglobals` can be read. The content view,
+  link, error, warning, success and focus colours are now read from the
+  scheme too.
+- **Light or dark on KDE Plasma follows the colours, not the scheme's name.**
+  **Behaviour change:** on a KDE Plasma session the `ThemeMode::Native`
+  theme is dark when the colour scheme's window background is dark, the rule
+  KDE reports to applications, and `query_color_scheme` answers by the same
+  rule when the desktop portal does not answer. Before, a scheme counted as
+  dark when its name contained "dark", so a scheme with a dark window and
+  another name, such as Breeze Twilight, was taken for light.
+- **Reduced motion follows KDE's animation speed.** **Behaviour change:** on
+  a KDE Plasma session, an animation speed of instant (`[KDE]
+  AnimationDurationFactor=0` in `kdeglobals`) now turns on
+  `AccessibilityPreferences::reduced_motion`, even when the desktop portal
+  does not report it.
 
 ## [0.19.0] - 2026-10-16
 

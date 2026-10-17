@@ -51,9 +51,11 @@ pub struct KdeConfigLocations {
 }
 
 /// Whether the environment describes a KDE session: `XDG_CURRENT_DESKTOP`,
-/// split at `:`, contains `KDE`, or `KDE_FULL_SESSION` is `true`.
+/// split at `:`, contains `KDE` (ignoring ASCII case), or `KDE_FULL_SESSION`
+/// is `true`.
 pub fn is_kde_session(get: impl Fn(&str) -> Option<String>) -> bool {
-    let desktop = get("XDG_CURRENT_DESKTOP").is_some_and(|v| v.split(':').any(|d| d == "KDE"));
+    let desktop = get("XDG_CURRENT_DESKTOP")
+        .is_some_and(|v| v.split(':').any(|d| d.eq_ignore_ascii_case("KDE")));
     desktop || get("KDE_FULL_SESSION").as_deref() == Some("true")
 }
 

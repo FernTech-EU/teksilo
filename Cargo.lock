@@ -12034,6 +12034,7 @@ dependencies = [
  "teksilo-automation",
  "teksilo-canvas",
  "teksilo-core",
+ "teksilo-kde-scheme",
  "teksilo-render",
  "teksilo-tokens",
  "thiserror 2.0.21",

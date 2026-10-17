@@ -6,21 +6,74 @@
 //!
 //! Supports GNOME, KDE, and Cinnamon on Linux. macOS and Windows return
 //! only the light/dark preference (via winit), with no color reading.
+//!
+//! On a KDE Plasma session ([`teksilo_kde_scheme::is_kde_session`]) the
+//! colours are KDE's own: the `kdeglobals` cascade, with its system layers
+//! and `kdedefaults`, and the colour scheme in effect with the user's
+//! accent, read through `teksilo-kde-scheme`. [`query_native_desktop`]
+//! also hands over the KDE desktop's settings (fonts, animation speed,
+//! widget style, Breeze style settings) as a [`KdeDesktop`].
 
+#[cfg(target_os = "linux")]
+pub(crate) mod kde;
+
+use teksilo_kde_scheme::KdeDesktop;
 #[cfg(target_os = "linux")]
 use teksilo_tokens::Color;
 use teksilo_tokens::{ColorSchemePreference, OsThemeColors};
 
+/// What the desktop reports for `ThemeMode::Native`: its colours, and on a
+/// KDE Plasma session its desktop settings.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct NativeDesktop {
+    /// The desktop's colour report.
+    pub os: OsThemeColors,
+    /// The KDE desktop's colour scheme and settings, on a KDE session whose
+    /// `kdeglobals` could be read; `None` elsewhere.
+    ///
+    /// When present, `os` is its scheme's colour report
+    /// ([`KdeColorScheme::os_theme_colors`](teksilo_kde_scheme::KdeColorScheme::os_theme_colors)).
+    pub kde: Option<KdeDesktop>,
+}
+
+impl NativeDesktop {
+    /// A desktop reporting `os` and no KDE settings.
+    pub fn new(os: OsThemeColors) -> Self {
+        NativeDesktop { os, kde: None }
+    }
+}
+
 /// Query only the OS light/dark preference (lightweight).
 /// Used by `ThemeMode::FollowSystem`.
+///
+/// On Linux the desktop portal is asked first. When it does not answer, a
+/// KDE session answers from its colour scheme (dark when the window
+/// background is dark, the rule KDE reports to applications), and GNOME and
+/// Cinnamon from their GTK theme's name.
 pub fn query_color_scheme() -> ColorSchemePreference {
     platform::query_color_scheme()
 }
 
+/// Query the desktop's colours and, on a KDE Plasma session, its settings.
+/// Used by `ThemeMode::Native`.
+///
+/// On a KDE session the colours are the KDE colour scheme's
+/// ([`KdeColorScheme::os_theme_colors`](teksilo_kde_scheme::KdeColorScheme::os_theme_colors)),
+/// accent and light or dark preference included; only when no
+/// `kdeglobals` file can be read does the report fall back to the desktop
+/// portal's preference and accent colour, with no [`KdeDesktop`]. Elsewhere
+/// the report is the one [`query_os_theme_colors`] has always given.
+pub fn query_native_desktop() -> NativeDesktop {
+    platform::query_native_desktop()
+}
+
 /// Query full OS theme colors from desktop config files.
 /// Used by `ThemeMode::Native`.
+///
+/// The colour report of [`query_native_desktop`].
 pub fn query_os_theme_colors() -> OsThemeColors {
-    platform::query_os_theme_colors()
+    query_native_desktop().os
 }
 
 // ── Linux ───────────────────────────────────────────────────────────────────
@@ -29,6 +82,7 @@ mod platform {
     use super::*;
     use crate::linux_helpers::{Desktop, detect_desktop, read_gsettings};
     use crate::linux_portal::{read_portal_rgb, read_portal_u32};
+    use teksilo_kde_scheme::KdeConfigLocations;
 
     pub(super) fn query_color_scheme() -> ColorSchemePreference {
         // XDG portal: 0 = no preference, 1 = dark, 2 = light.
@@ -51,20 +105,17 @@ mod platform {
         // dark-mode KDE users to a light theme).
         match detect_desktop() {
             Desktop::Kde => {
-                // KDE stores the active scheme in `kdeglobals` —
-                // `[General] ColorScheme=BreezeDark` for dark,
-                // `BreezeLight` (or any name without "dark") for
-                // light. Reading the file is cheap; we already
-                // do it under `ThemeMode::Native` for the full
-                // colour palette.
-                let path = dirs_kdeglobals();
-                if let Ok(content) = std::fs::read_to_string(&path)
-                    && let Some(scheme) = ini_value(&content, "General", "ColorScheme")
+                // The scheme in effect decides, by its window background,
+                // as KDE reports it to applications and to the portal.
+                let locations = KdeConfigLocations::from_env(kde::process_env);
+                if let Some(dark) =
+                    kde::kde_prefers_dark(&locations, &kde::process_env, kde::read_file)
                 {
-                    if scheme.to_lowercase().contains("dark") {
-                        return ColorSchemePreference::Dark;
-                    }
-                    return ColorSchemePreference::Light;
+                    return if dark {
+                        ColorSchemePreference::Dark
+                    } else {
+                        ColorSchemePreference::Light
+                    };
                 }
             }
             Desktop::Cinnamon => {
@@ -88,25 +139,41 @@ mod platform {
         ColorSchemePreference::NoPreference
     }
 
-    pub(super) fn query_os_theme_colors() -> OsThemeColors {
-        let mut colors = OsThemeColors::new(query_color_scheme());
-
+    pub(super) fn query_native_desktop() -> NativeDesktop {
         match detect_desktop() {
-            Desktop::Kde => query_kde(&mut colors),
-            Desktop::Cinnamon => query_cinnamon(&mut colors),
-            Desktop::Gnome | Desktop::Other(_) => query_gnome(&mut colors),
+            Desktop::Kde => {
+                let locations = KdeConfigLocations::from_env(kde::process_env);
+                let desktop = kde::discover_kde(&locations, &kde::process_env, kde::read_file);
+                kde::native_desktop(desktop, || {
+                    let mut colors = OsThemeColors::new(query_color_scheme());
+                    colors.accent = portal_accent();
+                    colors
+                })
+            }
+            Desktop::Cinnamon => {
+                let mut colors = OsThemeColors::new(query_color_scheme());
+                query_cinnamon(&mut colors);
+                NativeDesktop::new(colors)
+            }
+            Desktop::Gnome | Desktop::Other(_) => {
+                let mut colors = OsThemeColors::new(query_color_scheme());
+                query_gnome(&mut colors);
+                NativeDesktop::new(colors)
+            }
         }
+    }
 
-        colors
+    /// The desktop portal's accent colour (RGB doubles).
+    fn portal_accent() -> Option<Color> {
+        read_portal_rgb("org.freedesktop.appearance", "accent-color")
+            .map(|(r, g, b)| Color::from_rgb(r as f32, g as f32, b as f32))
     }
 
     // ── GNOME ────────────────────────────────────────────────────────────
 
     fn query_gnome(colors: &mut OsThemeColors) {
         // Accent color from XDG portal (RGB doubles)
-        if let Some((r, g, b)) = read_portal_rgb("org.freedesktop.appearance", "accent-color") {
-            colors.accent = Some(Color::from_rgb(r as f32, g as f32, b as f32));
-        }
+        colors.accent = portal_accent();
 
         // Fallback: GNOME 47 named accent
         if colors.accent.is_none()
@@ -136,93 +203,6 @@ mod platform {
             _ => return None,
         };
         Some(Color::from_hex(hex))
-    }
-
-    // ── KDE ──────────────────────────────────────────────────────────────
-
-    fn query_kde(colors: &mut OsThemeColors) {
-        let path = dirs_kdeglobals();
-        let content = match std::fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-
-        // Infer dark/light from color scheme name if portal didn't provide it
-        if colors.color_scheme == ColorSchemePreference::NoPreference
-            && let Some(scheme) = ini_value(&content, "General", "ColorScheme")
-        {
-            if scheme.to_lowercase().contains("dark") {
-                colors.color_scheme = ColorSchemePreference::Dark;
-            } else {
-                colors.color_scheme = ColorSchemePreference::Light;
-            }
-        }
-
-        // Window colors
-        colors.window_bg = ini_color(&content, "Colors:Window", "BackgroundNormal");
-        colors.window_fg = ini_color(&content, "Colors:Window", "ForegroundNormal");
-        colors.accent = ini_color(&content, "Colors:Window", "DecorationFocus");
-
-        // Button colors
-        colors.button_bg = ini_color(&content, "Colors:Button", "BackgroundNormal");
-        colors.button_fg = ini_color(&content, "Colors:Button", "ForegroundNormal");
-
-        // Selection colors
-        colors.selection_bg = ini_color(&content, "Colors:Selection", "BackgroundNormal");
-        colors.selection_fg = ini_color(&content, "Colors:Selection", "ForegroundNormal");
-
-        // Tooltip colors
-        colors.tooltip_bg = ini_color(&content, "Colors:Tooltip", "BackgroundNormal");
-        colors.tooltip_fg = ini_color(&content, "Colors:Tooltip", "ForegroundNormal");
-    }
-
-    fn dirs_kdeglobals() -> std::path::PathBuf {
-        if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
-            std::path::PathBuf::from(config_home).join("kdeglobals")
-        } else if let Ok(home) = std::env::var("HOME") {
-            std::path::PathBuf::from(home).join(".config/kdeglobals")
-        } else {
-            std::path::PathBuf::from("/dev/null")
-        }
-    }
-
-    /// Read a value from a simple INI file (section + key).
-    fn ini_value<'a>(content: &'a str, section: &str, key: &str) -> Option<&'a str> {
-        let section_header = format!("[{}]", section);
-        let mut in_section = false;
-
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with('[') {
-                in_section = trimmed == section_header;
-                continue;
-            }
-            if in_section
-                && let Some((k, v)) = trimmed.split_once('=')
-                && k.trim() == key
-            {
-                return Some(v.trim());
-            }
-        }
-        None
-    }
-
-    /// Parse a KDE "R,G,B" color value (0-255 integers).
-    fn ini_color(content: &str, section: &str, key: &str) -> Option<Color> {
-        let value = ini_value(content, section, key)?;
-        let parts: Vec<&str> = value.split(',').collect();
-        if parts.len() >= 3 {
-            let r = parts[0].trim().parse::<u8>().ok()?;
-            let g = parts[1].trim().parse::<u8>().ok()?;
-            let b = parts[2].trim().parse::<u8>().ok()?;
-            Some(Color::from_rgb(
-                r as f32 / 255.0,
-                g as f32 / 255.0,
-                b as f32 / 255.0,
-            ))
-        } else {
-            None
-        }
     }
 
     // ── Cinnamon ─────────────────────────────────────────────────────────
@@ -569,27 +549,6 @@ mod platform {
         }
 
         #[test]
-        fn kde_ini_parsing() {
-            let content = r#"
-[General]
-ColorScheme=Breeze-Dark
-
-[Colors:Window]
-BackgroundNormal=49,54,59
-ForegroundNormal=239,240,241
-DecorationFocus=61,174,233
-"#;
-            let bg = ini_color(content, "Colors:Window", "BackgroundNormal").unwrap();
-            assert!((bg.r() - 49.0 / 255.0).abs() < 0.01);
-
-            let fg = ini_color(content, "Colors:Window", "ForegroundNormal").unwrap();
-            assert!((fg.r() - 239.0 / 255.0).abs() < 0.01);
-
-            let scheme = ini_value(content, "General", "ColorScheme").unwrap();
-            assert!(scheme.contains("Dark"));
-        }
-
-        #[test]
         fn gnome_named_accent_mapping() {
             assert!(gnome_named_accent("blue").is_some());
             assert!(gnome_named_accent("teal").is_some());
@@ -632,8 +591,8 @@ mod platform {
         ColorSchemePreference::NoPreference
     }
 
-    pub(super) fn query_os_theme_colors() -> OsThemeColors {
-        OsThemeColors::new(query_color_scheme())
+    pub(super) fn query_native_desktop() -> NativeDesktop {
+        NativeDesktop::new(OsThemeColors::new(query_color_scheme()))
     }
 }
 
@@ -664,8 +623,8 @@ mod platform {
         ColorSchemePreference::NoPreference
     }
 
-    pub(super) fn query_os_theme_colors() -> OsThemeColors {
-        OsThemeColors::new(query_color_scheme())
+    pub(super) fn query_native_desktop() -> NativeDesktop {
+        NativeDesktop::new(OsThemeColors::new(query_color_scheme()))
     }
 }
 
@@ -678,7 +637,7 @@ mod platform {
         ColorSchemePreference::NoPreference
     }
 
-    pub(super) fn query_os_theme_colors() -> OsThemeColors {
-        OsThemeColors::default()
+    pub(super) fn query_native_desktop() -> NativeDesktop {
+        NativeDesktop::new(OsThemeColors::default())
     }
 }

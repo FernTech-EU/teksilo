@@ -17,6 +17,12 @@ categories = ["gui", "os", "accessibility"]
 
 [dependencies]
 teksilo-tokens = { workspace = true }
+# The KDE configuration cascade, colour schemes and desktop settings the KDE
+# reader in `os_theme/kde.rs` hands its file contents to. Pure (no I/O, no
+# environment), so it is a dependency on every target; nothing of it is
+# re-exported at the crate root, though `os_theme::NativeDesktop` carries its
+# `KdeDesktop`.
+teksilo-kde-scheme = { workspace = true }
 teksilo-core = { workspace = true }
 teksilo-canvas = { workspace = true }
 teksilo-render = { workspace = true }

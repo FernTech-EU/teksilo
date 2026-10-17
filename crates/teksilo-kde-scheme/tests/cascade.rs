@@ -348,7 +348,12 @@ fn kde_session_detection_reads_the_desktop_list_and_the_full_session_flag() {
     )])));
     assert!(is_kde_session(env(&[("KDE_FULL_SESSION", "true")])));
     assert!(!is_kde_session(env(&[("XDG_CURRENT_DESKTOP", "KDEx")])));
-    assert!(!is_kde_session(env(&[("XDG_CURRENT_DESKTOP", "kde")])));
+    assert!(is_kde_session(env(&[("XDG_CURRENT_DESKTOP", "kde")])));
+    assert!(is_kde_session(env(&[(
+        "XDG_CURRENT_DESKTOP",
+        "X-Generic:Kde"
+    )])));
+    assert!(!is_kde_session(env(&[("XDG_CURRENT_DESKTOP", "X-KDE")])));
     assert!(!is_kde_session(env(&[("KDE_FULL_SESSION", "1")])));
     assert!(!is_kde_session(env(&[])));
 }

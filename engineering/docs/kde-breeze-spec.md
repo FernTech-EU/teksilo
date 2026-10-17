@@ -422,7 +422,9 @@ copied and which are re-formatted.
 
 A session is KDE when `XDG_CURRENT_DESKTOP`, split at `:`, contains `KDE`,
 or when `KDE_FULL_SESSION` equals `true`. (The Plasma session start sets
-both, plus `KDE_SESSION_VERSION=6`.)
+both, plus `KDE_SESSION_VERSION=6`.) Teksilo compares the desktop names
+ignoring ASCII case **[derived]**: the session start writes `KDE`, and
+Teksilo's desktop detection has always ignored case.
 
 ### b.11 `[$e]` expansion
 
