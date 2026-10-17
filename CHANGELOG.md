@@ -147,6 +147,17 @@ by crate for clarity, not because crates version independently.
   contrast where they fall short. Before, only the window, selection, button
   and tooltip colours were read.
 
+#### Platform
+
+- **Reading the desktop's settings on Linux no longer starts a `busctl`
+  process.** The XDG desktop portal's colour scheme, accent colour, contrast
+  and reduced-motion settings, and the screen reader's on/off flag, are read
+  over the session bus directly. A portal or bus that does not answer now
+  holds up startup by at most a second in all, where each read used to wait
+  up to 25 seconds. The settings are now also read on systems without
+  `busctl` installed, and from portals older than version 2 of the settings
+  interface.
+
 ### Removed
 
 #### Theming

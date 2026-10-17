@@ -12,6 +12,8 @@ pub mod file_dialog;
 pub mod key_report;
 #[cfg(target_os = "linux")]
 pub(crate) mod linux_helpers;
+#[cfg(target_os = "linux")]
+pub(crate) mod linux_portal;
 #[cfg(feature = "native-menu")]
 pub mod native_menu;
 pub mod os_theme;

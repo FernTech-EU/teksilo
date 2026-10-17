@@ -210,9 +210,18 @@ libc = "0.2"
 # the CI job of the same name) fails the build if it ever forks.
 x11rb = "0.14"
 # Reporting each key to the AT-SPI registry (`key_report/atspi.rs`), which is
-# how Orca's legacy keyboard device hears keys. The same zbus, with the same
-# features, that `accesskit_unix` already links, so it adds no crate.
+# how Orca's legacy keyboard device hears keys, and reading the XDG desktop
+# portal's settings and the AT-SPI screen-reader flag (`linux_portal.rs`).
+# The same zbus, with the same features, that `accesskit_unix` already links,
+# so it adds no crate. `async-io` is the one feature needed: it is zbus's
+# executor and reactor (zbus runs nothing without one, and tokio would add a
+# runtime). `blocking-api` is not enabled: the reads drive the async API with
+# `async_io::block_on`, so the blocking proxies would be dead code.
 zbus = { version = "5.19", default-features = false, features = ["async-io"] }
+# The timer that bounds connecting to the session bus (`linux_portal.rs`),
+# which zbus's method timeout does not cover, and `block_on` for its reads.
+# The async-io zbus already links, so it adds no crate.
+async-io = "2.6"
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dev-dependencies]
 # The X keysym constants, to check `key_report`'s hand-written keysym table

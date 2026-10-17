@@ -73,15 +73,16 @@ impl AccessibilityPreferences {
     }
 }
 
-// ── Linux: XDG Desktop Portal via busctl + gsettings subprocess ─────────────
+// ── Linux: XDG Desktop Portal and AT-SPI over zbus, gsettings subprocess ───
 //
-// Uses subprocess calls (`busctl`, `gsettings`) which are present on all major
-// Linux desktops. This runs once at startup so subprocess overhead is negligible,
-// and it avoids adding zbus as a direct dependency.
+// The portal settings and the AT-SPI status flag are read over the session
+// bus (`linux_portal`), each read bounded by a timeout. The GNOME fallbacks
+// still run the `gsettings` tool.
 #[cfg(target_os = "linux")]
 mod platform {
     use super::{AccessibilityPreferences, ScreenReaderState};
-    use crate::linux_helpers::{read_dbus_bool_property, read_gsettings, read_portal_u32};
+    use crate::linux_helpers::read_gsettings;
+    use crate::linux_portal::{read_bool_property, read_portal_u32};
 
     pub(super) fn query() -> AccessibilityPreferences {
         let mut prefs = AccessibilityPreferences::default();
@@ -135,11 +136,12 @@ mod platform {
     /// tree; this is the narrower question.)
     ///
     /// Advisory: Orca sets it, and an assistive technology that never touches
-    /// the status object will not. A machine with no a11y bus at all — no
-    /// `busctl`, a sandbox with no session bus, a desktop that does not run
-    /// one — answers `Unknown`, which behaves as "no".
+    /// the status object will not. A machine with no a11y bus at all (a
+    /// sandbox with no session bus, a desktop that does not run one), or a
+    /// bus that does not answer within `linux_portal::CALL_TIMEOUT`, answers
+    /// `Unknown`, which behaves as "no".
     fn query_screen_reader() -> ScreenReaderState {
-        match read_dbus_bool_property(
+        match read_bool_property(
             "org.a11y.Bus",
             "/org/a11y/bus",
             "org.a11y.Status",

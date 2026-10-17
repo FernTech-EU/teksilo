@@ -27,9 +27,8 @@ pub fn query_os_theme_colors() -> OsThemeColors {
 #[cfg(target_os = "linux")]
 mod platform {
     use super::*;
-    use crate::linux_helpers::{
-        Desktop, detect_desktop, read_gsettings, read_portal_rgb, read_portal_u32,
-    };
+    use crate::linux_helpers::{Desktop, detect_desktop, read_gsettings};
+    use crate::linux_portal::{read_portal_rgb, read_portal_u32};
 
     pub(super) fn query_color_scheme() -> ColorSchemePreference {
         // XDG portal: 0 = no preference, 1 = dark, 2 = light.
