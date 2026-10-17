@@ -10,14 +10,18 @@
 //! `kdeglobals` ([`scheme`]), Qt's font descriptions ([`fonts`]) and the
 //! desktop settings built from all of them ([`desktop`]). [`math`] holds
 //! the colour arithmetic KDE derives its palettes with, reproduced to the
-//! byte KDE writes.
+//! byte KDE writes; [`effects`] the Disabled and Inactive state effects
+//! built on it, and [`palette`] the resolved palette of every state and set
+//! ([`KdeColorScheme::resolve`]), the light or dark decision
+//! ([`KdeColorScheme::is_dark`]) and the colour report Teksilo's native
+//! theme reads ([`KdeColorScheme::os_theme_colors`]).
 //!
 //! It does no I/O. The environment is passed in as a getter and files are
 //! passed in as text, so everything here runs the same in a test as on a
 //! desktop:
 //!
 //! ```
-//! use teksilo_kde_scheme::{KConfig, KdeColorScheme, KdeConfigLocations};
+//! use teksilo_kde_scheme::{ColorState, KConfig, KdeColorScheme, KdeConfigLocations, PaletteRole};
 //!
 //! let env = |name: &str| match name {
 //!     "HOME" => Some("/home/ada".to_owned()),
@@ -37,6 +41,11 @@
 //!
 //! let scheme = KdeColorScheme::breeze_dark();
 //! assert_eq!(scheme.contrast, 4);
+//! assert!(scheme.is_dark());
+//!
+//! let palette = scheme.resolve();
+//! let window = palette.role(ColorState::Active, PaletteRole::Window);
+//! assert_eq!(window.to_rgba8(), [32, 35, 38, 255]);
 //! ```
 //!
 //! The behaviour is implemented from Teksilo's written specification of
@@ -48,9 +57,11 @@
 pub mod color;
 pub mod config;
 pub mod desktop;
+pub mod effects;
 pub mod fonts;
 pub mod locations;
 pub mod math;
+pub mod palette;
 pub mod scheme;
 
 pub use color::KdeColor;
@@ -62,6 +73,9 @@ pub use desktop::{
 pub use fonts::{FontStyle, KdeFont};
 pub use locations::{ConfigLayerPath, KdeConfigLocations, is_kde_session};
 pub use math::{FloatColor, Hcy, ShadeRole};
+pub use palette::{
+    BackgroundRole, DecorationRole, ForegroundRole, PaletteRole, ResolvedPalette, ResolvedSet,
+};
 pub use scheme::{
     ColorEffect, ColorRole, ColorSet, ColorState, ContrastEffect, IntensityEffect, KdeColorScheme,
     SetColors, StateEffect, WmColors,

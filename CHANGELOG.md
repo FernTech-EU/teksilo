@@ -110,6 +110,16 @@ by crate for clarity, not because crates version independently.
   white text KDE derives from an accent, and Plasma's OKLab accent tint.
   `lift_luma_until` moves a colour's luma, keeping its hue, until it meets a
   WCAG contrast floor on the given backgrounds.
+  `KdeColorScheme::resolve` gives the scheme's full palette, as KDE
+  applications draw it: every colour set in the active, inactive and
+  disabled states, with the disabled and inactive effects the scheme
+  configures, the inactive selection drawn from the window colours, the
+  six tinted backgrounds (active, link, visited, negative, neutral and
+  positive) and the five 3D shades, and the twenty application palette
+  colours (`PaletteRole`). `is_dark` tells a dark scheme from a light one by
+  its window background, the way KDE reports it to applications, and
+  `os_theme_colors` gives the colour report Teksilo's native theme is built
+  from.
 
 ### Changed
 

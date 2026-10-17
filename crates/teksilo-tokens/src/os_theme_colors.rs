@@ -46,7 +46,9 @@ impl ColorSchemePreference {
 pub struct OsThemeColors {
     /// Light or dark preference.
     pub color_scheme: ColorSchemePreference,
-    /// Desktop accent / primary color (e.g., GNOME accent, KDE DecorationFocus).
+    /// Desktop accent / primary color. KDE `[Colors:Selection]
+    /// BackgroundNormal` (the colour the portal reports as `accent-color`);
+    /// GNOME's accent colour.
     pub accent: Option<Color>,
     /// Window background color.
     pub window_bg: Option<Color>,
