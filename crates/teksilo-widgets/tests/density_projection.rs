@@ -491,11 +491,11 @@ fn every_fixed_row_says_it_is_fixed() {
 // 5. The style traits' metric defaults restate the module constants
 // ───────────────────────────────────────────────────────────────────────────
 //
-// Three style traits carry a defaulted metrics accessor for a dimension the
-// widget composes itself and the trait's `make_*` hooks never see — a table
+// Four style traits carry a defaulted metrics accessor for a dimension the
+// widget composes itself and the trait's `make_*` hooks never see: a table
 // cell's gutter, a calendar nav arrow's footprint, a search suggestion row's
-// gutter. Each default is the module constant put through the same helper
-// `for_tokens` uses, restated as a literal because `teksilo-core` sits below
+// gutter, a list row's height floor. Each default is the module constant put
+// through the same helper `for_tokens` uses, restated as a literal because `teksilo-core` sits below
 // `teksilo-widgets` and cannot name the constant. A literal in one crate and a
 // constant in another is exactly the shape that drifts, so it is pinned here —
 // and the tests are named in the trait doc comments, so a reader who finds the
@@ -628,6 +628,59 @@ fn the_search_field_trait_defaults_restate_the_module_constants() {
     }
 }
 
+/// The `StandardItemStyle` row-height defaults equal
+/// `recipe_standard_item_style::STANDARD_ITEM_MIN_HEIGHT_{SINGLE,TWO}_LINE` at
+/// every density.
+#[test]
+fn the_standard_item_trait_defaults_restate_the_module_constants() {
+    use teksilo_core::styles::StandardItemStyle;
+    use teksilo_widgets::styles::recipe_standard_item_style as si;
+
+    /// A `StandardItemStyle` that overrides nothing but `make_body`.
+    struct BareStandardItemStyle;
+    impl StandardItemStyle for BareStandardItemStyle {
+        fn make_body(
+            &self,
+            cfg: &teksilo_core::styles::StandardItemStyleConfig,
+            _ctx: &mut teksilo_core::BuildContext,
+        ) -> teksilo_core::WidgetId {
+            cfg.content
+        }
+    }
+
+    for t in [compact(), comfortable(), touch()] {
+        assert_eq!(
+            BareStandardItemStyle.min_height_single_line(&t),
+            dp(
+                si::STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE,
+                TargetRole::Target,
+                &t
+            ),
+            "the StandardItemStyle default drifted from STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE",
+        );
+        assert_eq!(
+            BareStandardItemStyle.min_height_two_line(&t),
+            dp(
+                si::STANDARD_ITEM_MIN_HEIGHT_TWO_LINE,
+                TargetRole::Target,
+                &t
+            ),
+            "the StandardItemStyle default drifted from STANDARD_ITEM_MIN_HEIGHT_TWO_LINE",
+        );
+        // And the shipped recipe at that density agrees with the default, so
+        // an out-of-tree style and the shipped one draw the same row.
+        let shipped = RecipeStandardItemStyle::for_tokens(&t);
+        assert_eq!(
+            shipped.min_height_single_line(&t),
+            BareStandardItemStyle.min_height_single_line(&t),
+        );
+        assert_eq!(
+            shipped.min_height_two_line(&t),
+            BareStandardItemStyle.min_height_two_line(&t),
+        );
+    }
+}
+
 /// The shipped `Recipe*Style` answers from *its own recipe*, not from the
 /// trait default — which is the half of the mechanism that lets a preset's
 /// number reach the screen at all.
@@ -637,9 +690,17 @@ fn the_search_field_trait_defaults_restate_the_module_constants() {
 /// constant carries.
 #[test]
 fn a_recipe_style_answers_from_its_own_recipe() {
-    use teksilo_core::styles::{CalendarStyle, SearchFieldStyle, TableStyle};
+    use teksilo_core::styles::{CalendarStyle, SearchFieldStyle, StandardItemStyle, TableStyle};
 
     let t = compact();
+
+    let item = RecipeStandardItemStyle::new(StandardItemRecipe {
+        min_height_single_line: 23.0,
+        min_height_two_line: 39.0,
+        ..StandardItemRecipe::for_tokens(&t)
+    });
+    assert_eq!(item.min_height_single_line(&t), 23.0);
+    assert_eq!(item.min_height_two_line(&t), 39.0);
 
     let table = RecipeTableStyle::new(TableRecipe {
         cell_padding_horizontal: 12.0,

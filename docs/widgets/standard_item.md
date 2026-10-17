@@ -165,13 +165,11 @@ the wrapper.
 
 #### Touch and pen
 
-A row's **height** is a target floor and follows the density ladder: the row
-projects the raw module constants through `density::dp` at layout time. It does
-**not** read `StandardItemRecipe::min_height_single_line` /
-`min_height_two_line`, which have carried the same projected values since the
-density sweep and have no reader — so retuning either of those two recipe
-fields in a preset moves nothing. `layout_response` says the same thing at the
-site; `docs/touch-and-pen.md` §10.1 carries it as an open finding.
+A row's **height** is a target floor and follows the density ladder. The row
+asks the style it was built with for that floor, through
+`StandardItemStyle::min_height_single_line`
+and its two-line twin. The shipped recipe answers 28 / 44 dp at Compact, and
+a preset that writes its own (macOS 24, Fluent 40) gets that height.
 
 A row's **press** is not the row's. Inside a `ListView` or a `TreeView` the
 body pane owns the tap, the double tap and the reorder drag, and resolves which

@@ -20,6 +20,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_core::widget_tree::WidgetTree;
 use teksilo_data::ListModel;
 use teksilo_i18n::lit;
+use teksilo_tokens::TargetDensity;
 use teksilo_widgets::TableView;
 use teksilo_widgets::table_view::{Column, ColumnWidth};
 
@@ -122,4 +123,73 @@ fn the_installed_table_slot_reports_the_fluent_gutter() {
         4.0,
         "Fluent takes the shipped vertical gutter",
     );
+}
+
+// ── StandardListItem row height ────────────────────────────────────────
+
+/// The laid-out `(single-line, two-line)` heights of a `StandardListItem` row
+/// in a plain column, built at `density` under `theme`.
+///
+/// Built *at* the density, never switched into it: a row resolves its style
+/// in `build()`, so switching after the fact would measure a mixture.
+fn standard_row_heights(theme: &Theme, density: TargetDensity) -> (f32, f32) {
+    use teksilo_widgets::StandardListItem;
+    use teksilo_widgets::primitives::VStack;
+
+    let (tree, root) = mounted(
+        theme.with_density(density),
+        VStack::new()
+            .child(StandardListItem::new(lit!("Documents")))
+            .child(StandardListItem::new(lit!("Downloads")).subtitle(lit!("12 items"))),
+    );
+    let rows = nodes_named(&tree, root, "StandardListItem");
+    assert_eq!(rows.len(), 2, "one single-line row, one two-line row");
+    (tree.bounds(rows[0]).height, tree.bounds(rows[1]).height)
+}
+
+/// `ListViewItemMinHeight` is 40 dp, which is what the Fluent recipe writes,
+/// and a laid-out row must measure it. The row used to floor itself on the
+/// shipped 28 dp constant whatever the style declared.
+///
+/// The Fluent heights already clear the Comfortable target, so only Touch
+/// raises the single-line row (to 44); the 60 dp two-line row clears every
+/// rung. The IntUI arm is the control and must be unchanged; its two-line row
+/// at Touch is content-driven (44.4 under the mock text metrics), because a
+/// floor only ever raises a row.
+#[test]
+fn a_standard_list_row_measures_the_fluent_row_height_at_every_density() {
+    let expected = [
+        (TargetDensity::Compact, (40.0, 60.0), (28.0, 44.0)),
+        (TargetDensity::Comfortable, (40.0, 60.0), (32.0, 44.0)),
+        (TargetDensity::Touch, (44.0, 60.0), (44.0, 44.4)),
+    ];
+    for (density, fluent, intui) in expected {
+        assert_eq!(
+            standard_row_heights(&teksilo_core::presets::intui::light(), density),
+            intui,
+            "{density:?}: IntUI must be unchanged",
+        );
+        for theme in [teksilo_theme_fluent::light(), teksilo_theme_fluent::dark()] {
+            assert_eq!(
+                standard_row_heights(&theme, density),
+                fluent,
+                "{density:?}: the Fluent recipe's row heights must reach the row",
+            );
+        }
+        // The accessor half: what the installed slot tells a row asking it.
+        let theme = teksilo_theme_fluent::light().with_density(density);
+        let slot = theme
+            .style_slots
+            .standard_item
+            .clone()
+            .expect("the preset installs a standard-item slot");
+        assert_eq!(
+            (
+                slot.min_height_single_line(&theme.input),
+                slot.min_height_two_line(&theme.input),
+            ),
+            fluent,
+            "{density:?}: the installed slot reports the Fluent row heights",
+        );
+    }
 }

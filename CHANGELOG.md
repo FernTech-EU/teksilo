@@ -42,6 +42,10 @@ by crate for clarity, not because crates version independently.
   the tab edge. `ShapeTokens::focus_ring_envelope` and
   `focus_ring_stroke_distance` give those two distances, and
   `FocusRingStroke` gives the rectangle and radius a ring is stroked on.
+- **`StandardItemStyle::min_height_single_line` and `min_height_two_line`.**
+  A row style says how tall a `StandardListItem` or `StandardTreeItem` row is
+  at the active density, with and without a subtitle. Both have defaults, so
+  an existing style keeps its row heights.
 
 ### Fixed
 
@@ -58,6 +62,17 @@ by crate for clarity, not because crates version independently.
   technology can activate and focus it again. Before, every built crumb
   painted in the secondary text colour with no hover or focus state, and
   advertised neither the Click nor the Focus action.
+- **List and tree rows are as tall as the active style says.**
+  **Behaviour change:** a `StandardListItem` or `StandardTreeItem` row laid
+  out at its own height (on its own, or in a `ListView` or `TreeView` with
+  `auto_item_height`) now measures the height its style declares: 24 px for a
+  single-line row under the macOS preset and 40 px under Fluent at the
+  compact density, rising to the density's target size above it. Before,
+  every row was at least 28 px (44 px with a subtitle) whatever the theme.
+  Only a row that measures itself changes: a `ListView` or `TreeView`
+  without `auto_item_height` keeps its own row height, whether that is its
+  default or an `item_height` the app set. The notification log's minimum
+  height follows the same two-line row height.
 - **Accent chrome a recipe builds follows the high-contrast preference.**
   **Behaviour change:** under the OS increase contrast preference, a `Filled`
   button's fill and a button's focus border now take the high-contrast

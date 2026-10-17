@@ -147,6 +147,18 @@ impl StandardItemStyle for MacOsStandardItemStyle {
         // done from `make_body`.
         Some(TextRole::OnAccent)
     }
+
+    /// `NSTableView.rowHeight`, 24 dp at Compact, raised to the density's
+    /// target size above it. The row measures itself against this, so it is
+    /// the height a macOS list row renders.
+    fn min_height_single_line(&self, tokens: &InputTokens) -> f32 {
+        macos_standard_item_recipe_for(tokens).min_height_single_line
+    }
+
+    /// The two-line row height of [`macos_standard_item_recipe_for`].
+    fn min_height_two_line(&self, tokens: &InputTokens) -> f32 {
+        macos_standard_item_recipe_for(tokens).min_height_two_line
+    }
 }
 
 /// Stacks the selection capsule under the delegated row, stretching

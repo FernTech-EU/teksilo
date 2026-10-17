@@ -518,3 +518,131 @@ fn a_macos_switch_track_is_still_thirty_eight_by_twenty_two() {
         frame.shapes.iter().map(|s| s.screen).collect::<Vec<_>>(),
     );
 }
+
+// ── StandardListItem row height ────────────────────────────────────────
+
+/// The laid-out `(single-line, two-line)` heights of a `StandardListItem` row
+/// in a plain column, built at `density` under `theme`.
+///
+/// Built *at* the density, never switched into it, for the same reason
+/// [`nav_arrow_targets`] is: a row resolves its style in `build()`.
+fn standard_row_heights(theme: &Theme, density: TargetDensity) -> (f32, f32) {
+    use teksilo_i18n::lit;
+    use teksilo_widgets::StandardListItem;
+    use teksilo_widgets::primitives::VStack;
+
+    let mut tree = WidgetTree::new()
+        .with_theme(theme.with_density(density))
+        .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+    let root = tree.add(
+        VStack::new()
+            .child(StandardListItem::new(lit!("Documents")))
+            .child(StandardListItem::new(lit!("Downloads")).subtitle(lit!("12 items"))),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let rows = nodes_named(&tree, root, "StandardListItem");
+    assert_eq!(rows.len(), 2, "one single-line row, one two-line row");
+    (tree.bounds(rows[0]).height, tree.bounds(rows[1]).height)
+}
+
+/// `NSTableView.rowHeight` is 24 dp, which is what the macOS recipe writes,
+/// and a laid-out row must measure it. The row used to floor itself on the
+/// shipped 28 dp constant whatever the style declared, so every macOS list
+/// row rendered 4 dp taller than Apple's.
+///
+/// Above Compact the preset's 24 rises to the density's target size (32 at
+/// Comfortable, 44 at Touch), so the row tracks the ladder too. The IntUI arm
+/// is the control: 28 / 32 / 44 for a single line, 44 for two lines, which is
+/// what the row rendered before the style was consulted. The one exception is
+/// IntUI's two-line row at Touch, whose content (44.4 under the mock text
+/// metrics, with Touch's wider padding) already clears its 44 dp floor: a
+/// floor only ever raises a row.
+#[test]
+fn a_standard_list_row_measures_the_macos_row_height_at_every_density() {
+    let expected = [
+        (TargetDensity::Compact, (24.0, 40.0), (28.0, 44.0)),
+        (TargetDensity::Comfortable, (32.0, 40.0), (32.0, 44.0)),
+        (TargetDensity::Touch, (44.0, 44.0), (44.0, 44.4)),
+    ];
+    assert_eq!(
+        expected.len(),
+        ALL_DENSITIES.len(),
+        "every density is listed"
+    );
+    for (density, macos, intui) in expected {
+        assert_eq!(
+            standard_row_heights(&teksilo_core::presets::intui::light(), density),
+            intui,
+            "{density:?}: IntUI must be unchanged",
+        );
+        for theme in [teksilo_theme_macos::light(), teksilo_theme_macos::dark()] {
+            assert_eq!(
+                standard_row_heights(&theme, density),
+                macos,
+                "{density:?}: the macOS recipe's row heights must reach the row",
+            );
+        }
+        // The accessor half: what the installed slot tells a row asking it.
+        let theme = teksilo_theme_macos::light().with_density(density);
+        let slot = theme
+            .style_slots
+            .standard_item
+            .clone()
+            .expect("the preset installs a standard-item slot");
+        assert_eq!(
+            (
+                slot.min_height_single_line(&theme.input),
+                slot.min_height_two_line(&theme.input),
+            ),
+            macos,
+            "{density:?}: the installed slot reports the macOS row heights",
+        );
+    }
+}
+
+/// A `StandardTreeItem` row measures the macOS row height too. The tree row
+/// lays out through the `StandardListItem` it wraps, so the floor it reports
+/// is the one the list row resolves from the same style: 24 dp for a single
+/// line and 40 dp with a subtitle at Compact, rising to the density's target
+/// size above it, whatever the row's depth.
+#[test]
+fn a_standard_tree_row_measures_the_macos_row_height_at_every_density() {
+    use teksilo_i18n::lit;
+    use teksilo_widgets::StandardTreeItem;
+    use teksilo_widgets::primitives::VStack;
+
+    let expected = [
+        (TargetDensity::Compact, (24.0, 40.0)),
+        (TargetDensity::Comfortable, (32.0, 40.0)),
+        (TargetDensity::Touch, (44.0, 44.0)),
+    ];
+    assert_eq!(
+        expected.len(),
+        ALL_DENSITIES.len(),
+        "every density is listed"
+    );
+    for (density, macos) in expected {
+        for theme in [teksilo_theme_macos::light(), teksilo_theme_macos::dark()] {
+            let mut tree = WidgetTree::new()
+                .with_theme(theme.with_density(density))
+                .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+            let root = tree.add(
+                VStack::new()
+                    .child(StandardTreeItem::new(lit!("Documents")).depth(1))
+                    .child(
+                        StandardTreeItem::new(lit!("Downloads"))
+                            .depth(2)
+                            .subtitle(lit!("12 items")),
+                    ),
+            );
+            tree.layout(SizeProposal::exact(400.0, 300.0));
+            let rows = nodes_named(&tree, root, "StandardTreeItem");
+            assert_eq!(rows.len(), 2, "one single-line row, one two-line row");
+            assert_eq!(
+                (tree.bounds(rows[0]).height, tree.bounds(rows[1]).height),
+                macos,
+                "{density:?}: the macOS recipe's row heights must reach a tree row",
+            );
+        }
+    }
+}

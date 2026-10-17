@@ -108,6 +108,18 @@ impl StandardItemStyle for FluentStandardItemStyle {
         );
         ctx.add(FluentRowFrame { row, pill })
     }
+
+    /// `ListViewItemMinHeight`, 40 dp at Compact, raised to the density's
+    /// target size above it. The row measures itself against this, so it is
+    /// the height a Fluent list row renders.
+    fn min_height_single_line(&self, tokens: &InputTokens) -> f32 {
+        fluent_standard_item_recipe_for(tokens).min_height_single_line
+    }
+
+    /// The two-line row height of [`fluent_standard_item_recipe_for`].
+    fn min_height_two_line(&self, tokens: &InputTokens) -> f32 {
+        fluent_standard_item_recipe_for(tokens).min_height_two_line
+    }
 }
 
 /// Stacks the selection pill over the delegated row, stretching **both** to

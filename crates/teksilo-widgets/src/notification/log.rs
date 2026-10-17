@@ -518,20 +518,22 @@ impl Widget for NotificationLog {
             // `shrink = 0`, so on its own the list would keep its full
             // wanted height and spill out the bottom of a short panel.
             // `Shrinkable` preserves the inner flex weight and adds the
-            // compression path, floored at one two-line row.
+            // compression path, floored at one two-line row: the
+            // height the active `StandardItemStyle` gives a row with a
+            // subtitle, which is what every log row is.
+            let one_row =
+                si::resolve_standard_item_style(ctx).min_height_two_line(&ctx.theme().input);
             let scrollable = ScrollArea::new()
                 .preferred_height(self.preferred_height)
                 .child(sections);
             column = column.child(
                 ctx.add(
-                    Shrinkable::new()
-                        .min_height(si::STANDARD_ITEM_MIN_HEIGHT_TWO_LINE)
-                        .child(
-                            Expand::vertical()
-                                .flex(1.0)
-                                .respect_intrinsic()
-                                .child(scrollable),
-                        ),
+                    Shrinkable::new().min_height(one_row).child(
+                        Expand::vertical()
+                            .flex(1.0)
+                            .respect_intrinsic()
+                            .child(scrollable),
+                    ),
                 ),
             );
         }
@@ -921,6 +923,44 @@ mod tests {
             b.y + b.height <= 160.0 + 0.01,
             "list bottom {} must stay inside the 160 dp host",
             b.y + b.height
+        );
+    }
+
+    /// In a host far too short for it, the list stops compressing at one
+    /// row: the two-line row height the active `StandardItemStyle` declares,
+    /// not a constant. A style declaring 90 dp rows floors the list at 90.
+    #[test]
+    fn the_compressed_list_floors_at_the_styles_two_line_row_height() {
+        use teksilo_core::styles::{StandardItemStyle, StandardItemStyleConfig};
+
+        struct TallRows;
+        impl StandardItemStyle for TallRows {
+            fn make_body(&self, cfg: &StandardItemStyleConfig, ctx: &mut BuildContext) -> WidgetId {
+                si::RecipeStandardItemStyle::default().make_body(cfg, ctx)
+            }
+            fn min_height_two_line(&self, _tokens: &InputTokens) -> f32 {
+                90.0
+            }
+        }
+
+        let archive = fresh_archive();
+        for i in 0..8 {
+            archive.push(entry(&format!("Notice {i}"), Some("body"), Vec::new()));
+        }
+        let mut theme = teksilo_core::presets::intui::light();
+        theme.style_slots.standard_item = Some(Rc::new(TallRows));
+        let mut tree = WidgetTree::new()
+            .with_theme(theme)
+            .with_text_backend(Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )));
+        let root = tree.add(NotificationLog::new(archive));
+        tree.layout(SizeProposal::exact(480.0, 20.0));
+        let floor = find_by_type(&tree, root, "Shrinkable").expect("the list is Shrinkable");
+        assert!(
+            (tree.bounds(floor).height - 90.0).abs() < 0.01,
+            "the list must floor at the style's two-line row height, got {}",
+            tree.bounds(floor).height
         );
     }
 

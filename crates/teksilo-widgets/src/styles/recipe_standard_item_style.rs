@@ -17,7 +17,7 @@
 
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
-use teksilo_core::styles::{StandardItemStyle, StandardItemStyleConfig};
+use teksilo_core::styles::{SharedStandardItemStyle, StandardItemStyle, StandardItemStyleConfig};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{BorderRole, CornerRadius, InputTokens, SurfaceRole, TargetRole};
 
@@ -213,6 +213,33 @@ impl StandardItemStyle for RecipeStandardItemStyle {
 
         ctx.add(ZStack::new().child(bg_padded).child(content_padded))
     }
+
+    /// This recipe's own floor. The recipe was resolved against a density
+    /// when the style was built, so `tokens` is not consulted again: a preset
+    /// that wrote its own `min_height_single_line` gets exactly that number.
+    fn min_height_single_line(&self, _tokens: &InputTokens) -> f32 {
+        self.recipe.min_height_single_line
+    }
+
+    /// This recipe's own floor for a two-line row, on the same terms as
+    /// [`min_height_single_line`](Self::min_height_single_line).
+    fn min_height_two_line(&self, _tokens: &InputTokens) -> f32 {
+        self.recipe.min_height_two_line
+    }
+}
+
+/// The `StandardItemStyle` a row built here renders with when it carries no
+/// per-call override: the theme's slot, else the shipped recipe resolved
+/// against the theme's density.
+pub(crate) fn resolve_standard_item_style(ctx: &BuildContext) -> SharedStandardItemStyle {
+    ctx.theme()
+        .style_slots
+        .standard_item
+        .clone()
+        .unwrap_or_else(|| {
+            std::rc::Rc::new(RecipeStandardItemStyle::for_tokens(&ctx.theme().input))
+                as SharedStandardItemStyle
+        })
 }
 
 fn bg_signal(

@@ -68,13 +68,11 @@
 //!
 //! ## Touch and pen
 //!
-//! A row's **height** is a target floor and follows the density ladder: the row
-//! projects the raw module constants through `density::dp` at layout time. It does
-//! **not** read `StandardItemRecipe::min_height_single_line` /
-//! `min_height_two_line`, which have carried the same projected values since the
-//! density sweep and have no reader — so retuning either of those two recipe
-//! fields in a preset moves nothing. `layout_response` says the same thing at the
-//! site; `docs/touch-and-pen.md` §10.1 carries it as an open finding.
+//! A row's **height** is a target floor and follows the density ladder. The row
+//! asks the style it was built with for that floor, through
+//! [`StandardItemStyle::min_height_single_line`](teksilo_core::styles::StandardItemStyle::min_height_single_line)
+//! and its two-line twin. The shipped recipe answers 28 / 44 dp at Compact, and
+//! a preset that writes its own (macOS 24, Fluent 40) gets that height.
 //!
 //! A row's **press** is not the row's. Inside a `ListView` or a `TreeView` the
 //! body pane owns the tap, the double tap and the reorder drag, and resolves which
@@ -158,6 +156,10 @@ pub struct StandardListItem {
     /// hover-revealed controls be reachable right now".
     reveal: Option<Signal<bool>>,
     style_override: Option<SharedStandardItemStyle>,
+    /// The style this row was built with, kept so `layout_response` asks the
+    /// same style for its height floor that painted its chrome. `None` until
+    /// the first build.
+    resolved_style: Option<SharedStandardItemStyle>,
     root_child_id: Option<WidgetId>,
     /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
     /// with the rich / composite slots — every setter clears the other two so
@@ -195,6 +197,7 @@ impl StandardListItem {
             interaction: Signal::new(InteractionState::Idle),
             reveal: None,
             style_override: None,
+            resolved_style: None,
             root_child_id: None,
             tooltip_text: None,
             rich_tooltip_source: None,
@@ -534,16 +537,14 @@ struct RowRoles {
 
 impl StandardListItem {
     /// Per-call override > theme slot > the shipped recipe.
-    fn resolve_roles(&self, ctx: &mut BuildContext) -> RowRoles {
-        let style: SharedStandardItemStyle = self
-            .style_override
-            .clone()
-            .or_else(|| ctx.theme().style_slots.standard_item.clone())
-            .unwrap_or_else(|| {
-                Rc::new(crate::styles::RecipeStandardItemStyle::for_tokens(
-                    &ctx.theme().input,
-                ))
-            });
+    ///
+    /// Also parks the resolved style on the row, so its height floor comes
+    /// from the style that built its chrome.
+    fn resolve_roles(&mut self, ctx: &mut BuildContext) -> RowRoles {
+        let style: SharedStandardItemStyle = self.style_override.clone().unwrap_or_else(|| {
+            crate::styles::recipe_standard_item_style::resolve_standard_item_style(ctx)
+        });
+        self.resolved_style = Some(style.clone());
         let on_selected = style.selected_label_role();
         let emphasised =
             on_selected.map(|_| ctx.view_focus_active().and(&ctx.window_active_signal()));
@@ -869,22 +870,25 @@ impl Widget for StandardListItem {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        use crate::styles::recipe_standard_item_style as si;
-        // A row is a target, so its floor follows the density ladder — 28 dp at
-        // Compact (unchanged: the floor only ever raises), 32 at Comfortable, 44
-        // at Touch. `StandardItemRecipe` has carried both projected heights
-        // since the density sweep and nothing read them: the row measured
-        // itself against the raw Compact constants, so a Touch build laid out
-        // 28 dp list rows under a theme that had already decided on 44.
-        let min_height = teksilo_core::styles::density::dp(
-            if self.subtitle.is_some() {
-                si::STANDARD_ITEM_MIN_HEIGHT_TWO_LINE
-            } else {
-                si::STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE
-            },
-            teksilo_tokens::TargetRole::Target,
-            &ctx.theme.input,
-        );
+        // A row is a target, so its floor follows the density ladder. The
+        // floor is the active style's: the shipped recipe answers 28 dp at
+        // Compact, 32 at Comfortable and 44 at Touch, and a preset's recipe
+        // answers its own number (macOS 24, Fluent 40). Before the first build
+        // there is no resolved style, and the trait's default ladder stands in.
+        let input = &ctx.theme.input;
+        let two_line = self.subtitle.is_some();
+        let min_height = match self.resolved_style.as_ref() {
+            Some(style) if two_line => style.min_height_two_line(input),
+            Some(style) => style.min_height_single_line(input),
+            None => {
+                let fallback = crate::styles::RecipeStandardItemStyle::for_tokens(input);
+                if two_line {
+                    fallback.recipe.min_height_two_line
+                } else {
+                    fallback.recipe.min_height_single_line
+                }
+            }
+        };
         let raw = self
             .root_child_id
             .and_then(|id| ctx.child_size(id, proposal))

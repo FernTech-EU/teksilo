@@ -8,7 +8,7 @@ struct, and `for_tokens(&InputTokens)` projects each one onto the active density
 — `dp` for a target, `spacing` for a gap, `density_min_size` for a minimum box.
 A theme preset then builds that same struct with its own numbers.
 
-**Forty-nine of those projected fields have no reader.** The widget composes the
+**Forty-seven of those projected fields have no reader.** The widget composes the
 dimension from the raw `pub const` in the recipe's module instead, so the
 projected field is written by `for_tokens`, written again by every preset, and
 consulted by nothing. Retuning one changes nothing on screen.
@@ -48,13 +48,13 @@ and is therefore inside the scope; the rule finds both its projected fields read
 | | |
 |---|---|
 | projected fields in scope | 103 |
-| of those, unread by the rule | 51 |
+| of those, unread by the rule | 49 |
 | false positives of the rule (§4) | 2 |
-| **real gap** | **49** |
-| — inert even if wired (§1) | 10 |
-| — a shipped preset already sets a different value (§2) | 14 |
-| — a preset sets the same value the constant carries (§3a) | 3 |
-| — density only, no preset (§3b) | 22 |
+| **real gap** | **47** |
+| of which inert even if wired (§1) | 10 |
+| of which a shipped preset already sets a different value (§2) | 12 |
+| of which a preset sets the same value the constant carries (§3a) | 3 |
+| of which density only, no preset (§3b) | 22 |
 
 Only the **denominator** is pinned by the guard. Every other number here falls
 when someone wires one of these fields, which is what the page is for, so making
@@ -62,14 +62,15 @@ those cost a test failure would discourage the one change it invites: the tables
 are the record, the guard keeps their *membership* honest, and the arithmetic is
 a snapshot of the day it was taken.
 
-Five further fields were on this list until the metrics-accessor work that
-produced this page wired them, and they are the worked examples for what wiring
-one looks like: `TableRecipe::cell_padding_horizontal` / `cell_padding_vertical`
-(`TableStyle`), `CalendarRecipe::nav_arrow_size` (`CalendarStyle`) and
+Seven further fields were on this list until a metrics accessor wired them,
+and they are the worked examples for what wiring one looks like:
+`TableRecipe::cell_padding_horizontal` / `cell_padding_vertical`
+(`TableStyle`), `CalendarRecipe::nav_arrow_size` (`CalendarStyle`),
 `SearchFieldRecipe::row_padding_horizontal` / `row_padding_vertical`
-(`SearchFieldStyle`) — a defaulted metrics accessor on the style trait, defaulted
-so an out-of-tree style keeps compiling, overridden by the `Recipe*Style` from
-its own recipe so a preset's number takes effect.
+(`SearchFieldStyle`) and `StandardItemRecipe::min_height_single_line` /
+`min_height_two_line` (`StandardItemStyle`): a defaulted metrics accessor on
+the style trait, defaulted so an out-of-tree style keeps compiling, overridden
+by the `Recipe*Style` from its own recipe so a preset's number takes effect.
 
 **A verdict of "safe to wire" means the mechanism is available and the change is
 local.** It never means the resulting dimension is right: a preset's number
@@ -110,7 +111,7 @@ unwired one.
 
 ## 2. A shipped preset already sets a different value
 
-The fourteen that cost something today. Each is written by Fluent or macOS with
+The twelve that cost something today. Each is written by Fluent or macOS with
 a number chosen for that design language, and each renders the IntUI constant
 instead. The **renders** column is what a user sees under any theme.
 
@@ -123,8 +124,6 @@ instead. The **renders** column is what a user sees under any theme.
 | `SegmentedControlRecipe` | `height` | 24 | 32 | 22 | `segmented_control.rs` → `layout_response` |
 | `SegmentedControlRecipe` | `padding_horizontal` | 12 | — | 10 | `segmented_control.rs` → `layout_response`; `segmented_control/cell.rs` → `layout_response` |
 | `SegmentedControlRecipe` | `padding_vertical` | 6 | — | 3 | `segmented_control.rs` → `layout_response` |
-| `StandardItemRecipe` | `min_height_single_line` | 28 | 40 | 24 | `standard_item.rs` → `layout_response` |
-| `StandardItemRecipe` | `min_height_two_line` | 44 | 60 | 40 | `standard_item.rs` → `layout_response`; `notification/log.rs` → `build` |
 | `TabRecipe` | `editor_height` | 50 | 32 | 26 | `tab_widget/bar.rs` → `build`; `tab_widget/header.rs` → `intrinsic_height` |
 | `TabRecipe` | `padding_horizontal` | 12 | 8 | 12 | `tab_widget/header.rs` → `build`, `estimate_natural_width` |
 | `TabRecipe` | `tool_window_height` | 28 | 32 | 22 | none — see below |
@@ -135,11 +134,11 @@ Ladders, for the ones whose density projection also moves (Compact / Comfortable
 / Touch): `cell_size` 32/32/44, `CalendarRecipe::header_height` 28/32/44,
 `min_thumb_length` 24/32/44, `SearchFieldRecipe::row_height` 26/32/44,
 `SegmentedControlRecipe::height` 24/32/44 and `padding_horizontal` 12/13.8/15.6
-and `padding_vertical` 6/6.9/7.8, `min_height_single_line` 28/32/44,
-`TabRecipe::padding_horizontal` 12/13.8/15.6, `tool_window_height` 28/32/44,
+and `padding_vertical` 6/6.9/7.8, `TabRecipe::padding_horizontal`
+12/13.8/15.6, `tool_window_height` 28/32/44,
 `TableRecipe::header_height` 32/32/44, `row_height` 28/32/44.
-`min_height_two_line` (44) and `TabRecipe::editor_height` (50) are flat — their
-cost is the preset alone, not the density.
+`TabRecipe::editor_height` (50) is flat: its cost is the preset alone, not the
+density.
 
 ### Verdicts
 
@@ -156,11 +155,6 @@ accessor.
 from the constant three lines later, so the value is already in hand.
 `SearchFieldRecipe::row_height` — the same `SuggestionPanel::build` that now
 takes its row gutters from `SearchFieldStyle`.
-`StandardItemRecipe::min_height_single_line` / `min_height_two_line` — the one
-gap already documented at its own site (`standard_item.rs`'s module header says
-the row does not read them); `StandardItemStyle` is the trait, and the row's
-`layout_response` is the single call site. This is the highest-visibility row in
-the table: it is the height of every list and tree row in a Fluent or macOS app.
 
 **Needs care — the widget owns a composition the field cannot express.**
 `SegmentedControlRecipe::height` / `padding_horizontal` / `padding_vertical`:

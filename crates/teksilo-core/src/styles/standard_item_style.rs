@@ -6,10 +6,11 @@
 
 use std::rc::Rc;
 
-use teksilo_tokens::TextRole;
+use teksilo_tokens::{InputTokens, TargetRole, TextRole};
 
 use crate::build_context::BuildContext;
 use crate::signal::Signal;
+use crate::styles::density::dp;
 use crate::widget_id::WidgetId;
 
 #[derive(Clone, Debug)]
@@ -66,6 +67,33 @@ pub trait StandardItemStyle: 'static {
     /// change.
     fn selected_label_role(&self) -> Option<TextRole> {
         None
+    }
+
+    /// The height floor of a row with no subtitle, in logical pixels, at the
+    /// density `tokens` describe.
+    ///
+    /// A metrics accessor rather than a `make_body` concern: the row measures
+    /// itself in `layout_response`, long after the chrome is built, and holds
+    /// an `Rc<dyn StandardItemStyle>` that cannot reach a recipe field.
+    /// Without it a preset's row height is written and never rendered.
+    ///
+    /// **Defaulted**, so a `StandardItemStyle` implemented outside this
+    /// workspace keeps compiling and keeps the ladder it had. The default is
+    /// `teksilo_widgets::styles::recipe_standard_item_style::STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE`
+    /// put through [`dp`] as a target, restated as a literal because
+    /// `teksilo-core` cannot name a `teksilo-widgets` constant, and pinned
+    /// equal to it by
+    /// `the_standard_item_trait_defaults_restate_the_module_constants`.
+    fn min_height_single_line(&self, tokens: &InputTokens) -> f32 {
+        dp(28.0, TargetRole::Target, tokens)
+    }
+
+    /// The height floor of a row carrying a subtitle, in logical pixels.
+    /// Defaulted on the same terms as
+    /// [`min_height_single_line`](Self::min_height_single_line), from
+    /// `STANDARD_ITEM_MIN_HEIGHT_TWO_LINE`.
+    fn min_height_two_line(&self, tokens: &InputTokens) -> f32 {
+        dp(44.0, TargetRole::Target, tokens)
     }
 }
 
