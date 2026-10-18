@@ -115,7 +115,7 @@ pub struct Theme {
 /// next build.
 ///
 /// A **preset that installs Tier-3 slots of its own** (Fluent, macOS,
-/// Material 3) needs more: its slots are `Some(..)`, so they would ride across
+/// Material 3, KDE) needs more: its slots are `Some(..)`, so they would ride across
 /// a density switch still carrying the dimensions they were built with, and a
 /// Fluent button would stay 32 dp tall under Touch. Such a preset registers
 /// this — a function taking the *current* theme, so it can recover the palette

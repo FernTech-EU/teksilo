@@ -82,7 +82,7 @@ interaction-state mirror:
 `split_button.rs:732` (`hover_within` → tint) · `standard_item.rs:722` (the tint half) ·
 `tab_widget/header.rs:660` · every `is_hovered` consumer in
 `crates/teksilo-widgets/src/styles/recipe_*_style.rs` and in
-`crates/teksilo-theme-{fluent,macos,material3}/src/styles/*.rs`.
+`crates/teksilo-theme-{fluent,kde,macos,material3}/src/styles/*.rs`.
 
 Swept with zero hover-reveal hits: `crates/teksilo-preview-ui/src` (no `on_hover` at
 all), `crates/teksilo-webview/src`, `crates/teksilo-terminal/src`,

@@ -1814,8 +1814,8 @@ patch. They are the only `#[ignore]`s the programme added.
   8-dp-per-character fallback and `MockTextBackend` — both report one fixed line
   height whatever the theme's typography asks for. Every text-derived dimension in
   the census is therefore that constant rather than the theme's line box, which is
-  how a menu row comes out under the floor in three presets and at its declared
-  height in the fourth. The allow-list entry on the menu row says so at the point
+  how a menu row comes out under the floor in some presets and at its declared
+  height in the others. The allow-list entry on the menu row says so at the point
   it matters; the general consequence is that a fixture measuring a control sized
   by its label is measuring the harness's metrics as much as the widget's.
   Unowned, and the remedy (a backend that reads the theme) would re-measure every
@@ -1829,7 +1829,7 @@ patch. They are the only `#[ignore]`s the programme added.
   target rather than judging it. Same owner as A10's outset-versus-target
   precedence, and the same finding as the docking gutter already on the list.
 - **A `SearchField` with an empty query reports a 16 × 16 clear slot reaching
-  22 × 24 at Compact, under all four presets.** Measured, not described: the
+  22 × 24 at Compact, under every preset.** Measured, not described: the
   `search_field/empty` fixture produces exactly that row, and the figure above is
   read off the gate rather than written beside it. The same slot with a query
   typed reaches 24 × 24 and does not appear at all — `HitTarget::active`

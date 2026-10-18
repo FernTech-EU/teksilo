@@ -138,7 +138,7 @@ pub struct ColorTokens {
 
     // ── Cross-design-language roles ───────────────────────────────────────────
     // Universal slots every design language (Material 3, Fluent, macOS,
-    // GTK4/Adwaita) needs but IntUI's flat role model didn't carry. Design-
+    // KDE, GTK4/Adwaita) needs but IntUI's flat role model didn't carry. Design-
     // language-specific colors (M3 secondary/tertiary triads, the full tonal
     // ladder, inverse colors) stay in per-theme extensions, not here.
     /// Text/icon painted on top of an error surface (white on the error fill).

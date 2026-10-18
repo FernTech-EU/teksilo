@@ -64,7 +64,7 @@ pub const ALL_DENSITIES: &[TargetDensity] = &[
 /// `M3` is on the list because it is the prefix Material 3 actually gives its
 /// private widgets (`M3SwitchBody`); no `Widget` type in that crate starts with
 /// `Material3`, which stays here only to catch a future one written longhand.
-const THEME_OWNED_PREFIXES: &[&str] = &["Fluent", "MacOs", "Material3", "M3"];
+const THEME_OWNED_PREFIXES: &[&str] = &["Fluent", "MacOs", "Material3", "M3", "Breeze"];
 
 /// The id every theme built from raw tokens carries, so it names no preset and
 /// is never an admissible pin.

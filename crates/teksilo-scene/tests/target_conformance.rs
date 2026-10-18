@@ -272,7 +272,7 @@ fn fixtures() -> Vec<TargetFixture> {
 ///
 /// **Int UI only**, and that is a coverage boundary rather than an oversight: a
 /// scene's heavyweight tier is whatever widget the app puts in it, measured by
-/// the widget catalog's own gate under all four presets, and its lightweight
+/// the widget catalog's own gate under all five presets, and its lightweight
 /// tier has no arena node for any preset to style. Naming the theme on the pin
 /// rather than leaving it implicit is what makes the boundary visible.
 const INTUI: &str = "intui.light";

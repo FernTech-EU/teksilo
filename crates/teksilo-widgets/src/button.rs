@@ -86,7 +86,7 @@ use crate::primitives::{HStack, TextWidget, VStack};
 /// dialogs where the title/body carry the warning. The IntUI default
 /// `RecipeButtonStyle` collapses `Destructive → Filled`, `Tinted /
 /// Outlined → Plain`, and `Link → Ghost` accordingly. Other design
-/// languages (Material 3, macOS) honour the variants distinctly.
+/// languages (Material 3, Fluent, macOS, KDE) honour the variants distinctly.
 pub use teksilo_core::styles::ButtonVariant;
 use teksilo_i18n::LocalizedString;
 

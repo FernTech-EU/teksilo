@@ -367,7 +367,7 @@ pub struct TargetViolation {
     /// The density ladder this violation was found at.
     pub density: TargetDensity,
     /// The theme the tree was built with. Carried because a failure list over
-    /// four presets is unreadable without it, and because an allow-list pin
+    /// five presets is unreadable without it, and because an allow-list pin
     /// discriminates on it.
     pub theme: crate::styles::ThemeId,
     /// The SC 2.5.8 conformance floor this violation was judged against, in dp —
@@ -643,7 +643,7 @@ pub fn measure_fixtures(
 /// not a one-line `if projection.is_some() { return empty }`. A projection
 /// rebuilds the slots *it* owns and leaves the app's alone — that is the
 /// contract `DensityProjection`'s own docs state — so an app style installed on
-/// top of macOS, Fluent or Material 3 is exactly as frozen as one installed on
+/// top of macOS, Fluent, Material 3 or KDE is exactly as frozen as one installed on
 /// top of Int UI, and refusing to look at a projected theme reported nothing in
 /// the common case. (An app slot in a field the preset *also* owns is a
 /// different story: the projection overwrites it at the next density change, so

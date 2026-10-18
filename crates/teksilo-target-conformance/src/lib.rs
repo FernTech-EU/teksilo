@@ -58,7 +58,7 @@
 //! # A widget author can redden three other crates' tests
 //!
 //! That is the package, not an accident: a control that falls under the floor
-//! under macOS, Fluent or Material 3 is a failure whoever last touched it. The
+//! under macOS, Fluent, Material 3 or KDE is a failure whoever last touched it. The
 //! correct response is an [`AllowedViolation`] naming the preset's owner, never
 //! deleting the fixture.
 //!

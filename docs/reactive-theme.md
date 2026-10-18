@@ -185,7 +185,7 @@ Filled-area color (panel backgrounds, button fills, selection highlights).
 
 `Main` (default), `Content`, `Raised`, `Sunken`, `Hover`, `Pressed`, `Selected`, `SelectedInactive`, `AltRow`, `Accent`, `AccentHover`, `AccentPressed`, `AccentDisabled`, `Field`, `Disabled`, `AccentSubtle`, `StatusInfo`, `StatusSuccess`, `StatusWarning`, `StatusError`, `ErrorContainer`, `Container`, `ContainerRaised`, `ContainerSunken`, `TooltipBg`, `EditorBg`, `EditorCaret`, `EditorCurrentLineBg`, `EditorSelectionBg`, `Scrim`, **`Transparent`** (paints nothing, the "no surface" slot in interaction chains).
 
-The `OnError`/`*Container` roles are the cross-design-language slots shared by Material 3 / Fluent / macOS / GTK4-Adwaita; design-language-specific colors (M3 secondary/tertiary triads, full tonal ladder) live in per-theme extensions instead.
+The `OnError`/`*Container` roles are the cross-design-language slots shared by Material 3 / Fluent / macOS / KDE / GTK4-Adwaita; design-language-specific colors (M3 secondary/tertiary triads, full tonal ladder) live in per-theme extensions instead.
 
 ### `BorderRole`
 Stroke color.

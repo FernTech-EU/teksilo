@@ -26,7 +26,7 @@
 //!
 //! ## Tracking is the interesting part
 //!
-//! macOS is the only one of the three design languages Teksilo ships that
+//! macOS is the only one of the design languages Teksilo ships that
 //! tracks text **non-uniformly and with a sign change**. Apple publishes a
 //! tracking value for every integer point size from 6 to 96; the region
 //! this ramp lives in reads:

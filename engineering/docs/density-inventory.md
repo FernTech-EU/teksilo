@@ -884,7 +884,7 @@ own slots against the new tokens while colours, id, palette extension and any sl
 the *app* installed ride across untouched. Its own tests assert this
 (`a_density_switch_re_derives_the_installed_slots`).
 
-**The three presets do not share a ladder.** Material 3 keeps its published **48 dp**
+**The four sibling presets do not share a ladder.** Material 3 keeps its published **48 dp**
 touch target (`material3::input_tokens`), so an M3 button is 40 dp at Compact and
 48 dp at Touch, not 44. Fluent has no published touch ladder — WinUI's 40 px / 7.5 mm
 is a recommendation, not a metric its controls scale by — so it uses the generic one.

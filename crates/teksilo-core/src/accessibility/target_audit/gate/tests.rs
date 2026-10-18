@@ -381,7 +381,7 @@ fn roster_with(allow: &'static [AllowedViolation]) -> Roster {
 /// The product is swept: every theme in the roster, at every density.
 ///
 /// A census taken under one theme, or at one rung, is the shape in which a
-/// four-preset gate reports three presets' worth of nothing — and every question
+/// five-preset gate reports four presets' worth of nothing, and every question
 /// below is asked *of the census*, so a sweep that lost an axis takes all four
 /// with it and every one of them still reads green.
 #[test]
@@ -786,7 +786,7 @@ fn the_roster_lints() {
     // fixture-name-prefixed FIRST segment, which the lint has to strip the name
     // off before it can see, and one in an ordinary later segment.
     static THEME_OWNED_PATH: &[AllowedViolation] = &[AllowedViolation {
-        path: "row: FluentRowFrame > MacOsRowFrame > Grip",
+        path: "row: FluentRowFrame > MacOsRowFrame > BreezeRowFrame > Grip",
         measured: &[SIXTEEN],
         owner: Owner::Named("a fixture"),
         exception: None,
@@ -932,7 +932,8 @@ fn the_roster_lints() {
     let both = roster_defects(&[], &roster_with(THEME_OWNED_PATH));
     assert!(
         both.iter().any(|f| f.contains("`FluentRowFrame`"))
-            && both.iter().any(|f| f.contains("`MacOsRowFrame`")),
+            && both.iter().any(|f| f.contains("`MacOsRowFrame`"))
+            && both.iter().any(|f| f.contains("`BreezeRowFrame`")),
         "the lint must name the type behind the fixture name as well as the \
          plain one; it reported {both:#?}",
     );

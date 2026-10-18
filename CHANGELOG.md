@@ -35,7 +35,7 @@ by crate for clarity, not because crates version independently.
   ring partly or wholly inside the control: an offset of `-1` with a 2 dp
   width runs from 1 dp inside the edge to 1 dp outside it. Every stock ring
   (sliders, toggles, segmented controls, breadcrumbs, radio tile groups,
-  avatars, colour swatches, tabs and the Material 3 and macOS presets) follows
+  avatars, colour swatches, tabs and the Material 3, macOS and KDE presets) follows
   it without inverting on a small control, and a control reserves only the
   ring's reach outside it. Tabs, which sit flush against each other, keep
   their ring inside the tab: any offset at or below zero draws it flush with
@@ -79,7 +79,7 @@ by crate for clarity, not because crates version independently.
   `MenuItem`'s label and shortcut take while the row is pressed, for a design
   whose pressed row is a solid fill while its hover is a pale wash. It
   defaults to `None`, so an existing style keeps its pressed labels.
-- **Content-view and semantic colours in `OsThemeColors`.** A desktop report
+- **Breaking.** **Content-view and semantic colours in `OsThemeColors`.** A desktop report
   can carry ten more colours: `view_bg`, `view_fg`, `alternate_bg`,
   `inactive_fg`, `link`, `link_visited`, `error`, `warning`, `success` and
   `focus`. `ColorTokens::from_os_colors` uses each one it is given (the

@@ -66,7 +66,7 @@ let theme = intui::light();   // or intui::dark()
 ```
 
 Other presets ship as opt-in Cargo features (Material 3, macOS,
-Fluent), only IntUI is bundled by default.
+Fluent, KDE), only IntUI is bundled by default.
 
 **Reactive.** `Theme` lives behind a `Signal<Theme>` on
 `WidgetTree`, `set_theme(...)` dirty-marks every widget for relayout
@@ -218,7 +218,7 @@ button styling, destructive actions live in confirmation dialogs
 where the body carries the warning, not the button. So the IntUI
 `RecipeButtonStyle` collapses several variants:
 `Destructive` → Filled, `Tinted`/`Outlined` → Plain, `Link` → Ghost.
-Other design languages (Material 3, Fluent, macOS) honour them
+Other design languages (Material 3, Fluent, macOS, KDE) honour them
 distinctly.
 
 ## Tier 2: Recipes
