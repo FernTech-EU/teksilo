@@ -42,6 +42,9 @@
 //!   darkens it. The accent's hover and press shades move the same way if
 //!   the accent text falls short on them, and so do the hover and press
 //!   washes made from the accent if the primary text falls short on them.
+//!   A selection or a wash moves only toward the window's end of the scale
+//!   (lighter in a light scheme), never across the text to the other end:
+//!   under a mid-grey text a light fill would otherwise turn black.
 //! - **D2, inactive text.** The inactive foreground (secondary text,
 //!   placeholders, line numbers, a tooltip's shortcut) is 3.7:1 on the
 //!   Breeze Light window. It moves in luma to 4.5:1 on every surface text
@@ -62,8 +65,32 @@
 //! - **D9, the scroll-bar thumb.** Breeze paints the idle thumb in the
 //!   window text at an effective 17.5 % over the window, 1.4:1; the hovered
 //!   one in the hover colour at 50 %. Both move to 3:1.
+//! - **D10, the scheme's own text.** The window, view and tooltip text
+//!   move to the text floor where they fall short, toward their own end of
+//!   the scale. Stock Breeze's never do; a scheme whose text is a mid grey
+//!   does, and so does an inactive window whose scheme's inactive effects
+//!   fade or shade its text toward its background.
+//! - **D11, surfaces in the middle of the scale.** Where black (under a
+//!   dark text) or white (under a light one) cannot reach the text floor on
+//!   a surface text is set on, the surface moves in luma away from the text
+//!   until it can, so that every lift above can succeed. It happens in an
+//!   inactive window whose scheme's inactive effects shade, lighten or
+//!   darken its backgrounds toward the middle of the scale, and under high
+//!   contrast, whose 7:1 needs a surface further from the middle; stock
+//!   Breeze, whose inactive effects are off, keeps every surface. All the
+//!   window's surfaces move the same way, the one the window lies in from
+//!   its text, and the tooltip by its own text.
 //!
-//! D7 and D8 are row heights, not colours, and live with the styles.
+//! D7 and D8 are row heights, not colours, and live with the styles. The
+//! specification has no rule for D10 and D11 either: like D1 to D9 they are
+//! Teksilo's.
+//!
+//! A scheme colour may be translucent (the `r,g,b,a` and `#AARRGGBB`
+//! forms). The specification is silent on how such a text or decoration
+//! should be painted; every colour a rule above lifts is first made opaque,
+//! composited over the surface it is lifted on first (the window, or the
+//! view for the editor's text), so every lifted token is opaque and its
+//! contrast is the contrast it is painted at.
 //!
 //! ## The high-contrast projection
 //!
@@ -112,9 +139,17 @@
 //! - Under high contrast the selection fill stays below 4.5:1 on the
 //!   window, which no fill carrying the window's text at 7:1 can reach (see
 //!   the high-contrast projection above).
+//! - Teksilo sets the window text on the view too, so a scheme whose view
+//!   is in the other tone from its window (a dark view in a light window)
+//!   cannot keep both: D11 moves the view toward the window's tone until
+//!   the window text can be read on it.
+//! - D11 moves a surface only until black or white reaches the floor on
+//!   it, so on a surface it moved, a lifted colour can end at black or
+//!   white and lose its hue.
 
 use teksilo_kde_scheme::math::{
-    black_or_white_on, hsv_darker, hsv_lighter, lift_luma_until, luma, mix,
+    LumaDirection, black_or_white_on, hsv_darker, hsv_lighter, lift_luma_toward, lift_luma_until,
+    luma, mix, read_channel,
 };
 use teksilo_kde_scheme::{
     BackgroundRole, ColorSet, ColorState, DecorationRole, ForegroundRole, KdeColor, PaletteRole,
@@ -198,10 +233,79 @@ fn passes(fg: KdeColor, on: &[KdeColor], floor: f32) -> bool {
     worst_contrast(fg, on) >= floor
 }
 
+/// `[wcag]` `color` as painted on `backdrop`, made opaque: a translucent
+/// colour composited over the opaque `backdrop`, an opaque one unchanged.
+fn opaque_on(color: KdeColor, backdrop: KdeColor) -> KdeColor {
+    if color.a == u16::MAX {
+        return color;
+    }
+    let solid = |c: KdeColor| KdeColor { a: u16::MAX, ..c };
+    over(solid(color), read_channel(color.a), solid(backdrop))
+}
+
 /// `[wcag]` `color` with its HCY luma moved toward more contrast until it
 /// reaches `floor` on every one of `on`; unchanged when it already does.
+///
+/// A translucent `color` is first made opaque over the first of `on`, the
+/// surface it is chiefly painted on, so every lifted token is opaque.
 fn lift(color: KdeColor, on: &[KdeColor], floor: f32) -> KdeColor {
+    let color = on.first().map_or(color, |&bg| opaque_on(color, bg));
     lift_luma_until(color, on, floor)
+}
+
+/// `[wcag]` [`lift`] in the given direction only: a text lifted toward its
+/// own end of the scale, so it never crosses to the other side of the
+/// surfaces it is set on, where it might reach the floor on them but not on
+/// a fill moved away from it.
+fn lift_toward(color: KdeColor, on: &[KdeColor], floor: f32, toward: LumaDirection) -> KdeColor {
+    let color = on.first().map_or(color, |&bg| opaque_on(color, bg));
+    lift_luma_toward(color, on, floor, toward)
+}
+
+/// The other direction.
+fn opposite(direction: LumaDirection) -> LumaDirection {
+    match direction {
+        LumaDirection::Lighter => LumaDirection::Darker,
+        LumaDirection::Darker => LumaDirection::Lighter,
+    }
+}
+
+/// The direction away from `text` on the luma scale, as seen from
+/// `surface`: lighter for a surface at least as light as the text.
+fn away_from(text: KdeColor, surface: KdeColor) -> LumaDirection {
+    if luma(surface) >= luma(text) {
+        LumaDirection::Lighter
+    } else {
+        LumaDirection::Darker
+    }
+}
+
+/// `[wcag]` D11: `surface` moved in luma toward `direction`, away from
+/// the text set on it, until the end of the scale on the text's side (black
+/// under a dark text, white under a light one) reaches `floor` on it;
+/// unchanged when it already does, as every surface of a scheme with
+/// readable text does.
+///
+/// This keeps every surface where a text lift can reach the floor. No text
+/// reaches 7:1 on a surface in the middle of the scale, and no text reaches
+/// 4.5:1 on a mid-scale surface and on the surfaces either side of it at
+/// once, as happens in an inactive window when the scheme's inactive
+/// effects shade its backgrounds toward the middle. The surface is measured
+/// as opaque and keeps its alpha.
+fn carry(surface: KdeColor, direction: LumaDirection, floor: f32) -> KdeColor {
+    let extreme = match direction {
+        LumaDirection::Lighter => KdeColor::BLACK,
+        LumaDirection::Darker => KdeColor::WHITE,
+    };
+    let solid = KdeColor {
+        a: u16::MAX,
+        ..surface
+    };
+    let carried = lift_luma_toward(solid, &[extreme], floor, direction);
+    KdeColor {
+        a: surface.a,
+        ..carried
+    }
 }
 
 /// `[wcag]` D1: the text to paint on `fills`.
@@ -210,7 +314,11 @@ fn lift(color: KdeColor, on: &[KdeColor], floor: f32) -> KdeColor {
 /// by Plasma's rule for text on an accent, judged on the first fill, or the
 /// other of the two when the rule's choice still falls short (black and
 /// white cannot both fall below 4.58:1 on one opaque fill).
+///
+/// A translucent `vendor` is judged, and kept, made opaque over the first
+/// fill.
 pub(crate) fn text_on(vendor: KdeColor, fills: &[KdeColor], floor: f32) -> KdeColor {
+    let vendor = opaque_on(vendor, fills[0]);
     if passes(vendor, fills, floor) {
         return vendor;
     }
@@ -231,7 +339,21 @@ pub(crate) fn text_on(vendor: KdeColor, fills: &[KdeColor], floor: f32) -> KdeCo
 /// `[wcag]` D1: `fill` with its luma moved away from `text` until `text`
 /// reaches `floor` on it; unchanged when it already does.
 fn fill_under(fill: KdeColor, text: &[KdeColor], floor: f32) -> KdeColor {
-    lift(fill, text, floor)
+    lift_luma_until(fill, text, floor)
+}
+
+/// `[wcag]` D1: `fill` with its luma moved toward `toward`, the window's end
+/// of the scale, until `text` reaches `floor` on it; unchanged when it
+/// already does.
+///
+/// A wash or a selection sits among the window's surfaces, so it moves only
+/// toward their end, never across the text to the other end, where the
+/// text might read but the fill would be black in a light window. Where
+/// even that end falls short the fill stops there, as near the floor as the
+/// text can come; the text's own lift (D10) makes sure that cannot happen
+/// to the primary text.
+fn fill_toward(fill: KdeColor, text: &[KdeColor], floor: f32, toward: LumaDirection) -> KdeColor {
+    lift_luma_toward(fill, text, floor, toward)
 }
 
 /// The high-contrast accent and its text.
@@ -259,8 +381,8 @@ fn high_contrast_accent(
     // How far a candidate falls short of either floor, as the smaller of
     // its two margins: at least zero when it reaches both.
     let attempt = |text: KdeColor| {
-        let fill = lift(highlight, &[text], floors.text);
-        let fill = lift(fill, surfaces, floors.non_text);
+        let fill = fill_under(highlight, &[text], floors.text);
+        let fill = lift_luma_until(fill, surfaces, floors.non_text);
         let margin = (worst_contrast(text, &[fill]) - floors.text)
             .min(worst_contrast(fill, surfaces) - floors.non_text);
         (fill, text, margin)
@@ -293,11 +415,17 @@ pub(crate) fn tokens(m: &Mapping<'_>) -> ColorTokens {
     };
 
     let role = |state: ColorState, r: PaletteRole| p.role(state, r);
-    let window = role(s, PaletteRole::Window);
     let window_text = role(s, PaletteRole::WindowText);
-    let base = role(s, PaletteRole::Base);
-    let alternate = role(s, PaletteRole::AlternateBase);
-    let button = role(s, PaletteRole::Button);
+    // `[wcag]` D11: each surface text is set on moves away from the window
+    // text, in the direction the window lies from it, until black or white
+    // can reach the text floor on it. One direction for every surface, as
+    // the primary text is set on all of them.
+    let polarity = away_from(window_text, role(s, PaletteRole::Window));
+    let surface = |c: KdeColor| carry(c, polarity, floors.text);
+    let window = surface(role(s, PaletteRole::Window));
+    let base = surface(role(s, PaletteRole::Base));
+    let alternate = surface(role(s, PaletteRole::AlternateBase));
+    let button = surface(role(s, PaletteRole::Button));
     let highlight = role(s, PaletteRole::Highlight);
     let highlighted_text = role(s, PaletteRole::HighlightedText);
     let view = p.set(s, ColorSet::View);
@@ -310,7 +438,7 @@ pub(crate) fn tokens(m: &Mapping<'_>) -> ColorTokens {
 
     // `[Hp]` Breeze's frame background (menus, popups, group boxes): the
     // window colour 30 % of the way to the view's.
-    let frame_background = mix(window, base, BLEND);
+    let frame_background = surface(mix(window, base, BLEND));
     // `[Hp]` The frame outline and the separator: the window colour moved
     // toward the window text by the frame contrast.
     let frame_outline = mix(window, window_text, fc);
@@ -318,11 +446,13 @@ pub(crate) fn tokens(m: &Mapping<'_>) -> ColorTokens {
     // it is darker than the window, otherwise `[Hp]` the window darkened as
     // Breeze darkens an unselected tab.
     let window_alternate = window_set.background(BackgroundRole::Alternate);
-    let sunken = if luma(window_alternate) < luma(window) {
+    let sunken = surface(if luma(window_alternate) < luma(window) {
         window_alternate
     } else {
         hsv_darker(window, RECESSED_FACTOR)
-    };
+    });
+    // Every opaque plain surface text is set on.
+    let plain_surfaces = [window, base, frame_background, alternate, button, sunken];
     // `[Hp]` What a control stands on.
     let control_surfaces = [window, base, frame_background, button];
 
@@ -356,9 +486,20 @@ pub(crate) fn tokens(m: &Mapping<'_>) -> ColorTokens {
         floors.text,
     );
 
+    // ── Text ────────────────────────────────────────────────────────────
+    // `[qt]` WindowText is the text of the window. `[wcag]` D10: lifted to
+    // the text floor on the plain surfaces where it falls short (it never
+    // does in a stock scheme's normal projection; the high-contrast one
+    // raises the floor to 7:1).
+    let text_side = opposite(polarity);
+    let text_primary = lift_toward(window_text, &plain_surfaces, floors.text, text_side);
+    // The window's end of the luma scale, away from its text.
+    let toward_window = away_from(text_primary, window);
+
     // `[wcag]` D1: an accent wash carries the primary text, so it moves away
-    // from that text if the text falls short on it.
-    let wash = |fill: KdeColor| fill_under(fill, &[window_text], floors.text);
+    // from that text, toward the window's end of the scale, if the text
+    // falls short on it.
+    let wash = |fill: KdeColor| fill_toward(fill, &[text_primary], floors.text, toward_window);
     // `[Hp]` The item-view hover: Highlight over the view at the blend
     // value. Also the subtle accent wash.
     let surface_hover = wash(over(accent, BLEND, base));
@@ -388,15 +529,6 @@ pub(crate) fn tokens(m: &Mapping<'_>) -> ColorTokens {
         active_hover,
         active_pressed,
     ];
-
-    // ── Text ────────────────────────────────────────────────────────────
-    // `[qt]` WindowText is the text of the window. The high-contrast
-    // projection lifts it to its 7:1.
-    let text_primary = if m.high_contrast {
-        lift(window_text, &text_surfaces, floors.text)
-    } else {
-        window_text
-    };
     // `[wcag]` D2: the window set's inactive foreground, lifted to the text
     // floor on every surface. The high-contrast projection uses the primary
     // text instead.
@@ -415,17 +547,17 @@ pub(crate) fn tokens(m: &Mapping<'_>) -> ColorTokens {
     // `[derived]` A code block sits half-way between the view and the
     // window: a step below the view in a light scheme, above it in a dark
     // one.
-    let editor_code_block = mix(base, window, 0.5);
+    // `[wcag]` D11 again: a mix of two carried surfaces of different hues
+    // can be darker than both.
+    let editor_code_block = surface(mix(base, window, 0.5));
     let editor_surfaces = [base, editor_current_line, editor_code_block];
-    let editor_fg = if m.high_contrast {
-        lift(
-            view.foreground(ForegroundRole::Normal),
-            &editor_surfaces,
-            floors.text,
-        )
-    } else {
-        view.foreground(ForegroundRole::Normal)
-    };
+    // `[wcag]` D10: lifted where it falls short on them.
+    let editor_fg = lift_toward(
+        view.foreground(ForegroundRole::Normal),
+        &editor_surfaces,
+        floors.text,
+        text_side,
+    );
 
     // `[wcag]` D3: links on every text surface.
     let link = |r: ForegroundRole| lift(view.foreground(r), &text_surfaces, floors.text);
@@ -440,7 +572,7 @@ pub(crate) fn tokens(m: &Mapping<'_>) -> ColorTokens {
     // the foreground, KDE's negative, neutral, positive and active
     // backgrounds).
     let status = |fg: ForegroundRole, bg: BackgroundRole| {
-        let background = view.background(bg);
+        let background = surface(view.background(bg));
         let mut on = text_surfaces.to_vec();
         on.push(background);
         (lift(view.foreground(fg), &on, floors.text), background)
@@ -459,7 +591,8 @@ pub(crate) fn tokens(m: &Mapping<'_>) -> ColorTokens {
     // ── Selection ───────────────────────────────────────────────────────
     // `[qt]` Highlight is the selection. `[wcag]` D1: the fill moves until
     // the primary text Teksilo paints on it reaches the floor.
-    let selection_fill = |fill: KdeColor| fill_under(fill, &[text_primary, editor_fg], floors.text);
+    let selection_fill =
+        |fill: KdeColor| fill_toward(fill, &[text_primary, editor_fg], floors.text, toward_window);
     let surface_selected = selection_fill(highlight);
     // `[qt]` The Inactive state's highlight: KDE tints the window colour 40 %
     // toward the selection colour, the muted selection of a backdrop window.
@@ -498,13 +631,16 @@ pub(crate) fn tokens(m: &Mapping<'_>) -> ColorTokens {
     );
 
     // ── Tooltip ─────────────────────────────────────────────────────────
-    let tooltip_bg = tooltip_set.background(BackgroundRole::Normal);
     let tooltip_fg = tooltip_set.foreground(ForegroundRole::Normal);
-    let tooltip_text = if m.high_contrast {
-        lift(tooltip_fg, &[tooltip_bg], floors.text)
-    } else {
-        tooltip_fg
-    };
+    // `[wcag]` D11 for the tooltip's own surface.
+    let tooltip_normal = tooltip_set.background(BackgroundRole::Normal);
+    let tooltip_bg = carry(
+        tooltip_normal,
+        away_from(tooltip_fg, tooltip_normal),
+        floors.text,
+    );
+    // `[wcag]` D10.
+    let tooltip_text = lift(tooltip_fg, &[tooltip_bg], floors.text);
     // `[wcag]` D2: the tooltip's inactive text, the shortcut's.
     let tooltip_shortcut = if m.high_contrast {
         tooltip_text

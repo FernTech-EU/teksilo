@@ -3,15 +3,16 @@
 
 //! The worked examples of section d of Teksilo's KDE specification, the
 //! 8-bit blends the golden vectors reach only through the accent oracle,
-//! and Teksilo's own WCAG lift, [`lift_luma_until`].
+//! and Teksilo's own WCAG lifts, [`lift_luma_until`] and
+//! [`lift_luma_toward`].
 //!
 //! `tests/golden_math.rs` checks the same functions against every measured
 //! record; this file needs no vector and is published with the crate.
 
 use teksilo_kde_scheme::KdeColor;
 use teksilo_kde_scheme::math::{
-    self, Hcy, ShadeRole, accent_over, black_or_white_on, blend8, darken, lift_luma_until, luma,
-    shade_role, tint,
+    self, Hcy, LumaDirection, ShadeRole, accent_over, black_or_white_on, blend8, darken,
+    lift_luma_toward, lift_luma_until, luma, shade_role, tint,
 };
 use teksilo_tokens::contrast::composite_contrast;
 
@@ -265,4 +266,46 @@ fn the_lift_keeps_alpha() {
     let lifted = lift_luma_until(fg, &[KdeColor::WHITE], 3.0);
     assert_eq!(lifted.a, fg.a);
     assert!(wcag(lifted, KdeColor::WHITE) >= 3.0, "{lifted}");
+}
+
+#[test]
+fn a_directed_lift_never_crosses_to_the_other_end() {
+    // A light fill under a mid-grey text: black is the stronger end, so the
+    // free lift crosses the text and ends near black, while the lift held
+    // to the lighter end ends as light as it can.
+    let fill = rgb(204, 233, 249);
+    let text = rgb(125, 125, 125);
+    let free = lift_luma_until(fill, &[text], 4.5);
+    assert!(luma(free) < luma(text), "{free}");
+    let held = lift_luma_toward(fill, &[text], 4.5, LumaDirection::Lighter);
+    assert!(luma(held) >= luma(fill), "{held}");
+    // White falls short too (4.1:1), so the end of the scale is the best it
+    // reaches.
+    assert!(wcag(text, KdeColor::WHITE) < 4.5);
+    assert!((wcag(held, text) - wcag(KdeColor::WHITE, text)).abs() < 1e-4);
+}
+
+#[test]
+fn a_directed_lift_stops_at_its_first_passing_step() {
+    let fill = rgb(61, 174, 233);
+    let text = rgb(35, 38, 41);
+    assert!(wcag(fill, text) < 7.0);
+    let held = lift_luma_toward(fill, &[text], 7.0, LumaDirection::Lighter);
+    let contrast = wcag(held, text);
+    assert!(contrast >= 7.0, "{held}");
+    assert!(contrast < 7.3, "{held} overshoots to {contrast}");
+    // The other way only lowers the contrast: the colour comes back as it
+    // was.
+    let wrong = lift_luma_toward(fill, &[text], 7.0, LumaDirection::Darker);
+    assert_eq!(wrong, fill);
+}
+
+#[test]
+fn a_directed_lift_keeps_a_passing_colour_and_needs_a_backdrop() {
+    let fg = rgb(35, 38, 41);
+    assert_eq!(
+        lift_luma_toward(fg, &[KdeColor::WHITE], 4.5, LumaDirection::Lighter),
+        fg
+    );
+    assert_eq!(lift_luma_toward(fg, &[], 4.5, LumaDirection::Darker), fg);
 }

@@ -6,7 +6,9 @@
 //! Under the OS "increase contrast" preference every text must reach 7:1 on
 //! what it is set on (WCAG SC 1.4.6) and every boundary, focus ring and the
 //! accent 4.5:1, for Breeze Light and Dark, each of Plasma's ten accents on
-//! both, and an active and an inactive window.
+//! both, and an active and an inactive window. `tests/contrast.rs` holds
+//! every other scheme it sweeps to the same floors, inactive effects and
+//! translucent colours included.
 //!
 //! The selection fill is the one fill held to its text only. It carries the
 //! window's text at 7:1, and the window's text is at 7:1 on the window, so

@@ -123,7 +123,8 @@ by crate for clarity, not because crates version independently.
   palette, Qt's `lighter` and `darker`, the selection fill and black or
   white text KDE derives from an accent, and Plasma's OKLab accent tint.
   `lift_luma_until` moves a colour's luma, keeping its hue, until it meets a
-  WCAG contrast floor on the given backgrounds.
+  WCAG contrast floor on the given backgrounds, and `lift_luma_toward` does
+  so in one direction only.
   `KdeColorScheme::resolve` gives the scheme's full palette, as KDE
   applications draw it: every colour set in the active, inactive and
   disabled states, with the disabled and inactive effects the scheme
@@ -156,7 +157,12 @@ by crate for clarity, not because crates version independently.
   contrast preference gets the preset's own colours, with 7:1 text. Stock
   Breeze colours that fall short of WCAG (secondary text, links, status
   colours, the focus colour, strong outlines, the scroll-bar thumb and the
-  text on the accent) are made readable, keeping their hue. Every theme
+  text on the accent) are made readable, keeping their hue, and so are any
+  scheme's, its own text included, in an active and an inactive window:
+  a translucent colour is made opaque, a hover or selection fill stays light
+  in a light window, and where the scheme's inactive effects shade an
+  inactive window toward a mid tone its backgrounds move back until its
+  text reads. Every theme
   carries a `KdePalette` with the whole resolved scheme and the colours
   Breeze combines from it (`breeze_colors` gives them for the high-contrast
   colours too), and `geometry::BreezeGeometry` gives the Breeze control

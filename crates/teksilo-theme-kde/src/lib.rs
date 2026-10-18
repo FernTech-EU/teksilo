@@ -148,17 +148,23 @@
 //! fall short of WCAG 2.x (the light theme's secondary text, links, status
 //! colours, focus colour, frame outlines, scroll-bar thumb and selection
 //! text). The theme's colour tokens lift each of them by rule, for any
-//! scheme, keeping its hue; the [`KdePalette`] extension keeps the scheme's
-//! own colours. The rules, the inactive-window and high-contrast colours and
-//! the tokens kept from Int UI are listed in the colour mapping's
-//! documentation (the private `color` module); every lift is tested to pass
-//! and its premise, that the scheme's colour fails, is tested too.
+//! scheme, keeping its hue where it can, and make every lifted colour
+//! opaque, a translucent scheme colour included; the [`KdePalette`]
+//! extension keeps the scheme's own colours. A scheme's own text is lifted
+//! the same way where it falls short, and where the scheme's inactive
+//! effects shade an inactive window's backgrounds toward the middle of the
+//! scale, those backgrounds move back until text can reach its floor on
+//! them. The rules, the inactive-window and high-contrast colours and the
+//! tokens kept from Int UI are listed in the colour mapping's documentation
+//! (the private `color` module); every lift is tested to pass and its
+//! premise, that the scheme's colour fails, is tested too.
 //!
 //! An inactive window paints the scheme's Inactive colours: for Breeze, a
 //! selection and accent muted to the window colour tinted toward the
 //! selection colour, as Plasma paints a backdrop window, with the focus ring
 //! unchanged. Under the OS high-contrast preference the theme paints its own
-//! high-contrast colours, with 7:1 text and 4.5:1 boundaries.
+//! high-contrast colours, with 7:1 text and 4.5:1 boundaries, in an active
+//! and an inactive window alike.
 //!
 //! ## Trademarks
 //!

@@ -6,13 +6,16 @@
 //!
 //! Each lift (D1 to D6 and D9 of the colour mapping's documentation) has a
 //! premise test, that the scheme's own colour fails in stock Breeze, and a
-//! test that the token passes. The sweep then checks every declared pair
-//! for an active and an inactive window, over Breeze Light, Dark and
-//! Classic, Oxygen, Oxygen Cold and Oxygen Dark (whose inputs the golden
-//! vectors record; Oxygen and Oxygen Dark turn inactive effects on), the
-//! ten Plasma accents on Light and on Dark, and schemes built to defeat the
-//! lifts, each shown to need them; the property at the end does the same
-//! over random coherent schemes, the high-contrast states included.
+//! test that the token passes; D10 and D11, which stock Breeze never needs,
+//! have their premises in the schemes built to defeat the lifts. The sweep
+//! then checks every declared pair in all four paint states (an active and
+//! an inactive window, each with and without high contrast), over Breeze
+//! Light, Dark and Classic, every scheme the golden vectors record (Oxygen
+//! and Oxygen Dark turn inactive effects on, and two synthetic schemes
+//! carry intensity effects and translucent colours), the ten Plasma accents
+//! on Light and on Dark, and schemes built to defeat the lifts, each shown
+//! to need them; the property at the end does the same over random coherent
+//! schemes, with random inactive effects.
 //!
 //! This file reads `tools/kde_golden/vectors/resolve.json` from the
 //! repository, so it is left out of the published package (the `exclude`
@@ -38,8 +41,8 @@ use serde_json::Value;
 use teksilo_core::styles::{PaintState, Theme};
 use teksilo_theme_kde::scheme::math::mix;
 use teksilo_theme_kde::scheme::{
-    ColorSet, ColorState, DecorationRole, ForegroundRole, KdeColor, KdeColorScheme, PaletteRole,
-    SetColors, StateEffect,
+    ColorEffect, ColorSet, ColorState, ContrastEffect, DecorationRole, ForegroundRole,
+    IntensityEffect, KdeColor, KdeColorScheme, PaletteRole, SetColors, StateEffect,
 };
 use teksilo_theme_kde::{self as kde, KdePalette, PlasmaAccent};
 use teksilo_tokens::contrast::composite_contrast;
@@ -305,6 +308,141 @@ fn d1_the_selection_fill_carries_the_primary_text() {
     }
 }
 
+/// The fills D1 moves under the primary text: the hover and press washes
+/// and the selections.
+fn washes_and_selections(c: &ColorTokens) -> [(&'static str, Color); 7] {
+    [
+        ("surface_hover", c.surface_hover),
+        ("surface_pressed", c.surface_pressed),
+        ("accent_subtle_bg", c.accent_subtle_bg),
+        ("surface_selected", c.surface_selected),
+        ("surface_selected_inactive", c.surface_selected_inactive),
+        ("selection_bg_active", c.selection_bg_active),
+        ("editor_selection_bg", c.editor_selection_bg),
+    ]
+}
+
+/// Breeze Light with its window and view text set to the grey `v`.
+fn breeze_light_with_grey_text(v: u8) -> KdeColorScheme {
+    with(
+        KdeColorScheme::breeze_light(),
+        &[ColorSet::View, ColorSet::Window],
+        |set| set.foreground_normal = KdeColor::rgb8(v, v, v),
+    )
+}
+
+#[test]
+fn d1_a_wash_or_selection_stays_on_the_windows_side_of_a_mid_grey_text() {
+    // An active light window whose text is in the middle of the scale, and
+    // a backdrop window whose inactive effect shades the text toward it.
+    let mut cases: Vec<(String, ColorTokens)> = (110..=130u8)
+        .step_by(4)
+        .map(|v| {
+            let t = kde::from_scheme(&breeze_light_with_grey_text(v));
+            (format!("grey {v}, active"), paint(&t, true, false))
+        })
+        .collect();
+    for amount in [0.2, 0.25, 0.4] {
+        let mut scheme = KdeColorScheme::breeze_light();
+        scheme.inactive_effect = StateEffect {
+            enabled: true,
+            intensity_effect: IntensityEffect::Shade,
+            intensity_amount: amount,
+            ..StateEffect::INACTIVE_DEFAULT
+        };
+        let t = kde::from_scheme(&scheme);
+        cases.push((format!("shade {amount}, inactive"), paint(&t, false, false)));
+    }
+    for (name, c) in cases {
+        let text = c.text_primary.relative_luminance();
+        let window = c.surface_main.relative_luminance();
+        assert!(window > text, "{name}: the window is the lighter");
+        for (fill_name, fill) in washes_and_selections(&c) {
+            // Lighter than the text, as the window is: never moved across it
+            // to black.
+            assert!(
+                fill.relative_luminance() > text,
+                "{name}: {fill_name} {fill:?} crossed the text {:?}",
+                c.text_primary
+            );
+            assert!(
+                ratio(c.text_primary, fill) >= TEXT,
+                "{name}: text on {fill_name}"
+            );
+        }
+    }
+}
+
+// ── D10, the scheme's own text ──────────────────────────────────────────
+
+#[test]
+fn d10_a_scheme_text_that_passes_is_kept_and_one_that_fails_is_lifted() {
+    for t in [kde::light(), kde::dark()] {
+        for (_, active, high_contrast, _, _) in &PAINT_STATES[..2] {
+            let c = paint(&t, *active, *high_contrast);
+            let state = if *active {
+                ColorState::Active
+            } else {
+                ColorState::Inactive
+            };
+            assert_eq!(
+                c.text_primary,
+                palette(&t).role(state, PaletteRole::WindowText)
+            );
+            assert_eq!(c.editor_fg, palette(&t).role(state, PaletteRole::Text));
+        }
+    }
+    let t = kde::from_scheme(&breeze_light_with_grey_text(118));
+    let vendor = role(&t, PaletteRole::WindowText);
+    let c = &t.colors;
+    assert!(ratio(vendor, c.surface_main) < TEXT);
+    assert_ne!(c.text_primary, vendor);
+    assert!(c.text_primary.relative_luminance() < vendor.relative_luminance());
+    for (name, bg) in text_surfaces(c) {
+        assert!(ratio(c.text_primary, bg) >= TEXT, "on {name}");
+    }
+    assert!(ratio(c.editor_fg, c.editor_bg) >= TEXT);
+}
+
+// ── D11, surfaces in the middle of the scale ────────────────────────────
+
+#[test]
+fn d11_an_inactive_window_shaded_toward_the_middle_is_moved_back() {
+    // Breeze Dark with an inactive shade of 0.1: white reaches 6.44:1 on
+    // the inactive window, short of the 7:1 high-contrast floor.
+    let mut scheme = KdeColorScheme::breeze_dark();
+    scheme.inactive_effect = StateEffect {
+        enabled: true,
+        intensity_effect: IntensityEffect::Shade,
+        intensity_amount: 0.1,
+        ..StateEffect::INACTIVE_DEFAULT
+    };
+    let t = kde::from_scheme(&scheme);
+    let vendor = palette(&t).role(ColorState::Inactive, PaletteRole::Window);
+    assert!(ratio(Color::WHITE, vendor) < 7.0);
+    let c = paint(&t, false, true);
+    assert!(c.surface_main.relative_luminance() < vendor.relative_luminance());
+    assert!(ratio(c.text_primary, c.surface_main) >= 7.0);
+    // The normal projection needs no move: white reaches 4.5:1 there.
+    assert_eq!(paint(&t, false, false).surface_main, vendor);
+    // Nor does any stock surface, in any paint state.
+    for t in [kde::light(), kde::dark()] {
+        for (_, active, high_contrast, _, _) in PAINT_STATES {
+            let c = paint(&t, active, high_contrast);
+            let state = if active {
+                ColorState::Active
+            } else {
+                ColorState::Inactive
+            };
+            assert_eq!(c.surface_main, palette(&t).role(state, PaletteRole::Window));
+            assert_eq!(
+                c.surface_content,
+                palette(&t).role(state, PaletteRole::Base)
+            );
+        }
+    }
+}
+
 // ── D2, inactive text ───────────────────────────────────────────────────
 
 #[test]
@@ -408,14 +546,73 @@ fn d5_premise_breeze_lights_focus_colour_fails_on_its_view() {
     assert!(ratio(focus, role(&t, PaletteRole::Base)) < NON_TEXT);
 }
 
+/// Breeze Light with a translucent negative and focus colour, and the
+/// golden scheme with a translucent focus and a transparent positive.
+fn translucent_schemes() -> Vec<(&'static str, KdeColorScheme)> {
+    let half = with(KdeColorScheme::breeze_light(), &TEXT_SETS, |set| {
+        set.foreground_negative = KdeColor::rgba8(218, 68, 83, 128);
+        set.decoration_focus = KdeColor::rgba8(61, 174, 233, 128);
+    });
+    vec![
+        ("half-translucent negative and focus", half),
+        ("SyntheticValueForms", golden_scheme("SyntheticValueForms")),
+    ]
+}
+
 #[test]
 fn d5_the_focus_ring_passes_and_stays_opaque() {
-    for t in [kde::light(), kde::dark()] {
-        let c = &t.colors;
-        assert_eq!(c.focus_ring.a(), 1.0);
-        assert_eq!(c.focus_ring, c.border_focused);
-        for bg in [c.surface_main, c.surface_content, c.surface_raised] {
-            assert!(ratio(c.focus_ring, bg) >= NON_TEXT);
+    let mut themes = vec![("Breeze Light", kde::light()), ("Breeze Dark", kde::dark())];
+    for (name, scheme) in translucent_schemes() {
+        themes.push((name, kde::from_scheme(&scheme)));
+    }
+    for (name, t) in themes {
+        for (state, active, high_contrast, _, non_text) in PAINT_STATES {
+            let c = paint(&t, active, high_contrast);
+            assert_eq!(c.focus_ring.a(), 1.0, "{name}, {state}");
+            assert_eq!(c.focus_ring, c.border_focused);
+            for bg in [c.surface_main, c.surface_content, c.surface_raised] {
+                assert!(ratio(c.focus_ring, bg) >= non_text, "{name}, {state}");
+            }
+        }
+    }
+}
+
+#[test]
+fn every_lifted_token_is_opaque_even_from_a_translucent_scheme_colour() {
+    for (name, scheme) in translucent_schemes() {
+        let t = kde::from_scheme(&scheme);
+        // The premise: the scheme has translucent colours to lift.
+        let view = &scheme.sets[ColorSet::View.index()];
+        assert!(view.decoration_focus.a < u16::MAX, "{name}");
+        for (state, active, high_contrast, _, _) in PAINT_STATES {
+            let c = paint(&t, active, high_contrast);
+            for (token, color) in [
+                ("text_primary", c.text_primary),
+                ("text_secondary", c.text_secondary),
+                ("text_link", c.text_link),
+                ("text_link_hover", c.text_link_hover),
+                ("text_link_visited", c.text_link_visited),
+                ("text_error", c.text_error),
+                ("text_warning", c.text_warning),
+                ("text_success", c.text_success),
+                ("status_info_fg", c.status_info_fg),
+                ("text_on_accent", c.text_on_accent),
+                ("selection_text_active", c.selection_text_active),
+                ("selection_text_inactive", c.selection_text_inactive),
+                ("editor_fg", c.editor_fg),
+                ("editor_gutter_fg", c.editor_gutter_fg),
+                ("tooltip_text", c.tooltip_text),
+                ("tooltip_shortcut", c.tooltip_shortcut),
+                ("border_strong", c.border_strong),
+                ("border_error", c.border_error),
+                ("border_warning", c.border_warning),
+                ("focus_ring", c.focus_ring),
+                ("focus_ring_error", c.focus_ring_error),
+                ("scrollbar_thumb", c.scrollbar_thumb),
+                ("scrollbar_thumb_hover", c.scrollbar_thumb_hover),
+            ] {
+                assert_eq!(color.a(), 1.0, "{name}, {state}: {token} {color:?}");
+            }
         }
     }
 }
@@ -506,7 +703,10 @@ const TEXT_SETS: [ColorSet; 4] = [
 /// Schemes built to defeat the lifts: secondary, link, status and focus
 /// colours that nearly vanish into their backgrounds, frame contrast at
 /// both ends, a highlight that is the window colour or a mid grey, inactive
-/// effects turned on, and a scheme tinted toward its accent.
+/// effects turned on, with and without an intensity effect that shades the
+/// inactive backgrounds toward the middle of the scale, a scheme tinted
+/// toward its accent, a window text in the middle of the scale, and
+/// translucent status and focus colours.
 fn adversarial() -> Vec<(&'static str, KdeColorScheme)> {
     let rgb = KdeColor::rgb8;
     let faint_light = {
@@ -583,6 +783,30 @@ fn adversarial() -> Vec<(&'static str, KdeColorScheme)> {
         s.tint_factor = Some(0.4);
         s.with_accent(PlasmaAccent::Yellow.kde_color())
     };
+    // A window and view text in the middle of the scale: lifting a light
+    // fill until it carries this text at 4.5:1 cannot succeed on the light
+    // side, and once went all the way to black.
+    let mid_grey_text = with(
+        KdeColorScheme::breeze_light(),
+        &[ColorSet::View, ColorSet::Window],
+        |set| set.foreground_normal = rgb(118, 118, 118),
+    );
+    // `[ColorEffects:Inactive]` with Enable and one intensity effect, the
+    // other keys at KDE's defaults.
+    let intensity = |mut s: KdeColorScheme, intensity_effect, intensity_amount| {
+        s.inactive_effect = StateEffect {
+            enabled: true,
+            intensity_effect,
+            intensity_amount,
+            ..StateEffect::INACTIVE_DEFAULT
+        };
+        s
+    };
+    // Translucent colours, which the `r,g,b,a` form writes.
+    let translucent = with(KdeColorScheme::breeze_light(), &TEXT_SETS, |set| {
+        set.foreground_negative = KdeColor::rgba8(218, 68, 83, 128);
+        set.decoration_focus = KdeColor::rgba8(61, 174, 233, 128);
+    });
     vec![
         ("faint light", faint_light),
         ("faint dark", faint_dark),
@@ -596,6 +820,24 @@ fn adversarial() -> Vec<(&'static str, KdeColorScheme)> {
         ("inactive effects on, dark", effects_on_dark),
         ("tinted pink", tinted),
         ("tinted yellow, dark", tinted_dark),
+        ("mid-grey text, light", mid_grey_text),
+        (
+            "inactive shade 0.2, light",
+            intensity(KdeColorScheme::breeze_light(), IntensityEffect::Shade, 0.2),
+        ),
+        (
+            "inactive shade 0.4, light",
+            intensity(KdeColorScheme::breeze_light(), IntensityEffect::Shade, 0.4),
+        ),
+        (
+            "inactive shade 0.1, dark",
+            intensity(KdeColorScheme::breeze_dark(), IntensityEffect::Shade, 0.1),
+        ),
+        (
+            "inactive lighten 0.4, dark",
+            intensity(KdeColorScheme::breeze_dark(), IntensityEffect::Lighten, 0.4),
+        ),
+        ("translucent status and focus", translucent),
     ]
 }
 
@@ -631,6 +873,32 @@ fn golden_scheme(wanted: &str) -> KdeColorScheme {
     KdeColorScheme::parse(&text).0
 }
 
+/// The name of every scheme the golden vectors record.
+fn golden_names() -> Vec<String> {
+    let all: Value = serde_json::from_str(RESOLVE_JSON).expect("resolve.json parses");
+    all["schemes"]
+        .as_array()
+        .expect("resolve.json has a list of schemes")
+        .iter()
+        .map(|s| s["name"].as_str().expect("a scheme has a name").to_owned())
+        .collect()
+}
+
+#[test]
+fn the_golden_vectors_record_thirteen_schemes_two_with_inactive_intensity_or_alpha() {
+    let names = golden_names();
+    assert_eq!(names.len(), 13, "{names:?}");
+    // The two the sweep needs most: an intensity effect in the Inactive
+    // state, and translucent and transparent colours.
+    let effects = golden_scheme("SyntheticInactiveEffects").inactive_effect;
+    assert!(effects.enabled);
+    assert_eq!(effects.intensity_effect, IntensityEffect::Shade);
+    let forms = golden_scheme("SyntheticValueForms");
+    let view = &forms.sets[ColorSet::View.index()];
+    assert!(view.decoration_focus.a < u16::MAX);
+    assert_eq!(view.foreground_positive.a, 0);
+}
+
 /// Oxygen's three schemes, the installed schemes with inactive effects.
 fn oxygen() -> Vec<(&'static str, KdeColorScheme)> {
     vec![
@@ -661,8 +929,8 @@ fn sweep_schemes() -> Vec<(String, KdeColorScheme)> {
             KdeColorScheme::breeze_classic(),
         ),
     ];
-    for (name, scheme) in oxygen() {
-        out.push((name.to_owned(), scheme));
+    for name in golden_names() {
+        out.push((format!("golden {name}"), golden_scheme(&name)));
     }
     for accent in PlasmaAccent::ALL {
         out.push((
@@ -680,13 +948,21 @@ fn sweep_schemes() -> Vec<(String, KdeColorScheme)> {
     out
 }
 
+/// The four paint states, named, with the floors each is held to.
+const PAINT_STATES: [(&str, bool, bool, f32, f32); 4] = [
+    ("active", true, false, TEXT, NON_TEXT),
+    ("inactive", false, false, TEXT, NON_TEXT),
+    ("active, high contrast", true, true, 7.0, 4.5),
+    ("inactive, high contrast", false, true, 7.0, 4.5),
+];
+
 #[test]
-fn every_declared_pair_passes_for_every_scheme_in_both_window_states() {
+fn every_declared_pair_passes_for_every_scheme_in_every_paint_state() {
     let mut all = Vec::new();
     for (name, scheme) in sweep_schemes() {
         let theme = kde::from_scheme(&scheme);
-        for (state, active) in [("active", true), ("inactive", false)] {
-            for failure in failures(&paint(&theme, active, false), TEXT, NON_TEXT) {
+        for (state, active, high_contrast, text, non_text) in PAINT_STATES {
+            for failure in failures(&paint(&theme, active, high_contrast), text, non_text) {
                 all.push(format!("{name}, {state}: {failure}"));
             }
         }
@@ -711,6 +987,18 @@ enum Vendor {
     SelectionText,
     /// The window text on the selection: D1's fill.
     WindowTextOnSelection,
+    /// The window text on the window: D10, and D11 where no text could
+    /// reach the floor on the window.
+    WindowTextOnWindow,
+    /// The same pair at the high-contrast text floor, 7:1.
+    WindowTextOnWindowEnhanced,
+}
+
+fn window_text_on_window(p: &KdePalette, state: ColorState) -> f32 {
+    ratio(
+        p.role(state, PaletteRole::WindowText),
+        p.role(state, PaletteRole::Window),
+    )
 }
 
 impl Vendor {
@@ -733,6 +1021,8 @@ impl Vendor {
                 ratio(p.role(state, PaletteRole::WindowText), highlight),
                 TEXT,
             ),
+            Vendor::WindowTextOnWindow => (window_text_on_window(p, state), TEXT),
+            Vendor::WindowTextOnWindowEnhanced => (window_text_on_window(p, state), 7.0),
         }
     }
 }
@@ -783,6 +1073,36 @@ fn what_each_adversarial_scheme_defeats() -> Vec<(&'static str, ColorState, Vec<
             "tinted yellow, dark",
             Active,
             vec![WindowTextOnSelection, OnView(Negative)],
+        ),
+        (
+            "mid-grey text, light",
+            Active,
+            vec![WindowTextOnWindow, WindowTextOnSelection],
+        ),
+        (
+            "inactive shade 0.2, light",
+            Inactive,
+            vec![WindowTextOnWindow],
+        ),
+        (
+            "inactive shade 0.4, light",
+            Inactive,
+            vec![WindowTextOnWindow],
+        ),
+        (
+            "inactive shade 0.1, dark",
+            Inactive,
+            vec![WindowTextOnWindowEnhanced],
+        ),
+        (
+            "inactive lighten 0.4, dark",
+            Inactive,
+            vec![WindowTextOnWindow],
+        ),
+        (
+            "translucent status and focus",
+            Active,
+            vec![OnView(Negative), FocusOnView],
         ),
     ]
 }
@@ -846,19 +1166,71 @@ fn arb_set(dark: bool) -> impl Strategy<Value = SetColors> {
         })
 }
 
+/// A random `[ColorEffects:Inactive]`: enabled or not, each of the three
+/// effects any of its kinds at any amount in `0..=1`, and any colour.
+///
+/// Cost: one flag, three small enums, three numbers and a triple.
+fn arb_inactive_effect() -> impl Strategy<Value = StateEffect> {
+    (
+        any::<bool>(),
+        prop_oneof![
+            Just(IntensityEffect::None),
+            Just(IntensityEffect::Shade),
+            Just(IntensityEffect::Darken),
+            Just(IntensityEffect::Lighten),
+        ],
+        0.0_f64..=1.0,
+        prop_oneof![
+            Just(ColorEffect::None),
+            Just(ColorEffect::Desaturate),
+            Just(ColorEffect::Fade),
+            Just(ColorEffect::Tint),
+        ],
+        0.0_f64..=1.0,
+        any::<[u8; 3]>(),
+        prop_oneof![
+            Just(ContrastEffect::None),
+            Just(ContrastEffect::Fade),
+            Just(ContrastEffect::Tint),
+        ],
+        0.0_f64..=1.0,
+    )
+        .prop_map(
+            |(
+                enabled,
+                intensity_effect,
+                intensity_amount,
+                color_effect,
+                color_amount,
+                [r, g, b],
+                contrast_effect,
+                contrast_amount,
+            )| StateEffect {
+                enabled,
+                intensity_effect,
+                intensity_amount,
+                color_effect,
+                color_amount,
+                color: KdeColor::rgb8(r, g, b),
+                contrast_effect,
+                contrast_amount,
+            },
+        )
+}
+
 /// A coherent random scheme.
 ///
 /// Coherent means its surfaces are on one side, every window, view, button
 /// and tooltip background light (channels 210 to 255) or dark (0 to 45),
-/// and its normal texts on the other (0 to 60, or 200 to 255): the primary
-/// text then reads on every plain surface, which no lift adjusts. Every
+/// and its normal texts on the other (0 to 60, or 200 to 255). Every
 /// colour a lift or a rule derives (inactive text, links, status colours,
-/// decorations, the whole selection set) is free, as are the frame contrast
-/// and the contrast.
+/// decorations, the whole selection set) is free, as are the frame
+/// contrast, the contrast and the inactive effects, which can shade an
+/// inactive window anywhere on the scale.
 ///
-/// Cost: four sets of twelve colours plus twelve free ones, two numbers and
-/// a flag. Building the theme is the expensive part (see the module doc);
-/// the scheme itself is about 60 triples.
+/// Cost: four sets of twelve colours plus twelve free ones, two numbers, a
+/// flag and an effect. Building the theme is the expensive part (see the
+/// module doc); the scheme itself is about 60 triples.
 fn arb_scheme() -> impl Strategy<Value = KdeColorScheme> {
     any::<bool>().prop_flat_map(|dark| {
         (
@@ -869,9 +1241,10 @@ fn arb_scheme() -> impl Strategy<Value = KdeColorScheme> {
             prop::collection::vec(any::<[u8; 3]>(), 12),
             0.0_f64..=1.0,
             0_i32..=10,
+            arb_inactive_effect(),
         )
             .prop_map(
-                move |(view, window, button, tooltip, selection, fc, contrast)| {
+                move |(view, window, button, tooltip, selection, fc, contrast, inactive)| {
                     let mut scheme = if dark {
                         KdeColorScheme::breeze_dark()
                     } else {
@@ -886,6 +1259,7 @@ fn arb_scheme() -> impl Strategy<Value = KdeColorScheme> {
                     scheme.sets[ColorSet::Selection.index()] = SetColors::from_rgb8(rows);
                     scheme.frame_contrast = fc;
                     scheme.contrast = contrast;
+                    scheme.inactive_effect = inactive;
                     scheme
                 },
             )

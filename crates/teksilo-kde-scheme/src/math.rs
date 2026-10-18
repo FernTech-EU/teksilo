@@ -36,7 +36,8 @@
 //! it is **not** WCAG contrast and must never be used to check
 //! readability. [`lift_luma_until`] is Teksilo's helper for that: it keeps a
 //! colour's HCY hue and chroma and moves its luma until the WCAG 2.x ratio
-//! reaches a floor, measured with [`teksilo_tokens::contrast`].
+//! reaches a floor, measured with [`teksilo_tokens::contrast`], and
+//! [`lift_luma_toward`] does the same in a direction the caller gives.
 
 use teksilo_tokens::contrast::composite_contrast;
 
@@ -924,6 +925,25 @@ pub fn oklab_tint(base: KdeColor, color: KdeColor, factor: f64) -> KdeColor {
 /// little.
 const LUMA_LIFT_STEPS: u32 = 256;
 
+/// The end of the luma scale [`lift_luma_toward`] moves a colour toward.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LumaDirection {
+    /// Toward black, luma 0.
+    Darker,
+    /// Toward white, luma 1.
+    Lighter,
+}
+
+impl LumaDirection {
+    /// The luma this direction ends at.
+    fn end(self) -> f64 {
+        match self {
+            LumaDirection::Darker => 0.0,
+            LumaDirection::Lighter => 1.0,
+        }
+    }
+}
+
 /// `color` with its HCY luma moved toward more contrast until its WCAG 2.x
 /// contrast ratio reaches `floor` against every colour in `backdrops`.
 ///
@@ -941,31 +961,52 @@ const LUMA_LIFT_STEPS: u32 = 256;
 /// translucent `color`, or backdrops on both sides of the middle), the step
 /// with the highest minimum contrast.
 pub fn lift_luma_until(color: KdeColor, backdrops: &[KdeColor], floor: f32) -> KdeColor {
-    let worst = |c: KdeColor| -> f32 {
-        let fg = c.to_color();
-        backdrops
-            .iter()
-            .map(|bg| composite_contrast(fg, bg.to_color()))
-            .fold(f32::INFINITY, f32::min)
-    };
-    if backdrops.is_empty() || worst(color) >= floor {
+    if backdrops.is_empty() || worst_on(color, backdrops) >= floor {
         return color;
     }
     let hcy = Hcy::from_color(color);
     let at_luma = |y: f64| Hcy { y, ..hcy }.to_color();
-    let target = if worst(at_luma(0.0)) >= worst(at_luma(1.0)) {
-        0.0
+    let direction = if worst_on(at_luma(0.0), backdrops) >= worst_on(at_luma(1.0), backdrops) {
+        LumaDirection::Darker
     } else {
-        1.0
+        LumaDirection::Lighter
     };
-    let mut best = (worst(color), color);
+    lift_luma_toward(color, backdrops, floor, direction)
+}
+
+/// [`lift_luma_until`] with the direction given: `color`'s luma moves only
+/// toward `direction`'s end of the scale, never the other way, until its
+/// WCAG 2.x contrast reaches `floor` against every colour in `backdrops`.
+///
+/// For a colour that must stay on one side of the scale, such as a fill
+/// that must stay as light as the surfaces around it whatever the text on
+/// it needs. Hue, chroma and alpha are kept, and contrast is measured as in
+/// [`lift_luma_until`].
+///
+/// Returns `color` unchanged when it already passes, or when `backdrops` is
+/// empty. Otherwise returns the first luma step toward the end that passes,
+/// or, when none does, the step with the highest minimum contrast, which
+/// may be `color` itself when moving that way only lowers it.
+pub fn lift_luma_toward(
+    color: KdeColor,
+    backdrops: &[KdeColor],
+    floor: f32,
+    direction: LumaDirection,
+) -> KdeColor {
+    let start = worst_on(color, backdrops);
+    if backdrops.is_empty() || start >= floor {
+        return color;
+    }
+    let hcy = Hcy::from_color(color);
+    let at_luma = |y: f64| Hcy { y, ..hcy }.to_color();
+    let mut best = (start, color);
     for step in 1..=LUMA_LIFT_STEPS {
         let candidate = at_luma(lerp(
             hcy.y,
-            target,
+            direction.end(),
             f64::from(step) / f64::from(LUMA_LIFT_STEPS),
         ));
-        let score = worst(candidate);
+        let score = worst_on(candidate, backdrops);
         if score >= floor {
             return candidate;
         }
@@ -974,6 +1015,16 @@ pub fn lift_luma_until(color: KdeColor, backdrops: &[KdeColor], floor: f32) -> K
         }
     }
     best.1
+}
+
+/// The lowest WCAG 2.x contrast `color` reaches, painted over each of
+/// `backdrops`; infinite for no backdrop.
+fn worst_on(color: KdeColor, backdrops: &[KdeColor]) -> f32 {
+    let fg = color.to_color();
+    backdrops
+        .iter()
+        .map(|bg| composite_contrast(fg, bg.to_color()))
+        .fold(f32::INFINITY, f32::min)
 }
 
 #[cfg(test)]
