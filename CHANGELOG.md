@@ -78,8 +78,11 @@ by crate for clarity, not because crates version independently.
   header, tab, thumb and bar sizes at the active density;
   `StandardItemStyle::selection_emphasis` says whether a selection mutes
   with view focus or only with the window, and
-  `MenuItemStyle::pressed_label_role` colours a pressed row's label. Every
-  default keeps an existing style as it was.
+  `MenuItemStyle::pressed_label_role` colours a pressed row's label.
+  `StandardItemStyle::min_height_decorated` sets the height of a row with a
+  check box or leading slot, and `ProgressBarStyle::paints_busy_indicator`
+  lets a style draw an indeterminate bar's motion in place of the sweep.
+  Every default keeps an existing style as it was.
 - **`ComponentStyleSlots::NAMES`**, the name of every theme-wide style slot.
 - **More desktop colours in the native theme.** `ColorTokens::from_os_colors`
   uses a report's view, link, status and focus colours, made readable where
@@ -99,7 +102,9 @@ by crate for clarity, not because crates version independently.
   bus, changed KDE files are read when a window takes focus.
 - **`TeksiloAppBuilder::native_theme`** answers each `NativeThemeRequest`
   with the app's own Native-mode theme, or `None` for IntUI in the desktop's
-  colours; `resolve_native_theme` gives the theme a request resolves to.
+  colours; `resolve_native_theme` gives the theme a request resolves to,
+  `configured_native_theme()` returns the installed factory, and
+  `presets::intui::from_os` is the IntUI default on its own.
 
 #### Demos and documentation
 
@@ -126,13 +131,16 @@ by crate for clarity, not because crates version independently.
 - **The native theme takes more of a GTK theme's colours.**
   **Behaviour change:** with a GTK theme that ships its CSS (Breeze GTK, for
   example), `ThemeMode::Native` also follows its content surface, editor
-  text, link, error, warning, success and focus colours.
+  text, link, error, warning and success colours, and Breeze GTK's focus
+  colour.
 
 #### Platform
 
 - **Linux desktop settings are read without `busctl`.** The portal and the
   screen reader flag are read over the session bus directly; a silent bus
   delays startup by at most a second, where each read waited up to 25 seconds.
+  They are now also read without `busctl` installed and from portals older
+  than version 2 of the settings interface.
 - **A Linux session is KDE only when it says so.** **Behaviour change:**
   `XDG_CURRENT_DESKTOP` must list `KDE` or `KDE_FULL_SESSION` be `true`,
   checked before GNOME. A name merely containing KDE no longer counts.
@@ -144,7 +152,9 @@ by crate for clarity, not because crates version independently.
 - **Native mode on KDE takes the user's accent.** **Behaviour change:** the
   accent is KDE's selection colour, as KDE applications show it, and a
   chosen `AccentColor` applies to a scheme the profile never wrote. The
-  portal's accent is used only when no `kdeglobals` can be read.
+  portal's accent is used only when no `kdeglobals` can be read. The view,
+  link, error, warning, success and focus colours are read from the scheme
+  too, so a desktop with another widget style shows them in IntUI.
 - **Light or dark on KDE follows the colours.** **Behaviour change:** a
   scheme is dark when its window background is, not when its name says
   "dark", so Breeze Twilight is no longer taken for light.
