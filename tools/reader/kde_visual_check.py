@@ -911,12 +911,13 @@ class ModeCheck:
 
         frame, text = self.wait_for("no tooltip opened over the icon button", frames)
         # The known limitation: a plain TooltipWidget writes its text in the
-        # small style, so the frame is that line box plus Breeze's 4 px on
-        # each side, not Plasma's 26.
+        # small style and TextWidget lays one line out at the face's own
+        # natural height (it ignores the style's line_height), so the frame
+        # is that height plus Breeze's 4 px on each side, not Plasma's 26.
         line = text["bounds"]["height"]
         self.measure(Spec("tooltip, one line", (self.breeze.tooltip_height(), "tooltip size_hint h"),
                           "26", line + 8,
-                          f"known limitation: the small text style's {fmt(line)} px line box "
+                          f"known limitation: the text's natural {fmt(line)} px height "
                           "+ 2 x 4"), frame)
         # Away from every control, so the tooltip closes.
         b.call("inject_pointer", {"action": "move", "x": 2, "y": 2})

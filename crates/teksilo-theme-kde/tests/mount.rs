@@ -3124,6 +3124,31 @@ fn a_disabled_menu_row_is_not_highlighted() {
     assert!(row_shapes(&rerender(&mut tree), row).is_empty());
 }
 
+/// A one-line tooltip is its text's height plus 2 x 4 px, and that height is
+/// the text backend's own for one line, not the small text style's line box:
+/// `TextWidget` does not read `TextStyle::line_height`. The mock backend's
+/// line is 16 px and the small style's line box is 15 px, so a text that
+/// honoured the style would be told apart. (With the real backend the same
+/// relation gives 21.31 px for Inter at 11 px; the visual check measures it.)
+#[test]
+fn a_one_line_tooltip_is_its_text_height_plus_eight_not_the_style_line_box() {
+    for (scheme, theme) in themes() {
+        let small = theme.typography.small.clone();
+        let style_line = small.size * small.line_height;
+        assert!((style_line - 15.0).abs() < 1e-3, "{scheme}: {style_line}");
+        let mut tree = tree_with(theme);
+        let root = tree.add(
+            VStack::new().child(HStack::new().child(TooltipWidget::new(lit!("Tooltip text")))),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let (frame_id, bounds) = the_node(&tree, root, "BreezePopupFrame");
+        let text = tree.bounds(tree.children(frame_id)[0]);
+        assert_eq!(text.height, 16.0, "{scheme}: the backend's one line");
+        assert_ne!(text.height, style_line, "{scheme}");
+        assert_eq!(bounds.height, text.height + 8.0, "{scheme}");
+    }
+}
+
 /// A tooltip is Plasma's: the tooltip background in its outline, over the
 /// window shadow, the text 4 px inside the frame.
 #[test]

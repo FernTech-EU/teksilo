@@ -221,9 +221,15 @@
 //!   `breezerc`'s `MenuOpacity` has nothing blurred behind it, where Plasma's
 //!   compositor blurs what lies under it ([`styles::popup`]).
 //! - **A plain tooltip is shorter than Plasma's.** `TooltipWidget` writes its
-//!   text in the small text style, where Breeze uses the body font, so a
-//!   one-line tooltip is the small line box plus 8 px rather than 26 px
-//!   ([`styles::tooltip`]).
+//!   text in the small text style, where Breeze uses the body font, and
+//!   `TextWidget` lays a single line out at the face's own natural height,
+//!   ignoring the style's `line_height`. A one-line tooltip is therefore
+//!   that height plus 2 x 4 px: 21.31 px with the fixed presets (Inter at
+//!   11 px, 13.31 px of text) and 22.98 px in system mode (Noto Sans at
+//!   11 px, 14.98 px), where Plasma's is 26 px. Every preset has this,
+//!   because it is the framework's: matching Plasma would take the tooltip
+//!   text in the body style or `TextWidget` honouring `line_height`, both
+//!   changes outside this crate ([`styles::tooltip`]).
 //! - **A spin box's arrows keep their colour at the limit**, and an empty
 //!   combo box's arrow is not greyed: the styles are not told the value's
 //!   limits or the item count ([`styles::spin_box`],

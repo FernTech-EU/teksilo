@@ -12,9 +12,15 @@
 //! text wraps at 320 px ([`TOOLTIP_MAX_WIDTH`]).
 //!
 //! The text itself is the tooltip widget's: a plain `TooltipWidget` writes
-//! it in the small text style, where Breeze uses the body font, so its
-//! tooltip is shorter than Plasma's by the difference of the two line boxes
-//! (the crate's known limitations).
+//! it in the small text style, where Breeze uses the body font. And
+//! `TextWidget` does not use `TextStyle::line_height`: the text backend lays
+//! a single line out at the face's own natural height (Inter at 11 px:
+//! 13.31 px; Noto Sans at 11 px: 14.98 px), so a one-line tooltip is that
+//! height plus 2 x 4 px, 21.31 px with the fixed presets and 22.98 px in
+//! system mode, not the 26 px of Plasma. That is a property of the framework
+//! shared by every preset; matching Plasma would take the tooltip text in
+//! the body style or `TextWidget` honouring `line_height`, both outside this
+//! crate (the crate's known limitations).
 
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::styles::density::spacing;
