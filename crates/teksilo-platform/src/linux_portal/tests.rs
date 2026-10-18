@@ -136,7 +136,7 @@ fn a_silenced_name_is_quiet_until_its_instant_and_no_other_is() {
 /// theme watch's real-bus test.
 pub(crate) mod real_bus {
     use std::io::{BufRead, BufReader};
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::process::{Child, Command, Stdio};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
@@ -163,11 +163,45 @@ pub(crate) mod real_bus {
     pub(crate) struct PrivateBus {
         child: Child,
         dir: PathBuf,
+        config: PathBuf,
         pub(crate) address: String,
     }
 
     impl PrivateBus {
         pub(crate) fn start() -> Self {
+            Self::listening(false)
+        }
+
+        /// A bus on a socket at a fixed path in its directory, so that
+        /// [`restart`](Self::restart) brings it back at the same address. The
+        /// address names the path alone, without the daemon's `guid`, which a
+        /// restarted daemon does not keep (as a session's own bus address
+        /// usually does).
+        pub(crate) fn start_restartable() -> Self {
+            Self::listening(true)
+        }
+
+        /// Kill the daemon, closing every connection to it.
+        pub(crate) fn kill(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+
+        /// Kill the daemon and start another on the same configuration. On a
+        /// bus from [`start_restartable`](Self::start_restartable) it listens
+        /// at the same address.
+        pub(crate) fn restart(&mut self) {
+            self.kill();
+            let (child, printed) = Self::spawn(&self.config);
+            self.child = child;
+            assert!(
+                printed.starts_with(&self.address),
+                "the bus came back elsewhere: {printed}, not {}",
+                self.address
+            );
+        }
+
+        fn listening(fixed_path: bool) -> Self {
             static NEXT: AtomicUsize = AtomicUsize::new(0);
             let dir = std::env::temp_dir().join(format!(
                 "teksilo-dbus-test-{}-{}",
@@ -176,6 +210,11 @@ pub(crate) mod real_bus {
             ));
             std::fs::create_dir_all(&dir).expect("create the bus directory");
             let config = dir.join("bus.conf");
+            let listen = if fixed_path {
+                format!("unix:path={}", dir.join("bus").display())
+            } else {
+                format!("unix:dir={}", dir.display())
+            };
             std::fs::write(
                 &config,
                 format!(
@@ -183,7 +222,7 @@ pub(crate) mod real_bus {
  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
 <busconfig>
   <type>session</type>
-  <listen>unix:dir={}</listen>
+  <listen>{listen}</listen>
   <auth>EXTERNAL</auth>
   <policy context="default">
     <allow send_destination="*" eavesdrop="true"/>
@@ -191,11 +230,22 @@ pub(crate) mod real_bus {
     <allow own="*"/>
   </policy>
 </busconfig>
-"#,
-                    dir.display()
+"#
                 ),
             )
             .expect("write the bus configuration");
+            let (child, printed) = Self::spawn(&config);
+            let address = if fixed_path { listen } else { printed };
+            Self {
+                child,
+                dir,
+                config,
+                address,
+            }
+        }
+
+        /// A daemon on `config`, and the address it printed.
+        fn spawn(config: &Path) -> (Child, String) {
             let mut child = Command::new("dbus-daemon")
                 .arg(format!("--config-file={}", config.display()))
                 .args(["--nofork", "--print-address"])
@@ -211,11 +261,7 @@ pub(crate) mod real_bus {
                 .expect("read the bus address");
             let address = address.trim().to_owned();
             assert!(!address.is_empty(), "dbus-daemon printed no address");
-            Self {
-                child,
-                dir,
-                address,
-            }
+            (child, address)
         }
     }
 

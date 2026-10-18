@@ -2064,10 +2064,18 @@ impl WindowManager {
     /// motion", text scale, screen reader) and, if they changed since startup /
     /// the last refresh, apply them to every open window's tree.
     ///
-    /// Cost note: on Linux each of these is a subprocess (`busctl`,
-    /// `gsettings`), and the screen-reader flag adds one more `busctl` to the
-    /// handful this already runs. It is on the window-focus path, not an idle
-    /// poll, so it costs a fraction of a focus change and nothing at rest. Lets a runtime toggle
+    /// Cost note: on Linux the contrast, reduced-motion and screen-reader
+    /// flags are read over the session bus with zbus (the desktop portal, and
+    /// AT-SPI's status object on `org.a11y.Bus`), on one connection the
+    /// process keeps, and the text scale and the GNOME fallbacks run the
+    /// `gsettings` tool as a subprocess. A bus that answers costs a few
+    /// milliseconds per read. A bus, or a service on it, that does not answer
+    /// costs up to the reader's 500 ms call timeout for the first read that
+    /// meets it, after which the reader leaves that bus or service alone for
+    /// a 5 s quiet period: on such a session a focus change can be held up by
+    /// about half a second for each silent service, once per quiet period,
+    /// and by nothing in between. It is on the window-focus path, not an idle
+    /// poll, so it costs nothing at rest. Lets a runtime toggle
     /// of these settings take effect without restarting the app (WCAG / EN
     /// 301 549 §11.7). Driven event-first — from `WindowEvent::Focused` when a
     /// window gains focus — so there is no idle polling wakeup. Returns `true`

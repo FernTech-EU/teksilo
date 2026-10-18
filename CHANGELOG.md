@@ -290,7 +290,10 @@ by crate for clarity, not because crates version independently.
   settings, KDE's global settings notification, and KDE writing
   `kdeglobals` or `breezerc`. A change that arrives as several signals is
   reported once, as an `os_theme::OsThemeChanged` posted through the
-  application's event poster 150 ms after the first. `files_changed` says
+  application's event poster 150 ms after the first. When the connection
+  to the session bus closes, a change already heard is still reported, and
+  the watch connects again every second; once it is back it reports one
+  change, for whatever it could not hear meanwhile. `files_changed` says
   whether a KDE configuration file changed since it last looked, for a
   session with no bus. On macOS and Windows there is nothing to watch, and
   `OsThemeWatch::new` gives `None`.

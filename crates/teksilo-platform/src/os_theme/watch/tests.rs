@@ -132,14 +132,19 @@ fn a_window_opens_on_the_first_change_and_is_due_once() {
 
 /// A source whose changes come at fixed instants, on a clock it moves
 /// itself: to each change it reports, and to the deadline when that comes
-/// first. It closes when its changes are spent and no window is open.
+/// first. It closes when its changes are spent and no window is open, or,
+/// when `closes_early`, as soon as they are spent.
 struct Scripted {
     now: Rc<Cell<Instant>>,
     changes: VecDeque<Instant>,
+    closes_early: bool,
 }
 
 impl ChangeSource for Scripted {
     fn wait(&mut self, deadline: Option<Instant>) -> Heard {
+        if self.closes_early && self.changes.is_empty() {
+            return Heard::Closed;
+        }
         match (self.changes.front().copied(), deadline) {
             (Some(at), Some(due)) if at > due => {
                 self.now.set(due);
@@ -162,11 +167,21 @@ impl ChangeSource for Scripted {
 /// The milliseconds after the start at which [`run`] posts, for changes
 /// at `changes` milliseconds with a window of `window` milliseconds.
 fn posts_for(window: u64, changes: &[u64]) -> Vec<u64> {
+    posts_for_source(window, changes, false)
+}
+
+/// [`posts_for`] on a source that closes right after its last change.
+fn posts_for_closing(window: u64, changes: &[u64]) -> Vec<u64> {
+    posts_for_source(window, changes, true)
+}
+
+fn posts_for_source(window: u64, changes: &[u64], closes_early: bool) -> Vec<u64> {
     let start = Instant::now();
     let now = Rc::new(Cell::new(start));
     let mut source = Scripted {
         now: Rc::clone(&now),
         changes: changes.iter().map(|ms| start + *ms as u32 * MS).collect(),
+        closes_early,
     };
     let posted = std::cell::RefCell::new(Vec::new());
     run(
@@ -246,6 +261,7 @@ fn a_stopped_watch_posts_nothing() {
     let mut source = Scripted {
         now: Rc::clone(&now),
         changes: [start, start + 10 * MS].into(),
+        closes_early: false,
     };
     let stop = Stop::default();
     stop.stop();
@@ -258,6 +274,53 @@ fn a_stopped_watch_posts_nothing() {
         &|| posted.set(posted.get() + 1),
     );
     assert_eq!(posted.get(), 0);
+}
+
+#[test]
+fn a_window_open_when_the_source_closes_is_posted_then() {
+    // The source closes 10 ms into a window of 150: the changes it heard
+    // are posted for at the close, not dropped.
+    assert_eq!(posts_for_closing(150, &[0, 10]), vec![10]);
+    // A window that already ended was posted for at its end, and the close
+    // after it posts nothing more.
+    assert_eq!(posts_for_closing(150, &[0, 200]), vec![150, 200]);
+    assert_eq!(posts_for_closing(150, &[]), Vec::<u64>::new());
+}
+
+#[test]
+fn a_window_open_when_a_stopped_watch_closes_posts_nothing() {
+    let start = Instant::now();
+    let now = Rc::new(Cell::new(start));
+    let mut source = Scripted {
+        now: Rc::clone(&now),
+        changes: VecDeque::new(),
+        closes_early: true,
+    };
+    let stop = Stop::default();
+    stop.stop();
+    let mut debounce = Debounce::new(150 * MS);
+    debounce.heard(start);
+    let posted = Cell::new(0);
+    run(&mut source, &stop, &mut debounce, &|| now.get(), &|| {
+        posted.set(posted.get() + 1)
+    });
+    assert_eq!(posted.get(), 0);
+}
+
+#[test]
+fn a_pause_ends_at_once_when_the_watch_stops() {
+    let stop = Arc::new(Stop::default());
+    assert!(stop.pause(MS), "a pause nothing stops runs out");
+    let stopper = Arc::clone(&stop);
+    let thread = std::thread::spawn(move || {
+        std::thread::sleep(20 * MS);
+        stopper.stop();
+    });
+    let paused = Instant::now();
+    assert!(!stop.pause(Duration::from_secs(30)), "the stop ends it");
+    assert!(paused.elapsed() < Duration::from_secs(5));
+    thread.join().unwrap();
+    assert!(!stop.pause(Duration::from_secs(30)), "and every later one");
 }
 
 // ── The thread ──────────────────────────────────────────────────────────────
@@ -297,9 +360,16 @@ fn channel_watch(window: Duration) -> (Running, mpsc::Sender<()>, Arc<AtomicUsiz
     let (send, changes) = mpsc::channel();
     let posted = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&posted);
+    let mut changes = Some(changes);
     let running = Running::start(
         window,
-        move |stop| Some(Channel { changes, stop }),
+        10 * MS,
+        move |stop| {
+            Some(Channel {
+                changes: changes.take()?,
+                stop,
+            })
+        },
         move || {
             counter.fetch_add(1, Ordering::SeqCst);
         },
@@ -353,9 +423,108 @@ fn nothing_is_posted_after_drop() {
     );
 }
 
+/// A running watch with a window of `window` that opens a [`Channel`] on
+/// `first`, then one for each receiver sent on the returned sender, trying
+/// every `retry`, and counts its attempts to open and its posts.
+fn reopening_watch(
+    window: Duration,
+    retry: Duration,
+    first: Receiver<()>,
+) -> (
+    Running,
+    mpsc::Sender<Receiver<()>>,
+    Arc<AtomicUsize>,
+    Arc<AtomicUsize>,
+) {
+    let (sources, next) = mpsc::channel::<Receiver<()>>();
+    sources.send(first).unwrap();
+    let opens = Arc::new(AtomicUsize::new(0));
+    let posted = Arc::new(AtomicUsize::new(0));
+    let (open_count, post_count) = (Arc::clone(&opens), Arc::clone(&posted));
+    let running = Running::start(
+        window,
+        retry,
+        move |stop| {
+            open_count.fetch_add(1, Ordering::SeqCst);
+            let changes = next.try_recv().ok()?;
+            Some(Channel { changes, stop })
+        },
+        move || {
+            post_count.fetch_add(1, Ordering::SeqCst);
+        },
+    )
+    .expect("start the watch thread");
+    (running, sources, opens, posted)
+}
+
+#[test]
+fn a_closed_source_is_posted_for_and_opened_again() {
+    let window = 40 * MS;
+    let (first_send, first) = mpsc::channel();
+    let (running, sources, opens, posted) = reopening_watch(window, 10 * MS, first);
+    wait_for(&opens, 1);
+
+    // A change, then the source closes inside its window.
+    first_send.send(()).unwrap();
+    drop(first_send);
+    wait_for(&posted, 1);
+    assert_eq!(
+        posted.load(Ordering::SeqCst),
+        1,
+        "the open window is posted"
+    );
+
+    // With nothing to open, the watch keeps trying, and posts nothing.
+    wait_for(&opens, 4);
+    assert!(opens.load(Ordering::SeqCst) >= 4, "it tries again");
+    assert_eq!(posted.load(Ordering::SeqCst), 1);
+
+    // Opened again: one payload for what nobody heard, then one per burst.
+    let (second_send, second) = mpsc::channel();
+    sources.send(second).unwrap();
+    wait_for(&posted, 2);
+    std::thread::sleep(window * 3);
+    assert_eq!(
+        posted.load(Ordering::SeqCst),
+        2,
+        "the reopening reads again"
+    );
+    let opened = opens.load(Ordering::SeqCst);
+    second_send.send(()).unwrap();
+    wait_for(&posted, 3);
+    std::thread::sleep(window * 3);
+    assert_eq!(posted.load(Ordering::SeqCst), 3, "the new source is heard");
+    assert_eq!(opens.load(Ordering::SeqCst), opened, "and kept");
+
+    let dropped = Instant::now();
+    drop(running);
+    assert!(dropped.elapsed() < Duration::from_secs(1));
+    assert_eq!(posted.load(Ordering::SeqCst), 3);
+}
+
+#[test]
+fn a_watch_waiting_to_reopen_is_dropped_promptly() {
+    let (first_send, first) = mpsc::channel();
+    let (running, _sources, opens, posted) =
+        reopening_watch(10 * MS, Duration::from_secs(30), first);
+    wait_for(&opens, 1);
+    drop(first_send);
+    // Let the thread see the close and start its pause.
+    std::thread::sleep(50 * MS);
+    let dropped = Instant::now();
+    drop(running);
+    assert!(
+        dropped.elapsed() < Duration::from_secs(5),
+        "the drop ends the pause"
+    );
+    assert_eq!(opens.load(Ordering::SeqCst), 1);
+    assert_eq!(posted.load(Ordering::SeqCst), 0, "nothing was heard");
+}
+
 #[test]
 fn a_source_that_cannot_open_ends_the_thread() {
     let running = Running::start(
+        10 * MS,
         10 * MS,
         |_stop| None::<Channel>,
         || panic!("nothing to hear"),
@@ -457,7 +626,7 @@ mod real_bus {
     use teksilo_core::{AppEventPoster, SubscriptionId};
     use zbus::zvariant::Value;
 
-    use super::super::{DEBOUNCE, OsThemeChanged, OsThemeWatch};
+    use super::super::{DEBOUNCE, OsThemeChanged, OsThemeWatch, RECONNECT_EVERY};
     use crate::linux_portal::tests::real_bus::{PrivateBus, enabled};
 
     /// Counts the [`OsThemeChanged`] payloads posted to it, and every other
@@ -638,6 +807,62 @@ mod real_bus {
             send(&sender).expect("send the signal");
         }
         assert_eq!(recorder.settle(expected), expected, "nothing after drop");
+        assert_eq!(recorder.others.load(Ordering::SeqCst), 0);
+    }
+
+    /// A connection to the bus, for sending.
+    fn sender_on(address: &str) -> zbus::Connection {
+        async_io::block_on(
+            zbus::connection::Builder::address(address)
+                .expect("the bus address")
+                .build(),
+        )
+        .expect("connect the sender")
+    }
+
+    #[test]
+    fn a_bus_that_goes_away_is_posted_for_and_reached_again() {
+        if !enabled() {
+            return;
+        }
+        let mut bus = PrivateBus::start_restartable();
+        let recorder = Recorder::default();
+        let (opened, is_open) = mpsc::channel();
+        let watch = OsThemeWatch::on_bus(Some(bus.address.clone()), recorder.clone(), move |ok| {
+            let _ = opened.send(ok);
+        })
+        .expect("start the watch");
+        assert_eq!(is_open.recv_timeout(Duration::from_secs(5)), Ok(true));
+
+        // A change, and the bus killed inside its debounce window.
+        let sender = sender_on(&bus.address);
+        config_changed(&sender, "/kdeglobals").expect("send the signal");
+        std::thread::sleep(Duration::from_millis(20));
+        bus.kill();
+        drop(sender);
+        assert_eq!(
+            recorder.settle(1),
+            1,
+            "the change heard before the bus went"
+        );
+
+        // The bus back at its address: the watch reaches it again and reads
+        // the desktop once for what it could not hear meanwhile.
+        bus.restart();
+        let reached = Instant::now() + RECONNECT_EVERY * 5;
+        while Instant::now() < reached {
+            if is_open.recv_timeout(Duration::from_millis(50)) == Ok(true) {
+                break;
+            }
+        }
+        assert!(Instant::now() < reached, "the watch reached the bus again");
+        assert_eq!(recorder.settle(2), 2, "one payload for the gap");
+
+        // And it hears the new bus.
+        let sender = sender_on(&bus.address);
+        notify_change(&sender).expect("send the signal");
+        assert_eq!(recorder.settle(3), 3, "a signal on the new bus");
+        drop(watch);
         assert_eq!(recorder.others.load(Ordering::SeqCst), 0);
     }
 

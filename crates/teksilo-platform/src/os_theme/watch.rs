@@ -33,6 +33,15 @@
 //! followed by a payload posted no earlier than it, so the reading the
 //! payload prompts sees every change signalled before it.
 //!
+//! The connection can close while the application runs, when the bus daemon
+//! exits or restarts. A window still open then is posted at once rather than
+//! dropped, and the watch connects again every [`RECONNECT_EVERY`] until it
+//! reaches the bus or is dropped. A signal sent while it was not connected
+//! was heard by no one, so on reaching the bus again the watch opens a window
+//! as if it had heard one, and its payload reads the desktop again for
+//! whatever changed in between. A bus that cannot be reached when the watch
+//! starts is not tried again: that session has none.
+//!
 //! The watch reads nothing itself; the payload's receiver queries the
 //! desktop again ([`query_native_desktop`](super::query_native_desktop),
 //! [`query_color_scheme`](super::query_color_scheme)).
@@ -57,7 +66,7 @@ mod tests;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::task::{Context, Waker};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime};
@@ -67,6 +76,12 @@ use teksilo_kde_scheme::KdeConfigLocations;
 
 /// How long after the first signal of a change the watch posts its payload.
 pub const DEBOUNCE: Duration = Duration::from_millis(150);
+
+/// How often a watch whose connection closed tries to connect again. An
+/// attempt on a bus whose socket is gone fails at once, and one on a bus
+/// that does not answer is bounded by the reader's call timeout, on the
+/// watch's own thread either way.
+pub const RECONNECT_EVERY: Duration = Duration::from_secs(1);
 
 /// The portal's settings interface and object path, and its change signal.
 const PORTAL_SETTINGS: &str = "org.freedesktop.portal.Settings";
@@ -124,7 +139,8 @@ impl OsThemeWatch {
     ///
     /// The bus is connected to on the watch's thread, so this returns at
     /// once. A session with no bus leaves a watch that hears nothing, whose
-    /// [`files_changed`](Self::files_changed) still answers.
+    /// [`files_changed`](Self::files_changed) still answers. A connection
+    /// that closes later is made again; see the [module](self).
     pub fn new(poster: impl AppEventPoster) -> Option<Self> {
         #[cfg(target_os = "linux")]
         {
@@ -138,19 +154,20 @@ impl OsThemeWatch {
     }
 
     /// [`new`](Self::new) on the bus at `address` (`None`: the session bus
-    /// the environment names). `opened` is told on the watch's thread
-    /// whether the bus was reached and every signal subscribed to, before
-    /// any is heard.
+    /// the environment names). `opened` is told on the watch's thread, at
+    /// each attempt to connect, whether the bus was reached and every signal
+    /// subscribed to, before any is heard.
     #[cfg(target_os = "linux")]
     fn on_bus(
         address: Option<String>,
         poster: impl AppEventPoster,
-        opened: impl FnOnce(bool) + Send + 'static,
+        mut opened: impl FnMut(bool) + Send + 'static,
     ) -> Option<Self> {
         let locations = KdeConfigLocations::from_env(super::kde::process_env);
         let files = ConfigStamps::read(config_files(&locations), modified);
         let running = Running::start(
             DEBOUNCE,
+            RECONNECT_EVERY,
             move |stop| {
                 let source = bus::BusSource::connect(address.as_deref(), stop);
                 opened(source.is_some());
@@ -230,6 +247,11 @@ impl Debounce {
         self.due
     }
 
+    /// Close the open window before its end; whether one was open.
+    fn take_open(&mut self) -> bool {
+        self.due.take().is_some()
+    }
+
     /// Whether the open window has ended by `now`. A window that has is
     /// closed, so it is due once.
     fn take_due(&mut self, now: Instant) -> bool {
@@ -263,7 +285,9 @@ trait ChangeSource {
 
 /// Hear changes from `source` and call `post` once at the end of each
 /// debounce window, reading the time from `clock`, until the source closes
-/// or `stop` is set. Nothing is posted once `stop` is set.
+/// or `stop` is set. A window still open when the source closes is posted
+/// then, before its end, so a change heard is never dropped. Nothing is
+/// posted once `stop` is set.
 fn run(
     source: &mut impl ChangeSource,
     stop: &Stop,
@@ -275,7 +299,12 @@ fn run(
         match source.wait(debounce.deadline()) {
             Heard::Change => debounce.heard(clock()),
             Heard::Deadline => {}
-            Heard::Closed => return,
+            Heard::Closed => {
+                if !stop.is_stopped() && debounce.take_open() {
+                    post();
+                }
+                return;
+            }
         }
         if stop.is_stopped() {
             return;
@@ -289,25 +318,41 @@ fn run(
 // ── The thread ──────────────────────────────────────────────────────────────
 
 /// The flag a watch is stopped by, with the waker of the future waiting on
-/// it.
+/// it and the condition a thread pausing on it waits on.
 #[derive(Debug, Default)]
 struct Stop {
     stopped: AtomicBool,
     waker: Mutex<Option<Waker>>,
+    /// Paired with `waker`'s lock, for [`pause`](Self::pause).
+    parked: Condvar,
 }
 
 impl Stop {
     /// Set the flag and wake whatever waits on it.
     fn stop(&self) {
         self.stopped.store(true, Ordering::SeqCst);
-        let waker = self
-            .waker
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
+        let waker = {
+            let mut slot = self.waker.lock().unwrap_or_else(PoisonError::into_inner);
+            // Under the lock, so a pause that read the flag before it was set
+            // is already waiting and hears this.
+            self.parked.notify_all();
+            slot.take()
+        };
         if let Some(waker) = waker {
             waker.wake();
         }
+    }
+
+    /// Wait for `duration`, or until the flag is set; whether it is still
+    /// unset. The flag is read under the lock [`stop`](Self::stop) notifies
+    /// under, so a stop is never missed.
+    fn pause(&self, duration: Duration) -> bool {
+        let slot = self.waker.lock().unwrap_or_else(PoisonError::into_inner);
+        let _ = self
+            .parked
+            .wait_timeout_while(slot, duration, |_| !self.is_stopped())
+            .unwrap_or_else(PoisonError::into_inner);
+        !self.is_stopped()
     }
 
     fn is_stopped(&self) -> bool {
@@ -332,10 +377,14 @@ struct Running {
 impl Running {
     /// Start the thread: it opens its source with `open` (`None`: nothing
     /// to listen to, and the thread ends), then [`run`]s it with a debounce
-    /// window of `window`, calling `post` at the end of each.
+    /// window of `window`, calling `post` at the end of each. When the
+    /// source closes, `open` is called again every `retry` until it gives a
+    /// source or the watch stops, and the source it gives is run with a
+    /// window already open, for what was not heard meanwhile.
     fn start<S: ChangeSource>(
         window: Duration,
-        open: impl FnOnce(Arc<Stop>) -> Option<S> + Send + 'static,
+        retry: Duration,
+        mut open: impl FnMut(Arc<Stop>) -> Option<S> + Send + 'static,
         post: impl Fn() + Send + 'static,
     ) -> Option<Running> {
         let stop = Arc::new(Stop::default());
@@ -346,19 +395,45 @@ impl Running {
                 let Some(mut source) = open(Arc::clone(&thread_stop)) else {
                     return;
                 };
-                run(
-                    &mut source,
-                    &thread_stop,
-                    &mut Debounce::new(window),
-                    &Instant::now,
-                    &post,
-                );
+                let mut debounce = Debounce::new(window);
+                loop {
+                    run(
+                        &mut source,
+                        &thread_stop,
+                        &mut debounce,
+                        &Instant::now,
+                        &post,
+                    );
+                    drop(source);
+                    let Some(again) = reopen(&mut open, &thread_stop, retry) else {
+                        return;
+                    };
+                    source = again;
+                    debounce.heard(Instant::now());
+                }
             })
             .ok()?;
         Some(Running {
             stop,
             thread: Some(thread),
         })
+    }
+}
+
+/// A source from `open`, tried every `retry`, the first try one `retry`
+/// from now; `None` once `stop` is set.
+fn reopen<S>(
+    open: &mut impl FnMut(Arc<Stop>) -> Option<S>,
+    stop: &Arc<Stop>,
+    retry: Duration,
+) -> Option<S> {
+    loop {
+        if !stop.pause(retry) {
+            return None;
+        }
+        if let Some(source) = open(Arc::clone(stop)) {
+            return Some(source);
+        }
     }
 }
 

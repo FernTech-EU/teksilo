@@ -86,7 +86,7 @@ So the flag comes from the platform, through
 
 | Platform | Source | Caveat |
 | --- | --- | --- |
-| Linux | AT-SPI `org.a11y.Status.ScreenReaderEnabled` on `org.a11y.Bus` — the same status object `accesskit_unix` watches for the neighbouring `IsEnabled` | Advisory. Orca sets it; an assistive technology that never touches the status object will not. No bus, no `busctl`, or a sandbox that cannot reach the session bus all answer `Unknown`. |
+| Linux | AT-SPI `org.a11y.Status.ScreenReaderEnabled` on `org.a11y.Bus`, the same status object `accesskit_unix` watches for the neighbouring `IsEnabled` | Advisory. Orca sets it; an assistive technology that never touches the status object will not. No bus, a sandbox that cannot reach the session bus, or a bus that does not answer within the reader's 500 ms call timeout all answer `Unknown`. |
 | Windows | `SPI_GETSCREENREADER` | Narrator / NVDA / JAWS set it, Magnifier does not — the discrimination we want. Windows does not reliably clear it if an assistive technology terminates without doing so itself, so a stale `true` is the failure mode. |
 | macOS | `NSWorkspace::isVoiceOverEnabled` | VoiceOver only, which is the only screen reader on the platform. Zoom and Voice Control do not set it. |
 | other | — | `Unknown` |
@@ -184,8 +184,11 @@ that no Linux CI host can execute, and belong on a hardware sign-off checklist:
   tested headless in `teksilo-platform`; that the adapter invokes them at all
   needs a real window.
 
-The Linux `busctl` reply parser **is** tested, over recorded reply strings
-rather than a live bus.
+The Linux reply decoding **is** tested without a bus: `decode_bool` and the
+other zbus decoders in `teksilo-platform`'s `linux_portal` module are checked
+over constructed reply values. The reads themselves are tested against a
+private `dbus-daemon` serving a fake AT-SPI status object, when
+`TEKSILO_DBUS_TESTS=1` is set.
 
 ## See also
 
