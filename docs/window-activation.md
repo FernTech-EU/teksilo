@@ -86,11 +86,14 @@ active" rule above is the default of a style hook,
 | `SelectionEmphasis` | A selected row is emphasised while | Used by |
 | --- | --- | --- |
 | `ViewFocusedAndWindowActive` (default) | its view holds keyboard focus and its window is active | IntUI, Fluent, macOS, Material 3 |
-| `WindowActive` | its window is active, whichever view holds focus | styles following Qt's per-window colour groups (KDE's Breeze) |
+| `WindowActive` | its window is active, whichever view holds focus | the KDE preset (Breeze), and any style following Qt's per-window colour groups |
 
 Qt picks a palette colour group per *window*: in an active window every view
 paints its selection with the active `Highlight`, focused or not, so only the
-window going inactive mutes it. A style that returns `WindowActive` gets that.
+window going inactive mutes it. A style that returns `WindowActive` gets that;
+the KDE preset's list and tree rows do. What they are muted *to* is the
+`SelectedInactive` token, which the KDE preset fills with the scheme's own
+Inactive highlight (see below) rather than Int UI's hand-tuned grey.
 
 The row reads the hook for its foregrounds: the label, the subtitle and a tree
 row's chevron take `selected_label_role` only while the row is emphasised. A
@@ -200,6 +203,20 @@ decides how they combine, and it replaces the generic chain entirely:
 `Theme::for_inactive_window` and `Theme::for_high_contrast` stay the generic
 transforms and do not consult it. Only change colours in a hook. The swap is
 repaint-only, so geometry a hook changes is not honoured.
+
+**The KDE preset is the example.** A KDE colour scheme defines an Inactive
+colour group, so `teksilo-theme-kde` registers a `PaintProjection` that paints
+it: for an inactive window the theme takes the tokens it computed from the
+scheme's Inactive state, and for the high-contrast preference its own
+high-contrast tokens, in the combination the state names. For Breeze that is a
+selection and accent muted toward the window colour (the window colour tinted
+toward the selection colour, as Plasma paints a backdrop window) with the focus
+ring unchanged, where the generic chain would desaturate the accent toward
+graphite and dim the ring. The scheme's colours therefore decide what muting
+looks like, which is why the muting is "scheme-driven". A theme whose
+colours an app changed after building it gets the generic chain over the app's
+colours instead, so an app's override is never painted over. Combined with `SelectionEmphasis::WindowActive` above, a Breeze list's
+selection stays vivid while its view lacks focus and mutes only with its window.
 
 Colours a recipe bakes at build time (a `Filled` button's fill and focus
 border, held as a `ColorProp::Bound`) resolve through the same call,

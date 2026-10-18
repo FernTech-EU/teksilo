@@ -26,6 +26,7 @@
 - [Events & gestures](events-and-gestures.md)
 - [Styling system](styling-system.md)
 - [Reactive theme](reactive-theme.md)
+- [Native theme](native-theme.md)
 - [Animation](animation.md)
 - [Idle & animation](idle-and-animation.md)
 - [Accessibility overrides](accessibility-overrides.md)

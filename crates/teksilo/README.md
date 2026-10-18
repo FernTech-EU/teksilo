@@ -41,7 +41,7 @@ State is reactive through `Signal<T>` and `Prop<T>`; a derived signal
 - **Layout** — SwiftUI-style negotiation with grow *and* shrink weights, and
   correct height-for-width.
 - **Theming** — tokens → variants → recipes → style protocols, with Int-UI,
-  Material 3, Fluent and macOS Aqua presets.
+  Material 3, Fluent, macOS Aqua and KDE Plasma (Breeze) presets.
 - **i18n** — Fluent messages with compile-time key checking, plus ICU-backed
   number and date formatting.
 - **Headless tests** — the same widget tree runs with no window, no GPU and no

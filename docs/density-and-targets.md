@@ -103,7 +103,7 @@ recipe constructor, because there is nothing in such a theme to re-run, every
 `Recipe*Style` lazily at its own build site from `ctx.theme().input`. A slot an
 app installed itself is preserved as it is, so a hand-written Tier-3 style keeps
 whatever metrics its author gave it. A preset that installs slots of its own
-(Material 3, Fluent, macOS) registers a `DensityProjection`, and `with_density`
+(Material 3, Fluent, macOS, KDE) registers a `DensityProjection`, and `with_density`
 takes that function's answer instead, so the preset's own chrome follows the
 density.
 

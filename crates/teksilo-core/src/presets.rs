@@ -12,7 +12,7 @@
 //! ```
 //!
 //! IntUI ships in core. Sibling preset crates (`teksilo-theme-material3`,
-//! `teksilo-theme-macos`, `teksilo-theme-fluent`) live behind opt-in Cargo
-//! features in the `teksilo` umbrella crate.
+//! `teksilo-theme-macos`, `teksilo-theme-fluent`, `teksilo-theme-kde`) live
+//! behind opt-in Cargo features in the `teksilo` umbrella crate.
 
 pub mod intui;

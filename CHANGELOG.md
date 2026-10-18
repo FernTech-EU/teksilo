@@ -317,6 +317,18 @@ by crate for clarity, not because crates version independently.
   its own. The window manager and the widget previewer's Native canvas theme
   now resolve through it, with the same themes as before.
 
+#### Documentation
+
+- **A guide to Native mode.** The new Native theme page says what
+  `ThemeMode::Native` reads on Linux, macOS and Windows, what the KDE reader
+  takes from a Plasma desktop, how `NativeThemeRequest`,
+  `resolve_native_theme` and `native_theme_kde()` fit together, how the app
+  follows the desktop while it runs, and that switching themes at runtime
+  re-tints but keeps the shapes the windows were built with.
+- The README, the styling guide and the application guide that
+  `cargo teksilo init` installs describe the KDE Plasma preset, and keep
+  Native mode, which adopts the live desktop colours, apart from it.
+
 ### Changed
 
 #### Theming

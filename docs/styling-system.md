@@ -438,7 +438,47 @@ under `theme_slot_supplies_button_style_when_no_override` /
 | `material3::light` / `material3::dark` | `teksilo-theme-material3` crate | shipped, Material 3 |
 | `fluent::light` / `fluent::dark` | `teksilo-theme-fluent` crate | shipped, Windows 11 / WinUI 3 |
 | `macos::light` / `macos::dark` | `teksilo-theme-macos` crate | shipped, macOS Aqua / Dark Aqua |
+| `kde::light` / `kde::dark` | `teksilo-theme-kde` crate | shipped, KDE Plasma's Breeze |
 | Image-backed themes | `teksilo-image-theme` crate | not yet shipped |
+
+The four sibling presets are behind the umbrella features `theme-material3`,
+`theme-fluent`, `theme-macos` and `theme-kde`, and the prelude re-exports each
+crate under its short name (`material3`, `fluent`, `macos`, `kde`).
+
+**KDE Plasma's Breeze** (`kde`, `teksilo-theme-kde`) differs from the others in
+where its colours come from. They are a KDE colour scheme, read and resolved by
+`teksilo-kde-scheme` exactly as KDE resolves it: `kde::light()` and
+`kde::dark()` are the stock Breeze Light and Dark, `kde::from_scheme(&scheme)`
+the theme of any scheme (light or dark as KDE judges it),
+`kde::light_with_accent(PlasmaAccent::Purple.color())` the stock scheme with
+Plasma's accent applied, and `kde::from_desktop(&desktop, density)` the theme
+of a KDE desktop as it is configured (its scheme with the user's accent, its
+fonts, its animation speed, its `breezerc`). The scheme's own colours stay on
+the `KdePalette` theme extension. Where the scheme falls short of WCAG, the
+colour tokens are lifted by rule and the extension keeps the vendor colour. The
+geometry is Breeze's (a 5 px radius, text-driven control heights, a 2 px focus
+ring half inside the control), the motion Breeze's 100 ms linear, and the
+text sizes and line boxes Noto Sans's and Hack's at Plasma's defaults. The
+default build draws them in Teksilo's bundled faces; the font features
+`bundled-fonts` (embeds Noto Sans and Hack) and `system-fonts` (names them) are
+the crate's own and are not forwarded by the umbrella, so an app that wants
+Plasma's faces depends on `teksilo-theme-kde` directly and passes
+`kde::font_registrar()` to `TeksiloAppBuilder::register_fonts`.
+
+It uses three hooks the other presets do not need. Its `PaintProjection` paints
+the scheme's own Inactive and high-contrast colours instead of the generic
+desaturation (see [window-activation.md](window-activation.md)), its list
+rows return `SelectionEmphasis::WindowActive` from
+`StandardItemStyle::selection_emphasis`, because Qt mutes a selection per
+window and not per focused view, and its menu rows return a label role from
+`MenuItemStyle::pressed_label_role` (a held-down menu row is filled with the
+accent, so its label takes the on-accent text role). Which widgets carry Breeze's own chrome and
+which keep Teksilo's recipe styles built with Breeze's metrics is listed under
+"Known limitations" in the crate documentation.
+
+The colours of the desktop a program is running on, as opposed to a preset
+that reproduces a design language, are the job of Native mode; see
+[native-theme.md](native-theme.md).
 
 Each preset is just a function returning `Theme`. Apps can write their
 own without depending on any sibling crate:

@@ -133,8 +133,10 @@ teksilo-preview-ui      Reusable 3-pane previewer GUI
 teksilo-widgets-previewer   Bundle binary for the stock catalog
 teksilo-terminal        Embeddable terminal-emulator widget; PTY + VT delegated behind a
                         TerminalEngine trait. Renders into the wgpu surface (unlike webview)
-teksilo-theme-material3 / teksilo-theme-fluent / teksilo-theme-macos
+teksilo-theme-material3 / teksilo-theme-fluent / teksilo-theme-macos / teksilo-theme-kde
                         Sibling design-language presets (tokens + Tier-3 chrome), feature-gated
+teksilo-kde-scheme      KDE Plasma colour-scheme model and desktop settings; no I/O (environment and
+                        files passed in); read by teksilo-platform and teksilo-theme-kde
 teksilo-inspector       In-app debug introspection panel; cfg(debug_assertions) only
 teksilo-automation      GUI-free automation toolkit (DTOs, execute(), tool catalog, wire protocol)
 teksilo-automation-mcp  MCP server binary driving it
@@ -148,7 +150,7 @@ Stated dependency flow (verify):
 `canvas → render → platform → app`, `settings → app`, `i18n-macros → i18n`,
 `core → preview`, `preview-ui → preview + widgets`, `widgets → scene`, `core → webview`,
 `(app + core) → async → {tokio, async-std}`, `(core + tokens + canvas + platform) → terminal`,
-`(core + canvas) → automation → automation-mcp`.
+`(core + canvas) → automation → automation-mcp`, `tokens → kde-scheme → {platform, theme-kde}`.
 
 ---
 
@@ -201,7 +203,11 @@ axis at each child's final main size, then places. All in logical pixels. `Leadi
 `ThemeAppearance::{Light, Dark}` is a required field. Presets `presets::intui::{light, dark}` ship
 in `teksilo-core`. There is no `Theme::default()`. Per-widget style traits live in
 `teksilo-core/src/styles/`; default `Recipe*Style` impls in `teksilo-widgets/src/styles/`. Apps
-install styles per-call (`.style(...)`) or theme-wide (`theme.style_slots.<widget> = ...`).
+install styles per-call (`.style(...)`) or theme-wide (`theme.style_slots.<widget> = ...`). The
+sibling presets (Material 3, Fluent, macOS, KDE's Breeze) are separate crates behind umbrella
+features. `ThemeMode::Native` adopts the live desktop's colours through one function,
+`resolve_native_theme`; a theme change after a window is built re-tints and keeps the shapes the
+tree was built with, by design (`docs/native-theme.md`).
 
 ### App entry point
 
@@ -276,6 +282,7 @@ Core:
 - Accessibility: `crates/teksilo-core/src/accessibility.rs`
 - Animation: `crates/teksilo-core/src/animation.rs`, `animated_quad.rs`, `frame_tick_scheduler.rs`, `motion_visibility.rs`
 - Theme/styling: `crates/teksilo-core/src/styles/` (+ preset `presets/intui.rs`); default impls `crates/teksilo-widgets/src/styles/`
+- Native mode: `crates/teksilo-platform/src/os_theme.rs` (+ `os_theme/kde.rs`, `os_theme/watch.rs`), `crates/teksilo-app/src/native_theme.rs`
 - Actions/Intents/Shortcuts: `crates/teksilo-core/src/{action,intent,shortcut}.rs`; `IntentKind` derive in `crates/teksilo-macros/src/intent_kind.rs`
 - Drag-and-drop core: `crates/teksilo-core/src/drag_payload.rs`, `drag_state.rs`, `widget_tree/drag_drop_impl.rs`
 

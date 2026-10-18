@@ -30,9 +30,10 @@
 //! as every theme that follows the OS is.
 //!
 //! Setting the factory does not select Native mode; combine it with
-//! [`theme_mode`](teksilo_app::TeksiloAppBuilder::theme_mode). Only a window
-//! built while the app is in Native mode asks the factory, so a switch to
-//! Native at runtime re-tints and keeps the shapes the windows were built
+//! [`theme_mode`](teksilo_app::TeksiloAppBuilder::theme_mode). A widget picks
+//! its chrome when it is built, so the factory's shapes reach only a window
+//! built while the app is in Native mode; a switch to Native at runtime applies
+//! the factory theme's colours and keeps the shapes the windows were built
 //! with, and [`ThemeMode::FollowSystem`](teksilo_app::ThemeMode::FollowSystem)
 //! never asks it.
 

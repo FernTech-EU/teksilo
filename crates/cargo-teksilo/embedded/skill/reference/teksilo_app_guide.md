@@ -67,7 +67,7 @@ opt-outs:
 | `async` / `tokio` / `async-std` | Optional main-thread async executor (`.install_async()`, `ctx.spawn_local`, `spawn_blocking`). `tokio` / `async-std` imply `async` and add the reactor (`.install_async_tokio()` / `.install_async_async_std()`) so a handler can `.await` that runtime's futures: timers, sockets, `reqwest`. Off by default. See `cargo teksilo show docs/async.md` |
 | `terminal` | Embeddable `Terminal` widget: a real shell over a PTY. Off by default |
 | `automation` | Debug-only automation bridge (`.install_automation_bridge_in_debug()`) for agents and tests. Off by default |
-| `theme-material3` / `theme-fluent` / `theme-macos` | Material 3, Fluent (Windows 11) and macOS Aqua presets, as `material3::light()` etc. from the prelude |
+| `theme-material3` / `theme-fluent` / `theme-macos` / `theme-kde` | Material 3, Fluent (Windows 11), macOS Aqua and KDE Plasma (Breeze) presets, as `material3::light()` etc. from the prelude. `theme-kde` also adds `.native_theme_kde()` (see Theming). Its font features (`bundled-fonts`, `system-fonts`) are not forwarded: depend on `teksilo-theme-kde` directly for Plasma's own faces |
 | `telemetry` | Privacy-respecting analytics wiring + `PrivacySettings` widget |
 | `fonts-cjk-sc` / `fonts-thai` / `fonts-all` / `system-emoji` | Extra bundled script fonts / runtime color-emoji fallback |
 
@@ -362,6 +362,17 @@ let theme = intui::light();   // or intui::dark()
 `ThemeAppearance::{Light, Dark}` is a required field on every theme. **Theme is reactive**:
 `ctx.set_theme(...)` updates an internal signal and dirty-marks nodes — no rebuild, and
 focus/scroll/interaction state survive.
+
+**Following the desktop.** `.theme_mode(ThemeMode::FollowSystem)` picks Int UI light or
+dark by the desktop's preference; `ThemeMode::Native` adopts the desktop's own colours
+(accent, surfaces, selection; on a KDE Plasma session its colour scheme) in Int UI's
+shapes, and both track the desktop while the app runs. A handler
+switches to Native with `ctx.follow_system_theme()` and back with `ctx.set_theme(..)`. With
+the `theme-kde` feature, `.native_theme_kde()` (the prelude's `TeksiloAppBuilderKdeExt`)
+makes a window *built* in Native mode on a Breeze desktop use the desktop's fonts and
+animation speed and Breeze's shapes as well; any other desktop keeps Int UI in its colours. A theme change after the window is built is a
+re-tint: the shapes stay those it was built with. `.native_theme(|request| ..)` installs
+a factory of your own. Reference: `cargo teksilo show docs/native-theme.md`.
 
 **Variants** select a widget's look (Tier 1):
 

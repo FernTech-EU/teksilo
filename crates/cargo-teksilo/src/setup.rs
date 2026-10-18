@@ -111,7 +111,7 @@ as separate `teksilo-*` dependencies. On by default already: `widgets`, `i18n`,
 | An embedded shell | feature `terminal` | `Terminal` |
 | Driving the running app from an agent or a test | feature `automation` | `.install_automation_bridge_in_debug()` |
 | Product analytics | feature `telemetry` | `.telemetry(bundle)`, `PrivacySettings` |
-| Material 3, Fluent or macOS look | feature `theme-material3`, `theme-fluent` or `theme-macos` | `material3::light()` etc., from the prelude |
+| Material 3, Fluent, macOS or KDE Plasma look | feature `theme-material3`, `theme-fluent`, `theme-macos` or `theme-kde` | `material3::light()` etc., from the prelude |
 | Bar, line and pie charts | crate `teksilo-charts`, at the same version as `teksilo` | `BarChart`, `LineChart`, `PieChart` |
 | A pan/zoom canvas: node graphs, corkboards, maps | crate `teksilo-scene`, at the same version as `teksilo` | `SceneView`, `SceneModel` |
 

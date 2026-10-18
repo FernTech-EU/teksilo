@@ -155,7 +155,7 @@ See [TRADEMARKS.md](https://github.com/ferntech-eu/teksilo/blob/main/TRADEMARKS.
 
 Teksilo builds on the work of others: AccessKit; winit and wgpu; HarfBuzz (via harfrust), swash, fontdb, etagere, and ICU4X; unicode-bidi; Fluent and the Mozilla l10n team; the published design notes of the Druid, Masonry, and Xilem projects; and SwiftUI's layout protocol. Anthropic and Mistral provided the language models whose code generation contributed substantially under human review.
 
-The theme presets follow design languages published by others: JetBrains' Int UI, which the default light and dark themes are drawn from; Microsoft's Fluent and the WinUI theme resources; Google's Material 3; and Apple's macOS Human Interface Guidelines. Each preset is an independent implementation, and none of those vendors is affiliated with or endorses Teksilo. See [TRADEMARKS.md](https://github.com/ferntech-eu/teksilo/blob/main/TRADEMARKS.md) and [NOTICE](https://github.com/ferntech-eu/teksilo/blob/main/NOTICE).
+The theme presets follow design languages published by others: JetBrains' Int UI, which the default light and dark themes are drawn from; Microsoft's Fluent and the WinUI theme resources; Google's Material 3; Apple's macOS Human Interface Guidelines; and the Breeze style of KDE Plasma. Each preset is an independent implementation, and none of those vendors or projects is affiliated with or endorses Teksilo. See [TRADEMARKS.md](https://github.com/ferntech-eu/teksilo/blob/main/TRADEMARKS.md) and [NOTICE](https://github.com/ferntech-eu/teksilo/blob/main/NOTICE).
 <!-- END README: Acknowledgments -->
 
 ## Maintaining these pages

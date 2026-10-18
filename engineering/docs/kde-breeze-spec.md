@@ -1929,13 +1929,25 @@ Disabled arrow colour at the limit. No button chrome in the arrow column.
   on or partial. Fill: Button (Button darkened 110 percent, d.11, while
   pressed).
 - On or partial: the same rounded box filled again with Highlight at alpha
-  0.3 over it.
+  0.3 over it. [measured-qt] Qt's raster painter composites that wash over
+  the opaque Button fill in 8-bit sRGB, rounding each channel
+  (`(t a + b (255 - a) + 127) / 255` with the wash's alpha read as a byte),
+  so it lands as one opaque fill: Plasma's samples are #c2e4f6 for Breeze
+  Light and #2f5368 for Breeze Dark (`check_box.on` in the golden pixels).
+  A compositor that blends in linear light gives another shade of the same
+  colour (#d9e8f7 for Breeze Light). [measured-qt] The second fill is painted
+  with the outline pen still set, so the outline is laid twice: the
+  antialiased edge of a marked box is denser than one stroke gives (the
+  corner pixels of Plasma's checked box fit two strokes to within 15 levels,
+  one stroke no closer than 33).
 - Check mark (on): a polyline through, in the 16 x 16 box's coordinates
   (box at (2,2) inside the indicator, centre (10,10) of the indicator):
   (left + 4, centre y), (centre x - 1, bottom - 5), (centre x + 4.5,
   top + 5.5), where left = top = 2, bottom = 18 and the centre is (10, 10):
   so (6, 10), (9, 13), (14.5, 7.5) in indicator coordinates; pen 2 px, Text
-  colour (View text), mitre joins.
+  colour (View text), mitre joins, [measured-qt] square caps (Qt's default
+  pen cap), so the mark runs half the pen width, 1 px, past both end points
+  (`check_box.on` covers (5, 10), the pixel before the first point, at 0.83).
 - Partial: three 2 x 2 squares in Text colour, centred on the box centre and
   4 px to each side.
 - Hover (enabled): an extra 1 px ring in the focus colour on the box
@@ -1947,7 +1959,9 @@ Disabled arrow colour at the limit. No button chrome in the arrow column.
 
 - Disc: the indicator inset by 2 and then by 0.5 (15 x 15 circle at 2.5).
   Pen: separator colour when off, Highlight when on. Fill Button (darkened
-  110 percent while pressed). On: filled again with Highlight at alpha 0.3.
+  110 percent while pressed). On: filled again with Highlight at alpha 0.3,
+  [measured-qt] composited over the face as one opaque fill and with the
+  outline laid twice, as for the check box (k.5.6; `radio_button.on`).
 - Dot (on): a filled circle of radius `floor((18 - 12) / 2) = 3` (6 px
   diameter) at the centre, Text colour.
 - Hover: a 1 px ring in the focus colour on the 15 x 15 circle.
@@ -2109,7 +2123,11 @@ window is active, Inactive when not, Disabled when disabled.
   with alpha 0.3. Hovered and selected: Highlight lightened 110 percent
   (d.11).
 - Outline: the fill colour with alpha 1.0 when selected, 0.8 otherwise; 1 px,
-  on the stroked rectangle with radius 4.5, sides chosen by the item's
+  on the stroked rectangle with radius 5 [measured-qt] (the control radius;
+  this section gave 4.5, the radius less half the pen, as for the push button,
+  but Plasma's painted rows fit 5 to within 23 levels at every corner pixel
+  where 4.5 leaves up to 75: `item_view_row.selected` and `.hover` in the
+  golden pixels), sides chosen by the item's
   position in the row (only the row's two ends are rounded and outlined at
   the sides).
 - Tables: square cells, no rounding.
@@ -2121,7 +2139,9 @@ window is active, Inactive when not, Disabled when disabled.
 `s = min(width, height, 10)`, centred; apex at the centre line; the two
 ends at a quarter and three quarters of s; 1 px pen, square caps, mitre
 joins; nudged by -0.25, +0.5 or +0.25 px when `s mod 4` is 1, 2 or 3 so the
-apex lands on a pixel.
+apex lands on a pixel. [measured-qt] The nudge is along the way the arrow
+points: Plasma's spin box puts the ends of its up arrow half a pixel above
+the centre of its half and those of its down arrow half a pixel below.
 
 **k.5.18 Tooltip.** Fill ToolTipBase; pen Mix(ToolTipBase, ToolTipText, fc);
 with compositing a rounded rectangle, stroked, radius 4.5. Text ToolTipText.
@@ -2810,6 +2830,10 @@ ae80a5e79e4afbf493e9f4684ec4988e6a861b3598102ee48950b4b7a754cdff.
 | out-of-range float colours held in half precision, clamped on conversion | Qt 6 docs, the colour class, extended RGB specification; qcolor.cpp 1315-1332 | [measured-qt] (`math.json` `qt_extended`) |
 | smoothed animation curve, default velocity 200, shorter of velocity and duration | Qt docs, SmoothedAnimation | [qt] |
 | default animation easing linear | Qt docs, QVariantAnimation | [qt] |
+| a translucent fill over an opaque one is composited in 8-bit sRGB, each channel rounded; a compositor that blends in linear light gives another shade (k.5.6) | Qt 6 docs, the painter class, composition modes (source over) | [measured-qt] (`pixels.json` `check_box.on`, `radio_button.on`: #c2e4f6 and #2f5368) |
+| a fill painted with the pen still set strokes the outline again (k.5.6, k.5.7) | Qt 6 docs, the painter class (drawing a shape fills it with the brush and strokes it with the pen) | [measured-qt] (`pixels.json` `check_box.on`, `radio_button.on` corner pixels) |
+| the default pen cap is square (k.5.6 check mark) | Qt 6 docs, the pen class, default cap style | [qt]; [measured-qt] (`check_box.on`, 0.83 before the first point) |
+| an item-view selection is stroked and filled at radius 5, not 4.5 (k.5.16) | Qt 6 docs, the painter class (rounded rectangles); Plasma's painted rows | [measured-qt] (`pixels.json` `item_view_row.selected`, `.hover`) |
 | tooltip label margin = 1 + frame width | Qt widgets tooltip behaviour | [measured-qt] (`sizes.json` `tooltip`: margin 4, hint height 26 for an 18 px line) |
 | line edit inner height max(fm height, 14) + 2 | Qt widgets line edit size hint | [measured-qt] (`sizes.json`: framed 32, frameless 20 at 10 pt) |
 | progress bar hint height fm height + 8 | Qt widgets progress bar size hint | [measured-qt] (`sizes.json`: 26 at 10 pt, 23 at 8 pt) |

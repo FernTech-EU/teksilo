@@ -30,7 +30,7 @@
 //! `I18nManager` still reads "Light / Dark / System" rather than raw keys.
 //!
 //! Custom themes: `.themes([(label, theme), …])` replaces Light/Dark with an
-//! app-supplied set (e.g. the `teksilo-theme-{fluent,macos,material3}` presets);
+//! app-supplied set (e.g. the `teksilo-theme-{fluent,kde,macos,material3}` presets);
 //! `.system(false)` drops the System entry.
 
 use std::rc::Rc;

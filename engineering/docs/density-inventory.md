@@ -34,7 +34,7 @@ Three things make that work:
    site that already existed.
 3. A preset that installs Tier-3 slots of its own registers a
    `teksilo_core::styles::DensityProjection` in its theme extensions.
-   `Theme::with_density` calls it when present, so Fluent, macOS and Material 3
+   `Theme::with_density` calls it when present, so Fluent, macOS, Material 3 and KDE
    *rebuild* their slots for the new density instead of carrying Compact dimensions
    across. A slot an **app** installed stays untouched — a hand-written style owns
    its own metrics — which is documented behaviour, not an oversight.

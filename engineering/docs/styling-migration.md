@@ -102,10 +102,15 @@ style has to live where its own dependencies already reach. See
 [charts.md §11](charts.md) for the
 full reference.
 
-³ Carries a **defaulted label-role hook** —
-`StandardItemStyle::selected_label_role` and
-`MenuItemStyle::highlighted_label_role`, both `-> Option<TextRole>`,
-both `None` by default.
+³ Carries **defaulted label hooks**:
+`StandardItemStyle::selected_label_role`,
+`MenuItemStyle::highlighted_label_role` and
+`MenuItemStyle::pressed_label_role`, all `-> Option<TextRole>`, all
+`None` by default. `StandardItemStyle` also carries
+`selection_emphasis() -> SelectionEmphasis`, defaulted to
+`ViewFocusedAndWindowActive`: what mutes a selected row, which a design
+language that picks its palette per window (Qt, so KDE's Breeze) sets to
+`WindowActive`.
 
 A row builds its label *before* any style's `make_body` runs, so a
 style cannot recolour the text it is about to paint behind. That is
@@ -231,6 +236,49 @@ on macOS), vibrancy resolves to each material's opaque fallback, the
 the capsule (those views paint the shared `surface_selected` token
 behind app-supplied cells this preset cannot retint), and San Francisco
 is named under the optional `system-fonts` feature rather than bundled.
+
+The **`teksilo-theme-kde`** sibling preset is KDE Plasma's **Breeze** as
+Plasma 6.8 ships it, and the first whose colours are not a palette written
+in the crate. They are a KDE colour scheme, read and resolved by
+`teksilo-kde-scheme` (a no-I/O crate, written from
+`engineering/docs/kde-breeze-spec.md` and never from KDE or Qt source, with
+a test that fails on upstream identifiers), so the stock Breeze Light and
+Dark, any `.colors` file (`from_scheme`), Plasma's accent application
+(`light_with_accent`, `PlasmaAccent`) and a whole configured desktop
+(`from_desktop`: scheme, fonts, animation speed, `breezerc`) all come out of
+one function. `KdePalette` keeps the scheme's colours in every state as a
+theme extension; the colour tokens are those colours lifted to WCAG by
+stated rules where the scheme falls short, and each lift is tested both to
+pass and on its premise that the scheme's own colour fails. Every literal
+is tagged at its assignment with where it comes from (`[M]` / `[S]` /
+`[Hp]` Breeze's style code, `[qt]` / `[measured-qt]` Qt's behaviour,
+`[derived]`, `[wcag]`, `[unpublished]`), and a pixel test compares the
+controls with Plasma's own through the production renderer.
+
+Real `impl FooStyle` blocks cover the buttons, the check box, radio button
+and switch, the line edit, combo box, spin box and slider, the menu row, the
+popup frame and tooltip, the list and tree rows, tables, tabs, the scroll
+bar and the progress bar; the card, panel, dialog, snackbar and the like are
+the shipped recipe styles built with Breeze's metrics, and the crate's slot
+tests give a reason for every slot it leaves to the widget. Three framework
+additions came out of it, all defaulted so no existing style changed: a
+`PaintProjection` theme extension (a theme whose palette defines its own
+inactive and high-contrast colours paints those, replacing the generic
+desaturation chain; see `docs/window-activation.md`), the
+`selection_emphasis` and `pressed_label_role` hooks of footnote ³, and the
+recipe fields the Breeze metrics needed rendered (row, header and tab
+heights, a minimum thumb length, a negative focus-ring offset; see
+`density-projection-gaps.md`).
+
+Known limitations are in the crate's documentation, not deferred: some
+widgets keep the framework's chrome, Qt's linear-light-versus-sRGB blending
+shows in translucent paints over a backdrop the style does not paint, and
+the Noto Sans and Hack faces are named or embedded only under the crate's
+own font features, which the umbrella does not forward. The widget shapes
+are chosen when a tree is built, so switching to or from this preset at
+runtime re-tints and keeps the built shapes; `ThemeMode::Native` with
+`native_theme_kde()` builds a window in Breeze's shapes on a Breeze desktop
+(`docs/native-theme.md`).
 
 Still ahead on the styling roadmap: image-backed styles, the
 `ImageTheme` TOML manifest loader, and a GTK4-Adwaita sibling preset

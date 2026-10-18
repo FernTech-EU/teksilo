@@ -107,6 +107,14 @@ let dark  = intui::dark();
 
 Both are neutral Int UI baselines, not visually distinctive, designed to be customized. Apps usually start from one of them and override the slots they care about. For the full styling picture (variants, recipes, style traits) see [`styling-system.md`](styling-system.md).
 
+The sibling presets (`material3`, `fluent`, `macos`, `kde`) follow the same shape, behind the umbrella features `theme-material3`, `theme-fluent`, `theme-macos` and `theme-kde`.
+
+### Themes that follow the desktop
+
+`TeksiloAppBuilder::theme_mode(ThemeMode::FollowSystem)` and `ThemeMode::Native` hand the choice to the desktop, and the app's `WindowManager` keeps every window's theme in step with it. Each change is an ordinary `set_theme` on each window's tree, so it is a re-tint with no rebuild: focus and scroll position survive, and so does the shape of every widget that was already built. The desktop's changes are heard as they happen (an `OsThemeWatch` on Linux) and re-read; a re-read that changes nothing a theme was resolved from sets no theme. A theme built from the desktop carries the id `system`.
+
+The consequence worth knowing is the one `set_theme` always has: a swap changes the theme's tokens, but a widget chose its chrome (which style slot paints it) when it was built. A tree built as Int UI that is switched to Breeze, or to Native mode on a Breeze desktop, is Breeze's colours on Int UI's shapes; build the window in the mode to get both. What each mode reads, `native_theme_kde()`, and the live watch are in [`native-theme.md`](native-theme.md).
+
 ### Programmatic customization via struct spread
 
 `Theme` (`teksilo-core::styles`) and the token structs `ColorTokens`, `TypographyTokens`, `ShapeTokens`, `LayoutTokens`, `MotionTokens` (`teksilo-tokens`) are plain structs. Override the fields you want and spread the rest from a preset base:

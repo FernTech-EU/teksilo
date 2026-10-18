@@ -246,6 +246,20 @@ these two also show: reading the *default* recipe is not the same as reading the
 *active style*, so a preset that set `box_hit_area` would still not be honoured.
 Neither preset sets either, so nothing is lost today.
 
+## A preset must not write a field on this page
+
+Writing a field that no widget reads is writing a number nobody renders, and a
+preset whose design language publishes the number would look faithful in its own
+tests while painting the IntUI constant. The KDE preset is held to that from the
+page itself: `crates/teksilo-theme-kde/tests/density_gaps.rs` parses sections 1
+to 3 and fails when a recipe struct literal in the crate sets a listed field, or
+when a factory that builds such a recipe gives one a value other than the stock
+recipe's at any density. A row added here is covered there with no edit, and a
+field wired by a metrics accessor (the twelve above) leaves the page and becomes
+one KDE may set. That is what let Breeze's list, table, tab and scroll-bar
+numbers (row and header heights, the tab height and padding, the minimum thumb
+length) take effect rather than only be written.
+
 ## The guard
 
 `crates/teksilo-widgets/tests/density_projection_gaps.rs` re-derives the unread
