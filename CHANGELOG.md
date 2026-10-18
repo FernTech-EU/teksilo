@@ -500,9 +500,12 @@ by crate for clarity, not because crates version independently.
   setting an administrator locked with `[$i]` is no longer overridden by the
   user's own file. When `kdeglobals` holds no colours of its own, they come
   from the look-and-feel package, else the colour scheme it names, else
-  Breeze Light, as in KDE. Before, only the user's own `kdeglobals` was read,
-  so a profile whose colour scheme is set only in `kdedefaults` or
-  `/etc/xdg` got the generic theme.
+  Breeze Light, as in KDE. That holds for a `kdeglobals` an administrator
+  locked as a whole with a bare `[$i]` line too: the named scheme, with its
+  accent, is still read under the locked settings, rather than the colours
+  falling back to KDE's compiled defaults. Before, only the user's own
+  `kdeglobals` was read, so a profile whose colour scheme is set only in
+  `kdedefaults` or `/etc/xdg` got the generic theme.
 - **The native theme on KDE Plasma takes the accent colour the user chose.**
   **Behaviour change:** the accent is now KDE's selection colour, the one KDE
   applications and the desktop portal report, instead of the window's focus

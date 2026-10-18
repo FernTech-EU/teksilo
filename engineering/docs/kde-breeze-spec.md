@@ -369,6 +369,20 @@ below it, so a key the scheme file lacks (for example `[KDE] contrast`)
 falls back to `kdeglobals`. **KDE does not apply `[General] AccentColor` in
 this fallback** (see n.13; Teksilo applies it there, by decision).
 
+**A file-immutable `kdeglobals` layer and the scheme file.** This
+specification does not say whether a bare `[$i]` line in a `kdeglobals`
+layer (b.6) also keeps the scheme file out. Teksilo's rule **[derived]**:
+the lock suppresses the higher layers of the `kdeglobals` cascade (b.7
+steps 4 and 5) and nothing else. The scheme file is not one of those
+layers, so it is still read on top of the cascade and the accent is still
+applied to it (n.13), and the reported origin is the file actually read.
+Every entry the lock made immutable, and every group a `[$i]` header
+locked, keeps b.6 rules 1 and 2, so the scheme file cannot change them: it
+supplies only the keys the locked layers do not set, and replaces only the
+entries that were never locked, as it does without the lock. Reason: a
+locked `[General] ColorScheme` names the scheme its administrator wants,
+and leaving the file out would show the compiled defaults instead.
+
 **`KDE_COLOR_SCHEME_PATH` is not an environment variable.** It is an
 in-process application property that a KDE program sets on itself when it
 chooses its own scheme; KDE reads no environment variable of that name.
@@ -429,8 +443,8 @@ Teksilo's desktop detection has always ignored case.
 ### b.11 `[$e]` expansion
 
 Expansion applies only when the entry carries `[$e]` **and** the value is
-read as a plain string. Values read as colours, numbers, booleans or fonts
-are never expanded. Expansion scans left to right for `$`:
+read as a plain string. Values read as colours, numbers or booleans are
+never expanded. Font keys are read as strings, so they are expanded (j.1). Expansion scans left to right for `$`:
 
 1. `$$` becomes a single `$`; scanning resumes after it.
 2. `${NAME}` (up to the next `}`, or to the end of the value if there is
@@ -2443,7 +2457,10 @@ present and not transparent, through the accent application of section g.
 Reason: the accent the user chose is honoured even on a profile whose colour
 groups were never written. This is a documented deviation from Qt
 applications in that edge case only; with `[Colors:View]` present, the
-colour groups already carry the accent and nothing is re-applied.
+colour groups already carry the accent and nothing is re-applied. A
+whole-file lock in a `kdeglobals` layer does not keep the scheme file out,
+so the accent is applied under it too, and a locked entry still wins over
+what the accented file writes (b.8) **[derived]**.
 
 **n.14 `KDE_COLOR_SCHEME_PATH`.** It is an in-process application property,
 not an environment variable (b.8). `color_scheme_file(name)` must not

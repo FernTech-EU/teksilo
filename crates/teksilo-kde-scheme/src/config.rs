@@ -313,6 +313,20 @@ impl KConfig {
         self.file_immutable
     }
 
+    /// The same merge with its whole-file lock lifted, so a file cascaded on
+    /// it is read again.
+    ///
+    /// The entries the lock made immutable stay immutable, and so do the
+    /// groups a `[$i]` header locked, so a file cascaded on the result still
+    /// cannot change them; it can only add keys they do not set and replace
+    /// entries that were never locked. Used for the colour-scheme file of
+    /// the no-colours fallback, which is not a layer of the `kdeglobals`
+    /// cascade that a whole-file lock suppresses.
+    pub(crate) fn without_file_lock(mut self) -> KConfig {
+        self.file_immutable = false;
+        self
+    }
+
     /// Merges `layers`, lowest priority first.
     ///
     /// For each entry of each layer, in order:

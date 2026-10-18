@@ -554,6 +554,65 @@ fn a_desktop_without_colour_groups_applies_the_user_accent_to_the_scheme_file() 
 }
 
 #[test]
+fn a_file_immutable_kdeglobals_still_reads_the_scheme_file_under_its_locked_entries() {
+    use teksilo_kde_scheme::{ColorSet, KdeColor, KdeColorScheme};
+
+    let var = env(&[]);
+    let locations = KdeConfigLocations::from_env(env(&[]));
+    let expansion = locations.expansion_env(&var);
+    let accent = KdeColor::rgb8(233, 61, 61);
+    // A whole-file lock in a system kdeglobals that names a scheme and an
+    // accent but writes no colour groups. The user layer above it is not
+    // read, so its accent is not the one applied.
+    let kdeglobals = [
+        layer(
+            "[$i]\n[General]\nColorScheme=BreezeDark\nAccentColor=233,61,61\n\
+             [KDE]\nframeContrast=0.5\n",
+        ),
+        user("[General]\nAccentColor=1,2,3\n"),
+    ];
+    let scheme_file = layer(&KdeColorScheme::breeze_dark().to_kconfig_text());
+    let desktop = KdeDesktop::from_layers(
+        &KdeDesktopLayers {
+            kdeglobals: &kdeglobals,
+            breezerc: &[],
+            scheme_file: Some(&scheme_file),
+        },
+        &expansion,
+    );
+    assert_eq!(desktop.scheme_origin, SchemeOrigin::SchemeFile);
+    assert_eq!(desktop.user_accent, Some(accent));
+    // The scheme file is read, and the accent is applied to it.
+    let accented = KdeColorScheme::breeze_dark().with_accent(accent);
+    assert_eq!(desktop.scheme.sets, accented.sets);
+    assert_eq!(
+        desktop.scheme.set(ColorSet::Window).background_normal,
+        KdeColor::rgb8(32, 35, 38)
+    );
+    assert_eq!(
+        desktop.scheme.set(ColorSet::Window).decoration_focus,
+        accent
+    );
+    // A locked kdeglobals entry still wins over what the accented scheme
+    // file writes (0.2 without the lock).
+    assert_eq!(desktop.scheme.frame_contrast, 0.5);
+
+    let builtin = KdeDesktop::from_layers(
+        &KdeDesktopLayers {
+            kdeglobals: &kdeglobals,
+            breezerc: &[],
+            scheme_file: None,
+        },
+        &expansion,
+    );
+    assert_eq!(builtin.scheme_origin, SchemeOrigin::BuiltIn);
+    assert_eq!(
+        builtin.scheme.sets,
+        KdeColorScheme::breeze_light().with_accent(accent).sets
+    );
+}
+
+#[test]
 fn colour_groups_in_kdeglobals_are_not_accented_again() {
     use teksilo_kde_scheme::{ColorSet, KdeColor};
 

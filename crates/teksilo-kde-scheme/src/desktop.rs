@@ -65,6 +65,8 @@ impl Default for KdeFonts {
 }
 
 impl KdeFonts {
+    /// Reads the font keys as strings, so a `[$e]` entry is expanded
+    /// before it is parsed (spec j.1 and b.11).
     fn read(config: &KConfig, env: &ExpansionEnv<'_>) -> KdeFonts {
         let defaults = KdeFonts::default();
         let font = |key: &str, default: KdeFont| {
@@ -395,6 +397,14 @@ impl KdeDesktop {
     /// `kdeglobals`. KDE itself ignores the accent in this fallback; Teksilo
     /// honours it so that the accent the user chose still shows on a profile
     /// whose colour groups were never written.
+    ///
+    /// A `kdeglobals` layer with a bare `[$i]` line (a whole-file lock)
+    /// keeps every higher `kdeglobals` layer out, but not the scheme file,
+    /// which is not one of those layers: the file is still read and
+    /// accented, and [`KdeDesktop::scheme_origin`] still names it. Each
+    /// entry the lock made immutable wins over the file, so a locked
+    /// `[KDE] frameContrast` stays, while keys the locked layers do not set
+    /// come from the file as without the lock.
     pub fn from_layers(layers: &KdeDesktopLayers<'_>, env: &ExpansionEnv<'_>) -> KdeDesktop {
         let globals = KConfig::cascade(layers.kdeglobals);
         let user_accent = globals
@@ -417,7 +427,13 @@ impl KdeDesktop {
                 Some(accent) => KdeColorScheme::from_config(&file).accented_config(accent),
                 None => file,
             };
-            let merged = KConfig::cascade(&[globals.clone(), file.with_kind(LayerKind::Default)]);
+            // A whole-file lock in a `kdeglobals` layer keeps the higher
+            // `kdeglobals` layers out, not the scheme file: that lock is
+            // lifted here, and the locked entries still win over the file.
+            let merged = KConfig::cascade(&[
+                globals.clone().without_file_lock(),
+                file.with_kind(LayerKind::Default),
+            ]);
             (KdeColorScheme::from_config(&merged), origin)
         };
 
