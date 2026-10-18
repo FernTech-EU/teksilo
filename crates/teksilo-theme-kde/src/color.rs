@@ -274,6 +274,12 @@ fn opaque_on(color: KdeColor, backdrop: KdeColor) -> KdeColor {
     over(solid(color), read_channel(color.a), solid(backdrop))
 }
 
+/// `[wcag]` [`opaque_on`] for the colours a style paints: `color` as painted
+/// on `backdrop`, whose own alpha is ignored, made opaque.
+pub(crate) fn opaque_over(color: Color, backdrop: Color) -> Color {
+    opaque_on(KdeColor::from_color(color), KdeColor::from_color(backdrop)).to_color()
+}
+
 /// `[wcag]` `color` with its HCY luma moved toward more contrast until it
 /// reaches `floor` on every one of `on`; unchanged when it already does.
 ///

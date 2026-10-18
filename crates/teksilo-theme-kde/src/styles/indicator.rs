@@ -42,6 +42,15 @@
 //!   and the button colour (Breeze Light's is 2.2:1 on its window), so a
 //!   hovered control keeps its boundary. In the normal projection they are
 //!   the scheme's own.
+//! - **A translucent button colour.** Breeze fills a box over an opaque
+//!   button colour and washes the highlight over that fill
+//!   ([`crate::styles::checkbox`]). A scheme may give the button colour an
+//!   alpha; the specification is silent on how such a face is painted. It
+//!   is made opaque over the window, as the colour mapping makes a lifted
+//!   colour opaque, so the box, the disc and the switch's handle are one
+//!   opaque fill wherever the control sits, the wash is composited over it
+//!   as for stock Breeze, and the mark is lifted on the colour the box
+//!   actually shows.
 //! - **D5, keyboard focus.** Breeze shows keyboard focus with a 2 px band
 //!   of the highlight at 30 % outside the box. The band is drawn in the
 //!   opaque `focus_ring` token, the focus colour lifted to 3:1, as on the
@@ -61,7 +70,7 @@ use teksilo_kde_scheme::math::{hsv_darker, lift_luma_until};
 use teksilo_kde_scheme::{ColorSet, ColorState, DecorationRole, KdeColor, PaletteRole};
 use teksilo_tokens::Color;
 
-use crate::color::{AA, ENHANCED, high_contrast_boundary, mark_on_faces};
+use crate::color::{AA, ENHANCED, high_contrast_boundary, mark_on_faces, opaque_over};
 use crate::palette::KdePalette;
 use crate::styles::checkbox::box_paint;
 use crate::styles::metrics::{INDICATOR_BOX_INSET, INDICATOR_PRESSED_DARKER, INDICATOR_SIZE};
@@ -71,7 +80,9 @@ use crate::styles::metrics::{INDICATOR_BOX_INSET, INDICATOR_PRESSED_DARKER, INDI
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BreezeIndicatorColors {
     /// `[qt]` The button colour: the face of a box, a disc and a switch's
-    /// handle.
+    /// handle. A translucent button colour is made opaque over the window
+    /// (`surface_main`), so a box is one opaque fill whatever lies behind
+    /// it and its mark is lifted on what is painted under it.
     pub button: Color,
     /// `[Hp]` The button colour darkened 110 %, a pressed box's face.
     pub button_pressed: Color,
@@ -159,6 +170,7 @@ impl BreezeIndicatorColors {
             } else {
                 (c.surface_content, c.text_primary, c.border, c.editor_fg)
             };
+            let button = opaque_over(button, c.surface_main);
             let hover = high_contrast_boundary(c.border_focused, c, button, high_contrast);
             return BreezeIndicatorColors {
                 button,
@@ -183,6 +195,7 @@ impl BreezeIndicatorColors {
             ColorState::Inactive
         };
         let b = palette.breeze_colors(state, high_contrast);
+        let button = opaque_over(b.button, c.surface_main);
         // The view's text: the projected token, which the high-contrast
         // projection lifts, or the disabled view text.
         let text = if disabled {
@@ -191,8 +204,8 @@ impl BreezeIndicatorColors {
             c.editor_fg
         };
         BreezeIndicatorColors {
-            button: b.button,
-            button_pressed: darker(b.button),
+            button,
+            button_pressed: darker(button),
             button_text: b.button_text,
             button_outline: b.button_outline,
             button_hover: high_contrast_boundary(
@@ -202,15 +215,15 @@ impl BreezeIndicatorColors {
                     .decoration(DecorationRole::Hover)
                     .to_color(),
                 c,
-                b.button,
+                button,
                 high_contrast,
             ),
             text,
             text_pressed: text,
             highlight,
             outline,
-            checked_outline: checked_outline(theme, highlight, b.button, high_contrast, disabled),
-            focus: high_contrast_boundary(b.focus, c, b.button, high_contrast),
+            checked_outline: checked_outline(theme, highlight, button, high_contrast, disabled),
+            focus: high_contrast_boundary(b.focus, c, button, high_contrast),
             focus_ring: c.focus_ring,
         }
     }
@@ -219,7 +232,8 @@ impl BreezeIndicatorColors {
 /// `[wcag]` The mark of `colors` (the check mark, the partial squares and
 /// the radio dot, in the view's text) on a marked box or disc, pressed or
 /// not, lifted to the non-text floor, 3:1 or 4.5:1 under high contrast, on
-/// its face: the highlight washed over the button colour as it is painted.
+/// its face: the highlight washed over the button colour as it is painted,
+/// one opaque fill, since [`BreezeIndicatorColors::button`] is opaque.
 /// The view's text reaches the text floor on the view, not on this face: a
 /// scheme whose inactive effects move the button colour or the highlight
 /// toward the text would otherwise leave the mark unreadable. Stock
@@ -436,6 +450,44 @@ mod tests {
         assert_eq!(c.text, p.role(ColorState::Disabled, PaletteRole::Text));
         assert_eq!(c.highlight, t.colors.accent_disabled);
         assert_eq!(c.outline, t.colors.border_disabled);
+    }
+
+    /// A scheme may give the Button background an alpha, which D11 keeps.
+    /// The box is then still one opaque fill, the button colour composited
+    /// over the window with the wash over that, and the mark reaches the
+    /// floor on it: Breeze Dark with the Button background at alpha 0.8
+    /// and Inactive Lighten 0.4 left the mark 4.39:1 on the box as painted
+    /// under high contrast, lifted against the bare face instead.
+    #[test]
+    fn a_translucent_button_colour_paints_one_opaque_box_its_mark_reads_on() {
+        use teksilo_kde_scheme::{ColorSet, IntensityEffect, KdeColorScheme, StateEffect};
+        let mut scheme = KdeColorScheme::breeze_dark();
+        scheme.sets[ColorSet::Button.index()].background_normal = KdeColor::rgba8(41, 44, 48, 204);
+        scheme.inactive_effect = StateEffect {
+            enabled: true,
+            intensity_effect: IntensityEffect::Lighten,
+            intensity_amount: 0.4,
+            ..StateEffect::INACTIVE_DEFAULT
+        };
+        let theme = crate::from_scheme(&scheme);
+        let hc = theme.for_paint_state(teksilo_core::styles::PaintState {
+            window_active: false,
+            high_contrast: true,
+        });
+        let p = hc.extension::<KdePalette>().unwrap();
+        assert!(
+            p.breeze_colors(ColorState::Inactive, true).button.a() < 1.0,
+            "premise: the carried button colour keeps the scheme's alpha"
+        );
+        let c = BreezeIndicatorColors::resolve(&hc, false, true, false);
+        assert_eq!(c.button.a(), 1.0);
+        assert_eq!(c.button_pressed.a(), 1.0);
+        for pressed in [false, true] {
+            let paint = box_paint(true, false, pressed, false, &c);
+            let fill = paint.composited_fill().expect("one opaque fill");
+            let ratio = paint.mark.contrast_ratio(fill);
+            assert!(ratio >= 4.5, "pressed {pressed}: {ratio:.2}:1");
+        }
     }
 
     #[test]

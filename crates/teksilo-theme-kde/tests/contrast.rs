@@ -78,6 +78,12 @@ fn ratio(fg: Color, bg: Color) -> f32 {
     composite_contrast(fg, bg)
 }
 
+/// `top` composited over `bottom`, whose alpha is ignored, made opaque.
+fn painted_over(top: Color, bottom: Color) -> Color {
+    let solid = |c: Color| KdeColor::from_color(c.with_alpha(1.0));
+    mix(solid(bottom), solid(top), f64::from(top.a())).to_color()
+}
+
 fn palette(theme: &Theme) -> &KdePalette {
     theme
         .extension::<KdePalette>()
@@ -896,6 +902,17 @@ fn adversarial() -> Vec<(&'static str, KdeColorScheme)> {
         set.foreground_negative = KdeColor::rgba8(218, 68, 83, 128);
         set.decoration_focus = KdeColor::rgba8(61, 174, 233, 128);
     });
+    // A translucent Button background, which D11 carries with its alpha,
+    // in an inactive window whose effects move it toward the middle.
+    let translucent_button = |intensity_effect, intensity_amount| {
+        intensity(
+            with(KdeColorScheme::breeze_dark(), &[ColorSet::Button], |set| {
+                set.background_normal = KdeColor::rgba8(41, 44, 48, 204);
+            }),
+            intensity_effect,
+            intensity_amount,
+        )
+    };
     vec![
         ("faint light", faint_light),
         ("faint dark", faint_dark),
@@ -927,6 +944,14 @@ fn adversarial() -> Vec<(&'static str, KdeColorScheme)> {
             intensity(KdeColorScheme::breeze_dark(), IntensityEffect::Lighten, 0.4),
         ),
         ("translucent status and focus", translucent),
+        (
+            "translucent button, inactive lighten 0.4, dark",
+            translucent_button(IntensityEffect::Lighten, 0.4),
+        ),
+        (
+            "translucent button, inactive shade 0.1, dark",
+            translucent_button(IntensityEffect::Shade, 0.1),
+        ),
     ]
 }
 
@@ -1221,7 +1246,12 @@ fn face_failures(theme: &Theme, window_active: bool, high_contrast: bool) -> Vec
     let indicator = BreezeIndicatorColors::resolve(&projected, window_active, high_contrast, false);
     for pressed in [false, true] {
         let paint = box_paint(true, false, pressed, false, &indicator);
-        let face = paint.composited_fill().expect("the box face is opaque");
+        // The box as painted: one opaque fill, or a translucent face and
+        // the wash laid as two layers over the window.
+        let face = paint.composited_fill().unwrap_or_else(|| {
+            let face = painted_over(paint.face, c.surface_main);
+            paint.wash.map_or(face, |wash| painted_over(wash, face))
+        });
         pairs.push((
             format!("check mark on its box, pressed {pressed}"),
             paint.mark,
@@ -1291,6 +1321,11 @@ enum Vendor {
     WindowTextOnWindow,
     /// The same pair at the high-contrast text floor, 7:1.
     WindowTextOnWindowEnhanced,
+    /// The view text, a check box's mark, on a checked box as the scheme's
+    /// colours paint it (the Button background over the window, the
+    /// highlight at 30 % over that), at the high-contrast non-text floor,
+    /// 4.5:1.
+    MarkOnCheckedBoxEnhanced,
 }
 
 fn window_text_on_window(p: &KdePalette, state: ColorState) -> f32 {
@@ -1322,6 +1357,14 @@ impl Vendor {
             ),
             Vendor::WindowTextOnWindow => (window_text_on_window(p, state), TEXT),
             Vendor::WindowTextOnWindowEnhanced => (window_text_on_window(p, state), 7.0),
+            Vendor::MarkOnCheckedBoxEnhanced => {
+                let face = painted_over(
+                    p.role(state, PaletteRole::Button),
+                    p.role(state, PaletteRole::Window),
+                );
+                let checked = painted_over(highlight.with_alpha(0.3), face);
+                (ratio(p.role(state, PaletteRole::Text), checked), 4.5)
+            }
         }
     }
 }
@@ -1402,6 +1445,18 @@ fn what_each_adversarial_scheme_defeats() -> Vec<(&'static str, ColorState, Vec<
             "translucent status and focus",
             Active,
             vec![OnView(Negative), FocusOnView],
+        ),
+        (
+            "translucent button, inactive lighten 0.4, dark",
+            Inactive,
+            vec![WindowTextOnWindow, MarkOnCheckedBoxEnhanced],
+        ),
+        (
+            "translucent button, inactive shade 0.1, dark",
+            Inactive,
+            // The scheme's own mark passes (5.13:1); the box D11 carries
+            // for the 7:1 text does not carry it without the lift.
+            vec![WindowTextOnWindowEnhanced],
         ),
     ]
 }

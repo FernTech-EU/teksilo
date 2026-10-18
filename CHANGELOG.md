@@ -183,7 +183,8 @@ by crate for clarity, not because crates version independently.
   and `Destructive` variants filled with the accent so their label stays
   readable. All three grow to the density's target size. A `Checkbox` and a
   `RadioButton` are Breeze's: a 15 px box or disc in the button colour,
-  outlined, and when checked outlined in the highlight, washed with it in
+  painted opaque over the window when a scheme makes it translucent, so the
+  mark stays readable on it, outlined, and when checked outlined in the highlight, washed with it in
   the colour Plasma paints and marked in the text colour with square-ended
   strokes, with the label 24 px from the leading edge;
   their row is 24 px rather than Breeze's 22, so it stays a WCAG target

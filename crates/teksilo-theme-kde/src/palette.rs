@@ -54,8 +54,15 @@ const CONTROL_SHADOW_ALPHA: f32 = 0.125;
 
 /// The colours Breeze combines from a scheme's palette for one colour state.
 ///
-/// `fc` is the scheme's frame contrast. Every colour is opaque except
-/// [`shadow`](Self::shadow).
+/// `fc` is the scheme's frame contrast. [`shadow`](Self::shadow) is
+/// translucent; every other colour is as opaque as the scheme colours it is
+/// made from, so all of stock Breeze's are opaque. A scheme may write a
+/// colour with an alpha: D11 moves a translucent surface in luma and keeps
+/// its alpha, so a translucent Button background gives a translucent
+/// [`button`](Self::button), while a text lifted for contrast is made
+/// opaque. A style painting a translucent colour composites it as it
+/// documents (a check box makes its face opaque over the window, see
+/// [`crate::styles::indicator`]).
 ///
 /// The combinations are made from the surfaces the window paints, which
 /// are the scheme's own except where the colour mapping's D11 moves them
