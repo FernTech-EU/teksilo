@@ -53,6 +53,9 @@ Install the server matching the framework version your app pins:
 cargo install teksilo-automation-mcp --version <the teksilo version your app pins>
 ```
 
+`cargo teksilo status` says when the server on PATH is from an older or another
+release, and `cargo teksilo update` replaces it.
+
 Then:
 
 ```bash

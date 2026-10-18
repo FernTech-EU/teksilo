@@ -13,6 +13,36 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### cargo-teksilo
+
+- `cargo teksilo update` brings what is already installed to the tool's
+  release: the probe harness, the project's agent instructions, and the
+  `teksilo-automation-mcp` and `cargo-teksilo-fmt` binaries on PATH. It lists
+  the changes and asks first; `-y` skips the question, `-i` asks per action
+  and shows the equivalent command, `--dry-run` only lists. `--agent` limits
+  it to the project's agent instructions, `--user` updates the ones under the
+  home directory instead. It ends by saying to restart the agent session or
+  the MCP server when it replaced what they run.
+- `cargo teksilo status` reports `cargo-teksilo-fmt` on a `Fmt` line, and the
+  tool's own version on a `Tool` line; `--json` adds `formatter`,
+  `tool_outdated` and `tool_update_command`.
+
+### Changed
+
+#### cargo-teksilo
+
+- `cargo teksilo status` prints the `cargo install` command for a tool, an
+  automation server or a formatter that is older than the app's Teksilo,
+  including a patch-level difference, which it previously reported as
+  matching. The server's JSON `state` can now be `older`.
+- `cargo teksilo update --user` replaces `agent install --user --force` as the
+  remedy `status` gives for a differing user-scope copy.
+- `cargo teksilo init` and `update` no longer ask when `$CI` or `$CLAUDECODE`
+  is set, even on a terminal: they print the listing and exit with an error
+  naming `-y`, which now tells an agent to show the list to the user first.
+
 ### Fixed
 
 - **Builds without link-time optimisation embed each bundled font once.** A

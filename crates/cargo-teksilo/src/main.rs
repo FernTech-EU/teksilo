@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-mod automation;
+mod companion;
 mod guard;
+mod install;
 mod output;
 mod probe;
 mod resolve;
@@ -11,6 +12,7 @@ mod setup;
 mod show;
 mod status;
 mod symbol;
+mod update;
 mod vectors;
 
 use clap::{Args, Parser, Subcommand};
@@ -102,6 +104,27 @@ enum Command {
     Model {
         #[command(subcommand)]
         command: ModelCommand,
+    },
+    /// Refresh installed tooling to this release.
+    Update {
+        /// Update the project's agent instructions only.
+        #[arg(long)]
+        agent: bool,
+        /// Update the agent instructions under your home directory instead.
+        #[arg(long)]
+        user: bool,
+        /// Skip the confirmation.
+        #[arg(short = 'y', long, conflicts_with = "interactive")]
+        yes: bool,
+        /// Confirm each action, showing its equivalent command.
+        #[arg(short = 'i', long)]
+        interactive: bool,
+        /// List what would change, and change nothing.
+        #[arg(long, conflicts_with_all = ["yes", "interactive"])]
+        dry_run: bool,
+        /// With --yes, also replace probe files that have local edits.
+        #[arg(long)]
+        force: bool,
     },
     /// Show project and tooling status.
     Status {
@@ -199,6 +222,10 @@ fn project(dir: &Path) -> Result<PathBuf, String> {
         .ok_or_else(|| "no Cargo.toml found\nhelp: run inside a Cargo project".into())
 }
 fn version(root: &Path) -> Result<String, String> {
+    resolution(root).map(|r| r.version)
+}
+/// The app's resolution, refused when this tool cannot serve it.
+fn resolution(root: &Path) -> Result<resolve::Resolution, String> {
     let r = resolve::resolve(root).map_err(|e| e.to_string())?;
     match guard::check(&r.version) {
         guard::Verdict::Refuse { app, tool } => Err(guard::refusal_text(
@@ -211,11 +238,11 @@ fn version(root: &Path) -> Result<String, String> {
             if let Some(note) = verdict.note() {
                 output::provenance(note);
             }
-            Ok(r.version)
+            Ok(r)
         }
     }
 }
-fn install_probe(root: &Path, version: &str, force: bool) -> Result<(), String> {
+pub(crate) fn install_probe(root: &Path, version: &str, force: bool) -> Result<(), String> {
     let written = probe::materialise(root, force).map_err(|e| e.to_string())?;
     probe::record_provenance(root, version).map_err(|e| e.to_string())?;
     if output::verbose() {
@@ -249,6 +276,133 @@ fn success(message: impl std::fmt::Display) {
     if !output::quiet() {
         println!("{message}");
     }
+}
+fn update(
+    dir: &Path,
+    scope: update::Scope,
+    yes: bool,
+    interactive: bool,
+    dry_run: bool,
+    force: bool,
+) -> Result<(), String> {
+    // `-i` is nothing but questions, so refuse before printing half of them.
+    if interactive && let Some(reason) = setup::nobody_to_ask() {
+        return Err(format!(
+            "--interactive asks before each action, and {reason}\n\
+             help: run `cargo teksilo update --dry-run` to list the changes"
+        ));
+    }
+    let (root, version, header) = if scope == update::Scope::User {
+        // As `agent install --user`: no project, and the copies are this
+        // release's whatever a project nearby resolves.
+        let home = setup::home_dir().map_err(|e| e.to_string())?;
+        let header = format!("Home     {}", home.display());
+        (home, guard::TOOL_VERSION.to_string(), header)
+    } else {
+        let root = project(dir)?;
+        let r = resolution(&root)?;
+        // A patch-older tool passes the guard, and would write an older
+        // release's files over the ones it is meant to refresh.
+        if guard::tool_is_older(&r.version) {
+            return Err(format!(
+                "tool {} cannot update tooling for Teksilo {}\nhelp: run `{}`, then `cargo teksilo update` again",
+                guard::TOOL_VERSION,
+                r.version,
+                guard::self_install(&r.version, r.checkout_root().as_deref()).display()
+            ));
+        }
+        let header = format!("Project  {}\nTeksilo  {}", root.display(), r.version);
+        (root, r.version, header)
+    };
+    let companions = if scope == update::Scope::Project {
+        [companion::MCP, companion::FMT]
+            .into_iter()
+            .map(|c| companion::inspect_path(c, &version))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let items = update::plan(&root, scope, &version, companions)?;
+    if items.is_empty() {
+        success("Nothing to update.");
+        return Ok(());
+    }
+    println!("{header}\n");
+    for item in &items {
+        for line in item.describe(&root) {
+            println!("{line}");
+        }
+    }
+    if dry_run {
+        return Ok(());
+    }
+    let confirm = |question: &str| setup::confirm(question, "--yes").map_err(|e| e.to_string());
+    let mut accepted = Vec::new();
+    let mut skipped = Vec::new();
+    if interactive {
+        for item in &items {
+            println!();
+            for line in item.describe(&root) {
+                println!("{line}");
+            }
+            println!("         $ {}", item.manual());
+            if confirm("Apply?")? {
+                accepted.push(item);
+            } else {
+                skipped.push(item);
+            }
+        }
+    } else if yes || confirm("\nProceed?")? {
+        accepted.extend(&items);
+    } else {
+        return Ok(());
+    }
+    // Agreeing to a listing that names the edited probe files is consent to
+    // replacing them; `--yes` agrees to a listing nobody read.
+    let consented = !yes || force;
+    let mut updated = Vec::new();
+    for item in &accepted {
+        if let Err(e) = item.apply(&root, &version, consented) {
+            if !updated.is_empty() {
+                success(format!("Updated: {}.", updated.join(", ")));
+            }
+            return Err(e);
+        }
+        updated.push(item.name());
+    }
+    if !updated.is_empty() {
+        success(format!("Updated: {}.", updated.join(", ")));
+    }
+    // What is already running keeps the old copy: an agent read its
+    // instructions when its session started, and its MCP client spawned the
+    // server once.
+    let mut restart = Vec::new();
+    if accepted
+        .iter()
+        .any(|i| matches!(i, update::Item::Agent { .. }))
+    {
+        restart.push("the agent session, to read the new instructions");
+    }
+    if accepted
+        .iter()
+        .any(|i| matches!(i, update::Item::Binary(found) if found.companion == companion::MCP))
+    {
+        restart.push("the MCP server, to run the new teksilo-automation-mcp");
+    }
+    if !restart.is_empty() {
+        success(format!("help: restart {}", restart.join(", and ")));
+    }
+    if !skipped.is_empty() {
+        success(format!(
+            "Skipped: {}.",
+            skipped
+                .iter()
+                .map(|i| i.name())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    Ok(())
 }
 fn run(dir: &Path, command: Command) -> Result<(), String> {
     match command {
@@ -288,6 +442,21 @@ fn run(dir: &Path, command: Command) -> Result<(), String> {
             status::report(dir);
             Ok(())
         }
+        Command::Update {
+            agent,
+            user,
+            yes,
+            interactive,
+            dry_run,
+            force,
+        } => update(
+            dir,
+            update::Scope::from_flags(agent, user),
+            yes,
+            interactive,
+            dry_run,
+            force,
+        ),
         Command::Probe {
             command: ProbeCommand::Install { force },
         } => {
@@ -404,5 +573,19 @@ mod tests {
             Cargo::try_parse_from(["cargo", "teksilo", "--quiet", "--verbose", "status"]).is_err()
         );
         assert!(Cargo::try_parse_from(["cargo", "teksilo", "setup"]).is_err());
+        for args in [
+            &["update"][..],
+            &["update", "--agent"],
+            &["update", "--user"],
+            &["update", "--agent", "--user", "-i"],
+            &["update", "-y", "--force"],
+            &["update", "--dry-run"],
+            &["update", "--user", "--dry-run"],
+        ] {
+            let argv = ["cargo", "teksilo"].iter().chain(args);
+            assert!(Cargo::try_parse_from(argv).is_ok(), "{args:?}");
+        }
+        assert!(Cargo::try_parse_from(["cargo", "teksilo", "update", "-y", "-i"]).is_err());
+        assert!(Cargo::try_parse_from(["cargo", "teksilo", "update", "--dry-run", "-y"]).is_err());
     }
 }

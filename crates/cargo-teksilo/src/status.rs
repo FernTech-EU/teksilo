@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-use crate::{guard, resolve, setup, symbol, vectors};
+use crate::{companion, guard, resolve, setup, symbol, vectors};
 use std::path::Path;
 
 /// Machine-readable agent status uses the same target selection as installation.
@@ -87,11 +87,18 @@ pub fn report(dir: &Path) {
     // Only an app's own release says which server it needs; without one, the
     // release this tool was built for is the best guess there is.
     let expected = version.unwrap_or(guard::TOOL_VERSION);
-    let server = crate::automation::inspect_path(expected);
+    let server = companion::inspect_path(companion::MCP, expected);
+    let formatter = companion::inspect_path(companion::FMT, expected);
+    let checkout = resolution
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .and_then(|r| r.checkout_root());
+    let outdated = version.filter(|v| guard::tool_is_older(v));
+    let tool_update = outdated.map(|v| guard::self_install(v, checkout.as_deref()).display());
     if crate::output::json() {
         println!(
             "{}",
-            serde_json::json!({"tool_version":guard::TOOL_VERSION,"project":root,"teksilo_version":version,"teksilo_enabled_by":enabled_by,"compatible":compatible,"resolution_error":error,"agents":rows,"user_agents":user_rows,"model":model,"python":python,"probe_version":probe,"automation_server":server.json(expected)})
+            serde_json::json!({"tool_version":guard::TOOL_VERSION,"tool_outdated":outdated.is_some(),"tool_update_command":tool_update,"project":root,"teksilo_version":version,"teksilo_enabled_by":enabled_by,"compatible":compatible,"resolution_error":error,"agents":rows,"user_agents":user_rows,"model":model,"python":python,"probe_version":probe,"automation_server":server.json(),"formatter":formatter.json()})
         );
         return;
     }
@@ -125,6 +132,18 @@ pub fn report(dir: &Path) {
             "help: any other cargo teksilo command, or `cargo generate-lockfile`, creates it",
         );
     }
+    println!(
+        "Tool     {}{}",
+        guard::TOOL_VERSION,
+        outdated
+            .map(|v| format!(" (older than {v})"))
+            .unwrap_or_default()
+    );
+    if let Some(app) = outdated {
+        // Every answer the tool gives is this older release's, so `--quiet`
+        // keeps it, as it keeps which release answered.
+        crate::output::provenance(guard::outdated_tool_text(app, checkout.as_deref()));
+    }
     println!("Probe    {}", probe.as_deref().unwrap_or("missing"));
     println!("Model    {model}");
     println!(
@@ -135,9 +154,11 @@ pub fn report(dir: &Path) {
             "missing"
         }
     );
-    println!("MCP      {}", server.line());
-    if let Some(help) = server.help() {
-        crate::output::note(help);
+    for (label, found) in [("MCP     ", &server), ("Fmt     ", &formatter)] {
+        println!("{label} {}", found.line());
+        if let Some(help) = found.help() {
+            crate::output::note(help);
+        }
     }
     let mut paths = std::collections::BTreeSet::new();
     let installed: Vec<_> = rows
@@ -158,8 +179,8 @@ pub fn report(dir: &Path) {
     for agent in differing {
         crate::output::note(format!(
             "help: the {agent} instructions under your home directory differ from \
-             this release's; `cargo teksilo agent install {agent} --user --force` \
-             replaces them, local edits included"
+             this release's; `cargo teksilo update --user` replaces them, local \
+             edits included"
         ));
     }
     if crate::output::verbose() {

@@ -66,9 +66,47 @@ when its default features leave teksilo out, the commands resolve with every
 feature enabled, and `status` names the feature that turns teksilo on.
 
 `status` reports the resolved app version and installed tooling without
-changing the lockfile. `--verbose` adds paths and diagnostics. `--quiet`
+changing the lockfile. When this tool, or the automation server or formatter on
+PATH, is older than the app's release, it prints the command that updates it. `--verbose` adds paths and diagnostics. `--quiet`
 suppresses informational output while preserving results, errors, and the
 line that says which release answered.
+
+## Updating after a framework upgrade
+
+After moving the app to a new Teksilo release, install the matching tool, then
+update what it installed:
+
+```sh
+cargo install cargo-teksilo --version <version> --locked
+cargo teksilo update
+```
+
+`update` lists what differs from this release and asks before changing it: the
+probe harness, the project's agent instructions, and the
+`teksilo-automation-mcp` and `cargo-teksilo-fmt` binaries on PATH, which it
+reinstalls with `cargo install` into the root they came from. Nothing absent is
+installed. Use `-y` in scripts, `-i` to confirm each action (it also shows the
+equivalent command, such as `cargo teksilo agent install claude --force`), or
+`--dry-run` to list the changes and make none.
+
+```sh
+cargo teksilo update --agent    # the project's agent instructions only
+cargo teksilo update --user     # the instructions under your home directory instead
+```
+
+An agent copy that differs from this release may hold local edits, which
+`update` replaces once confirmed. Probe files with local edits are listed by
+name; with `-y`, they are replaced only with `--force`. A tool older than the
+app is refused, because it would write an older release's files; `status` says
+so and prints the `cargo install` command.
+
+`update` and `init` never wait for an answer nobody can give. When stdin is not
+a terminal, or `$CI` or `$CLAUDECODE` is set, they print the listing and exit
+with an error that names `-y`, and `-i` refuses before printing anything. The
+shipped instructions tell an agent to run `--dry-run`, show the user the list,
+and pass `-y` once they agree. A session that is already running keeps the
+instructions it started with, and an MCP client keeps the server it spawned, so
+`update` ends by saying which to restart.
 
 ## Semantic search
 

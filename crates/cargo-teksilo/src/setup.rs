@@ -69,6 +69,11 @@ and a wrong answer reads exactly like a right one.
 - `cargo teksilo agent install <agents...>`: instructions only. `--user` supports
   claude, vibe, and opencode. `agent list` shows targets and installation state.
 - `cargo teksilo probe install`: install the automation harness in scripts/teksilo_probe/.
+- `cargo teksilo update`: bring the installed harness, instructions and companion
+  binaries to this release; asks first (`-y` skips, `-i` asks per action).
+  `--agent` for instructions only, `--user` for those under the home directory.
+  You cannot answer its question: run `--dry-run`, show the user the list, and
+  pass `-y` once they agree. Then ask them to restart your session.
 - `cargo teksilo model fetch`: explicitly download the search model. Search uses
   BM25 until cached; init and search never download weights.
 - `cargo teksilo status --json`: project version and tooling state.
@@ -208,10 +213,13 @@ pub enum SetupError {
     Probe(#[from] crate::probe::ProbeError),
 
     #[error(
-        "stdin is not a terminal, so there is nobody to answer this prompt.\n\
-         Pass {hint} to run non-interactively."
+        "{reason}, so there is nobody to answer this prompt.\n\
+         help: show the list above to the user, and pass {hint} once they agree"
     )]
-    NotATerminal { hint: &'static str },
+    NobodyToAsk {
+        reason: &'static str,
+        hint: &'static str,
+    },
 
     #[error("could not find a home directory (neither $HOME nor %USERPROFILE% is set)")]
     NoHome,
@@ -1048,16 +1056,42 @@ fn remove_strays(root: &Path, dir: &Path, keep: &[&Path]) -> Result<bool, SetupE
 // Asking
 // ---------------------------------------------------------------------------
 
-/// Refuse to prompt when nobody can answer.
+/// Why nobody can answer a prompt, or `None` when somebody can.
 ///
-/// CI and coding agents run this command. A blocking `read_line` against a
-/// closed stdin hangs until something kills it, which is strictly worse than
-/// an error — so the error names the flag that would have avoided the question.
+/// CI and coding agents run this command, and a prompt nobody answers hangs
+/// until something kills it. A closed stdin is the usual sign. Some harnesses
+/// hand the command a terminal nobody is watching, so the markers they set
+/// count too.
+pub fn nobody_to_ask() -> Option<&'static str> {
+    if !std::io::stdin().is_terminal() {
+        return Some("stdin is not a terminal");
+    }
+    unattended_marker(|name| std::env::var_os(name))
+}
+
+/// Environment variables set where nobody watches the terminal.
+const UNATTENDED: [(&str, &str); 2] = [
+    ("CI", "$CI is set"),
+    (
+        "CLAUDECODE",
+        "$CLAUDECODE is set, so a coding agent runs this",
+    ),
+];
+
+fn unattended_marker(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<&'static str> {
+    UNATTENDED.iter().find_map(|(name, reason)| {
+        let value = var(name)?;
+        let off = value.is_empty() || value == "0" || value.eq_ignore_ascii_case("false");
+        (!off).then_some(*reason)
+    })
+}
+
+/// Refuse to prompt when nobody can answer, naming the flag that would have
+/// avoided the question.
 pub fn require_interactive(hint: &'static str) -> Result<(), SetupError> {
-    if std::io::stdin().is_terminal() {
-        Ok(())
-    } else {
-        Err(SetupError::NotATerminal { hint })
+    match nobody_to_ask() {
+        None => Ok(()),
+        Some(reason) => Err(SetupError::NobodyToAsk { reason, hint }),
     }
 }
 
@@ -1082,6 +1116,29 @@ pub fn confirm(question: &str, hint: &'static str) -> Result<bool, SetupError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ci_and_agent_markers_mean_nobody_answers() {
+        let marker = |pairs: &[(&str, &str)]| {
+            unattended_marker(|name| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, v)| std::ffi::OsString::from(v))
+            })
+        };
+        assert_eq!(marker(&[]), None);
+        assert_eq!(marker(&[("CI", "true")]), Some("$CI is set"));
+        assert_eq!(marker(&[("CI", "1")]), Some("$CI is set"));
+        for off in ["", "0", "false", "FALSE"] {
+            assert_eq!(marker(&[("CI", off)]), None, "CI={off:?}");
+        }
+        assert!(
+            marker(&[("CLAUDECODE", "1")])
+                .unwrap()
+                .contains("coding agent")
+        );
+    }
 
     fn temp() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()

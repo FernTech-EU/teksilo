@@ -91,6 +91,7 @@ cargo teksilo probe install                  # write the probe harness into scri
 cargo teksilo init                  # probe + brief every agent configured in the project
 cargo teksilo init -y    # install non-interactively
 cargo teksilo agent install claude --user           # install only Claude instructions for this user
+cargo teksilo update                 # refresh installed harness, instructions, companion binaries (-i, -y, --dry-run, --agent, --user)
 cargo teksilo status                 # project and search model status (read-only)
 cargo teksilo build-vectors          # MAINTAINER ONLY: re-encode the corpus (see below)
 ```
