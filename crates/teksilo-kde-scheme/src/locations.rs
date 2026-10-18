@@ -67,8 +67,14 @@ impl KdeConfigLocations {
     /// default; empty and relative entries of a directory list are dropped,
     /// and a list left empty takes its default.
     pub fn from_env(get: impl Fn(&str) -> Option<String>) -> KdeConfigLocations {
-        let home = absolute(get("HOME"));
-        let under_home = |rel: &str| home.as_ref().map(|h| h.join(rel));
+        let home = get("HOME").filter(|v| is_absolute(v));
+        // Joined with `/`, not `Path::join`: these are POSIX paths on every
+        // host, and on Windows `join` would insert a `\` that then reaches
+        // `$QT_DATA_HOME` and the other `[$e]` defaults.
+        let under_home = |rel: &str| {
+            home.as_ref()
+                .map(|h| PathBuf::from(format!("{}/{rel}", h.trim_end_matches('/'))))
+        };
         let config_home = absolute(get("XDG_CONFIG_HOME")).or_else(|| under_home(".config"));
         let data_home = absolute(get("XDG_DATA_HOME")).or_else(|| under_home(".local/share"));
         let cache_home = absolute(get("XDG_CACHE_HOME")).or_else(|| under_home(".cache"));
@@ -84,7 +90,7 @@ impl KdeConfigLocations {
         let data_dirs = dir_list(get("XDG_DATA_DIRS"), &["/usr/local/share", "/usr/share"]);
 
         KdeConfigLocations {
-            home,
+            home: home.map(PathBuf::from),
             config_home,
             config_dirs,
             data_home,
