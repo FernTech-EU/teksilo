@@ -157,10 +157,10 @@ against them:
 BreezeLight.colors and BreezeDark.colors carry their own copyright and
 LGPL-2.0-or-later headers; BreezeClassic.colors carries none and comes from
 the same release. The GNU Library General Public License, version 2, sits
-beside them as LICENSE.txt. The fixtures, and tests/breeze_files.rs, the
-one test that reads them, are excluded from the published
-teksilo-kde-scheme crate (the "exclude" list in its Cargo.toml) and are
-never compiled into a library or binary.
+beside them as LICENSE.txt. The fixtures, and the two tests that read
+them, tests/breeze_files.rs and tests/golden_accent.rs, are excluded from
+the published teksilo-kde-scheme crate (the "exclude" list in its
+Cargo.toml) and are never compiled into a library or binary.
 
 The specification describes Plasma's accent tint in OKLab, the colour space
 Björn Ottosson published at https://bottosson.github.io/posts/oklab/ with

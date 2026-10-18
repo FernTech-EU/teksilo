@@ -16,11 +16,14 @@ keywords = ["kde", "plasma", "breeze", "color-scheme", "kconfig"]
 categories = ["gui", "config", "parser-implementations"]
 # The stock Breeze `.colors` files are LGPL-2.0-or-later test fixtures,
 # vendored verbatim so the tests can compare against them. They are not part
-# of the published crate, and neither is `tests/breeze_files.rs`, the one
-# test target that reads them: left in, it would not compile from the
-# package and `cargo test` there would fail. The same holds for the tests
-# that read the golden vectors under `tools/kde_golden` and the clean-room
-# vocabulary scan, which reads the repository's source tree.
+# of the published crate, and neither are `tests/breeze_files.rs` and
+# `tests/golden_accent.rs`, the two test targets that read them: left in,
+# they would not compile from the package and `cargo test` there would
+# fail. The same holds for the tests that read the golden vectors under
+# `tools/kde_golden` (`tests/golden_accent.rs` among them) and the
+# clean-room vocabulary scan, which reads the repository's source tree.
+# NOTICE section 1.5 names the same two fixture readers, and a test in
+# `tests/breeze_files.rs` checks both records against the test sources.
 exclude = [
     "tests/fixtures/**",
     "tests/breeze_files.rs",
