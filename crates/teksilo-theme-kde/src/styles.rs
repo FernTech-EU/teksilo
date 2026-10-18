@@ -16,7 +16,8 @@
 //!   switch, a handle as tall as its track's indicator, which share their
 //!   colours through [`indicator`];
 //! - the line edit, a view-coloured frame whose outline turns to the focus
-//!   colour, in [`text_input`];
+//!   colour, in [`text_input`], which also frames an editable rich-text
+//!   editor, in [`rich_text_editor`];
 //! - the combo box, a push button with a chevron at its trailing edge, and
 //!   the spin box, a line edit with a column of two chevrons, which share
 //!   the chevron, [`arrow`];
@@ -58,6 +59,7 @@ pub mod popup;
 pub mod progress_bar;
 pub mod radio;
 pub mod recipes;
+pub mod rich_text_editor;
 pub mod scroll_bar;
 pub mod slider;
 pub mod spin_box;

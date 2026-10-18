@@ -39,11 +39,13 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_core::widget_tree::WidgetTree;
 use teksilo_data::{ListModel, TreeModel};
 use teksilo_i18n::lit;
+use teksilo_text::text_document::TextDocument;
 use teksilo_theme_kde::styles::indicator::BreezeIndicatorColors;
 use teksilo_theme_kde::styles::table::BreezeHeaderColors;
 use teksilo_theme_kde::{self as kde, KdePalette, PlasmaAccent};
 use teksilo_tokens::{Color, Orientation};
 use teksilo_widgets::primitives::{FixedSize, HStack, IconWidget, TextWidget};
+use teksilo_widgets::rich_text::RichTextEditor;
 use teksilo_widgets::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVariant};
 use teksilo_widgets::tab_widget::{TabBar, TabDelegate, TabId, TabSizing};
 use teksilo_widgets::table_view::{Column, ColumnWidth, SortDirection};
@@ -1406,6 +1408,67 @@ fn a_disabled_field_paints_the_disabled_colours() {
         let outline = rgba8(theme.colors.border_disabled.to_array());
         assert!(strokes(&frame).contains(&outline), "{scheme}");
         assert!(near(outline, sample(scheme, "line_edit.disabled", 0, 16)));
+    }
+}
+
+/// An editable rich-text editor is framed as the line edit: the same
+/// 1 px outline at the same radius, in `border_strong` at rest and
+/// `border_focused` while focused, over the view fill. A viewer has no frame.
+#[test]
+fn an_editable_rich_text_editor_is_framed_as_the_line_edit() {
+    for (scheme, theme) in themes() {
+        let mut tree = tree_with(theme.clone());
+        let column = tree.add(
+            VStack::new()
+                .child(TextInput::new(Signal::new(String::new())))
+                .child(RichTextEditor::editor(TextDocument::new())),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let editor = tree.children(column)[1];
+        let frame = rerender(&mut tree);
+        let rest = rgba8(theme.colors.border_strong.to_array());
+        let fill = rgba8(theme.colors.surface_content.to_array());
+        let mut outlines: Vec<Painted> = painted(&frame)
+            .into_iter()
+            .filter(|p| p.stroke > 0.0 && p.color == rest)
+            .collect();
+        outlines.sort_by(|a, b| a.screen[1].total_cmp(&b.screen[1]));
+        let [field, area] = outlines[..] else {
+            panic!("{scheme}: not two lifted outlines in {:?}", painted(&frame));
+        };
+        assert_eq!(area.stroke, field.stroke, "{scheme}: the line edit's pen");
+        assert_eq!(
+            area.radius, field.radius,
+            "{scheme}: the line edit's radius"
+        );
+        assert_eq!(area.radius, 4.5, "{scheme}");
+        assert!(
+            painted(&frame)
+                .iter()
+                .any(|p| p.stroke == 0.0 && p.color == fill && p.screen == area.screen),
+            "{scheme}: no view fill on the editor's frame"
+        );
+
+        tree.focus(editor);
+        let frame = rerender(&mut tree);
+        let focus = rgba8(theme.colors.border_focused.to_array());
+        let focused = painted(&frame)
+            .into_iter()
+            .find(|p| p.stroke > 0.0 && p.color == focus && p.screen == area.screen)
+            .unwrap_or_else(|| panic!("{scheme}: no focus outline in {:?}", painted(&frame)));
+        assert_eq!(focused.stroke, 1.0, "{scheme}: focus keeps the 1 px width");
+        assert_eq!(focused.radius, 4.5, "{scheme}");
+
+        let (mut tree, _) = placed(
+            theme.clone(),
+            RichTextEditor::read_only(TextDocument::new()),
+        );
+        let frame = rerender(&mut tree);
+        assert!(
+            strokes(&frame).is_empty(),
+            "{scheme}: a viewer is frameless, {:?}",
+            painted(&frame)
+        );
     }
 }
 

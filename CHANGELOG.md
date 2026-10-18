@@ -154,7 +154,9 @@ by crate for clarity, not because crates version independently.
   Plasma's default text sizes and line heights (13 px text on an 18 px line),
   its spacing and its 100 ms linear transitions. An inactive window shows the
   scheme's muted selection and accent, as Plasma does, and the OS increase
-  contrast preference gets the preset's own colours, with 7:1 text. Stock
+  contrast preference gets the preset's own colours, with 7:1 text and
+  4.5:1 control outlines, a hovered field, check box, radio button, switch
+  or slider handle included. Stock
   Breeze colours that fall short of WCAG (secondary text, links, status
   colours, the focus colour, strong outlines, the scroll-bar thumb and the
   text on the accent) are made readable, keeping their hue, and so are any
@@ -185,7 +187,9 @@ by crate for clarity, not because crates version independently.
   a 36 px track, moving and changing colour on the curves KDE uses. A
   `TextInput` is the line edit, 32 px tall at Plasma's default font, its
   1 px outline turning to the focus colour while it has focus, and it
-  honours `TextInput::min_height`. A `ComboBox` is the push button with a
+  honours `TextInput::min_height`. An editable `RichTextEditor` is framed as
+  the line edit, its text 6 px inside the frame; a read-only one has no
+  frame. A `ComboBox` is the push button with a
   chevron at its trailing edge, 32 px tall at Plasma's default font, filled
   toward the highlight while its list is open. A `SpinBox` is the line edit
   with a 20 px column of two arrows and no buttons drawn, each arrow taking
@@ -207,7 +211,8 @@ by crate for clarity, not because crates version independently.
   outline, are strengthened to a 3:1 contrast, keeping their hue. A
   `StandardListItem` or `StandardTreeItem` row is Breeze's, 24 px at
   Plasma's default font, 26 px with an icon or a check box and 42 px with a
-  subtitle, growing to the density's target size: a selected row is the
+  subtitle, growing to the density's target size; the first row is the
+  height of the others, where Breeze makes it 1 px taller: a selected row is the
   highlight inside the row's margins, rounded at 5 px as Plasma rounds it,
   its label in the text on it, a
   hovered one a pale wash of the highlight, and a selection mutes only when
@@ -216,7 +221,8 @@ by crate for clarity, not because crates version independently.
   header of Breeze's sections, where the column sorted in ascending order
   is shown pressed, as in Plasma. A selected tab is the window colour under
   a 3 px highlight bar, its outline turning through the bar's rounded
-  corners, and an unselected one the window colour darkened, 30 px tall. A
+  corners, and an unselected one the window colour darkened, 30 px tall at
+  Plasma's default font and growing with the density. A
   `ScrollBar` is Breeze's 8 px handle over no track, beside a 1 px
   separator, with a thumb at least 20 px long, its colours strengthened to a
   3:1 contrast. A `ProgressBar` is 26 px thick around Breeze's 6 px groove,

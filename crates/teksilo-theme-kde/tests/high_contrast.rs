@@ -14,9 +14,19 @@
 //! window's text at 7:1, and the window's text is at 7:1 on the window, so
 //! no fill can also reach 4.5:1 on the window: the last tests check that
 //! premise and that the fill keeps its text.
+//!
+//! A hovered field, check box, radio button, switch or slider handle is
+//! outlined in a hover or focus decoration in place of its lifted outline,
+//! so the decoration is held to the boundary floor too.
 
 use teksilo_core::styles::{PaintState, Theme};
-use teksilo_theme_kde::{self as kde, PlasmaAccent};
+use teksilo_theme_kde::scheme::ColorState;
+use teksilo_theme_kde::styles::checkbox::box_paint;
+use teksilo_theme_kde::styles::indicator::BreezeIndicatorColors;
+use teksilo_theme_kde::styles::slider::BreezeSliderColors;
+use teksilo_theme_kde::styles::text_input::BreezeFieldColors;
+use teksilo_theme_kde::styles::toggle::switch_paint;
+use teksilo_theme_kde::{self as kde, KdePalette, PlasmaAccent};
 use teksilo_tokens::contrast::composite_contrast;
 use teksilo_tokens::{Color, ColorTokens};
 
@@ -312,4 +322,112 @@ fn the_selection_fill_is_held_to_its_text() {
         assert!((normal_ratio - normal).abs() < 0.01, "{normal_ratio}");
         assert!((high_ratio - high).abs() < 0.01, "{high_ratio}");
     }
+}
+
+/// The outline a control shows under the pointer, against what it meets.
+fn hovered_boundaries(theme: &Theme, window_active: bool) -> Vec<(&'static str, Color, Color)> {
+    let hc = theme.for_paint_state(PaintState {
+        window_active,
+        high_contrast: true,
+    });
+    let c = &hc.colors;
+    let surfaces = [c.surface_main, c.surface_content, c.surface_raised];
+    let mut out = Vec::new();
+    let mut against = |name: &'static str, outline: Color, face: Color| {
+        for bg in surfaces.into_iter().chain([face]) {
+            out.push((name, outline, bg));
+        }
+    };
+
+    let field = BreezeFieldColors::resolve(&hc, window_active, true, false);
+    against(
+        "hovered field outline",
+        field.outline_for(false, true, false, None),
+        field.fill,
+    );
+
+    let ind = BreezeIndicatorColors::resolve(&hc, window_active, true, false);
+    let hovered_box = box_paint(false, true, false, false, &ind);
+    against(
+        "hovered box ring",
+        hovered_box.hover_ring.expect("a hovered box is ringed"),
+        hovered_box.face,
+    );
+    let hovered_switch = switch_paint(0.0, 1.0, &ind);
+    against(
+        "hovered off track outline",
+        hovered_switch.track_outline,
+        ind.button,
+    );
+    against(
+        "hovered handle outline",
+        hovered_switch.handle_outline,
+        hovered_switch.handle,
+    );
+
+    let slider = BreezeSliderColors::resolve(&hc, window_active, true, false);
+    against(
+        "hovered slider handle outline",
+        slider.handle_outline_for(false, true, false),
+        slider.handle,
+    );
+    out
+}
+
+/// Under high contrast a hovered control keeps a 4.5:1 boundary: the hover
+/// or focus decoration that replaces its outline is lifted like the outline.
+#[test]
+fn a_hovered_control_keeps_a_four_and_a_half_to_one_boundary() {
+    let mut all = Vec::new();
+    for (name, theme) in themes() {
+        for (state, active) in [("active", true), ("inactive", false)] {
+            for (what, outline, bg) in hovered_boundaries(&theme, active) {
+                let ratio = composite_contrast(outline, bg);
+                if ratio < NON_TEXT {
+                    all.push(format!("{name}, {state}: {what} {ratio:.2}:1 on {bg:?}"));
+                }
+            }
+        }
+    }
+    assert!(
+        all.is_empty(),
+        "{} failures:\n{}",
+        all.len(),
+        all.join("\n")
+    );
+}
+
+/// The premise: the scheme's own hover and focus decorations, which Breeze
+/// paints there, fall short of 4.5:1 on Breeze Light's high-contrast window.
+#[test]
+fn the_schemes_hover_decorations_fall_short_on_a_light_window() {
+    let theme = kde::light();
+    let hc = theme.for_paint_state(PaintState {
+        window_active: true,
+        high_contrast: true,
+    });
+    let b = hc
+        .extension::<KdePalette>()
+        .unwrap()
+        .breeze_colors(ColorState::Active, true);
+    for decoration in [b.hover, b.focus] {
+        assert!(composite_contrast(decoration, hc.colors.surface_main) < NON_TEXT);
+    }
+}
+
+/// The lift is high contrast's alone: the normal projection paints the
+/// scheme's hover colour, as Breeze does.
+#[test]
+fn the_normal_projection_keeps_the_schemes_hover_colour() {
+    let theme = kde::light();
+    let b = theme
+        .extension::<KdePalette>()
+        .unwrap()
+        .breeze_colors(ColorState::Active, false);
+    let field = BreezeFieldColors::resolve(&theme, true, false, false);
+    assert_eq!(field.hover, b.hover);
+    let ind = BreezeIndicatorColors::resolve(&theme, true, false, false);
+    assert_eq!(ind.focus, b.focus);
+    let slider = BreezeSliderColors::resolve(&theme, true, false, false);
+    assert_eq!(slider.hover, b.hover);
 }

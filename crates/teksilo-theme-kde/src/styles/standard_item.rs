@@ -47,6 +47,12 @@
 //!   to tell the current row from the selected one.
 //! - **A pressed row** paints as it does at rest or hovered: Breeze has no
 //!   pressed item.
+//! - **The first row is not one taller.** Breeze gives the first row of a
+//!   view without a frame a 2 px top margin, where every other row has 1,
+//!   so the first text row is 25 px with its selection 2 px from the top
+//!   ([`BreezeGeometry::first_row_extra`](crate::geometry::BreezeGeometry::first_row_extra)).
+//!   A row is not told its index, so every row is laid out as the others,
+//!   24 px with its selection 1 px from the top.
 
 use teksilo_canvas::{Canvas, Point, Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;

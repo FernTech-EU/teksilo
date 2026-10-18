@@ -60,7 +60,9 @@
 //! - **Hover is the slider's.** Breeze outlines the handle in the hover
 //!   colour while the pointer is over the handle; the style is told only
 //!   whether the pointer is over the slider, so the outline turns while the
-//!   pointer is anywhere on it.
+//!   pointer is anywhere on it. Under high contrast the hover colour is
+//!   lifted to 4.5:1 on the control surfaces and the handle's face, as it
+//!   replaces the handle's lifted outline.
 //! - **The node is the target size.** Breeze's 20 px slider is under WCAG
 //!   2.2 SC 2.5.8's 24 px, so the node is raised; nothing painted grows.
 
@@ -80,6 +82,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_kde_scheme::{ColorState, PaletteRole};
 use teksilo_tokens::{Color, CornerRadius, InputTokens, TargetAxes};
 
+use crate::color::high_contrast_boundary;
 use crate::geometry::{
     SLIDER_CONTROL_THICKNESS, SLIDER_GROOVE_THICKNESS, SLIDER_HANDLE_PAINTED, SLIDER_TICK_LENGTH,
     SLIDER_TICK_MARGIN,
@@ -155,7 +158,8 @@ pub struct BreezeSliderColors {
     /// `border_disabled` for a disabled slider.
     pub handle_outline: Color,
     /// `[Hp]` The handle's outline under the pointer: the view's hover
-    /// decoration.
+    /// decoration, lifted to 4.5:1 on the control surfaces and the handle's
+    /// face under high contrast, where it stands in for the lifted outline.
     pub hover: Color,
     /// `[wcag]` D5: the handle's outline while focused, `border_focused`.
     pub focus: Color,
@@ -244,7 +248,7 @@ impl BreezeSliderColors {
             } else {
                 c.border_strong
             },
-            hover,
+            hover: high_contrast_boundary(hover, c, handle, high_contrast),
             focus: c.border_focused,
             focus_ring: c.focus_ring,
             shadow,

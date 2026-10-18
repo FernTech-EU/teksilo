@@ -42,7 +42,11 @@
 //!   [`checked_outline`](BreezeIndicatorColors::checked_outline), which
 //!   Breeze Dark's highlight already passes and keeps. The lift includes the
 //!   button colour, the handle's face, so in either state the handle stands
-//!   out at 3:1 where the track's outline meets it.
+//!   out at 3:1 where the track's outline meets it. Hovered, the off track
+//!   and the handle are outlined in the button set's hover decoration,
+//!   which under high contrast is lifted to 4.5:1 on the control surfaces
+//!   and the handle's face, so the off switch keeps its boundary
+//!   ([`BreezeIndicatorColors::button_hover`]).
 //! - **The handle keeps its colours.** Its face, the button colour, is
 //!   1.7:1 on the checked fill and its outline 1.3:1 on the Breeze Light
 //!   window, as the desktop style paints them. The handle's position is

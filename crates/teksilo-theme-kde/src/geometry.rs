@@ -200,7 +200,8 @@ pub struct BreezeGeometry {
     /// 26 at H = 18.
     pub list_row_height_with_check: f32,
     /// `[S]` The first row of a view without a frame is one taller: its top
-    /// margin is 2, not 1.
+    /// margin is 2, not 1. The row styles do not apply it, as a row is not
+    /// told its index (see [`crate::styles::standard_item`]).
     pub first_row_extra: f32,
     /// `[measured-qt]` A table row: `H + 2 x (1 + 1)`, plus the 1 px grid
     /// line the table view adds. 23 at H = 18.

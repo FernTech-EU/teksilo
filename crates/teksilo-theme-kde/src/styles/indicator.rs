@@ -30,6 +30,14 @@
 //!   and the button colour, [`BreezeIndicatorColors::checked_outline`]; a
 //!   scheme whose highlight already passes, Breeze Dark's, keeps it exactly.
 //!   See [`crate::styles::toggle`].
+//! - **The hover decorations under high contrast.** A hovered box or disc
+//!   is ringed in the view's focus decoration, stroked over its outline,
+//!   and a hovered switch outlines its track and handle in the button set's
+//!   hover decoration; both stand in for the control's lifted outline.
+//!   Under high contrast they are lifted to 4.5:1 on the control surfaces
+//!   and the button colour (Breeze Light's is 2.2:1 on its window), so a
+//!   hovered control keeps its boundary. In the normal projection they are
+//!   the scheme's own.
 //! - **D5, keyboard focus.** Breeze shows keyboard focus with a 2 px band
 //!   of the highlight at 30 % outside the box. The band is drawn in the
 //!   opaque `focus_ring` token, the focus colour lifted to 3:1, as on the
@@ -49,7 +57,7 @@ use teksilo_kde_scheme::math::{hsv_darker, lift_luma_until};
 use teksilo_kde_scheme::{ColorSet, ColorState, DecorationRole, KdeColor, PaletteRole};
 use teksilo_tokens::Color;
 
-use crate::color::{AA, ENHANCED};
+use crate::color::{AA, ENHANCED, high_contrast_boundary};
 use crate::palette::KdePalette;
 use crate::styles::metrics::{INDICATOR_BOX_INSET, INDICATOR_PRESSED_DARKER, INDICATOR_SIZE};
 
@@ -68,7 +76,9 @@ pub struct BreezeIndicatorColors {
     /// contrast: a switch handle's outline at rest.
     pub button_outline: Color,
     /// `[Qd]` The button set's hover decoration: a hovered or focused switch
-    /// handle's outline.
+    /// handle's outline, and an off track's. Under high contrast it is
+    /// lifted to 4.5:1 on the control surfaces and the button colour, as it
+    /// stands in for the track's lifted outline.
     pub button_hover: Color,
     /// `[Hp]` The view's text: the check mark, the partial squares and the
     /// radio dot.
@@ -86,7 +96,9 @@ pub struct BreezeIndicatorColors {
     /// disabled highlight, unlifted, when disabled.
     pub checked_outline: Color,
     /// `[Hp]` The view's focus decoration, the ring a hovered box or disc
-    /// adds to its outline.
+    /// adds to its outline, stroked over it. Under high contrast it is
+    /// lifted to 4.5:1 on the control surfaces and the button colour, as it
+    /// covers the lifted outline.
     pub focus: Color,
     /// `[wcag]` D5: the keyboard focus frame, `focus_ring`.
     pub focus_ring: Color,
@@ -124,17 +136,18 @@ impl BreezeIndicatorColors {
             } else {
                 (c.surface_content, c.text_primary, c.border, c.editor_fg)
             };
+            let hover = high_contrast_boundary(c.border_focused, c, button, high_contrast);
             return BreezeIndicatorColors {
                 button,
                 button_pressed: darker(button),
                 button_text,
                 button_outline,
-                button_hover: c.border_focused,
+                button_hover: hover,
                 text,
                 highlight,
                 outline,
                 checked_outline: checked_outline(theme, highlight, button, high_contrast, disabled),
-                focus: c.border_focused,
+                focus: hover,
                 focus_ring: c.focus_ring,
             };
         };
@@ -158,16 +171,21 @@ impl BreezeIndicatorColors {
             button_pressed: darker(b.button),
             button_text: b.button_text,
             button_outline: b.button_outline,
-            button_hover: palette
-                .resolved()
-                .set(state, ColorSet::Button)
-                .decoration(DecorationRole::Hover)
-                .to_color(),
+            button_hover: high_contrast_boundary(
+                palette
+                    .resolved()
+                    .set(state, ColorSet::Button)
+                    .decoration(DecorationRole::Hover)
+                    .to_color(),
+                c,
+                b.button,
+                high_contrast,
+            ),
             text,
             highlight,
             outline,
             checked_outline: checked_outline(theme, highlight, b.button, high_contrast, disabled),
-            focus: b.focus,
+            focus: high_contrast_boundary(b.focus, c, b.button, high_contrast),
             focus_ring: c.focus_ring,
         }
     }

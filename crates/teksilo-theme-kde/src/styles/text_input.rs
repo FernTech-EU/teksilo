@@ -31,8 +31,10 @@
 //!   mapping).
 //! - **D5, focus.** The focus outline is `border_focused`, the focus colour
 //!   lifted to 3:1, which Breeze Light's 61,174,233 does not reach on the
-//!   white view. The hover outline is the scheme's own hover colour: it
-//!   shows where the pointer is, which needs no contrast floor.
+//!   white view. The hover outline is the scheme's own hover colour, which
+//!   shows where the pointer is; under high contrast it is lifted to 4.5:1
+//!   on the control surfaces and the view, so a hovered field keeps the
+//!   boundary the high-contrast outline gives it at rest.
 //! - **A short field keeps its frame.** Breeze paints only the fill of a
 //!   line edit shorter than the line box plus 12 px. This keeps the frame
 //!   at every height, for the reason of D6.
@@ -49,6 +51,7 @@ use teksilo_canvas::{Canvas, Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::color_prop::ColorProp;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{
     TextInputStyle, TextInputStyleConfig, TextInputValidationLevel, TextInputVariant, Theme,
@@ -59,6 +62,7 @@ use teksilo_kde_scheme::{ColorState, PaletteRole};
 use teksilo_tokens::{Color, CornerRadius};
 use teksilo_widgets::primitives::{MinSize, Padding, ZStack};
 
+use crate::color::high_contrast_boundary;
 use crate::palette::KdePalette;
 use crate::styles::chrome::frame_radius;
 use crate::styles::metrics::breeze_field_metrics_for;
@@ -99,7 +103,9 @@ pub struct BreezeFieldColors {
     /// `[wcag]` D6: the outline at rest, `border_strong`; `border_disabled`
     /// for a disabled field.
     pub outline: Color,
-    /// `[Hp]` The outline under the pointer: the view's hover decoration.
+    /// `[Hp]` The outline under the pointer: the view's hover decoration,
+    /// lifted to 4.5:1 on the control surfaces and the fill under high
+    /// contrast, where it stands in for the lifted outline.
     pub hover: Color,
     /// `[wcag]` D5: the outline while focused, `border_focused`.
     pub focus: Color,
@@ -127,20 +133,22 @@ impl BreezeFieldColors {
         } else {
             ColorState::Inactive
         };
+        let fill = match (disabled, palette) {
+            (false, _) => c.surface_content,
+            (true, Some(p)) => p.role(ColorState::Disabled, PaletteRole::Base),
+            (true, None) => c.surface_disabled,
+        };
+        let hover = palette.map_or(c.border_focused, |p| {
+            p.breeze_colors(state, high_contrast).hover
+        });
         BreezeFieldColors {
-            fill: match (disabled, palette) {
-                (false, _) => c.surface_content,
-                (true, Some(p)) => p.role(ColorState::Disabled, PaletteRole::Base),
-                (true, None) => c.surface_disabled,
-            },
+            fill,
             outline: if disabled {
                 c.border_disabled
             } else {
                 c.border_strong
             },
-            hover: palette.map_or(c.border_focused, |p| {
-                p.breeze_colors(state, high_contrast).hover
-            }),
+            hover: high_contrast_boundary(hover, c, fill, high_contrast),
             focus: c.border_focused,
         }
     }
@@ -204,14 +212,15 @@ pub struct BreezeFieldChrome {
     is_disabled: Signal<bool>,
     validation: Signal<TextInputValidationLevel>,
     underline: bool,
+    fill: Option<ColorProp>,
 }
 
 impl BreezeFieldChrome {
     /// A field frame outlined by the focus, hover and disabled states and a
     /// validation level; with `underline`, only its bottom edge is outlined.
     ///
-    /// The spin box frames its field with it, and a combo box's `Underline`
-    /// variant draws its bottom edge.
+    /// The spin box and an editable rich-text editor frame their fields with
+    /// it, and a combo box's `Underline` variant draws its bottom edge.
     pub fn new(
         is_focused: Signal<bool>,
         is_hovered: Signal<bool>,
@@ -225,7 +234,15 @@ impl BreezeFieldChrome {
             is_disabled,
             validation,
             underline,
+            fill: None,
         }
+    }
+
+    /// Fill the frame with `fill` in place of the view background, as a
+    /// `RichTextEditor::background` asks; the outline is unchanged.
+    pub fn fill(mut self, fill: impl Into<ColorProp>) -> Self {
+        self.fill = Some(fill.into());
+        self
     }
 }
 
@@ -246,6 +263,9 @@ impl Widget for BreezeFieldChrome {
         }
         self.validation
             .bind_to(id, registry, BindingLevel::RepaintOnly);
+        if let Some(fill) = &self.fill {
+            fill.register_if_bound(id, registry, BindingLevel::RepaintOnly);
+        }
         vec![]
     }
 
@@ -273,8 +293,12 @@ impl Widget for BreezeFieldChrome {
         let pen = ctx.theme.shape.border_width;
         let rect = field_frame_rect(bounds, pen);
         let corner = CornerRadius::uniform(frame_radius(&ctx.theme.shape));
-        if colors.fill.a() > 0.0 {
-            canvas.fill_rounded_rect(rect, corner, colors.fill);
+        let fill = self
+            .fill
+            .as_ref()
+            .map_or(colors.fill, |f| f.resolve(ctx.theme, !disabled));
+        if fill.a() > 0.0 {
+            canvas.fill_rounded_rect(rect, corner, fill);
         }
         let outline = colors.outline_for(
             self.is_focused.get(),

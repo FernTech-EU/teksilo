@@ -105,6 +105,14 @@
 //! is white: the one place this preset overrides Plasma's black-text rule
 //! of D1.
 //!
+//! A hovered or focused field, check box, radio button, switch or slider
+//! handle is outlined in the scheme's hover or focus decoration in place of
+//! its lifted outline. Under high contrast the style lifts that decoration
+//! the same way, to 4.5:1 on the control surfaces and on the control's own
+//! face ([`high_contrast_boundary`]), so the control keeps a 4.5:1 boundary
+//! while the pointer is over it. In the normal projection it keeps the
+//! scheme's colour, as Breeze paints it.
+//!
 //! The selection fill does not move with the accent: it carries the
 //! window's primary text, which must reach 7:1 on it, so where that text
 //! falls short it moves toward the window until the text reaches 7:1
@@ -251,6 +259,38 @@ fn opaque_on(color: KdeColor, backdrop: KdeColor) -> KdeColor {
 fn lift(color: KdeColor, on: &[KdeColor], floor: f32) -> KdeColor {
     let color = on.first().map_or(color, |&bg| opaque_on(color, bg));
     lift_luma_until(color, on, floor)
+}
+
+/// `[wcag]` A hover or focus decoration a style paints in place of a
+/// control's only boundary, as it paints it: under the high-contrast
+/// preference, [`lift`]ed to the enhanced non-text floor on the window, the
+/// view and the frame background of `colors` (`surface_main`,
+/// `surface_content`, `surface_raised`) and on `face`, the control's own
+/// fill the outline meets; otherwise `decoration` unchanged, the scheme's
+/// own colour.
+///
+/// The hovered or focused outline of a field, a check box, a radio button,
+/// a switch and a slider handle replaces the outline lifted at rest, so
+/// without this a hovered control would lose the 4.5:1 boundary the
+/// high-contrast projection gives it at rest (2.2:1 for Breeze Light's
+/// hover colour on its window).
+pub(crate) fn high_contrast_boundary(
+    decoration: Color,
+    colors: &ColorTokens,
+    face: Color,
+    high_contrast: bool,
+) -> Color {
+    if !high_contrast {
+        return decoration;
+    }
+    let on = [
+        colors.surface_main,
+        colors.surface_content,
+        colors.surface_raised,
+        face,
+    ]
+    .map(KdeColor::from_color);
+    lift(KdeColor::from_color(decoration), &on, ENHANCED.non_text).to_color()
 }
 
 /// `[wcag]` [`lift`] in the given direction only: a text lifted toward its

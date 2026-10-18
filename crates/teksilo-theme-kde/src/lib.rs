@@ -180,8 +180,9 @@
 //!
 //! - **Some widget chrome is the framework's.** This version installs
 //!   Breeze styles for `Button`, `IconButton`, `SplitButton`, `Toggle`,
-//!   `Checkbox`, `RadioButton`, `TextInput`, `ComboBox`, `SpinBox`,
-//!   `Slider`, `MenuItem`, the popup frame, the tooltip, `StandardListItem`
+//!   `Checkbox`, `RadioButton`, `TextInput`, an editable `RichTextEditor`
+//!   (framed as the line edit), `ComboBox`, `SpinBox`, `Slider`,
+//!   `MenuItem`, the popup frame, the tooltip, `StandardListItem`
 //!   and `StandardTreeItem`, `TableView` and `TreeTableView`, `TabBar` and
 //!   `TabWidget`, `ScrollBar` and `ProgressBar`. `Card`, `Panel`, `Dialog`,
 //!   `Snackbar`, `Toast`, `Banner`, `Link`, `Badge`, `Calendar`,
@@ -251,10 +252,12 @@
 //!   focus as well as when the window goes inactive, and a hovered row is
 //!   not washed. The style's own row background and sort arrow are
 //!   Breeze's, for a style that composes them ([`styles::table`]).
-//! - **A tab is at least 96 px wide, and always 30 px tall.** The bar
-//!   applies its own minimum tab width, where Breeze's is 80, and a
-//!   `TabStyle` is not told whether its bar is one Breeze makes 34 px tall
-//!   (a document-mode, static bar); both numbers are in
+//! - **A tab is at least 96 px wide, and never Breeze's 34 px static-bar
+//!   height.** The bar applies its own minimum tab width, where Breeze's is
+//!   80, and a `TabStyle` is not told whether its bar is one Breeze makes
+//!   34 px tall (a document-mode, static bar), so every tab is the height of
+//!   any other: 30 px at the Compact density, rising with the density (32
+//!   at Comfortable, 44 at Touch). Both numbers are in
 //!   [`styles::metrics::BreezeTabMetrics`] ([`styles::tab`]).
 //! - **A scroll bar is as thick as the widget lays it out.** A
 //!   `ScrollArea`'s bars are 12 px and a `ScrollBar`'s 8 px unless the app
@@ -274,6 +277,12 @@
 //!   is #e1e2e3 where Plasma's is #d1d2d3), and antialiased edges blend the
 //!   same way. Where the style paints the backdrop itself, as a check box's
 //!   wash over its face, it paints Plasma's composite.
+//! - **A view's first row is not one taller.** Breeze gives the first row
+//!   of a view without a frame a 2 px top margin, where every other row has
+//!   1, so its first text row is 25 px and its selection lies 2 px from the
+//!   top ([`geometry::BreezeGeometry::first_row_extra`]); a Teksilo row is
+//!   not told its index, so every row is 24 px with its selection 1 px from
+//!   the top ([`styles::standard_item`]).
 //! - **A list row does not mark the current row apart from the selected
 //!   one.** Keyboard focus on a focused view adds the focus frame around the
 //!   selected row; Breeze outlines an unselected current row instead, which
@@ -631,6 +640,7 @@ fn install_styles(theme: &mut Theme) {
     slots.checkbox = Some(Rc::new(styles::checkbox::BreezeCheckboxStyle));
     slots.radio = Some(Rc::new(styles::radio::BreezeRadioStyle));
     slots.text_input = Some(Rc::new(styles::text_input::BreezeTextInputStyle));
+    slots.rich_text_editor = Some(Rc::new(styles::rich_text_editor::BreezeRichTextEditorStyle));
     slots.combo_box = Some(Rc::new(styles::combo_box::BreezeComboBoxStyle));
     slots.spin_box = Some(Rc::new(styles::spin_box::BreezeSpinBoxStyle));
     slots.slider = Some(Rc::new(styles::slider::BreezeSliderStyle));
@@ -934,11 +944,6 @@ mod tests {
             "the recipe is a passthrough around the TextInput, which this preset frames as Breeze's line edit",
         ),
         (
-            "rich_text_editor",
-            "a read-only viewer is frameless, and an editable one takes its frame's radius, pen and \
-             insets from the stock line-edit recipe rather than the slot, painted in the Breeze roles",
-        ),
-        (
             "drop_zone",
             "Breeze has no drop-zone control, so there is no Breeze metric to build it with; \
              the recipe tints its region from the theme roles",
@@ -1168,6 +1173,63 @@ mod tests {
     /// projected to: the installed row, table, tab, scroll-bar and
     /// progress-bar styles are rebuilt from the projected input tokens, and
     /// a row measured in a tree is the one the style reports.
+    #[test]
+    fn known_limitations_state_the_tab_and_first_row_heights_the_styles_give() {
+        // The crate documentation, as one line of prose.
+        let doc = include_str!("lib.rs")
+            .lines()
+            .filter_map(|l| l.strip_prefix("//!"))
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let limitations = &doc[doc.find("## Known limitations").expect("the section")..];
+        let tab = |density| {
+            let t = light().with_density(density);
+            t.style_slots.tab.as_ref().unwrap().editor_height(&t.input)
+        };
+        let static_height =
+            styles::metrics::breeze_tab_metrics_for(&light().input, &light().typography)
+                .static_height;
+        for stated in [
+            format!("never Breeze's {static_height} px static-bar height"),
+            format!("{} px at the Compact density", tab(TargetDensity::Compact)),
+            format!("{} at Comfortable", tab(TargetDensity::Comfortable)),
+            format!("{} at Touch", tab(TargetDensity::Touch)),
+        ] {
+            assert!(limitations.contains(&stated), "not stated: {stated}");
+        }
+        assert!(
+            !limitations.contains("always 30 px tall"),
+            "a tab's height rises with the density"
+        );
+
+        // Breeze's first row is one taller, which the row style never makes
+        // it, and the limitations say so with both heights.
+        let t = light();
+        let g = geometry::BreezeGeometry::for_line_height(18.0);
+        assert!(
+            g.first_row_extra > 0.0,
+            "premise: Breeze's first row is taller"
+        );
+        let row = t
+            .style_slots
+            .standard_item
+            .as_ref()
+            .unwrap()
+            .min_height_single_line(&t.input);
+        assert_eq!(row, g.list_row_height, "every row is the same height");
+        for stated in [
+            "A view's first row is not one taller.".to_owned(),
+            format!(
+                "first text row is {} px",
+                g.list_row_height + g.first_row_extra
+            ),
+            format!("every row is {row} px"),
+        ] {
+            assert!(limitations.contains(&stated), "not stated: {stated}");
+        }
+    }
+
     #[test]
     fn a_density_switch_reprojects_the_rows_and_bars() {
         use std::cell::RefCell;
