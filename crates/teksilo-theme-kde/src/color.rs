@@ -46,9 +46,19 @@
 //!   (lighter in a light scheme), never across the text to the other end:
 //!   under a mid-grey text a light fill would otherwise turn black.
 //! - **D2, inactive text.** The inactive foreground (secondary text,
-//!   placeholders, line numbers, a tooltip's shortcut) is 3.7:1 on the
-//!   Breeze Light window. It moves in luma to 4.5:1 on every surface text
-//!   sits on, the hover and press washes included.
+//!   placeholders, line numbers, a tooltip's shortcut, the title of an
+//!   unselected tab) is 3.7:1 on the Breeze Light window and 2.5:1 on its
+//!   unselected tab, which Breeze paints as the window darkened 120 percent
+//!   (k.5.14). It moves in luma to 4.5:1 on every surface text sits on, the
+//!   hover and press washes included, and on an unselected tab's face at
+//!   rest and hovered (the window moved 20 percent toward the hover colour),
+//!   computed from the same colour state. In Breeze Light the tab is the
+//!   darkest of those surfaces, so it decides how far the text moves: it
+//!   ends 2.0:1 from the primary text. A scheme whose tab face would bring
+//!   the two grades together gets them together: legibility wins over the
+//!   distinction between them. The faces themselves are the
+//!   specification's; under high contrast the secondary text is the primary
+//!   text, lifted on them in the same way where it falls short there.
 //! - **D3, links.** Breeze Light's link colour is 3.8:1 on the window; the
 //!   unvisited, visited and hover links move to 4.5:1 the same way.
 //! - **D4, status colours.** The negative, neutral and positive foregrounds
@@ -88,7 +98,11 @@
 //!   styles mix from it (a default, checked or pressed button, a hovered or
 //!   pressed header section) move as the accent washes of D1 do, until the
 //!   primary text reaches the floor on them, and a check box's mark is
-//!   lifted to the non-text floor on its washed box.
+//!   lifted to the non-text floor on its washed box. The window moves on
+//!   until black or white also reaches the floor on the two faces Breeze
+//!   computes from it for an unselected tab, so D2 can lift the tab's title
+//!   there; the faces keep the specification's rule, computed from the moved
+//!   window.
 //!
 //! D7 and D8 are row heights, not colours, and live with the styles. The
 //! specification has no rule for D10 and D11 either: like D1 to D9 they are
@@ -106,9 +120,10 @@
 //! Under the OS "increase contrast" preference the tokens are rebuilt from
 //! the scheme with a frame contrast of 1 and a contrast of 10, every text
 //! floor raised to 7:1 (SC 1.4.6) and every non-text floor to 4.5:1, and the
-//! secondary text grades made the primary ones. The accent moves in luma
-//! until its text reaches 7:1 on it and it reaches 4.5:1 on the control
-//! surfaces. In a light scheme no single colour lets black text reach 7:1
+//! secondary text grades made the primary ones (the secondary text lifted
+//! further on an unselected tab's faces where the primary text falls short
+//! there, D2). The accent moves in luma until its text reaches 7:1 on it
+//! and it reaches 4.5:1 on the control surfaces. In a light scheme no single colour lets black text reach 7:1
 //! (the fill must be light) while the fill reaches 4.5:1 on a near-white
 //! window (the fill must be dark), so there the accent darkens and its text
 //! is white: the one place this preset overrides Plasma's black-text rule
@@ -166,8 +181,8 @@
 //!   white and lose its hue.
 
 use teksilo_kde_scheme::math::{
-    LumaDirection, black_or_white_on, hsv_darker, hsv_lighter, lift_luma_toward, lift_luma_until,
-    luma, mix, read_channel,
+    Hcy, LumaDirection, black_or_white_on, hsv_darker, hsv_lighter, lift_luma_toward,
+    lift_luma_until, luma, mix, read_channel,
 };
 use teksilo_kde_scheme::{
     BackgroundRole, ColorSet, ColorState, DecorationRole, ForegroundRole, KdeColor, PaletteRole,
@@ -175,6 +190,8 @@ use teksilo_kde_scheme::{
 };
 use teksilo_tokens::contrast::composite_contrast;
 use teksilo_tokens::{Color, ColorTokens};
+
+use crate::styles::metrics::{TAB_HOVER_MIX, TAB_UNSELECTED_DARKER};
 
 /// The contrast floors a projection lifts colours to.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -215,10 +232,6 @@ const THUMB_HOVER_ALPHA: f64 = 0.5;
 /// `[qt]` `[Hp]` Qt's `lighter` and `darker` factor Breeze uses for a
 /// hovered or pressed highlight.
 const FOCUS_LIGHTEN_FACTOR: i32 = 110;
-
-/// `[Hp]` The `darker` factor of an unselected tab's fill, the recessed
-/// surface Breeze paints.
-const RECESSED_FACTOR: i32 = 120;
 
 /// Everything a projection is computed from.
 pub(crate) struct Mapping<'a> {
@@ -367,6 +380,76 @@ fn carry(surface: KdeColor, direction: LumaDirection, floor: f32) -> KdeColor {
     }
 }
 
+/// `[Hp]` An unselected tab's face (k.5.14): the window darkened 120
+/// percent, Qt's `darker`.
+pub(crate) fn tab_unselected_face(window: KdeColor) -> KdeColor {
+    hsv_darker(window, TAB_UNSELECTED_DARKER)
+}
+
+/// `[Hp]` A hovered unselected tab's face (k.5.14): the window moved 20
+/// percent toward the hover colour.
+pub(crate) fn tab_hovered_face(window: KdeColor, hover: KdeColor) -> KdeColor {
+    mix(window, hover, TAB_HOVER_MIX)
+}
+
+/// `[wcag]` D11 for the window: [`carry`]ed, and then moved further toward
+/// `direction` until the end of the scale on the text's side also reaches
+/// `floor` on the two faces Breeze derives from the window, an unselected
+/// tab's and a hovered one's (k.5.14, with `hover` the hover colour), so a
+/// tab's title can be lifted on them. The faces are always computed from
+/// the window as the specification gives them; it is the window they are
+/// computed from that moves. Unchanged when the end already reaches the
+/// floor on all three, as in every stock Breeze scheme.
+fn carry_window(
+    window: KdeColor,
+    hover: KdeColor,
+    direction: LumaDirection,
+    floor: f32,
+) -> KdeColor {
+    let carried = carry(window, direction, floor);
+    let extreme = match direction {
+        LumaDirection::Lighter => KdeColor::BLACK,
+        LumaDirection::Darker => KdeColor::WHITE,
+    };
+    let solid = |c: KdeColor| KdeColor { a: u16::MAX, ..c };
+    let reaches = |w: KdeColor| {
+        let w = solid(w);
+        passes(
+            extreme,
+            &[w, tab_unselected_face(w), tab_hovered_face(w, hover)],
+            floor,
+        )
+    };
+    if reaches(carried) {
+        return carried;
+    }
+    let hcy = Hcy::from_color(solid(carried));
+    let end = match direction {
+        LumaDirection::Lighter => 1.0,
+        LumaDirection::Darker => 0.0,
+    };
+    let at = |step: u32| {
+        let t = f64::from(step) / f64::from(WINDOW_CARRY_STEPS);
+        Hcy {
+            y: hcy.y + (end - hcy.y) * t,
+            ..hcy
+        }
+        .to_color()
+    };
+    let moved = (1..=WINDOW_CARRY_STEPS)
+        .map(at)
+        .find(|&w| reaches(w))
+        .unwrap_or_else(|| at(WINDOW_CARRY_STEPS));
+    KdeColor {
+        a: carried.a,
+        ..moved
+    }
+}
+
+/// The luma steps [`carry_window`] takes from the carried window to the end
+/// of the scale, as many as the scheme crate's own luma lifts take.
+const WINDOW_CARRY_STEPS: u32 = 256;
+
 /// `[wcag]` D11 for one colour state: the window's, view's and button's
 /// backgrounds and Breeze's frame background, each carried in the direction
 /// the window lies from its text until black or white reaches `floor` on
@@ -397,7 +480,10 @@ impl Surfaces {
         let role = |r: PaletteRole| palette.role(state, r);
         let polarity = away_from(role(PaletteRole::WindowText), role(PaletteRole::Window));
         let surface = |c: KdeColor| carry(c, polarity, floor);
-        let window = surface(role(PaletteRole::Window));
+        let hover = palette
+            .set(state, ColorSet::View)
+            .decoration(DecorationRole::Hover);
+        let window = carry_window(role(PaletteRole::Window), hover, polarity, floor);
         let base = surface(role(PaletteRole::Base));
         Surfaces {
             polarity,
@@ -615,7 +701,7 @@ pub(crate) fn tokens(m: &Mapping<'_>) -> ColorTokens {
     let sunken = surface(if luma(window_alternate) < luma(window) {
         window_alternate
     } else {
-        hsv_darker(window, RECESSED_FACTOR)
+        tab_unselected_face(window)
     });
     // Every opaque plain surface text is set on.
     let plain_surfaces = [window, base, frame_background, alternate, button, sunken];
@@ -695,15 +781,31 @@ pub(crate) fn tokens(m: &Mapping<'_>) -> ColorTokens {
         active_hover,
         active_pressed,
     ];
+    // `[Hp]` The faces of an unselected tab (k.5.14), as the tab style paints
+    // them: the window darkened 120 percent, and hovered, the window moved
+    // 20 percent toward the hover colour. A tab bar paints an unselected
+    // tab's title in the secondary text, so D2 lifts it on both.
+    let tab_unselected = tab_unselected_face(window);
+    let tab_hovered = tab_hovered_face(window, hover);
     // `[wcag]` D2: the window set's inactive foreground, lifted to the text
-    // floor on every surface. The high-contrast projection uses the primary
-    // text instead.
+    // floor on every surface and on the two unselected-tab faces. In Breeze
+    // Light the tab face is the darkest of them and decides the lift, which
+    // leaves the text 2.0:1 from the primary text; where a scheme's tab face
+    // would bring the two together, legibility wins over the distinction.
+    // The high-contrast projection uses the primary text instead, lifted
+    // toward its own end of the scale on the same surfaces where it falls
+    // short on the tab faces (D10 lifted it on the plain surfaces only).
+    let secondary_surfaces: Vec<KdeColor> = text_surfaces
+        .iter()
+        .copied()
+        .chain([tab_unselected, tab_hovered])
+        .collect();
     let text_secondary = if m.high_contrast {
-        text_primary
+        lift_toward(text_primary, &secondary_surfaces, floors.text, text_side)
     } else {
         lift(
             window_set.foreground(ForegroundRole::Inactive),
-            &text_surfaces,
+            &secondary_surfaces,
             floors.text,
         )
     };

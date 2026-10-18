@@ -157,7 +157,9 @@
 //! them. The styles paint their faces from the moved backgrounds: a push
 //! button, a combo box, a table header section and a check box carry their
 //! label or mark at the same floors in every state, hovered, pressed,
-//! checked or the default button. The rules, the inactive-window and high-contrast colours and the
+//! checked or the default button, and an unselected tab carries its title
+//! in the secondary text, lifted on the tab's darker face at rest and
+//! hovered. The rules, the inactive-window and high-contrast colours and the
 //! tokens kept from Int UI are listed in the colour mapping's documentation
 //! (the private `color` module); every lift is tested to pass and its
 //! premise, that the scheme's colour fails, is tested too.

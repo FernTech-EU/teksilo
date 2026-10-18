@@ -166,6 +166,8 @@ by crate for clarity, not because crates version independently.
   inactive window toward a mid tone its backgrounds move back until its
   text reads, the faces of its buttons, combo boxes, table headers and check
   boxes with them, so their labels and marks stay readable in every state.
+  The title of an unselected tab, painted in the secondary text on Breeze's
+  darker tab face, is readable too, at rest and under the pointer.
   Every theme
   carries a `KdePalette` with the whole resolved scheme and the colours
   Breeze combines from it (`breeze_colors` gives them for the high-contrast

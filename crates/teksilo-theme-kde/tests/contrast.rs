@@ -16,8 +16,9 @@
 //! on Light and on Dark, and schemes built to defeat the lifts, each shown
 //! to need them. A second sweep checks the faces the styles paint their own
 //! text and marks on (a push button's in every state, a combo box's, a
-//! table header section's, a check box's) over the same schemes and paint
-//! states. The property at the end does both over random coherent schemes,
+//! table header section's, a check box's, and an unselected tab's at rest
+//! and hovered, read from a mounted tab bar's frame with its title) over
+//! the same schemes and paint states. The property at the end does both over random coherent schemes,
 //! with random inactive effects.
 //!
 //! This file reads `tools/kde_golden/vectors/resolve.json` from the
@@ -25,9 +26,9 @@
 //! list in `Cargo.toml`).
 //!
 //! The property builds four complete token sets per case, each lifting some
-//! thirty colours by up to 256 luma steps against up to eleven backdrops:
-//! about 5 ms a case in a debug build, so it keeps proptest's default 256
-//! cases. Manual override knob: `PROPTEST_CASES=N cargo test -p
+//! thirty colours by up to 256 luma steps against up to twelve backdrops,
+//! and mounts a tab bar in each of the four paint states: about 10 ms a
+//! case in a debug build, so it keeps proptest's default 256 cases. Manual override knob: `PROPTEST_CASES=N cargo test -p
 //! teksilo-theme-kde --test contrast`.
 //!
 //! Safe run (engineering/docs/property-testing.md):
@@ -39,9 +40,18 @@
 //! ( ulimit -v 6000000 -t 300; "$BIN" --test-threads=1 )
 //! ```
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use proptest::prelude::*;
 use serde_json::Value;
+use teksilo_canvas::{GlyphQuad, MockTextBackend, SizeProposal};
+use teksilo_core::signal::Signal;
 use teksilo_core::styles::{PaintState, Theme};
+use teksilo_core::widget_id::WidgetId;
+use teksilo_core::widget_tree::WidgetTree;
+use teksilo_data::ListModel;
+use teksilo_i18n::lit;
 use teksilo_theme_kde::scheme::math::mix;
 use teksilo_theme_kde::scheme::{
     ColorEffect, ColorSet, ColorState, ContrastEffect, DecorationRole, ForegroundRole,
@@ -53,10 +63,12 @@ use teksilo_theme_kde::styles::chrome::{
 };
 use teksilo_theme_kde::styles::combo_box::combo_arrow_color;
 use teksilo_theme_kde::styles::indicator::BreezeIndicatorColors;
+use teksilo_theme_kde::styles::tab::BreezeTabColors;
 use teksilo_theme_kde::styles::table::BreezeHeaderColors;
 use teksilo_theme_kde::{self as kde, KdePalette, PlasmaAccent};
 use teksilo_tokens::contrast::composite_contrast;
 use teksilo_tokens::{Color, ColorTokens};
+use teksilo_widgets::tab_widget::{TabBar, TabDelegate, TabId, TabSizing};
 
 /// `[wcag]` SC 1.4.3 and SC 1.4.11.
 const TEXT: f32 = 4.5;
@@ -480,6 +492,73 @@ fn d2_secondary_text_passes_on_every_surface() {
         assert!(ratio(c.tooltip_shortcut, c.tooltip_bg) >= TEXT);
         assert!(ratio(c.editor_gutter_fg, c.editor_bg) >= TEXT);
     }
+}
+
+/// The two faces of an unselected Breeze tab, at rest and hovered, in
+/// `theme` as the paint walker projects it for the paint state.
+fn unselected_tab_faces(
+    theme: &Theme,
+    window_active: bool,
+    high_contrast: bool,
+) -> [(&'static str, Color); 2] {
+    let projected = theme.for_paint_state(PaintState {
+        window_active,
+        high_contrast,
+    });
+    let t = BreezeTabColors::resolve(&projected, window_active, high_contrast, false);
+    [
+        ("unselected tab", t.unselected),
+        ("hovered unselected tab", t.hovered),
+    ]
+}
+
+/// Breeze paints an unselected tab darker than the window (k.5.14), and the
+/// scheme's inactive text, which a tab bar's idle title is painted in, falls
+/// short on it even in stock Breeze Light in an active window.
+#[test]
+fn d2_premise_breeze_lights_inactive_text_fails_on_its_unselected_tab() {
+    let t = kde::light();
+    let inactive = palette(&t)
+        .resolved()
+        .set(ColorState::Active, ColorSet::Window)
+        .foreground(ForegroundRole::Inactive)
+        .to_color();
+    let [(_, face), _] = unselected_tab_faces(&t, true, false);
+    assert!(
+        ratio(inactive, face) < TEXT,
+        "{:.2}:1 on {face:?}",
+        ratio(inactive, face)
+    );
+}
+
+/// D2 lifts the secondary text on the unselected tab's faces too, at rest
+/// and hovered, for Breeze Light, Dark and Classic, every recorded scheme,
+/// the ten accents on Light and on Dark and the adversarial schemes, in
+/// every paint state; the property over random schemes checks the same
+/// pair through a mounted tab bar ([`face_failures`]).
+#[test]
+fn d2_secondary_text_passes_on_the_unselected_tab_faces_in_every_paint_state() {
+    let mut all = Vec::new();
+    for (name, scheme) in sweep_schemes() {
+        let theme = kde::from_scheme(&scheme);
+        for (state, active, high_contrast, text, _) in PAINT_STATES {
+            let secondary = paint(&theme, active, high_contrast).text_secondary;
+            for (face_name, face) in unselected_tab_faces(&theme, active, high_contrast) {
+                if ratio(secondary, face) < text {
+                    all.push(format!(
+                        "{name}, {state}: text_secondary on the {face_name}: {:.2}:1 < {text}",
+                        ratio(secondary, face)
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        all.is_empty(),
+        "{} failures:\n{}",
+        all.len(),
+        all.join("\n")
+    );
 }
 
 // ── D3, links ───────────────────────────────────────────────────────────
@@ -985,11 +1064,98 @@ fn every_declared_pair_passes_for_every_scheme_in_every_paint_state() {
     );
 }
 
+/// The title of a mounted two-tab bar's unselected tab and the face the
+/// tab paints behind it, at rest and hovered, in a window that is or is not
+/// active, with or without the high-contrast preference: each distinct
+/// glyph colour and the tab's fill, as the frame records them.
+fn mounted_tab_titles(
+    theme: &Theme,
+    window_active: bool,
+    high_contrast: bool,
+) -> Vec<(&'static str, Color, Color)> {
+    let first = TabId::fresh();
+    let model = ListModel::from_vec(vec![(first, "Tab"), (TabId::fresh(), "Second")]);
+    let delegate = TabDelegate::new(|_, t: &(TabId, &'static str)| lit!(t.1));
+    let selected: Signal<Option<TabId>> = Signal::new(Some(first));
+    let bar = TabBar::horizontal(model, delegate, selected, |_, t| t.0)
+        .tab_sizing(TabSizing::Independent)
+        .show_scroll_arrows(false)
+        .show_overflow_dropdown(false);
+    let mut tree = WidgetTree::new()
+        .with_theme(theme.clone())
+        .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+    tree.set_window_active(window_active);
+    tree.set_accessibility_preferences(high_contrast, false, 1.0);
+    let bar = tree.add(bar);
+    let proposal = SizeProposal {
+        width: Some(800.0),
+        height: None,
+    };
+    tree.layout(proposal);
+    let headers = nodes_named(&tree, bar, "TabHeader");
+    assert_eq!(headers.len(), 2, "two tab headers");
+    let other = tree.bounds(headers[1]);
+    let rect = [other.x, other.y, other.width, other.height];
+    let color = |c: [f32; 4]| Color::new(c[0], c[1], c[2], c[3]);
+    let mut out = Vec::new();
+    for what in ["resting", "hovered"] {
+        if what == "hovered" {
+            tree.pointer_move(other.center());
+            tree.layout(proposal);
+        }
+        let frame = tree.render();
+        let face = frame
+            .decorations
+            .iter()
+            .rev()
+            .find(|d| d.rect == rect)
+            .unwrap_or_else(|| panic!("no {what} unselected tab face"))
+            .color;
+        let inside = |g: &&GlyphQuad| {
+            let (x, y) = (
+                g.screen[0] + g.screen[2] * 0.5,
+                g.screen[1] + g.screen[3] * 0.5,
+            );
+            x >= rect[0] && x <= rect[0] + rect[2] && y >= rect[1] && y <= rect[1] + rect[3]
+        };
+        let glyphs: Vec<&GlyphQuad> = frame.glyphs.iter().filter(inside).collect();
+        assert!(!glyphs.is_empty(), "the {what} unselected tab has a title");
+        for g in glyphs {
+            let pair = (what, color(g.color), color(face));
+            if !out.contains(&pair) {
+                out.push(pair);
+            }
+        }
+    }
+    out
+}
+
+/// Every node under `root` whose widget type is `name`, in tree order.
+fn nodes_named(tree: &WidgetTree, root: WidgetId, name: &str) -> Vec<WidgetId> {
+    fn walk(tree: &WidgetTree, id: WidgetId, name: &str, out: &mut Vec<WidgetId>) {
+        if tree
+            .widget_type_name(id)
+            .is_some_and(|t| t.rsplit("::").next() == Some(name))
+        {
+            out.push(id);
+        }
+        for c in tree.children(id) {
+            walk(tree, c, name, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(tree, root, name, &mut out);
+    out
+}
+
 /// What the Breeze styles paint on a face of their own rather than on a
 /// surface token: the push button's label on its face in every state, a
 /// combo box's arrow on its face, a table header's label and sort arrow on
-/// its section, and a check box's mark on its box. Each face is the style's, read from the theme as the
-/// paint walker projects it, so the pairs follow what is painted.
+/// its section, a check box's mark on its box, and an unselected tab's
+/// title on its face, at rest and hovered. Each face is the style's, read
+/// from the theme as the paint walker projects it, and the tab's title and
+/// face are read from a mounted tab bar's frame, so the pairs follow what
+/// is painted.
 fn face_failures(theme: &Theme, window_active: bool, high_contrast: bool) -> Vec<String> {
     let (text, non_text) = if high_contrast {
         (7.0, 4.5)
@@ -1061,6 +1227,15 @@ fn face_failures(theme: &Theme, window_active: bool, high_contrast: bool) -> Vec
             paint.mark,
             face,
             non_text,
+        ));
+    }
+
+    for (what, title, face) in mounted_tab_titles(theme, window_active, high_contrast) {
+        pairs.push((
+            format!("unselected tab title on its {what} face"),
+            title,
+            face,
+            text,
         ));
     }
 

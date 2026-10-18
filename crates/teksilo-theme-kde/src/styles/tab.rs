@@ -12,7 +12,9 @@
 //! starts runs on into the outline and the face below the bar, rows 3 and 4
 //! of a 30 px tab, before the sides straighten. An unselected tab is the window colour
 //! darkened 120 %, square; hovered, the window colour moved 20 % toward the
-//! hover colour. A disabled tab paints the disabled colours.
+//! hover colour. A disabled tab paints the disabled colours. The title of
+//! an unselected tab is the bar's idle text, the secondary text, which the
+//! colour mapping lifts to the text floor on both unselected faces (D2).
 //!
 //! The bar is on the edge the bar's `active_indicator` names: the top of a
 //! horizontal tab and the leading side of a vertical one by default, the
@@ -47,17 +49,16 @@ use teksilo_core::styles::{
 };
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_kde_scheme::math::hsv_darker;
 use teksilo_kde_scheme::{ColorState, KdeColor, PaletteRole};
 use teksilo_tokens::{Color, InputTokens, TypographyTokens};
 use teksilo_widgets::primitives::{HStack, ZStack};
 use teksilo_widgets::styles::{RecipeTabStyle, TabRecipe};
 
+use crate::color;
 use crate::palette::KdePalette;
-use crate::styles::chrome::{kde_mix, paint_focus_frame};
+use crate::styles::chrome::paint_focus_frame;
 use crate::styles::metrics::{
-    BreezeTabMetrics, TAB_BAR_RADIUS, TAB_HOVER_MIX, TAB_OUTLINE_RADIUS, TAB_UNSELECTED_DARKER,
-    breeze_tab_metrics_for,
+    BreezeTabMetrics, TAB_BAR_RADIUS, TAB_OUTLINE_RADIUS, breeze_tab_metrics_for,
 };
 
 /// Breeze `TabStyle`.
@@ -402,8 +403,12 @@ impl BreezeTabColors {
             selected: window,
             outline: b.frame_outline,
             bar,
-            unselected: hsv_darker(KdeColor::from_color(window), TAB_UNSELECTED_DARKER).to_color(),
-            hovered: kde_mix(window, b.hover, TAB_HOVER_MIX),
+            unselected: color::tab_unselected_face(KdeColor::from_color(window)).to_color(),
+            hovered: color::tab_hovered_face(
+                KdeColor::from_color(window),
+                KdeColor::from_color(b.hover),
+            )
+            .to_color(),
         }
     }
 }
