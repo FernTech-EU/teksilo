@@ -693,14 +693,14 @@ impl ColorTokens {
     /// `color_scheme`, then overlays any color fields actually reported by
     /// the OS. Missing fields keep their built-in default values.
     ///
-    /// The content-view and semantic fields map as follows, each lifted to
-    /// WCAG's floor on `surface_main` and `surface_content` when the OS
-    /// colour falls short:
+    /// The content-view and semantic fields map as follows. A foreground is
+    /// lifted to WCAG's floor on `surface_main` and `surface_content` when
+    /// the OS colour falls short, and the editor's on `editor_bg`:
     ///
     /// | Field | Tokens |
     /// |---|---|
-    /// | `view_bg` | `surface_content`, `editor_bg` (and the editor's current-line and code-block tints) |
-    /// | `view_fg` | `editor_fg`, `editor_caret` |
+    /// | `view_bg` | `editor_bg` (and the editor's current-line and code-block tints, `editor_code_block_fg` lifted to 4.5:1 on the latter); `surface_content` too when the window's text can reach 4.5:1 on it and on `surface_main`, `text_primary` and `text_secondary` then lifted to that floor on both, while a view in the window's opposite tone stays the editor's alone |
+    /// | `view_fg` | `editor_fg` (4.5:1), `editor_caret` (3:1) |
     /// | `alternate_bg` | `surface_alt_row` |
     /// | `inactive_fg` | `text_secondary` (4.5:1) |
     /// | `link` | `text_link`, `text_link_hover` (4.5:1) |
@@ -885,14 +885,33 @@ impl ColorTokens {
     /// checked against the surfaces it is painted on and lifted to WCAG's
     /// floor when it falls short (4.5:1 for text, 3:1 for the focus ring and
     /// the status glyphs): a desktop scheme was tuned for its own widgets,
-    /// not for every Teksilo surface.
+    /// not for every Teksilo surface. The same goes for the text already in
+    /// place when the view background replaces a surface under it: the
+    /// window's text on `surface_content`, the editor's on `editor_bg`.
     fn apply_os_view_colors(&mut self, os: &OsThemeColors, is_dark: bool) {
         use crate::contrast::lift_until_readable;
         const TEXT: f32 = 4.5;
         const NON_TEXT: f32 = 3.0;
 
         if let Some(bg) = os.view_bg {
-            self.surface_content = bg;
+            // `text_primary` and `text_secondary` are painted on
+            // `surface_content` as well as on `surface_main`, so the view
+            // background becomes the content surface only where the window
+            // text can be read on both. A view in the window's tone takes it,
+            // the text lifted as far as the new surface needs; a view in the
+            // opposite tone (a dark view in a light scheme), on which no one
+            // colour reads alongside the window, is left to the editor, whose
+            // own text is checked against it below.
+            let surfaces = [self.surface_main, bg];
+            let primary = lift_until_readable(self.text_primary, &surfaces, TEXT);
+            if surfaces
+                .iter()
+                .all(|&s| composite_contrast(primary, s) >= TEXT)
+            {
+                self.surface_content = bg;
+                self.text_primary = primary;
+                self.text_secondary = lift_until_readable(self.text_secondary, &surfaces, TEXT);
+            }
             self.editor_bg = bg;
             // The current-line and code-block tints follow the editor
             // surface, as they do from the window background.
@@ -910,6 +929,19 @@ impl ColorTokens {
         if let Some(fg) = os.view_fg {
             self.editor_fg = fg;
             self.editor_caret = fg;
+        }
+        // The editor's text, the desktop's or the one derived from the
+        // window, on the editor surface the desktop supplied or the one it
+        // already had.
+        if os.view_bg.is_some() || os.view_fg.is_some() {
+            let editor = [self.editor_bg];
+            self.editor_fg = lift_until_readable(self.editor_fg, &editor, TEXT);
+            self.editor_caret = lift_until_readable(self.editor_caret, &editor, NON_TEXT);
+            self.editor_code_block_fg = lift_until_readable(
+                self.editor_code_block_fg,
+                &[self.editor_code_block_bg],
+                TEXT,
+            );
         }
         if let Some(alt) = os.alternate_bg {
             self.surface_alt_row = alt;
@@ -1553,9 +1585,10 @@ mod tests {
 
     #[test]
     fn from_os_colors_view_bg_overrides_the_content_surface() {
-        for scheme in [Scheme::Light, Scheme::Dark] {
+        // A view in the scheme's own tone.
+        for (scheme, bg) in [(Scheme::Light, "#FCFCFC"), (Scheme::Dark, "#1B1E20")] {
             let base = ColorTokens::from_os_colors(&os(scheme));
-            let bg = Color::from_hex("#FCFCFC");
+            let bg = Color::from_hex(bg);
             let mut report = os(scheme);
             report.view_bg = Some(bg);
             let t = ColorTokens::from_os_colors(&report);
@@ -1595,6 +1628,104 @@ mod tests {
         assert_eq!(t.editor_fg, fg);
         assert_eq!(t.editor_caret, fg);
         assert_eq!(changed_fields(&t, &base), ["editor_caret", "editor_fg"]);
+    }
+
+    /// Each text pair a view colour can put on a surface, below 4.5:1 in
+    /// `t`, named with its ratio.
+    fn view_text_shortfalls(t: &ColorTokens) -> Vec<String> {
+        [
+            (
+                "text_primary on surface_main",
+                t.text_primary,
+                t.surface_main,
+            ),
+            (
+                "text_primary on surface_content",
+                t.text_primary,
+                t.surface_content,
+            ),
+            (
+                "text_secondary on surface_main",
+                t.text_secondary,
+                t.surface_main,
+            ),
+            (
+                "text_secondary on surface_content",
+                t.text_secondary,
+                t.surface_content,
+            ),
+            ("editor_fg on editor_bg", t.editor_fg, t.editor_bg),
+            (
+                "editor_code_block_fg on editor_code_block_bg",
+                t.editor_code_block_fg,
+                t.editor_code_block_bg,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(name, fg, bg)| {
+            let r = composite_contrast(fg, bg);
+            (r < 4.5).then(|| format!("{name} = {r:.2}"))
+        })
+        .chain(
+            (composite_contrast(t.editor_caret, t.editor_bg) < 3.0)
+                .then(|| "editor_caret on editor_bg".to_owned()),
+        )
+        .collect()
+    }
+
+    #[test]
+    fn from_os_colors_view_fg_is_lifted_on_the_view() {
+        let mut report = os(Scheme::Light);
+        report.view_bg = Some(Color::WHITE);
+        report.view_fg = Some(Color::from_hex("#BBBBBB"));
+        let t = ColorTokens::from_os_colors(&report);
+        assert_ne!(t.editor_fg, Color::from_hex("#BBBBBB"));
+        assert_eq!(view_text_shortfalls(&t), Vec::<String>::new());
+        // Lifted toward black, so it stays a grey.
+        assert!((t.editor_fg.r() - t.editor_fg.b()).abs() < 1e-3);
+    }
+
+    #[test]
+    fn from_os_colors_a_view_in_the_windows_tone_lifts_the_window_text() {
+        // #767676 reads at 4.54:1 on white, not on a #E0E0E0 view.
+        let mut report = os(Scheme::Light);
+        report.window_bg = Some(Color::WHITE);
+        report.window_fg = Some(Color::from_hex("#767676"));
+        report.view_bg = Some(Color::from_hex("#E0E0E0"));
+        let t = ColorTokens::from_os_colors(&report);
+        assert_eq!(t.surface_content, Color::from_hex("#E0E0E0"));
+        assert_ne!(t.text_primary, Color::from_hex("#767676"));
+        assert_eq!(view_text_shortfalls(&t), Vec::<String>::new());
+    }
+
+    #[test]
+    fn from_os_colors_a_view_in_the_opposite_tone_stays_the_editors() {
+        // A light scheme with a dark view, alone and with its own text.
+        let dark_view = Color::from_hex("#202020");
+        let mut alone = os(Scheme::Light);
+        alone.view_bg = Some(dark_view);
+        let mut full = os(Scheme::Light);
+        full.window_bg = Some(Color::from_hex("#EFF0F1"));
+        full.window_fg = Some(Color::from_hex("#232629"));
+        full.view_bg = Some(Color::from_hex("#232629"));
+        full.view_fg = Some(Color::from_hex("#FCFCFC"));
+        for report in [alone, full] {
+            let without_view = ColorTokens::from_os_colors(&OsThemeColors {
+                view_bg: None,
+                view_fg: None,
+                ..report.clone()
+            });
+            let t = ColorTokens::from_os_colors(&report);
+            assert_eq!(t.editor_bg, report.view_bg.unwrap());
+            assert_eq!(t.surface_content, without_view.surface_content);
+            assert_eq!(t.text_primary, without_view.text_primary);
+            // The view adds no shortfall to the window's own (this window's
+            // derived secondary text reads at 4.24:1 on its background).
+            assert_eq!(
+                view_text_shortfalls(&t),
+                view_text_shortfalls(&without_view)
+            );
+        }
     }
 
     #[test]

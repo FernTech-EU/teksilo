@@ -240,15 +240,64 @@ mod tests {
         );
     }
 
-    #[test]
-    fn filled_button_hover_is_a_state_layer() {
-        use teksilo_core::styles::{ButtonVariant, FillRecipe};
+    /// The fill the Filled button paints in `state` under `colors`, as the
+    /// button resolves it on every paint.
+    fn filled_fill(
+        state: teksilo_core::styles::WidgetState,
+        colors: &teksilo_tokens::ColorTokens,
+    ) -> Color {
+        use teksilo_core::styles::ButtonVariant;
         let style = styles::button::m3_button_style(&InputTokens::default());
-        let filled = &style.recipes[&ButtonVariant::Filled];
-        assert!(matches!(
-            filled.fill.hover,
-            Some(FillRecipe::StateLayer { .. })
-        ));
+        style.recipes[&ButtonVariant::Filled]
+            .fill
+            .resolve(state)
+            .resolve_flat(colors)
+            .expect("a flat fill")
+    }
+
+    #[test]
+    fn filled_button_hover_and_pressed_are_the_m3_state_layers() {
+        use teksilo_core::styles::WidgetState;
+        for theme in [light(), dark()] {
+            let c = &theme.colors;
+            for (state, alpha) in [
+                (WidgetState::Idle, 0.0),
+                (WidgetState::Hovered, 0.08),
+                (WidgetState::Pressed, 0.12),
+            ] {
+                let want = c.accent.mix(c.text_on_accent, alpha);
+                let got = filled_fill(state, c);
+                for (g, w) in got.to_array().iter().zip(want.to_array()) {
+                    assert!((g - w).abs() < 1e-6, "{state:?}: {got:?} != {want:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn filled_button_label_reads_7_to_1_in_every_state_under_high_contrast() {
+        use teksilo_core::styles::{PaintState, WidgetState};
+        use teksilo_tokens::contrast::composite_contrast;
+        for (name, theme) in [("light", light()), ("dark", dark())] {
+            for window_active in [true, false] {
+                let c = theme.paint_colors(PaintState {
+                    window_active,
+                    high_contrast: true,
+                });
+                for state in [
+                    WidgetState::Idle,
+                    WidgetState::Hovered,
+                    WidgetState::Pressed,
+                    WidgetState::Focused,
+                ] {
+                    let r = composite_contrast(c.text_on_accent, filled_fill(state, &c));
+                    assert!(
+                        r >= 7.0,
+                        "{name}, window active {window_active}, {state:?}: {r:.2}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

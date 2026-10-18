@@ -15,9 +15,16 @@
 //! | `Ghost` / `Link` | Text |
 //! | `Destructive` | Filled (error) |
 //!
-//! The filled button's hover/pressed use exact M3 state layers
-//! ([`FillRecipe::state_layer`] — an 8 % / 12 % on-primary overlay over
-//! the primary fill); the error fill reuses `TextRole::Error` (which
+//! The filled button's hover/pressed are the exact M3 state layers, an
+//! 8 % / 12 % on-primary overlay over the primary fill, which the preset's
+//! palette carries as `accent_hover` / `accent_pressed` and the recipe
+//! paints through [`SurfaceRole::AccentHover`] /
+//! [`SurfaceRole::AccentPressed`]. Painting the tokens rather than a
+//! [`FillRecipe::state_layer`] mixed at paint time is what lets the
+//! high-contrast projection, which lifts those tokens until the label reads
+//! 7:1 on them, reach the hovered and pressed button; a layer mixed over the
+//! lifted accent moves it back toward its own label. The error fill reuses
+//! `TextRole::Error` (which
 //! carries the M3 error color in both schemes). Outlined/text/plain
 //! labels are redirected to the accent color, and the Destructive label
 //! to `TextRole::OnError`, via [`RecipeButtonStyle::label_roles`].
@@ -85,18 +92,10 @@ fn filled(tokens: &InputTokens) -> ButtonRecipe {
         shape: ShapeRecipe::Pill,
         fill: PerStateRecipe {
             idle: FillRecipe::solid(SurfaceRole::Accent),
-            // Exact M3 state layers: an 8 % / 12 % on-primary overlay
-            // composited over the primary fill at paint time.
-            hover: Some(FillRecipe::state_layer(
-                SurfaceRole::Accent,
-                TextRole::OnAccent,
-                0.08,
-            )),
-            pressed: Some(FillRecipe::state_layer(
-                SurfaceRole::Accent,
-                TextRole::OnAccent,
-                0.12,
-            )),
+            // The M3 state layers (8 % / 12 % on-primary over the primary),
+            // as the palette's own tokens: see the module doc.
+            hover: Some(FillRecipe::solid(SurfaceRole::AccentHover)),
+            pressed: Some(FillRecipe::solid(SurfaceRole::AccentPressed)),
             focused: None,
             disabled: Some(FillRecipe::solid(SurfaceRole::AccentDisabled)),
         },

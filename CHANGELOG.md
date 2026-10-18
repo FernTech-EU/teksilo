@@ -85,9 +85,13 @@ by crate for clarity, not because crates version independently.
   `focus`. `ColorTokens::from_os_colors` uses each one it is given (the
   content surface and editor colours, the alternate row, secondary text,
   links, the error, warning and success text and status colours, and the
-  focus ring), raising a supplied text colour to 4.5:1 and a focus or status
-  colour to 3:1 against the surfaces it sits on. A report without them gives
-  the same tokens as before. `OsThemeColors::new` builds a report from the
+  focus ring), raising a supplied text colour, the editor's included, to
+  4.5:1 and a focus or status colour to 3:1 against the surfaces it sits on.
+  A view background becomes the content surface only where the window's text
+  can reach 4.5:1 on it, and that text is raised as far as it needs; a view
+  in the opposite tone to the window (a dark view in a light scheme) colours
+  the editor alone, so window text is never painted on it. A report without
+  them gives the same tokens as before. `OsThemeColors::new` builds a report from the
   light or dark preference, and `OsThemeColors` now implements `PartialEq`.
 - **`teksilo_tokens::contrast`.** `composite_contrast` gives the WCAG contrast
   of a translucent colour as painted over its backdrop, and
@@ -465,7 +469,11 @@ by crate for clarity, not because crates version independently.
   focus ring at 4.21:1 on the macOS window. Int UI changes too: its light
   hover and pressed fills, whose black text measured 6.33:1 and 4.64:1, are
   lighter, its dark accent stays its own teal instead of a brighter one, and
-  its selections are a shade of its own selection colour. Themes that bring
+  its selections are a shade of its own selection colour. Material 3's filled
+  button keeps its label at 7:1 when hovered and pressed as well: it now
+  paints those states from the theme's hover and pressed accent colours, the
+  same 8 % and 12 % state layers as before, so the projection lifts them too
+  (they measured 5.79:1 and 5.26:1 in the light theme). Themes that bring
   their own high-contrast colours, such as KDE Plasma, are unchanged.
 - **macOS and Fluent sliders under right-to-left layout.**
   **Behaviour change:** in a right-to-left window, a horizontal `Slider`
