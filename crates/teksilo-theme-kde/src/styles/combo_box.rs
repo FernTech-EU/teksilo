@@ -29,6 +29,11 @@
 //! - **D5, keyboard focus.** As on a push button, keyboard focus adds the
 //!   2 px focus frame in the opaque `focus_ring` token, from 1 px inside to
 //!   1 px outside the node, besides the highlight outline Breeze draws.
+//! - **The arrow on any scheme.** The arrow colour is lifted in luma to the
+//!   non-text floor (3:1, 4.5:1 under high contrast) on the face at rest and
+//!   on the open combo box's pressed face, which a scheme whose inactive
+//!   effects move the button colour toward the button text needs; stock
+//!   Breeze's arrow is kept.
 //! - **An empty combo box keeps its arrow colour.** Breeze draws the arrow
 //!   of a combo box with no items in the disabled colours; the style is not
 //!   told how many items there are, so only a disabled combo box's arrow is
@@ -56,9 +61,12 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_kde_scheme::ColorState;
 use teksilo_tokens::Color;
 
+use crate::color::mark_on_faces;
 use crate::palette::KdePalette;
 use crate::styles::arrow::{ArrowDirection, arrow_color, paint_arrow};
-use crate::styles::chrome::{BreezeButtonChrome, BreezeButtonKind, BreezeButtonState};
+use crate::styles::chrome::{
+    BreezeButtonChrome, BreezeButtonColors, BreezeButtonKind, BreezeButtonState,
+};
 use crate::styles::metrics::{BreezeComboMetrics, breeze_combo_metrics_for};
 use crate::styles::text_input::BreezeFieldChrome;
 
@@ -148,7 +156,14 @@ pub fn combo_arrow_color(
         ColorState::Inactive
     };
     let b = palette.breeze_colors(state, high_contrast);
-    arrow_color(b.button_text, b.button)
+    let arrow = arrow_color(b.button_text, b.button);
+    if disabled {
+        return arrow;
+    }
+    // `[wcag]` The arrow lies on the face at rest and on the pressed face
+    // while the popup is open: lifted to the non-text floor on both.
+    let faces = BreezeButtonColors::resolve(theme, window_active, high_contrast, false);
+    mark_on_faces(arrow, &[faces.button, faces.pressed], high_contrast)
 }
 
 /// `[S]` Where a combo box's arrow box lies in the node `bounds`: at the

@@ -14,8 +14,11 @@
 //! and Oxygen Dark turn inactive effects on, and two synthetic schemes
 //! carry intensity effects and translucent colours), the ten Plasma accents
 //! on Light and on Dark, and schemes built to defeat the lifts, each shown
-//! to need them; the property at the end does the same over random coherent
-//! schemes, with random inactive effects.
+//! to need them. A second sweep checks the faces the styles paint their own
+//! text and marks on (a push button's in every state, a combo box's, a
+//! table header section's, a check box's) over the same schemes and paint
+//! states. The property at the end does both over random coherent schemes,
+//! with random inactive effects.
 //!
 //! This file reads `tools/kde_golden/vectors/resolve.json` from the
 //! repository, so it is left out of the published package (the `exclude`
@@ -44,6 +47,13 @@ use teksilo_theme_kde::scheme::{
     ColorEffect, ColorSet, ColorState, ContrastEffect, DecorationRole, ForegroundRole,
     IntensityEffect, KdeColor, KdeColorScheme, PaletteRole, SetColors, StateEffect,
 };
+use teksilo_theme_kde::styles::checkbox::box_paint;
+use teksilo_theme_kde::styles::chrome::{
+    BreezeButtonColors, BreezeButtonKind, BreezeButtonState, button_paint,
+};
+use teksilo_theme_kde::styles::combo_box::combo_arrow_color;
+use teksilo_theme_kde::styles::indicator::BreezeIndicatorColors;
+use teksilo_theme_kde::styles::table::BreezeHeaderColors;
 use teksilo_theme_kde::{self as kde, KdePalette, PlasmaAccent};
 use teksilo_tokens::contrast::composite_contrast;
 use teksilo_tokens::{Color, ColorTokens};
@@ -975,6 +985,120 @@ fn every_declared_pair_passes_for_every_scheme_in_every_paint_state() {
     );
 }
 
+/// What the Breeze styles paint on a face of their own rather than on a
+/// surface token: the push button's label on its face in every state, a
+/// combo box's arrow on its face, a table header's label and sort arrow on
+/// its section, and a check box's mark on its box. Each face is the style's, read from the theme as the
+/// paint walker projects it, so the pairs follow what is painted.
+fn face_failures(theme: &Theme, window_active: bool, high_contrast: bool) -> Vec<String> {
+    let (text, non_text) = if high_contrast {
+        (7.0, 4.5)
+    } else {
+        (TEXT, NON_TEXT)
+    };
+    let projected = theme.for_paint_state(PaintState {
+        window_active,
+        high_contrast,
+    });
+    let c = &projected.colors;
+    let mut pairs: Vec<(String, Color, Color, f32)> = Vec::new();
+
+    let button = BreezeButtonColors::resolve(&projected, window_active, high_contrast, false);
+    for kind in [BreezeButtonKind::Push, BreezeButtonKind::Default] {
+        for state in [
+            BreezeButtonState::Rest,
+            BreezeButtonState::Highlighted,
+            BreezeButtonState::Pressed,
+        ] {
+            for checked in [false, true] {
+                let face = button_paint(kind, state, checked, window_active, &button)
+                    .face
+                    .expect("a push or default button has a face");
+                pairs.push((
+                    format!("{kind:?} button label on its {state:?} face, checked {checked}"),
+                    c.text_primary,
+                    face,
+                    text,
+                ));
+            }
+        }
+    }
+
+    let header = BreezeHeaderColors::resolve(&projected, window_active, high_contrast);
+    for (hovered, pressed) in [(false, false), (true, false), (false, true)] {
+        let fill = header.fill(hovered, pressed);
+        let what = format!("hovered {hovered}, pressed {pressed}");
+        pairs.push((
+            format!("header label on its section, {what}"),
+            c.text_primary,
+            fill,
+            text,
+        ));
+        pairs.push((
+            format!("header sort arrow on its section, {what}"),
+            header.arrow,
+            fill,
+            non_text,
+        ));
+    }
+
+    let arrow = combo_arrow_color(&projected, window_active, high_contrast, false, false);
+    for (what, face) in [("at rest", button.button), ("open", button.pressed)] {
+        pairs.push((
+            format!("combo box arrow on its face {what}"),
+            arrow,
+            face,
+            non_text,
+        ));
+    }
+
+    let indicator = BreezeIndicatorColors::resolve(&projected, window_active, high_contrast, false);
+    for pressed in [false, true] {
+        let paint = box_paint(true, false, pressed, false, &indicator);
+        let face = paint.composited_fill().expect("the box face is opaque");
+        pairs.push((
+            format!("check mark on its box, pressed {pressed}"),
+            paint.mark,
+            face,
+            non_text,
+        ));
+    }
+
+    pairs
+        .into_iter()
+        .filter(|(_, fg, bg, floor)| ratio(*fg, *bg) < *floor)
+        .map(|(name, fg, bg, floor)| {
+            format!(
+                "{name}: {:.2}:1 < {floor} ({fg:?} on {bg:?})",
+                ratio(fg, bg)
+            )
+        })
+        .collect()
+}
+
+/// The faces the styles paint reach the same floors as the tokens, for
+/// every scheme of the sweep in every paint state: a face is the surface
+/// its text was lifted on, moved back by D11 where the scheme's inactive
+/// effects shade it toward the middle of the scale.
+#[test]
+fn every_face_a_style_paints_carries_its_text_for_every_scheme_in_every_paint_state() {
+    let mut all = Vec::new();
+    for (name, scheme) in sweep_schemes() {
+        let theme = kde::from_scheme(&scheme);
+        for (state, active, high_contrast, _, _) in PAINT_STATES {
+            for failure in face_failures(&theme, active, high_contrast) {
+                all.push(format!("{name}, {state}: {failure}"));
+            }
+        }
+    }
+    assert!(
+        all.is_empty(),
+        "{} failures:\n{}",
+        all.len(),
+        all.join("\n")
+    );
+}
+
 /// A colour pair a scheme itself gives, read from the palette the theme
 /// keeps, with the floor its token is lifted to.
 #[derive(Debug, Clone, Copy)]
@@ -1275,7 +1399,8 @@ proptest! {
         let theme = kde::from_scheme(&scheme);
         for (active, high_contrast) in [(true, false), (false, false), (true, true), (false, true)] {
             let (text, non_text) = if high_contrast { (7.0, 4.5) } else { (TEXT, NON_TEXT) };
-            let f = failures(&paint(&theme, active, high_contrast), text, non_text);
+            let mut f = failures(&paint(&theme, active, high_contrast), text, non_text);
+            f.extend(face_failures(&theme, active, high_contrast));
             prop_assert!(
                 f.is_empty(),
                 "active {} high contrast {}: {:?}\nscheme {:?}",

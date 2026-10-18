@@ -31,6 +31,11 @@
 //! - **D6, the outline at rest.** As on the line edit, the frame is
 //!   outlined in `border_strong` rather than in the frame outline, which is
 //!   1.5:1 on the Breeze Light window; focus is `border_focused` (D5).
+//! - **The hovered arrow under high contrast.** The chevron is a half's
+//!   only visual, and the view's hover decoration it turns to is 2.5:1 on
+//!   the Breeze Light view. Under high contrast it is lifted to 4.5:1 on the
+//!   view and the other control surfaces, as a hovered field's outline is;
+//!   in the normal projection it is the scheme's own.
 //! - **An arrow keeps its colour at the limit.** Breeze draws the arrow
 //!   that can step no further in the disabled colours. The style is not told
 //!   the value's limits, so only a disabled spin box's arrows are in them;
@@ -55,6 +60,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_kde_scheme::{ColorState, PaletteRole};
 use teksilo_tokens::Color;
 
+use crate::color::high_contrast_boundary;
 use crate::palette::KdePalette;
 use crate::styles::arrow::{ArrowDirection, arrow_color, paint_arrow};
 use crate::styles::metrics::{BreezeSpinMetrics, breeze_spin_metrics_for};
@@ -116,7 +122,8 @@ pub struct BreezeSpinArrowColors {
     /// view; of the disabled view's text for a disabled spin box.
     pub arrow: Color,
     /// `[Hp]` The arrow of the half under the pointer: the view's hover
-    /// decoration.
+    /// decoration, lifted under high contrast to 4.5:1 on the view and the
+    /// other control surfaces.
     pub hover: Color,
 }
 
@@ -163,9 +170,18 @@ impl BreezeSpinArrowColors {
         } else {
             arrow_color(c.editor_fg, c.surface_content)
         };
+        // `[wcag]` The hovered half's chevron is its only visual: under high
+        // contrast the hover colour is lifted to 4.5:1 on the view it is
+        // drawn on and the other control surfaces, as a hovered field's
+        // outline is.
         BreezeSpinArrowColors {
             arrow,
-            hover: palette.breeze_colors(state, high_contrast).hover,
+            hover: high_contrast_boundary(
+                palette.breeze_colors(state, high_contrast).hover,
+                c,
+                c.surface_content,
+                high_contrast,
+            ),
         }
     }
 }

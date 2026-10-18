@@ -22,7 +22,11 @@
 //!   colour mapping), which a scheme whose outline already passes keeps
 //!   exactly. A checked box and a selected disc keep Breeze's highlight
 //!   outline: their state is carried by the mark, in the view text, which
-//!   is well above 3:1 on the highlight-washed fill.
+//!   is well above 3:1 on the highlight-washed fill in stock Breeze. For any
+//!   scheme the mark is lifted in luma to the non-text floor (3:1, 4.5:1
+//!   under high contrast) on that fill at rest and pressed, which a scheme
+//!   whose inactive effects move the button colour or the highlight toward
+//!   the text needs.
 //! - **D6, the outline of a checked switch.** A switch has no mark: on, its
 //!   track's highlight outline (2.2:1 on the Breeze Light window) is as much
 //!   the control's only boundary as the off track's. It is drawn in the
@@ -57,8 +61,9 @@ use teksilo_kde_scheme::math::{hsv_darker, lift_luma_until};
 use teksilo_kde_scheme::{ColorSet, ColorState, DecorationRole, KdeColor, PaletteRole};
 use teksilo_tokens::Color;
 
-use crate::color::{AA, ENHANCED, high_contrast_boundary};
+use crate::color::{AA, ENHANCED, high_contrast_boundary, mark_on_faces};
 use crate::palette::KdePalette;
+use crate::styles::checkbox::box_paint;
 use crate::styles::metrics::{INDICATOR_BOX_INSET, INDICATOR_PRESSED_DARKER, INDICATOR_SIZE};
 
 /// The colours a Breeze check box, radio button or switch is painted from, in
@@ -81,8 +86,10 @@ pub struct BreezeIndicatorColors {
     /// stands in for the track's lifted outline.
     pub button_hover: Color,
     /// `[Hp]` The view's text: the check mark, the partial squares and the
-    /// radio dot.
+    /// radio dot on a box or disc at rest.
     pub text: Color,
+    /// The same mark on a pressed box or disc, whose face is darker.
+    pub text_pressed: Color,
     /// `[Hp]` The current window's highlight (the muted one in a backdrop
     /// window, the disabled one for a disabled control): a checked box's
     /// outline and wash, a checked track.
@@ -109,6 +116,22 @@ impl BreezeIndicatorColors {
     /// active, with or without the high-contrast preference, for an enabled
     /// or a disabled control.
     pub fn resolve(
+        theme: &Theme,
+        window_active: bool,
+        high_contrast: bool,
+        disabled: bool,
+    ) -> BreezeIndicatorColors {
+        let mut colors = Self::resolve_faces(theme, window_active, high_contrast, disabled);
+        if !disabled {
+            let unlifted = colors;
+            colors.text = mark_on_marked_face(&unlifted, false, high_contrast);
+            colors.text_pressed = mark_on_marked_face(&unlifted, true, high_contrast);
+        }
+        colors
+    }
+
+    /// [`resolve`](Self::resolve) before the mark is lifted on the faces.
+    fn resolve_faces(
         theme: &Theme,
         window_active: bool,
         high_contrast: bool,
@@ -144,6 +167,7 @@ impl BreezeIndicatorColors {
                 button_outline,
                 button_hover: hover,
                 text,
+                text_pressed: text,
                 highlight,
                 outline,
                 checked_outline: checked_outline(theme, highlight, button, high_contrast, disabled),
@@ -182,6 +206,7 @@ impl BreezeIndicatorColors {
                 high_contrast,
             ),
             text,
+            text_pressed: text,
             highlight,
             outline,
             checked_outline: checked_outline(theme, highlight, b.button, high_contrast, disabled),
@@ -189,6 +214,24 @@ impl BreezeIndicatorColors {
             focus_ring: c.focus_ring,
         }
     }
+}
+
+/// `[wcag]` The mark of `colors` (the check mark, the partial squares and
+/// the radio dot, in the view's text) on a marked box or disc, pressed or
+/// not, lifted to the non-text floor, 3:1 or 4.5:1 under high contrast, on
+/// its face: the highlight washed over the button colour as it is painted.
+/// The view's text reaches the text floor on the view, not on this face: a
+/// scheme whose inactive effects move the button colour or the highlight
+/// toward the text would otherwise leave the mark unreadable. Stock
+/// Breeze's mark is kept.
+fn mark_on_marked_face(
+    colors: &BreezeIndicatorColors,
+    pressed: bool,
+    high_contrast: bool,
+) -> Color {
+    let paint = box_paint(true, false, pressed, false, colors);
+    let face = paint.composited_fill().unwrap_or(paint.face);
+    mark_on_faces(colors.text, &[face], high_contrast)
 }
 
 /// `[wcag]` D6: `highlight` lifted in luma until it reaches the non-text

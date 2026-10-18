@@ -53,6 +53,7 @@ use teksilo_kde_scheme::{ColorState, PaletteRole};
 use teksilo_tokens::{Color, InputTokens, TypographyTokens};
 use teksilo_widgets::primitives::ZStack;
 
+use crate::color::{face_under_primary_text, mark_on_faces};
 use crate::palette::KdePalette;
 use crate::styles::arrow::{ArrowDirection, arrow_color, paint_arrow};
 use crate::styles::chrome::kde_mix;
@@ -152,6 +153,13 @@ impl TableStyle for BreezeTableStyle {
 }
 
 /// The colours a Breeze header section is painted in, in one paint state.
+///
+/// The section carries its label's primary text at the paint state's text
+/// floor: at rest it is the button colour the colour tokens lift that text
+/// on, and hovered or pressed it is moved, as an accent wash is (D1 of the
+/// colour mapping), until the text reaches the floor on it. The sort arrow
+/// is lifted to the non-text floor on all three. In stock Breeze nothing
+/// moves.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BreezeHeaderColors {
     /// `[qt]` The section at rest: the button colour.
@@ -199,12 +207,22 @@ impl BreezeHeaderColors {
         } else {
             palette.frame_contrast() as f32
         };
+        // `[wcag]` D1: a section mixed toward the hover or focus colour
+        // carries the label's primary text, as the button colour does.
+        let under_label = |face: Color| face_under_primary_text(face, c, high_contrast);
+        let hovered = under_label(kde_mix(b.button, b.hover, HEADER_STATE_MIX));
+        let pressed = under_label(kde_mix(b.button, b.focus, HEADER_STATE_MIX));
         BreezeHeaderColors {
             rest: b.button,
-            hovered: kde_mix(b.button, b.hover, HEADER_STATE_MIX),
-            pressed: kde_mix(b.button, b.focus, HEADER_STATE_MIX),
+            hovered,
+            pressed,
             line: palette.role(state, PaletteRole::WindowText).with_alpha(fc),
-            arrow: arrow_color(b.button_text, b.button),
+            // `[wcag]` The arrow on all three sections.
+            arrow: mark_on_faces(
+                arrow_color(b.button_text, b.button),
+                &[b.button, hovered, pressed],
+                high_contrast,
+            ),
         }
     }
 

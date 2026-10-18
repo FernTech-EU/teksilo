@@ -17,6 +17,7 @@
 //!
 //! A hovered field, check box, radio button, switch or slider handle is
 //! outlined in a hover or focus decoration in place of its lifted outline,
+//! and a spin box's hovered half draws its chevron in the hover decoration,
 //! so the decoration is held to the boundary floor too.
 
 use teksilo_core::styles::{PaintState, Theme};
@@ -24,6 +25,7 @@ use teksilo_theme_kde::scheme::ColorState;
 use teksilo_theme_kde::styles::checkbox::box_paint;
 use teksilo_theme_kde::styles::indicator::BreezeIndicatorColors;
 use teksilo_theme_kde::styles::slider::BreezeSliderColors;
+use teksilo_theme_kde::styles::spin_box::BreezeSpinArrowColors;
 use teksilo_theme_kde::styles::text_input::BreezeFieldColors;
 use teksilo_theme_kde::styles::toggle::switch_paint;
 use teksilo_theme_kde::{self as kde, KdePalette, PlasmaAccent};
@@ -371,6 +373,11 @@ fn hovered_boundaries(theme: &Theme, window_active: bool) -> Vec<(&'static str, 
         slider.handle_outline_for(false, true, false),
         slider.handle,
     );
+
+    // A spin box's hovered half draws no fill and no outline: its chevron,
+    // on the view, is all there is.
+    let spin = BreezeSpinArrowColors::resolve(&hc, window_active, true, false);
+    against("hovered spin box arrow", spin.hover, c.surface_content);
     out
 }
 
@@ -413,6 +420,8 @@ fn the_schemes_hover_decorations_fall_short_on_a_light_window() {
     for decoration in [b.hover, b.focus] {
         assert!(composite_contrast(decoration, hc.colors.surface_main) < NON_TEXT);
     }
+    // And the hover colour on the view, where a spin box draws its chevron.
+    assert!(composite_contrast(b.hover, hc.colors.surface_content) < NON_TEXT);
 }
 
 /// The lift is high contrast's alone: the normal projection paints the
@@ -430,4 +439,6 @@ fn the_normal_projection_keeps_the_schemes_hover_colour() {
     assert_eq!(ind.focus, b.focus);
     let slider = BreezeSliderColors::resolve(&theme, true, false, false);
     assert_eq!(slider.hover, b.hover);
+    let spin = BreezeSpinArrowColors::resolve(&theme, true, false, false);
+    assert_eq!(spin.hover, b.hover);
 }

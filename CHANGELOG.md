@@ -155,8 +155,8 @@ by crate for clarity, not because crates version independently.
   its spacing and its 100 ms linear transitions. An inactive window shows the
   scheme's muted selection and accent, as Plasma does, and the OS increase
   contrast preference gets the preset's own colours, with 7:1 text and
-  4.5:1 control outlines, a hovered field, check box, radio button, switch
-  or slider handle included. Stock
+  4.5:1 control outlines, a hovered field, check box, radio button, switch,
+  slider handle or spin box arrow included. Stock
   Breeze colours that fall short of WCAG (secondary text, links, status
   colours, the focus colour, strong outlines, the scroll-bar thumb and the
   text on the accent) are made readable, keeping their hue, and so are any
@@ -164,7 +164,9 @@ by crate for clarity, not because crates version independently.
   a translucent colour is made opaque, a hover or selection fill stays light
   in a light window, and where the scheme's inactive effects shade an
   inactive window toward a mid tone its backgrounds move back until its
-  text reads. Every theme
+  text reads, the faces of its buttons, combo boxes, table headers and check
+  boxes with them, so their labels and marks stay readable in every state.
+  Every theme
   carries a `KdePalette` with the whole resolved scheme and the colours
   Breeze combines from it (`breeze_colors` gives them for the high-contrast
   colours too), and `geometry::BreezeGeometry` gives the Breeze control

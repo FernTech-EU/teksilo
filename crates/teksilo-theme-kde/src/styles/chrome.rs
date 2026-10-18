@@ -74,6 +74,7 @@ use teksilo_kde_scheme::KdeColor;
 use teksilo_kde_scheme::math::mix;
 use teksilo_tokens::{Color, CornerRadius, ShapeTokens};
 
+use crate::color::face_under_primary_text;
 use crate::palette::KdePalette;
 
 /// `[Hp]` How far a default button's fill moves from the button colour
@@ -165,6 +166,14 @@ impl BreezeButtonState {
 }
 
 /// The colours a Breeze button is painted from, in one paint state.
+///
+/// The faces a label is set on (the face at rest, pressed, checked and the
+/// default button's) carry the primary text the label is painted in at the
+/// text floor of the paint state, 4.5:1 or 7:1 under high contrast: the
+/// button colour is the surface the colour tokens lift that text on, and
+/// a face mixed from it is moved, as an accent wash is (D1 of the colour
+/// mapping), until the text reaches the floor on it. In stock Breeze none
+/// moves. A disabled button's faces are Breeze's, its text being exempt.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BreezeButtonColors {
     /// The button colour, a push button's face.
@@ -180,6 +189,12 @@ pub struct BreezeButtonColors {
     /// A pressed push button's face: the button colour 30 % of the way to
     /// the highlight, the theme's `surface_pressed`.
     pub pressed: Color,
+    /// `[Hp]` The default button's face: the button colour moved toward the
+    /// highlight.
+    pub default_face: Color,
+    /// `[Hp]` A checked push button's face: the button colour moved toward
+    /// the button text.
+    pub checked_face: Color,
     /// The accent family, for [`BreezeButtonKind::Accent`].
     pub accent: Color,
     /// The hovered accent.
@@ -216,64 +231,68 @@ impl BreezeButtonColors {
                     c.accent
                 },
                 pressed: c.surface_pressed,
+                default_face: button,
+                checked_face: button,
                 accent: c.accent,
                 accent_hover: c.accent_hover,
                 accent_pressed: c.accent_pressed,
                 accent_disabled: c.accent_disabled,
             };
-        let Some(palette) = theme.extension::<KdePalette>() else {
+        let mut colors = match theme.extension::<KdePalette>() {
             // No KDE palette: the theme's own roles stand in for the button
             // colours it has no slot for.
-            return if disabled {
+            None if disabled => {
                 accent_family(c.surface_disabled, c.text_primary, c.border_disabled)
-            } else {
-                accent_family(c.surface_content, c.text_primary, c.border)
-            };
-        };
-        let state = if disabled {
-            ColorState::Disabled
-        } else if window_active {
-            ColorState::Active
-        } else {
-            ColorState::Inactive
-        };
-        let b = palette.breeze_colors(state, high_contrast);
-        let mut colors = accent_family(b.button, b.button_text, b.button_outline);
-        // `[Hp]` The active window's highlight, while the theme paints the
-        // palette's own accent for this state.
-        let painted = PaintState {
-            window_active,
-            high_contrast,
-        };
-        if c.accent == palette.tokens(painted).accent {
-            let active = palette.tokens(PaintState {
-                window_active: true,
-                high_contrast,
-            });
-            if !disabled {
-                colors.highlight = active.accent;
             }
-            colors.pressed = active.surface_pressed;
+            None => accent_family(c.surface_content, c.text_primary, c.border),
+            Some(palette) => {
+                let state = if disabled {
+                    ColorState::Disabled
+                } else if window_active {
+                    ColorState::Active
+                } else {
+                    ColorState::Inactive
+                };
+                let b = palette.breeze_colors(state, high_contrast);
+                let mut colors = accent_family(b.button, b.button_text, b.button_outline);
+                // `[Hp]` The active window's highlight, while the theme
+                // paints the palette's own accent for this state.
+                let painted = PaintState {
+                    window_active,
+                    high_contrast,
+                };
+                if c.accent == palette.tokens(painted).accent {
+                    let active = palette.tokens(PaintState {
+                        window_active: true,
+                        high_contrast,
+                    });
+                    if !disabled {
+                        colors.highlight = active.accent;
+                    }
+                    colors.pressed = active.surface_pressed;
+                }
+                colors
+            }
+        };
+        // `[Hp]` The default button's face moves toward the highlight, a
+        // checked one's toward the button text.
+        colors.default_face = kde_mix(colors.button, colors.highlight, DEFAULT_BUTTON_FILL);
+        colors.checked_face = kde_mix(colors.button, colors.button_text, f64::from(CHECKED_FILL));
+        if !disabled {
+            // `[wcag]` D1: each face mixed from the button colour carries the
+            // label's primary text, as the button colour itself does.
+            let under_label = |face: Color| face_under_primary_text(face, c, high_contrast);
+            colors.pressed = under_label(colors.pressed);
+            colors.default_face = under_label(colors.default_face);
+            colors.checked_face = under_label(colors.checked_face);
         }
         colors
-    }
-
-    /// The default button's face: the button colour moved toward the
-    /// highlight.
-    pub fn default_face(&self) -> Color {
-        kde_mix(self.button, self.highlight, DEFAULT_BUTTON_FILL)
     }
 
     /// The default button's outline: half-way from the highlight to the
     /// button outline.
     pub fn default_outline(&self) -> Color {
         kde_mix(self.highlight, self.button_outline, DEFAULT_BUTTON_OUTLINE)
-    }
-
-    /// A checked push button's face: the button colour moved toward the
-    /// button text.
-    pub fn checked_face(&self) -> Color {
-        kde_mix(self.button, self.button_text, f64::from(CHECKED_FILL))
     }
 }
 
@@ -331,13 +350,13 @@ pub fn button_paint(
     match kind {
         BreezeButtonKind::Push | BreezeButtonKind::Default => {
             let (rest_face, rest_outline) = if kind == BreezeButtonKind::Default {
-                (c.default_face(), c.default_outline())
+                (c.default_face, c.default_outline())
             } else {
                 (c.button, c.button_outline)
             };
             match state {
                 Pressed => paint(Some(c.pressed), Some(c.highlight)),
-                _ if checked => paint(Some(c.checked_face()), Some(c.button_outline)),
+                _ if checked => paint(Some(c.checked_face), Some(c.button_outline)),
                 Highlighted => paint(Some(rest_face), Some(c.highlight)),
                 Rest | Disabled => paint(Some(rest_face), Some(rest_outline)),
             }
@@ -588,13 +607,13 @@ mod tests {
         assert_eq!(rgba8(c.button_outline), [209, 209, 210, 255]);
         assert_eq!(rgba8(c.highlight), [61, 174, 233, 255]);
         assert_eq!(rgba8(c.pressed), [195, 229, 246, 255]);
-        assert_eq!(rgba8(c.default_face()), [214, 236, 248, 255]);
+        assert_eq!(rgba8(c.default_face), [214, 236, 248, 255]);
         assert_eq!(rgba8(c.default_outline()), [135, 192, 221, 255]);
 
         let d = colors(&crate::dark(), true, false);
         assert_eq!(rgba8(d.button), [41, 44, 48, 255]);
         assert_eq!(rgba8(d.button_outline), [83, 86, 89, 255]);
-        assert_eq!(rgba8(d.default_face()), [45, 70, 85, 255]);
+        assert_eq!(rgba8(d.default_face), [45, 70, 85, 255]);
         assert_eq!(rgba8(d.default_outline()), [72, 130, 161, 255]);
         assert_eq!(rgba8(d.pressed), [47, 83, 104, 255]);
     }
@@ -695,13 +714,13 @@ mod tests {
         let checked = p(Push, Highlighted, true, true);
         assert_eq!(
             (checked.face, checked.outline, checked.shadow),
-            (Some(c.checked_face()), Some(c.button_outline), false)
+            (Some(c.checked_face), Some(c.button_outline), false)
         );
         // The shadow is an active window's only.
         assert!(!p(Push, Rest, false, false).shadow);
 
         let default = p(Default, Rest, false, true);
-        assert_eq!(default.face, Some(c.default_face()));
+        assert_eq!(default.face, Some(c.default_face));
         assert_eq!(default.outline, Some(c.default_outline()));
         assert!(default.shadow);
         // In an inactive window the default button is a push button.

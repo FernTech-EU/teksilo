@@ -154,7 +154,10 @@
 //! the same way where it falls short, and where the scheme's inactive
 //! effects shade an inactive window's backgrounds toward the middle of the
 //! scale, those backgrounds move back until text can reach its floor on
-//! them. The rules, the inactive-window and high-contrast colours and the
+//! them. The styles paint their faces from the moved backgrounds: a push
+//! button, a combo box, a table header section and a check box carry their
+//! label or mark at the same floors in every state, hovered, pressed,
+//! checked or the default button. The rules, the inactive-window and high-contrast colours and the
 //! tokens kept from Int UI are listed in the colour mapping's documentation
 //! (the private `color` module); every lift is tested to pass and its
 //! premise, that the scheme's colour fails, is tested too.
@@ -1169,10 +1172,40 @@ mod tests {
         assert_eq!(m.item_height, 29.0);
     }
 
-    /// The rows a `StandardListItem` lays out follow the density a theme is
-    /// projected to: the installed row, table, tab, scroll-bar and
-    /// progress-bar styles are rebuilt from the projected input tokens, and
-    /// a row measured in a tree is the one the style reports.
+    /// The doc comment directly above the limitations test and the row
+    /// density test describes that test, not its neighbour.
+    #[test]
+    fn the_limitations_and_row_density_tests_carry_their_own_documentation() {
+        let source = include_str!("lib.rs");
+        let doc_above = |name: &str| {
+            let at = source
+                .find(&format!("    #[test]\n    fn {name}()"))
+                .unwrap_or_else(|| panic!("no test {name}"));
+            let mut lines: Vec<&str> = source[..at]
+                .lines()
+                .rev()
+                .take_while(|l| l.trim_start().starts_with("///"))
+                .map(|l| l.trim_start().trim_start_matches("///").trim())
+                .collect();
+            lines.reverse();
+            lines.join(" ")
+        };
+        let rows = doc_above("a_density_switch_reprojects_the_rows_and_bars");
+        assert!(
+            rows.starts_with("The rows a `StandardListItem` lays out follow the density"),
+            "{rows:?}"
+        );
+        let limitations =
+            doc_above("known_limitations_state_the_tab_and_first_row_heights_the_styles_give");
+        assert!(
+            limitations.starts_with("The known limitations give the heights"),
+            "{limitations:?}"
+        );
+    }
+
+    /// The known limitations give the heights the styles do: a tab's at each
+    /// density, never Breeze's static-bar height, and a first row as tall as
+    /// the others where Breeze's is one taller.
     #[test]
     fn known_limitations_state_the_tab_and_first_row_heights_the_styles_give() {
         // The crate documentation, as one line of prose.
@@ -1230,6 +1263,10 @@ mod tests {
         }
     }
 
+    /// The rows a `StandardListItem` lays out follow the density a theme is
+    /// projected to: the installed row, table, tab, scroll-bar and
+    /// progress-bar styles are rebuilt from the projected input tokens, and
+    /// a row measured in a tree is the one the style reports.
     #[test]
     fn a_density_switch_reprojects_the_rows_and_bars() {
         use std::cell::RefCell;

@@ -23,10 +23,14 @@
 //! assert!(outline.a() > 0.0);
 //! ```
 //!
-//! The palette keeps the scheme's own colours. Where the theme's tokens lift
-//! one to meet WCAG (see the colour mapping's deviations in the crate
-//! documentation), the token carries the lifted colour and the palette the
-//! vendor one.
+//! The resolved scheme ([`KdePalette::resolved`], [`KdePalette::role`])
+//! keeps the scheme's own colours. Where the theme's tokens lift one to meet
+//! WCAG (see the colour mapping's deviations in the crate documentation),
+//! the token carries the lifted colour and the resolved scheme the vendor
+//! one. Breeze's combinations are made from the surfaces the window paints:
+//! where the mapping moves a background back from the middle of the scale
+//! (D11), they are made from the moved one, so a style painting a button
+//! face paints the surface the text was lifted on.
 
 use std::fmt;
 use std::str::FromStr;
@@ -52,6 +56,17 @@ const CONTROL_SHADOW_ALPHA: f32 = 0.125;
 ///
 /// `fc` is the scheme's frame contrast. Every colour is opaque except
 /// [`shadow`](Self::shadow).
+///
+/// The combinations are made from the surfaces the window paints, which
+/// are the scheme's own except where the colour mapping's D11 moves them
+/// (an Active or Inactive state whose backgrounds lie in the middle of the
+/// scale, under the scheme's inactive effects or the high-contrast floor):
+/// the window, the view and the button colour are the colour tokens'
+/// `surface_main`, `surface_content` and the button surface their text is
+/// lifted on, the frame background is `surface_raised` and the frame
+/// outline `border`. The button text is lifted the same way the window's
+/// text is (D10). The Disabled state keeps the scheme's colours: its text
+/// is exempt from WCAG's contrast floors.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BreezeColors {
     /// `[Hp]` The outline of a frame, field or menu: the window colour moved
@@ -84,13 +99,42 @@ pub struct BreezeColors {
 }
 
 impl BreezeColors {
-    /// The combinations for `state` of `palette` at frame contrast `fc`.
-    pub fn compute(palette: &ResolvedPalette, state: ColorState, fc: f64) -> BreezeColors {
+    /// The combinations for `state` of `palette` at frame contrast `fc`,
+    /// their surfaces carried to the text floor of the high-contrast
+    /// projection (7:1) when `high_contrast` is set and to 4.5:1 otherwise.
+    pub fn compute(
+        palette: &ResolvedPalette,
+        state: ColorState,
+        fc: f64,
+        high_contrast: bool,
+    ) -> BreezeColors {
         let role = |r: PaletteRole| palette.role(state, r);
-        let window = role(PaletteRole::Window);
         let window_text = role(PaletteRole::WindowText);
-        let button = role(PaletteRole::Button);
-        let button_text = role(PaletteRole::ButtonText);
+        let vendor_button_text = role(PaletteRole::ButtonText);
+        let (window, button, button_text, frame_background) = if state == ColorState::Disabled {
+            (
+                role(PaletteRole::Window),
+                role(PaletteRole::Button),
+                vendor_button_text,
+                mix(role(PaletteRole::Window), role(PaletteRole::Base), 0.3),
+            )
+        } else {
+            // `[wcag]` D11, the surfaces the colour tokens paint, and D10 for
+            // the button text on the button.
+            let floor = if high_contrast {
+                color::ENHANCED
+            } else {
+                color::AA
+            }
+            .text;
+            let s = color::Surfaces::of(palette, state, floor);
+            (
+                s.window,
+                s.button,
+                color::lift_toward(vendor_button_text, &[s.button], floor, s.text_side()),
+                s.frame_background,
+            )
+        };
         let view = palette.set(state, ColorSet::View);
         let focus = view.decoration(DecorationRole::Focus);
         let hover = view.decoration(DecorationRole::Hover);
@@ -99,7 +143,7 @@ impl BreezeColors {
         BreezeColors {
             frame_outline: outline,
             separator: outline,
-            frame_background: mix(window, role(PaletteRole::Base), 0.3).to_color(),
+            frame_background: frame_background.to_color(),
             focus: focus.to_color(),
             hover: hover.to_color(),
             focus_outline: mix(focus, window_text, OUTLINE_TOWARD_TEXT).to_color(),
@@ -179,9 +223,9 @@ impl KdePalette {
 
         KdePalette {
             colors: ColorState::ALL
-                .map(|state| BreezeColors::compute(&resolved, state, frame_contrast)),
+                .map(|state| BreezeColors::compute(&resolved, state, frame_contrast, false)),
             high_contrast_colors: ColorState::ALL
-                .map(|state| BreezeColors::compute(&enhanced_resolved, state, 1.0)),
+                .map(|state| BreezeColors::compute(&enhanced_resolved, state, 1.0, true)),
             resolved: Arc::new(resolved),
             frame_contrast,
             dark,
@@ -406,7 +450,7 @@ mod tests {
     fn the_combinations_follow_the_breeze_rules() {
         let scheme = KdeColorScheme::breeze_light();
         let resolved = scheme.resolve();
-        let c = BreezeColors::compute(&resolved, ColorState::Active, 0.2);
+        let c = BreezeColors::compute(&resolved, ColorState::Active, 0.2, false);
         let r = |role| resolved.role(ColorState::Active, role);
         assert_eq!(
             c.frame_outline,
@@ -442,6 +486,45 @@ mod tests {
         assert_ne!(
             p.breeze_colors(ColorState::Active, true).button_outline,
             p.colors(ColorState::Active).button_outline
+        );
+    }
+
+    /// D11 reaches the combinations: in an inactive window whose scheme
+    /// lightens its backgrounds toward the middle of the scale, the frame
+    /// background and outline are the tokens' and the button colour carries
+    /// the primary text, which the scheme's own button colour does not.
+    #[test]
+    fn the_combinations_are_made_from_the_surfaces_the_window_paints() {
+        use teksilo_kde_scheme::{IntensityEffect, StateEffect};
+        use teksilo_tokens::contrast::composite_contrast;
+        let mut scheme = KdeColorScheme::breeze_dark();
+        scheme.inactive_effect = StateEffect {
+            enabled: true,
+            intensity_effect: IntensityEffect::Lighten,
+            intensity_amount: 0.4,
+            ..StateEffect::INACTIVE_DEFAULT
+        };
+        let p = KdePalette::from_scheme(&scheme);
+        for (high_contrast, floor) in [(false, 4.5), (true, 7.0)] {
+            let t = p.tokens(PaintState {
+                window_active: false,
+                high_contrast,
+            });
+            let b = p.breeze_colors(ColorState::Inactive, high_contrast);
+            assert_eq!(b.frame_background, t.surface_raised);
+            assert_eq!(b.frame_outline, t.border);
+            assert!(composite_contrast(t.text_primary, b.button) >= floor);
+            assert!(composite_contrast(b.button_text, b.button) >= floor);
+            let vendor = p.role(ColorState::Inactive, PaletteRole::Button);
+            assert!(
+                composite_contrast(t.text_primary, vendor) < floor,
+                "premise: the scheme's own button colour falls short"
+            );
+        }
+        // The Disabled state keeps the scheme's colours.
+        assert_eq!(
+            p.colors(ColorState::Disabled).button,
+            p.role(ColorState::Disabled, PaletteRole::Button)
         );
     }
 

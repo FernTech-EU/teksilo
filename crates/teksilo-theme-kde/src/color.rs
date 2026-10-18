@@ -67,9 +67,11 @@
 //!   one in the hover colour at 50 %. Both move to 3:1.
 //! - **D10, the scheme's own text.** The window, view and tooltip text
 //!   move to the text floor where they fall short, toward their own end of
-//!   the scale. Stock Breeze's never do; a scheme whose text is a mid grey
-//!   does, and so does an inactive window whose scheme's inactive effects
-//!   fade or shade its text toward its background.
+//!   the scale, and so does the button text Breeze mixes a checked button's
+//!   face and the header and combo box arrows from, on the button colour.
+//!   Stock Breeze's never do; a scheme whose text is a mid grey does, and
+//!   so does an inactive window whose scheme's inactive effects fade or
+//!   shade its text toward its background.
 //! - **D11, surfaces in the middle of the scale.** Where black (under a
 //!   dark text) or white (under a light one) cannot reach the text floor on
 //!   a surface text is set on, the surface moves in luma away from the text
@@ -79,7 +81,14 @@
 //!   contrast, whose 7:1 needs a surface further from the middle; stock
 //!   Breeze, whose inactive effects are off, keeps every surface. All the
 //!   window's surfaces move the same way, the one the window lies in from
-//!   its text, and the tooltip by its own text.
+//!   its text, and the tooltip by its own text. The palette's Breeze
+//!   combinations ([`crate::palette::BreezeColors`]) are made from the
+//!   moved surfaces, so a push button, a table header or a check box is
+//!   painted on the button colour its text was lifted on; the faces the
+//!   styles mix from it (a default, checked or pressed button, a hovered or
+//!   pressed header section) move as the accent washes of D1 do, until the
+//!   primary text reaches the floor on them, and a check box's mark is
+//!   lifted to the non-text floor on its washed box.
 //!
 //! D7 and D8 are row heights, not colours, and live with the styles. The
 //! specification has no rule for D10 and D11 either: like D1 to D9 they are
@@ -107,11 +116,12 @@
 //!
 //! A hovered or focused field, check box, radio button, switch or slider
 //! handle is outlined in the scheme's hover or focus decoration in place of
-//! its lifted outline. Under high contrast the style lifts that decoration
-//! the same way, to 4.5:1 on the control surfaces and on the control's own
-//! face ([`high_contrast_boundary`]), so the control keeps a 4.5:1 boundary
-//! while the pointer is over it. In the normal projection it keeps the
-//! scheme's colour, as Breeze paints it.
+//! its lifted outline, and a spin box's hovered half draws its chevron, its
+//! only visual, in the hover decoration. Under high contrast the style
+//! lifts that decoration the same way, to 4.5:1 on the control surfaces and
+//! on the control's own face ([`high_contrast_boundary`]), so the control
+//! keeps a 4.5:1 boundary while the pointer is over it. In the normal
+//! projection it keeps the scheme's colour, as Breeze paints it.
 //!
 //! The selection fill does not move with the accent: it carries the
 //! window's primary text, which must reach 7:1 on it, so where that text
@@ -270,10 +280,11 @@ fn lift(color: KdeColor, on: &[KdeColor], floor: f32) -> KdeColor {
 /// own colour.
 ///
 /// The hovered or focused outline of a field, a check box, a radio button,
-/// a switch and a slider handle replaces the outline lifted at rest, so
-/// without this a hovered control would lose the 4.5:1 boundary the
-/// high-contrast projection gives it at rest (2.2:1 for Breeze Light's
-/// hover colour on its window).
+/// a switch and a slider handle replaces the outline lifted at rest, and a
+/// spin box's hovered chevron is drawn in it, so without this a hovered
+/// control would lose the 4.5:1 boundary the high-contrast projection gives
+/// it at rest (2.2:1 for Breeze Light's hover colour on its window, 2.5:1
+/// on its view).
 pub(crate) fn high_contrast_boundary(
     decoration: Color,
     colors: &ColorTokens,
@@ -297,7 +308,15 @@ pub(crate) fn high_contrast_boundary(
 /// own end of the scale, so it never crosses to the other side of the
 /// surfaces it is set on, where it might reach the floor on them but not on
 /// a fill moved away from it.
-fn lift_toward(color: KdeColor, on: &[KdeColor], floor: f32, toward: LumaDirection) -> KdeColor {
+///
+/// D10 for the button text the palette's Breeze combinations mix a checked
+/// button's face and the arrows from goes through here too.
+pub(crate) fn lift_toward(
+    color: KdeColor,
+    on: &[KdeColor],
+    floor: f32,
+    toward: LumaDirection,
+) -> KdeColor {
     let color = on.first().map_or(color, |&bg| opaque_on(color, bg));
     lift_luma_toward(color, on, floor, toward)
 }
@@ -346,6 +365,113 @@ fn carry(surface: KdeColor, direction: LumaDirection, floor: f32) -> KdeColor {
         a: surface.a,
         ..carried
     }
+}
+
+/// `[wcag]` D11 for one colour state: the window's, view's and button's
+/// backgrounds and Breeze's frame background, each carried in the direction
+/// the window lies from its text until black or white reaches `floor` on
+/// it, and that direction.
+///
+/// The colour tokens and the palette's Breeze combinations
+/// ([`crate::palette::BreezeColors`]) both read their surfaces here, so a
+/// style painting a button face paints the surface the text was lifted on.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Surfaces {
+    /// Where the window lies from its text: the way every surface moves.
+    pub polarity: LumaDirection,
+    /// `[qt]` Window.
+    pub window: KdeColor,
+    /// `[qt]` Base.
+    pub base: KdeColor,
+    /// `[qt]` Button.
+    pub button: KdeColor,
+    /// `[Hp]` The frame background, the window 30 % of the way to the view,
+    /// mixed from the carried two and carried again: a mix of two surfaces
+    /// of different hues can be darker than both.
+    pub frame_background: KdeColor,
+}
+
+impl Surfaces {
+    /// The surfaces of `state` of `palette`, carried to `floor`.
+    pub(crate) fn of(palette: &ResolvedPalette, state: ColorState, floor: f32) -> Surfaces {
+        let role = |r: PaletteRole| palette.role(state, r);
+        let polarity = away_from(role(PaletteRole::WindowText), role(PaletteRole::Window));
+        let surface = |c: KdeColor| carry(c, polarity, floor);
+        let window = surface(role(PaletteRole::Window));
+        let base = surface(role(PaletteRole::Base));
+        Surfaces {
+            polarity,
+            window,
+            base,
+            button: surface(role(PaletteRole::Button)),
+            frame_background: surface(mix(window, base, BLEND)),
+        }
+    }
+
+    /// `[wcag]` D11 for any other surface of the same window.
+    pub(crate) fn carry(&self, c: KdeColor, floor: f32) -> KdeColor {
+        carry(c, self.polarity, floor)
+    }
+
+    /// The end of the scale the window's text lies toward, which D10 lifts
+    /// a text toward.
+    pub(crate) fn text_side(&self) -> LumaDirection {
+        opposite(self.polarity)
+    }
+}
+
+/// `[wcag]` D1 for a face a style paints under the primary text (a default
+/// or checked push button's face, a pressed one, a hovered or pressed
+/// header section): `face` moved, as an accent wash is, toward the
+/// window's end of the scale until the primary text of `colors` reaches the
+/// text floor on it, 7:1 under `high_contrast` and 4.5:1 otherwise;
+/// unchanged when it already does, as in stock Breeze.
+///
+/// These faces are mixes Breeze makes from the button colour toward the
+/// highlight, the hover or focus colour or the button text, so a style
+/// computes them from the colours it paints, the app's accent included;
+/// the tokens' text is lifted on the button colour itself.
+pub(crate) fn face_under_primary_text(
+    face: Color,
+    colors: &ColorTokens,
+    high_contrast: bool,
+) -> Color {
+    let floor = if high_contrast { ENHANCED } else { AA }.text;
+    let text = KdeColor::from_color(colors.text_primary);
+    let toward = away_from(text, KdeColor::from_color(colors.surface_main));
+    let solid = opaque_on(
+        KdeColor::from_color(face),
+        KdeColor::from_color(colors.surface_main),
+    );
+    fill_toward(solid, &[text], floor, toward).to_color()
+}
+
+/// `[wcag]` A mark a style draws on faces of its own (a check box's mark, a
+/// combo box's or a header's arrow), lifted in luma to the non-text floor,
+/// 3:1 or 4.5:1 under `high_contrast`, on every one of `faces`; unchanged
+/// when it already reaches it, as stock Breeze's marks do.
+///
+/// Where the lift ends at black or white short of the floor (a face in the
+/// middle of the scale, with the mark already at the end on its side), the
+/// mark is the other of black and white when that one does better: on one
+/// opaque face one of the two reaches 4.58:1.
+pub(crate) fn mark_on_faces(mark: Color, faces: &[Color], high_contrast: bool) -> Color {
+    let floor = if high_contrast { ENHANCED } else { AA }.non_text;
+    let on: Vec<KdeColor> = faces.iter().map(|&f| KdeColor::from_color(f)).collect();
+    let lifted = lift(KdeColor::from_color(mark), &on, floor);
+    if passes(lifted, &on, floor) {
+        return lifted.to_color();
+    }
+    [KdeColor::BLACK, KdeColor::WHITE]
+        .into_iter()
+        .fold(lifted, |best, end| {
+            if worst_contrast(end, &on) > worst_contrast(best, &on) {
+                end
+            } else {
+                best
+            }
+        })
+        .to_color()
 }
 
 /// `[wcag]` D1: the text to paint on `fills`.
@@ -460,12 +586,12 @@ pub(crate) fn tokens(m: &Mapping<'_>) -> ColorTokens {
     // text, in the direction the window lies from it, until black or white
     // can reach the text floor on it. One direction for every surface, as
     // the primary text is set on all of them.
-    let polarity = away_from(window_text, role(s, PaletteRole::Window));
-    let surface = |c: KdeColor| carry(c, polarity, floors.text);
-    let window = surface(role(s, PaletteRole::Window));
-    let base = surface(role(s, PaletteRole::Base));
+    let carried = Surfaces::of(p, s, floors.text);
+    let surface = |c: KdeColor| carried.carry(c, floors.text);
+    let window = carried.window;
+    let base = carried.base;
     let alternate = surface(role(s, PaletteRole::AlternateBase));
-    let button = surface(role(s, PaletteRole::Button));
+    let button = carried.button;
     let highlight = role(s, PaletteRole::Highlight);
     let highlighted_text = role(s, PaletteRole::HighlightedText);
     let view = p.set(s, ColorSet::View);
@@ -478,7 +604,7 @@ pub(crate) fn tokens(m: &Mapping<'_>) -> ColorTokens {
 
     // `[Hp]` Breeze's frame background (menus, popups, group boxes): the
     // window colour 30 % of the way to the view's.
-    let frame_background = surface(mix(window, base, BLEND));
+    let frame_background = carried.frame_background;
     // `[Hp]` The frame outline and the separator: the window colour moved
     // toward the window text by the frame contrast.
     let frame_outline = mix(window, window_text, fc);
@@ -531,7 +657,7 @@ pub(crate) fn tokens(m: &Mapping<'_>) -> ColorTokens {
     // the text floor on the plain surfaces where it falls short (it never
     // does in a stock scheme's normal projection; the high-contrast one
     // raises the floor to 7:1).
-    let text_side = opposite(polarity);
+    let text_side = carried.text_side();
     let text_primary = lift_toward(window_text, &plain_surfaces, floors.text, text_side);
     // The window's end of the luma scale, away from its text.
     let toward_window = away_from(text_primary, window);

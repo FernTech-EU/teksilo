@@ -146,6 +146,9 @@ pub struct BoxPaint {
     pub outline: Color,
     /// The 1 px ring of the focus colour on the outline, under the pointer.
     pub hover_ring: Option<Color>,
+    /// The mark's colour (the check mark, the partial squares, the radio
+    /// dot): the one lifted on the pressed face while pressed.
+    pub mark: Color,
 }
 
 /// `[Hp]` What a box (or a radio disc) paints, marked or not, hovered or
@@ -167,6 +170,11 @@ pub fn box_paint(
         wash: marked.then(|| c.highlight.with_alpha(INDICATOR_CHECKED_WASH)),
         outline: if marked { c.highlight } else { c.outline },
         hover_ring: (hovered && active).then_some(c.focus),
+        mark: if pressed && active {
+            c.text_pressed
+        } else {
+            c.text
+        },
     }
 }
 
@@ -370,7 +378,7 @@ impl Widget for BreezeCheckboxBody {
         match check {
             CheckboxState::Checked => {
                 let points = check_mark(indicator, progress);
-                if points.len() >= 2 && colors.text.a() > 0.0 {
+                if points.len() >= 2 && paint.mark.a() > 0.0 {
                     let mut path = Path::new();
                     path.move_to(points[0]);
                     for p in &points[1..] {
@@ -383,12 +391,12 @@ impl Widget for BreezeCheckboxBody {
                     // (`check_box.on` covers (5, 10) of the indicator, 1 px
                     // before the first point, at 0.83).
                     style.line_cap = LineCap::Square;
-                    canvas.stroke_path(&path, colors.text, style);
+                    canvas.stroke_path(&path, paint.mark, style);
                 }
             }
             CheckboxState::Indeterminate => {
                 for dot in partial_dots(indicator, progress, rtl) {
-                    canvas.fill_rect(dot, colors.text);
+                    canvas.fill_rect(dot, paint.mark);
                 }
             }
             CheckboxState::Unchecked => {}

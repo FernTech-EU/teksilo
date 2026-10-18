@@ -164,12 +164,12 @@ impl Widget for BreezeRadioBody {
         } else {
             0.0
         };
-        if r > 0.0 && colors.text.a() > 0.0 {
+        if r > 0.0 && paint.mark.a() > 0.0 {
             let centre = Point::new(
                 indicator.x + INDICATOR_SIZE * 0.5,
                 indicator.y + INDICATOR_SIZE * 0.5,
             );
-            canvas.fill_circle(centre, r, colors.text);
+            canvas.fill_circle(centre, r, paint.mark);
         }
 
         if self.show_focus_frame.get() {
