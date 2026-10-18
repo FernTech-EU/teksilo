@@ -185,9 +185,10 @@ pub fn tool_is_older(app: &str) -> bool {
 pub fn self_install(app: &str, checkout: Option<&Path>) -> crate::install::Install {
     let exe = std::env::current_exe().ok();
     match checkout {
-        Some(root) => {
-            crate::install::Install::path(&root.join("crates/cargo-teksilo"), exe.as_deref())
-        }
+        Some(root) => crate::install::Install::path(
+            &root.join("crates").join("cargo-teksilo"),
+            exe.as_deref(),
+        ),
         None => crate::install::Install::release("cargo-teksilo", app, exe.as_deref()),
     }
 }
@@ -305,9 +306,16 @@ mod tests {
 
     #[test]
     fn the_tool_installs_from_a_checkout_when_the_app_uses_one() {
-        let line = outdated_tool_text("9.9.9", Some(Path::new("/src/teksilo")));
+        let checkout = Path::new("/src/teksilo");
+        let line = outdated_tool_text("9.9.9", Some(checkout));
+        // The platform's own separator throughout: a literal `crates/...`
+        // joined onto the checkout printed `/src/teksilo\crates/cargo-teksilo` on Windows.
+        let path = checkout.join("crates").join("cargo-teksilo");
         assert!(
-            line.contains("`cargo install --path /src/teksilo/crates/cargo-teksilo --locked`"),
+            line.contains(&format!(
+                "`cargo install --path {} --locked`",
+                path.display()
+            )),
             "{line}"
         );
         let line = outdated_tool_text("9.9.9", None);
