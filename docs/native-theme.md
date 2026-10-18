@@ -187,3 +187,24 @@ settings, and `KdeDesktop::new(KdeColorScheme::breeze_dark())` a KDE desktop at
 Plasma's defaults, so a test can call `resolve_native_theme` or a factory
 without a desktop. `teksilo-kde-scheme` takes the environment and the files as
 arguments for the same reason.
+
+### The Breeze preset in the running catalog
+
+`tools/reader/kde_visual_check.sh` checks the KDE preset as it renders in the
+real `widget-catalog`, and in Native mode on a KDE desktop. It builds the debug
+catalog and `teksilo-automation-mcp`, then runs everything in a private session
+(`tools/reader/private_session.sh`: its own D-Bus bus, `kwin_wayland --virtual`
+and configuration home), so neither the catalog nor Plasma's tools reach the
+desktop or `~/.config`. For `--theme kde-light`, `kde-dark` and `system` in
+turn, it gives the private configuration a Breeze scheme with
+`plasma-apply-colorscheme`, starts the catalog as on a KDE session, and measures
+over the automation bridge the push button, line edit, combo box, spin box,
+check box row, list and tree rows, table header and row, menu row, tab and
+scroll bars. It prints each height beside Plasma 6.8's own
+(`tools/kde_golden/vectors/sizes.json`), the specification's and the preset's,
+with the documented deviations, and fails on a control more than 1 px from the
+preset's height or missing from the catalog. In `system` mode it then switches
+the desktop to Breeze Dark and to another accent while the catalog runs, and
+checks that the window repaints in the new colours with the same widget tree.
+It needs `kwin_wayland` and Plasma's `plasma-apply-colorscheme`, so it is not
+part of `cargo test`.
