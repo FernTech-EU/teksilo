@@ -194,17 +194,28 @@ arguments for the same reason.
 real `widget-catalog`, and in Native mode on a KDE desktop. It builds the debug
 catalog and `teksilo-automation-mcp`, then runs everything in a private session
 (`tools/reader/private_session.sh`: its own D-Bus bus, `kwin_wayland --virtual`
-and configuration home), so neither the catalog nor Plasma's tools reach the
-desktop or `~/.config`. For `--theme kde-light`, `kde-dark` and `system` in
-turn, it gives the private configuration a Breeze scheme with
-`plasma-apply-colorscheme`, starts the catalog as on a KDE session, and measures
-over the automation bridge the push button, line edit, combo box, spin box,
-check box row, list and tree rows, table header and row, menu row, tab and
-scroll bars. It prints each height beside Plasma 6.8's own
-(`tools/kde_golden/vectors/sizes.json`), the specification's and the preset's,
-with the documented deviations, and fails on a control more than 1 px from the
-preset's height or missing from the catalog. In `system` mode it then switches
-the desktop to Breeze Dark and to another accent while the catalog runs, and
-checks that the window repaints in the new colours with the same widget tree.
-It needs `kwin_wayland` and Plasma's `plasma-apply-colorscheme`, so it is not
-part of `cargo test`.
+and configuration home). The session keeps the desktop's `XDG_CONFIG_DIRS`,
+which on Plasma lists `~/.config/kdedefaults` and `/etc/xdg`, so the check
+gives the catalog and Plasma's tools a configuration list of their own, one
+private directory, and sets `KDE_SKIP_KDERC`: no `kdeglobals` of the machine
+(its widget style, fonts, animation factor or default scheme) reaches what is
+measured, and neither the catalog nor Plasma's tools write to the desktop or
+`~/.config`. For `--theme kde-light`, `kde-dark` and `system` in turn, it gives
+the private configuration a Breeze scheme with `plasma-apply-colorscheme`,
+starts the catalog as on a KDE session, and measures over the automation bridge
+the push button, the tooltip of an icon button, line edit, combo box, spin box,
+check box and radio button rows, switch, slider, progress bar, list and tree rows,
+table header, menu row, tab and scroll bars. It prints each height beside
+Plasma 6.8's own (`tools/kde_golden/vectors/sizes.json`), the specification's
+and the preset's, with the documented deviations, and fails on a control more
+than 1 px from the preset's height or missing from the catalog. The table row,
+and the `ListView` and `TreeView` rows, are printed as INFO and not judged: the
+catalog sets their heights itself. In `system` mode it then switches the desktop
+to Breeze Dark and to another accent while the catalog runs. For each change it
+checks that the window presented a frame without any input (the catalog's
+`TEKSILO_IDLE_TRACE` counts the frames drawn to the window, and the span after
+the change is compared with the same span when nothing changed), that the
+widget tree, rendered offscreen by the bridge's screenshots, paints in the new
+colours, and that it is the same widget tree. The screenshots do not read the
+frame on screen. It needs `kwin_wayland` and Plasma's
+`plasma-apply-colorscheme`, so it is not part of `cargo test`.

@@ -15,21 +15,37 @@ directory, `kwin_wayland --virtual` and configuration home, so neither the
 catalog nor `plasma-apply-colorscheme` touches the desktop or the user's
 `~/.config`. Started any other way, the driver refuses to run.
 
+The private session keeps the desktop's `XDG_CONFIG_DIRS`, which on a Plasma
+desktop lists `~/.config/kdedefaults` (written by the Global Theme settings)
+before `/etc/xdg`, and the catalog reads every `kdeglobals` of that list
+(specification b.7). The driver therefore gives the catalog and
+`plasma-apply-colorscheme` a configuration list of their own, one private
+directory, and sets `KDE_SKIP_KDERC`, so no file of this machine's cascade
+(a widget style, a font, an animation factor, a look-and-feel package)
+decides what is measured. That directory holds one `kdeglobals` naming the
+scheme `BreezeClassic` (`CASCADE_DEFAULT_SCHEME`), a scheme no mode asks
+for: `plasma-apply-colorscheme` writes no `ColorScheme` key when asked for the
+scheme the cascade already defaults to, so with the default left to the
+machine one of the two Breeze schemes would be seeded as nothing.
+
 For each mode, `kde-light`, `kde-dark` and `system`:
 
 1. The private configuration home is given a Breeze colour scheme by the
    installed `plasma-apply-colorscheme` (BreezeLight for `kde-light` and
-   `system`, BreezeDark for `kde-dark`), and the catalog runs with
+   `system`, BreezeDark for `kde-dark`), and the driver checks that the
+   private `kdeglobals` names it. The catalog runs with
    `XDG_CURRENT_DESKTOP=KDE` and `KDE_FULL_SESSION=true`, so the native path
    takes the session for a Breeze desktop.
 2. `widget-catalog --theme <mode>` starts; the driver reads its automation
    bridge's endpoint descriptor under the private runtime directory and
    attaches `teksilo-automation-mcp --connect`.
 3. It opens the catalog tabs the controls live on and measures each control
-   with `layout_tree`, found by its Rust type name: a push button, a line
-   edit's frame, a combo box, a spin box, a check box row, a list row and a
-   tree row, a table header and a table row, a row of a menu opened from a
-   menu bar, a tab of a horizontal tab bar and a scroll bar's extent. Every
+   with `layout_tree`, found by its Rust type name: a push button, the
+   tooltip a hover over an icon button opens, a line edit's frame, a combo
+   box, a spin box, a check box row, a radio button row, a switch, a
+   slider, a progress bar, a list row and a tree row, a table header and a table row,
+   a row of a menu opened from a menu bar, a tab of a horizontal tab bar and
+   a scroll bar's extent. Every
    height is printed beside the Breeze value Plasma 6.8 reports
    (`tools/kde_golden/vectors/sizes.json`, the entry named in the table), the
    specification's computed size (`engineering/docs/kde-breeze-spec.md`
@@ -47,20 +63,33 @@ For each mode, `kde-light`, `kde-dark` and `system`:
    button is 24 px high, Breeze's 34).
 4. In `system` mode only, it then changes the desktop while the catalog
    runs: `plasma-apply-colorscheme BreezeDark`, then the accent `#e93a9a`.
-   After each it polls, with a deadline, screenshots of a push button and of
-   the selected tab of the catalog's tab bar until they change (the desktop
-   watch reports a change 150 ms after the signal), and checks that the
-   button turned darker and that the selected tab's changed pixels moved
-   toward the new accent. Then it checks that nothing was rebuilt: the
-   `layout_tree` node ids and the bounds of every active node are the ones
-   measured before the change.
+   Two things are checked for each change.
+   - The window presented a frame because of it. The catalog runs with
+     `TEKSILO_IDLE_TRACE=1`, whose report counts the frames rendered to the
+     window's surface (not the offscreen renders a screenshot makes). The
+     driver makes no bridge call for `QUIET_WINDOW` seconds after the
+     change and reads how many frames were presented in that span, and
+     compares that with the same span measured just before with nothing
+     changed (where only the frame its own previous call asked for is
+     drawn): the change must present more.
+   - The tree paints in the new colours. Screenshots, which render the
+     current tree offscreen, of a push button and of the selected tab of
+     the catalog's tab bar are polled with a deadline until they change;
+     the button must turn darker and the selected tab's changed pixels move
+     toward the new accent.
+   Then it checks that nothing was rebuilt: the `layout_tree` node ids and
+   the bounds of every active node are the ones measured before the change.
+   The screenshots do not read the presented frame, so what is shown is
+   that a frame was presented after the change and that the tree it renders
+   paints in the new colours.
 
 Some heights are not the preset's to give, and are printed as INFO rather
-than judged: the catalog's `TableView` and `TreeView` set their row heights
-themselves (28 px), and a `ListView` lays its rows out at its own uniform
-item height (32 px) whatever the style. The preset's table row height (24,
-D7) therefore has no table in the catalog to show it, and no list or tree
-row in the catalog has an icon or a check box; `NOT_IN_CATALOG` names both.
+than judged: the catalog's `TableView` sets its row height itself (28 px,
+the row printed as "table row"), so does its `TreeView` (28 px), and a
+`ListView` lays its rows out at its own uniform item height (32 px) whatever
+the style. The preset's table row height (24, D7) therefore has no table in
+the catalog to show it, and no list or tree row in the catalog has an icon
+or a check box; `NOT_IN_CATALOG` names both.
 
 Exit status: 0 when every judged control passes, 1 on a failed check (the
 reason is printed), 2 when the driver cannot run (not a private session,
@@ -98,12 +127,21 @@ SWITCHER_ENTRY = {"kde-light": "KDE Light", "kde-dark": "KDE Dark", "system": "S
 #: The accent the system mode applies while the catalog runs: Plasma's pink
 #: swatch (specification, section h).
 LIVE_ACCENT = "#e93a9a"
+#: The scheme the private configuration list defaults to: a Breeze scheme no
+#: mode seeds, so `plasma-apply-colorscheme` always writes the one asked for.
+CASCADE_DEFAULT_SCHEME = "BreezeClassic"
 
 #: How long a launch, a tab switch, a menu or a repaint is waited for.
 LAUNCH_DEADLINE = 90.0
 STEP_DEADLINE = 20.0
 REPAINT_DEADLINE = 15.0
 POLL = 0.1
+#: The span after a desktop change in which no bridge call is made, so every
+#: frame presented in it is the catalog's own (the desktop watch reports a
+#: change 150 ms after the signal).
+QUIET_WINDOW = 2.0
+#: How long the catalog's idle trace waits between two reports.
+TRACE_PERIOD = 1.1
 #: The tolerance of a judged height, in logical pixels.
 TOLERANCE = 1.0
 
@@ -114,6 +152,14 @@ FIELD_CHROME = "teksilo_theme_kde::styles::text_input::BreezeFieldChrome"
 COMBO = "teksilo_widgets::combo_box::ComboBox<"
 SPIN = "teksilo_widgets::spin_box::SpinBox<"
 CHECKBOX = "teksilo_widgets::checkbox::Checkbox"
+RADIO = "teksilo_widgets::radio_button::RadioButton"
+SWITCH_BODY = "teksilo_theme_kde::styles::toggle::BreezeSwitchBody"
+SLIDER_BODY = "teksilo_theme_kde::styles::slider::BreezeSliderBody"
+PROGRESS_BODY = "teksilo_theme_kde::styles::progress_bar::BreezeProgressBody"
+ICON_BUTTON = "teksilo_widgets::icon_button::IconButton"
+TOOLTIP = "teksilo_widgets::tooltip::TooltipWidget"
+POPUP_FRAME = "teksilo_theme_kde::styles::popup::BreezePopupFrame"
+TEXT = "teksilo_widgets::primitives::text_widget::TextWidget"
 LIST_ITEM = "teksilo_widgets::standard_item::StandardListItem"
 TREE_ITEM = "teksilo_widgets::standard_item::StandardTreeItem"
 LIST_ROW_WRAPPER = "teksilo_widgets::list_item_a11y::ListItemWrapper"
@@ -199,6 +245,8 @@ class Desktop:
     """The private desktop's KDE configuration, written by Plasma's own tool."""
 
     config: Path
+    #: The one directory of the private `XDG_CONFIG_DIRS`.
+    config_dirs: Path
     user_kdeglobals: Path
     user_stat: tuple | None
 
@@ -206,19 +254,37 @@ class Desktop:
     def open(cls, config: Path) -> "Desktop":
         if shutil.which("plasma-apply-colorscheme") is None:
             raise CannotRun("plasma-apply-colorscheme is not installed")
+        # Inside the private runtime directory, which check_private_session
+        # has vetted.
+        config_dirs = Path(os.environ["XDG_RUNTIME_DIR"]) / "kde-visual-check-config-dirs"
+        config_dirs.mkdir(mode=0o700, exist_ok=True)
+        (config_dirs / "kdeglobals").write_text(
+            f"[General]\nColorScheme={CASCADE_DEFAULT_SCHEME}\n")
         user = user_config_home() / "kdeglobals"
-        return cls(config, user, stat_or_none(user))
+        return cls(config, config_dirs, user, stat_or_none(user))
 
     @property
     def kdeglobals(self) -> Path:
         return self.config / "kdeglobals"
 
+    def session_env(self, **extra: str) -> dict[str, str]:
+        """The environment the catalog and Plasma's tool both run with.
+
+        `XDG_CONFIG_DIRS` is the private list alone: the session's own value
+        names the desktop's `~/.config/kdedefaults` and `/etc/xdg`, whose
+        `kdeglobals` would otherwise set the widget style, the fonts and the
+        default scheme of what is measured. `KDE_SKIP_KDERC` leaves
+        `/etc/kde5rc` out of the cascade for the same reason.
+        """
+        env = dict(os.environ, XDG_CONFIG_HOME=str(self.config),
+                   XDG_CONFIG_DIRS=str(self.config_dirs), KDE_SKIP_KDERC="1")
+        env.update(extra)
+        return env
+
     def env(self) -> dict[str, str]:
-        env = dict(os.environ, XDG_CONFIG_HOME=str(self.config))
         # The tool needs no window; it would otherwise try the private
         # compositor and an X display that does not exist.
-        env["QT_QPA_PLATFORM"] = "offscreen"
-        return env
+        return self.session_env(QT_QPA_PLATFORM="offscreen")
 
     def run_tool(self, *args: str) -> None:
         proc = subprocess.run(["plasma-apply-colorscheme", *args], env=self.env(),
@@ -256,12 +322,12 @@ class Desktop:
                 shutil.rmtree(path)
             elif path.exists():
                 path.unlink()
-        # With no kdeglobals the tool takes the system default (the Look and
-        # Feel's scheme, from XDG_CONFIG_DIRS, which differs between machines)
-        # for the scheme in use, and writes nothing when asked for that one. Going
-        # through the other Breeze scheme first writes `scheme` whatever the
-        # default is.
-        self.run_tool("BreezeDark" if scheme == "BreezeLight" else "BreezeLight")
+        # With no kdeglobals of its own the tool takes the cascade's default
+        # for the scheme in use, and writes no ColorScheme key when asked for
+        # that one. The private cascade defaults to CASCADE_DEFAULT_SCHEME,
+        # which no mode seeds, so the requested scheme is always written.
+        if scheme == CASCADE_DEFAULT_SCHEME:
+            raise CannotRun(f"{scheme} is the private cascade's default and cannot be seeded")
         self.run_tool(scheme)
         self.expect_scheme(scheme)
 
@@ -542,6 +608,9 @@ class Breeze:
     def __init__(self, path: Path):
         data = json.loads(path.read_text())
         self.widgets = {w["id"]: w for w in data["widgets"] if w.get("font") == "Noto Sans 10"}
+        self.tooltip = data["tooltip"]
+        if self.tooltip.get("font") != "Noto Sans 10":
+            raise CannotRun(f"{SIZES} measures its tooltip at {self.tooltip.get('font')!r}")
 
     def widget(self, wid: str) -> dict:
         if wid not in self.widgets:
@@ -564,13 +633,18 @@ class Breeze:
     def tab(self) -> tuple[float, str]:
         return self.widget("tab_bar")["tab_rects"][0][3], "tab_bar tab_rects[0] h"
 
+    def tooltip_height(self) -> float:
+        return self.tooltip["size_hint"][1]
+
 
 @dataclass
 class Spec:
     """One control's expectations."""
 
     control: str
-    breeze: tuple[float, str]
+    #: Plasma's value and the sizes.json entry it is read from; the value is
+    #: None for a control the file has no entry for.
+    breeze: tuple[float | None, str]
     #: The specification's k.4 size at H = 18, as text (it can carry a note).
     spec_k4: str
     #: The height the preset gives it, or None for an INFO row.
@@ -652,7 +726,10 @@ class ModeCheck:
 
     def run(self) -> None:
         self.desktop.seed(SEED_SCHEME[self.mode])
-        env = dict(os.environ, XDG_CURRENT_DESKTOP="KDE", KDE_FULL_SESSION="true")
+        env = self.desktop.session_env(XDG_CURRENT_DESKTOP="KDE", KDE_FULL_SESSION="true")
+        if self.mode == "system":
+            # Counts the frames presented to the window (see live_change).
+            env["TEKSILO_IDLE_TRACE"] = "1"
         self.bridge = Bridge(["--theme", self.mode, "--tab", "buttons"], env, self.out, self.mode)
         try:
             self.measure_all()
@@ -690,6 +767,7 @@ class ModeCheck:
             self.failures.append("the push button is not painted by the Breeze button chrome")
         self.measure(Spec("push button", br.hint_height("push_button"), "34", 34,
                           "Breeze's H + 16"), button)
+        self.measure_tooltip(layout, tab)
 
         layout = self.open_tab("Text")
         tab = layout.active_tab_content()["id"]
@@ -709,6 +787,34 @@ class ModeCheck:
         check = layout.find(tab, is_type(CHECKBOX), "Checkbox on the Inputs tab")[0]
         self.measure(Spec("check box row", br.hint_height("check_box"), "22", 24,
                           "D8: the 24 px target, the 20 px indicator unchanged"), check)
+        radio = layout.find(tab, is_type(RADIO), "RadioButton on the Inputs tab")[0]
+        self.measure(Spec("radio button row", br.hint_height("radio_button"), "22", 24,
+                          "D8: the 24 px target, the 20 px indicator unchanged"), radio)
+        # Breeze's switch is a QtQuick control (k.5.9): sizes.json, measured
+        # from QWidgets, has no entry for it.
+        switch = layout.find(tab, is_type(SWITCH_BODY), "Breeze switch on the Inputs tab")[0]
+        self.measure(Spec("switch (Toggle)", (None, "no entry: a QtQuick control"), "18 (36 x 18)",
+                          24, f"documented: the node is raised to the 24 px target, the painted "
+                          f"36 x 18 unchanged; node {fmt(switch['bounds']['width'])} wide"),
+                     switch)
+        # The catalog's sliders have no tick marks (Breeze's 23 and 26 are the
+        # ticked ones); the first horizontal one is the volume slider.
+        slider = layout.find(tab, lambda n: is_type(SLIDER_BODY)(n)
+                             and n["bounds"]["width"] > n["bounds"]["height"],
+                             "horizontal Breeze slider on the Inputs tab")[0]
+        self.measure(Spec("slider (horizontal)", br.hint_height("slider.horizontal"), "20", 24,
+                          "documented: the node is raised to the 24 px target, the "
+                          "painted 20 px unchanged"), slider)
+
+        layout = self.open_tab("Indicators")
+        tab = layout.active_tab_content()["id"]
+        # The first horizontal bar is the determinate one; the vertical one is
+        # given a thickness of 8 by the catalog.
+        progress = layout.find(tab, lambda n: is_type(PROGRESS_BODY)(n)
+                               and n["bounds"]["width"] > n["bounds"]["height"],
+                               "horizontal Breeze progress bar on the Indicators tab")[0]
+        self.measure(Spec("progress bar", br.hint_height("progress_bar"), "26", 26,
+                          "Qt's H + 8, the 6 px groove centred"), progress)
 
         layout = self.open_tab("Data")
         tab = layout.active_tab_content()["id"]
@@ -784,7 +890,74 @@ class ModeCheck:
         b.call("inject_key", {"key": "Escape"})
         self.wait_for("the menu did not close", lambda: None if popup_rows() else True)
 
+    def measure_tooltip(self, layout: Layout, tab: int) -> None:
+        """The tooltip a hover over the Buttons tab's first icon button opens."""
+        b = self.bridge
+        assert b is not None
+        icon = layout.find(tab, is_type(ICON_BUTTON), "icon button on the Buttons tab")[0]
+        b.call("inject_pointer", {"node": icon["id"], "action": "move",
+                                  "x": icon["bounds"]["width"] / 2,
+                                  "y": icon["bounds"]["height"] / 2})
+
+        def frames():
+            lay = b.layout()
+            tips = [n for n in lay.nodes if n["type"] == TOOLTIP and n["active"]
+                    and n["bounds"]["height"] > 0]
+            if not tips:
+                return None
+            frame = [n for n in lay.descendants(tips[0]["id"]) if n["type"] == POPUP_FRAME]
+            text = [n for n in lay.descendants(tips[0]["id"]) if n["type"] == TEXT]
+            return (frame[0], text[0]) if frame and text else None
+
+        frame, text = self.wait_for("no tooltip opened over the icon button", frames)
+        # The known limitation: a plain TooltipWidget writes its text in the
+        # small style, so the frame is that line box plus Breeze's 4 px on
+        # each side, not Plasma's 26.
+        line = text["bounds"]["height"]
+        self.measure(Spec("tooltip, one line", (self.breeze.tooltip_height(), "tooltip size_hint h"),
+                          "26", line + 8,
+                          f"known limitation: the small text style's {fmt(line)} px line box "
+                          "+ 2 x 4"), frame)
+        # Away from every control, so the tooltip closes.
+        b.call("inject_pointer", {"action": "move", "x": 2, "y": 2})
+        self.wait_for("the tooltip did not close", lambda: None if frames() else True)
+
     # -- live change (system mode) ---------------------------------------------
+
+    def presented_frames(self, change=None) -> int:
+        """Frames presented to the window in `QUIET_WINDOW` s, with `change` run first.
+
+        The catalog's idle trace prints its counters on the first event at
+        least `TRACE_PERIOD` after its last report, and a bridge call is such
+        an event, its report written before the call is answered. So: one
+        call after a quiet `TRACE_PERIOD` closes the span before, then no call
+        for `QUIET_WINDOW`, then one more call closes the span measured. The
+        frame the first call itself asks for falls in that span; the control
+        span, measured with `change` None, has it too.
+        """
+        b = self.bridge
+        assert b is not None
+        time.sleep(TRACE_PERIOD)
+        b.call("list_windows")
+        offset = b.log_path.stat().st_size
+        if change is not None:
+            change()
+        time.sleep(QUIET_WINDOW)
+        b.call("list_windows")
+        with open(b.log_path, "rb") as log:
+            log.seek(offset)
+            lines = log.read().decode(errors="replace").splitlines()
+        reports = [ln for ln in lines if ln.startswith("teksilo_idle_trace ")]
+        if not reports:
+            raise CheckFailed(f"the catalog's idle trace printed no report in {b.log_path} "
+                              "(TEKSILO_IDLE_TRACE not honoured?)")
+        total = 0
+        for ln in reports:
+            field = next((f for f in ln.split() if f.startswith("rendered_frames=")), None)
+            if field is None:
+                raise CheckFailed(f"an idle trace report has no rendered_frames: {ln}")
+            total += int(field.split("=", 1)[1])
+        return total
 
     def live_change(self) -> None:
         b = self.bridge
@@ -803,34 +976,44 @@ class ModeCheck:
                 return img if len(reference.changed(img)) >= 20 else None
             return probe
 
-        start = time.monotonic()
-        self.desktop.run_tool("BreezeDark")
-        self.desktop.expect_scheme("BreezeDark")
-        dark_button = self.wait_for("the push button was not repainted after the scheme "
-                                    "changed to BreezeDark", repainted(button["id"], shot_button),
-                                    REPAINT_DEADLINE)
-        took = time.monotonic() - start
+        def frames_after(what: str, change) -> None:
+            control = self.presented_frames()
+            changed = self.presented_frames(change)
+            self.notes.append(f"{what}: {changed} frames presented in the {QUIET_WINDOW:g} s "
+                              f"after it with no bridge call, {control} in the same span with "
+                              "nothing changed")
+            if changed <= control:
+                self.failures.append(f"the window presented no frame for {what} ({changed} "
+                                     f"frames after it, {control} with nothing changed)")
+
+        def to_dark() -> None:
+            self.desktop.run_tool("BreezeDark")
+            self.desktop.expect_scheme("BreezeDark")
+
+        frames_after("the scheme change to BreezeDark", to_dark)
+        dark_button = self.wait_for("the push button does not paint differently after the "
+                                    "scheme changed to BreezeDark",
+                                    repainted(button["id"], shot_button), REPAINT_DEADLINE)
         l0, l1 = luma(shot_button.mean()), luma(dark_button.mean())
-        self.notes.append(f"BreezeDark: push button repainted after {took:.2f} s, mean luma "
-                          f"{l0:.1f} -> {l1:.1f}, {len(shot_button.changed(dark_button))} of "
+        self.notes.append(f"BreezeDark: the push button paints at mean luma {l0:.1f} -> "
+                          f"{l1:.1f}, {len(shot_button.changed(dark_button))} of "
                           f"{len(dark_button.pixels)} pixels changed")
         if not l1 < l0 - 30:
             self.failures.append(f"the push button did not turn dark (mean luma {l0:.1f} -> "
                                  f"{l1:.1f})")
         dark_tab = b.screenshot(selected["id"])
 
-        start = time.monotonic()
-        self.desktop.run_tool("-a", LIVE_ACCENT)
-        accent_tab = self.wait_for("the selected tab was not repainted after the accent "
-                                   f"changed to {LIVE_ACCENT}", repainted(selected["id"], dark_tab),
-                                   REPAINT_DEADLINE)
-        took = time.monotonic() - start
+        frames_after(f"the accent change to {LIVE_ACCENT}",
+                     lambda: self.desktop.run_tool("-a", LIVE_ACCENT))
+        accent_tab = self.wait_for("the selected tab does not paint differently after the "
+                                   f"accent changed to {LIVE_ACCENT}",
+                                   repainted(selected["id"], dark_tab), REPAINT_DEADLINE)
         moved = dark_tab.changed(accent_tab)
         r0, g0, _ = dark_tab.mean(moved)
         r1, g1, _ = accent_tab.mean(moved)
-        self.notes.append(f"accent {LIVE_ACCENT}: selected tab repainted after {took:.2f} s, "
-                          f"{len(moved)} pixels changed, their mean red {r0:.0f} -> {r1:.0f}, "
-                          f"green {g0:.0f} -> {g1:.0f}")
+        self.notes.append(f"accent {LIVE_ACCENT}: the selected tab paints {len(moved)} pixels "
+                          f"differently, their mean red {r0:.0f} -> {r1:.0f}, green {g0:.0f} -> "
+                          f"{g1:.0f}")
         if not (r1 > r0 and g1 < g0):
             self.failures.append("the selected tab's changed pixels did not move toward the "
                                  f"accent {LIVE_ACCENT}")
@@ -861,7 +1044,8 @@ class ModeCheck:
             lines.append((
                 r.spec.control,
                 fmt(r.measured),
-                f"{fmt(r.spec.breeze[0])} ({r.spec.breeze[1]})",
+                ("-" if r.spec.breeze[0] is None else fmt(r.spec.breeze[0]))
+                + f" ({r.spec.breeze[1]})",
                 r.spec.spec_k4,
                 "-" if r.spec.intended is None else fmt(r.spec.intended),
                 r.spec.note,
