@@ -15,587 +15,212 @@ by crate for clarity, not because crates version independently.
 
 ### Added
 
-#### Theming
-
-- **`ComponentStyleSlots::NAMES`.** The name of every theme-wide style slot,
-  in declaration order, the same names `installed()` reports. A test can say
-  which slots a theme fills and which it leaves to the widget's default as set
-  equality against it, so a slot added to the framework later cannot be
-  overlooked.
-- **`PaintProjection`: a theme's own inactive-window and high-contrast
-  colours.** A theme registers `with_paint_projection(fn(&Theme, PaintState)
-  -> Theme)` and every frame of an inactive window, or under the OS increase
-  contrast preference, paints the colours it returns instead of the generic
-  accent desaturation and high-contrast swap. `Theme::for_paint_state` and
-  `Theme::paint_colors` give the theme or palette for a `PaintState`; without
-  a hook they return what the paint walker painted before. The preference is
-  readable at build time through `BuildContext::prefers_high_contrast`,
-  `high_contrast_signal` and `paint_state`.
-- **A negative `ShapeTokens::focus_ring_offset`.** A theme can draw its focus
-  ring partly or wholly inside the control: an offset of `-1` with a 2 dp
-  width runs from 1 dp inside the edge to 1 dp outside it. Every stock ring
-  (sliders, toggles, segmented controls, breadcrumbs, radio tile groups,
-  avatars, colour swatches, tabs and the Material 3, macOS and KDE presets) follows
-  it without inverting on a small control, and a control reserves only the
-  ring's reach outside it. Tabs, which sit flush against each other, keep
-  their ring inside the tab: any offset at or below zero draws it flush with
-  the tab edge. `ShapeTokens::focus_ring_envelope` and
-  `focus_ring_stroke_distance` give those two distances, and
-  `FocusRingStroke` gives the rectangle and radius a ring is stroked on.
-- **`StandardItemStyle::min_height_single_line` and `min_height_two_line`.**
-  A row style says how tall a `StandardListItem` or `StandardTreeItem` row is
-  at the active density, with and without a subtitle. Both have defaults, so
-  an existing style keeps its row heights.
-- **`TableStyle::row_height` and `header_height`.** A table style says how
-  tall a `TableView` or `TreeTableView` body row and column header row are at
-  the active density. Both have defaults, the shipped table heights raised to
-  the density's target size.
-- **`TabStyle::editor_height` and `padding_horizontal`.** A tab style says how
-  tall a `TabBar` or `TabWidget` tab is and how far its title sits from the
-  tab's edges at the active density. Both have defaults, so an existing style
-  keeps Int UI's 50 px tabs.
-- **`ScrollBarStyle::min_thumb_length`.** A scroll-bar style says how short a
-  `ScrollBar` thumb may get on a long document at the active density. It has
-  a default, so an existing style keeps the shipped floor.
-- **`StandardItemStyle::selection_emphasis` and `SelectionEmphasis`.** A row
-  style says what mutes a selected `StandardListItem` or `StandardTreeItem`:
-  the view losing keyboard focus or the window going inactive
-  (`ViewFocusedAndWindowActive`, the default and the rule every row followed
-  before), or the window going inactive only (`WindowActive`, Qt's per-window
-  colour groups). The row's label, subtitle and chevron follow it, and
-  `SelectionEmphasis::emphasised` gives a style the same condition for its
-  own selection fill.
-- **`StandardItemStyle::min_height_decorated`.** A row style says how tall a
-  `StandardListItem` or `StandardTreeItem` row with a check box or a leading
-  slot is at the active density, for a design whose rows grow with an icon.
-  It defaults to the single-line height, so an existing style keeps one
-  height for every row.
-- **`ProgressBarStyle::thickness` and `paints_busy_indicator`.** A progress
-  bar style says how thick a `ProgressBar` is when the app sets no
-  thickness, and whether it draws an indeterminate bar's motion itself, in
-  which case the bar shows the style alone instead of its own sweep. Both
-  have defaults, so an existing style keeps the 4 px bar and the sweep.
-- **`MenuItemStyle::pressed_label_role`.** A menu style gives the text role a
-  `MenuItem`'s label and shortcut take while the row is pressed, for a design
-  whose pressed row is a solid fill while its hover is a pale wash. It
-  defaults to `None`, so an existing style keeps its pressed labels.
-- **Breaking.** **Content-view and semantic colours in `OsThemeColors`.** A desktop report
-  can carry ten more colours: `view_bg`, `view_fg`, `alternate_bg`,
-  `inactive_fg`, `link`, `link_visited`, `error`, `warning`, `success` and
-  `focus`. `ColorTokens::from_os_colors` uses each one it is given (the
-  content surface and editor colours, the alternate row, secondary text,
-  links, the error, warning and success text and status colours, and the
-  focus ring), raising a supplied text colour, the editor's included, to
-  4.5:1 and a focus or status colour to 3:1 against the surfaces it sits on.
-  A view background becomes the content surface only where the window's text
-  can reach 4.5:1 on it, and that text is raised as far as it needs; a view
-  in the opposite tone to the window (a dark view in a light scheme) colours
-  the editor alone, so window text is never painted on it. A report without
-  them gives the same tokens as before. `OsThemeColors::new` builds a report from the
-  light or dark preference, and `OsThemeColors` now implements `PartialEq`.
-- **`teksilo_tokens::contrast`.** `composite_contrast` gives the WCAG contrast
-  of a translucent colour as painted over its backdrop, and
-  `lift_until_readable` moves a colour toward black or white just far enough
-  to reach a contrast floor against every backdrop it is given.
-- **`MotionTokens::scaled`.** The same motion tokens with every animation
-  duration multiplied by a factor, as a desktop's animation-speed setting
-  asks; the tooltip delays are kept, and a factor of 0 turns animation off.
-
 #### KDE Plasma
 
-- **New crate `teksilo-kde-scheme`.** Reads a KDE Plasma desktop's look
-  without touching the file system or the environment: the caller hands it
-  the environment and the file contents. `KConfig` parses KDE's
-  configuration format, with nested groups, immutable (Kiosk) entries,
-  groups and files, deleted entries, `[$e]` environment expansion that never
-  runs a command, and diagnostics instead of failures, and merges system
-  and user files into one cascade. `KdeConfigLocations` lists the files KDE
-  reads, `kdedefaults` included, from the XDG variables. `KdeColorScheme`
-  holds a `.colors` file or the colour groups of `kdeglobals`, every
-  missing key filled from KDE's defaults, and writes it back as text;
-  `breeze_light`, `breeze_dark` and `breeze_classic` are the stock Breeze
-  schemes. `KdeFont` reads Qt 5 and Qt 6 font strings, and `KdeDesktop`
-  gathers the scheme, the user's accent, the five desktop fonts, the
-  animation speed, the widget style and the Breeze style settings.
-  `teksilo_kde_scheme::math` is KDE's colour arithmetic, giving the same
-  8-bit values KDE writes: the HCY colour space, luma and KDE's luma
-  contrast, mix, tint, lighten, darken and shade, the five 3D shades of a
-  palette, Qt's `lighter` and `darker`, the selection fill and black or
-  white text KDE derives from an accent, and Plasma's OKLab accent tint.
-  `lift_luma_until` moves a colour's luma, keeping its hue, until it meets a
-  WCAG contrast floor on the given backgrounds, and `lift_luma_toward` does
-  so in one direction only.
-  `KdeColorScheme::resolve` gives the scheme's full palette, as KDE
-  applications draw it: every colour set in the active, inactive and
-  disabled states, with the disabled and inactive effects the scheme
-  configures, the inactive selection drawn from the window colours, the
-  six tinted backgrounds (active, link, visited, negative, neutral and
-  positive) and the five 3D shades, and the twenty application palette
-  colours (`PaletteRole`). `is_dark` tells a dark scheme from a light one by
-  its window background, the way KDE reports it to applications, and
-  `os_theme_colors` gives the colour report Teksilo's native theme is built
-  from. `KdeColorScheme::with_accent` applies an accent colour to a scheme
-  the way Plasma's colour settings do, writing the same values Plasma
-  writes: the accent on links, focus and hover, a selection and button fill
-  blended from it with black or white text, the scheme's colours tinted
-  toward it when the scheme asks for tinting, and an accent-coloured title
-  bar when the scheme asks for one. `ACCENT_SWATCHES` are Plasma's ten
-  accent swatches. When `kdeglobals` holds no colours of its own,
-  `KdeDesktop` applies the user's chosen accent to the scheme it reads in
-  their place, which KDE itself does not.
-- **New crate `teksilo-theme-kde`, the KDE Plasma theme preset.** `light()`
-  and `dark()` are Breeze Light and Breeze Dark; `light_with_accent` and
-  `dark_with_accent` apply an accent colour the way Plasma's colour settings
-  do, and `PlasmaAccent` lists Plasma's ten accent swatches with stable names
-  for saving a choice; `from_scheme` gives the theme of any KDE colour
-  scheme, light or dark as KDE judges it. The themes carry the ids
-  `kde.light` and `kde.dark`. Each has Breeze's colours, its 5 px corner
-  radius, the geometry of its 2 px focus ring drawn half inside the control,
-  Plasma's default text sizes and line heights (13 px text on an 18 px line),
-  its spacing and its 100 ms linear transitions. An inactive window shows the
-  scheme's muted selection and accent, as Plasma does, and the OS increase
-  contrast preference gets the preset's own colours, with 7:1 text and
-  4.5:1 control outlines, a hovered field, check box, radio button, switch,
-  slider handle or spin box arrow included. Stock
-  Breeze colours that fall short of WCAG (secondary text, links, status
-  colours, the focus colour, strong outlines, the scroll-bar thumb and the
-  text on the accent) are made readable, keeping their hue, and so are any
-  scheme's, its own text included, in an active and an inactive window:
-  a translucent colour is made opaque, a hover or selection fill stays light
-  in a light window, and where the scheme's inactive effects shade an
-  inactive window toward a mid tone its backgrounds move back until its
-  text reads, the faces of its buttons, combo boxes, table headers and check
-  boxes with them, so their labels and marks stay readable in every state.
-  The title of an unselected tab, painted in the secondary text on Breeze's
-  darker tab face, is readable too, at rest and under the pointer.
-  Every theme
-  carries a `KdePalette` with the whole resolved scheme and the colours
-  Breeze combines from it (`breeze_colors` gives them for the high-contrast
-  colours too), and `geometry::BreezeGeometry` gives the Breeze control
-  heights for any font size. Buttons are Breeze's: a `Button` is the push
-  button, 34 px tall and at least 84 px wide at Plasma's default font, its
-  outline turning to the highlight under the pointer or keyboard focus and a
-  1 px shadow below it in an active window; its `Filled` variant is the
-  default button, tinted toward the highlight, and `Ghost` and `Link` are
-  the flat button, which shows nothing until hovered. An `IconButton` is the
-  toolbar's tool button, 28 px around a 16 px icon and 34 px around a
-  toolbar one, and a `SplitButton` has the push button's frame, its `Filled`
-  and `Destructive` variants filled with the accent so their label stays
-  readable. All three grow to the density's target size. A `Checkbox` and a
-  `RadioButton` are Breeze's: a 15 px box or disc in the button colour,
-  painted opaque over the window when a scheme makes it translucent, so the
-  mark stays readable on it, outlined, and when checked outlined in the highlight, washed with it in
-  the colour Plasma paints and marked in the text colour with square-ended
-  strokes, with the label 24 px from the leading edge;
-  their row is 24 px rather than Breeze's 22, so it stays a WCAG target
-  size. A `Toggle` is the switch KDE applications show, an 18 px handle on
-  a 36 px track, moving and changing colour on the curves KDE uses. A
-  `TextInput` is the line edit, 32 px tall at Plasma's default font, its
-  1 px outline turning to the focus colour while it has focus, and it
-  honours `TextInput::min_height`. An editable `RichTextEditor` is framed as
-  the line edit, its text 6 px inside the frame; a read-only one has no
-  frame. A `ComboBox` is the push button with a
-  chevron at its trailing edge, 32 px tall at Plasma's default font, filled
-  toward the highlight while its list is open. A `SpinBox` is the line edit
-  with a 20 px column of two arrows and no buttons drawn, each arrow taking
-  the hover colour under the pointer. A `Slider` is Breeze's 6 px groove,
-  filled toward the highlight up to a 17 px round handle in the button
-  colour, with tick marks below it when it has a tick count, mirrored right
-  to left; its node grows to the density's target size. A `MenuItem` is
-  Breeze's menu row, 29 px tall at Plasma's default font and growing to the
-  density's target size, washed with the focus colour and outlined while it
-  is highlighted, and filled with the accent while it is held down, its
-  label then turning to the text on the accent; a `MenuSeparator` is 5 px.
-  Menus, combo box lists, popovers and tooltips are framed as Breeze's
-  popups, at the 5 px radius in a 1 px outline over Breeze's two-layer
-  window shadow, and a tooltip's text lies 4 px inside its frame.
-  `styles::metrics::BreezeMenuMetrics` gives the menu's dimensions at any
-  density and font, among them the height of a section title. The outlines
-  of an empty check box, radio button and field, of a switch on or off and
-  of a slider's handle, a slider's tick marks and a highlighted menu row's
-  outline, are strengthened to a 3:1 contrast, keeping their hue. A
-  `StandardListItem` or `StandardTreeItem` row is Breeze's, 24 px at
-  Plasma's default font, 26 px with an icon or a check box and 42 px with a
-  subtitle, growing to the density's target size; the first row is the
-  height of the others, where Breeze makes it 1 px taller: a selected row is the
-  highlight inside the row's margins, rounded at 5 px as Plasma rounds it,
-  its label in the text on it, a
-  hovered one a pale wash of the highlight, and a selection mutes only when
-  the window goes inactive. A `TableView` or `TreeTableView` row is 24 px,
-  rather than Breeze's 23, so it stays a WCAG target size, under a 30 px
-  header of Breeze's sections, where the column sorted in ascending order
-  is shown pressed, as in Plasma. A selected tab is the window colour under
-  a 3 px highlight bar, its outline turning through the bar's rounded
-  corners, and an unselected one the window colour darkened, 30 px tall at
-  Plasma's default font and growing with the density. A
-  `ScrollBar` is Breeze's 8 px handle over no track, beside a 1 px
-  separator, with a thumb at least 20 px long, its colours strengthened to a
-  3:1 contrast. A `ProgressBar` is 26 px thick around Breeze's 6 px groove,
-  filled toward the highlight, and an indeterminate one shows Breeze's
-  moving stripes. A `Card`, a `Panel` and a `Banner` are framed as Breeze
-  frames a group, at the 5 px radius in a 1 px outline with their content
-  6 px inside, and a `Dialog`'s content lies 10 px inside it, Breeze's
-  dialog margin; these gaps grow with the density. A `Snackbar`, a `Toast`
-  and a `Badge` are rounded at the 5 px radius, the badge rather than as a
-  pill, a toast's glyph, text and close button stand 6 px apart, and a
-  `SegmentedControl`'s frame is a 5 px radius in a 1 px outline. A
-  `Calendar`'s selected day is rounded at 5 px too, a focused `Link` is
-  ringed by Breeze's 2 px focus frame, from 1 px inside it to 1 px outside,
-  and a `SearchField`'s suggestions are laid out as the items of a Breeze
-  menu without icons. Other widgets draw Teksilo's own chrome in these
-  colours and shapes. `from_desktop` gives the theme of a KDE desktop as it
-  is configured: its colour scheme with the accent the user chose; its
-  general, smallest readable and fixed fonts as the text styles, in the
-  desktop's own families at the sizes and line heights Qt gives them, so
-  the controls grow with the font; its menu font sizing the menu rows, and
-  its menu and toolbar fonts carried as `KdeFontRoles`; its animation
-  speed, which slows or quickens the transitions as it does Plasma's, a
-  factor of 0 meaning reduced motion; and its `breezerc`, carried as
-  `BreezeStyleConfig`: menus translucent under `MenuOpacity`, the window
-  shadow's size, colour and strength, and the busy progress bar's period,
-  or its stripes standing still. `native_theme` gives that theme for a
-  desktop using the Breeze widget style and nothing for Fusion, Oxygen,
-  Kvantum or any other, which keep Teksilo's default shapes in the
-  desktop's colours; it is what `TeksiloAppBuilder::native_theme` asks
-  for, so a window in `ThemeMode::Native` shows Breeze on a Breeze desktop.
-  The stock themes write in Teksilo's bundled Inter and JetBrains Mono at
-  the sizes and line heights of Plasma's Noto Sans and Hack. Two features,
-  both off by default, write in Plasma's own faces instead:
-  `bundled-fonts` embeds Noto Sans 2.015 (upright and italic, every
-  weight) and Hack 3.003 (regular, bold and their italics), about 5.6 MB,
-  with `font_registrar()` to hand to `TeksiloAppBuilder::register_fonts`;
-  `system-fonts` uses the copies installed on the desktop and embeds
-  nothing. Neither changes a text size, a line height or a control's
-  height.
-- **The `theme-kde` feature of `teksilo`.** Turns on the KDE Plasma preset,
-  reached as `teksilo::prelude::kde::{light, dark}` like the other presets
-  (`kde::from_desktop`, `kde::native_theme` and the rest of
-  `teksilo-theme-kde` come with it). The preset's font features are not
-  forwarded: an app that wants Plasma's own faces depends on
-  `teksilo-theme-kde` directly.
-- **`native_theme_kde()` on `TeksiloAppBuilder`.** One call, from the
-  `TeksiloAppBuilderKdeExt` trait in the prelude, makes a window built while
-  the app is in `ThemeMode::Native` (for example after
-  `.theme_mode(ThemeMode::Native)`) show Breeze's geometry and chrome in the
-  desktop's live colours on a KDE desktop that uses the Breeze style, at the
-  density of the window. On any other desktop the window keeps IntUI in the
-  desktop's colours. `ThemeMode::FollowSystem` is not affected, and
-  switching to Native mode at runtime re-tints with the desktop's colours and
-  keeps the shapes the windows were built with.
-- **`TeksiloAppBuilder::configured_native_theme()`** returns the native-theme
-  factory installed with `native_theme`, if any, so an install hook or a
-  test can see what was put there.
+- **New crate `teksilo-theme-kde`, the KDE Plasma preset.** `light()` and
+  `dark()` are Breeze Light and Breeze Dark (ids `kde.light`, `kde.dark`);
+  `light_with_accent` and `dark_with_accent` apply an accent as Plasma's
+  colour settings do, `PlasmaAccent` lists Plasma's ten accent swatches with
+  stable names for saving a choice, and `from_scheme` themes any KDE colour
+  scheme. Breeze's colours, radius, focus ring, text sizes and motion, the
+  scheme's muted colours in an inactive window, and the preset's own colours
+  under the OS increase contrast preference (7:1 text, 4.5:1 outlines).
+  `KdePalette` carries the whole resolved scheme.
+- **Breeze chrome for the stock controls.** Buttons (`Filled` as the default
+  button, `Ghost` and `Link` flat), tool and split buttons, check boxes,
+  radio buttons, switches, line edits (`TextInput`, an editable
+  `RichTextEditor`), combo and spin boxes, sliders, menus, popups, tooltips,
+  list and tree rows, tables, tabs, scroll bars and progress bars are drawn
+  and sized as Breeze's, growing to the density's target size; other widgets
+  keep Teksilo's chrome in Breeze's colours and shapes.
+- **Breeze made readable.** Where stock Breeze or the user's scheme falls
+  short of WCAG (secondary text, links, status and focus colours, outlines,
+  the scroll-bar thumb, text on the accent, an inactive window's shading, a
+  translucent colour), the preset lifts the colour, keeping its hue, and
+  check box, radio and table rows are 24 px to stay target sizes. The crate
+  documentation lists every deviation from Breeze and the known limitations.
+- **The theme of the live KDE desktop.** `from_desktop` builds it from a
+  `KdeDesktop`: the colour scheme with the user's accent, the desktop's
+  fonts as the text styles (the controls grow with them), its animation
+  speed (0 means reduced motion) and its `breezerc` settings. `native_theme`
+  gives that theme on a desktop using the Breeze widget style, `None` on any
+  other.
+- **Plasma's fonts, optionally.** The themes write in the bundled Inter and
+  JetBrains Mono at the sizes of Plasma's Noto Sans and Hack. The
+  `bundled-fonts` feature embeds Noto Sans and Hack (about 5.6 MB; pass
+  `font_registrar()` to `TeksiloAppBuilder::register_fonts`), and
+  `system-fonts` uses the desktop's installed copies. Neither changes a size.
+- **New crate `teksilo-kde-scheme`.** Reads a KDE desktop from contents the
+  caller supplies, touching no file or environment and running no command:
+  the configuration cascade (`KConfig`), colour schemes (`KdeColorScheme`,
+  resolved into KDE's palette, accented as Plasma does), fonts and the whole
+  desktop (`KdeDesktop`), with KDE's colour arithmetic in `math`.
+- **The `theme-kde` feature of `teksilo`**, the preset in
+  `teksilo::prelude::kde`. Its font features are not forwarded.
+- **`native_theme_kde()` on `TeksiloAppBuilder`** (`TeksiloAppBuilderKdeExt`,
+  in the prelude). A window built in `ThemeMode::Native` on a KDE desktop
+  with the Breeze style shows Breeze's chrome in the desktop's live colours,
+  fonts and animation speed, at the window's density; elsewhere it keeps
+  IntUI in the desktop's colours. `ThemeMode::FollowSystem` is unaffected,
+  and switching to Native at runtime re-tints but keeps the shapes the
+  windows were built with.
 
-#### Demos
+#### Theming
 
-- **The widget catalog offers KDE.** The title-bar theme switcher lists KDE
-  Light and KDE Dark after the IntUI, Material 3, Fluent and macOS pairs, a
-  pick survives a restart, and `--theme kde-light` and `--theme kde-dark`
-  start the catalog in Breeze's own chrome. `--theme system` starts it in
-  Native mode on the switcher's System entry, which on a KDE desktop with
-  the Breeze style builds Breeze's chrome too and elsewhere IntUI in the
-  desktop's colours. Picking System in the switcher later only re-tints.
+- **`PaintProjection`.** A theme registered with `with_paint_projection`
+  paints its own colours in an inactive window and under the OS increase
+  contrast preference; `BuildContext::prefers_high_contrast` reads the
+  preference at build time.
+- **A negative `ShapeTokens::focus_ring_offset`** draws the focus ring
+  partly or wholly inside the control; every stock ring follows it.
+- **Style hooks for sizes and states.** `StandardItemStyle`, `TableStyle`,
+  `TabStyle`, `ScrollBarStyle` and `ProgressBarStyle` declare their row,
+  header, tab, thumb and bar sizes at the active density;
+  `StandardItemStyle::selection_emphasis` says whether a selection mutes
+  with view focus or only with the window, and
+  `MenuItemStyle::pressed_label_role` colours a pressed row's label. Every
+  default keeps an existing style as it was.
+- **`ComponentStyleSlots::NAMES`**, the name of every theme-wide style slot.
+- **More desktop colours in the native theme.** `ColorTokens::from_os_colors`
+  uses a report's view, link, status and focus colours, made readable where
+  they fall short.
+- **`teksilo_tokens::contrast`** and **`MotionTokens::scaled`** (durations
+  times a desktop's animation-speed factor).
 
-#### Platform
+#### Platform and app
 
-- **`os_theme::query_native_desktop` and `NativeDesktop`.** What the desktop
-  reports for `ThemeMode::Native`, in one value: its colour report (`os`,
-  what `query_os_theme_colors` returns) and, on a KDE Plasma session, the KDE
-  desktop itself (`kde`, a `teksilo_kde_scheme::KdeDesktop`: the colour
-  scheme in effect, the accent the user chose, the five desktop fonts, the
-  animation speed, the widget style and the Breeze style settings).
-  `NativeDesktop::new` builds one from a colour report alone, and it
-  implements `PartialEq`, so a caller can tell whether the desktop changed.
-- **`os_theme::OsThemeWatch`.** Hears the desktop's appearance change while
-  the application runs: on Linux, the desktop portal's appearance and KDE
-  settings, KDE's global settings notification, and KDE writing
-  `kdeglobals` or `breezerc`. A change that arrives as several signals is
-  reported once, as an `os_theme::OsThemeChanged` posted through the
-  application's event poster 150 ms after the first. When the connection
-  to the session bus closes, a change already heard is still reported, and
-  the watch connects again every second; once it is back it reports one
-  change, for whatever it could not hear meanwhile. `files_changed` says
-  whether a KDE configuration file changed since it last looked, for a
-  session with no bus. On macOS and Windows there is nothing to watch, and
-  `OsThemeWatch::new` gives `None`.
-
-#### App
-
+- **`os_theme::query_native_desktop`** gives the desktop's colour report
+  and, on KDE Plasma, the KDE desktop itself; **`OsThemeWatch`** reports each
+  appearance change on Linux, reconnecting when the session bus goes away.
 - **Native and follow-system themes update live.** Under `ThemeMode::Native`
-  or `ThemeMode::FollowSystem`, every window takes the new theme when the
-  desktop's accent, colour scheme or light or dark setting changes, without
-  a restart, and the reduced-motion preference follows a change of the
-  desktop's animation speed. On a KDE Plasma session whose change signals
-  do not reach the application, such as one with no session bus, a change
-  to `kdeglobals` or `breezerc` is picked up the next time a window takes
-  focus. Under `ThemeMode::Manual` nothing is watched.
+  or `ThemeMode::FollowSystem`, every window takes the desktop's new accent,
+  colour scheme or light or dark setting without a restart, and reduced
+  motion follows the desktop's animation speed. On a KDE session with no
+  bus, changed KDE files are read when a window takes focus.
+- **`TeksiloAppBuilder::native_theme`** answers each `NativeThemeRequest`
+  with the app's own Native-mode theme, or `None` for IntUI in the desktop's
+  colours; `resolve_native_theme` gives the theme a request resolves to.
 
-- **`TeksiloAppBuilder::native_theme`.** An app can give `ThemeMode::Native`
-  a theme of its own: the closure is asked with a `NativeThemeRequest` (what
-  the desktop reports, whether the theme is to be dark, the density wanted)
-  whenever Native mode needs a theme, and answers with a theme, for example a
-  design-language preset rebuilt over the desktop's colours so Native mode
-  keeps that preset's geometry and chrome, or with `None` to keep IntUI in
-  the desktop's colours. `resolve_native_theme` gives the theme Native mode
-  uses for a request, and `presets::intui::from_os` is the IntUI default on
-  its own. The window manager and the widget previewer's Native canvas theme
-  now resolve through it, with the same themes as before.
+#### Demos and documentation
 
-#### Documentation
-
-- **A guide to Native mode.** The new Native theme page says what
-  `ThemeMode::Native` reads on Linux, macOS and Windows, what the KDE reader
-  takes from a Plasma desktop, how `NativeThemeRequest`,
-  `resolve_native_theme` and `native_theme_kde()` fit together, how the app
-  follows the desktop while it runs, and that switching themes at runtime
-  re-tints but keeps the shapes the windows were built with.
-- The README, the styling guide and the application guide that
-  `cargo teksilo init` installs describe the KDE Plasma preset, and keep
-  Native mode, which adopts the live desktop colours, apart from it.
+- **The widget catalog offers KDE**: KDE Light and KDE Dark in the theme
+  switcher, `--theme kde-light` and `--theme kde-dark` for Breeze's chrome,
+  and `--theme system` for Native mode, which is Breeze on a Breeze desktop.
+- **A guide to Native mode**, and the KDE preset in the README, the styling
+  guide and the application guide.
 
 ### Changed
 
 #### Theming
 
-- **Breaking.** **`MacOsMenuItemStyle` and `FluentMenuItemStyle` hold their
-  dimensions.** Each now carries the `MenuItemRecipe` it lays out in a public
-  `recipe` field, so a style built for one density keeps that density's
-  sizes. The unit value `MacOsMenuItemStyle` or `FluentMenuItemStyle` no
-  longer compiles: use `::default()` for the compact sizes, `::for_tokens`
-  for a density's, or `::new` with a recipe of your own.
-- **Breaking.** **`OsThemeColors` is `#[non_exhaustive]`.** Outside
-  `teksilo-tokens` it can no longer be built with a struct literal: start from
-  `OsThemeColors::new(scheme)` or `OsThemeColors::default()` and assign the
-  fields the desktop reports.
+- **Breaking.** **`OsThemeColors` is `#[non_exhaustive]` and has ten new
+  fields** (`view_bg`, `view_fg`, `alternate_bg`, `inactive_fg`, `link`,
+  `link_visited`, `error`, `warning`, `success`, `focus`). Outside
+  `teksilo-tokens`, build it with the new `OsThemeColors::new(scheme)` or
+  `OsThemeColors::default()` and assign fields, not a struct literal. It
+  now implements `PartialEq`.
+- **Breaking.** **`MacOsMenuItemStyle` and `FluentMenuItemStyle` are no
+  longer unit structs**; they hold their `MenuItemRecipe` in `recipe`. Use
+  `::default()` for the compact sizes, `::for_tokens` for a density's or
+  `::new` with a recipe.
 - **The native theme takes more of a GTK theme's colours.**
-  **Behaviour change:** under `ThemeMode::Native` on a GNOME, Cinnamon or
-  other GTK desktop whose GTK theme ships its CSS (Breeze GTK, for example),
-  the content surface, editor text, links, error, warning and success colours
-  and, for Breeze GTK, the focus ring now follow the theme's
-  `theme_base_color`, `theme_text_color`, `link_color`, `error_color`,
-  `warning_color`, `success_color` and focus colour, raised to a readable
-  contrast where they fall short. Before, only the window, selection, button
-  and tooltip colours were read.
+  **Behaviour change:** with a GTK theme that ships its CSS (Breeze GTK, for
+  example), `ThemeMode::Native` also follows its content surface, editor
+  text, link, error, warning, success and focus colours.
 
 #### Platform
 
-- **Reading the desktop's settings on Linux no longer starts a `busctl`
-  process.** The XDG desktop portal's colour scheme, accent colour, contrast
-  and reduced-motion settings, and the screen reader's on/off flag, are read
-  over the session bus directly. A portal or bus that does not answer now
-  holds up startup by at most a second in all, where each read used to wait
-  up to 25 seconds. The settings are now also read on systems without
-  `busctl` installed, and from portals older than version 2 of the settings
-  interface.
-- **A Linux session is KDE Plasma only when it says so.**
-  **Behaviour change:** a session counts as KDE when `KDE` is one of the
-  colon-separated names of `XDG_CURRENT_DESKTOP` (ignoring case) or when
-  `KDE_FULL_SESSION` is `true`, the rule KDE itself uses, and this is now
-  checked before GNOME. A desktop name that only contains KDE, such as
-  `X-KDE-Other`, is no longer KDE, so under `ThemeMode::Native` it is read
-  like any other desktop and its `kdeglobals` is no longer read. A session
-  that lists both GNOME and KDE, or sets `KDE_FULL_SESSION=true` under GNOME,
-  is now KDE.
-
-### Removed
-
-#### Theming
-
-- **Breaking.** **`TabRecipe::tool_window_height` and
-  `recipe_tab_style::TAB_TOOL_WINDOW_HEIGHT`.** Nothing read either, so
-  setting them changed nothing. A `TabRecipe` struct literal that names
-  `tool_window_height` must drop it.
-
-### Fixed
-
-- **Builds without link-time optimisation embed each bundled font once.** A
-  debug build, or a release profile without LTO, of an application with text
-  input carried Inter and JetBrains Mono three times over, 4.8 MB more than
-  needed.
-
-#### Theming
-
-- **A menu row shows its pressed state while the pointer holds it.**
-  **Behaviour change:** pressing a `MenuItem` with the mouse, a pen or a
-  finger now paints the style's pressed row (the pressed surface under Int UI
-  and Fluent, the deeper accent under macOS) from the pointer-down until the
-  release, and a style's `pressed_label_role` applies over the same span.
-  Before, a menu row showed its pressed state only after an Enter or Space
-  activation, so a pointer never saw it.
-- **A breadcrumb crumb shows its hover, focus and link colours.**
-  **Behaviour change:** a navigable crumb now paints its hover and focus
-  background, its focus ring and its accent link colour, and assistive
-  technology can activate and focus it again. Before, every built crumb
-  painted in the secondary text colour with no hover or focus state, and
-  advertised neither the Click nor the Focus action.
-- **List and tree rows are as tall as the active style says.**
-  **Behaviour change:** a `StandardListItem` or `StandardTreeItem` row laid
-  out at its own height (on its own, or in a `ListView` or `TreeView` with
-  `auto_item_height`) now measures the height its style declares: 24 px for a
-  single-line row under the macOS preset and 40 px under Fluent at the
-  compact density, rising to the density's target size above it. Before,
-  every row was at least 28 px (44 px with a subtitle) whatever the theme.
-  Only a row that measures itself changes: a `ListView` or `TreeView`
-  without `auto_item_height` keeps its own row height, whether that is its
-  default or an `item_height` the app set. The notification log's minimum
-  height follows the same two-line row height.
-- **Table rows and headers are as tall as the active style says.**
-  **Behaviour change:** a `TableView` or `TreeTableView` with no row or
-  header height of its own, and a standalone `TableHeader`, now lay out the
-  heights their style declares: 24 px rows and headers under the macOS preset
-  and 40 px under Fluent at the compact density. Above the compact density a
-  row or header rises to the density's target size where the style's height
-  is below it: at the comfortable density macOS goes from 24 to 32 px and
-  Int UI rows from 28 to 32 px, while Fluent stays at 40 px; at the touch
-  density every theme's rows and headers are 44 px. Before, every table laid
-  out 28 px rows and a 32 px header whatever the theme and the density.
-  A `row_height`, `row_height_fn`, `auto_row_height` or `header_height` the
-  app set still wins.
-- **Tabs are as tall and as padded as the active style says.**
-  **Behaviour change:** a `TabBar` or `TabWidget` with no `tab_bar_height` of
-  its own now lays out the tab height its style declares, and each tab pads
-  its title by the style's padding: 26 px tabs under the macOS preset and
-  32 px under Fluent at the compact density (44 px at the touch density for
-  both), and 8 px of padding under Fluent. Before, every tab was 50 px tall
-  with 12 px of padding whatever the theme. Under Int UI tabs stay 50 px tall,
-  and their padding now grows with the density: 13.8 px at the comfortable
-  density and 15.6 px at the touch density, so tabs there are wider.
-- **Scroll-bar thumbs are as long as the active style says.**
-  **Behaviour change:** on a long document, a `ScrollBar` (and every scroll
-  bar a `ScrollArea`, a list, a table or a text editor shows) with no
-  `min_thumb_length` of its own now keeps its thumb at the minimum length its
-  style declares: 28 px under the macOS preset and 30 px under Fluent at the
-  compact density. Before, every thumb was held at 24 px whatever the theme.
-  Above the compact density nothing changes: the floor is 32 px at the
-  comfortable density and 44 px at the touch density under every theme.
-- **Accent chrome a recipe builds follows the high-contrast preference.**
-  **Behaviour change:** under the OS increase contrast preference, a `Filled`
-  button's fill and a button's focus border now take the high-contrast
-  palette, as `Toggle`, `Checkbox` and the other accent controls already did;
-  before, they kept the normal colours.
-- **High contrast keeps each theme's own colours and reaches its targets.**
-  **Behaviour change:** under the OS increase contrast preference, the Int UI,
-  macOS, Fluent and Material 3 themes now paint their own accent, focus ring,
-  secondary text and selection, made darker or lighter in their own hue until
-  text on the accent reaches 7:1, the focus ring 4.5:1 on the window and the
-  content surfaces, and secondary text 7:1, also on a selected row; the
-  selection stands 1.5:1 off the page with its text at 7:1, in a focused list
-  and in an unfocused list or inactive window alike. Before, every dark
-  theme took Int UI's teal accent and ring, and a light theme kept its accent
-  under black text: 3.87:1 on macOS's blue and 3.70:1 on Fluent's, with the
-  focus ring at 4.21:1 on the macOS window. Int UI changes too: its light
-  hover and pressed fills, whose black text measured 6.33:1 and 4.64:1, are
-  lighter, its dark accent stays its own teal instead of a brighter one, and
-  its selections are a shade of its own selection colour. Material 3's filled
-  button keeps its label at 7:1 when hovered and pressed as well: it now
-  paints those states from the theme's hover and pressed accent colours, the
-  same 8 % and 12 % state layers as before, so the projection lifts them too
-  (they measured 5.79:1 and 5.26:1 in the light theme). Themes that bring
-  their own high-contrast colours, such as KDE Plasma, are unchanged.
-- **macOS and Fluent sliders under right-to-left layout.**
-  **Behaviour change:** in a right-to-left window, a horizontal `Slider`
-  under the macOS or Fluent preset now runs from the right, as it does under
-  Int UI and KDE Plasma: the knob sits at the value measured from the right
-  end and the accent fill grows from the right end to it, so the knob stays
-  under a pointer dragging it and moves the way the arrow keys point. Before,
-  both presets painted the slider from the left, mirrored from where the
-  value actually was. Vertical sliders are unchanged.
-- **macOS and Fluent menus at touch densities.**
-  **Behaviour change:** at the comfortable and touch densities, a menu under
-  the macOS or Fluent preset now sizes its separators and the column that
-  holds the shortcut and the submenu arrow for the active density, as its
-  rows already were, and a Fluent menu with `max_visible_items` caps its
-  height by its 44 px touch rows. Before, both presets reported their compact
-  menu sizes at every density, so those parts kept their compact sizes inside
-  rows laid out for touch. Compact menus are unchanged, and macOS menu rows
-  stay AppKit's 22 px at every density.
-- **macOS and Fluent vertical sliders.**
-  **Behaviour change:** macOS and Fluent vertical sliders now show the value
-  where the pointer and the keyboard put it: the minimum is at the bottom and
-  the maximum at the top, as under Int UI and KDE Plasma, the accent fill
-  rises from the bottom to the knob, a press near the top sets a value near
-  the maximum with the knob under the pointer, and `ArrowUp` moves the knob
-  up. Before, both presets painted the minimum at the top with the fill
-  running down, so the knob sat opposite to the value and the arrow keys
-  moved it the wrong way. Horizontal sliders are unchanged.
-
-#### Platform
-
-- **The native theme on KDE Plasma reads all of KDE's configuration.**
-  **Behaviour change:** under `ThemeMode::Native` on a KDE Plasma session the
-  colours now come from every `kdeglobals` file KDE reads, the system files
-  of `XDG_CONFIG_DIRS` and the session's `kdedefaults` included, and a
-  setting an administrator locked with `[$i]` is no longer overridden by the
-  user's own file. When `kdeglobals` holds no colours of its own, they come
-  from the look-and-feel package, else the colour scheme it names, else
-  Breeze Light, as in KDE. That holds for a `kdeglobals` an administrator
-  locked as a whole with a bare `[$i]` line too: the named scheme, with its
-  accent, is still read under the locked settings, rather than the colours
-  falling back to KDE's compiled defaults. Before, only the user's own
-  `kdeglobals` was read, so a profile whose colour scheme is set only in
-  `kdedefaults` or `/etc/xdg` got the generic theme.
-- **The native theme on KDE Plasma takes the accent colour the user chose.**
-  **Behaviour change:** the accent is now KDE's selection colour, the one KDE
-  applications and the desktop portal report, instead of the window's focus
-  decoration, and on a profile whose colour groups were never written the
-  `AccentColor` the user picked is applied to the colour scheme. A
-  transparent or unreadable `AccentColor` is ignored, and the portal's accent
-  colour is used only when no `kdeglobals` can be read. The content view,
-  link, error, warning, success and focus colours are now read from the
-  scheme too.
-- **Light or dark on KDE Plasma follows the colours, not the scheme's name.**
-  **Behaviour change:** on a KDE Plasma session the `ThemeMode::Native`
-  theme is dark when the colour scheme's window background is dark, the rule
-  KDE reports to applications, and `query_color_scheme` answers by the same
-  rule when the desktop portal does not answer. Before, a scheme counted as
-  dark when its name contained "dark", so a scheme with a dark window and
-  another name, such as Breeze Twilight, was taken for light.
-- **Reduced motion follows KDE's animation speed.** **Behaviour change:** on
-  a KDE Plasma session, an animation speed of instant (`[KDE]
-  AnimationDurationFactor=0` in `kdeglobals`) now turns on
-  `AccessibilityPreferences::reduced_motion`, even when the desktop portal
-  does not report it.
+- **Linux desktop settings are read without `busctl`.** The portal and the
+  screen reader flag are read over the session bus directly; a silent bus
+  delays startup by at most a second, where each read waited up to 25 seconds.
+- **A Linux session is KDE only when it says so.** **Behaviour change:**
+  `XDG_CURRENT_DESKTOP` must list `KDE` or `KDE_FULL_SESSION` be `true`,
+  checked before GNOME. A name merely containing KDE no longer counts.
+- **Native mode on KDE reads all of KDE's configuration.**
+  **Behaviour change:** every `kdeglobals` KDE reads, `kdedefaults` and
+  `XDG_CONFIG_DIRS` included, with administrator locks honoured; without
+  colours of its own, the look-and-feel package's or named scheme's, as in
+  KDE. Before, only the user's own `kdeglobals` was read.
+- **Native mode on KDE takes the user's accent.** **Behaviour change:** the
+  accent is KDE's selection colour, as KDE applications show it, and a
+  chosen `AccentColor` applies to a scheme the profile never wrote. The
+  portal's accent is used only when no `kdeglobals` can be read.
+- **Light or dark on KDE follows the colours.** **Behaviour change:** a
+  scheme is dark when its window background is, not when its name says
+  "dark", so Breeze Twilight is no longer taken for light.
+- **Reduced motion follows KDE's animation speed.** **Behaviour change:** an
+  instant speed (`AnimationDurationFactor=0`) turns on
+  `AccessibilityPreferences::reduced_motion`.
 
 #### App
 
 - **A theme that follows the OS keeps the app's density.**
-  **Behaviour change:** under `ThemeMode::Native` and
-  `ThemeMode::FollowSystem`, the theme a window opens with, the theme an OS
-  light or dark change brings and the theme `follow_system_theme` switches to
-  are now at the density the app is at (the density of the window's tree, or
-  of the app's theme for a window opening), as `Theme::with_density` gives
-  it. Before, each of them reset the theme's input tokens to the compact
-  density, so an app at the comfortable or touch density opened its windows
-  with compact targets, hit slop and gesture thresholds, and after an OS
-  theme change kept widgets built for its own density under compact input
-  tokens.
-- **A window opening under `ThemeMode::Native` follows the window system's
-  light or dark state when the desktop states neither.**
-  **Behaviour change:** on macOS, on Windows and on a Linux desktop whose
-  portal reports no preference, a window now opens dark when the window
-  system says it is dark, as an OS theme change already made it. Before, it
-  always opened light.
-- **A window opening under `ThemeMode::FollowSystem` follows the desktop's
-  light or dark preference.** **Behaviour change:** a window now opens dark
-  when the desktop says it prefers dark, as a change heard while the app runs
-  already made it, and follows the window system's light or dark state only
-  when the desktop states neither. Before, it decided on the window system's
-  state alone, which on Linux is never given, so every window opened light on
-  a dark desktop, and a window opened after the app had turned dark came up
-  light beside the others.
-- **A Native theme keeps the desktop's colours when the desktop states no
-  light or dark preference.** **Behaviour change:** on a Linux desktop whose
-  portal reports no preference but whose accent or GTK colours can be read,
-  such as GNOME in its default style, an OS theme change and
-  `follow_system_theme` now keep those colours under the light or dark state
-  the window system reports, as a window opening already did. Before, they
-  dropped them for the plain IntUI preset.
-- **An OS theme re-read that changes nothing sets no theme.** When the
-  desktop's report, its light or dark state and a window's density are what
-  that window's theme was last made from, the window's theme is not set
-  again, so an OS theme event that changes none of them no longer relays out
-  and repaints every window. A theme the app set in between is replaced as
-  before.
+  **Behaviour change:** under Native and FollowSystem, a window's theme and
+  each OS change keep the app's density instead of resetting to compact.
+- **A Native window opens in the window system's light or dark state when
+  the desktop states neither.** **Behaviour change:** before, it always
+  opened light.
+- **A FollowSystem window opens in the desktop's light or dark preference.**
+  **Behaviour change:** before, it went by the window system alone, which Linux
+  never gives, so it opened light on a dark desktop.
+- **A Native theme keeps the desktop's colours without a light or dark
+  preference.** **Behaviour change:** on GNOME's default style, an OS change
+  and `follow_system_theme` keep its accent and GTK colours, not plain IntUI.
+- **An OS theme event that changes nothing no longer relays out and
+  repaints every window.**
+
+### Removed
+
+- **Breaking.** **`TabRecipe::tool_window_height` and
+  `recipe_tab_style::TAB_TOOL_WINDOW_HEIGHT`.** Nothing read them. Drop
+  `tool_window_height` from a `TabRecipe` struct literal.
+
+### Fixed
+
+- **Builds without link-time optimisation embed each bundled font once,**
+  4.8 MB less in a debug build of an app with text input.
+
+#### Theming
+
+- **List and tree rows are as tall as the active style says.**
+  **Behaviour change:** a self-measuring row is 24 px under macOS and 40 px
+  under Fluent at the compact density, rising to the density's target size
+  above it. Before, every row was at least 28 px (44 px with a subtitle).
+- **Table rows and headers are as tall as the active style says.**
+  **Behaviour change:** 24 px under macOS and 40 px under Fluent at the
+  compact density, rising to the target size above it (Int UI rows to 32 px
+  at comfortable, 44 px at touch), where every table had 28 px rows under a
+  32 px header. A height the app sets still wins, here and for rows.
+- **Tabs are as tall and as padded as the active style says.**
+  **Behaviour change:** without a `tab_bar_height`, 26 px under macOS and
+  32 px under Fluent (8 px padding) at the compact density and 44 px at
+  touch, where every tab was 50 px with 12 px padding. Int UI tabs stay
+  50 px, their padding growing with the density.
+- **Scroll-bar thumbs are as long as the active style says.**
+  **Behaviour change:** at least 28 px under macOS and 30 px under Fluent at
+  the compact density, where every thumb was held at 24 px.
+- **Accent chrome a recipe builds follows high contrast.**
+  **Behaviour change:** a `Filled` button's fill and a button's focus border
+  take the high-contrast palette, as the other accent controls did.
+- **High contrast keeps each theme's own colours and reaches its targets.**
+  **Behaviour change:** Int UI, macOS, Fluent and Material 3 lift their own
+  accent, focus ring, secondary text and selection until text reaches 7:1
+  and the ring 4.5:1. Before, every dark theme took Int UI's teal, and macOS
+  and Fluent kept black text on their accent below 4:1.
+- **macOS and Fluent sliders under right-to-left layout.**
+  **Behaviour change:** a horizontal slider runs from the right, so the knob
+  stays under the pointer and moves the way the arrow keys point.
+- **macOS and Fluent vertical sliders.** **Behaviour change:** the minimum
+  is at the bottom and `ArrowUp` moves the knob up; the knob used to sit
+  opposite to the value.
+- **macOS and Fluent menus at touch densities.** **Behaviour change:** the
+  separators, the shortcut column and a `max_visible_items` cap follow the
+  density, as the rows did. macOS rows stay 22 px.
+- **A menu row shows its pressed state while a pointer holds it.**
+  **Behaviour change:** before, only Enter or Space showed it.
+- **A breadcrumb crumb shows its hover, focus and link colours.**
+  **Behaviour change:** before, every crumb painted in the secondary text
+  colour, and assistive technology could neither click nor focus it.
 
 ## [0.19.0] - 2026-10-16
 
