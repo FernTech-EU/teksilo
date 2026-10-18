@@ -23,7 +23,6 @@ use teksilo_platform::AccessibilityPreferences;
 use teksilo_platform::PlatformWindow;
 use teksilo_platform::create_title_bar_host;
 use teksilo_platform::event_translation::TranslationState;
-use teksilo_tokens::ColorSchemePreference;
 #[allow(unused_imports)]
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::WindowLevel;
@@ -462,6 +461,35 @@ pub(crate) fn wake_routes(
     (state, draw)
 }
 
+/// What the manager keeps while it listens to the desktop's appearance: the
+/// platform's [`OsThemeWatch`](teksilo_platform::os_theme::OsThemeWatch),
+/// which stops when dropped. A trait so the manager's tests can watch a
+/// watch start and stop without an event loop or a session bus.
+pub(crate) trait DesktopWatch {
+    /// Whether a configuration file the theme is read from changed since the
+    /// last call; see
+    /// [`OsThemeWatch::files_changed`](teksilo_platform::os_theme::OsThemeWatch::files_changed).
+    fn files_changed(&mut self) -> bool;
+}
+
+impl DesktopWatch for teksilo_platform::os_theme::OsThemeWatch {
+    fn files_changed(&mut self) -> bool {
+        teksilo_platform::os_theme::OsThemeWatch::files_changed(self)
+    }
+}
+
+/// How the manager starts a [`DesktopWatch`] posting through `proxy`.
+pub(crate) type DesktopWatchStart = fn(Option<&AppEventProxy>) -> Option<Box<dyn DesktopWatch>>;
+
+/// The platform's watch, posting through `proxy`; `None` before the event
+/// proxy is installed, and wherever
+/// [`OsThemeWatch::new`](teksilo_platform::os_theme::OsThemeWatch::new) answers
+/// `None`.
+fn start_platform_desktop_watch(proxy: Option<&AppEventProxy>) -> Option<Box<dyn DesktopWatch>> {
+    let watch = teksilo_platform::os_theme::OsThemeWatch::new(proxy?.clone())?;
+    Some(Box::new(watch))
+}
+
 /// Manages multiple application windows.
 ///
 /// Each window owns its own `WidgetTree` and `PlatformWindow`. The manager
@@ -542,7 +570,10 @@ pub struct WindowManager {
     /// OS; `None` under [`ThemeMode::Manual`], before
     /// [`sync_os_theme_watch`](Self::sync_os_theme_watch) has run with the
     /// event proxy installed, and on every platform but Linux.
-    os_theme_watch: Option<teksilo_platform::os_theme::OsThemeWatch>,
+    os_theme_watch: Option<Box<dyn DesktopWatch>>,
+    /// What starts [`os_theme_watch`](Self::os_theme_watch):
+    /// [`start_platform_desktop_watch`], except in tests.
+    start_os_theme_watch: DesktopWatchStart,
 }
 
 // Doc comments on **every** method here are enforced, not hoped for: a new item
@@ -588,6 +619,7 @@ impl WindowManager {
             session_away: false,
             session_rechecked_at: None,
             os_theme_watch: None,
+            start_os_theme_watch: start_platform_desktop_watch,
         }
     }
 
@@ -664,9 +696,7 @@ impl WindowManager {
         if self.os_theme_watch.is_some() {
             return;
         }
-        if let Some(proxy) = self.event_proxy.clone() {
-            self.os_theme_watch = teksilo_platform::os_theme::OsThemeWatch::new(proxy);
-        }
+        self.os_theme_watch = (self.start_os_theme_watch)(self.event_proxy.as_ref());
     }
 
     /// Answer `payload` when it is an
@@ -680,21 +710,20 @@ impl WindowManager {
         &mut self,
         payload: Box<dyn std::any::Any + Send>,
     ) -> Result<bool, Box<dyn std::any::Any + Send>> {
-        let themed = self.route_os_theme_payload_from(payload, OsQueries::PLATFORM)?;
-        let preferences = self.refresh_accessibility_preferences();
-        Ok(themed || preferences)
+        self.route_os_theme_payload_from(payload, OsQueries::PLATFORM)
     }
 
-    /// The theme half of
     /// [`route_os_theme_payload`](Self::route_os_theme_payload), reading the
-    /// desktop through `queries`.
+    /// desktop and its accessibility preferences through `queries`.
     fn route_os_theme_payload_from(
         &mut self,
         payload: Box<dyn std::any::Any + Send>,
         queries: OsQueries,
     ) -> Result<bool, Box<dyn std::any::Any + Send>> {
         payload.downcast::<teksilo_platform::os_theme::OsThemeChanged>()?;
-        Ok(self.reapply_os_theme_from(queries))
+        let themed = self.reapply_os_theme_from(queries);
+        let preferences = self.refresh_accessibility_preferences_from(queries.accessibility);
+        Ok(themed || preferences)
     }
 
     /// Read the desktop again through `queries` and give each window the
@@ -863,11 +892,7 @@ impl WindowManager {
         let source = match self.theme_mode {
             ThemeMode::Manual => return false,
             ThemeMode::FollowSystem => {
-                OsThemeSource::follow_system(match (queries.color_scheme)() {
-                    ColorSchemePreference::Dark => true,
-                    ColorSchemePreference::Light => false,
-                    ColorSchemePreference::NoPreference => hint.unwrap_or(false),
-                })
+                OsThemeSource::follow_system(queries.follow_system_dark(hint))
             }
             // A desktop stating a light or dark preference decides; one
             // stating none (macOS, Windows) follows the winit hint.
@@ -905,10 +930,12 @@ impl WindowManager {
     /// window's winit light or dark state.
     ///
     /// Under `Manual` it is the manager's theme. Under `FollowSystem` it is
-    /// the IntUI preset the hint names, and under `Native` the theme the
-    /// desktop resolves to, with a desktop that states no preference
-    /// following the hint, as [`apply_os_theme`](Self::apply_os_theme) does.
-    /// Either is resolved at the density of the manager's theme and becomes
+    /// the IntUI light or dark preset the desktop's preference names, and
+    /// under `Native` the theme the desktop resolves to. Under either, a
+    /// desktop that states no preference follows the hint, as
+    /// [`apply_os_theme`](Self::apply_os_theme) does, so a window opened and
+    /// a change heard later resolve alike. The theme is resolved at the
+    /// density of the manager's theme and becomes
     /// the manager's theme, which later windows start from.
     fn new_window_theme(
         &mut self,
@@ -917,7 +944,9 @@ impl WindowManager {
     ) -> (Theme, Option<OsThemeInputs>) {
         let source = match self.theme_mode {
             ThemeMode::Manual => return (self.theme.clone(), None),
-            ThemeMode::FollowSystem => OsThemeSource::follow_system(window_hint.unwrap_or(false)),
+            ThemeMode::FollowSystem => {
+                OsThemeSource::follow_system(queries.follow_system_dark(window_hint))
+            }
             ThemeMode::Native => OsThemeSource::native((queries.native_desktop)(), window_hint),
         };
         let inputs = source.at(self.theme.input.density);
@@ -2081,7 +2110,16 @@ impl WindowManager {
     /// window gains focus — so there is no idle polling wakeup. Returns `true`
     /// if anything changed (so the caller can request a redraw).
     pub fn refresh_accessibility_preferences(&mut self) -> bool {
-        let fresh = AccessibilityPreferences::query();
+        self.refresh_accessibility_preferences_from(AccessibilityPreferences::query)
+    }
+
+    /// [`refresh_accessibility_preferences`](Self::refresh_accessibility_preferences),
+    /// reading the preferences through `query`.
+    fn refresh_accessibility_preferences_from(
+        &mut self,
+        query: fn() -> AccessibilityPreferences,
+    ) -> bool {
+        let fresh = query();
         if fresh == self.a11y_prefs {
             return false;
         }
@@ -2480,6 +2518,15 @@ impl WindowManager {
                 requests.push(theme);
             }
         }
+        self.apply_theme_requests(requests)
+    }
+
+    /// Set each theme of `requests` in turn, the last winning, then, when
+    /// there was one, leave the OS-following modes for
+    /// [`ThemeMode::Manual`]; whether there was one. The half of
+    /// [`drain_pending_theme_requests`](Self::drain_pending_theme_requests)
+    /// after the requests are taken from the windows.
+    fn apply_theme_requests(&mut self, requests: Vec<Theme>) -> bool {
         let had_requests = !requests.is_empty();
         for theme in requests {
             self.set_theme(theme);
@@ -3288,6 +3335,7 @@ mod os_theme_tests {
     use std::cell::Cell;
     use teksilo_core::presets::intui;
     use teksilo_platform::os_theme::NativeDesktop;
+    use teksilo_tokens::ColorSchemePreference;
     use teksilo_tokens::{Color, OsThemeColors, TargetDensity};
 
     const DENSITIES: [TargetDensity; 2] = [TargetDensity::Compact, TargetDensity::Touch];
@@ -3324,6 +3372,7 @@ mod os_theme_tests {
         OsQueries {
             native_desktop,
             color_scheme,
+            accessibility: AccessibilityPreferences::default,
         }
     }
 
@@ -3338,9 +3387,11 @@ mod os_theme_tests {
         out
     }
 
-    /// A manager in `mode` whose theme is at `density`.
+    /// A manager in `mode` whose theme is at `density`, holding the
+    /// accessibility preferences [`queries`] reads.
     fn manager(mode: ThemeMode, density: TargetDensity) -> WindowManager {
         let mut wm = WindowManager::new(intui::light().with_density(density));
+        wm.a11y_prefs = AccessibilityPreferences::default();
         wm.set_theme_mode(mode);
         wm
     }
@@ -3371,7 +3422,7 @@ mod os_theme_tests {
                 assert_eq!(theme.input.density, density);
                 assert_eq!(
                     theme,
-                    projected(OsThemeSource::follow_system(hint.unwrap_or(false)), density)
+                    projected(OsThemeSource::follow_system(true), density)
                 );
             }
         }
@@ -3439,17 +3490,50 @@ mod os_theme_tests {
     }
 
     #[test]
+    fn a_window_opened_under_follow_system_reads_the_desktops_preference() {
+        // On Linux winit gives a window no light or dark hint, so the
+        // desktop's own answer is all there is to open on.
+        for density in DENSITIES {
+            for (scheme, dark) in [
+                (says_dark as fn() -> ColorSchemePreference, true),
+                (says_light, false),
+            ] {
+                for hint in [None, Some(false), Some(true)] {
+                    let mut wm = manager(ThemeMode::FollowSystem, density);
+                    let (theme, inputs) =
+                        wm.new_window_theme(hint, queries(silent_desktop, scheme));
+                    assert_eq!(theme.is_dark(), dark, "hint {hint:?}");
+                    assert_eq!(
+                        inputs,
+                        Some(OsThemeSource::follow_system(dark).at(density)),
+                        "hint {hint:?}"
+                    );
+                    assert_eq!(wm.theme, theme, "later windows start from it");
+                }
+            }
+            for (hint, dark) in [(None, false), (Some(false), false), (Some(true), true)] {
+                let mut wm = manager(ThemeMode::FollowSystem, density);
+                let (theme, _) = wm.new_window_theme(hint, queries(silent_desktop, says_nothing));
+                assert_eq!(theme.is_dark(), dark, "no preference follows hint {hint:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_second_window_keeps_the_dark_a_live_change_set() {
+        let mut wm = manager(ThemeMode::FollowSystem, TargetDensity::Compact);
+        let dark = queries(light_desktop, says_dark);
+        wm.new_window_theme(None, dark);
+        wm.apply_os_theme_from(None, dark);
+        let (second, _) = wm.new_window_theme(None, dark);
+        assert!(second.is_dark());
+        assert!(wm.theme.is_dark());
+    }
+
+    #[test]
     fn a_window_opened_and_a_live_change_agree() {
         for mode in [ThemeMode::FollowSystem, ThemeMode::Native] {
             for q in all_queries() {
-                // FollowSystem reads the light or dark answer only on a live
-                // change; a window opens on the hint alone. They read the same
-                // when the desktop gives no answer.
-                if mode == ThemeMode::FollowSystem
-                    && (q.color_scheme)() != ColorSchemePreference::NoPreference
-                {
-                    continue;
-                }
                 for hint in [None, Some(false), Some(true)] {
                     for density in DENSITIES {
                         let mut opened = manager(mode, density);
@@ -3577,6 +3661,7 @@ mod os_theme_tests {
     fn a_desktop_change_leaves_a_manual_theme_alone() {
         let theme = intui::dark().with_density(TargetDensity::Touch);
         let mut wm = WindowManager::new(theme.clone());
+        wm.a11y_prefs = AccessibilityPreferences::default();
         assert_eq!(
             wm.route_os_theme_payload_from(changed(), queries(light_desktop, says_light))
                 .ok(),
@@ -3597,12 +3682,133 @@ mod os_theme_tests {
         assert_eq!(wm.theme, theme, "and the desktop was not read");
     }
 
+    thread_local! {
+        /// How many [`FakeWatch`]es this test thread started, and how many
+        /// are alive.
+        static WATCHES_STARTED: Cell<usize> = const { Cell::new(0) };
+        static WATCHES_ALIVE: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// A watch that hears nothing and counts itself.
+    struct FakeWatch;
+
+    impl DesktopWatch for FakeWatch {
+        fn files_changed(&mut self) -> bool {
+            false
+        }
+    }
+
+    impl Drop for FakeWatch {
+        fn drop(&mut self) {
+            WATCHES_ALIVE.with(|alive| alive.set(alive.get() - 1));
+        }
+    }
+
+    /// Starts a [`FakeWatch`], with or without an event proxy.
+    fn start_fake_watch(_proxy: Option<&AppEventProxy>) -> Option<Box<dyn DesktopWatch>> {
+        WATCHES_STARTED.with(|started| started.set(started.get() + 1));
+        WATCHES_ALIVE.with(|alive| alive.set(alive.get() + 1));
+        Some(Box::new(FakeWatch))
+    }
+
+    /// A manager in `mode` that starts [`FakeWatch`]es.
+    fn watching_manager(mode: ThemeMode) -> WindowManager {
+        WATCHES_STARTED.with(|started| started.set(0));
+        WATCHES_ALIVE.with(|alive| alive.set(0));
+        let mut wm = manager(ThemeMode::Manual, TargetDensity::Compact);
+        wm.start_os_theme_watch = start_fake_watch;
+        wm.set_theme_mode(mode);
+        wm
+    }
+
+    fn watches() -> (usize, usize) {
+        (
+            WATCHES_STARTED.with(Cell::get),
+            WATCHES_ALIVE.with(Cell::get),
+        )
+    }
+
     #[test]
-    fn the_watch_waits_for_the_event_proxy_and_stops_under_manual() {
+    fn the_platform_watch_waits_for_the_event_proxy() {
+        assert!(start_platform_desktop_watch(None).is_none());
         let mut wm = manager(ThemeMode::Native, TargetDensity::Compact);
         wm.sync_os_theme_watch();
         assert!(wm.os_theme_watch.is_none(), "no proxy, no watch");
-        wm.set_theme_mode(ThemeMode::Manual);
+    }
+
+    #[test]
+    fn the_watch_runs_while_the_theme_follows_the_os_and_stops_under_manual() {
+        for mode in [ThemeMode::Native, ThemeMode::FollowSystem] {
+            let mut wm = watching_manager(mode);
+            assert!(wm.os_theme_watch.is_some(), "{mode:?}");
+            assert_eq!(watches(), (1, 1), "{mode:?}");
+            wm.sync_os_theme_watch();
+            wm.set_theme_mode(ThemeMode::Native);
+            wm.set_theme_mode(ThemeMode::FollowSystem);
+            assert_eq!(watches(), (1, 1), "{mode:?}: one watch, kept");
+            wm.set_theme_mode(ThemeMode::Manual);
+            assert!(wm.os_theme_watch.is_none(), "{mode:?}");
+            assert_eq!(watches(), (1, 0), "{mode:?}: stopped");
+        }
+        let wm = watching_manager(ThemeMode::Manual);
         assert!(wm.os_theme_watch.is_none());
+        assert_eq!(watches(), (0, 0), "Manual starts none");
+    }
+
+    #[test]
+    fn an_explicit_theme_pick_stops_the_watch() {
+        let mut wm = watching_manager(ThemeMode::Native);
+        assert!(!wm.apply_theme_requests(Vec::new()), "no request");
+        assert_eq!(wm.theme_mode(), ThemeMode::Native);
+        assert_eq!(watches(), (1, 1), "no request, the watch runs on");
+
+        assert!(wm.apply_theme_requests(vec![intui::dark()]));
+        assert_eq!(wm.theme_mode(), ThemeMode::Manual);
+        assert!(wm.os_theme_watch.is_none());
+        assert_eq!(watches(), (1, 0), "a pick stops it");
+        assert!(wm.theme.is_dark());
+    }
+
+    #[test]
+    fn following_the_system_starts_the_watch() {
+        let mut wm = watching_manager(ThemeMode::Manual);
+        wm.follow_system_theme(queries(light_desktop, says_light));
+        assert!(wm.os_theme_watch.is_some());
+        assert_eq!(watches(), (1, 1));
+    }
+
+    /// The defaults with reduced motion asked for, as KDE's animation speed
+    /// set to instant reads.
+    fn reduced_motion() -> AccessibilityPreferences {
+        AccessibilityPreferences {
+            reduced_motion: true,
+            ..AccessibilityPreferences::default()
+        }
+    }
+
+    #[test]
+    fn a_desktop_change_reads_the_accessibility_preferences_again() {
+        let mut wm = manager(ThemeMode::Native, TargetDensity::Compact);
+        let q = queries(light_desktop, says_nothing);
+        assert!(wm.route_os_theme_payload_from(changed(), q).expect("taken"));
+        assert!(
+            !wm.route_os_theme_payload_from(changed(), q).expect("taken"),
+            "nothing changed"
+        );
+
+        let slowed = OsQueries {
+            accessibility: reduced_motion,
+            ..q
+        };
+        assert!(
+            wm.route_os_theme_payload_from(changed(), slowed)
+                .expect("taken"),
+            "the preferences alone changed"
+        );
+        assert!(wm.a11y_prefs.reduced_motion);
+        assert!(
+            !wm.route_os_theme_payload_from(changed(), slowed)
+                .expect("taken")
+        );
     }
 }

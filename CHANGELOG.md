@@ -550,6 +550,14 @@ by crate for clarity, not because crates version independently.
   portal reports no preference, a window now opens dark when the window
   system says it is dark, as an OS theme change already made it. Before, it
   always opened light.
+- **A window opening under `ThemeMode::FollowSystem` follows the desktop's
+  light or dark preference.** **Behaviour change:** a window now opens dark
+  when the desktop says it prefers dark, as a change heard while the app runs
+  already made it, and follows the window system's light or dark state only
+  when the desktop states neither. Before, it decided on the window system's
+  state alone, which on Linux is never given, so every window opened light on
+  a dark desktop, and a window opened after the app had turned dark came up
+  light beside the others.
 - **A Native theme keeps the desktop's colours when the desktop states no
   light or dark preference.** **Behaviour change:** on a Linux desktop whose
   portal reports no preference but whose accent or GTK colours can be read,

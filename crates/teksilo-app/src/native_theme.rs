@@ -74,9 +74,10 @@ pub fn resolve_native_theme(
         .unwrap_or_else(|| presets::intui::from_os(&request.desktop.os, request.dark))
 }
 
-/// The two desktop reads a theme that follows the OS is made from. The
-/// window manager reads the platform's own ([`OsQueries::PLATFORM`]); its
-/// tests hand it fixed answers.
+/// The desktop reads a theme that follows the OS is made from, and the
+/// accessibility preferences read again with it when the desktop changes.
+/// The window manager reads the platform's own ([`OsQueries::PLATFORM`]);
+/// its tests hand it fixed answers.
 #[derive(Clone, Copy)]
 pub(crate) struct OsQueries {
     /// What the desktop reports for [`ThemeMode::Native`](crate::ThemeMode::Native).
@@ -84,17 +85,35 @@ pub(crate) struct OsQueries {
     /// The desktop's light or dark preference, for
     /// [`ThemeMode::FollowSystem`](crate::ThemeMode::FollowSystem).
     pub(crate) color_scheme: fn() -> ColorSchemePreference,
+    /// The accessibility preferences, among them reduced motion, read again
+    /// whenever the desktop's appearance is heard to change.
+    pub(crate) accessibility: fn() -> teksilo_platform::AccessibilityPreferences,
 }
 
 impl OsQueries {
     /// The platform's reads,
-    /// [`query_native_desktop`](teksilo_platform::os_theme::query_native_desktop)
+    /// [`query_native_desktop`](teksilo_platform::os_theme::query_native_desktop),
+    /// [`query_color_scheme`](teksilo_platform::os_theme::query_color_scheme)
     /// and
-    /// [`query_color_scheme`](teksilo_platform::os_theme::query_color_scheme).
+    /// [`AccessibilityPreferences::query`](teksilo_platform::AccessibilityPreferences::query).
     pub(crate) const PLATFORM: OsQueries = OsQueries {
         native_desktop: teksilo_platform::os_theme::query_native_desktop,
         color_scheme: teksilo_platform::os_theme::query_color_scheme,
+        accessibility: teksilo_platform::AccessibilityPreferences::query,
     };
+
+    /// Whether [`ThemeMode::FollowSystem`](crate::ThemeMode::FollowSystem)
+    /// is dark: the desktop's light or dark preference when it states one,
+    /// otherwise `hint`, the window system's light or dark state, with no
+    /// hint meaning light. A window that opens and a change heard later both
+    /// decide here, so they cannot disagree.
+    pub(crate) fn follow_system_dark(self, hint: Option<bool>) -> bool {
+        match (self.color_scheme)() {
+            ColorSchemePreference::Dark => true,
+            ColorSchemePreference::Light => false,
+            ColorSchemePreference::NoPreference => hint.unwrap_or(false),
+        }
+    }
 }
 
 /// What a theme that follows the OS is resolved from, apart from the density
