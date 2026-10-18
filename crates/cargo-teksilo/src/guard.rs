@@ -152,7 +152,7 @@ pub fn refusal_text(app: &str, tool: &str, what: &str, sources: Option<&Path>) -
         Some(parts) if parts < FIRST_PUBLISHED => {
             "use the resolved crate sources, or upgrade to Teksilo 0.13.0 or later".to_string()
         }
-        Some(_) => format!("cargo install cargo-teksilo --version {app} --locked"),
+        Some(_) => self_install(app, None).display(),
         None => "install cargo-teksilo from the matching framework checkout".to_string(),
     };
     let mut message = format!("tool {tool} cannot serve {what} for Teksilo {app}\nhelp: {help}");
@@ -163,6 +163,41 @@ pub fn refusal_text(app: &str, tool: &str, what: &str, sources: Option<&Path>) -
         message.push_str("\nFor unpublished versions: cargo install --path <checkout>/crates/cargo-teksilo --locked");
     }
     message
+}
+
+/// Whether this binary is an older release than the app's teksilo, at any level.
+///
+/// A patch-older tool still answers ([`Verdict::Degraded`]), which is right for
+/// a lookup and wrong for anything that writes: `update` would "refresh" every
+/// file it installed to the older release. An unparseable version is not
+/// older; [`check`] already refuses it.
+pub fn tool_is_older(app: &str) -> bool {
+    match (semver_parts(TOOL_VERSION), semver_parts(app)) {
+        (Some(tool), Some(app)) => tool < app,
+        _ => false,
+    }
+}
+
+/// The command that installs the cargo-teksilo matching `app`.
+///
+/// From the checkout when the app builds against one, whose version crates.io
+/// may not have yet, and into the root this binary was installed under.
+pub fn self_install(app: &str, checkout: Option<&Path>) -> crate::install::Install {
+    let exe = std::env::current_exe().ok();
+    match checkout {
+        Some(root) => {
+            crate::install::Install::path(&root.join("crates/cargo-teksilo"), exe.as_deref())
+        }
+        None => crate::install::Install::release("cargo-teksilo", app, exe.as_deref()),
+    }
+}
+
+/// The help line for a tool older than the app.
+pub fn outdated_tool_text(app: &str, checkout: Option<&Path>) -> String {
+    format!(
+        "help: cargo-teksilo {TOOL_VERSION} is older than Teksilo {app}; `{}` updates it",
+        self_install(app, checkout).display()
+    )
 }
 
 /// The note printed when a command answers across a patch-level difference.
@@ -250,6 +285,35 @@ mod tests {
         assert!(
             tool >= FIRST_PUBLISHED,
             "TOOL_VERSION {TOOL_VERSION} is below FIRST_PUBLISHED {FIRST_PUBLISHED:?}"
+        );
+    }
+
+    #[test]
+    fn only_a_newer_app_makes_the_tool_older() {
+        let (major, minor, patch) = semver_parts(TOOL_VERSION).unwrap();
+        for newer in [
+            format!("{major}.{minor}.{}", patch + 1),
+            format!("{major}.{}.0", minor + 1),
+            format!("{}.0.0", major + 1),
+        ] {
+            assert!(tool_is_older(&newer), "{newer}");
+        }
+        assert!(!tool_is_older(TOOL_VERSION));
+        assert!(!tool_is_older("0.0.1"));
+        assert!(!tool_is_older("not-a-version"));
+    }
+
+    #[test]
+    fn the_tool_installs_from_a_checkout_when_the_app_uses_one() {
+        let line = outdated_tool_text("9.9.9", Some(Path::new("/src/teksilo")));
+        assert!(
+            line.contains("`cargo install --path /src/teksilo/crates/cargo-teksilo --locked`"),
+            "{line}"
+        );
+        let line = outdated_tool_text("9.9.9", None);
+        assert!(
+            line.contains("`cargo install cargo-teksilo --version 9.9.9 --locked`"),
+            "{line}"
         );
     }
 

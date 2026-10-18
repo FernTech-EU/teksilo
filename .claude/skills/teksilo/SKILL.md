@@ -55,10 +55,11 @@ theme presets, and the separate `teksilo-charts` and `teksilo-scene` crates.
 If the version this app resolves (`cargo teksilo status`, or `Cargo.lock`) is
 not the one this copy ships with, the skill was installed for another release.
 Say so, and refresh it before relying on the prose: `cargo install
-cargo-teksilo --version <the app's teksilo version>`, then `cargo teksilo agent
-install claude --force` (add `--user` for a copy under the home directory).
-`cargo teksilo status` flags a user-scope copy that differs from the installed
-tool's.
+cargo-teksilo --version <the app's teksilo version> --locked`, then `cargo
+teksilo update` (`--user` for a copy under the home directory). `cargo teksilo
+status` flags a tool older than the app, a user-scope copy that differs from the
+installed tool's, and an automation server or formatter on PATH from an older
+release, each with the command that fixes it.
 
 ## The tool: `cargo teksilo`
 
@@ -96,6 +97,7 @@ cargo teksilo show docs/scroll-area.md      # read a search result in full, offl
 cargo teksilo show docs/scroll-area.md --lines 166-172
 cargo teksilo probe install                         # materialise the Python automation harness
 cargo teksilo init                         # the harness, plus a teksilo brief for every agent here
+cargo teksilo update                       # bring everything installed to this release
 ```
 
 - **`symbol`** replaces reading the widget source by hand. It emits the type's
@@ -132,6 +134,18 @@ cargo teksilo init                         # the harness, plus a teksilo brief f
   `--user` supports `claude`, `vibe`, and `opencode`; it writes no project harness.
   `--force` replaces conflicting generated files. Shared-file text outside the
   managed region is preserved. `agent list` reports supported targets and state.
+- **`update`** brings what is already installed to this release: the harness,
+  the project's agent instructions, and the `teksilo-automation-mcp` and
+  `cargo-teksilo-fmt` binaries on PATH (through `cargo install`). It lists the
+  changes and asks first; `-y` skips the question, `-i` asks per action and
+  shows the equivalent command, `--dry-run` only lists. `--agent` limits it to
+  the project's agent instructions, `--user` updates the ones under the home
+  directory instead. It installs nothing that is not there, and refuses when
+  the tool is older than the app. You cannot answer its question: run it with
+  `--dry-run`, show the user the list, and run it again with `-y` once they
+  agree. Afterwards, ask them to restart your session (and the MCP server, if
+  `teksilo-automation-mcp` was replaced), since this one still has the old
+  instructions.
 - **`model fetch`** explicitly downloads the semantic search model. Search uses
   BM25 until it is cached; a lookup never starts a download.
 - **`status --json`** reports the resolved version and installed tooling.

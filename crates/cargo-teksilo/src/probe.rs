@@ -91,18 +91,7 @@ pub fn materialise(project: &Path, force: bool) -> Result<Written, ProbeError> {
     // three files wants to hear about three, not to re-run and be stopped
     // again by the next one.
     if !force {
-        let mut modified = locally_modified(&dest, &previous);
-        for file in walk(&PROBE) {
-            let rel = shipped_path(file.path());
-            if !previous.contains_key(&rel)
-                && dest.join(&rel).exists()
-                && std::fs::read(dest.join(&rel))? != file.contents()
-            {
-                modified.push(rel);
-            }
-        }
-        modified.sort();
-        modified.dedup();
+        let modified = edited(&dest, &previous)?;
         if !modified.is_empty() {
             return Err(ProbeError::LocallyModified {
                 count: modified.len(),
@@ -153,6 +142,52 @@ pub fn materialise(project: &Path, force: bool) -> Result<Written, ProbeError> {
 
     write_manifest(&dest, &manifest)?;
     Ok(written)
+}
+
+/// What [`materialise`] followed by [`record_provenance`] would find, without
+/// writing anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProbeState {
+    /// No harness: nothing recorded, no generated directory.
+    Absent,
+    /// Every shipped file, the manifest and the recorded version are this
+    /// release's.
+    Current,
+    /// Something would change.
+    Stale {
+        /// The version the harness was recorded for, if any.
+        recorded: Option<String>,
+        /// Generated files with local edits, which `materialise` refuses to
+        /// replace without `force`.
+        edited: Vec<String>,
+    },
+}
+
+/// The dry run of a probe install for `version`.
+///
+/// Built from the same pieces as [`materialise`] (the edit check, the shipped
+/// set and the manifest it would write), so `Current` means a run would
+/// change nothing.
+pub fn inspect(project: &Path, version: &str) -> ProbeState {
+    let dest = project.join(DEST);
+    let recorded = recorded_provenance(project);
+    if recorded.is_none() && !dest.exists() {
+        return ProbeState::Absent;
+    }
+    let previous = read_manifest(&dest);
+    let edited = edited(&dest, &previous).unwrap_or_default();
+    let wanted: BTreeMap<String, String> = walk(&PROBE)
+        .into_iter()
+        .map(|f| (shipped_path(f.path()), digest(f.contents())))
+        .collect();
+    let files_current = walk(&PROBE).into_iter().all(|f| {
+        std::fs::read(dest.join(shipped_path(f.path()))).is_ok_and(|body| body == f.contents())
+    });
+    if files_current && previous == wanted && recorded.as_deref() == Some(version) {
+        ProbeState::Current
+    } else {
+        ProbeState::Stale { recorded, edited }
+    }
 }
 
 /// Record which teksilo this harness came from, in the consumer's manifest.
@@ -287,6 +322,24 @@ fn write_manifest(dest: &Path, manifest: &BTreeMap<String, String>) -> Result<()
     Ok(())
 }
 
+/// Generated files a consumer has edited: changed since the manifest recorded
+/// them, or present without a manifest entry and different from what ships.
+fn edited(dest: &Path, previous: &BTreeMap<String, String>) -> std::io::Result<Vec<String>> {
+    let mut modified = locally_modified(dest, previous);
+    for file in walk(&PROBE) {
+        let rel = shipped_path(file.path());
+        if !previous.contains_key(&rel)
+            && dest.join(&rel).exists()
+            && std::fs::read(dest.join(&rel))? != file.contents()
+        {
+            modified.push(rel);
+        }
+    }
+    modified.sort();
+    modified.dedup();
+    Ok(modified)
+}
+
 fn locally_modified(dest: &Path, previous: &BTreeMap<String, String>) -> Vec<String> {
     let mut modified: Vec<String> = previous
         .iter()
@@ -376,6 +429,45 @@ mod tests {
         assert_eq!(w.created.len(), 0);
         assert_eq!(w.updated.len(), 0);
         assert!(w.unchanged.len() > 5);
+    }
+
+    #[test]
+    fn inspect_is_current_exactly_when_an_install_changes_nothing() {
+        let p = project();
+        assert_eq!(inspect(p.path(), "0.19.0"), ProbeState::Absent);
+
+        materialise(p.path(), false).unwrap();
+        record_provenance(p.path(), "0.19.0").unwrap();
+        assert_eq!(inspect(p.path(), "0.19.0"), ProbeState::Current);
+        let w = materialise(p.path(), false).unwrap();
+        assert!(w.created.is_empty() && w.updated.is_empty());
+
+        // Same files, recorded for another release.
+        assert_eq!(
+            inspect(p.path(), "0.20.0"),
+            ProbeState::Stale {
+                recorded: Some("0.19.0".into()),
+                edited: vec![],
+            }
+        );
+
+        // A deleted file is not an edit, but an install would recreate it.
+        std::fs::remove_file(p.path().join(DEST).join("session.py")).unwrap();
+        assert!(matches!(
+            inspect(p.path(), "0.19.0"),
+            ProbeState::Stale { ref edited, .. } if edited.is_empty()
+        ));
+        materialise(p.path(), false).unwrap();
+        assert_eq!(inspect(p.path(), "0.19.0"), ProbeState::Current);
+
+        std::fs::write(p.path().join(DEST).join("session.py"), b"# mine\n").unwrap();
+        assert_eq!(
+            inspect(p.path(), "0.19.0"),
+            ProbeState::Stale {
+                recorded: Some("0.19.0".into()),
+                edited: vec!["session.py".into()],
+            }
+        );
     }
 
     #[test]

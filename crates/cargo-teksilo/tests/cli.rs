@@ -282,3 +282,182 @@ fn user_install_creates_missing_configuration_without_project_writes() {
     assert!(!root.path().join("scripts").exists());
     assert!(!root.path().join("Cargo.lock").exists());
 }
+
+/// Run with fake companion binaries ahead on PATH, each reporting `version`,
+/// so `update` never reaches the real ones and never runs `cargo install`.
+#[cfg(unix)]
+fn run_with_companions(root: &Path, version: &str, args: &[&str]) -> Output {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = root.join("fake-bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    for name in ["teksilo-automation-mcp", "cargo-teksilo-fmt"] {
+        let script = bin.join(name);
+        std::fs::write(&script, format!("#!/bin/sh\necho '{name} {version}'\n")).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path = std::env::join_paths(
+        std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    Command::new(env!("CARGO_BIN_EXE_cargo-teksilo"))
+        .arg("teksilo")
+        .args(args)
+        .current_dir(root)
+        .env("PATH", path)
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("FASTEMBED_CACHE_DIR", root.join("model-cache"))
+        .output()
+        .unwrap()
+}
+#[cfg(unix)]
+#[test]
+fn update_refreshes_what_is_installed_and_nothing_else() {
+    let root = project();
+    let tool = env!("CARGO_PKG_VERSION");
+    ok(&run(
+        root.path(),
+        &["agent", "install", "claude", "--quiet"],
+    ));
+    let skill = root.path().join(".claude/skills/teksilo/SKILL.md");
+    let shipped = std::fs::read_to_string(&skill).unwrap();
+    std::fs::write(&skill, "an earlier release's skill").unwrap();
+
+    let listing = "Update   Claude Code instructions (.claude/skills/teksilo)";
+    let untouched = || {
+        assert_eq!(
+            std::fs::read_to_string(&skill).unwrap(),
+            "an earlier release's skill"
+        )
+    };
+    // Nobody to ask: the listing, then an error naming the flag, never a wait.
+    let result = run_with_companions(root.path(), tool, &["update"]);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("pass --yes once they agree"));
+    assert!(String::from_utf8_lossy(&result.stdout).contains(listing));
+    untouched();
+    // `-i` is only questions, so it refuses before printing any.
+    let result = run_with_companions(root.path(), tool, &["update", "-i"]);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("update --dry-run"));
+    assert!(result.stdout.is_empty());
+    untouched();
+    // A dry run lists and succeeds.
+    let result = run_with_companions(root.path(), tool, &["update", "--dry-run"]);
+    ok(&result);
+    assert!(String::from_utf8_lossy(&result.stdout).contains(listing));
+    untouched();
+
+    let result = run_with_companions(root.path(), tool, &["update", "-y"]);
+    ok(&result);
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(stdout.contains("Updated: Claude Code."));
+    assert!(stdout.contains("help: restart the agent session"));
+    assert!(!stdout.contains("MCP server"));
+    assert_eq!(std::fs::read_to_string(&skill).unwrap(), shipped);
+    // Only what was there: no harness, no other agent.
+    assert!(!root.path().join("scripts").exists());
+    assert!(!root.path().join("AGENTS.md").exists());
+
+    let manifest = std::fs::read_to_string(root.path().join("Cargo.toml")).unwrap();
+    let result = run_with_companions(root.path(), tool, &["update", "-y"]);
+    ok(&result);
+    assert_eq!(
+        String::from_utf8_lossy(&result.stdout),
+        "Nothing to update.\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("Cargo.toml")).unwrap(),
+        manifest
+    );
+}
+#[cfg(unix)]
+#[test]
+fn status_names_the_command_for_an_older_formatter() {
+    // The app one patch ahead, the fakes at this release: one patch older.
+    let tool = env!("CARGO_PKG_VERSION");
+    let (minor, patch) = tool.rsplit_once('.').unwrap();
+    let app = format!("{minor}.{}", patch.parse::<u32>().unwrap() + 1);
+    let root = project_at(&app);
+    ok(&run(
+        root.path(),
+        &["show", "docs/agent-tooling.md", "--quiet"],
+    )); // writes Cargo.lock
+    let result = run_with_companions(root.path(), tool, &["status"]);
+    ok(&result);
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(
+        stdout.contains(&format!("Fmt      {tool} (older than {app})")),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!("MCP      {tool} (older than {app})")),
+        "{stdout}"
+    );
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    for name in ["cargo-teksilo-fmt", "teksilo-automation-mcp"] {
+        assert!(
+            stderr.contains(&format!("`cargo install {name} --version {app} --locked`")),
+            "{stderr}"
+        );
+    }
+}
+#[test]
+fn an_older_tool_says_so_and_does_not_update() {
+    let tool = env!("CARGO_PKG_VERSION");
+    let (minor, patch) = tool.rsplit_once('.').unwrap();
+    let app = format!("{minor}.{}", patch.parse::<u32>().unwrap() + 1);
+    let root = project_at(&app);
+    ok(&run(
+        root.path(),
+        &["agent", "install", "claude", "--quiet"],
+    ));
+    let skill = root.path().join(".claude/skills/teksilo/SKILL.md");
+    std::fs::write(&skill, "a newer release's skill").unwrap();
+
+    let result = run(root.path(), &["status", "--quiet"]);
+    ok(&result);
+    assert!(
+        String::from_utf8_lossy(&result.stdout)
+            .contains(&format!("Tool     {tool} (older than {app})"))
+    );
+    let help = format!("`cargo install cargo-teksilo --version {app} --locked`");
+    assert!(String::from_utf8_lossy(&result.stderr).contains(&help));
+
+    let result = run(root.path(), &["update", "-y"]);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains(&help));
+    assert_eq!(
+        std::fs::read_to_string(&skill).unwrap(),
+        "a newer release's skill"
+    );
+}
+#[test]
+fn update_user_refreshes_home_copies_outside_any_project() {
+    let outside = tempfile::tempdir().unwrap();
+    let home = outside.path().join("home");
+    let user_run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_cargo-teksilo"))
+            .arg("teksilo")
+            .args(args)
+            .current_dir(outside.path())
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("VIBE_HOME", home.join("vibe"))
+            .env("XDG_CONFIG_HOME", home.join("config"))
+            .output()
+            .unwrap()
+    };
+    ok(&user_run(&[
+        "agent", "install", "claude", "--user", "--quiet",
+    ]));
+    let skill = home.join(".claude/skills/teksilo/SKILL.md");
+    let shipped = std::fs::read_to_string(&skill).unwrap();
+    std::fs::write(&skill, "an earlier release's skill").unwrap();
+
+    let result = user_run(&["update", "--user", "-y"]);
+    ok(&result);
+    assert!(String::from_utf8_lossy(&result.stdout).contains("Updated: user Claude Code."));
+    assert_eq!(std::fs::read_to_string(&skill).unwrap(), shipped);
+    assert!(!home.join("vibe").exists());
+    assert!(!outside.path().join("Cargo.lock").exists());
+}

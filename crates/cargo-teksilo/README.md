@@ -30,6 +30,7 @@ cargo teksilo init --agent codex --agent claude
 cargo teksilo agent install cursor cline
 cargo teksilo agent list
 cargo teksilo probe install
+cargo teksilo update
 cargo teksilo model fetch
 cargo teksilo status --json
 cargo teksilo --version
@@ -49,6 +50,24 @@ Claude receives a full skill; the others receive rules or a managed `AGENTS.md`
 section. `--user` supports `claude`, `vibe`, and `opencode` and writes no harness.
 Shared-file text outside the managed region is preserved. `--force` replaces
 conflicting generated files.
+
+`update` brings what is already installed to this release: the probe harness,
+the project's agent instructions, and the `teksilo-automation-mcp` and
+`cargo-teksilo-fmt` binaries on PATH, reinstalled with `cargo install`. It lists
+the changes and asks before making them; `-y` skips the question, and `-i` asks
+per action, showing the equivalent command; `--dry-run` only lists. Where
+nobody can answer (stdin is not a terminal, or `$CI` or `$CLAUDECODE` is set),
+it prints the list and exits with an error naming `-y`, rather than waiting.
+`--agent` limits it to the
+project's agent instructions; `--user` updates the instructions under the home
+directory instead, and needs no project. It installs nothing that is absent,
+and refuses when the tool is older than the app: install the matching
+cargo-teksilo first. With `-y`, probe files with local edits are replaced only
+with `--force`.
+
+`status` reports the tool, the app's Teksilo, the harness, the search model,
+and the automation server and formatter on PATH. A tool, server or formatter
+older than the app's release is reported with the command that updates it.
 
 `--quiet` suppresses informational messages but still says which release
 answered; `--verbose` shows paths and diagnostics. `search --json`, `status --json`, and `agent list --json` emit
