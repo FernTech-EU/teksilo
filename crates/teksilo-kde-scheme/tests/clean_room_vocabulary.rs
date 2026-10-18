@@ -10,8 +10,10 @@
 //! after upstream rather than after the specification, so this test fails
 //! on any of them, naming the file and line.
 //!
-//! The words are matched whole and case-sensitively. A comment line that
-//! cites `doc.qt.io`, Qt's public documentation, may name what it cites.
+//! The words are matched whole and case-sensitively. A `//` comment line
+//! that cites `doc.qt.io`, Qt's public documentation, may name the Qt words
+//! ([`QT_WORDS`]) it cites; every KDE word is still reported there, since
+//! Qt's documentation cannot be where a KDE identifier comes from.
 //! Test fixtures (verbatim upstream files) are not scanned, and neither is
 //! the word list below.
 //!
@@ -58,6 +60,10 @@ const FORBIDDEN: &[&str] = &[
     "KColorScheme",
     "qreal",
 ];
+
+/// The words of [`FORBIDDEN`] that Qt's public documentation names, the only
+/// ones a comment citing `doc.qt.io` may carry.
+const QT_WORDS: &[&str] = &["QColor", "qreal"];
 // clean-room word list: end
 
 fn repository_root() -> PathBuf {
@@ -85,9 +91,20 @@ fn whole_words_in(line: &str) -> Vec<&'static str> {
         .collect()
 }
 
+/// Whether `line` is a `//` comment (including `///` and `//!`) that cites
+/// Qt's public documentation.
 fn cites_qt_documentation(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    (trimmed.starts_with("//") || trimmed.starts_with('#')) && line.contains("doc.qt.io")
+    line.trim_start().starts_with("//") && line.contains("doc.qt.io")
+}
+
+/// The forbidden words reported on `line`: every whole word, except a Qt
+/// word on a comment line that cites `doc.qt.io`.
+fn reported_words(line: &str) -> Vec<&'static str> {
+    let cites_qt = cites_qt_documentation(line);
+    whole_words_in(line)
+        .into_iter()
+        .filter(|word| !(cites_qt && QT_WORDS.contains(word)))
+        .collect()
 }
 
 fn collect_files(dir: &Path, root: &Path, out: &mut Vec<PathBuf>) {
@@ -162,10 +179,10 @@ fn no_upstream_identifier_appears_in_the_kde_crates() {
                 in_list = false;
                 continue;
             }
-            if in_list || cites_qt_documentation(line) {
+            if in_list {
                 continue;
             }
-            for word in whole_words_in(line) {
+            for word in reported_words(line) {
                 let shown = file.strip_prefix(&root).unwrap_or(file);
                 findings.push(format!("{}:{}: {word}", shown.display(), index + 1));
             }
@@ -192,10 +209,29 @@ fn words_match_whole_and_case_sensitively() {
     assert!(whole_words_in(&format!("_{word}")).is_empty());
     assert_ne!(word, word.to_lowercase());
     assert!(whole_words_in(&word.to_lowercase()).is_empty());
-    assert!(cites_qt_documentation(&format!(
-        "    // {word}: see https://doc.qt.io/qt-6/"
-    )));
-    assert!(!cites_qt_documentation(&format!(
-        "let {word} = 1; // https://doc.qt.io/"
-    )));
+}
+
+#[test]
+fn a_qt_documentation_comment_exempts_only_the_qt_words() {
+    for &qt in QT_WORDS {
+        assert!(FORBIDDEN.contains(&qt), "{qt} is a forbidden word");
+        for comment in ["//", "///", "//!"] {
+            let line = format!("    {comment} {qt}: see https://doc.qt.io/qt-6/qcolor.html");
+            assert!(reported_words(&line).is_empty(), "{line}");
+        }
+        // Code before the comment is not a citation, and neither is an
+        // attribute, even one that names doc.qt.io.
+        let code = format!("let x: {qt} = 1; // https://doc.qt.io/");
+        assert_eq!(reported_words(&code), vec![qt]);
+        let attribute = format!("#[doc = \"{qt}, see doc.qt.io\"]");
+        assert_eq!(reported_words(&attribute), vec![qt]);
+    }
+    // A KDE word is reported next to a doc.qt.io citation, alone or beside
+    // a Qt word the citation does exempt.
+    for &kde in FORBIDDEN.iter().filter(|w| !QT_WORDS.contains(w)) {
+        let alone = format!("// port of {kde}, see https://doc.qt.io/qt-6/qcolor.html");
+        assert_eq!(reported_words(&alone), vec![kde], "{alone}");
+        let beside = format!("/// {kde} / {}::lightness, doc.qt.io", QT_WORDS[0]);
+        assert_eq!(reported_words(&beside), vec![kde], "{beside}");
+    }
 }

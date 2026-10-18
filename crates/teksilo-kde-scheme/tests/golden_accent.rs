@@ -27,6 +27,10 @@ const BREEZE_DARK: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/fixtures/breeze-v6.8.0/BreezeDark.colors"
 ));
+const BREEZE_CLASSIC: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/breeze-v6.8.0/BreezeClassic.colors"
+));
 
 fn vectors() -> Value {
     serde_json::from_str(ACCENT_JSON).expect("accent.json parses")
@@ -177,6 +181,9 @@ fn accenting_a_breeze_constant_is_accenting_its_stock_file() {
     for (constant, file) in [
         (KdeColorScheme::breeze_light(), BREEZE_LIGHT),
         (KdeColorScheme::breeze_dark(), BREEZE_DARK),
+        // No [Colors:Header] group, the legacy title-bar key and its own
+        // [WM] colours: the paths of the written text the other two miss.
+        (KdeColorScheme::breeze_classic(), BREEZE_CLASSIC),
     ] {
         let file = parse_clean(file);
         for accent in ACCENT_SWATCHES.into_iter().chain([
@@ -187,11 +194,12 @@ fn accenting_a_breeze_constant_is_accenting_its_stock_file() {
         ]) {
             let from_constant = constant.with_accent(accent);
             let from_file = file.with_accent(accent);
-            assert_eq!(from_constant, from_file, "accent {accent}");
+            let name = constant.name.clone();
+            assert_eq!(from_constant, from_file, "{name:?}, accent {accent}");
             assert_eq!(
                 from_constant.source(),
                 from_file.source(),
-                "the written configuration for accent {accent}"
+                "the written configuration of {name:?} for accent {accent}"
             );
         }
     }
