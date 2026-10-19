@@ -3,20 +3,16 @@
 
 use std::cell::Cell;
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
-use std::time::{Duration, Instant, SystemTime};
-
-use teksilo_kde_scheme::KdeConfigLocations;
+use std::time::{Duration, Instant};
 
 use super::{
-    BREEZERC_PATH, CONFIG_CHANGED, ChangeSource, ConfigStamps, Debounce, GLOBAL_SETTINGS,
-    GLOBAL_SETTINGS_PATH, Heard, KCONFIG_NOTIFY, KDEGLOBALS_PATH, LISTENED, NOTIFY_CHANGE,
-    PORTAL_PATH, PORTAL_SETTINGS, Running, SETTING_CHANGED, Stop, config_files, modified, run,
-    signal_matters,
+    BREEZERC_PATH, CONFIG_CHANGED, ChangeSource, Debounce, GLOBAL_SETTINGS, GLOBAL_SETTINGS_PATH,
+    Heard, KCONFIG_NOTIFY, KDEGLOBALS_PATH, LISTENED, NOTIFY_CHANGE, PORTAL_PATH, PORTAL_SETTINGS,
+    Running, SETTING_CHANGED, Stop, run, signal_matters,
 };
 
 const MS: Duration = Duration::from_millis(1);
@@ -537,79 +533,92 @@ fn a_source_that_cannot_open_ends_the_thread() {
 
 // ── The configuration files ─────────────────────────────────────────────────
 
-fn set_modified(path: &Path, time: SystemTime) {
-    std::fs::File::options()
-        .write(true)
-        .open(path)
-        .expect("open the file")
-        .set_modified(time)
-        .expect("set its modification time");
-}
+/// Unix only: XDG paths must start with `/`, so a Windows scratch directory
+/// (`C:\...`) is not one and the cascade falls back to `/etc/xdg`. The watch
+/// reads these files on Linux alone (`OsThemeWatch::new` is `None` elsewhere).
+#[cfg(unix)]
+mod cascade_files {
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, SystemTime};
 
-#[test]
-fn a_file_of_either_cascade_written_made_or_removed_is_a_change() {
-    let dir = tempfile::tempdir().expect("make a scratch directory");
-    let root = dir.path().to_owned();
-    let config = root.join("config");
-    let etc = root.join("etc");
-    for d in [&config, &etc, &config.join("kdedefaults")] {
-        std::fs::create_dir_all(d).expect("make a configuration directory");
+    use teksilo_kde_scheme::KdeConfigLocations;
+
+    use super::super::{ConfigStamps, config_files, modified};
+
+    fn set_modified(path: &Path, time: SystemTime) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .expect("open the file")
+            .set_modified(time)
+            .expect("set its modification time");
     }
-    let vars: Vec<(&str, String)> = vec![
-        ("HOME", root.display().to_string()),
-        ("XDG_CONFIG_HOME", config.display().to_string()),
-        ("XDG_CONFIG_DIRS", etc.display().to_string()),
-        ("XDG_CURRENT_DESKTOP", "KDE".to_owned()),
-        ("KDE_SKIP_KDERC", "1".to_owned()),
-    ];
-    let locations = KdeConfigLocations::from_env(|name: &str| {
-        vars.iter()
-            .find(|(key, _)| *key == name)
-            .map(|(_, value)| value.clone())
-    });
-    let paths = config_files(&locations);
-    assert!(
-        paths.iter().all(|path| path.starts_with(&root)),
-        "every file is in the scratch directory: {paths:?}"
-    );
-    let has = |path: PathBuf| assert!(paths.contains(&path), "{} is watched", path.display());
-    has(config.join("kdeglobals"));
-    has(config.join("breezerc"));
-    has(config.join("kdedefaults").join("kdeglobals"));
-    has(etc.join("kdeglobals"));
-    has(etc.join("breezerc"));
 
-    let user = config.join("kdeglobals");
-    let system_breezerc = etc.join("breezerc");
-    std::fs::write(&user, "[General]\nColorScheme=BreezeLight\n").unwrap();
-    std::fs::write(&system_breezerc, "[Style]\n").unwrap();
-    let base = SystemTime::now() - Duration::from_secs(3600);
-    set_modified(&user, base);
-    set_modified(&system_breezerc, base);
+    #[test]
+    fn a_file_of_either_cascade_written_made_or_removed_is_a_change() {
+        let dir = tempfile::tempdir().expect("make a scratch directory");
+        let root = dir.path().to_owned();
+        let config = root.join("config");
+        let etc = root.join("etc");
+        for d in [&config, &etc, &config.join("kdedefaults")] {
+            std::fs::create_dir_all(d).expect("make a configuration directory");
+        }
+        let vars: Vec<(&str, String)> = vec![
+            ("HOME", root.display().to_string()),
+            ("XDG_CONFIG_HOME", config.display().to_string()),
+            ("XDG_CONFIG_DIRS", etc.display().to_string()),
+            ("XDG_CURRENT_DESKTOP", "KDE".to_owned()),
+            ("KDE_SKIP_KDERC", "1".to_owned()),
+        ];
+        let locations = KdeConfigLocations::from_env(|name: &str| {
+            vars.iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| value.clone())
+        });
+        let paths = config_files(&locations);
+        assert!(
+            paths.iter().all(|path| path.starts_with(&root)),
+            "every file is in the scratch directory: {paths:?}"
+        );
+        let has = |path: PathBuf| assert!(paths.contains(&path), "{} is watched", path.display());
+        has(config.join("kdeglobals"));
+        has(config.join("breezerc"));
+        has(config.join("kdedefaults").join("kdeglobals"));
+        has(etc.join("kdeglobals"));
+        has(etc.join("breezerc"));
 
-    let mut stamps = ConfigStamps::read(paths, modified);
-    assert!(!stamps.refresh(modified), "nothing changed");
+        let user = config.join("kdeglobals");
+        let system_breezerc = etc.join("breezerc");
+        std::fs::write(&user, "[General]\nColorScheme=BreezeLight\n").unwrap();
+        std::fs::write(&system_breezerc, "[Style]\n").unwrap();
+        let base = SystemTime::now() - Duration::from_secs(3600);
+        set_modified(&user, base);
+        set_modified(&system_breezerc, base);
 
-    set_modified(&user, base + Duration::from_secs(10));
-    assert!(
-        stamps.refresh(modified),
-        "the user's kdeglobals was written"
-    );
-    assert!(!stamps.refresh(modified), "and is counted once");
+        let mut stamps = ConfigStamps::read(paths, modified);
+        assert!(!stamps.refresh(modified), "nothing changed");
 
-    std::fs::write(config.join("breezerc"), "[Common]\n").unwrap();
-    assert!(stamps.refresh(modified), "the user's breezerc was made");
+        set_modified(&user, base + Duration::from_secs(10));
+        assert!(
+            stamps.refresh(modified),
+            "the user's kdeglobals was written"
+        );
+        assert!(!stamps.refresh(modified), "and is counted once");
 
-    std::fs::write(config.join("kdedefaults").join("kdeglobals"), "[KDE]\n").unwrap();
-    assert!(stamps.refresh(modified), "the kdedefaults layer was made");
+        std::fs::write(config.join("breezerc"), "[Common]\n").unwrap();
+        assert!(stamps.refresh(modified), "the user's breezerc was made");
 
-    std::fs::remove_file(&system_breezerc).unwrap();
-    assert!(stamps.refresh(modified), "the system breezerc was removed");
-    assert!(!stamps.refresh(modified));
+        std::fs::write(config.join("kdedefaults").join("kdeglobals"), "[KDE]\n").unwrap();
+        assert!(stamps.refresh(modified), "the kdedefaults layer was made");
 
-    // A file outside both cascades is not watched.
-    std::fs::write(config.join("kwinrc"), "[Windows]\n").unwrap();
-    assert!(!stamps.refresh(modified));
+        std::fs::remove_file(&system_breezerc).unwrap();
+        assert!(stamps.refresh(modified), "the system breezerc was removed");
+        assert!(!stamps.refresh(modified));
+
+        // A file outside both cascades is not watched.
+        std::fs::write(config.join("kwinrc"), "[Windows]\n").unwrap();
+        assert!(!stamps.refresh(modified));
+    }
 }
 
 // ── The real bus ────────────────────────────────────────────────────────────
