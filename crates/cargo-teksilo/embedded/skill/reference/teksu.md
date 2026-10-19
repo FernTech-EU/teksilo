@@ -14,7 +14,7 @@ It is **optional**. It earns its keep on deep, nested trees where
 reads just as well in plain builder form. The two nest in either direction, so
 adopt it where it helps.
 
-> This copy ships with teksilo **0.19.0**. Routing rules and slot arities are
+> This copy ships with teksilo **0.20.0**. Routing rules and slot arities are
 > version-sensitive: when a rule here disagrees with the compiler, the compiler
 > is right, and `cargo teksilo symbol <Widget>` will tell you the real signature
 > for the version your app pins.
