@@ -2230,7 +2230,8 @@ impl WindowManager {
         self.windows.len()
     }
 
-    /// Whether no windows remain (app should exit).
+    /// Whether no windows remain. Whether the application then quits is its
+    /// [`QuitPolicy`](crate::QuitPolicy)'s call.
     pub fn is_empty(&self) -> bool {
         self.windows.is_empty()
     }
@@ -2248,10 +2249,11 @@ impl WindowManager {
         self.windows.values_mut()
     }
 
-    /// Iterate the `TeksiloWindowId` of every managed window. Currently
-    /// unused: the automation `list_windows` tool (debug-only `automation`
-    /// feature) is served from [`iter`](Self::iter) instead, because it also
-    /// needs each window's `string_id` label and current title.
+    /// Iterate the `TeksiloWindowId` of every managed window. Used only by
+    /// the loop test: the automation `list_windows` tool (debug-only
+    /// `automation` feature) is served from [`iter`](Self::iter) instead,
+    /// because it also needs each window's `string_id` label and current
+    /// title.
     #[allow(dead_code)]
     pub(crate) fn teksilo_ids(&self) -> impl Iterator<Item = TeksiloWindowId> + '_ {
         self.windows.values().map(|m| m.teksilo_id)

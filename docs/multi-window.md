@@ -28,8 +28,9 @@ Full end-to-end example:
 
 ## Canonical app shape
 
-Every Teksilo app opens exactly one initial window via
-`TeksiloAppBuilder::initial_window(WindowConfig)`. Secondary windows are
+A Teksilo app opens one initial window via
+`TeksiloAppBuilder::initial_window(WindowConfig)` (an app that starts with
+no window says so with its quit policy, below). Secondary windows are
 opened from handler code via `EventContext::open_window`.
 
 ```rust
@@ -59,6 +60,18 @@ Notes:
 - `root_builder` receives `(tree, WindowState)`, the state clone is
   how a widget can bind against its own window's signals at
   construction time, without going through a `BuildContext`.
+
+### When the app quits: `QuitPolicy`
+
+`TeksiloAppBuilder::quit_policy` decides what closing the last window does:
+
+| Policy | Last window closed | Initial window |
+|---|---|---|
+| `QuitPolicy::LastWindowClosed` (default) | the app quits | required: `run()` panics without one, since the app would quit before showing anything |
+| `QuitPolicy::Explicit` | the app keeps running with no window | optional |
+
+`Explicit` is for an application whose life is not tied to its windows: a
+background service, or an application that lives in the system tray.
 
 ---
 
@@ -526,9 +539,9 @@ tears the window down:
 - a handler calling `ctx.close_window()`.
 
 The guard returns `CloseResponse::Close` to let the close proceed, or
-`CloseResponse::Veto` to cancel it. Quitting the app is just the last
-window closing, so a guard that vetoes the final window's close also
-keeps the app alive.
+`CloseResponse::Veto` to cancel it. Under the default quit policy,
+quitting the app is the last window closing, so a guard that vetoes the
+final window's close also keeps the app alive.
 
 Guards are **strictly per-window**, closing one window never consults
 another's guard, so this is correct for multi-window apps: an editor
@@ -615,6 +628,8 @@ Working demo: `cargo run -p close-confirmation` (main window: full
 2. On `resumed()`, the handler calls
    `WindowManager::create_window(initial_window_config, event_loop)`,
    synchronous winit creation, widget tree built, first paint requested.
+   An app under `QuitPolicy::Explicit` may have no initial window, and
+   skips this.
 3. On every `winit::WindowEvent`:
    - Event translation → `WidgetEvent`.
    - `dispatch_in_window(winit_id, evt, event_loop)`, temporarily
@@ -646,6 +661,9 @@ Working demo: `cargo run -p close-confirmation` (main window: full
 , both thread ops through, so state-change-triggered handlers
    (data-driven rebuilds, delayed overlays, drag-tick) can open
    windows too.
+6. At the end of `post_event` and of `about_to_wait`, the loop ends if
+   the quit policy says so: under `QuitPolicy::LastWindowClosed`, once no
+   window is open.
 
 ---
 

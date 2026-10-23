@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Twenty-three claims, and they do not all carry the same weight. Verified by
+//! Twenty-four claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -90,7 +90,9 @@
 //!   window reporting the focus takes the claim every window is born with
 //!   from the others;
 //! - **(w)** a window created with `skip_taskbar(true)` carries
-//!   `_NET_WM_STATE_SKIP_TASKBAR`, and one created without it does not.
+//!   `_NET_WM_STATE_SKIP_TASKBAR`, and one created without it does not;
+//! - **(x)** with every window closed, the loop goes on under
+//!   `QuitPolicy::Explicit` and ends under `QuitPolicy::LastWindowClosed`.
 //!
 //! Two are weaker than they look, and the reason is not fixable from here.
 //! **(c)**, the safe area, and the missing-override half of **(d)** compare a
@@ -1571,6 +1573,29 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             (before.0 + 40, before.1 + 30),
             "a blocked window still has to hear the OS resize it — reverting \
              `BlockedDisposition::Deliver` to a swallow leaves it at {before:?}"
+        );
+
+        // -- (x) the quit policy decides what closing the last window does
+        //
+        // Last, because it closes every window. Under `Explicit` the loop
+        // turns with no window open and goes on; under the default it ends.
+        // Making `maybe_exit` ignore the policy exits under `Explicit`.
+        let open: Vec<_> = app.wm.teksilo_ids().collect();
+        for id in open {
+            app.wm.close_window(id);
+        }
+        assert!(app.wm.is_empty());
+        app.quit_policy = crate::QuitPolicy::Explicit;
+        app.about_to_wait(event_loop);
+        assert!(
+            !event_loop.exiting(),
+            "under QuitPolicy::Explicit the loop outlives its last window"
+        );
+        app.quit_policy = crate::QuitPolicy::LastWindowClosed;
+        app.about_to_wait(event_loop);
+        assert!(
+            event_loop.exiting(),
+            "under QuitPolicy::LastWindowClosed it ends with the last window"
         );
     });
 

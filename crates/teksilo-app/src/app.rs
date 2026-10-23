@@ -37,6 +37,46 @@ pub enum ThemeMode {
     Native,
 }
 
+/// When the application quits on its own. Set with
+/// [`TeksiloAppBuilder::quit_policy`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum QuitPolicy {
+    /// The application quits when its last window closes. The default, and
+    /// the only behaviour before this setting existed.
+    #[default]
+    LastWindowClosed,
+    /// Closing the last window does not quit: the application keeps running
+    /// with no window open, the way a background service or a tray
+    /// application does. It also lets the application start with no window
+    /// at all ([`TeksiloAppBuilder::initial_window`] is then optional).
+    Explicit,
+}
+
+impl QuitPolicy {
+    /// Whether the event loop should end, with `open_windows` windows open.
+    fn exits_with(self, open_windows: usize) -> bool {
+        match self {
+            QuitPolicy::LastWindowClosed => open_windows == 0,
+            QuitPolicy::Explicit => false,
+        }
+    }
+
+    /// Why an application with this policy cannot start without an initial
+    /// window, `None` when it can.
+    fn refuses_no_initial_window(self) -> Option<&'static str> {
+        match self {
+            QuitPolicy::LastWindowClosed => Some(
+                "TeksiloAppBuilder: no initial_window, and the quit policy is \
+                 QuitPolicy::LastWindowClosed, so the application would quit before \
+                 showing anything. Give it an initial_window, or set \
+                 quit_policy(QuitPolicy::Explicit) to start with no window.",
+            ),
+            QuitPolicy::Explicit => None,
+        }
+    }
+}
+
 use teksilo_text::SharedTypesetter;
 
 use crate::window_config::{SizeToContent, TeksiloWindowId, WindowConfig};
@@ -856,6 +896,8 @@ struct TeksiloAppHandler {
     external_ctx_handler: Option<ExternalCtxHandler>,
     initial_window: Option<WindowConfig>,
     initial_created: bool,
+    /// When the loop ends on its own; see [`QuitPolicy`].
+    quit_policy: QuitPolicy,
     idle_budget: Duration,
     idle_trace: Option<IdleTrace>,
     /// The GPU reclaim poll, [`teksilo_render::poll_gpu_reclaim`]: a field
@@ -903,7 +945,8 @@ impl TeksiloAppHandler {
         theme: Theme,
         theme_mode: ThemeMode,
         app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
-        initial_window: WindowConfig,
+        initial_window: Option<WindowConfig>,
+        quit_policy: QuitPolicy,
         app_context_template: Option<std::rc::Rc<TreeAppContext>>,
         typesetter: SharedTypesetter,
         i18n_watcher: Option<teksilo_i18n::FtlFileWatcher>,
@@ -930,8 +973,9 @@ impl TeksiloAppHandler {
             wm,
             app_event_handler,
             external_ctx_handler: None,
-            initial_window: Some(initial_window),
+            initial_window,
             initial_created: false,
+            quit_policy,
             idle_budget: Duration::from_millis(4),
             idle_trace: IdleTrace::from_env(),
             gpu_reclaim: teksilo_render::poll_gpu_reclaim,
@@ -1056,7 +1100,7 @@ impl TeksiloAppHandler {
     }
 
     fn maybe_exit(&self, event_loop: &ActiveEventLoop) {
-        if self.wm.is_empty() {
+        if self.quit_policy.exits_with(self.wm.window_count()) {
             event_loop.exit();
         }
     }
@@ -4031,6 +4075,8 @@ pub struct TeksiloAppBuilder {
     external_ctx_handler: Option<ExternalCtxHandler>,
     on_ready: Vec<Box<dyn FnOnce(AppEventProxy)>>,
     initial_window: Option<WindowConfig>,
+    /// When the application quits on its own. See [`QuitPolicy`].
+    quit_policy: QuitPolicy,
     /// Type-erased adapter for the application's backend event source.
     /// Installed via `event_source<S>(source)`.
     event_source: Option<EventSourceAdapter>,
@@ -4095,6 +4141,7 @@ impl TeksiloAppBuilder {
             external_ctx_handler: None,
             on_ready: Vec::new(),
             initial_window: None,
+            quit_policy: QuitPolicy::default(),
             event_source: None,
             app_state_registry: HashMap::new(),
             i18n: None,
@@ -4628,9 +4675,12 @@ impl TeksiloAppBuilder {
         self
     }
 
-    /// Configure the initial window. Required — every app must open at
-    /// least one window at startup. The single canonical entry point:
-    /// build a [`WindowConfig`] and pass it here.
+    /// Configure the window the application opens at startup: build a
+    /// [`WindowConfig`] and pass it here.
+    ///
+    /// Required under the default [`QuitPolicy::LastWindowClosed`], where an
+    /// application with no window quits at once: [`run`](Self::run) panics
+    /// without one. Optional under [`QuitPolicy::Explicit`].
     ///
     /// ```ignore
     /// TeksiloAppBuilder::new()
@@ -4645,6 +4695,13 @@ impl TeksiloAppBuilder {
     /// ```
     pub fn initial_window(mut self, config: WindowConfig) -> Self {
         self.initial_window = Some(config);
+        self
+    }
+
+    /// Set when the application quits on its own. The default,
+    /// [`QuitPolicy::LastWindowClosed`], quits when the last window closes.
+    pub fn quit_policy(mut self, policy: QuitPolicy) -> Self {
+        self.quit_policy = policy;
         self
     }
 
@@ -4872,6 +4929,15 @@ impl TeksiloAppBuilder {
         build_loop: impl FnOnce() -> winit::event_loop::EventLoop<AppEvent>,
         drive: impl FnOnce(winit::event_loop::EventLoop<AppEvent>, &mut TeksiloAppHandler),
     ) {
+        // Before anything touches the display: an application that would
+        // quit before showing anything is a programming error, not a
+        // runtime condition.
+        if self.initial_window.is_none()
+            && let Some(why) = self.quit_policy.refuses_no_initial_window()
+        {
+            panic!("{why}");
+        }
+
         // Install the tooltip registry before the window manager
         // starts building trees — rich tooltips read from it during
         // their first build.
@@ -5062,15 +5128,12 @@ impl TeksiloAppBuilder {
             on_ready(proxy.clone());
         }
 
-        let initial_config = self
-            .initial_window
-            .expect("TeksiloAppBuilder::initial_window(WindowConfig) is required");
-
         let mut app = TeksiloAppHandler::new(
             self.theme,
             self.theme_mode,
             self.app_event_handler,
-            initial_config,
+            self.initial_window,
+            self.quit_policy,
             app_context_template,
             typesetter,
             i18n_watcher,
@@ -6723,6 +6786,66 @@ mod occluded_band_tests {
 /// backtrace are the useful answer.
 fn display_connection_lost(err: &winit::error::EventLoopError) -> bool {
     matches!(err, winit::error::EventLoopError::ExitFailure(code) if *code != 0)
+}
+
+#[cfg(test)]
+mod quit_policy_tests {
+    use super::{AppEvent, QuitPolicy, TeksiloAppBuilder, WindowConfig};
+
+    #[test]
+    fn the_default_quits_with_the_last_window_and_not_before() {
+        let policy = QuitPolicy::default();
+        assert_eq!(policy, QuitPolicy::LastWindowClosed);
+        assert!(policy.exits_with(0));
+        assert!(!policy.exits_with(1));
+        assert!(!policy.exits_with(3));
+    }
+
+    #[test]
+    fn explicit_never_quits_for_want_of_a_window() {
+        for open in [0, 1, 3] {
+            assert!(!QuitPolicy::Explicit.exits_with(open));
+        }
+    }
+
+    /// Without the check, the default policy would open the loop, find no
+    /// window and quit at once: a silent exit with status zero. The check
+    /// runs before the loop is built, so this needs no display.
+    #[test]
+    #[should_panic(expected = "quit_policy(QuitPolicy::Explicit)")]
+    fn no_initial_window_under_the_default_policy_panics_before_the_loop() {
+        TeksiloAppBuilder::new().run_with(
+            || -> winit::event_loop::EventLoop<AppEvent> {
+                unreachable!("the event loop must not be built")
+            },
+            |_, _| unreachable!("the event loop must not run"),
+        );
+    }
+
+    /// The same builder under `Explicit` gets past the check: it reaches the
+    /// loop, which this test replaces with a panic of its own.
+    #[test]
+    #[should_panic(expected = "reached the event loop")]
+    fn no_initial_window_under_explicit_reaches_the_loop() {
+        TeksiloAppBuilder::new()
+            .quit_policy(QuitPolicy::Explicit)
+            .run_with(
+                || -> winit::event_loop::EventLoop<AppEvent> { panic!("reached the event loop") },
+                |_, _| unreachable!(),
+            );
+    }
+
+    /// An initial window satisfies the default policy: also past the check.
+    #[test]
+    #[should_panic(expected = "reached the event loop")]
+    fn an_initial_window_satisfies_the_default_policy() {
+        TeksiloAppBuilder::new()
+            .initial_window(WindowConfig::new())
+            .run_with(
+                || -> winit::event_loop::EventLoop<AppEvent> { panic!("reached the event loop") },
+                |_, _| unreachable!(),
+            );
+    }
 }
 
 #[cfg(test)]

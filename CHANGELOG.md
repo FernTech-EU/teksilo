@@ -28,6 +28,10 @@ by crate for clarity, not because crates version independently.
 #### App
 
 - **`WindowManager::most_recent_window`**, the window opened or focused last.
+- **`QuitPolicy`, set with `TeksiloAppBuilder::quit_policy`.** The default,
+  `LastWindowClosed`, quits when the last window closes, as before.
+  `Explicit` keeps the application running with no window open, and makes
+  `initial_window` optional.
 
 #### Platform
 
