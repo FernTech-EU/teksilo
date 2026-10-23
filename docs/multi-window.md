@@ -77,6 +77,87 @@ see "Quitting the application" below.
 
 ---
 
+## The application tree
+
+Code that must run with no window open (an application-level menu's
+actions, a single-instance handler, a quit) lives in the **application
+tree**: a widget tree that belongs to no window. Give it a root with
+`TeksiloAppBuilder::app_root`, which takes the same kind of builder as a
+window's root:
+
+```rust
+TeksiloAppBuilder::new()
+    .quit_policy(QuitPolicy::Explicit)            // live with no window
+    .app_root(|tree| tree.add(AppActions::new()))
+    .run();
+
+impl Widget for AppActions {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        ctx.register_action_global(Action::new("app.new_window").on_invoke(|_, ctx| {
+            ctx.open_window(document_window());
+        }));
+        ctx.register_action_global(Action::new("app.quit").on_invoke(|_, ctx| {
+            ctx.request_quit();
+        }));
+        // Runs once at startup: an app with no initial window opens its
+        // first one here.
+        ctx.run_after_mount(|ctx| {
+            ctx.open_window(document_window());
+        });
+        vec![]
+    }
+    // layout_response: a zero size; the tree is never drawn.
+}
+```
+
+Without `app_root` the tree still exists, with an empty root of its own.
+
+The tree is never painted. Its handlers run with `ctx.window()` `None`:
+everything that names a window by id works (opening, finding and focusing
+one, `close_window_by_id`, `request_quit`), and nothing about "this window"
+does (`close_window` closes nothing). It shares the application's theme,
+locale, text scale, accessibility preferences and app state with the
+windows, and a request it makes for an application-wide change
+(`set_locale`, `set_theme`, `set_text_scale`) applies everywhere. It is
+ticked by the event loop, so its bindings, tweens, idle callbacks and
+`request_wake_at` timers run as a window's do.
+
+It receives:
+
+- the intents a window leaves unclaimed: an intent sent in a window (by a
+  menu item, a button, `ctx.send_intent`) that no action on its way to that
+  window's root and no global action of that window takes is offered to the
+  application tree once. So a window's menu can fire `app.new_window`, which
+  only the application tree implements. The other way, an intent the
+  application tree leaves goes to the window used last (at its frontmost
+  native dialog), so its handlers can send a window a command. An intent
+  crosses once and never comes back; one nobody takes is dropped, and a debug
+  build names it (the framework's own `teksilo.` intents excepted). A
+  shortcut's intent never crosses: an unclaimed shortcut already reaches the
+  focused widget as its key. On macOS a chord that is also a native menu
+  item's key equivalent arrives as that menu choice, not as a shortcut, so
+  there it does cross. In a test, `HeadlessApp::route_unclaimed_intents`
+  does the crossing;
+- `on_external_with_ctx` payloads while no window is open (see the
+  single-instance recipe below);
+- events of a `subscribe_event_with_ctx` subscription registered in it;
+- its own mount actions (`run_after_mount`), at startup and after a rebuild.
+
+What needs a window is not drawn there:
+
+| From the application tree | Happens |
+|---|---|
+| a modal request (`MessageBox`, `present_modal`) | presented in the window used last, or in a window of its own when none is open; content must be `ModalRequest::deferred` |
+| a file dialog | refused with an error: no parent window |
+| a toast | shown in every window |
+| an overlay, an animated widget | never shown; a debug build says so |
+| a tooltip, a `WebView` | never shown |
+| `spawn_local_with` | its completion is delivered to windows only, and is lost here; use `spawn_local` and a `Signal` |
+| a shortcut registered there | never fires: keys reach window trees only |
+
+The application tree's actions do not appear in `ShortcutSettings` or a
+command palette, which read the window's registry.
+
 ## `WindowConfig`
 
 The single entry point for creating any window. Uniform whether you
@@ -447,8 +528,9 @@ a standalone context panics: "open_window called outside of a dispatch").
 
 `on_external_with_ctx` is the hook for that case. It is offered every
 `AppEvent::External` payload that no framework router claimed, together with
-a live `EventContext` minted from the window opened or focused last, and
-returns `true` when the payload was the app's:
+a live `EventContext` minted from the window opened or focused last (or,
+with no window open, from the application tree; see below), and returns
+`true` when the payload was the app's:
 
 ```rust
 // A single-instance app. The second launch forwards its argv over a socket
@@ -481,12 +563,21 @@ Notes:
 - It is a **single slot**, like `on_app_event`, a second call replaces the
   first. For fan-out use `register_app_event_observer`, which composes (but
   gets no context).
-- With no window open there is nowhere to mint a context from, and the call
-  is silently skipped.
-- On Wayland, a launcher that hands you an `XDG_ACTIVATION_TOKEN` should have
-  it forwarded in the payload and applied via
-  `WindowState::set_activation_token` before `focus()`, or the compositor
-  treats the raise as unsolicited.
+- With no window open, the handler runs in the application tree
+  (`TeksiloAppBuilder::app_root`), which no window hosts: `ctx.window()` is
+  `None`, and `ctx.open_window` works as in the recipe above. That is what an
+  application under `QuitPolicy::Explicit` with every window closed, or a
+  tray application, gets when its second launch forwards a document.
+- On Wayland, the second launch's launcher hands it an
+  `XDG_ACTIVATION_TOKEN` (`DESKTOP_STARTUP_ID` on X11); without it the
+  compositor treats the raise as unsolicited and only asks for attention.
+  Forward it with the request and post both as one payload,
+  `AppEventProxy::send_external(WithActivationToken::new(token, request))`.
+  The handler sees the request, and the token goes to the first window it
+  raises or opens: `ctx.focus_window(id)` (the window the handler runs in
+  included), a `WindowState::focus()` with no token of its own, or
+  `ctx.open_window(...)`. An unused token is dropped at the end of the
+  turn.
 
 **Cross-window read** (dim the inspector when the main window is
 fullscreen):

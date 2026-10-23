@@ -345,6 +345,21 @@ impl TreeAppContext {
             .and_then(|(window_id, _)| *window_id)
     }
 
+    /// Whether `sub_id` names a context-bearing subscription, and the window
+    /// it was registered from: `None` when it names none, `Some(None)` for
+    /// one registered in a tree no window hosts (the application tree, in a
+    /// running app), `Some(Some(window))` otherwise. teksilo-app reads it to
+    /// pick the tree it mints the [`EventContext`] from.
+    pub fn ctx_subscription_target(
+        &self,
+        sub_id: SubscriptionId,
+    ) -> Option<Option<TeksiloWindowId>> {
+        self.subscription_ctx_callbacks
+            .borrow()
+            .get(&sub_id)
+            .map(|(window_id, _)| *window_id)
+    }
+
     /// Invoke the *context-bearing* UI-side callback for a posted subscription
     /// event, passing the freshly-minted [`EventContext`]. Returns `true` if a
     /// callback was found and invoked. Called by teksilo-app from inside
@@ -681,6 +696,24 @@ mod tests {
         assert_eq!(signal.get(), "hello");
     }
 
+    /// A context-bearing subscription registered in a tree no window hosts
+    /// is still one: the target says so, with no window, where the window
+    /// query cannot tell it from no subscription at all.
+    #[test]
+    fn a_windowless_ctx_subscription_is_told_apart_from_none() {
+        let tree = WidgetTree::new();
+        let app_ctx = tree.app_context().clone();
+        let sub_id = app_ctx.allocate_subscription_id();
+        let stored: std::rc::Rc<dyn Fn(&dyn Any, &mut crate::widget::EventContext)> =
+            std::rc::Rc::new(|_, _| {});
+        app_ctx
+            .subscription_ctx_callbacks
+            .borrow_mut()
+            .insert(sub_id, (None, stored));
+        assert_eq!(app_ctx.ctx_subscription_window(sub_id), None);
+        assert_eq!(app_ctx.ctx_subscription_target(sub_id), Some(None));
+    }
+
     #[test]
     fn subscribe_event_with_ctx_dispatches_inside_fresh_context() {
         use crate::window::{NoopWindowOps, TeksiloWindowId};
@@ -711,6 +744,8 @@ mod tests {
         // whose `EventContext` it mints).
         assert_eq!(app_ctx.ctx_subscription_window(sub_id), Some(win));
         assert_eq!(app_ctx.ctx_subscription_window(SubscriptionId(9999)), None);
+        assert_eq!(app_ctx.ctx_subscription_target(sub_id), Some(Some(win)));
+        assert_eq!(app_ctx.ctx_subscription_target(SubscriptionId(9999)), None);
 
         // Dispatch inside a fresh `EventContext`, exactly like teksilo-app's
         // `try_dispatch_subscription_with_ctx`.

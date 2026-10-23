@@ -518,6 +518,11 @@ pub struct WindowManager {
     /// one child per parent, it keeps every child of a parent that opened
     /// two, and it is what the quit reads.
     modal_parents: HashMap<TeksiloWindowId, TeksiloWindowId>,
+    /// Plain windows opened to present the application tree's modal
+    /// requests with no window to parent them: a modal dismissal closes
+    /// them as it closes a modal window. See
+    /// [`mark_modal_host`](Self::mark_modal_host).
+    modal_hosts: std::collections::HashSet<TeksiloWindowId>,
     /// OS-level accessibility preferences, queried at startup and re-queried
     /// on every window focus gain by
     /// [`refresh_accessibility_preferences`](Self::refresh_accessibility_preferences).
@@ -581,6 +586,38 @@ pub struct WindowManager {
     /// The order in which the open windows were opened or focused; see
     /// [`most_recent_window`](Self::most_recent_window).
     recency: crate::window_recency::WindowRecency,
+    /// The application tree: a widget tree no window hosts, for code that
+    /// must run with no window open. Never painted, no `WindowState`, no
+    /// accessibility adapter. Taken out while one of its handlers runs,
+    /// like a window's tree. See [`install_app_tree`](Self::install_app_tree).
+    app_tree: Option<WidgetTree>,
+    /// Set by the application tree's waker when it posts an
+    /// [`AppTreeWake`](crate::app::AppTreeWake), cleared when the loop takes
+    /// it: at most one is in flight.
+    app_tree_wake_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// An activation token the event being routed carried (see
+    /// [`WithActivationToken`](crate::WithActivationToken)), for the first
+    /// window operation of its handler that raises or opens a window to
+    /// use. Cleared at the end of the `post_event` that follows the
+    /// dispatch, used or not.
+    dispatch_activation_token: Option<String>,
+    /// What [`dispatch_activation_token`](Self::dispatch_activation_token)
+    /// left once its handler returned: only a `WindowState::focus()` with no
+    /// token of its own, applied in this turn's command drain, takes it, so
+    /// a window the framework opens meanwhile (a native dialog, the
+    /// application tree's tick) cannot.
+    focus_command_token: Option<String>,
+    /// Intents a window left unclaimed and could not hand over before it
+    /// closed (a close guard's, sent as the window went): they still go to
+    /// the application tree.
+    orphan_intents: Vec<teksilo_core::Intent>,
+    /// Bumped whenever [`theme`](Self::theme) changes.
+    theme_generation: u64,
+    /// The [`theme_generation`](Self::theme_generation) the application
+    /// tree was last given, so a change made while the tree was taken out
+    /// (a window opened from one of its handlers resolving the OS theme)
+    /// reaches it when it is put back.
+    app_tree_theme_generation: u64,
     /// The quit under way, if any; see [`crate::quit`].
     quit: Option<crate::quit::PendingQuit>,
     /// The last [`PendingQuit::generation`](crate::quit::PendingQuit) handed
@@ -621,6 +658,7 @@ impl WindowManager {
             typesetter: None,
             modal_blocked: HashMap::new(),
             modal_parents: HashMap::new(),
+            modal_hosts: Default::default(),
             a11y_prefs,
             user_text_scale: 1.0,
             theme_mode: ThemeMode::Manual,
@@ -637,6 +675,13 @@ impl WindowManager {
             os_theme_watch: None,
             start_os_theme_watch: start_platform_desktop_watch,
             recency: crate::window_recency::WindowRecency::default(),
+            app_tree: None,
+            app_tree_wake_pending: Default::default(),
+            dispatch_activation_token: None,
+            focus_command_token: None,
+            orphan_intents: Vec::new(),
+            theme_generation: 0,
+            app_tree_theme_generation: 0,
             quit: None,
             quit_generation: 0,
             quit_completed: false,
@@ -687,10 +732,190 @@ impl WindowManager {
     fn new_window_tree(&self, theme: Theme) -> WidgetTree {
         let mut tree = WidgetTree::new().with_theme(theme);
         tree.set_records_announcements(self.records_announcements);
+        // What no action of a tree takes is offered to the other side; see
+        // `crate::intent_routing`.
+        tree.set_records_unclaimed_intents(true);
         // The standard edit shortcuts arrive with English names; the settings
         // UI shows them in the user's language.
         teksilo_widgets::localize_standard_shortcuts(tree.shortcut_registry_mut());
         tree
+    }
+
+    /// Give a new tree what every tree of this application shares: the
+    /// active locale and layout direction, the app context, the OS
+    /// accessibility preferences and the user's text scale. Shared by the
+    /// windows' trees and the [application tree](Self::install_app_tree).
+    ///
+    /// The locale must be seeded BEFORE the root builder runs so any `tr!`
+    /// call in `build()` sees it on the first build, and BEFORE the first
+    /// layout so the tree's `layout_direction` already matches the
+    /// manager's. Without it `WidgetTree::new()` is left-to-right with an
+    /// empty locale, and an app started in an RTL locale would lay out its
+    /// first window left to right until the user switched locale.
+    fn seed_tree(&self, tree: &mut WidgetTree) {
+        if let Some((loc, dir)) = teksilo_i18n::thread_local::with_active(|m| {
+            (
+                m.locale_signal().get().to_string(),
+                m.direction_signal().get(),
+            )
+        }) {
+            tree.set_layout_direction(dir);
+            tree.set_locale(loc);
+        }
+        if let Some(template) = self.app_context_template.as_ref() {
+            tree.set_app_context(template.clone());
+        }
+        tree.set_accessibility_preferences(
+            self.a11y_prefs.high_contrast,
+            self.a11y_prefs.reduced_motion,
+            self.a11y_prefs.text_scale_factor,
+        );
+        tree.set_screen_reader_state(self.a11y_prefs.screen_reader);
+        if (self.user_text_scale - 1.0).abs() > f32::EPSILON {
+            tree.set_user_text_scale(self.user_text_scale);
+        }
+    }
+
+    /// Create the application tree and build its root with `root`, which
+    /// returns the root's id. Replaces any application tree already there.
+    ///
+    /// The tree is seeded as a window's is (locale and direction, app
+    /// context, accessibility preferences, text scale) and themed with the
+    /// application's theme, but has no `WindowState`
+    /// (so `ctx.window()` is `None` in its handlers), no app-wide
+    /// post-root wrapper, no accessibility adapter, and records no
+    /// announcements. It shares the typesetter, so a widget in it can
+    /// measure text.
+    pub fn install_app_tree(&mut self, root: impl FnOnce(&mut WidgetTree) -> WidgetId) -> WidgetId {
+        // A theme that follows the OS is otherwise resolved by the first
+        // window, which an application started with none has not opened.
+        if self.theme_mode != ThemeMode::Manual {
+            self.new_window_theme(None, OsQueries::PLATFORM);
+        }
+        let mut tree = self.new_window_tree(self.theme.clone());
+        tree.set_records_announcements(false);
+        self.seed_tree(&mut tree);
+        if let Some(typesetter) = self.typesetter.as_ref() {
+            tree = tree.with_text_backend(typesetter.as_text_backend());
+        }
+        // Before the root builds, so a source attached in `build()` already
+        // wakes the loop for this tree.
+        if let Some(proxy) = self.event_proxy.clone() {
+            tree.set_redraw_waker(Some(std::sync::Arc::new(crate::app::AppTreeWaker {
+                post: std::sync::Arc::new(move |payload| proxy.send_external_boxed(payload)),
+                pending: self.app_tree_wake_pending.clone(),
+            })));
+        }
+        let root_id = root(&mut tree);
+        self.app_tree = Some(tree);
+        self.app_tree_theme_generation = self.theme_generation;
+        root_id
+    }
+
+    /// Give the application tree the application's theme if it changed
+    /// since the tree last got it. A no-op while the tree is taken out:
+    /// [`reinsert_app_tree`](Self::reinsert_app_tree) catches up.
+    fn sync_app_tree_theme(&mut self) {
+        if self.app_tree_theme_generation != self.theme_generation
+            && let Some(tree) = &mut self.app_tree
+        {
+            tree.set_theme(self.theme.clone());
+            self.app_tree_theme_generation = self.theme_generation;
+        }
+    }
+
+    /// Every window's tree, then the application tree: the trees a request
+    /// that applies application-wide (locale, theme, text scale) can come
+    /// from.
+    fn trees_mut(&mut self) -> impl Iterator<Item = &mut WidgetTree> {
+        self.windows
+            .values_mut()
+            .map(|managed| &mut managed.tree)
+            .chain(self.app_tree.as_mut())
+    }
+
+    /// Take the application tree out while one of its handlers runs with
+    /// `&mut self` behind a [`WindowOpsImpl::windowless`] sink; put it back
+    /// with [`reinsert_app_tree`](Self::reinsert_app_tree).
+    pub(crate) fn take_app_tree(&mut self) -> Option<WidgetTree> {
+        self.app_tree.take()
+    }
+
+    /// Put back the tree [`take_app_tree`](Self::take_app_tree) took.
+    pub(crate) fn reinsert_app_tree(&mut self, tree: WidgetTree) {
+        self.app_tree = Some(tree);
+        self.sync_app_tree_theme();
+    }
+
+    /// Hold `token` for the handler about to run: the first window it
+    /// raises or opens uses it. See
+    /// [`WithActivationToken`](crate::WithActivationToken).
+    pub(crate) fn set_dispatch_activation_token(&mut self, token: String) {
+        self.dispatch_activation_token = Some(token);
+    }
+
+    /// Take the routed event's activation token, if it carried one and no
+    /// window operation took it yet. Its handler's operations only.
+    pub(crate) fn take_dispatch_activation_token(&mut self) -> Option<String> {
+        self.dispatch_activation_token.take()
+    }
+
+    /// The routed event's handler returned: a token it did not use waits,
+    /// for this turn's command drain only, for a `WindowState::focus()`
+    /// it queued.
+    pub(crate) fn end_dispatch_activation(&mut self) {
+        self.focus_command_token = self.dispatch_activation_token.take();
+    }
+
+    /// Drop the routed event's activation token, used or not: a token is
+    /// good for the activation the event asked for, and that is over.
+    pub(crate) fn clear_dispatch_activation_token(&mut self) {
+        self.dispatch_activation_token = None;
+        self.focus_command_token = None;
+    }
+
+    /// Take the intents of windows that closed before handing theirs over.
+    pub(crate) fn take_orphan_intents(&mut self) -> Vec<teksilo_core::Intent> {
+        std::mem::take(&mut self.orphan_intents)
+    }
+
+    /// Whether a turn owes another pass of the drains: an intent left
+    /// unclaimed anywhere (an orphan's included), or a request the
+    /// application tree or a window made since the drains ran. Window mount
+    /// actions are not counted: a modal-blocked window keeps them on
+    /// purpose.
+    pub(crate) fn owes_turn_work(&self) -> bool {
+        !self.orphan_intents.is_empty()
+            || self.windows.values().any(|managed| {
+                managed.tree.has_unclaimed_intents() || managed.tree.has_pending_dispatch_requests()
+            })
+            || self
+                .app_tree
+                .as_ref()
+                .is_some_and(|tree| tree.has_unclaimed_intents() || tree.has_pending_app_requests())
+    }
+
+    /// Record that `teksilo_id` is a plain window presenting a modal
+    /// request of the application tree, which its dismissal closes.
+    pub(crate) fn mark_modal_host(&mut self, teksilo_id: TeksiloWindowId) {
+        self.modal_hosts.insert(teksilo_id);
+    }
+
+    /// Take the application tree's posted wake: whether one was pending.
+    /// The waker posts again only after this.
+    pub(crate) fn take_app_tree_wake(&self) -> bool {
+        self.app_tree_wake_pending
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
+    }
+
+    /// The application tree, if one was installed.
+    pub fn app_tree(&self) -> Option<&WidgetTree> {
+        self.app_tree.as_ref()
+    }
+
+    /// The application tree, mutably.
+    pub fn app_tree_mut(&mut self) -> Option<&mut WidgetTree> {
+        self.app_tree.as_mut()
     }
 
     /// Set the theme mode (called by TeksiloAppHandler during initialization).
@@ -940,8 +1165,12 @@ impl WindowManager {
         }
         if let Some(theme) = update.theme_for(&mut self.os_theme, self.theme.input.density) {
             self.theme = theme;
+            self.theme_generation += 1;
             changed = true;
         }
+        // The application tree follows the application's theme, which has
+        // no window density of its own to resolve against.
+        self.sync_app_tree_theme();
         changed
     }
 
@@ -972,7 +1201,11 @@ impl WindowManager {
         let inputs = source.at(self.theme.input.density);
         let theme = resolve_os_theme(self.native_theme.as_ref(), &inputs);
         self.theme = theme.clone();
+        self.theme_generation += 1;
         self.os_theme = Some(inputs.clone());
+        // The application tree follows the application's theme, which this
+        // has just resolved.
+        self.sync_app_tree_theme();
         (theme, Some(inputs))
     }
 
@@ -1254,10 +1487,14 @@ impl WindowManager {
             window_attrs = unsafe { window_attrs.with_parent_window(Some(parent_handle.as_raw())) };
         }
 
-        // Opt-in: consume a startup activation token from the environment so a
-        // window spawned by another instance's "open in new window" comes up
-        // focused on Wayland. No-op off Wayland/X11 or when the env is unset.
-        if config.activate_from_env {
+        // The token the routed event carried, if its handler opens this
+        // window (see `WithActivationToken`); otherwise, opted in, a startup
+        // activation token from the environment so a window spawned by
+        // another instance's "open in new window" comes up focused on
+        // Wayland. No-op off Wayland/X11 or when the env is unset.
+        if let Some(token) = self.take_dispatch_activation_token() {
+            window_attrs = teksilo_platform::window_activation::apply_token(window_attrs, token);
+        } else if config.activate_from_env {
             window_attrs =
                 teksilo_platform::window_activation::apply_creation_token(window_attrs, target);
         }
@@ -1397,43 +1634,9 @@ impl WindowManager {
         // already wakes this window.
         tree.set_redraw_waker(Some(pw.redraw_waker()));
 
-        // Seed the tree from the active i18n manager (if any). Without
-        // this, `WidgetTree::new()` defaults to `LayoutDirection::LeftToRight`
-        // and an empty locale — so a windowed app started in an RTL
-        // locale (via `TeksiloAppBuilder::i18n(...)` with Arabic/Hebrew as
-        // initial) would lay out its first window as LTR until the
-        // user manually triggered a locale switch. New windows created
-        // mid-session also benefit: they inherit the active locale
-        // and direction instead of reverting to the default.
-        //
-        // The seeding must happen BEFORE `root_builder` runs so any
-        // `tr!` calls inside `build()` see the correct locale on
-        // first build, and BEFORE the first layout pass so the tree's
-        // `layout_direction` field already matches `m.direction_signal()`.
-        if let Some((loc, dir)) = teksilo_i18n::thread_local::with_active(|m| {
-            (
-                m.locale_signal().get().to_string(),
-                m.direction_signal().get(),
-            )
-        }) {
-            tree.set_layout_direction(dir);
-            tree.set_locale(loc);
-        }
-
-        if let Some(template) = self.app_context_template.as_ref() {
-            tree.set_app_context(template.clone());
-        }
+        self.seed_tree(&mut tree);
         if let Some(ref host) = title_bar_host {
             tree.set_title_bar_host(host.clone());
-        }
-        tree.set_accessibility_preferences(
-            self.a11y_prefs.high_contrast,
-            self.a11y_prefs.reduced_motion,
-            self.a11y_prefs.text_scale_factor,
-        );
-        tree.set_screen_reader_state(self.a11y_prefs.screen_reader);
-        if (self.user_text_scale - 1.0).abs() > f32::EPSILON {
-            tree.set_user_text_scale(self.user_text_scale);
         }
 
         let mut primed_atlas_version: u64 = 0;
@@ -1716,6 +1919,9 @@ impl WindowManager {
         if let Some(winit_id) = self.teksilo_to_winit.remove(&teksilo_id)
             && let Some(mut managed) = self.windows.remove(&winit_id)
         {
+            // What it left unclaimed outlives it: see `orphan_intents`.
+            self.orphan_intents
+                .extend(managed.tree.take_unclaimed_intents());
             // If this window is involved in an in-flight app-originated OS
             // drag, abort it before the tree is dropped — otherwise the
             // app-global typed-payload stash would leak and a later genuine
@@ -1744,6 +1950,7 @@ impl WindowManager {
         // Also remove any modal children blocking this window
         self.modal_blocked.remove(&teksilo_id);
         self.modal_parents.remove(&teksilo_id);
+        self.modal_hosts.remove(&teksilo_id);
 
         // Fire the teardown hook last, once every registry above
         // (`windows`, `teksilo_to_winit`, `string_to_id`, `modal_blocked`)
@@ -1869,6 +2076,15 @@ impl WindowManager {
                 self.queue_close(teksilo_id);
                 continue;
             }
+            // A focus with no token of its own takes the routed event's.
+            let cmd = match cmd {
+                WindowCommand::Focus {
+                    activation_token: None,
+                } => WindowCommand::Focus {
+                    activation_token: self.focus_command_token.take(),
+                },
+                cmd => cmd,
+            };
             let Some(managed) = self.windows.get(&winit_id) else {
                 continue;
             };
@@ -1974,13 +2190,13 @@ impl WindowManager {
 
     /// The window to bring forward for `teksilo_id`'s dialog: its deepest
     /// open native modal descendant, or itself.
-    fn frontmost_modal_of(&self, teksilo_id: TeksiloWindowId) -> TeksiloWindowId {
+    pub(crate) fn frontmost_modal_of(&self, teksilo_id: TeksiloWindowId) -> TeksiloWindowId {
         let mut front = teksilo_id;
         for _ in 0..64 {
             match self
                 .modal_parents
                 .iter()
-                .filter(|(_, parent)| **parent == front)
+                .filter(|(child, parent)| **parent == front && !self.is_closing(**child))
                 .map(|(child, _)| *child)
                 .max_by_key(|child| self.recency.stamp(*child))
             {
@@ -1989,6 +2205,27 @@ impl WindowManager {
             }
         }
         front
+    }
+
+    /// Whether `teksilo_id` has a close queued for this turn's
+    /// [`process_pending`](Self::process_pending).
+    pub(crate) fn is_closing(&self, teksilo_id: TeksiloWindowId) -> bool {
+        self.pending_closes
+            .iter()
+            .any(|pending| pending.id == teksilo_id)
+    }
+
+    /// The window to present the application tree's dialog in: the open
+    /// window used last that is not about to close, or its frontmost native
+    /// dialog. `None` when no window is open or every one is closing.
+    pub(crate) fn app_modal_target(&self) -> Option<TeksiloWindowId> {
+        let window = self.recency.most_recent_where(|id| {
+            self.teksilo_to_winit
+                .get(&id)
+                .is_some_and(|winit| self.windows.contains_key(winit))
+                && !self.is_closing(id)
+        })?;
+        Some(self.frontmost_modal_of(window))
     }
 
     /// The quit stops at `teksilo_id`, whose guard vetoed: wait on it, and
@@ -2288,6 +2525,7 @@ impl WindowManager {
     /// `Manual` (the default).
     pub fn set_theme(&mut self, theme: Theme) {
         self.theme = theme.clone();
+        self.theme_generation += 1;
         self.os_theme = None;
         for managed in self.windows.values_mut() {
             managed.os_theme = None;
@@ -2297,6 +2535,7 @@ impl WindowManager {
             // the wheel-notch scale stay at whatever the old theme said.
             managed.translation_state.set_input_tokens(theme.input);
         }
+        self.sync_app_tree_theme();
     }
 
     /// Broadcast a user text-scale change to all windows. Stores the factor so
@@ -2306,6 +2545,9 @@ impl WindowManager {
         self.user_text_scale = factor;
         for managed in self.windows.values_mut() {
             managed.tree.set_user_text_scale(factor);
+        }
+        if let Some(tree) = &mut self.app_tree {
+            tree.set_user_text_scale(factor);
         }
     }
 
@@ -2362,6 +2604,10 @@ impl WindowManager {
             // on the field, so the early return above no longer swallows it.
             managed.tree.set_screen_reader_state(sr);
         }
+        if let Some(tree) = &mut self.app_tree {
+            tree.set_accessibility_preferences(hc, rm, ts);
+            tree.set_screen_reader_state(sr);
+        }
         true
     }
 
@@ -2375,11 +2621,11 @@ impl WindowManager {
         }) else {
             return;
         };
-        for managed in self.windows.values_mut() {
+        for tree in self.trees_mut() {
             if outcome.direction_changed {
-                managed.tree.set_layout_direction(new_dir);
+                tree.set_layout_direction(new_dir);
             }
-            managed.tree.set_locale(locale.to_string());
+            tree.set_locale(locale.to_string());
         }
     }
 
@@ -2695,7 +2941,9 @@ impl WindowManager {
     pub fn drain_pending_modal_dismissals(&mut self) -> Vec<TeksiloWindowId> {
         let mut windows_to_close = Vec::new();
         for managed in self.windows.values_mut() {
-            if managed.tree.drain_pending_modal_dismissal() && managed.modal {
+            if managed.tree.drain_pending_modal_dismissal()
+                && (managed.modal || self.modal_hosts.contains(&managed.teksilo_id))
+            {
                 windows_to_close.push(managed.teksilo_id);
             }
         }
@@ -2725,6 +2973,22 @@ impl WindowManager {
                 guarded.push(managed.teksilo_id);
             }
         }
+        // The application tree is no window: a close it asks for closes
+        // nothing. Drained so it does not linger, and said in debug builds.
+        if let Some(tree) = &mut self.app_tree {
+            let wants_guarded = tree.take_close_window_request();
+            let wants_forced = tree.take_force_close_request();
+            #[cfg(debug_assertions)]
+            if wants_guarded || wants_forced {
+                eprintln!(
+                    "teksilo-app: close_window called from the application tree, which is no \
+                     window's; nothing closed. Close a window by id (close_window_by_id) or \
+                     quit (request_quit)."
+                );
+            }
+            #[cfg(not(debug_assertions))]
+            let _ = (wants_guarded, wants_forced);
+        }
         let any = !guarded.is_empty() || !forced.is_empty();
         for id in forced {
             self.queue_close(id);
@@ -2748,8 +3012,8 @@ impl WindowManager {
     /// `request_redraw`.
     pub fn drain_pending_locale_requests(&mut self) -> bool {
         let mut requests: Vec<String> = Vec::new();
-        for managed in self.windows.values_mut() {
-            if let Some(loc) = managed.tree.take_pending_locale_request() {
+        for tree in self.trees_mut() {
+            if let Some(loc) = tree.take_pending_locale_request() {
                 requests.push(loc);
             }
         }
@@ -2776,8 +3040,8 @@ impl WindowManager {
     /// wins, matching the locale path.
     pub fn drain_pending_theme_requests(&mut self) -> bool {
         let mut requests: Vec<Theme> = Vec::new();
-        for managed in self.windows.values_mut() {
-            if let Some(theme) = managed.tree.take_pending_theme_request() {
+        for tree in self.trees_mut() {
+            if let Some(theme) = tree.take_pending_theme_request() {
                 requests.push(theme);
             }
         }
@@ -2806,15 +3070,16 @@ impl WindowManager {
         had_requests
     }
 
-    /// Drain per-tree "follow OS theme" requests raised by handlers via
+    /// Drain per-tree "follow OS theme" requests raised by handlers (in a
+    /// window or in the application tree) via
     /// [`EventContext::follow_system_theme`](teksilo_core::widget::EventContext::follow_system_theme).
     /// Switches the app to [`ThemeMode::Native`] and recomputes the theme from
     /// the current OS colours, fanning it to every window. Returns `true` if
     /// any window requested it (so the caller schedules a repaint).
     pub fn drain_pending_follow_system_requests(&mut self) -> bool {
         let mut requested = false;
-        for managed in self.windows.values_mut() {
-            if managed.tree.take_pending_follow_system_request() {
+        for tree in self.trees_mut() {
+            if tree.take_pending_follow_system_request() {
                 requested = true;
             }
         }
@@ -2843,8 +3108,8 @@ impl WindowManager {
     /// windows requested in the same tick.
     pub fn drain_pending_text_scale_requests(&mut self) -> bool {
         let mut requests: Vec<f32> = Vec::new();
-        for managed in self.windows.values_mut() {
-            if let Some(scale) = managed.tree.take_pending_text_scale_request() {
+        for tree in self.trees_mut() {
+            if let Some(scale) = tree.take_pending_text_scale_request() {
                 requests.push(scale);
             }
         }
@@ -2927,8 +3192,10 @@ pub struct WindowOpsImpl<'a> {
     /// Current (dispatching) window's id. Names the window the outbound
     /// OS-drag ops below (`begin_os_drag` / `cancel_os_drag` /
     /// `set_drop_accepted`) route to, and is also available for diagnostics
-    /// and future modal-parent self-reference logic.
-    current_id: TeksiloWindowId,
+    /// and future modal-parent self-reference logic. `None` for the
+    /// [windowless](Self::windowless) sink, which has no window to drag
+    /// from.
+    current_id: Option<TeksiloWindowId>,
     /// Current window's raw handle, captured before removal so a
     /// modal whose parent is the current window can still attach.
     #[cfg(not(target_os = "macos"))]
@@ -2955,10 +3222,29 @@ impl<'a> WindowOpsImpl<'a> {
         Self {
             wm,
             event_loop,
-            current_id,
+            current_id: Some(current_id),
             #[cfg(not(target_os = "macos"))]
             current_handle,
             current_window_arc,
+        }
+    }
+
+    /// The sink for code that runs in no window: the application tree's
+    /// handlers. Every operation that names a window by id works as from a
+    /// window; those about the dispatching window itself find none: no
+    /// parent handle (a file dialog refuses), no IME area, no OS drag
+    /// (`begin_os_drag` declines), and no activation token for itself.
+    pub fn windowless(
+        wm: &'a mut WindowManager,
+        event_loop: &'a winit::event_loop::ActiveEventLoop,
+    ) -> Self {
+        Self {
+            wm,
+            event_loop,
+            current_id: None,
+            #[cfg(not(target_os = "macos"))]
+            current_handle: None,
+            current_window_arc: None,
         }
     }
 }
@@ -2994,11 +3280,26 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
     }
 
     fn focus_window(&mut self, id: TeksiloWindowId) {
-        if let Some(winit_id) = self.wm.teksilo_to_winit_map().get(&id).copied()
-            && let Some(managed) = self.wm.windows_map().get(&winit_id)
-        {
-            teksilo_platform::window_activation::raise(managed.platform_window.window(), None);
-        }
+        // The dispatching window is out of the map while its handler runs,
+        // and raising it is the common case (a single-instance handler
+        // routed to the document window it was asked to show): its own
+        // handle is kept for that.
+        let window = if self.current_id == Some(id) {
+            self.current_window_arc.clone()
+        } else {
+            self.wm
+                .teksilo_to_winit_map()
+                .get(&id)
+                .and_then(|winit_id| self.wm.windows_map().get(winit_id))
+                .map(|managed| managed.platform_window.window_arc())
+        };
+        let Some(window) = window else {
+            return;
+        };
+        // The routed event's activation token, if it carried one: on
+        // Wayland the raise is otherwise only an attention request.
+        let token = self.wm.take_dispatch_activation_token();
+        teksilo_platform::window_activation::raise(&window, token.as_deref());
     }
 
     fn request_activation_token(
@@ -3104,7 +3405,10 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
         else {
             return false;
         };
-        handle.begin_drag(self.current_id, &data, image.as_ref(), pointer)
+        let Some(current_id) = self.current_id else {
+            return false;
+        };
+        handle.begin_drag(current_id, &data, image.as_ref(), pointer)
     }
 
     fn cancel_os_drag(&mut self) {
@@ -3113,8 +3417,9 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
             .wm
             .app_context_template()
             .and_then(|t| t.app_state::<ExternalDndHandle>().cloned())
+            && let Some(current_id) = self.current_id
         {
-            handle.cancel_drag(self.current_id);
+            handle.cancel_drag(current_id);
         }
     }
 
@@ -3124,8 +3429,9 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
             .wm
             .app_context_template()
             .and_then(|t| t.app_state::<ExternalDndHandle>().cloned())
+            && let Some(current_id) = self.current_id
         {
-            handle.set_drop_accepted(self.current_id, accepted);
+            handle.set_drop_accepted(current_id, accepted);
         }
     }
 }
@@ -4085,5 +4391,205 @@ mod os_theme_tests {
             !wm.route_os_theme_payload_from(changed(), slowed)
                 .expect("taken")
         );
+    }
+}
+
+#[cfg(test)]
+mod app_tree_tests {
+    use teksilo_canvas::SizeProposal;
+    use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget};
+
+    use super::*;
+
+    /// A zero-size root.
+    #[derive(Debug)]
+    struct Anchor;
+
+    impl Widget for Anchor {
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+
+    fn manager_with_app_tree() -> WindowManager {
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        wm.install_app_tree(|tree| tree.add(Anchor));
+        wm
+    }
+
+    #[test]
+    fn the_app_tree_has_its_root_and_no_window() {
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        wm.set_records_announcements(true);
+        let root = wm.install_app_tree(|tree| tree.add(Anchor));
+        let tree = wm.app_tree().expect("installed");
+        assert_eq!(tree.roots(), [root]);
+        assert!(tree.window_state().is_none(), "no window hosts it");
+        assert!(
+            !tree.records_announcements(),
+            "nothing reads announcements from a tree no adapter serves"
+        );
+        assert_eq!(wm.window_count(), 0, "it is not a window");
+    }
+
+    #[test]
+    fn the_app_tree_starts_with_the_applications_text_scale() {
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        wm.set_initial_text_scale(1.5);
+        wm.install_app_tree(|tree| tree.add(Anchor));
+        assert_eq!(wm.app_tree().unwrap().user_text_scale(), 1.5);
+    }
+
+    #[test]
+    fn a_theme_change_reaches_the_app_tree() {
+        let mut wm = manager_with_app_tree();
+        let dark = teksilo_core::presets::intui::dark();
+        wm.set_theme(dark.clone());
+        assert_eq!(wm.app_tree().unwrap().theme().id, dark.id);
+    }
+
+    /// A theme change made while the tree is taken out (a window opened
+    /// from one of its handlers resolving the OS theme) reaches it when it
+    /// is put back.
+    #[test]
+    fn a_theme_change_made_while_the_app_tree_is_out_reaches_it_on_return() {
+        let mut wm = manager_with_app_tree();
+        let tree = wm.take_app_tree().expect("installed");
+        let dark = teksilo_core::presets::intui::dark();
+        wm.set_theme(dark.clone());
+        wm.reinsert_app_tree(tree);
+        assert_eq!(wm.app_tree().unwrap().theme().id, dark.id);
+    }
+
+    #[test]
+    fn a_text_scale_change_reaches_the_app_tree() {
+        let mut wm = manager_with_app_tree();
+        wm.set_text_scale(1.25);
+        assert_eq!(wm.app_tree().unwrap().user_text_scale(), 1.25);
+    }
+
+    #[test]
+    fn an_accessibility_preference_change_reaches_the_app_tree() {
+        let mut wm = manager_with_app_tree();
+        fn high_contrast() -> AccessibilityPreferences {
+            AccessibilityPreferences {
+                high_contrast: true,
+                ..AccessibilityPreferences::default()
+            }
+        }
+        assert!(wm.refresh_accessibility_preferences_from(high_contrast));
+        assert!(wm.app_tree().unwrap().high_contrast_signal().get());
+    }
+
+    #[test]
+    fn a_locale_change_reaches_the_app_tree() {
+        teksilo_i18n::thread_local::install(teksilo_i18n::I18nManager::from_config(
+            &teksilo_i18n::I18nConfig::test_only("en-US", &[]),
+        ));
+        let mut wm = manager_with_app_tree();
+        assert_eq!(wm.app_tree().unwrap().locale(), Some("en-US"), "seeded");
+        wm.set_locale("fr-FR".parse().unwrap());
+        assert_eq!(wm.app_tree().unwrap().locale(), Some("fr-FR"));
+        teksilo_i18n::thread_local::clear();
+    }
+}
+
+#[cfg(test)]
+mod app_tree_drain_tests {
+    use teksilo_canvas::SizeProposal;
+    use teksilo_core::NoopWindowOps;
+    use teksilo_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget};
+
+    use super::*;
+
+    #[derive(Debug)]
+    struct Anchor;
+
+    impl Widget for Anchor {
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+
+    /// A manager whose application tree ran `handler`, as one of its
+    /// handlers would.
+    fn after(handler: impl FnOnce(&mut EventContext)) -> WindowManager {
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        wm.install_app_tree(|tree| tree.add(Anchor));
+        wm.app_tree_mut()
+            .unwrap()
+            .run_with_event_context(&mut NoopWindowOps, handler);
+        wm
+    }
+
+    #[test]
+    fn a_text_scale_asked_by_the_app_tree_is_applied_everywhere() {
+        let mut wm = after(|ctx| ctx.set_text_scale(1.3));
+        assert!(wm.drain_pending_text_scale_requests());
+        assert_eq!(wm.app_tree().unwrap().user_text_scale(), 1.3);
+        assert!(!wm.drain_pending_text_scale_requests(), "drained once");
+    }
+
+    #[test]
+    fn a_theme_asked_by_the_app_tree_is_applied_everywhere() {
+        let dark = teksilo_core::presets::intui::dark();
+        let requested = dark.clone();
+        let mut wm = after(move |ctx| ctx.set_theme(requested));
+        assert!(wm.drain_pending_theme_requests());
+        assert_eq!(wm.theme().id, dark.id);
+        assert_eq!(wm.app_tree().unwrap().theme().id, dark.id);
+    }
+
+    #[test]
+    fn following_the_system_asked_by_the_app_tree_switches_the_mode() {
+        let mut wm = after(|ctx| ctx.follow_system_theme());
+        assert!(wm.drain_pending_follow_system_requests());
+        assert_eq!(wm.theme_mode(), ThemeMode::Native);
+    }
+
+    #[test]
+    fn a_locale_asked_by_the_app_tree_is_applied_everywhere() {
+        teksilo_i18n::thread_local::install(teksilo_i18n::I18nManager::from_config(
+            &teksilo_i18n::I18nConfig::test_only("en-US", &[]),
+        ));
+        let mut wm = after(|ctx| ctx.set_locale("fr-FR"));
+        assert!(wm.drain_pending_locale_requests());
+        assert_eq!(wm.app_tree().unwrap().locale(), Some("fr-FR"));
+        teksilo_i18n::thread_local::clear();
+    }
+
+    /// The application tree is no window: its close request queues nothing,
+    /// and does not stay to fire later.
+    #[test]
+    fn a_close_asked_by_the_app_tree_closes_nothing_and_is_drained() {
+        let mut wm = after(|ctx| {
+            ctx.close_window();
+            ctx.close_window_forced();
+        });
+        assert!(!wm.drain_close_window_requests());
+        assert!(wm.pending_closes.is_empty());
+        let tree = wm.app_tree_mut().unwrap();
+        assert!(!tree.take_close_window_request());
+        assert!(!tree.take_force_close_request());
+    }
+}
+
+#[cfg(test)]
+mod activation_token_slot_tests {
+    use super::*;
+
+    #[test]
+    fn the_token_is_taken_once_and_cleared_unused() {
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        assert_eq!(wm.take_dispatch_activation_token(), None);
+        wm.set_dispatch_activation_token("token".into());
+        assert_eq!(
+            wm.take_dispatch_activation_token().as_deref(),
+            Some("token")
+        );
+        assert_eq!(wm.take_dispatch_activation_token(), None, "taken once");
+        wm.set_dispatch_activation_token("unused".into());
+        wm.clear_dispatch_activation_token();
+        assert_eq!(wm.take_dispatch_activation_token(), None);
     }
 }

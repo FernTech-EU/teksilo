@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Twenty-five claims, and they do not all carry the same weight. Verified by
+//! Thirty-one claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -93,6 +93,26 @@
 //!   `_NET_WM_STATE_SKIP_TASKBAR`, and one created without it does not;
 //! - **(x)** with no window open, the loop goes on under
 //!   `QuitPolicy::Explicit`;
+//! - **(z)** a mount action in the application tree runs with the window
+//!   operations and opens a window;
+//! - **(ab)** with no window open, `on_external_with_ctx` runs in the
+//!   application tree and can open a window, and runs in that window once it
+//!   is open;
+//! - **(ac)** a modal request from the application tree gets a window of its
+//!   own with none open, closed by its dismissal, is presented in the window
+//!   open otherwise, but not in one about to close, and is refused when it
+//!   presents an existing widget; one a rebuild in an `about_to_wait` tick
+//!   asks for is presented by `about_to_wait`;
+//! - **(ad)** an intent a window's actions leave reaches the application
+//!   tree, and one the application tree's handler sends reaches the window,
+//!   in `post_event` and in `about_to_wait`; a shortcut's stays where it was
+//!   sent; a window closing that turn is passed over, and a close guard's
+//!   intent outlives its window;
+//! - **(ae)** a payload wrapped with an activation token reaches the handler
+//!   unwrapped, and the token is taken by the window it opens or raises, or
+//!   dropped at the end of the turn;
+//! - **(aa)** the application tree is ticked by `about_to_wait` and by the
+//!   wake its waker posts, which the loop takes so the next one posts;
 //! - **(y)** a quit closes a window with no guard, stops at one whose guard
 //!   vetoed and presented a `MessageBox`, waits while the box is queued and
 //!   while it is up, is abandoned when Escape cancels the box, and, asked
@@ -1593,10 +1613,497 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             .map(|id| (id, app.wm.take_managed(id).expect("the window is open")))
             .collect();
         assert!(app.wm.is_empty());
+        // Everything below turns the loop with no window open, which ends it
+        // under the default policy before (x) and (y) are reached.
+        app.quit_policy = crate::QuitPolicy::Explicit;
+
+        // (z) The application tree's mount actions run with the window
+        // operations: one opens a window, through the windowless sink, as an
+        // application root opens the first window of an application started
+        // with none. Dropping the application tree from
+        // `process_pending_mount_actions` leaves no window.
+        #[derive(Debug)]
+        struct OpensAWindow;
+        impl teksilo_core::widget::Widget for OpensAWindow {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                ctx.run_after_mount(|ctx| {
+                    assert!(
+                        ctx.window().is_none(),
+                        "the application tree is no window's"
+                    );
+                    ctx.open_window(
+                        WindowConfig::new()
+                            .id("from-the-app-tree")
+                            .title("teksilo loop test: from the app tree")
+                            .size(160, 100)
+                            .root(|tree, _state| {
+                                tree.add(logging_leaf(&Default::default(), false))
+                            }),
+                    );
+                });
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+        }
+        app.wm.install_app_tree(|tree| tree.add(OpensAWindow));
+        app.process_pending_mount_actions(event_loop);
+        let opened = app
+            .wm
+            .find_window("from-the-app-tree")
+            .expect("the application tree's mount action opened a window");
+        app.wm.close_window(opened);
+
+        // (aa) The application tree is ticked: by `about_to_wait`, and by
+        // the private wake its waker posts for content off the UI thread,
+        // which the loop takes so the next one posts. Dropping the tick from
+        // `about_to_wait` leaves the first rebuild undone; dropping the
+        // wake's handling leaves the wake untaken, and every later one lost.
+        #[derive(Debug)]
+        struct Rebuilt(teksilo_core::signal::Signal<u32>, Rc<Cell<u32>>);
+        impl teksilo_core::widget::Widget for Rebuilt {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                self.0
+                    .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+                self.1.set(self.1.get() + 1);
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+        }
+        let generation = teksilo_core::signal::Signal::new(0_u32);
+        let builds = Rc::new(Cell::new(0_u32));
+        {
+            let (generation, builds) = (generation.clone(), builds.clone());
+            app.wm
+                .install_app_tree(move |tree| tree.add(Rebuilt(generation, builds)));
+        }
+        let built = builds.get();
+        generation.set(1);
+        app.about_to_wait(event_loop);
+        assert_eq!(
+            builds.get(),
+            built + 1,
+            "about_to_wait ticked the application tree"
+        );
+
+        let waker = app
+            .wm
+            .app_tree()
+            .and_then(|tree| tree.redraw_waker().cloned())
+            .expect("the application tree has a waker");
+        waker.wake(WakeKind::Layout);
+        generation.set(2);
+        app.user_event(
+            event_loop,
+            AppEvent::External(Box::new(crate::app::AppTreeWake)),
+        );
+        assert_eq!(
+            builds.get(),
+            built + 2,
+            "the wake ticked the application tree"
+        );
+        assert!(
+            !app.wm.take_app_tree_wake(),
+            "and the loop took it, so the tree's next wake posts again"
+        );
+
+        // (ab) An unclaimed external payload reaches `on_external_with_ctx`
+        // in the application tree while no window is open, where the handler
+        // opens one; with that window open, the next one runs in it. Making
+        // `route_external_with_ctx` skip when no window is open leaves no
+        // window.
+        struct OpenFromOutside;
+        let contexts: Rc<RefCell<Vec<Option<crate::TeksiloWindowId>>>> = Rc::default();
+        app.external_ctx_handler = Some(Box::new({
+            let contexts = contexts.clone();
+            move |payload, ctx| {
+                if !payload.is::<OpenFromOutside>() {
+                    return false;
+                }
+                contexts
+                    .borrow_mut()
+                    .push(ctx.window().map(|state| state.id()));
+                if ctx.find_window("from-outside").is_none() {
+                    ctx.open_window(
+                        WindowConfig::new()
+                            .id("from-outside")
+                            .title("teksilo loop test: from outside")
+                            .size(160, 100)
+                            .root(|tree, _state| {
+                                tree.add(logging_leaf(&Default::default(), false))
+                            }),
+                    );
+                }
+                true
+            }
+        }));
+        app.route_external_with_ctx(&OpenFromOutside, event_loop);
+        let outside = app
+            .wm
+            .find_window("from-outside")
+            .expect("the handler, run in the application tree, opened a window");
+        app.route_external_with_ctx(&OpenFromOutside, event_loop);
+        assert_eq!(
+            *contexts.borrow(),
+            [None, Some(outside)],
+            "first in no window, then in the window it opened"
+        );
+        // (ae) A payload wrapped with an activation token: the handler sees
+        // the payload, and the token waits for the first raise or open. Here
+        // `open_window` takes it; with the window open, `focus_window` takes
+        // the next one; one nothing takes is gone after `post_event`.
+        // Removing the slot from `create_window` leaves the first token
+        // waiting.
+        app.wm.close_window(outside);
+        let wrapped = |token: &str| crate::WithActivationToken::new(token, OpenFromOutside);
+        app.external_ctx_handler = Some(Box::new(|payload, ctx| {
+            assert!(
+                payload.is::<OpenFromOutside>(),
+                "the handler sees what is wrapped"
+            );
+            match ctx.find_window("from-outside") {
+                Some(id) => ctx.focus_window(id),
+                None => {
+                    ctx.open_window(
+                        WindowConfig::new()
+                            .id("from-outside")
+                            .title("teksilo loop test: from outside")
+                            .size(160, 100)
+                            .root(|tree, _state| {
+                                tree.add(logging_leaf(&Default::default(), false))
+                            }),
+                    );
+                }
+            }
+            true
+        }));
+        app.route_external_with_ctx(&wrapped("for-the-open"), event_loop);
+        assert_eq!(
+            app.wm.take_dispatch_activation_token(),
+            None,
+            "opening the window took the token"
+        );
+        app.route_external_with_ctx(&wrapped("for-the-raise"), event_loop);
+        assert_eq!(
+            app.wm.take_dispatch_activation_token(),
+            None,
+            "raising the open window took the token"
+        );
+        app.external_ctx_handler = Some(Box::new(|_, _| true));
+        app.route_external_with_ctx(&wrapped("for-nothing"), event_loop);
+        assert_eq!(
+            app.wm.take_dispatch_activation_token(),
+            None,
+            "once its handler returned, no window the framework opens can take it"
+        );
+        app.post_event(event_loop);
+        assert_eq!(
+            app.wm.take_dispatch_activation_token(),
+            None,
+            "an unused token does not outlive its turn"
+        );
+        app.external_ctx_handler = None;
+        let outside = app.wm.find_window("from-outside").expect("opened above");
+        app.wm.close_window(outside);
+
+        // (ac) A modal request from the application tree has no window of
+        // its own to appear in. With none open it gets a plain window, which
+        // its dismissal (Escape) closes; with one open, it is presented in
+        // that window (in its tree, on X11). One presenting an existing
+        // widget of the application tree is refused. Dropping the
+        // application tree's drain from `post_event` leaves the first
+        // request unshown.
+        let ask = |app: &mut TeksiloAppHandler| {
+            app.run_in_app_tree(event_loop, |tree, ops| {
+                tree.run_with_event_context(ops, |ctx| {
+                    ctx.present_message_box(
+                        teksilo_widgets::MessageBox::information(teksilo_i18n::lit!(
+                            "From the application"
+                        ))
+                        .buttons(teksilo_widgets::MessageBoxButtons::Ok),
+                    );
+                });
+            });
+            app.post_event(event_loop);
+        };
+        assert!(app.wm.is_empty());
+        ask(app);
+        let host: Vec<_> = app.wm.windows_map().keys().copied().collect();
+        assert_eq!(host.len(), 1, "a window of its own, none being open");
+        let host = host[0];
+        app.window_event(event_loop, host, WindowEvent::RedrawRequested);
+        app.dispatch_in_window(
+            host,
+            teksilo_core::event::WidgetEvent::KeyDown {
+                key: teksilo_core::event::Key::Escape,
+                modifiers: teksilo_core::event::Modifiers::empty(),
+                text: None,
+            },
+            event_loop,
+        );
+        app.post_event(event_loop);
+        assert!(app.wm.is_empty(), "its dismissal closed its window");
+
+        let working = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: working")
+                .size(480, 320)
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        ask(app);
+        assert_eq!(app.wm.window_count(), 1, "no window of its own this time");
+        let working_winit = app.wm.winit_id_for_teksilo(working).expect("open");
+        assert!(
+            app.wm.windows_map()[&working_winit]
+                .tree
+                .has_modal_overlay(),
+            "presented in the window open"
+        );
+        let overlays = |app: &TeksiloAppHandler| {
+            app.wm.windows_map()[&working_winit]
+                .tree
+                .overlay_manager()
+                .len()
+        };
+        let before = overlays(app);
+        app.run_in_app_tree(event_loop, |tree, ops| {
+            let existing = tree.add(logging_leaf(&Default::default(), false));
+            tree.run_with_event_context(ops, |ctx| {
+                ctx.present_modal(teksilo_core::modal::ModalRequest::in_tree(existing));
+            });
+        });
+        app.post_event(event_loop);
+        assert_eq!(app.wm.window_count(), 1, "an existing widget is refused");
+        assert_eq!(
+            overlays(app),
+            before,
+            "and nothing was presented in the open window either"
+        );
+
+        // A window about to close is no place for it: with the only window
+        // closing in the same turn, it gets a window of its own.
+        app.wm.queue_close(working);
+        ask(app);
+        assert!(
+            app.wm.winit_id_for_teksilo(working).is_none(),
+            "the closing window closed"
+        );
+        let hosts: Vec<_> = app.wm.teksilo_ids().collect();
+        assert_eq!(hosts.len(), 1, "the dialog got a window of its own");
+        app.wm.close_window(hosts[0]);
+
+        // A dialog asked for by a mount action that a rebuild in an
+        // `about_to_wait` tick queued, with no window open: no window event
+        // follows, so `about_to_wait` itself drains it.
+        #[derive(Debug)]
+        struct AsksOnRebuild(teksilo_core::signal::Signal<u32>);
+        impl teksilo_core::widget::Widget for AsksOnRebuild {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                self.0
+                    .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+                if self.0.get() > 0 {
+                    ctx.run_after_mount(|ctx| {
+                        ctx.present_message_box(
+                            teksilo_widgets::MessageBox::information(teksilo_i18n::lit!("Rebuilt"))
+                                .buttons(teksilo_widgets::MessageBoxButtons::Ok),
+                        );
+                    });
+                }
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+        }
+        let asks_now = teksilo_core::signal::Signal::new(0_u32);
+        {
+            let asks_now = asks_now.clone();
+            app.wm
+                .install_app_tree(move |tree| tree.add(AsksOnRebuild(asks_now)));
+        }
+        app.about_to_wait(event_loop);
+        assert!(app.wm.is_empty(), "nothing asked yet");
+        asks_now.set(1);
+        app.about_to_wait(event_loop);
+        let hosts: Vec<_> = app.wm.teksilo_ids().collect();
+        assert_eq!(hosts.len(), 1, "about_to_wait presented the dialog");
+        app.wm.close_window(hosts[0]);
+
+        // (ad) Intents cross between a window and the application tree in
+        // `post_event`: one the window's actions leave reaches the
+        // application tree, and one the application tree's handler sends
+        // that only the window takes reaches the window. A shortcut's never
+        // crosses. Removing the forwarding from `post_event` leaves the
+        // application tree's action unrun.
+        #[derive(Debug)]
+        struct Takes {
+            label: &'static str,
+            takes: &'static str,
+            then: Option<&'static str>,
+            log: Rc<RefCell<Vec<String>>>,
+        }
+        impl teksilo_core::widget::Widget for Takes {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                let (label, then, log) = (self.label, self.then, self.log.clone());
+                ctx.register_action_global(teksilo_core::Action::new(self.takes).on_invoke(
+                    move |intent, ctx| {
+                        log.borrow_mut().push(format!("{label}:{}", intent.name));
+                        if let Some(then) = then {
+                            ctx.send_intent(teksilo_core::Intent::new(then));
+                        }
+                    },
+                ));
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+        }
+        let crossed: Rc<RefCell<Vec<String>>> = Rc::default();
+        {
+            let log = crossed.clone();
+            app.wm.install_app_tree(move |tree| {
+                tree.add(Takes {
+                    label: "app",
+                    takes: "app.from_window",
+                    then: Some("doc.from_app"),
+                    log,
+                })
+            });
+        }
+        let document = {
+            let log = crossed.clone();
+            app.wm.create_window(
+                WindowConfig::new()
+                    .title("teksilo loop test: document")
+                    .size(200, 120)
+                    .root(move |tree, _state| {
+                        tree.add(Takes {
+                            label: "window",
+                            takes: "doc.from_app",
+                            then: None,
+                            log,
+                        })
+                    }),
+                event_loop,
+            )
+        };
+        let document_winit = app.wm.winit_id_for_teksilo(document).expect("open");
+        app.run_in_window(document_winit, event_loop, |tree, ops| {
+            tree.run_with_event_context(ops, |ctx| {
+                ctx.send_intent(teksilo_core::Intent::new("app.from_window"));
+                ctx.send_intent(
+                    teksilo_core::Intent::new("app.from_window")
+                        .with_source(teksilo_core::telemetry::IntentSource::Shortcut),
+                );
+            });
+        });
+        app.post_event(event_loop);
+        assert_eq!(
+            *crossed.borrow(),
+            ["app:app.from_window", "window:doc.from_app"],
+            "across and back, once; the shortcut's intent stayed in its window"
+        );
+
+        // Input dispatched outside a window event (a pen tap, a timed
+        // gesture) is followed by `about_to_wait`: it forwards too.
+        crossed.borrow_mut().clear();
+        app.run_in_window(document_winit, event_loop, |tree, ops| {
+            tree.run_with_event_context(ops, |ctx| {
+                ctx.send_intent(teksilo_core::Intent::new("app.from_window"));
+            });
+        });
+        app.about_to_wait(event_loop);
+        assert_eq!(
+            *crossed.borrow(),
+            ["app:app.from_window", "window:doc.from_app"],
+            "about_to_wait forwarded both ways"
+        );
+
+        // The application tree's intent goes to a window not closing this
+        // turn: `document` closes itself as it sends, so `other` gets it.
+        crossed.borrow_mut().clear();
+        let other = {
+            let log = crossed.clone();
+            app.wm.create_window(
+                WindowConfig::new()
+                    .title("teksilo loop test: other")
+                    .size(200, 120)
+                    .root(move |tree, _state| {
+                        tree.add(Takes {
+                            label: "other",
+                            takes: "doc.from_app",
+                            then: None,
+                            log,
+                        })
+                    }),
+                event_loop,
+            )
+        };
+        app.window_event(event_loop, document_winit, WindowEvent::Focused(true));
+        app.run_in_window(document_winit, event_loop, |tree, ops| {
+            tree.run_with_event_context(ops, |ctx| {
+                ctx.close_window_forced();
+                ctx.send_intent(teksilo_core::Intent::new("app.from_window"));
+            });
+        });
+        app.post_event(event_loop);
+        assert!(
+            app.wm.winit_id_for_teksilo(document).is_none(),
+            "document closed"
+        );
+        assert_eq!(
+            *crossed.borrow(),
+            ["app:app.from_window", "other:doc.from_app"],
+            "the closing window was passed over"
+        );
+
+        // A close guard's intent, sent as its window goes, still reaches
+        // the application tree.
+        crossed.borrow_mut().clear();
+        let leaving = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: leaving")
+                .size(200, 120)
+                .on_close_requested(|ctx| {
+                    ctx.send_intent(teksilo_core::Intent::new("app.from_window"));
+                    teksilo_core::CloseResponse::Close
+                })
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        app.wm.request_close(leaving);
+        app.post_event(event_loop);
+        assert!(app.wm.winit_id_for_teksilo(leaving).is_none());
+        assert_eq!(
+            crossed.borrow().first().map(String::as_str),
+            Some("app:app.from_window"),
+            "the closed window's intent was not lost"
+        );
+        app.wm.close_window(other);
 
         // (x) Under `Explicit` the loop turns with no window open and goes
         // on. Making `maybe_exit` ignore the policy ends it here.
-        app.quit_policy = crate::QuitPolicy::Explicit;
         app.about_to_wait(event_loop);
         assert!(
             !event_loop.exiting(),

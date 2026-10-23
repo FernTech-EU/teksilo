@@ -43,6 +43,27 @@ pub fn raise(window: &Window, token: Option<&str>) {
     window.focus_window();
 }
 
+/// Create the window with `token`, an activation token a launcher or
+/// another instance of the application handed over, so it comes up focused
+/// on Wayland (`xdg_activation_v1`) and ends the launch feedback on X11
+/// (startup notification). The token is meaningless elsewhere and is
+/// dropped.
+pub fn apply_token(
+    attrs: winit::window::WindowAttributes,
+    token: String,
+) -> winit::window::WindowAttributes {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        use winit::platform::startup_notify::WindowAttributesExtStartupNotify;
+        attrs.with_activation_token(winit::window::ActivationToken::from_raw(token))
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        let _ = token;
+        attrs
+    }
+}
+
 /// Consume an `xdg_activation_v1` startup token from the environment (set by the
 /// process that spawned us) and apply it to `attrs`, so the created window comes
 /// up focused on Wayland. Resets the env afterwards so later windows / grandchild

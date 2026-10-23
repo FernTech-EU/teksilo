@@ -45,6 +45,18 @@ impl WindowRecency {
         self.stamps.get(&id).copied()
     }
 
+    /// The window opened or focused last among those `keep` accepts.
+    pub(crate) fn most_recent_where(
+        &self,
+        keep: impl Fn(TeksiloWindowId) -> bool,
+    ) -> Option<TeksiloWindowId> {
+        self.stamps
+            .iter()
+            .filter(|(id, _)| keep(**id))
+            .max_by_key(|(_, stamp)| **stamp)
+            .map(|(id, _)| *id)
+    }
+
     /// The window opened or focused last, `None` with no window open.
     pub(crate) fn most_recent(&self) -> Option<TeksiloWindowId> {
         self.stamps
@@ -110,6 +122,16 @@ mod tests {
         assert!(recency.stamp(id(2)) > recency.stamp(id(1)));
         recency.forget(id(2));
         assert_eq!(recency.stamp(id(2)), None);
+    }
+
+    #[test]
+    fn the_most_recent_window_a_filter_accepts() {
+        let mut recency = WindowRecency::default();
+        recency.touch(id(1));
+        recency.touch(id(2));
+        recency.touch(id(3));
+        assert_eq!(recency.most_recent_where(|w| w != id(3)), Some(id(2)));
+        assert_eq!(recency.most_recent_where(|_| false), None);
     }
 
     #[test]

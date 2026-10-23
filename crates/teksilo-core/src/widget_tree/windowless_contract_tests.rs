@@ -17,7 +17,9 @@
 //! - a tree with no root drops the context's intents, which is why that tree
 //!   always has a root;
 //! - a tree that was laid out but never painted still reports
-//!   `needs_render`, which is why its tick must not be gated on it.
+//!   `needs_render`, which is why its tick must not be gated on it;
+//! - its own wake-up time, `next_unpainted_deadline`, holds what layout
+//!   moves forward and nothing that only render or a window would.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -192,4 +194,102 @@ fn a_tree_laid_out_but_never_painted_still_needs_render() {
         tree.needs_render(),
         "paint never clears it here, so a tick gated on it would run on every turn"
     );
+}
+
+#[test]
+fn the_unpainted_deadline_holds_a_requested_wake() {
+    let (tree, _, _, _) = app_tree();
+    assert_eq!(tree.next_unpainted_deadline(), None, "nothing to wake for");
+    let at = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    tree.request_wake_at(at);
+    assert_eq!(tree.next_unpainted_deadline(), Some(at));
+}
+
+#[test]
+fn the_unpainted_deadline_paces_a_frame_request_from_the_last_layout() {
+    let (mut tree, _, _, _) = app_tree();
+    let mut ops = RecordingOps::default();
+    tree.layout_with_ops(no_window(), &mut ops);
+    tree.request_frame();
+    let deadline = tree
+        .next_unpainted_deadline()
+        .expect("a frame was asked for");
+    tree.layout_with_ops(no_window(), &mut ops);
+    assert_eq!(
+        tree.next_unpainted_deadline(),
+        None,
+        "the layout ran the frame and nothing asked again"
+    );
+    assert!(deadline > std::time::Instant::now() - std::time::Duration::from_secs(1));
+}
+
+/// An animated quad advances only when the tree renders. Counted, it would
+/// keep a tree that never renders due forever and spin the loop.
+#[test]
+fn the_unpainted_deadline_leaves_out_animated_quads() {
+    let (mut tree, _, _, _) = app_tree();
+    let root = tree.roots()[0];
+    let _quad = tree.register_animated_quad(
+        root,
+        crate::animated_quad::AnimatedQuadKind::SpinnerArc {
+            period: std::time::Duration::from_secs(1),
+            arc_fraction: 0.25,
+            stroke_fraction: 0.12,
+            color: teksilo_tokens::Color::RED.into(),
+        },
+    );
+    assert!(
+        tree.next_timer_deadline().is_some(),
+        "a window would wake for it"
+    );
+    assert_eq!(tree.next_unpainted_deadline(), None);
+}
+
+/// The tick of a tree that is never painted is gated on this, not on
+/// `needs_render`: it says yes for a rebuild, an idle callback or a due
+/// timer, and no once a frame has run.
+#[test]
+fn needs_logic_frame_turns_false_once_a_frame_ran() {
+    let (mut tree, generation, _, _) = app_tree();
+    let mut ops = RecordingOps::default();
+    let now = std::time::Instant::now;
+    assert!(tree.needs_logic_frame(now()), "never laid out");
+    tree.layout_with_ops(no_window(), &mut ops);
+    assert!(
+        !tree.needs_logic_frame(now()),
+        "nothing to do after a frame"
+    );
+    generation.set(5);
+    assert!(tree.needs_logic_frame(now()), "a bound signal changed");
+    tree.layout_with_ops(no_window(), &mut ops);
+    assert!(!tree.needs_logic_frame(now()));
+    tree.request_wake_at(now());
+    assert!(tree.needs_logic_frame(now()), "a wake is due");
+    tree.layout_with_ops(no_window(), &mut ops);
+    tree.run_with_event_context(&mut ops, |ctx| ctx.request_idle_callback(|_| {}));
+    assert!(tree.needs_logic_frame(now()), "an idle callback waits");
+}
+
+#[test]
+fn has_pending_app_requests_sees_each_request() {
+    let (mut tree, _, _, _) = app_tree();
+    let mut ops = RecordingOps::default();
+    tree.run_mount_actions(&mut ops);
+    assert!(!tree.has_pending_app_requests());
+    let asks: [fn(&mut crate::widget::EventContext); 6] = [
+        |ctx| ctx.set_locale("fr-FR"),
+        |ctx| ctx.set_theme(crate::presets::intui::dark()),
+        |ctx| ctx.follow_system_theme(),
+        |ctx| ctx.set_text_scale(1.5),
+        |ctx| ctx.close_window(),
+        |ctx| ctx.close_window_forced(),
+    ];
+    for ask in asks {
+        let (mut tree, _, _, _) = app_tree();
+        tree.run_mount_actions(&mut ops);
+        tree.run_with_event_context(&mut ops, ask);
+        assert!(tree.has_pending_app_requests());
+    }
+    let (tree, _, _, _) = app_tree();
+    assert!(tree.has_pending_app_requests(), "a mount action waits");
 }

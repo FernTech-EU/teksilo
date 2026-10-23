@@ -1505,12 +1505,13 @@ impl<'a> BuildContext<'a> {
     /// mismatched call site in a release build is not caught here but panics
     /// later at the payload downcast.
     ///
-    /// Registering from a windowless tree (headless / tests) is allowed but
-    /// records `None` for the window — the app-side router then has no tree to
-    /// mint an `EventContext` from and cannot deliver it, so such a subscription
-    /// never fires in a running app. Ordinary application widgets always have a
-    /// window; headless code that wants to observe events should use
-    /// [`subscribe_event`](Self::subscribe_event) and drive `Signal`s instead.
+    /// Registering from a tree no window hosts records no window. In a
+    /// running app that tree is the application tree (`teksilo_app`'s
+    /// `TeksiloAppBuilder::app_root`), and the event is delivered there,
+    /// with a context whose `window()` is `None`. A headless tree has no
+    /// event loop to deliver through; headless code that wants to observe
+    /// events should use [`subscribe_event`](Self::subscribe_event) and
+    /// drive `Signal`s instead.
     pub fn subscribe_event_with_ctx<O, E, F>(&mut self, origin: O, callback: F)
     where
         O: 'static,

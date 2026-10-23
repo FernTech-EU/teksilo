@@ -82,6 +82,69 @@ impl QuitPolicy {
     }
 }
 
+/// Builds the application tree's root: see [`TeksiloAppBuilder::app_root`].
+pub type AppRootBuilder = Box<dyn FnOnce(&mut WidgetTree) -> teksilo_core::WidgetId>;
+
+/// The application tree's root when the application gives none: a tree
+/// with no root drops every intent sent from an application callback, so
+/// there is always one.
+#[derive(Debug)]
+struct AppTreeAnchor;
+
+impl teksilo_core::widget::Widget for AppTreeAnchor {
+    fn layout_response(
+        &self,
+        proposal: teksilo_canvas::SizeProposal,
+        _ctx: &teksilo_core::widget::LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+}
+
+/// The logic half of a frame, which a window's tree and the application
+/// tree share: idle callbacks within `idle_budget`, then layout at
+/// `proposal`, which runs the clocks, the reactive bindings (rebuilds,
+/// effects) and the frame tick. Returns whether idle callbacks ran.
+///
+/// The application tree is laid out at a zero proposal: it has no window to
+/// be sized to, and nothing in it is drawn.
+pub(crate) fn run_tree_logic_frame(
+    tree: &mut WidgetTree,
+    idle_budget: Duration,
+    proposal: SizeProposal,
+    ops: &mut dyn teksilo_core::WindowOps,
+) -> bool {
+    let ran_idle = tree.has_idle_work();
+    if ran_idle {
+        tree.run_idle_callbacks(idle_budget);
+    }
+    tree.layout_with_ops(proposal, ops);
+    ran_idle
+}
+
+/// Posted by the application tree's [`RedrawWaker`](teksilo_canvas::wake::RedrawWaker),
+/// from any thread, when content off the UI thread asks that tree for a
+/// frame. Private to the framework, like [`WindowWake`]; the loop answers
+/// with a tick of the application tree. At most one is in flight.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AppTreeWake;
+
+/// The application tree's waker: posts one [`AppTreeWake`] until the loop
+/// has taken it, whatever the [`WakeKind`](teksilo_canvas::wake::WakeKind),
+/// since every frame of that tree is a logic frame.
+pub(crate) struct AppTreeWaker {
+    pub(crate) post: std::sync::Arc<dyn Fn(Box<dyn std::any::Any + Send>) + Send + Sync>,
+    pub(crate) pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl teksilo_canvas::wake::RedrawWaker for AppTreeWaker {
+    fn wake(&self, _kind: teksilo_canvas::wake::WakeKind) {
+        if !self.pending.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            (self.post)(Box::new(AppTreeWake));
+        }
+    }
+}
+
 use teksilo_text::SharedTypesetter;
 
 use crate::window_config::{SizeToContent, TeksiloWindowId, WindowConfig};
@@ -903,6 +966,13 @@ struct TeksiloAppHandler {
     initial_created: bool,
     /// When the loop ends on its own; see [`QuitPolicy`].
     quit_policy: QuitPolicy,
+    /// The intents dropped by the routing between trees that a debug build
+    /// has already named.
+    dropped_intents: crate::intent_routing::DroppedIntents,
+    /// A debug build said once that the application tree holds something
+    /// only a drawn tree shows: an animated widget or an overlay.
+    #[cfg(debug_assertions)]
+    warned_visual_app_tree: bool,
     idle_budget: Duration,
     idle_trace: Option<IdleTrace>,
     /// The GPU reclaim poll, [`teksilo_render::poll_gpu_reclaim`]: a field
@@ -981,6 +1051,9 @@ impl TeksiloAppHandler {
             initial_window,
             initial_created: false,
             quit_policy,
+            dropped_intents: Default::default(),
+            #[cfg(debug_assertions)]
+            warned_visual_app_tree: false,
             idle_budget: Duration::from_millis(4),
             idle_trace: IdleTrace::from_env(),
             gpu_reclaim: teksilo_render::poll_gpu_reclaim,
@@ -1031,72 +1104,144 @@ impl TeksiloAppHandler {
                         }
                     }
                     ResolvedModalPresentation::NativeWindow => {
-                        let ModalRequest {
-                            content,
-                            title,
-                            size,
-                            focus_target,
-                            close_behavior,
-                            ..
-                        } = queued.request;
-
-                        let ModalContent::Deferred(builder) = content else {
-                            continue;
-                        };
-
-                        let mut config =
-                            WindowConfig::new().modal(crate::window_config::ModalConfig {
-                                parent: source_window,
-                                focus_target,
-                            });
-                        if let Some(title) = title {
-                            config = config.title(title);
-                        }
-                        if let Some((width, height)) = size {
-                            // Native modals size their height to content: the
-                            // requested (width, height) is the floor and the OS
-                            // window grows to fit taller content (e.g. a
-                            // MessageBox "Show details" expander). Without this
-                            // the fixed height clips content that exceeds it —
-                            // the footer buttons fall below the client edge and
-                            // stop receiving clicks. NOTE: deliberately NOT
-                            // `resizable(false)` — winit encodes that as
-                            // min==max size hints on X11, which would clamp away
-                            // the programmatic growth this relies on.
-                            config = config
-                                .size(width, height)
-                                .min_size(width, height)
-                                .size_to_content(SizeToContent::Height);
-                        }
-                        // Honour the request's `ModalCloseBehavior`. Only the
-                        // Escape half of it is expressible for a native
-                        // window: there is no "outside" to click, because the
-                        // parent window is input-blocked for as long as the
-                        // modal is up — which is what the OS does with a click
-                        // there, and is why `ClickOutside` resolves to
-                        // "nothing dismisses this but the app" here rather
-                        // than to a second route. Before this the whole field
-                        // fell into the struct's `..` and was never read, so a
-                        // `Dialog` taking BOTH defaults (`Auto` presentation,
-                        // `EscapeOrClickOutside`) got neither behaviour on
-                        // every platform that hosts a native modal.
-                        let escape_dismisses = native_modal_escape_dismisses(close_behavior);
-                        self.wm.create_window(
-                            config.root(move |tree, _state| {
-                                let content_id = builder(tree);
-                                if escape_dismisses {
-                                    wrap_native_modal_in_escape_route(tree, content_id)
-                                } else {
-                                    content_id
-                                }
-                            }),
-                            event_loop,
-                        );
+                        self.open_modal_window(Some(source_window), queued.request, event_loop);
                     }
                 }
             }
         }
 
+        had_requests
+    }
+
+    /// Open a native window presenting a [`ModalRequest`] with deferred
+    /// content: a modal child of `parent`, or, with no parent (a request
+    /// from the application tree with no window open), a plain window that
+    /// the request's dismissal closes like a modal one. A request whose
+    /// content is an existing widget cannot move to another tree and opens
+    /// nothing.
+    fn open_modal_window(
+        &mut self,
+        parent: Option<TeksiloWindowId>,
+        request: ModalRequest,
+        event_loop: &ActiveEventLoop,
+    ) {
+        let ModalRequest {
+            content,
+            title,
+            size,
+            focus_target,
+            close_behavior,
+            ..
+        } = request;
+
+        let ModalContent::Deferred(builder) = content else {
+            return;
+        };
+
+        let mut config = match parent {
+            Some(parent) => WindowConfig::new().modal(crate::window_config::ModalConfig {
+                parent,
+                focus_target,
+            }),
+            None => WindowConfig::new(),
+        };
+        if let Some(title) = title {
+            config = config.title(title);
+        }
+        if let Some((width, height)) = size {
+            // Native modals size their height to content: the
+            // requested (width, height) is the floor and the OS
+            // window grows to fit taller content (e.g. a
+            // MessageBox "Show details" expander). Without this
+            // the fixed height clips content that exceeds it:
+            // the footer buttons fall below the client edge and
+            // stop receiving clicks. NOTE: deliberately NOT
+            // `resizable(false)`: winit encodes that as
+            // min==max size hints on X11, which would clamp away
+            // the programmatic growth this relies on.
+            config = config
+                .size(width, height)
+                .min_size(width, height)
+                .size_to_content(SizeToContent::Height);
+        }
+        // Honour the request's `ModalCloseBehavior`. Only the
+        // Escape half of it is expressible for a native
+        // window: there is no "outside" to click, because the
+        // parent window is input-blocked for as long as the
+        // modal is up, which is what the OS does with a click
+        // there, and is why `ClickOutside` resolves to
+        // "nothing dismisses this but the app" here rather
+        // than to a second route. Before this the whole field
+        // fell into the struct's `..` and was never read, so a
+        // `Dialog` taking BOTH defaults (`Auto` presentation,
+        // `EscapeOrClickOutside`) got neither behaviour on
+        // every platform that hosts a native modal.
+        let escape_dismisses = native_modal_escape_dismisses(close_behavior);
+        let id = self.wm.create_window(
+            config.root(move |tree, _state| {
+                let content_id = builder(tree);
+                if escape_dismisses {
+                    wrap_native_modal_in_escape_route(tree, content_id)
+                } else {
+                    content_id
+                }
+            }),
+            event_loop,
+        );
+        if parent.is_none() {
+            self.wm.mark_modal_host(id);
+        }
+    }
+
+    /// Present the modal requests the application tree queued. It has no
+    /// window to show them in, so each goes to the window the user is
+    /// working with: the [most recent](crate::WindowManager::most_recent_window)
+    /// one not about to close, over its frontmost native dialog if it has
+    /// one, in its tree or as a native modal child as the request resolves.
+    /// With no window open, or every one closing, it gets a plain window of
+    /// its own, which its dismissal closes. A
+    /// request whose content is an existing widget of the application tree
+    /// cannot move to another tree, and is refused.
+    fn process_app_tree_modal_requests(&mut self, event_loop: &ActiveEventLoop) -> bool {
+        let requests = self
+            .wm
+            .app_tree_mut()
+            .map(|tree| tree.drain_pending_modal_requests())
+            .unwrap_or_default();
+        let had_requests = !requests.is_empty();
+        let native_supported = teksilo_platform::supports_native_modal_windows();
+        for queued in requests {
+            let request = queued.request;
+            if matches!(request.content, ModalContent::ExistingWidget(_)) {
+                eprintln!(
+                    "teksilo-app: a modal request from the application tree presents an \
+                     existing widget, which cannot move to a window's tree; nothing shown. \
+                     Build the content with ModalRequest::deferred."
+                );
+                continue;
+            }
+            let Some(window) = self.wm.app_modal_target() else {
+                self.open_modal_window(None, request, event_loop);
+                continue;
+            };
+            match resolve_modal_presentation(
+                request.presentation,
+                &request.content,
+                native_supported,
+            ) {
+                ResolvedModalPresentation::InTree => {
+                    if let Some(managed) = self.wm.get_by_teksilo_mut(window)
+                        && let Some(&anchor) = managed.tree.roots().first()
+                    {
+                        present_in_tree_modal_request(&mut managed.tree, anchor, request);
+                        managed.request_redraw();
+                    }
+                }
+                ResolvedModalPresentation::NativeWindow => {
+                    self.open_modal_window(Some(window), request, event_loop);
+                }
+            }
+        }
         had_requests
     }
 
@@ -1230,6 +1375,19 @@ impl TeksiloAppHandler {
                     None => deadline,
                 });
             }
+        }
+
+        // The application tree's timers: its tweens, a requested wake, its
+        // frame tick. Served by the tick in `about_to_wait`.
+        if let Some(deadline) = self
+            .wm
+            .app_tree()
+            .and_then(|tree| tree.next_unpainted_deadline())
+        {
+            earliest_deadline = Some(match earliest_deadline {
+                Some(current) => current.min(deadline),
+                None => deadline,
+            });
         }
 
         // While nothing on screen can be seen, the session watch rereads the
@@ -1371,35 +1529,65 @@ impl TeksiloAppHandler {
     }
 
     fn post_event(&mut self, event_loop: &ActiveEventLoop) {
-        // App-wide environment changes (theme / locale) raised by a handler
-        // in one window fan out to every window's tree, marking the
-        // non-originating windows dirty. Those windows never received the
-        // triggering event, so they would otherwise stay un-repainted —
-        // `request_redraw_all()` below (gated on these flags) fixes that.
-        let had_locale = self.wm.drain_pending_locale_requests();
-        let had_theme = self.wm.drain_pending_theme_requests();
-        let had_follow_system = self.wm.drain_pending_follow_system_requests();
-        let had_text_scale = self.wm.drain_pending_text_scale_requests();
-        let had_commands = self.wm.drain_close_window_requests();
-        let had_modal_requests = self.process_modal_requests(event_loop);
-        let had_modal_dismissals = self.process_modal_dismissals();
-        self.process_pending(event_loop);
-        // Drain post-mount actions (e.g. a WebView opening its native engine
-        // subview, which needs the OS parent handle only reachable here).
-        self.process_pending_mount_actions(event_loop);
-        // Drain per-window command queues: app-side writes to
-        // WindowState signals emitted WindowCommand values that the
-        // registry routes through the per-window queue. Translate each
-        // into the appropriate winit call.
-        self.wm.drain_window_commands();
-        if had_locale
-            || had_theme
-            || had_follow_system
-            || had_text_scale
-            || had_commands
-            || had_modal_requests
-            || had_modal_dismissals
-        {
+        // First, so what its frame asks for (an application-wide change, a
+        // quit, a window) is drained below in this same turn.
+        self.tick_app_tree(event_loop);
+        let mut redraw_all = false;
+        // What a pass carries out can owe another: a routed intent's handler
+        // asks for a theme or a dialog, a close guard leaves an intent, a
+        // mount action makes a request. Bounded, as a handler could keep
+        // asking.
+        for pass in 0..4 {
+            if pass > 0 && !self.wm.owes_turn_work() {
+                break;
+            }
+            // The application tree's mount actions, which its tick's rebuild
+            // queues, before the drains that must see what they ask for.
+            if self
+                .wm
+                .app_tree()
+                .is_some_and(|tree| tree.has_pending_mount_actions())
+            {
+                self.run_in_app_tree(event_loop, |tree, ops| tree.run_mount_actions(ops));
+            }
+            // App-wide environment changes (theme / locale) raised by a
+            // handler in one window fan out to every window's tree, marking
+            // the non-originating windows dirty. Those windows never received
+            // the triggering event, so they would otherwise stay
+            // un-repainted: `request_redraw_all()` below (gated on these
+            // flags) fixes that.
+            let had_locale = self.wm.drain_pending_locale_requests();
+            let had_theme = self.wm.drain_pending_theme_requests();
+            let had_follow_system = self.wm.drain_pending_follow_system_requests();
+            let had_text_scale = self.wm.drain_pending_text_scale_requests();
+            let had_commands = self.wm.drain_close_window_requests();
+            // What a dispatch left unclaimed goes to the other side after the
+            // close flags are queued, so a window closing this turn is no
+            // target, and before the modal and close processing, which then
+            // see what its handlers asked for.
+            self.forward_unclaimed_intents(event_loop);
+            let had_modal_requests = self.process_modal_requests(event_loop)
+                | self.process_app_tree_modal_requests(event_loop);
+            let had_modal_dismissals = self.process_modal_dismissals();
+            self.process_pending(event_loop);
+            // Drain post-mount actions (e.g. a WebView opening its native
+            // engine subview, which needs the OS parent handle only reachable
+            // here).
+            self.process_pending_mount_actions(event_loop);
+            // Drain per-window command queues: app-side writes to
+            // WindowState signals emitted WindowCommand values that the
+            // registry routes through the per-window queue. Translate each
+            // into the appropriate winit call.
+            self.wm.drain_window_commands();
+            redraw_all |= had_locale
+                || had_theme
+                || had_follow_system
+                || had_text_scale
+                || had_commands
+                || had_modal_requests
+                || had_modal_dismissals;
+        }
+        if redraw_all {
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_request_redraw_all();
             }
@@ -1416,6 +1604,8 @@ impl TeksiloAppHandler {
         {
             trace.note_cross_window_redraw(cross_window_redraws);
         }
+        // The routed event's activation token is good for this turn only.
+        self.wm.clear_dispatch_activation_token();
         self.maybe_exit(event_loop);
         self.update_control_flow(event_loop);
     }
@@ -2129,8 +2319,11 @@ impl TeksiloAppHandler {
     /// pumps another external event) therefore sees `None` and is a no-op rather
     /// than a double borrow.
     ///
-    /// No window open (the instant between the last close and loop exit) is a
-    /// silent no-op — there is nowhere to mint a context from.
+    /// With no window open, the handler runs in the application tree
+    /// instead, with a context whose `window()` is `None`: still able to open
+    /// a window, which is what a single-instance application with none open
+    /// (a tray application, an application under
+    /// [`QuitPolicy::Explicit`]) needs.
     fn route_external_with_ctx(
         &mut self,
         payload: &(dyn std::any::Any + Send),
@@ -2139,18 +2332,38 @@ impl TeksiloAppHandler {
         let Some(mut handler) = self.external_ctx_handler.take() else {
             return;
         };
-        let target = self
-            .wm
-            .most_recent_window()
-            .unwrap_or_else(|| self.wm.primary_window_id());
-        if let Some(winit_id) = self.wm.winit_id_for_teksilo(target) {
-            let handler = &mut handler;
-            self.run_in_window(winit_id, event_loop, move |tree, ops| {
+        // A payload that came with an activation token: the handler sees
+        // what it wraps, and the token waits for its first raise or open.
+        let payload = match payload.downcast_ref::<WithActivationToken>() {
+            Some(wrapped) => {
+                self.wm.set_dispatch_activation_token(wrapped.token.clone());
+                wrapped.payload()
+            }
+            None => payload,
+        };
+        // "No window open" asked of the window map itself, which is what
+        // the application tree stands in for.
+        let target = if self.wm.is_empty() {
+            None
+        } else {
+            self.wm
+                .most_recent_window()
+                .and_then(|id| self.wm.winit_id_for_teksilo(id))
+        };
+        let handler_ref = &mut handler;
+        match target {
+            Some(winit_id) => self.run_in_window(winit_id, event_loop, move |tree, ops| {
                 tree.run_with_event_context(ops, |ctx| {
-                    handler(payload, ctx);
+                    handler_ref(payload, ctx);
                 });
-            });
+            }),
+            None => self.run_in_app_tree(event_loop, move |tree, ops| {
+                tree.run_with_event_context(ops, |ctx| {
+                    handler_ref(payload, ctx);
+                });
+            }),
         }
+        self.wm.end_dispatch_activation();
         self.external_ctx_handler = Some(handler);
     }
 
@@ -2261,6 +2474,138 @@ impl TeksiloAppHandler {
                 tree.run_mount_actions(ops)
             });
         }
+        if self
+            .wm
+            .app_tree()
+            .is_some_and(|tree| tree.has_pending_mount_actions())
+        {
+            self.run_in_app_tree(event_loop, |tree, ops| tree.run_mount_actions(ops));
+        }
+    }
+
+    /// Run a logic frame of the application tree, when it has one to run
+    /// ([`needs_logic_frame`](teksilo_core::WidgetTree::needs_logic_frame)):
+    /// its idle callbacks, then layout, which runs its tweens, bindings and
+    /// frame tick. Never gated on `needs_render`, which a tree that is never
+    /// painted always reports.
+    fn tick_app_tree(&mut self, event_loop: &ActiveEventLoop) {
+        // Gated on what the tree has to do, so a frame request in it paces
+        // at its deadline rather than at the rate events arrive.
+        if !self
+            .wm
+            .app_tree()
+            .is_some_and(|tree| tree.needs_logic_frame(Instant::now()))
+        {
+            return;
+        }
+        let budget = self.idle_budget;
+        self.run_in_app_tree(event_loop, |tree, ops| {
+            run_tree_logic_frame(tree, budget, SizeProposal::exact(0.0, 0.0), ops);
+        });
+        #[cfg(debug_assertions)]
+        if !self.warned_visual_app_tree
+            && let Some(tree) = self.wm.app_tree()
+        {
+            let what = if tree.animated_quad_count() > 0 {
+                Some("an animated widget (a spinner, an indeterminate progress bar)")
+            } else if !tree.overlay_manager().is_empty() {
+                Some("an overlay (a popover, a tooltip, a menu)")
+            } else {
+                None
+            };
+            if let Some(what) = what {
+                self.warned_visual_app_tree = true;
+                eprintln!(
+                    "teksilo-app: the application tree holds {what}, which is never drawn \
+                     there. Show it from a window; a modal request from the application tree \
+                     is presented in a window for you."
+                );
+            }
+        }
+    }
+
+    /// Offer what each tree left unclaimed to the other side: the windows'
+    /// to the application tree, the application tree's to the window the
+    /// user works with. Repeats while a routed intent's handler sends new
+    /// ones across, within a bound. See [`crate::intent_routing`].
+    fn forward_unclaimed_intents(&mut self, event_loop: &ActiveEventLoop) {
+        use crate::intent_routing::offer;
+        for _ in 0..16 {
+            let mut from_windows: Vec<teksilo_core::Intent> = self.wm.take_orphan_intents();
+            from_windows.extend(
+                self.wm
+                    .iter_mut()
+                    .flat_map(|managed| managed.tree.take_unclaimed_intents()),
+            );
+            let from_app = self
+                .wm
+                .app_tree_mut()
+                .map(|tree| tree.take_unclaimed_intents())
+                .unwrap_or_default();
+            if from_windows.is_empty() && from_app.is_empty() {
+                return;
+            }
+            if !from_windows.is_empty() {
+                let mut dropped = Vec::new();
+                if self.wm.app_tree().is_some() {
+                    self.run_in_app_tree(event_loop, |tree, ops| {
+                        dropped = offer(from_windows, Some(tree), ops);
+                    });
+                } else {
+                    dropped = from_windows.iter().map(|intent| intent.name).collect();
+                }
+                self.dropped_intents.report("a window", dropped);
+            }
+            if !from_app.is_empty() {
+                let target = self
+                    .wm
+                    .app_modal_target()
+                    .and_then(|id| self.wm.winit_id_for_teksilo(id));
+                let mut dropped: Vec<&'static str> =
+                    from_app.iter().map(|intent| intent.name).collect();
+                if let Some(winit_id) = target {
+                    self.run_in_window(winit_id, event_loop, |tree, ops| {
+                        dropped = offer(from_app, Some(tree), ops);
+                    });
+                }
+                self.dropped_intents.report("the application tree", dropped);
+            }
+        }
+        #[cfg(debug_assertions)]
+        if self
+            .wm
+            .iter()
+            .any(|managed| managed.tree.has_unclaimed_intents())
+            || self
+                .wm
+                .app_tree()
+                .is_some_and(|tree| tree.has_unclaimed_intents())
+        {
+            eprintln!(
+                "teksilo-app: the windows and the application tree kept sending each other \
+                 intents for 16 rounds; the rest wait for the next turn"
+            );
+        }
+    }
+
+    /// Run `f` against the application tree with a
+    /// [windowless](crate::window_manager::WindowOpsImpl::windowless) ops
+    /// sink, the tree taken out of the manager meanwhile as a window's is.
+    /// A no-op when no application tree is installed.
+    fn run_in_app_tree(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        f: impl FnOnce(&mut WidgetTree, &mut crate::window_manager::WindowOpsImpl),
+    ) {
+        let Some(mut tree) = self.wm.take_app_tree() else {
+            return;
+        };
+        {
+            let mut ops =
+                crate::window_manager::WindowOpsImpl::windowless(&mut self.wm, event_loop);
+            f(&mut tree, &mut ops);
+        }
+        self.wm.reinsert_app_tree(tree);
     }
 
     /// Let the installed web-view engine run, on this thread: the answer to a
@@ -2425,12 +2770,21 @@ impl TeksiloAppHandler {
         let Some(template) = self.wm.app_context_template().cloned() else {
             return false;
         };
-        let Some(window_id) = template.ctx_subscription_window(sub_id) else {
+        let Some(target) = template.ctx_subscription_target(sub_id) else {
             return false;
         };
         // From here `sub_id` IS a context-bearing subscription: consume it
         // (return `true`) even if the window is gone, so a late event never
         // falls back to the plain, context-free map.
+        let Some(window_id) = target else {
+            // Registered in the application tree, which no window hosts.
+            self.run_in_app_tree(event_loop, |tree, ops| {
+                tree.run_with_event_context(ops, |ctx| {
+                    template.dispatch_subscription_event_with_ctx(sub_id, event, ctx);
+                });
+            });
+            return true;
+        };
         let Some(winit_id) = self.wm.teksilo_to_winit_map().get(&window_id).copied() else {
             return true;
         };
@@ -2876,18 +3230,11 @@ impl TeksiloAppHandler {
         let current_arc = Some(current.platform_window.window_arc());
         current.redraw.ran_frame(Instant::now());
 
-        if current.tree.has_idle_work() {
-            if let Some(trace) = &mut self.idle_trace {
-                trace.note_idle_callbacks_run();
-            }
-            current.tree.run_idle_callbacks(self.idle_budget);
-        }
-
         let size = current.platform_window.surface_size();
         let sf = current.platform_window.scale_factor() as f32;
         let proposal = SizeProposal::exact(size.0 as f32 / sf, size.1 as f32 / sf);
 
-        {
+        let ran_idle = {
             let mut ops = crate::window_manager::WindowOpsImpl::new(
                 &mut self.wm,
                 event_loop,
@@ -2896,7 +3243,10 @@ impl TeksiloAppHandler {
                 current_handle,
                 current_arc,
             );
-            current.tree.layout_with_ops(proposal, &mut ops);
+            run_tree_logic_frame(&mut current.tree, self.idle_budget, proposal, &mut ops)
+        };
+        if ran_idle && let Some(trace) = &mut self.idle_trace {
+            trace.note_idle_callbacks_run();
         }
 
         // Size-to-content: after layout, measure the content's intrinsic height
@@ -3557,9 +3907,14 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
             self.wm.create_window(config, event_loop);
             self.initial_created = true;
         }
-
-        self.process_pending(event_loop);
-        self.update_control_flow(event_loop);
+        // The application tree's mount actions run now, with an event
+        // context and the window operations, so an application root can
+        // open the first window of an application that starts with none;
+        // what they ask for (a dialog, a theme) is drained by the
+        // `post_event`, which nothing else brings to an application with no
+        // window.
+        self.process_pending_mount_actions(event_loop);
+        self.post_event(event_loop);
     }
 
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
@@ -3593,6 +3948,13 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
             AppEvent::External(payload) => match payload.downcast::<WindowWake>() {
                 Ok(wake) => {
                     self.window_wake(*wake, event_loop);
+                    return;
+                }
+                Err(payload) if payload.is::<AppTreeWake>() => {
+                    // Taken before the tick, so a wake made during it posts
+                    // again rather than being lost.
+                    self.wm.take_app_tree_wake();
+                    self.post_event(event_loop);
                     return;
                 }
                 Err(payload) => match payload.downcast::<SessionChanged>() {
@@ -3897,12 +4259,24 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         {
             self.wm.request_redraw_all();
         }
+        // After the loop tick, which may have set state the application
+        // tree reads; also how the tree's own deadline, folded into the
+        // control flow below, is served when it wakes the loop. What it asks
+        // for is drained below.
+        self.tick_app_tree(event_loop);
         // Once per event-loop turn, which is what the shim's own contract
         // asks for. A digitizer reads on its own thread and buffers; this is
         // the only place that asks it what it saw.
         self.pump_pen_sources(event_loop);
         self.refresh_occluded_band();
         self.process_pending(event_loop);
+        // What the tick above, the pen input or a timed gesture left (an
+        // intent for the other side, a request) is drained by a
+        // `post_event`, which nothing else brings to an application with no
+        // window, or to input that arrived outside a window event.
+        if self.wm.owes_turn_work() {
+            self.post_event(event_loop);
+        }
         // A redraw becomes withheld with time alone, so the wake targets learn
         // it here, before the ticks that serve a window drawing nothing.
         let now = Instant::now();
@@ -3968,6 +4342,49 @@ pub(crate) struct WindowWake {
 /// [`WindowManager::apply_session`](crate::window_manager::WindowManager::apply_session).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SessionChanged;
+
+/// An `AppEvent::External` payload with the activation token that came with
+/// it: what a single-instance application's listener posts when a second
+/// launch forwards its request together with the token its launcher gave it
+/// (`XDG_ACTIVATION_TOKEN` on Wayland, `DESKTOP_STARTUP_ID` on X11).
+///
+/// [`TeksiloAppBuilder::on_external_with_ctx`] sees the inner payload. While
+/// its handler runs, and until the turn ends, the token is held for the
+/// first window operation that can use it: `ctx.focus_window`, a
+/// `WindowState::focus()` with no token of its own, or `ctx.open_window`.
+/// Without it a Wayland compositor treats the raise as unsolicited and only
+/// asks for attention. Elsewhere the token is ignored.
+pub struct WithActivationToken {
+    token: String,
+    payload: Box<dyn std::any::Any + Send>,
+}
+
+impl WithActivationToken {
+    /// Wrap `payload` with `token`.
+    pub fn new(token: impl Into<String>, payload: impl std::any::Any + Send) -> Self {
+        Self {
+            token: token.into(),
+            payload: Box::new(payload),
+        }
+    }
+
+    /// The activation token.
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
+    /// The wrapped payload.
+    pub fn payload(&self) -> &(dyn std::any::Any + Send) {
+        &*self.payload
+    }
+}
+
+impl std::fmt::Debug for WithActivationToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WithActivationToken")
+            .finish_non_exhaustive()
+    }
+}
 
 /// Payload used by `TitleBarHostCallbacks::request_close` to route a
 /// host-initiated close back to the main event loop. The host's
@@ -4092,6 +4509,8 @@ pub struct TeksiloAppBuilder {
     initial_window: Option<WindowConfig>,
     /// When the application quits on its own. See [`QuitPolicy`].
     quit_policy: QuitPolicy,
+    /// The application tree's root; see [`app_root`](Self::app_root).
+    app_root: Option<AppRootBuilder>,
     /// Type-erased adapter for the application's backend event source.
     /// Installed via `event_source<S>(source)`.
     event_source: Option<EventSourceAdapter>,
@@ -4157,6 +4576,7 @@ impl TeksiloAppBuilder {
             on_ready: Vec::new(),
             initial_window: None,
             quit_policy: QuitPolicy::default(),
+            app_root: None,
             event_source: None,
             app_state_registry: HashMap::new(),
             i18n: None,
@@ -4621,7 +5041,9 @@ impl TeksiloAppBuilder {
     ///
     /// The handler runs against the tree of the
     /// [most recent window](crate::WindowManager::most_recent_window) (the
-    /// one opened or focused last) with a real [`WindowOps`](teksilo_core::WindowOps) sink, and is
+    /// one opened or focused last), or against the application tree (see
+    /// [`app_root`](Self::app_root)) when no window is open, with a real
+    /// [`WindowOps`](teksilo_core::WindowOps) sink either way, and is
     /// consulted **only** for payloads that no framework router and no built-in
     /// downcast arm claimed — so it never has to defend against
     /// `CloseWindowRequest` and friends. Return `true` when the payload was
@@ -4717,6 +5139,46 @@ impl TeksiloAppBuilder {
     /// [`QuitPolicy::LastWindowClosed`], quits when the last window closes.
     pub fn quit_policy(mut self, policy: QuitPolicy) -> Self {
         self.quit_policy = policy;
+        self
+    }
+
+    /// Build the root of the **application tree**, the widget tree that
+    /// belongs to no window and hosts application code that must run with
+    /// none open: actions an application-level menu fires, a
+    /// single-instance handler, the quit. `root` adds the root widget to
+    /// the tree and returns its id, as a window's root builder does.
+    ///
+    /// The tree is never painted. Its handlers run with
+    /// [`EventContext::window`](teksilo_core::widget::EventContext::window)
+    /// `None`; everything that names a window by id works there, including
+    /// opening one, and nothing about "this window" does (no parent handle
+    /// for a file dialog, no `close_window`). It shares the application's
+    /// theme, locale, text scale and app state with the windows.
+    ///
+    /// Register application-wide actions in the root's `build()` with
+    /// [`BuildContext::register_action_global`](teksilo_core::BuildContext::register_action_global),
+    /// and run code once the tree is mounted with
+    /// [`BuildContext::run_after_mount`](teksilo_core::BuildContext::run_after_mount):
+    /// that runs at startup, after the initial window if there is one, and
+    /// can open the first window of an application started with
+    /// [`QuitPolicy::Explicit`] and no initial window.
+    ///
+    /// What needs a window is not drawn there. A modal request
+    /// ([`EventContext::present_modal`](teksilo_core::widget::EventContext::present_modal),
+    /// a `MessageBox`) is presented in the window used last, or in a window
+    /// of its own when none is open, and must build its content with
+    /// `ModalRequest::deferred`; one presenting an existing widget is
+    /// refused. A file dialog has no parent window and reports an error. A
+    /// toast is shown in every window. An overlay or an animated widget is
+    /// never shown, and a debug build says so; a tooltip or a `WebView` is
+    /// never shown either.
+    ///
+    /// Without this, the application tree has an empty root of its own.
+    pub fn app_root(
+        mut self,
+        root: impl FnOnce(&mut WidgetTree) -> teksilo_core::WidgetId + 'static,
+    ) -> Self {
+        self.app_root = Some(Box::new(root));
         self
     }
 
@@ -4840,6 +5302,10 @@ impl TeksiloAppBuilder {
         self.install_telemetry(opened_settings.as_ref().map(|s| &s.store));
 
         let mut tree = WidgetTree::new().with_theme(self.theme.clone());
+        let mut app_tree = self
+            .app_root
+            .is_some()
+            .then(|| WidgetTree::new().with_theme(self.theme.clone()));
 
         let typesetter = self
             .typesetter
@@ -4852,6 +5318,8 @@ impl TeksiloAppBuilder {
             typesetter.apply_font_registrar(registrar.as_ref());
         }
         tree = tree.with_text_backend(typesetter.as_text_backend());
+        app_tree =
+            app_tree.map(|app_tree| app_tree.with_text_backend(typesetter.as_text_backend()));
         // Auto-register so rich-text widgets can reach the shared typesetter
         // via `ctx.app_state::<SharedTypesetter>()` in headless tests too.
         self.app_state_registry.insert(
@@ -4865,13 +5333,30 @@ impl TeksiloAppBuilder {
         // resolve against the correct locale on first build.
         let i18n_manager = self.i18n.as_ref().map(|cfg| install_i18n(&mut tree, cfg));
         teksilo_widgets::localize_standard_shortcuts(tree.shortcut_registry_mut());
+        if let (Some(app_tree), Some(mgr)) = (app_tree.as_mut(), i18n_manager.as_ref()) {
+            app_tree.set_locale(mgr.locale_signal().get().to_string());
+            app_tree.set_layout_direction(mgr.direction_signal().get());
+        }
 
         // Install the app-state registry (if any) before running the root
         // builder so that widgets' `build()` methods can call
         // `ctx.app_state::<T>()`.
         if !self.app_state_registry.is_empty() {
-            let ctx = TreeAppContext::empty().with_app_state(self.app_state_registry);
-            tree.set_app_context(std::rc::Rc::new(ctx));
+            let ctx =
+                std::rc::Rc::new(TreeAppContext::empty().with_app_state(self.app_state_registry));
+            if let Some(app_tree) = app_tree.as_mut() {
+                app_tree.set_app_context(ctx.clone());
+            }
+            tree.set_app_context(ctx);
+        }
+
+        // The application tree, as `run` builds it, minus the window
+        // manager: no window, never painted. Both trees keep what they leave
+        // unclaimed, for `HeadlessApp::route_unclaimed_intents`.
+        if let (Some(app_tree), Some(root)) = (app_tree.as_mut(), self.app_root.take()) {
+            app_tree.set_records_unclaimed_intents(true);
+            tree.set_records_unclaimed_intents(true);
+            root(app_tree);
         }
 
         // Build the root from the `initial_window`'s builder if one was
@@ -4900,6 +5385,7 @@ impl TeksiloAppBuilder {
 
         HeadlessApp {
             tree,
+            app_tree,
             theme: self.theme,
             i18n_manager,
             settings: opened_settings,
@@ -5163,6 +5649,12 @@ impl TeksiloAppBuilder {
         app.wm.set_native_theme(self.native_theme);
         app.wm.set_records_announcements(self.records_announcements);
         app.external_ctx_handler = self.external_ctx_handler;
+        // After the app context, typesetter and theme mode are in place, so
+        // the tree is seeded like a window's.
+        app.wm.install_app_tree(
+            self.app_root
+                .unwrap_or_else(|| Box::new(|tree: &mut WidgetTree| tree.add(AppTreeAnchor))),
+        );
         // Hand over any registered loop-tick hook (e.g. the `teksilo-async`
         // executor poll). Async-agnostic: just a closure + a poll flag.
         app.loop_tick = self.loop_tick;
@@ -5230,6 +5722,13 @@ fn install_i18n(tree: &mut WidgetTree, cfg: &I18nConfig) -> Rc<I18nManager> {
 /// A headless app for testing (no window, no GPU).
 pub struct HeadlessApp {
     pub tree: WidgetTree,
+    /// The application tree, when [`TeksiloAppBuilder::app_root`] gave it a
+    /// root. Drive it as a running application would: its handlers through
+    /// `run_with_event_context`, its mount actions through
+    /// `run_mount_actions`, and the intents crossing between it and
+    /// [`tree`](Self::tree) through
+    /// [`route_unclaimed_intents`](Self::route_unclaimed_intents).
+    pub app_tree: Option<WidgetTree>,
     pub theme: Theme,
     /// Active i18n manager, if `TeksiloAppBuilder::i18n(...)` was used. Tests
     /// can reach the bundles, version signal, and locale signal directly
@@ -5244,6 +5743,40 @@ pub struct HeadlessApp {
 impl HeadlessApp {
     pub fn theme(&self) -> &Theme {
         &self.theme
+    }
+
+    /// Offer what [`tree`](Self::tree) and the
+    /// [application tree](Self::app_tree) left unclaimed to each other, as a
+    /// running application does after every dispatch, until neither leaves
+    /// anything (at most 16 rounds). Returns the names nobody took. Without
+    /// an application tree nothing is kept, and this returns nothing.
+    ///
+    /// The window operations are a no-op sink, as everywhere in a headless
+    /// app.
+    pub fn route_unclaimed_intents(&mut self) -> Vec<&'static str> {
+        let Some(app_tree) = self.app_tree.as_mut() else {
+            return Vec::new();
+        };
+        let mut dropped = Vec::new();
+        let mut ops = teksilo_core::NoopWindowOps;
+        for _ in 0..16 {
+            let from_window = self.tree.take_unclaimed_intents();
+            let from_app = app_tree.take_unclaimed_intents();
+            if from_window.is_empty() && from_app.is_empty() {
+                break;
+            }
+            dropped.extend(crate::intent_routing::offer(
+                from_window,
+                Some(app_tree),
+                &mut ops,
+            ));
+            dropped.extend(crate::intent_routing::offer(
+                from_app,
+                Some(&mut self.tree),
+                &mut ops,
+            ));
+        }
+        dropped
     }
 
     /// The active i18n manager, if `i18n(...)` was registered on the
@@ -6868,6 +7401,168 @@ mod quit_policy_tests {
                 || -> winit::event_loop::EventLoop<AppEvent> { panic!("reached the event loop") },
                 |_, _| unreachable!(),
             );
+    }
+}
+
+#[cfg(test)]
+mod app_root_tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget};
+    use teksilo_core::{Action, BuildContext, Intent, NoopWindowOps, WidgetId};
+
+    use super::TeksiloAppBuilder;
+
+    /// Registers `app.ping`, which counts its calls and checks it runs in
+    /// no window.
+    #[derive(Debug)]
+    struct PingRoot(Rc<Cell<u32>>);
+
+    impl Widget for PingRoot {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let pings = self.0.clone();
+            ctx.register_action_global(Action::new("app.ping").on_invoke(move |_, ctx| {
+                assert!(
+                    ctx.window().is_none(),
+                    "the application tree is no window's"
+                );
+                pings.set(pings.get() + 1);
+            }));
+            Vec::new()
+        }
+
+        fn layout_response(
+            &self,
+            proposal: teksilo_canvas::SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+
+    #[test]
+    fn a_headless_app_builds_the_application_tree_it_was_given() {
+        let pings = Rc::new(Cell::new(0));
+        let root = pings.clone();
+        let mut app = TeksiloAppBuilder::new()
+            .app_root(move |tree| tree.add(PingRoot(root)))
+            .build_headless();
+        let app_tree = app.app_tree.as_mut().expect("an app root was given");
+        assert_eq!(app_tree.roots().len(), 1);
+        assert!(app_tree.window_state().is_none());
+        app_tree.run_with_event_context(&mut NoopWindowOps, |ctx| {
+            ctx.send_intent(Intent::new("app.ping"));
+        });
+        assert_eq!(pings.get(), 1);
+    }
+
+    /// The logic frame both kinds of tree run: idle callbacks, then the
+    /// layout that runs the bindings.
+    #[test]
+    fn the_logic_frame_runs_idle_callbacks_and_rebuilds_bound_roots() {
+        use teksilo_core::binding::BindingLevel;
+        use teksilo_core::signal::Signal;
+
+        #[derive(Debug)]
+        struct Counted(Signal<u32>, Rc<Cell<u32>>);
+        impl Widget for Counted {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                self.0
+                    .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+                self.1.set(self.1.get() + 1);
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                proposal: teksilo_canvas::SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+        }
+
+        let generation = Signal::new(0);
+        let builds = Rc::new(Cell::new(0));
+        let mut tree = teksilo_core::WidgetTree::new();
+        tree.add(Counted(generation.clone(), builds.clone()));
+        let idle_ran = Rc::new(Cell::new(false));
+        let flag = idle_ran.clone();
+        tree.run_with_event_context(&mut NoopWindowOps, move |ctx| {
+            ctx.request_idle_callback(move |_| flag.set(true));
+        });
+        let zero = teksilo_canvas::SizeProposal::exact(0.0, 0.0);
+        let budget = std::time::Duration::from_millis(4);
+        assert!(super::run_tree_logic_frame(
+            &mut tree,
+            budget,
+            zero,
+            &mut NoopWindowOps
+        ));
+        assert!(idle_ran.get());
+        let before = builds.get();
+        generation.set(1);
+        assert!(!super::run_tree_logic_frame(
+            &mut tree,
+            budget,
+            zero,
+            &mut NoopWindowOps
+        ));
+        assert_eq!(builds.get(), before + 1, "the binding rebuilt the root");
+    }
+
+    /// However many wakes arrive before the loop takes the first, one is
+    /// posted; once taken, the next posts again.
+    #[test]
+    fn the_app_tree_waker_posts_once_until_taken() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use teksilo_canvas::wake::{RedrawWaker, WakeKind};
+
+        let posts = Arc::new(AtomicUsize::new(0));
+        let pending = Arc::new(AtomicBool::new(false));
+        let counted = posts.clone();
+        let waker = super::AppTreeWaker {
+            post: Arc::new(move |payload| {
+                assert!(payload.is::<super::AppTreeWake>());
+                counted.fetch_add(1, Ordering::SeqCst);
+            }),
+            pending: pending.clone(),
+        };
+        waker.wake(WakeKind::Layout);
+        waker.wake(WakeKind::Draw);
+        waker.wake(WakeKind::Layout);
+        assert_eq!(posts.load(Ordering::SeqCst), 1);
+        assert!(pending.swap(false, Ordering::SeqCst), "the loop takes it");
+        waker.wake(WakeKind::Draw);
+        assert_eq!(posts.load(Ordering::SeqCst), 2);
+    }
+
+    /// A window's intent that only the application root implements reaches
+    /// it in a headless app too, once routed.
+    #[test]
+    fn a_headless_app_routes_a_windows_intent_to_its_app_root() {
+        let pings = Rc::new(Cell::new(0));
+        let root = pings.clone();
+        let mut app = TeksiloAppBuilder::new()
+            .app_root(move |tree| tree.add(PingRoot(root)))
+            .build_headless();
+        app.tree.add(super::AppTreeAnchor);
+        app.tree.run_with_event_context(&mut NoopWindowOps, |ctx| {
+            ctx.send_intent(Intent::new("app.ping"));
+            ctx.send_intent(Intent::new("app.unknown"));
+        });
+        assert_eq!(
+            app.route_unclaimed_intents(),
+            ["app.unknown"],
+            "taken by nobody"
+        );
+        assert_eq!(pings.get(), 1, "app.ping crossed to the app root");
+    }
+
+    #[test]
+    fn a_headless_app_without_an_app_root_has_no_application_tree() {
+        assert!(TeksiloAppBuilder::new().build_headless().app_tree.is_none());
     }
 }
 

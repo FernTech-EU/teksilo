@@ -1920,6 +1920,31 @@ impl WidgetTree {
         .min()
     }
 
+    /// When a tree that is never painted must next be laid out: the part
+    /// of [`next_timer_deadline`](Self::next_timer_deadline) that layout
+    /// alone moves forward. That is a wake requested with `request_wake_at`,
+    /// a running tween (a looping one counts only while its widget is
+    /// painted, so never here), and the frame tick, paced from the last
+    /// layout.
+    ///
+    /// Left out: animated quads, which advance only in render and would be
+    /// due forever, and the tooltip, overlay and gesture timers, which
+    /// pointer input and a window's overlays start, and a tree no window
+    /// hosts has neither.
+    pub fn next_unpainted_deadline(&self) -> Option<std::time::Instant> {
+        let animation_deadline = self
+            .animation_scheduler
+            .next_deadline(&self.arena, self.paint_epoch);
+        [
+            self.pending_wake_at.get(),
+            animation_deadline,
+            self.frame_tick_deadline(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
     pub fn overlay_manager(&self) -> &crate::overlay::OverlayManager {
         &self.overlay_manager
     }

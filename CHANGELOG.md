@@ -42,6 +42,30 @@ by crate for clarity, not because crates version independently.
   and `cancel_quit` abandons the quit. `WindowOps` has matching defaulted
   methods, and `WidgetTree::has_modal_overlay` tells whether a dialog is up
   in a tree.
+- **The application tree, for code that runs with no window open.**
+  `TeksiloAppBuilder::app_root` builds the root of a widget tree that belongs
+  to no window: never drawn, ticked by the event loop, sharing the
+  application's theme, locale, text scale and app state. Its handlers can open
+  windows and quit; its mount actions run at startup, so an application with
+  no initial window can open its first one there. With no window open,
+  `on_external_with_ctx` runs there, and so does a `subscribe_event_with_ctx`
+  subscription registered there. Its dialogs are presented in the window used
+  last, or in a window of their own. An intent a window leaves unclaimed is
+  offered to it once, and one it leaves goes to the window used last, so a
+  window's menu can fire a command only the application tree implements;
+  shortcuts' intents stay where they were sent.
+- **`WithActivationToken`, an external payload with the activation token that
+  came with it.** `on_external_with_ctx` sees the payload, and the first
+  window its handler raises or opens is activated with the token, so a
+  single-instance application's second launch brings its window forward on
+  Wayland instead of only asking for attention. `HeadlessApp::app_tree` makes an app root
+  testable. See "The application tree" in the multi-window guide.
+
+#### Core
+
+- **`WidgetTree::next_unpainted_deadline`**, the timers of a tree that is never
+  painted, and `TreeAppContext::ctx_subscription_target`, which tells a
+  context-bearing subscription registered with no window from none at all.
 
 #### Platform
 
@@ -121,6 +145,9 @@ by crate for clarity, not because crates version independently.
   the dialog and left the document window open. The guide and the
   `close-confirmation` example now capture the guarded window's id in the
   guard and call `ctx.close_window_by_id(id)`.
+- **`ctx.focus_window(id)` raises the window its handler runs in.** That
+  window is out of the window list during its own dispatch, so raising it
+  did nothing, which is the common case in a single-instance handler.
 - **`WindowConfig::skip_taskbar` keeps the window out of the taskbar** on
   Windows and X11. It had no effect anywhere. Wayland and macOS have nothing
   per window to apply it to, as its documentation now says.
