@@ -57,6 +57,8 @@ mod test_api;
 pub mod touch_route;
 #[cfg(test)]
 mod window_name_tests;
+#[cfg(test)]
+mod windowless_contract_tests;
 
 struct AnimatedRegistration {
     weak: crate::signal::WeakAnimatedSignal,
