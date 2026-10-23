@@ -53,7 +53,12 @@ by crate for clarity, not because crates version independently.
   last, or in a window of their own. An intent a window leaves unclaimed is
   offered to it once, and one it leaves goes to the window used last, so a
   window's menu can fire a command only the application tree implements;
-  shortcuts' intents stay where they were sent. `HeadlessApp::app_tree` makes an app root
+  shortcuts' intents stay where they were sent.
+- **`WithActivationToken`, an external payload with the activation token that
+  came with it.** `on_external_with_ctx` sees the payload, and the first
+  window its handler raises or opens is activated with the token, so a
+  single-instance application's second launch brings its window forward on
+  Wayland instead of only asking for attention. `HeadlessApp::app_tree` makes an app root
   testable. See "The application tree" in the multi-window guide.
 
 #### Core
@@ -117,6 +122,9 @@ by crate for clarity, not because crates version independently.
   the dialog and left the document window open. The guide and the
   `close-confirmation` example now capture the guarded window's id in the
   guard and call `ctx.close_window_by_id(id)`.
+- **`ctx.focus_window(id)` raises the window its handler runs in.** That
+  window is out of the window list during its own dispatch, so raising it
+  did nothing, which is the common case in a single-instance handler.
 - **`WindowConfig::skip_taskbar` keeps the window out of the taskbar** on
   Windows and X11. It had no effect anywhere. Wayland and macOS have nothing
   per window to apply it to, as its documentation now says.

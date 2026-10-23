@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Thirty claims, and they do not all carry the same weight. Verified by
+//! Thirty-one claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -106,6 +106,9 @@
 //! - **(ad)** an intent a window's actions leave reaches the application
 //!   tree, and one the application tree's handler sends reaches the window,
 //!   in `post_event`; a shortcut's stays where it was sent;
+//! - **(ae)** a payload wrapped with an activation token reaches the handler
+//!   unwrapped, and the token is taken by the window it opens or raises, or
+//!   dropped at the end of the turn;
 //! - **(aa)** the application tree is ticked by `about_to_wait` and by the
 //!   wake its waker posts, which the loop takes so the next one posts;
 //! - **(y)** a quit closes a window with no guard, stops at one whose guard
@@ -1754,7 +1757,57 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             [None, Some(outside)],
             "first in no window, then in the window it opened"
         );
+        // (ae) A payload wrapped with an activation token: the handler sees
+        // the payload, and the token waits for the first raise or open. Here
+        // `open_window` takes it; with the window open, `focus_window` takes
+        // the next one; one nothing takes is gone after `post_event`.
+        // Removing the slot from `create_window` leaves the first token
+        // waiting.
+        app.wm.close_window(outside);
+        let wrapped = |token: &str| crate::WithActivationToken::new(token, OpenFromOutside);
+        app.external_ctx_handler = Some(Box::new(|payload, ctx| {
+            assert!(
+                payload.is::<OpenFromOutside>(),
+                "the handler sees what is wrapped"
+            );
+            match ctx.find_window("from-outside") {
+                Some(id) => ctx.focus_window(id),
+                None => {
+                    ctx.open_window(
+                        WindowConfig::new()
+                            .id("from-outside")
+                            .title("teksilo loop test: from outside")
+                            .size(160, 100)
+                            .root(|tree, _state| {
+                                tree.add(logging_leaf(&Default::default(), false))
+                            }),
+                    );
+                }
+            }
+            true
+        }));
+        app.route_external_with_ctx(&wrapped("for-the-open"), event_loop);
+        assert_eq!(
+            app.wm.take_dispatch_activation_token(),
+            None,
+            "opening the window took the token"
+        );
+        app.route_external_with_ctx(&wrapped("for-the-raise"), event_loop);
+        assert_eq!(
+            app.wm.take_dispatch_activation_token(),
+            None,
+            "raising the open window took the token"
+        );
+        app.external_ctx_handler = Some(Box::new(|_, _| true));
+        app.route_external_with_ctx(&wrapped("for-nothing"), event_loop);
+        app.post_event(event_loop);
+        assert_eq!(
+            app.wm.take_dispatch_activation_token(),
+            None,
+            "an unused token does not outlive its turn"
+        );
         app.external_ctx_handler = None;
+        let outside = app.wm.find_window("from-outside").expect("opened above");
         app.wm.close_window(outside);
 
         // (ac) A modal request from the application tree has no window of

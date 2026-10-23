@@ -595,6 +595,12 @@ pub struct WindowManager {
     /// [`AppTreeWake`](crate::app::AppTreeWake), cleared when the loop takes
     /// it: at most one is in flight.
     app_tree_wake_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// An activation token the event being routed carried (see
+    /// [`WithActivationToken`](crate::WithActivationToken)), for the first
+    /// window operation of its handler that raises or opens a window to
+    /// use. Cleared at the end of the `post_event` that follows the
+    /// dispatch, used or not.
+    dispatch_activation_token: Option<String>,
     /// Bumped whenever [`theme`](Self::theme) changes.
     theme_generation: u64,
     /// The [`theme_generation`](Self::theme_generation) the application
@@ -661,6 +667,7 @@ impl WindowManager {
             recency: crate::window_recency::WindowRecency::default(),
             app_tree: None,
             app_tree_wake_pending: Default::default(),
+            dispatch_activation_token: None,
             theme_generation: 0,
             app_tree_theme_generation: 0,
             quit: None,
@@ -826,6 +833,25 @@ impl WindowManager {
     pub(crate) fn reinsert_app_tree(&mut self, tree: WidgetTree) {
         self.app_tree = Some(tree);
         self.sync_app_tree_theme();
+    }
+
+    /// Hold `token` for the handler about to run: the first window it
+    /// raises or opens uses it. See
+    /// [`WithActivationToken`](crate::WithActivationToken).
+    pub(crate) fn set_dispatch_activation_token(&mut self, token: String) {
+        self.dispatch_activation_token = Some(token);
+    }
+
+    /// Take the routed event's activation token, if it carried one and no
+    /// window operation took it yet.
+    pub(crate) fn take_dispatch_activation_token(&mut self) -> Option<String> {
+        self.dispatch_activation_token.take()
+    }
+
+    /// Drop the routed event's activation token, used or not: a token is
+    /// good for the activation the event asked for, and that is over.
+    pub(crate) fn clear_dispatch_activation_token(&mut self) {
+        self.dispatch_activation_token = None;
     }
 
     /// Record that `teksilo_id` is a plain window presenting a modal
@@ -1420,10 +1446,14 @@ impl WindowManager {
             window_attrs = unsafe { window_attrs.with_parent_window(Some(parent_handle.as_raw())) };
         }
 
-        // Opt-in: consume a startup activation token from the environment so a
-        // window spawned by another instance's "open in new window" comes up
-        // focused on Wayland. No-op off Wayland/X11 or when the env is unset.
-        if config.activate_from_env {
+        // The token the routed event carried, if its handler opens this
+        // window (see `WithActivationToken`); otherwise, opted in, a startup
+        // activation token from the environment so a window spawned by
+        // another instance's "open in new window" comes up focused on
+        // Wayland. No-op off Wayland/X11 or when the env is unset.
+        if let Some(token) = self.take_dispatch_activation_token() {
+            window_attrs = teksilo_platform::window_activation::apply_token(window_attrs, token);
+        } else if config.activate_from_env {
             window_attrs =
                 teksilo_platform::window_activation::apply_creation_token(window_attrs, target);
         }
@@ -2002,6 +2032,15 @@ impl WindowManager {
                 self.queue_close(teksilo_id);
                 continue;
             }
+            // A focus with no token of its own takes the routed event's.
+            let cmd = match cmd {
+                WindowCommand::Focus {
+                    activation_token: None,
+                } => WindowCommand::Focus {
+                    activation_token: self.take_dispatch_activation_token(),
+                },
+                cmd => cmd,
+            };
             let Some(managed) = self.windows.get(&winit_id) else {
                 continue;
             };
@@ -3197,11 +3236,26 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
     }
 
     fn focus_window(&mut self, id: TeksiloWindowId) {
-        if let Some(winit_id) = self.wm.teksilo_to_winit_map().get(&id).copied()
-            && let Some(managed) = self.wm.windows_map().get(&winit_id)
-        {
-            teksilo_platform::window_activation::raise(managed.platform_window.window(), None);
-        }
+        // The dispatching window is out of the map while its handler runs,
+        // and raising it is the common case (a single-instance handler
+        // routed to the document window it was asked to show): its own
+        // handle is kept for that.
+        let window = if self.current_id == Some(id) {
+            self.current_window_arc.clone()
+        } else {
+            self.wm
+                .teksilo_to_winit_map()
+                .get(&id)
+                .and_then(|winit_id| self.wm.windows_map().get(winit_id))
+                .map(|managed| managed.platform_window.window_arc())
+        };
+        let Some(window) = window else {
+            return;
+        };
+        // The routed event's activation token, if it carried one: on
+        // Wayland the raise is otherwise only an attention request.
+        let token = self.wm.take_dispatch_activation_token();
+        teksilo_platform::window_activation::raise(&window, token.as_deref());
     }
 
     fn request_activation_token(
@@ -4473,5 +4527,25 @@ mod app_tree_drain_tests {
         let tree = wm.app_tree_mut().unwrap();
         assert!(!tree.take_close_window_request());
         assert!(!tree.take_force_close_request());
+    }
+}
+
+#[cfg(test)]
+mod activation_token_slot_tests {
+    use super::*;
+
+    #[test]
+    fn the_token_is_taken_once_and_cleared_unused() {
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        assert_eq!(wm.take_dispatch_activation_token(), None);
+        wm.set_dispatch_activation_token("token".into());
+        assert_eq!(
+            wm.take_dispatch_activation_token().as_deref(),
+            Some("token")
+        );
+        assert_eq!(wm.take_dispatch_activation_token(), None, "taken once");
+        wm.set_dispatch_activation_token("unused".into());
+        wm.clear_dispatch_activation_token();
+        assert_eq!(wm.take_dispatch_activation_token(), None);
     }
 }

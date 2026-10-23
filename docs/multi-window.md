@@ -564,10 +564,16 @@ Notes:
   `None`, and `ctx.open_window` works as in the recipe above. That is what an
   application under `QuitPolicy::Explicit` with every window closed, or a
   tray application, gets when its second launch forwards a document.
-- On Wayland, a launcher that hands you an `XDG_ACTIVATION_TOKEN` should have
-  it forwarded in the payload and applied via
-  `WindowState::set_activation_token` before `focus()`, or the compositor
-  treats the raise as unsolicited.
+- On Wayland, the second launch's launcher hands it an
+  `XDG_ACTIVATION_TOKEN` (`DESKTOP_STARTUP_ID` on X11); without it the
+  compositor treats the raise as unsolicited and only asks for attention.
+  Forward it with the request and post both as one payload,
+  `AppEventProxy::send_external(WithActivationToken::new(token, request))`.
+  The handler sees the request, and the token goes to the first window it
+  raises or opens: `ctx.focus_window(id)` (the window the handler runs in
+  included), a `WindowState::focus()` with no token of its own, or
+  `ctx.open_window(...)`. An unused token is dropped at the end of the
+  turn.
 
 **Cross-window read** (dim the inspector when the main window is
 fullscreen):

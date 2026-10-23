@@ -20,7 +20,7 @@ pub(crate) mod window_recency;
 
 pub use app::{
     AppEventProxy, AppRootBuilder, ExternalCtxHandler, HeadlessApp, QuitPolicy, SyntheticImeInject,
-    TeksiloAppBuilder, ThemeMode,
+    TeksiloAppBuilder, ThemeMode, WithActivationToken,
 };
 pub use app_event_observers::AppEventObservers;
 #[cfg(feature = "automation")]

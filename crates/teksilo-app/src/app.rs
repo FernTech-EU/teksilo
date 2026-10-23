@@ -1591,6 +1591,8 @@ impl TeksiloAppHandler {
         {
             trace.note_cross_window_redraw(cross_window_redraws);
         }
+        // The routed event's activation token is good for this turn only.
+        self.wm.clear_dispatch_activation_token();
         self.maybe_exit(event_loop);
         self.update_control_flow(event_loop);
     }
@@ -2316,6 +2318,15 @@ impl TeksiloAppHandler {
     ) {
         let Some(mut handler) = self.external_ctx_handler.take() else {
             return;
+        };
+        // A payload that came with an activation token: the handler sees
+        // what it wraps, and the token waits for its first raise or open.
+        let payload = match payload.downcast_ref::<WithActivationToken>() {
+            Some(wrapped) => {
+                self.wm.set_dispatch_activation_token(wrapped.token.clone());
+                wrapped.payload()
+            }
+            None => payload,
         };
         // "No window open" asked of the window map itself, which is what
         // the application tree stands in for.
@@ -4308,6 +4319,49 @@ pub(crate) struct WindowWake {
 /// [`WindowManager::apply_session`](crate::window_manager::WindowManager::apply_session).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SessionChanged;
+
+/// An `AppEvent::External` payload with the activation token that came with
+/// it: what a single-instance application's listener posts when a second
+/// launch forwards its request together with the token its launcher gave it
+/// (`XDG_ACTIVATION_TOKEN` on Wayland, `DESKTOP_STARTUP_ID` on X11).
+///
+/// [`TeksiloAppBuilder::on_external_with_ctx`] sees the inner payload. While
+/// its handler runs, and until the turn ends, the token is held for the
+/// first window operation that can use it: `ctx.focus_window`, a
+/// `WindowState::focus()` with no token of its own, or `ctx.open_window`.
+/// Without it a Wayland compositor treats the raise as unsolicited and only
+/// asks for attention. Elsewhere the token is ignored.
+pub struct WithActivationToken {
+    token: String,
+    payload: Box<dyn std::any::Any + Send>,
+}
+
+impl WithActivationToken {
+    /// Wrap `payload` with `token`.
+    pub fn new(token: impl Into<String>, payload: impl std::any::Any + Send) -> Self {
+        Self {
+            token: token.into(),
+            payload: Box::new(payload),
+        }
+    }
+
+    /// The activation token.
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
+    /// The wrapped payload.
+    pub fn payload(&self) -> &(dyn std::any::Any + Send) {
+        &*self.payload
+    }
+}
+
+impl std::fmt::Debug for WithActivationToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WithActivationToken")
+            .finish_non_exhaustive()
+    }
+}
 
 /// Payload used by `TitleBarHostCallbacks::request_close` to route a
 /// host-initiated close back to the main event loop. The host's
