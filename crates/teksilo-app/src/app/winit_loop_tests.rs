@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Twenty-two claims, and they do not all carry the same weight. Verified by
+//! Twenty-three claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -88,7 +88,9 @@
 //! - **(v)** the window opened or focused last is the most recent one, the
 //!   role passes back to the window used before it when it closes, and a
 //!   window reporting the focus takes the claim every window is born with
-//!   from the others.
+//!   from the others;
+//! - **(w)** a window created with `skip_taskbar(true)` carries
+//!   `_NET_WM_STATE_SKIP_TASKBAR`, and one created without it does not.
 //!
 //! Two are weaker than they look, and the reason is not fixable from here.
 //! **(c)**, the safe area, and the missing-override half of **(d)** compare a
@@ -1468,6 +1470,61 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             "closing the most recent window hands the role to the one used \
              before it"
         );
+
+        // -- (w) `skip_taskbar` reaches the X server before the window maps
+        //
+        // The property is written before the first map; a window manager
+        // keeps it (openbox in CI), and with none (a bare X server) nobody
+        // touches it. Deleting the `skip_taskbar_before_show` call leaves the
+        // first window without the state.
+        {
+            fn taskbar_state(app: &TeksiloAppHandler, id: crate::TeksiloWindowId) -> Vec<u32> {
+                let winit_id = app.wm.winit_id_for_teksilo(id).expect("the window is open");
+                let handle = app.wm.windows_map()[&winit_id]
+                    .platform_window
+                    .window()
+                    .window_handle()
+                    .expect("an X11 window handle")
+                    .as_raw();
+                let xid = match handle {
+                    winit::raw_window_handle::RawWindowHandle::Xlib(handle) => handle.window as u32,
+                    winit::raw_window_handle::RawWindowHandle::Xcb(handle) => handle.window.get(),
+                    other => panic!("the loop runs on X11, got {other:?}"),
+                };
+                teksilo_platform::x11::ewmh::net_wm_state(xid).expect("read _NET_WM_STATE")
+            }
+
+            let skip_atom = teksilo_platform::x11::X11Connection::open()
+                .expect("connect to $DISPLAY")
+                .atoms()
+                .net_wm_state_skip_taskbar;
+            let palette = app.wm.create_window(
+                WindowConfig::new()
+                    .title("teksilo loop test: skip taskbar")
+                    .size(160, 100)
+                    .skip_taskbar(true)
+                    .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                event_loop,
+            );
+            let listed = app.wm.create_window(
+                WindowConfig::new()
+                    .title("teksilo loop test: in the taskbar")
+                    .size(160, 100)
+                    .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                event_loop,
+            );
+            assert!(
+                taskbar_state(app, palette).contains(&skip_atom),
+                "a window created with `skip_taskbar(true)` carries \
+                 _NET_WM_STATE_SKIP_TASKBAR"
+            );
+            assert!(
+                !taskbar_state(app, listed).contains(&skip_atom),
+                "a window created without it does not"
+            );
+            app.wm.close_window(palette);
+            app.wm.close_window(listed);
+        }
 
         // -- (b) a window blocked by a modal child
         //

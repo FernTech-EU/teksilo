@@ -149,6 +149,54 @@ pub fn capabilities() -> WmCapabilities {
     })
 }
 
+/// Keep an X11 window that is not mapped yet out of the taskbar, by adding
+/// `_NET_WM_STATE_SKIP_TASKBAR` to its `_NET_WM_STATE`.
+///
+/// EWMH lets a client write `_NET_WM_STATE` itself only before the window is
+/// first mapped; the window manager reads it at map time. Afterwards the
+/// state changes only through a client message to the root window, and a
+/// window manager removes the property when the window is withdrawn, so a
+/// window unmapped and mapped again has to be marked again.
+///
+/// Atoms already in the property are kept, and the atom is added once. The
+/// write goes over a connection of our own, not winit's, so this returns
+/// only after the server confirmed it: that round trip is what orders it
+/// before the map request winit sends over its own connection.
+pub fn mark_skip_taskbar(window: Window) -> Result<(), X11Error> {
+    use x11rb::protocol::xproto::PropMode;
+    use x11rb::wrapper::ConnectionExt as _;
+
+    let conn = X11Connection::open()?;
+    let atoms = conn.atoms();
+    if read_net_wm_state(&conn, window)?.contains(&atoms.net_wm_state_skip_taskbar) {
+        return Ok(());
+    }
+    conn.conn()
+        .change_property32(
+            PropMode::APPEND,
+            window,
+            atoms.net_wm_state,
+            AtomEnum::ATOM,
+            &[atoms.net_wm_state_skip_taskbar],
+        )?
+        .check()?;
+    Ok(())
+}
+
+/// The atoms in `window`'s `_NET_WM_STATE`, empty when it has none. Opens
+/// (and drops) its own short-lived connection.
+pub fn net_wm_state(window: Window) -> Result<Vec<Atom>, X11Error> {
+    read_net_wm_state(&X11Connection::open()?, window)
+}
+
+/// [`net_wm_state`] over a connection already open.
+fn read_net_wm_state(conn: &X11Connection, window: Window) -> Result<Vec<Atom>, X11Error> {
+    Ok(conn
+        .get_property_full(window, conn.atoms().net_wm_state, AtomEnum::ATOM.into())?
+        .map(|value| value.as_u32s())
+        .unwrap_or_default())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,6 +267,58 @@ mod tests {
     ///
     /// Clearing `WAYLAND_DISPLAY` is what makes the session read as X11 (under
     /// a Wayland desktop this then probes XWayland's window manager).
+    /// Talks to a **real** X server; no window manager is needed, since the
+    /// window is never mapped.
+    ///
+    /// ```text
+    /// WAYLAND_DISPLAY= cargo test -p teksilo-platform -- --ignored x11_skip_taskbar
+    /// ```
+    #[test]
+    #[ignore = "requires a live X server; run with --ignored"]
+    fn x11_skip_taskbar_adds_the_state_once_and_keeps_the_others() {
+        use x11rb::connection::Connection as _;
+        use x11rb::protocol::xproto::{ConnectionExt as _, CreateWindowAux, WindowClass};
+
+        let conn = X11Connection::open().expect("connect to $DISPLAY");
+        let atoms = conn.atoms().clone();
+        let raw = conn.conn();
+        let window = raw.generate_id().expect("allocate an XID");
+        raw.create_window(
+            x11rb::COPY_DEPTH_FROM_PARENT,
+            window,
+            conn.root(),
+            0,
+            0,
+            16,
+            16,
+            0,
+            WindowClass::INPUT_OUTPUT,
+            x11rb::COPY_FROM_PARENT,
+            &CreateWindowAux::new(),
+        )
+        .expect("send CreateWindow")
+        .check()
+        .expect("create an unmapped window");
+        let above = raw
+            .intern_atom(false, b"_NET_WM_STATE_ABOVE")
+            .expect("send InternAtom")
+            .reply()
+            .expect("intern _NET_WM_STATE_ABOVE")
+            .atom;
+        conn.set_property32(window, atoms.net_wm_state, AtomEnum::ATOM.into(), &[above])
+            .expect("give the window a state of its own");
+
+        mark_skip_taskbar(window).expect("mark the window");
+        mark_skip_taskbar(window).expect("mark it again");
+
+        assert_eq!(
+            net_wm_state(window).expect("read _NET_WM_STATE"),
+            vec![above, atoms.net_wm_state_skip_taskbar],
+            "the window's own state is kept and the taskbar state is added once"
+        );
+        let _ = raw.destroy_window(window).map(|cookie| cookie.check());
+    }
+
     #[test]
     #[ignore = "requires a live X server; run with --ignored"]
     fn x11_probe_against_a_live_server() {

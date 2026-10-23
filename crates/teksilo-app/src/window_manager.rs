@@ -1187,6 +1187,10 @@ impl WindowManager {
         if config.always_on_top {
             window_attrs = window_attrs.with_window_level(WindowLevel::AlwaysOnTop);
         }
+        // Windows takes the taskbar flag at creation; X11 takes it between
+        // creation and the first map, below.
+        window_attrs =
+            teksilo_platform::taskbar::skip_taskbar_attributes(window_attrs, config.skip_taskbar);
 
         // Parent-window attachment. Independent of the modal flag so
         // non-modal parented windows (popover-as-window, inspector
@@ -1245,6 +1249,9 @@ impl WindowManager {
         let window = target
             .create_window(window_attrs)
             .expect("winit window creation failed");
+        // Still unmapped: the window is shown once its accessibility adapter
+        // exists, in `new_with_a11y` below.
+        teksilo_platform::taskbar::skip_taskbar_before_show(&window, config.skip_taskbar);
         let winit_id = window.id();
         let scale_factor = window.scale_factor();
 
