@@ -100,7 +100,9 @@
 //!   is open;
 //! - **(ac)** a modal request from the application tree gets a window of its
 //!   own with none open, closed by its dismissal, is presented in the window
-//!   open otherwise, and is refused when it presents an existing widget;
+//!   open otherwise, but not in one about to close, and is refused when it
+//!   presents an existing widget; one a rebuild in an `about_to_wait` tick
+//!   asks for is presented by `about_to_wait`;
 //! - **(aa)** the application tree is ticked by `about_to_wait` and by the
 //!   wake its waker posts, which the loop takes so the next one posts;
 //! - **(y)** a quit closes a window with no guard, stops at one whose guard
@@ -1806,6 +1808,13 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                 .has_modal_overlay(),
             "presented in the window open"
         );
+        let overlays = |app: &TeksiloAppHandler| {
+            app.wm.windows_map()[&working_winit]
+                .tree
+                .overlay_manager()
+                .len()
+        };
+        let before = overlays(app);
         app.run_in_app_tree(event_loop, |tree, ops| {
             let existing = tree.add(logging_leaf(&Default::default(), false));
             tree.run_with_event_context(ops, |ctx| {
@@ -1814,7 +1823,64 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         });
         app.post_event(event_loop);
         assert_eq!(app.wm.window_count(), 1, "an existing widget is refused");
-        app.wm.close_window(working);
+        assert_eq!(
+            overlays(app),
+            before,
+            "and nothing was presented in the open window either"
+        );
+
+        // A window about to close is no place for it: with the only window
+        // closing in the same turn, it gets a window of its own.
+        app.wm.queue_close(working);
+        ask(app);
+        assert!(
+            app.wm.winit_id_for_teksilo(working).is_none(),
+            "the closing window closed"
+        );
+        let hosts: Vec<_> = app.wm.teksilo_ids().collect();
+        assert_eq!(hosts.len(), 1, "the dialog got a window of its own");
+        app.wm.close_window(hosts[0]);
+
+        // A dialog asked for by a mount action that a rebuild in an
+        // `about_to_wait` tick queued, with no window open: no window event
+        // follows, so `about_to_wait` itself drains it.
+        #[derive(Debug)]
+        struct AsksOnRebuild(teksilo_core::signal::Signal<u32>);
+        impl teksilo_core::widget::Widget for AsksOnRebuild {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                self.0
+                    .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+                if self.0.get() > 0 {
+                    ctx.run_after_mount(|ctx| {
+                        ctx.present_message_box(
+                            teksilo_widgets::MessageBox::information(teksilo_i18n::lit!("Rebuilt"))
+                                .buttons(teksilo_widgets::MessageBoxButtons::Ok),
+                        );
+                    });
+                }
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+        }
+        let asks_now = teksilo_core::signal::Signal::new(0_u32);
+        {
+            let asks_now = asks_now.clone();
+            app.wm
+                .install_app_tree(move |tree| tree.add(AsksOnRebuild(asks_now)));
+        }
+        app.about_to_wait(event_loop);
+        assert!(app.wm.is_empty(), "nothing asked yet");
+        asks_now.set(1);
+        app.about_to_wait(event_loop);
+        let hosts: Vec<_> = app.wm.teksilo_ids().collect();
+        assert_eq!(hosts.len(), 1, "about_to_wait presented the dialog");
+        app.wm.close_window(hosts[0]);
 
         // (x) Under `Explicit` the loop turns with no window open and goes
         // on. Making `maybe_exit` ignore the policy ends it here.

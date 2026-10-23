@@ -1993,6 +1993,37 @@ impl WidgetTree {
             || self.frame_requested()
     }
 
+    /// Whether a tree that is never painted has a logic frame to run now
+    /// (`now` on the real clock): reactive work to reconcile, a node to lay
+    /// out, an idle callback, or a [timer](Self::next_unpainted_deadline)
+    /// due. Unlike [`needs_render`](Self::needs_render), which such a tree
+    /// always reports, it turns false once a frame has run.
+    pub fn needs_logic_frame(&self, now: std::time::Instant) -> bool {
+        self.needs_reconcile()
+            || self.arena.any_needs_layout()
+            || self.has_idle_work()
+            || self
+                .next_unpainted_deadline()
+                .is_some_and(|deadline| deadline <= now)
+    }
+
+    /// Whether a handler asked for something the application layer carries
+    /// out after the dispatch: a locale, a theme, following the system
+    /// theme, a text scale, a close, a modal to present or dismiss, or a
+    /// mount action to run. A tree whose handlers run outside a window event
+    /// tells the event loop this way that a drain is owed.
+    pub fn has_pending_app_requests(&self) -> bool {
+        self.pending_locale_request.is_some()
+            || self.pending_theme_request.is_some()
+            || self.pending_follow_system_request
+            || self.pending_text_scale_request.is_some()
+            || self.close_window_requested
+            || self.force_close_requested
+            || !self.pending_modal_requests.is_empty()
+            || self.pending_modal_dismissal
+            || !self.pending_mount_actions.is_empty()
+    }
+
     /// Whether a render pass is needed (any widget needs layout or paint).
     pub fn needs_render(&self) -> bool {
         self.arena.any_needs_layout() || self.arena.any_needs_paint()

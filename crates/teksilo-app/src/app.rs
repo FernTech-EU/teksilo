@@ -1192,9 +1192,10 @@ impl TeksiloAppHandler {
     /// Present the modal requests the application tree queued. It has no
     /// window to show them in, so each goes to the window the user is
     /// working with: the [most recent](crate::WindowManager::most_recent_window)
-    /// one, over its frontmost native dialog if it has one, in its tree or
-    /// as a native modal child as the request resolves. With no window open
-    /// it gets a plain window of its own, which its dismissal closes. A
+    /// one not about to close, over its frontmost native dialog if it has
+    /// one, in its tree or as a native modal child as the request resolves.
+    /// With no window open, or every one closing, it gets a plain window of
+    /// its own, which its dismissal closes. A
     /// request whose content is an existing widget of the application tree
     /// cannot move to another tree, and is refused.
     fn process_app_tree_modal_requests(&mut self, event_loop: &ActiveEventLoop) -> bool {
@@ -1215,14 +1216,7 @@ impl TeksiloAppHandler {
                 );
                 continue;
             }
-            let target = if self.wm.is_empty() {
-                None
-            } else {
-                self.wm
-                    .most_recent_window()
-                    .map(|window| self.wm.frontmost_modal_of(window))
-            };
-            let Some(window) = target else {
+            let Some(window) = self.wm.app_modal_target() else {
                 self.open_modal_window(None, request, event_loop);
                 continue;
             };
@@ -1532,8 +1526,17 @@ impl TeksiloAppHandler {
 
     fn post_event(&mut self, event_loop: &ActiveEventLoop) {
         // First, so what its frame asks for (an application-wide change, a
-        // quit, a window) is drained below in this same turn.
+        // quit, a window) is drained below in this same turn; its mount
+        // actions too, which a rebuild in the tick queues and whose own
+        // requests the drains below must also see.
         self.tick_app_tree(event_loop);
+        if self
+            .wm
+            .app_tree()
+            .is_some_and(|tree| tree.has_pending_mount_actions())
+        {
+            self.run_in_app_tree(event_loop, |tree, ops| tree.run_mount_actions(ops));
+        }
         // App-wide environment changes (theme / locale) raised by a handler
         // in one window fan out to every window's tree, marking the
         // non-originating windows dirty. Those windows never received the
@@ -2447,10 +2450,21 @@ impl TeksiloAppHandler {
         }
     }
 
-    /// Run a logic frame of the application tree: its idle callbacks, then
-    /// layout, which runs its tweens, bindings and frame tick. Never gated
-    /// on `needs_render`, which a tree that is never painted always reports.
+    /// Run a logic frame of the application tree, when it has one to run
+    /// ([`needs_logic_frame`](teksilo_core::WidgetTree::needs_logic_frame)):
+    /// its idle callbacks, then layout, which runs its tweens, bindings and
+    /// frame tick. Never gated on `needs_render`, which a tree that is never
+    /// painted always reports.
     fn tick_app_tree(&mut self, event_loop: &ActiveEventLoop) {
+        // Gated on what the tree has to do, so a frame request in it paces
+        // at its deadline rather than at the rate events arrive.
+        if !self
+            .wm
+            .app_tree()
+            .is_some_and(|tree| tree.needs_logic_frame(Instant::now()))
+        {
+            return;
+        }
         let budget = self.idle_budget;
         self.run_in_app_tree(event_loop, |tree, ops| {
             run_tree_logic_frame(tree, budget, SizeProposal::exact(0.0, 0.0), ops);
@@ -3798,11 +3812,12 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         }
         // The application tree's mount actions run now, with an event
         // context and the window operations, so an application root can
-        // open the first window of an application that starts with none.
+        // open the first window of an application that starts with none;
+        // what they ask for (a dialog, a theme) is drained by the
+        // `post_event`, which nothing else brings to an application with no
+        // window.
         self.process_pending_mount_actions(event_loop);
-
-        self.process_pending(event_loop);
-        self.update_control_flow(event_loop);
+        self.post_event(event_loop);
     }
 
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
@@ -4149,8 +4164,17 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         }
         // After the loop tick, which may have set state the application
         // tree reads; also how the tree's own deadline, folded into the
-        // control flow below, is served when it wakes the loop.
+        // control flow below, is served when it wakes the loop. What the
+        // tick asks for is drained by a `post_event`, which nothing else
+        // brings when no window is open.
         self.tick_app_tree(event_loop);
+        if self
+            .wm
+            .app_tree()
+            .is_some_and(|tree| tree.has_pending_app_requests())
+        {
+            self.post_event(event_loop);
+        }
         // Once per event-loop turn, which is what the shim's own contract
         // asks for. A digitizer reads on its own thread and buffers; this is
         // the only place that asks it what it saw.
@@ -5006,8 +5030,9 @@ impl TeksiloAppBuilder {
     /// of its own when none is open, and must build its content with
     /// `ModalRequest::deferred`; one presenting an existing widget is
     /// refused. A file dialog has no parent window and reports an error. A
-    /// toast is shown in every window. An overlay, a tooltip or a `WebView`
-    /// is never shown, and a debug build says so.
+    /// toast is shown in every window. An overlay or an animated widget is
+    /// never shown, and a debug build says so; a tooltip or a `WebView` is
+    /// never shown either.
     ///
     /// Without this, the application tree has an empty root of its own.
     pub fn app_root(

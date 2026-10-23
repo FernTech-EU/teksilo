@@ -136,7 +136,8 @@ What needs a window is not drawn there:
 | a modal request (`MessageBox`, `present_modal`) | presented in the window used last, or in a window of its own when none is open; content must be `ModalRequest::deferred` |
 | a file dialog | refused with an error: no parent window |
 | a toast | shown in every window |
-| an overlay, a tooltip, a `WebView`, an animated widget | never shown; a debug build says so |
+| an overlay, an animated widget | never shown; a debug build says so |
+| a tooltip, a `WebView` | never shown |
 | `spawn_local_with` | its completion is delivered to windows only, and is lost here; use `spawn_local` and a `Signal` |
 | a shortcut registered there | never fires: keys reach window trees only |
 

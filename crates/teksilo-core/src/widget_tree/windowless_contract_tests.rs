@@ -244,3 +244,52 @@ fn the_unpainted_deadline_leaves_out_animated_quads() {
     );
     assert_eq!(tree.next_unpainted_deadline(), None);
 }
+
+/// The tick of a tree that is never painted is gated on this, not on
+/// `needs_render`: it says yes for a rebuild, an idle callback or a due
+/// timer, and no once a frame has run.
+#[test]
+fn needs_logic_frame_turns_false_once_a_frame_ran() {
+    let (mut tree, generation, _, _) = app_tree();
+    let mut ops = RecordingOps::default();
+    let now = std::time::Instant::now;
+    assert!(tree.needs_logic_frame(now()), "never laid out");
+    tree.layout_with_ops(no_window(), &mut ops);
+    assert!(
+        !tree.needs_logic_frame(now()),
+        "nothing to do after a frame"
+    );
+    generation.set(5);
+    assert!(tree.needs_logic_frame(now()), "a bound signal changed");
+    tree.layout_with_ops(no_window(), &mut ops);
+    assert!(!tree.needs_logic_frame(now()));
+    tree.request_wake_at(now());
+    assert!(tree.needs_logic_frame(now()), "a wake is due");
+    tree.layout_with_ops(no_window(), &mut ops);
+    tree.run_with_event_context(&mut ops, |ctx| ctx.request_idle_callback(|_| {}));
+    assert!(tree.needs_logic_frame(now()), "an idle callback waits");
+}
+
+#[test]
+fn has_pending_app_requests_sees_each_request() {
+    let (mut tree, _, _, _) = app_tree();
+    let mut ops = RecordingOps::default();
+    tree.run_mount_actions(&mut ops);
+    assert!(!tree.has_pending_app_requests());
+    let asks: [fn(&mut crate::widget::EventContext); 6] = [
+        |ctx| ctx.set_locale("fr-FR"),
+        |ctx| ctx.set_theme(crate::presets::intui::dark()),
+        |ctx| ctx.follow_system_theme(),
+        |ctx| ctx.set_text_scale(1.5),
+        |ctx| ctx.close_window(),
+        |ctx| ctx.close_window_forced(),
+    ];
+    for ask in asks {
+        let (mut tree, _, _, _) = app_tree();
+        tree.run_mount_actions(&mut ops);
+        tree.run_with_event_context(&mut ops, ask);
+        assert!(tree.has_pending_app_requests());
+    }
+    let (tree, _, _, _) = app_tree();
+    assert!(tree.has_pending_app_requests(), "a mount action waits");
+}

@@ -595,6 +595,13 @@ pub struct WindowManager {
     /// [`AppTreeWake`](crate::app::AppTreeWake), cleared when the loop takes
     /// it: at most one is in flight.
     app_tree_wake_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Bumped whenever [`theme`](Self::theme) changes.
+    theme_generation: u64,
+    /// The [`theme_generation`](Self::theme_generation) the application
+    /// tree was last given, so a change made while the tree was taken out
+    /// (a window opened from one of its handlers resolving the OS theme)
+    /// reaches it when it is put back.
+    app_tree_theme_generation: u64,
     /// The quit under way, if any; see [`crate::quit`].
     quit: Option<crate::quit::PendingQuit>,
     /// The last [`PendingQuit::generation`](crate::quit::PendingQuit) handed
@@ -654,6 +661,8 @@ impl WindowManager {
             recency: crate::window_recency::WindowRecency::default(),
             app_tree: None,
             app_tree_wake_pending: Default::default(),
+            theme_generation: 0,
+            app_tree_theme_generation: 0,
             quit: None,
             quit_generation: 0,
             quit_completed: false,
@@ -756,6 +765,11 @@ impl WindowManager {
     /// announcements. It shares the typesetter, so a widget in it can
     /// measure text.
     pub fn install_app_tree(&mut self, root: impl FnOnce(&mut WidgetTree) -> WidgetId) -> WidgetId {
+        // A theme that follows the OS is otherwise resolved by the first
+        // window, which an application started with none has not opened.
+        if self.theme_mode != ThemeMode::Manual {
+            self.new_window_theme(None, OsQueries::PLATFORM);
+        }
         let mut tree = self.new_window_tree(self.theme.clone());
         tree.set_records_announcements(false);
         self.seed_tree(&mut tree);
@@ -772,7 +786,20 @@ impl WindowManager {
         }
         let root_id = root(&mut tree);
         self.app_tree = Some(tree);
+        self.app_tree_theme_generation = self.theme_generation;
         root_id
+    }
+
+    /// Give the application tree the application's theme if it changed
+    /// since the tree last got it. A no-op while the tree is taken out:
+    /// [`reinsert_app_tree`](Self::reinsert_app_tree) catches up.
+    fn sync_app_tree_theme(&mut self) {
+        if self.app_tree_theme_generation != self.theme_generation
+            && let Some(tree) = &mut self.app_tree
+        {
+            tree.set_theme(self.theme.clone());
+            self.app_tree_theme_generation = self.theme_generation;
+        }
     }
 
     /// Every window's tree, then the application tree: the trees a request
@@ -795,6 +822,7 @@ impl WindowManager {
     /// Put back the tree [`take_app_tree`](Self::take_app_tree) took.
     pub(crate) fn reinsert_app_tree(&mut self, tree: WidgetTree) {
         self.app_tree = Some(tree);
+        self.sync_app_tree_theme();
     }
 
     /// Record that `teksilo_id` is a plain window presenting a modal
@@ -1067,13 +1095,12 @@ impl WindowManager {
         }
         if let Some(theme) = update.theme_for(&mut self.os_theme, self.theme.input.density) {
             self.theme = theme;
+            self.theme_generation += 1;
             changed = true;
         }
         // The application tree follows the application's theme, which has
         // no window density of its own to resolve against.
-        if changed && let Some(tree) = &mut self.app_tree {
-            tree.set_theme(self.theme.clone());
-        }
+        self.sync_app_tree_theme();
         changed
     }
 
@@ -1104,12 +1131,11 @@ impl WindowManager {
         let inputs = source.at(self.theme.input.density);
         let theme = resolve_os_theme(self.native_theme.as_ref(), &inputs);
         self.theme = theme.clone();
+        self.theme_generation += 1;
         self.os_theme = Some(inputs.clone());
         // The application tree follows the application's theme, which this
         // has just resolved.
-        if let Some(tree) = &mut self.app_tree {
-            tree.set_theme(theme.clone());
-        }
+        self.sync_app_tree_theme();
         (theme, Some(inputs))
     }
 
@@ -2084,7 +2110,7 @@ impl WindowManager {
             match self
                 .modal_parents
                 .iter()
-                .filter(|(_, parent)| **parent == front)
+                .filter(|(child, parent)| **parent == front && !self.is_closing(**child))
                 .map(|(child, _)| *child)
                 .max_by_key(|child| self.recency.stamp(*child))
             {
@@ -2093,6 +2119,27 @@ impl WindowManager {
             }
         }
         front
+    }
+
+    /// Whether `teksilo_id` has a close queued for this turn's
+    /// [`process_pending`](Self::process_pending).
+    pub(crate) fn is_closing(&self, teksilo_id: TeksiloWindowId) -> bool {
+        self.pending_closes
+            .iter()
+            .any(|pending| pending.id == teksilo_id)
+    }
+
+    /// The window to present the application tree's dialog in: the open
+    /// window used last that is not about to close, or its frontmost native
+    /// dialog. `None` when no window is open or every one is closing.
+    pub(crate) fn app_modal_target(&self) -> Option<TeksiloWindowId> {
+        let window = self.recency.most_recent_where(|id| {
+            self.teksilo_to_winit
+                .get(&id)
+                .is_some_and(|winit| self.windows.contains_key(winit))
+                && !self.is_closing(id)
+        })?;
+        Some(self.frontmost_modal_of(window))
     }
 
     /// The quit stops at `teksilo_id`, whose guard vetoed: wait on it, and
@@ -2392,6 +2439,7 @@ impl WindowManager {
     /// `Manual` (the default).
     pub fn set_theme(&mut self, theme: Theme) {
         self.theme = theme.clone();
+        self.theme_generation += 1;
         self.os_theme = None;
         for managed in self.windows.values_mut() {
             managed.os_theme = None;
@@ -2401,9 +2449,7 @@ impl WindowManager {
             // the wheel-notch scale stay at whatever the old theme said.
             managed.translation_state.set_input_tokens(theme.input);
         }
-        if let Some(tree) = &mut self.app_tree {
-            tree.set_theme(theme);
-        }
+        self.sync_app_tree_theme();
     }
 
     /// Broadcast a user text-scale change to all windows. Stores the factor so
@@ -4298,6 +4344,19 @@ mod app_tree_tests {
         let mut wm = manager_with_app_tree();
         let dark = teksilo_core::presets::intui::dark();
         wm.set_theme(dark.clone());
+        assert_eq!(wm.app_tree().unwrap().theme().id, dark.id);
+    }
+
+    /// A theme change made while the tree is taken out (a window opened
+    /// from one of its handlers resolving the OS theme) reaches it when it
+    /// is put back.
+    #[test]
+    fn a_theme_change_made_while_the_app_tree_is_out_reaches_it_on_return() {
+        let mut wm = manager_with_app_tree();
+        let tree = wm.take_app_tree().expect("installed");
+        let dark = teksilo_core::presets::intui::dark();
+        wm.set_theme(dark.clone());
+        wm.reinsert_app_tree(tree);
         assert_eq!(wm.app_tree().unwrap().theme().id, dark.id);
     }
 
