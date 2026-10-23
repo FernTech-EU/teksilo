@@ -25,6 +25,10 @@ by crate for clarity, not because crates version independently.
   selection that a two-way radio would write first, leaving its owner nothing
   to do.
 
+#### App
+
+- **`WindowManager::most_recent_window`**, the window opened or focused last.
+
 ### Changed
 
 #### Widgets
@@ -72,6 +76,16 @@ by crate for clarity, not because crates version independently.
   fired its own tap as well. A button in a split `DockingLayout` pane
   collapsed the pane's accordion, and a button or checkbox in the header of a
   `ToolBox` with `on_header_drag` selected its section.
+
+#### App
+
+- **With several windows open, application-level work runs in the window
+  used last.** An `on_external_with_ctx` handler, and the automation bridge
+  when no window is named, ran in whichever window claiming focus came first
+  in an unordered map, and every new window claims focus until the OS says
+  otherwise. They now run in the window opened or focused last. A window that
+  never received the focus also stops claiming it once another window takes
+  it, so it no longer keeps its caret and animations running as if active.
 
 ## [0.20.0] - 2026-10-19
 

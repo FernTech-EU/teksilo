@@ -574,6 +574,9 @@ pub struct WindowManager {
     /// What starts [`os_theme_watch`](Self::os_theme_watch):
     /// [`start_platform_desktop_watch`], except in tests.
     start_os_theme_watch: DesktopWatchStart,
+    /// The order in which the open windows were opened or focused; see
+    /// [`most_recent_window`](Self::most_recent_window).
+    recency: crate::window_recency::WindowRecency,
 }
 
 // Doc comments on **every** method here are enforced, not hoped for: a new item
@@ -620,6 +623,7 @@ impl WindowManager {
             session_rechecked_at: None,
             os_theme_watch: None,
             start_os_theme_watch: start_platform_desktop_watch,
+            recency: crate::window_recency::WindowRecency::default(),
         }
     }
 
@@ -1556,6 +1560,9 @@ impl WindowManager {
 
         self.windows.insert(winit_id, managed);
         self.teksilo_to_winit.insert(teksilo_id, winit_id);
+        // A window just opened is the one the user is about to work with,
+        // whether or not the OS ever reports it focused.
+        self.recency.touch(teksilo_id);
 
         // Register the window as an OS drop target if external drag-and-drop
         // was installed (no-op otherwise). Runs on the main thread, as macOS
@@ -1681,6 +1688,7 @@ impl WindowManager {
         // this whole `if let` block's own cleanup — is completely gone.
         // See `WindowConfig::on_removed` for why "after" is load-bearing.
         let mut removed_hook: Option<(teksilo_core::WindowRemovedCallback, Option<String>)> = None;
+        self.recency.forget(teksilo_id);
         if let Some(winit_id) = self.teksilo_to_winit.remove(&teksilo_id)
             && let Some(mut managed) = self.windows.remove(&winit_id)
         {
@@ -2174,6 +2182,40 @@ impl WindowManager {
             .copied()
             .min_by_key(|id| id.raw())
             .unwrap_or(TeksiloWindowId::new(0))
+    }
+
+    /// The window opened or focused last, `None` with no window open.
+    ///
+    /// Deterministic where the windows' `focused` flags are not: every
+    /// window is born claiming focus, so two can claim it at once, and the
+    /// window map has no order. A window counts from the moment it opens
+    /// and again each time the OS reports it focused; when it closes, the
+    /// window used before it takes over. The window a handler is running in
+    /// is taken out of the map meanwhile, and still counts here.
+    pub fn most_recent_window(&self) -> Option<TeksiloWindowId> {
+        self.recency.most_recent()
+    }
+
+    /// Record that the OS reported `teksilo_id` focused, making it the
+    /// [most recent window](Self::most_recent_window).
+    pub(crate) fn note_window_focused(&mut self, teksilo_id: TeksiloWindowId) {
+        self.recency.touch(teksilo_id);
+    }
+
+    /// Every window other than `except` that still claims focus. Only one
+    /// window holds the OS focus at a time, so once `except` reports it,
+    /// each of these carries the flag every window is born with and that no
+    /// event corrected (a window the compositor opened without focus, on
+    /// Wayland with no activation token).
+    pub(crate) fn other_focus_claims(
+        &self,
+        except: winit::window::WindowId,
+    ) -> Vec<winit::window::WindowId> {
+        self.windows
+            .iter()
+            .filter(|(id, managed)| **id != except && managed.focused)
+            .map(|(id, _)| *id)
+            .collect()
     }
 
     /// Number of active windows.
