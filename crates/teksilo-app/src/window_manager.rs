@@ -2927,8 +2927,10 @@ pub struct WindowOpsImpl<'a> {
     /// Current (dispatching) window's id. Names the window the outbound
     /// OS-drag ops below (`begin_os_drag` / `cancel_os_drag` /
     /// `set_drop_accepted`) route to, and is also available for diagnostics
-    /// and future modal-parent self-reference logic.
-    current_id: TeksiloWindowId,
+    /// and future modal-parent self-reference logic. `None` for the
+    /// [windowless](Self::windowless) sink, which has no window to drag
+    /// from.
+    current_id: Option<TeksiloWindowId>,
     /// Current window's raw handle, captured before removal so a
     /// modal whose parent is the current window can still attach.
     #[cfg(not(target_os = "macos"))]
@@ -2955,10 +2957,29 @@ impl<'a> WindowOpsImpl<'a> {
         Self {
             wm,
             event_loop,
-            current_id,
+            current_id: Some(current_id),
             #[cfg(not(target_os = "macos"))]
             current_handle,
             current_window_arc,
+        }
+    }
+
+    /// The sink for code that runs in no window: the application tree's
+    /// handlers. Every operation that names a window by id works as from a
+    /// window; those about the dispatching window itself find none: no
+    /// parent handle (a file dialog refuses), no IME area, no OS drag
+    /// (`begin_os_drag` declines), and no activation token for itself.
+    pub fn windowless(
+        wm: &'a mut WindowManager,
+        event_loop: &'a winit::event_loop::ActiveEventLoop,
+    ) -> Self {
+        Self {
+            wm,
+            event_loop,
+            current_id: None,
+            #[cfg(not(target_os = "macos"))]
+            current_handle: None,
+            current_window_arc: None,
         }
     }
 }
@@ -3104,7 +3125,10 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
         else {
             return false;
         };
-        handle.begin_drag(self.current_id, &data, image.as_ref(), pointer)
+        let Some(current_id) = self.current_id else {
+            return false;
+        };
+        handle.begin_drag(current_id, &data, image.as_ref(), pointer)
     }
 
     fn cancel_os_drag(&mut self) {
@@ -3113,8 +3137,9 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
             .wm
             .app_context_template()
             .and_then(|t| t.app_state::<ExternalDndHandle>().cloned())
+            && let Some(current_id) = self.current_id
         {
-            handle.cancel_drag(self.current_id);
+            handle.cancel_drag(current_id);
         }
     }
 
@@ -3124,8 +3149,9 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
             .wm
             .app_context_template()
             .and_then(|t| t.app_state::<ExternalDndHandle>().cloned())
+            && let Some(current_id) = self.current_id
         {
-            handle.set_drop_accepted(self.current_id, accepted);
+            handle.set_drop_accepted(current_id, accepted);
         }
     }
 }
