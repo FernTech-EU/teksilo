@@ -82,6 +82,25 @@ impl QuitPolicy {
     }
 }
 
+/// Builds the application tree's root: see [`TeksiloAppBuilder::app_root`].
+pub type AppRootBuilder = Box<dyn FnOnce(&mut WidgetTree) -> teksilo_core::WidgetId>;
+
+/// The application tree's root when the application gives none: a tree
+/// with no root drops every intent sent from an application callback, so
+/// there is always one.
+#[derive(Debug)]
+struct AppTreeAnchor;
+
+impl teksilo_core::widget::Widget for AppTreeAnchor {
+    fn layout_response(
+        &self,
+        proposal: teksilo_canvas::SizeProposal,
+        _ctx: &teksilo_core::widget::LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+}
+
 use teksilo_text::SharedTypesetter;
 
 use crate::window_config::{SizeToContent, TeksiloWindowId, WindowConfig};
@@ -2261,6 +2280,33 @@ impl TeksiloAppHandler {
                 tree.run_mount_actions(ops)
             });
         }
+        if self
+            .wm
+            .app_tree()
+            .is_some_and(|tree| tree.has_pending_mount_actions())
+        {
+            self.run_in_app_tree(event_loop, |tree, ops| tree.run_mount_actions(ops));
+        }
+    }
+
+    /// Run `f` against the application tree with a
+    /// [windowless](crate::window_manager::WindowOpsImpl::windowless) ops
+    /// sink, the tree taken out of the manager meanwhile as a window's is.
+    /// A no-op when no application tree is installed.
+    fn run_in_app_tree(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        f: impl FnOnce(&mut WidgetTree, &mut crate::window_manager::WindowOpsImpl),
+    ) {
+        let Some(mut tree) = self.wm.take_app_tree() else {
+            return;
+        };
+        {
+            let mut ops =
+                crate::window_manager::WindowOpsImpl::windowless(&mut self.wm, event_loop);
+            f(&mut tree, &mut ops);
+        }
+        self.wm.reinsert_app_tree(tree);
     }
 
     /// Let the installed web-view engine run, on this thread: the answer to a
@@ -3557,6 +3603,10 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
             self.wm.create_window(config, event_loop);
             self.initial_created = true;
         }
+        // The application tree's mount actions run now, with an event
+        // context and the window operations, so an application root can
+        // open the first window of an application that starts with none.
+        self.process_pending_mount_actions(event_loop);
 
         self.process_pending(event_loop);
         self.update_control_flow(event_loop);
@@ -4092,6 +4142,8 @@ pub struct TeksiloAppBuilder {
     initial_window: Option<WindowConfig>,
     /// When the application quits on its own. See [`QuitPolicy`].
     quit_policy: QuitPolicy,
+    /// The application tree's root; see [`app_root`](Self::app_root).
+    app_root: Option<AppRootBuilder>,
     /// Type-erased adapter for the application's backend event source.
     /// Installed via `event_source<S>(source)`.
     event_source: Option<EventSourceAdapter>,
@@ -4157,6 +4209,7 @@ impl TeksiloAppBuilder {
             on_ready: Vec::new(),
             initial_window: None,
             quit_policy: QuitPolicy::default(),
+            app_root: None,
             event_source: None,
             app_state_registry: HashMap::new(),
             i18n: None,
@@ -4720,6 +4773,36 @@ impl TeksiloAppBuilder {
         self
     }
 
+    /// Build the root of the **application tree**, the widget tree that
+    /// belongs to no window and hosts application code that must run with
+    /// none open: actions an application-level menu fires, a
+    /// single-instance handler, the quit. `root` adds the root widget to
+    /// the tree and returns its id, as a window's root builder does.
+    ///
+    /// The tree is never painted. Its handlers run with
+    /// [`EventContext::window`](teksilo_core::widget::EventContext::window)
+    /// `None`; everything that names a window by id works there, including
+    /// opening one, and nothing about "this window" does (no parent handle
+    /// for a file dialog, no `close_window`). It shares the application's
+    /// theme, locale, text scale and app state with the windows.
+    ///
+    /// Register application-wide actions in the root's `build()` with
+    /// [`BuildContext::register_action_global`](teksilo_core::BuildContext::register_action_global),
+    /// and run code once the tree is mounted with
+    /// [`BuildContext::run_after_mount`](teksilo_core::BuildContext::run_after_mount):
+    /// that runs at startup, after the initial window if there is one, and
+    /// can open the first window of an application started with
+    /// [`QuitPolicy::Explicit`] and no initial window.
+    ///
+    /// Without this, the application tree has an empty root of its own.
+    pub fn app_root(
+        mut self,
+        root: impl FnOnce(&mut WidgetTree) -> teksilo_core::WidgetId + 'static,
+    ) -> Self {
+        self.app_root = Some(Box::new(root));
+        self
+    }
+
     /// Open the configured settings bundle (if any) and register
     /// each service in the app-state registry.
     fn install_settings(&mut self) -> Option<teksilo_settings::OpenedSettings> {
@@ -4840,6 +4923,10 @@ impl TeksiloAppBuilder {
         self.install_telemetry(opened_settings.as_ref().map(|s| &s.store));
 
         let mut tree = WidgetTree::new().with_theme(self.theme.clone());
+        let mut app_tree = self
+            .app_root
+            .is_some()
+            .then(|| WidgetTree::new().with_theme(self.theme.clone()));
 
         let typesetter = self
             .typesetter
@@ -4852,6 +4939,8 @@ impl TeksiloAppBuilder {
             typesetter.apply_font_registrar(registrar.as_ref());
         }
         tree = tree.with_text_backend(typesetter.as_text_backend());
+        app_tree =
+            app_tree.map(|app_tree| app_tree.with_text_backend(typesetter.as_text_backend()));
         // Auto-register so rich-text widgets can reach the shared typesetter
         // via `ctx.app_state::<SharedTypesetter>()` in headless tests too.
         self.app_state_registry.insert(
@@ -4865,13 +4954,27 @@ impl TeksiloAppBuilder {
         // resolve against the correct locale on first build.
         let i18n_manager = self.i18n.as_ref().map(|cfg| install_i18n(&mut tree, cfg));
         teksilo_widgets::localize_standard_shortcuts(tree.shortcut_registry_mut());
+        if let (Some(app_tree), Some(mgr)) = (app_tree.as_mut(), i18n_manager.as_ref()) {
+            app_tree.set_locale(mgr.locale_signal().get().to_string());
+            app_tree.set_layout_direction(mgr.direction_signal().get());
+        }
 
         // Install the app-state registry (if any) before running the root
         // builder so that widgets' `build()` methods can call
         // `ctx.app_state::<T>()`.
         if !self.app_state_registry.is_empty() {
-            let ctx = TreeAppContext::empty().with_app_state(self.app_state_registry);
-            tree.set_app_context(std::rc::Rc::new(ctx));
+            let ctx =
+                std::rc::Rc::new(TreeAppContext::empty().with_app_state(self.app_state_registry));
+            if let Some(app_tree) = app_tree.as_mut() {
+                app_tree.set_app_context(ctx.clone());
+            }
+            tree.set_app_context(ctx);
+        }
+
+        // The application tree, as `run` builds it, minus the window
+        // manager: no window, never painted.
+        if let (Some(app_tree), Some(root)) = (app_tree.as_mut(), self.app_root.take()) {
+            root(app_tree);
         }
 
         // Build the root from the `initial_window`'s builder if one was
@@ -4900,6 +5003,7 @@ impl TeksiloAppBuilder {
 
         HeadlessApp {
             tree,
+            app_tree,
             theme: self.theme,
             i18n_manager,
             settings: opened_settings,
@@ -5163,6 +5267,12 @@ impl TeksiloAppBuilder {
         app.wm.set_native_theme(self.native_theme);
         app.wm.set_records_announcements(self.records_announcements);
         app.external_ctx_handler = self.external_ctx_handler;
+        // After the app context, typesetter and theme mode are in place, so
+        // the tree is seeded like a window's.
+        app.wm.install_app_tree(
+            self.app_root
+                .unwrap_or_else(|| Box::new(|tree: &mut WidgetTree| tree.add(AppTreeAnchor))),
+        );
         // Hand over any registered loop-tick hook (e.g. the `teksilo-async`
         // executor poll). Async-agnostic: just a closure + a poll flag.
         app.loop_tick = self.loop_tick;
@@ -5230,6 +5340,11 @@ fn install_i18n(tree: &mut WidgetTree, cfg: &I18nConfig) -> Rc<I18nManager> {
 /// A headless app for testing (no window, no GPU).
 pub struct HeadlessApp {
     pub tree: WidgetTree,
+    /// The application tree, when [`TeksiloAppBuilder::app_root`] gave it a
+    /// root. Drive it as a running application would: its handlers through
+    /// `run_with_event_context`, its mount actions through
+    /// `run_mount_actions`.
+    pub app_tree: Option<WidgetTree>,
     pub theme: Theme,
     /// Active i18n manager, if `TeksiloAppBuilder::i18n(...)` was used. Tests
     /// can reach the bundles, version signal, and locale signal directly
@@ -6868,6 +6983,65 @@ mod quit_policy_tests {
                 || -> winit::event_loop::EventLoop<AppEvent> { panic!("reached the event loop") },
                 |_, _| unreachable!(),
             );
+    }
+}
+
+#[cfg(test)]
+mod app_root_tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget};
+    use teksilo_core::{Action, BuildContext, Intent, NoopWindowOps, WidgetId};
+
+    use super::TeksiloAppBuilder;
+
+    /// Registers `app.ping`, which counts its calls and checks it runs in
+    /// no window.
+    #[derive(Debug)]
+    struct PingRoot(Rc<Cell<u32>>);
+
+    impl Widget for PingRoot {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let pings = self.0.clone();
+            ctx.register_action_global(Action::new("app.ping").on_invoke(move |_, ctx| {
+                assert!(
+                    ctx.window().is_none(),
+                    "the application tree is no window's"
+                );
+                pings.set(pings.get() + 1);
+            }));
+            Vec::new()
+        }
+
+        fn layout_response(
+            &self,
+            proposal: teksilo_canvas::SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+
+    #[test]
+    fn a_headless_app_builds_the_application_tree_it_was_given() {
+        let pings = Rc::new(Cell::new(0));
+        let root = pings.clone();
+        let mut app = TeksiloAppBuilder::new()
+            .app_root(move |tree| tree.add(PingRoot(root)))
+            .build_headless();
+        let app_tree = app.app_tree.as_mut().expect("an app root was given");
+        assert_eq!(app_tree.roots().len(), 1);
+        assert!(app_tree.window_state().is_none());
+        app_tree.run_with_event_context(&mut NoopWindowOps, |ctx| {
+            ctx.send_intent(Intent::new("app.ping"));
+        });
+        assert_eq!(pings.get(), 1);
+    }
+
+    #[test]
+    fn a_headless_app_without_an_app_root_has_no_application_tree() {
+        assert!(TeksiloAppBuilder::new().build_headless().app_tree.is_none());
     }
 }
 

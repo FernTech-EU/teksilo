@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Twenty-five claims, and they do not all carry the same weight. Verified by
+//! Twenty-six claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -93,6 +93,8 @@
 //!   `_NET_WM_STATE_SKIP_TASKBAR`, and one created without it does not;
 //! - **(x)** with no window open, the loop goes on under
 //!   `QuitPolicy::Explicit`;
+//! - **(z)** a mount action in the application tree runs with the window
+//!   operations and opens a window;
 //! - **(y)** a quit closes a window with no guard, stops at one whose guard
 //!   vetoed and presented a `MessageBox`, waits while the box is queued and
 //!   while it is up, is abandoned when Escape cancels the box, and, asked
@@ -1593,6 +1595,48 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             .map(|id| (id, app.wm.take_managed(id).expect("the window is open")))
             .collect();
         assert!(app.wm.is_empty());
+
+        // (z) The application tree's mount actions run with the window
+        // operations: one opens a window, through the windowless sink, as an
+        // application root opens the first window of an application started
+        // with none. Dropping the application tree from
+        // `process_pending_mount_actions` leaves no window.
+        #[derive(Debug)]
+        struct OpensAWindow;
+        impl teksilo_core::widget::Widget for OpensAWindow {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                ctx.run_after_mount(|ctx| {
+                    assert!(
+                        ctx.window().is_none(),
+                        "the application tree is no window's"
+                    );
+                    ctx.open_window(
+                        WindowConfig::new()
+                            .id("from-the-app-tree")
+                            .title("teksilo loop test: from the app tree")
+                            .size(160, 100)
+                            .root(|tree, _state| {
+                                tree.add(logging_leaf(&Default::default(), false))
+                            }),
+                    );
+                });
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+        }
+        app.wm.install_app_tree(|tree| tree.add(OpensAWindow));
+        app.process_pending_mount_actions(event_loop);
+        let opened = app
+            .wm
+            .find_window("from-the-app-tree")
+            .expect("the application tree's mount action opened a window");
+        app.wm.close_window(opened);
 
         // (x) Under `Explicit` the loop turns with no window open and goes
         // on. Making `maybe_exit` ignore the policy ends it here.

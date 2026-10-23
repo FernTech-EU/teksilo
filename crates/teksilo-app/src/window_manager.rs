@@ -737,8 +737,9 @@ impl WindowManager {
     /// Create the application tree and build its root with `root`, which
     /// returns the root's id. Replaces any application tree already there.
     ///
-    /// The tree is seeded as a window's is ([`seed_tree`](Self::seed_tree))
-    /// and themed with the application's theme, but has no `WindowState`
+    /// The tree is seeded as a window's is (locale and direction, app
+    /// context, accessibility preferences, text scale) and themed with the
+    /// application's theme, but has no `WindowState`
     /// (so `ctx.window()` is `None` in its handlers), no app-wide
     /// post-root wrapper, no accessibility adapter, and records no
     /// announcements. It shares the typesetter, so a widget in it can
@@ -763,6 +764,18 @@ impl WindowManager {
             .values_mut()
             .map(|managed| &mut managed.tree)
             .chain(self.app_tree.as_mut())
+    }
+
+    /// Take the application tree out while one of its handlers runs with
+    /// `&mut self` behind a [`WindowOpsImpl::windowless`] sink; put it back
+    /// with [`reinsert_app_tree`](Self::reinsert_app_tree).
+    pub(crate) fn take_app_tree(&mut self) -> Option<WidgetTree> {
+        self.app_tree.take()
+    }
+
+    /// Put back the tree [`take_app_tree`](Self::take_app_tree) took.
+    pub(crate) fn reinsert_app_tree(&mut self, tree: WidgetTree) {
+        self.app_tree = Some(tree);
     }
 
     /// The application tree, if one was installed.
@@ -1060,6 +1073,11 @@ impl WindowManager {
         let theme = resolve_os_theme(self.native_theme.as_ref(), &inputs);
         self.theme = theme.clone();
         self.os_theme = Some(inputs.clone());
+        // The application tree follows the application's theme, which this
+        // has just resolved.
+        if let Some(tree) = &mut self.app_tree {
+            tree.set_theme(theme.clone());
+        }
         (theme, Some(inputs))
     }
 

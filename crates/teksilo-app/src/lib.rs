@@ -18,7 +18,7 @@ pub(crate) mod window_persist;
 pub(crate) mod window_recency;
 
 pub use app::{
-    AppEventProxy, ExternalCtxHandler, HeadlessApp, QuitPolicy, SyntheticImeInject,
+    AppEventProxy, AppRootBuilder, ExternalCtxHandler, HeadlessApp, QuitPolicy, SyntheticImeInject,
     TeksiloAppBuilder, ThemeMode,
 };
 pub use app_event_observers::AppEventObservers;
