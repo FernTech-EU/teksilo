@@ -518,6 +518,11 @@ pub struct WindowManager {
     /// one child per parent, it keeps every child of a parent that opened
     /// two, and it is what the quit reads.
     modal_parents: HashMap<TeksiloWindowId, TeksiloWindowId>,
+    /// Plain windows opened to present the application tree's modal
+    /// requests with no window to parent them: a modal dismissal closes
+    /// them as it closes a modal window. See
+    /// [`mark_modal_host`](Self::mark_modal_host).
+    modal_hosts: std::collections::HashSet<TeksiloWindowId>,
     /// OS-level accessibility preferences, queried at startup and re-queried
     /// on every window focus gain by
     /// [`refresh_accessibility_preferences`](Self::refresh_accessibility_preferences).
@@ -630,6 +635,7 @@ impl WindowManager {
             typesetter: None,
             modal_blocked: HashMap::new(),
             modal_parents: HashMap::new(),
+            modal_hosts: Default::default(),
             a11y_prefs,
             user_text_scale: 1.0,
             theme_mode: ThemeMode::Manual,
@@ -789,6 +795,12 @@ impl WindowManager {
     /// Put back the tree [`take_app_tree`](Self::take_app_tree) took.
     pub(crate) fn reinsert_app_tree(&mut self, tree: WidgetTree) {
         self.app_tree = Some(tree);
+    }
+
+    /// Record that `teksilo_id` is a plain window presenting a modal
+    /// request of the application tree, which its dismissal closes.
+    pub(crate) fn mark_modal_host(&mut self, teksilo_id: TeksiloWindowId) {
+        self.modal_hosts.insert(teksilo_id);
     }
 
     /// Take the application tree's posted wake: whether one was pending.
@@ -1835,6 +1847,7 @@ impl WindowManager {
         // Also remove any modal children blocking this window
         self.modal_blocked.remove(&teksilo_id);
         self.modal_parents.remove(&teksilo_id);
+        self.modal_hosts.remove(&teksilo_id);
 
         // Fire the teardown hook last, once every registry above
         // (`windows`, `teksilo_to_winit`, `string_to_id`, `modal_blocked`)
@@ -2065,7 +2078,7 @@ impl WindowManager {
 
     /// The window to bring forward for `teksilo_id`'s dialog: its deepest
     /// open native modal descendant, or itself.
-    fn frontmost_modal_of(&self, teksilo_id: TeksiloWindowId) -> TeksiloWindowId {
+    pub(crate) fn frontmost_modal_of(&self, teksilo_id: TeksiloWindowId) -> TeksiloWindowId {
         let mut front = teksilo_id;
         for _ in 0..64 {
             match self
@@ -2796,7 +2809,9 @@ impl WindowManager {
     pub fn drain_pending_modal_dismissals(&mut self) -> Vec<TeksiloWindowId> {
         let mut windows_to_close = Vec::new();
         for managed in self.windows.values_mut() {
-            if managed.tree.drain_pending_modal_dismissal() && managed.modal {
+            if managed.tree.drain_pending_modal_dismissal()
+                && (managed.modal || self.modal_hosts.contains(&managed.teksilo_id))
+            {
                 windows_to_close.push(managed.teksilo_id);
             }
         }

@@ -966,8 +966,8 @@ struct TeksiloAppHandler {
     initial_created: bool,
     /// When the loop ends on its own; see [`QuitPolicy`].
     quit_policy: QuitPolicy,
-    /// A debug build said once that the application tree holds a widget
-    /// that only animates when drawn.
+    /// A debug build said once that the application tree holds something
+    /// only a drawn tree shows: an animated widget or an overlay.
     #[cfg(debug_assertions)]
     warned_visual_app_tree: bool,
     idle_budget: Duration,
@@ -1100,72 +1100,150 @@ impl TeksiloAppHandler {
                         }
                     }
                     ResolvedModalPresentation::NativeWindow => {
-                        let ModalRequest {
-                            content,
-                            title,
-                            size,
-                            focus_target,
-                            close_behavior,
-                            ..
-                        } = queued.request;
-
-                        let ModalContent::Deferred(builder) = content else {
-                            continue;
-                        };
-
-                        let mut config =
-                            WindowConfig::new().modal(crate::window_config::ModalConfig {
-                                parent: source_window,
-                                focus_target,
-                            });
-                        if let Some(title) = title {
-                            config = config.title(title);
-                        }
-                        if let Some((width, height)) = size {
-                            // Native modals size their height to content: the
-                            // requested (width, height) is the floor and the OS
-                            // window grows to fit taller content (e.g. a
-                            // MessageBox "Show details" expander). Without this
-                            // the fixed height clips content that exceeds it —
-                            // the footer buttons fall below the client edge and
-                            // stop receiving clicks. NOTE: deliberately NOT
-                            // `resizable(false)` — winit encodes that as
-                            // min==max size hints on X11, which would clamp away
-                            // the programmatic growth this relies on.
-                            config = config
-                                .size(width, height)
-                                .min_size(width, height)
-                                .size_to_content(SizeToContent::Height);
-                        }
-                        // Honour the request's `ModalCloseBehavior`. Only the
-                        // Escape half of it is expressible for a native
-                        // window: there is no "outside" to click, because the
-                        // parent window is input-blocked for as long as the
-                        // modal is up — which is what the OS does with a click
-                        // there, and is why `ClickOutside` resolves to
-                        // "nothing dismisses this but the app" here rather
-                        // than to a second route. Before this the whole field
-                        // fell into the struct's `..` and was never read, so a
-                        // `Dialog` taking BOTH defaults (`Auto` presentation,
-                        // `EscapeOrClickOutside`) got neither behaviour on
-                        // every platform that hosts a native modal.
-                        let escape_dismisses = native_modal_escape_dismisses(close_behavior);
-                        self.wm.create_window(
-                            config.root(move |tree, _state| {
-                                let content_id = builder(tree);
-                                if escape_dismisses {
-                                    wrap_native_modal_in_escape_route(tree, content_id)
-                                } else {
-                                    content_id
-                                }
-                            }),
-                            event_loop,
-                        );
+                        self.open_modal_window(Some(source_window), queued.request, event_loop);
                     }
                 }
             }
         }
 
+        had_requests
+    }
+
+    /// Open a native window presenting a [`ModalRequest`] with deferred
+    /// content: a modal child of `parent`, or, with no parent (a request
+    /// from the application tree with no window open), a plain window that
+    /// the request's dismissal closes like a modal one. A request whose
+    /// content is an existing widget cannot move to another tree and opens
+    /// nothing.
+    fn open_modal_window(
+        &mut self,
+        parent: Option<TeksiloWindowId>,
+        request: ModalRequest,
+        event_loop: &ActiveEventLoop,
+    ) {
+        let ModalRequest {
+            content,
+            title,
+            size,
+            focus_target,
+            close_behavior,
+            ..
+        } = request;
+
+        let ModalContent::Deferred(builder) = content else {
+            return;
+        };
+
+        let mut config = match parent {
+            Some(parent) => WindowConfig::new().modal(crate::window_config::ModalConfig {
+                parent,
+                focus_target,
+            }),
+            None => WindowConfig::new(),
+        };
+        if let Some(title) = title {
+            config = config.title(title);
+        }
+        if let Some((width, height)) = size {
+            // Native modals size their height to content: the
+            // requested (width, height) is the floor and the OS
+            // window grows to fit taller content (e.g. a
+            // MessageBox "Show details" expander). Without this
+            // the fixed height clips content that exceeds it:
+            // the footer buttons fall below the client edge and
+            // stop receiving clicks. NOTE: deliberately NOT
+            // `resizable(false)`: winit encodes that as
+            // min==max size hints on X11, which would clamp away
+            // the programmatic growth this relies on.
+            config = config
+                .size(width, height)
+                .min_size(width, height)
+                .size_to_content(SizeToContent::Height);
+        }
+        // Honour the request's `ModalCloseBehavior`. Only the
+        // Escape half of it is expressible for a native
+        // window: there is no "outside" to click, because the
+        // parent window is input-blocked for as long as the
+        // modal is up, which is what the OS does with a click
+        // there, and is why `ClickOutside` resolves to
+        // "nothing dismisses this but the app" here rather
+        // than to a second route. Before this the whole field
+        // fell into the struct's `..` and was never read, so a
+        // `Dialog` taking BOTH defaults (`Auto` presentation,
+        // `EscapeOrClickOutside`) got neither behaviour on
+        // every platform that hosts a native modal.
+        let escape_dismisses = native_modal_escape_dismisses(close_behavior);
+        let id = self.wm.create_window(
+            config.root(move |tree, _state| {
+                let content_id = builder(tree);
+                if escape_dismisses {
+                    wrap_native_modal_in_escape_route(tree, content_id)
+                } else {
+                    content_id
+                }
+            }),
+            event_loop,
+        );
+        if parent.is_none() {
+            self.wm.mark_modal_host(id);
+        }
+    }
+
+    /// Present the modal requests the application tree queued. It has no
+    /// window to show them in, so each goes to the window the user is
+    /// working with: the [most recent](crate::WindowManager::most_recent_window)
+    /// one, over its frontmost native dialog if it has one, in its tree or
+    /// as a native modal child as the request resolves. With no window open
+    /// it gets a plain window of its own, which its dismissal closes. A
+    /// request whose content is an existing widget of the application tree
+    /// cannot move to another tree, and is refused.
+    fn process_app_tree_modal_requests(&mut self, event_loop: &ActiveEventLoop) -> bool {
+        let requests = self
+            .wm
+            .app_tree_mut()
+            .map(|tree| tree.drain_pending_modal_requests())
+            .unwrap_or_default();
+        let had_requests = !requests.is_empty();
+        let native_supported = teksilo_platform::supports_native_modal_windows();
+        for queued in requests {
+            let request = queued.request;
+            if matches!(request.content, ModalContent::ExistingWidget(_)) {
+                eprintln!(
+                    "teksilo-app: a modal request from the application tree presents an \
+                     existing widget, which cannot move to a window's tree; nothing shown. \
+                     Build the content with ModalRequest::deferred."
+                );
+                continue;
+            }
+            let target = if self.wm.is_empty() {
+                None
+            } else {
+                self.wm
+                    .most_recent_window()
+                    .map(|window| self.wm.frontmost_modal_of(window))
+            };
+            let Some(window) = target else {
+                self.open_modal_window(None, request, event_loop);
+                continue;
+            };
+            match resolve_modal_presentation(
+                request.presentation,
+                &request.content,
+                native_supported,
+            ) {
+                ResolvedModalPresentation::InTree => {
+                    if let Some(managed) = self.wm.get_by_teksilo_mut(window)
+                        && let Some(&anchor) = managed.tree.roots().first()
+                    {
+                        present_in_tree_modal_request(&mut managed.tree, anchor, request);
+                        managed.request_redraw();
+                    }
+                }
+                ResolvedModalPresentation::NativeWindow => {
+                    self.open_modal_window(Some(window), request, event_loop);
+                }
+            }
+        }
         had_requests
     }
 
@@ -1466,7 +1544,8 @@ impl TeksiloAppHandler {
         let had_follow_system = self.wm.drain_pending_follow_system_requests();
         let had_text_scale = self.wm.drain_pending_text_scale_requests();
         let had_commands = self.wm.drain_close_window_requests();
-        let had_modal_requests = self.process_modal_requests(event_loop);
+        let had_modal_requests = self.process_modal_requests(event_loop)
+            | self.process_app_tree_modal_requests(event_loop);
         let had_modal_dismissals = self.process_modal_dismissals();
         self.process_pending(event_loop);
         // Drain post-mount actions (e.g. a WebView opening its native engine
@@ -2378,17 +2457,23 @@ impl TeksiloAppHandler {
         });
         #[cfg(debug_assertions)]
         if !self.warned_visual_app_tree
-            && self
-                .wm
-                .app_tree()
-                .is_some_and(|tree| tree.animated_quad_count() > 0)
+            && let Some(tree) = self.wm.app_tree()
         {
-            self.warned_visual_app_tree = true;
-            eprintln!(
-                "teksilo-app: the application tree holds an animated widget (a spinner, an \
-                 indeterminate progress bar); it is never drawn and never advances there. \
-                 Put visual widgets in a window."
-            );
+            let what = if tree.animated_quad_count() > 0 {
+                Some("an animated widget (a spinner, an indeterminate progress bar)")
+            } else if !tree.overlay_manager().is_empty() {
+                Some("an overlay (a popover, a tooltip, a menu)")
+            } else {
+                None
+            };
+            if let Some(what) = what {
+                self.warned_visual_app_tree = true;
+                eprintln!(
+                    "teksilo-app: the application tree holds {what}, which is never drawn \
+                     there. Show it from a window; a modal request from the application tree \
+                     is presented in a window for you."
+                );
+            }
         }
     }
 
@@ -4914,6 +4999,15 @@ impl TeksiloAppBuilder {
     /// that runs at startup, after the initial window if there is one, and
     /// can open the first window of an application started with
     /// [`QuitPolicy::Explicit`] and no initial window.
+    ///
+    /// What needs a window is not drawn there. A modal request
+    /// ([`EventContext::present_modal`](teksilo_core::widget::EventContext::present_modal),
+    /// a `MessageBox`) is presented in the window used last, or in a window
+    /// of its own when none is open, and must build its content with
+    /// `ModalRequest::deferred`; one presenting an existing widget is
+    /// refused. A file dialog has no parent window and reports an error. A
+    /// toast is shown in every window. An overlay, a tooltip or a `WebView`
+    /// is never shown, and a debug build says so.
     ///
     /// Without this, the application tree has an empty root of its own.
     pub fn app_root(

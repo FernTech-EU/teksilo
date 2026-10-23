@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Twenty-eight claims, and they do not all carry the same weight. Verified by
+//! Twenty-nine claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -98,6 +98,9 @@
 //! - **(ab)** with no window open, `on_external_with_ctx` runs in the
 //!   application tree and can open a window, and runs in that window once it
 //!   is open;
+//! - **(ac)** a modal request from the application tree gets a window of its
+//!   own with none open, closed by its dismissal, is presented in the window
+//!   open otherwise, and is refused when it presents an existing widget;
 //! - **(aa)** the application tree is ticked by `about_to_wait` and by the
 //!   wake its waker posts, which the loop takes so the next one posts;
 //! - **(y)** a quit closes a window with no guard, stops at one whose guard
@@ -1748,6 +1751,70 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         );
         app.external_ctx_handler = None;
         app.wm.close_window(outside);
+
+        // (ac) A modal request from the application tree has no window of
+        // its own to appear in. With none open it gets a plain window, which
+        // its dismissal (Escape) closes; with one open, it is presented in
+        // that window (in its tree, on X11). One presenting an existing
+        // widget of the application tree is refused. Dropping the
+        // application tree's drain from `post_event` leaves the first
+        // request unshown.
+        let ask = |app: &mut TeksiloAppHandler| {
+            app.run_in_app_tree(event_loop, |tree, ops| {
+                tree.run_with_event_context(ops, |ctx| {
+                    ctx.present_message_box(
+                        teksilo_widgets::MessageBox::information(teksilo_i18n::lit!(
+                            "From the application"
+                        ))
+                        .buttons(teksilo_widgets::MessageBoxButtons::Ok),
+                    );
+                });
+            });
+            app.post_event(event_loop);
+        };
+        assert!(app.wm.is_empty());
+        ask(app);
+        let host: Vec<_> = app.wm.windows_map().keys().copied().collect();
+        assert_eq!(host.len(), 1, "a window of its own, none being open");
+        let host = host[0];
+        app.window_event(event_loop, host, WindowEvent::RedrawRequested);
+        app.dispatch_in_window(
+            host,
+            teksilo_core::event::WidgetEvent::KeyDown {
+                key: teksilo_core::event::Key::Escape,
+                modifiers: teksilo_core::event::Modifiers::empty(),
+                text: None,
+            },
+            event_loop,
+        );
+        app.post_event(event_loop);
+        assert!(app.wm.is_empty(), "its dismissal closed its window");
+
+        let working = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: working")
+                .size(480, 320)
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        ask(app);
+        assert_eq!(app.wm.window_count(), 1, "no window of its own this time");
+        let working_winit = app.wm.winit_id_for_teksilo(working).expect("open");
+        assert!(
+            app.wm.windows_map()[&working_winit]
+                .tree
+                .has_modal_overlay(),
+            "presented in the window open"
+        );
+        app.run_in_app_tree(event_loop, |tree, ops| {
+            let existing = tree.add(logging_leaf(&Default::default(), false));
+            tree.run_with_event_context(ops, |ctx| {
+                ctx.present_modal(teksilo_core::modal::ModalRequest::in_tree(existing));
+            });
+        });
+        app.post_event(event_loop);
+        assert_eq!(app.wm.window_count(), 1, "an existing widget is refused");
+        app.wm.close_window(working);
 
         // (x) Under `Explicit` the loop turns with no window open and goes
         // on. Making `maybe_exit` ignore the policy ends it here.
