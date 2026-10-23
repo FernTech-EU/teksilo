@@ -755,6 +755,16 @@ impl WindowManager {
         root_id
     }
 
+    /// Every window's tree, then the application tree: the trees a request
+    /// that applies application-wide (locale, theme, text scale) can come
+    /// from.
+    fn trees_mut(&mut self) -> impl Iterator<Item = &mut WidgetTree> {
+        self.windows
+            .values_mut()
+            .map(|managed| &mut managed.tree)
+            .chain(self.app_tree.as_mut())
+    }
+
     /// The application tree, if one was installed.
     pub fn app_tree(&self) -> Option<&WidgetTree> {
         self.app_tree.as_ref()
@@ -2428,12 +2438,7 @@ impl WindowManager {
         }) else {
             return;
         };
-        let trees = self
-            .windows
-            .values_mut()
-            .map(|managed| &mut managed.tree)
-            .chain(self.app_tree.as_mut());
-        for tree in trees {
+        for tree in self.trees_mut() {
             if outcome.direction_changed {
                 tree.set_layout_direction(new_dir);
             }
@@ -2783,6 +2788,22 @@ impl WindowManager {
                 guarded.push(managed.teksilo_id);
             }
         }
+        // The application tree is no window: a close it asks for closes
+        // nothing. Drained so it does not linger, and said in debug builds.
+        if let Some(tree) = &mut self.app_tree {
+            let wants_guarded = tree.take_close_window_request();
+            let wants_forced = tree.take_force_close_request();
+            #[cfg(debug_assertions)]
+            if wants_guarded || wants_forced {
+                eprintln!(
+                    "teksilo-app: close_window called from the application tree, which is no \
+                     window's; nothing closed. Close a window by id (close_window_by_id) or \
+                     quit (request_quit)."
+                );
+            }
+            #[cfg(not(debug_assertions))]
+            let _ = (wants_guarded, wants_forced);
+        }
         let any = !guarded.is_empty() || !forced.is_empty();
         for id in forced {
             self.queue_close(id);
@@ -2806,8 +2827,8 @@ impl WindowManager {
     /// `request_redraw`.
     pub fn drain_pending_locale_requests(&mut self) -> bool {
         let mut requests: Vec<String> = Vec::new();
-        for managed in self.windows.values_mut() {
-            if let Some(loc) = managed.tree.take_pending_locale_request() {
+        for tree in self.trees_mut() {
+            if let Some(loc) = tree.take_pending_locale_request() {
                 requests.push(loc);
             }
         }
@@ -2834,8 +2855,8 @@ impl WindowManager {
     /// wins, matching the locale path.
     pub fn drain_pending_theme_requests(&mut self) -> bool {
         let mut requests: Vec<Theme> = Vec::new();
-        for managed in self.windows.values_mut() {
-            if let Some(theme) = managed.tree.take_pending_theme_request() {
+        for tree in self.trees_mut() {
+            if let Some(theme) = tree.take_pending_theme_request() {
                 requests.push(theme);
             }
         }
@@ -2864,15 +2885,16 @@ impl WindowManager {
         had_requests
     }
 
-    /// Drain per-tree "follow OS theme" requests raised by handlers via
+    /// Drain per-tree "follow OS theme" requests raised by handlers (in a
+    /// window or in the application tree) via
     /// [`EventContext::follow_system_theme`](teksilo_core::widget::EventContext::follow_system_theme).
     /// Switches the app to [`ThemeMode::Native`] and recomputes the theme from
     /// the current OS colours, fanning it to every window. Returns `true` if
     /// any window requested it (so the caller schedules a repaint).
     pub fn drain_pending_follow_system_requests(&mut self) -> bool {
         let mut requested = false;
-        for managed in self.windows.values_mut() {
-            if managed.tree.take_pending_follow_system_request() {
+        for tree in self.trees_mut() {
+            if tree.take_pending_follow_system_request() {
                 requested = true;
             }
         }
@@ -2901,8 +2923,8 @@ impl WindowManager {
     /// windows requested in the same tick.
     pub fn drain_pending_text_scale_requests(&mut self) -> bool {
         let mut requests: Vec<f32> = Vec::new();
-        for managed in self.windows.values_mut() {
-            if let Some(scale) = managed.tree.take_pending_text_scale_request() {
+        for tree in self.trees_mut() {
+            if let Some(scale) = tree.take_pending_text_scale_request() {
                 requests.push(scale);
             }
         }
@@ -4256,5 +4278,85 @@ mod app_tree_tests {
         wm.set_locale("fr-FR".parse().unwrap());
         assert_eq!(wm.app_tree().unwrap().locale(), Some("fr-FR"));
         teksilo_i18n::thread_local::clear();
+    }
+}
+
+#[cfg(test)]
+mod app_tree_drain_tests {
+    use teksilo_canvas::SizeProposal;
+    use teksilo_core::NoopWindowOps;
+    use teksilo_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget};
+
+    use super::*;
+
+    #[derive(Debug)]
+    struct Anchor;
+
+    impl Widget for Anchor {
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+
+    /// A manager whose application tree ran `handler`, as one of its
+    /// handlers would.
+    fn after(handler: impl FnOnce(&mut EventContext)) -> WindowManager {
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        wm.install_app_tree(|tree| tree.add(Anchor));
+        wm.app_tree_mut()
+            .unwrap()
+            .run_with_event_context(&mut NoopWindowOps, handler);
+        wm
+    }
+
+    #[test]
+    fn a_text_scale_asked_by_the_app_tree_is_applied_everywhere() {
+        let mut wm = after(|ctx| ctx.set_text_scale(1.3));
+        assert!(wm.drain_pending_text_scale_requests());
+        assert_eq!(wm.app_tree().unwrap().user_text_scale(), 1.3);
+        assert!(!wm.drain_pending_text_scale_requests(), "drained once");
+    }
+
+    #[test]
+    fn a_theme_asked_by_the_app_tree_is_applied_everywhere() {
+        let dark = teksilo_core::presets::intui::dark();
+        let requested = dark.clone();
+        let mut wm = after(move |ctx| ctx.set_theme(requested));
+        assert!(wm.drain_pending_theme_requests());
+        assert_eq!(wm.theme().id, dark.id);
+        assert_eq!(wm.app_tree().unwrap().theme().id, dark.id);
+    }
+
+    #[test]
+    fn following_the_system_asked_by_the_app_tree_switches_the_mode() {
+        let mut wm = after(|ctx| ctx.follow_system_theme());
+        assert!(wm.drain_pending_follow_system_requests());
+        assert_eq!(wm.theme_mode(), ThemeMode::Native);
+    }
+
+    #[test]
+    fn a_locale_asked_by_the_app_tree_is_applied_everywhere() {
+        teksilo_i18n::thread_local::install(teksilo_i18n::I18nManager::from_config(
+            &teksilo_i18n::I18nConfig::test_only("en-US", &[]),
+        ));
+        let mut wm = after(|ctx| ctx.set_locale("fr-FR"));
+        assert!(wm.drain_pending_locale_requests());
+        assert_eq!(wm.app_tree().unwrap().locale(), Some("fr-FR"));
+        teksilo_i18n::thread_local::clear();
+    }
+
+    /// The application tree is no window: its close request queues nothing,
+    /// and does not stay to fire later.
+    #[test]
+    fn a_close_asked_by_the_app_tree_closes_nothing_and_is_drained() {
+        let mut wm = after(|ctx| {
+            ctx.close_window();
+            ctx.close_window_forced();
+        });
+        assert!(!wm.drain_close_window_requests());
+        assert!(wm.pending_closes.is_empty());
+        let tree = wm.app_tree_mut().unwrap();
+        assert!(!tree.take_close_window_request());
+        assert!(!tree.take_force_close_request());
     }
 }
