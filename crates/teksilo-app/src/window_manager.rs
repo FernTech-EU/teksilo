@@ -581,6 +581,11 @@ pub struct WindowManager {
     /// The order in which the open windows were opened or focused; see
     /// [`most_recent_window`](Self::most_recent_window).
     recency: crate::window_recency::WindowRecency,
+    /// The application tree: a widget tree no window hosts, for code that
+    /// must run with no window open. Never painted, no `WindowState`, no
+    /// accessibility adapter. Taken out while one of its handlers runs,
+    /// like a window's tree. See [`install_app_tree`](Self::install_app_tree).
+    app_tree: Option<WidgetTree>,
     /// The quit under way, if any; see [`crate::quit`].
     quit: Option<crate::quit::PendingQuit>,
     /// The last [`PendingQuit::generation`](crate::quit::PendingQuit) handed
@@ -637,6 +642,7 @@ impl WindowManager {
             os_theme_watch: None,
             start_os_theme_watch: start_platform_desktop_watch,
             recency: crate::window_recency::WindowRecency::default(),
+            app_tree: None,
             quit: None,
             quit_generation: 0,
             quit_completed: false,
@@ -691,6 +697,72 @@ impl WindowManager {
         // UI shows them in the user's language.
         teksilo_widgets::localize_standard_shortcuts(tree.shortcut_registry_mut());
         tree
+    }
+
+    /// Give a new tree what every tree of this application shares: the
+    /// active locale and layout direction, the app context, the OS
+    /// accessibility preferences and the user's text scale. Shared by the
+    /// windows' trees and the [application tree](Self::install_app_tree).
+    ///
+    /// The locale must be seeded BEFORE the root builder runs so any `tr!`
+    /// call in `build()` sees it on the first build, and BEFORE the first
+    /// layout so the tree's `layout_direction` already matches the
+    /// manager's. Without it `WidgetTree::new()` is left-to-right with an
+    /// empty locale, and an app started in an RTL locale would lay out its
+    /// first window left to right until the user switched locale.
+    fn seed_tree(&self, tree: &mut WidgetTree) {
+        if let Some((loc, dir)) = teksilo_i18n::thread_local::with_active(|m| {
+            (
+                m.locale_signal().get().to_string(),
+                m.direction_signal().get(),
+            )
+        }) {
+            tree.set_layout_direction(dir);
+            tree.set_locale(loc);
+        }
+        if let Some(template) = self.app_context_template.as_ref() {
+            tree.set_app_context(template.clone());
+        }
+        tree.set_accessibility_preferences(
+            self.a11y_prefs.high_contrast,
+            self.a11y_prefs.reduced_motion,
+            self.a11y_prefs.text_scale_factor,
+        );
+        tree.set_screen_reader_state(self.a11y_prefs.screen_reader);
+        if (self.user_text_scale - 1.0).abs() > f32::EPSILON {
+            tree.set_user_text_scale(self.user_text_scale);
+        }
+    }
+
+    /// Create the application tree and build its root with `root`, which
+    /// returns the root's id. Replaces any application tree already there.
+    ///
+    /// The tree is seeded as a window's is ([`seed_tree`](Self::seed_tree))
+    /// and themed with the application's theme, but has no `WindowState`
+    /// (so `ctx.window()` is `None` in its handlers), no app-wide
+    /// post-root wrapper, no accessibility adapter, and records no
+    /// announcements. It shares the typesetter, so a widget in it can
+    /// measure text.
+    pub fn install_app_tree(&mut self, root: impl FnOnce(&mut WidgetTree) -> WidgetId) -> WidgetId {
+        let mut tree = self.new_window_tree(self.theme.clone());
+        tree.set_records_announcements(false);
+        self.seed_tree(&mut tree);
+        if let Some(typesetter) = self.typesetter.as_ref() {
+            tree = tree.with_text_backend(typesetter.as_text_backend());
+        }
+        let root_id = root(&mut tree);
+        self.app_tree = Some(tree);
+        root_id
+    }
+
+    /// The application tree, if one was installed.
+    pub fn app_tree(&self) -> Option<&WidgetTree> {
+        self.app_tree.as_ref()
+    }
+
+    /// The application tree, mutably.
+    pub fn app_tree_mut(&mut self) -> Option<&mut WidgetTree> {
+        self.app_tree.as_mut()
     }
 
     /// Set the theme mode (called by TeksiloAppHandler during initialization).
@@ -941,6 +1013,11 @@ impl WindowManager {
         if let Some(theme) = update.theme_for(&mut self.os_theme, self.theme.input.density) {
             self.theme = theme;
             changed = true;
+        }
+        // The application tree follows the application's theme, which has
+        // no window density of its own to resolve against.
+        if changed && let Some(tree) = &mut self.app_tree {
+            tree.set_theme(self.theme.clone());
         }
         changed
     }
@@ -1397,43 +1474,9 @@ impl WindowManager {
         // already wakes this window.
         tree.set_redraw_waker(Some(pw.redraw_waker()));
 
-        // Seed the tree from the active i18n manager (if any). Without
-        // this, `WidgetTree::new()` defaults to `LayoutDirection::LeftToRight`
-        // and an empty locale — so a windowed app started in an RTL
-        // locale (via `TeksiloAppBuilder::i18n(...)` with Arabic/Hebrew as
-        // initial) would lay out its first window as LTR until the
-        // user manually triggered a locale switch. New windows created
-        // mid-session also benefit: they inherit the active locale
-        // and direction instead of reverting to the default.
-        //
-        // The seeding must happen BEFORE `root_builder` runs so any
-        // `tr!` calls inside `build()` see the correct locale on
-        // first build, and BEFORE the first layout pass so the tree's
-        // `layout_direction` field already matches `m.direction_signal()`.
-        if let Some((loc, dir)) = teksilo_i18n::thread_local::with_active(|m| {
-            (
-                m.locale_signal().get().to_string(),
-                m.direction_signal().get(),
-            )
-        }) {
-            tree.set_layout_direction(dir);
-            tree.set_locale(loc);
-        }
-
-        if let Some(template) = self.app_context_template.as_ref() {
-            tree.set_app_context(template.clone());
-        }
+        self.seed_tree(&mut tree);
         if let Some(ref host) = title_bar_host {
             tree.set_title_bar_host(host.clone());
-        }
-        tree.set_accessibility_preferences(
-            self.a11y_prefs.high_contrast,
-            self.a11y_prefs.reduced_motion,
-            self.a11y_prefs.text_scale_factor,
-        );
-        tree.set_screen_reader_state(self.a11y_prefs.screen_reader);
-        if (self.user_text_scale - 1.0).abs() > f32::EPSILON {
-            tree.set_user_text_scale(self.user_text_scale);
         }
 
         let mut primed_atlas_version: u64 = 0;
@@ -2297,6 +2340,9 @@ impl WindowManager {
             // the wheel-notch scale stay at whatever the old theme said.
             managed.translation_state.set_input_tokens(theme.input);
         }
+        if let Some(tree) = &mut self.app_tree {
+            tree.set_theme(theme);
+        }
     }
 
     /// Broadcast a user text-scale change to all windows. Stores the factor so
@@ -2306,6 +2352,9 @@ impl WindowManager {
         self.user_text_scale = factor;
         for managed in self.windows.values_mut() {
             managed.tree.set_user_text_scale(factor);
+        }
+        if let Some(tree) = &mut self.app_tree {
+            tree.set_user_text_scale(factor);
         }
     }
 
@@ -2362,6 +2411,10 @@ impl WindowManager {
             // on the field, so the early return above no longer swallows it.
             managed.tree.set_screen_reader_state(sr);
         }
+        if let Some(tree) = &mut self.app_tree {
+            tree.set_accessibility_preferences(hc, rm, ts);
+            tree.set_screen_reader_state(sr);
+        }
         true
     }
 
@@ -2375,11 +2428,16 @@ impl WindowManager {
         }) else {
             return;
         };
-        for managed in self.windows.values_mut() {
+        let trees = self
+            .windows
+            .values_mut()
+            .map(|managed| &mut managed.tree)
+            .chain(self.app_tree.as_mut());
+        for tree in trees {
             if outcome.direction_changed {
-                managed.tree.set_layout_direction(new_dir);
+                tree.set_layout_direction(new_dir);
             }
-            managed.tree.set_locale(locale.to_string());
+            tree.set_locale(locale.to_string());
         }
     }
 
@@ -4111,5 +4169,92 @@ mod os_theme_tests {
             !wm.route_os_theme_payload_from(changed(), slowed)
                 .expect("taken")
         );
+    }
+}
+
+#[cfg(test)]
+mod app_tree_tests {
+    use teksilo_canvas::SizeProposal;
+    use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget};
+
+    use super::*;
+
+    /// A zero-size root.
+    #[derive(Debug)]
+    struct Anchor;
+
+    impl Widget for Anchor {
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+
+    fn manager_with_app_tree() -> WindowManager {
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        wm.install_app_tree(|tree| tree.add(Anchor));
+        wm
+    }
+
+    #[test]
+    fn the_app_tree_has_its_root_and_no_window() {
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        wm.set_records_announcements(true);
+        let root = wm.install_app_tree(|tree| tree.add(Anchor));
+        let tree = wm.app_tree().expect("installed");
+        assert_eq!(tree.roots(), [root]);
+        assert!(tree.window_state().is_none(), "no window hosts it");
+        assert!(
+            !tree.records_announcements(),
+            "nothing reads announcements from a tree no adapter serves"
+        );
+        assert_eq!(wm.window_count(), 0, "it is not a window");
+    }
+
+    #[test]
+    fn the_app_tree_starts_with_the_applications_text_scale() {
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        wm.set_initial_text_scale(1.5);
+        wm.install_app_tree(|tree| tree.add(Anchor));
+        assert_eq!(wm.app_tree().unwrap().user_text_scale(), 1.5);
+    }
+
+    #[test]
+    fn a_theme_change_reaches_the_app_tree() {
+        let mut wm = manager_with_app_tree();
+        let dark = teksilo_core::presets::intui::dark();
+        wm.set_theme(dark.clone());
+        assert_eq!(wm.app_tree().unwrap().theme().id, dark.id);
+    }
+
+    #[test]
+    fn a_text_scale_change_reaches_the_app_tree() {
+        let mut wm = manager_with_app_tree();
+        wm.set_text_scale(1.25);
+        assert_eq!(wm.app_tree().unwrap().user_text_scale(), 1.25);
+    }
+
+    #[test]
+    fn an_accessibility_preference_change_reaches_the_app_tree() {
+        let mut wm = manager_with_app_tree();
+        fn high_contrast() -> AccessibilityPreferences {
+            AccessibilityPreferences {
+                high_contrast: true,
+                ..AccessibilityPreferences::default()
+            }
+        }
+        assert!(wm.refresh_accessibility_preferences_from(high_contrast));
+        assert!(wm.app_tree().unwrap().high_contrast_signal().get());
+    }
+
+    #[test]
+    fn a_locale_change_reaches_the_app_tree() {
+        teksilo_i18n::thread_local::install(teksilo_i18n::I18nManager::from_config(
+            &teksilo_i18n::I18nConfig::test_only("en-US", &[]),
+        ));
+        let mut wm = manager_with_app_tree();
+        assert_eq!(wm.app_tree().unwrap().locale(), Some("en-US"), "seeded");
+        wm.set_locale("fr-FR".parse().unwrap());
+        assert_eq!(wm.app_tree().unwrap().locale(), Some("fr-FR"));
+        teksilo_i18n::thread_local::clear();
     }
 }
