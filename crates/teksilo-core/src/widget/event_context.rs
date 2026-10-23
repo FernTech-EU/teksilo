@@ -1136,11 +1136,16 @@ impl<'ops> EventContext<'ops> {
     /// [`WindowConfig::on_close_requested`](crate::window::WindowConfig::on_close_requested)
     /// / [`can_close`](crate::window::WindowConfig::can_close).
     ///
-    /// This is the second half of the veto-then-reissue pattern: the
-    /// guard returns [`CloseResponse::Veto`](crate::window::CloseResponse::Veto)
-    /// and opens a confirmation dialog; the dialog's "close anyway"
-    /// button calls `close_window_forced` so the window actually closes
-    /// without re-triggering the guard.
+    /// It closes the window this context belongs to, which for the answer
+    /// of a confirmation dialog is not always the guarded window: a
+    /// `MessageBox` is a native modal window of its own on macOS and
+    /// Windows, and its answer runs there. The second half of the
+    /// veto-then-reissue pattern (the guard returns
+    /// [`CloseResponse::Veto`](crate::window::CloseResponse::Veto) and opens
+    /// a dialog, whose "close anyway" answer closes the window without
+    /// re-triggering the guard) therefore captures the guarded window's id
+    /// in the guard and calls [`close_window_by_id`](Self::close_window_by_id),
+    /// which is unguarded too.
     pub fn close_window_forced(&mut self) {
         self.force_close_requested = true;
     }
@@ -1317,10 +1322,10 @@ impl<'ops> EventContext<'ops> {
     ///
     /// A guard that vetoes stops the quit at its window. If it opened a
     /// dialog there (a modal overlay or a native modal window), the quit
-    /// waits: when the window then closes, through either re-issue the close
-    /// guard docs describe ([`close_window_forced`](Self::close_window_forced),
-    /// or a [`close_window`](Self::close_window) the guard now lets through),
-    /// the quit goes on to the next window. It is abandoned when the window
+    /// waits: when the window then closes (the dialog's answer closing it
+    /// by id, see [`close_window_forced`](Self::close_window_forced), or a
+    /// [`close_window`](Self::close_window) the guard now lets through), the
+    /// quit goes on to the next window. It is abandoned when the window
     /// is left open with no dialog (the guard vetoed without asking, or its
     /// dialog was cancelled), when another window is closed meanwhile, or by
     /// [`cancel_quit`](Self::cancel_quit). A dialog that closes before the

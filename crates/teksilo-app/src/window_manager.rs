@@ -514,6 +514,10 @@ pub struct WindowManager {
     typesetter: Option<teksilo_text::SharedTypesetter>,
     /// Windows that are blocked by a modal child.
     modal_blocked: HashMap<TeksiloWindowId, TeksiloWindowId>,
+    /// Each open modal window's parent. Unlike `modal_blocked`, which holds
+    /// one child per parent, it keeps every child of a parent that opened
+    /// two, and it is what the quit reads.
+    modal_parents: HashMap<TeksiloWindowId, TeksiloWindowId>,
     /// OS-level accessibility preferences, queried at startup and re-queried
     /// on every window focus gain by
     /// [`refresh_accessibility_preferences`](Self::refresh_accessibility_preferences).
@@ -616,6 +620,7 @@ impl WindowManager {
             theme,
             typesetter: None,
             modal_blocked: HashMap::new(),
+            modal_parents: HashMap::new(),
             a11y_prefs,
             user_text_scale: 1.0,
             theme_mode: ThemeMode::Manual,
@@ -1518,6 +1523,7 @@ impl WindowManager {
         // Handle modal blocking
         if let Some(parent_id) = modal_parent {
             self.modal_blocked.insert(parent_id, teksilo_id);
+            self.modal_parents.insert(teksilo_id, parent_id);
         }
 
         // Install the auto-save observers if persistence is wired and
@@ -1723,9 +1729,11 @@ impl WindowManager {
             if let Some(sid) = managed.string_id.as_deref() {
                 self.string_to_id.remove(sid);
             }
-            // Unblock parent if this was a modal
+            // Unblock the parent if this was the modal blocking it, and not
+            // an earlier one a second modal has since replaced there.
             if managed.modal
                 && let Some(parent_id) = managed.parent
+                && self.modal_blocked.get(&parent_id) == Some(&teksilo_id)
             {
                 self.modal_blocked.remove(&parent_id);
             }
@@ -1735,6 +1743,7 @@ impl WindowManager {
         }
         // Also remove any modal children blocking this window
         self.modal_blocked.remove(&teksilo_id);
+        self.modal_parents.remove(&teksilo_id);
 
         // Fire the teardown hook last, once every registry above
         // (`windows`, `teksilo_to_winit`, `string_to_id`, `modal_blocked`)
@@ -1886,6 +1895,14 @@ impl WindowManager {
         for pending in closes {
             if pending.force || self.evaluate_close_guard(pending.id, target) {
                 self.close_window(pending.id);
+            } else if let Some(quit) = self.quit
+                && quit.awaiting.is_none()
+                && !quit.skip_guards
+            {
+                // A guard asked in the same turn a quit was requested saw
+                // the quit and vetoed it; asking it again would open a
+                // second dialog, so the quit adopts the veto.
+                self.await_quit_at(pending.id);
             }
             // Vetoed guarded close → the window stays open. The app may
             // have opened a confirmation dialog from inside the guard;
@@ -1948,14 +1965,55 @@ impl WindowManager {
         }
     }
 
-    /// The window `teksilo_id` is a modal child of, if any. Read from the
-    /// blocking map rather than from the window, which a handler may have
-    /// taken out of the map while it runs.
+    /// The window `teksilo_id` is a modal child of, if any. Read from
+    /// `modal_parents` rather than from the window, which a handler may
+    /// have taken out of the map while it runs.
     fn modal_parent_of(&self, teksilo_id: TeksiloWindowId) -> Option<TeksiloWindowId> {
-        self.modal_blocked
-            .iter()
-            .find(|(_, child)| **child == teksilo_id)
-            .map(|(parent, _)| *parent)
+        self.modal_parents.get(&teksilo_id).copied()
+    }
+
+    /// The window to bring forward for `teksilo_id`'s dialog: its deepest
+    /// open native modal descendant, or itself.
+    fn frontmost_modal_of(&self, teksilo_id: TeksiloWindowId) -> TeksiloWindowId {
+        let mut front = teksilo_id;
+        for _ in 0..64 {
+            match self
+                .modal_parents
+                .iter()
+                .filter(|(_, parent)| **parent == front)
+                .map(|(child, _)| *child)
+                .max_by_key(|child| self.recency.stamp(*child))
+            {
+                Some(child) => front = child,
+                None => break,
+            }
+        }
+        front
+    }
+
+    /// The quit stops at `teksilo_id`, whose guard vetoed: wait on it, and
+    /// make sure the user can see its question. A minimised window is
+    /// restored and the dialog raised (or the window, while its dialog is
+    /// still queued); the redraw brings the `post_event` that presents a
+    /// queued dialog.
+    fn await_quit_at(&mut self, teksilo_id: TeksiloWindowId) {
+        if let Some(quit) = &mut self.quit {
+            quit.awaiting = Some(teksilo_id);
+        }
+        if let Some(&winit_id) = self.teksilo_to_winit.get(&teksilo_id)
+            && let Some(managed) = self.windows.get(&winit_id)
+        {
+            if managed.minimized {
+                managed.platform_window.window().set_minimized(false);
+            }
+            managed.request_redraw();
+        }
+        let front = self.frontmost_modal_of(teksilo_id);
+        if let Some(&winit_id) = self.teksilo_to_winit.get(&front)
+            && let Some(managed) = self.windows.get(&winit_id)
+        {
+            teksilo_platform::window_activation::raise(managed.platform_window.window(), None);
+        }
     }
 
     /// What the quit sees of the open windows; see
@@ -1977,7 +2035,7 @@ impl WindowManager {
                     id,
                     modal_depth,
                     recency: self.recency.stamp(id).unwrap_or(0),
-                    dialog_open: self.modal_blocked.contains_key(&id)
+                    dialog_open: self.modal_parents.values().any(|parent| *parent == id)
                         || managed.tree.has_modal_overlay()
                         || managed.tree.has_pending_modal_requests(),
                 }
@@ -2020,16 +2078,9 @@ impl WindowManager {
                     // The guard may have changed the quit: cancelled it,
                     // or made it forced. Only the quit that asked waits on
                     // a veto.
-                    match &mut self.quit {
+                    match self.quit {
                         Some(now) if now.generation == quit.generation && !closes => {
-                            now.awaiting = Some(id);
-                            // A dialog the guard queued is presented in the
-                            // next `post_event`, which a frame brings.
-                            if let Some(&winit_id) = self.teksilo_to_winit.get(&id)
-                                && let Some(managed) = self.windows.get(&winit_id)
-                            {
-                                managed.request_redraw();
-                            }
+                            self.await_quit_at(id);
                             return;
                         }
                         _ => {}

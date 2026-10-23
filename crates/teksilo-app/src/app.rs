@@ -997,6 +997,12 @@ impl TeksiloAppHandler {
     }
 
     fn process_pending(&mut self, event_loop: &ActiveEventLoop) {
+        // A close a tree asked for since the last drain (input dispatched
+        // in `about_to_wait`, such as a pen tap or a timed gesture, is not
+        // followed by `post_event`'s drain) is queued first, so the quit
+        // sees a dialog's answer that closed its window, not the window
+        // left without its dialog.
+        self.wm.drain_close_window_requests();
         self.wm.process_pending(event_loop);
         self.wm.advance_quit(event_loop);
     }

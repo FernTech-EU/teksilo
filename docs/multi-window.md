@@ -567,13 +567,17 @@ WindowConfig::new()
         if !dirty.get() {
             return CloseResponse::Close;     // nothing unsaved → just close
         }
+        // The window being closed. The answer below may run in another one.
+        let Some(window) = ctx.window().map(|w| w.id()) else {
+            return CloseResponse::Close;
+        };
         ctx.present_message_box(
             MessageBox::question(lit!("Close window?"))
                 .text(lit!("The document has unsaved changes."))
                 .buttons(MessageBoxButtons::SaveDiscardCancel)
                 .on_result(move |r, ctx| match r.button {
-                    StandardButton::Save    => { save(); ctx.close_window_forced(); }
-                    StandardButton::Discard => ctx.close_window_forced(),
+                    StandardButton::Save    => { save(); ctx.close_window_by_id(window); }
+                    StandardButton::Discard => ctx.close_window_by_id(window),
                     _                       => {}   // Cancel → stay open
                 }),
         );
@@ -581,9 +585,17 @@ WindowConfig::new()
     });
 ```
 
-`ctx.close_window_forced()` is the escape hatch: it closes the window
+`ctx.close_window_by_id(window)` is the escape hatch: it closes the window
 **unconditionally**, bypassing the guard, so the second close (from the
 dialog's button) actually goes through instead of re-prompting.
+
+Name the window by its id rather than calling `ctx.close_window_forced()`
+from the answer: that closes the window the answer *runs in*. A
+`MessageBox` is presented in the guarded window's own tree on Linux, but in
+a native modal window of its own on macOS and Windows, so there
+`close_window_forced()` would close the dialog and leave the document
+window open. `close_window_forced()` is right where the code runs in the
+window to close, such as the guard itself.
 
 ### Reactive sugar: `can_close` + `on_close_blocked`
 
@@ -632,9 +644,8 @@ pattern above carries on from there:
 
 - while the guard's dialog is up (a modal overlay, or a native modal
   window), the quit waits;
-- when the window then closes, by `close_window_forced()` or by a
-  `close_window()` the guard now lets through, the quit goes on with the
-  next window;
+- when the window then closes, closed by id as above, the quit goes on
+  with the next window;
 - when the window is left open with no dialog (the guard vetoed without
   asking, or the dialog was cancelled), the quit is abandoned. So is it
   when another window is closed meanwhile, or by `ctx.cancel_quit()`.
@@ -652,6 +663,9 @@ a guarded quit while one is under way changes nothing.
     if !dirty.get() {
         return CloseResponse::Close;
     }
+    let Some(window) = ctx.window().map(|w| w.id()) else {
+        return CloseResponse::Close;
+    };
     let question = if ctx.quit_in_progress() {
         lit!("Quit with unsaved changes?")
     } else {
@@ -660,8 +674,8 @@ a guarded quit while one is under way changes nothing.
     ctx.present_message_box(
         MessageBox::question(question)
             .buttons(MessageBoxButtons::SaveDiscardCancel)
-            .on_result(|result, ctx| match result.button {
-                StandardButton::Save | StandardButton::Discard => ctx.close_window_forced(),
+            .on_result(move |result, ctx| match result.button {
+                StandardButton::Save | StandardButton::Discard => ctx.close_window_by_id(window),
                 _ => ctx.cancel_quit(),
             }),
     );
