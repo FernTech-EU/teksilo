@@ -143,7 +143,7 @@ WindowConfig::new()
     .decorations(DecorationsMode::CustomChrome)
     .resizable(true)
     .always_on_top(true)                       // floating tool palette
-    .skip_taskbar(true)                        // not in the taskbar/dock
+    .skip_taskbar(true)                        // not in the taskbar (Windows, X11)
     .icon(WindowIcon::from_rgba(rgba, w, h))
     .root(|tree, state| tree.add(Inspector::new(state)))
 ```

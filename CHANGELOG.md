@@ -29,6 +29,11 @@ by crate for clarity, not because crates version independently.
 
 - **`WindowManager::most_recent_window`**, the window opened or focused last.
 
+#### Platform
+
+- **`taskbar`**, the per-OS half of `WindowConfig::skip_taskbar`, and on X11
+  `x11::ewmh::mark_skip_taskbar` and `x11::ewmh::net_wm_state`.
+
 ### Changed
 
 #### Widgets
@@ -63,6 +68,9 @@ by crate for clarity, not because crates version independently.
   otherwise. They now run in the window opened or focused last. A window that
   never received the focus also stops claiming it once another window takes
   it, so it no longer keeps its caret and animations running as if active.
+- **`WindowConfig::skip_taskbar` keeps the window out of the taskbar** on
+  Windows and X11. It had no effect anywhere. Wayland and macOS have nothing
+  per window to apply it to, as its documentation now says.
 
 ## [0.20.0] - 2026-10-19
 

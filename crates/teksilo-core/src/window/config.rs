@@ -432,8 +432,14 @@ impl WindowConfig {
         self
     }
 
-    /// Hide this window from the taskbar / dock. Useful for tool
-    /// palettes and secondary overlays.
+    /// Keep this window out of the taskbar. Useful for tool palettes and
+    /// secondary overlays.
+    ///
+    /// Honoured on Windows and X11, when the window is created. Wayland has
+    /// no protocol open to every client for it, so the compositor decides.
+    /// macOS has nothing to hide: the Dock lists applications, not windows,
+    /// and keeping the application itself out of the Dock is its activation
+    /// policy, not this setting.
     pub fn skip_taskbar(mut self, skip: bool) -> Self {
         self.skip_taskbar = skip;
         self

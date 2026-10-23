@@ -58,7 +58,8 @@ pub fn ignore_errors<C: x11rb::connection::RequestConnection>(
     }
 }
 
-/// The interned atoms used by the title-bar probe and the XDND backend.
+/// The interned atoms used by the title-bar probe, the taskbar hint and the
+/// XDND backend.
 ///
 /// Interned once per connection: an X round trip per atom per use would put a
 /// server round trip in the middle of every drag motion.
@@ -109,6 +110,10 @@ pub struct Atoms {
     pub net_supporting_wm_check: Atom,
     pub net_wm_moveresize: Atom,
     pub motif_wm_hints: Atom,
+
+    // --- EWMH window state (taskbar) ---
+    pub net_wm_state: Atom,
+    pub net_wm_state_skip_taskbar: Atom,
 }
 
 impl Atoms {
@@ -145,6 +150,8 @@ impl Atoms {
             b"_NET_SUPPORTING_WM_CHECK",
             b"_NET_WM_MOVERESIZE",
             b"_MOTIF_WM_HINTS",
+            b"_NET_WM_STATE",
+            b"_NET_WM_STATE_SKIP_TASKBAR",
         ];
 
         let cookies = NAMES
@@ -188,6 +195,8 @@ impl Atoms {
             net_supporting_wm_check: take(),
             net_wm_moveresize: take(),
             motif_wm_hints: take(),
+            net_wm_state: take(),
+            net_wm_state_skip_taskbar: take(),
         })
     }
 
