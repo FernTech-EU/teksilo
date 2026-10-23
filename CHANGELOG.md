@@ -41,6 +41,13 @@ by crate for clarity, not because crates version independently.
 - **Breaking.** `MenuItemState` has a new variant, so an exhaustive `match`
   on it needs a `ReflectRadio` arm.
 
+#### Platform
+
+- **Breaking.** `NativeMenuNode::Item` and `MenuItemDelta` have a `visible`
+  field: a native menu item is installed hidden rather than left out, and
+  shown or hidden in place. Code that builds an item, or a delta without
+  `..Default::default()`, has to set it.
+
 ### Fixed
 
 #### Widgets
@@ -58,6 +65,9 @@ by crate for clarity, not because crates version independently.
 - **A `Toolbar` toggle action in the overflow menu toggles.** Activating it
   left the state unchanged, and in a debug build opening the menu panicked.
   Its row shows the checkmark and no icon.
+- **A `MenuModel` entry hidden with `visible` reappears in the macOS menu
+  bar when its signal turns true.** It was left out of the native menu, and
+  came back only when something rebuilt the menu.
 
 #### App
 

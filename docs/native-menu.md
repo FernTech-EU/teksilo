@@ -70,7 +70,7 @@ tree of `MenuNode`s with a `version: Signal<u64>`:
 | `.on_activate(\|ctx\| …)` | run a closure (after the intent) |
 | `.shortcut("app.x")` | display + bind the `ShortcutRegistry` chord |
 | `.enabled(prop)` | static or `Signal<bool>`, greys out **reactively** (both surfaces) |
-| `.visible(prop)` | static or `Signal<bool>`, hide reactively in-window (native: omitted at build) |
+| `.visible(prop)` | static or `Signal<bool>`, hides **reactively** (both surfaces) |
 | `.checkable(Signal<bool>)` | two-state check item, activation flips the signal (two-way) |
 | `.checked(Signal<bool>)` | two-state check item, **reflect-only**, the checkmark mirrors the signal but activation does not write it; pair with `.intent`/`.on_activate` |
 | `.tri_checkable(Signal<CheckState>)` | tri-state check item, activation moves it between unchecked and checked |

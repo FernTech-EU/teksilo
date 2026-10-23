@@ -196,6 +196,9 @@ impl NativeMenuBackend for MacOsNativeMenuBackend {
             if let Some(enabled) = delta.enabled {
                 item.setEnabled(enabled);
             }
+            if let Some(visible) = delta.visible {
+                item.setHidden(!visible);
+            }
             if let Some(check) = delta.check {
                 item.setState(control_state(check));
             }
@@ -316,11 +319,13 @@ fn build_submenu(
                 title,
                 key_equiv,
                 enabled,
+                visible,
                 check,
             } => {
                 let item = leaf_item(mtm, title, target);
                 item.setTag(id.raw() as isize);
                 item.setEnabled(*enabled);
+                item.setHidden(!*visible);
                 item.setState(control_state(*check));
                 apply_key_equiv(&item, key_equiv.as_ref());
                 menu.addItem(&item);
@@ -370,6 +375,11 @@ fn leaf_item(
     unsafe {
         item.setTarget(Some(target));
     }
+    // A hidden row's chord falls through to the window, whose shortcut
+    // dispatcher fires it as it would with no native menu, the way it did
+    // when a hidden row was left out of the menu. Set rather than left to
+    // AppKit's default, so it does not depend on the SDK the app links.
+    item.setAllowsKeyEquivalentWhenHidden(false);
     item
 }
 
