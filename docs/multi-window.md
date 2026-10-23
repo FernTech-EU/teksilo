@@ -77,6 +77,72 @@ see "Quitting the application" below.
 
 ---
 
+## The application tree
+
+Code that must run with no window open (an application-level menu's
+actions, a single-instance handler, a quit) lives in the **application
+tree**: a widget tree that belongs to no window. Give it a root with
+`TeksiloAppBuilder::app_root`, which takes the same kind of builder as a
+window's root:
+
+```rust
+TeksiloAppBuilder::new()
+    .quit_policy(QuitPolicy::Explicit)            // live with no window
+    .app_root(|tree| tree.add(AppActions::new()))
+    .run();
+
+impl Widget for AppActions {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        ctx.register_action_global(Action::new("app.new_window").on_invoke(|_, ctx| {
+            ctx.open_window(document_window());
+        }));
+        ctx.register_action_global(Action::new("app.quit").on_invoke(|_, ctx| {
+            ctx.request_quit();
+        }));
+        // Runs once at startup: an app with no initial window opens its
+        // first one here.
+        ctx.run_after_mount(|ctx| {
+            ctx.open_window(document_window());
+        });
+        vec![]
+    }
+    // layout_response: a zero size; the tree is never drawn.
+}
+```
+
+Without `app_root` the tree still exists, with an empty root of its own.
+
+The tree is never painted. Its handlers run with `ctx.window()` `None`:
+everything that names a window by id works (opening, finding and focusing
+one, `close_window_by_id`, `request_quit`), and nothing about "this window"
+does (`close_window` closes nothing). It shares the application's theme,
+locale, text scale, accessibility preferences and app state with the
+windows, and a request it makes for an application-wide change
+(`set_locale`, `set_theme`, `set_text_scale`) applies everywhere. It is
+ticked by the event loop, so its bindings, tweens, idle callbacks and
+`request_wake_at` timers run as a window's do.
+
+It receives:
+
+- `on_external_with_ctx` payloads while no window is open (see the
+  single-instance recipe below);
+- events of a `subscribe_event_with_ctx` subscription registered in it;
+- its own mount actions (`run_after_mount`), at startup and after a rebuild.
+
+What needs a window is not drawn there:
+
+| From the application tree | Happens |
+|---|---|
+| a modal request (`MessageBox`, `present_modal`) | presented in the window used last, or in a window of its own when none is open; content must be `ModalRequest::deferred` |
+| a file dialog | refused with an error: no parent window |
+| a toast | shown in every window |
+| an overlay, a tooltip, a `WebView`, an animated widget | never shown; a debug build says so |
+| `spawn_local_with` | its completion is delivered to windows only, and is lost here; use `spawn_local` and a `Signal` |
+| a shortcut registered there | never fires: keys reach window trees only |
+
+The application tree's actions do not appear in `ShortcutSettings` or a
+command palette, which read the window's registry.
+
 ## `WindowConfig`
 
 The single entry point for creating any window. Uniform whether you

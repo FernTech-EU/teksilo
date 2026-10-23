@@ -42,6 +42,22 @@ by crate for clarity, not because crates version independently.
   and `cancel_quit` abandons the quit. `WindowOps` has matching defaulted
   methods, and `WidgetTree::has_modal_overlay` tells whether a dialog is up
   in a tree.
+- **The application tree, for code that runs with no window open.**
+  `TeksiloAppBuilder::app_root` builds the root of a widget tree that belongs
+  to no window: never drawn, ticked by the event loop, sharing the
+  application's theme, locale, text scale and app state. Its handlers can open
+  windows and quit; its mount actions run at startup, so an application with
+  no initial window can open its first one there. With no window open,
+  `on_external_with_ctx` runs there, and so does a `subscribe_event_with_ctx`
+  subscription registered there. Its dialogs are presented in the window used
+  last, or in a window of their own. `HeadlessApp::app_tree` makes an app root
+  testable. See "The application tree" in the multi-window guide.
+
+#### Core
+
+- **`WidgetTree::next_unpainted_deadline`**, the timers of a tree that is never
+  painted, and `TreeAppContext::ctx_subscription_target`, which tells a
+  context-bearing subscription registered with no window from none at all.
 
 #### Platform
 
