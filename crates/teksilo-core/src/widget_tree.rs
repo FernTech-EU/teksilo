@@ -35,6 +35,8 @@ pub(crate) use focus_impl::FocusRequestMode;
 mod gesture_dispatch_impl;
 #[cfg(test)]
 mod hit_targeting_tests;
+#[cfg(test)]
+mod intent_routing_tests;
 mod layout_impl;
 #[cfg(test)]
 mod live_image_tests;
@@ -252,6 +254,11 @@ pub struct WidgetTree {
     /// intent itself, and the firing shortcut's
     /// `propagate_when_disabled` policy.
     pending_intents: Vec<(WidgetId, crate::intent::Intent, bool)>,
+    /// Intents this tree's drain dispatched and no action took, kept for
+    /// the application layer to offer to another tree; `None` (the
+    /// default) keeps none. See
+    /// [`set_records_unclaimed_intents`](Self::set_records_unclaimed_intents).
+    unclaimed_intents: Option<Vec<crate::intent::Intent>>,
     /// Window-global actions registered via
     /// [`BuildContext::register_action_global`](crate::BuildContext::register_action_global).
     /// Consulted as a fallback at the end of every intent dispatch — *after* the
@@ -1010,6 +1017,7 @@ impl WidgetTree {
                 registry
             },
             pending_intents: Vec::new(),
+            unclaimed_intents: None,
             global_actions: Vec::new(),
             text_surfaces: crate::text_surface::TextSurfaces::new(focused_signal.clone()),
             key_capture: None,
@@ -3713,11 +3721,73 @@ impl WidgetTree {
     /// those too until the queue drains. No ordering guarantee
     /// beyond "first-enqueued is first-dispatched"; the `pop` path
     /// uses `remove(0)` to keep that FIFO behavior.
+    ///
+    /// With [`set_records_unclaimed_intents`](Self::set_records_unclaimed_intents)
+    /// on, an intent no action took is kept for
+    /// [`take_unclaimed_intents`](Self::take_unclaimed_intents), unless a
+    /// shortcut sent it: an unclaimed shortcut already falls through to the
+    /// focused widget as its key (`Ctrl+C` copies in an editor), and acting
+    /// on it in another tree as well would run two things for one chord.
+    /// Shortcuts do not dispatch through this drain anyway; the check
+    /// covers an intent re-sent with the shortcut's source.
     pub(crate) fn drain_pending_intents(&mut self, ops: &mut dyn crate::window::WindowOps) {
         while !self.pending_intents.is_empty() {
             let (source, intent, propagate) = self.pending_intents.remove(0);
-            self.dispatch_intent(source, intent, propagate, &mut *ops);
+            let keep = (self.unclaimed_intents.is_some()
+                && intent.source != crate::telemetry::IntentSource::Shortcut)
+                .then(|| intent.clone());
+            let consumed = self.dispatch_intent(source, intent, propagate, &mut *ops);
+            if !consumed
+                && let (Some(intent), Some(unclaimed)) = (keep, self.unclaimed_intents.as_mut())
+            {
+                unclaimed.push(intent);
+            }
         }
+    }
+
+    /// Keep the intents no action takes, for
+    /// [`take_unclaimed_intents`](Self::take_unclaimed_intents). Off by
+    /// default, so a tree nobody drains keeps nothing; `teksilo-app` turns
+    /// it on for every window's tree and the application tree, and offers
+    /// what one tree leaves to another. Turning it off drops what is kept.
+    pub fn set_records_unclaimed_intents(&mut self, on: bool) {
+        self.unclaimed_intents = on.then(Vec::new);
+    }
+
+    /// Take the intents kept since the last call, oldest first: each was
+    /// sent in this tree, and neither an action on its way to the root nor
+    /// a global one took it. Empty when recording is off.
+    pub fn take_unclaimed_intents(&mut self) -> Vec<crate::intent::Intent> {
+        self.unclaimed_intents
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
+    /// Dispatch an intent another tree sent and left unclaimed, as if sent
+    /// here: from the focused widget to the root, then the global actions;
+    /// from the first root when nothing is focused. Returns whether an
+    /// action took it.
+    ///
+    /// It is not counted again by telemetry, which counted it where it was
+    /// sent, and it is not kept as unclaimed here: an intent is offered to
+    /// one other tree at most. Intents its handlers send are this tree's
+    /// own, dispatched before this returns.
+    pub fn dispatch_routed_intent(
+        &mut self,
+        intent: crate::intent::Intent,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> bool {
+        let anchor = self
+            .focused
+            .filter(|id| self.arena.is_active(*id))
+            .or_else(|| self.arena.roots().first().copied());
+        let Some(anchor) = anchor else {
+            return false;
+        };
+        let consumed = self.dispatch_intent_with(anchor, intent, true, &mut *ops, false);
+        self.drain_pending_intents(ops);
+        consumed
     }
 
     /// Walk `source → root` invoking any [`Action`](crate::action::Action)
@@ -3738,11 +3808,27 @@ impl WidgetTree {
         propagate_when_disabled: bool,
         ops: &mut dyn crate::window::WindowOps,
     ) -> bool {
+        self.dispatch_intent_with(source, intent, propagate_when_disabled, ops, true)
+    }
+
+    /// [`dispatch_intent`](Self::dispatch_intent), telemetry tap optional:
+    /// an intent routed from another tree was counted there.
+    fn dispatch_intent_with(
+        &mut self,
+        source: WidgetId,
+        intent: crate::intent::Intent,
+        propagate_when_disabled: bool,
+        ops: &mut dyn crate::window::WindowOps,
+        tap: bool,
+    ) -> bool {
         // Telemetry tap. Single insertion point catches every intent
-        // — shortcut-driven, programmatic via `send_intent`, etc. —
-        // because every dispatch funnels through here. A no-op when
-        // no `TelemetryContext` is registered.
-        self.tap_intent_dispatched(&intent);
+        // (shortcut-driven, programmatic via `send_intent`, etc.)
+        // because every dispatch funnels through here, once, in the
+        // tree that sent it. A no-op when no `TelemetryContext` is
+        // registered.
+        if tap {
+            self.tap_intent_dispatched(&intent);
+        }
 
         // Pre-compute the source → root chain so the walk doesn't
         // need to hold any arena borrow while invoking handlers.
