@@ -48,18 +48,23 @@ pub enum QuitPolicy {
     LastWindowClosed,
     /// Closing the last window does not quit: the application keeps running
     /// with no window open, the way a background service or a tray
-    /// application does. It also lets the application start with no window
-    /// at all ([`TeksiloAppBuilder::initial_window`] is then optional).
+    /// application does, until it asks to with
+    /// [`EventContext::request_quit`](teksilo_core::widget::EventContext::request_quit)
+    /// or [`EventContext::quit`](teksilo_core::widget::EventContext::quit).
+    /// It also lets the application start with no window at all
+    /// ([`TeksiloAppBuilder::initial_window`] is then optional).
     Explicit,
 }
 
 impl QuitPolicy {
-    /// Whether the event loop should end, with `open_windows` windows open.
-    fn exits_with(self, open_windows: usize) -> bool {
-        match self {
-            QuitPolicy::LastWindowClosed => open_windows == 0,
-            QuitPolicy::Explicit => false,
-        }
+    /// Whether the event loop should end, with `open_windows` windows open
+    /// and `quit_completed` telling whether a quit request ran to its end.
+    fn exits_with(self, open_windows: usize, quit_completed: bool) -> bool {
+        quit_completed
+            || match self {
+                QuitPolicy::LastWindowClosed => open_windows == 0,
+                QuitPolicy::Explicit => false,
+            }
     }
 
     /// Why an application with this policy cannot start without an initial
@@ -993,6 +998,7 @@ impl TeksiloAppHandler {
 
     fn process_pending(&mut self, event_loop: &ActiveEventLoop) {
         self.wm.process_pending(event_loop);
+        self.wm.advance_quit(event_loop);
     }
 
     fn process_modal_requests(&mut self, event_loop: &ActiveEventLoop) -> bool {
@@ -1100,7 +1106,10 @@ impl TeksiloAppHandler {
     }
 
     fn maybe_exit(&self, event_loop: &ActiveEventLoop) {
-        if self.quit_policy.exits_with(self.wm.window_count()) {
+        if self
+            .quit_policy
+            .exits_with(self.wm.window_count(), self.wm.quit_completed())
+        {
             event_loop.exit();
         }
     }
@@ -6796,15 +6805,23 @@ mod quit_policy_tests {
     fn the_default_quits_with_the_last_window_and_not_before() {
         let policy = QuitPolicy::default();
         assert_eq!(policy, QuitPolicy::LastWindowClosed);
-        assert!(policy.exits_with(0));
-        assert!(!policy.exits_with(1));
-        assert!(!policy.exits_with(3));
+        assert!(policy.exits_with(0, false));
+        assert!(!policy.exits_with(1, false));
+        assert!(!policy.exits_with(3, false));
     }
 
     #[test]
     fn explicit_never_quits_for_want_of_a_window() {
         for open in [0, 1, 3] {
-            assert!(!QuitPolicy::Explicit.exits_with(open));
+            assert!(!QuitPolicy::Explicit.exits_with(open, false));
+        }
+    }
+
+    /// A completed quit ends the loop under every policy.
+    #[test]
+    fn a_completed_quit_ends_the_loop_under_every_policy() {
+        for policy in [QuitPolicy::LastWindowClosed, QuitPolicy::Explicit] {
+            assert!(policy.exits_with(0, true));
         }
     }
 

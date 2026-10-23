@@ -577,6 +577,14 @@ pub struct WindowManager {
     /// The order in which the open windows were opened or focused; see
     /// [`most_recent_window`](Self::most_recent_window).
     recency: crate::window_recency::WindowRecency,
+    /// The quit under way, if any; see [`crate::quit`].
+    quit: Option<crate::quit::PendingQuit>,
+    /// The last [`PendingQuit::generation`](crate::quit::PendingQuit) handed
+    /// out.
+    quit_generation: u64,
+    /// A quit ran to completion: the application ends whatever its quit
+    /// policy.
+    quit_completed: bool,
 }
 
 // Doc comments on **every** method here are enforced, not hoped for: a new item
@@ -624,6 +632,9 @@ impl WindowManager {
             os_theme_watch: None,
             start_os_theme_watch: start_platform_desktop_watch,
             recency: crate::window_recency::WindowRecency::default(),
+            quit: None,
+            quit_generation: 0,
+            quit_completed: false,
         }
     }
 
@@ -1747,6 +1758,7 @@ impl WindowManager {
     /// [`on_close_requested`](teksilo_core::WindowConfig::on_close_requested)
     /// can veto, use [`request_close`](Self::request_close).
     pub fn queue_close(&mut self, teksilo_id: TeksiloWindowId) {
+        self.note_close_request(teksilo_id);
         self.pending_closes.push(PendingClose {
             id: teksilo_id,
             force: true,
@@ -1764,6 +1776,7 @@ impl WindowManager {
     /// close button, a custom-chrome close button, and
     /// [`EventContext::close_window`](teksilo_core::widget::EventContext::close_window).
     pub fn request_close(&mut self, teksilo_id: TeksiloWindowId) {
+        self.note_close_request(teksilo_id);
         self.pending_closes.push(PendingClose {
             id: teksilo_id,
             force: false,
@@ -1880,6 +1893,154 @@ impl WindowManager {
             // `EventContext::close_window_forced`, which re-queues this
             // window as a forced close on a later tick.
         }
+    }
+
+    /// Ask the application to quit; see
+    /// [`EventContext::request_quit`](teksilo_core::widget::EventContext::request_quit).
+    /// A guarded request while a quit is under way
+    /// changes nothing; a forced one makes the quit under way forced.
+    /// Carried out by [`advance_quit`](Self::advance_quit).
+    pub fn request_quit(&mut self, forced: bool) {
+        match &mut self.quit {
+            Some(quit) if forced && !quit.skip_guards => {
+                self.quit_generation += 1;
+                quit.skip_guards = true;
+                quit.awaiting = None;
+                quit.generation = self.quit_generation;
+            }
+            Some(_) => {}
+            None => {
+                self.quit_generation += 1;
+                self.quit = Some(crate::quit::PendingQuit {
+                    skip_guards: forced,
+                    awaiting: None,
+                    generation: self.quit_generation,
+                });
+            }
+        }
+    }
+
+    /// Whether a quit is under way: requested, and neither completed nor
+    /// abandoned.
+    pub fn quit_in_progress(&self) -> bool {
+        self.quit.is_some()
+    }
+
+    /// Abandon the quit under way, if any.
+    pub fn cancel_quit(&mut self) {
+        self.quit = None;
+    }
+
+    /// Whether a quit ran to completion, closing every window. The event
+    /// loop ends then, whatever the application's
+    /// [`QuitPolicy`](crate::QuitPolicy).
+    pub fn quit_completed(&self) -> bool {
+        self.quit_completed
+    }
+
+    /// A close was requested for `teksilo_id`: abandon a quit that awaits
+    /// another window. See [`crate::quit::close_abandons`].
+    fn note_close_request(&mut self, teksilo_id: TeksiloWindowId) {
+        if let Some(quit) = self.quit
+            && crate::quit::close_abandons(quit.awaiting, teksilo_id, |w| self.modal_parent_of(w))
+        {
+            self.quit = None;
+        }
+    }
+
+    /// The window `teksilo_id` is a modal child of, if any. Read from the
+    /// blocking map rather than from the window, which a handler may have
+    /// taken out of the map while it runs.
+    fn modal_parent_of(&self, teksilo_id: TeksiloWindowId) -> Option<TeksiloWindowId> {
+        self.modal_blocked
+            .iter()
+            .find(|(_, child)| **child == teksilo_id)
+            .map(|(parent, _)| *parent)
+    }
+
+    /// What the quit sees of the open windows; see
+    /// [`QuitWindow`](crate::quit::QuitWindow).
+    fn quit_windows(&self) -> Vec<crate::quit::QuitWindow> {
+        self.windows
+            .values()
+            .map(|managed| {
+                let id = managed.teksilo_id;
+                let mut modal_depth = 0;
+                let mut parent = self.modal_parent_of(id);
+                while let Some(up) = parent
+                    && modal_depth < 64
+                {
+                    modal_depth += 1;
+                    parent = self.modal_parent_of(up);
+                }
+                crate::quit::QuitWindow {
+                    id,
+                    modal_depth,
+                    recency: self.recency.stamp(id).unwrap_or(0),
+                    dialog_open: self.modal_blocked.contains_key(&id)
+                        || managed.tree.has_modal_overlay()
+                        || managed.tree.has_pending_modal_requests(),
+                }
+            })
+            .collect()
+    }
+
+    /// Carry the quit under way as far as it goes now: close the windows
+    /// that agree, and stop at one whose guard vetoes, or at its dialog.
+    /// Runs after every [`process_pending`](Self::process_pending), outside
+    /// any dispatch, so every window is in the map.
+    pub fn advance_quit(&mut self, target: &winit::event_loop::ActiveEventLoop) {
+        use crate::quit::QuitStep;
+
+        // Each pass closes a window or stops; the bound only guards against
+        // guards that open a window for every one they close.
+        for _ in 0..4096 {
+            let Some(quit) = self.quit else {
+                return;
+            };
+            match crate::quit::step(&quit, &self.quit_windows()) {
+                QuitStep::Complete => {
+                    self.quit = None;
+                    self.quit_completed = true;
+                    return;
+                }
+                QuitStep::Abandon => {
+                    self.quit = None;
+                    return;
+                }
+                QuitStep::Wait => return,
+                QuitStep::Ask(id) => {
+                    if let Some(quit) = &mut self.quit {
+                        quit.awaiting = None;
+                    }
+                    let closes = quit.skip_guards || self.evaluate_close_guard(id, target);
+                    if closes {
+                        self.close_window(id);
+                    }
+                    // The guard may have changed the quit: cancelled it,
+                    // or made it forced. Only the quit that asked waits on
+                    // a veto.
+                    match &mut self.quit {
+                        Some(now) if now.generation == quit.generation && !closes => {
+                            now.awaiting = Some(id);
+                            // A dialog the guard queued is presented in the
+                            // next `post_event`, which a frame brings.
+                            if let Some(&winit_id) = self.teksilo_to_winit.get(&id)
+                                && let Some(managed) = self.windows.get(&winit_id)
+                            {
+                                managed.request_redraw();
+                            }
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "teksilo-app: a quit was still opening windows after 4096 steps; it goes on next turn"
+        );
     }
 
     /// Run the close guard for `teksilo_id` (if it declared one) and
@@ -2825,6 +2986,18 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
         } else {
             cb(None);
         }
+    }
+
+    fn request_quit(&mut self, forced: bool) {
+        self.wm.request_quit(forced);
+    }
+
+    fn quit_in_progress(&self) -> bool {
+        self.wm.quit_in_progress()
+    }
+
+    fn cancel_quit(&mut self) {
+        self.wm.cancel_quit();
     }
 
     fn close_window_by_id(&mut self, id: TeksiloWindowId) {

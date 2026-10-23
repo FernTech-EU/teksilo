@@ -71,7 +71,9 @@ Notes:
 | `QuitPolicy::Explicit` | the app keeps running with no window | optional |
 
 `Explicit` is for an application whose life is not tied to its windows: a
-background service, or an application that lives in the system tray.
+background service, or an application that lives in the system tray. Under
+either policy, `ctx.request_quit()` and `ctx.quit()` end the application;
+see "Quitting the application" below.
 
 ---
 
@@ -612,13 +614,64 @@ short-circuits to a veto and fires `on_close_blocked`; a `true` signal
 | `ctx.close_window_by_id(id)` | No bypasses (explicit programmatic close) |
 | `WindowState::close()` | No bypasses |
 | Modal-dismissal / framework teardown | No bypasses |
+| `ctx.request_quit()` | Yes, each window in turn (below) |
+| `ctx.quit()` | No bypasses |
 
 A window with no guard configured always closes immediately, the guard
 machinery only runs when `on_close_requested` or `can_close` is set.
 
+### Quitting the application
+
+`ctx.request_quit()` is what a Quit menu item calls. It asks every open
+window in turn, as if the user closed it, and the application ends once no
+window is left, whatever its `QuitPolicy`. Modal windows are asked before
+the windows they block, then the others from the most recently used.
+
+A guard that vetoes stops the quit at its window, and the veto-then-reissue
+pattern above carries on from there:
+
+- while the guard's dialog is up (a modal overlay, or a native modal
+  window), the quit waits;
+- when the window then closes, by `close_window_forced()` or by a
+  `close_window()` the guard now lets through, the quit goes on with the
+  next window;
+- when the window is left open with no dialog (the guard vetoed without
+  asking, or the dialog was cancelled), the quit is abandoned. So is it
+  when another window is closed meanwhile, or by `ctx.cancel_quit()`.
+
+A guard reads `ctx.quit_in_progress()` to word its question for the whole
+application, and a dialog's "Quit anyway" answer calls `ctx.quit()`, which
+closes every window without asking. A dialog that closes before its window
+does, to save in the background and close the window afterwards, abandons
+the quit; call `ctx.request_quit()` again once the save is done. Asking for
+a guarded quit while one is under way changes nothing.
+
+```rust
+// The guard of the close-confirmation demo, quit-aware:
+.on_close_requested(move |ctx| {
+    if !dirty.get() {
+        return CloseResponse::Close;
+    }
+    let question = if ctx.quit_in_progress() {
+        lit!("Quit with unsaved changes?")
+    } else {
+        lit!("Close window?")
+    };
+    ctx.present_message_box(
+        MessageBox::question(question)
+            .buttons(MessageBoxButtons::SaveDiscardCancel)
+            .on_result(|result, ctx| match result.button {
+                StandardButton::Save | StandardButton::Discard => ctx.close_window_forced(),
+                _ => ctx.cancel_quit(),
+            }),
+    );
+    CloseResponse::Veto
+})
+```
+
 Working demo: `cargo run -p close-confirmation` (main window: full
-`on_close_requested` + Save/Discard/Cancel; second window: the
-`can_close` sugar).
+`on_close_requested` + Save/Discard/Cancel, and a Quit button; second
+window: the `can_close` sugar).
 
 ---
 
@@ -661,9 +714,11 @@ Working demo: `cargo run -p close-confirmation` (main window: full
 , both thread ops through, so state-change-triggered handlers
    (data-driven rebuilds, delayed overlays, drag-tick) can open
    windows too.
-6. At the end of `post_event` and of `about_to_wait`, the loop ends if
-   the quit policy says so: under `QuitPolicy::LastWindowClosed`, once no
-   window is open.
+6. After each `process_pending`, a quit under way takes its next steps
+   (`WindowManager::advance_quit`). At the end of `post_event` and of
+   `about_to_wait`, the loop ends once a quit has completed, or when the
+   quit policy says so: under `QuitPolicy::LastWindowClosed`, once no window
+   is open.
 
 ---
 

@@ -262,6 +262,14 @@ impl WidgetTree {
         !self.pending_modal_requests.is_empty()
     }
 
+    /// Whether a modal overlay is open in this tree: a dialog presented
+    /// in the window, or a command palette. A modal request still queued
+    /// ([`has_pending_modal_requests`](Self::has_pending_modal_requests))
+    /// does not count until it is presented.
+    pub fn has_modal_overlay(&self) -> bool {
+        self.overlay_manager.topmost_modal().is_some()
+    }
+
     pub fn has_pending_modal_dismissal(&self) -> bool {
         self.pending_modal_dismissal
     }
