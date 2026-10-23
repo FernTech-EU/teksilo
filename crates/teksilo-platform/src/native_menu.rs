@@ -160,6 +160,9 @@ pub enum NativeMenuNode {
         key_equiv: Option<NativeKeyEquivalent>,
         /// Whether the item is enabled.
         enabled: bool,
+        /// Whether the item is shown. A hidden item keeps its place, so a
+        /// [`MenuItemDelta`] can show it again without rebuilding the menu.
+        visible: bool,
         /// Check-mark state.
         check: NativeCheck,
     },
@@ -221,6 +224,8 @@ pub struct NativeMenuSnapshot {
 pub struct MenuItemDelta {
     /// New enabled state.
     pub enabled: Option<bool>,
+    /// New shown state.
+    pub visible: Option<bool>,
     /// New check state.
     pub check: Option<NativeCheck>,
     /// New display title.
@@ -575,6 +580,7 @@ mod tests {
                     title: "New".into(),
                     key_equiv: None,
                     enabled: true,
+                    visible: true,
                     check: NativeCheck::None,
                 }],
             }],

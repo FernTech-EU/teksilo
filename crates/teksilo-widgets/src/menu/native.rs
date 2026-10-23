@@ -6,8 +6,8 @@
 //!
 //! Resolves the model into a plain [`NativeMenuSnapshot`] (titles localized +
 //! mnemonic-stripped, shortcuts resolved to key equivalents), installs it for
-//! the current window, and wires reactive `Signal`s so a toggled check or a
-//! disabled item updates the native item in place.
+//! the current window, and wires reactive `Signal`s so a toggled check, a
+//! disabled item or a hidden one updates the native item in place.
 
 use std::collections::HashMap;
 
@@ -117,7 +117,8 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
 
     handle.set_window_menu(window_id, snapshot, activations, poster);
 
-    // Wire reactive per-item updates (title / enabled / check / radio).
+    // Wire reactive per-item updates (title / enabled / visible / check /
+    // radio).
     let mut observers = Vec::new();
     for item in reactive {
         // The title first, and by the same delta mechanism as the rest: a menu
@@ -146,6 +147,19 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
                     id,
                     MenuItemDelta {
                         enabled: Some(*v),
+                        ..Default::default()
+                    },
+                );
+            });
+        }
+        if let Prop::Bound(sig) = item.visible {
+            let h = handle.clone();
+            let id = item.id;
+            push_observer(&mut observers, &sig, move |v| {
+                h.update_item(
+                    id,
+                    MenuItemDelta {
+                        visible: Some(*v),
                         ..Default::default()
                     },
                 );
@@ -228,6 +242,7 @@ fn push_observer<T: 'static>(
 struct ReactiveItem {
     id: MenuItemId,
     enabled: Prop<bool>,
+    visible: Prop<bool>,
     state: MenuItemState,
     /// The entry's label, kept so a title that depends on application state —
     /// "Undo renaming «Chapter 3»" — reaches the native bar too. Almost every
@@ -256,10 +271,8 @@ fn resolve_node(
                 .filter_map(|n| resolve_node(n, ctx, activations, reactive))
                 .collect(),
         }),
-        // A currently-hidden item is omitted from the native snapshot. (It
-        // reappears on the next menu rebuild; for fully-dynamic native menus use
-        // `MenuModel::remove` / `push_item`.)
-        MenuNode::Item(entry) if !entry.visible.get() => None,
+        // A hidden item is installed hidden rather than left out, so its
+        // `visible` signal can show it again in place.
         MenuNode::Item(entry) => {
             let check = match &entry.state {
                 MenuItemState::Plain => NativeCheck::None,
@@ -289,6 +302,7 @@ fn resolve_node(
             reactive.push(ReactiveItem {
                 id: entry.id,
                 enabled: entry.enabled.clone(),
+                visible: entry.visible.clone(),
                 state: entry.state.clone(),
                 title: entry.title.clone(),
             });
@@ -298,6 +312,7 @@ fn resolve_node(
                 title: strip_title(&entry.title.resolve_now()),
                 key_equiv,
                 enabled: entry.enabled.get(),
+                visible: entry.visible.get(),
                 check,
             })
         }
@@ -503,6 +518,159 @@ mod tests {
             .key_equiv
             .as_ref()
             .map(|k| (k.key.clone(), k.command, k.shift))
+    }
+
+    /// Installs a model into the native menu from its `build`, as
+    /// `MenuBar` does on macOS, and keeps the binding alive. Calling
+    /// [`install`] directly is what lets this run on every OS: `MenuBar` only
+    /// calls it on macOS.
+    struct Installer {
+        model: MenuModel,
+        binding: std::cell::RefCell<Option<NativeMenuBinding>>,
+    }
+
+    impl std::fmt::Debug for Installer {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("Installer")
+        }
+    }
+
+    impl teksilo_core::widget::Widget for Installer {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<teksilo_core::widget_id::WidgetId> {
+            *self.binding.borrow_mut() = install(&self.model, ctx);
+            Vec::new()
+        }
+
+        fn layout_response(
+            &self,
+            proposal: teksilo_canvas::SizeProposal,
+            _ctx: &teksilo_core::widget::LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+
+    /// Install `model` for window 1 through a recording backend, and return
+    /// the backend with the tree that keeps the installation alive.
+    fn install_recorded(
+        model: MenuModel,
+    ) -> (
+        teksilo_platform::native_menu::MemoryNativeMenuBackend,
+        teksilo_core::widget_tree::WidgetTree,
+    ) {
+        use std::any::{Any, TypeId};
+        use std::sync::Arc;
+        use teksilo_core::AppEventPoster;
+        use teksilo_core::window::state::WindowStateInit;
+        use teksilo_core::window::{TeksiloWindowId, WindowPlacement, WindowState};
+
+        struct NullPoster;
+        impl AppEventPoster for NullPoster {
+            fn post_subscription_event(
+                &self,
+                _: teksilo_core::SubscriptionId,
+                _: Box<dyn Any + Send>,
+            ) {
+            }
+            fn post_external(&self, _: Box<dyn Any + Send>) {}
+        }
+
+        let backend = teksilo_platform::native_menu::MemoryNativeMenuBackend::new();
+        let mut app_state: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
+        app_state.insert(
+            TypeId::of::<NativeMenuHandle>(),
+            Box::new(NativeMenuHandle::new(backend.clone())),
+        );
+        let poster: Arc<dyn AppEventPoster> = Arc::new(NullPoster);
+        let mut tree = teksilo_core::widget_tree::WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light());
+        tree.set_window_state(WindowState::new(WindowStateInit {
+            id: TeksiloWindowId::new(1),
+            string_id: None,
+            placement: WindowPlacement::Floating,
+            title: String::new(),
+            size: (800, 600),
+            position: (0, 0),
+            focused: true,
+            resizable: true,
+            always_on_top: false,
+        }));
+        tree.set_app_context(std::rc::Rc::new(
+            teksilo_core::event_source::TreeAppContext::empty()
+                .with_app_state(app_state)
+                .with_poster(poster),
+        ));
+        tree.add(Installer {
+            model,
+            binding: Default::default(),
+        });
+        tree.layout(teksilo_canvas::SizeProposal::exact(800.0, 600.0));
+        (backend, tree)
+    }
+
+    /// The first menu named `menu`'s items, as `(id, title, visible)`.
+    fn items_of(snapshot: &NativeMenuSnapshot, menu: &str) -> Vec<(MenuItemId, String, bool)> {
+        snapshot
+            .roots
+            .iter()
+            .find_map(|node| match node {
+                NativeMenuNode::Submenu { title, children } if title == menu => Some(children),
+                _ => None,
+            })
+            .expect("the menu is in the snapshot")
+            .iter()
+            .filter_map(|node| match node {
+                NativeMenuNode::Item {
+                    id, title, visible, ..
+                } => Some((*id, title.clone(), *visible)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A hidden row is installed hidden, in its place, and its signal shows
+    /// and hides it in the native menu with no rebuild. It used to be left
+    /// out of the native menu and come back only when something rebuilt it.
+    #[test]
+    fn a_hidden_row_is_installed_hidden_and_follows_its_signal() {
+        use crate::menu::MenuEntry;
+        use teksilo_i18n::lit;
+
+        let shown = Signal::new(false);
+        let model = MenuModel::new().menu(lit!("File"), |m| {
+            m.item(MenuEntry::new(lit!("New")))
+                .item(MenuEntry::new(lit!("Recent")).visible(shown.clone()))
+                .item(MenuEntry::new(lit!("Never")).visible(false))
+        });
+        let (backend, _tree) = install_recorded(model);
+
+        let snapshot = backend
+            .menu_for(teksilo_core::window::TeksiloWindowId::new(1))
+            .expect("the menu was installed");
+        let items = items_of(&snapshot, "File");
+        let titles: Vec<(&str, bool)> = items
+            .iter()
+            .map(|(_, title, visible)| (title.as_str(), *visible))
+            .collect();
+        assert_eq!(
+            titles,
+            [("New", true), ("Recent", false), ("Never", false)],
+            "hidden rows keep their place, hidden"
+        );
+        let recent = items[1].0;
+
+        let visibility = |backend: &teksilo_platform::native_menu::MemoryNativeMenuBackend| {
+            backend
+                .deltas()
+                .into_iter()
+                .filter_map(|(id, delta)| delta.visible.map(|visible| (id, visible)))
+                .collect::<Vec<_>>()
+        };
+        assert!(visibility(&backend).is_empty(), "nothing changed yet");
+        shown.set(true);
+        assert_eq!(visibility(&backend), [(recent, true)]);
+        shown.set(false);
+        assert_eq!(visibility(&backend), [(recent, true), (recent, false)]);
     }
 
     /// Settings has no `terminate:`-style fallback: no platform opens an

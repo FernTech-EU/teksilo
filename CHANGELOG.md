@@ -41,6 +41,13 @@ by crate for clarity, not because crates version independently.
 - **Breaking.** `MenuItemState` has a new variant, so an exhaustive `match`
   on it needs a `ReflectRadio` arm.
 
+#### Platform
+
+- **Breaking.** `NativeMenuNode::Item` and `MenuItemDelta` have a `visible`
+  field: a native menu item is installed hidden rather than left out, and
+  shown or hidden in place. Code that builds an item, or a delta without
+  `..Default::default()`, has to set it.
+
 ### Fixed
 
 #### Widgets
@@ -72,6 +79,9 @@ by crate for clarity, not because crates version independently.
 - **A `ToolBox` item follows its `ToolBoxItem::enabled` signal.** An item
   kept the state its signal had when the `ToolBox` was built, for clicks,
   arrow keys and the actions offered to assistive technology.
+- **A `MenuModel` entry hidden with `visible` reappears in the macOS menu
+  bar when its signal turns true.** It was left out of the native menu, and
+  came back only when something rebuilt the menu.
 
 #### Core
 
