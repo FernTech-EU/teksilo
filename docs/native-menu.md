@@ -73,8 +73,15 @@ tree of `MenuNode`s with a `version: Signal<u64>`:
 | `.visible(prop)` | static or `Signal<bool>`, hide reactively in-window (native: omitted at build) |
 | `.checkable(Signal<bool>)` | two-state check item, activation flips the signal (two-way) |
 | `.checked(Signal<bool>)` | two-state check item, **reflect-only**, the checkmark mirrors the signal but activation does not write it; pair with `.intent`/`.on_activate` |
-| `.tri_checkable(Signal<CheckState>)` | tri-state check item |
-| `.radio(value, Signal<usize>)` | radio item within a group |
+| `.tri_checkable(Signal<CheckState>)` | tri-state check item, activation moves it between unchecked and checked |
+| `.radio(value, Signal<usize>)` | radio item within a group, activation writes `value` (two-way) |
+| `.reflect_radio(value, Signal<usize>)` | radio item, **reflect-only**, the dot mirrors the signal but activation does not write it; pair with `.intent`/`.on_activate` |
+
+A two-way item writes its signal when chosen, in the window and in the native
+bar alike, before its `.on_activate` runs; the intent is dispatched after both.
+Use a reflect-only item when the state belongs to something else that changes
+it, a model or a setter that only acts on a real change: a two-way item would
+write the signal first and leave that owner nothing to do.
 
 Each `MenuEntry` is assigned a process-unique
 [`MenuItemId`](../crates/teksilo-core/src/menu_item_id.rs), the token the native
@@ -114,8 +121,8 @@ MenuEntry::new(lit!("&Save")).intent("app.save").enabled(can_save.clone());
 can_save.set(true);     // greys in/out live, in-window AND native
 ```
 
-`enabled` / `checkable` / `tri_checkable` / `radio` / `visible` are all
-signal-driven and update without a rebuild (the native path observes the signal
+`enabled` / `checkable` / `checked` / `tri_checkable` / `radio` /
+`reflect_radio` / `visible` are all signal-driven and update without a rebuild (the native path observes the signal
 and calls `update_item`; the in-window path binds it directly).
 
 A **derived** signal works here too, `enabled(unsaved.and(&backup_mode.not()))`

@@ -207,10 +207,10 @@ fn distribute(space: f32, visible: &[usize], natural: &[f32], sizing: SegmentSiz
 /// props, which `MenuList` already honours in both layout and keyboard
 /// navigation. This is `Toolbar`'s overflow-menu pattern.
 ///
-/// Rows are `MenuItem::radio` bound to the control's private index
-/// mirror, which is what gives them a real `Role::MenuItemRadio` and
-/// automatic `push_to_radio_group` "N of M" from `MenuList` — no
-/// `MenuItem` changes needed.
+/// Rows are reflect-only `MenuItem` radios over the control's private
+/// index mirror, which is what gives them a real `Role::MenuItemRadio` and
+/// automatic `push_to_radio_group` "N of M" from `MenuList`, while leaving
+/// every write of the index to `select`.
 pub(crate) fn build_overflow_trigger(
     ctx: &mut BuildContext,
     segments: &[Segment],
@@ -231,13 +231,13 @@ pub(crate) fn build_overflow_trigger(
     let mut menu = MenuList::new();
     for (live_index, &seg_index) in live.iter().enumerate() {
         let segment = &segments[seg_index];
-        // `radio` gives the row a real `Role::MenuItemRadio` and lets
-        // `MenuList` wire `push_to_radio_group` automatically; the
-        // activation handler routes the same change through the control's
-        // funnel so `on_change` fires with an `EventContext` — something
-        // the radio binding alone cannot provide.
+        // The row only reflects the index; the activation handler writes it,
+        // through the control's funnel, so `on_change` fires with an
+        // `EventContext`. A two-way `radio` would write the index first, and
+        // the funnel, finding it already at its target, would return without
+        // calling `on_change`.
         let mut item = MenuItem::new(segment.label.clone())
-            .radio(live_index, index_mirror.clone())
+            .reflect_radio(live_index, index_mirror.clone())
             .enabled(not(&segment.disabled))
             .on_activate_fn({
                 let select = select.clone();

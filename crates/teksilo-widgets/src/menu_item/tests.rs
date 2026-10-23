@@ -4,6 +4,7 @@
 //! Tests for [`MenuItem`].
 use super::*;
 use crate::menu_list::MenuList;
+use std::cell::RefCell;
 use teksilo_core::accesskit::Role;
 use teksilo_core::event::Modifiers;
 use teksilo_core::widget_tree::WidgetTree;
@@ -570,6 +571,93 @@ fn radio_external_signal_change_reflects_in_at() {
     let _ = list_id;
     assert!(!t.accessibility_node(light_id).is_toggled());
     assert!(t.accessibility_node(dark_id).is_toggled());
+}
+
+// --- Reflect-only radio ---
+
+/// Two reflect-only radios over `sel`, whose activations are recorded.
+fn reflect_radio_pair(sel: &Signal<usize>) -> (WidgetTree, WidgetId, Rc<RefCell<Vec<usize>>>) {
+    let fired: Rc<RefCell<Vec<usize>>> = Rc::new(RefCell::new(Vec::new()));
+    let row = |label: &'static str, value: usize| {
+        let fired = fired.clone();
+        MenuItem::new(lit!(label))
+            .reflect_radio(value, sel.clone())
+            .on_activate_fn(move |_| fired.borrow_mut().push(value))
+    };
+    let mut t = tree();
+    let list_id = t.add(MenuList::new().item(row("Light", 0)).item(row("Dark", 1)));
+    layout(&mut t);
+    (t, list_id, fired)
+}
+
+#[test]
+fn reflect_radio_dot_and_at_state_follow_the_signal() {
+    let sel = Signal::new(0_usize);
+    let (t, _list, _fired) = reflect_radio_pair(&sel);
+    let light = t.find_by_label("Light").expect("Light exists");
+    let dark = t.find_by_label("Dark").expect("Dark exists");
+    assert_eq!(t.accessibility_node(dark).role(), Role::MenuItemRadio);
+    assert!(t.accessibility_node(light).is_toggled());
+    assert!(!t.accessibility_node(dark).is_toggled());
+
+    sel.set(1);
+    assert!(!t.accessibility_node(light).is_toggled());
+    assert!(t.accessibility_node(dark).is_toggled());
+}
+
+#[test]
+fn reflect_radio_click_runs_on_activate_without_writing_the_signal() {
+    let sel = Signal::new(0_usize);
+    let (mut t, _list, fired) = reflect_radio_pair(&sel);
+    let dark = t.find_by_label("Dark").expect("Dark exists");
+    t.click(dark);
+    assert_eq!(
+        *fired.borrow(),
+        vec![1],
+        "the click reaches on_activate once"
+    );
+    assert_eq!(
+        sel.get(),
+        0,
+        "reflect_radio must not write the bound signal"
+    );
+}
+
+#[test]
+fn reflect_radio_enter_runs_on_activate_without_writing_the_signal() {
+    let sel = Signal::new(0_usize);
+    let (mut t, list, fired) = reflect_radio_pair(&sel);
+    t.focus(list);
+    t.press_key(Key::ArrowDown, Modifiers::NONE);
+    t.press_key(Key::ArrowDown, Modifiers::NONE);
+    t.press_key(Key::Enter, Modifiers::NONE);
+    assert_eq!(*fired.borrow(), vec![1], "Enter reaches on_activate once");
+    assert_eq!(
+        sel.get(),
+        0,
+        "reflect_radio must not write the bound signal"
+    );
+}
+
+#[test]
+fn reflect_radios_sharing_a_signal_form_one_radio_group() {
+    let sel = Signal::new(0_usize);
+    let (mut t, _list, _fired) = reflect_radio_pair(&sel);
+    let members: std::collections::BTreeSet<_> = ["Light", "Dark"]
+        .into_iter()
+        .map(|label| {
+            teksilo_core::accessibility::widget_id_to_node_id(
+                t.find_by_label(label).expect("row exists"),
+            )
+        })
+        .collect();
+    let update = t.sync_accessibility();
+    for (id, node) in &update.nodes {
+        if members.contains(id) {
+            let group: std::collections::BTreeSet<_> = node.radio_group().iter().copied().collect();
+            assert_eq!(group, members, "{id:?} announces both rows as its group");
+        }
+    }
 }
 
 // --- Reactive role state ---

@@ -362,25 +362,21 @@ impl ToolbarAction {
                 .enabled(self.enabled.clone())
                 .icon((self.icon)());
         }
-        let mut mi = MenuItem::new(self.label.clone())
-            .enabled(self.enabled.clone())
-            .icon((self.icon)());
+        let mi = MenuItem::new(self.label.clone()).enabled(self.enabled.clone());
+        // A checkable row's leading slot holds its checkmark, which `MenuItem`
+        // does not share with an icon. The row also flips `toggle` itself,
+        // before the action runs, so `on_activate` reads the new value as it
+        // does inline (`IconButton::toggle`); flipping it here as well would
+        // undo the click.
+        let mi = match self.toggle {
+            Some(ref toggle) => mi.checked(toggle.clone()),
+            None => mi.icon((self.icon)()),
+        };
         let act = self.on_activate.clone();
-        if let Some(ref toggle) = self.toggle {
-            mi = mi.checked(toggle.clone());
-            let toggle = toggle.clone();
-            mi = mi.on_activate_fn(move |ctx| {
-                toggle.set(!toggle.get());
-                act(ctx);
-                ctx.dismiss_self_overlay_chain();
-            });
-        } else {
-            mi = mi.on_activate_fn(move |ctx| {
-                act(ctx);
-                ctx.dismiss_self_overlay_chain();
-            });
-        }
-        mi
+        mi.on_activate_fn(move |ctx| {
+            act(ctx);
+            ctx.dismiss_self_overlay_chain();
+        })
     }
 }
 

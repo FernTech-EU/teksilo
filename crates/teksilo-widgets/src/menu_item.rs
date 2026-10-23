@@ -19,6 +19,11 @@
 //! | `.check_state(signal)` | `Role::MenuItemCheckBox` | check / dash / blank |
 //! | `.reflect_checked(signal)` | `Role::MenuItemCheckBox` | checkmark (read-only) |
 //! | `.radio(value, selected)` | `Role::MenuItemRadio` | filled dot / blank |
+//! | `.reflect_radio(value, selected)` | `Role::MenuItemRadio` | filled dot (read-only) |
+//!
+//! The two-way modes write their signal when the item is activated, before its
+//! `on_activate` runs. The `reflect_*` modes only display it: use them when the
+//! state is owned and changed elsewhere, and change it from `on_activate`.
 //!
 //! Check and radio modes are mutually exclusive with `.icon(...)` — the
 //! Windows convention reserves the leading slot for state glyphs on
@@ -182,6 +187,12 @@ enum MenuItemMode {
     Radio {
         value: usize,
         selected: Signal<usize>,
+        /// Reflect-only, the radio counterpart of [`CheckKind::Reflect`]:
+        /// the dot mirrors `selected`, but activation does **not** write
+        /// it; the item's `on_activate` routes the change to whoever owns
+        /// the selection. Renders, groups and announces identically to a
+        /// two-way radio.
+        reflect: bool,
     },
 }
 
@@ -199,6 +210,49 @@ enum CheckKind {
     /// follows layout state the menu doesn't own. Renders identically to
     /// `TwoState`; differs only in that clicking has no built-in toggle.
     Reflect(Prop<bool>),
+}
+
+/// The bound-state write a mode makes when its item is activated, run before
+/// the item's `on_activate`. Shared so every surface that activates an item
+/// (pointer, keyboard, assistive technology, the native menu bar) writes the
+/// same thing.
+pub(crate) type ActivationWrite = Rc<dyn Fn()>;
+
+impl MenuItemMode {
+    /// The write activation makes: flip a two-state check, move a tri-state
+    /// check between `Unchecked` and `Checked`, or select a radio's value.
+    /// `None` for `Plain` and for the reflect-only modes, whose `on_activate`
+    /// owns the change.
+    fn activation_write(&self) -> Option<ActivationWrite> {
+        match self {
+            MenuItemMode::Plain => None,
+            MenuItemMode::Check(CheckKind::TwoState(s)) => {
+                let s = s.clone();
+                Some(Rc::new(move || s.set(!s.get())))
+            }
+            MenuItemMode::Check(CheckKind::Reflect(_)) => None,
+            MenuItemMode::Check(CheckKind::TriState(s)) => {
+                let s = s.clone();
+                // Indeterminate (driven by external aggregation models)
+                // promotes to Checked. Mirrors `Checkbox::toggle`.
+                Some(Rc::new(move || match s.get() {
+                    CheckState::Unchecked => s.set(CheckState::Checked),
+                    CheckState::Checked => s.set(CheckState::Unchecked),
+                    CheckState::Indeterminate => s.set(CheckState::Checked),
+                }))
+            }
+            MenuItemMode::Radio { reflect: true, .. } => None,
+            MenuItemMode::Radio {
+                value,
+                selected,
+                reflect: false,
+            } => {
+                let value = *value;
+                let selected = selected.clone();
+                Some(Rc::new(move || selected.set(value)))
+            }
+        }
+    }
 }
 
 /// A single command row in a `MenuList` or context menu.
@@ -639,12 +693,81 @@ impl MenuItem {
     /// by selection-signal identity and emits `push_to_radio_group`
     /// relationships automatically — no app-side wiring required.
     ///
+    /// When something else owns the selection and makes the change itself, use
+    /// [`reflect_radio`](Self::reflect_radio) instead.
+    ///
     /// Mutually exclusive with [`checked`](Self::checked)
     /// and [`check_state`](Self::check_state) — last call
     /// wins.
     pub fn radio(mut self, value: usize, selected: Signal<usize>) -> Self {
-        self.mode = MenuItemMode::Radio { value, selected };
+        self.mode = MenuItemMode::Radio {
+            value,
+            selected,
+            reflect: false,
+        };
         self
+    }
+
+    /// Render `Role::MenuItemRadio` whose dot **reflects** `selected == value`
+    /// read-only: activation does NOT write `selected`. The radio counterpart
+    /// of [`reflect_checked`](Self::reflect_checked), for a selection that is
+    /// owned and changed somewhere else (a model, a setter that validates or
+    /// persists, a control that reports each change): this item's
+    /// `on_activate` asks that owner for the change, and `selected` then moves
+    /// the dot.
+    ///
+    /// A two-way [`radio`](Self::radio) cannot sit beside such an owner: it
+    /// writes `selected` before `on_activate` runs, so an owner that skips a
+    /// value it already holds (one that fires a change callback once per real
+    /// change) finds nothing left to do.
+    ///
+    /// Grouping is the same as `radio`'s: the enclosing
+    /// [`MenuList`](crate::menu_list::MenuList) groups by `selected`'s
+    /// identity, so the item still announces "N of M".
+    ///
+    /// Mutually exclusive with the other check / radio binders; the last call
+    /// wins.
+    ///
+    /// ```rust
+    /// # use teksilo_core::signal::Signal;
+    /// # use teksilo_i18n::lit;
+    /// # use teksilo_widgets::{MenuItem, MenuList};
+    /// // The view mode belongs to the document; `set_view_mode` saves it.
+    /// let view_mode = Signal::new(0_usize);
+    /// let set_view_mode = {
+    ///     let view_mode = view_mode.clone();
+    ///     move |mode: usize| {
+    ///         if view_mode.get() != mode {
+    ///             view_mode.set(mode);
+    ///             // ...save the document's settings
+    ///         }
+    ///     }
+    /// };
+    /// let row = |label, mode| {
+    ///     let set_view_mode = set_view_mode.clone();
+    ///     MenuItem::new(label)
+    ///         .reflect_radio(mode, view_mode.clone())
+    ///         .on_activate_fn(move |_| set_view_mode(mode))
+    /// };
+    /// let _menu = MenuList::new()
+    ///     .item(row(lit!("Outline"), 0))
+    ///     .item(row(lit!("Pages"), 1));
+    /// ```
+    pub fn reflect_radio(mut self, value: usize, selected: Signal<usize>) -> Self {
+        self.mode = MenuItemMode::Radio {
+            value,
+            selected,
+            reflect: true,
+        };
+        self
+    }
+
+    /// The bound-state write activating this item makes, before its
+    /// `on_activate`; `None` for a plain or reflect-only item. Lets a surface
+    /// that is not this widget, the native menu bar, activate the item the
+    /// same way.
+    pub(crate) fn activation_write(&self) -> Option<ActivationWrite> {
+        self.mode.activation_write()
     }
 
     /// Internal accessor for [`MenuList::build`](crate::menu_list::MenuList::build)
@@ -652,7 +775,9 @@ impl MenuItem {
     /// (the `Rc`-identity of its `selected` signal).
     pub(crate) fn radio_selection_handle(&self) -> Option<(usize, Signal<usize>)> {
         match &self.mode {
-            MenuItemMode::Radio { value, selected } => Some((*value, selected.clone())),
+            MenuItemMode::Radio {
+                value, selected, ..
+            } => Some((*value, selected.clone())),
             _ => None,
         }
     }
@@ -727,7 +852,8 @@ impl std::fmt::Debug for MenuItem {
             MenuItemMode::Check(CheckKind::TwoState(_)) => "Check(TwoState)",
             MenuItemMode::Check(CheckKind::TriState(_)) => "Check(TriState)",
             MenuItemMode::Check(CheckKind::Reflect(_)) => "Check(Reflect)",
-            MenuItemMode::Radio { .. } => "Radio",
+            MenuItemMode::Radio { reflect: false, .. } => "Radio",
+            MenuItemMode::Radio { reflect: true, .. } => "Radio(Reflect)",
         };
         f.debug_struct("MenuItem")
             .field("label", &self.label)

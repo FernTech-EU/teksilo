@@ -11,7 +11,7 @@ use teksilo_core::widget::EventContext;
 use teksilo_core::{Intent, MenuItemId};
 use teksilo_data::CheckState;
 use teksilo_i18n::LocalizedString;
-use teksilo_platform::native_menu::StandardMenuRole;
+use teksilo_platform::native_menu::{MenuActionFn, NativeMenuActivation, StandardMenuRole};
 
 use crate::menu_item::MenuItem;
 use crate::menu_list::MenuList;
@@ -29,13 +29,40 @@ pub enum MenuItemState {
     ReflectCheck(Signal<bool>),
     /// Tri-state checkbox bound to a `Signal<CheckState>`.
     TriCheck(Signal<CheckState>),
-    /// Radio item: selected iff `selected == value`.
+    /// Radio item: selected iff `selected == value`; activation writes `value`.
     Radio {
         /// This item's value within the group.
         value: usize,
         /// The shared selection signal.
         selected: Signal<usize>,
     },
+    /// Reflect-only radio item: selected iff `selected == value`, but activation
+    /// does NOT write it (the `intent`/`on_activate` owns the change). For a
+    /// selection owned and changed elsewhere.
+    ReflectRadio {
+        /// This item's value within the group.
+        value: usize,
+        /// The shared selection signal.
+        selected: Signal<usize>,
+    },
+}
+
+impl MenuItemState {
+    /// Bind `item` to this state: the one mapping from a model state to a
+    /// [`MenuItem`] mode, shared by the in-window row and the native one so
+    /// both write the same thing when chosen.
+    fn bind(&self, item: MenuItem) -> MenuItem {
+        match self {
+            MenuItemState::Plain => item,
+            MenuItemState::Check(s) => item.checked(s.clone()),
+            MenuItemState::ReflectCheck(s) => item.reflect_checked(s.clone()),
+            MenuItemState::TriCheck(s) => item.check_state(s.clone()),
+            MenuItemState::Radio { value, selected } => item.radio(*value, selected.clone()),
+            MenuItemState::ReflectRadio { value, selected } => {
+                item.reflect_radio(*value, selected.clone())
+            }
+        }
+    }
 }
 
 /// One leaf command in the menu tree. Both the builder and the stored spec.
@@ -128,8 +155,26 @@ impl MenuEntry {
     }
 
     /// Make this a radio item: selected iff `selected.get() == value`.
+    /// Choosing it writes `value` into `selected`, before the
+    /// [`intent`](Self::intent) / [`on_activate`](Self::on_activate) run. Use
+    /// it when the signal *is* the source of truth.
     pub fn radio(mut self, value: usize, selected: Signal<usize>) -> Self {
         self.state = MenuItemState::Radio { value, selected };
+        self
+    }
+
+    /// Make this a radio item whose dot **reflects** `selected.get() == value`
+    /// read-only. Choosing it does not write `selected`: pair it with an
+    /// [`intent`](Self::intent) / [`on_activate`](Self::on_activate) that asks
+    /// the selection's owner for the change; the dot then follows `selected`
+    /// reactively. Use when the selection is owned elsewhere (a model, a setter
+    /// that validates or persists, a change callback that fires once per real
+    /// change), where two-way [`radio`](Self::radio) would write it first and
+    /// leave the owner nothing to do. The radio counterpart of
+    /// [`checked`](Self::checked); see
+    /// [`MenuItem::reflect_radio`](crate::menu_item::MenuItem::reflect_radio).
+    pub fn reflect_radio(mut self, value: usize, selected: Signal<usize>) -> Self {
+        self.state = MenuItemState::ReflectRadio { value, selected };
         self
     }
 
@@ -156,14 +201,37 @@ impl MenuEntry {
                 a(ctx);
             }
         });
-        match &self.state {
-            MenuItemState::Plain => {}
-            MenuItemState::Check(s) => mi = mi.checked(s.clone()),
-            MenuItemState::ReflectCheck(s) => mi = mi.reflect_checked(s.clone()),
-            MenuItemState::TriCheck(s) => mi = mi.check_state(s.clone()),
-            MenuItemState::Radio { value, selected } => mi = mi.radio(*value, selected.clone()),
+        self.state.bind(mi)
+    }
+
+    /// What choosing this item in the native menu bar does: the intent, and
+    /// the action preceded by the same state write the in-window row makes.
+    ///
+    /// The write leads the action so the action reads the new value, as it
+    /// does in-window. The intent needs no such care: `send_intent` only
+    /// queues it, and the router dispatches it after the action returns, by
+    /// which time the write has happened.
+    pub(crate) fn native_activation(&self) -> NativeMenuActivation {
+        let write = self
+            .state
+            .bind(MenuItem::new(self.title.clone()))
+            .activation_write();
+        let action = match (write, self.action.clone()) {
+            (None, action) => action,
+            (Some(write), action) => {
+                let with_write: MenuActionFn = Rc::new(move |ctx| {
+                    write();
+                    if let Some(a) = &action {
+                        a(ctx);
+                    }
+                });
+                Some(with_write)
+            }
+        };
+        NativeMenuActivation {
+            intent: self.intent,
+            action,
         }
-        mi
     }
 }
 
@@ -823,7 +891,235 @@ pub(crate) fn build_menu_list(nodes: &[MenuNode]) -> MenuList {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+    use teksilo_canvas::SizeProposal;
+    use teksilo_core::action::Action;
+    use teksilo_core::build_context::BuildContext;
+    use teksilo_core::telemetry::IntentSource;
+    use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget};
+    use teksilo_core::widget_id::WidgetId;
+    use teksilo_core::widget_tree::WidgetTree;
     use teksilo_i18n::lit;
+
+    // What choosing an entry writes, in the native bar and in-window.
+
+    const CHOSEN: &str = "test.chosen";
+
+    /// An application whose `CHOSEN` action records what `read` returns when
+    /// the intent reaches it.
+    struct App {
+        read: Rc<dyn Fn() -> i64>,
+        heard: Rc<RefCell<Vec<i64>>>,
+    }
+
+    impl std::fmt::Debug for App {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("App")
+        }
+    }
+
+    impl Widget for App {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let read = self.read.clone();
+            let heard = self.heard.clone();
+            ctx.register_action_global(
+                Action::new(CHOSEN).on_invoke(move |_, _| heard.borrow_mut().push(read())),
+            );
+            vec![]
+        }
+
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+
+    /// `entry` with `CHOSEN` as its intent and an action, both recording what
+    /// `read` returns when they run, and the tree whose application handles
+    /// the intent.
+    struct Choice {
+        tree: WidgetTree,
+        entry: MenuEntry,
+        /// What the entry's action read.
+        acted: Rc<RefCell<Vec<i64>>>,
+        /// What the intent's action read.
+        heard: Rc<RefCell<Vec<i64>>>,
+    }
+
+    impl Choice {
+        fn new(entry: MenuEntry, read: impl Fn() -> i64 + 'static) -> Self {
+            let read: Rc<dyn Fn() -> i64> = Rc::new(read);
+            let acted: Rc<RefCell<Vec<i64>>> = Rc::new(RefCell::new(Vec::new()));
+            let heard: Rc<RefCell<Vec<i64>>> = Rc::new(RefCell::new(Vec::new()));
+            let entry = entry.intent(CHOSEN).on_activate({
+                let read = read.clone();
+                let acted = acted.clone();
+                move |_| acted.borrow_mut().push(read())
+            });
+            let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+            tree.add(App {
+                read,
+                heard: heard.clone(),
+            });
+            tree.layout(SizeProposal::exact(400.0, 300.0));
+            Self {
+                tree,
+                entry,
+                acted,
+                heard,
+            }
+        }
+
+        /// Choose the entry in the native menu bar: run its activation the way
+        /// `teksilo-app`'s `try_route_native_menu_payload` does.
+        fn choose_natively(&mut self) {
+            let activation = self.entry.native_activation();
+            assert_eq!(
+                activation.intent,
+                Some(CHOSEN),
+                "the activation carries the entry's intent"
+            );
+            self.tree
+                .run_with_event_context(&mut teksilo_core::window::NoopWindowOps, |ctx| {
+                    ctx.with_intent_source(IntentSource::Menu, |ctx| {
+                        if let Some(name) = activation.intent {
+                            ctx.send_intent(Intent::new(name));
+                        }
+                        if let Some(action) = &activation.action {
+                            action(ctx);
+                        }
+                    });
+                });
+        }
+
+        /// Choose the entry in the in-window menu: click its row.
+        fn choose_in_window(&mut self) {
+            self.tree
+                .add(MenuList::new().item(self.entry.to_menu_item()));
+            self.tree.layout(SizeProposal::exact(400.0, 300.0));
+            let row = self.tree.find_by_label("Pages").expect("the entry's row");
+            self.tree.click(row);
+        }
+
+        /// What the action and the intent each read, in that order.
+        fn reads(&self) -> (Vec<i64>, Vec<i64>) {
+            (self.acted.borrow().clone(), self.heard.borrow().clone())
+        }
+    }
+
+    fn radio_choice(reflect: bool) -> (Choice, Signal<usize>) {
+        let selected = Signal::new(0_usize);
+        let entry = MenuEntry::new(lit!("Pages"));
+        let entry = if reflect {
+            entry.reflect_radio(1, selected.clone())
+        } else {
+            entry.radio(1, selected.clone())
+        };
+        let read = selected.clone();
+        (Choice::new(entry, move || read.get() as i64), selected)
+    }
+
+    #[test]
+    fn a_radio_chosen_natively_selects_its_value_before_the_action_and_intent_run() {
+        let (mut choice, selected) = radio_choice(false);
+        choice.choose_natively();
+        assert_eq!(selected.get(), 1);
+        assert_eq!(choice.reads(), (vec![1], vec![1]));
+    }
+
+    #[test]
+    fn a_reflect_radio_chosen_natively_leaves_the_selection_to_its_owner() {
+        let (mut choice, selected) = radio_choice(true);
+        choice.choose_natively();
+        assert_eq!(
+            selected.get(),
+            0,
+            "reflect_radio must not write the selection"
+        );
+        assert_eq!(choice.reads(), (vec![0], vec![0]));
+    }
+
+    #[test]
+    fn a_radio_chosen_in_window_selects_its_value_before_the_action_and_intent_run() {
+        let (mut choice, selected) = radio_choice(false);
+        choice.choose_in_window();
+        assert_eq!(selected.get(), 1);
+        assert_eq!(choice.reads(), (vec![1], vec![1]));
+    }
+
+    #[test]
+    fn a_reflect_radio_chosen_in_window_leaves_the_selection_to_its_owner() {
+        let (mut choice, selected) = radio_choice(true);
+        choice.choose_in_window();
+        assert_eq!(
+            selected.get(),
+            0,
+            "reflect_radio must not write the selection"
+        );
+        assert_eq!(choice.reads(), (vec![0], vec![0]));
+    }
+
+    #[test]
+    fn a_checkable_chosen_natively_flips_before_the_action_and_intent_run() {
+        let state = Signal::new(false);
+        let read = state.clone();
+        let mut choice = Choice::new(
+            MenuEntry::new(lit!("Pages")).checkable(state.clone()),
+            move || read.get() as i64,
+        );
+        choice.choose_natively();
+        assert!(state.get());
+        assert_eq!(choice.reads(), (vec![1], vec![1]));
+    }
+
+    #[test]
+    fn a_reflect_check_chosen_natively_leaves_the_state_to_its_owner() {
+        let state = Signal::new(false);
+        let read = state.clone();
+        let mut choice = Choice::new(
+            MenuEntry::new(lit!("Pages")).checked(state.clone()),
+            move || read.get() as i64,
+        );
+        choice.choose_natively();
+        assert!(!state.get(), "checked must not write the state");
+        assert_eq!(choice.reads(), (vec![0], vec![0]));
+    }
+
+    #[test]
+    fn a_tri_checkable_chosen_natively_moves_as_it_does_in_window() {
+        let code = |s: CheckState| match s {
+            CheckState::Unchecked => 0,
+            CheckState::Checked => 1,
+            CheckState::Indeterminate => 2,
+        };
+        for (from, to) in [
+            (CheckState::Unchecked, CheckState::Checked),
+            (CheckState::Checked, CheckState::Unchecked),
+            (CheckState::Indeterminate, CheckState::Checked),
+        ] {
+            let state = Signal::new(from);
+            let read = state.clone();
+            let mut choice = Choice::new(
+                MenuEntry::new(lit!("Pages")).tri_checkable(state.clone()),
+                move || code(read.get()),
+            );
+            choice.choose_natively();
+            assert_eq!(state.get(), to, "from {from:?}");
+            assert_eq!(choice.reads(), (vec![code(to)], vec![code(to)]));
+        }
+    }
+
+    #[test]
+    fn a_plain_entry_chosen_natively_runs_its_action_and_intent_once() {
+        let calls = Rc::new(Cell::new(0_i64));
+        let read = calls.clone();
+        let mut choice = Choice::new(MenuEntry::new(lit!("Pages")), move || {
+            read.set(read.get() + 1);
+            read.get()
+        });
+        choice.choose_natively();
+        assert_eq!(choice.reads(), (vec![1], vec![2]));
+        assert_eq!(calls.get(), 2);
+    }
 
     #[test]
     fn menu_appends_nodes_and_bumps_version() {

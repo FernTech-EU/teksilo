@@ -127,14 +127,9 @@ impl Widget for Root {
                     .item(MenuEntry::new(lit!("&Paste")).intent("app.paste"))
             })
             .menu(lit!("&View"), |m| {
-                m.item(
-                    MenuEntry::new(lit!("Show &Grid"))
-                        .checkable(grid_visible.clone())
-                        .on_activate({
-                            let g = grid_visible.clone();
-                            move |_| g.set(!g.get())
-                        }),
-                )
+                // Two-way: choosing the item flips `grid_visible` itself, from
+                // the native bar and the in-window bar alike.
+                m.item(MenuEntry::new(lit!("Show &Grid")).checkable(grid_visible.clone()))
             })
             // Standard macOS menus — labels go through i18n (pass `tr!` for a
             // localized app); the framework wires the system selectors. The

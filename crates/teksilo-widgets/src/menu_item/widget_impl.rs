@@ -213,7 +213,9 @@ impl Widget for MenuItem {
                             .child(Spacer::new()),
                     )
                 }
-                MenuItemMode::Radio { value, selected } => {
+                MenuItemMode::Radio {
+                    value, selected, ..
+                } => {
                     debug_assert!(
                         self.icon.is_none(),
                         "MenuItem: .icon() is mutually exclusive with .radio()"
@@ -483,39 +485,10 @@ impl Widget for MenuItem {
         let action_rc: std::rc::Rc<Option<CommandFactory>> = std::rc::Rc::new(action);
         let action_for_key = action_rc.clone();
 
-        // Shared closure that performs the bound-state mutation on
-        // activation — flips the check signal, cycles the tristate
-        // signal, or writes the radio value. Captured by both the
-        // tap and key handlers so click and Enter/Space have
-        // identical semantics. `None` for `Plain` and for submenu
-        // triggers (which never carry a bound state).
-        type ActivateFn = std::rc::Rc<dyn Fn()>;
-        let mode_activate: Option<ActivateFn> = match &self.mode {
-            MenuItemMode::Plain => None,
-            MenuItemMode::Check(CheckKind::TwoState(s)) => {
-                let s = s.clone();
-                Some(std::rc::Rc::new(move || s.set(!s.get())))
-            }
-            // Reflect-only: no built-in write — the on_activate / intent owns
-            // the state change; the checkmark follows `state` reactively.
-            MenuItemMode::Check(CheckKind::Reflect(_)) => None,
-            MenuItemMode::Check(CheckKind::TriState(s)) => {
-                let s = s.clone();
-                // Click toggles Unchecked <-> Checked. Indeterminate
-                // (driven by external aggregation models) promotes
-                // to Checked. Mirrors `Checkbox::toggle`.
-                Some(std::rc::Rc::new(move || match s.get() {
-                    CheckState::Unchecked => s.set(CheckState::Checked),
-                    CheckState::Checked => s.set(CheckState::Unchecked),
-                    CheckState::Indeterminate => s.set(CheckState::Checked),
-                }))
-            }
-            MenuItemMode::Radio { value, selected } => {
-                let v = *value;
-                let selected = selected.clone();
-                Some(std::rc::Rc::new(move || selected.set(v)))
-            }
-        };
+        // The bound-state write activation makes (see
+        // `MenuItemMode::activation_write`), shared by the tap and key
+        // handlers so click and Enter/Space have identical semantics.
+        let mode_activate = self.mode.activation_write();
         let mode_activate_for_tap = mode_activate.clone();
         let mode_activate_for_key = mode_activate.clone();
 
@@ -1016,7 +989,9 @@ impl Widget for MenuItem {
                     builder.inner_mut().set_toggled(Toggled::Mixed);
                 }
             },
-            MenuItemMode::Radio { value, selected } => {
+            MenuItemMode::Radio {
+                value, selected, ..
+            } => {
                 builder.set_toggled(selected.get() == *value);
             }
         }

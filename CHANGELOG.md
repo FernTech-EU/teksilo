@@ -13,6 +13,43 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Widgets
+
+- **Reflect-only radio menu items.** `MenuItem::reflect_radio` and
+  `MenuEntry::reflect_radio` make a radio item whose dot follows a
+  `Signal<usize>` but which does not write it when chosen: its `on_activate`
+  or intent asks whatever owns the selection to change it. The radio
+  counterpart of `MenuItem::reflect_checked` and `MenuEntry::checked`, for a
+  selection that a two-way radio would write first, leaving its owner nothing
+  to do.
+
+### Changed
+
+#### Widgets
+
+- **Breaking.** `MenuItemState` has a new variant, so an exhaustive `match`
+  on it needs a `ReflectRadio` arm.
+
+### Fixed
+
+#### Widgets
+
+- **Check and radio items in the macOS menu bar change when chosen.** A
+  `MenuModel` entry made with `checkable`, `tri_checkable` or `radio` changed
+  its signal when chosen in the window, but from the native menu bar only its
+  intent and action ran. **Behaviour change:** an action that changed the
+  signal itself to make up for this now changes it a second time: remove that
+  write, or keep it and make the entry reflect-only (`checked`,
+  `reflect_radio`).
+- **Picking a segment from a `SegmentedControl`'s overflow menu calls
+  `on_change`,** by click, keyboard or assistive technology, as the
+  documentation says. The selection changed but the callback never ran.
+- **A `Toolbar` toggle action in the overflow menu toggles.** Activating it
+  left the state unchanged, and in a debug build opening the menu panicked.
+  Its row shows the checkmark and no icon.
+
 ## [0.20.0] - 2026-10-19
 
 ### Added

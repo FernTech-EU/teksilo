@@ -36,6 +36,7 @@ MenuItem — a single command row in a menu or context menu.
 | `Self` | [`reflect_checked(state: impl Into<Prop<bool>>)`](#menuitem-reflect_checked) |
 | `Self` | [`check_state(state: Signal<CheckState>)`](#menuitem-check_state) |
 | `Self` | [`radio(value: usize, selected: Signal<usize>)`](#menuitem-radio) |
+| `Self` | [`reflect_radio(value: usize, selected: Signal<usize>)`](#menuitem-reflect_radio) |
 | | **Methods** |
 | `String` | [`label()`](#menuitem-label) |
 | `LocalizedString` | [`label_localized()`](#menuitem-label_localized) |
@@ -60,6 +61,11 @@ Every item operates in one of three **modes** selected by builder methods:
 | `.check_state(signal)` | `Role::MenuItemCheckBox` | check / dash / blank |
 | `.reflect_checked(signal)` | `Role::MenuItemCheckBox` | checkmark (read-only) |
 | `.radio(value, selected)` | `Role::MenuItemRadio` | filled dot / blank |
+| `.reflect_radio(value, selected)` | `Role::MenuItemRadio` | filled dot (read-only) |
+
+The two-way modes write their signal when the item is activated, before its
+`on_activate` runs. The `reflect_*` modes only display it: use them when the
+state is owned and changed elsewhere, and change it from `on_activate`.
 
 Check and radio modes are mutually exclusive with `.icon(...)` — the
 Windows convention reserves the leading slot for state glyphs on
@@ -396,6 +402,59 @@ For "2 of 3"-style AT announcement, the enclosing
 by selection-signal identity and emits `push_to_radio_group`
 relationships automatically — no app-side wiring required.
 
+When something else owns the selection and makes the change itself, use
+`reflect_radio` instead.
+
 Mutually exclusive with `checked`
 and `check_state` — last call
 wins.
+
+<a id="menuitem-reflect_radio"></a>
+
+#### `pub fn reflect_radio(mut self, value: usize, selected: Signal<usize>) -> Self`
+
+Render `Role::MenuItemRadio` whose dot **reflects** `selected == value`
+read-only: activation does NOT write `selected`. The radio counterpart
+of `reflect_checked`, for a selection that is
+owned and changed somewhere else (a model, a setter that validates or
+persists, a control that reports each change): this item's
+`on_activate` asks that owner for the change, and `selected` then moves
+the dot.
+
+A two-way `radio` cannot sit beside such an owner: it
+writes `selected` before `on_activate` runs, so an owner that skips a
+value it already holds (one that fires a change callback once per real
+change) finds nothing left to do.
+
+Grouping is the same as `radio`'s: the enclosing
+`MenuList` groups by `selected`'s
+identity, so the item still announces "N of M".
+
+Mutually exclusive with the other check / radio binders; the last call
+wins.
+
+```rust
+# use teksilo_core::signal::Signal;
+# use teksilo_i18n::lit;
+# use teksilo_widgets::{MenuItem, MenuList};
+// The view mode belongs to the document; `set_view_mode` saves it.
+let view_mode = Signal::new(0_usize);
+let set_view_mode = {
+    let view_mode = view_mode.clone();
+    move |mode: usize| {
+        if view_mode.get() != mode {
+            view_mode.set(mode);
+            // ...save the document's settings
+        }
+    }
+};
+let row = |label, mode| {
+    let set_view_mode = set_view_mode.clone();
+    MenuItem::new(label)
+        .reflect_radio(mode, view_mode.clone())
+        .on_activate_fn(move |_| set_view_mode(mode))
+};
+let _menu = MenuList::new()
+    .item(row(lit!("Outline"), 0))
+    .item(row(lit!("Pages"), 1));
+```

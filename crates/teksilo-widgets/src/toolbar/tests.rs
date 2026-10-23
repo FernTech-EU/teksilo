@@ -809,3 +809,86 @@ fn menu_action_opens_a_dropdown_on_click() {
         "the dropdown shows its menu items"
     );
 }
+
+// ── checkable actions: one flip per activation, inline and in overflow ──────
+
+/// A toolbar holding one checkable "Wrap" action bound to `state`, recording
+/// the value `on_activate` reads. In a `VStack`, so the bar keeps its natural
+/// height and its chevron menu has room to open below it.
+fn wrap_toolbar(state: &Signal<bool>, in_overflow: bool) -> (WidgetTree, Rc<RefCell<Vec<bool>>>) {
+    let observed: Rc<RefCell<Vec<bool>>> = Rc::new(RefCell::new(Vec::new()));
+    let mut wrap = ToolbarAction::new(lit!("Wrap"), || IconWidget::checkmark(16.0))
+        .toggle(state.clone())
+        .on_activate({
+            let state = state.clone();
+            let observed = observed.clone();
+            move |_| observed.borrow_mut().push(state.get())
+        });
+    if in_overflow {
+        wrap = wrap.always_overflow();
+    }
+    let mut tree = themed_tree();
+    tree.add(crate::primitives::VStack::new().child(Toolbar::new().action(wrap)));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    (tree, observed)
+}
+
+/// The published node of `role` named `name`.
+fn published(tree: &mut WidgetTree, role: teksilo_core::accesskit::Role, name: &str) -> WidgetId {
+    let update = tree.sync_accessibility();
+    update
+        .nodes
+        .iter()
+        .find(|(_, node)| node.role() == role && node.label() == Some(name))
+        .and_then(|(id, _)| teksilo_core::accessibility::node_id_to_widget_id_maybe(*id))
+        .unwrap_or_else(|| panic!("no published {role:?} named {name:?}"))
+}
+
+#[test]
+fn an_inline_toggle_action_flips_once_before_on_activate_runs() {
+    let state = Signal::new(false);
+    let (mut tree, observed) = wrap_toolbar(&state, false);
+    let button = published(&mut tree, teksilo_core::accesskit::Role::Button, "Wrap");
+    tree.click(button);
+
+    assert!(state.get(), "one click turns the toggle on");
+    assert_eq!(
+        *observed.borrow(),
+        vec![true],
+        "on_activate reads the new value"
+    );
+}
+
+#[test]
+fn an_overflowed_toggle_action_flips_once_before_on_activate_runs() {
+    let state = Signal::new(false);
+    let (mut tree, observed) = wrap_toolbar(&state, true);
+    let chevron = {
+        let update = tree.sync_accessibility();
+        update
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == teksilo_core::accesskit::Role::Button
+                    && node.has_popup() == Some(HasPopup::Menu)
+            })
+            .and_then(|(id, _)| teksilo_core::accessibility::node_id_to_widget_id_maybe(*id))
+            .expect("an always-overflow action shows the chevron")
+    };
+    tree.click(chevron);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let row = published(
+        &mut tree,
+        teksilo_core::accesskit::Role::MenuItemCheckBox,
+        "Wrap",
+    );
+    tree.click(row);
+
+    assert!(state.get(), "one activation turns the toggle on");
+    assert_eq!(
+        *observed.borrow(),
+        vec![true],
+        "on_activate reads the new value, as it does inline"
+    );
+}

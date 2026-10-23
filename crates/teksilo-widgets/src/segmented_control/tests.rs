@@ -347,6 +347,130 @@ fn on_change_fires_once_per_user_driven_change_with_an_event_context() {
     assert_eq!(*seen.borrow(), vec![B, C]);
 }
 
+/// [`seven`] too narrow for its segments, with every `on_change` recorded.
+///
+/// The control sits in a `VStack` so it keeps its natural height: as the
+/// tree's root it would be stretched to the whole window, leaving its
+/// `BelowPreferred` menu no room above or below, and a menu shrunk to a
+/// sliver cannot be clicked.
+struct OverflowPick {
+    tree: WidgetTree,
+    ids: Vec<SegmentId>,
+    selected: Signal<Option<SegmentId>>,
+    seen: Rc<RefCell<Vec<SegmentId>>>,
+}
+
+impl OverflowPick {
+    const WIDTH: f32 = 300.0;
+    const HEIGHT: f32 = 400.0;
+
+    fn new() -> Self {
+        let selected = Signal::new(Some(SegmentId::from_u64(201)));
+        let seen: Rc<RefCell<Vec<SegmentId>>> = Rc::new(RefCell::new(Vec::new()));
+        let (control, ids) = seven(selected.clone());
+        let control = control.on_change({
+            let seen = seen.clone();
+            move |id, _ctx| seen.borrow_mut().push(id)
+        });
+        let mut tree = measured_tree();
+        tree.add(crate::primitives::VStack::new().child(control));
+        let mut pick = Self {
+            tree,
+            ids,
+            selected,
+            seen,
+        };
+        pick.settle();
+        assert!(
+            pick.row("Seven").is_none(),
+            "the menu must start closed, and the last segment off the strip"
+        );
+        pick
+    }
+
+    fn settle(&mut self) {
+        settle(&mut self.tree, Self::WIDTH, Self::HEIGHT);
+    }
+
+    /// The chevron: the one published button that opens a menu.
+    fn chevron(&mut self) -> WidgetId {
+        let update = self.tree.sync_accessibility();
+        update
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == accesskit::Role::Button
+                    && node.has_popup() == Some(accesskit::HasPopup::Menu)
+            })
+            .and_then(|(id, _)| teksilo_core::accessibility::node_id_to_widget_id_maybe(*id))
+            .expect("an overflowing control shows its chevron")
+    }
+
+    /// The menu row for `label`, if the menu is open and shows it.
+    fn row(&self, label: &str) -> Option<WidgetId> {
+        self.tree
+            .find_by_label(label)
+            .filter(|&id| self.tree.accessibility_node(id).role() == accesskit::Role::MenuItemRadio)
+    }
+
+    fn open_menu_by_click(&mut self) {
+        let chevron = self.chevron();
+        self.tree.click(chevron);
+        self.settle();
+    }
+}
+
+#[test]
+fn picking_a_segment_from_the_overflow_menu_by_click_fires_on_change() {
+    let mut pick = OverflowPick::new();
+    pick.open_menu_by_click();
+    let row = pick
+        .row("Seven")
+        .expect("the open menu lists the last segment");
+    pick.tree.click(row);
+    pick.settle();
+
+    assert_eq!(pick.selected.get(), Some(pick.ids[6]));
+    assert_eq!(*pick.seen.borrow(), vec![pick.ids[6]]);
+}
+
+#[test]
+fn picking_a_segment_from_the_overflow_menu_by_keyboard_fires_on_change() {
+    let mut pick = OverflowPick::new();
+    let chevron = pick.chevron();
+    pick.tree.focus(chevron);
+    pick.tree.press_key(Key::Enter, Modifiers::NONE);
+    pick.settle();
+    // Rows "Five", "Six" and "Seven" are in the menu; Down highlights the
+    // first of them.
+    pick.tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    pick.tree.press_key(Key::Enter, Modifiers::NONE);
+    pick.settle();
+
+    assert_eq!(pick.selected.get(), Some(pick.ids[4]));
+    assert_eq!(*pick.seen.borrow(), vec![pick.ids[4]]);
+}
+
+#[test]
+fn picking_a_segment_from_the_overflow_menu_by_assistive_technology_fires_on_change() {
+    let mut pick = OverflowPick::new();
+    pick.open_menu_by_click();
+    let row = pick
+        .row("Six")
+        .expect("the open menu lists the sixth segment");
+    let handled = pick.tree.dispatch_access_action(
+        teksilo_core::accessibility::widget_id_to_node_id(row),
+        accesskit::Action::Click,
+        None,
+        &mut teksilo_core::window::NoopWindowOps,
+    );
+    pick.settle();
+
+    assert!(handled, "a menu row answers an AT click");
+    assert_eq!(pick.selected.get(), Some(pick.ids[5]));
+    assert_eq!(*pick.seen.borrow(), vec![pick.ids[5]]);
+}
+
 // ───────────────────────────── overflow ─────────────────────────────
 
 #[test]

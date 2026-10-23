@@ -154,7 +154,8 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
         match item.state {
             MenuItemState::Plain => {}
             // Two-way and reflect-only both mirror the signal into the native
-            // checkmark; they differ only in the in-window click behavior.
+            // checkmark; they differ only in what choosing the item writes
+            // (`MenuEntry::native_activation`).
             MenuItemState::Check(sig) | MenuItemState::ReflectCheck(sig) => {
                 let h = handle.clone();
                 let id = item.id;
@@ -176,7 +177,10 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
                     h.update_item(id, check_delta(tri_to_native(*v)));
                 });
             }
-            MenuItemState::Radio { value, selected } => {
+            // Two-way and reflect-only likewise differ only in what choosing
+            // the item writes (`MenuEntry::native_activation`).
+            MenuItemState::Radio { value, selected }
+            | MenuItemState::ReflectRadio { value, selected } => {
                 let h = handle.clone();
                 let id = item.id;
                 push_observer(&mut observers, &selected, move |sel| {
@@ -267,7 +271,8 @@ fn resolve_node(
                     }
                 }
                 MenuItemState::TriCheck(s) => tri_to_native(s.get()),
-                MenuItemState::Radio { value, selected } => {
+                MenuItemState::Radio { value, selected }
+                | MenuItemState::ReflectRadio { value, selected } => {
                     if selected.get() == *value {
                         NativeCheck::On
                     } else {
@@ -280,13 +285,7 @@ fn resolve_node(
                 .and_then(|id| ctx.effective_shortcut(id).and_then(|eff| eff.primary))
                 .map(native_key_equiv);
 
-            activations.insert(
-                entry.id,
-                NativeMenuActivation {
-                    intent: entry.intent,
-                    action: entry.action.clone(),
-                },
-            );
+            activations.insert(entry.id, entry.native_activation());
             reactive.push(ReactiveItem {
                 id: entry.id,
                 enabled: entry.enabled.clone(),
