@@ -2013,6 +2013,13 @@ impl WidgetTree {
     /// mount action to run. A tree whose handlers run outside a window event
     /// tells the event loop this way that a drain is owed.
     pub fn has_pending_app_requests(&self) -> bool {
+        self.has_pending_dispatch_requests() || !self.pending_mount_actions.is_empty()
+    }
+
+    /// [`has_pending_app_requests`](Self::has_pending_app_requests) less the
+    /// mount actions, which a window blocked by a modal keeps queued on
+    /// purpose until the modal closes.
+    pub fn has_pending_dispatch_requests(&self) -> bool {
         self.pending_locale_request.is_some()
             || self.pending_theme_request.is_some()
             || self.pending_follow_system_request
@@ -2021,7 +2028,6 @@ impl WidgetTree {
             || self.force_close_requested
             || !self.pending_modal_requests.is_empty()
             || self.pending_modal_dismissal
-            || !self.pending_mount_actions.is_empty()
     }
 
     /// Whether a render pass is needed (any widget needs layout or paint).
@@ -3783,6 +3789,14 @@ impl WidgetTree {
     /// what one tree leaves to another. Turning it off drops what is kept.
     pub fn set_records_unclaimed_intents(&mut self, on: bool) {
         self.unclaimed_intents = on.then(Vec::new);
+    }
+
+    /// Whether intents are kept for
+    /// [`take_unclaimed_intents`](Self::take_unclaimed_intents).
+    pub fn has_unclaimed_intents(&self) -> bool {
+        self.unclaimed_intents
+            .as_ref()
+            .is_some_and(|kept| !kept.is_empty())
     }
 
     /// Take the intents kept since the last call, oldest first: each was

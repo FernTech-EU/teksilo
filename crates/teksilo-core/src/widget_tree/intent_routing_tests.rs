@@ -75,12 +75,14 @@ fn an_intent_no_action_takes_is_kept_once() {
         ctx.send_intent(Intent::new("app.known"));
     });
     assert_eq!(*calls.borrow(), ["app.known"]);
+    assert!(tree.has_unclaimed_intents());
     assert_eq!(
         names(&tree.take_unclaimed_intents()),
         ["app.unknown", "app.followup"],
         "the taken one is not kept; what its handler sent and nothing took is"
     );
     assert!(tree.take_unclaimed_intents().is_empty(), "taken once");
+    assert!(!tree.has_unclaimed_intents());
 }
 
 #[test]

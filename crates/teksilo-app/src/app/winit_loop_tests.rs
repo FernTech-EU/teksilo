@@ -105,7 +105,9 @@
 //!   asks for is presented by `about_to_wait`;
 //! - **(ad)** an intent a window's actions leave reaches the application
 //!   tree, and one the application tree's handler sends reaches the window,
-//!   in `post_event`; a shortcut's stays where it was sent;
+//!   in `post_event` and in `about_to_wait`; a shortcut's stays where it was
+//!   sent; a window closing that turn is passed over, and a close guard's
+//!   intent outlives its window;
 //! - **(ae)** a payload wrapped with an activation token reaches the handler
 //!   unwrapped, and the token is taken by the window it opens or raises, or
 //!   dropped at the end of the turn;
@@ -1800,6 +1802,11 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         );
         app.external_ctx_handler = Some(Box::new(|_, _| true));
         app.route_external_with_ctx(&wrapped("for-nothing"), event_loop);
+        assert_eq!(
+            app.wm.take_dispatch_activation_token(),
+            None,
+            "once its handler returned, no window the framework opens can take it"
+        );
         app.post_event(event_loop);
         assert_eq!(
             app.wm.take_dispatch_activation_token(),
@@ -2017,7 +2024,83 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             ["app:app.from_window", "window:doc.from_app"],
             "across and back, once; the shortcut's intent stayed in its window"
         );
-        app.wm.close_window(document);
+
+        // Input dispatched outside a window event (a pen tap, a timed
+        // gesture) is followed by `about_to_wait`: it forwards too.
+        crossed.borrow_mut().clear();
+        app.run_in_window(document_winit, event_loop, |tree, ops| {
+            tree.run_with_event_context(ops, |ctx| {
+                ctx.send_intent(teksilo_core::Intent::new("app.from_window"));
+            });
+        });
+        app.about_to_wait(event_loop);
+        assert_eq!(
+            *crossed.borrow(),
+            ["app:app.from_window", "window:doc.from_app"],
+            "about_to_wait forwarded both ways"
+        );
+
+        // The application tree's intent goes to a window not closing this
+        // turn: `document` closes itself as it sends, so `other` gets it.
+        crossed.borrow_mut().clear();
+        let other = {
+            let log = crossed.clone();
+            app.wm.create_window(
+                WindowConfig::new()
+                    .title("teksilo loop test: other")
+                    .size(200, 120)
+                    .root(move |tree, _state| {
+                        tree.add(Takes {
+                            label: "other",
+                            takes: "doc.from_app",
+                            then: None,
+                            log,
+                        })
+                    }),
+                event_loop,
+            )
+        };
+        app.window_event(event_loop, document_winit, WindowEvent::Focused(true));
+        app.run_in_window(document_winit, event_loop, |tree, ops| {
+            tree.run_with_event_context(ops, |ctx| {
+                ctx.close_window_forced();
+                ctx.send_intent(teksilo_core::Intent::new("app.from_window"));
+            });
+        });
+        app.post_event(event_loop);
+        assert!(
+            app.wm.winit_id_for_teksilo(document).is_none(),
+            "document closed"
+        );
+        assert_eq!(
+            *crossed.borrow(),
+            ["app:app.from_window", "other:doc.from_app"],
+            "the closing window was passed over"
+        );
+
+        // A close guard's intent, sent as its window goes, still reaches
+        // the application tree.
+        crossed.borrow_mut().clear();
+        let leaving = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: leaving")
+                .size(200, 120)
+                .on_close_requested(|ctx| {
+                    ctx.send_intent(teksilo_core::Intent::new("app.from_window"));
+                    teksilo_core::CloseResponse::Close
+                })
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        app.wm.request_close(leaving);
+        app.post_event(event_loop);
+        assert!(app.wm.winit_id_for_teksilo(leaving).is_none());
+        assert_eq!(
+            crossed.borrow().first().map(String::as_str),
+            Some("app:app.from_window"),
+            "the closed window's intent was not lost"
+        );
+        app.wm.close_window(other);
 
         // (x) Under `Explicit` the loop turns with no window open and goes
         // on. Making `maybe_exit` ignore the policy ends it here.

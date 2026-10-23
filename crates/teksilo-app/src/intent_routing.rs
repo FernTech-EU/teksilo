@@ -56,8 +56,15 @@ pub(crate) struct DroppedIntents {
 impl DroppedIntents {
     /// Report `names`, sent `from` one side, that the other side did not
     /// take either: once per name, in debug builds.
+    ///
+    /// The framework's own intents (`teksilo.` names, such as the rich-text
+    /// editor's `teksilo.rich_text.copy`) are notifications an application
+    /// may act on or not, so none of them is reported.
     pub(crate) fn report(&mut self, from: &str, names: Vec<&'static str>) {
         for name in names {
+            if name.starts_with("teksilo.") {
+                continue;
+            }
             if self.reported.insert(name) {
                 #[cfg(debug_assertions)]
                 eprintln!(
@@ -221,5 +228,14 @@ mod tests {
         dropped.report("a window", vec!["x", "x", "y"]);
         dropped.report("the application tree", vec!["x"]);
         assert_eq!(dropped.reported.len(), 2);
+    }
+
+    /// The rich-text editor's context menu sends `teksilo.rich_text.copy`
+    /// and friends for an application to observe if it wants; most do not.
+    #[test]
+    fn the_frameworks_own_intents_are_not_reported() {
+        let mut dropped = DroppedIntents::default();
+        dropped.report("a window", vec!["teksilo.rich_text.copy"]);
+        assert!(dropped.reported.is_empty());
     }
 }

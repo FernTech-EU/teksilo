@@ -132,8 +132,12 @@ It receives:
   application tree leaves goes to the window used last (at its frontmost
   native dialog), so its handlers can send a window a command. An intent
   crosses once and never comes back; one nobody takes is dropped, and a debug
-  build names it. A shortcut's intent never crosses: an unclaimed shortcut
-  already reaches the focused widget as its key;
+  build names it (the framework's own `teksilo.` intents excepted). A
+  shortcut's intent never crosses: an unclaimed shortcut already reaches the
+  focused widget as its key. On macOS a chord that is also a native menu
+  item's key equivalent arrives as that menu choice, not as a shortcut, so
+  there it does cross. In a test, `HeadlessApp::route_unclaimed_intents`
+  does the crossing;
 - `on_external_with_ctx` payloads while no window is open (see the
   single-instance recipe below);
 - events of a `subscribe_event_with_ctx` subscription registered in it;

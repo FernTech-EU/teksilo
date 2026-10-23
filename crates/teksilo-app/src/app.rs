@@ -1530,51 +1530,64 @@ impl TeksiloAppHandler {
 
     fn post_event(&mut self, event_loop: &ActiveEventLoop) {
         // First, so what its frame asks for (an application-wide change, a
-        // quit, a window) is drained below in this same turn; its mount
-        // actions too, which a rebuild in the tick queues and whose own
-        // requests the drains below must also see.
+        // quit, a window) is drained below in this same turn.
         self.tick_app_tree(event_loop);
-        if self
-            .wm
-            .app_tree()
-            .is_some_and(|tree| tree.has_pending_mount_actions())
-        {
-            self.run_in_app_tree(event_loop, |tree, ops| tree.run_mount_actions(ops));
+        let mut redraw_all = false;
+        // What a pass carries out can owe another: a routed intent's handler
+        // asks for a theme or a dialog, a close guard leaves an intent, a
+        // mount action makes a request. Bounded, as a handler could keep
+        // asking.
+        for pass in 0..4 {
+            if pass > 0 && !self.wm.owes_turn_work() {
+                break;
+            }
+            // The application tree's mount actions, which its tick's rebuild
+            // queues, before the drains that must see what they ask for.
+            if self
+                .wm
+                .app_tree()
+                .is_some_and(|tree| tree.has_pending_mount_actions())
+            {
+                self.run_in_app_tree(event_loop, |tree, ops| tree.run_mount_actions(ops));
+            }
+            // App-wide environment changes (theme / locale) raised by a
+            // handler in one window fan out to every window's tree, marking
+            // the non-originating windows dirty. Those windows never received
+            // the triggering event, so they would otherwise stay
+            // un-repainted: `request_redraw_all()` below (gated on these
+            // flags) fixes that.
+            let had_locale = self.wm.drain_pending_locale_requests();
+            let had_theme = self.wm.drain_pending_theme_requests();
+            let had_follow_system = self.wm.drain_pending_follow_system_requests();
+            let had_text_scale = self.wm.drain_pending_text_scale_requests();
+            let had_commands = self.wm.drain_close_window_requests();
+            // What a dispatch left unclaimed goes to the other side after the
+            // close flags are queued, so a window closing this turn is no
+            // target, and before the modal and close processing, which then
+            // see what its handlers asked for.
+            self.forward_unclaimed_intents(event_loop);
+            let had_modal_requests = self.process_modal_requests(event_loop)
+                | self.process_app_tree_modal_requests(event_loop);
+            let had_modal_dismissals = self.process_modal_dismissals();
+            self.process_pending(event_loop);
+            // Drain post-mount actions (e.g. a WebView opening its native
+            // engine subview, which needs the OS parent handle only reachable
+            // here).
+            self.process_pending_mount_actions(event_loop);
+            // Drain per-window command queues: app-side writes to
+            // WindowState signals emitted WindowCommand values that the
+            // registry routes through the per-window queue. Translate each
+            // into the appropriate winit call.
+            self.wm.drain_window_commands();
+            redraw_all |= had_locale
+                || had_theme
+                || had_follow_system
+                || had_text_scale
+                || had_commands
+                || had_modal_requests
+                || had_modal_dismissals;
         }
-        // What a window's dispatch or the application tree's frame left
-        // unclaimed goes to the other side before the drains, which then see
-        // what its handlers asked for.
-        self.forward_unclaimed_intents(event_loop);
-        // App-wide environment changes (theme / locale) raised by a handler
-        // in one window fan out to every window's tree, marking the
-        // non-originating windows dirty. Those windows never received the
-        // triggering event, so they would otherwise stay un-repainted —
-        // `request_redraw_all()` below (gated on these flags) fixes that.
-        let had_locale = self.wm.drain_pending_locale_requests();
-        let had_theme = self.wm.drain_pending_theme_requests();
-        let had_follow_system = self.wm.drain_pending_follow_system_requests();
-        let had_text_scale = self.wm.drain_pending_text_scale_requests();
-        let had_commands = self.wm.drain_close_window_requests();
-        let had_modal_requests = self.process_modal_requests(event_loop)
-            | self.process_app_tree_modal_requests(event_loop);
-        let had_modal_dismissals = self.process_modal_dismissals();
-        self.process_pending(event_loop);
-        // Drain post-mount actions (e.g. a WebView opening its native engine
-        // subview, which needs the OS parent handle only reachable here).
-        self.process_pending_mount_actions(event_loop);
-        // Drain per-window command queues: app-side writes to
-        // WindowState signals emitted WindowCommand values that the
-        // registry routes through the per-window queue. Translate each
-        // into the appropriate winit call.
-        self.wm.drain_window_commands();
-        if had_locale
-            || had_theme
-            || had_follow_system
-            || had_text_scale
-            || had_commands
-            || had_modal_requests
-            || had_modal_dismissals
-        {
+        if redraw_all {
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_request_redraw_all();
             }
@@ -2350,6 +2363,7 @@ impl TeksiloAppHandler {
                 });
             }),
         }
+        self.wm.end_dispatch_activation();
         self.external_ctx_handler = Some(handler);
     }
 
@@ -2517,11 +2531,12 @@ impl TeksiloAppHandler {
     fn forward_unclaimed_intents(&mut self, event_loop: &ActiveEventLoop) {
         use crate::intent_routing::offer;
         for _ in 0..16 {
-            let from_windows: Vec<teksilo_core::Intent> = self
-                .wm
-                .iter_mut()
-                .flat_map(|managed| managed.tree.take_unclaimed_intents())
-                .collect();
+            let mut from_windows: Vec<teksilo_core::Intent> = self.wm.take_orphan_intents();
+            from_windows.extend(
+                self.wm
+                    .iter_mut()
+                    .flat_map(|managed| managed.tree.take_unclaimed_intents()),
+            );
             let from_app = self
                 .wm
                 .app_tree_mut()
@@ -2557,10 +2572,20 @@ impl TeksiloAppHandler {
             }
         }
         #[cfg(debug_assertions)]
-        eprintln!(
-            "teksilo-app: the windows and the application tree kept sending each other \
-             intents for 16 rounds; the rest wait for the next turn"
-        );
+        if self
+            .wm
+            .iter()
+            .any(|managed| managed.tree.has_unclaimed_intents())
+            || self
+                .wm
+                .app_tree()
+                .is_some_and(|tree| tree.has_unclaimed_intents())
+        {
+            eprintln!(
+                "teksilo-app: the windows and the application tree kept sending each other \
+                 intents for 16 rounds; the rest wait for the next turn"
+            );
+        }
     }
 
     /// Run `f` against the application tree with a
@@ -4236,24 +4261,22 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         }
         // After the loop tick, which may have set state the application
         // tree reads; also how the tree's own deadline, folded into the
-        // control flow below, is served when it wakes the loop. What the
-        // tick asks for is drained by a `post_event`, which nothing else
-        // brings when no window is open.
+        // control flow below, is served when it wakes the loop. What it asks
+        // for is drained below.
         self.tick_app_tree(event_loop);
-        self.forward_unclaimed_intents(event_loop);
-        if self
-            .wm
-            .app_tree()
-            .is_some_and(|tree| tree.has_pending_app_requests())
-        {
-            self.post_event(event_loop);
-        }
         // Once per event-loop turn, which is what the shim's own contract
         // asks for. A digitizer reads on its own thread and buffers; this is
         // the only place that asks it what it saw.
         self.pump_pen_sources(event_loop);
         self.refresh_occluded_band();
         self.process_pending(event_loop);
+        // What the tick above, the pen input or a timed gesture left (an
+        // intent for the other side, a request) is drained by a
+        // `post_event`, which nothing else brings to an application with no
+        // window, or to input that arrived outside a window event.
+        if self.wm.owes_turn_work() {
+            self.post_event(event_loop);
+        }
         // A redraw becomes withheld with time alone, so the wake targets learn
         // it here, before the ticks that serve a window drawing nothing.
         let now = Instant::now();
@@ -5328,8 +5351,11 @@ impl TeksiloAppBuilder {
         }
 
         // The application tree, as `run` builds it, minus the window
-        // manager: no window, never painted.
+        // manager: no window, never painted. Both trees keep what they leave
+        // unclaimed, for `HeadlessApp::route_unclaimed_intents`.
         if let (Some(app_tree), Some(root)) = (app_tree.as_mut(), self.app_root.take()) {
+            app_tree.set_records_unclaimed_intents(true);
+            tree.set_records_unclaimed_intents(true);
             root(app_tree);
         }
 
@@ -5699,7 +5725,9 @@ pub struct HeadlessApp {
     /// The application tree, when [`TeksiloAppBuilder::app_root`] gave it a
     /// root. Drive it as a running application would: its handlers through
     /// `run_with_event_context`, its mount actions through
-    /// `run_mount_actions`.
+    /// `run_mount_actions`, and the intents crossing between it and
+    /// [`tree`](Self::tree) through
+    /// [`route_unclaimed_intents`](Self::route_unclaimed_intents).
     pub app_tree: Option<WidgetTree>,
     pub theme: Theme,
     /// Active i18n manager, if `TeksiloAppBuilder::i18n(...)` was used. Tests
@@ -5715,6 +5743,40 @@ pub struct HeadlessApp {
 impl HeadlessApp {
     pub fn theme(&self) -> &Theme {
         &self.theme
+    }
+
+    /// Offer what [`tree`](Self::tree) and the
+    /// [application tree](Self::app_tree) left unclaimed to each other, as a
+    /// running application does after every dispatch, until neither leaves
+    /// anything (at most 16 rounds). Returns the names nobody took. Without
+    /// an application tree nothing is kept, and this returns nothing.
+    ///
+    /// The window operations are a no-op sink, as everywhere in a headless
+    /// app.
+    pub fn route_unclaimed_intents(&mut self) -> Vec<&'static str> {
+        let Some(app_tree) = self.app_tree.as_mut() else {
+            return Vec::new();
+        };
+        let mut dropped = Vec::new();
+        let mut ops = teksilo_core::NoopWindowOps;
+        for _ in 0..16 {
+            let from_window = self.tree.take_unclaimed_intents();
+            let from_app = app_tree.take_unclaimed_intents();
+            if from_window.is_empty() && from_app.is_empty() {
+                break;
+            }
+            dropped.extend(crate::intent_routing::offer(
+                from_window,
+                Some(app_tree),
+                &mut ops,
+            ));
+            dropped.extend(crate::intent_routing::offer(
+                from_app,
+                Some(&mut self.tree),
+                &mut ops,
+            ));
+        }
+        dropped
     }
 
     /// The active i18n manager, if `i18n(...)` was registered on the
@@ -7474,6 +7536,28 @@ mod app_root_tests {
         assert!(pending.swap(false, Ordering::SeqCst), "the loop takes it");
         waker.wake(WakeKind::Draw);
         assert_eq!(posts.load(Ordering::SeqCst), 2);
+    }
+
+    /// A window's intent that only the application root implements reaches
+    /// it in a headless app too, once routed.
+    #[test]
+    fn a_headless_app_routes_a_windows_intent_to_its_app_root() {
+        let pings = Rc::new(Cell::new(0));
+        let root = pings.clone();
+        let mut app = TeksiloAppBuilder::new()
+            .app_root(move |tree| tree.add(PingRoot(root)))
+            .build_headless();
+        app.tree.add(super::AppTreeAnchor);
+        app.tree.run_with_event_context(&mut NoopWindowOps, |ctx| {
+            ctx.send_intent(Intent::new("app.ping"));
+            ctx.send_intent(Intent::new("app.unknown"));
+        });
+        assert_eq!(
+            app.route_unclaimed_intents(),
+            ["app.unknown"],
+            "taken by nobody"
+        );
+        assert_eq!(pings.get(), 1, "app.ping crossed to the app root");
     }
 
     #[test]

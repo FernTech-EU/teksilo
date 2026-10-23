@@ -601,6 +601,16 @@ pub struct WindowManager {
     /// use. Cleared at the end of the `post_event` that follows the
     /// dispatch, used or not.
     dispatch_activation_token: Option<String>,
+    /// What [`dispatch_activation_token`](Self::dispatch_activation_token)
+    /// left once its handler returned: only a `WindowState::focus()` with no
+    /// token of its own, applied in this turn's command drain, takes it, so
+    /// a window the framework opens meanwhile (a native dialog, the
+    /// application tree's tick) cannot.
+    focus_command_token: Option<String>,
+    /// Intents a window left unclaimed and could not hand over before it
+    /// closed (a close guard's, sent as the window went): they still go to
+    /// the application tree.
+    orphan_intents: Vec<teksilo_core::Intent>,
     /// Bumped whenever [`theme`](Self::theme) changes.
     theme_generation: u64,
     /// The [`theme_generation`](Self::theme_generation) the application
@@ -668,6 +678,8 @@ impl WindowManager {
             app_tree: None,
             app_tree_wake_pending: Default::default(),
             dispatch_activation_token: None,
+            focus_command_token: None,
+            orphan_intents: Vec::new(),
             theme_generation: 0,
             app_tree_theme_generation: 0,
             quit: None,
@@ -843,15 +855,44 @@ impl WindowManager {
     }
 
     /// Take the routed event's activation token, if it carried one and no
-    /// window operation took it yet.
+    /// window operation took it yet. Its handler's operations only.
     pub(crate) fn take_dispatch_activation_token(&mut self) -> Option<String> {
         self.dispatch_activation_token.take()
+    }
+
+    /// The routed event's handler returned: a token it did not use waits,
+    /// for this turn's command drain only, for a `WindowState::focus()`
+    /// it queued.
+    pub(crate) fn end_dispatch_activation(&mut self) {
+        self.focus_command_token = self.dispatch_activation_token.take();
     }
 
     /// Drop the routed event's activation token, used or not: a token is
     /// good for the activation the event asked for, and that is over.
     pub(crate) fn clear_dispatch_activation_token(&mut self) {
         self.dispatch_activation_token = None;
+        self.focus_command_token = None;
+    }
+
+    /// Take the intents of windows that closed before handing theirs over.
+    pub(crate) fn take_orphan_intents(&mut self) -> Vec<teksilo_core::Intent> {
+        std::mem::take(&mut self.orphan_intents)
+    }
+
+    /// Whether a turn owes another pass of the drains: an intent left
+    /// unclaimed anywhere (an orphan's included), or a request the
+    /// application tree or a window made since the drains ran. Window mount
+    /// actions are not counted: a modal-blocked window keeps them on
+    /// purpose.
+    pub(crate) fn owes_turn_work(&self) -> bool {
+        !self.orphan_intents.is_empty()
+            || self.windows.values().any(|managed| {
+                managed.tree.has_unclaimed_intents() || managed.tree.has_pending_dispatch_requests()
+            })
+            || self
+                .app_tree
+                .as_ref()
+                .is_some_and(|tree| tree.has_unclaimed_intents() || tree.has_pending_app_requests())
     }
 
     /// Record that `teksilo_id` is a plain window presenting a modal
@@ -1878,6 +1919,9 @@ impl WindowManager {
         if let Some(winit_id) = self.teksilo_to_winit.remove(&teksilo_id)
             && let Some(mut managed) = self.windows.remove(&winit_id)
         {
+            // What it left unclaimed outlives it: see `orphan_intents`.
+            self.orphan_intents
+                .extend(managed.tree.take_unclaimed_intents());
             // If this window is involved in an in-flight app-originated OS
             // drag, abort it before the tree is dropped — otherwise the
             // app-global typed-payload stash would leak and a later genuine
@@ -2037,7 +2081,7 @@ impl WindowManager {
                 WindowCommand::Focus {
                     activation_token: None,
                 } => WindowCommand::Focus {
-                    activation_token: self.take_dispatch_activation_token(),
+                    activation_token: self.focus_command_token.take(),
                 },
                 cmd => cmd,
             };
