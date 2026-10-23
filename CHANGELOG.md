@@ -50,7 +50,10 @@ by crate for clarity, not because crates version independently.
   no initial window can open its first one there. With no window open,
   `on_external_with_ctx` runs there, and so does a `subscribe_event_with_ctx`
   subscription registered there. Its dialogs are presented in the window used
-  last, or in a window of their own. `HeadlessApp::app_tree` makes an app root
+  last, or in a window of their own. An intent a window leaves unclaimed is
+  offered to it once, and one it leaves goes to the window used last, so a
+  window's menu can fire a command only the application tree implements;
+  shortcuts' intents stay where they were sent. `HeadlessApp::app_tree` makes an app root
   testable. See "The application tree" in the multi-window guide.
 
 #### Core

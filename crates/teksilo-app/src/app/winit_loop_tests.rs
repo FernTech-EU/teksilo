@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Twenty-nine claims, and they do not all carry the same weight. Verified by
+//! Thirty claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -103,6 +103,9 @@
 //!   open otherwise, but not in one about to close, and is refused when it
 //!   presents an existing widget; one a rebuild in an `about_to_wait` tick
 //!   asks for is presented by `about_to_wait`;
+//! - **(ad)** an intent a window's actions leave reaches the application
+//!   tree, and one the application tree's handler sends reaches the window,
+//!   in `post_event`; a shortcut's stays where it was sent;
 //! - **(aa)** the application tree is ticked by `about_to_wait` and by the
 //!   wake its waker posts, which the loop takes so the next one posts;
 //! - **(y)** a quit closes a window with no guard, stops at one whose guard
@@ -1881,6 +1884,87 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         let hosts: Vec<_> = app.wm.teksilo_ids().collect();
         assert_eq!(hosts.len(), 1, "about_to_wait presented the dialog");
         app.wm.close_window(hosts[0]);
+
+        // (ad) Intents cross between a window and the application tree in
+        // `post_event`: one the window's actions leave reaches the
+        // application tree, and one the application tree's handler sends
+        // that only the window takes reaches the window. A shortcut's never
+        // crosses. Removing the forwarding from `post_event` leaves the
+        // application tree's action unrun.
+        #[derive(Debug)]
+        struct Takes {
+            label: &'static str,
+            takes: &'static str,
+            then: Option<&'static str>,
+            log: Rc<RefCell<Vec<String>>>,
+        }
+        impl teksilo_core::widget::Widget for Takes {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                let (label, then, log) = (self.label, self.then, self.log.clone());
+                ctx.register_action_global(teksilo_core::Action::new(self.takes).on_invoke(
+                    move |intent, ctx| {
+                        log.borrow_mut().push(format!("{label}:{}", intent.name));
+                        if let Some(then) = then {
+                            ctx.send_intent(teksilo_core::Intent::new(then));
+                        }
+                    },
+                ));
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+        }
+        let crossed: Rc<RefCell<Vec<String>>> = Rc::default();
+        {
+            let log = crossed.clone();
+            app.wm.install_app_tree(move |tree| {
+                tree.add(Takes {
+                    label: "app",
+                    takes: "app.from_window",
+                    then: Some("doc.from_app"),
+                    log,
+                })
+            });
+        }
+        let document = {
+            let log = crossed.clone();
+            app.wm.create_window(
+                WindowConfig::new()
+                    .title("teksilo loop test: document")
+                    .size(200, 120)
+                    .root(move |tree, _state| {
+                        tree.add(Takes {
+                            label: "window",
+                            takes: "doc.from_app",
+                            then: None,
+                            log,
+                        })
+                    }),
+                event_loop,
+            )
+        };
+        let document_winit = app.wm.winit_id_for_teksilo(document).expect("open");
+        app.run_in_window(document_winit, event_loop, |tree, ops| {
+            tree.run_with_event_context(ops, |ctx| {
+                ctx.send_intent(teksilo_core::Intent::new("app.from_window"));
+                ctx.send_intent(
+                    teksilo_core::Intent::new("app.from_window")
+                        .with_source(teksilo_core::telemetry::IntentSource::Shortcut),
+                );
+            });
+        });
+        app.post_event(event_loop);
+        assert_eq!(
+            *crossed.borrow(),
+            ["app:app.from_window", "window:doc.from_app"],
+            "across and back, once; the shortcut's intent stayed in its window"
+        );
+        app.wm.close_window(document);
 
         // (x) Under `Explicit` the loop turns with no window open and goes
         // on. Making `maybe_exit` ignore the policy ends it here.

@@ -124,6 +124,16 @@ ticked by the event loop, so its bindings, tweens, idle callbacks and
 
 It receives:
 
+- the intents a window leaves unclaimed: an intent sent in a window (by a
+  menu item, a button, `ctx.send_intent`) that no action on its way to that
+  window's root and no global action of that window takes is offered to the
+  application tree once. So a window's menu can fire `app.new_window`, which
+  only the application tree implements. The other way, an intent the
+  application tree leaves goes to the window used last (at its frontmost
+  native dialog), so its handlers can send a window a command. An intent
+  crosses once and never comes back; one nobody takes is dropped, and a debug
+  build names it. A shortcut's intent never crosses: an unclaimed shortcut
+  already reaches the focused widget as its key;
 - `on_external_with_ctx` payloads while no window is open (see the
   single-instance recipe below);
 - events of a `subscribe_event_with_ctx` subscription registered in it;

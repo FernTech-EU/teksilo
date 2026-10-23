@@ -966,6 +966,9 @@ struct TeksiloAppHandler {
     initial_created: bool,
     /// When the loop ends on its own; see [`QuitPolicy`].
     quit_policy: QuitPolicy,
+    /// The intents dropped by the routing between trees that a debug build
+    /// has already named.
+    dropped_intents: crate::intent_routing::DroppedIntents,
     /// A debug build said once that the application tree holds something
     /// only a drawn tree shows: an animated widget or an overlay.
     #[cfg(debug_assertions)]
@@ -1048,6 +1051,7 @@ impl TeksiloAppHandler {
             initial_window,
             initial_created: false,
             quit_policy,
+            dropped_intents: Default::default(),
             #[cfg(debug_assertions)]
             warned_visual_app_tree: false,
             idle_budget: Duration::from_millis(4),
@@ -1537,6 +1541,10 @@ impl TeksiloAppHandler {
         {
             self.run_in_app_tree(event_loop, |tree, ops| tree.run_mount_actions(ops));
         }
+        // What a window's dispatch or the application tree's frame left
+        // unclaimed goes to the other side before the drains, which then see
+        // what its handlers asked for.
+        self.forward_unclaimed_intents(event_loop);
         // App-wide environment changes (theme / locale) raised by a handler
         // in one window fan out to every window's tree, marking the
         // non-originating windows dirty. Those windows never received the
@@ -2489,6 +2497,59 @@ impl TeksiloAppHandler {
                 );
             }
         }
+    }
+
+    /// Offer what each tree left unclaimed to the other side: the windows'
+    /// to the application tree, the application tree's to the window the
+    /// user works with. Repeats while a routed intent's handler sends new
+    /// ones across, within a bound. See [`crate::intent_routing`].
+    fn forward_unclaimed_intents(&mut self, event_loop: &ActiveEventLoop) {
+        use crate::intent_routing::offer;
+        for _ in 0..16 {
+            let from_windows: Vec<teksilo_core::Intent> = self
+                .wm
+                .iter_mut()
+                .flat_map(|managed| managed.tree.take_unclaimed_intents())
+                .collect();
+            let from_app = self
+                .wm
+                .app_tree_mut()
+                .map(|tree| tree.take_unclaimed_intents())
+                .unwrap_or_default();
+            if from_windows.is_empty() && from_app.is_empty() {
+                return;
+            }
+            if !from_windows.is_empty() {
+                let mut dropped = Vec::new();
+                if self.wm.app_tree().is_some() {
+                    self.run_in_app_tree(event_loop, |tree, ops| {
+                        dropped = offer(from_windows, Some(tree), ops);
+                    });
+                } else {
+                    dropped = from_windows.iter().map(|intent| intent.name).collect();
+                }
+                self.dropped_intents.report("a window", dropped);
+            }
+            if !from_app.is_empty() {
+                let target = self
+                    .wm
+                    .app_modal_target()
+                    .and_then(|id| self.wm.winit_id_for_teksilo(id));
+                let mut dropped: Vec<&'static str> =
+                    from_app.iter().map(|intent| intent.name).collect();
+                if let Some(winit_id) = target {
+                    self.run_in_window(winit_id, event_loop, |tree, ops| {
+                        dropped = offer(from_app, Some(tree), ops);
+                    });
+                }
+                self.dropped_intents.report("the application tree", dropped);
+            }
+        }
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "teksilo-app: the windows and the application tree kept sending each other \
+             intents for 16 rounds; the rest wait for the next turn"
+        );
     }
 
     /// Run `f` against the application tree with a
@@ -4168,6 +4229,7 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         // tick asks for is drained by a `post_event`, which nothing else
         // brings when no window is open.
         self.tick_app_tree(event_loop);
+        self.forward_unclaimed_intents(event_loop);
         if self
             .wm
             .app_tree()
