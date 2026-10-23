@@ -1538,6 +1538,58 @@ impl TeksiloAppHandler {
         });
     }
 
+    /// Apply what the OS reported about a window's focus to that window
+    /// alone: its flags, its active state and a redraw. Returns the window's
+    /// id when it took focus, which also makes it the
+    /// [most recent window](crate::WindowManager::most_recent_window).
+    fn apply_os_focus(
+        &mut self,
+        window_id: WindowId,
+        focused: bool,
+        event_loop: &ActiveEventLoop,
+    ) -> Option<crate::window_config::TeksiloWindowId> {
+        let active = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+            managed.focused = focused;
+            managed.state.set_focused_from_os(focused);
+            if focused {
+                // A window that takes focus is on screen.
+                managed.minimized = false;
+                managed.sync_hidden();
+            } else {
+                // An X11 iconify sends only this: the next redraw
+                // re-reads the placement without waiting.
+                managed.minimized_probed_at = None;
+            }
+            Some(managed.focused && !managed.occluded)
+        } else {
+            None
+        };
+        // Every live pointer is revoked at both ends on the way out: the
+        // user releases the button over whatever took focus, and this
+        // window is never told. See `input_routing`.
+        if let Some(active) = active {
+            self.set_window_active_in_window(
+                window_id,
+                active,
+                teksilo_core::pointer::CancelReason::WindowDeactivated,
+                event_loop,
+            );
+        }
+        let managed = self.wm.get_by_winit_mut(window_id)?;
+        // Drive a redraw on every focus transition so the window-active
+        // observers (caret hide/restore, selection desaturation,
+        // DimWhenInactive) reach a paint pass promptly: the OS does not
+        // reliably emit RedrawRequested on focus change across all
+        // platforms.
+        managed.request_redraw();
+        let teksilo_id = managed.teksilo_id;
+        if !focused {
+            return None;
+        }
+        self.wm.note_window_focused(teksilo_id);
+        Some(teksilo_id)
+    }
+
     /// Apply a [`MenubarAction`](teksilo_core::window::MenubarAction)
     /// decision from a window-level menubar dispatcher. Takes the
     /// managed window aside the same way
@@ -1642,14 +1694,13 @@ impl TeksiloAppHandler {
 
         let payload = *payload.downcast::<crate::automation_bridge::AutomationPayload>()?;
 
-        // Resolve target window: explicit id, else focused, else primary.
+        // Resolve target window: explicit id, else the most recent, else
+        // primary.
         let bid = match payload.window_id {
             Some(raw) => crate::window_config::TeksiloWindowId::new(raw),
             None => self
                 .wm
-                .iter()
-                .find(|m| m.focused)
-                .map(|m| m.teksilo_id)
+                .most_recent_window()
                 .unwrap_or_else(|| self.wm.primary_window_id()),
         };
         let Some(winit_id) = self.wm.winit_id_for_teksilo(bid) else {
@@ -2004,8 +2055,10 @@ impl TeksiloAppHandler {
     /// [`EventContext`](teksilo_core::widget::EventContext), so it can open,
     /// find and focus windows.
     ///
-    /// **Target window** = the focused one, else the primary — the same
-    /// resolution [`try_route_automation_payload`](Self::try_route_automation_payload)
+    /// **Target window** = the
+    /// [most recent](crate::WindowManager::most_recent_window) one, else the
+    /// primary, the same resolution
+    /// [`try_route_automation_payload`](Self::try_route_automation_payload)
     /// uses. The handler is about *application*-level intent ("open this
     /// document"), so which window hosts the context is an implementation
     /// detail; it just has to be a real one, because `open_window` on a
@@ -2029,9 +2082,7 @@ impl TeksiloAppHandler {
         };
         let target = self
             .wm
-            .iter()
-            .find(|m| m.focused)
-            .map(|m| m.teksilo_id)
+            .most_recent_window()
             .unwrap_or_else(|| self.wm.primary_window_id());
         if let Some(winit_id) = self.wm.winit_id_for_teksilo(target) {
             let handler = &mut handler;
@@ -3307,45 +3358,16 @@ impl TeksiloAppHandler {
             // On Linux/Windows (winit 0.30) minimize fires `Focused(false)`
             // — no separate minimize event — so this path covers it.
             WindowEvent::Focused(focused) => {
-                let mut newly_focused = None;
-                let active = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-                    managed.focused = focused;
-                    managed.state.set_focused_from_os(focused);
-                    if focused {
-                        // A window that takes focus is on screen.
-                        managed.minimized = false;
-                        managed.sync_hidden();
-                    } else {
-                        // An X11 iconify sends only this: the next redraw
-                        // re-reads the placement without waiting.
-                        managed.minimized_probed_at = None;
-                    }
-                    Some(managed.focused && !managed.occluded)
-                } else {
-                    None
-                };
-                // Every live pointer is revoked at both ends on the way out —
-                // the user releases the button over whatever took focus, and
-                // this window is never told. See `input_routing`.
-                if let Some(active) = active {
-                    self.set_window_active_in_window(
-                        window_id,
-                        active,
-                        teksilo_core::pointer::CancelReason::WindowDeactivated,
-                        event_loop,
-                    );
-                }
-                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-                    // Drive a redraw on every focus transition so the
-                    // window-active observers (caret hide/restore, selection
-                    // desaturation, DimWhenInactive) reach a paint pass
-                    // promptly — the OS does not reliably emit RedrawRequested
-                    // on focus change across all platforms.
-                    managed.request_redraw();
-                    if focused {
-                        newly_focused = Some(managed.teksilo_id);
+                if focused {
+                    // Only one window holds the OS focus. Any other still
+                    // claiming it was born with the flag and never told
+                    // otherwise; it loses it now, as if `Focused(false)` had
+                    // arrived for it.
+                    for stale in self.wm.other_focus_claims(window_id) {
+                        self.apply_os_focus(stale, false, event_loop);
                     }
                 }
+                let newly_focused = self.apply_os_focus(window_id, focused, event_loop);
                 // A window regaining focus is the natural, zero-idle-cost moment
                 // to re-check the OS accessibility preferences (WCAG / EN 301
                 // 549 §11.7): the user may have toggled "increase contrast" /
@@ -3746,17 +3768,14 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
                             );
                         } else if let Some(inject) = payload.downcast_ref::<SyntheticImeInject>() {
                             // Test / demo hook: replay a scripted IME
-                            // sequence into the focused window's focused
+                            // sequence into the most recent window's focused
                             // widget through the real dispatch path — no OS
                             // IME needed. Mirrors exactly what the
                             // `WindowEvent::Ime` arm produces.
                             let target = self
                                 .wm
-                                .windows_map()
-                                .iter()
-                                .find(|(_, m)| m.focused)
-                                .or_else(|| self.wm.windows_map().iter().next())
-                                .map(|(id, _)| *id);
+                                .most_recent_window()
+                                .and_then(|id| self.wm.winit_id_for_teksilo(id));
                             if let Some(winit_id) = target {
                                 for evt in inject.events.clone() {
                                     self.dispatch_in_window(winit_id, evt, event_loop);
@@ -3904,7 +3923,8 @@ pub struct CloseWindowRequest {
 }
 
 /// Test / demo payload that replays a scripted IME sequence into the
-/// focused window's focused widget, through the same dispatch path the
+/// focused widget of the
+/// [most recent window](crate::WindowManager::most_recent_window), through the same dispatch path the
 /// real `WindowEvent::Ime` arm uses — so the full preedit pipeline
 /// (document mutation, underline, caret-area reporting, AT selection) can
 /// be exercised without an OS input method installed.
@@ -4537,8 +4557,9 @@ impl TeksiloAppBuilder {
     /// nothing else, and `EventContext::open_window` panics on a standalone
     /// context, so there is no way to open a window from there at all.
     ///
-    /// The handler runs against the focused window's tree (or the primary
-    /// window's) with a real [`WindowOps`](teksilo_core::WindowOps) sink, and is
+    /// The handler runs against the tree of the
+    /// [most recent window](crate::WindowManager::most_recent_window) (the
+    /// one opened or focused last) with a real [`WindowOps`](teksilo_core::WindowOps) sink, and is
     /// consulted **only** for payloads that no framework router and no built-in
     /// downcast arm claimed — so it never has to defend against
     /// `CloseWindowRequest` and friends. Return `true` when the payload was

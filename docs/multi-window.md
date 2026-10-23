@@ -432,8 +432,8 @@ a standalone context panics: "open_window called outside of a dispatch").
 
 `on_external_with_ctx` is the hook for that case. It is offered every
 `AppEvent::External` payload that no framework router claimed, together with
-a live `EventContext` minted from the focused window (or the primary one),
-and returns `true` when the payload was the app's:
+a live `EventContext` minted from the window opened or focused last, and
+returns `true` when the payload was the app's:
 
 ```rust
 // A single-instance app. The second launch forwards its argv over a socket

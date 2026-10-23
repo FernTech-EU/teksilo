@@ -14,6 +14,7 @@ pub(crate) mod redraw_gate;
 pub mod window_config;
 pub mod window_manager;
 pub(crate) mod window_persist;
+pub(crate) mod window_recency;
 
 pub use app::{
     AppEventProxy, ExternalCtxHandler, HeadlessApp, SyntheticImeInject, TeksiloAppBuilder,

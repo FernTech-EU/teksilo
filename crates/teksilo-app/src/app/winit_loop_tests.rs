@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Twenty-one claims, and they do not all carry the same weight. Verified by
+//! Twenty-two claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -84,7 +84,11 @@
 //!   opened meanwhile is born hidden; the loop rereads the session no sooner
 //!   than its interval, a reading that finds it present shows every window
 //!   with the redraw a reveal owes, and the watch's event never reaches
-//!   `on_app_event`.
+//!   `on_app_event`;
+//! - **(v)** the window opened or focused last is the most recent one, the
+//!   role passes back to the window used before it when it closes, and a
+//!   window reporting the focus takes the claim every window is born with
+//!   from the others.
 //!
 //! Two are weaker than they look, and the reason is not fixable from here.
 //! **(c)**, the safe area, and the missing-override half of **(d)** compare a
@@ -1404,6 +1408,66 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             let producer = flood(writer, stop.clone());
             *exit_flood_in.borrow_mut() = Some((source, stop, producer));
         }
+
+        // -- (v) the window used last is the most recent, and one window at
+        //    most keeps the focus flag
+        //
+        // Every window is born claiming focus, so this one and `window` both
+        // claim it until the OS reports a focus. The window map is a
+        // `HashMap`, so "the focused one" used to be whichever its hash order
+        // put first. Deleting `note_window_focused` from `apply_os_focus`
+        // leaves the window opened last as the most recent after the first
+        // `Focused(true)`; deleting the `other_focus_claims` loop leaves both
+        // windows claiming focus.
+        let first = app.wm.windows_map()[&window].teksilo_id;
+        let second = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: recency")
+                .size(200, 120)
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        let second_winit = app
+            .wm
+            .winit_id_for_teksilo(second)
+            .expect("the window was just created");
+        assert_eq!(
+            app.wm.most_recent_window(),
+            Some(second),
+            "the window opened last is the most recent"
+        );
+        assert!(
+            app.wm.windows_map()[&second_winit].focused,
+            "a window is born claiming focus"
+        );
+        app.window_event(event_loop, window, WindowEvent::Focused(true));
+        assert_eq!(
+            app.wm.most_recent_window(),
+            Some(first),
+            "a window the OS reports focused becomes the most recent"
+        );
+        let claims = |app: &TeksiloAppHandler| {
+            [window, second_winit].map(|id| {
+                let managed = &app.wm.windows_map()[&id];
+                (managed.focused, managed.state.focused().get())
+            })
+        };
+        assert_eq!(
+            claims(app),
+            [(true, true), (false, false)],
+            "the window born claiming focus loses the claim, its `WindowState` \
+             with it, once another window reports the focus"
+        );
+        app.window_event(event_loop, second_winit, WindowEvent::Focused(true));
+        assert_eq!(app.wm.most_recent_window(), Some(second));
+        assert_eq!(claims(app), [(false, false), (true, true)]);
+        app.wm.close_window(second);
+        assert_eq!(
+            app.wm.most_recent_window(),
+            Some(first),
+            "closing the most recent window hands the role to the one used \
+             before it"
+        );
 
         // -- (b) a window blocked by a modal child
         //
