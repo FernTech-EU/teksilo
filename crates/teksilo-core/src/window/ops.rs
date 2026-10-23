@@ -9,7 +9,8 @@
 //! dispatch. Handlers reach the multi-window API through it.
 //!
 //! Calls are **synchronous** except the two activation-token requests,
-//! which answer through a callback on a later event-loop tick:
+//! which answer through a callback on a later event-loop tick, and a quit
+//! request, which the application carries out over the ticks that follow:
 //! `open_window` creates the winit window and registers it before
 //! returning; the returned id is immediately usable for
 //! `focus_window`, `window_state`, `close_window_by_id`. The trait exists to keep teksilo-core
@@ -169,6 +170,24 @@ pub trait WindowOps {
     fn soft_keyboard_support(&self) -> SoftKeyboardSupport {
         SoftKeyboardSupport::None
     }
+
+    /// Ask the application to quit. With `forced` false, every open
+    /// window's close guard is asked in turn, and a veto stops the quit
+    /// until that window closes; with `forced` true, the guards are skipped.
+    /// The application quits once no window is left. See
+    /// [`EventContext::request_quit`](crate::widget::EventContext::request_quit).
+    ///
+    /// Default: no-op, for a sink with no application behind it.
+    fn request_quit(&mut self, _forced: bool) {}
+
+    /// Whether a quit is under way: requested, and neither finished nor
+    /// abandoned. Default: `false`.
+    fn quit_in_progress(&self) -> bool {
+        false
+    }
+
+    /// Abandon the quit under way, if any. Default: no-op.
+    fn cancel_quit(&mut self) {}
 }
 
 /// What a platform can do about an on-screen keyboard.

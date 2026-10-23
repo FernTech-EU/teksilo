@@ -39,6 +39,12 @@ impl WindowRecency {
         self.stamps.remove(&id);
     }
 
+    /// `id`'s place in the order, higher for a window used later; `None`
+    /// for a window that is not open.
+    pub(crate) fn stamp(&self, id: TeksiloWindowId) -> Option<u64> {
+        self.stamps.get(&id).copied()
+    }
+
     /// The window opened or focused last, `None` with no window open.
     pub(crate) fn most_recent(&self) -> Option<TeksiloWindowId> {
         self.stamps
@@ -94,6 +100,16 @@ mod tests {
         assert_eq!(recency.most_recent(), Some(id(1)));
         recency.forget(id(1));
         assert_eq!(recency.most_recent(), None);
+    }
+
+    #[test]
+    fn stamps_order_the_windows_and_go_with_them() {
+        let mut recency = WindowRecency::default();
+        recency.touch(id(1));
+        recency.touch(id(2));
+        assert!(recency.stamp(id(2)) > recency.stamp(id(1)));
+        recency.forget(id(2));
+        assert_eq!(recency.stamp(id(2)), None);
     }
 
     #[test]

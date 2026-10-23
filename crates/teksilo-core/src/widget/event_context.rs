@@ -1136,11 +1136,16 @@ impl<'ops> EventContext<'ops> {
     /// [`WindowConfig::on_close_requested`](crate::window::WindowConfig::on_close_requested)
     /// / [`can_close`](crate::window::WindowConfig::can_close).
     ///
-    /// This is the second half of the veto-then-reissue pattern: the
-    /// guard returns [`CloseResponse::Veto`](crate::window::CloseResponse::Veto)
-    /// and opens a confirmation dialog; the dialog's "close anyway"
-    /// button calls `close_window_forced` so the window actually closes
-    /// without re-triggering the guard.
+    /// It closes the window this context belongs to, which for the answer
+    /// of a confirmation dialog is not always the guarded window: a
+    /// `MessageBox` is a native modal window of its own on macOS and
+    /// Windows, and its answer runs there. The second half of the
+    /// veto-then-reissue pattern (the guard returns
+    /// [`CloseResponse::Veto`](crate::window::CloseResponse::Veto) and opens
+    /// a dialog, whose "close anyway" answer closes the window without
+    /// re-triggering the guard) therefore captures the guarded window's id
+    /// in the guard and calls [`close_window_by_id`](Self::close_window_by_id),
+    /// which is unguarded too.
     pub fn close_window_forced(&mut self) {
         self.force_close_requested = true;
     }
@@ -1302,6 +1307,78 @@ impl<'ops> EventContext<'ops> {
             .as_deref()
             .map(|o| o.windows())
             .unwrap_or_default()
+    }
+
+    /// Ask the application to quit, the way a Quit menu item does.
+    ///
+    /// Every open window is asked in turn, as if the user closed it: its
+    /// close guard
+    /// ([`WindowConfig::on_close_requested`](crate::window::WindowConfig::on_close_requested),
+    /// [`can_close`](crate::window::WindowConfig::can_close)) runs, and a
+    /// window that agrees closes. Modal windows are asked before the windows
+    /// they block, then the rest from the most recently used. The
+    /// application quits once no window is left, whatever its quit policy
+    /// (`teksilo_app::QuitPolicy`).
+    ///
+    /// A guard that vetoes stops the quit at its window. If it opened a
+    /// dialog there (a modal overlay or a native modal window), the quit
+    /// waits: when the window then closes (the dialog's answer closing it
+    /// by id, see [`close_window_forced`](Self::close_window_forced), or a
+    /// [`close_window`](Self::close_window) the guard now lets through), the
+    /// quit goes on to the next window. It is abandoned when the window
+    /// is left open with no dialog (the guard vetoed without asking, or its
+    /// dialog was cancelled), when another window is closed meanwhile, or by
+    /// [`cancel_quit`](Self::cancel_quit). A dialog that closes before the
+    /// window does (a save run in the background, then a forced close)
+    /// abandons the quit too; ask again with `request_quit` once it is done.
+    ///
+    /// Requesting a quit while one is under way changes nothing; use
+    /// [`quit`](Self::quit) to stop asking.
+    pub fn request_quit(&mut self) {
+        match self.window_ops.as_deref_mut() {
+            Some(ops) => ops.request_quit(false),
+            None => Self::warn_without_ops("request_quit"),
+        }
+    }
+
+    /// Quit the application without asking any close guard: every window
+    /// closes, and the application quits. Also turns a
+    /// [`request_quit`](Self::request_quit) under way into this one, which
+    /// is what a guard's "Quit anyway" answer calls.
+    pub fn quit(&mut self) {
+        match self.window_ops.as_deref_mut() {
+            Some(ops) => ops.request_quit(true),
+            None => Self::warn_without_ops("quit"),
+        }
+    }
+
+    /// Whether a quit is under way, requested and neither finished nor
+    /// abandoned. A close guard reads it to word its question for the whole
+    /// application ("Quit anyway?") rather than for its window.
+    pub fn quit_in_progress(&self) -> bool {
+        self.window_ops
+            .as_deref()
+            .is_some_and(|ops| ops.quit_in_progress())
+    }
+
+    /// Abandon the quit under way, if any: a dialog's Cancel answer says it
+    /// this way rather than leaving the quit to notice.
+    pub fn cancel_quit(&mut self) {
+        if let Some(ops) = self.window_ops.as_deref_mut() {
+            ops.cancel_quit();
+        }
+    }
+
+    /// A quit asked of a context with no application behind it goes
+    /// nowhere; say so in a debug build rather than lose it silently.
+    fn warn_without_ops(what: &str) {
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "teksilo-core: EventContext::{what} called outside a dispatch with \
+             window operations; ignored"
+        );
+        #[cfg(not(debug_assertions))]
+        let _ = what;
     }
 
     /// Raise a window to the front and give it keyboard focus.
@@ -2423,6 +2500,9 @@ mod multi_window_tests {
         open_calls: RefCell<Vec<WindowConfig>>,
         focus_calls: RefCell<Vec<TeksiloWindowId>>,
         close_calls: RefCell<Vec<TeksiloWindowId>>,
+        /// Each `request_quit`'s `forced` argument, in order.
+        quit_calls: RefCell<Vec<bool>>,
+        cancel_quit_calls: RefCell<usize>,
         next_id: RefCell<u64>,
         // A fake registry so `find_window` / `window_state` / `windows`
         // can return values.
@@ -2479,6 +2559,49 @@ mod multi_window_tests {
         fn close_window_by_id(&mut self, id: TeksiloWindowId) {
             self.close_calls.borrow_mut().push(id);
         }
+
+        fn request_quit(&mut self, forced: bool) {
+            self.quit_calls.borrow_mut().push(forced);
+        }
+
+        fn quit_in_progress(&self) -> bool {
+            let quits = self.quit_calls.borrow().len();
+            quits > *self.cancel_quit_calls.borrow()
+        }
+
+        fn cancel_quit(&mut self) {
+            *self.cancel_quit_calls.borrow_mut() += 1;
+        }
+    }
+
+    /// `request_quit` asks with the guards, `quit` without, and both reach
+    /// the application through the ops sink, as do the query and the cancel.
+    #[test]
+    fn quit_requests_route_through_ops() {
+        let mut ops = RecordingOps::default();
+        {
+            let mut ctx =
+                EventContext::new().with_window_context(&mut ops, Some(make_state(1, None)));
+            assert!(!ctx.quit_in_progress());
+            ctx.request_quit();
+            assert!(ctx.quit_in_progress());
+            ctx.cancel_quit();
+            assert!(!ctx.quit_in_progress());
+            ctx.quit();
+        }
+        assert_eq!(*ops.quit_calls.borrow(), [false, true]);
+        assert_eq!(*ops.cancel_quit_calls.borrow(), 1);
+    }
+
+    /// With no application behind the context there is nothing to quit, and
+    /// nothing to panic about either.
+    #[test]
+    fn quit_without_ops_is_a_harmless_no_op() {
+        let mut ctx = EventContext::new();
+        ctx.request_quit();
+        ctx.quit();
+        ctx.cancel_quit();
+        assert!(!ctx.quit_in_progress());
     }
 
     fn make_state(id: u64, string_id: Option<&str>) -> WindowState {

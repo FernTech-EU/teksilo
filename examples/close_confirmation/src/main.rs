@@ -16,14 +16,22 @@
 //! Because a confirmation dialog is asynchronous (it waits for a
 //! click), the idiomatic shape is **veto-then-reissue**: the guard
 //! vetoes *and* opens a confirmation; the dialog's "close anyway"
-//! button calls [`EventContext::close_window_forced`], which closes the
-//! window unconditionally without re-triggering the guard.
+//! button calls [`EventContext::close_window_by_id`] with the guarded
+//! window's id, which closes it unconditionally without re-triggering
+//! the guard. By id, because on macOS and Windows the dialog is a native
+//! window of its own and its answer runs there: a plain
+//! [`EventContext::close_window_forced`] would close the dialog.
+//!
+//! [`EventContext::request_quit`] asks every window's guard in turn, the
+//! way a Quit menu item does; a guard reads
+//! [`EventContext::quit_in_progress`] to word its question for the whole
+//! application, and a Cancel answer calls [`EventContext::cancel_quit`].
 //!
 //! This demo wires the guard two ways, one per window:
 //!
 //! * **Main window** — a full `on_close_requested` guard that pops a
 //!   Save / Discard / Cancel [`MessageBox`] while the document is
-//!   marked dirty.
+//!   marked dirty, and a Quit button.
 //! * **Sugar window** (opened from the main window) — the reactive
 //!   [`WindowConfig::can_close`] + [`WindowConfig::on_close_blocked`]
 //!   shorthand: a `Signal<bool>` gates the close and a callback shows
@@ -73,10 +81,19 @@ fn main_window(dirty: Signal<bool>) -> WindowConfig {
             }
 
             // Unsaved changes: veto this attempt and ask. The dialog's
-            // buttons decide what happens next.
+            // buttons decide what happens next. Asked by a quit, the
+            // question is about the whole application.
+            let Some(window) = ctx.window().map(|w| w.id()) else {
+                return CloseResponse::Close;
+            };
             let dirty = dirty_for_guard.clone();
+            let question = if ctx.quit_in_progress() {
+                lit!("Quit with unsaved changes?")
+            } else {
+                lit!("Close window?")
+            };
             ctx.present_message_box(
-                MessageBox::question(lit!("Close window?"))
+                MessageBox::question(question)
                     .text(lit!("The document has unsaved changes."))
                     .informative_text(lit!(
                         "Your changes will be lost if you close without saving."
@@ -89,12 +106,14 @@ fn main_window(dirty: Signal<bool>) -> WindowConfig {
                         // flag, then re-issue the close (now unguarded).
                         StandardButton::Save => {
                             dirty.set(false);
-                            ctx.close_window_forced();
+                            ctx.close_window_by_id(window);
                         }
-                        // "Discard" — close without saving.
-                        StandardButton::Discard => ctx.close_window_forced(),
-                        // "Cancel" (or Esc) — leave the window open.
-                        _ => {}
+                        // "Discard": close without saving.
+                        StandardButton::Discard => ctx.close_window_by_id(window),
+                        // "Cancel" (or Esc): leave the window open, and
+                        // stop a quit that asked (it would notice the
+                        // dialog gone by itself; this says so at once).
+                        _ => ctx.cancel_quit(),
                     }),
             );
             CloseResponse::Veto
@@ -123,6 +142,10 @@ fn main_window(dirty: Signal<bool>) -> WindowConfig {
                             Button::new(lit!("Close window (ctx.close_window)"))
                                 .variant(ButtonVariant::Filled)
                                 .on_activate_fn(|ctx| ctx.close_window()),
+                        )
+                        .child(
+                            Button::new(lit!("Quit (ctx.request_quit)"))
+                                .on_activate_fn(|ctx| ctx.request_quit()),
                         )
                         .child(
                             Button::new(lit!("Open can_close-sugar window…"))
@@ -156,6 +179,9 @@ fn sugar_window() -> WindowConfig {
         .can_close(may_close)
         // Fired only when `can_close` blocked a close attempt.
         .on_close_blocked(move |ctx| {
+            let Some(window) = ctx.window().map(|w| w.id()) else {
+                return;
+            };
             let locked = locked_for_blocked.clone();
             ctx.present_message_box(
                 MessageBox::question(lit!("Close this window?"))
@@ -165,11 +191,10 @@ fn sugar_window() -> WindowConfig {
                     .escape_button(StandardButton::No)
                     .on_result(move |result, ctx| {
                         if matches!(result.button, StandardButton::Yes) {
-                            // Unlock so `can_close` now reads true, then
-                            // re-issue the close (which the now-permissive
-                            // signal lets through — no force needed).
+                            // Unlock, then close this window by id: the
+                            // answer may run in the dialog's own window.
                             locked.set(false);
-                            ctx.close_window();
+                            ctx.close_window_by_id(window);
                         }
                     }),
             );

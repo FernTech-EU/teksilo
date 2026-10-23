@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Twenty-three claims, and they do not all carry the same weight. Verified by
+//! Twenty-five claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -90,7 +90,14 @@
 //!   window reporting the focus takes the claim every window is born with
 //!   from the others;
 //! - **(w)** a window created with `skip_taskbar(true)` carries
-//!   `_NET_WM_STATE_SKIP_TASKBAR`, and one created without it does not.
+//!   `_NET_WM_STATE_SKIP_TASKBAR`, and one created without it does not;
+//! - **(x)** with no window open, the loop goes on under
+//!   `QuitPolicy::Explicit`;
+//! - **(y)** a quit closes a window with no guard, stops at one whose guard
+//!   vetoed and presented a `MessageBox`, waits while the box is queued and
+//!   while it is up, is abandoned when Escape cancels the box, and, asked
+//!   again, completes once Enter picks Discard, which closes the window by
+//!   id, and that ends the loop even under `Explicit`.
 //!
 //! Two are weaker than they look, and the reason is not fixable from here.
 //! **(c)**, the safe area, and the missing-override half of **(d)** compare a
@@ -1572,6 +1579,153 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             "a blocked window still has to hear the OS resize it — reverting \
              `BlockedDisposition::Deliver` to a swallow leaves it at {before:?}"
         );
+
+        // -- (x) / (y) the quit policy, and the application-level quit
+        //
+        // Both need windows to come and go, and none of the windows open now
+        // may go: (n) checks the wakers of the windows still open when
+        // `exiting` runs, and (s) wants its producer's window alive then. So
+        // they are taken out of the manager for the duration, which is what
+        // a window dispatching an event is anyway, and put back at the end.
+        let aside: Vec<_> = app.wm.windows_map().keys().copied().collect();
+        let aside: Vec<_> = aside
+            .into_iter()
+            .map(|id| (id, app.wm.take_managed(id).expect("the window is open")))
+            .collect();
+        assert!(app.wm.is_empty());
+
+        // (x) Under `Explicit` the loop turns with no window open and goes
+        // on. Making `maybe_exit` ignore the policy ends it here.
+        app.quit_policy = crate::QuitPolicy::Explicit;
+        app.about_to_wait(event_loop);
+        assert!(
+            !event_loop.exiting(),
+            "under QuitPolicy::Explicit the loop outlives its last window"
+        );
+
+        // (y) A quit asks every window. `guarded`'s guard vetoes and
+        // presents a `MessageBox`, the veto-then-reissue shape (in the
+        // window's own tree on X11, the Linux path); `plain` has no guard.
+        // The box is answered with keys, the way a user answers it: Escape
+        // for Cancel, Enter for its default button, Discard, which closes
+        // the guarded window by id. Removing `advance_quit` from
+        // `process_pending` leaves `plain` open after the first step.
+        use teksilo_widgets::{EventContextMessageBoxExt, MessageBox, MessageBoxButtons};
+        let asks = Rc::new(Cell::new(0_usize));
+        let guarded = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: guarded")
+                .size(480, 320)
+                .on_close_requested({
+                    let asks = asks.clone();
+                    move |ctx| {
+                        asks.set(asks.get() + 1);
+                        assert!(
+                            ctx.quit_in_progress(),
+                            "a guard asked by a quit can tell it from a close"
+                        );
+                        let window = ctx.window().expect("the guard runs in its window").id();
+                        ctx.present_message_box(
+                            MessageBox::question(teksilo_i18n::lit!("Quit?"))
+                                .buttons(MessageBoxButtons::SaveDiscardCancel)
+                                .default_button(teksilo_widgets::StandardButton::Discard)
+                                .escape_button(teksilo_widgets::StandardButton::Cancel)
+                                .on_result(move |result, ctx| {
+                                    if result.button == teksilo_widgets::StandardButton::Discard {
+                                        ctx.close_window_by_id(window);
+                                    }
+                                }),
+                        );
+                        teksilo_core::CloseResponse::Veto
+                    }
+                })
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        let plain = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: plain")
+                .size(200, 120)
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        let open = |app: &TeksiloAppHandler, id| app.wm.winit_id_for_teksilo(id).is_some();
+        let guarded_winit = app.wm.winit_id_for_teksilo(guarded).expect("open");
+        let has_box = |app: &TeksiloAppHandler| {
+            app.wm.windows_map()[&guarded_winit]
+                .tree
+                .has_modal_overlay()
+        };
+        let key = |key| teksilo_core::event::WidgetEvent::KeyDown {
+            key,
+            modifiers: teksilo_core::event::Modifiers::empty(),
+            text: None,
+        };
+
+        app.wm.request_quit(false);
+        app.process_pending(event_loop);
+        assert!(
+            !open(app, plain),
+            "the window used last, with no guard, closed"
+        );
+        assert!(open(app, guarded), "the window whose guard vetoed is open");
+        assert!(app.wm.quit_in_progress(), "the quit waits on it");
+        assert!(!has_box(app), "its box is still queued");
+
+        // The turn that presents the box: the quit goes on waiting.
+        app.post_event(event_loop);
+        app.window_event(event_loop, guarded_winit, WindowEvent::RedrawRequested);
+        assert!(has_box(app), "the box is up");
+        assert!(
+            app.wm.quit_in_progress(),
+            "its dialog up, the quit goes on waiting"
+        );
+        assert_eq!(asks.get(), 1, "and asks nothing again");
+
+        // Escape: Cancel. The box goes, the window stays.
+        app.dispatch_in_window(
+            guarded_winit,
+            key(teksilo_core::event::Key::Escape),
+            event_loop,
+        );
+        app.post_event(event_loop);
+        assert!(!has_box(app));
+        assert!(open(app, guarded));
+        assert!(
+            !app.wm.quit_in_progress(),
+            "the awaited window open with no dialog: the quit is abandoned"
+        );
+
+        // Again, and Enter this time: Discard closes the window by id, and
+        // the quit goes on to completion.
+        app.wm.request_quit(false);
+        app.process_pending(event_loop);
+        assert_eq!(asks.get(), 2, "a new quit asks the guard again");
+        app.post_event(event_loop);
+        app.window_event(event_loop, guarded_winit, WindowEvent::RedrawRequested);
+        assert!(has_box(app));
+        app.dispatch_in_window(
+            guarded_winit,
+            key(teksilo_core::event::Key::Enter),
+            event_loop,
+        );
+        // Input dispatched outside a window event (a pen tap, a timed
+        // gesture) is followed by `about_to_wait`, not by `post_event`.
+        app.about_to_wait(event_loop);
+        assert!(!open(app, guarded), "Discard closed the guarded window");
+        assert!(
+            app.wm.quit_completed(),
+            "with the awaited window closed and nothing else open, the quit completes"
+        );
+        assert!(!app.wm.quit_in_progress());
+        assert!(
+            event_loop.exiting(),
+            "a completed quit ends the loop, under QuitPolicy::Explicit too"
+        );
+
+        for (id, managed) in aside {
+            app.wm.reinsert_managed(id, managed);
+        }
     });
 
     // -- (n) a waker outlives the event loop harmlessly

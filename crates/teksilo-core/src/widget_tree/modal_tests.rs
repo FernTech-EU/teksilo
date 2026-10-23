@@ -412,3 +412,19 @@ fn a_top_anchored_overlay_is_a_modal() {
         "the page behind a top-anchored modal refuses requests, as behind a centred one"
     );
 }
+
+/// What the application's quit asks of a window: is a dialog up there. The
+/// scrim alone, a full-viewport overlay, is not one; the centred panel is,
+/// and its dismissal ends it.
+#[test]
+fn has_modal_overlay_follows_the_centred_panel() {
+    let mut scene = Scene::page();
+    assert!(!scene.tree.has_modal_overlay(), "no overlay at all");
+    let modal = scene.open();
+    assert!(scene.tree.has_modal_overlay());
+    scene.tree.dismiss_overlay(modal);
+    assert!(
+        !scene.tree.has_modal_overlay(),
+        "the dismissed panel takes its scrim with it"
+    );
+}

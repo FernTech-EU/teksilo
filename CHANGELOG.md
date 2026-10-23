@@ -28,6 +28,20 @@ by crate for clarity, not because crates version independently.
 #### App
 
 - **`WindowManager::most_recent_window`**, the window opened or focused last.
+- **`QuitPolicy`, set with `TeksiloAppBuilder::quit_policy`.** The default,
+  `LastWindowClosed`, quits when the last window closes, as before.
+  `Explicit` keeps the application running with no window open, and makes
+  `initial_window` optional.
+- **Quitting the application from a handler.** `EventContext::request_quit`
+  asks every open window's close guard in turn, as closing each window
+  would, and ends the application once no window is left, under either
+  quit policy. A guard that vetoes holds the quit while its dialog is up;
+  the quit goes on when the window closes and is abandoned when the window
+  stays open with no dialog. `EventContext::quit` skips the guards,
+  `quit_in_progress` lets a guard word its question for the application,
+  and `cancel_quit` abandons the quit. `WindowOps` has matching defaulted
+  methods, and `WidgetTree::has_modal_overlay` tells whether a dialog is up
+  in a tree.
 
 #### Platform
 
@@ -101,6 +115,12 @@ by crate for clarity, not because crates version independently.
   otherwise. They now run in the window opened or focused last. A window that
   never received the focus also stops claiming it once another window takes
   it, so it no longer keeps its caret and animations running as if active.
+- **The close-confirmation recipe closes the right window on macOS and
+  Windows.** There a `MessageBox` is a native window of its own and its
+  answer runs in it, so the documented `ctx.close_window_forced()` closed
+  the dialog and left the document window open. The guide and the
+  `close-confirmation` example now capture the guarded window's id in the
+  guard and call `ctx.close_window_by_id(id)`.
 - **`WindowConfig::skip_taskbar` keeps the window out of the taskbar** on
   Windows and X11. It had no effect anywhere. Wayland and macOS have nothing
   per window to apply it to, as its documentation now says.

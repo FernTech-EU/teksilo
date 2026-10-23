@@ -213,7 +213,8 @@ pub mod prelude {
 
     // App
     pub use teksilo_app::{
-        NativeThemeFactory, NativeThemeRequest, TeksiloAppBuilder, ThemeMode, resolve_native_theme,
+        NativeThemeFactory, NativeThemeRequest, QuitPolicy, TeksiloAppBuilder, ThemeMode,
+        resolve_native_theme,
     };
 
     // Settings (persistence layer)

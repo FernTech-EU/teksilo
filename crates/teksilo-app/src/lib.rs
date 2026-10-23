@@ -10,6 +10,7 @@ pub mod default_post_root;
 pub(crate) mod input_loop;
 pub(crate) mod input_routing;
 pub mod native_theme;
+pub(crate) mod quit;
 pub(crate) mod redraw_gate;
 pub mod window_config;
 pub mod window_manager;
@@ -17,8 +18,8 @@ pub(crate) mod window_persist;
 pub(crate) mod window_recency;
 
 pub use app::{
-    AppEventProxy, ExternalCtxHandler, HeadlessApp, SyntheticImeInject, TeksiloAppBuilder,
-    ThemeMode,
+    AppEventProxy, ExternalCtxHandler, HeadlessApp, QuitPolicy, SyntheticImeInject,
+    TeksiloAppBuilder, ThemeMode,
 };
 pub use app_event_observers::AppEventObservers;
 #[cfg(feature = "automation")]
