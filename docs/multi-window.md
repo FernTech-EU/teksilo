@@ -447,8 +447,9 @@ a standalone context panics: "open_window called outside of a dispatch").
 
 `on_external_with_ctx` is the hook for that case. It is offered every
 `AppEvent::External` payload that no framework router claimed, together with
-a live `EventContext` minted from the window opened or focused last, and
-returns `true` when the payload was the app's:
+a live `EventContext` minted from the window opened or focused last (or,
+with no window open, from the application tree; see below), and returns
+`true` when the payload was the app's:
 
 ```rust
 // A single-instance app. The second launch forwards its argv over a socket
@@ -481,8 +482,11 @@ Notes:
 - It is a **single slot**, like `on_app_event`, a second call replaces the
   first. For fan-out use `register_app_event_observer`, which composes (but
   gets no context).
-- With no window open there is nowhere to mint a context from, and the call
-  is silently skipped.
+- With no window open, the handler runs in the application tree
+  (`TeksiloAppBuilder::app_root`), which no window hosts: `ctx.window()` is
+  `None`, and `ctx.open_window` works as in the recipe above. That is what an
+  application under `QuitPolicy::Explicit` with every window closed, or a
+  tray application, gets when its second launch forwards a document.
 - On Wayland, a launcher that hands you an `XDG_ACTIVATION_TOKEN` should have
   it forwarded in the payload and applied via
   `WindowState::set_activation_token` before `focus()`, or the compositor

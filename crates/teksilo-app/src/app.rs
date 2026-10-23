@@ -2214,8 +2214,11 @@ impl TeksiloAppHandler {
     /// pumps another external event) therefore sees `None` and is a no-op rather
     /// than a double borrow.
     ///
-    /// No window open (the instant between the last close and loop exit) is a
-    /// silent no-op — there is nowhere to mint a context from.
+    /// With no window open, the handler runs in the application tree
+    /// instead, with a context whose `window()` is `None`: still able to open
+    /// a window, which is what a single-instance application with none open
+    /// (a tray application, an application under
+    /// [`QuitPolicy::Explicit`]) needs.
     fn route_external_with_ctx(
         &mut self,
         payload: &(dyn std::any::Any + Send),
@@ -2224,17 +2227,27 @@ impl TeksiloAppHandler {
         let Some(mut handler) = self.external_ctx_handler.take() else {
             return;
         };
-        let target = self
-            .wm
-            .most_recent_window()
-            .unwrap_or_else(|| self.wm.primary_window_id());
-        if let Some(winit_id) = self.wm.winit_id_for_teksilo(target) {
-            let handler = &mut handler;
-            self.run_in_window(winit_id, event_loop, move |tree, ops| {
+        // "No window open" asked of the window map itself, which is what
+        // the application tree stands in for.
+        let target = if self.wm.is_empty() {
+            None
+        } else {
+            self.wm
+                .most_recent_window()
+                .and_then(|id| self.wm.winit_id_for_teksilo(id))
+        };
+        let handler_ref = &mut handler;
+        match target {
+            Some(winit_id) => self.run_in_window(winit_id, event_loop, move |tree, ops| {
                 tree.run_with_event_context(ops, |ctx| {
-                    handler(payload, ctx);
+                    handler_ref(payload, ctx);
                 });
-            });
+            }),
+            None => self.run_in_app_tree(event_loop, move |tree, ops| {
+                tree.run_with_event_context(ops, |ctx| {
+                    handler_ref(payload, ctx);
+                });
+            }),
         }
         self.external_ctx_handler = Some(handler);
     }
@@ -2561,12 +2574,21 @@ impl TeksiloAppHandler {
         let Some(template) = self.wm.app_context_template().cloned() else {
             return false;
         };
-        let Some(window_id) = template.ctx_subscription_window(sub_id) else {
+        let Some(target) = template.ctx_subscription_target(sub_id) else {
             return false;
         };
         // From here `sub_id` IS a context-bearing subscription: consume it
         // (return `true`) even if the window is gone, so a late event never
         // falls back to the plain, context-free map.
+        let Some(window_id) = target else {
+            // Registered in the application tree, which no window hosts.
+            self.run_in_app_tree(event_loop, |tree, ops| {
+                tree.run_with_event_context(ops, |ctx| {
+                    template.dispatch_subscription_event_with_ctx(sub_id, event, ctx);
+                });
+            });
+            return true;
+        };
         let Some(winit_id) = self.wm.teksilo_to_winit_map().get(&window_id).copied() else {
             return true;
         };
@@ -4771,7 +4793,9 @@ impl TeksiloAppBuilder {
     ///
     /// The handler runs against the tree of the
     /// [most recent window](crate::WindowManager::most_recent_window) (the
-    /// one opened or focused last) with a real [`WindowOps`](teksilo_core::WindowOps) sink, and is
+    /// one opened or focused last), or against the application tree (see
+    /// [`app_root`](Self::app_root)) when no window is open, with a real
+    /// [`WindowOps`](teksilo_core::WindowOps) sink either way, and is
     /// consulted **only** for payloads that no framework router and no built-in
     /// downcast arm claimed — so it never has to defend against
     /// `CloseWindowRequest` and friends. Return `true` when the payload was

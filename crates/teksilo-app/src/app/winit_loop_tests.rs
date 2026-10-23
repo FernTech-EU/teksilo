@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Twenty-seven claims, and they do not all carry the same weight. Verified by
+//! Twenty-eight claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -95,6 +95,9 @@
 //!   `QuitPolicy::Explicit`;
 //! - **(z)** a mount action in the application tree runs with the window
 //!   operations and opens a window;
+//! - **(ab)** with no window open, `on_external_with_ctx` runs in the
+//!   application tree and can open a window, and runs in that window once it
+//!   is open;
 //! - **(aa)** the application tree is ticked by `about_to_wait` and by the
 //!   wake its waker posts, which the loop takes so the next one posts;
 //! - **(y)** a quit closes a window with no guard, stops at one whose guard
@@ -1701,6 +1704,50 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             !app.wm.take_app_tree_wake(),
             "and the loop took it, so the tree's next wake posts again"
         );
+
+        // (ab) An unclaimed external payload reaches `on_external_with_ctx`
+        // in the application tree while no window is open, where the handler
+        // opens one; with that window open, the next one runs in it. Making
+        // `route_external_with_ctx` skip when no window is open leaves no
+        // window.
+        struct OpenFromOutside;
+        let contexts: Rc<RefCell<Vec<Option<crate::TeksiloWindowId>>>> = Rc::default();
+        app.external_ctx_handler = Some(Box::new({
+            let contexts = contexts.clone();
+            move |payload, ctx| {
+                if !payload.is::<OpenFromOutside>() {
+                    return false;
+                }
+                contexts
+                    .borrow_mut()
+                    .push(ctx.window().map(|state| state.id()));
+                if ctx.find_window("from-outside").is_none() {
+                    ctx.open_window(
+                        WindowConfig::new()
+                            .id("from-outside")
+                            .title("teksilo loop test: from outside")
+                            .size(160, 100)
+                            .root(|tree, _state| {
+                                tree.add(logging_leaf(&Default::default(), false))
+                            }),
+                    );
+                }
+                true
+            }
+        }));
+        app.route_external_with_ctx(&OpenFromOutside, event_loop);
+        let outside = app
+            .wm
+            .find_window("from-outside")
+            .expect("the handler, run in the application tree, opened a window");
+        app.route_external_with_ctx(&OpenFromOutside, event_loop);
+        assert_eq!(
+            *contexts.borrow(),
+            [None, Some(outside)],
+            "first in no window, then in the window it opened"
+        );
+        app.external_ctx_handler = None;
+        app.wm.close_window(outside);
 
         // (x) Under `Explicit` the loop turns with no window open and goes
         // on. Making `maybe_exit` ignore the policy ends it here.
