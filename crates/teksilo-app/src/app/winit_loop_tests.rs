@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Twenty-six claims, and they do not all carry the same weight. Verified by
+//! Twenty-seven claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -95,6 +95,8 @@
 //!   `QuitPolicy::Explicit`;
 //! - **(z)** a mount action in the application tree runs with the window
 //!   operations and opens a window;
+//! - **(aa)** the application tree is ticked by `about_to_wait` and by the
+//!   wake its waker posts, which the loop takes so the next one posts;
 //! - **(y)** a quit closes a window with no guard, stops at one whose guard
 //!   vetoed and presented a `MessageBox`, waits while the box is queued and
 //!   while it is up, is abandoned when Escape cancels the box, and, asked
@@ -1595,6 +1597,9 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             .map(|id| (id, app.wm.take_managed(id).expect("the window is open")))
             .collect();
         assert!(app.wm.is_empty());
+        // Everything below turns the loop with no window open, which ends it
+        // under the default policy before (x) and (y) are reached.
+        app.quit_policy = crate::QuitPolicy::Explicit;
 
         // (z) The application tree's mount actions run with the window
         // operations: one opens a window, through the windowless sink, as an
@@ -1638,9 +1643,67 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             .expect("the application tree's mount action opened a window");
         app.wm.close_window(opened);
 
+        // (aa) The application tree is ticked: by `about_to_wait`, and by
+        // the private wake its waker posts for content off the UI thread,
+        // which the loop takes so the next one posts. Dropping the tick from
+        // `about_to_wait` leaves the first rebuild undone; dropping the
+        // wake's handling leaves the wake untaken, and every later one lost.
+        #[derive(Debug)]
+        struct Rebuilt(teksilo_core::signal::Signal<u32>, Rc<Cell<u32>>);
+        impl teksilo_core::widget::Widget for Rebuilt {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                self.0
+                    .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+                self.1.set(self.1.get() + 1);
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+        }
+        let generation = teksilo_core::signal::Signal::new(0_u32);
+        let builds = Rc::new(Cell::new(0_u32));
+        {
+            let (generation, builds) = (generation.clone(), builds.clone());
+            app.wm
+                .install_app_tree(move |tree| tree.add(Rebuilt(generation, builds)));
+        }
+        let built = builds.get();
+        generation.set(1);
+        app.about_to_wait(event_loop);
+        assert_eq!(
+            builds.get(),
+            built + 1,
+            "about_to_wait ticked the application tree"
+        );
+
+        let waker = app
+            .wm
+            .app_tree()
+            .and_then(|tree| tree.redraw_waker().cloned())
+            .expect("the application tree has a waker");
+        waker.wake(WakeKind::Layout);
+        generation.set(2);
+        app.user_event(
+            event_loop,
+            AppEvent::External(Box::new(crate::app::AppTreeWake)),
+        );
+        assert_eq!(
+            builds.get(),
+            built + 2,
+            "the wake ticked the application tree"
+        );
+        assert!(
+            !app.wm.take_app_tree_wake(),
+            "and the loop took it, so the tree's next wake posts again"
+        );
+
         // (x) Under `Explicit` the loop turns with no window open and goes
         // on. Making `maybe_exit` ignore the policy ends it here.
-        app.quit_policy = crate::QuitPolicy::Explicit;
         app.about_to_wait(event_loop);
         assert!(
             !event_loop.exiting(),

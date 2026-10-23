@@ -101,6 +101,50 @@ impl teksilo_core::widget::Widget for AppTreeAnchor {
     }
 }
 
+/// The logic half of a frame, which a window's tree and the application
+/// tree share: idle callbacks within `idle_budget`, then layout at
+/// `proposal`, which runs the clocks, the reactive bindings (rebuilds,
+/// effects) and the frame tick. Returns whether idle callbacks ran.
+///
+/// The application tree is laid out at a zero proposal: it has no window to
+/// be sized to, and nothing in it is drawn.
+pub(crate) fn run_tree_logic_frame(
+    tree: &mut WidgetTree,
+    idle_budget: Duration,
+    proposal: SizeProposal,
+    ops: &mut dyn teksilo_core::WindowOps,
+) -> bool {
+    let ran_idle = tree.has_idle_work();
+    if ran_idle {
+        tree.run_idle_callbacks(idle_budget);
+    }
+    tree.layout_with_ops(proposal, ops);
+    ran_idle
+}
+
+/// Posted by the application tree's [`RedrawWaker`](teksilo_canvas::wake::RedrawWaker),
+/// from any thread, when content off the UI thread asks that tree for a
+/// frame. Private to the framework, like [`WindowWake`]; the loop answers
+/// with a tick of the application tree. At most one is in flight.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AppTreeWake;
+
+/// The application tree's waker: posts one [`AppTreeWake`] until the loop
+/// has taken it, whatever the [`WakeKind`](teksilo_canvas::wake::WakeKind),
+/// since every frame of that tree is a logic frame.
+pub(crate) struct AppTreeWaker {
+    pub(crate) post: std::sync::Arc<dyn Fn(Box<dyn std::any::Any + Send>) + Send + Sync>,
+    pub(crate) pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl teksilo_canvas::wake::RedrawWaker for AppTreeWaker {
+    fn wake(&self, _kind: teksilo_canvas::wake::WakeKind) {
+        if !self.pending.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            (self.post)(Box::new(AppTreeWake));
+        }
+    }
+}
+
 use teksilo_text::SharedTypesetter;
 
 use crate::window_config::{SizeToContent, TeksiloWindowId, WindowConfig};
@@ -922,6 +966,10 @@ struct TeksiloAppHandler {
     initial_created: bool,
     /// When the loop ends on its own; see [`QuitPolicy`].
     quit_policy: QuitPolicy,
+    /// A debug build said once that the application tree holds a widget
+    /// that only animates when drawn.
+    #[cfg(debug_assertions)]
+    warned_visual_app_tree: bool,
     idle_budget: Duration,
     idle_trace: Option<IdleTrace>,
     /// The GPU reclaim poll, [`teksilo_render::poll_gpu_reclaim`]: a field
@@ -1000,6 +1048,8 @@ impl TeksiloAppHandler {
             initial_window,
             initial_created: false,
             quit_policy,
+            #[cfg(debug_assertions)]
+            warned_visual_app_tree: false,
             idle_budget: Duration::from_millis(4),
             idle_trace: IdleTrace::from_env(),
             gpu_reclaim: teksilo_render::poll_gpu_reclaim,
@@ -1251,6 +1301,19 @@ impl TeksiloAppHandler {
             }
         }
 
+        // The application tree's timers: its tweens, a requested wake, its
+        // frame tick. Served by the tick in `about_to_wait`.
+        if let Some(deadline) = self
+            .wm
+            .app_tree()
+            .and_then(|tree| tree.next_unpainted_deadline())
+        {
+            earliest_deadline = Some(match earliest_deadline {
+                Some(current) => current.min(deadline),
+                None => deadline,
+            });
+        }
+
         // While nothing on screen can be seen, the session watch rereads the
         // system's state now and then (`WindowManager::recheck_session`).
         if let Some(recheck) = self.wm.session_deadline() {
@@ -1390,6 +1453,9 @@ impl TeksiloAppHandler {
     }
 
     fn post_event(&mut self, event_loop: &ActiveEventLoop) {
+        // First, so what its frame asks for (an application-wide change, a
+        // quit, a window) is drained below in this same turn.
+        self.tick_app_tree(event_loop);
         // App-wide environment changes (theme / locale) raised by a handler
         // in one window fan out to every window's tree, marking the
         // non-originating windows dirty. Those windows never received the
@@ -2289,6 +2355,30 @@ impl TeksiloAppHandler {
         }
     }
 
+    /// Run a logic frame of the application tree: its idle callbacks, then
+    /// layout, which runs its tweens, bindings and frame tick. Never gated
+    /// on `needs_render`, which a tree that is never painted always reports.
+    fn tick_app_tree(&mut self, event_loop: &ActiveEventLoop) {
+        let budget = self.idle_budget;
+        self.run_in_app_tree(event_loop, |tree, ops| {
+            run_tree_logic_frame(tree, budget, SizeProposal::exact(0.0, 0.0), ops);
+        });
+        #[cfg(debug_assertions)]
+        if !self.warned_visual_app_tree
+            && self
+                .wm
+                .app_tree()
+                .is_some_and(|tree| tree.animated_quad_count() > 0)
+        {
+            self.warned_visual_app_tree = true;
+            eprintln!(
+                "teksilo-app: the application tree holds an animated widget (a spinner, an \
+                 indeterminate progress bar); it is never drawn and never advances there. \
+                 Put visual widgets in a window."
+            );
+        }
+    }
+
     /// Run `f` against the application tree with a
     /// [windowless](crate::window_manager::WindowOpsImpl::windowless) ops
     /// sink, the tree taken out of the manager meanwhile as a window's is.
@@ -2922,18 +3012,11 @@ impl TeksiloAppHandler {
         let current_arc = Some(current.platform_window.window_arc());
         current.redraw.ran_frame(Instant::now());
 
-        if current.tree.has_idle_work() {
-            if let Some(trace) = &mut self.idle_trace {
-                trace.note_idle_callbacks_run();
-            }
-            current.tree.run_idle_callbacks(self.idle_budget);
-        }
-
         let size = current.platform_window.surface_size();
         let sf = current.platform_window.scale_factor() as f32;
         let proposal = SizeProposal::exact(size.0 as f32 / sf, size.1 as f32 / sf);
 
-        {
+        let ran_idle = {
             let mut ops = crate::window_manager::WindowOpsImpl::new(
                 &mut self.wm,
                 event_loop,
@@ -2942,7 +3025,10 @@ impl TeksiloAppHandler {
                 current_handle,
                 current_arc,
             );
-            current.tree.layout_with_ops(proposal, &mut ops);
+            run_tree_logic_frame(&mut current.tree, self.idle_budget, proposal, &mut ops)
+        };
+        if ran_idle && let Some(trace) = &mut self.idle_trace {
+            trace.note_idle_callbacks_run();
         }
 
         // Size-to-content: after layout, measure the content's intrinsic height
@@ -3645,6 +3731,13 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
                     self.window_wake(*wake, event_loop);
                     return;
                 }
+                Err(payload) if payload.is::<AppTreeWake>() => {
+                    // Taken before the tick, so a wake made during it posts
+                    // again rather than being lost.
+                    self.wm.take_app_tree_wake();
+                    self.post_event(event_loop);
+                    return;
+                }
                 Err(payload) => match payload.downcast::<SessionChanged>() {
                     Ok(_) => {
                         self.wm.apply_session(Instant::now());
@@ -3947,6 +4040,10 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         {
             self.wm.request_redraw_all();
         }
+        // After the loop tick, which may have set state the application
+        // tree reads; also how the tree's own deadline, folded into the
+        // control flow below, is served when it wakes the loop.
+        self.tick_app_tree(event_loop);
         // Once per event-loop turn, which is what the shim's own contract
         // asks for. A digitizer reads on its own thread and buffers; this is
         // the only place that asks it what it saw.
@@ -7037,6 +7134,87 @@ mod app_root_tests {
             ctx.send_intent(Intent::new("app.ping"));
         });
         assert_eq!(pings.get(), 1);
+    }
+
+    /// The logic frame both kinds of tree run: idle callbacks, then the
+    /// layout that runs the bindings.
+    #[test]
+    fn the_logic_frame_runs_idle_callbacks_and_rebuilds_bound_roots() {
+        use teksilo_core::binding::BindingLevel;
+        use teksilo_core::signal::Signal;
+
+        #[derive(Debug)]
+        struct Counted(Signal<u32>, Rc<Cell<u32>>);
+        impl Widget for Counted {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                self.0
+                    .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+                self.1.set(self.1.get() + 1);
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                proposal: teksilo_canvas::SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+        }
+
+        let generation = Signal::new(0);
+        let builds = Rc::new(Cell::new(0));
+        let mut tree = teksilo_core::WidgetTree::new();
+        tree.add(Counted(generation.clone(), builds.clone()));
+        let idle_ran = Rc::new(Cell::new(false));
+        let flag = idle_ran.clone();
+        tree.run_with_event_context(&mut NoopWindowOps, move |ctx| {
+            ctx.request_idle_callback(move |_| flag.set(true));
+        });
+        let zero = teksilo_canvas::SizeProposal::exact(0.0, 0.0);
+        let budget = std::time::Duration::from_millis(4);
+        assert!(super::run_tree_logic_frame(
+            &mut tree,
+            budget,
+            zero,
+            &mut NoopWindowOps
+        ));
+        assert!(idle_ran.get());
+        let before = builds.get();
+        generation.set(1);
+        assert!(!super::run_tree_logic_frame(
+            &mut tree,
+            budget,
+            zero,
+            &mut NoopWindowOps
+        ));
+        assert_eq!(builds.get(), before + 1, "the binding rebuilt the root");
+    }
+
+    /// However many wakes arrive before the loop takes the first, one is
+    /// posted; once taken, the next posts again.
+    #[test]
+    fn the_app_tree_waker_posts_once_until_taken() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use teksilo_canvas::wake::{RedrawWaker, WakeKind};
+
+        let posts = Arc::new(AtomicUsize::new(0));
+        let pending = Arc::new(AtomicBool::new(false));
+        let counted = posts.clone();
+        let waker = super::AppTreeWaker {
+            post: Arc::new(move |payload| {
+                assert!(payload.is::<super::AppTreeWake>());
+                counted.fetch_add(1, Ordering::SeqCst);
+            }),
+            pending: pending.clone(),
+        };
+        waker.wake(WakeKind::Layout);
+        waker.wake(WakeKind::Draw);
+        waker.wake(WakeKind::Layout);
+        assert_eq!(posts.load(Ordering::SeqCst), 1);
+        assert!(pending.swap(false, Ordering::SeqCst), "the loop takes it");
+        waker.wake(WakeKind::Draw);
+        assert_eq!(posts.load(Ordering::SeqCst), 2);
     }
 
     #[test]

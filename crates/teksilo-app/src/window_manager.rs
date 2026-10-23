@@ -586,6 +586,10 @@ pub struct WindowManager {
     /// accessibility adapter. Taken out while one of its handlers runs,
     /// like a window's tree. See [`install_app_tree`](Self::install_app_tree).
     app_tree: Option<WidgetTree>,
+    /// Set by the application tree's waker when it posts an
+    /// [`AppTreeWake`](crate::app::AppTreeWake), cleared when the loop takes
+    /// it: at most one is in flight.
+    app_tree_wake_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// The quit under way, if any; see [`crate::quit`].
     quit: Option<crate::quit::PendingQuit>,
     /// The last [`PendingQuit::generation`](crate::quit::PendingQuit) handed
@@ -643,6 +647,7 @@ impl WindowManager {
             start_os_theme_watch: start_platform_desktop_watch,
             recency: crate::window_recency::WindowRecency::default(),
             app_tree: None,
+            app_tree_wake_pending: Default::default(),
             quit: None,
             quit_generation: 0,
             quit_completed: false,
@@ -751,6 +756,14 @@ impl WindowManager {
         if let Some(typesetter) = self.typesetter.as_ref() {
             tree = tree.with_text_backend(typesetter.as_text_backend());
         }
+        // Before the root builds, so a source attached in `build()` already
+        // wakes the loop for this tree.
+        if let Some(proxy) = self.event_proxy.clone() {
+            tree.set_redraw_waker(Some(std::sync::Arc::new(crate::app::AppTreeWaker {
+                post: std::sync::Arc::new(move |payload| proxy.send_external_boxed(payload)),
+                pending: self.app_tree_wake_pending.clone(),
+            })));
+        }
         let root_id = root(&mut tree);
         self.app_tree = Some(tree);
         root_id
@@ -776,6 +789,13 @@ impl WindowManager {
     /// Put back the tree [`take_app_tree`](Self::take_app_tree) took.
     pub(crate) fn reinsert_app_tree(&mut self, tree: WidgetTree) {
         self.app_tree = Some(tree);
+    }
+
+    /// Take the application tree's posted wake: whether one was pending.
+    /// The waker posts again only after this.
+    pub(crate) fn take_app_tree_wake(&self) -> bool {
+        self.app_tree_wake_pending
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
     }
 
     /// The application tree, if one was installed.

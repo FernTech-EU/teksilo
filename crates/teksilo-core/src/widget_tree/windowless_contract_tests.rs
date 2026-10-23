@@ -17,7 +17,9 @@
 //! - a tree with no root drops the context's intents, which is why that tree
 //!   always has a root;
 //! - a tree that was laid out but never painted still reports
-//!   `needs_render`, which is why its tick must not be gated on it.
+//!   `needs_render`, which is why its tick must not be gated on it;
+//! - its own wake-up time, `next_unpainted_deadline`, holds what layout
+//!   moves forward and nothing that only render or a window would.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -192,4 +194,53 @@ fn a_tree_laid_out_but_never_painted_still_needs_render() {
         tree.needs_render(),
         "paint never clears it here, so a tick gated on it would run on every turn"
     );
+}
+
+#[test]
+fn the_unpainted_deadline_holds_a_requested_wake() {
+    let (tree, _, _, _) = app_tree();
+    assert_eq!(tree.next_unpainted_deadline(), None, "nothing to wake for");
+    let at = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    tree.request_wake_at(at);
+    assert_eq!(tree.next_unpainted_deadline(), Some(at));
+}
+
+#[test]
+fn the_unpainted_deadline_paces_a_frame_request_from_the_last_layout() {
+    let (mut tree, _, _, _) = app_tree();
+    let mut ops = RecordingOps::default();
+    tree.layout_with_ops(no_window(), &mut ops);
+    tree.request_frame();
+    let deadline = tree
+        .next_unpainted_deadline()
+        .expect("a frame was asked for");
+    tree.layout_with_ops(no_window(), &mut ops);
+    assert_eq!(
+        tree.next_unpainted_deadline(),
+        None,
+        "the layout ran the frame and nothing asked again"
+    );
+    assert!(deadline > std::time::Instant::now() - std::time::Duration::from_secs(1));
+}
+
+/// An animated quad advances only when the tree renders. Counted, it would
+/// keep a tree that never renders due forever and spin the loop.
+#[test]
+fn the_unpainted_deadline_leaves_out_animated_quads() {
+    let (mut tree, _, _, _) = app_tree();
+    let root = tree.roots()[0];
+    let _quad = tree.register_animated_quad(
+        root,
+        crate::animated_quad::AnimatedQuadKind::SpinnerArc {
+            period: std::time::Duration::from_secs(1),
+            arc_fraction: 0.25,
+            stroke_fraction: 0.12,
+            color: teksilo_tokens::Color::RED.into(),
+        },
+    );
+    assert!(
+        tree.next_timer_deadline().is_some(),
+        "a window would wake for it"
+    );
+    assert_eq!(tree.next_unpainted_deadline(), None);
 }
