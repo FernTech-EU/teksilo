@@ -679,21 +679,8 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             let arc = Some(managed.platform_window.window_arc());
             let mut seen = None;
             {
-                #[cfg(not(target_os = "macos"))]
-                let handle = managed
-                    .platform_window
-                    .window()
-                    .window_handle()
-                    .ok()
-                    .map(|h| h.as_raw());
-                let mut ops = crate::window_manager::WindowOpsImpl::new(
-                    &mut app.wm,
-                    event_loop,
-                    id,
-                    #[cfg(not(target_os = "macos"))]
-                    handle,
-                    arc,
-                );
+                let mut ops =
+                    crate::window_manager::WindowOpsImpl::new(&mut app.wm, event_loop, id, arc);
                 managed.tree.run_with_event_context(&mut ops, |ctx| {
                     seen = Some(ctx.soft_keyboard_support())
                 });
@@ -1620,18 +1607,11 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             );
             let parent_winit = app.wm.winit_id_for_teksilo(parent).expect("open");
             let current = app.wm.take_managed(parent_winit).expect("open");
-            let handle = current
-                .platform_window
-                .window()
-                .window_handle()
-                .ok()
-                .map(|h| h.as_raw());
             let dialog = {
                 let mut ops = crate::window_manager::WindowOpsImpl::new(
                     &mut app.wm,
                     event_loop,
                     parent,
-                    handle,
                     Some(current.platform_window.window_arc()),
                 );
                 teksilo_core::WindowOps::open_window(

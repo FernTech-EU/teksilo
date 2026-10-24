@@ -1634,13 +1634,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -1648,8 +1641,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             current.tree.dispatch_event_with_ops(event, &mut ops);
@@ -1680,13 +1671,6 @@ impl TeksiloAppHandler {
     ) -> Option<R> {
         let mut current = self.wm.take_managed(window_id)?;
         let current_id = current.teksilo_id;
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         let result = {
@@ -1694,8 +1678,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             let mut chrome = WindowChrome::new(
@@ -1859,13 +1841,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         // A collapsed (hamburger) MenuBar's action carries a `reveal`
@@ -1883,8 +1858,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             crate::input_routing::apply_menubar_action(
@@ -2062,13 +2035,6 @@ impl TeksiloAppHandler {
             return;
         };
         let current_id = current.teksilo_id;
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         // Settle synchronously on the main thread with a real `WindowOps`.
@@ -2077,8 +2043,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             let settle = crate::automation_bridge::clamp_live_settle(&payload.settle);
@@ -2226,20 +2190,11 @@ impl TeksiloAppHandler {
         // Re-render with a real ops sink so rebuild-triggered handlers on
         // this recovery path can still open windows.
         let current_id = managed.teksilo_id;
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = managed
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(managed.platform_window.window_arc());
         let mut ops = crate::window_manager::WindowOpsImpl::new(
             &mut self.wm,
             event_loop,
             current_id,
-            #[cfg(not(target_os = "macos"))]
-            current_handle,
             current_arc,
         );
         let frame = managed.tree.render_with_ops(&mut ops);
@@ -2277,13 +2232,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -2291,8 +2239,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             f(&mut current.tree, &mut ops);
@@ -2430,13 +2376,6 @@ impl TeksiloAppHandler {
             };
             let current_id = current.teksilo_id;
 
-            #[cfg(not(target_os = "macos"))]
-            let current_handle = current
-                .platform_window
-                .window()
-                .window_handle()
-                .ok()
-                .map(|h| h.as_raw());
             let current_arc = Some(current.platform_window.window_arc());
 
             {
@@ -2444,8 +2383,6 @@ impl TeksiloAppHandler {
                     &mut self.wm,
                     event_loop,
                     current_id,
-                    #[cfg(not(target_os = "macos"))]
-                    current_handle,
                     current_arc,
                 );
                 current
@@ -2720,13 +2657,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -2734,8 +2664,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             current.tree.run_with_event_context(&mut ops, |ctx| {
@@ -2795,13 +2723,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -2809,8 +2730,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             current.tree.run_with_event_context(&mut ops, |ctx| {
@@ -2868,13 +2787,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -2882,8 +2794,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             current.tree.run_with_event_context(&mut ops, |ctx| {
@@ -2953,13 +2863,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -2967,8 +2870,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             match payload.event {
@@ -3012,13 +2913,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -3026,8 +2920,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             current.tree.tick_gestures_with_ops(now, &mut ops);
@@ -3222,13 +3114,6 @@ impl TeksiloAppHandler {
         event_loop: &ActiveEventLoop,
     ) {
         let current_id = current.teksilo_id;
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
         current.redraw.ran_frame(Instant::now());
 
@@ -3241,8 +3126,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             run_tree_logic_frame(&mut current.tree, self.idle_budget, proposal, &mut ops)
@@ -3365,13 +3248,6 @@ impl TeksiloAppHandler {
         current.refresh_minimized(Instant::now());
         current.sync_hidden_for_frame();
         let current_id = current.teksilo_id;
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         if let Some(trace) = &mut self.idle_trace {
@@ -3393,8 +3269,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc.clone(),
             );
             current.tree.render_with_ops(&mut ops)

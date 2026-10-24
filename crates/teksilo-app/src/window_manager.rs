@@ -2422,13 +2422,6 @@ impl WindowManager {
             return true;
         };
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = managed
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(managed.platform_window.window_arc());
 
         // Clone the guard handles so the dispatch closure captures them
@@ -2440,14 +2433,7 @@ impl WindowManager {
 
         let mut should_close = true;
         {
-            let mut ops = WindowOpsImpl::new(
-                self,
-                target,
-                teksilo_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
-                current_arc,
-            );
+            let mut ops = WindowOpsImpl::new(self, target, teksilo_id, current_arc);
             managed.tree.run_with_event_context(&mut ops, |ctx| {
                 should_close = close_verdict(&can_close, &on_close_blocked, &close_guard, ctx);
             });
@@ -3254,18 +3240,14 @@ pub struct WindowOpsImpl<'a> {
     event_loop: &'a winit::event_loop::ActiveEventLoop,
     /// Current (dispatching) window's id. Names the window the outbound
     /// OS-drag ops below (`begin_os_drag` / `cancel_os_drag` /
-    /// `set_drop_accepted`) route to, and is also available for diagnostics
-    /// and future modal-parent self-reference logic. `None` for the
+    /// `set_drop_accepted`) route to, and the window a dialog `modal_to` it
+    /// is attached to (with `current_window_arc`). `None` for the
     /// [windowless](Self::windowless) sink, which has no window to drag
     /// from.
     current_id: Option<TeksiloWindowId>,
-    /// Current window's raw handle, captured before removal. A modal whose
-    /// parent is the current window finds it through `current_window_arc`.
-    #[cfg(not(target_os = "macos"))]
-    current_handle: Option<winit::raw_window_handle::RawWindowHandle>,
-    /// `Arc<Window>` of the current (dispatching) window. On macOS
-    /// it is needed for `addChildWindow:ordered:`. On every platform
-    /// it backs `current_parent_handle()` so native-dialog
+    /// `Arc<Window>` of the current (dispatching) window. A dialog opened
+    /// `modal_to` it finds its parent here (owner window, transient-for or
+    /// `addChildWindow:ordered:`). It also backs `current_parent_handle()` so native-dialog
     /// integrations can extract both window and display handles even
     /// while the dispatching window is temporarily out of
     /// `WindowManager::windows`.
@@ -3277,17 +3259,12 @@ impl<'a> WindowOpsImpl<'a> {
         wm: &'a mut WindowManager,
         event_loop: &'a winit::event_loop::ActiveEventLoop,
         current_id: TeksiloWindowId,
-        #[cfg(not(target_os = "macos"))] current_handle: Option<
-            winit::raw_window_handle::RawWindowHandle,
-        >,
         current_window_arc: Option<std::sync::Arc<winit::window::Window>>,
     ) -> Self {
         Self {
             wm,
             event_loop,
             current_id: Some(current_id),
-            #[cfg(not(target_os = "macos"))]
-            current_handle,
             current_window_arc,
         }
     }
@@ -3305,8 +3282,6 @@ impl<'a> WindowOpsImpl<'a> {
             wm,
             event_loop,
             current_id: None,
-            #[cfg(not(target_os = "macos"))]
-            current_handle: None,
             current_window_arc: None,
         }
     }
@@ -3314,8 +3289,6 @@ impl<'a> WindowOpsImpl<'a> {
 
 impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
     fn open_window(&mut self, config: teksilo_core::WindowConfig) -> TeksiloWindowId {
-        #[cfg(not(target_os = "macos"))]
-        let _ = self.current_handle;
         let dispatching = self.current_id.zip(self.current_window_arc.as_deref());
         self.wm
             .create_window_beside(config, self.event_loop, dispatching)

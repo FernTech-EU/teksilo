@@ -871,7 +871,6 @@ let Some(mut current) = self.wm.take_managed(winit_id) else { return };
 {
     let mut ops = WindowOpsImpl::new(&mut self.wm, event_loop,
                                       current.teksilo_id,
-                                      current_handle,   // not on macOS
                                       current_arc);
     current.tree.dispatch_event_with_ops(evt, &mut ops);
 }
