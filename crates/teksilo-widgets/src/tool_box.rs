@@ -1971,6 +1971,77 @@ mod tests {
         );
     }
 
+    /// A header's slot controls keep their own clicks when the headers drag.
+    /// `on_header_drag` puts a drag on each header, so the header competes for
+    /// every press on its slot widgets, and the release used to fire its tap
+    /// beside theirs: a trailing button selected (or collapsed) its section.
+    #[test]
+    fn a_draggable_headers_slot_controls_do_not_select_its_section() {
+        use crate::{Button, Checkbox};
+        use std::cell::Cell as StdCell;
+
+        let clicks = Rc::new(StdCell::new(0));
+        let checked = Signal::new(false);
+        let selected = Signal::new(0_usize);
+        let c = clicks.clone();
+        let mut t = tree().with_text_backend(Rc::new(std::cell::RefCell::new(
+            teksilo_canvas::MockTextBackend::new(),
+        )));
+        let tb = t.add(
+            ToolBox::new(selected.clone())
+                .collapsible(true)
+                .on_header_drag(|_idx, _ctx| {})
+                .item(lit!("A"), TextWidget::new(lit!("a")))
+                .add(
+                    ToolBoxItem::new(lit!("B"), TextWidget::new(lit!("b")))
+                        .leading(Checkbox::new(checked.clone()).label(lit!("on")))
+                        .trailing(
+                            Button::new(lit!("x")).on_activate_fn(move |_| c.set(c.get() + 1)),
+                        ),
+                ),
+        );
+        t.layout(SizeProposal::exact(300.0, 600.0));
+        fn find_role(t: &WidgetTree, root: WidgetId, role: accesskit::Role) -> Option<WidgetId> {
+            t.children(root).into_iter().find_map(|child| {
+                (t.accessibility_node(child).role() == role)
+                    .then_some(child)
+                    .or_else(|| find_role(t, child, role))
+            })
+        }
+        let header = header_id(&t, tb, 1);
+        let button = find_role(&t, header, accesskit::Role::Button).expect("the trailing button");
+        let checkbox =
+            find_role(&t, header, accesskit::Role::CheckBox).expect("the leading checkbox");
+        assert!(t.bounds(button).width > 0.0 && t.bounds(checkbox).width > 0.0);
+
+        t.click(button);
+        assert_eq!(clicks.get(), 1, "the click works the trailing button");
+        assert_eq!(selected.get(), 0, "and leaves section B unselected");
+
+        t.click(checkbox);
+        assert!(checked.get(), "the click checks the leading checkbox");
+        assert_eq!(selected.get(), 0, "and leaves section B unselected");
+
+        // The header itself still selects: a click on its label, between the
+        // two slots (its centre is on the trailing button).
+        let label = teksilo_canvas::Point::new(
+            (t.bounds(checkbox).right() + t.bounds(button).x) / 2.0,
+            t.bounds(header).y + t.bounds(header).height / 2.0,
+        );
+        t.tap_with(teksilo_tokens::PointerKind::Mouse, label);
+        assert_eq!(
+            selected.get(),
+            1,
+            "a click on the header's label selects it"
+        );
+        t.click(button);
+        assert_eq!(
+            selected.get(),
+            1,
+            "a click on the open section's button keeps it open"
+        );
+    }
+
     // ─── fill mode ─────────────────────────────────────────────────────
 
     #[test]

@@ -781,7 +781,10 @@ owns, and a node write would outlive the press that chose it.
    the terminating `Up` so its recognizer clears the origin it recorded, which
    is what stops an ancestor `DragRecognizer` from staying armed and starting a
    phantom drag on the next *hover* move, and the pressed owner's own arena
-   resolves its tap through the normal capture dispatch.
+   resolves its tap through the normal capture dispatch. The tap belongs to the
+   pressed owner alone: each member's **tap family** is revoked before it is
+   fed, or a member that also taps (an accordion header that is a dock's drag
+   handle) would fire its tap beside the owner's.
 
 A member that loses keeps its handlers and loses only its **recognizers**: the
 router silences the arena of a rejected member, of every non-winner once a

@@ -64,6 +64,15 @@ by crate for clarity, not because crates version independently.
   kept the state its signal had when the `ToolBox` was built, for clicks,
   arrow keys and the actions offered to assistive technology.
 
+#### Core
+
+- **A click on a control fires only that control, even under an ancestor
+  that both taps and drags.** Such an ancestor follows every press inside it,
+  so that a drag from the control can still move it, and on the release it
+  fired its own tap as well. A button in a split `DockingLayout` pane
+  collapsed the pane's accordion, and a button or checkbox in the header of a
+  `ToolBox` with `on_header_drag` selected its section.
+
 ## [0.20.0] - 2026-10-19
 
 ### Added

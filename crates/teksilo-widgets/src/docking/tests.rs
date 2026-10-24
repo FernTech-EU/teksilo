@@ -199,6 +199,60 @@ fn collapsing_a_split_accordion_keeps_its_header() {
     );
 }
 
+/// A click on a control inside a split pane works the control and leaves the
+/// pane open. The pane's accordion header is the dock's drag handle, so the
+/// accordion competes for every press in its pane through that drag, and the
+/// release used to fire its collapsing tap beside the control's own.
+#[test]
+fn clicking_a_button_in_a_split_pane_does_not_collapse_it() {
+    use crate::button::Button;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let clicks = Rc::new(Cell::new(0));
+    let model = DockingModel::new();
+    let a = DockWidgetId::fresh();
+    let (b, dwb) = dock("Bbb");
+    let dwa = DockWidget::new(a, lit!("Aaa"), {
+        let clicks = clicks.clone();
+        move |_| {
+            let clicks = clicks.clone();
+            crate::scroll_area::ScrollArea::new().child(
+                Button::new(lit!("Press")).on_activate_fn(move |_| clicks.set(clicks.get() + 1)),
+            )
+        }
+    });
+    let mut t = tree().with_text_backend(Rc::new(std::cell::RefCell::new(
+        teksilo_canvas::MockTextBackend::new(),
+    )));
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading).stack());
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    let acc_a = find_role_name(&t, root, Role::Button, "Aaa").expect("accordion A header exists");
+    assert!(t.accessibility_node(acc_a).is_expanded());
+    let button =
+        find_role_name(&t, root, Role::Button, "Press").expect("dock A's button is laid out");
+
+    t.click(button);
+    t.tick_animations(Duration::from_millis(400));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    assert_eq!(clicks.get(), 1, "the click works the button");
+    assert!(
+        t.accessibility_node(acc_a).is_expanded(),
+        "the click leaves dock A's accordion open"
+    );
+}
+
 #[test]
 fn empty_layout_center_fills() {
     let model = DockingModel::new();

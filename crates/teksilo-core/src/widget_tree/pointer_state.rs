@@ -1109,9 +1109,14 @@ impl WidgetTree {
                 // dispatch; feeding it twice would count the release twice.
                 continue;
             }
-            // An `Up` while the recognizer is not mid-drag resolves it to
-            // `Failed` and clears `down_position` — no gesture is produced, so
-            // this only tidies recognizer state.
+            // The press belongs to the captor, so a member's tap family is
+            // revoked first: its TapRecognizer saw the whole press, and fed the
+            // `Up` it would fire the member's tap beside the captor's (a button
+            // in a dock collapsing the accordion whose header drags the dock).
+            // What is left, an `Up` while the recognizer is not mid-drag,
+            // resolves it to `Failed` and clears `down_position`, so this only
+            // tidies recognizer state.
+            self.cancel_member_taps(id, pointer);
             self.feed_member_arena(id, up_event, &mut *ops);
         }
         if let Some(entry) = self.pointers.get_mut(pointer) {

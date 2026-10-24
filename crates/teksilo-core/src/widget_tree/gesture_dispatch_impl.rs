@@ -1019,6 +1019,96 @@ mod tests {
             "a hover after a click must not start a phantom ancestor drag"
         );
     }
+
+    #[test]
+    fn click_on_tap_child_does_not_fire_a_dragging_ancestors_tap() {
+        // Regression: an ancestor that both taps and drags (an accordion header
+        // that collapses on a tap and is a dock's drag handle) is enrolled for
+        // its drag when a tapping descendant takes the press. The release sweep
+        // fed it the `Up` to disarm that drag, and its TapRecognizer, having
+        // seen the whole press, fired the ancestor's tap beside the child's: a
+        // click on a button inside a dock collapsed the dock.
+        use crate::gesture::DragPhase;
+        use crate::test_widgets::StackWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let child_taps = Rc::new(Cell::new(0));
+        let parent_taps = Rc::new(Cell::new(0));
+        let drag_started = Rc::new(Cell::new(false));
+        let (c, p, d) = (
+            child_taps.clone(),
+            parent_taps.clone(),
+            drag_started.clone(),
+        );
+
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new().on_tap(move |_e, _c| c.set(c.get() + 1)));
+        let parent = tree.add(
+            StackWidget::new()
+                .child(child)
+                .on_tap(move |_e, _c| p.set(p.get() + 1))
+                .on_drag(move |phase, _c| {
+                    if matches!(phase, DragPhase::Started { .. }) {
+                        d.set(true);
+                    }
+                }),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(50.0, 25.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        assert_eq!(
+            tree.sequence_members(crate::pointer::PointerId::MOUSE),
+            vec![(
+                parent,
+                crate::gesture::MemberRole::Gesture,
+                crate::gesture::MemberState::Possible
+            )],
+            "the ancestor competes for the press through its drag"
+        );
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(50.0, 25.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        assert_eq!(child_taps.get(), 1, "the click taps the child");
+        assert_eq!(
+            parent_taps.get(),
+            0,
+            "the click must not tap the ancestor that was only watching for a drag"
+        );
+        assert_eq!(
+            tree.arena
+                .get(parent)
+                .and_then(|n| n.handlers.gesture_arena.as_ref())
+                .map(|set| set.streak().count()),
+            Some(0),
+            "nor count towards the ancestor's tap streak"
+        );
+
+        // The ancestor keeps its drag: press on the child and move.
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(50.0, 25.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(80.0, 25.0)));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(80.0, 25.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        assert!(
+            drag_started.get(),
+            "dragging from the child drags the ancestor"
+        );
+        assert_eq!(child_taps.get(), 1, "a drag taps nothing");
+        assert_eq!(parent_taps.get(), 0, "a drag taps nothing");
+    }
     // ---------------------------------------------------------------
     // P06: per-contact arenas, the node tap streak, and the profile
     // ---------------------------------------------------------------
