@@ -557,6 +557,10 @@ pub struct WindowManager {
     /// them as it closes a modal window. See
     /// [`mark_modal_host`](Self::mark_modal_host).
     modal_hosts: std::collections::HashSet<TeksiloWindowId>,
+    /// Windows minimised because the modal window blocking them was: the
+    /// pair goes and comes back as one. See
+    /// [`minimise_with_modal_child`](Self::minimise_with_modal_child).
+    minimised_with_modal: std::collections::HashSet<TeksiloWindowId>,
     /// OS-level accessibility preferences, queried at startup and re-queried
     /// on every window focus gain by
     /// [`refresh_accessibility_preferences`](Self::refresh_accessibility_preferences).
@@ -693,6 +697,7 @@ impl WindowManager {
             modal_blocked: HashMap::new(),
             modal_parents: HashMap::new(),
             modal_hosts: Default::default(),
+            minimised_with_modal: Default::default(),
             a11y_prefs,
             user_text_scale: 1.0,
             theme_mode: ThemeMode::Manual,
@@ -2005,7 +2010,10 @@ impl WindowManager {
         }
         // Also remove any modal children blocking this window
         self.modal_blocked.remove(&teksilo_id);
-        self.modal_parents.remove(&teksilo_id);
+        if let Some(parent) = self.modal_parents.remove(&teksilo_id) {
+            self.minimised_with_modal.remove(&parent);
+        }
+        self.minimised_with_modal.remove(&teksilo_id);
         self.modal_hosts.remove(&teksilo_id);
 
         // Fire the teardown hook last, once every registry above
@@ -2528,6 +2536,7 @@ impl WindowManager {
     /// clicked, the "this window is waiting on that one" nudge. A child
     /// the user minimised comes back first.
     pub fn refocus_modal_child(&mut self, blocked_parent: TeksiloWindowId) {
+        self.minimised_with_modal.remove(&blocked_parent);
         let Some(child_id) = self.blocking_modal_child(blocked_parent) else {
             return;
         };
@@ -2546,6 +2555,93 @@ impl WindowManager {
         // and avoids. The owner / transient-parent relationship already keeps
         // the modal above its parent.
         child.restore_and_raise();
+    }
+
+    /// The modal window `child` was minimised: minimise the window it blocks
+    /// with it, so the pair goes and comes back as one. Otherwise the OS
+    /// hands the focus to that window, whose focus brings the dialog back
+    /// at once, and the dialog cannot be minimised at all. Nothing when the
+    /// window it blocks is minimised already.
+    pub(crate) fn minimise_with_modal_child(&mut self, child: TeksiloWindowId) {
+        let Some(parent) = self.modal_parent_of(child) else {
+            return;
+        };
+        if self.blocking_modal_child(parent) != Some(child) {
+            return;
+        }
+        let Some(managed) = self.get_by_teksilo_mut(parent) else {
+            return;
+        };
+        let window = managed.platform_window.window();
+        if managed.minimized || window.is_minimized() == Some(true) {
+            return;
+        }
+        window.set_minimized(true);
+        managed.minimized = true;
+        managed.minimized_probed_at = None;
+        managed.sync_hidden();
+        self.minimised_with_modal.insert(parent);
+    }
+
+    /// `id` took the focus. A modal window whose parent went with it brings
+    /// the parent back. A window blocked by a modal child brings the child
+    /// back, as a click in it does; or, when the child was minimised just
+    /// now and the OS passed the focus on, goes with it. See [`pair_focus`].
+    pub(crate) fn note_focus_gained(&mut self, id: TeksiloWindowId) {
+        let is_minimised = |wm: &mut Self, id| {
+            wm.get_by_teksilo_mut(id).map(|w| {
+                (
+                    w.minimized,
+                    w.platform_window.window().is_minimized() == Some(true),
+                )
+            })
+        };
+        let parent_went_with = self
+            .modal_parent_of(id)
+            .filter(|parent| self.minimised_with_modal.contains(parent));
+        let child = self.blocking_modal_child(id);
+        let went_with_child = self.minimised_with_modal.contains(&id);
+        // Only a window in a modal pair asks: on X11 the question is a round
+        // trip.
+        let (minimised, child_known_minimised, child_minimised) = match child {
+            Some(child) if parent_went_with.is_none() => {
+                let minimised = went_with_child && is_minimised(self, id).is_some_and(|m| m.1);
+                let (known, now) = is_minimised(self, child).unwrap_or_default();
+                (minimised, known, now)
+            }
+            _ => (false, false, false),
+        };
+        match pair_focus(PairFacts {
+            parent_went_with,
+            child,
+            went_with_child,
+            minimised,
+            child_known_minimised,
+            child_minimised,
+        }) {
+            PairFocus::Nothing => {}
+            PairFocus::RestoreParent(parent) => {
+                self.minimised_with_modal.remove(&parent);
+                if let Some(parent) = self.get_by_teksilo_mut(parent) {
+                    parent.restore();
+                }
+                if let Some(dialog) = self.get_by_teksilo_mut(id) {
+                    teksilo_platform::window_activation::raise(
+                        dialog.platform_window.window(),
+                        None,
+                    );
+                }
+            }
+            PairFocus::MinimisePair(child) => {
+                if let Some(dialog) = self.get_by_teksilo_mut(child) {
+                    dialog.minimized = true;
+                    dialog.minimized_probed_at = None;
+                    dialog.sync_hidden();
+                }
+                self.minimise_with_modal_child(child);
+            }
+            PairFocus::RefocusChild => self.refocus_modal_child(id),
+        }
     }
 
     /// Broadcast a theme change to all windows.
@@ -3468,6 +3564,162 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
         {
             handle.set_drop_accepted(current_id, accepted);
         }
+    }
+}
+
+/// What [`WindowManager::note_focus_gained`] knows about the window that
+/// took the focus and the modal pair it belongs to.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PairFacts {
+    /// It is a modal window, and the window it blocks was minimised with it.
+    pub parent_went_with: Option<TeksiloWindowId>,
+    /// The modal window blocking it.
+    pub child: Option<TeksiloWindowId>,
+    /// It was minimised because `child` was.
+    pub went_with_child: bool,
+    /// The window system reports it minimised (asked only when
+    /// `went_with_child`).
+    pub minimised: bool,
+    /// The manager has `child` minimised.
+    pub child_known_minimised: bool,
+    /// The window system reports `child` minimised.
+    pub child_minimised: bool,
+}
+
+/// What a window taking the focus does about its modal pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PairFocus {
+    /// Nothing: it is in no pair, or the focus is stale.
+    Nothing,
+    /// The dialog is back: restore the window that went with it.
+    RestoreParent(TeksiloWindowId),
+    /// The dialog was minimised and the OS passed the focus on: minimise
+    /// the window it blocks with it.
+    MinimisePair(TeksiloWindowId),
+    /// Bring the dialog back, restored if minimised, and raise it.
+    RefocusChild,
+}
+
+/// The rule behind [`WindowManager::note_focus_gained`].
+///
+/// A dialog minimised shows only in its focus passing to the window it
+/// blocks (Windows activates the owner) before the manager has heard of the
+/// minimise: that is the moment the window goes with it. Bringing the
+/// dialog back instead, as for any other focus, made it impossible to
+/// minimise. A minimise the manager already knows (a resize to zero, the
+/// pair minimised together, Win+M) is one the user is coming back from.
+pub(crate) fn pair_focus(facts: PairFacts) -> PairFocus {
+    if let Some(parent) = facts.parent_went_with {
+        return PairFocus::RestoreParent(parent);
+    }
+    let Some(child) = facts.child else {
+        return PairFocus::Nothing;
+    };
+    if facts.went_with_child {
+        // The focus handed on as the dialog minimised, arriving after the
+        // window went too.
+        if facts.minimised {
+            return PairFocus::Nothing;
+        }
+        return PairFocus::RefocusChild;
+    }
+    if facts.child_minimised && !facts.child_known_minimised {
+        return PairFocus::MinimisePair(child);
+    }
+    PairFocus::RefocusChild
+}
+
+#[cfg(test)]
+mod pair_focus_tests {
+    use super::*;
+
+    fn child() -> TeksiloWindowId {
+        TeksiloWindowId::new(2)
+    }
+
+    fn parent() -> TeksiloWindowId {
+        TeksiloWindowId::new(1)
+    }
+
+    fn blocked() -> PairFacts {
+        PairFacts {
+            parent_went_with: None,
+            child: Some(child()),
+            went_with_child: false,
+            minimised: false,
+            child_known_minimised: false,
+            child_minimised: false,
+        }
+    }
+
+    #[test]
+    fn a_window_in_no_pair_does_nothing() {
+        let facts = PairFacts {
+            child: None,
+            ..blocked()
+        };
+        assert_eq!(pair_focus(facts), PairFocus::Nothing);
+    }
+
+    #[test]
+    fn a_blocked_window_brings_its_dialog_back() {
+        assert_eq!(pair_focus(blocked()), PairFocus::RefocusChild);
+    }
+
+    /// The bounce Windows showed: the focus reaches the blocked window
+    /// while its dialog minimises, before the manager knows.
+    #[test]
+    fn a_dialog_minimised_just_now_takes_its_window_with_it() {
+        let facts = PairFacts {
+            child_minimised: true,
+            ..blocked()
+        };
+        assert_eq!(pair_focus(facts), PairFocus::MinimisePair(child()));
+    }
+
+    /// Minimised before (a resize to zero was heard, Win+M): the user is
+    /// coming back to the window.
+    #[test]
+    fn a_dialog_known_minimised_comes_back() {
+        let facts = PairFacts {
+            child_minimised: true,
+            child_known_minimised: true,
+            ..blocked()
+        };
+        assert_eq!(pair_focus(facts), PairFocus::RefocusChild);
+    }
+
+    #[test]
+    fn a_late_focus_of_the_minimised_pair_brings_nothing_back() {
+        let facts = PairFacts {
+            went_with_child: true,
+            minimised: true,
+            child_minimised: true,
+            child_known_minimised: true,
+            ..blocked()
+        };
+        assert_eq!(pair_focus(facts), PairFocus::Nothing);
+    }
+
+    #[test]
+    fn the_window_restored_brings_its_dialog_back() {
+        let facts = PairFacts {
+            went_with_child: true,
+            child_minimised: true,
+            child_known_minimised: true,
+            ..blocked()
+        };
+        assert_eq!(pair_focus(facts), PairFocus::RefocusChild);
+    }
+
+    #[test]
+    fn the_dialog_restored_brings_its_window_back() {
+        let facts = PairFacts {
+            parent_went_with: Some(parent()),
+            child: None,
+            ..blocked()
+        };
+        assert_eq!(pair_focus(facts), PairFocus::RestoreParent(parent()));
     }
 }
 

@@ -463,7 +463,9 @@ impl WindowConfig {
     /// Offer a minimise button in the window's title bar, or not. By
     /// default an ordinary window has one and a [modal](Self::modal_to) one
     /// does not: a minimised dialog keeps the window it blocks refusing
-    /// input, with nothing on screen to say why.
+    /// input, with nothing on screen to say why. A modal window asked to
+    /// have one is minimised with the window it blocks: minimising it takes
+    /// that window along, and restoring either brings both back.
     ///
     /// Applied when the window is created, on Windows and macOS. X11 and
     /// Wayland leave the title bar to the window manager or compositor, and

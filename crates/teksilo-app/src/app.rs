@@ -3425,6 +3425,7 @@ impl TeksiloAppHandler {
                 }
             }
             WindowEvent::Resized(new_size) => {
+                let mut just_minimised = None;
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.platform_window.resize(new_size);
                     // Mirror OS-initiated geometry / placement changes
@@ -3446,6 +3447,9 @@ impl TeksiloAppHandler {
                     managed.state.set_placement_from_os(placement);
                     // Windows reports a minimise as a resize to zero, and a
                     // restore as a resize back.
+                    if placement.is_minimized() && !managed.minimized {
+                        just_minimised = Some(managed.teksilo_id);
+                    }
                     managed.minimized = placement.is_minimized();
                     managed.sync_hidden();
                     // A resize is when the safe area changes: on the one
@@ -3457,6 +3461,11 @@ impl TeksiloAppHandler {
                         trace.note_redraw_request("resize");
                     }
                     managed.request_redraw();
+                }
+                // A modal window the user minimised takes the window it
+                // blocks with it.
+                if let Some(id) = just_minimised {
+                    self.wm.minimise_with_modal_child(id);
                 }
             }
             WindowEvent::Moved(pos) => {
@@ -3656,12 +3665,11 @@ impl TeksiloAppHandler {
                 // A window blocked by a modal child can take the focus without
                 // a press reaching it: a click on its title bar, Alt+Tab, its
                 // taskbar button. The child comes back to the front, restored
-                // if the user minimised it, as for a click in the window.
-                if focused
-                    && let Some(fid) = self.wm.teksilo_id_for_winit(window_id)
-                    && self.wm.is_blocked(fid)
-                {
-                    self.wm.refocus_modal_child(fid);
+                // if the user minimised it, as for a click in the window. A
+                // modal window and the window it blocks are minimised and
+                // restored together.
+                if focused && let Some(fid) = self.wm.teksilo_id_for_winit(window_id) {
+                    self.wm.note_focus_gained(fid);
                 }
                 // A window regaining focus is the natural, zero-idle-cost moment
                 // to re-check the OS accessibility preferences (WCAG / EN 301

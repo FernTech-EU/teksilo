@@ -58,7 +58,8 @@ by crate for clarity, not because crates version independently.
   offers those buttons, on Windows and macOS. **Behaviour change:** a modal
   window, and a native dialog the framework opens, now has only a close
   button; ask for the others with `minimizable(true)` or
-  `maximizable(true)`.
+  `maximizable(true)`. A minimisable dialog is minimised with the window it
+  blocks, and restoring either one brings both back.
 - **`WithActivationToken`, an external payload with the activation token that
   came with it.** `on_external_with_ctx` sees the payload, and the first
   window its handler raises or opens is activated with the token, so a

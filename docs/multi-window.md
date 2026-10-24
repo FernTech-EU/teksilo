@@ -624,8 +624,11 @@ based on `ModalPresentation::Auto` and platform capability.
 
 A modal window has a close button and no minimise or maximise button, on
 Windows and macOS, unless its config asks for them with `minimizable(true)`
-or `maximizable(true)`; where the window manager offers to minimise it
-anyway (X11), a click on the window it blocks brings it back.
+or `maximizable(true)`. A modal window and the window it blocks are
+minimised together: minimising the dialog takes the window with it, and
+restoring either one brings both back. Where the window manager offers to
+minimise a dialog anyway (X11), a click on the window it blocks brings it
+back.
 
 ---
 
