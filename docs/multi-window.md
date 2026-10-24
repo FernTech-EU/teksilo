@@ -180,6 +180,8 @@ pub struct WindowConfig {
     pub size_to_content: SizeToContent,  // Off (default) | Height, dialogs that grow with content
     pub always_on_top: bool,
     pub skip_taskbar: bool,
+    pub minimizable: Option<bool>,       // None: no for a modal window, yes otherwise
+    pub maximizable: Option<bool>,       // the same
     pub activate_from_env: bool,         // consume an xdg_activation startup token (Wayland)
     pub icon: Option<WindowIcon>,
     pub modal: Option<ModalConfig>,
@@ -240,6 +242,7 @@ WindowConfig::new()
     .resizable(true)
     .always_on_top(true)                       // floating tool palette
     .skip_taskbar(true)                        // not in the taskbar (Windows, X11)
+    .minimizable(false)                        // ...so nothing to minimise it to (Windows, macOS)
     .icon(WindowIcon::from_rgba(rgba, w, h))
     .root(|tree, state| tree.add(Inspector::new(state)))
 ```
@@ -617,6 +620,11 @@ ctx.open_modal(ModalRequest {
 For the general case (may land in-tree or in a native window),
 `ctx.present_modal(request)` picks the presentation at dispatch time
 based on `ModalPresentation::Auto` and platform capability.
+
+A modal window has a close button and no minimise or maximise button, on
+Windows and macOS, unless its config asks for them with `minimizable(true)`
+or `maximizable(true)`; where the window manager offers to minimise it
+anyway (X11), a click on the window it blocks brings it back.
 
 ---
 

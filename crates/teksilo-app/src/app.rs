@@ -1143,7 +1143,9 @@ impl TeksiloAppHandler {
                 parent,
                 focus_target,
             }),
-            None => WindowConfig::new(),
+            // A dialog with no window to block is not modal, and would get
+            // the buttons of an ordinary window.
+            None => WindowConfig::new().minimizable(false).maximizable(false),
         };
         if let Some(title) = title {
             config = config.title(title);

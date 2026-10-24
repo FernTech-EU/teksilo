@@ -89,6 +89,17 @@ fn close_verdict(
 /// meaningful (it clears an active composition); only the second-and-later
 /// consecutive empties are skipped. Extracted from the `WindowEvent::Ime` arm so
 /// the state machine is unit-testable without a winit event loop.
+/// The title-bar buttons `config` offers: always close, minimise and
+/// maximise as [`WindowConfig::is_minimizable`] and
+/// [`WindowConfig::is_maximizable`] say.
+fn caption_buttons(config: &WindowConfig) -> winit::window::WindowButtons {
+    use winit::window::WindowButtons;
+    let mut buttons = WindowButtons::CLOSE;
+    buttons.set(WindowButtons::MINIMIZE, config.is_minimizable());
+    buttons.set(WindowButtons::MAXIMIZE, config.is_maximizable());
+    buttons
+}
+
 pub(crate) fn ime_should_skip_empty_preedit(last_empty: &mut bool, empty_preedit: bool) -> bool {
     let repeat = empty_preedit && *last_empty;
     *last_empty = empty_preedit;
@@ -366,6 +377,29 @@ impl ManagedWindow {
         } else {
             self.platform_window.set_hidden(false);
         }
+    }
+
+    /// Bring the window back if it is minimised, and ask for a redraw. The
+    /// flag is read as well as asked of winit, since
+    /// [`refresh_minimized`](Self::refresh_minimized) reads it at most every
+    /// [`MINIMIZED_PROBE_INTERVAL`].
+    pub(crate) fn restore(&mut self) {
+        let window = self.platform_window.window();
+        if self.minimized || window.is_minimized() == Some(true) {
+            window.set_minimized(false);
+            self.minimized = false;
+            self.minimized_probed_at = None;
+            self.sync_hidden();
+        }
+        self.request_redraw();
+    }
+
+    /// [Restore](Self::restore) the window, then raise it: winit's
+    /// `focus_window` leaves a minimised window where it is, so a raise
+    /// alone would not show it.
+    pub(crate) fn restore_and_raise(&mut self) {
+        self.restore();
+        teksilo_platform::window_activation::raise(self.platform_window.window(), None);
     }
 
     /// Re-read `minimized` from winit while the window is unfocused, at most
@@ -1280,6 +1314,17 @@ impl WindowManager {
             always_on_top: config.always_on_top,
         });
         if let Some(sid) = &config.string_id {
+            // Nothing refuses a second open window with the same id, and
+            // `find_window` can name only one of them, so a debug build says
+            // so.
+            #[cfg(debug_assertions)]
+            if let Some(open) = self.string_to_id.get(sid) {
+                eprintln!(
+                    "teksilo-app: a window with id `{sid}` is already open ({open:?}); \
+                     `find_window(\"{sid}\")` now finds the new one. Look the id up \
+                     before opening it to raise the open window instead"
+                );
+            }
             self.string_to_id.insert(sid.clone(), teksilo_id);
         }
         let wants_custom_chrome = config.decorations.wants_custom_chrome_host();
@@ -1317,6 +1362,7 @@ impl WindowManager {
             .with_title(&config.title)
             .with_inner_size(winit::dpi::LogicalSize::new(config.size.0, config.size.1))
             .with_resizable(config.resizable)
+            .with_enabled_buttons(caption_buttons(&config))
             .with_visible(false); // Must be invisible for AccessKit adapter creation
 
         // The id the desktop matches this window against. On Wayland it is the
@@ -1932,8 +1978,23 @@ impl WindowManager {
             // buys, which is not widget teardown.
             let now = managed.tree.input_now();
             crate::input_loop::release_contacts(&mut managed.translation_state, now);
+            // The id goes with the window, unless another one opened with
+            // it is still open: then the newest of those has it.
             if let Some(sid) = managed.string_id.as_deref() {
-                self.string_to_id.remove(sid);
+                match self
+                    .windows
+                    .values()
+                    .filter(|other| other.string_id.as_deref() == Some(sid))
+                    .map(|other| other.teksilo_id)
+                    .max_by_key(|id| id.raw())
+                {
+                    Some(other) => {
+                        self.string_to_id.insert(sid.to_owned(), other);
+                    }
+                    None => {
+                        self.string_to_id.remove(sid);
+                    }
+                }
             }
             // Unblock the parent if this was the modal blocking it, and not
             // an earlier one a second modal has since replaced there.
@@ -2237,19 +2298,12 @@ impl WindowManager {
         if let Some(quit) = &mut self.quit {
             quit.awaiting = Some(teksilo_id);
         }
-        if let Some(&winit_id) = self.teksilo_to_winit.get(&teksilo_id)
-            && let Some(managed) = self.windows.get(&winit_id)
-        {
-            if managed.minimized {
-                managed.platform_window.window().set_minimized(false);
-            }
-            managed.request_redraw();
+        if let Some(managed) = self.get_by_teksilo_mut(teksilo_id) {
+            managed.restore();
         }
         let front = self.frontmost_modal_of(teksilo_id);
-        if let Some(&winit_id) = self.teksilo_to_winit.get(&front)
-            && let Some(managed) = self.windows.get(&winit_id)
-        {
-            teksilo_platform::window_activation::raise(managed.platform_window.window(), None);
+        if let Some(managed) = self.get_by_teksilo_mut(front) {
+            managed.restore_and_raise();
         }
     }
 
@@ -2490,15 +2544,13 @@ impl WindowManager {
     }
 
     /// Pull focus back to the modal child of a blocked parent the user just
-    /// clicked — the "this window is waiting on that one" nudge.
-    pub fn refocus_modal_child(&self, blocked_parent: TeksiloWindowId) {
+    /// clicked, the "this window is waiting on that one" nudge. A child
+    /// the user minimised comes back first.
+    pub fn refocus_modal_child(&mut self, blocked_parent: TeksiloWindowId) {
         let Some(child_id) = self.blocking_modal_child(blocked_parent) else {
             return;
         };
-        let Some(child_winit) = self.winit_id_for_teksilo(child_id) else {
-            return;
-        };
-        let Some(child) = self.windows.get(&child_winit) else {
+        let Some(child) = self.get_by_teksilo_mut(child_id) else {
             return;
         };
 
@@ -2512,8 +2564,7 @@ impl WindowManager {
         // forces a redraw) — exactly the failure the creation path documents
         // and avoids. The owner / transient-parent relationship already keeps
         // the modal above its parent.
-        teksilo_platform::window_activation::raise(child.platform_window.window(), None);
-        child.request_redraw();
+        child.restore_and_raise();
     }
 
     /// Broadcast a theme change to all windows.
@@ -3433,6 +3484,26 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
         {
             handle.set_drop_accepted(current_id, accepted);
         }
+    }
+}
+
+#[cfg(test)]
+mod caption_button_tests {
+    use super::*;
+    use winit::window::WindowButtons;
+
+    #[test]
+    fn a_dialog_gets_only_a_close_button() {
+        let parent = TeksiloWindowId::new(1);
+        assert_eq!(
+            caption_buttons(&WindowConfig::new().modal_to(parent)),
+            WindowButtons::CLOSE
+        );
+        assert_eq!(caption_buttons(&WindowConfig::new()), WindowButtons::all());
+        assert_eq!(
+            caption_buttons(&WindowConfig::new().minimizable(false)),
+            WindowButtons::CLOSE | WindowButtons::MAXIMIZE
+        );
     }
 }
 

@@ -54,6 +54,11 @@ by crate for clarity, not because crates version independently.
   offered to it once, and one it leaves goes to the window used last, so a
   window's menu can fire a command only the application tree implements;
   shortcuts' intents stay where they were sent.
+- **`WindowConfig::minimizable` and `maximizable`**, whether the title bar
+  offers those buttons, on Windows and macOS. **Behaviour change:** a modal
+  window, and a native dialog the framework opens, now has only a close
+  button; ask for the others with `minimizable(true)` or
+  `maximizable(true)`.
 - **`WithActivationToken`, an external payload with the activation token that
   came with it.** `on_external_with_ctx` sees the payload, and the first
   window its handler raises or opens is activated with the token, so a
@@ -73,6 +78,11 @@ by crate for clarity, not because crates version independently.
   `x11::ewmh::mark_skip_taskbar` and `x11::ewmh::net_wm_state`.
 
 ### Changed
+
+#### App
+
+- **Breaking.** `WindowManager::refocus_modal_child` takes `&mut self`, since
+  it may restore the window it raises.
 
 #### Widgets
 
@@ -125,6 +135,13 @@ by crate for clarity, not because crates version independently.
 - **`ctx.focus_window(id)` raises the window its handler runs in.** That
   window is out of the window list during its own dispatch, so raising it
   did nothing, which is the common case in a single-instance handler.
+- **A minimised dialog comes back when the window it blocks is clicked,**
+  and when a quit stops at its window. Raising it left it minimised, with the
+  window it blocks refusing input.
+- **Two windows opened with one `WindowConfig::id` no longer lose it.**
+  Closing either left `find_window` finding neither; the one still open now
+  keeps the id. A debug build warns when a window opens with an id another
+  open window has.
 - **`WindowConfig::skip_taskbar` keeps the window out of the taskbar** on
   Windows and X11. It had no effect anywhere. Wayland and macOS have nothing
   per window to apply it to, as its documentation now says.

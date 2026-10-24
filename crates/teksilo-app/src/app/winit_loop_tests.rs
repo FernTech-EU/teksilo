@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Thirty-one claims, and they do not all carry the same weight. Verified by
+//! Thirty-two claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -39,7 +39,8 @@
 //!   translator (`WindowManager::set_theme`) and a window created afterwards
 //!   (`input_loop::wire_translator`);
 //! - **(b)** the modal-blocked guard both swallows input and still delivers
-//!   `Resized`;
+//!   `Resized`, and a click on the blocked window brings back a modal child
+//!   the user minimised;
 //! - **(d)** a *wrong* soft-keyboard row is caught;
 //! - **(g)** a window awaiting a redraw it requested does not make
 //!   `update_control_flow` sleep until a deadline already due, so it cannot
@@ -91,6 +92,9 @@
 //!   from the others;
 //! - **(w)** a window created with `skip_taskbar(true)` carries
 //!   `_NET_WM_STATE_SKIP_TASKBAR`, and one created without it does not;
+//! - **(af)** of two windows opened with one id, `find_window` names the
+//!   newer, the other once the newer closes, and still the newer when the
+//!   older closes first;
 //! - **(x)** with no window open, the loop goes on under
 //!   `QuitPolicy::Explicit`;
 //! - **(z)** a mount action in the application tree runs with the window
@@ -114,7 +118,8 @@
 //! - **(aa)** the application tree is ticked by `about_to_wait` and by the
 //!   wake its waker posts, which the loop takes so the next one posts;
 //! - **(y)** a quit closes a window with no guard, stops at one whose guard
-//!   vetoed and presented a `MessageBox`, waits while the box is queued and
+//!   vetoed and presented a `MessageBox`, restoring it if it was minimised,
+//!   waits while the box is queued and
 //!   while it is up, is abandoned when Escape cancels the box, and, asked
 //!   again, completes once Enter picks Discard, which closes the window by
 //!   id, and that ends the loop even under `Explicit`.
@@ -1553,12 +1558,50 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             app.wm.close_window(listed);
         }
 
+        // -- (af) two windows opened with one id
+        //
+        // Nothing refuses the second. Closing either used to drop the id,
+        // leaving `find_window` blind to the window still open.
+        {
+            let twin = |app: &mut TeksiloAppHandler, title: &str| {
+                app.wm.create_window(
+                    WindowConfig::new()
+                        .id("loop-twin")
+                        .title(title)
+                        .size(200, 120)
+                        .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                    event_loop,
+                )
+            };
+            let older = twin(app, "teksilo loop test: twin 1");
+            let newer = twin(app, "teksilo loop test: twin 2");
+            assert_eq!(app.wm.find_window("loop-twin"), Some(newer), "the newer");
+            app.wm.close_window(older);
+            assert_eq!(
+                app.wm.find_window("loop-twin"),
+                Some(newer),
+                "the older closing leaves the id with the newer"
+            );
+            app.wm.close_window(newer);
+            assert_eq!(app.wm.find_window("loop-twin"), None);
+
+            let older = twin(app, "teksilo loop test: twin 1");
+            let newer = twin(app, "teksilo loop test: twin 2");
+            app.wm.close_window(newer);
+            assert_eq!(
+                app.wm.find_window("loop-twin"),
+                Some(older),
+                "the newer closing hands the id to the window that still has it"
+            );
+            app.wm.close_window(older);
+        }
+
         // -- (b) a window blocked by a modal child
         //
         // Open a real modal over it, then hand the *parent* three events and
         // watch which of them survive the guard in `handle_window_event_inner`.
         let parent_id = app.wm.windows_map()[&window].teksilo_id;
-        app.wm.create_window(
+        let modal_child = app.wm.create_window(
             WindowConfig::new()
                 .title("modal")
                 .size(200, 120)
@@ -1581,6 +1624,24 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             recorder.borrow().phases.is_empty(),
             "a blocked window must not deliver input to its widgets: {:?}",
             recorder.borrow().phases
+        );
+
+        // A click on the blocked window raises its modal child, and brings
+        // it back first if the user minimised it: winit's raise leaves a
+        // minimised window where it is. Raising without restoring in
+        // `refocus_modal_child` leaves it minimised.
+        app.wm
+            .get_by_teksilo_mut(modal_child)
+            .expect("the modal child")
+            .minimized = true;
+        app.window_event(event_loop, window, click(ElementState::Pressed));
+        app.window_event(event_loop, window, click(ElementState::Released));
+        assert!(
+            !app.wm
+                .get_by_teksilo_mut(modal_child)
+                .expect("the modal child")
+                .minimized,
+            "a click on the blocked window brings back its minimised dialog"
         );
 
         // Non-input still arrives: a `Resized` the blocked window never saw
@@ -2204,10 +2265,17 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         );
 
         // Again, and Enter this time: Discard closes the window by id, and
-        // the quit goes on to completion.
+        // the quit goes on to completion. The window is minimised meanwhile,
+        // and the quit stopping at it brings it back. Taking the restore
+        // out of `await_quit_at` leaves it minimised.
+        app.wm.get_by_teksilo_mut(guarded).expect("open").minimized = true;
         app.wm.request_quit(false);
         app.process_pending(event_loop);
         assert_eq!(asks.get(), 2, "a new quit asks the guard again");
+        assert!(
+            !app.wm.get_by_teksilo_mut(guarded).expect("open").minimized,
+            "the quit restores the minimised window it stops at"
+        );
         app.post_event(event_loop);
         app.window_event(event_loop, guarded_winit, WindowEvent::RedrawRequested);
         assert!(has_box(app));
