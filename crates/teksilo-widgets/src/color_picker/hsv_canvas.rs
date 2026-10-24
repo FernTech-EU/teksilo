@@ -109,8 +109,6 @@ pub(crate) struct HsvCanvas {
     set_hsv: Rc<dyn Fn(f32, f32, f32)>,
     dragging: Rc<Cell<bool>>,
     cached_bounds: Rc<Cell<Rect>>,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
 }
 
 impl HsvCanvas {
@@ -128,14 +126,7 @@ impl HsvCanvas {
             set_hsv,
             dragging,
             cached_bounds: Rc::new(Cell::new(Rect::ZERO)),
-            initial_enabled: true,
         }
-    }
-
-    /// Set the initial enabled state. Forwarded to the arena at build time.
-    pub(crate) fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
-        self
     }
 }
 
@@ -148,10 +139,6 @@ impl std::fmt::Debug for HsvCanvas {
 impl Widget for HsvCanvas {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
         let registry = ctx.binding_registry();
         // Bind for repaint when any of the HSV channels move; layout
         // is fixed, so RepaintOnly is the right level.

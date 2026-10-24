@@ -251,9 +251,9 @@ pub struct Snackbar {
     /// Enabled state (static or reactive). Wired into the arena on the
     /// trigger node -- the default `Button` and, on the `.trigger(...)`
     /// path, the `OverlayTrigger` -- so a disabled trigger greys out,
-    /// reports `disabled` to AT, and has its dispatch gated. The snapshot
-    /// read in `build()` is a redundant early-out kept in the custom-trigger
-    /// closures.
+    /// reports `disabled` to AT, and has its dispatch gated. The opener
+    /// closures must not snapshot it: a trigger built disabled would then
+    /// stay shut after its signal enabled it.
     enabled: Prop<bool>,
     dismiss: DismissBehavior,
     auto_dismiss_after: Option<Duration>,
@@ -378,10 +378,6 @@ impl Widget for Snackbar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         let label = self.label.clone();
-        // Redundant early-out for the custom-trigger closures below; the
-        // arena.s `enabled_when` (wired on the OverlayTrigger) already gates
-        // dispatch, so this snapshot is belt-and-suspenders.
-        let enabled = self.enabled.get();
         let dismiss = self.dismiss.clone();
         let auto_dismiss_after = self.auto_dismiss_after;
         let style = self.variant;
@@ -422,9 +418,6 @@ impl Widget for Snackbar {
             let open = {
                 let shown = shown.clone();
                 move |ctx: &mut teksilo_core::widget::EventContext| {
-                    if !enabled {
-                        return;
-                    }
                     present_snackbar(
                         ctx,
                         self_id,
@@ -604,6 +597,30 @@ mod tests {
         tree.click(trigger);
 
         assert_eq!(tree.active_overlays().len(), 1);
+    }
+
+    /// A custom trigger built disabled opens once its signal turns it on,
+    /// with no rebuild in between.
+    #[test]
+    fn custom_trigger_built_disabled_opens_once_enabled() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let enabled = teksilo_core::Signal::new(false);
+        tree.add(
+            Snackbar::new(lit!("Show snackbar"))
+                .content(FixedLeaf(180.0, 36.0))
+                .trigger(FixedLeaf(132.0, 36.0))
+                .enabled(enabled.clone()),
+        );
+        tree.layout(SizeProposal::exact(640.0, 480.0));
+
+        let trigger = tree.find_by_label("Show snackbar").unwrap();
+        tree.click(trigger);
+        assert!(tree.active_overlays().is_empty(), "disabled: no snackbar");
+
+        enabled.set(true);
+        tree.layout(SizeProposal::exact(640.0, 480.0));
+        tree.click(trigger);
+        assert_eq!(tree.active_overlays().len(), 1, "enabled: snackbar opens");
     }
 
     #[test]

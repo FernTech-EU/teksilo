@@ -46,8 +46,6 @@ pub(crate) struct AlphaStrip {
     cached_bounds: Rc<Cell<Rect>>,
     focus_origin: Rc<Cell<Option<FocusOrigin>>>,
     orientation: Orientation,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
     label: String,
 }
 
@@ -66,19 +64,12 @@ impl AlphaStrip {
             cached_bounds: Rc::new(Cell::new(Rect::ZERO)),
             focus_origin: Rc::new(Cell::new(None)),
             orientation: Orientation::Vertical,
-            initial_enabled: true,
             label: String::new(),
         }
     }
 
     pub(crate) fn orientation(mut self, orientation: Orientation) -> Self {
         self.orientation = orientation;
-        self
-    }
-
-    /// Set the initial enabled state. Forwarded to the arena at build time.
-    pub(crate) fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
         self
     }
 
@@ -97,10 +88,6 @@ impl std::fmt::Debug for AlphaStrip {
 impl Widget for AlphaStrip {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
         let registry = ctx.binding_registry();
         // Color drives the gradient colour; alpha drives the thumb position.
         self.current_color.bind_to(

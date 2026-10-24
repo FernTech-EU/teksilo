@@ -1560,3 +1560,51 @@ fn day_cell(
     });
     cells.into_iter().nth(n)
 }
+
+/// A calendar built disabled must not keep the `bool` it was built with:
+/// once its signal enables it, it is a Tab stop, a click on a day selects
+/// that day, and the arrows move the cursor.
+#[test]
+fn a_calendar_built_disabled_works_once_enabled() {
+    use teksilo_core::event::{Key, Modifiers, WidgetEvent};
+    let (_mgr, mut tree) = speaking("fr-FR");
+    let enabled = Signal::new(false);
+    let date = Signal::new(Some(Date::constant(2027, 3, 12)));
+    let calendar = Calendar::single(date.clone()).enabled(enabled.clone());
+    let cursor = calendar.focused_date_signal();
+    let id = tree.add(calendar);
+    lay_out(&mut tree);
+    assert!(tree.tab_stops_within(id).is_empty(), "built disabled");
+
+    enabled.set(true);
+    lay_out(&mut tree);
+    assert!(
+        tree.tab_stops_within(id).contains(&id),
+        "the grid is a Tab stop"
+    );
+
+    let day = tree
+        .find_by_label("mardi 16 mars 2027")
+        .expect("a day of the month on show");
+    tree.click(day);
+    lay_out(&mut tree);
+    assert_eq!(
+        date.get(),
+        Some(Date::constant(2027, 3, 16)),
+        "the day is picked"
+    );
+
+    tree.focus(id);
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::ArrowRight,
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+    lay_out(&mut tree);
+    assert_eq!(
+        cursor.get(),
+        Date::constant(2027, 3, 17),
+        "the arrow moves the cursor"
+    );
+    teksilo_i18n::thread_local::clear();
+}

@@ -49,6 +49,14 @@ by crate for clarity, not because crates version independently.
 - **A `Toolbar` toggle action in the overflow menu toggles.** Activating it
   left the state unchanged, and in a debug build opening the menu panicked.
   Its row shows the checkmark and no icon.
+- **A widget built disabled works once its `enabled` signal turns it on.**
+  `Snackbar` with a custom trigger, `Calendar`, `ColorPicker`, `SpinBox` and
+  `DateEdit` bound to a `Signal<bool>` that started `false` stayed partly
+  disabled after it became `true`: the snackbar never opened, the calendar
+  was no Tab stop and ignored clicks and keys, the picker's strips, spinners
+  and buttons stayed disabled, the spin box's field and step buttons took no
+  input, and the date edit's field, calendar button and arrow keys did
+  nothing.
 
 ## [0.20.0] - 2026-10-19
 

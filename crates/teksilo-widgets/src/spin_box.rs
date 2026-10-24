@@ -876,13 +876,12 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         let self_id = ctx.self_id();
         // Forward the enabled state into the arena; see IconButton.
         ctx.enabled_when(self_id, self.enabled.clone());
-        // Snapshot the build-time enabled state into a local for
-        // closures that capture it for read-only-style guards on
-        // wheel events / step buttons. The framework's event gate
-        // already refuses to dispatch to disabled subtrees, so the
-        // value here only matters for the few build-time decisions
-        // (e.g. seeding the inner TextInputField's read_only mode).
-        let enabled = self.enabled.get();
+        // Nothing below reads `self.enabled`: the arena disables every part
+        // with this node, and a `bool` read here would freeze a SpinBox
+        // built disabled, since nothing rebuilds it when the signal flips.
+        // The step buttons, which keep their own enabled signal, follow
+        // `effective_enabled` instead.
+        let effective_enabled = ctx.effective_enabled_signal(self_id);
         let read_only = self.read_only;
         let wheel_mode = self.wheel_mode;
 
@@ -1279,7 +1278,6 @@ impl<T: SpinValue> Widget for SpinBox<T> {
 
         let mut field = TextInputField::new(self.text_signal.clone())
             .share_handle(&field_handle)
-            .enabled(enabled)
             // An assistive-technology `SetValue` on the inner text node is a
             // finished edit, not a keystroke, so it takes the same parse,
             // clamp and revert `Enter` takes. Handed the string rather than
@@ -1443,7 +1441,11 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 &step_silent,
                 self.can_step_up.clone(),
                 self.can_step_down.clone(),
-                enabled && !read_only,
+                if read_only {
+                    Signal::new(false)
+                } else {
+                    effective_enabled.clone()
+                },
                 field_dims::TEXT_FIELD_HEIGHT,
                 field_dims::TEXT_FIELD_CORNER_RADIUS,
             );
@@ -1456,10 +1458,10 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // surface) to the active SpinBoxStyle.
         let style =
             crate::styles::recipe_spin_box_style::resolve_spin_box_style(&self.style_override, ctx);
-        // Derive the disabled state from the arena rather than from the
-        // build-time `enabled` snapshot above, so a bound `Signal<bool>`
-        // (or a disabled *ancestor*) re-tints the chrome with no rebuild.
-        let is_disabled = ctx.effective_enabled_signal(self_id).map(|on| !*on);
+        // Derive the disabled state from the arena, so a bound
+        // `Signal<bool>` (or a disabled *ancestor*) re-tints the chrome
+        // with no rebuild.
+        let is_disabled = effective_enabled.map(|on| !*on);
         let cfg = teksilo_core::styles::SpinBoxStyleConfig {
             field: padded_field_id,
             step_up: step_up_id,
@@ -1817,7 +1819,7 @@ fn build_step_buttons<T: SpinValue>(
     step_silent: &Rc<dyn Fn(i32, bool) -> StepOutcome<T>>,
     can_up: Signal<bool>,
     can_down: Signal<bool>,
-    enabled: bool,
+    enabled: Signal<bool>,
     frame_height: f32,
     corner_radius: f32,
 ) -> (WidgetId, WidgetId) {
@@ -1829,13 +1831,9 @@ fn build_step_buttons<T: SpinValue>(
     let up_icon = chevron_up_icon(8.0);
     let down_icon = chevron_down_icon(8.0);
 
-    // Derived enabled signals: OR with the caller-wide `enabled`.
-    let up_enabled = if enabled { can_up } else { Signal::new(false) };
-    let down_enabled = if enabled {
-        can_down
-    } else {
-        Signal::new(false)
-    };
+    // Derived enabled signals: AND with the caller-wide `enabled`.
+    let up_enabled = enabled.and(&can_up);
+    let down_enabled = enabled.and(&can_down);
 
     let step_for_up_tap = step.clone();
     let silent_for_up_auto = step_silent.clone();

@@ -19,6 +19,8 @@ pub(crate) mod drop_bands;
 mod editor_focus_tests;
 pub(crate) mod editor_runtime;
 #[cfg(test)]
+pub(crate) mod enabled_test;
+#[cfg(test)]
 pub(crate) mod heard_test;
 pub(crate) mod interaction;
 pub(crate) mod list_nav;

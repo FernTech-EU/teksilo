@@ -485,19 +485,17 @@ impl Widget for ColorPicker {
         }
 
         let self_id = ctx.self_id();
-        // Forward the enabled state into the arena; see IconButton. Inner
-        // sub-widgets (HsvCanvas, HueStrip, AlphaStrip, SwatchGrid)
-        // inherit disabled via the ancestor walk — their per-widget
-        // `enabled` snapshot below is only consulted at build time and
-        // then they too forward into the arena, so the AND semantics
-        // fall out for free.
+        // Forward the enabled state into the arena; see IconButton. The
+        // parts (canvas, strips, spinners, footer buttons) inherit it
+        // through the ancestor walk and are handed no copy: a `bool` read
+        // here would freeze a picker built disabled, since nothing rebuilds
+        // it when the signal flips.
         ctx.enabled_when(self_id, self.enabled.clone());
 
         // ── Resolve flags ──
         let alpha_enabled = self.alpha_enabled;
         let show_alpha_strip = self.show_alpha_strip.unwrap_or(alpha_enabled);
         let layout = self.layout;
-        let enabled = self.enabled.get();
         use crate::styles::recipe_color_picker_style as cp;
 
         // ── Build subcomponents ──
@@ -511,8 +509,7 @@ impl Widget for ColorPicker {
                 components.value_hsv.clone(),
                 components.set_hsv.clone(),
                 components.dragging.clone(),
-            )
-            .enabled(enabled);
+            );
             // The canvas's own children are decoration (three stacked gradient
             // layers), so its subtree stays out of the AT tree — but the canvas
             // node itself does not: it carries the four
@@ -530,7 +527,6 @@ impl Widget for ColorPicker {
                 components.dragging.clone(),
             )
             .orientation(Orientation::Vertical)
-            .enabled(enabled)
             .label(resolve_message_widget("color-picker-hue-label", &[]));
             top_row = top_row.child(hue);
         }
@@ -542,7 +538,6 @@ impl Widget for ColorPicker {
                 components.dragging.clone(),
             )
             .orientation(Orientation::Vertical)
-            .enabled(enabled)
             .label(resolve_message_widget("color-picker-alpha-label", &[]));
             top_row = top_row.child(alpha);
         }
@@ -591,7 +586,6 @@ impl Widget for ColorPicker {
                     value.clone(),
                     |c| c.r(),
                     components.set_red.clone(),
-                    enabled,
                     cp::SPINNER_FIELD_WIDTH,
                 );
                 let g_spin = make_byte_spinner_from_value(
@@ -599,7 +593,6 @@ impl Widget for ColorPicker {
                     value.clone(),
                     |c| c.g(),
                     components.set_green.clone(),
-                    enabled,
                     cp::SPINNER_FIELD_WIDTH,
                 );
                 let b_spin = make_byte_spinner_from_value(
@@ -607,7 +600,6 @@ impl Widget for ColorPicker {
                     value.clone(),
                     |c| c.b(),
                     components.set_blue.clone(),
-                    enabled,
                     cp::SPINNER_FIELD_WIDTH,
                 );
                 let mut row = HStack::new()
@@ -621,7 +613,6 @@ impl Widget for ColorPicker {
                         value.clone(),
                         |c| c.a(),
                         components.set_alpha.clone(),
-                        enabled,
                         cp::SPINNER_FIELD_WIDTH,
                     );
                     row = row.child(spinner_cell("color-picker-alpha-short", a_spin));
@@ -638,7 +629,6 @@ impl Widget for ColorPicker {
                     ctx,
                     value.clone(),
                     components.set_hue.clone(),
-                    enabled,
                     cp::SPINNER_FIELD_WIDTH,
                 );
                 let s_spin = make_percent_spinner_from_value(
@@ -646,7 +636,6 @@ impl Widget for ColorPicker {
                     value.clone(),
                     |c| c.to_hsv().1,
                     components.set_saturation.clone(),
-                    enabled,
                     cp::SPINNER_FIELD_WIDTH,
                 );
                 let v_spin = make_percent_spinner_from_value(
@@ -654,7 +643,6 @@ impl Widget for ColorPicker {
                     value.clone(),
                     |c| c.to_hsv().2,
                     components.set_value_hsv.clone(),
-                    enabled,
                     cp::SPINNER_FIELD_WIDTH,
                 );
                 Some(
@@ -726,7 +714,6 @@ impl Widget for ColorPicker {
                     resolve_message_widget("color-picker-cancel-label", &[])
                 }))
                 .variant(ButtonVariant::Plain)
-                .enabled(enabled)
                 .on_activate_fn(move |ctx_evt| cb(ctx_evt));
                 row = row.child(cancel_btn);
             }
@@ -735,7 +722,6 @@ impl Widget for ColorPicker {
                     resolve_message_widget("color-picker-done-label", &[])
                 }))
                 .variant(ButtonVariant::Filled)
-                .enabled(enabled)
                 .on_activate_fn(move |ctx_evt| cb(ctx_evt));
                 row = row.child(done_btn);
             }
@@ -864,7 +850,6 @@ fn make_byte_spinner_from_value(
     value: Signal<Color>,
     accessor: fn(Color) -> f32,
     setter: Rc<dyn Fn(f32)>,
-    enabled: bool,
     width: f32,
 ) -> SpinBox<u8> {
     let initial = (accessor(value.get()) * 255.0).round().clamp(0.0, 255.0) as u8;
@@ -897,7 +882,6 @@ fn make_byte_spinner_from_value(
     SpinBox::new(bridge, 0u8, 255u8)
         .single_step(1u8)
         .page_step(16u8)
-        .enabled(enabled)
         .width(width)
 }
 
@@ -906,7 +890,6 @@ fn make_hue_spinner_from_value(
     ctx: &mut BuildContext,
     value: Signal<Color>,
     setter: Rc<dyn Fn(f32)>,
-    enabled: bool,
     width: f32,
 ) -> SpinBox<u32> {
     let initial = value.get().to_hsv().0.round().clamp(0.0, 359.0) as u32;
@@ -934,7 +917,6 @@ fn make_hue_spinner_from_value(
     SpinBox::new(bridge, 0u32, 359u32)
         .single_step(1u32)
         .page_step(15u32)
-        .enabled(enabled)
         .width(width)
 }
 
@@ -944,7 +926,6 @@ fn make_percent_spinner_from_value(
     value: Signal<Color>,
     accessor: fn(Color) -> f32,
     setter: Rc<dyn Fn(f32)>,
-    enabled: bool,
     width: f32,
 ) -> SpinBox<u8> {
     let initial = (accessor(value.get()) * 100.0).round().clamp(0.0, 100.0) as u8;
@@ -973,7 +954,6 @@ fn make_percent_spinner_from_value(
         .single_step(1u8)
         .page_step(10u8)
         .suffix(" %")
-        .enabled(enabled)
         .width(width)
 }
 

@@ -768,3 +768,35 @@ fn an_accessible_label_given_to_the_date_input_names_the_field() {
     );
     teksilo_i18n::thread_local::clear();
 }
+
+/// A date edit built disabled hands no `bool` to its parts: once its signal
+/// enables it, the field and the calendar button take input again, and an
+/// arrow steps the caret's segment.
+#[test]
+fn a_date_edit_built_disabled_works_once_enabled() {
+    use crate::common::enabled_test::disabled_nodes_under;
+
+    let enabled = Signal::new(false);
+    let value = Signal::new(Some(Date::constant(2026, 5, 15)));
+    let mut tree = light_tree();
+    let id = tree.add(DateEdit::new(value.clone()).enabled(enabled.clone()));
+    laid_out(&mut tree);
+    assert!(!tree.is_enabled(id), "built disabled");
+
+    enabled.set(true);
+    laid_out(&mut tree);
+    assert_eq!(
+        disabled_nodes_under(&tree, id),
+        vec![],
+        "no part left disabled"
+    );
+
+    focus_field(&mut tree, id);
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    laid_out(&mut tree);
+    assert_ne!(
+        value.get(),
+        Some(Date::constant(2026, 5, 15)),
+        "an arrow steps the caret's segment"
+    );
+}

@@ -484,7 +484,9 @@ impl Widget for DateEdit {
         let self_id = ctx.self_id();
         // Forward the enabled state into the arena; see IconButton.
         ctx.enabled_when(self_id, self.enabled.clone());
-        let enabled = self.enabled.get();
+        // Nothing below reads `self.enabled`: the arena disables every part
+        // with this node, and a `bool` read here would freeze a DateEdit
+        // built disabled, since nothing rebuilds it when the signal flips.
         let read_only = self.read_only;
 
         // A locale switch must re-derive the date pattern: it is read from
@@ -799,7 +801,7 @@ impl Widget for DateEdit {
                 IconButton::new(calendar_glyph_icon(de::CALENDAR_ICON_SIZE))
                     .embedded()
                     .size(IconButtonSize::Default)
-                    .enabled(enabled && !read_only)
+                    .enabled(!read_only)
                     .tooltip(localized(move || {
                         resolve_message_widget("date-edit-trigger-tooltip", &[])
                     }))
@@ -835,7 +837,6 @@ impl Widget for DateEdit {
                     commit(ctx)
                 }
             })
-            .enabled(enabled)
             .read_only(read_only)
             .input_mask(mask_string)
             .validator({
@@ -991,7 +992,7 @@ impl Widget for DateEdit {
         let handlers = HandlerSet::new()
             .focus_within(self.focused.clone())
             .on_key_preview(move |event, ctx_evt| {
-                if !enabled || read_only {
+                if read_only {
                     return EventResponse::Ignored;
                 }
                 let WidgetEvent::KeyDown { key, modifiers, .. } = event else {

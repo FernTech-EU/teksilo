@@ -1109,3 +1109,25 @@ fn a_negative_focus_ring_offset_draws_the_swatch_ring_on_its_edge() {
     let (_, deep) = swatch_focus_ring(-60.0);
     assert!(deep[2] >= 0.0 && deep[3] >= 0.0, "ring inverted: {deep:?}");
 }
+
+/// A picker built disabled hands no `bool` to its parts: once its signal
+/// enables it, every strip, spinner and footer button takes input again.
+#[test]
+fn a_picker_built_disabled_enables_every_part_once_enabled() {
+    use crate::common::enabled_test::disabled_nodes_under;
+
+    let enabled = Signal::new(false);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        ColorPicker::new(Signal::new(Color::RED))
+            .on_done(|_| {})
+            .on_cancel(|_| {})
+            .enabled(enabled.clone()),
+    );
+    tree.layout(SizeProposal::exact(640.0, 640.0));
+    assert!(!tree.is_enabled(id), "built disabled");
+
+    enabled.set(true);
+    tree.layout(SizeProposal::exact(640.0, 640.0));
+    assert_eq!(disabled_nodes_under(&tree, id), vec![]);
+}

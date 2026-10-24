@@ -560,9 +560,15 @@ impl Widget for Calendar {
         // Forward the enabled state into the arena. After this point the
         // arena is the single source of truth.
         ctx.enabled_when(self_id, self.enabled.clone());
-        // Inner cell/grid helpers still take an `enabled: bool`
-        // snapshot which is fine for build-time decisions (they pass
-        // it to the inner widgets which now consult the arena).
+        // The key handler, the root's Tab stop and every cell (its cursor
+        // among them) take a `bool` read here, so a bound `enabled` rebuilds
+        // the calendar, as the text scale does: without it a calendar built
+        // disabled stayed inert after its signal enabled it.
+        self.enabled.register_if_bound(
+            self_id,
+            ctx.binding_registry(),
+            teksilo_core::binding::BindingLevel::Rebuild,
+        );
         let enabled = self.enabled.get();
         let week_numbers = self.week_numbers;
         let week_number_col_width = match week_numbers {

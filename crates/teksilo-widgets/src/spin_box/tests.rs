@@ -2361,3 +2361,31 @@ fn a_special_value_box_built_off_its_minimum_shows_its_unit() {
     let (tree, _value, spin) = timeout_box();
     assert_eq!(suffix_of(&tree, spin), "", "built at the minimum: \"Auto\"");
 }
+
+/// A spin box built disabled hands no `bool` to its parts: once its signal
+/// enables it, the field takes typing and the step buttons step again.
+#[test]
+fn a_spin_box_built_disabled_works_once_enabled() {
+    use crate::common::enabled_test::disabled_nodes_under;
+    use teksilo_core::event::PointerButton;
+
+    let enabled = Signal::new(false);
+    let value = Signal::new(5_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(SpinBox::new(value.clone(), 0, 100).enabled(enabled.clone()));
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    assert!(!tree.is_enabled(id), "built disabled");
+
+    enabled.set(true);
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    assert_eq!(
+        disabled_nodes_under(&tree, id),
+        vec![],
+        "no part left disabled"
+    );
+
+    let up = step_buttons(&tree, id)[0];
+    tree.pointer_down_button(up.center(), PointerButton::Primary);
+    tree.pointer_up_button(up.center(), PointerButton::Primary);
+    assert_eq!(value.get(), 6, "the up button steps the value");
+}
