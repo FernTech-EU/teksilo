@@ -193,8 +193,9 @@ impl Widget for DayCell {
         // AT / automation `Action::Click`. The cell advertises
         // `Action::Click` in `accessibility`, and the dispatcher never
         // synthesizes a tap from it, so the AT path has to run the same
-        // pipeline explicitly. `interactable` is checked inside (this
-        // cell is not arena-disabled — the guard lives here).
+        // pipeline explicitly. `interactable` is checked inside: a date the
+        // min, max or filter rules out is not arena-disabled, so its guard
+        // lives here. A disabled calendar is, and rebuilds when enabled.
         let select_date: Rc<dyn Fn(&mut EventContext)> = Rc::new(move |ctx_evt| {
             if !interactable {
                 return;

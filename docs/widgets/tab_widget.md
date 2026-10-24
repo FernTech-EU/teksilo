@@ -1206,9 +1206,10 @@ Whether the tab can be activated. Disabled tabs render but
 are skipped by keyboard navigation, can't be clicked, and
 don't get the close button. Default: `true`.
 
-Forwarded to the arena via `ctx.enabled_when(header_id, false)`
-at build time when `false`. Ancestor-driven disable (e.g. a
-disabled `TabBar`) ANDs with this flag automatically.
+Static or reactive: a bound `Signal<bool>` rebuilds the
+`TabWidget` when it flips, so the tab follows it both ways.
+Ancestor-driven disable (e.g. a disabled `TabBar`) ANDs with this
+flag automatically.
 
 <a id="tabinfo-focusable_panel"></a>
 

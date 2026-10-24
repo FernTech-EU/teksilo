@@ -185,8 +185,9 @@ error/warning strip and border tint the inner `TextInput` renders (e.g.
 
 #### `pub fn enabled(mut self, on: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
-Set the initial enabled state for the text field and Browse button.
-Forwarded to the arena at build time.
+Set the enabled state of the text field and Browse button, statically
+or reactively. Forwarded to the arena at build time; a bound
+`Signal<bool>` updates live.
 
 <a id="filepickerfield-tooltip"></a>
 

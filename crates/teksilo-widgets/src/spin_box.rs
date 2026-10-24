@@ -399,14 +399,10 @@ pub struct SpinBox<T: SpinValue> {
     label: Option<LocalizedString>,
     placeholder: LocalizedString,
     /// Enabled state, static or reactive; forwarded to the arena at
-    /// build time. Also captured as a build-time snapshot for the two
-    /// build-time decisions inside `build()` that need a plain `bool`
-    /// (seeding the inner `TextInputField`'s own `enabled` prop, and
-    /// deriving the step buttons' enabled signals). The key-preview
-    /// and scroll handlers deliberately do NOT read it — the
-    /// dispatcher gates on `arena.is_enabled` first, and a build-time
-    /// snapshot would leave a `Signal`-enabled spin box with a dead
-    /// keyboard and wheel.
+    /// build time and never read as a `bool` there. The arena disables
+    /// the field and the handlers with this node, and the step buttons
+    /// follow `effective_enabled_signal`: a snapshot would leave a spin
+    /// box built disabled dead after its signal enabled it.
     enabled: Prop<bool>,
     read_only: bool,
     text_from_value: Option<TextFromValue<T>>,

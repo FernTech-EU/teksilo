@@ -999,7 +999,7 @@ impl TabWidget {
                 .icon(|_, h: &TabHandle| h.info.icon.as_ref().map(|f| f()))
                 .closable(|_, h: &TabHandle| h.info.closable)
                 .pinned(|_, h: &TabHandle| h.info.pinned)
-                .enabled(|_, h: &TabHandle| h.info.initial_enabled.get())
+                .enabled(|_, h: &TabHandle| h.info.enabled.get())
                 .tooltip(|_, h: &TabHandle| {
                     // Pinned tabs render icon-only; promote `title` to the
                     // tooltip if the caller didn't set one explicitly so
@@ -1280,6 +1280,15 @@ impl Widget for TabWidget {
                     all_handles.push(h);
                 }
             }
+        }
+        // The bar reads each tab's `enabled` as a `bool` when it builds,
+        // so a bound one rebuilds TabWidget, as the tab list does.
+        for handle in &all_handles {
+            handle.info.enabled.register_if_bound(
+                self_id,
+                ctx.binding_registry(),
+                BindingLevel::Rebuild,
+            );
         }
 
         // Index → id lookup table. Used by the close / reorder /

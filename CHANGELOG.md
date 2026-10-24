@@ -57,6 +57,12 @@ by crate for clarity, not because crates version independently.
   and buttons stayed disabled, the spin box's field and step buttons took no
   input, and the date edit's field, calendar button and arrow keys did
   nothing.
+- **A tab follows its `TabInfo::enabled` signal.** A tab kept the state its
+  signal had when the `TabWidget` was built: one built disabled could never
+  be selected, and one built enabled could not be disabled.
+- **A `ToolBox` item follows its `ToolBoxItem::enabled` signal.** An item
+  kept the state its signal had when the `ToolBox` was built, for clicks,
+  arrow keys and the actions offered to assistive technology.
 
 ## [0.20.0] - 2026-10-19
 

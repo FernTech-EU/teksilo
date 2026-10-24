@@ -183,8 +183,9 @@ impl FilePickerField {
         self
     }
 
-    /// Set the initial enabled state for the text field and Browse button.
-    /// Forwarded to the arena at build time.
+    /// Set the enabled state of the text field and Browse button, statically
+    /// or reactively. Forwarded to the arena at build time; a bound
+    /// `Signal<bool>` updates live.
     pub fn enabled(mut self, on: impl Into<Prop<bool>>) -> Self {
         self.enabled = on.into();
         self
@@ -267,7 +268,7 @@ fn build_request_owned(
 impl Widget for FilePickerField {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
+        // Forward the enabled state into the arena; see IconButton.
         ctx.enabled_when(self_id, self.enabled.clone());
 
         // Snapshot dialog config + result writer for the Browse-button

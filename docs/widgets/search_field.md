@@ -154,7 +154,8 @@ suggestion popup (`suggestions`) wires itself and needs none of this.
 
 #### `pub fn enabled(mut self, on: impl Into<Prop<bool>>) -> Self` (default: `true`)
 
-Set the initial enabled state. Forwarded to the arena at build time.
+Set the enabled state, statically or reactively. Forwarded to the
+arena at build time; a bound `Signal<bool>` updates live.
 
 <a id="searchfield-on_submit_fn"></a>
 

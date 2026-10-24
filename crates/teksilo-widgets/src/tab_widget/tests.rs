@@ -964,6 +964,60 @@ fn static_tab_disabled_skipped_by_arrow_keys() {
     );
 }
 
+/// A tab's `enabled` signal follows both ways after the build: a tab built
+/// disabled is clicked into once enabled, and refuses the click again once
+/// disabled.
+#[test]
+fn a_tab_enabled_signal_follows_after_the_build() {
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let enabled = Signal::new(false);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    tree.add(
+        TabWidget::new(selected.clone())
+            .static_tab(TabInfo::new().title(label("A")), FixedLeaf(120.0, 48.0))
+            .static_tab(
+                TabInfo::new()
+                    .title(label("Locked"))
+                    .enabled(enabled.clone()),
+                FixedLeaf(120.0, 48.0),
+            )
+            .show_scroll_arrows(false)
+            .show_overflow_dropdown(false),
+    );
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    let first = selected.get();
+    let header = |tree: &WidgetTree| tree.find_by_label("Locked").expect("the tab header");
+
+    tree.click(header(&tree));
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert!(!tree.is_enabled(header(&tree)), "built disabled");
+    assert_eq!(selected.get(), first, "a disabled tab takes no click");
+
+    enabled.set(true);
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert!(tree.is_enabled(header(&tree)), "enabled by its signal");
+    tree.click(header(&tree));
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    let locked = selected.get();
+    assert_ne!(locked, first, "the enabled tab is selected by a click");
+
+    tree.click(tree.find_by_label("A").expect("the first header"));
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    enabled.set(false);
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert!(
+        !tree.is_enabled(header(&tree)),
+        "disabled again by its signal"
+    );
+    tree.click(header(&tree));
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    assert_ne!(
+        selected.get(),
+        locked,
+        "the disabled tab takes no click again"
+    );
+}
+
 /// Both `Enter` and `Space` activate the focused tab AND dive focus into
 /// its content panel — the desktop tab-control convention (Space/Enter
 /// keyboard parity for invocable controls). Parameterized so each key is

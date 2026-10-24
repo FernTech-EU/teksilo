@@ -250,13 +250,10 @@ Disable the item: its header renders in the disabled text role,
 click and keyboard activation are ignored, and arrow navigation
 skips it. Accepts a static bool or a reactive `Signal<bool>`.
 
-Read **once** at build time: a `false` snapshot is forwarded to the
-arena via `ctx.enabled_when(header_id, false)`, and the arena is then
-the single source of truth, ANDing with ancestors — disabling the
-surrounding `ToolBox` (or any ancestor) disables every item regardless
-of this flag. The `Prop` itself is *not* handed to the arena, so
-flipping a bound `Signal<bool>` after build has no effect until the
-`ToolBox` is rebuilt.
+The `Prop` is handed to the arena as is, so a bound `Signal<bool>`
+enables and disables the item live. The arena ANDs it with the
+ancestors: disabling the surrounding `ToolBox` (or any ancestor)
+disables every item regardless of this flag.
 
 <a id="tool_box_header_min_height"></a>
 

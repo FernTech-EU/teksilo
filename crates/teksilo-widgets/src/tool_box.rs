@@ -244,13 +244,10 @@ impl ToolBoxItem {
     /// click and keyboard activation are ignored, and arrow navigation
     /// skips it. Accepts a static bool or a reactive `Signal<bool>`.
     ///
-    /// Read **once** at build time: a `false` snapshot is forwarded to the
-    /// arena via `ctx.enabled_when(header_id, false)`, and the arena is then
-    /// the single source of truth, ANDing with ancestors — disabling the
-    /// surrounding `ToolBox` (or any ancestor) disables every item regardless
-    /// of this flag. The `Prop` itself is *not* handed to the arena, so
-    /// flipping a bound `Signal<bool>` after build has no effect until the
-    /// `ToolBox` is rebuilt.
+    /// The `Prop` is handed to the arena as is, so a bound `Signal<bool>`
+    /// enables and disables the item live. The arena ANDs it with the
+    /// ancestors: disabling the surrounding `ToolBox` (or any ancestor)
+    /// disables every item regardless of this flag.
     pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
         self.enabled = enabled.into();
         self
@@ -452,6 +449,11 @@ fn next_enabled_index(enabled: &[bool], current: usize, direction: isize) -> usi
     current
 }
 
+/// The items' enabled flags as they stand now, read when a key is pressed.
+fn current_flags(enabled: &[Prop<bool>]) -> Vec<bool> {
+    enabled.iter().map(Prop::get).collect()
+}
+
 fn first_enabled_index(enabled: &[bool]) -> Option<usize> {
     enabled.iter().position(|&e| e)
 }
@@ -467,14 +469,13 @@ fn last_enabled_index(enabled: &[bool]) -> Option<usize> {
 struct ToolBoxHeader {
     label: LocalizedString,
     index: usize,
-    /// Structural per-item enabled flag. Forwarded into the arena at
-    /// build time; the arena is then the single source of truth (events,
-    /// focus, a11y `set_disabled`, leaf role-substitution all consult
-    /// `arena.is_enabled(self_id)` / `PaintContext::effective_enabled`).
-    /// Kept on the struct only so `accessibility()` can decide whether
-    /// to advertise the `Click` / `Expand` / `Collapse` actions for the
-    /// structural-disabled case.
-    initial_enabled: bool,
+    /// Per-item enabled state, static or reactive. Handed to the arena
+    /// as is, which gates events, focus, a11y `set_disabled` and the
+    /// leaves' disabled role (`arena.is_enabled(self_id)` /
+    /// `PaintContext::effective_enabled`). Kept on the struct so
+    /// `accessibility()` can decide whether to advertise the `Click` /
+    /// `Expand` / `Collapse` actions.
+    enabled: Prop<bool>,
     selected: Signal<usize>,
     /// Shared ordered list of header widget ids. Populated by
     /// [`ToolBox::build`] as each header is registered. Headers read this to
@@ -483,12 +484,11 @@ struct ToolBoxHeader {
     /// Shared ordered list of panel widget ids, used to publish the
     /// ARIA `controls` relation in [`ToolBoxHeader::accessibility`].
     panel_ids: Rc<RefCell<Vec<WidgetId>>>,
-    /// One entry per item — `true` if that header is structurally
-    /// enabled (per its own `initial_enabled`). Used by arrow / Home /
-    /// End navigation to skip structurally-disabled siblings. Ancestor-
-    /// driven disable cascades through the arena and the focus walker,
-    /// so it doesn't need to be re-evaluated here.
-    enabled_flags: Rc<Vec<bool>>,
+    /// One entry per item: that header's own `enabled`, read when a key
+    /// is pressed. Used by arrow / Home / End navigation to skip disabled
+    /// siblings. Ancestor-driven disable cascades through the arena and
+    /// the focus walker, so it doesn't need to be re-evaluated here.
+    enabled_flags: Rc<Vec<Prop<bool>>>,
     pending_leading: Option<Box<dyn Widget>>,
     pending_trailing: Option<Box<dyn Widget>>,
     tooltip_text: Option<LocalizedString>,
@@ -517,11 +517,11 @@ impl ToolBoxHeader {
     fn new(
         label: LocalizedString,
         index: usize,
-        initial_enabled: bool,
+        enabled: Prop<bool>,
         selected: Signal<usize>,
         header_ids: Rc<RefCell<Vec<WidgetId>>>,
         panel_ids: Rc<RefCell<Vec<WidgetId>>>,
-        enabled_flags: Rc<Vec<bool>>,
+        enabled_flags: Rc<Vec<Prop<bool>>>,
         pending_leading: Option<Box<dyn Widget>>,
         pending_trailing: Option<Box<dyn Widget>>,
         tooltip_text: Option<LocalizedString>,
@@ -534,7 +534,7 @@ impl ToolBoxHeader {
         Self {
             label,
             index,
-            initial_enabled,
+            enabled,
             selected,
             header_ids,
             panel_ids,
@@ -559,16 +559,20 @@ impl Widget for ToolBoxHeader {
         let focus_ring_width = theme.shape.focus_ring_width;
 
         let idx = self.index;
-        // Forward the structural per-item enabled hint into the arena.
-        // After this point the arena is the single source of truth:
+        // Forward the per-item enabled state into the arena, signal and
+        // all. After this point the arena is the single source of truth:
         // events are gated by `arena.is_enabled(self_id)`, the focus
         // walker skips disabled subtrees, the a11y walker auto-emits
         // `set_disabled()`, and the leaf widgets (TextWidget /
         // IconWidget for label + chevron) substitute `TextRole::Disabled`
-        // at paint time via `PaintContext::effective_enabled`.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // at paint time via `PaintContext::effective_enabled`. The
+        // binding re-walks the AT node so its advertised actions follow.
+        ctx.enabled_when(self_id, self.enabled.clone());
+        self.enabled.register_if_bound(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
+        );
 
         // Derived read-only signal: am I the active section?
         let is_selected = self.selected.map(move |s| *s == idx);
@@ -900,7 +904,8 @@ impl Widget for ToolBoxHeader {
                         if headers.is_empty() {
                             return EventResponse::Ignored;
                         }
-                        let next = next_enabled_index(&enabled_flags_for_key, idx, 1);
+                        let next =
+                            next_enabled_index(&current_flags(&enabled_flags_for_key), idx, 1);
                         if next != idx {
                             ctx.request_focus(headers[next]);
                         }
@@ -913,7 +918,8 @@ impl Widget for ToolBoxHeader {
                         if headers.is_empty() {
                             return EventResponse::Ignored;
                         }
-                        let prev = next_enabled_index(&enabled_flags_for_key, idx, -1);
+                        let prev =
+                            next_enabled_index(&current_flags(&enabled_flags_for_key), idx, -1);
                         if prev != idx {
                             ctx.request_focus(headers[prev]);
                         }
@@ -921,7 +927,8 @@ impl Widget for ToolBoxHeader {
                     }
                     WidgetEvent::KeyDown { key: Key::Home, .. } => {
                         let headers = header_ids_for_key.borrow();
-                        if let Some(first) = first_enabled_index(&enabled_flags_for_key)
+                        if let Some(first) =
+                            first_enabled_index(&current_flags(&enabled_flags_for_key))
                             && let Some(&target) = headers.get(first)
                         {
                             ctx.request_focus(target);
@@ -931,7 +938,8 @@ impl Widget for ToolBoxHeader {
                     }
                     WidgetEvent::KeyDown { key: Key::End, .. } => {
                         let headers = header_ids_for_key.borrow();
-                        if let Some(last) = last_enabled_index(&enabled_flags_for_key)
+                        if let Some(last) =
+                            last_enabled_index(&current_flags(&enabled_flags_for_key))
                             && let Some(&target) = headers.get(last)
                         {
                             ctx.request_focus(target);
@@ -1022,10 +1030,10 @@ impl Widget for ToolBoxHeader {
         builder.set_expanded(is_active);
         // Framework a11y walker auto-emits `set_disabled()` when
         // `arena.is_enabled(self_id) == false`, so we don't call it
-        // here. The action set still reflects the structural
-        // per-item enabled flag — a disabled header advertises no
-        // Click / Expand / Collapse actions to AT.
-        if self.initial_enabled {
+        // here. The action set still reflects the per-item enabled
+        // state: a disabled header advertises no Click / Expand /
+        // Collapse actions to AT.
+        if self.enabled.get() {
             builder.add_action(Action::Click);
             builder.add_action(Action::Expand);
             builder.add_action(Action::Collapse);
@@ -1326,7 +1334,8 @@ impl Widget for RotatedLabel {
 impl Widget for ToolBox {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let items = std::mem::take(&mut self.items);
-        let enabled_flags: Rc<Vec<bool>> = Rc::new(items.iter().map(|i| i.enabled.get()).collect());
+        let enabled_flags: Rc<Vec<Prop<bool>>> =
+            Rc::new(items.iter().map(|i| i.enabled.clone()).collect());
         let header_ids: Rc<RefCell<Vec<WidgetId>>> =
             Rc::new(RefCell::new(Vec::with_capacity(items.len())));
         let panel_ids: Rc<RefCell<Vec<WidgetId>>> =
@@ -1348,7 +1357,7 @@ impl Widget for ToolBox {
             let header_id = ctx.add(ToolBoxHeader::new(
                 item.label.clone(),
                 index,
-                item.enabled.get(),
+                item.enabled.clone(),
                 self.selected.clone(),
                 header_ids.clone(),
                 panel_ids.clone(),
@@ -1801,6 +1810,63 @@ mod tests {
         let info = t.accessibility_node(disabled);
         assert!(!info.actions().contains(&accesskit::Action::Click));
         assert!(!info.actions().contains(&accesskit::Action::Expand));
+    }
+
+    /// An item's `enabled` signal follows both ways after the build: the
+    /// click, the arrow keys and the advertised actions all track it.
+    #[test]
+    fn an_item_enabled_signal_follows_after_the_build() {
+        let selected = Signal::new(0_usize);
+        let enabled = Signal::new(false);
+        let mut t = tree();
+        let tb = t.add(
+            ToolBox::new(selected.clone())
+                .item(lit!("A"), TextWidget::new(lit!("A")))
+                .add(
+                    ToolBoxItem::new(lit!("B"), TextWidget::new(lit!("B")))
+                        .enabled(enabled.clone()),
+                )
+                .item(lit!("C"), TextWidget::new(lit!("C"))),
+        );
+        t.layout(SizeProposal::exact(300.0, 600.0));
+        let b = header_id(&t, tb, 1);
+
+        enabled.set(true);
+        t.layout(SizeProposal::exact(300.0, 600.0));
+        assert!(
+            t.accessibility_node(b)
+                .actions()
+                .contains(&accesskit::Action::Click),
+            "an enabled header offers Click"
+        );
+        t.press_key(Key::Tab, Modifiers::NONE);
+        t.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(
+            t.focused(),
+            Some(b),
+            "the arrow stops on the enabled header"
+        );
+        t.click(b);
+        assert_eq!(selected.get(), 1, "the enabled header activates");
+
+        t.click(header_id(&t, tb, 0));
+        enabled.set(false);
+        t.layout(SizeProposal::exact(300.0, 600.0));
+        t.click(b);
+        assert_eq!(selected.get(), 0, "the disabled header takes no click");
+        t.focus(header_id(&t, tb, 0));
+        t.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(
+            t.focused(),
+            Some(header_id(&t, tb, 2)),
+            "the arrow skips it again"
+        );
+        assert!(
+            !t.accessibility_node(b)
+                .actions()
+                .contains(&accesskit::Action::Click),
+            "a disabled header offers no Click"
+        );
     }
 
     // ─── orientation + drag ────────────────────────────────────────────
