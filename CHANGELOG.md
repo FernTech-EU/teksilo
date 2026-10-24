@@ -31,7 +31,10 @@ by crate for clarity, not because crates version independently.
 - **`QuitPolicy`, set with `TeksiloAppBuilder::quit_policy`.** The default,
   `LastWindowClosed`, quits when the last window closes, as before.
   `Explicit` keeps the application running with no window open, and makes
-  `initial_window` optional.
+  `initial_window` optional. On macOS the menu bar then keeps the App menu
+  of the last window's native menu, with About, Settings, Hide and a working
+  ⌘Q; a routed Quit or Settings runs in the application tree, and with none
+  Quit asks the application to quit.
 - **Quitting the application from a handler.** `EventContext::request_quit`
   asks every open window's close guard in turn, as closing each window
   would, and ends the application once no window is left, under either
@@ -54,6 +57,12 @@ by crate for clarity, not because crates version independently.
   offered to it once, and one it leaves goes to the window used last, so a
   window's menu can fire a command only the application tree implements;
   shortcuts' intents stay where they were sent.
+- **`WindowConfig::minimizable` and `maximizable`**, whether the title bar
+  offers those buttons, on Windows and macOS. **Behaviour change:** a modal
+  window, and a native dialog the framework opens, now has only a close
+  button; ask for the others with `minimizable(true)` or
+  `maximizable(true)`. A minimisable dialog is minimised with the window it
+  blocks, and restoring either one brings both back.
 - **`WithActivationToken`, an external payload with the activation token that
   came with it.** `on_external_with_ctx` sees the payload, and the first
   window its handler raises or opens is activated with the token, so a
@@ -73,6 +82,11 @@ by crate for clarity, not because crates version independently.
   `x11::ewmh::mark_skip_taskbar` and `x11::ewmh::net_wm_state`.
 
 ### Changed
+
+#### App
+
+- **Breaking.** `WindowManager::refocus_modal_child` takes `&mut self`, since
+  it may restore the window it raises.
 
 #### Widgets
 
@@ -148,6 +162,20 @@ by crate for clarity, not because crates version independently.
 - **`ctx.focus_window(id)` raises the window its handler runs in.** That
   window is out of the window list during its own dispatch, so raising it
   did nothing, which is the common case in a single-instance handler.
+- **A minimised dialog comes back when the window it blocks is clicked,**
+  when that window takes the focus some other way (its title bar, Alt+Tab,
+  its taskbar button), and when a quit stops at its window. Raising it left it
+  minimised, with the window it blocks refusing input, and a click on the
+  title bar did not raise it at all.
+- **A dialog opened from its parent window's own handler belongs to the
+  parent.** It was opened as a window of its own: not kept above the parent,
+  not centred over it, and with a taskbar button of its own on Windows.
+- **A dialog on X11 is a window of its own, transient for its parent.** It
+  was created inside the parent window, clipped to it.
+- **Two windows opened with one `WindowConfig::id` no longer lose it.**
+  Closing either left `find_window` finding neither; the one still open now
+  keeps the id. A debug build warns when a window opens with an id another
+  open window has.
 - **`WindowConfig::skip_taskbar` keeps the window out of the taskbar** on
   Windows and X11. It had no effect anywhere. Wayland and macOS have nothing
   per window to apply it to, as its documentation now says.

@@ -115,7 +115,12 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
     }
     let snapshot = NativeMenuSnapshot { roots };
 
-    handle.set_window_menu(window_id, snapshot, activations, poster);
+    // The App menu is also what the app keeps once its last window has
+    // closed (an app that stays open without a window), with its routed
+    // rows reaching the application tree.
+    let (app_menu, app_activations) = app_menu_of(&snapshot, &activations);
+    handle.set_window_menu(window_id, snapshot, activations, poster.clone());
+    handle.set_app_menu(app_menu, app_activations, poster);
 
     // Wire reactive per-item updates (title / enabled / visible / check /
     // radio).
@@ -228,6 +233,41 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
 /// the state it was resolved with and simply does not follow later changes,
 /// in the global bar only. The in-window menu binds it directly and stays live
 /// either way.
+/// The application menu a window's menu leaves behind: its App menu alone,
+/// with the activations of the rows the App menu routes (Quit, Settings).
+fn app_menu_of(
+    snapshot: &NativeMenuSnapshot,
+    activations: &HashMap<MenuItemId, NativeMenuActivation>,
+) -> (
+    NativeMenuSnapshot,
+    HashMap<MenuItemId, NativeMenuActivation>,
+) {
+    let app = snapshot.roots.iter().find(|node| {
+        matches!(
+            node,
+            NativeMenuNode::Standard {
+                role: StandardMenuRole::App,
+                ..
+            }
+        )
+    });
+    let mut app_activations = HashMap::new();
+    if let Some(NativeMenuNode::Standard {
+        quit_item,
+        settings_item,
+        ..
+    }) = app
+    {
+        for item in quit_item.iter().chain(settings_item) {
+            if let Some(activation) = activations.get(&item.id) {
+                app_activations.insert(item.id, activation.clone());
+            }
+        }
+    }
+    let roots = app.cloned().into_iter().collect();
+    (NativeMenuSnapshot { roots }, app_activations)
+}
+
 fn push_observer<T: 'static>(
     observers: &mut Vec<ObserverHandle>,
     signal: &Signal<T>,
@@ -551,11 +591,13 @@ mod tests {
     }
 
     /// Install `model` for window 1 through a recording backend, and return
-    /// the backend with the tree that keeps the installation alive.
+    /// the backend and the handle, with the tree that keeps the installation
+    /// alive.
     fn install_recorded(
         model: MenuModel,
     ) -> (
         teksilo_platform::native_menu::MemoryNativeMenuBackend,
+        NativeMenuHandle,
         teksilo_core::widget_tree::WidgetTree,
     ) {
         use std::any::{Any, TypeId};
@@ -576,11 +618,9 @@ mod tests {
         }
 
         let backend = teksilo_platform::native_menu::MemoryNativeMenuBackend::new();
+        let handle = NativeMenuHandle::new(backend.clone());
         let mut app_state: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
-        app_state.insert(
-            TypeId::of::<NativeMenuHandle>(),
-            Box::new(NativeMenuHandle::new(backend.clone())),
-        );
+        app_state.insert(TypeId::of::<NativeMenuHandle>(), Box::new(handle.clone()));
         let poster: Arc<dyn AppEventPoster> = Arc::new(NullPoster);
         let mut tree = teksilo_core::widget_tree::WidgetTree::new()
             .with_theme(teksilo_core::presets::intui::light());
@@ -605,7 +645,85 @@ mod tests {
             binding: Default::default(),
         });
         tree.layout(teksilo_canvas::SizeProposal::exact(800.0, 600.0));
-        (backend, tree)
+        (backend, handle, tree)
+    }
+
+    /// The App menu is what the app keeps once its last window has closed:
+    /// the window's App menu alone, wherever the model declared it, its
+    /// routed rows still routed and nothing else. With none, ⌘Q went dead
+    /// in an app left open with no window.
+    #[test]
+    fn the_app_menu_is_the_windows_app_menu_alone_with_its_routed_rows() {
+        use crate::menu::{MenuEntry, StandardMenu};
+        use teksilo_i18n::lit;
+
+        let model = MenuModel::new()
+            .menu(lit!("File"), |m| {
+                m.item(MenuEntry::new(lit!("New")).intent("app.new"))
+            })
+            .standard_menu(
+                StandardMenu::app()
+                    .quit_intent("app.quit")
+                    .settings_intent("app.settings"),
+            );
+        let (backend, handle, _tree) = install_recorded(model);
+
+        let window = backend
+            .menu_for(teksilo_core::window::TeksiloWindowId::new(1))
+            .expect("the window's menu");
+        let app = backend.app_menu().expect("an app menu is set");
+        assert_eq!(app.roots.len(), 1, "the App menu and nothing else");
+        let app_node = window
+            .roots
+            .iter()
+            .find(|node| {
+                matches!(
+                    node,
+                    NativeMenuNode::Standard {
+                        role: StandardMenuRole::App,
+                        ..
+                    }
+                )
+            })
+            .expect("the window's App menu");
+        let quit = quit_item_of(app_node).expect("quit id");
+        let settings = settings_item_of(app_node).expect("settings id");
+        assert_eq!(quit_item_of(&app.roots[0]), Some(quit));
+        assert_eq!(settings_item_of(&app.roots[0]), Some(settings));
+
+        assert_eq!(handle.app_quit_item(), Some(quit));
+        let intent = |id| handle.app_activation(id).and_then(|a| a.intent);
+        assert_eq!(intent(quit), Some("app.quit"));
+        assert_eq!(intent(settings), Some("app.settings"));
+        let (new, _, _) = items_of(&window, "File")[0].clone();
+        assert!(
+            handle.app_activation(new).is_none(),
+            "a window's own rows are not in the app menu"
+        );
+    }
+
+    /// A model with no App menu gets the injected one in the app menu too,
+    /// with Quit left to the platform.
+    #[test]
+    fn an_app_menu_from_a_model_without_one_leaves_quit_to_the_platform() {
+        use crate::menu::MenuEntry;
+        use teksilo_i18n::lit;
+
+        let model = MenuModel::new().menu(lit!("File"), |m| {
+            m.item(MenuEntry::new(lit!("New")).intent("app.new"))
+        });
+        let (backend, handle, _tree) = install_recorded(model);
+        let app = backend.app_menu().expect("an app menu is set");
+        assert_eq!(app.roots.len(), 1);
+        assert!(matches!(
+            app.roots[0],
+            NativeMenuNode::Standard {
+                role: StandardMenuRole::App,
+                quit_item: None,
+                ..
+            }
+        ));
+        assert_eq!(handle.app_quit_item(), None);
     }
 
     /// The first menu named `menu`'s items, as `(id, title, visible)`.
@@ -642,7 +760,7 @@ mod tests {
                 .item(MenuEntry::new(lit!("Recent")).visible(shown.clone()))
                 .item(MenuEntry::new(lit!("Never")).visible(false))
         });
-        let (backend, _tree) = install_recorded(model);
+        let (backend, _, _tree) = install_recorded(model);
 
         let snapshot = backend
             .menu_for(teksilo_core::window::TeksiloWindowId::new(1))

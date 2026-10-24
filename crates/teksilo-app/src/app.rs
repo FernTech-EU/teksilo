@@ -1143,7 +1143,9 @@ impl TeksiloAppHandler {
                 parent,
                 focus_target,
             }),
-            None => WindowConfig::new(),
+            // A dialog with no window to block is not modal, and would get
+            // the buttons of an ordinary window.
+            None => WindowConfig::new().minimizable(false).maximizable(false),
         };
         if let Some(title) = title {
             config = config.title(title);
@@ -1632,13 +1634,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -1646,8 +1641,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             current.tree.dispatch_event_with_ops(event, &mut ops);
@@ -1678,13 +1671,6 @@ impl TeksiloAppHandler {
     ) -> Option<R> {
         let mut current = self.wm.take_managed(window_id)?;
         let current_id = current.teksilo_id;
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         let result = {
@@ -1692,8 +1678,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             let mut chrome = WindowChrome::new(
@@ -1857,13 +1841,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         // A collapsed (hamburger) MenuBar's action carries a `reveal`
@@ -1881,8 +1858,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             crate::input_routing::apply_menubar_action(
@@ -2060,13 +2035,6 @@ impl TeksiloAppHandler {
             return;
         };
         let current_id = current.teksilo_id;
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         // Settle synchronously on the main thread with a real `WindowOps`.
@@ -2075,8 +2043,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             let settle = crate::automation_bridge::clamp_live_settle(&payload.settle);
@@ -2224,20 +2190,11 @@ impl TeksiloAppHandler {
         // Re-render with a real ops sink so rebuild-triggered handlers on
         // this recovery path can still open windows.
         let current_id = managed.teksilo_id;
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = managed
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(managed.platform_window.window_arc());
         let mut ops = crate::window_manager::WindowOpsImpl::new(
             &mut self.wm,
             event_loop,
             current_id,
-            #[cfg(not(target_os = "macos"))]
-            current_handle,
             current_arc,
         );
         let frame = managed.tree.render_with_ops(&mut ops);
@@ -2275,13 +2232,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -2289,8 +2239,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             f(&mut current.tree, &mut ops);
@@ -2428,13 +2376,6 @@ impl TeksiloAppHandler {
             };
             let current_id = current.teksilo_id;
 
-            #[cfg(not(target_os = "macos"))]
-            let current_handle = current
-                .platform_window
-                .window()
-                .window_handle()
-                .ok()
-                .map(|h| h.as_raw());
             let current_arc = Some(current.platform_window.window_arc());
 
             {
@@ -2442,8 +2383,6 @@ impl TeksiloAppHandler {
                     &mut self.wm,
                     event_loop,
                     current_id,
-                    #[cfg(not(target_os = "macos"))]
-                    current_handle,
                     current_arc,
                 );
                 current
@@ -2718,13 +2657,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -2732,8 +2664,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             current.tree.run_with_event_context(&mut ops, |ctx| {
@@ -2793,13 +2723,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -2807,8 +2730,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             current.tree.run_with_event_context(&mut ops, |ctx| {
@@ -2828,7 +2749,10 @@ impl TeksiloAppHandler {
     /// and fires it inside the originating window's `EventContext` with
     /// `IntentSource::Menu` — the same pipeline an in-window `MenuItem` uses.
     /// Same take/run-with-context/reinsert shape as the file-dialog router; any
-    /// miss is dropped silently.
+    /// miss is dropped silently. A
+    /// [`NativeAppMenuEventPayload`](teksilo_platform::native_menu::NativeAppMenuEventPayload),
+    /// from the menu shown while no window's menu is, goes to
+    /// [`Self::route_app_menu_item`].
     fn try_route_native_menu_payload(
         &mut self,
         payload: Box<dyn std::any::Any + Send>,
@@ -2836,9 +2760,18 @@ impl TeksiloAppHandler {
     ) -> Result<(), Box<dyn std::any::Any + Send>> {
         use teksilo_core::Intent;
         use teksilo_core::telemetry::IntentSource;
-        use teksilo_platform::native_menu::{NativeMenuEventPayload, NativeMenuHandle};
+        use teksilo_platform::native_menu::{
+            NativeAppMenuEventPayload, NativeMenuEventPayload, NativeMenuHandle,
+        };
 
-        let payload = *payload.downcast::<NativeMenuEventPayload>()?;
+        let payload = match payload.downcast::<NativeMenuEventPayload>() {
+            Ok(payload) => *payload,
+            Err(payload) => {
+                let payload = payload.downcast::<NativeAppMenuEventPayload>()?;
+                self.route_app_menu_item(payload.item_id, event_loop);
+                return Ok(());
+            }
+        };
 
         let target_winit = self
             .wm
@@ -2866,13 +2799,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -2880,8 +2806,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             current.tree.run_with_event_context(&mut ops, |ctx| {
@@ -2898,6 +2822,50 @@ impl TeksiloAppHandler {
 
         self.wm.reinsert_managed(winit_id, current);
         Ok(())
+    }
+
+    /// Fire an item chosen in the application menu, the menu shown while no
+    /// window's menu is (its App menu: Quit, Settings). It runs in the
+    /// application tree, as an intent no window claimed does. With no
+    /// application tree, Quit asks the application to quit, through every
+    /// window's guard as `request_quit` does, so ⌘Q still works.
+    fn route_app_menu_item(
+        &mut self,
+        item: teksilo_core::MenuItemId,
+        event_loop: &ActiveEventLoop,
+    ) {
+        use teksilo_core::Intent;
+        use teksilo_core::telemetry::IntentSource;
+        use teksilo_platform::native_menu::NativeMenuHandle;
+
+        let Some(handle) = self
+            .wm
+            .app_context_template()
+            .and_then(|t| t.app_state::<NativeMenuHandle>().cloned())
+        else {
+            return;
+        };
+        let Some(activation) = handle.app_activation(item) else {
+            return;
+        };
+        if self.wm.app_tree().is_none() {
+            if handle.app_quit_item() == Some(item) {
+                self.wm.request_quit(false);
+            }
+            return;
+        }
+        self.run_in_app_tree(event_loop, |tree, ops| {
+            tree.run_with_event_context(ops, |ctx| {
+                ctx.with_intent_source(IntentSource::Menu, |ctx| {
+                    if let Some(name) = activation.intent {
+                        ctx.send_intent(Intent::new(name));
+                    }
+                    if let Some(action) = &activation.action {
+                        action(ctx);
+                    }
+                });
+            });
+        });
     }
 
     /// Try to interpret an `AppEvent::External` payload as an
@@ -2951,13 +2919,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -2965,8 +2926,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             match payload.event {
@@ -3010,13 +2969,6 @@ impl TeksiloAppHandler {
         };
         let current_id = current.teksilo_id;
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -3024,8 +2976,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             current.tree.tick_gestures_with_ops(now, &mut ops);
@@ -3220,13 +3170,6 @@ impl TeksiloAppHandler {
         event_loop: &ActiveEventLoop,
     ) {
         let current_id = current.teksilo_id;
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
         current.redraw.ran_frame(Instant::now());
 
@@ -3239,8 +3182,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc,
             );
             run_tree_logic_frame(&mut current.tree, self.idle_budget, proposal, &mut ops)
@@ -3363,13 +3304,6 @@ impl TeksiloAppHandler {
         current.refresh_minimized(Instant::now());
         current.sync_hidden_for_frame();
         let current_id = current.teksilo_id;
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = current
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
         if let Some(trace) = &mut self.idle_trace {
@@ -3391,8 +3325,6 @@ impl TeksiloAppHandler {
                 &mut self.wm,
                 event_loop,
                 current_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
                 current_arc.clone(),
             );
             current.tree.render_with_ops(&mut ops)
@@ -3549,6 +3481,7 @@ impl TeksiloAppHandler {
                 }
             }
             WindowEvent::Resized(new_size) => {
+                let mut just_minimised = None;
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.platform_window.resize(new_size);
                     // Mirror OS-initiated geometry / placement changes
@@ -3570,6 +3503,9 @@ impl TeksiloAppHandler {
                     managed.state.set_placement_from_os(placement);
                     // Windows reports a minimise as a resize to zero, and a
                     // restore as a resize back.
+                    if placement.is_minimized() && !managed.minimized {
+                        just_minimised = Some(managed.teksilo_id);
+                    }
                     managed.minimized = placement.is_minimized();
                     managed.sync_hidden();
                     // A resize is when the safe area changes: on the one
@@ -3581,6 +3517,11 @@ impl TeksiloAppHandler {
                         trace.note_redraw_request("resize");
                     }
                     managed.request_redraw();
+                }
+                // A modal window the user minimised takes the window it
+                // blocks with it.
+                if let Some(id) = just_minimised {
+                    self.wm.minimise_with_modal_child(id);
                 }
             }
             WindowEvent::Moved(pos) => {
@@ -3777,6 +3718,15 @@ impl TeksiloAppHandler {
                     }
                 }
                 let newly_focused = self.apply_os_focus(window_id, focused, event_loop);
+                // A window blocked by a modal child can take the focus without
+                // a press reaching it: a click on its title bar, Alt+Tab, its
+                // taskbar button. The child comes back to the front, restored
+                // if the user minimised it, as for a click in the window. A
+                // modal window and the window it blocks are minimised and
+                // restored together.
+                if focused && let Some(fid) = self.wm.teksilo_id_for_winit(window_id) {
+                    self.wm.note_focus_gained(fid);
+                }
                 // A window regaining focus is the natural, zero-idle-cost moment
                 // to re-check the OS accessibility preferences (WCAG / EN 301
                 // 549 §11.7): the user may have toggled "increase contrast" /

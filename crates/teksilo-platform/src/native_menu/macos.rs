@@ -34,8 +34,9 @@ use objc2_app_kit::{NSApplication, NSControlStateValue, NSEventModifierFlags, NS
 use objc2_foundation::{NSString, ns_string};
 
 use super::{
-    MenuItemDelta, NativeCheck, NativeKeyEquivalent, NativeMenuBackend, NativeMenuEventPayload,
-    NativeMenuNode, NativeMenuSnapshot, StandardLabels, StandardMenuRole, StandardRoutedItem,
+    MenuItemDelta, NativeAppMenuEventPayload, NativeCheck, NativeKeyEquivalent, NativeMenuBackend,
+    NativeMenuEventPayload, NativeMenuNode, NativeMenuSnapshot, StandardLabels, StandardMenuRole,
+    StandardRoutedItem,
 };
 
 // ============================================================
@@ -43,7 +44,8 @@ use super::{
 // ============================================================
 
 struct MenuTargetIvars {
-    window_id: TeksiloWindowId,
+    /// The window whose menu this is; `None` for the application menu.
+    window_id: Option<TeksiloWindowId>,
     poster: Arc<dyn AppEventPoster>,
 }
 
@@ -65,10 +67,18 @@ define_class!(
                 return;
             }
             let ivars = self.ivars();
-            ivars.poster.post_external(Box::new(NativeMenuEventPayload {
-                window_id_owner: ivars.window_id,
-                item_id: MenuItemId::from_raw(tag as u64),
-            }));
+            let item_id = MenuItemId::from_raw(tag as u64);
+            match ivars.window_id {
+                Some(window_id_owner) => ivars.poster.post_external(Box::new(
+                    NativeMenuEventPayload {
+                        window_id_owner,
+                        item_id,
+                    },
+                )),
+                None => ivars
+                    .poster
+                    .post_external(Box::new(NativeAppMenuEventPayload { item_id })),
+            }
         }
     }
 );
@@ -76,7 +86,7 @@ define_class!(
 impl TeksiloMenuTarget {
     fn new(
         mtm: MainThreadMarker,
-        window_id: TeksiloWindowId,
+        window_id: Option<TeksiloWindowId>,
         poster: Arc<dyn AppEventPoster>,
     ) -> Retained<Self> {
         let this = mtm
@@ -107,6 +117,9 @@ struct WindowMenu {
 pub struct MacOsNativeMenuBackend {
     windows: HashMap<TeksiloWindowId, WindowMenu>,
     active: Option<TeksiloWindowId>,
+    /// Shown while no window's menu is: see
+    /// [`NativeMenuBackend::set_app_menu`].
+    app: Option<WindowMenu>,
 }
 
 impl MacOsNativeMenuBackend {
@@ -118,6 +131,27 @@ impl MacOsNativeMenuBackend {
         if let Some(wm) = self.windows.get(&window_id) {
             let app = NSApplication::sharedApplication(mtm);
             app.setMainMenu(Some(&wm.menu));
+        }
+    }
+
+    /// Show the application menu, or no menu when the app set none.
+    fn apply_app_menu(&self, mtm: MainThreadMarker) {
+        NSApplication::sharedApplication(mtm).setMainMenu(self.app.as_ref().map(|m| &*m.menu));
+    }
+
+    fn build(
+        mtm: MainThreadMarker,
+        window_id: Option<TeksiloWindowId>,
+        menu: &NativeMenuSnapshot,
+        poster: Arc<dyn AppEventPoster>,
+    ) -> WindowMenu {
+        let target = TeksiloMenuTarget::new(mtm, window_id, poster);
+        let mut items = HashMap::new();
+        let root = build_root_menu(mtm, menu, &target, &mut items);
+        WindowMenu {
+            menu: root,
+            _target: target,
+            items,
         }
     }
 }
@@ -132,18 +166,8 @@ impl NativeMenuBackend for MacOsNativeMenuBackend {
         let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
-        let target = TeksiloMenuTarget::new(mtm, window_id, poster);
-        let mut items = HashMap::new();
-        let root = build_root_menu(mtm, &menu, &target, &mut items);
-
-        self.windows.insert(
-            window_id,
-            WindowMenu {
-                menu: root,
-                _target: target,
-                items,
-            },
-        );
+        self.windows
+            .insert(window_id, Self::build(mtm, Some(window_id), &menu, poster));
 
         // First menu becomes active; an already-active window keeps focus.
         let make_active = match self.active {
@@ -173,8 +197,9 @@ impl NativeMenuBackend for MacOsNativeMenuBackend {
         }
         self.active = None;
         // The closed window owned the visible menu (its target object is now
-        // dropped). Hand the bar to any remaining window, or clear it, so we
-        // never leave `mainMenu` pointing at a dead target.
+        // dropped). Hand the bar to any remaining window, or to the
+        // application menu, so we never leave `mainMenu` pointing at a dead
+        // target, and an app left with no window keeps its App menu and ⌘Q.
         let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
@@ -182,7 +207,17 @@ impl NativeMenuBackend for MacOsNativeMenuBackend {
             self.active = Some(next);
             self.apply_main_menu(mtm, next);
         } else {
-            NSApplication::sharedApplication(mtm).setMainMenu(None);
+            self.apply_app_menu(mtm);
+        }
+    }
+
+    fn set_app_menu(&mut self, menu: NativeMenuSnapshot, poster: Arc<dyn AppEventPoster>) {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        self.app = Some(Self::build(mtm, None, &menu, poster));
+        if self.active.is_none() {
+            self.apply_app_menu(mtm);
         }
     }
 

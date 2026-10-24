@@ -200,6 +200,14 @@ window installs its own snapshot (`NativeMenuHandle::set_window_menu`), and
 window's menu becomes `mainMenu`. The menu + its activation map are dropped when
 the window closes.
 
+An application left running with no window (`QuitPolicy::Explicit`) keeps an
+App menu: each install also hands its App menu to
+`NativeMenuHandle::set_app_menu`, and the bar shows that menu while no window's
+menu is. About and Hide work as in any window. A routed Quit or Settings runs
+in the application tree (`TeksiloAppBuilder::app_root`), so register its action
+there; with no application tree, Quit asks the application to quit, as
+`EventContext::request_quit` does. An unrouted Quit stays `terminate:`.
+
 ## Standard macOS menus
 
 The App / Window / Help menus carry **system selectors** (About / Hide / Quit,

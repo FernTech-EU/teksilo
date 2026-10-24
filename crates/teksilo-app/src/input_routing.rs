@@ -100,9 +100,26 @@ pub(crate) fn bounces_to_modal(event: &WindowEvent) -> bool {
     match event {
         WindowEvent::MouseInput { state, .. } => *state == winit::event::ElementState::Pressed,
         WindowEvent::Touch(touch) => touch.phase == winit::event::TouchPhase::Started,
-        WindowEvent::KeyboardInput { event, .. } => event.state.is_pressed(),
+        WindowEvent::KeyboardInput {
+            event,
+            is_synthetic,
+            ..
+        } => key_bounces_to_modal(event.state, *is_synthetic),
         _ => false,
     }
+}
+
+/// Whether a key event in a blocked window raises its modal child: a press,
+/// and not a **synthetic** one. winit makes up a press for every key still
+/// held when a window gains focus (see [`key_widget_event`]). Win+Down on a
+/// minimisable modal hands the focus to the window it blocks with both keys
+/// down; raising the modal for those made-up presses restored it at once,
+/// so the shortcut minimised only the blocked window.
+///
+/// Taken apart from winit's `KeyEvent`, which only winit can build, so a test
+/// can drive it.
+pub(crate) fn key_bounces_to_modal(state: winit::event::ElementState, is_synthetic: bool) -> bool {
+    state.is_pressed() && !is_synthetic
 }
 
 /// The widget event a `KeyboardInput` becomes, or `None` when it must reach
@@ -998,6 +1015,12 @@ pub(crate) mod tests {
         assert!(!bounces_to_modal(&cursor(1.0, 1.0)));
         assert!(!bounces_to_modal(&touch(TouchPhase::Moved, 0, 1.0, 1.0)));
         assert!(!bounces_to_modal(&WindowEvent::RedrawRequested));
+        // A key the user presses here raises the modal; a press winit makes
+        // up for a key held as the focus arrives does not.
+        assert!(key_bounces_to_modal(ElementState::Pressed, false));
+        assert!(!key_bounces_to_modal(ElementState::Pressed, true));
+        assert!(!key_bounces_to_modal(ElementState::Released, false));
+        assert!(!key_bounces_to_modal(ElementState::Released, true));
     }
 
     fn enter() -> winit::keyboard::Key {

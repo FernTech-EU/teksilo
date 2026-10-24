@@ -180,6 +180,8 @@ pub struct WindowConfig {
     pub size_to_content: SizeToContent,  // Off (default) | Height, dialogs that grow with content
     pub always_on_top: bool,
     pub skip_taskbar: bool,
+    pub minimizable: Option<bool>,       // None: no for a modal window, yes otherwise
+    pub maximizable: Option<bool>,       // the same
     pub activate_from_env: bool,         // consume an xdg_activation startup token (Wayland)
     pub icon: Option<WindowIcon>,
     pub modal: Option<ModalConfig>,
@@ -240,6 +242,7 @@ WindowConfig::new()
     .resizable(true)
     .always_on_top(true)                       // floating tool palette
     .skip_taskbar(true)                        // not in the taskbar (Windows, X11)
+    .minimizable(false)                        // ...so nothing to minimise it to (Windows, macOS)
     .icon(WindowIcon::from_rgba(rgba, w, h))
     .root(|tree, state| tree.add(Inspector::new(state)))
 ```
@@ -294,9 +297,10 @@ Short form when you only need the parent:
 ```
 
 Modal semantics are preserved from the previous `ModalRequest` path:
-input-blocking on the parent, Z-order child-window attachment
-(`WM_TRANSIENT_FOR` / `xdg_toplevel.set_parent` / AppKit
-`addChildWindow:ordered:`), refocus-on-stolen-focus.
+input-blocking on the parent, Z-order child-window attachment (an owner
+window on Windows, `WM_TRANSIENT_FOR` on X11, AppKit
+`addChildWindow:ordered:` on macOS; Wayland has none, since winit offers no
+`xdg_toplevel.set_parent`), refocus-on-stolen-focus.
 
 ### `WindowIcon`
 
@@ -618,6 +622,14 @@ For the general case (may land in-tree or in a native window),
 `ctx.present_modal(request)` picks the presentation at dispatch time
 based on `ModalPresentation::Auto` and platform capability.
 
+A modal window has a close button and no minimise or maximise button, on
+Windows and macOS, unless its config asks for them with `minimizable(true)`
+or `maximizable(true)`. A modal window and the window it blocks are
+minimised together: minimising the dialog takes the window with it, and
+restoring either one brings both back. Where the window manager offers to
+minimise a dialog anyway (X11), a click on the window it blocks brings it
+back.
+
 ---
 
 ## Intercepting close / quit: confirmation guards
@@ -796,7 +808,7 @@ window: the `can_close` sugar).
      `tree.dispatch_event_with_ops(evt, ops)`, reinserts the window.
    - Handlers can call `ctx.open_window(...)` which synchronously
      reaches `wm.create_window(...)`, modal parents attach to either
-     the dispatching window (via the stashed raw handle on the ops
+     the dispatching window (via its `Window`, kept on the ops
      object) or to another window that's still in the map.
 4. After dispatch, `post_event`:
    - Drains tree-level pending operations (locale, theme, follow-system
@@ -857,12 +869,11 @@ Inside `TeksiloAppHandler::dispatch_in_window`:
 let Some(mut current) = self.wm.take_managed(winit_id) else { return };
 // SAFETY: the current window is held in `current`; the map no longer
 // contains it. WindowOpsImpl holds `&mut self.wm` (minus the current
-// window) + `&ActiveEventLoop` + the current window's raw handle so
+// window) + `&ActiveEventLoop` + the current window's `Window` so
 // modal parents pointing at it still resolve.
 {
     let mut ops = WindowOpsImpl::new(&mut self.wm, event_loop,
                                       current.teksilo_id,
-                                      current_handle,   // not on macOS
                                       current_arc);
     current.tree.dispatch_event_with_ops(evt, &mut ops);
 }
@@ -873,8 +884,8 @@ The dispatching window is removed from the windows map for the
 duration of the handler run. That releases the mutable borrow on
 `self.wm.windows[winit_id]` so `WindowOpsImpl::open_window` can call
 `self.wm.create_window(...)` without borrow conflicts. The stashed
-raw window handle lets modal-parent lookups reach back to the
-dispatching window.
+`Window` lets modal-parent lookups reach back to the dispatching
+window.
 
 If you're a handler, none of this is visible, you just call
 `ctx.open_window(...)` and it returns an id.

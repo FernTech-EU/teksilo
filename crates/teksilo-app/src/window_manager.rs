@@ -89,6 +89,17 @@ fn close_verdict(
 /// meaningful (it clears an active composition); only the second-and-later
 /// consecutive empties are skipped. Extracted from the `WindowEvent::Ime` arm so
 /// the state machine is unit-testable without a winit event loop.
+/// The title-bar buttons `config` offers: always close, minimise and
+/// maximise as [`WindowConfig::is_minimizable`] and
+/// [`WindowConfig::is_maximizable`] say.
+fn caption_buttons(config: &WindowConfig) -> winit::window::WindowButtons {
+    use winit::window::WindowButtons;
+    let mut buttons = WindowButtons::CLOSE;
+    buttons.set(WindowButtons::MINIMIZE, config.is_minimizable());
+    buttons.set(WindowButtons::MAXIMIZE, config.is_maximizable());
+    buttons
+}
+
 pub(crate) fn ime_should_skip_empty_preedit(last_empty: &mut bool, empty_preedit: bool) -> bool {
     let repeat = empty_preedit && *last_empty;
     *last_empty = empty_preedit;
@@ -368,6 +379,29 @@ impl ManagedWindow {
         }
     }
 
+    /// Bring the window back if it is minimised, and ask for a redraw. The
+    /// flag is read as well as asked of winit, since
+    /// [`refresh_minimized`](Self::refresh_minimized) reads it at most every
+    /// [`MINIMIZED_PROBE_INTERVAL`].
+    pub(crate) fn restore(&mut self) {
+        let window = self.platform_window.window();
+        if self.minimized || window.is_minimized() == Some(true) {
+            window.set_minimized(false);
+            self.minimized = false;
+            self.minimized_probed_at = None;
+            self.sync_hidden();
+        }
+        self.request_redraw();
+    }
+
+    /// [Restore](Self::restore) the window, then raise it: winit's
+    /// `focus_window` leaves a minimised window where it is, so a raise
+    /// alone would not show it.
+    pub(crate) fn restore_and_raise(&mut self) {
+        self.restore();
+        teksilo_platform::window_activation::raise(self.platform_window.window(), None);
+    }
+
     /// Re-read `minimized` from winit while the window is unfocused, at most
     /// every [`MINIMIZED_PROBE_INTERVAL`]. An X11 iconify sends only
     /// `Focused(false)`, and `is_minimized` costs a round trip there; on
@@ -523,6 +557,10 @@ pub struct WindowManager {
     /// them as it closes a modal window. See
     /// [`mark_modal_host`](Self::mark_modal_host).
     modal_hosts: std::collections::HashSet<TeksiloWindowId>,
+    /// Windows minimised because the modal window blocking them was: the
+    /// pair goes and comes back as one. See
+    /// [`minimise_with_modal_child`](Self::minimise_with_modal_child).
+    minimised_with_modal: std::collections::HashSet<TeksiloWindowId>,
     /// OS-level accessibility preferences, queried at startup and re-queried
     /// on every window focus gain by
     /// [`refresh_accessibility_preferences`](Self::refresh_accessibility_preferences).
@@ -659,6 +697,7 @@ impl WindowManager {
             modal_blocked: HashMap::new(),
             modal_parents: HashMap::new(),
             modal_hosts: Default::default(),
+            minimised_with_modal: Default::default(),
             a11y_prefs,
             user_text_scale: 1.0,
             theme_mode: ThemeMode::Manual,
@@ -1234,8 +1273,21 @@ impl WindowManager {
     /// `drain_window_commands` tick.
     pub fn create_window(
         &mut self,
+        config: WindowConfig,
+        target: &winit::event_loop::ActiveEventLoop,
+    ) -> TeksiloWindowId {
+        self.create_window_beside(config, target, None)
+    }
+
+    /// [`create_window`](Self::create_window) from a window's own handler,
+    /// which runs with that window out of the map (`take_managed`).
+    /// `dispatching` is that window, so a dialog `modal_to` it is still owned
+    /// by it and centred over it.
+    pub(crate) fn create_window_beside(
+        &mut self,
         mut config: WindowConfig,
         target: &winit::event_loop::ActiveEventLoop,
+        dispatching: Option<(TeksiloWindowId, &winit::window::Window)>,
     ) -> TeksiloWindowId {
         // If a `WindowStateService` is registered AND this window has
         // a stable `id(...)`, restore the saved geometry — sanitized
@@ -1280,6 +1332,17 @@ impl WindowManager {
             always_on_top: config.always_on_top,
         });
         if let Some(sid) = &config.string_id {
+            // Nothing refuses a second open window with the same id, and
+            // `find_window` can name only one of them, so a debug build says
+            // so.
+            #[cfg(debug_assertions)]
+            if let Some(open) = self.string_to_id.get(sid) {
+                eprintln!(
+                    "teksilo-app: a window with id `{sid}` is already open ({open:?}); \
+                     `find_window(\"{sid}\")` now finds the new one. Look the id up \
+                     before opening it to raise the open window instead"
+                );
+            }
             self.string_to_id.insert(sid.clone(), teksilo_id);
         }
         let wants_custom_chrome = config.decorations.wants_custom_chrome_host();
@@ -1293,30 +1356,27 @@ impl WindowManager {
         // since decoration thickness is small relative to the dialog.
         // No-op on Wayland (compositor owns positioning).
         if config.position.is_none()
-            && let Some(parent_id) = modal_parent
-            && let Some(parent_winit) = self.winit_id_for_teksilo(parent_id)
-            && let Some(parent_managed) = self.windows.get(&parent_winit)
+            && let Some(parent_window) = self.parent_window(modal_parent, dispatching)
+            && let Ok(parent_outer_pos) = parent_window.outer_position()
         {
-            let parent_window = parent_managed.platform_window.window();
-            if let Ok(parent_outer_pos) = parent_window.outer_position() {
-                let parent_sf = parent_window.scale_factor();
-                let parent_outer_size = parent_window.outer_size();
-                let p_x = parent_outer_pos.x as f64 / parent_sf;
-                let p_y = parent_outer_pos.y as f64 / parent_sf;
-                let p_w = parent_outer_size.width as f64 / parent_sf;
-                let p_h = parent_outer_size.height as f64 / parent_sf;
-                let m_w = config.size.0 as f64;
-                let m_h = config.size.1 as f64;
-                let x = (p_x + (p_w - m_w) / 2.0).round() as i32;
-                let y = (p_y + (p_h - m_h) / 2.0).round() as i32;
-                config.position = Some((x, y));
-            }
+            let parent_sf = parent_window.scale_factor();
+            let parent_outer_size = parent_window.outer_size();
+            let p_x = parent_outer_pos.x as f64 / parent_sf;
+            let p_y = parent_outer_pos.y as f64 / parent_sf;
+            let p_w = parent_outer_size.width as f64 / parent_sf;
+            let p_h = parent_outer_size.height as f64 / parent_sf;
+            let m_w = config.size.0 as f64;
+            let m_h = config.size.1 as f64;
+            let x = (p_x + (p_w - m_w) / 2.0).round() as i32;
+            let y = (p_y + (p_h - m_h) / 2.0).round() as i32;
+            config.position = Some((x, y));
         }
 
         let mut window_attrs = winit::window::Window::default_attributes()
             .with_title(&config.title)
             .with_inner_size(winit::dpi::LogicalSize::new(config.size.0, config.size.1))
             .with_resizable(config.resizable)
+            .with_enabled_buttons(caption_buttons(&config))
             .with_visible(false); // Must be invisible for AccessKit adapter creation
 
         // The id the desktop matches this window against. On Wayland it is the
@@ -1455,9 +1515,11 @@ impl WindowManager {
         // inside the owner's client area — wrong for dialogs in every
         // way (paint, input, movement, z-order).
         //
-        // X11 / Wayland: `with_parent_window` is correct — winit wires
-        // it through `WM_TRANSIENT_FOR` / `xdg_toplevel.set_parent`,
-        // both of which match dialog semantics.
+        // X11: `WM_TRANSIENT_FOR`, written before the first map
+        // (`set_transient_for_before_show`, below). Not `with_parent_window`
+        // either: on X11 winit creates the window inside its parent,
+        // clipped to its client area. Wayland: nothing; winit ignores a
+        // parent there and offers no `xdg_toplevel.set_parent`.
         //
         // macOS: skip here and defer to `attach_child_window` after
         // `PlatformWindow::new_with_a11y`. AppKit's
@@ -1466,25 +1528,12 @@ impl WindowManager {
         // AccessKit adapter that requires a hidden window at
         // construction.
         #[cfg(target_os = "windows")]
-        if let Some(parent_id) = modal_parent
-            && let Some(parent_winit) = self.winit_id_for_teksilo(parent_id)
-            && let Some(parent_managed) = self.windows.get(&parent_winit)
-            && let Ok(parent_handle) = parent_managed.platform_window.window().window_handle()
+        if let Some(parent_window) = self.parent_window(modal_parent, dispatching)
+            && let Ok(parent_handle) = parent_window.window_handle()
             && let winit::raw_window_handle::RawWindowHandle::Win32(win32) = parent_handle.as_raw()
         {
             use winit::platform::windows::WindowAttributesExtWindows;
             window_attrs = window_attrs.with_owner_window(win32.hwnd.get());
-        }
-
-        #[cfg(all(unix, not(target_os = "macos")))]
-        if let Some(parent_id) = modal_parent
-            && let Some(parent_winit) = self.winit_id_for_teksilo(parent_id)
-            && let Some(parent_managed) = self.windows.get(&parent_winit)
-            && let Ok(parent_handle) = parent_managed.platform_window.window().window_handle()
-        {
-            // SAFETY: the parent window is managed by the WindowManager
-            // and remains alive for the lifetime of the child.
-            window_attrs = unsafe { window_attrs.with_parent_window(Some(parent_handle.as_raw())) };
         }
 
         // The token the routed event carried, if its handler opens this
@@ -1505,6 +1554,9 @@ impl WindowManager {
         // Still unmapped: the window is shown once its accessibility adapter
         // exists, in `new_with_a11y` below.
         teksilo_platform::taskbar::skip_taskbar_before_show(&window, config.skip_taskbar);
+        if let Some(parent_window) = self.parent_window(modal_parent, dispatching) {
+            teksilo_platform::set_transient_for_before_show(&window, parent_window);
+        }
         let winit_id = window.id();
         let scale_factor = window.scale_factor();
 
@@ -1570,14 +1622,8 @@ impl WindowManager {
         // with AccessKit adapter creation. Wire it now that the child
         // is visible.
         #[cfg(target_os = "macos")]
-        if let Some(parent_id) = modal_parent
-            && let Some(parent_winit) = self.winit_id_for_teksilo(parent_id)
-            && let Some(parent_managed) = self.windows.get(&parent_winit)
-        {
-            teksilo_platform::attach_child_window(
-                parent_managed.platform_window.window(),
-                pw.window(),
-            );
+        if let Some(parent_window) = self.parent_window(modal_parent, dispatching) {
+            teksilo_platform::attach_child_window(parent_window, pw.window());
         }
 
         if is_modal {
@@ -1932,8 +1978,23 @@ impl WindowManager {
             // buys, which is not widget teardown.
             let now = managed.tree.input_now();
             crate::input_loop::release_contacts(&mut managed.translation_state, now);
+            // The id goes with the window, unless another one opened with
+            // it is still open: then the newest of those has it.
             if let Some(sid) = managed.string_id.as_deref() {
-                self.string_to_id.remove(sid);
+                match self
+                    .windows
+                    .values()
+                    .filter(|other| other.string_id.as_deref() == Some(sid))
+                    .map(|other| other.teksilo_id)
+                    .max_by_key(|id| id.raw())
+                {
+                    Some(other) => {
+                        self.string_to_id.insert(sid.to_owned(), other);
+                    }
+                    None => {
+                        self.string_to_id.remove(sid);
+                    }
+                }
             }
             // Unblock the parent if this was the modal blocking it, and not
             // an earlier one a second modal has since replaced there.
@@ -1949,7 +2010,10 @@ impl WindowManager {
         }
         // Also remove any modal children blocking this window
         self.modal_blocked.remove(&teksilo_id);
-        self.modal_parents.remove(&teksilo_id);
+        if let Some(parent) = self.modal_parents.remove(&teksilo_id) {
+            self.minimised_with_modal.remove(&parent);
+        }
+        self.minimised_with_modal.remove(&teksilo_id);
         self.modal_hosts.remove(&teksilo_id);
 
         // Fire the teardown hook last, once every registry above
@@ -2237,19 +2301,12 @@ impl WindowManager {
         if let Some(quit) = &mut self.quit {
             quit.awaiting = Some(teksilo_id);
         }
-        if let Some(&winit_id) = self.teksilo_to_winit.get(&teksilo_id)
-            && let Some(managed) = self.windows.get(&winit_id)
-        {
-            if managed.minimized {
-                managed.platform_window.window().set_minimized(false);
-            }
-            managed.request_redraw();
+        if let Some(managed) = self.get_by_teksilo_mut(teksilo_id) {
+            managed.restore();
         }
         let front = self.frontmost_modal_of(teksilo_id);
-        if let Some(&winit_id) = self.teksilo_to_winit.get(&front)
-            && let Some(managed) = self.windows.get(&winit_id)
-        {
-            teksilo_platform::window_activation::raise(managed.platform_window.window(), None);
+        if let Some(managed) = self.get_by_teksilo_mut(front) {
+            managed.restore_and_raise();
         }
     }
 
@@ -2373,13 +2430,6 @@ impl WindowManager {
             return true;
         };
 
-        #[cfg(not(target_os = "macos"))]
-        let current_handle = managed
-            .platform_window
-            .window()
-            .window_handle()
-            .ok()
-            .map(|h| h.as_raw());
         let current_arc = Some(managed.platform_window.window_arc());
 
         // Clone the guard handles so the dispatch closure captures them
@@ -2391,14 +2441,7 @@ impl WindowManager {
 
         let mut should_close = true;
         {
-            let mut ops = WindowOpsImpl::new(
-                self,
-                target,
-                teksilo_id,
-                #[cfg(not(target_os = "macos"))]
-                current_handle,
-                current_arc,
-            );
+            let mut ops = WindowOpsImpl::new(self, target, teksilo_id, current_arc);
             managed.tree.run_with_event_context(&mut ops, |ctx| {
                 should_close = close_verdict(&can_close, &on_close_blocked, &close_guard, ctx);
             });
@@ -2490,15 +2533,14 @@ impl WindowManager {
     }
 
     /// Pull focus back to the modal child of a blocked parent the user just
-    /// clicked — the "this window is waiting on that one" nudge.
-    pub fn refocus_modal_child(&self, blocked_parent: TeksiloWindowId) {
+    /// clicked, the "this window is waiting on that one" nudge. A child
+    /// the user minimised comes back first.
+    pub fn refocus_modal_child(&mut self, blocked_parent: TeksiloWindowId) {
+        self.minimised_with_modal.remove(&blocked_parent);
         let Some(child_id) = self.blocking_modal_child(blocked_parent) else {
             return;
         };
-        let Some(child_winit) = self.winit_id_for_teksilo(child_id) else {
-            return;
-        };
-        let Some(child) = self.windows.get(&child_winit) else {
+        let Some(child) = self.get_by_teksilo_mut(child_id) else {
             return;
         };
 
@@ -2512,8 +2554,94 @@ impl WindowManager {
         // forces a redraw) — exactly the failure the creation path documents
         // and avoids. The owner / transient-parent relationship already keeps
         // the modal above its parent.
-        teksilo_platform::window_activation::raise(child.platform_window.window(), None);
-        child.request_redraw();
+        child.restore_and_raise();
+    }
+
+    /// The modal window `child` was minimised: minimise the window it blocks
+    /// with it, so the pair goes and comes back as one. Otherwise the OS
+    /// hands the focus to that window, whose focus brings the dialog back
+    /// at once, and the dialog cannot be minimised at all. Nothing when the
+    /// window it blocks is minimised already.
+    pub(crate) fn minimise_with_modal_child(&mut self, child: TeksiloWindowId) {
+        let Some(parent) = self.modal_parent_of(child) else {
+            return;
+        };
+        if self.blocking_modal_child(parent) != Some(child) {
+            return;
+        }
+        let Some(managed) = self.get_by_teksilo_mut(parent) else {
+            return;
+        };
+        let window = managed.platform_window.window();
+        if managed.minimized || window.is_minimized() == Some(true) {
+            return;
+        }
+        window.set_minimized(true);
+        managed.minimized = true;
+        managed.minimized_probed_at = None;
+        managed.sync_hidden();
+        self.minimised_with_modal.insert(parent);
+    }
+
+    /// `id` took the focus. A modal window whose parent went with it brings
+    /// the parent back. A window blocked by a modal child brings the child
+    /// back, as a click in it does; or, when the child was minimised just
+    /// now and the OS passed the focus on, goes with it. See [`pair_focus`].
+    pub(crate) fn note_focus_gained(&mut self, id: TeksiloWindowId) {
+        let is_minimised = |wm: &mut Self, id| {
+            wm.get_by_teksilo_mut(id).map(|w| {
+                (
+                    w.minimized,
+                    w.platform_window.window().is_minimized() == Some(true),
+                )
+            })
+        };
+        let parent_went_with = self
+            .modal_parent_of(id)
+            .filter(|parent| self.minimised_with_modal.contains(parent));
+        let child = self.blocking_modal_child(id);
+        let went_with_child = self.minimised_with_modal.contains(&id);
+        // Only a window in a modal pair asks: on X11 the question is a round
+        // trip.
+        let (minimised, child_known_minimised, child_minimised) = match child {
+            Some(child) if parent_went_with.is_none() => {
+                let minimised = went_with_child && is_minimised(self, id).is_some_and(|m| m.1);
+                let (known, now) = is_minimised(self, child).unwrap_or_default();
+                (minimised, known, now)
+            }
+            _ => (false, false, false),
+        };
+        match pair_focus(PairFacts {
+            parent_went_with,
+            child,
+            went_with_child,
+            minimised,
+            child_known_minimised,
+            child_minimised,
+        }) {
+            PairFocus::Nothing => {}
+            PairFocus::RestoreParent(parent) => {
+                self.minimised_with_modal.remove(&parent);
+                if let Some(parent) = self.get_by_teksilo_mut(parent) {
+                    parent.restore();
+                }
+                if let Some(dialog) = self.get_by_teksilo_mut(id) {
+                    teksilo_platform::window_activation::raise(
+                        dialog.platform_window.window(),
+                        None,
+                    );
+                }
+            }
+            PairFocus::MinimisePair(child) => {
+                if let Some(dialog) = self.get_by_teksilo_mut(child) {
+                    dialog.minimized = true;
+                    dialog.minimized_probed_at = None;
+                    dialog.sync_hidden();
+                }
+                self.minimise_with_modal_child(child);
+            }
+            PairFocus::RefocusChild => self.refocus_modal_child(id),
+        }
     }
 
     /// Broadcast a theme change to all windows.
@@ -2715,6 +2843,23 @@ impl WindowManager {
     #[allow(dead_code)]
     pub(crate) fn teksilo_ids(&self) -> impl Iterator<Item = TeksiloWindowId> + '_ {
         self.windows.values().map(|m| m.teksilo_id)
+    }
+
+    /// The window `parent` names: `dispatching` when it is that one (out of
+    /// the map while its handler runs), otherwise the open window with that id.
+    fn parent_window<'w>(
+        &'w self,
+        parent: Option<TeksiloWindowId>,
+        dispatching: Option<(TeksiloWindowId, &'w winit::window::Window)>,
+    ) -> Option<&'w winit::window::Window> {
+        let parent = parent?;
+        if let Some((id, window)) = dispatching
+            && id == parent
+        {
+            return Some(window);
+        }
+        let winit_id = self.winit_id_for_teksilo(parent)?;
+        Some(self.windows.get(&winit_id)?.platform_window.window())
     }
 
     /// Get the winit WindowId for a TeksiloWindowId.
@@ -3191,18 +3336,14 @@ pub struct WindowOpsImpl<'a> {
     event_loop: &'a winit::event_loop::ActiveEventLoop,
     /// Current (dispatching) window's id. Names the window the outbound
     /// OS-drag ops below (`begin_os_drag` / `cancel_os_drag` /
-    /// `set_drop_accepted`) route to, and is also available for diagnostics
-    /// and future modal-parent self-reference logic. `None` for the
+    /// `set_drop_accepted`) route to, and the window a dialog `modal_to` it
+    /// is attached to (with `current_window_arc`). `None` for the
     /// [windowless](Self::windowless) sink, which has no window to drag
     /// from.
     current_id: Option<TeksiloWindowId>,
-    /// Current window's raw handle, captured before removal so a
-    /// modal whose parent is the current window can still attach.
-    #[cfg(not(target_os = "macos"))]
-    current_handle: Option<winit::raw_window_handle::RawWindowHandle>,
-    /// `Arc<Window>` of the current (dispatching) window. On macOS
-    /// it is needed for `addChildWindow:ordered:`. On every platform
-    /// it backs `current_parent_handle()` so native-dialog
+    /// `Arc<Window>` of the current (dispatching) window. A dialog opened
+    /// `modal_to` it finds its parent here (owner window, transient-for or
+    /// `addChildWindow:ordered:`). It also backs `current_parent_handle()` so native-dialog
     /// integrations can extract both window and display handles even
     /// while the dispatching window is temporarily out of
     /// `WindowManager::windows`.
@@ -3214,17 +3355,12 @@ impl<'a> WindowOpsImpl<'a> {
         wm: &'a mut WindowManager,
         event_loop: &'a winit::event_loop::ActiveEventLoop,
         current_id: TeksiloWindowId,
-        #[cfg(not(target_os = "macos"))] current_handle: Option<
-            winit::raw_window_handle::RawWindowHandle,
-        >,
         current_window_arc: Option<std::sync::Arc<winit::window::Window>>,
     ) -> Self {
         Self {
             wm,
             event_loop,
             current_id: Some(current_id),
-            #[cfg(not(target_os = "macos"))]
-            current_handle,
             current_window_arc,
         }
     }
@@ -3242,8 +3378,6 @@ impl<'a> WindowOpsImpl<'a> {
             wm,
             event_loop,
             current_id: None,
-            #[cfg(not(target_os = "macos"))]
-            current_handle: None,
             current_window_arc: None,
         }
     }
@@ -3251,12 +3385,9 @@ impl<'a> WindowOpsImpl<'a> {
 
 impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
     fn open_window(&mut self, config: teksilo_core::WindowConfig) -> TeksiloWindowId {
-        let _ = self.current_id;
-        #[cfg(not(target_os = "macos"))]
-        let _ = self.current_handle;
-        #[cfg(target_os = "macos")]
-        let _ = &self.current_window_arc;
-        self.wm.create_window(config, self.event_loop)
+        let dispatching = self.current_id.zip(self.current_window_arc.as_deref());
+        self.wm
+            .create_window_beside(config, self.event_loop, dispatching)
     }
 
     fn find_window(&self, string_id: &str) -> Option<TeksiloWindowId> {
@@ -3433,6 +3564,182 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
         {
             handle.set_drop_accepted(current_id, accepted);
         }
+    }
+}
+
+/// What [`WindowManager::note_focus_gained`] knows about the window that
+/// took the focus and the modal pair it belongs to.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PairFacts {
+    /// It is a modal window, and the window it blocks was minimised with it.
+    pub parent_went_with: Option<TeksiloWindowId>,
+    /// The modal window blocking it.
+    pub child: Option<TeksiloWindowId>,
+    /// It was minimised because `child` was.
+    pub went_with_child: bool,
+    /// The window system reports it minimised (asked only when
+    /// `went_with_child`).
+    pub minimised: bool,
+    /// The manager has `child` minimised.
+    pub child_known_minimised: bool,
+    /// The window system reports `child` minimised.
+    pub child_minimised: bool,
+}
+
+/// What a window taking the focus does about its modal pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PairFocus {
+    /// Nothing: it is in no pair, or the focus is stale.
+    Nothing,
+    /// The dialog is back: restore the window that went with it.
+    RestoreParent(TeksiloWindowId),
+    /// The dialog was minimised and the OS passed the focus on: minimise
+    /// the window it blocks with it.
+    MinimisePair(TeksiloWindowId),
+    /// Bring the dialog back, restored if minimised, and raise it.
+    RefocusChild,
+}
+
+/// The rule behind [`WindowManager::note_focus_gained`].
+///
+/// A dialog minimised shows only in its focus passing to the window it
+/// blocks (Windows activates the owner) before the manager has heard of the
+/// minimise: that is the moment the window goes with it. Bringing the
+/// dialog back instead, as for any other focus, made it impossible to
+/// minimise. A minimise the manager already knows (a resize to zero, the
+/// pair minimised together, Win+M) is one the user is coming back from.
+pub(crate) fn pair_focus(facts: PairFacts) -> PairFocus {
+    if let Some(parent) = facts.parent_went_with {
+        return PairFocus::RestoreParent(parent);
+    }
+    let Some(child) = facts.child else {
+        return PairFocus::Nothing;
+    };
+    if facts.went_with_child {
+        // The focus handed on as the dialog minimised, arriving after the
+        // window went too.
+        if facts.minimised {
+            return PairFocus::Nothing;
+        }
+        return PairFocus::RefocusChild;
+    }
+    if facts.child_minimised && !facts.child_known_minimised {
+        return PairFocus::MinimisePair(child);
+    }
+    PairFocus::RefocusChild
+}
+
+#[cfg(test)]
+mod pair_focus_tests {
+    use super::*;
+
+    fn child() -> TeksiloWindowId {
+        TeksiloWindowId::new(2)
+    }
+
+    fn parent() -> TeksiloWindowId {
+        TeksiloWindowId::new(1)
+    }
+
+    fn blocked() -> PairFacts {
+        PairFacts {
+            parent_went_with: None,
+            child: Some(child()),
+            went_with_child: false,
+            minimised: false,
+            child_known_minimised: false,
+            child_minimised: false,
+        }
+    }
+
+    #[test]
+    fn a_window_in_no_pair_does_nothing() {
+        let facts = PairFacts {
+            child: None,
+            ..blocked()
+        };
+        assert_eq!(pair_focus(facts), PairFocus::Nothing);
+    }
+
+    #[test]
+    fn a_blocked_window_brings_its_dialog_back() {
+        assert_eq!(pair_focus(blocked()), PairFocus::RefocusChild);
+    }
+
+    /// The bounce Windows showed: the focus reaches the blocked window
+    /// while its dialog minimises, before the manager knows.
+    #[test]
+    fn a_dialog_minimised_just_now_takes_its_window_with_it() {
+        let facts = PairFacts {
+            child_minimised: true,
+            ..blocked()
+        };
+        assert_eq!(pair_focus(facts), PairFocus::MinimisePair(child()));
+    }
+
+    /// Minimised before (a resize to zero was heard, Win+M): the user is
+    /// coming back to the window.
+    #[test]
+    fn a_dialog_known_minimised_comes_back() {
+        let facts = PairFacts {
+            child_minimised: true,
+            child_known_minimised: true,
+            ..blocked()
+        };
+        assert_eq!(pair_focus(facts), PairFocus::RefocusChild);
+    }
+
+    #[test]
+    fn a_late_focus_of_the_minimised_pair_brings_nothing_back() {
+        let facts = PairFacts {
+            went_with_child: true,
+            minimised: true,
+            child_minimised: true,
+            child_known_minimised: true,
+            ..blocked()
+        };
+        assert_eq!(pair_focus(facts), PairFocus::Nothing);
+    }
+
+    #[test]
+    fn the_window_restored_brings_its_dialog_back() {
+        let facts = PairFacts {
+            went_with_child: true,
+            child_minimised: true,
+            child_known_minimised: true,
+            ..blocked()
+        };
+        assert_eq!(pair_focus(facts), PairFocus::RefocusChild);
+    }
+
+    #[test]
+    fn the_dialog_restored_brings_its_window_back() {
+        let facts = PairFacts {
+            parent_went_with: Some(parent()),
+            child: None,
+            ..blocked()
+        };
+        assert_eq!(pair_focus(facts), PairFocus::RestoreParent(parent()));
+    }
+}
+
+#[cfg(test)]
+mod caption_button_tests {
+    use super::*;
+    use winit::window::WindowButtons;
+
+    #[test]
+    fn a_dialog_gets_only_a_close_button() {
+        let parent = TeksiloWindowId::new(1);
+        assert_eq!(
+            caption_buttons(&WindowConfig::new().modal_to(parent)),
+            WindowButtons::CLOSE
+        );
+        assert_eq!(caption_buttons(&WindowConfig::new()), WindowButtons::all());
+        assert_eq!(
+            caption_buttons(&WindowConfig::new().minimizable(false)),
+            WindowButtons::CLOSE | WindowButtons::MAXIMIZE
+        );
     }
 }
 

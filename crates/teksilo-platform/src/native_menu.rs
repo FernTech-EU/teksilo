@@ -274,6 +274,15 @@ pub struct NativeMenuEventPayload {
     pub item_id: MenuItemId,
 }
 
+/// Boxed inside `AppEvent::External` when the user picks an item of the
+/// [application menu](NativeMenuBackend::set_app_menu), the menu shown while
+/// no window's menu is. `teksilo-app` routes it to the application tree.
+#[derive(Debug, Clone)]
+pub struct NativeAppMenuEventPayload {
+    /// The chosen item.
+    pub item_id: MenuItemId,
+}
+
 // ============================================================
 // Backend trait
 // ============================================================
@@ -301,6 +310,15 @@ pub trait NativeMenuBackend {
 
     /// Apply a reactive delta to a single already-installed item.
     fn update_item(&mut self, id: MenuItemId, delta: MenuItemDelta);
+
+    /// Set the application menu: the menu shown while no window's menu is,
+    /// after the last window closed. Replaces any earlier one. For every item
+    /// the user later chooses in it, the backend MUST post a
+    /// [`NativeAppMenuEventPayload`] through `poster`. The default does
+    /// nothing, for a backend whose menus belong to windows alone.
+    fn set_app_menu(&mut self, menu: NativeMenuSnapshot, poster: Arc<dyn AppEventPoster>) {
+        let _ = (menu, poster);
+    }
 }
 
 /// Forward through a boxed backend so `NativeMenuHandle::new(default_backend())`
@@ -323,6 +341,9 @@ impl NativeMenuBackend for Box<dyn NativeMenuBackend> {
     fn update_item(&mut self, id: MenuItemId, delta: MenuItemDelta) {
         (**self).update_item(id, delta)
     }
+    fn set_app_menu(&mut self, menu: NativeMenuSnapshot, poster: Arc<dyn AppEventPoster>) {
+        (**self).set_app_menu(menu, poster)
+    }
 }
 
 // ============================================================
@@ -336,6 +357,10 @@ struct NativeMenuState {
     backend: RefCell<Box<dyn NativeMenuBackend>>,
     /// Per-window: item id → what to do when chosen.
     activations: RefCell<HashMap<TeksiloWindowId, WindowActivations>>,
+    /// The application menu's items → what to do when chosen.
+    app_activations: RefCell<WindowActivations>,
+    /// The application menu's Quit row, when the app routes it.
+    app_quit_item: std::cell::Cell<Option<MenuItemId>>,
 }
 
 /// Per-app native-menu service. Registered in app-state by
@@ -353,6 +378,8 @@ impl NativeMenuHandle {
             inner: Rc::new(NativeMenuState {
                 backend: RefCell::new(Box::new(backend)),
                 activations: RefCell::new(HashMap::new()),
+                app_activations: RefCell::new(HashMap::new()),
+                app_quit_item: std::cell::Cell::new(None),
             }),
         }
     }
@@ -390,6 +417,39 @@ impl NativeMenuHandle {
     /// Apply a reactive delta to one installed item.
     pub fn update_item(&self, id: MenuItemId, delta: MenuItemDelta) {
         self.inner.backend.borrow_mut().update_item(id, delta);
+    }
+
+    /// Set the application menu, shown while no window's menu is (see
+    /// [`NativeMenuBackend::set_app_menu`]), recording its activations.
+    /// Replaces any earlier one.
+    pub fn set_app_menu(
+        &self,
+        menu: NativeMenuSnapshot,
+        activations: HashMap<MenuItemId, NativeMenuActivation>,
+        poster: Arc<dyn AppEventPoster>,
+    ) {
+        let quit = menu.roots.iter().find_map(|node| match node {
+            NativeMenuNode::Standard {
+                role: StandardMenuRole::App,
+                quit_item,
+                ..
+            } => quit_item.as_ref().map(|item| item.id),
+            _ => None,
+        });
+        self.inner.app_quit_item.set(quit);
+        *self.inner.app_activations.borrow_mut() = activations;
+        self.inner.backend.borrow_mut().set_app_menu(menu, poster);
+    }
+
+    /// The activation for an item chosen in the application menu.
+    pub fn app_activation(&self, id: MenuItemId) -> Option<NativeMenuActivation> {
+        self.inner.app_activations.borrow().get(&id).cloned()
+    }
+
+    /// The application menu's Quit row, when the app routes it rather than
+    /// leaving it to the platform.
+    pub fn app_quit_item(&self) -> Option<MenuItemId> {
+        self.inner.app_quit_item.get()
     }
 
     /// Look up (and clone) the activation for a chosen item, for the router.
@@ -478,6 +538,7 @@ pub struct MemoryNativeMenuBackend {
 #[derive(Default)]
 struct MemoryRecording {
     menus: HashMap<TeksiloWindowId, NativeMenuSnapshot>,
+    app_menu: Option<NativeMenuSnapshot>,
     active: Option<TeksiloWindowId>,
     deltas: Vec<(MenuItemId, MenuItemDelta)>,
     cleared: Vec<TeksiloWindowId>,
@@ -509,6 +570,11 @@ impl MemoryNativeMenuBackend {
     pub fn cleared(&self) -> Vec<TeksiloWindowId> {
         self.inner.borrow().cleared.clone()
     }
+
+    /// The application menu last set, if any.
+    pub fn app_menu(&self) -> Option<NativeMenuSnapshot> {
+        self.inner.borrow().app_menu.clone()
+    }
 }
 
 impl NativeMenuBackend for MemoryNativeMenuBackend {
@@ -539,6 +605,9 @@ impl NativeMenuBackend for MemoryNativeMenuBackend {
     }
     fn update_item(&mut self, id: MenuItemId, delta: MenuItemDelta) {
         self.inner.borrow_mut().deltas.push((id, delta));
+    }
+    fn set_app_menu(&mut self, menu: NativeMenuSnapshot, _poster: Arc<dyn AppEventPoster>) {
+        self.inner.borrow_mut().app_menu = Some(menu);
     }
 }
 

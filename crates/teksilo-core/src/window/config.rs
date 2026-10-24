@@ -187,6 +187,12 @@ pub struct WindowConfig {
     pub size_to_content: SizeToContent,
     pub always_on_top: bool,
     pub skip_taskbar: bool,
+    /// Whether the title bar offers a minimise button; `None` leaves it to
+    /// the kind of window. See [`minimizable`](Self::minimizable).
+    pub minimizable: Option<bool>,
+    /// Whether the title bar offers a maximise button; `None` leaves it to
+    /// the kind of window. See [`maximizable`](Self::maximizable).
+    pub maximizable: Option<bool>,
     /// When set, this window consumes an `xdg_activation_v1` startup token from
     /// the environment at creation so it comes up focused on Wayland (the
     /// launching process set it via `set_child_activation_env`). No effect off
@@ -232,6 +238,8 @@ impl std::fmt::Debug for WindowConfig {
             .field("size_to_content", &self.size_to_content)
             .field("always_on_top", &self.always_on_top)
             .field("skip_taskbar", &self.skip_taskbar)
+            .field("minimizable", &self.minimizable)
+            .field("maximizable", &self.maximizable)
             .field("activate_from_env", &self.activate_from_env)
             .field("icon", &self.icon.as_ref().map(|i| (i.width, i.height)))
             .field("modal", &self.modal)
@@ -312,6 +320,8 @@ impl WindowConfig {
             size_to_content: SizeToContent::Off,
             always_on_top: false,
             skip_taskbar: false,
+            minimizable: None,
+            maximizable: None,
             activate_from_env: false,
             icon: None,
             modal: None,
@@ -440,9 +450,53 @@ impl WindowConfig {
     /// macOS has nothing to hide: the Dock lists applications, not windows,
     /// and keeping the application itself out of the Dock is its activation
     /// policy, not this setting.
+    ///
+    /// On Windows a window with no taskbar button is also left out of
+    /// Alt+Tab, so once minimised the user has no way to bring it back. Give
+    /// such a window no minimise button ([`minimizable(false)`](Self::minimizable)),
+    /// or hide it and offer a way to show it again, such as a tray menu.
     pub fn skip_taskbar(mut self, skip: bool) -> Self {
         self.skip_taskbar = skip;
         self
+    }
+
+    /// Offer a minimise button in the window's title bar, or not. By
+    /// default an ordinary window has one and a [modal](Self::modal_to) one
+    /// does not: a minimised dialog keeps the window it blocks refusing
+    /// input, with nothing on screen to say why. A modal window asked to
+    /// have one is minimised with the window it blocks: minimising it takes
+    /// that window along, and restoring either brings both back.
+    ///
+    /// Applied when the window is created, on Windows and macOS. X11 and
+    /// Wayland leave the title bar to the window manager or compositor, and
+    /// so does a title bar the application draws itself
+    /// ([`DecorationsMode::CustomChrome`]), which decides its own buttons.
+    pub fn minimizable(mut self, minimizable: bool) -> Self {
+        self.minimizable = Some(minimizable);
+        self
+    }
+
+    /// Offer a maximise button in the window's title bar, or not; on macOS
+    /// the zoom button. By default an ordinary window has one and a
+    /// [modal](Self::modal_to) one does not. Where it applies is as for
+    /// [`minimizable`](Self::minimizable).
+    pub fn maximizable(mut self, maximizable: bool) -> Self {
+        self.maximizable = Some(maximizable);
+        self
+    }
+
+    /// Whether the title bar offers a minimise button: as set with
+    /// [`minimizable`](Self::minimizable), otherwise unless the window is
+    /// modal.
+    pub fn is_minimizable(&self) -> bool {
+        self.minimizable.unwrap_or(!self.is_modal())
+    }
+
+    /// Whether the title bar offers a maximise button: as set with
+    /// [`maximizable`](Self::maximizable), otherwise unless the window is
+    /// modal.
+    pub fn is_maximizable(&self) -> bool {
+        self.maximizable.unwrap_or(!self.is_modal())
     }
 
     /// Consume an `xdg_activation_v1` startup token from the environment at
@@ -686,6 +740,8 @@ mod tests {
         assert!(config.resizable);
         assert!(!config.always_on_top);
         assert!(!config.skip_taskbar);
+        assert!(config.is_minimizable());
+        assert!(config.is_maximizable());
         assert!(config.modal.is_none());
         assert!(config.string_id.is_none());
         assert!(config.app_id.is_none());
@@ -818,6 +874,26 @@ mod tests {
         assert!(config.is_modal());
         assert_eq!(config.modal_parent(), Some(parent));
         assert_eq!(config.modal_focus_target(), None);
+    }
+
+    /// A dialog has no minimise or maximise button unless asked, in either
+    /// builder order; an ordinary window has both unless refused.
+    #[test]
+    fn a_modal_window_has_only_a_close_button_by_default() {
+        let parent = TeksiloWindowId::new(3);
+        let dialog = WindowConfig::new().modal_to(parent);
+        assert!(!dialog.is_minimizable());
+        assert!(!dialog.is_maximizable());
+
+        let asked = WindowConfig::new().minimizable(true).modal_to(parent);
+        assert!(asked.is_minimizable(), "set before modal_to");
+        assert!(!asked.is_maximizable());
+        let asked = WindowConfig::new().modal_to(parent).maximizable(true);
+        assert!(asked.is_maximizable(), "set after modal_to");
+
+        let palette = WindowConfig::new().minimizable(false);
+        assert!(!palette.is_minimizable());
+        assert!(palette.is_maximizable());
     }
 
     #[test]

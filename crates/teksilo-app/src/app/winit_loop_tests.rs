@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Thirty-one claims, and they do not all carry the same weight. Verified by
+//! Thirty-four claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -39,7 +39,8 @@
 //!   translator (`WindowManager::set_theme`) and a window created afterwards
 //!   (`input_loop::wire_translator`);
 //! - **(b)** the modal-blocked guard both swallows input and still delivers
-//!   `Resized`;
+//!   `Resized`, and a click on the blocked window, or its taking the focus,
+//!   brings back a modal child the user minimised;
 //! - **(d)** a *wrong* soft-keyboard row is caught;
 //! - **(g)** a window awaiting a redraw it requested does not make
 //!   `update_control_flow` sleep until a deadline already due, so it cannot
@@ -91,6 +92,11 @@
 //!   from the others;
 //! - **(w)** a window created with `skip_taskbar(true)` carries
 //!   `_NET_WM_STATE_SKIP_TASKBAR`, and one created without it does not;
+//! - **(af)** of two windows opened with one id, `find_window` names the
+//!   newer, the other once the newer closes, and still the newer when the
+//!   older closes first;
+//! - **(ag)** a dialog is transient for its parent on X11, also when opened
+//!   from the parent's own handler, with the parent out of the map;
 //! - **(x)** with no window open, the loop goes on under
 //!   `QuitPolicy::Explicit`;
 //! - **(z)** a mount action in the application tree runs with the window
@@ -111,10 +117,14 @@
 //! - **(ae)** a payload wrapped with an activation token reaches the handler
 //!   unwrapped, and the token is taken by the window it opens or raises, or
 //!   dropped at the end of the turn;
+//! - **(ah)** with no window open, the application menu's Quit runs the
+//!   application tree's action for its intent, and with no application tree
+//!   starts a quit;
 //! - **(aa)** the application tree is ticked by `about_to_wait` and by the
 //!   wake its waker posts, which the loop takes so the next one posts;
 //! - **(y)** a quit closes a window with no guard, stops at one whose guard
-//!   vetoed and presented a `MessageBox`, waits while the box is queued and
+//!   vetoed and presented a `MessageBox`, restoring it if it was minimised,
+//!   waits while the box is queued and
 //!   while it is up, is abandoned when Escape cancels the box, and, asked
 //!   again, completes once Enter picks Discard, which closes the window by
 //!   id, and that ends the loop even under `Explicit`.
@@ -271,6 +281,22 @@ fn drive(builder: TeksiloAppBuilder, step: impl FnOnce(&mut TeksiloAppHandler, &
     );
 }
 
+/// The X11 window behind `id`.
+fn xid(app: &TeksiloAppHandler, id: crate::TeksiloWindowId) -> u32 {
+    let winit_id = app.wm.winit_id_for_teksilo(id).expect("the window is open");
+    let handle = app.wm.windows_map()[&winit_id]
+        .platform_window
+        .window()
+        .window_handle()
+        .expect("an X11 window handle")
+        .as_raw();
+    match handle {
+        winit::raw_window_handle::RawWindowHandle::Xlib(handle) => handle.window as u32,
+        winit::raw_window_handle::RawWindowHandle::Xcb(handle) => handle.window.get(),
+        other => panic!("the loop runs on X11, got {other:?}"),
+    }
+}
+
 /// The one managed window's winit id, when there is exactly one.
 fn only_window(app: &TeksiloAppHandler) -> WindowId {
     let ids: Vec<WindowId> = app.wm.windows_map().keys().copied().collect();
@@ -291,6 +317,9 @@ fn app_with_recorder(log: &Shared, waker_at_build: &Rc<Cell<usize>>) -> TeksiloA
     let waker_at_build = waker_at_build.clone();
     TeksiloAppBuilder::new()
         .theme(teksilo_core::presets::intui::light())
+        .app_state(teksilo_platform::native_menu::NativeMenuHandle::new(
+            teksilo_platform::native_menu::MemoryNativeMenuBackend::new(),
+        ))
         .initial_window(
             WindowConfig::new()
                 .title("teksilo winit-loop test")
@@ -656,21 +685,8 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             let arc = Some(managed.platform_window.window_arc());
             let mut seen = None;
             {
-                #[cfg(not(target_os = "macos"))]
-                let handle = managed
-                    .platform_window
-                    .window()
-                    .window_handle()
-                    .ok()
-                    .map(|h| h.as_raw());
-                let mut ops = crate::window_manager::WindowOpsImpl::new(
-                    &mut app.wm,
-                    event_loop,
-                    id,
-                    #[cfg(not(target_os = "macos"))]
-                    handle,
-                    arc,
-                );
+                let mut ops =
+                    crate::window_manager::WindowOpsImpl::new(&mut app.wm, event_loop, id, arc);
                 managed.tree.run_with_event_context(&mut ops, |ctx| {
                     seen = Some(ctx.soft_keyboard_support())
                 });
@@ -1506,19 +1522,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         // first window without the state.
         {
             fn taskbar_state(app: &TeksiloAppHandler, id: crate::TeksiloWindowId) -> Vec<u32> {
-                let winit_id = app.wm.winit_id_for_teksilo(id).expect("the window is open");
-                let handle = app.wm.windows_map()[&winit_id]
-                    .platform_window
-                    .window()
-                    .window_handle()
-                    .expect("an X11 window handle")
-                    .as_raw();
-                let xid = match handle {
-                    winit::raw_window_handle::RawWindowHandle::Xlib(handle) => handle.window as u32,
-                    winit::raw_window_handle::RawWindowHandle::Xcb(handle) => handle.window.get(),
-                    other => panic!("the loop runs on X11, got {other:?}"),
-                };
-                teksilo_platform::x11::ewmh::net_wm_state(xid).expect("read _NET_WM_STATE")
+                teksilo_platform::x11::ewmh::net_wm_state(xid(app, id)).expect("read _NET_WM_STATE")
             }
 
             let skip_atom = teksilo_platform::x11::X11Connection::open()
@@ -1553,12 +1557,110 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             app.wm.close_window(listed);
         }
 
+        // -- (af) two windows opened with one id
+        //
+        // Nothing refuses the second. Closing either used to drop the id,
+        // leaving `find_window` blind to the window still open.
+        {
+            let twin = |app: &mut TeksiloAppHandler, title: &str| {
+                app.wm.create_window(
+                    WindowConfig::new()
+                        .id("loop-twin")
+                        .title(title)
+                        .size(200, 120)
+                        .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                    event_loop,
+                )
+            };
+            let older = twin(app, "teksilo loop test: twin 1");
+            let newer = twin(app, "teksilo loop test: twin 2");
+            assert_eq!(app.wm.find_window("loop-twin"), Some(newer), "the newer");
+            app.wm.close_window(older);
+            assert_eq!(
+                app.wm.find_window("loop-twin"),
+                Some(newer),
+                "the older closing leaves the id with the newer"
+            );
+            app.wm.close_window(newer);
+            assert_eq!(app.wm.find_window("loop-twin"), None);
+
+            let older = twin(app, "teksilo loop test: twin 1");
+            let newer = twin(app, "teksilo loop test: twin 2");
+            app.wm.close_window(newer);
+            assert_eq!(
+                app.wm.find_window("loop-twin"),
+                Some(older),
+                "the newer closing hands the id to the window that still has it"
+            );
+            app.wm.close_window(older);
+        }
+
+        // -- (ag) a dialog is transient for its parent
+        //
+        // winit has no call for it on X11 (its `with_parent_window` creates
+        // the dialog inside the parent), so `create_window` writes
+        // `WM_TRANSIENT_FOR` itself. And from the parent's own handler: that
+        // runs with its window out of the map, as `dispatch_in_window` takes
+        // it out, and looking the parent up in the map alone left the dialog
+        // unowned (its own taskbar entry on Windows) and not centred.
+        {
+            let parent = app.wm.create_window(
+                WindowConfig::new()
+                    .title("teksilo loop test: dialog parent")
+                    .size(300, 200)
+                    .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                event_loop,
+            );
+            let parent_winit = app.wm.winit_id_for_teksilo(parent).expect("open");
+            let current = app.wm.take_managed(parent_winit).expect("open");
+            let dialog = {
+                let mut ops = crate::window_manager::WindowOpsImpl::new(
+                    &mut app.wm,
+                    event_loop,
+                    parent,
+                    Some(current.platform_window.window_arc()),
+                );
+                teksilo_core::WindowOps::open_window(
+                    &mut ops,
+                    WindowConfig::new()
+                        .title("teksilo loop test: dialog")
+                        .size(120, 80)
+                        .modal_to(parent)
+                        .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                )
+            };
+            app.wm.reinsert_managed(parent_winit, current);
+            assert_eq!(
+                teksilo_platform::x11::ewmh::transient_for(xid(app, dialog))
+                    .expect("read WM_TRANSIENT_FOR"),
+                Some(xid(app, parent)),
+                "a dialog opened from its parent's handler is transient for the parent"
+            );
+            let from_outside = app.wm.create_window(
+                WindowConfig::new()
+                    .title("teksilo loop test: dialog from outside")
+                    .size(120, 80)
+                    .modal_to(parent)
+                    .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                event_loop,
+            );
+            assert_eq!(
+                teksilo_platform::x11::ewmh::transient_for(xid(app, from_outside))
+                    .expect("read WM_TRANSIENT_FOR"),
+                Some(xid(app, parent)),
+                "a dialog opened with its parent in the map is transient for it"
+            );
+            app.wm.close_window(from_outside);
+            app.wm.close_window(dialog);
+            app.wm.close_window(parent);
+        }
+
         // -- (b) a window blocked by a modal child
         //
         // Open a real modal over it, then hand the *parent* three events and
         // watch which of them survive the guard in `handle_window_event_inner`.
         let parent_id = app.wm.windows_map()[&window].teksilo_id;
-        app.wm.create_window(
+        let modal_child = app.wm.create_window(
             WindowConfig::new()
                 .title("modal")
                 .size(200, 120)
@@ -1581,6 +1683,40 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             recorder.borrow().phases.is_empty(),
             "a blocked window must not deliver input to its widgets: {:?}",
             recorder.borrow().phases
+        );
+
+        // A click on the blocked window raises its modal child, and brings
+        // it back first if the user minimised it: winit's raise leaves a
+        // minimised window where it is. Raising without restoring in
+        // `refocus_modal_child` leaves it minimised.
+        app.wm
+            .get_by_teksilo_mut(modal_child)
+            .expect("the modal child")
+            .minimized = true;
+        app.window_event(event_loop, window, click(ElementState::Pressed));
+        app.window_event(event_loop, window, click(ElementState::Released));
+        assert!(
+            !app.wm
+                .get_by_teksilo_mut(modal_child)
+                .expect("the modal child")
+                .minimized,
+            "a click on the blocked window brings back its minimised dialog"
+        );
+        // So does the blocked window taking the focus with no press reaching
+        // it: a click on its title bar, Alt+Tab, its taskbar button.
+        // Deleting the `Focused` arm's `refocus_modal_child` leaves it
+        // minimised.
+        app.wm
+            .get_by_teksilo_mut(modal_child)
+            .expect("the modal child")
+            .minimized = true;
+        app.window_event(event_loop, window, WindowEvent::Focused(true));
+        assert!(
+            !app.wm
+                .get_by_teksilo_mut(modal_child)
+                .expect("the modal child")
+                .minimized,
+            "the blocked window taking the focus brings back its minimised dialog"
         );
 
         // Non-input still arrives: a `Resized` the blocked window never saw
@@ -1816,6 +1952,106 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         app.external_ctx_handler = None;
         let outside = app.wm.find_window("from-outside").expect("opened above");
         app.wm.close_window(outside);
+
+        // (ah) The application menu, the one macOS shows once the last
+        // window has closed: its routed Quit runs in the application tree,
+        // and with no application tree asks the application to quit. Without
+        // it ⌘Q did nothing in an app left with no window. Dropping the
+        // payload from `try_route_native_menu_payload` leaves the action
+        // unrun; dropping the fallback leaves no quit.
+        {
+            use teksilo_platform::native_menu::{
+                NativeAppMenuEventPayload, NativeMenuActivation, NativeMenuHandle, NativeMenuNode,
+                NativeMenuSnapshot, StandardMenuRole, StandardRoutedItem,
+            };
+            struct NoPoster;
+            impl teksilo_core::AppEventPoster for NoPoster {
+                fn post_subscription_event(
+                    &self,
+                    _: teksilo_core::SubscriptionId,
+                    _: Box<dyn std::any::Any + Send>,
+                ) {
+                }
+                fn post_external(&self, _: Box<dyn std::any::Any + Send>) {}
+            }
+            #[derive(Debug)]
+            struct AnswersQuit(Rc<Cell<u32>>);
+            impl teksilo_core::widget::Widget for AnswersQuit {
+                fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                    let runs = self.0.clone();
+                    ctx.register_action_global(
+                        teksilo_core::Action::new("test.app_quit")
+                            .on_invoke(move |_, _| runs.set(runs.get() + 1)),
+                    );
+                    Vec::new()
+                }
+                fn layout_response(
+                    &self,
+                    proposal: SizeProposal,
+                    _ctx: &LayoutContext,
+                ) -> LayoutResponse {
+                    proposal.resolve(0.0, 0.0).into()
+                }
+            }
+            assert!(app.wm.is_empty(), "no window is open");
+            let handle = app
+                .wm
+                .app_context_template()
+                .and_then(|t| t.app_state::<NativeMenuHandle>().cloned())
+                .expect("the test app has a native menu handle");
+            let quit = teksilo_core::MenuItemId::next();
+            handle.set_app_menu(
+                NativeMenuSnapshot {
+                    roots: vec![NativeMenuNode::Standard {
+                        role: StandardMenuRole::App,
+                        labels: Default::default(),
+                        quit_item: Some(StandardRoutedItem {
+                            id: quit,
+                            key_equiv: None,
+                        }),
+                        settings_item: None,
+                    }],
+                },
+                [(
+                    quit,
+                    NativeMenuActivation {
+                        intent: Some("test.app_quit"),
+                        action: None,
+                    },
+                )]
+                .into_iter()
+                .collect(),
+                Arc::new(NoPoster),
+            );
+            let runs = Rc::new(Cell::new(0));
+            {
+                let runs = runs.clone();
+                app.wm
+                    .install_app_tree(move |tree| tree.add(AnswersQuit(runs)));
+            }
+            app.user_event(
+                event_loop,
+                AppEvent::External(Box::new(NativeAppMenuEventPayload { item_id: quit })),
+            );
+            assert_eq!(runs.get(), 1, "Quit ran the application tree's action");
+            assert!(!app.wm.quit_in_progress(), "and the action owns the quit");
+
+            // No application tree: Quit asks the application to quit. Routed
+            // directly, so the quit is not carried out (with no window it
+            // would end the loop) and can be withdrawn.
+            let tree = app.wm.take_app_tree().expect("installed above");
+            let left = app.try_route_native_menu_payload(
+                Box::new(NativeAppMenuEventPayload { item_id: quit }),
+                event_loop,
+            );
+            assert!(left.is_ok(), "the payload is the native menu's");
+            assert!(
+                app.wm.quit_in_progress(),
+                "Quit asked the application to quit"
+            );
+            app.wm.cancel_quit();
+            app.wm.reinsert_app_tree(tree);
+        }
 
         // (ac) A modal request from the application tree has no window of
         // its own to appear in. With none open it gets a plain window, which
@@ -2204,10 +2440,17 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         );
 
         // Again, and Enter this time: Discard closes the window by id, and
-        // the quit goes on to completion.
+        // the quit goes on to completion. The window is minimised meanwhile,
+        // and the quit stopping at it brings it back. Taking the restore
+        // out of `await_quit_at` leaves it minimised.
+        app.wm.get_by_teksilo_mut(guarded).expect("open").minimized = true;
         app.wm.request_quit(false);
         app.process_pending(event_loop);
         assert_eq!(asks.get(), 2, "a new quit asks the guard again");
+        assert!(
+            !app.wm.get_by_teksilo_mut(guarded).expect("open").minimized,
+            "the quit restores the minimised window it stops at"
+        );
         app.post_event(event_loop);
         app.window_event(event_loop, guarded_winit, WindowEvent::RedrawRequested);
         assert!(has_box(app));
