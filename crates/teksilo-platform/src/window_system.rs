@@ -123,9 +123,9 @@ pub fn supports_native_modal_windows() -> bool {
 /// tool panels are all expected to route through this path as the
 /// multi-window system matures.
 ///
-/// On non-macOS targets the parent relationship is already set by
-/// winit's `WindowAttributes::with_parent_window` at creation time,
-/// so this is a no-op. macOS needs the deferred call because AppKit's
+/// On Windows the parent relationship is the owner window winit sets at
+/// creation, and on X11 it is [`set_transient_for_before_show`], so this is a
+/// no-op there. macOS needs the deferred call because AppKit's
 /// `-[NSWindow addChildWindow:ordered:]` orders the child window
 /// front (making it visible), which conflicts with AccessKit's
 /// requirement that its adapter be created while the window is still
@@ -173,6 +173,54 @@ pub fn attach_child_window(parent: &winit::window::Window, child: &winit::window
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (parent, child);
+    }
+}
+
+/// Make `child` a transient window of `parent` on X11 (ICCCM
+/// `WM_TRANSIENT_FOR`), before `child` is shown for the first time; nothing
+/// on other window systems.
+///
+/// winit 0.30 has no call for it: its `with_parent_window` creates an X11
+/// window *inside* the parent, confined to and clipped by its client area,
+/// and is ignored on Wayland, where no protocol open to every client sets a
+/// parent. The window manager keeps a transient window above its parent and
+/// treats it as a dialog. The property is written before the first map, as
+/// [`skip_taskbar_before_show`](crate::taskbar::skip_taskbar_before_show)
+/// writes its own. A failure is reported on stderr and leaves `child` a window
+/// of its own.
+pub fn set_transient_for_before_show(
+    child: &winit::window::Window,
+    parent: &winit::window::Window,
+) {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let (Some(child), Some(parent)) = (x11_window_id(child), x11_window_id(parent)) else {
+            return;
+        };
+        if let Err(err) = crate::x11::ewmh::set_transient_for(child, parent) {
+            eprintln!(
+                "teksilo-platform: could not make the window transient for its parent ({err}); \
+                 the window manager will treat it as a window of its own"
+            );
+        }
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    let _ = (child, parent);
+}
+
+/// The X11 window behind `window`, `None` on any other window system.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub(crate) fn x11_window_id(window: &winit::window::Window) -> Option<u32> {
+    use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawWindowHandle};
+
+    let display = window.display_handle().ok()?;
+    if window_system_for_display_handle(&display.as_raw()) != WindowSystem::X11 {
+        return None;
+    }
+    match window.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Xlib(handle) => Some(handle.window as u32),
+        RawWindowHandle::Xcb(handle) => Some(handle.window.get()),
+        _ => None,
     }
 }
 

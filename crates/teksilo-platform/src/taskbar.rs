@@ -42,18 +42,8 @@ pub fn skip_taskbar_attributes(attrs: WindowAttributes, skip: bool) -> WindowAtt
 pub fn skip_taskbar_before_show(window: &Window, skip: bool) {
     #[cfg(all(unix, not(target_os = "macos")))]
     if skip {
-        use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawWindowHandle};
-
-        let is_x11 = window.display_handle().is_ok_and(|display| {
-            crate::window_system_for_display_handle(&display.as_raw()) == crate::WindowSystem::X11
-        });
-        if !is_x11 {
+        let Some(xid) = crate::window_system::x11_window_id(window) else {
             return;
-        }
-        let xid = match window.window_handle().map(|handle| handle.as_raw()) {
-            Ok(RawWindowHandle::Xlib(handle)) => handle.window as u32,
-            Ok(RawWindowHandle::Xcb(handle)) => handle.window.get(),
-            _ => return,
         };
         if let Err(err) = crate::x11::ewmh::mark_skip_taskbar(xid) {
             eprintln!(

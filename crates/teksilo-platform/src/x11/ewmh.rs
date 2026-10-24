@@ -189,6 +189,40 @@ pub fn net_wm_state(window: Window) -> Result<Vec<Atom>, X11Error> {
     read_net_wm_state(&X11Connection::open()?, window)
 }
 
+/// The window `window` is transient for (ICCCM `WM_TRANSIENT_FOR`, which
+/// winit writes for a parent window), `None` when it has none. Opens (and
+/// drops) its own short-lived connection.
+pub fn transient_for(window: Window) -> Result<Option<Window>, X11Error> {
+    let conn = X11Connection::open()?;
+    Ok(conn
+        .get_property_full(
+            window,
+            AtomEnum::WM_TRANSIENT_FOR.into(),
+            AtomEnum::WINDOW.into(),
+        )?
+        .and_then(|value| value.as_u32()))
+}
+
+/// Write ICCCM `WM_TRANSIENT_FOR` on `window`, naming `parent`. Like
+/// [`mark_skip_taskbar`], over a connection of our own, returning once the
+/// server confirmed it so the write is ordered before winit's map request.
+pub fn set_transient_for(window: Window, parent: Window) -> Result<(), X11Error> {
+    use x11rb::protocol::xproto::PropMode;
+    use x11rb::wrapper::ConnectionExt as _;
+
+    let conn = X11Connection::open()?;
+    conn.conn()
+        .change_property32(
+            PropMode::REPLACE,
+            window,
+            AtomEnum::WM_TRANSIENT_FOR,
+            AtomEnum::WINDOW,
+            &[parent],
+        )?
+        .check()?;
+    Ok(())
+}
+
 /// [`net_wm_state`] over a connection already open.
 fn read_net_wm_state(conn: &X11Connection, window: Window) -> Result<Vec<Atom>, X11Error> {
     Ok(conn

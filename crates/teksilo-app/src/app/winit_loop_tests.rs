@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Thirty-two claims, and they do not all carry the same weight. Verified by
+//! Thirty-three claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -39,8 +39,8 @@
 //!   translator (`WindowManager::set_theme`) and a window created afterwards
 //!   (`input_loop::wire_translator`);
 //! - **(b)** the modal-blocked guard both swallows input and still delivers
-//!   `Resized`, and a click on the blocked window brings back a modal child
-//!   the user minimised;
+//!   `Resized`, and a click on the blocked window, or its taking the focus,
+//!   brings back a modal child the user minimised;
 //! - **(d)** a *wrong* soft-keyboard row is caught;
 //! - **(g)** a window awaiting a redraw it requested does not make
 //!   `update_control_flow` sleep until a deadline already due, so it cannot
@@ -95,6 +95,8 @@
 //! - **(af)** of two windows opened with one id, `find_window` names the
 //!   newer, the other once the newer closes, and still the newer when the
 //!   older closes first;
+//! - **(ag)** a dialog is transient for its parent on X11, also when opened
+//!   from the parent's own handler, with the parent out of the map;
 //! - **(x)** with no window open, the loop goes on under
 //!   `QuitPolicy::Explicit`;
 //! - **(z)** a mount action in the application tree runs with the window
@@ -274,6 +276,22 @@ fn drive(builder: TeksiloAppBuilder, step: impl FnOnce(&mut TeksiloAppHandler, &
             assert!(script.exited, "winit never called `exiting`");
         },
     );
+}
+
+/// The X11 window behind `id`.
+fn xid(app: &TeksiloAppHandler, id: crate::TeksiloWindowId) -> u32 {
+    let winit_id = app.wm.winit_id_for_teksilo(id).expect("the window is open");
+    let handle = app.wm.windows_map()[&winit_id]
+        .platform_window
+        .window()
+        .window_handle()
+        .expect("an X11 window handle")
+        .as_raw();
+    match handle {
+        winit::raw_window_handle::RawWindowHandle::Xlib(handle) => handle.window as u32,
+        winit::raw_window_handle::RawWindowHandle::Xcb(handle) => handle.window.get(),
+        other => panic!("the loop runs on X11, got {other:?}"),
+    }
 }
 
 /// The one managed window's winit id, when there is exactly one.
@@ -1511,19 +1529,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         // first window without the state.
         {
             fn taskbar_state(app: &TeksiloAppHandler, id: crate::TeksiloWindowId) -> Vec<u32> {
-                let winit_id = app.wm.winit_id_for_teksilo(id).expect("the window is open");
-                let handle = app.wm.windows_map()[&winit_id]
-                    .platform_window
-                    .window()
-                    .window_handle()
-                    .expect("an X11 window handle")
-                    .as_raw();
-                let xid = match handle {
-                    winit::raw_window_handle::RawWindowHandle::Xlib(handle) => handle.window as u32,
-                    winit::raw_window_handle::RawWindowHandle::Xcb(handle) => handle.window.get(),
-                    other => panic!("the loop runs on X11, got {other:?}"),
-                };
-                teksilo_platform::x11::ewmh::net_wm_state(xid).expect("read _NET_WM_STATE")
+                teksilo_platform::x11::ewmh::net_wm_state(xid(app, id)).expect("read _NET_WM_STATE")
             }
 
             let skip_atom = teksilo_platform::x11::X11Connection::open()
@@ -1596,6 +1602,73 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             app.wm.close_window(older);
         }
 
+        // -- (ag) a dialog is transient for its parent
+        //
+        // winit has no call for it on X11 (its `with_parent_window` creates
+        // the dialog inside the parent), so `create_window` writes
+        // `WM_TRANSIENT_FOR` itself. And from the parent's own handler: that
+        // runs with its window out of the map, as `dispatch_in_window` takes
+        // it out, and looking the parent up in the map alone left the dialog
+        // unowned (its own taskbar entry on Windows) and not centred.
+        {
+            let parent = app.wm.create_window(
+                WindowConfig::new()
+                    .title("teksilo loop test: dialog parent")
+                    .size(300, 200)
+                    .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                event_loop,
+            );
+            let parent_winit = app.wm.winit_id_for_teksilo(parent).expect("open");
+            let current = app.wm.take_managed(parent_winit).expect("open");
+            let handle = current
+                .platform_window
+                .window()
+                .window_handle()
+                .ok()
+                .map(|h| h.as_raw());
+            let dialog = {
+                let mut ops = crate::window_manager::WindowOpsImpl::new(
+                    &mut app.wm,
+                    event_loop,
+                    parent,
+                    handle,
+                    Some(current.platform_window.window_arc()),
+                );
+                teksilo_core::WindowOps::open_window(
+                    &mut ops,
+                    WindowConfig::new()
+                        .title("teksilo loop test: dialog")
+                        .size(120, 80)
+                        .modal_to(parent)
+                        .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                )
+            };
+            app.wm.reinsert_managed(parent_winit, current);
+            assert_eq!(
+                teksilo_platform::x11::ewmh::transient_for(xid(app, dialog))
+                    .expect("read WM_TRANSIENT_FOR"),
+                Some(xid(app, parent)),
+                "a dialog opened from its parent's handler is transient for the parent"
+            );
+            let from_outside = app.wm.create_window(
+                WindowConfig::new()
+                    .title("teksilo loop test: dialog from outside")
+                    .size(120, 80)
+                    .modal_to(parent)
+                    .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                event_loop,
+            );
+            assert_eq!(
+                teksilo_platform::x11::ewmh::transient_for(xid(app, from_outside))
+                    .expect("read WM_TRANSIENT_FOR"),
+                Some(xid(app, parent)),
+                "a dialog opened with its parent in the map is transient for it"
+            );
+            app.wm.close_window(from_outside);
+            app.wm.close_window(dialog);
+            app.wm.close_window(parent);
+        }
+
         // -- (b) a window blocked by a modal child
         //
         // Open a real modal over it, then hand the *parent* three events and
@@ -1642,6 +1715,22 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                 .expect("the modal child")
                 .minimized,
             "a click on the blocked window brings back its minimised dialog"
+        );
+        // So does the blocked window taking the focus with no press reaching
+        // it: a click on its title bar, Alt+Tab, its taskbar button.
+        // Deleting the `Focused` arm's `refocus_modal_child` leaves it
+        // minimised.
+        app.wm
+            .get_by_teksilo_mut(modal_child)
+            .expect("the modal child")
+            .minimized = true;
+        app.window_event(event_loop, window, WindowEvent::Focused(true));
+        assert!(
+            !app.wm
+                .get_by_teksilo_mut(modal_child)
+                .expect("the modal child")
+                .minimized,
+            "the blocked window taking the focus brings back its minimised dialog"
         );
 
         // Non-input still arrives: a `Resized` the blocked window never saw

@@ -3779,6 +3779,16 @@ impl TeksiloAppHandler {
                     }
                 }
                 let newly_focused = self.apply_os_focus(window_id, focused, event_loop);
+                // A window blocked by a modal child can take the focus without
+                // a press reaching it: a click on its title bar, Alt+Tab, its
+                // taskbar button. The child comes back to the front, restored
+                // if the user minimised it, as for a click in the window.
+                if focused
+                    && let Some(fid) = self.wm.teksilo_id_for_winit(window_id)
+                    && self.wm.is_blocked(fid)
+                {
+                    self.wm.refocus_modal_child(fid);
+                }
                 // A window regaining focus is the natural, zero-idle-cost moment
                 // to re-check the OS accessibility preferences (WCAG / EN 301
                 // 549 §11.7): the user may have toggled "increase contrast" /

@@ -1268,8 +1268,21 @@ impl WindowManager {
     /// `drain_window_commands` tick.
     pub fn create_window(
         &mut self,
+        config: WindowConfig,
+        target: &winit::event_loop::ActiveEventLoop,
+    ) -> TeksiloWindowId {
+        self.create_window_beside(config, target, None)
+    }
+
+    /// [`create_window`](Self::create_window) from a window's own handler,
+    /// which runs with that window out of the map (`take_managed`).
+    /// `dispatching` is that window, so a dialog `modal_to` it is still owned
+    /// by it and centred over it.
+    pub(crate) fn create_window_beside(
+        &mut self,
         mut config: WindowConfig,
         target: &winit::event_loop::ActiveEventLoop,
+        dispatching: Option<(TeksiloWindowId, &winit::window::Window)>,
     ) -> TeksiloWindowId {
         // If a `WindowStateService` is registered AND this window has
         // a stable `id(...)`, restore the saved geometry — sanitized
@@ -1338,24 +1351,20 @@ impl WindowManager {
         // since decoration thickness is small relative to the dialog.
         // No-op on Wayland (compositor owns positioning).
         if config.position.is_none()
-            && let Some(parent_id) = modal_parent
-            && let Some(parent_winit) = self.winit_id_for_teksilo(parent_id)
-            && let Some(parent_managed) = self.windows.get(&parent_winit)
+            && let Some(parent_window) = self.parent_window(modal_parent, dispatching)
+            && let Ok(parent_outer_pos) = parent_window.outer_position()
         {
-            let parent_window = parent_managed.platform_window.window();
-            if let Ok(parent_outer_pos) = parent_window.outer_position() {
-                let parent_sf = parent_window.scale_factor();
-                let parent_outer_size = parent_window.outer_size();
-                let p_x = parent_outer_pos.x as f64 / parent_sf;
-                let p_y = parent_outer_pos.y as f64 / parent_sf;
-                let p_w = parent_outer_size.width as f64 / parent_sf;
-                let p_h = parent_outer_size.height as f64 / parent_sf;
-                let m_w = config.size.0 as f64;
-                let m_h = config.size.1 as f64;
-                let x = (p_x + (p_w - m_w) / 2.0).round() as i32;
-                let y = (p_y + (p_h - m_h) / 2.0).round() as i32;
-                config.position = Some((x, y));
-            }
+            let parent_sf = parent_window.scale_factor();
+            let parent_outer_size = parent_window.outer_size();
+            let p_x = parent_outer_pos.x as f64 / parent_sf;
+            let p_y = parent_outer_pos.y as f64 / parent_sf;
+            let p_w = parent_outer_size.width as f64 / parent_sf;
+            let p_h = parent_outer_size.height as f64 / parent_sf;
+            let m_w = config.size.0 as f64;
+            let m_h = config.size.1 as f64;
+            let x = (p_x + (p_w - m_w) / 2.0).round() as i32;
+            let y = (p_y + (p_h - m_h) / 2.0).round() as i32;
+            config.position = Some((x, y));
         }
 
         let mut window_attrs = winit::window::Window::default_attributes()
@@ -1501,9 +1510,11 @@ impl WindowManager {
         // inside the owner's client area — wrong for dialogs in every
         // way (paint, input, movement, z-order).
         //
-        // X11 / Wayland: `with_parent_window` is correct — winit wires
-        // it through `WM_TRANSIENT_FOR` / `xdg_toplevel.set_parent`,
-        // both of which match dialog semantics.
+        // X11: `WM_TRANSIENT_FOR`, written before the first map
+        // (`set_transient_for_before_show`, below). Not `with_parent_window`
+        // either: on X11 winit creates the window inside its parent,
+        // clipped to its client area. Wayland: nothing; winit ignores a
+        // parent there and offers no `xdg_toplevel.set_parent`.
         //
         // macOS: skip here and defer to `attach_child_window` after
         // `PlatformWindow::new_with_a11y`. AppKit's
@@ -1512,25 +1523,12 @@ impl WindowManager {
         // AccessKit adapter that requires a hidden window at
         // construction.
         #[cfg(target_os = "windows")]
-        if let Some(parent_id) = modal_parent
-            && let Some(parent_winit) = self.winit_id_for_teksilo(parent_id)
-            && let Some(parent_managed) = self.windows.get(&parent_winit)
-            && let Ok(parent_handle) = parent_managed.platform_window.window().window_handle()
+        if let Some(parent_window) = self.parent_window(modal_parent, dispatching)
+            && let Ok(parent_handle) = parent_window.window_handle()
             && let winit::raw_window_handle::RawWindowHandle::Win32(win32) = parent_handle.as_raw()
         {
             use winit::platform::windows::WindowAttributesExtWindows;
             window_attrs = window_attrs.with_owner_window(win32.hwnd.get());
-        }
-
-        #[cfg(all(unix, not(target_os = "macos")))]
-        if let Some(parent_id) = modal_parent
-            && let Some(parent_winit) = self.winit_id_for_teksilo(parent_id)
-            && let Some(parent_managed) = self.windows.get(&parent_winit)
-            && let Ok(parent_handle) = parent_managed.platform_window.window().window_handle()
-        {
-            // SAFETY: the parent window is managed by the WindowManager
-            // and remains alive for the lifetime of the child.
-            window_attrs = unsafe { window_attrs.with_parent_window(Some(parent_handle.as_raw())) };
         }
 
         // The token the routed event carried, if its handler opens this
@@ -1551,6 +1549,9 @@ impl WindowManager {
         // Still unmapped: the window is shown once its accessibility adapter
         // exists, in `new_with_a11y` below.
         teksilo_platform::taskbar::skip_taskbar_before_show(&window, config.skip_taskbar);
+        if let Some(parent_window) = self.parent_window(modal_parent, dispatching) {
+            teksilo_platform::set_transient_for_before_show(&window, parent_window);
+        }
         let winit_id = window.id();
         let scale_factor = window.scale_factor();
 
@@ -1616,14 +1617,8 @@ impl WindowManager {
         // with AccessKit adapter creation. Wire it now that the child
         // is visible.
         #[cfg(target_os = "macos")]
-        if let Some(parent_id) = modal_parent
-            && let Some(parent_winit) = self.winit_id_for_teksilo(parent_id)
-            && let Some(parent_managed) = self.windows.get(&parent_winit)
-        {
-            teksilo_platform::attach_child_window(
-                parent_managed.platform_window.window(),
-                pw.window(),
-            );
+        if let Some(parent_window) = self.parent_window(modal_parent, dispatching) {
+            teksilo_platform::attach_child_window(parent_window, pw.window());
         }
 
         if is_modal {
@@ -2768,6 +2763,23 @@ impl WindowManager {
         self.windows.values().map(|m| m.teksilo_id)
     }
 
+    /// The window `parent` names: `dispatching` when it is that one (out of
+    /// the map while its handler runs), otherwise the open window with that id.
+    fn parent_window<'w>(
+        &'w self,
+        parent: Option<TeksiloWindowId>,
+        dispatching: Option<(TeksiloWindowId, &'w winit::window::Window)>,
+    ) -> Option<&'w winit::window::Window> {
+        let parent = parent?;
+        if let Some((id, window)) = dispatching
+            && id == parent
+        {
+            return Some(window);
+        }
+        let winit_id = self.winit_id_for_teksilo(parent)?;
+        Some(self.windows.get(&winit_id)?.platform_window.window())
+    }
+
     /// Get the winit WindowId for a TeksiloWindowId.
     pub fn winit_id_for_teksilo(
         &self,
@@ -3247,8 +3259,8 @@ pub struct WindowOpsImpl<'a> {
     /// [windowless](Self::windowless) sink, which has no window to drag
     /// from.
     current_id: Option<TeksiloWindowId>,
-    /// Current window's raw handle, captured before removal so a
-    /// modal whose parent is the current window can still attach.
+    /// Current window's raw handle, captured before removal. A modal whose
+    /// parent is the current window finds it through `current_window_arc`.
     #[cfg(not(target_os = "macos"))]
     current_handle: Option<winit::raw_window_handle::RawWindowHandle>,
     /// `Arc<Window>` of the current (dispatching) window. On macOS
@@ -3302,12 +3314,11 @@ impl<'a> WindowOpsImpl<'a> {
 
 impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
     fn open_window(&mut self, config: teksilo_core::WindowConfig) -> TeksiloWindowId {
-        let _ = self.current_id;
         #[cfg(not(target_os = "macos"))]
         let _ = self.current_handle;
-        #[cfg(target_os = "macos")]
-        let _ = &self.current_window_arc;
-        self.wm.create_window(config, self.event_loop)
+        let dispatching = self.current_id.zip(self.current_window_arc.as_deref());
+        self.wm
+            .create_window_beside(config, self.event_loop, dispatching)
     }
 
     fn find_window(&self, string_id: &str) -> Option<TeksiloWindowId> {

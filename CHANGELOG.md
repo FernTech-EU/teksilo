@@ -136,8 +136,15 @@ by crate for clarity, not because crates version independently.
   window is out of the window list during its own dispatch, so raising it
   did nothing, which is the common case in a single-instance handler.
 - **A minimised dialog comes back when the window it blocks is clicked,**
-  and when a quit stops at its window. Raising it left it minimised, with the
-  window it blocks refusing input.
+  when that window takes the focus some other way (its title bar, Alt+Tab,
+  its taskbar button), and when a quit stops at its window. Raising it left it
+  minimised, with the window it blocks refusing input, and a click on the
+  title bar did not raise it at all.
+- **A dialog opened from its parent window's own handler belongs to the
+  parent.** It was opened as a window of its own: not kept above the parent,
+  not centred over it, and with a taskbar button of its own on Windows.
+- **A dialog on X11 is a window of its own, transient for its parent.** It
+  was created inside the parent window, clipped to it.
 - **Two windows opened with one `WindowConfig::id` no longer lose it.**
   Closing either left `find_window` finding neither; the one still open now
   keeps the id. A debug build warns when a window opens with an id another
