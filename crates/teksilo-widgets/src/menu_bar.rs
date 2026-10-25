@@ -283,7 +283,8 @@ impl MenuBar {
     /// keeps the in-window bar too.
     ///
     /// With no application menu declared the bar shows no menu (and a debug
-    /// build says so once).
+    /// build says so once), as it does in a tree that belongs to no
+    /// application (a test, a tree built by hand; said once per process).
     pub fn application() -> Self {
         let mut bar = Self::new();
         bar.application = true;

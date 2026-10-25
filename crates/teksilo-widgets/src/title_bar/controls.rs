@@ -53,7 +53,8 @@ use crate::title_bar::CloseAction;
 
 /// Layout snapshot that [`WindowControls`] exports to its parent `TitleBar`
 /// so the `after_paint` aggregator can read the per-button [`WidgetId`]s.
-/// Populated during `WindowControls::build`.
+/// Populated during `WindowControls::build`. A button the window does not
+/// offer (see `WindowConfig::minimizable`) has no id.
 ///
 /// The maximize slot is the **Switcher** that wraps the two glyph
 /// buttons (`□` / `❐`), not either child directly: the inactive
@@ -64,8 +65,8 @@ use crate::title_bar::CloseAction;
 /// child is currently visible.
 #[derive(Debug, Clone)]
 pub struct WindowControlsLayout {
-    pub minimize_id: WidgetId,
-    pub maximize_id: WidgetId,
+    pub minimize_id: Option<WidgetId>,
+    pub maximize_id: Option<WidgetId>,
     pub close_id: WidgetId,
 }
 
@@ -319,6 +320,10 @@ pub struct WindowControls {
     /// `after_paint` aggregator can read our per-button `WidgetId`s.
     /// `None` when the controls are used standalone (tests / docs).
     layout_sink: Option<Rc<Cell<Option<WindowControlsLayout>>>>,
+    /// Whether the minimise button is built. See [`Self::buttons`].
+    minimizable: bool,
+    /// Whether the maximise / restore button is built.
+    maximizable: bool,
 }
 
 impl std::fmt::Debug for WindowControls {
@@ -351,7 +356,19 @@ impl WindowControls {
             close_action,
             root_child_id: None,
             layout_sink: None,
+            minimizable: true,
+            maximizable: true,
         }
+    }
+
+    /// Which of the minimise and maximise buttons to offer; both by
+    /// default, and close always. `TitleBar` passes the window's own, so a
+    /// modal dialog's bar has no minimise button, as the window it draws
+    /// for has none (`WindowConfig::minimizable`).
+    pub(crate) fn buttons(mut self, minimizable: bool, maximizable: bool) -> Self {
+        self.minimizable = minimizable;
+        self.maximizable = maximizable;
+        self
     }
 
     /// Wire a sink the parent `TitleBar` will read from in its
@@ -454,12 +471,15 @@ impl Widget for WindowControls {
             close_hover_signal.clone(),
         );
 
-        let minimize = ControlButton::new("\u{2014}", cell_w, cell_h, fg)
-            .hover_background(hover_bg)
-            .with_action(minimize_action)
-            .set_a11y_name(minimize_name)
-            .external_hover(minimize_hover);
-        let minimize_id = ctx.add(minimize);
+        let minimize_id = self.minimizable.then(|| {
+            ctx.add(
+                ControlButton::new("\u{2014}", cell_w, cell_h, fg)
+                    .hover_background(hover_bg)
+                    .with_action(minimize_action)
+                    .set_a11y_name(minimize_name)
+                    .external_hover(minimize_hover),
+            )
+        });
 
         // Maximize/restore: both states use `□` (U+25A1). The
         // semantically nicer "two stacked squares" glyphs (`❐` U+2750,
@@ -493,12 +513,15 @@ impl Widget for WindowControls {
             .with_action(maximize_action_restore)
             .set_a11y_name(restore_name)
             .external_hover(maximize_hover);
-        let max_normal_id = ctx.add(maximize_normal);
-        let max_zoomed_id = ctx.add(maximize_zoomed);
-        let maximize_switcher = Switcher::new(switcher_idx)
-            .child(max_normal_id)
-            .child(max_zoomed_id);
-        let switcher_id = ctx.add(maximize_switcher);
+        let switcher_id = self.maximizable.then(|| {
+            let max_normal_id = ctx.add(maximize_normal);
+            let max_zoomed_id = ctx.add(maximize_zoomed);
+            ctx.add(
+                Switcher::new(switcher_idx)
+                    .child(max_normal_id)
+                    .child(max_zoomed_id),
+            )
+        });
 
         // U+00D7 (Latin-1 ×) instead of U+2715 (Dingbats ✕): the latter
         // is missing from many default Linux sans-serif fonts, leaving the
@@ -513,8 +536,8 @@ impl Widget for WindowControls {
 
         let row = HStack::new()
             .spacing(0.0)
-            .child(minimize_id)
-            .child(switcher_id)
+            .child_opt(minimize_id)
+            .child_opt(switcher_id)
             .child(close_id);
 
         let root = ctx.add(row);

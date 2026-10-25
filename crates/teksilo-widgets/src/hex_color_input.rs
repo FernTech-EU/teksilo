@@ -403,11 +403,11 @@ impl Widget for HexColorInput {
 
         // Validator — pure classification. Side-effects (writing back
         // to the bound signal, firing on_value_changed / on_invalid)
-        // happen in the on_blur / on_submit chain because the validator
+        // happen in the on_commit / on_submit chain because the validator
         // closure can't see EventContext.
         //
         // Invalid messages capture the raw input via a shared cell so
-        // the on_blur handler can pass it to on_invalid.
+        // the on_commit handler can pass it to on_invalid.
         let last_raw: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
         let validator: ValidatorFn = {
             let last_raw = last_raw.clone();
@@ -529,7 +529,7 @@ impl Widget for HexColorInput {
                 let commit = commit.clone();
                 move |ctx_evt| commit(ctx_evt)
             })
-            .on_blur_fn({
+            .on_commit_fn({
                 let commit = commit.clone();
                 move |ctx_evt| commit(ctx_evt)
             });

@@ -1053,19 +1053,18 @@ impl WidgetTree {
                     // moving focus at touch-down would leave the ring — and
                     // the caret — on a control the user never activated. See
                     // `focus_on_release`. A widget built with
-                    // `focus_on_click(false)` takes no focus from either.
+                    // `focus_on_click(false)` takes no focus from either, and
+                    // has the focused field commit on the release that
+                    // completes the click, for either.
                     if !pressing.kind.is_direct()
                         && let Some(focusable) = focusable
+                        && self.click_may_focus(focusable)
                     {
-                        if self.click_may_focus(focusable) {
-                            self.focus_with_origin_ops(
-                                focusable,
-                                crate::focus::FocusOrigin::Pointer(pressing.kind),
-                                &mut *ops,
-                            );
-                        } else {
-                            self.commit_pending_edit(&mut *ops);
-                        }
+                        self.focus_with_origin_ops(
+                            focusable,
+                            crate::focus::FocusOrigin::Pointer(pressing.kind),
+                            &mut *ops,
+                        );
                     }
                     self.dispatch_to_widget(target, &event, &mut *ops);
                     // Enrol the competitors that only become knowable once the
@@ -1137,7 +1136,8 @@ impl WidgetTree {
                 self.end_sequence(&event, &mut *ops);
                 // A direct pointer's focus lands here, before the release is
                 // dispatched, so a handler activating on the `Up` runs with the
-                // focus its own press earned.
+                // focus its own press earned; so does the commit a click on a
+                // control that takes no focus makes, for every pointer.
                 self.focus_on_release(*position, &mut *ops);
                 if let Some(captured) = self.current_pointer_capture() {
                     self.dispatch_to_widget(captured, &event, &mut *ops);
@@ -1349,6 +1349,17 @@ impl WidgetTree {
                                 )
                             };
                     } else {
+                        // A Click on a control a click does not focus
+                        // (`focus_on_click(false)`) blurs nothing, as the
+                        // pointer's does not: the focused field commits what
+                        // was typed first, so the command sees it.
+                        if *action == accesskit::Action::Click
+                            && self
+                                .find_focusable_at_or_above(id)
+                                .is_some_and(|focusable| !self.click_may_focus(focusable))
+                        {
+                            self.commit_pending_edit(&mut *ops);
+                        }
                         self.access_action_handled =
                             self.dispatch_to_widget_returning_handled(id, &event, &mut *ops);
                     }
@@ -1861,22 +1872,25 @@ impl WidgetTree {
         self.presses.next_deadline().map(|t| self.instant_for(t))
     }
 
-    /// The click about to be dispatched lands on a control that takes no
+    /// The click about to be dispatched (by a pointer, or an
+    /// assistive-technology Click) lands on a control that takes no
     /// focus from it, so it blurs nothing: have the focused widget, and each
     /// of its ancestors, commit the edit it holds
     /// ([`on_commit_edit`](crate::widget_builder::HandlerSet::on_commit_edit)),
     /// innermost first, as a blur would have made it, so that the command
     /// the click runs sees the value typed (AppKit's `commitEditing`).
+    ///
+    /// The ancestors are those of an intent's walk from the focused widget
+    /// ([`intent_walk`](Self::intent_walk)): from a popup on to the widget it
+    /// is attached to, and no further than an open modal. The widgets that
+    /// commit are the ones whose actions the command can reach; a form whose
+    /// field is edited in a popover attached to it commits, and the page
+    /// behind a dialog does not.
     pub(crate) fn commit_pending_edit(&mut self, ops: &mut dyn crate::window::WindowOps) {
         let Some(focus) = self.focused.filter(|id| self.arena.is_active(*id)) else {
             return;
         };
-        let mut chain = vec![focus];
-        let mut current = focus;
-        while let Some(parent) = self.arena.parent(current) {
-            chain.push(parent);
-            current = parent;
-        }
+        let (chain, _, _) = self.intent_walk(focus, &[]);
         for id in chain {
             for external in [true, false] {
                 let handler = self.arena.get_mut(id).and_then(|node| {
@@ -1928,19 +1942,21 @@ impl WidgetTree {
     /// recognizer applies to activation, applied to focus so the two cannot
     /// disagree. A press that found no focusable defers nothing.
     ///
-    /// A no-op for an indirect pointer, which focused at press. For a widget
-    /// built with `focus_on_click(false)` it moves no focus and has the
-    /// focused widget commit its pending edit instead
-    /// ([`commit_pending_edit`](Self::commit_pending_edit)).
+    /// For a widget built with `focus_on_click(false)` it moves no focus and
+    /// has the focused widget commit its pending edit instead
+    /// ([`commit_pending_edit`](Self::commit_pending_edit)), under the same
+    /// guard and for every pointer, a mouse included: a press dragged off or
+    /// cancelled has run no command, so nothing is committed for it.
+    /// Otherwise a no-op for an indirect pointer, which focused at press.
     fn focus_on_release(&mut self, position: Point, ops: &mut dyn crate::window::WindowOps) {
         let releasing = self.current_input.pointer;
-        if !releasing.kind.is_direct() {
-            return;
-        }
         let pointer = self.current_pointer_id();
         let Some(pressed) = self.presses.get(pointer).and_then(|p| p.focusable) else {
             return;
         };
+        if !releasing.kind.is_direct() && self.click_may_focus(pressed) {
+            return;
+        }
         let Some(target) = self.hit_test_for(position, &releasing) else {
             return;
         };

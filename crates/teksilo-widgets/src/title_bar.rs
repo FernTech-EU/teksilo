@@ -72,8 +72,12 @@ pub type CloseAction = Rc<dyn Fn(&mut EventContext)>;
 /// child that absorbs all leftover horizontal space and forwards
 /// pointer / drag / double-tap gestures to the platform host. The window
 /// controls (minimize / maximize / close) are rendered only when the host
-/// advertises [`PlatformTitleBarHost::renders_custom_controls`] — i.e. on
-/// Windows and Wayland but not on macOS.
+/// advertises [`PlatformTitleBarHost::renders_custom_controls`], i.e. on
+/// Windows and Wayland but not on macOS, and offer only the buttons the
+/// window was created with: a modal dialog has no minimise button, and a
+/// window built with `WindowConfig::minimizable(false)` or
+/// `maximizable(false)` lacks that one. The same goes for the window menu the
+/// bar builds on X11 and for maximising by double click.
 ///
 /// ## This widget builds exactly once
 ///
@@ -301,12 +305,19 @@ impl Widget for TitleBar {
         // node is skipped by layout, hit-test, focus and paint, so the cluster
         // takes no space and receives no input while hidden, and comes back
         // without the bar ever being rebuilt.
+        // The window's own buttons: a modal dialog has no minimise button,
+        // and a window may have been created without either.
+        let (minimizable, maximizable) = ctx
+            .window()
+            .map(|w| (w.is_minimizable(), w.is_maximizable()))
+            .unwrap_or((true, true));
         let controls_id: Option<WidgetId> = if renders_controls {
             let controls = WindowControls::new(
                 self.host.clone(),
                 show_restore_signal,
                 self.close_action.clone(),
             )
+            .buttons(minimizable, maximizable)
             .layout_sink(self.controls_layout.clone());
             let id = ctx.add(controls);
             ctx.visible_when(id, self.controls_visible.clone());
@@ -463,8 +474,8 @@ impl Widget for TitleBar {
         }
 
         if let Some(layout) = self.controls_layout.take() {
-            regions.minimize = Some(view.bounds(layout.minimize_id));
-            regions.minimize_id = Some(layout.minimize_id);
+            regions.minimize = layout.minimize_id.map(|id| view.bounds(id));
+            regions.minimize_id = layout.minimize_id;
 
             // The maximize id is the Switcher's, not either glyph
             // button's. The Switcher's bounds are always valid (the
@@ -473,8 +484,8 @@ impl Widget for TitleBar {
             // through hit-testing to whichever child is currently
             // visible — handles the floating ↔ maximized swap without
             // the dormant-child-zero-bounds trap.
-            regions.maximize = Some(view.bounds(layout.maximize_id));
-            regions.maximize_id = Some(layout.maximize_id);
+            regions.maximize = layout.maximize_id.map(|id| view.bounds(id));
+            regions.maximize_id = layout.maximize_id;
 
             regions.close = Some(view.bounds(layout.close_id));
             regions.close_id = Some(layout.close_id);
@@ -695,11 +706,20 @@ mod tests {
     /// resolves and the restore/maximize derivation is exercised for real
     /// rather than falling back to its no-window `false`.
     fn tree_at_placement(placement: teksilo_core::WindowPlacement) -> (WidgetTree, WidgetId) {
+        tree_for_window(placement, (true, true), Rc::new(TestHost::default()))
+    }
+
+    /// [`tree_at_placement`] for a window created with the given
+    /// `(minimizable, maximizable)` caption buttons, over `host`.
+    fn tree_for_window(
+        placement: teksilo_core::WindowPlacement,
+        (minimizable, maximizable): (bool, bool),
+        host: Rc<TestHost>,
+    ) -> (WidgetTree, WidgetId) {
         use crate::primitives::VStack;
         use teksilo_core::window::WindowState;
         use teksilo_core::{TeksiloWindowId, WindowStateInit};
 
-        let host = Rc::new(TestHost::default());
         let mut tree = WidgetTree::new()
             .with_theme(teksilo_core::presets::intui::light())
             .with_text_backend(Rc::new(std::cell::RefCell::new(
@@ -716,6 +736,9 @@ mod tests {
             resizable: true,
             always_on_top: false,
         }));
+        if let Some(state) = tree.window_state() {
+            state.set_caption_buttons(minimizable, maximizable);
+        }
         let bar_id = tree.add(TitleBar::new(host as Rc<dyn PlatformTitleBarHost>).height(40.0));
         let body_id = tree.add(Expand::new());
         let _root = tree.add(VStack::new().spacing(0.0).child(bar_id).child(body_id));
@@ -888,6 +911,36 @@ mod tests {
     /// Fullscreen offers **Restore**, not Maximize. `WindowPlacement::is_maximized`
     /// reports `false` in `Fullscreen`, so reading it alone used to render the
     /// Maximize affordance over a window that has no frame to maximize.
+    /// The cluster offers the buttons the window was created with: a modal
+    /// dialog's bar has no minimise button, and one without maximise has
+    /// no maximise one either. The platform is told of no region for a
+    /// missing button, so Windows reports no `HTMINBUTTON` there.
+    #[test]
+    fn the_controls_offer_only_the_windows_caption_buttons() {
+        for (buttons, expected) in [
+            ((true, true), 3),
+            ((false, true), 2),
+            ((true, false), 2),
+            ((false, false), 1),
+        ] {
+            let host = Rc::new(TestHost::default());
+            let (mut tree, bar) = tree_for_window(
+                teksilo_core::WindowPlacement::Floating,
+                buttons,
+                host.clone(),
+            );
+            let row = tree.children(bar)[0];
+            let controls = *tree.children(row).last().expect("the cluster");
+            let inner = tree.children(controls)[0];
+            assert_eq!(tree.children(inner).len(), expected, "{buttons:?}");
+            let _ = tree.render();
+            let regions = host.last_regions.borrow();
+            assert_eq!(regions.minimize.is_some(), buttons.0, "{buttons:?}");
+            assert_eq!(regions.maximize.is_some(), buttons.1, "{buttons:?}");
+            assert!(regions.close.is_some(), "{buttons:?}");
+        }
+    }
+
     #[test]
     fn fullscreen_shows_the_restore_page_not_maximize() {
         use teksilo_core::WindowPlacement as P;

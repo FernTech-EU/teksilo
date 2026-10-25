@@ -75,7 +75,8 @@ hover on any platform and loses nothing by it.
 
 Layout snapshot that `WindowControls` exports to its parent `TitleBar`
 so the `after_paint` aggregator can read the per-button `WidgetId`s.
-Populated during `WindowControls::build`.
+Populated during `WindowControls::build`. A button the window does not
+offer (see `WindowConfig::minimizable`) has no id.
 
 The maximize slot is the **Switcher** that wraps the two glyph
 buttons (`□` / `❐`), not either child directly: the inactive
@@ -91,8 +92,8 @@ pub struct WindowControlsLayout { /* fields */ }
 
 ### Fields
 
-- **`minimize_id`**: `WidgetId`
-- **`maximize_id`**: `WidgetId`
+- **`minimize_id`**: `Option<WidgetId>`
+- **`maximize_id`**: `Option<WidgetId>`
 - **`close_id`**: `WidgetId`
 
 <a id="controlaction"></a>

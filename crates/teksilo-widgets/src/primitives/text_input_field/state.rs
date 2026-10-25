@@ -185,11 +185,23 @@ pub(crate) struct TextInputState {
     /// a host reading the signal here would parse the text from *before* this
     /// edit and revert.
     pub on_access_set_value: Option<AccessSetValue>,
-    /// Fired exactly once per focus-loss, AFTER the caret has been hidden
-    /// and scroll reset — the selection is deliberately **preserved**, so a
-    /// context menu opened over the field still has a range to act on. Used
-    /// by SpinBox-style widgets to parse/clamp/reformat on blur.
+    /// The app's blur callback: fired exactly once per focus-loss, AFTER
+    /// the caret has been hidden, scroll reset and the field committed
+    /// ([`on_commit`](Self::on_commit)); the selection is deliberately
+    /// **preserved**, so a context menu opened over the field still has a
+    /// range to act on. Never fired while the field keeps focus.
     pub on_blur: Option<Rc<CommandFactory>>,
+    /// The field's own commit: the validator, then the composite's parse
+    /// (SpinBox-style widgets parse, clamp and reformat here). Run on a
+    /// focus-loss, and while the field keeps focus when a click on a
+    /// control that takes no focus is about to run a command; a focus-loss
+    /// right after such a commit, with the text unchanged, does not run it
+    /// again ([`committed_text`](Self::committed_text)).
+    pub on_commit: Option<Rc<CommandFactory>>,
+    /// The text as a commit made while the field kept focus left it, until
+    /// the field next loses or gains focus. A focus-loss finding the same
+    /// text commits nothing more.
+    pub committed_text: Option<String>,
     /// Per-character input-filter predicate. `None` admits every
     /// non-control character; `Some(f)` additionally requires `f(c)
     /// == true`. Applied to keyboard input, IME commits, and paste.
@@ -315,6 +327,7 @@ pub(crate) struct TextInputConfig {
     /// edit and revert.
     pub on_access_set_value: Option<AccessSetValue>,
     pub on_blur: Option<Rc<CommandFactory>>,
+    pub on_commit: Option<Rc<CommandFactory>>,
     pub char_filter: Option<CharFilter>,
     pub placeholder: String,
     pub suffix: String,
@@ -340,6 +353,7 @@ impl TextInputState {
             on_submit,
             on_access_set_value,
             on_blur,
+            on_commit,
             char_filter,
             placeholder,
             suffix,
@@ -416,6 +430,8 @@ impl TextInputState {
             on_submit,
             on_access_set_value,
             on_blur,
+            on_commit,
+            committed_text: None,
             char_filter,
             placeholder,
             suffix,
@@ -783,6 +799,7 @@ mod secure_tests {
             on_submit: None,
             on_access_set_value: None,
             on_blur: None,
+            on_commit: None,
             char_filter: None,
             placeholder: String::new(),
             suffix: String::new(),

@@ -20,15 +20,22 @@
 //! - [`connection`] owns our private X connection, the atom cache, and the
 //!   property/event helpers.
 //! - [`ewmh`] is the pre-window-creation probe that decides whether custom
-//!   chrome is safe, and the taskbar hint written before a window's first
-//!   map.
+//!   chrome is safe, and the taskbar and dialog hints written before a
+//!   window's first map.
+//! - [`state_watch`] hears a window's `_NET_WM_STATE` change, which winit
+//!   drops: how a dialog learns that its owner was minimised or restored.
 //!
 //! [`window_system_for_display_handle`]: crate::window_system::window_system_for_display_handle
 //! [`active_window_system`]: crate::window_system::active_window_system
 
 pub mod connection;
 pub mod ewmh;
+#[doc(hidden)]
+pub mod state_watch;
+pub(crate) mod wake_pipe;
 pub mod xdnd;
 
 pub use connection::{Atoms, PropertyValue, X11Connection, X11Error};
 pub use ewmh::{WmCapabilities, capabilities};
+#[doc(hidden)]
+pub use state_watch::WmStateWatch;

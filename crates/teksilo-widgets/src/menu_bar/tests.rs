@@ -2375,3 +2375,99 @@ fn a_two_way_check_or_radio_row_never_greys_out() {
         "a reflect-only row writes nothing"
     );
 }
+
+/// Rebuild the bar `b` shows by changing its model, and check it was. Both
+/// menus are opened and closed first, so each has been built once.
+fn rebuild_the_bar(b: &mut Bar) {
+    for menu in ["File", "Edit"] {
+        b.click(menu);
+        b.key(Key::Escape, Modifiers::NONE);
+    }
+    assert_eq!(b.t.focused(), Some(b.editor), "precondition");
+    let before = b.trigger("Edit");
+    b.model.push_menu(lit!("&View"), |m| {
+        m.item(crate::menu::MenuEntry::new(lit!("Zoom")).intent("app.zoom"))
+    });
+    b.settle();
+    assert_ne!(
+        b.trigger("Edit"),
+        before,
+        "precondition: the bar was rebuilt"
+    );
+}
+
+/// After the bar is rebuilt, the first menu opened by a click stays open
+/// with focus in it and its rows live, and Escape gives focus back to the
+/// editor. The menu used to be handed the id its menu list would have had
+/// before it was built, so focus went to no widget, the overlay followed
+/// focus out and closed, and the rows asked from a dead widget.
+#[test]
+fn after_a_rebuild_the_first_menu_opened_by_a_click_stays_open() {
+    let mut b = Bar::new(false);
+    rebuild_the_bar(&mut b);
+    b.click("Edit");
+    assert!(!b.t.active_overlays().is_empty(), "Edit stays open");
+    assert!(focus_is_in_menu_holding(&b.t, "Copy"), "with focus in it");
+    assert!(
+        row_enabled(&b, "Copy"),
+        "and its rows answer for the editor"
+    );
+    b.key(Key::Escape, Modifiers::NONE);
+    assert!(b.t.active_overlays().is_empty());
+    assert_eq!(b.t.focused(), Some(b.editor));
+}
+
+/// The same from the keyboard: after a rebuild, F10 and ArrowDown open File
+/// with focus in it and its rows live; Escape closes it onto its title, and
+/// a second Escape goes back to the editor.
+#[test]
+fn after_a_rebuild_the_first_menu_opened_from_the_keyboard_stays_open() {
+    let mut b = Bar::new(false);
+    rebuild_the_bar(&mut b);
+    b.menubar_key(Key::F10, Modifiers::NONE);
+    b.key(Key::ArrowDown, Modifiers::NONE);
+    assert!(!b.t.active_overlays().is_empty(), "File stays open");
+    assert!(focus_is_in_menu_holding(&b.t, "Save"), "with focus in it");
+    assert!(row_enabled(&b, "Save"));
+    b.key(Key::Escape, Modifiers::NONE);
+    assert_eq!(b.t.focused(), Some(b.trigger("File")));
+    b.key(Key::Escape, Modifiers::NONE);
+    assert_eq!(b.t.focused(), Some(b.editor));
+}
+
+/// The bar rebuilt while F10 holds focus on a title: ArrowDown then opens
+/// File with focus in it, and the Escapes go back as before the rebuild.
+#[test]
+fn a_bar_rebuilt_under_f10_opens_its_first_menu_and_keeps_it_open() {
+    let mut b = Bar::new(false);
+    b.menubar_key(Key::F10, Modifiers::NONE);
+    b.model.push_menu(lit!("&View"), |m| {
+        m.item(crate::menu::MenuEntry::new(lit!("Zoom")).intent("app.zoom"))
+    });
+    b.settle();
+    assert_eq!(b.t.focused(), Some(b.trigger("File")), "precondition");
+    b.key(Key::ArrowDown, Modifiers::NONE);
+    assert!(!b.t.active_overlays().is_empty(), "File stays open");
+    assert!(focus_is_in_menu_holding(&b.t, "Save"), "with focus in it");
+    assert!(row_enabled(&b, "Save"));
+    b.key(Key::Escape, Modifiers::NONE);
+    assert_eq!(b.t.focused(), Some(b.trigger("File")));
+    b.key(Key::Escape, Modifiers::NONE);
+    assert_eq!(b.t.focused(), Some(b.editor));
+}
+
+/// A bar showing the application menu in a tree that belongs to no
+/// application (no `ApplicationMenu` holder: a test, a tree built by hand)
+/// says so once, not at every build of every such bar.
+#[test]
+fn an_application_bar_with_no_application_says_so_once() {
+    use crate::menu::application::UNDECLARED_SAID;
+    let before = UNDECLARED_SAID.with(|said| said.get());
+    for _ in 0..3 {
+        let mut t = tree_with_window();
+        t.add(MenuBar::application());
+        t.layout(teksilo_canvas::SizeProposal::exact(800.0, 600.0));
+    }
+    let said = UNDECLARED_SAID.with(|said| said.get()) - before;
+    assert!(said <= 1, "said {said} times");
+}

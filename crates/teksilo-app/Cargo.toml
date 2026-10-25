@@ -106,5 +106,10 @@ tempfile = { workspace = true }
 wgpu = { workspace = true }
 serde = { workspace = true }
 
+# The winit loop test plays the part of an X11 window manager (claim (am)):
+# the same x11rb teksilo-platform links, so it adds no crate.
+[target.'cfg(all(unix, not(target_os = "macos")))'.dev-dependencies]
+x11rb = "0.14"
+
 [package.metadata.docs.rs]
 all-features = true

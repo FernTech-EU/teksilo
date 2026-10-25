@@ -71,9 +71,10 @@ pub(crate) struct EventHandlers {
     /// per-widget hook.
     pub on_key_preview: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_focus: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
-    /// Commit the edit this widget holds without being blurred: a click on a
-    /// control that takes no focus (`focus_on_click(false)`) is about to run
-    /// a command while focus stays here. See
+    /// Commit the edit this widget holds without being blurred: a click (a
+    /// pointer's, or an assistive technology's Click) on a control that
+    /// takes no focus (`focus_on_click(false)`) is about to run a command
+    /// while focus stays here. See
     /// [`HandlerSet::on_commit_edit`](crate::widget_builder::HandlerSet::on_commit_edit).
     pub on_commit_edit: Option<Box<dyn FnMut(&mut EventContext)>>,
     /// Low-level escape hatch for the raw pointer stream, run *before* gesture

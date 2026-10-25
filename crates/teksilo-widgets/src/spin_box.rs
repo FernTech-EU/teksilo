@@ -1350,11 +1350,12 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             let commit = commit.clone();
             field = field.on_submit_fn(move |ctx| commit(ctx));
         }
-        // Commit on blur: after the field clears its selection and
-        // resets scroll.
+        // Commit on blur, after the field clears its selection and resets
+        // scroll, and before a click on a control that takes no focus runs
+        // its command (a toolbar button).
         {
             let commit = commit.clone();
-            field = field.on_blur_fn(move |ctx| commit(ctx));
+            field = field.on_commit_fn(move |ctx| commit(ctx));
         }
 
         // Focus changes nothing in the text. The field used to swap a

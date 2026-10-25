@@ -4140,16 +4140,19 @@ impl WidgetTree {
     /// [application scope](Self::set_application_scope), one of the
     /// application tree's. What a menu row asks to grey itself out.
     ///
-    /// The logical focus is where a command chosen in a menu is sent from:
-    /// the focused widget, except while focus is in an open menu or popup,
-    /// where it is the widget that menu gives focus back to when it closes
-    /// with every menu it was opened from (the editor under a menu bar's
-    /// dropdown opened with a click; the bar's title when the keyboard opened
-    /// it, since the bar passes focus on to the editor only as a command is
-    /// chosen); the focused widget itself when that one is gone; with nothing
-    /// focused, the content of the topmost open modal overlay, as if focus
-    /// were in it, else the [content root](Self::set_content_root). To ask
-    /// from the focused widget as it is, as a native menu bar sends, use
+    /// The logical focus is where a command chosen in an in-window menu is
+    /// sent from: the focused widget, except while focus is in an open menu
+    /// or popup, where it is the widget the outermost menu of that chain
+    /// names as its command source, else the one it gives focus back to when
+    /// it closes (the editor under a menu bar's dropdown, whether a click
+    /// opened it or F10 did: after F10 focus goes back to the bar's title,
+    /// but the bar names the editor focused before it as the command
+    /// source, and a chosen command goes there); the focused widget itself
+    /// when that one is gone; with nothing focused, the content of the
+    /// topmost open modal overlay, as if focus were in it, else the
+    /// [content root](Self::set_content_root). To ask from the focused
+    /// widget as it is, inside a popup included, as the native menu bar
+    /// sends, pass [`live_command_focus`](Self::live_command_focus) to
     /// [`can_handle_from`](Self::can_handle_from).
     ///
     /// Two answers are approximate, and say "handled": an action built with
@@ -4164,15 +4167,12 @@ impl WidgetTree {
             .is_some_and(|source| self.can_handle_from(source, name))
     }
 
-    /// Every intent name [`can_handle`](Self::can_handle) answers true for
-    /// now, sorted, each once: one walk from the logical focus, for a caller
+    /// Every intent name [`can_handle_from`](Self::can_handle_from) answers
+    /// true for from `source`, sorted, each once: one walk, for a caller
     /// that would otherwise ask for many names (the native menu bar's rows),
     /// and an answer two turns can compare to see that nothing changed.
     #[doc(hidden)]
-    pub fn handled_intents(&self) -> Vec<&'static str> {
-        let Some(source) = self.command_focus() else {
-            return Vec::new();
-        };
+    pub fn handled_intents_from(&self, source: WidgetId) -> Vec<&'static str> {
         let mut names: Vec<&'static str> = self
             .actions_on_route(source, &[], false)
             .into_iter()
@@ -4185,6 +4185,19 @@ impl WidgetTree {
         names.sort_unstable();
         names.dedup();
         names
+    }
+
+    /// Where an intent sent from focus by a handler outside every overlay
+    /// (an app callback, an item of the native menu bar) starts: the focused
+    /// widget as it is, inside an open popup included; with nothing focused,
+    /// the content of the topmost open modal overlay, else the
+    /// [content root](Self::set_content_root). Pass it to
+    /// [`can_handle_from`](Self::can_handle_from) to ask what such an intent
+    /// would find. [`can_handle`](Self::can_handle) asks from the logical
+    /// focus instead, where a row of an in-window menu sends from.
+    #[doc(hidden)]
+    pub fn live_command_focus(&self) -> Option<WidgetId> {
+        self.focus_or_modal().or_else(|| self.intent_anchor())
     }
 
     /// [`can_handle`](Self::can_handle), for an intent sent from `source`.

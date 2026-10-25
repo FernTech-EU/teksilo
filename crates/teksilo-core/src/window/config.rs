@@ -188,7 +188,8 @@ pub struct WindowConfig {
     pub always_on_top: bool,
     pub skip_taskbar: bool,
     /// Whether the title bar offers a minimise button; `None` leaves it to
-    /// the kind of window. See [`minimizable`](Self::minimizable).
+    /// the kind of window. Ignored for a modal window. See
+    /// [`minimizable`](Self::minimizable).
     pub minimizable: Option<bool>,
     /// Whether the title bar offers a maximise button; `None` leaves it to
     /// the kind of window. See [`maximizable`](Self::maximizable).
@@ -462,17 +463,23 @@ impl WindowConfig {
         self
     }
 
-    /// Offer a minimise button in the window's title bar, or not. By
-    /// default an ordinary window has one and a [modal](Self::modal_to) one
-    /// does not: a minimised dialog keeps the window it blocks refusing
-    /// input, with nothing on screen to say why. A modal window asked to
-    /// have one is minimised with the window it blocks: minimising it takes
-    /// that window along, and restoring either brings both back.
+    /// Offer a minimise button in the window's title bar, or not. An
+    /// ordinary window has one unless refused.
     ///
-    /// Applied when the window is created, on Windows and macOS. X11 and
-    /// Wayland leave the title bar to the window manager or compositor, and
-    /// so does a title bar the application draws itself
-    /// ([`DecorationsMode::CustomChrome`]), which decides its own buttons.
+    /// A [modal](Self::modal_to) window never has one, whatever this says
+    /// (a debug build warns when it says `true`): a dialog is minimised and
+    /// restored with the window it blocks, as Windows does with an owned
+    /// window and macOS with a child window, and a dialog minimised alone
+    /// would leave that window refusing input with nothing on screen to say
+    /// why.
+    ///
+    /// Applied when the window is created: on Windows and macOS through the
+    /// window's own title bar, and in a title bar the application draws
+    /// itself ([`DecorationsMode::CustomChrome`]), whose `TitleBar`
+    /// (teksilo-widgets) leaves the button out.
+    /// The title bar an X11 window manager or a Wayland compositor draws is
+    /// theirs: on X11 a modal window is a transient dialog, which window
+    /// managers usually draw without a minimise button.
     pub fn minimizable(mut self, minimizable: bool) -> Self {
         self.minimizable = Some(minimizable);
         self
@@ -480,18 +487,18 @@ impl WindowConfig {
 
     /// Offer a maximise button in the window's title bar, or not; on macOS
     /// the zoom button. By default an ordinary window has one and a
-    /// [modal](Self::modal_to) one does not. Where it applies is as for
-    /// [`minimizable`](Self::minimizable).
+    /// [modal](Self::modal_to) one does not, unless it asks. Where it applies
+    /// is as for [`minimizable`](Self::minimizable).
     pub fn maximizable(mut self, maximizable: bool) -> Self {
         self.maximizable = Some(maximizable);
         self
     }
 
-    /// Whether the title bar offers a minimise button: as set with
-    /// [`minimizable`](Self::minimizable), otherwise unless the window is
-    /// modal.
+    /// Whether the title bar offers a minimise button: never for a modal
+    /// window, otherwise as set with [`minimizable`](Self::minimizable), by
+    /// default yes.
     pub fn is_minimizable(&self) -> bool {
-        self.minimizable.unwrap_or(!self.is_modal())
+        !self.is_modal() && self.minimizable.unwrap_or(true)
     }
 
     /// Whether the title bar offers a maximise button: as set with
@@ -524,6 +531,17 @@ impl WindowConfig {
     /// Make this window modal to the given parent, with no explicit
     /// focus target. Prefer this over constructing [`ModalConfig`]
     /// yourself when you already have the parent id handy.
+    ///
+    /// The parent is the dialog's owner. It refuses input while the dialog
+    /// is open (a click or the focus there brings the dialog forward), and
+    /// its close button does nothing but bring the dialog forward. The
+    /// dialog stays in front of it, has no taskbar entry and no minimise
+    /// button of its own ([`minimizable`](Self::minimizable) is ignored),
+    /// and is minimised, restored and closed with it (its own close guard is
+    /// not asked then). On Wayland, where winit gives a window no parent, the
+    /// compositor treats it as a window of its own, and it is not minimised
+    /// or restored with its owner: no protocol tells the application of
+    /// either.
     pub fn modal_to(mut self, parent: TeksiloWindowId) -> Self {
         self.modal = Some(ModalConfig {
             parent,
@@ -534,7 +552,8 @@ impl WindowConfig {
 
     /// Make this window modal using a caller-built [`ModalConfig`].
     /// Use this form when you need to specify an explicit
-    /// `focus_target`.
+    /// `focus_target`. The window belongs to `config.parent` as
+    /// [`modal_to`](Self::modal_to) describes.
     pub fn modal(mut self, config: ModalConfig) -> Self {
         self.modal = Some(config);
         self
@@ -878,18 +897,21 @@ mod tests {
         assert_eq!(config.modal_focus_target(), None);
     }
 
-    /// A dialog has no minimise or maximise button unless asked, in either
-    /// builder order; an ordinary window has both unless refused.
+    /// A dialog has no minimise button, asked for one or not, in either
+    /// builder order: it follows the window it blocks. It has no maximise
+    /// button unless asked. An ordinary window has both unless refused.
     #[test]
-    fn a_modal_window_has_only_a_close_button_by_default() {
+    fn a_modal_window_has_no_minimise_button_of_its_own() {
         let parent = TeksiloWindowId::new(3);
         let dialog = WindowConfig::new().modal_to(parent);
         assert!(!dialog.is_minimizable());
         assert!(!dialog.is_maximizable());
 
         let asked = WindowConfig::new().minimizable(true).modal_to(parent);
-        assert!(asked.is_minimizable(), "set before modal_to");
+        assert!(!asked.is_minimizable(), "set before modal_to");
         assert!(!asked.is_maximizable());
+        let asked = WindowConfig::new().modal_to(parent).minimizable(true);
+        assert!(!asked.is_minimizable(), "set after modal_to");
         let asked = WindowConfig::new().modal_to(parent).maximizable(true);
         assert!(asked.is_maximizable(), "set after modal_to");
 

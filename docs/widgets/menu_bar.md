@@ -205,7 +205,8 @@ leading and trailing slots there; `.native_on_macos(NativeMenuMode::Coexist)`
 keeps the in-window bar too.
 
 With no application menu declared the bar shows no menu (and a debug
-build says so once).
+build says so once), as it does in a tree that belongs to no
+application (a test, a tree built by hand; said once per process).
 
 <a id="menubar-native_on_macos"></a>
 

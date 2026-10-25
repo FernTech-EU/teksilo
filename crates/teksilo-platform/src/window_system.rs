@@ -245,6 +245,30 @@ pub fn set_transient_for_before_show(
     let _ = (child, parent);
 }
 
+/// Make `window`, a modal dialog, modal to the window manager on X11
+/// (`_NET_WM_STATE_MODAL`), before it is shown for the first time; nothing on
+/// other window systems. With `WM_TRANSIENT_FOR`
+/// ([`set_transient_for_before_show`]) and the dialog window type, it is how
+/// GTK marks a modal dialog. A failure is reported on stderr and leaves the
+/// dialog a plain transient window.
+#[doc(hidden)]
+pub fn mark_modal_before_show(window: &winit::window::Window) {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let Some(xid) = x11_window_id(window) else {
+            return;
+        };
+        if let Err(err) = crate::x11::ewmh::mark_modal(xid) {
+            eprintln!(
+                "teksilo-platform: could not mark the dialog modal ({err}); the window manager \
+                 will treat it as a plain transient window"
+            );
+        }
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    let _ = window;
+}
+
 /// The X11 window behind `window`, `None` on any other window system.
 #[cfg(all(unix, not(target_os = "macos")))]
 pub(crate) fn x11_window_id(window: &winit::window::Window) -> Option<u32> {

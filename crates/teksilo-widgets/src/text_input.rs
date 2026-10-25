@@ -126,6 +126,7 @@ pub struct TextInput {
     on_submit: Option<Box<dyn Fn(&mut EventContext)>>,
     on_access_set_value: Option<std::rc::Rc<dyn Fn(&str, &mut EventContext) -> bool>>,
     on_blur: Option<Box<dyn Fn(&mut EventContext)>>,
+    on_commit: Option<Box<dyn Fn(&mut EventContext)>>,
     char_filter: Option<std::rc::Rc<dyn Fn(char) -> bool>>,
     suffix: String,
     /// Optional input-mask grammar string (Qt syntax). Forwarded
@@ -229,6 +230,7 @@ impl TextInput {
             on_submit: None,
             on_access_set_value: None,
             on_blur: None,
+            on_commit: None,
             char_filter: None,
             suffix: String::new(),
             input_mask: None,
@@ -442,12 +444,21 @@ impl TextInput {
         self
     }
 
-    /// Closure invoked on focus loss, and while the field keeps focus before
-    /// a click on a control that takes none (a toolbar button) runs its
-    /// command, so that command sees what this commits. Forwarded to
-    /// `TextInputField`.
+    /// Closure invoked once per focus loss, after the field has committed
+    /// (its [validator](Self::validator) has run). Only a real focus loss
+    /// invokes it: a click on a control that takes no focus (a toolbar
+    /// button) has the field commit while it keeps focus, and this waits for
+    /// focus to leave. Forwarded to `TextInputField`.
     pub fn on_blur_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_blur = Some(Box::new(f));
+        self
+    }
+
+    /// The composite's own commit (a date field's parse), run on focus loss
+    /// and before a click on a control that takes no focus runs its command.
+    /// Forwarded to `TextInputField::on_commit_fn`.
+    pub(crate) fn on_commit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.on_commit = Some(Box::new(f));
         self
     }
 

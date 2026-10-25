@@ -41,8 +41,8 @@ use objc2_foundation::{NSString, ns_string};
 use super::{
     MacAppMenuRow, MenuItemDelta, NativeAppMenuEventPayload, NativeCheck, NativeKeyEquivalent,
     NativeMenuBackend, NativeMenuEventPayload, NativeMenuNode, NativeMenuSnapshot, StandardLabels,
-    StandardMenuRole, StandardRoutedItem, key_window_bar, mac_app_menu_rows, mac_bar_plan,
-    mac_relists_window,
+    StandardMenuRole, StandardRoutedItem, bar_after_app_menu, bar_after_clear, key_window_bar,
+    mac_app_menu_rows, mac_bar_plan, mac_relists_window,
 };
 
 // ============================================================
@@ -307,24 +307,25 @@ impl NativeMenuBackend for MacOsNativeMenuBackend {
     fn clear_window(&mut self, window_id: TeksiloWindowId) {
         self.windows.remove(&window_id);
         self.owners.remove(&window_id);
-        if self.active != Some(window_id) {
-            return;
-        }
-        let Some(mtm) = MainThreadMarker::new() else {
-            self.active = None;
-            return;
-        };
-        // The closed window owned the visible menu (its target object is now
-        // dropped), so it never stays up, even with no application menu
+        // When the closed window owned the visible menu (its target object is
+        // now dropped), it never stays up, even with no application menu
         // declared: the key window's bar if another window is key, else the
         // application menu, until the window AppKit makes key next is
         // activated; an app left with no window keeps the application menu.
-        self.active = None;
-        let bar = self
-            .key
-            .filter(|key| *key != window_id)
-            .and_then(|key| self.bar_for(key));
-        self.show(mtm, bar);
+        let Some(bar) = bar_after_clear(
+            window_id,
+            self.key,
+            self.active,
+            |window| self.windows.contains_key(&window),
+            |window| self.owners.get(&window).copied(),
+            self.app_declared,
+        ) else {
+            return;
+        };
+        match MainThreadMarker::new() {
+            Some(mtm) => self.show(mtm, bar),
+            None => self.active = None,
+        }
     }
 
     fn set_app_menu(
@@ -338,8 +339,12 @@ impl NativeMenuBackend for MacOsNativeMenuBackend {
         };
         self.app = Some(Self::build(mtm, None, &menu, poster));
         self.app_declared = declared;
-        if self.active.is_none() {
-            self.apply_app_menu(mtm);
+        // The key window's bar again: the new application menu when that is
+        // its pick, which it now is for a key window with no menu of its own
+        // whose bar was kept only while no application menu was declared.
+        let key_bar = self.key.map(|key| self.bar_for(key));
+        if let Some(bar) = bar_after_app_menu(key_bar, self.active) {
+            self.show(mtm, bar);
         }
     }
 

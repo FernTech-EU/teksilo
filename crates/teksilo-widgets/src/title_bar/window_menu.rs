@@ -38,6 +38,10 @@ use crate::{MenuItem, MenuList};
 /// context-menu contract reads `None` as "decline, let an ancestor answer",
 /// which is the right behaviour rather than showing a dead menu.
 ///
+/// It offers the window's own buttons: no Minimize for a window with no
+/// minimise button (a modal dialog, which follows the window it blocks), no
+/// Maximize for one with no maximise button.
+///
 /// `close_action` mirrors [`TitleBar::close_action`](crate::TitleBar::close_action):
 /// when the application overrode the close button, the menu's Close entry must
 /// do the same thing, or the two would disagree about what closing means (a
@@ -58,24 +62,28 @@ pub(crate) fn build_window_menu(
     // one is visible at a time — `item_when` collapses the hidden row to zero
     // height and skips it in keyboard navigation, so the menu reads correctly
     // to a screen reader too.
-    let menu = MenuList::new()
-        .item_when(
-            MenuItem::new(tr!(window_menu_restore())).on_activate_fn(move |_ctx| {
-                restore_placement.set(WindowPlacement::Floating);
-            }),
-            is_maximized.clone(),
-        )
-        .item_when(
+    let mut menu = MenuList::new().item_when(
+        MenuItem::new(tr!(window_menu_restore())).on_activate_fn(move |_ctx| {
+            restore_placement.set(WindowPlacement::Floating);
+        }),
+        is_maximized.clone(),
+    );
+    if window.is_maximizable() {
+        menu = menu.item_when(
             MenuItem::new(tr!(window_menu_maximize())).on_activate_fn(move |_ctx| {
                 maximize_placement.set(WindowPlacement::Maximized);
             }),
             is_maximized.not(),
-        )
-        .item(
+        );
+    }
+    if window.is_minimizable() {
+        menu = menu.item(
             MenuItem::new(tr!(window_menu_minimize())).on_activate_fn(move |_ctx| {
                 minimize_placement.set(WindowPlacement::Minimized);
             }),
-        )
+        );
+    }
+    let menu = menu
         .separator()
         .item(MenuItem::new(tr!(window_menu_close())).on_activate_fn(
             move |ctx| match &close_action {

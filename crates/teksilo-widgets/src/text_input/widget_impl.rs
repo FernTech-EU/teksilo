@@ -75,6 +75,9 @@ impl Widget for TextInput {
         if let Some(cb) = self.on_blur.take() {
             field = field.on_blur_fn(move |ctx| (cb)(ctx));
         }
+        if let Some(cb) = self.on_commit.take() {
+            field = field.on_commit_fn(move |ctx| (cb)(ctx));
+        }
         if !self.suffix.is_empty() {
             field = field.suffix(std::mem::take(&mut self.suffix));
         }

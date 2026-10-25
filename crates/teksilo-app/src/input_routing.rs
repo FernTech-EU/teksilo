@@ -89,6 +89,25 @@ pub(crate) fn is_user_input_event(event: &WindowEvent) -> bool {
         )
 }
 
+/// Whether `event` is the user acting on the application: a mouse button, a
+/// contact landing or lifting, a key the user pressed or released in this
+/// window (not one winit made up as the window gained focus), a committed
+/// IME text. What a handler asks for in the turn of such an event is the
+/// user's request, so a window it brings forward may take the focus from
+/// another application.
+pub(crate) fn is_user_activation(event: &WindowEvent) -> bool {
+    match event {
+        WindowEvent::MouseInput { .. } => true,
+        WindowEvent::Touch(touch) => matches!(
+            touch.phase,
+            winit::event::TouchPhase::Started | winit::event::TouchPhase::Ended
+        ),
+        WindowEvent::KeyboardInput { is_synthetic, .. } => !is_synthetic,
+        WindowEvent::Ime(winit::event::Ime::Commit(_)) => true,
+        _ => false,
+    }
+}
+
 /// Whether a blocked window should raise its modal child for this event.
 ///
 /// Only for an event that means *the user tried to interact*: a press, a
@@ -100,26 +119,11 @@ pub(crate) fn bounces_to_modal(event: &WindowEvent) -> bool {
     match event {
         WindowEvent::MouseInput { state, .. } => *state == winit::event::ElementState::Pressed,
         WindowEvent::Touch(touch) => touch.phase == winit::event::TouchPhase::Started,
-        WindowEvent::KeyboardInput {
-            event,
-            is_synthetic,
-            ..
-        } => key_bounces_to_modal(event.state, *is_synthetic),
+        // A synthetic press (winit makes one up for each key held as the
+        // window gains focus) raises it too, as the focus itself does.
+        WindowEvent::KeyboardInput { event, .. } => event.state.is_pressed(),
         _ => false,
     }
-}
-
-/// Whether a key event in a blocked window raises its modal child: a press,
-/// and not a **synthetic** one. winit makes up a press for every key still
-/// held when a window gains focus (see [`key_widget_event`]). Win+Down on a
-/// minimisable modal hands the focus to the window it blocks with both keys
-/// down; raising the modal for those made-up presses restored it at once,
-/// so the shortcut minimised only the blocked window.
-///
-/// Taken apart from winit's `KeyEvent`, which only winit can build, so a test
-/// can drive it.
-pub(crate) fn key_bounces_to_modal(state: winit::event::ElementState, is_synthetic: bool) -> bool {
-    state.is_pressed() && !is_synthetic
 }
 
 /// The widget event a `KeyboardInput` becomes, or `None` when it must reach
@@ -503,6 +507,41 @@ pub(crate) mod tests {
             state,
             button: winit::event::MouseButton::Left,
         }
+    }
+
+    /// What the user does to the application counts as asking; what the
+    /// pointer merely passes over, a contact moving, or the window system's
+    /// own reports do not.
+    #[test]
+    fn a_press_a_release_a_contact_and_a_commit_are_the_users_activation() {
+        assert!(super::is_user_activation(&click(ElementState::Pressed)));
+        assert!(super::is_user_activation(&click(ElementState::Released)));
+        assert!(super::is_user_activation(&touch(
+            TouchPhase::Started,
+            1,
+            0.0,
+            0.0
+        )));
+        assert!(super::is_user_activation(&touch(
+            TouchPhase::Ended,
+            1,
+            0.0,
+            0.0
+        )));
+        assert!(super::is_user_activation(&WindowEvent::Ime(
+            winit::event::Ime::Commit("é".into())
+        )));
+        assert!(!super::is_user_activation(&cursor(1.0, 1.0)));
+        assert!(!super::is_user_activation(&touch(
+            TouchPhase::Moved,
+            1,
+            0.0,
+            0.0
+        )));
+        assert!(!super::is_user_activation(&WindowEvent::Focused(true)));
+        assert!(!super::is_user_activation(&WindowEvent::Ime(
+            winit::event::Ime::Preedit("e".into(), None)
+        )));
     }
 
     fn wheel(delta: MouseScrollDelta, phase: TouchPhase) -> WindowEvent {
@@ -1015,12 +1054,6 @@ pub(crate) mod tests {
         assert!(!bounces_to_modal(&cursor(1.0, 1.0)));
         assert!(!bounces_to_modal(&touch(TouchPhase::Moved, 0, 1.0, 1.0)));
         assert!(!bounces_to_modal(&WindowEvent::RedrawRequested));
-        // A key the user presses here raises the modal; a press winit makes
-        // up for a key held as the focus arrives does not.
-        assert!(key_bounces_to_modal(ElementState::Pressed, false));
-        assert!(!key_bounces_to_modal(ElementState::Pressed, true));
-        assert!(!key_bounces_to_modal(ElementState::Released, false));
-        assert!(!key_bounces_to_modal(ElementState::Released, true));
     }
 
     fn enter() -> winit::keyboard::Key {

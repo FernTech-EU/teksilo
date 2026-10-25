@@ -18,15 +18,18 @@ impl Widget for MenuBar {
         // An application bar reads the application menu afresh at each build,
         // and rebuilds when the application declares another one.
         let origin = if self.application {
-            let holder = ctx.app_state::<crate::menu::ApplicationMenu>().cloned();
-            let holder = holder.unwrap_or_default();
+            let found = ctx.app_state::<crate::menu::ApplicationMenu>().cloned();
+            let orphan = found.is_none();
+            let holder = found.unwrap_or_default();
             holder.generation().bind_to(
                 ctx.self_id(),
                 ctx.binding_registry(),
                 teksilo_core::BindingLevel::Rebuild,
             );
             self.model = holder.model();
-            if self.model.is_none() {
+            if orphan {
+                crate::menu::ApplicationMenu::warn_no_holder();
+            } else if self.model.is_none() {
                 holder.warn_undeclared();
             }
             crate::menu::model::RowOrigin::Application(holder)

@@ -12,9 +12,13 @@
 //! ([`WidgetTree::take_unclaimed_intents`](teksilo_core::WidgetTree::take_unclaimed_intents))
 //! and offers it to the other side once:
 //!
-//! - a window's to the application tree;
+//! - a window's to the application tree; a native modal dialog window's to
+//!   the window it blocks first, up the chain of owners, then to the
+//!   application tree, as an in-tree dialog's intent sent as it closes walks
+//!   on to the page;
 //! - the application tree's to the window the user works with: the most
-//!   recent one, at its frontmost native dialog when it has one.
+//!   recent one not minimised (else the most recent one), at its frontmost
+//!   native dialog when it has one.
 //!
 //! The receiving tree dispatches it from its focus
 //! ([`WidgetTree::dispatch_routed_intent`](teksilo_core::WidgetTree::dispatch_routed_intent))

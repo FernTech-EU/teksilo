@@ -176,6 +176,91 @@ fn on_blur_and_on_submit_coexist() {
     assert!(blurred.get(), "Focus loss must fire on_blur");
 }
 
+/// A row: the field, a button that takes focus from a click (`sink`) and
+/// one that does not (`tool`, a toolbar button), placed first so that the
+/// 300-wide layout of [`tick`] keeps it in view. Returns the tree, the
+/// field's focusable node, `sink` and `tool`'s centre.
+fn row_with_a_tool(
+    input: TextInput,
+) -> (
+    WidgetTree,
+    teksilo_core::widget_id::WidgetId,
+    teksilo_core::widget_id::WidgetId,
+    teksilo_canvas::Point,
+) {
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let input = tree.add(input);
+    let sink = tree.add(crate::button::Button::new(lit!("sink")).on_activate_fn(|_| {}));
+    let tool = tree.add(
+        crate::button::Button::new(lit!("tool"))
+            .on_activate_fn(|_| {})
+            .focus_on_click(false),
+    );
+    tree.add(
+        crate::primitives::HStack::new()
+            .child(tool)
+            .child(sink)
+            .child(input),
+    );
+    tree.layout(SizeProposal::exact(300.0, 40.0));
+    tick(&mut tree);
+    let field = tree.first_focusable_descendant(input).unwrap();
+    let sink = tree.first_focusable_descendant(sink).unwrap();
+    let b = tree.bounds(tool);
+    let at = teksilo_canvas::Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
+    (tree, field, sink, at)
+}
+
+/// A click on a control that takes no focus commits the field (here its
+/// validator runs) without calling the app's `on_blur_fn`, which runs only
+/// when focus really leaves, once; and that blur does not commit again what
+/// the click committed. Typing again makes the next blur commit.
+#[test]
+fn a_commit_before_a_command_is_not_a_blur() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use teksilo_tokens::PointerKind;
+    let (blurs, commits) = (Rc::new(Cell::new(0u32)), Rc::new(Cell::new(0u32)));
+    let input = TextInput::new(Signal::new(String::new()))
+        .on_blur_fn({
+            let blurs = blurs.clone();
+            move |_| blurs.set(blurs.get() + 1)
+        })
+        .validator({
+            let commits = commits.clone();
+            move |_| {
+                commits.set(commits.get() + 1);
+                crate::primitives::text_input_field::ValidationOutcome::Valid
+            }
+        });
+    let (mut tree, field, sink, tool) = row_with_a_tool(input);
+    tree.focus(field);
+    tree.type_text(field, "a");
+    tick(&mut tree);
+
+    tree.tap_with(PointerKind::Mouse, tool);
+    tick(&mut tree);
+    assert_eq!(tree.focused(), Some(field), "the click takes no focus");
+    assert_eq!(commits.get(), 1, "the click commits the field");
+    assert_eq!(blurs.get(), 0, "and is no blur to the app");
+
+    tree.focus(sink);
+    tick(&mut tree);
+    assert_eq!(blurs.get(), 1, "the real blur reaches the app once");
+    assert_eq!(commits.get(), 1, "and commits nothing twice");
+
+    tree.focus(field);
+    tree.type_text(field, "b");
+    tree.focus(sink);
+    tick(&mut tree);
+    assert_eq!(
+        (commits.get(), blurs.get()),
+        (2, 2),
+        "an edit commits again"
+    );
+}
+
 // ── suffix ─────────────────────────────────────────────────────────
 
 #[test]

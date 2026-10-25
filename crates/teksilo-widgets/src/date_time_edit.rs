@@ -1200,7 +1200,7 @@ impl DateTimeEdit {
         }
         {
             let commit = commit.clone();
-            field = field.on_blur_fn(move |ctx_evt| {
+            field = field.on_commit_fn(move |ctx_evt| {
                 commit(ctx_evt);
             });
         }

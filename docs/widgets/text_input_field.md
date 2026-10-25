@@ -118,8 +118,11 @@ Features:
   (`TextInputField::read_only`).
 - Commit hooks: Enter fires
   `on_submit_fn` and focus loss
-  fires `on_blur_fn`, as does a click on
-  a control that takes no focus (a toolbar button), before its command.
+  fires `on_blur_fn`, only on a real
+  focus loss. The `validator` runs on focus
+  loss and also when a click on a control that takes no focus (a toolbar
+  button) is about to run its command, so the command sees the value
+  committed.
 - Non-editable trailing
   `suffix`, rendered flush-right inside
   the field's bounds (Qt's `QSpinBox::suffix`). Caret cannot
@@ -315,14 +318,13 @@ edit and revert.
 #### `pub fn on_blur_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Closure fired once per focus-loss, after selection/scroll
-have been reset. SpinBox-style callers parse and reformat
-here; validators revalidate here.
+have been reset and the `validator` has run.
 
-Also fired, with the field keeping focus, when a click lands on a
-control built with `focus_on_click(false)` (a toolbar button, a menu
-bar title): such a click blurs nothing, and the command it runs must
-still see the value this commits, as AppKit's `commitEditing`
-ensures.
+Only a real focus loss fires it. A click on a control built with
+`focus_on_click(false)` (a toolbar button, a menu bar title) blurs
+nothing: the field commits for it (its validator runs, and a
+composite such as `SpinBox` parses its text) while keeping focus,
+and this closure waits for focus to leave.
 
 <a id="textinputfield-char_filter"></a>
 
@@ -334,7 +336,7 @@ field cannot receive disallowed characters through any path.
 Composes with `max_length` and the built-in control/newline
 strip (filter runs after the strip). Whole-string validity
 (e.g. "at most one decimal point") is a commit-time concern
-for `on_blur` / `on_submit`.
+for the `validator`.
 
 <a id="textinputfield-suffix"></a>
 

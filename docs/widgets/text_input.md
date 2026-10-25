@@ -349,10 +349,11 @@ reasoning lives. Composites whose text projects a typed value —
 
 #### `pub fn on_blur_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
-Closure invoked on focus loss, and while the field keeps focus before
-a click on a control that takes none (a toolbar button) runs its
-command, so that command sees what this commits. Forwarded to
-`TextInputField`.
+Closure invoked once per focus loss, after the field has committed
+(its `validator` has run). Only a real focus loss
+invokes it: a click on a control that takes no focus (a toolbar
+button) has the field commit while it keeps focus, and this waits for
+focus to leave. Forwarded to `TextInputField`.
 
 <a id="textinput-char_filter"></a>
 

@@ -35,7 +35,10 @@ by crate for clarity, not because crates version independently.
   `NativeMenuMode::Suppress` and renders only its leading and trailing slots
   in the window; `.native_on_macos(NativeMenuMode::Coexist)` keeps the strip.
   Declaring the menu from a window's tree does nothing, and panics in a
-  debug build. On macOS, with `install_native_menu`, the application menu
+  debug build. Declaring the same model again changes nothing; build it
+  once and declare a clone of it, since another model declared at every
+  build of the root rebuilds every bar each time, which a debug build
+  points out. On macOS, with `install_native_menu`, the application menu
   is the menu bar whenever the key window has no menu of its own (no
   `MenuBar::from_model` mirrored into the global bar), nor belongs to a
   window that has one (a modal dialog shows its owner's), and
@@ -84,9 +87,14 @@ by crate for clarity, not because crates version independently.
   no initial window can open its first one there. With no window open,
   `on_external_with_ctx` runs there, and so does a `subscribe_event_with_ctx`
   subscription registered there. Its dialogs are presented in the window used
-  last, or in a window of their own. An intent a window leaves unclaimed is
-  offered to it once, and one it leaves goes to the window used last, so a
-  window's menu can fire a command only the application tree implements. A
+  last of those not minimised (else in the window used last), or in a window
+  of their own when none is open. Asked in answer to the user's input, or
+  with an activation token, that window is restored and brought to the
+  front; asked otherwise (a timer, another thread), it asks for the user's
+  attention and takes the focus from no other application. An
+  intent a window leaves unclaimed is offered to it once, and one it leaves
+  goes to the window used last (of those not minimised, when there is one),
+  so a window's menu can fire a command only the application tree implements. A
   shortcut's intent nothing in the window takes goes to it too when one of
   its enabled actions takes it, so Ctrl+N bound in a window can run the
   application tree's `app.new` (not with focus in a dialog presented in the
@@ -94,11 +102,15 @@ by crate for clarity, not because crates version independently.
   goes to the focused widget. A chain of intents that actions on the two sides send in
   answer to each other stops after 64 crossings, and a debug build says so.
 - **`WindowConfig::minimizable` and `maximizable`**, whether the title bar
-  offers those buttons, on Windows and macOS. **Behaviour change:** a modal
-  window, and a native dialog the framework opens, now has only a close
-  button; ask for the others with `minimizable(true)` or
-  `maximizable(true)`. A minimisable dialog is minimised with the window it
-  blocks, and restoring either one brings both back.
+  offers those buttons, on Windows and macOS and in a Teksilo `TitleBar`.
+  **Behaviour change:** a modal window, and a native dialog the framework
+  opens, now has only a close button. A modal window may ask for a maximise
+  button with `maximizable(true)`, never for a minimise button: a dialog is
+  minimised and restored with the window it blocks. Windows and macOS do that
+  themselves; on X11 Teksilo does it where the window manager does not, as
+  soon as the window manager changes the owner's state, and counts a dialog
+  minimised once the window manager says it is. On Wayland a dialog does not
+  follow its owner (no protocol reports a minimise or a restore).
 - **`WithActivationToken`, an external payload with the activation token that
   came with it.** `on_external_with_ctx`, `on_app_event` and the app-event
   observers see the payload, and the first window the handler raises or
@@ -119,9 +131,14 @@ by crate for clarity, not because crates version independently.
   to the one widget: a text field inside a container built with it still
   takes focus from a click, and `PopoverButton` and `PopoverIconButton` pass
   it on to their inner button. Since such a click blurs nothing, the
-  focused field first commits what was typed in it, as a blur would (a
-  `SpinBox`, a `DateEdit`, a `TextInput` with an `on_blur_fn`), so the
-  command the click runs reads the new value. For controls that act on
+  focused field first commits what was typed in it, as a blur would, once
+  the click completes (a press dragged off the control or cancelled commits
+  nothing), and for a screen reader's Click on such a control too (a
+  `SpinBox`, `DateEdit`, `TimeEdit`, `DateTimeEdit`, `DateRangeEdit` or
+  `HexColorInput` parses its text, a field's validator runs), so the
+  command the click runs reads the new value. The field keeps focus: an
+  `on_blur_fn` runs only when focus really leaves, once, and that blur does
+  not commit again what the click committed. For controls that act on
   another widget's content, such as menu bar triggers and toolbar
   buttons.
 - **`WidgetTree::next_unpainted_deadline`**, the timers of a tree that is never
@@ -131,7 +148,8 @@ by crate for clarity, not because crates version independently.
 #### Platform
 
 - **`taskbar`**, the per-OS half of `WindowConfig::skip_taskbar`, and on X11
-  `x11::ewmh::mark_skip_taskbar` and `x11::ewmh::net_wm_state`.
+  `x11::ewmh::mark_skip_taskbar`, `x11::ewmh::net_wm_state` and
+  `x11::ewmh::is_dialog_type`.
 
 ### Changed
 
@@ -185,18 +203,34 @@ by crate for clarity, not because crates version independently.
 
 #### App
 
+- **An intent a native dialog window leaves unclaimed goes to the window it
+  blocks** (from that window's focus, then up its owners), and only then to
+  the application tree, as an intent sent as an in-window dialog closes
+  walks on to the page. It went to the application tree only, so a
+  `MessageBox` answer on macOS and Windows that sent the document a command
+  instead of closing it by id reached no action of the document.
 - **Breaking.** `WindowManager::refocus_modal_child` takes `&mut self`, since
   it may restore the window it raises.
 
 #### Widgets
 
+- **A `TitleBar` offers only the window's own buttons.** Its minimise and
+  maximise buttons, the Minimize and Maximize rows of the window menu it
+  builds on X11, and maximising by double click follow the window's
+  `WindowConfig::minimizable` and `maximizable`, so a modal dialog's bar has
+  no minimise button.
+- **Breaking.** `WindowControlsLayout::minimize_id` and `maximize_id` are
+  `Option<WidgetId>`, `None` for a button the window does not offer.
 - **Breaking.** `MenuItemState` has a new variant, so an exhaustive `match`
   on it needs a `ReflectRadio` arm.
 - **A `MenuModel` row whose only effect is its intent greys out while
   nothing takes the intent**: no enabled action on its route from the
   window's focus, no global action of the window, none of the application
   tree's. The in-window row follows that while its menu is open; the macOS
-  menu bar is brought up to date after every turn of the event loop. A row
+  menu bar is brought up to date after every turn of the event loop, from
+  the key window's focused widget as it is, where its rows send their
+  intent (a field in an open popover included), so a row there greys out
+  exactly when choosing it would do nothing. A row
   with an `on_activate` closure stays enabled (its `enabled` alone decides),
   and so does a two-way `checkable`, `tri_checkable` or `radio` row, which
   writes its state when chosen, in the window as in the macOS menu bar. An
@@ -243,7 +277,8 @@ by crate for clarity, not because crates version independently.
   it blocks (up the chain of owners), as AppKit keeps the bar for a sheet or
   a panel; another window shows the application menu, or, when the app
   declared none, keeps the bar shown before, so File and Edit no longer
-  vanish while a dialog or a secondary window is key. The bar shows the
+  vanish while a dialog or a secondary window is key; an application menu
+  declared meanwhile shows at once. The bar shows the
   application menu while no window is open, whichever window installed its
   menu last. `MemoryNativeMenuBackend` follows the same rule
   (`shows_app_menu`). A window's
@@ -323,11 +358,27 @@ by crate for clarity, not because crates version independently.
   its taskbar button), and when a quit stops at its window. Raising it left it
   minimised, with the window it blocks refusing input, and a click on the
   title bar did not raise it at all.
+- **Closing a window closes its dialogs.** A modal dialog stayed open,
+  blocking nothing, when the window it blocks was closed by id, and the
+  application did not quit under
+  `QuitPolicy::LastWindowClosed`. A window the OS destroyed on its own
+  (Windows destroys an owned window with its owner) stayed counted too.
+  **Behaviour change:** the close button of a window a dialog blocks (and
+  Alt+F4, Cmd+W, `ctx.close_window()` on it) brings the dialog forward and
+  closes nothing, as on macOS and Windows natively; close the window by id
+  from the dialog's answer instead.
+- **On macOS a dialog is key again once the window it blocks comes back
+  from the Dock.** Minimised alone, then restored, the window took the focus
+  while AppKit still hid its dialog, so raising the dialog did nothing: the
+  window stayed key and swallowed the first click or key. The dialog is now
+  raised when AppKit shows it again, unless the user went to another
+  application meanwhile.
 - **A dialog opened from its parent window's own handler belongs to the
   parent.** It was opened as a window of its own: not kept above the parent,
   not centred over it, and with a taskbar button of its own on Windows.
-- **A dialog on X11 is a window of its own, transient for its parent.** It
-  was created inside the parent window, clipped to it.
+- **A dialog on X11 is a window of its own, transient for its parent,** and
+  a modal dialog (`_NET_WM_WINDOW_TYPE_DIALOG`, `_NET_WM_STATE_MODAL`) to the
+  window manager. It was created inside the parent window, clipped to it.
 - **Two windows opened with one `WindowConfig::id` no longer lose it.**
   Closing either left `find_window` finding neither; the one still open now
   keeps the id. A debug build warns when a window opens with an id another

@@ -60,6 +60,7 @@ impl Default for ApplicationMenu {
                 pending: RefCell::new(Vec::new()),
                 warned: Cell::new(false),
                 native: RefCell::new(None),
+                redeclared: RefCell::new(RedeclareWatch::default()),
             }),
         }
     }
@@ -78,6 +79,47 @@ struct Inner {
     /// installed from: [`ApplicationMenu::revision`] and the application
     /// tree's shortcut registry version.
     native: RefCell<Option<NativeInstall>>,
+    /// How often another model was declared lately: see [`RedeclareWatch`].
+    redeclared: RefCell<RedeclareWatch>,
+}
+
+/// Notices an application menu declared again and again with another model,
+/// which is what a model built inline in a build that runs often does: every
+/// declaration rebuilds every bar showing it and installs the native menu
+/// again. Says so once, in a debug build, past
+/// [`LIMIT`](Self::LIMIT) new declarations within [`SPAN`](Self::SPAN).
+#[derive(Default)]
+struct RedeclareWatch {
+    /// When the current run of declarations started, and how many it holds.
+    run: Option<(std::time::Instant, u32)>,
+    warned: bool,
+}
+
+impl RedeclareWatch {
+    /// More new declarations than this within [`SPAN`](Self::SPAN) is a
+    /// model built where it is declared. A few are normal: the application
+    /// may change its menu, and the first layouts rebuild the tree.
+    const LIMIT: u32 = 4;
+    const SPAN: std::time::Duration = std::time::Duration::from_secs(10);
+
+    /// Note a new declaration at `now`; true, once, when it should be said.
+    fn note(&mut self, now: std::time::Instant) -> bool {
+        let count = match self.run {
+            Some((start, count)) if now.duration_since(start) < Self::SPAN => count + 1,
+            _ => {
+                self.run = Some((now, 1));
+                1
+            }
+        };
+        if let Some(run) = self.run.as_mut() {
+            run.1 = count;
+        }
+        if count > Self::LIMIT && !self.warned {
+            self.warned = true;
+            return true;
+        }
+        false
+    }
 }
 
 /// What [`ApplicationMenu::sync_native`] installed, and from what.
@@ -120,7 +162,10 @@ impl ApplicationMenu {
 
     /// Declare `model` as the application menu, replacing any earlier one.
     /// The model already declared (the same handle, as a rebuild of the
-    /// application tree's root declares it again) changes nothing.
+    /// application tree's root declares it again) changes nothing. Another
+    /// handle, even with equal content, is a new declaration: a debug build
+    /// says so when that keeps happening (a model built where it is
+    /// declared).
     pub fn set(&self, model: MenuModel) {
         if self
             .inner
@@ -132,6 +177,23 @@ impl ApplicationMenu {
             return;
         }
         model.warn_second_app_menu();
+        if self
+            .inner
+            .redeclared
+            .borrow_mut()
+            .note(std::time::Instant::now())
+        {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "teksilo: the application menu was declared again with another MenuModel {} \
+                 times within {} s: every declaration rebuilds every bar showing it and \
+                 installs the native menu again. Build the model once (in the application \
+                 root's constructor, say), keep it, and declare a clone of that handle; change \
+                 it with its mutators.",
+                RedeclareWatch::LIMIT + 1,
+                RedeclareWatch::SPAN.as_secs(),
+            );
+        }
         *self.inner.model.borrow_mut() = Some(model);
         let generation = self.inner.generation.get();
         self.inner.generation.set(generation.wrapping_add(1));
@@ -240,10 +302,30 @@ impl ApplicationMenu {
         std::mem::take(&mut *self.inner.pending.borrow_mut())
     }
 
+    /// Say once per process, in a debug build, that a bar asked for the
+    /// application menu in a tree that belongs to no application: no holder
+    /// in its app state (a test, a tree built by hand), so each build would
+    /// otherwise make a fresh one and say it again.
+    pub(crate) fn warn_no_holder() {
+        static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            #[cfg(test)]
+            UNDECLARED_SAID.with(|said| said.set(said.get() + 1));
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "teksilo: MenuBar::application() shows nothing: this tree belongs to no \
+                 application, so it has no application menu (teksilo-app registers its \
+                 holder in every application)."
+            );
+        }
+    }
+
     /// Say once, in a debug build, that a bar asked for the application
     /// menu and the application declared none.
     pub(crate) fn warn_undeclared(&self) {
         if !self.inner.warned.replace(true) {
+            #[cfg(test)]
+            UNDECLARED_SAID.with(|said| said.set(said.get() + 1));
             #[cfg(debug_assertions)]
             eprintln!(
                 "teksilo: MenuBar::application() shows nothing: the application declared no \
@@ -252,6 +334,13 @@ impl ApplicationMenu {
             );
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times [`ApplicationMenu::warn_undeclared`] spoke on this
+    /// thread, for the tests.
+    pub(crate) static UNDECLARED_SAID: Cell<u32> = const { Cell::new(0) };
 }
 
 impl std::fmt::Debug for ApplicationMenu {
@@ -283,24 +372,46 @@ impl std::fmt::Debug for ApplicationMenu {
 /// a window shows a menu of its own with
 /// [`MenuBar::from_model`](crate::menu_bar::MenuBar::from_model).
 ///
+/// Build the model once and declare a clone of that handle, as below: the
+/// same handle declared again changes nothing, but a model built where it
+/// is declared is a new one at every build of the root, and every bar
+/// showing it rebuilds and the macOS menu is installed again each time (a
+/// debug build says so when it keeps happening). Change a declared menu with
+/// its mutators ([`MenuModel::push_item`] and the others) or its entries'
+/// signals.
+///
 /// ```ignore
 /// use teksilo::prelude::*;
 /// use teksilo::widgets::menu::{MenuEntry, MenuModel, StandardMenu};
 ///
+/// struct AppRoot {
+///     menu: MenuModel,
+/// }
+///
+/// impl AppRoot {
+///     fn new() -> Self {
+///         let menu = MenuModel::new()
+///             .standard_menu(StandardMenu::app().title(tr!(app_name())).quit_intent("app.quit"))
+///             .menu(tr!(file()), |m| m.item(MenuEntry::new(tr!(new())).intent("app.new").shortcut("app.new")));
+///         Self { menu }
+///     }
+/// }
+///
 /// impl Widget for AppRoot {
 ///     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
 ///         ctx.register_action_global(Action::new("app.new").on_invoke(|_, ctx| open_document(ctx)));
-///         ctx.set_application_menu(
-///             MenuModel::new()
-///                 .standard_menu(StandardMenu::app().title(tr!(app_name())).quit_intent("app.quit"))
-///                 .menu(tr!(file()), |m| m.item(MenuEntry::new(tr!(new())).intent("app.new").shortcut("app.new"))),
-///         );
+///         ctx.set_application_menu(self.menu.clone());
 ///         vec![]
 ///     }
 /// }
 /// ```
 pub trait ApplicationMenuExt {
     /// Declare `model` as the application menu. See [`ApplicationMenuExt`].
+    ///
+    /// Pass a clone of a model built once and kept (a field of the
+    /// application root): declaring that same handle again from a later
+    /// build changes nothing, while a model built here would be a new
+    /// declaration at every build, rebuilding every bar that shows it.
     fn set_application_menu(&mut self, model: MenuModel);
 }
 
@@ -390,6 +501,42 @@ mod tests {
         assert_eq!(holder.generation().get(), generation, "the same handle");
         holder.set(MenuModel::new());
         assert_ne!(holder.generation().get(), generation, "another model");
+    }
+
+    /// A model declared again and again under a new handle is said once,
+    /// past a few within the span; a slow trickle, or the same handle, is
+    /// not.
+    #[test]
+    fn a_menu_declared_again_and_again_is_said_once() {
+        let start = std::time::Instant::now();
+        let at = |secs: u64| start + std::time::Duration::from_secs(secs);
+        let mut watch = RedeclareWatch::default();
+        let said: Vec<bool> = (0..8).map(|i| watch.note(at(i))).collect();
+        let limit = RedeclareWatch::LIMIT as usize;
+        assert!(said[..limit].iter().all(|said| !said), "a few are normal");
+        assert!(said[limit], "one more within the span is said");
+        assert!(said[limit + 1..].iter().all(|said| !said), "once");
+
+        let mut slow = RedeclareWatch::default();
+        let span = RedeclareWatch::SPAN.as_secs();
+        assert!(
+            (0..20).all(|i| !slow.note(at(i * span))),
+            "one a span is a menu that changes"
+        );
+
+        let holder = ApplicationMenu::new();
+        let model = MenuModel::new();
+        for _ in 0..10 {
+            holder.set(model.clone());
+        }
+        assert!(
+            !holder.inner.redeclared.borrow().warned,
+            "the same handle is not a declaration"
+        );
+        for _ in 0..10 {
+            holder.set(MenuModel::new());
+        }
+        assert!(holder.inner.redeclared.borrow().warned);
     }
 
     /// A window's tree cannot declare the application menu: the call

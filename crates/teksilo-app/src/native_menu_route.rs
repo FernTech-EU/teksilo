@@ -39,6 +39,24 @@ pub(crate) fn native_menu_intent_window(
     focused.unwrap_or(owner)
 }
 
+/// Every intent a row of the native menu bar would have handled in `tree`,
+/// the window with the OS focus, sorted: what the walk from where
+/// [`fire_native_menu_item`] sends a row's intent finds, so a row greys out
+/// exactly when choosing it would do nothing.
+pub(crate) fn native_menu_handled_intents(tree: &WidgetTree) -> Vec<&'static str> {
+    tree.live_command_focus()
+        .map(|source| tree.handled_intents_from(source))
+        .unwrap_or_default()
+}
+
+/// Whether a row of the native menu bar whose intent is `name` would be
+/// handled in `tree`, the window with the OS focus, as
+/// [`native_menu_handled_intents`] answers.
+pub(crate) fn native_menu_handles(tree: &WidgetTree, name: &str) -> bool {
+    tree.live_command_focus()
+        .is_some_and(|source| tree.can_handle_from(source, name))
+}
+
 /// Run part of a native menu item's activation in `tree`, tagged
 /// [`IntentSource::Menu`]: `action` anchored at the tree's content root,
 /// then `intent` sent from its focused widget (from the content root when
@@ -93,10 +111,11 @@ mod tests {
 
     type Heard = Rc<RefCell<Vec<&'static str>>>;
 
-    /// A focusable widget answering `test.copy` with `name`.
+    /// A focusable widget answering `intent` with `name`.
     #[derive(Debug)]
     struct Copier {
         name: &'static str,
+        intent: &'static str,
         heard: Heard,
         focusable: bool,
         children: Vec<Copier>,
@@ -106,7 +125,7 @@ mod tests {
     impl Widget for Copier {
         fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
             let (name, heard) = (self.name, self.heard.clone());
-            ctx.register_action(Action::new("test.copy").on_invoke(move |_, _| {
+            ctx.register_action(Action::new(self.intent).on_invoke(move |_, _| {
                 heard.borrow_mut().push(name);
             }));
             ctx.apply_self_handlers(HandlerSet::new().focusable(self.focusable));
@@ -129,6 +148,7 @@ mod tests {
         let ids = Rc::new(RefCell::new(Vec::new()));
         let editor = Copier {
             name: "editor",
+            intent: "test.copy",
             heard: heard.clone(),
             focusable: true,
             children: Vec::new(),
@@ -136,6 +156,7 @@ mod tests {
         };
         let root = Copier {
             name: "root",
+            intent: "test.copy",
             heard: heard.clone(),
             focusable: false,
             children: vec![editor],
@@ -191,6 +212,85 @@ mod tests {
         let kept = tree.take_unclaimed_intents();
         assert_eq!(kept.len(), 1, "nothing in the window takes it");
         assert_eq!(kept[0].origin_window(), Some(win(2)));
+    }
+
+    /// A window whose editor answers `test.editor_copy` and whose popover,
+    /// attached to a toolbar button and opened over the editor, holds focus
+    /// in a field answering `test.field_copy`. Returns the tree.
+    fn window_with_a_focused_popover(heard: &Heard) -> WidgetTree {
+        let ids = Rc::new(RefCell::new(Vec::new()));
+        let root = Copier {
+            name: "root",
+            intent: "test.copy",
+            heard: heard.clone(),
+            focusable: false,
+            children: vec![
+                Copier {
+                    name: "button",
+                    intent: "test.copy",
+                    heard: heard.clone(),
+                    focusable: true,
+                    children: Vec::new(),
+                    ids: ids.clone(),
+                },
+                Copier {
+                    name: "editor",
+                    intent: "test.editor_copy",
+                    heard: heard.clone(),
+                    focusable: true,
+                    children: Vec::new(),
+                    ids: ids.clone(),
+                },
+            ],
+            ids: ids.clone(),
+        };
+        let mut tree = WidgetTree::new();
+        let root = tree.add(root);
+        tree.set_content_root(root);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let (button, editor) = (ids.borrow()[1], ids.borrow()[2]);
+        // Only the editor and the field answer their own copy.
+        let field = tree.add(Copier {
+            name: "field",
+            intent: "test.field_copy",
+            heard: heard.clone(),
+            focusable: true,
+            children: Vec::new(),
+            ids: ids.clone(),
+        });
+        tree.focus(editor);
+        tree.show_overlay(OverlayRequest::new(
+            field,
+            button,
+            OverlayPlacement::Below,
+            DismissBehavior::Manual,
+        ));
+        tree.overlay_manager_mut().set_top_focus_restore(editor);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.focus(field);
+        tree
+    }
+
+    /// The bar greys a row exactly when choosing it would do nothing: its
+    /// availability is asked from the widget its intent is sent from, the
+    /// focused field in a popover, not from the editor the popover gives
+    /// focus back to (which an in-window menu row asks from). Both ways:
+    /// what the field takes is enabled, what only the editor takes greys.
+    #[test]
+    fn a_row_greys_from_the_widget_its_intent_is_sent_from() {
+        for (name, by) in [("test.field_copy", "field"), ("test.editor_copy", "editor")] {
+            let heard = Heard::default();
+            let mut tree = window_with_a_focused_popover(&heard);
+            let handled = native_menu_handled_intents(&tree);
+            let available = native_menu_handles(&tree, name);
+            assert_eq!(handled.contains(&name), available, "{name}: one answer");
+            fire_native_menu_item(&mut tree, &mut NoopWindowOps, None, Some(name));
+            let ran = heard.borrow().contains(&by);
+            assert_eq!(
+                available, ran,
+                "{name}: the row says {available}, choosing it ran {by}: {ran}"
+            );
+        }
     }
 
     #[test]

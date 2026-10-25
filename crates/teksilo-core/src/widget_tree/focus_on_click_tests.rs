@@ -235,3 +235,150 @@ fn a_click_that_takes_no_focus_has_the_focused_field_commit_first() {
         assert_eq!(*log.borrow(), expected, "{focus_on_click} {kind:?}");
     }
 }
+
+/// An assistive-technology Click on a control that takes no focus from a
+/// click has the focused field commit first too, as the pointer's click
+/// does: a screen reader user's command sees the value typed. A Click on a
+/// control that does take focus from a click leaves the hook alone, as the
+/// AT Click moves no focus there either and the pointer's path blurs.
+#[test]
+fn an_assistive_click_that_takes_no_focus_has_the_focused_field_commit_first() {
+    use crate::event::{EventResponse, WidgetEvent};
+    use crate::widget_builder::HandlerSet;
+    for (focus_on_click, expected) in [(false, &["commit", "click"][..]), (true, &["click"][..])] {
+        let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut tree = WidgetTree::new();
+        let field = tree.add(FillWidget::new().focusable());
+        {
+            let log = log.clone();
+            tree.apply_external_handler_set(
+                field,
+                HandlerSet::new().on_commit_edit(move |_| log.borrow_mut().push("commit")),
+            );
+        }
+        let button = {
+            let log = log.clone();
+            tree.add(
+                FillWidget::new()
+                    .focusable()
+                    .on_access_action(move |action, _| {
+                        if action == accesskit::Action::Click {
+                            log.borrow_mut().push("click");
+                            EventResponse::Handled
+                        } else {
+                            EventResponse::Ignored
+                        }
+                    })
+                    .focus_on_click(focus_on_click),
+            )
+        };
+        tree.add(Row(vec![field, button]));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(field);
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: accesskit::Action::Click,
+            target: Some(button),
+            target_node: crate::accessibility::widget_id_to_node_id(button),
+            data: None,
+        });
+        assert_eq!(*log.borrow(), expected, "{focus_on_click}");
+    }
+}
+
+/// The commit waits for the click to complete, for a mouse as for a finger:
+/// a press on a control that takes no focus, dragged off before the release
+/// or cancelled, has activated nothing, so the focused field commits nothing.
+/// A press and release inside commits, before the control's tap.
+#[test]
+fn a_press_that_does_not_complete_a_click_commits_nothing() {
+    use crate::event::{PointerButton, WidgetEvent};
+    use crate::pointer::{CancelReason, PointerId};
+    use crate::widget_builder::HandlerSet;
+    let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let f = fixture(false);
+    let mut tree = f.tree;
+    {
+        let log = log.clone();
+        tree.apply_external_handler_set(
+            f.field,
+            HandlerSet::new().on_commit_edit(move |_| log.borrow_mut().push("commit")),
+        );
+    }
+    let centre = |tree: &WidgetTree, id: WidgetId| {
+        let b = tree.bounds(id);
+        teksilo_canvas::Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0)
+    };
+    let (on, off) = (centre(&tree, f.button), centre(&tree, f.other));
+    tree.focus(f.field);
+
+    // Pressed, dragged off, released elsewhere.
+    tree.pointer_down_button(on, PointerButton::Primary);
+    assert!(log.borrow().is_empty(), "nothing is committed on the press");
+    tree.pointer_move(off);
+    tree.pointer_up_button(off, PointerButton::Primary);
+    assert!(log.borrow().is_empty(), "a drag-off commits nothing");
+
+    // Pressed, then cancelled.
+    tree.pointer_down_button(on, PointerButton::Primary);
+    tree.cancel_pointer(
+        PointerId::MOUSE,
+        CancelReason::WindowDeactivated,
+        &mut crate::window::NoopWindowOps,
+    );
+    tree.pointer_up_button(on, PointerButton::Primary);
+    assert!(log.borrow().is_empty(), "a cancelled press commits nothing");
+    assert_eq!(f.taps.get(), 0, "and neither activated the button");
+
+    // Pressed and released inside: the click completes.
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        on,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.pointer_up_button(on, PointerButton::Primary);
+    assert_eq!(*log.borrow(), ["commit"]);
+    assert_eq!(f.taps.get(), 1);
+    assert_eq!(tree.focused(), Some(f.field));
+}
+
+/// The commit takes the route the click's command does: from a field
+/// focused in a popover, on to the widget the popover is attached to and its
+/// ancestors, innermost first, as an intent sent from the field crosses to
+/// them; a modal stops it, as it stops the intent, so the page behind a
+/// dialog commits nothing for a click inside the dialog.
+#[test]
+fn the_commit_crosses_from_a_popover_to_its_anchor_and_stops_at_a_modal() {
+    use crate::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
+    use crate::widget_builder::HandlerSet;
+    for (modal, expected) in [(false, &["field", "page"][..]), (true, &["field"][..])] {
+        let placement = if modal {
+            OverlayPlacement::Centered
+        } else {
+            OverlayPlacement::Below
+        };
+        let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let page = tree.add(StackWidget::new().child(anchor));
+        let field = tree.add(FillWidget::new().focusable());
+        for (id, name) in [(field, "field"), (page, "page")] {
+            let log = log.clone();
+            tree.apply_external_handler_set(
+                id,
+                HandlerSet::new().on_commit_edit(move |_| log.borrow_mut().push(name)),
+            );
+        }
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.show_overlay(OverlayRequest::new(
+            field,
+            anchor,
+            placement,
+            DismissBehavior::Manual,
+        ));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(field);
+        // What a completed click on a control that takes no focus asks for.
+        tree.commit_pending_edit(&mut crate::window::NoopWindowOps);
+        assert_eq!(*log.borrow(), expected, "modal: {modal}");
+    }
+}

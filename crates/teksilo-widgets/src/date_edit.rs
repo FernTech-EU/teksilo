@@ -549,7 +549,7 @@ impl Widget for DateEdit {
         // ── Validator ─────────────────────────────────────────
         // Pure classification: given raw text, return one of three
         // outcomes. The field's wrapper writes feedback signal +
-        // re-formats text on `Corrected`. The on_blur callback
+        // re-formats text on `Corrected`. The on_commit callback
         // (chained AFTER the validator) re-parses the (now-corrected)
         // text and updates the bound value signal + fires the user
         // callback with EventContext.
@@ -606,7 +606,7 @@ impl Widget for DateEdit {
         // Commit-side effect: when the inner field's wrapper writes
         // a Corrected outcome, the text_signal already holds the
         // formatted-corrected text. Re-parse and sync the bound
-        // value + fire on_value_changed via the chained on_blur
+        // value + fire on_value_changed via the chained on_commit
         // callback below.
         //
         // For Invalid: leave the typed text in the field so the user
@@ -862,7 +862,7 @@ impl Widget for DateEdit {
                     commit(ctx_evt);
                 }
             })
-            .on_blur_fn({
+            .on_commit_fn({
                 let commit = commit.clone();
                 move |ctx_evt| {
                     commit(ctx_evt);

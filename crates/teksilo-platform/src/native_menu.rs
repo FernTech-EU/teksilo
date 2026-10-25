@@ -380,7 +380,11 @@ pub trait NativeMenuBackend {
     /// Set the application menu: the menu shown whenever the key window has
     /// no menu of its own nor an owner with one, and while no window is
     /// open. `teksilo-app` sets it from the application tree at startup and
-    /// again whenever it changes; it replaces any earlier one. `declared`
+    /// again whenever it changes; it replaces any earlier one, and the bar
+    /// is chosen again for the key window, as
+    /// [`activate_window`](Self::activate_window) chooses it: an
+    /// application menu declared while a window
+    /// with no menu of its own is key shows at once. `declared`
     /// says whether the application declared it: `false` for the default
     /// App menu `teksilo-app` supplies when it declared none, which a key
     /// window without a menu does not bring up (see [`key_window_bar`]).
@@ -561,7 +565,8 @@ impl NativeMenuHandle {
     ///
     /// `teksilo-app` calls it once per event-loop turn, with what the route
     /// a chosen row's intent takes answers (the focused window's
-    /// `WidgetTree::handled_intents`, else the application tree's), so the
+    /// `WidgetTree::handled_intents_from` its live focus, where the row's
+    /// intent starts, else the application tree's), so the
     /// menu is current whenever the user opens it: focus, the key window and
     /// the actions only change while the loop runs. With the same `handled`
     /// as the last call and no menu installed since, nothing can have
@@ -752,6 +757,61 @@ pub fn key_window_bar(
         }
     }
     if app_declared { None } else { shown }
+}
+
+/// What a backend shows once the application menu has been set or replaced
+/// ([`NativeMenuBackend::set_app_menu`]): `Some(bar)` to show `bar` (as
+/// [`key_window_bar`] names it, `None` for the application menu), `None`
+/// to leave the bar up as it is.
+///
+/// `key_bar` is what [`key_window_bar`] picks for the key window now, `None`
+/// before any window was activated; `shown` is the bar up. The key window's
+/// pick is shown when it differs from the bar up (an application menu
+/// declared while a window with no menu of its own is key replaces the
+/// window bar kept for it), and whenever it is the application menu, which
+/// is a new menu now. With no key window, only an application menu already
+/// up is replaced.
+pub(crate) fn bar_after_app_menu(
+    key_bar: Option<Option<TeksiloWindowId>>,
+    shown: Option<TeksiloWindowId>,
+) -> Option<Option<TeksiloWindowId>> {
+    match key_bar {
+        Some(bar) => (bar.is_none() || bar != shown).then_some(bar),
+        None => shown.is_none().then_some(None),
+    }
+}
+
+/// What a backend shows once it has forgotten `cleared`'s menu
+/// ([`NativeMenuBackend::clear_window`]): `Some(bar)` to show `bar` (as
+/// [`key_window_bar`] names it, `None` for the application menu), `None` to
+/// leave the bar up as it is.
+///
+/// Only a bar that was `cleared`'s own (`shown`) is replaced, by the key
+/// window's pick (`key`, with `has_menu`, `owner` and `app_declared` as for
+/// [`key_window_bar`]) when another window is key, else by the application
+/// menu. The pick is made as if `cleared` were already gone and no bar were
+/// up, so it is never `cleared`'s menu, declared application menu or not,
+/// even when the key window is `cleared` itself or a dialog it owned.
+pub(crate) fn bar_after_clear(
+    cleared: TeksiloWindowId,
+    key: Option<TeksiloWindowId>,
+    shown: Option<TeksiloWindowId>,
+    has_menu: impl Fn(TeksiloWindowId) -> bool,
+    owner: impl Fn(TeksiloWindowId) -> Option<TeksiloWindowId>,
+    app_declared: bool,
+) -> Option<Option<TeksiloWindowId>> {
+    if shown != Some(cleared) {
+        return None;
+    }
+    Some(key.filter(|key| *key != cleared).and_then(|key| {
+        key_window_bar(
+            key,
+            |window| window != cleared && has_menu(window),
+            |window| owner(window).filter(|owner| *owner != cleared),
+            app_declared,
+            None,
+        )
+    }))
 }
 
 // ============================================================
@@ -1032,13 +1092,17 @@ impl NativeMenuBackend for MemoryNativeMenuBackend {
         rec.menus.remove(&window_id);
         rec.owners.remove(&window_id);
         rec.cleared.push(window_id);
-        if rec.active == Some(window_id) {
-            // Never the dead window's menu: the key window's bar, or the
-            // application menu, declared or not.
-            rec.active = None;
-            if let Some(key) = rec.key.filter(|key| *key != window_id) {
-                rec.active = rec.bar_for(key);
-            }
+        // As the macOS backend: never the dead window's menu.
+        let bar = bar_after_clear(
+            window_id,
+            rec.key,
+            rec.active,
+            |window| rec.menus.contains_key(&window),
+            |window| rec.owners.get(&window).copied(),
+            rec.app_declared,
+        );
+        if let Some(bar) = bar {
+            rec.active = bar;
         }
     }
     fn update_item(&mut self, id: MenuItemId, delta: MenuItemDelta) {
@@ -1053,6 +1117,12 @@ impl NativeMenuBackend for MemoryNativeMenuBackend {
         let mut rec = self.inner.borrow_mut();
         rec.app_menu = Some(menu);
         rec.app_declared = declared;
+        // As the macOS backend: the key window's bar again, which the new
+        // application menu may be.
+        let key_bar = rec.key.map(|key| rec.bar_for(key));
+        if let Some(bar) = bar_after_app_menu(key_bar, rec.active) {
+            rec.active = bar;
+        }
     }
 }
 
@@ -1482,6 +1552,92 @@ mod tests {
         assert_eq!(backend.active_window(), Some(win(1)));
         handle.clear_window(win(1));
         assert!(backend.shows_app_menu(), "the owner's menu went with it");
+    }
+
+    /// Declaring the application menu while a window with no menu of its own
+    /// is key shows it at once, without waiting for focus to move: the bar
+    /// left up was another window's, kept only because no application menu
+    /// was declared. Declaring it while the key window shows its own menu
+    /// leaves that one up.
+    #[test]
+    fn declaring_the_application_menu_shows_it_for_a_menu_less_key_window() {
+        let backend = MemoryNativeMenuBackend::new();
+        let handle = NativeMenuHandle::new(backend.clone());
+        let app_menu = |declared| {
+            handle.set_app_menu(
+                sample_snapshot(MenuItemId::next()),
+                HashMap::new(),
+                poster(),
+                declared,
+            )
+        };
+        app_menu(false);
+        handle.set_window_menu(
+            win(1),
+            sample_snapshot(MenuItemId::next()),
+            HashMap::new(),
+            poster(),
+        );
+        handle.activate_window(win(1));
+        handle.activate_window(win(2));
+        assert_eq!(backend.active_window(), Some(win(1)), "precondition");
+        app_menu(true);
+        assert!(backend.shows_app_menu(), "window 2 is key and has none");
+
+        handle.activate_window(win(1));
+        app_menu(true);
+        assert_eq!(
+            backend.active_window(),
+            Some(win(1)),
+            "a key window's own menu stays"
+        );
+    }
+
+    /// After a window's menu is forgotten the bar is never that window's,
+    /// whoever is key: the window itself, a dialog it owned, another window
+    /// with or without a menu, none; with an application menu declared or
+    /// not. A bar that was not the forgotten window's stays.
+    #[test]
+    fn a_cleared_windows_bar_never_comes_back() {
+        let (closed, dialog, other, plain) = (win(1), win(2), win(3), win(4));
+        // `has_menu` and `owner` still answer for the closed window, as a
+        // backend that had not forgotten it yet would.
+        let has_menu = |w: TeksiloWindowId| w == closed || w == other;
+        let owner = |w: TeksiloWindowId| (w == dialog).then_some(closed);
+        for declared in [true, false] {
+            for key in [Some(closed), Some(dialog), Some(other), Some(plain), None] {
+                let bar = bar_after_clear(closed, key, Some(closed), has_menu, owner, declared)
+                    .expect("its bar was up: replaced");
+                assert_ne!(bar, Some(closed), "key {key:?}, declared {declared}");
+                if key == Some(other) {
+                    assert_eq!(bar, Some(other), "the key window's own menu");
+                }
+            }
+            assert_eq!(
+                bar_after_clear(closed, Some(plain), Some(other), has_menu, owner, declared),
+                None,
+                "another window's bar stays"
+            );
+        }
+    }
+
+    /// The rule both backends follow when the application menu is set:
+    /// show what [`key_window_bar`] picks for the key window when it differs
+    /// from the bar up, and the new application menu whenever that is the
+    /// pick; with no window key yet, replace only an application menu
+    /// already showing.
+    #[test]
+    fn what_setting_the_application_menu_shows() {
+        let app = None;
+        assert_eq!(bar_after_app_menu(Some(app), Some(win(1))), Some(app));
+        assert_eq!(bar_after_app_menu(Some(app), app), Some(app), "rebuilt");
+        assert_eq!(bar_after_app_menu(Some(Some(win(1))), Some(win(1))), None);
+        assert_eq!(
+            bar_after_app_menu(Some(Some(win(1))), app),
+            Some(Some(win(1)))
+        );
+        assert_eq!(bar_after_app_menu(None, app), Some(app));
+        assert_eq!(bar_after_app_menu(None, Some(win(1))), None);
     }
 
     /// A refresh whose inputs are the last refresh's (the same intents

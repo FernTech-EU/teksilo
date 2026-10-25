@@ -129,8 +129,12 @@ It receives:
   window's root and no global action of that window takes is offered to the
   application tree once. So a window's menu can fire `app.new_window`, which
   only the application tree implements. The other way, an intent the
-  application tree leaves goes to the window used last (at its frontmost
-  native dialog), so its handlers can send a window a command. An intent
+  application tree leaves goes to the window used last of those not
+  minimised, else to the window used last (at its frontmost native dialog),
+  so its handlers can send a window a command. It goes to that one window
+  only, as AppKit offers what the application leaves to its key window and
+  to no other: a command meant for every window is better state they all
+  observe (a `Signal` in app state) than an intent. An intent
   crosses once and never comes back; one nobody takes is dropped, and a debug
   build names it (the framework's own `teksilo.` intents excepted). An intent
   the action that took it sends may cross in its turn, up to 64 crossings in
@@ -154,7 +158,7 @@ What needs a window is not drawn there:
 
 | From the application tree | Happens |
 |---|---|
-| a modal request (`MessageBox`, `present_modal`) | presented in the window used last, or in a window of its own when none is open; content must be `ModalRequest::deferred` |
+| a modal request (`MessageBox`, `present_modal`) | presented in the window used last of those not minimised, else in the window used last. Asked in answer to the user's input (a click, a key, a menu row, a screen reader's action, a payload with an activation token), that window is restored and brought to the front; otherwise (a timer, another thread) it asks for attention (taskbar button, Dock icon, urgency hint) and stays where it is, as a background application's does. In a window of its own when none is open. Content must be `ModalRequest::deferred` |
 | a file dialog | refused with an error: no parent window |
 | a toast | shown in every window |
 | an overlay, an animated widget | never shown; a debug build says so |
@@ -175,6 +179,17 @@ prelude). What the application tree registers with `register_action` or
 the menu's rows that no window takes go there.
 
 ```rust
+struct AppActions {
+    menu: MenuModel,
+}
+
+impl AppActions {
+    // Called once, by `app_root` (above): the menu is built here, not in `build`.
+    fn new() -> Self {
+        Self { menu: application_menu() }
+    }
+}
+
 impl Widget for AppActions {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         ctx.register_shortcut_global(
@@ -183,13 +198,23 @@ impl Widget for AppActions {
         ctx.register_action_global(Action::new("app.new_window").on_invoke(|_, ctx| {
             ctx.open_window(document_window());
         }));
-        ctx.set_application_menu(MenuModel::new().menu(tr!(file()), |m| {
-            m.item(MenuEntry::new(tr!(new_window())).intent("app.new_window").shortcut("app.new_window"))
-        }));
+        ctx.set_application_menu(self.menu.clone());
         vec![]
     }
 }
+
+fn application_menu() -> MenuModel {
+    MenuModel::new().menu(tr!(file()), |m| {
+        m.item(MenuEntry::new(tr!(new_window())).intent("app.new_window").shortcut("app.new_window"))
+    })
+}
 ```
+
+- Build the model once and declare a clone of that handle, as above: the same
+  handle declared again from a later build changes nothing, while a model
+  built inside `build` is a new menu at every rebuild of the root, which
+  rebuilds every bar showing it (a debug build says so when it keeps
+  happening).
 
 - A window shows it with `MenuBar::application()`, or a menu of its own with
   `MenuBar::from_model(m)`. On Windows and Linux nothing is put in a window by
@@ -242,8 +267,8 @@ pub struct WindowConfig {
     pub size_to_content: SizeToContent,  // Off (default) | Height, dialogs that grow with content
     pub always_on_top: bool,
     pub skip_taskbar: bool,
-    pub minimizable: Option<bool>,       // None: no for a modal window, yes otherwise
-    pub maximizable: Option<bool>,       // the same
+    pub minimizable: Option<bool>,       // None: yes; a modal window never has one
+    pub maximizable: Option<bool>,       // None: no for a modal window, yes otherwise
     pub activate_from_env: bool,         // consume an xdg_activation startup token (Wayland)
     pub icon: Option<WindowIcon>,
     pub modal: Option<ModalConfig>,
@@ -360,9 +385,12 @@ Short form when you only need the parent:
 
 Modal semantics are preserved from the previous `ModalRequest` path:
 input-blocking on the parent, Z-order child-window attachment (an owner
-window on Windows, `WM_TRANSIENT_FOR` on X11, AppKit
-`addChildWindow:ordered:` on macOS; Wayland has none, since winit offers no
-`xdg_toplevel.set_parent`), refocus-on-stolen-focus.
+window on Windows, `WM_TRANSIENT_FOR`, `_NET_WM_WINDOW_TYPE_DIALOG` and
+`_NET_WM_STATE_MODAL` on X11, AppKit `addChildWindow:ordered:` on macOS; Wayland has none, since
+winit offers no `xdg_toplevel.set_parent`), refocus-on-stolen-focus. The
+parent is the dialog's owner: the dialog has no minimise of its own and is
+minimised, restored and closed with it. See
+[Modal dialogs](#modal-dialogs).
 
 ### `WindowIcon`
 
@@ -688,35 +716,86 @@ For the general case (may land in-tree or in a native window),
 `ctx.present_modal(request)` picks the presentation at dispatch time
 based on `ModalPresentation::Auto` and platform capability.
 
-Commands sent in a dialog route the same way whichever presentation it got.
-A native modal window has a tree of its own: an intent sent there, or a key
-pressed there, reaches that tree's actions and shortcuts, then the
-application tree, and never the window it blocks. A dialog presented in the
-window (Linux) behaves the same while it is open: from inside it, the walk
-stops at its content, and of the window's global actions and global
-shortcuts only those registered by widgets inside the dialog apply. An
-intent nothing in the window takes still goes to the application tree; a
-key goes there only through a shortcut that applies in the dialog, and the
-page's do not, so the page's Ctrl+N bound to an application-tree action does
-not fire inside an in-window dialog. An intent sent from the page while the
-dialog is up (only a programmatic send can be) still reaches every global
-action of the window.
+Commands sent in a dialog route the same way whichever presentation it got,
+with one difference, below. A native modal window has a tree of its own: an
+intent sent there, or a key pressed there, reaches that tree's actions and
+shortcuts first, and the window it blocks has no part in that walk. A
+dialog presented in the window (Linux) behaves the same while it is open:
+from inside it, the walk stops at its content, and of the window's global
+actions and global shortcuts only those registered by widgets inside the
+dialog apply. A key goes on only through a shortcut that applies in the
+dialog, and the page's do not, so the page's Ctrl+N bound to an
+application-tree action does not fire inside an in-window dialog. An intent
+sent from the page while the dialog is up (only a programmatic send can be)
+still reaches every global action of the window.
 
-The two differ once the dialog closes. An intent sent as an in-window dialog
-closes (its button closes it, then sends) is dispatched after it has closed,
-and is the page's: it walks on from the widget the dialog was attached to,
-or, sent from focus, starts at the focus the dialog gave back. One sent as a
-native dialog window closes is that window's, and goes to the application
-tree when nothing there takes it. See "Scoped vs global actions" in the
-[shortcut guide](shortcut-intent-action.md).
+An intent sent as an in-window dialog closes (its button closes it, then
+sends) is dispatched after it has closed, and is the page's: it walks on
+from the widget the dialog was attached to, or, sent from focus, starts at
+the focus the dialog gave back. An intent a native dialog window leaves
+unclaimed, sent as it closes or while it is open, goes on to the window it
+blocks, dispatched from that window's focus, then up the chain of owners,
+and then to the application tree. An intent an in-window dialog leaves
+unclaimed while it is open goes to the application tree only. See "Scoped
+vs global actions" in the [shortcut guide](shortcut-intent-action.md).
 
-A modal window has a close button and no minimise or maximise button, on
-Windows and macOS, unless its config asks for them with `minimizable(true)`
-or `maximizable(true)`. A modal window and the window it blocks are
-minimised together: minimising the dialog takes the window with it, and
-restoring either one brings both back. Where the window manager offers to
-minimise a dialog anyway (X11), a click on the window it blocks brings it
-back.
+#### A dialog belongs to the window it blocks
+
+A modal window is owned by the window it blocks, its parent, as a dialog is
+on every desktop: it stays in front of it, has no taskbar entry of its own,
+and has no minimise of its own. It goes and comes back with its owner.
+
+- **Its title bar** has a close button and no minimise button, whatever its
+  config says (`minimizable(true)` on a modal config is ignored, and a debug
+  build says so). It has no maximise button unless asked with
+  `maximizable(true)`. The OS title bar follows this on Windows and macOS,
+  and so does a Teksilo [`TitleBar`](title-bar.md) on every platform. On X11
+  the window manager draws it: a modal window is a transient, modal dialog
+  (`WM_TRANSIENT_FOR`, `_NET_WM_WINDOW_TYPE_DIALOG` and
+  `_NET_WM_STATE_MODAL`, as GTK marks its own), which window managers
+  usually draw with no minimise button. Wayland's compositors draw
+  theirs as they see fit.
+- **Minimising the owner** takes its dialogs with it, and restoring it brings
+  them back, in front. Windows does this itself for an owned window and
+  macOS for a child window. On X11 the window manager may (openbox and KWin
+  minimise a transient window with its parent); where it does not, Teksilo
+  minimises and restores the dialogs itself. winit reports no X11 minimise,
+  so Teksilo's own X connection listens to the `_NET_WM_STATE` of each
+  dialog and of the window it blocks while the dialog is open, and the
+  dialogs follow as soon as the window manager changes it, with nothing
+  polled. A dialog is asked of the window manager to minimise and counts as
+  minimised (and stops drawing) only once its own state says it is: a
+  window manager may refuse (i3 marks the windows of a hidden tab
+  `_NET_WM_STATE_HIDDEN` and minimises nothing), and the dialog then stays
+  drawn. A dialog of a dialog follows the same way, one step after the
+  dialog it follows.
+  On macOS the owner, restored from the Dock, takes the focus before AppKit
+  shows its dialog again at the end of the restore animation; the dialog is
+  raised then, so it is key and the owner refuses the first click as it
+  refuses every other. That raise is dropped if the user has gone to
+  another application meanwhile.
+- **Closing the owner.** While its dialog is up, the owner's close button
+  (and Alt+F4, Cmd+W, `ctx.close_window()` on it) brings the dialog forward
+  and closes nothing, as a window with a sheet does on macOS and a disabled
+  owner on Windows: the dialog is answered first. A close the dialog has
+  already queued for itself lets the owner's through. A forced close of the
+  owner (`ctx.close_window_by_id(owner)`, `close_window_forced()` in its
+  tree, `WindowState::close()`, `ctx.quit()`) closes its dialogs first,
+  without asking their close guards or running their answer callbacks. A
+  window the OS destroys on its own (Windows destroys an owned window with
+  its owner) is forgotten as if closed.
+- **A dialog minimised anyway** (a window manager that offers to, or a
+  program minimising it) comes back when the window it blocks is clicked or
+  takes the focus (its title bar, Alt+Tab, its taskbar button).
+- **Wayland**: winit gives a window no parent there, so the compositor treats
+  the dialog as a window of its own, and no protocol tells a client that its
+  window was minimised or restored. A dialog therefore does not follow its
+  owner: it stays on screen when the user minimises the owner. Teksilo could
+  minimise a dialog with an owner it minimised itself (`set_minimized`), but
+  it would never learn of the owner's restore and could not bring the dialog
+  back with it, so it does not. A dialog the compositor minimised comes back
+  only when the user restores it; a click on the window it blocks asks the
+  compositor to draw attention to it.
 
 ---
 
@@ -817,11 +896,15 @@ short-circuits to a veto and fires `on_close_blocked`; a `true` signal
 | `ctx.close_window_by_id(id)` | No bypasses (explicit programmatic close) |
 | `WindowState::close()` | No bypasses |
 | Modal-dismissal / framework teardown | No bypasses |
+| A window's dialogs, when the window closes | No bypasses (closed with it) |
 | `ctx.request_quit()` | Yes, each window in turn (below) |
 | `ctx.quit()` | No bypasses |
 
 A window with no guard configured always closes immediately, the guard
-machinery only runs when `on_close_requested` or `can_close` is set.
+machinery only runs when `on_close_requested` or `can_close` is set. A
+guarded close of a window a modal dialog blocks never reaches its guard:
+the dialog is brought forward instead (see
+[A dialog belongs to the window it blocks](#a-dialog-belongs-to-the-window-it-blocks)).
 
 ### Quitting the application
 

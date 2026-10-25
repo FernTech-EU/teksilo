@@ -208,8 +208,9 @@ pub trait WindowOps {
 
     /// The routed intent's actions have run: a token they did not use is
     /// left to a `WindowState::focus()` they queued, for this turn only, as
-    /// after any event that carried one. One they used leaves in place a
-    /// token already waiting for such a focus. Default: no-op.
+    /// after any event that carried one, unless a token already waits for
+    /// such a focus (an earlier handler of the turn left it): that one
+    /// stays, whether this one was used or not. Default: no-op.
     #[doc(hidden)]
     fn release_activation_token(&mut self) {}
 }

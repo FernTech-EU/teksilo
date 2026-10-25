@@ -749,15 +749,22 @@ impl HandlerSet {
 
     /// Commit the edit this widget holds, as losing focus would, while it
     /// keeps focus. For a field that commits on blur (a spin box, a date
-    /// field, a text field with an `on_blur_fn`).
+    /// field, a text field with a validator). It is not a blur: a callback
+    /// the app asked to run on blur waits for focus to leave.
     ///
     /// A click on a control built with
     /// [`focus_on_click(false)`](Self::focus_on_click) (a toolbar button, a
     /// menu bar title) blurs nothing, so a value typed and not yet committed
-    /// would be missed by the command it runs. Before that click is
-    /// dispatched, the framework calls this on the focused widget and on each
-    /// of its ancestors that set one, innermost first: AppKit's
-    /// `commitEditing`, and the fix for Qt's `NoFocus` tool button pitfall.
+    /// would be missed by the command it runs. When that click completes,
+    /// before the release that activates the control is dispatched (a press
+    /// dragged off the control or cancelled commits nothing), and before an
+    /// assistive technology's Click on it, the
+    /// framework calls this on the focused widget and on each of its
+    /// ancestors that set one, innermost first: AppKit's `commitEditing`,
+    /// and the fix for Qt's `NoFocus` tool button pitfall. The ancestors are
+    /// those an intent sent from the focused widget walks through: from a
+    /// popover on to the widget it is attached to and that widget's
+    /// ancestors, and no further than an open modal.
     #[doc(hidden)]
     pub fn on_commit_edit(mut self, f: impl FnMut(&mut EventContext) + 'static) -> Self {
         self.handlers.on_commit_edit = Some(Box::new(f));
@@ -883,7 +890,7 @@ impl HandlerSet {
     /// triggers, a toolbar's buttons. Ordinary push buttons and form controls
     /// keep the default, as on every desktop. Since such a click blurs
     /// nothing, the focused widget first commits the edit it holds (a spin
-    /// box's typed number, a field with an `on_blur_fn`), so the command the
+    /// box's typed number, a field's validator), so the command the
     /// click runs sees it.
     ///
     /// Only the framework's own focus move is affected. A widget that asks for

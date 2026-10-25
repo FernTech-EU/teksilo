@@ -28,8 +28,11 @@
 //!   ([`TextInputField::read_only`]).
 //! - Commit hooks: Enter fires
 //!   [`on_submit_fn`](TextInputField::on_submit_fn) and focus loss
-//!   fires [`on_blur_fn`](TextInputField::on_blur_fn), as does a click on
-//!   a control that takes no focus (a toolbar button), before its command.
+//!   fires [`on_blur_fn`](TextInputField::on_blur_fn), only on a real
+//!   focus loss. The [validator](TextInputField::validator) runs on focus
+//!   loss and also when a click on a control that takes no focus (a toolbar
+//!   button) is about to run its command, so the command sees the value
+//!   committed.
 //! - Non-editable trailing
 //!   [`suffix`](TextInputField::suffix), rendered flush-right inside
 //!   the field's bounds (Qt's `QSpinBox::suffix`). Caret cannot
@@ -222,6 +225,7 @@ pub struct TextInputField {
     on_submit: Option<CommandFactory>,
     on_access_set_value: Option<super::text_input_field::state::AccessSetValue>,
     on_blur: Option<CommandFactory>,
+    on_commit: Option<CommandFactory>,
     char_filter: Option<CharFilter>,
     /// Fixed trailing label rendered inside the field's border.
     /// Accepts both plain strings and `Signal<String>` — when bound,
@@ -352,6 +356,7 @@ impl TextInputField {
             on_submit: None,
             on_access_set_value: None,
             on_blur: None,
+            on_commit: None,
             char_filter: None,
             suffix: Prop::Static(String::new()),
             text_height: None,
@@ -454,16 +459,27 @@ impl TextInputField {
     }
 
     /// Closure fired once per focus-loss, after selection/scroll
-    /// have been reset. SpinBox-style callers parse and reformat
-    /// here; validators revalidate here.
+    /// have been reset and the [validator](Self::validator) has run.
     ///
-    /// Also fired, with the field keeping focus, when a click lands on a
-    /// control built with `focus_on_click(false)` (a toolbar button, a menu
-    /// bar title): such a click blurs nothing, and the command it runs must
-    /// still see the value this commits, as AppKit's `commitEditing`
-    /// ensures.
+    /// Only a real focus loss fires it. A click on a control built with
+    /// `focus_on_click(false)` (a toolbar button, a menu bar title) blurs
+    /// nothing: the field commits for it (its validator runs, and a
+    /// composite such as `SpinBox` parses its text) while keeping focus,
+    /// and this closure waits for focus to leave.
     pub fn on_blur_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_blur = Some(Box::new(f));
+        self
+    }
+
+    /// The composite's own commit, run after the validator: a `SpinBox`
+    /// parses, clamps and reformats its text here, a date field its date.
+    /// Run on a focus loss, before [`on_blur_fn`](Self::on_blur_fn), and
+    /// while the field keeps focus before a click on a control that takes
+    /// no focus runs its command (AppKit's `commitEditing`), so that command
+    /// sees the value. A focus loss right after such a commit, with nothing
+    /// typed since, does not run it again.
+    pub(crate) fn on_commit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.on_commit = Some(Box::new(f));
         self
     }
 
@@ -473,7 +489,7 @@ impl TextInputField {
     /// Composes with `max_length` and the built-in control/newline
     /// strip (filter runs after the strip). Whole-string validity
     /// (e.g. "at most one decimal point") is a commit-time concern
-    /// for `on_blur` / `on_submit`.
+    /// for the [validator](Self::validator).
     pub fn char_filter(mut self, f: impl Fn(char) -> bool + 'static) -> Self {
         self.char_filter = Some(Rc::new(f));
         self

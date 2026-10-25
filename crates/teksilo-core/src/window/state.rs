@@ -98,6 +98,10 @@ pub(crate) struct WindowStateInner {
     focused: Signal<bool>,
     resizable: Signal<bool>,
     always_on_top: Signal<bool>,
+    /// Whether the window's title bar offers a minimise and a maximise
+    /// button, as the window manager created it; see
+    /// [`WindowState::set_caption_buttons`].
+    caption_buttons: Cell<(bool, bool)>,
     /// Caps Lock active state, OS-driven only — no observer and no
     /// app→OS command (the app never sets the keyboard lock). Toggled by
     /// the window manager on each `Key::CapsLock` press; read by password
@@ -178,6 +182,7 @@ impl WindowState {
             focused: Signal::new(init.focused),
             resizable: Signal::new(init.resizable),
             always_on_top: Signal::new(init.always_on_top),
+            caption_buttons: Cell::new((true, true)),
             caps_lock: Signal::new(false),
             alt_down: Signal::new(false),
             other_key_pressed_during_alt: Cell::new(false),
@@ -283,6 +288,30 @@ impl WindowState {
 
     pub fn always_on_top(&self) -> &Signal<bool> {
         &self.inner.always_on_top
+    }
+
+    /// Whether the window's title bar offers a minimise button: `false` for
+    /// a modal dialog, which follows the window it blocks, and for a window
+    /// created with `WindowConfig::minimizable(false)`. A title bar the
+    /// application draws reads it to leave the button out.
+    #[doc(hidden)]
+    pub fn is_minimizable(&self) -> bool {
+        self.inner.caption_buttons.get().0
+    }
+
+    /// Whether the window's title bar offers a maximise button; see
+    /// [`is_minimizable`](Self::is_minimizable).
+    #[doc(hidden)]
+    pub fn is_maximizable(&self) -> bool {
+        self.inner.caption_buttons.get().1
+    }
+
+    /// Record which caption buttons the window was created with. Called by
+    /// the window manager before the window's root is built; both are
+    /// `true` until then.
+    #[doc(hidden)]
+    pub fn set_caption_buttons(&self, minimizable: bool, maximizable: bool) {
+        self.inner.caption_buttons.set((minimizable, maximizable));
     }
 
     /// Caps Lock active state. OS-driven only — the window manager

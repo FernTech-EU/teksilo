@@ -643,8 +643,10 @@ its walk inside the modal, then the window-global actions and global shortcuts
 registered by widgets inside the modal, never those of the page; the scoped
 shortcuts of the page do not fire either. With nothing focused while a
 modal is up, a key is judged as if focus were in the topmost modal. An
-intent nothing in the window takes still goes to the application tree, as
-from a native dialog window. A key does not: it becomes an intent only
+intent nothing in the window takes still goes to the application tree (from
+a native dialog window, it goes to the window the dialog blocks first; see
+"Modal dialogs" in the [multi-window guide](multi-window.md)). A key does
+not: it becomes an intent only
 through a shortcut that applies in the modal, and the page's do not, so the
 page's Ctrl+N bound to an application-tree action does not fire inside an
 in-window dialog. A shortcut registered in the application tree fires in a

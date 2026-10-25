@@ -18,7 +18,9 @@
 //! `WindowEvent` exactly as winit would hand it one. [`Script`] is the wrapper
 //! that does the handing: it forwards every callback to the real handler and,
 //! on the first `about_to_wait` (by which time `resumed` has created the
-//! window), runs the assertions and exits.
+//! window), runs the assertions and exits. One claim, (am), needs the loop to
+//! turn between its steps, to see what wakes it: it runs first, as a prelude
+//! called on each `about_to_wait` until it is done.
 //!
 //! # Why it is `#[ignore]`d
 //!
@@ -29,7 +31,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Thirty-four claims, and they do not all carry the same weight. Verified by
+//! Thirty-seven claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -40,8 +42,11 @@
 //!   (`input_loop::wire_translator`);
 //! - **(b)** the modal-blocked guard both swallows input and still delivers
 //!   `Resized`, and a click on the blocked window, or its taking the focus,
-//!   brings back a modal child the user minimised; the key modal child
-//!   shows its owner's native menu;
+//!   brings back a minimised modal child, and a raise it is owed is paid
+//!   while the application is active and dropped once it is not; the modal
+//!   child is minimised and
+//!   restored with the window it blocks (X11 leaves that to the window
+//!   manager); the key modal child shows its owner's native menu;
 //! - **(d)** a *wrong* soft-keyboard row is caught;
 //! - **(g)** a window awaiting a redraw it requested does not make
 //!   `update_control_flow` sleep until a deadline already due, so it cannot
@@ -97,7 +102,19 @@
 //!   newer, the other once the newer closes, and still the newer when the
 //!   older closes first;
 //! - **(ag)** a dialog is transient for its parent on X11, also when opened
-//!   from the parent's own handler, with the parent out of the map;
+//!   from the parent's own handler, with the parent out of the map, and is a
+//!   dialog (`_NET_WM_WINDOW_TYPE_DIALOG`) and modal (`_NET_WM_STATE_MODAL`)
+//!   to the window manager;
+//! - **(am)** on X11 a dialog, and a dialog of that dialog, follow their
+//!   owner's minimise and restore done through the window manager, woken by
+//!   the window-state watch alone, and a dialog counts as minimised only
+//!   once the window manager says it is (the prelude:
+//!   [`owners_followed_through_the_window_manager`]);
+//! - **(al)** a close request on a window its dialog blocks closes nothing
+//!   and raises the dialog, refused as it is asked and, when the dialog's own
+//!   close was queued then vetoed, as it comes up; a forced close of it
+//!   closes the dialog first, and a window the OS
+//!   destroyed (`Destroyed`) leaves the manager and unblocks its owner;
 //! - **(x)** with no window open, the loop goes on under
 //!   `QuitPolicy::Explicit`;
 //! - **(z)** a mount action in the application tree runs with the window
@@ -107,14 +124,20 @@
 //!   is open;
 //! - **(ac)** a modal request from the application tree gets a window of its
 //!   own with none open, closed by its dismissal, is presented in the window
-//!   open otherwise, but not in one about to close, and is refused when it
+//!   open otherwise (the one used last of those not minimised, else the one
+//!   used last), restored and raised with the request's activation token
+//!   when the user asked, asking for attention otherwise, and left alone
+//!   when focused, but not in one about to close, and is refused when it
 //!   presents an existing widget; one a rebuild in an `about_to_wait` tick
 //!   asks for is presented by `about_to_wait`;
 //! - **(ad)** an intent a window's actions leave reaches the application
 //!   tree, and one the application tree's handler sends reaches the window,
 //!   in `post_event` and in `about_to_wait`; a shortcut's crosses when the
 //!   application tree takes it; a window closing that turn is passed over,
-//!   and a close guard's intent outlives its window;
+//!   and a close guard's intent outlives its window; one a native dialog
+//!   window leaves goes to the window it blocks first, also as the dialog
+//!   closes, and up the owners it had when a dialog in between closed with
+//!   it;
 //! - **(ae)** a payload wrapped with an activation token reaches the handler
 //!   unwrapped, `on_app_event` too, and the token is taken by the window it
 //!   opens or raises, or dropped at the end of the turn; an intent the
@@ -198,20 +221,43 @@ use teksilo_core::{LiveImageAttachment, LiveImageSignals, WidgetId};
 
 use super::{
     AppEvent, GPU_RECLAIM_POLL, SessionChanged, TeksiloAppBuilder, TeksiloAppHandler, WindowWake,
+    WmStateChanged,
 };
 use crate::input_routing::tests::{Shared, click, cursor, logging_leaf, touch};
 use crate::redraw_gate::{TICK_INTERVAL, WITHHELD_AFTER};
 use crate::window_config::WindowConfig;
 use crate::window_manager::SESSION_RECHECK_INTERVAL;
 
-/// Forwards every winit callback to the real handler, then runs `step` once —
-/// on the first `about_to_wait`, which is the first moment a window exists and
-/// an `&ActiveEventLoop` is in hand — and exits.
+/// Forwards every winit callback to the real handler, then runs `step` once
+/// (on the first `about_to_wait`, which is the first moment a window exists
+/// and an `&ActiveEventLoop` is in hand) and exits. A `prelude`, when there is
+/// one, runs first, on every `about_to_wait` until it answers `true`: a claim
+/// that needs the loop itself to turn (to be woken by something) between its
+/// steps.
 struct Script<'a, F> {
     app: &'a mut TeksiloAppHandler,
+    prelude: Option<Prelude<'a>>,
     step: Option<F>,
+    /// What reached the loop while the prelude ran, oldest first: see
+    /// [`LoopSeen`].
+    seen: Rc<RefCell<Vec<LoopSeen>>>,
     /// `exiting` ran, and claim (n)'s check in it with it.
     exited: bool,
+}
+
+/// A claim run before the main step, on each `about_to_wait`, until it
+/// answers `true`.
+type Prelude<'a> = Box<dyn FnMut(&mut TeksiloAppHandler, &ActiveEventLoop) -> bool + 'a>;
+
+/// What woke the loop, as the prelude's claims read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoopSeen {
+    /// The X11 window-state watch's private payload.
+    WmStateChanged,
+    /// Any other user event.
+    OtherUserEvent,
+    /// A window event other than a redraw.
+    WindowEvent,
 }
 
 impl<F> ApplicationHandler<AppEvent> for Script<'_, F>
@@ -227,10 +273,21 @@ where
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
+        if self.prelude.is_some() {
+            self.seen.borrow_mut().push(match &event {
+                AppEvent::External(payload) if payload.is::<WmStateChanged>() => {
+                    LoopSeen::WmStateChanged
+                }
+                _ => LoopSeen::OtherUserEvent,
+            });
+        }
         self.app.user_event(event_loop, event);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if self.prelude.is_some() && !matches!(event, WindowEvent::RedrawRequested) {
+            self.seen.borrow_mut().push(LoopSeen::WindowEvent);
+        }
         self.app.window_event(event_loop, id, event);
     }
 
@@ -255,6 +312,12 @@ where
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.app.about_to_wait(event_loop);
+        if let Some(prelude) = &mut self.prelude {
+            if !prelude(self.app, event_loop) {
+                return;
+            }
+            self.prelude = None;
+        }
         if let Some(step) = self.step.take() {
             step(self.app, event_loop);
             event_loop.exit();
@@ -263,8 +326,15 @@ where
 }
 
 /// Build the app `builder` describes, pump one real event loop, and run `step`
-/// against the live handler with a live `&ActiveEventLoop`.
-fn drive(builder: TeksiloAppBuilder, step: impl FnOnce(&mut TeksiloAppHandler, &ActiveEventLoop)) {
+/// against the live handler with a live `&ActiveEventLoop`, after `prelude`
+/// (see [`Script`]). `prelude` is handed what reached the loop while it ran,
+/// and the time after which a watchdog wakes the loop once, so that a
+/// prelude waiting on a wake that never comes fails rather than hangs.
+fn drive<'a>(
+    builder: TeksiloAppBuilder,
+    prelude: impl FnOnce(Rc<RefCell<Vec<LoopSeen>>>, Instant) -> Prelude<'a>,
+    step: impl FnOnce(&mut TeksiloAppHandler, &ActiveEventLoop),
+) {
     builder.run_with(
         || {
             EventLoop::<AppEvent>::with_user_event()
@@ -279,18 +349,48 @@ fn drive(builder: TeksiloAppBuilder, step: impl FnOnce(&mut TeksiloAppHandler, &
                 .expect("winit could not build an X11 event loop (is DISPLAY set?)")
         },
         |mut event_loop, app| {
+            let seen: Rc<RefCell<Vec<LoopSeen>>> = Rc::default();
+            let deadline = Instant::now() + PRELUDE_TIMEOUT;
+            let done = Arc::new(AtomicBool::new(false));
+            let watchdog = {
+                let proxy = event_loop.create_proxy();
+                let done = done.clone();
+                std::thread::spawn(move || {
+                    while Instant::now() < deadline {
+                        if done.load(Ordering::Acquire) {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    if !done.load(Ordering::Acquire) {
+                        let _ = proxy.send_event(AppEvent::External(Box::new(PreludeWatchdog)));
+                    }
+                })
+            };
             let mut script = Script {
                 app,
+                prelude: Some(prelude(seen.clone(), deadline)),
                 step: Some(step),
+                seen,
                 exited: false,
             };
             event_loop
                 .run_app_on_demand(&mut script)
                 .expect("winit event loop exited with error");
+            done.store(true, Ordering::Release);
+            let _ = watchdog.join();
             assert!(script.exited, "winit never called `exiting`");
         },
     );
 }
+
+/// How long a prelude may wait for the loop to be woken before the watchdog
+/// wakes it to fail.
+const PRELUDE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// What the watchdog posts once [`PRELUDE_TIMEOUT`] has passed.
+#[derive(Debug)]
+struct PreludeWatchdog;
 
 /// The X11 window behind `id`.
 fn xid(app: &TeksiloAppHandler, id: crate::TeksiloWindowId) -> u32 {
@@ -306,6 +406,270 @@ fn xid(app: &TeksiloAppHandler, id: crate::TeksiloWindowId) -> u32 {
         winit::raw_window_handle::RawWindowHandle::Xcb(handle) => handle.window.get(),
         other => panic!("the loop runs on X11, got {other:?}"),
     }
+}
+
+/// The part of an X11 window manager claim (am) needs, for an X server
+/// running none (the private one a developer runs this under): it maps and
+/// configures what asks, and answers an iconify request (ICCCM
+/// `WM_CHANGE_STATE`, what winit's `set_minimized(true)` sends) by adding
+/// `_NET_WM_STATE_HIDDEN` to the window's state, and an activation
+/// (`_NET_ACTIVE_WINDOW`, what `set_minimized(false)` sends) by taking it
+/// away, as a window manager does. Nothing else: no focus, no unmap, so the
+/// window-state change is the one thing the application could hear.
+/// Released when dropped.
+struct MiniWm {
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl MiniWm {
+    /// Take the window manager's part on `$DISPLAY`; `None` when a window
+    /// manager runs already (openbox in CI), which then answers instead.
+    fn start() -> Option<Self> {
+        use x11rb::connection::Connection as _;
+        use x11rb::protocol::Event;
+        use x11rb::protocol::xproto::{
+            AtomEnum, ChangeWindowAttributesAux, ConfigureWindowAux, ConnectionExt as _, EventMask,
+            PropMode,
+        };
+        use x11rb::wrapper::ConnectionExt as _;
+
+        let (conn, screen) = x11rb::connect(None).expect("connect to $DISPLAY");
+        let root = conn.setup().roots[screen].root;
+        conn.change_window_attributes(
+            root,
+            &ChangeWindowAttributesAux::new()
+                .event_mask(EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY),
+        )
+        .expect("send ChangeWindowAttributes")
+        .check()
+        .ok()?;
+        let atom = |name: &[u8]| {
+            conn.intern_atom(false, name)
+                .expect("send InternAtom")
+                .reply()
+                .expect("intern an atom")
+                .atom
+        };
+        let change_state = atom(b"WM_CHANGE_STATE");
+        let active = atom(b"_NET_ACTIVE_WINDOW");
+        let state = atom(b"_NET_WM_STATE");
+        let hidden = atom(b"_NET_WM_STATE_HIDDEN");
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread = {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                let set_hidden = |window, on: bool| {
+                    let mut atoms: Vec<u32> = conn
+                        .get_property(false, window, state, AtomEnum::ATOM, 0, 1024)
+                        .ok()
+                        .and_then(|cookie| cookie.reply().ok())
+                        .and_then(|reply| reply.value32().map(Iterator::collect))
+                        .unwrap_or_default();
+                    atoms.retain(|atom| *atom != hidden);
+                    if on {
+                        atoms.push(hidden);
+                    }
+                    let _ = conn.change_property32(
+                        PropMode::REPLACE,
+                        window,
+                        state,
+                        AtomEnum::ATOM,
+                        &atoms,
+                    );
+                };
+                while !stop.load(Ordering::Acquire) {
+                    while let Ok(Some(event)) = conn.poll_for_event() {
+                        match event {
+                            Event::MapRequest(request) => {
+                                let _ = conn.map_window(request.window);
+                            }
+                            Event::ConfigureRequest(request) => {
+                                let _ = conn.configure_window(
+                                    request.window,
+                                    &ConfigureWindowAux::from_configure_request(&request),
+                                );
+                            }
+                            Event::ClientMessage(message) if message.type_ == change_state => {
+                                if message.data.as_data32()[0] == 3 {
+                                    set_hidden(message.window, true);
+                                }
+                            }
+                            Event::ClientMessage(message) if message.type_ == active => {
+                                set_hidden(message.window, false);
+                            }
+                            _ => {}
+                        }
+                    }
+                    let _ = conn.flush();
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            })
+        };
+        Some(Self {
+            stop,
+            thread: Some(thread),
+        })
+    }
+}
+
+impl Drop for MiniWm {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// Ask the window manager, as a pager or a taskbar does, to minimise
+/// (`iconify`) or activate `window`: an ICCCM `WM_CHANGE_STATE` to
+/// `IconicState`, or an EWMH `_NET_ACTIVE_WINDOW` from a pager.
+fn ask_window_manager(window: u32, iconify: bool) {
+    use x11rb::protocol::xproto::{ConnectionExt as _, EventMask};
+    let conn = teksilo_platform::x11::X11Connection::open().expect("connect to $DISPLAY");
+    let name: &[u8] = if iconify {
+        b"WM_CHANGE_STATE"
+    } else {
+        b"_NET_ACTIVE_WINDOW"
+    };
+    let type_ = conn
+        .conn()
+        .intern_atom(false, name)
+        .expect("send InternAtom")
+        .reply()
+        .expect("intern an atom")
+        .atom;
+    let data = if iconify {
+        [3, 0, 0, 0, 0]
+    } else {
+        [2, 0, 0, 0, 0]
+    };
+    conn.send_client_message(
+        conn.root(),
+        window,
+        type_,
+        data,
+        EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+    )
+    .expect("send the request to the window manager");
+    conn.flush().expect("flush");
+}
+
+/// Claim (am), the prelude: on X11, where winit reports no minimise, a dialog
+/// follows its owner because Teksilo's own X connection hears the owner's
+/// `_NET_WM_STATE` change and wakes the loop, with no other event and no
+/// polling. A window P with a dialog D1, itself with a dialog D2, is
+/// iconified through the window manager: D1 is asked to follow, counts as
+/// minimised once the window manager says it is, and D2 follows D1 the same
+/// way; P activated, both come back. With no window manager on the display
+/// the test plays its part ([`MiniWm`]), and then the first thing to reach
+/// the loop after the iconify is the watch's wake. Deleting the watch's
+/// post, or `reread_wm_states`, leaves the dialogs up until the watchdog
+/// fails the claim; marking a dialog minimised as it is asked marks it before
+/// the window manager did (with no window manager, never).
+fn owners_followed_through_the_window_manager(
+    seen: Rc<RefCell<Vec<LoopSeen>>>,
+    deadline: Instant,
+) -> Prelude<'static> {
+    let mut phase = 0;
+    let mut chain: Option<[crate::TeksiloWindowId; 3]> = None;
+    let mut wm: Option<MiniWm> = None;
+    // The windows' own first events (their map, their size) settle before
+    // the iconify, so that what reaches the loop after it is its answer.
+    let mut settled_at = Instant::now();
+    Box::new(move |app, event_loop| {
+        let minimised = |app: &mut TeksiloAppHandler, id| {
+            app.wm.get_by_teksilo_mut(id).expect("open").minimized
+        };
+        let report = |app: &mut TeksiloAppHandler, chain: [crate::TeksiloWindowId; 3]| {
+            format!(
+                "minimised: P {} D1 {} D2 {}; window-state rereads {}; seen {:?}",
+                minimised(app, chain[0]),
+                minimised(app, chain[1]),
+                minimised(app, chain[2]),
+                app.wm.wm_state_rereads,
+                seen.borrow()
+            )
+        };
+        match phase {
+            0 => {
+                let open = |app: &mut TeksiloAppHandler, title: &str, owner| {
+                    let config = WindowConfig::new()
+                        .title(title)
+                        .size(160, 100)
+                        .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false)));
+                    let config = match owner {
+                        Some(owner) => config.modal_to(owner),
+                        None => config,
+                    };
+                    app.wm.create_window(config, event_loop)
+                };
+                let p = open(app, "teksilo loop test: followed owner", None);
+                let d1 = open(app, "teksilo loop test: following dialog", Some(p));
+                let d2 = open(app, "teksilo loop test: dialog of the dialog", Some(d1));
+                chain = Some([p, d1, d2]);
+                wm = MiniWm::start();
+                settled_at = Instant::now() + Duration::from_millis(300);
+                event_loop.set_control_flow(ControlFlow::WaitUntil(settled_at));
+                phase = 1;
+                false
+            }
+            1 => {
+                if Instant::now() < settled_at {
+                    event_loop.set_control_flow(ControlFlow::WaitUntil(settled_at));
+                    return false;
+                }
+                app.wm.wm_state_rereads = 0;
+                seen.borrow_mut().clear();
+                ask_window_manager(xid(app, chain.expect("opened")[0]), true);
+                phase = 2;
+                false
+            }
+            2 => {
+                let chain = chain.expect("opened");
+                if chain.iter().all(|id| minimised(app, *id)) {
+                    if wm.is_some() {
+                        assert_eq!(
+                            seen.borrow().first(),
+                            Some(&LoopSeen::WmStateChanged),
+                            "the iconify reached the loop through the window-state watch"
+                        );
+                    }
+                    ask_window_manager(xid(app, chain[0]), false);
+                    phase = 3;
+                    return false;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "the dialogs did not follow their owner's minimise: {}",
+                    report(app, chain)
+                );
+                false
+            }
+            _ => {
+                let chain = chain.expect("opened");
+                if chain.iter().all(|id| !minimised(app, *id)) {
+                    assert!(app.wm.wm_state_rereads > 0);
+                    app.wm.close_window(chain[0]);
+                    assert!(
+                        chain
+                            .iter()
+                            .all(|id| app.wm.winit_id_for_teksilo(*id).is_none()),
+                        "closing the owner closed its dialogs"
+                    );
+                    wm = None;
+                    return true;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "the dialogs did not follow their owner's restore: {}",
+                    report(app, chain)
+                );
+                false
+            }
+        }
+    })
 }
 
 /// The one managed window's winit id, when there is exactly one.
@@ -595,7 +959,8 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             counter.set(counter.get() + 1);
         }
     });
-    drive(builder, move |app, event_loop| {
+    let prelude = owners_followed_through_the_window_manager;
+    drive(builder, prelude, move |app, event_loop| {
         let window = only_window(app);
 
         // -- (a) a contact handed to the real `window_event` reaches the tree
@@ -618,7 +983,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                 seen.phases.len(),
                 3,
                 "down / move / up should have reached the widget through the \
-                 real callback: {:?}",
+             real callback: {:?}",
                 seen.phases
             );
             assert!(
@@ -656,7 +1021,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                     .iter()
                     .any(|(_, kind)| *kind == teksilo_tokens::PointerKind::Mouse),
                 "a cursor move while a contact is live is X11's ghost and must \
-                 not reach the widget as a mouse: {:?}",
+             not reach the widget as a mouse: {:?}",
                 seen.phases
             );
         }
@@ -754,7 +1119,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             probe_new_window(app, event_loop, "teksilo loop test: control", 20),
             3,
             "a freshly created, laid-out window must deliver a contact — \
-             without this the two assertions below prove nothing"
+         without this the two assertions below prove nothing"
         );
 
         // (e) The translator holds the input tokens, not the theme, so a theme
@@ -772,7 +1137,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         assert!(
             recorder.borrow().phases.is_empty(),
             "`touch_enabled = false` must reach the already-open window's \
-             translator: {:?}",
+         translator: {:?}",
             recorder.borrow().phases
         );
 
@@ -783,7 +1148,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             probe_new_window(app, event_loop, "teksilo loop test: touch off", 22),
             0,
             "a window created under a touch-off theme must be born with the \
-             switch already thrown"
+         switch already thrown"
         );
 
         // -- (g) a window awaiting its redraw does not hold the loop awake
@@ -817,7 +1182,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                 assert!(
                     t > past,
                     "a window awaiting its redraw must not put the loop to sleep until \
-                     a deadline that has already passed"
+                 a deadline that has already passed"
                 );
             }
             // Once the redraw arrives the deadline counts again, so the half
@@ -992,7 +1357,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             assert!(
                 managed.platform_window.is_hidden(),
                 "the wake target knows the window draws nothing, so its draw \
-                 wakes are owed rather than lost in a request winit holds"
+             wakes are owed rather than lost in a request winit holds"
             );
             assert!(
                 managed.state.drain_os_commands().is_empty(),
@@ -1516,7 +1881,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             claims(app),
             [(true, true), (false, false)],
             "the window born claiming focus loses the claim, its `WindowState` \
-             with it, once another window reports the focus"
+         with it, once another window reports the focus"
         );
         app.window_event(event_loop, second_winit, WindowEvent::Focused(true));
         assert_eq!(app.wm.most_recent_window(), Some(second));
@@ -1526,7 +1891,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             app.wm.most_recent_window(),
             Some(first),
             "closing the most recent window hands the role to the one used \
-             before it"
+         before it"
         );
 
         // -- (w) `skip_taskbar` reaches the X server before the window maps
@@ -1562,7 +1927,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             assert!(
                 taskbar_state(app, palette).contains(&skip_atom),
                 "a window created with `skip_taskbar(true)` carries \
-                 _NET_WM_STATE_SKIP_TASKBAR"
+             _NET_WM_STATE_SKIP_TASKBAR"
             );
             assert!(
                 !taskbar_state(app, listed).contains(&skip_atom),
@@ -1665,9 +2030,156 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                 Some(xid(app, parent)),
                 "a dialog opened with its parent in the map is transient for it"
             );
+            // A dialog window, which a window manager draws with no minimise
+            // button of its own; its parent is not one.
+            assert!(
+                teksilo_platform::x11::ewmh::is_dialog_type(xid(app, from_outside))
+                    .expect("read _NET_WM_WINDOW_TYPE"),
+                "a modal window is a dialog to the window manager"
+            );
+            assert!(
+                !teksilo_platform::x11::ewmh::is_dialog_type(xid(app, parent))
+                    .expect("read _NET_WM_WINDOW_TYPE"),
+                "an ordinary window is not a dialog"
+            );
+            // And a modal one (`_NET_WM_STATE_MODAL`, written before the
+            // first map as GTK writes it), which a window manager keeps above
+            // its parent. Leaving out `create_window`'s
+            // `mark_modal_before_show` leaves the state out.
+            let modal_atom = teksilo_platform::x11::X11Connection::open()
+                .expect("connect to $DISPLAY")
+                .atoms()
+                .net_wm_state_modal;
+            let state = |id| {
+                teksilo_platform::x11::ewmh::net_wm_state(xid(app, id)).expect("read _NET_WM_STATE")
+            };
+            assert!(
+                state(from_outside).contains(&modal_atom),
+                "a modal window is modal to the window manager"
+            );
+            assert!(
+                state(dialog).contains(&modal_atom),
+                "also one opened from its parent's handler"
+            );
+            assert!(
+                !state(parent).contains(&modal_atom),
+                "an ordinary window is not modal"
+            );
             app.wm.close_window(from_outside);
             app.wm.close_window(dialog);
             app.wm.close_window(parent);
+        }
+
+        // -- (al) closing a dialog's owner
+        //
+        // The owner's close button, while its dialog is up, raises the
+        // dialog and closes nothing, as a window with a sheet on macOS or a
+        // disabled owner on Windows does. A forced close of the owner closes
+        // its dialog first: left open, the dialog kept the loop's window
+        // count above zero with nothing to block, and its `modal_parents`
+        // entry named a dead window. And a dialog the OS destroyed
+        // (`Destroyed`; Windows destroys owned windows with their owner)
+        // leaves the manager.
+        {
+            let open = |app: &mut TeksiloAppHandler, title: &str, owner| {
+                let config = WindowConfig::new()
+                    .title(title)
+                    .size(160, 100)
+                    .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false)));
+                let config = match owner {
+                    Some(owner) => config.modal_to(owner),
+                    None => config,
+                };
+                app.wm.create_window(config, event_loop)
+            };
+            use crate::window_manager::activation_log::{self, Activation};
+            let before = app.wm.window_count();
+            let owner = open(app, "teksilo loop test: owner", None);
+            let dialog = open(app, "teksilo loop test: owned dialog", Some(owner));
+            let owner_winit = app.wm.winit_id_for_teksilo(owner).expect("open");
+            let dialog_winit = app.wm.winit_id_for_teksilo(dialog).expect("open");
+            // Refused as it is asked: nothing is queued, and the dialog is
+            // raised. Deleting `request_close`'s refusal queues the close.
+            // (Through the window's `CloseRequested` the refusal in
+            // `process_pending`, run by the same event's `post_event`, would
+            // still keep the window, so the request is made directly.)
+            activation_log::take();
+            app.wm.request_close(owner);
+            assert!(
+                !app.wm.is_closing(owner),
+                "a close request on a window its dialog blocks is refused, not queued"
+            );
+            assert_eq!(
+                activation_log::take(),
+                [(dialog_winit, Activation::Raised)],
+                "the refused close raises the dialog"
+            );
+            app.window_event(event_loop, owner_winit, WindowEvent::CloseRequested);
+            app.wm.process_pending(event_loop);
+            assert_eq!(
+                app.wm.window_count(),
+                before + 2,
+                "a close request on a window its dialog blocks closes nothing"
+            );
+            assert_eq!(
+                activation_log::take(),
+                [(dialog_winit, Activation::Raised)],
+                "and raises the dialog"
+            );
+            // Asked while the dialog's own close is queued, the owner's close
+            // goes through `request_close`; the dialog's guard then vetoes,
+            // and the owner's close is refused when it comes up. Deleting the
+            // refusal in `process_pending` closes the owner, its dialog
+            // with it.
+            let vetoing = app.wm.create_window(
+                WindowConfig::new()
+                    .title("teksilo loop test: vetoing dialog")
+                    .size(160, 100)
+                    .modal_to(owner)
+                    .on_close_requested(|_ctx| teksilo_core::CloseResponse::Veto)
+                    .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                event_loop,
+            );
+            let vetoing_winit = app.wm.winit_id_for_teksilo(vetoing).expect("open");
+            app.wm.close_window(dialog);
+            app.wm.request_close(vetoing);
+            app.wm.request_close(owner);
+            assert!(
+                app.wm.is_closing(owner),
+                "let through: its dialog is closing"
+            );
+            activation_log::take();
+            app.wm.process_pending(event_loop);
+            assert_eq!(
+                app.wm.window_count(),
+                before + 2,
+                "the dialog vetoed its close, and the owner's is refused"
+            );
+            assert_eq!(
+                activation_log::take(),
+                [(vetoing_winit, Activation::Raised)],
+                "the refused close raises the dialog"
+            );
+            app.wm.queue_close(owner);
+            app.wm.process_pending(event_loop);
+            assert_eq!(
+                app.wm.window_count(),
+                before,
+                "closing the owner closes its dialog too"
+            );
+            assert!(app.wm.winit_id_for_teksilo(vetoing).is_none());
+
+            let owner = open(app, "teksilo loop test: owner 2", None);
+            let dialog = open(app, "teksilo loop test: destroyed dialog", Some(owner));
+            let dialog_winit = app.wm.winit_id_for_teksilo(dialog).expect("open");
+            app.window_event(event_loop, dialog_winit, WindowEvent::Destroyed);
+            assert!(
+                app.wm.winit_id_for_teksilo(dialog).is_none(),
+                "a window the OS destroyed leaves the manager"
+            );
+            assert!(!app.wm.is_blocked(owner), "and no longer blocks its owner");
+            app.wm.close_window(owner);
+            assert_eq!(app.wm.window_count(), before);
         }
 
         // -- (b) a window blocked by a modal child
@@ -1752,9 +2264,9 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         );
 
         // A click on the blocked window raises its modal child, and brings
-        // it back first if the user minimised it: winit's raise leaves a
-        // minimised window where it is. Raising without restoring in
-        // `refocus_modal_child` leaves it minimised.
+        // it back first if it was minimised (a window manager may offer to):
+        // winit's raise leaves a minimised window where it is. Raising
+        // without restoring in `refocus_modal_child` leaves it minimised.
         app.wm
             .get_by_teksilo_mut(modal_child)
             .expect("the modal child")
@@ -1785,6 +2297,114 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             "the blocked window taking the focus brings back its minimised dialog"
         );
 
+        // A raise the dialog could not take, hidden with the window it
+        // blocks (macOS restores a child window after its parent's
+        // animation), is owed: paid on the first sign it is shown again
+        // while the application is active, dropped once no window of the
+        // application has the focus (the user went elsewhere), and not paid
+        // either when that sign comes while none has. Deleting the drop
+        // from `about_to_wait` pays the third; deleting the check in
+        // `note_dialog_sign` pays the second.
+        {
+            use crate::window_manager::DialogSign;
+            use crate::window_manager::activation_log::{self, Activation};
+            let dialog_winit = app.wm.winit_id_for_teksilo(modal_child).expect("open");
+            let dialog_window = app.wm.windows_map()[&dialog_winit]
+                .platform_window
+                .window_arc();
+            let was_focused: Vec<(WindowId, bool)> = app
+                .wm
+                .windows_map()
+                .iter()
+                .map(|(id, managed)| (*id, managed.focused))
+                .collect();
+            let set_app_active = |app: &mut TeksiloAppHandler, active: bool| {
+                for (id, _) in &was_focused {
+                    if let Some(managed) = app.wm.get_by_winit_mut(*id) {
+                        managed.focused = active && *id == window;
+                    }
+                }
+            };
+            let owe = |app: &mut TeksiloAppHandler| {
+                dialog_window.set_visible(false);
+                app.wm.refocus_modal_child(parent_id);
+                dialog_window.set_visible(true);
+                activation_log::take();
+            };
+            set_app_active(app, true);
+            owe(app);
+            app.wm.note_dialog_sign(modal_child, DialogSign::Shown);
+            assert_eq!(
+                activation_log::take(),
+                [(dialog_winit, Activation::Raised)],
+                "an owed raise is paid while the application is active"
+            );
+            owe(app);
+            set_app_active(app, false);
+            app.wm.note_dialog_sign(modal_child, DialogSign::Shown);
+            assert_eq!(
+                activation_log::take(),
+                [],
+                "not with no window of the application focused"
+            );
+            set_app_active(app, true);
+            owe(app);
+            set_app_active(app, false);
+            app.about_to_wait(event_loop);
+            set_app_active(app, true);
+            app.wm.note_dialog_sign(modal_child, DialogSign::Shown);
+            assert_eq!(
+                activation_log::take(),
+                [],
+                "dropped once the application was no longer active"
+            );
+            for (id, focused) in was_focused {
+                if let Some(managed) = app.wm.get_by_winit_mut(id) {
+                    managed.focused = focused;
+                }
+            }
+        }
+
+        // The dialog follows its owner, from what the manager knows of the
+        // owner (the window-state watch keeps it, see the prelude's claim):
+        // asked to minimise with it, but not counted minimised, so still
+        // drawn, until its own state says the window manager did (none runs
+        // here); restored and raised with it. Deleting `about_to_wait`'s
+        // `follow_owners` raises nothing; marking the dialog minimised as
+        // it is asked fails the first assertion.
+        {
+            use crate::window_manager::activation_log::{self, Activation};
+            let dialog_winit = app.wm.winit_id_for_teksilo(modal_child).expect("open");
+            let set_owner_minimised = |app: &mut TeksiloAppHandler, minimised: bool| {
+                app.wm
+                    .get_by_winit_mut(window)
+                    .expect("the owner")
+                    .minimized = minimised;
+            };
+            let dialog_minimised = |app: &mut TeksiloAppHandler| {
+                app.wm
+                    .get_by_teksilo_mut(modal_child)
+                    .expect("the modal child")
+                    .minimized
+            };
+            set_owner_minimised(app, true);
+            app.about_to_wait(event_loop);
+            assert!(
+                !dialog_minimised(app),
+                "a dialog asked to minimise with its owner counts as minimised only once \
+             the window manager says it is"
+            );
+            activation_log::take();
+            set_owner_minimised(app, false);
+            app.about_to_wait(event_loop);
+            assert!(!dialog_minimised(app));
+            assert_eq!(
+                activation_log::take(),
+                [(dialog_winit, Activation::Raised)],
+                "a dialog comes back, in front, with the window it blocks"
+            );
+        }
+
         // Non-input still arrives: a `Resized` the blocked window never saw
         // would leave its surface and its `WindowState` at the old size.
         let before = app.wm.windows_map()[&window].state.size().get();
@@ -1799,7 +2419,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             after,
             (before.0 + 40, before.1 + 30),
             "a blocked window still has to hear the OS resize it — reverting \
-             `BlockedDisposition::Deliver` to a swallow leaves it at {before:?}"
+         `BlockedDisposition::Deliver` to a swallow leaves it at {before:?}"
         );
 
         // -- (x) / (y) the quit policy, and the application-level quit
@@ -2670,6 +3290,124 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             "and nothing was presented in the open window either"
         );
 
+        // A window the user can see: of `working` and a window used since
+        // but minimised, `working`. With every window minimised, the one
+        // used last. Picking the most recent window whatever its state
+        // presents in the minimised one.
+        //
+        // Brought to the user as the request came: asked by the user (here
+        // with an activation token, as a launcher's arrives), the window is
+        // restored and raised with the token; asked with no input (a timer,
+        // another thread), it asks for attention and stays minimised, so it
+        // takes the focus from no other application; already focused, it is
+        // left alone. Leaving out the restore leaves it minimised; raising
+        // whatever the source raises the unasked one; dropping the focus
+        // test raises the focused one.
+        {
+            use crate::window_manager::activation_log::{self, Activation};
+            let other = app.wm.create_window(
+                WindowConfig::new()
+                    .title("teksilo loop test: used last")
+                    .size(320, 200)
+                    .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                event_loop,
+            );
+            let other_winit = app.wm.winit_id_for_teksilo(other).expect("open");
+            let minimise = |app: &mut TeksiloAppHandler, id, minimised: bool| {
+                let window = app.wm.get_by_teksilo_mut(id).expect("open");
+                window.minimized = minimised;
+                window.minimized_probed_at = Some(Instant::now());
+            };
+            let focus = |app: &mut TeksiloAppHandler, id, focused: bool| {
+                app.wm.get_by_teksilo_mut(id).expect("open").focused = focused;
+            };
+            let shows_a_dialog = |app: &mut TeksiloAppHandler, id| {
+                app.wm
+                    .get_by_teksilo_mut(id)
+                    .expect("open")
+                    .tree
+                    .has_modal_overlay()
+            };
+            focus(app, working, false);
+            focus(app, other, false);
+            minimise(app, other, true);
+            let before = overlays(app);
+            activation_log::take();
+            ask(app);
+            assert!(
+                overlays(app) > before,
+                "presented in the window not minimised"
+            );
+            assert!(!shows_a_dialog(app, other));
+            assert_eq!(
+                activation_log::take(),
+                [(working_winit, Activation::Attention)],
+                "asked with no input: attention, no raise"
+            );
+            minimise(app, working, true);
+            ask(app);
+            assert!(shows_a_dialog(app, other), "in the window used last");
+            assert!(
+                app.wm.get_by_teksilo_mut(other).expect("open").minimized,
+                "asked with no input: left minimised"
+            );
+            assert_eq!(
+                activation_log::take(),
+                [(other_winit, Activation::Attention)],
+                "and it asks for attention"
+            );
+            app.wm.set_dispatch_activation_token("user".into());
+            app.wm.used_activation_tokens.clear();
+            ask(app);
+            assert!(
+                !app.wm.get_by_teksilo_mut(other).expect("open").minimized,
+                "asked by the user: restored to show it"
+            );
+            assert_eq!(
+                activation_log::take(),
+                [(other_winit, Activation::Raised)],
+                "and raised"
+            );
+            assert_eq!(
+                app.wm.used_activation_tokens,
+                ["user"],
+                "with the token the request came with"
+            );
+            // Asked in the turn of the user's click (the click's handler
+            // asking, as the application tree's action a button's intent
+            // reaches does): the click's `post_event` presents it, raised.
+            // Leaving out `handle_window_event_inner`'s
+            // `note_user_activation` asks for attention instead.
+            minimise(app, other, true);
+            app.run_in_app_tree(event_loop, |tree, ops| {
+                tree.run_with_event_context(ops, |ctx| {
+                    ctx.present_message_box(
+                        teksilo_widgets::MessageBox::information(teksilo_i18n::lit!(
+                            "From a click"
+                        ))
+                        .buttons(teksilo_widgets::MessageBoxButtons::Ok),
+                    );
+                });
+            });
+            app.window_event(event_loop, working_winit, click(ElementState::Released));
+            assert_eq!(
+                activation_log::take(),
+                [(other_winit, Activation::Raised)],
+                "asked in the turn of a click: raised"
+            );
+            assert!(!app.wm.get_by_teksilo_mut(other).expect("open").minimized);
+            focus(app, other, true);
+            app.wm.set_dispatch_activation_token("user".into());
+            ask(app);
+            assert_eq!(
+                activation_log::take(),
+                [],
+                "the focused window is left alone"
+            );
+            app.wm.close_window(other);
+            minimise(app, working, false);
+        }
+
         // A window about to close is no place for it: with the only window
         // closing in the same turn, it gets a window of its own.
         app.wm.queue_close(working);
@@ -2886,6 +3624,126 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             Some("app:app.from_window"),
             "the closed window's intent was not lost"
         );
+
+        // An intent a native dialog window leaves goes on to the window it
+        // blocks, then to the application tree, as one sent in an in-tree
+        // dialog walks on to the page: sent while it is open, as it closes,
+        // and from its close guard as it goes. Offering a window's leftovers
+        // to the application tree alone leaves `owner`'s action unrun.
+        crossed.borrow_mut().clear();
+        let owner = {
+            let log = crossed.clone();
+            app.wm.create_window(
+                WindowConfig::new()
+                    .title("teksilo loop test: dialog owner")
+                    .size(200, 120)
+                    .root(move |tree, _state| {
+                        tree.add(Takes {
+                            label: "owner",
+                            takes: "doc.from_dialog",
+                            then: None,
+                            log,
+                        })
+                    }),
+                event_loop,
+            )
+        };
+        let dialog = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: native dialog")
+                .size(120, 80)
+                .modal_to(owner)
+                .on_close_requested(|ctx| {
+                    ctx.send_intent(teksilo_core::Intent::new("doc.from_dialog"));
+                    teksilo_core::CloseResponse::Close
+                })
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        let dialog_winit = app.wm.winit_id_for_teksilo(dialog).expect("open");
+        app.run_in_window(dialog_winit, event_loop, |tree, ops| {
+            tree.run_with_event_context(ops, |ctx| {
+                ctx.send_intent(teksilo_core::Intent::new("doc.from_dialog"));
+                ctx.send_intent(teksilo_core::Intent::new("app.from_window"));
+            });
+        });
+        app.post_event(event_loop);
+        assert_eq!(
+            *crossed.borrow(),
+            ["owner:doc.from_dialog", "app:app.from_window"],
+            "to the window it blocks, else to the application tree"
+        );
+        crossed.borrow_mut().clear();
+        app.run_in_window(dialog_winit, event_loop, |tree, ops| {
+            tree.run_with_event_context(ops, |ctx| {
+                ctx.send_intent(teksilo_core::Intent::new("doc.from_dialog"));
+                ctx.close_window_forced();
+            });
+        });
+        app.post_event(event_loop);
+        assert_eq!(
+            *crossed.borrow(),
+            ["owner:doc.from_dialog"],
+            "sent as it closes"
+        );
+        let dialog = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: native dialog 2")
+                .size(120, 80)
+                .modal_to(owner)
+                .on_close_requested(|ctx| {
+                    ctx.send_intent(teksilo_core::Intent::new("doc.from_dialog"));
+                    teksilo_core::CloseResponse::Close
+                })
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        crossed.borrow_mut().clear();
+        app.wm.request_close(dialog);
+        app.post_event(event_loop);
+        assert!(app.wm.winit_id_for_teksilo(dialog).is_none());
+        assert_eq!(
+            *crossed.borrow(),
+            ["owner:doc.from_dialog"],
+            "sent by its close guard as it goes"
+        );
+        // Up a chain of dialogs, the owners are the ones the dialog had: a
+        // dialog's dialog whose middle owner is closed with it still offers
+        // its leftover to the window at the top. Climbing from the recorded
+        // owner as the windows are now (the middle one gone) skips it.
+        let middle = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: middle dialog")
+                .size(120, 80)
+                .modal_to(owner)
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        let innermost = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: innermost dialog")
+                .size(100, 60)
+                .modal_to(middle)
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        let innermost_winit = app.wm.winit_id_for_teksilo(innermost).expect("open");
+        crossed.borrow_mut().clear();
+        app.run_in_window(innermost_winit, event_loop, |tree, ops| {
+            tree.run_with_event_context(ops, |ctx| {
+                ctx.send_intent(teksilo_core::Intent::new("doc.from_dialog"));
+            });
+        });
+        app.wm.queue_close(middle);
+        app.wm.process_pending(event_loop);
+        assert!(app.wm.winit_id_for_teksilo(innermost).is_none());
+        app.post_event(event_loop);
+        assert_eq!(
+            *crossed.borrow(),
+            ["owner:doc.from_dialog"],
+            "past the closed middle dialog, to the window at the top"
+        );
+        app.wm.close_window(owner);
         app.wm.close_window(other);
 
         // (x) Under `Explicit` the loop turns with no window open and goes

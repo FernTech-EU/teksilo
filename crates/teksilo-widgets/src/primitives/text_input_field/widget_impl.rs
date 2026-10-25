@@ -107,24 +107,26 @@ impl Widget for TextInputField {
 
         // Build the shared state from the configured builder values.
         let mut on_submit = self.on_submit.take().map(Rc::new);
-        let mut on_blur = self.on_blur.take().map(Rc::new);
+        let on_blur = self.on_blur.take().map(Rc::new);
+        let mut on_commit = self.on_commit.take().map(Rc::new);
 
         // Wrap commit callbacks with the validator pipeline. The
         // wrapping closure: snapshots the bound text, runs the
         // validator, applies the outcome (writes feedback, mutates
-        // text on `Corrected`), then chains the user's callback so
-        // composites can react to the now-updated state.
+        // text on `Corrected`), then chains the composite's commit so
+        // it can react to the now-updated state. The app's blur
+        // callback is not a commit: it runs after one, on a real blur.
         if let Some(validator) = self.validator.clone() {
             let bound_text = self.text.clone();
             let feedback = self.feedback.clone();
-            let prev_on_blur = on_blur.take();
-            on_blur = Some(Rc::new(Box::new({
+            let prev_on_commit = on_commit.take();
+            on_commit = Some(Rc::new(Box::new({
                 let validator = validator.clone();
                 let feedback = feedback.clone();
                 let bound_text = bound_text.clone();
                 move |evt_ctx: &mut EventContext| {
                     run_validator_and_apply(&validator, &bound_text, &feedback);
-                    if let Some(cb) = prev_on_blur.as_ref() {
+                    if let Some(cb) = prev_on_commit.as_ref() {
                         cb(evt_ctx);
                     }
                 }
@@ -161,6 +163,7 @@ impl Widget for TextInputField {
             on_submit,
             on_access_set_value: self.on_access_set_value.clone(),
             on_blur,
+            on_commit,
             char_filter: self.char_filter.take(),
             placeholder: self.placeholder.clone(),
             suffix: initial_suffix,
@@ -777,7 +780,9 @@ impl Widget for TextInputField {
                     st.needs_full_layout = true;
                 }
                 let mut blur_callback: Option<Rc<CommandFactory>> = None;
+                let mut commit_callback: Option<Rc<CommandFactory>> = None;
                 if gained {
+                    st.committed_text = None;
                     st.blink.restart();
                     st.caret_visible.set(true);
                     drop(st);
@@ -842,6 +847,14 @@ impl Widget for TextInputField {
                     // while we are unfocused; clearing this forces the next
                     // focus-gain report to re-seed it instead of being deduped.
                     st.last_ime_area = None;
+                    // A commit made for a click while the field kept focus
+                    // covers this blur when nothing was typed since.
+                    let committed = st.committed_text.take();
+                    st.apply_pending_chars();
+                    let text = st.document.to_plain_text().unwrap_or_default();
+                    if committed.as_ref() != Some(&text) {
+                        commit_callback = st.on_commit.clone();
+                    }
                     blur_callback = st.on_blur.clone();
                     drop(st);
                     // The band is exempt from outside-press dismissal, so the
@@ -863,6 +876,9 @@ impl Widget for TextInputField {
                     keyboard::clear_ime_preedit(&state_for_focus);
                     sync_cursor_signals(&state_for_focus);
                 }
+                if let Some(cb) = commit_callback {
+                    cb(ctx);
+                }
                 if let Some(cb) = blur_callback {
                     cb(ctx);
                 }
@@ -870,16 +886,22 @@ impl Widget for TextInputField {
             })
             // A click on a control that takes no focus (a toolbar button)
             // blurs nothing, so the command it runs would miss what a blur
-            // commits: the framework asks for that commit here first, and it
-            // is the blur callback's own (a spin box's parse, a date field's,
-            // an app's `on_blur_fn`), run while the field keeps focus.
+            // commits: the framework asks for that commit here first. It is
+            // the field's own (its validator, a spin box's parse, a date
+            // field's), run while the field keeps focus; the app's
+            // `on_blur_fn` waits for a real blur. The text it leaves is noted
+            // so that blur does not commit it again.
             .on_commit_edit({
                 let state = self.state().clone();
                 move |ctx| {
-                    let commit = state.borrow().on_blur.clone();
+                    let commit = state.borrow().on_commit.clone();
                     if let Some(commit) = commit {
                         commit(ctx);
                     }
+                    let mut st = state.borrow_mut();
+                    st.apply_pending_chars();
+                    let text = st.document.to_plain_text().unwrap_or_default();
+                    st.committed_text = Some(text);
                 }
             })
             .on_pointer_event(move |event, ctx| {

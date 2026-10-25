@@ -462,7 +462,7 @@ impl Widget for TimeEdit {
 
         // ── Validator ─────────────────────────────────────────
         // Mirrors DateEdit's design: pure classification; the
-        // chained on_blur callback below re-parses and updates the
+        // chained on_commit callback below re-parses and updates the
         // bound value signal.
         let validation_behavior = self.validation_behavior;
         let validator: crate::primitives::text_input_field::ValidatorFn = {
@@ -605,7 +605,7 @@ impl Widget for TimeEdit {
                     commit(ctx_evt);
                 }
             })
-            .on_blur_fn({
+            .on_commit_fn({
                 let commit = commit.clone();
                 move |ctx_evt| {
                     commit(ctx_evt);

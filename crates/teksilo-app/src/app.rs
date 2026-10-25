@@ -1198,10 +1198,13 @@ impl TeksiloAppHandler {
     /// Present the modal requests the application tree queued. It has no
     /// window to show them in, so each goes to the window the user is
     /// working with: the [most recent](crate::WindowManager::most_recent_window)
-    /// one not about to close, over its frontmost native dialog if it has
-    /// one, in its tree or as a native modal child as the request resolves.
-    /// With no window open, or every one closing, it gets a plain window of
-    /// its own, which its dismissal closes. A
+    /// one not about to close and not minimised, else the most recent one;
+    /// over its frontmost native dialog if it has one, in its tree or as a
+    /// native modal child as the request resolves. That window is restored
+    /// and brought forward first when the user asked for the dialog, and
+    /// otherwise asks for the user's attention (see
+    /// [`show_for_app_tree_dialog`](crate::window_manager::WindowManager::show_for_app_tree_dialog)). With no window open, or every one closing,
+    /// it gets a plain window of its own, which its dismissal closes. A
     /// request whose content is an existing widget of the application tree
     /// cannot move to another tree, and is refused.
     fn process_app_tree_modal_requests(&mut self, event_loop: &ActiveEventLoop) -> bool {
@@ -1226,6 +1229,9 @@ impl TeksiloAppHandler {
                 self.open_modal_window(None, request, event_loop);
                 continue;
             };
+            // Where the user can see it: restored and in front when the
+            // user asked, else announced (see `show_for_app_tree_dialog`).
+            self.wm.show_for_app_tree_dialog(window);
             match resolve_modal_presentation(
                 request.presentation,
                 &request.content,
@@ -1615,8 +1621,10 @@ impl TeksiloAppHandler {
         {
             trace.note_cross_window_redraw(cross_window_redraws);
         }
-        // The routed event's activation token is good for this turn only.
+        // The routed event's activation token is good for this turn only,
+        // and so is the user's input as the source of what was asked.
         self.wm.clear_dispatch_activation_token();
+        self.wm.clear_user_activation();
         self.maybe_exit(event_loop);
         self.update_control_flow(event_loop);
     }
@@ -2476,18 +2484,16 @@ impl TeksiloAppHandler {
 
     /// Offer what each tree left unclaimed to the other side: the windows'
     /// to the application tree, the application tree's to the window the
-    /// user works with. Repeats while a routed intent's handler sends new
+    /// user works with ([`app_modal_target`](WindowManager::app_modal_target)),
+    /// and to that one window only, as AppKit offers what the application
+    /// leaves to its key window alone. Repeats while a routed intent's handler sends new
     /// ones across, for 16 rounds in a turn; the trees stop keeping a chain
     /// of intents after 64 crossings in all. See [`crate::intent_routing`].
     fn forward_unclaimed_intents(&mut self, event_loop: &ActiveEventLoop) {
         use crate::intent_routing::offer;
         for _ in 0..16 {
-            let mut from_windows: Vec<teksilo_core::Intent> = self.wm.take_orphan_intents();
-            from_windows.extend(
-                self.wm
-                    .iter_mut()
-                    .flat_map(|managed| managed.tree.take_unclaimed_intents()),
-            );
+            let from_windows = self.wm.take_unclaimed_window_intents();
+            let from_windows = self.offer_to_dialog_owners(from_windows, event_loop);
             let from_app = self
                 .wm
                 .app_tree_mut()
@@ -2538,6 +2544,45 @@ impl TeksiloAppHandler {
                  stops after 64 crossings"
             );
         }
+    }
+
+    /// Offer each intent a native modal dialog window left unclaimed to the
+    /// window it blocks, then to that window's own owner and so on up, as
+    /// the chain was when the intent was taken (a window in between closed
+    /// since is passed over, not the end of the climb), and return the
+    /// intents none of them took, for the application tree. An in-tree
+    /// dialog's intent walks on to the page in the same way. A window
+    /// closing this turn is passed over. Each offer is
+    /// [routed](WidgetTree::dispatch_routed_intent), so a window that does
+    /// not take it does not keep it.
+    fn offer_to_dialog_owners(
+        &mut self,
+        intents: Vec<(teksilo_core::Intent, Vec<TeksiloWindowId>)>,
+        event_loop: &ActiveEventLoop,
+    ) -> Vec<teksilo_core::Intent> {
+        let mut left = Vec::new();
+        for (intent, owners) in intents {
+            let mut taken = false;
+            for up in owners {
+                if self.wm.is_closing(up) {
+                    continue;
+                }
+                let Some(winit_id) = self.wm.winit_id_for_teksilo(up) else {
+                    continue;
+                };
+                let offered = intent.clone();
+                self.run_in_window(winit_id, event_loop, |tree, ops| {
+                    taken = tree.dispatch_routed_intent(offered, ops);
+                });
+                if taken {
+                    break;
+                }
+            }
+            if !taken {
+                left.push(intent);
+            }
+        }
+        left
     }
 
     /// Run `f` against the application tree with a
@@ -2776,6 +2821,11 @@ impl TeksiloAppHandler {
             NativeAppMenuEventPayload, NativeMenuEventPayload, NativeMenuHandle,
         };
 
+        // A native menu row the user chose: what its handlers ask is the
+        // user's request, as a click's is.
+        if payload.is::<NativeMenuEventPayload>() || payload.is::<NativeAppMenuEventPayload>() {
+            self.wm.note_user_activation();
+        }
         let payload = match payload.downcast::<NativeMenuEventPayload>() {
             Ok(payload) => *payload,
             Err(payload) => {
@@ -3169,6 +3219,10 @@ impl TeksiloAppHandler {
                 a11y_events.push(evt);
             }
         }
+        // A screen reader's action is the user's, as a click is.
+        if !a11y_events.is_empty() {
+            self.wm.note_user_activation();
+        }
         for evt in a11y_events {
             self.dispatch_in_window(window_id, evt, event_loop);
         }
@@ -3504,6 +3558,12 @@ impl TeksiloAppHandler {
             return;
         }
 
+        // A click, a key, a contact: what its handlers ask for this turn is
+        // the user's request (see `WindowManager::acts_for_user`).
+        if crate::input_routing::is_user_activation(&event) {
+            self.wm.note_user_activation();
+        }
+
         // A window blocked by a modal child swallows the user's *input* and
         // bounces it to the child, while still hearing everything the OS says
         // about the window itself. Which is which — and which of the swallowed
@@ -3546,12 +3606,22 @@ impl TeksiloAppHandler {
                     // Guarded close: the OS close button / Alt+F4 / Cmd+W
                     // is an interactive gesture, so it runs through the
                     // window's close guard (if any) on the next
-                    // `process_pending` tick and may be vetoed.
+                    // `process_pending` tick and may be vetoed. A window
+                    // its dialog blocks refuses it and raises the dialog.
                     self.wm.request_close(fid);
                 }
             }
+            // The OS destroyed the window: Windows destroys an owned window
+            // with its owner. One Teksilo closed itself is already gone from
+            // the manager; one still in it is forgotten now, or it would
+            // stay counted (keeping a `LastWindowClosed` app alive with
+            // nothing on screen) and keep its owner blocked.
+            WindowEvent::Destroyed => {
+                if let Some(fid) = teksilo_id {
+                    self.wm.close_window(fid);
+                }
+            }
             WindowEvent::Resized(new_size) => {
-                let mut just_minimised = None;
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.platform_window.resize(new_size);
                     // Mirror OS-initiated geometry / placement changes
@@ -3573,9 +3643,6 @@ impl TeksiloAppHandler {
                     managed.state.set_placement_from_os(placement);
                     // Windows reports a minimise as a resize to zero, and a
                     // restore as a resize back.
-                    if placement.is_minimized() && !managed.minimized {
-                        just_minimised = Some(managed.teksilo_id);
-                    }
                     managed.minimized = placement.is_minimized();
                     managed.sync_hidden();
                     // A resize is when the safe area changes: on the one
@@ -3587,11 +3654,6 @@ impl TeksiloAppHandler {
                         trace.note_redraw_request("resize");
                     }
                     managed.request_redraw();
-                }
-                // A modal window the user minimised takes the window it
-                // blocks with it.
-                if let Some(id) = just_minimised {
-                    self.wm.minimise_with_modal_child(id);
                 }
             }
             WindowEvent::Moved(pos) => {
@@ -3760,6 +3822,10 @@ impl TeksiloAppHandler {
                 }
             }
             WindowEvent::RedrawRequested => {
+                if let Some(fid) = teksilo_id {
+                    self.wm
+                        .note_dialog_sign(fid, crate::window_manager::DialogSign::Redrawn);
+                }
                 self.handle_redraw_requested(window_id, event_loop);
             }
             WindowEvent::ThemeChanged(winit_theme) => {
@@ -3790,12 +3856,12 @@ impl TeksiloAppHandler {
                 let newly_focused = self.apply_os_focus(window_id, focused, event_loop);
                 // A window blocked by a modal child can take the focus without
                 // a press reaching it: a click on its title bar, Alt+Tab, its
-                // taskbar button. The child comes back to the front, restored
-                // if the user minimised it, as for a click in the window. A
-                // modal window and the window it blocks are minimised and
-                // restored together.
+                // taskbar button. The child comes back to the front, as for a
+                // click in the window.
                 if focused && let Some(fid) = self.wm.teksilo_id_for_winit(window_id) {
                     self.wm.note_focus_gained(fid);
+                    self.wm
+                        .note_dialog_sign(fid, crate::window_manager::DialogSign::Focused);
                 }
                 // A window regaining focus is the natural, zero-idle-cost moment
                 // to re-check the OS accessibility preferences (WCAG / EN 301
@@ -3829,6 +3895,12 @@ impl TeksiloAppHandler {
             // behind another — still focused, on macOS — also parks its
             // animations, and so a hidden window stops drawing.
             WindowEvent::Occluded(occluded) => {
+                // A dialog AppKit shows again once the window it blocks is
+                // back from the Dock gets the raise it was owed.
+                if !occluded && let Some(fid) = teksilo_id {
+                    self.wm
+                        .note_dialog_sign(fid, crate::window_manager::DialogSign::Shown);
+                }
                 let active = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.occluded = occluded;
                     // winit's word replaces what asking the platform found.
@@ -3981,6 +4053,12 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
                     // again rather than being lost.
                     self.wm.take_app_tree_wake();
                     self.post_event(event_loop);
+                    return;
+                }
+                Err(payload) if payload.is::<WmStateChanged>() => {
+                    // A dialog or its owner was minimised or restored (X11);
+                    // the `about_to_wait` that follows acts on it.
+                    self.wm.reread_wm_states(Instant::now());
                     return;
                 }
                 Err(payload) => match payload.downcast::<SessionChanged>() {
@@ -4305,6 +4383,13 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         self.pump_pen_sources(event_loop);
         self.refresh_occluded_band();
         self.process_pending(event_loop);
+        // A dialog follows its owner's minimise and restore where the window
+        // system does not keep it with its owner.
+        self.wm.follow_owners();
+        // A raise a dialog is owed is the user's only while the application
+        // is: with no window of it focused, it would take the focus from
+        // whatever the user went to.
+        self.wm.drop_owed_raises_if_inactive();
         // What the tick above, the pen input or a timed gesture left (an
         // intent for the other side, a request) is drained by a
         // `post_event`, which nothing else brings to an application with no
@@ -4381,6 +4466,19 @@ pub(crate) struct WindowWake {
 /// [`WindowManager::apply_session`](crate::window_manager::WindowManager::apply_session).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SessionChanged;
+
+/// Posted by the X11 window-state watch, from its thread, each time the
+/// `_NET_WM_STATE` of a modal dialog or of the window it blocks changes (a
+/// minimise or a restore, which winit does not report). Private to the
+/// framework, like [`WindowWake`]; the loop answers with
+/// [`WindowManager::reread_wm_states`](crate::window_manager::WindowManager::reread_wm_states),
+/// and the `about_to_wait` that follows lets the dialogs follow their owners.
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(
+    not(all(unix, not(target_os = "macos"))),
+    allow(dead_code, reason = "posted only by the X11 window-state watch")
+)]
+pub(crate) struct WmStateChanged;
 
 /// An `AppEvent::External` payload with the activation token that came with
 /// it: what a single-instance application's listener posts when a second
@@ -5225,8 +5323,14 @@ impl TeksiloAppBuilder {
     ///
     /// What needs a window is not drawn there. A modal request
     /// ([`EventContext::present_modal`](teksilo_core::widget::EventContext::present_modal),
-    /// a `MessageBox`) is presented in the window used last, or in a window
-    /// of its own when none is open, and must build its content with
+    /// a `MessageBox`) is presented in the window used last of those not
+    /// minimised (else the one used last), or in a window of its own when
+    /// none is open. Asked in answer to the user's input (a click, a key, a
+    /// menu row, a screen reader's action, or a payload carrying an
+    /// activation token), that window is restored and brought to the front;
+    /// otherwise (a timer, another thread) it asks for the user's attention
+    /// and stays where it is, so the application takes the focus from no
+    /// other. The request must build its content with
     /// `ModalRequest::deferred`; one presenting an existing widget is
     /// refused. A file dialog has no parent window and reports an error. A
     /// toast is shown in every window. An overlay or an animated widget is

@@ -151,6 +151,8 @@ independent of who draws the frame.
 
 On macOS, because `renders_custom_controls()` is `false`, `WindowControls` never enters the tree, the OS's native traffic lights are what you see.
 
+The cluster offers the buttons the window was created with, read from its `WindowState` at build time: a modal dialog has no minimise button (it is minimised and restored with the window it blocks, see [multi-window.md](multi-window.md#modal-dialogs)), and a window built with `WindowConfig::minimizable(false)` or `maximizable(false)` has no such button. A button left out has no region in `HitRegions`, so Windows reports no `HTMINBUTTON` or `HTMAXBUTTON` there. The X11 fallback window menu leaves out its Minimize and Maximize rows the same way, and a double click on the title bar does not maximise a window with no maximise button. macOS's traffic lights follow the same flags through the OS.
+
 Window minimize / maximize / close are **not** trait methods. They flow through [`WindowState::placement`](../crates/teksilo-core/src/window/state.rs) (a `Signal<WindowPlacement>`) and `WindowState::close`, `WindowControls` mutates these and the app-level [`apply_window_command`](../crates/teksilo-app/src/window_manager.rs) translates each `WindowCommand` into the matching winit call. OS-initiated changes flow back via `set_placement_from_os` (re-entrancy guarded).
 
 ---

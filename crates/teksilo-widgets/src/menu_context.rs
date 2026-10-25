@@ -252,7 +252,6 @@ impl MenuContext {
         }
         let content_id = inner.content_ids[index];
         let trigger_id = inner.trigger_ids[index];
-        let focus_id = inner.focus_ids[index];
         drop(inner);
 
         ctx.dismiss_all_except_hosts();
@@ -308,7 +307,11 @@ impl MenuContext {
         ctx.show_overlay(request);
         // Focus the inner MenuList (not the host) so it receives key events
         // first. ArrowLeft/Escape bubble from MenuList → host for cross-menu nav.
-        ctx.request_focus(focus_id);
+        // Asked of the host, which takes no focus, so the request lands on
+        // the first focusable widget in it, the menu list, as the tree is
+        // once the materialisation above has built it: an id read here, before
+        // the menu is built, would name a widget the build has not made yet.
+        ctx.request_focus(content_id);
     }
 
     /// Close all menus and reset the open_index signal. Focus goes where the

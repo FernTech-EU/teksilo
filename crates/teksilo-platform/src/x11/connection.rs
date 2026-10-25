@@ -111,9 +111,15 @@ pub struct Atoms {
     pub net_wm_moveresize: Atom,
     pub motif_wm_hints: Atom,
 
-    // --- EWMH window state (taskbar) ---
+    // --- EWMH window state (taskbar, dialogs, minimised) ---
     pub net_wm_state: Atom,
     pub net_wm_state_skip_taskbar: Atom,
+    pub net_wm_state_modal: Atom,
+    pub net_wm_state_hidden: Atom,
+
+    // --- EWMH window type (dialogs) ---
+    pub net_wm_window_type: Atom,
+    pub net_wm_window_type_dialog: Atom,
 }
 
 impl Atoms {
@@ -152,6 +158,10 @@ impl Atoms {
             b"_MOTIF_WM_HINTS",
             b"_NET_WM_STATE",
             b"_NET_WM_STATE_SKIP_TASKBAR",
+            b"_NET_WM_STATE_MODAL",
+            b"_NET_WM_STATE_HIDDEN",
+            b"_NET_WM_WINDOW_TYPE",
+            b"_NET_WM_WINDOW_TYPE_DIALOG",
         ];
 
         let cookies = NAMES
@@ -197,6 +207,10 @@ impl Atoms {
             motif_wm_hints: take(),
             net_wm_state: take(),
             net_wm_state_skip_taskbar: take(),
+            net_wm_state_modal: take(),
+            net_wm_state_hidden: take(),
+            net_wm_window_type: take(),
+            net_wm_window_type_dialog: take(),
         })
     }
 

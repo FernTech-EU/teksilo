@@ -209,8 +209,12 @@ impl Widget for DragRegion {
                 if let Some(w) = ctx.window() {
                     let next = if w.placement().get().is_maximized() {
                         teksilo_core::WindowPlacement::Floating
-                    } else {
+                    } else if w.is_maximizable() {
                         teksilo_core::WindowPlacement::Maximized
+                    } else {
+                        // No maximise button, no maximise by double click
+                        // either, as on Windows.
+                        return;
                     };
                     w.placement().set(next);
                 }
@@ -366,6 +370,15 @@ mod tests {
     /// The drag region alone in a 400 × 32 tree, on a manual input clock so a
     /// hold is a `set` rather than a sleep.
     fn region(host: Rc<TestHost>) -> (WidgetTree, Rc<ManualClock>, Point) {
+        region_of_window(host, (true, true))
+    }
+
+    /// [`region`] in a window created with the given `(minimizable,
+    /// maximizable)` caption buttons.
+    fn region_of_window(
+        host: Rc<TestHost>,
+        (minimizable, maximizable): (bool, bool),
+    ) -> (WidgetTree, Rc<ManualClock>, Point) {
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let clock = Rc::new(ManualClock::new(EventTime::ZERO));
         tree.set_input_clock(clock.clone());
@@ -380,6 +393,9 @@ mod tests {
             resizable: true,
             always_on_top: false,
         }));
+        if let Some(state) = tree.window_state() {
+            state.set_caption_buttons(minimizable, maximizable);
+        }
         let id = tree.add(DragRegion::new(host as Rc<dyn PlatformTitleBarHost>));
         tree.layout(SizeProposal::exact(400.0, 32.0));
         let at = tree.bounds(id).center();
@@ -561,6 +577,52 @@ mod tests {
             assert!(
                 placement.get().is_maximized(),
                 "a double tap must maximise (coarse = {coarse})"
+            );
+        }
+    }
+
+    /// A window with no maximise button is not maximised by a double tap on
+    /// its title bar either, as Windows ignores a double click on such a
+    /// window's caption.
+    #[test]
+    fn a_double_tap_does_not_maximise_a_window_with_no_maximise_button() {
+        let host = Rc::new(TestHost::with_os_menu());
+        let (mut tree, _clock, at) = region_of_window(host, (true, false));
+        let placement = tree.window_state().unwrap().placement().clone();
+        tree.pointer_move(at);
+        for _ in 0..2 {
+            tree.pointer_down_button(at, PointerButton::Primary);
+            tree.pointer_up_button(at, PointerButton::Primary);
+        }
+        assert!(!placement.get().is_maximized());
+    }
+
+    /// The window menu built where the platform has none (X11) offers only
+    /// the window's own buttons: a dialog's has no Minimize, and one with no
+    /// maximise button no Maximize.
+    #[test]
+    fn the_fallback_window_menu_offers_only_the_windows_buttons() {
+        use teksilo_i18n::tr;
+        let minimize = tr!(window_menu_minimize()).resolve_now();
+        let maximize = tr!(window_menu_maximize()).resolve_now();
+        let close = tr!(window_menu_close()).resolve_now();
+        for buttons in [(true, true), (false, false), (false, true)] {
+            let host = Rc::new(TestHost::default());
+            let (mut tree, _clock, at) = region_of_window(host, buttons);
+            tree.pointer_move(at);
+            tree.pointer_down_button(at, PointerButton::Secondary);
+            tree.pointer_up_button(at, PointerButton::Secondary);
+            tree.layout(SizeProposal::exact(400.0, 32.0));
+            assert!(tree.find_by_label(&close).is_some(), "{buttons:?}");
+            assert_eq!(
+                tree.find_by_label(&minimize).is_some(),
+                buttons.0,
+                "{buttons:?}"
+            );
+            assert_eq!(
+                tree.find_by_label(&maximize).is_some(),
+                buttons.1,
+                "{buttons:?}"
             );
         }
     }

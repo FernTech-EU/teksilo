@@ -92,8 +92,12 @@ macOS. The drag region is a `Spacer`-style flex
 child that absorbs all leftover horizontal space and forwards
 pointer / drag / double-tap gestures to the platform host. The window
 controls (minimize / maximize / close) are rendered only when the host
-advertises `PlatformTitleBarHost::renders_custom_controls` — i.e. on
-Windows and Wayland but not on macOS.
+advertises `PlatformTitleBarHost::renders_custom_controls`, i.e. on
+Windows and Wayland but not on macOS, and offer only the buttons the
+window was created with: a modal dialog has no minimise button, and a
+window built with `WindowConfig::minimizable(false)` or
+`maximizable(false)` lacks that one. The same goes for the window menu the
+bar builds on X11 and for maximising by double click.
 
 ## This widget builds exactly once
 

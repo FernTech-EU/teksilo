@@ -28,7 +28,7 @@ use std::sync::OnceLock;
 
 use x11rb::protocol::xproto::{Atom, AtomEnum, Window};
 
-use super::connection::{X11Connection, X11Error};
+use super::connection::{Atoms, X11Connection, X11Error};
 
 /// What the running window manager can do for a borderless window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,12 +163,29 @@ pub fn capabilities() -> WmCapabilities {
 /// only after the server confirmed it: that round trip is what orders it
 /// before the map request winit sends over its own connection.
 pub fn mark_skip_taskbar(window: Window) -> Result<(), X11Error> {
+    add_net_wm_state(window, |atoms| atoms.net_wm_state_skip_taskbar)
+}
+
+/// Make an X11 window that is not mapped yet modal to its transient parent,
+/// by adding `_NET_WM_STATE_MODAL` to its `_NET_WM_STATE`, as GTK marks a
+/// modal dialog. A window manager keeps it above its parent and may refuse
+/// the parent focus while it is up. Written before the first map, like
+/// [`mark_skip_taskbar`].
+#[doc(hidden)]
+pub fn mark_modal(window: Window) -> Result<(), X11Error> {
+    add_net_wm_state(window, |atoms| atoms.net_wm_state_modal)
+}
+
+/// Add the atom `which` picks to `window`'s `_NET_WM_STATE`, keeping the
+/// atoms already there and adding it once; see [`mark_skip_taskbar`].
+fn add_net_wm_state(window: Window, which: fn(&Atoms) -> Atom) -> Result<(), X11Error> {
     use x11rb::protocol::xproto::PropMode;
     use x11rb::wrapper::ConnectionExt as _;
 
     let conn = X11Connection::open()?;
     let atoms = conn.atoms();
-    if read_net_wm_state(&conn, window)?.contains(&atoms.net_wm_state_skip_taskbar) {
+    let atom = which(atoms);
+    if read_net_wm_state(&conn, window)?.contains(&atom) {
         return Ok(());
     }
     conn.conn()
@@ -177,7 +194,7 @@ pub fn mark_skip_taskbar(window: Window) -> Result<(), X11Error> {
             window,
             atoms.net_wm_state,
             AtomEnum::ATOM,
-            &[atoms.net_wm_state_skip_taskbar],
+            &[atom],
         )?
         .check()?;
     Ok(())
@@ -190,8 +207,8 @@ pub fn net_wm_state(window: Window) -> Result<Vec<Atom>, X11Error> {
 }
 
 /// The window `window` is transient for (ICCCM `WM_TRANSIENT_FOR`, which
-/// winit writes for a parent window), `None` when it has none. Opens (and
-/// drops) its own short-lived connection.
+/// [`set_transient_for`] writes for a modal window; winit never writes it),
+/// `None` when it has none. Opens (and drops) its own short-lived connection.
 pub fn transient_for(window: Window) -> Result<Option<Window>, X11Error> {
     let conn = X11Connection::open()?;
     Ok(conn
@@ -221,6 +238,22 @@ pub fn set_transient_for(window: Window, parent: Window) -> Result<(), X11Error>
         )?
         .check()?;
     Ok(())
+}
+
+/// Whether `window`'s `_NET_WM_WINDOW_TYPE` names a dialog
+/// (`_NET_WM_WINDOW_TYPE_DIALOG`), as a modal window's does. Opens (and
+/// drops) its own short-lived connection.
+pub fn is_dialog_type(window: Window) -> Result<bool, X11Error> {
+    let conn = X11Connection::open()?;
+    let types = conn
+        .get_property_full(
+            window,
+            conn.atoms().net_wm_window_type,
+            AtomEnum::ATOM.into(),
+        )?
+        .map(|value| value.as_u32s())
+        .unwrap_or_default();
+    Ok(types.contains(&conn.atoms().net_wm_window_type_dialog))
 }
 
 /// [`net_wm_state`] over a connection already open.

@@ -299,10 +299,11 @@ fn with_a_modal_up_and_nothing_focused_the_page_handles_nothing() {
     assert!(!window.tree.can_handle("test.global"));
 }
 
-/// `handled_intents` names exactly the intents `can_handle` answers true for,
-/// whatever the focus, so a caller that asks for many names can walk once.
+/// `handled_intents_from` names exactly the intents `can_handle_from`
+/// answers true for, whatever the source, so a caller that asks for many
+/// names can walk once.
 #[test]
-fn handled_intents_names_what_can_handle_takes() {
+fn handled_intents_from_names_what_can_handle_from_takes() {
     #[derive(Debug)]
     struct AppRoot;
     impl Widget for AppRoot {
@@ -339,11 +340,12 @@ fn handled_intents_names_what_can_handle_takes() {
         if let Some(focus) = focus {
             window.tree.focus(focus);
         }
-        let handled = window.tree.handled_intents();
+        let source = window.tree.live_command_focus().unwrap();
+        let handled = window.tree.handled_intents_from(source);
         for name in names {
             assert_eq!(
                 handled.contains(&name),
-                window.tree.can_handle(name),
+                window.tree.can_handle_from(source, name),
                 "{name} with focus on {focus:?}"
             );
         }

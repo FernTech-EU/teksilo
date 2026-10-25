@@ -32,9 +32,26 @@ use teksilo::widgets::{MenuBar, MenuEntry, MenuModel, StandardMenu};
 
 TeksiloAppBuilder::new()
     .install_native_menu()                         // the macOS menu bar
-    .app_root(|tree| tree.add(AppRoot))            // the application tree
+    .app_root(|tree| tree.add(AppRoot::new()))     // the application tree
     .initial_window(WindowConfig::new().root(|tree, _| tree.add(Document::new())))
     .run();
+
+struct AppRoot {
+    menu: MenuModel,                               // built once, kept
+}
+
+impl AppRoot {
+    fn new() -> Self {
+        let menu = MenuModel::new()
+            .standard_menu(StandardMenu::app().title(tr!(app_name())).quit_intent("app.quit"))
+            .menu(tr!(file()), |m| m
+                .item(MenuEntry::new(tr!(new())).intent("app.new").shortcut("app.new")))
+            .menu(tr!(edit()), |m| m
+                .item(MenuEntry::new(tr!(copy())).intent("edit.copy").shortcut("edit.copy")))
+            .standard_menu(StandardMenu::window());
+        Self { menu }
+    }
+}
 
 impl Widget for AppRoot {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
@@ -47,15 +64,8 @@ impl Widget for AppRoot {
         }));
         ctx.register_action_global(Action::new("app.quit").on_invoke(|_, ctx| ctx.request_quit()));
 
-        ctx.set_application_menu(
-            MenuModel::new()
-                .standard_menu(StandardMenu::app().title(tr!(app_name())).quit_intent("app.quit"))
-                .menu(tr!(file()), |m| m
-                    .item(MenuEntry::new(tr!(new())).intent("app.new").shortcut("app.new")))
-                .menu(tr!(edit()), |m| m
-                    .item(MenuEntry::new(tr!(copy())).intent("edit.copy").shortcut("edit.copy")))
-                .standard_menu(StandardMenu::window()),
-        );
+        // The same handle at every build: declaring it again changes nothing.
+        ctx.set_application_menu(self.menu.clone());
         vec![]
     }
     // layout_response: a zero size; the tree is never drawn.
@@ -68,7 +78,13 @@ let bar = ctx.add(MenuBar::application());
 `set_application_menu` is on `BuildContext` and `EventContext` (the
 `ApplicationMenuExt` trait, in the prelude). Call it from the application tree;
 called from a window's tree it does nothing, and a debug build panics. Calling
-it again replaces the menu everywhere. `MenuBar::application()` with no
+it again with another model replaces the menu everywhere: every bar showing it
+rebuilds and the macOS menu is installed again. So build the model once, keep
+the handle (a field of the application root, as above) and declare a clone of
+it: the same handle declared again changes nothing. A model built inside
+`build` is a new one at every rebuild of the root, and a debug build says so
+when that keeps happening. Change the declared menu with its mutators
+(`push_item`, `remove`, `modify`) or its entries' signals. `MenuBar::application()` with no
 application menu declared shows no menu, and a debug build says so once.
 
 Demo: `cargo run -p native-menu`.
@@ -120,7 +136,9 @@ those, in the window as in the macOS menu bar.
   bar's title.
 - In the macOS menu bar the rows are brought up to date after every turn of the
   event loop, with the route a chosen row's intent would take, so a menu is
-  current when the user opens it. The route is walked once a turn, and the rows
+  current when the user opens it. That route starts at the key window's focused
+  widget as it is: the menu bar is outside the window, so a field focused in an
+  open popover is where Edit ▸ Copy goes, and what the row asks. The route is walked once a turn, and the rows
   are evaluated only when what it takes changed or a menu was installed since;
   where the backend shows no bar (every platform but macOS) nothing is
   refreshed. With no window open, a command that only
@@ -310,7 +328,7 @@ whenever it changes, and calls `activate_window` on `WindowEvent::Focused`:
 | --- | --- |
 | has a menu of its own (`MenuBar::from_model(..).native_on_macos(Suppress or Coexist)`) | that menu |
 | a modal dialog with no menu of its own | the menu of the window it blocks, or of that window's owner, up the chain, as AppKit keeps the bar for a sheet or a panel |
-| shows the application menu (`MenuBar::application()`), or has no menu bar and no owner with one (a secondary window) | the application menu; with none declared, the bar shown before stays |
+| shows the application menu (`MenuBar::application()`), or has no menu bar and no owner with one (a secondary window) | the application menu; with none declared, the bar shown before stays, until one is declared, which then shows at once |
 | none: no window is open (`QuitPolicy::Explicit`) | the application menu, whole: File ▸ New and Open live, window commands greyed out |
 
 A window's own menu never replaces the application menu itself: what the bar
