@@ -229,9 +229,9 @@ pub mod prelude {
 
     // Multi-window API
     pub use teksilo_core::{
-        CloseResponse, DecorationsMode, ModalConfig, SizeToContent, TeksiloWindowId,
-        UserAttentionKind, WindowCommand, WindowConfig, WindowPlacement, WindowRemovedCallback,
-        WindowRemovedEvent, WindowState,
+        CloseDecision, CloseResponse, DecorationsMode, ModalConfig, QuitSource, SizeToContent,
+        TeksiloWindowId, UserAttentionKind, WindowCommand, WindowConfig, WindowPlacement,
+        WindowRemovedCallback, WindowRemovedEvent, WindowState,
     };
 
     // i18n (architecture §12)

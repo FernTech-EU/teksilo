@@ -229,6 +229,10 @@ enum PoolMsg {
         id: WriterId,
         ack: SyncSender<()>,
     },
+    /// Write every writer's queued patches now; the first error, if any.
+    FlushAll {
+        ack: SyncSender<Result<(), FlushError>>,
+    },
     /// Register the process-wide sink invoked when a write is permanently
     /// discarded (see [`WriteFailureSink`]). Replaces any previous sink.
     SetFailureSink(WriteFailureSink),
@@ -354,6 +358,21 @@ fn worker_loop(rx: Receiver<PoolMsg>) {
             Ok(PoolMsg::Schedule { id, patch }) => apply_schedule(&mut state, id, patch),
             Ok(PoolMsg::FlushNow { id, ack }) => {
                 let _ = ack.send(flush_writer(&mut state, id));
+            }
+            Ok(PoolMsg::FlushAll { ack }) => {
+                let ids: Vec<WriterId> = state.pending.keys().copied().collect();
+                let mut first_error = None;
+                for id in ids {
+                    if let Err(e) = flush_writer(&mut state, id) {
+                        let path = state.paths.get(&id).map(|p| p.display().to_string());
+                        eprintln!(
+                            "teksilo-settings: write to {} failed: {e}",
+                            path.as_deref().unwrap_or("<unknown>"),
+                        );
+                        first_error.get_or_insert(e);
+                    }
+                }
+                let _ = ack.send(first_error.map_or(Ok(()), Err));
             }
             Ok(PoolMsg::Unregister { id, ack }) => {
                 if let Err(e) = flush_writer(&mut state, id) {
@@ -643,6 +662,21 @@ impl DebouncedWriter {
     /// iteration (useful in tests).
     pub fn delay(&self) -> Duration {
         self.delay
+    }
+}
+
+/// Force the queued patches of every writer in the process to disk
+/// synchronously, whoever owns it: for a process about to end without
+/// dropping its writers. Every writer is tried; the first error is
+/// returned and the others are logged.
+pub(crate) fn flush_every_writer() -> Result<(), FlushError> {
+    let (ack_tx, ack_rx) = mpsc::sync_channel(0);
+    pool()
+        .send(PoolMsg::FlushAll { ack: ack_tx })
+        .map_err(|_| FlushError::Disconnected)?;
+    match ack_rx.recv() {
+        Ok(result) => result,
+        Err(_) => Err(FlushError::Disconnected),
     }
 }
 

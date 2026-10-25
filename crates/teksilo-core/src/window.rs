@@ -19,6 +19,7 @@
 //! observers; the app-level window manager drains it once per tick and
 //! translates each command into a winit call.
 
+pub mod close_decision;
 pub mod command;
 pub mod config;
 pub mod decorations;
@@ -27,8 +28,10 @@ pub mod id;
 pub mod menubar_dispatcher;
 pub mod ops;
 pub mod placement;
+pub mod quit_source;
 pub mod state;
 
+pub use close_decision::{CloseAnswer, CloseDecision, CloseDecisionReceipt};
 pub use command::{UserAttentionKind, WindowCommand};
 pub use config::{
     CloseBlockedCallback, CloseGuard, CloseResponse, ModalConfig, PostRootBuilder, RootBuilder,
@@ -42,4 +45,5 @@ pub use menubar_dispatcher::{
 };
 pub use ops::{NoopWindowOps, SoftKeyboardSupport, WindowOps};
 pub use placement::WindowPlacement;
+pub use quit_source::QuitSource;
 pub use state::WindowState;

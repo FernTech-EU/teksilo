@@ -91,9 +91,12 @@ pub struct ModalRequest {
     /// the first focusable descendant in tree-walk order.
     pub focus_target: Option<WidgetId>,
     /// Invoked when the modal is dismissed by any path (Escape, close
-    /// button, click-outside, explicit `ctx.dismiss_modal()`). Only
-    /// fired for in-tree presentations — native-window modals do not
-    /// have a reliable dismiss callback yet.
+    /// button, click-outside, explicit `ctx.dismiss_modal()`), and when the
+    /// window presenting it closes with it still up (a quit, a forced
+    /// close of the window), with
+    /// [`DismissReason::Programmatic`](crate::overlay::DismissReason::Programmatic).
+    /// For a native modal window, it runs in that window's tree as the
+    /// window closes, whatever closes it.
     pub on_dismiss: Option<OverlayDismissCallback>,
 }
 
@@ -156,7 +159,9 @@ impl ModalRequest {
 
     /// Register a callback invoked when the modal is dismissed by any
     /// path (Escape, close button, click-outside, explicit
-    /// `ctx.dismiss_modal()`). Only fired for in-tree presentations.
+    /// `ctx.dismiss_modal()`), or closed with the window presenting it, in
+    /// the tree and as a native modal window alike, with the reason it
+    /// went.
     pub fn on_dismiss(mut self, callback: OverlayDismissCallback) -> Self {
         self.on_dismiss = Some(callback);
         self

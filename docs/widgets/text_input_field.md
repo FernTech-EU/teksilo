@@ -33,6 +33,7 @@
 | `Self` | [`on_submit_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinputfield-on_submit_fn) |
 | `Self` | [`on_access_set_value(f: impl Fn(&str, &mut EventContext) -> bool + 'static)`](#textinputfield-on_access_set_value) |
 | `Self` | [`on_blur_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinputfield-on_blur_fn) |
+| `Self` | [`on_commit_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinputfield-on_commit_fn) |
 | `Self` | [`char_filter(f: impl Fn(char) -> bool + 'static)`](#textinputfield-char_filter) |
 | `Self` | [`suffix(text: impl Into<Prop<String>>)`](#textinputfield-suffix) |
 | `Self` | [`text_height(height: f32)`](#textinputfield-text_height) |
@@ -119,7 +120,8 @@ Features:
 - Commit hooks: Enter fires
   `on_submit_fn` and focus loss
   fires `on_blur_fn`, only on a real
-  focus loss. The `validator` runs on focus
+  focus loss. `on_commit_fn` runs once per
+  edit, on whichever of a no-focus command and a blur comes first. The `validator` runs on focus
   loss and also when a click on a control that takes no focus (a toolbar
   button) is about to run its command, so the command sees the value
   committed.
@@ -325,6 +327,24 @@ Only a real focus loss fires it. A click on a control built with
 nothing: the field commits for it (its validator runs, and a
 composite such as `SpinBox` parses its text) while keeping focus,
 and this closure waits for focus to leave.
+
+<a id="textinputfield-on_commit_fn"></a>
+
+#### `pub fn on_commit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
+
+Editing is finished, commit: run once per edit, after the
+`validator` and before the app's
+`on_blur_fn`. Use it for what must happen when the
+user is done with the text, such as saving it or parsing it into a
+value.
+
+It runs at the first of two moments. While the field keeps focus, it
+runs before the command of a click on a control that takes no focus
+(`focus_on_click(false)`: a toolbar button, a menu bar title), so that
+command sees the value (AppKit's `commitEditing`). On a real blur it
+runs unless such a click already ran it and nothing was typed since.
+`on_blur_fn` means focus left and waits for a real blur; a composite
+such as `SpinBox` commits its parse through this same hook.
 
 <a id="textinputfield-char_filter"></a>
 

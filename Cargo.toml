@@ -155,6 +155,11 @@ text-typeset = "2.0.0"
 portable-pty = "0.9"
 alacritty_terminal = "0.26"
 
+# SIGTERM and SIGHUP turned into a quit request (`teksilo-platform`'s
+# `os_quit`, Unix only), from a thread rather than inside the handler. The
+# version `alacritty_terminal` already resolves, so it adds no crate.
+signal-hook = "0.4"
+
 # Derive-based CLI parsing. Every binary in this workspace uses it, so the
 # argument surface is declared once per command rather than hand-matched — and
 # `--help` is generated rather than a string constant that drifts from the code.

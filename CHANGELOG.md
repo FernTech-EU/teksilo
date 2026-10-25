@@ -17,6 +17,12 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **`TextInput::on_commit_fn` and `TextInputField::on_commit_fn`**:
+  "editing is finished, commit". It runs once per edit, before the command
+  of a click on a control that takes no focus (`focus_on_click(false)`) and
+  on a real blur, whichever comes first; `on_blur_fn` keeps meaning that
+  focus left. An app that saved a field's text from `on_blur_fn` moves that
+  code here.
 - **The application menu.** The application tree declares one menu for the
   whole application with `ctx.set_application_menu(model)` (the
   `ApplicationMenuExt` trait, in the prelude), and a window shows it with
@@ -62,23 +68,61 @@ by crate for clarity, not because crates version independently.
 
 #### App
 
+- **`SIGTERM` and `SIGHUP` quit the application through its guards on
+  Unix.** While the event loop runs, either signal asks the application's
+  quit guard and every window's close guard once, with
+  `QuitSource::Signal`, so a guard can save without asking; a refusal or a
+  deferred answer is overruled, the settings are written, and the
+  application ends normally instead of dying with nothing saved. Both
+  signals at once (systemd ends a login session with both) quit once. A
+  signal the process was started with ignored (`SIGHUP` under `nohup`)
+  stays ignored. `SIGINT` (Ctrl+C) keeps its default.
+  `TeksiloAppBuilder::termination_signals(false)` leaves both signals to an
+  application that handles them itself.
+- **On macOS the Dock menu's Quit, AppleScript's `quit`, `terminate:` and a
+  logout ask the application to quit.** AppKit ended the process at once,
+  past every close guard and with nothing written. It now waits while the
+  application runs a guarded quit, with `QuitSource::UserQuit`, or
+  `QuitSource::SessionEnd` for a logout, restart or shutdown: a guard can
+  ask the user, and a refusal keeps the application running (and cancels a
+  logout). Once the quit completes the settings are written and AppKit ends
+  the process.
+- **On Windows the end of the session quits the application through its
+  guards.** Signing out, restarting or shutting down ended the process with
+  nothing asked or written. When Windows says the session ends, every guard
+  is asked once with `QuitSource::SessionEnd` and can save, nothing can
+  refuse, and the settings are written before Windows ends the process;
+  the session is never held up. An application with no window open hears
+  it too.
+- **The settings are written on every way out**: also when a quit with no
+  time to ask ends the application, and when the event loop ends, before the
+  operating system ends the process.
 - **`WindowManager::most_recent_window`**, the window opened or focused last.
 - **`QuitPolicy`, set with `TeksiloAppBuilder::quit_policy`.** The default,
   `LastWindowClosed`, quits when the last window closes, as before.
-  `Explicit` keeps the application running with no window open, and makes
-  `initial_window` optional. On macOS the menu bar then shows the
+  `Explicit` keeps the application running with no window open.
+  `initial_window` is optional under either policy: under the default one,
+  the application tree may open the first window from `run_after_mount`,
+  and `run` panics on its first turn only when no window is open once
+  startup has run. On macOS the menu bar then shows the
   application menu (see "The application menu" under Widgets), with a
   working ⌘Q.
-- **Quitting the application from a handler.** `EventContext::request_quit`
+- **Quitting the application from a handler.** `EventContext::quit`
   asks every open window's close guard in turn, as closing each window
   would, and ends the application once no window is left, under either
-  quit policy. A guard that vetoes holds the quit while its dialog is up;
-  the quit goes on when the window closes and is abandoned when the window
-  stays open with no dialog. `EventContext::quit` skips the guards,
+  quit policy. A guard that vetoes abandons the quit; one that defers
+  holds it at its window, brought to the front, until its `CloseDecision`
+  is answered, and a window whose own close is already waiting on an
+  answer is not asked again. `EventContext::quit_forced` skips the guards
+  (the pair named like `close_window` and `close_window_forced`),
   `quit_in_progress` lets a guard word its question for the application,
-  and `cancel_quit` abandons the quit. `WindowOps` has matching defaulted
-  methods, and `WidgetTree::has_modal_overlay` tells whether a dialog is up
-  in a tree.
+  and `cancel_quit` abandons a guarded quit (a forced quit, and one for a
+  source that leaves no time to ask, go on).
+  `TeksiloAppBuilder::on_quit_requested` installs the application's own
+  guard, asked in the application tree before any window, which can refuse
+  the quit or defer its answer the same way. `WindowOps` has matching
+  defaulted methods, and `WidgetTree::has_modal_overlay` tells whether a
+  dialog is up in a tree.
 - **The application tree, for code that runs with no window open.**
   `TeksiloAppBuilder::app_root` builds the root of a widget tree that belongs
   to no window: never drawn, ticked by the event loop, sharing the
@@ -99,8 +143,9 @@ by crate for clarity, not because crates version independently.
   its enabled actions takes it, so Ctrl+N bound in a window can run the
   application tree's `app.new` (not with focus in a dialog presented in the
   window, where the page's shortcuts do not apply); otherwise the key still
-  goes to the focused widget. A chain of intents that actions on the two sides send in
-  answer to each other stops after 64 crossings, and a debug build says so.
+  goes to the focused widget. A chain of intents that actions on the two
+  sides send in answer to each other stops after 64 crossings, and says so
+  on standard error, in release builds too.
 - **`WindowConfig::minimizable` and `maximizable`**, whether the title bar
   offers those buttons, on Windows and macOS and in a Teksilo `TitleBar`.
   **Behaviour change:** a modal window, and a native dialog the framework
@@ -123,6 +168,15 @@ by crate for clarity, not because crates version independently.
 
 #### Core
 
+- **A close guard can answer later.** `CloseResponse::Defer(CloseDecision)`
+  keeps the window open until the decision is answered: `proceed()` closes
+  it without asking the guard again, `cancel()` leaves it open, and
+  dropping every clone unanswered cancels (a debug build says so). The
+  decision is `Clone + Send`, so a dialog's result callback, an async task
+  or another thread can answer it, and it knows its window, so a
+  `MessageBox` answer that runs in a native dialog window of its own
+  closes the right one. While the answer is pending, another close of the
+  window asks nothing and brings it forward. A quit waits on it.
 - **`focus_on_click(false)`, a control a click activates without taking
   focus.** On `WidgetBuilder`, `HandlerSet` and `WidgetWithHandlers`, as
   GTK's `focus-on-click` and Qt's `Qt::TabFocus`: a click or tap that
@@ -144,6 +198,12 @@ by crate for clarity, not because crates version independently.
 - **`WidgetTree::next_unpainted_deadline`**, the timers of a tree that is never
   painted, and `TreeAppContext::ctx_subscription_target`, which tells a
   context-bearing subscription registered with no window from none at all.
+- **`EventContext::quit_source()` and `QuitSource`**: a close guard or the
+  `on_quit_requested` guard reads where the quit under way came from
+  (`Application`, `UserQuit`, `SessionEnd`, `Signal`), `None` when no quit
+  is under way. A guard can skip its dialog and save directly for
+  `SessionEnd` and `Signal`. `WindowOps` has a matching defaulted
+  `quit_source`.
 
 #### Platform
 
@@ -201,6 +261,16 @@ by crate for clarity, not because crates version independently.
   the menu was asked for**, so every factory's widget is on their way to the
   root. They started at the window's root.
 
+- **Breaking.** `CloseResponse` has a third variant, `Defer(CloseDecision)`,
+  and is no longer `Copy`, `PartialEq` or `Eq`. A `match` on it needs the
+  new arm.
+- **Breaking.** `WindowConfig::on_close_blocked` receives a `CloseDecision`:
+  the callback is `Fn(&mut EventContext, CloseDecision)`, where it was
+  `Fn(&mut EventContext)`. With `can_close` false and the callback set, a
+  close defers on that decision, so its confirmation can `proceed()` (the
+  window closes, and a quit waiting on it goes on) or `cancel()`. Without
+  the callback a blocked close is still a final veto.
+
 #### App
 
 - **An intent a native dialog window leaves unclaimed goes to the window it
@@ -238,12 +308,11 @@ by crate for clarity, not because crates version independently.
   After F10, a menu's rows answer for the widget focused before the bar,
   where a chosen command goes, not for the bar's title.
 - **The macOS App menu's Quit asks the application to quit.** It goes
-  through every window's close guard, as `EventContext::request_quit` does,
-  instead of AppKit's `terminate:`, which ended the process past the guards
-  and past winit's exit. With `StandardMenu::quit_intent` it sends that
-  intent, and still asks the application to quit when nothing takes it, so
-  ⌘Q works with no window open in an app that handles its quit command in
-  its windows only.
+  through every window's close guard, as `EventContext::quit` does,
+  instead of sending AppKit's `terminate:`. With `StandardMenu::quit_intent`
+  it sends that intent, and still asks the application to quit when nothing
+  takes it, so ⌘Q works with no window open in an app that handles its quit
+  command in its windows only.
 - **A `MenuModel` entry chosen in the window sends its intent from the
   focused widget,** as its shortcut and the macOS menu bar do: Edit ▸ Copy
   copies in the focused field, and `register_action` on the window's root is
@@ -290,6 +359,14 @@ by crate for clarity, not because crates version independently.
 - **Breaking.** `NativeMenuActivation` has a `quits` field, and
   `NativeMenuHandle::app_quit_item` is gone: the activation of a Quit row
   says it is one.
+
+#### Settings
+
+- **`OpenedSettings::flush_all` also writes what the application's own
+  settings files hold** (a `SettingsFile`, `PersistedListModel` or `MruList`
+  the app opened itself), not only the bundle's store and window state.
+  One that cannot be written no longer keeps the others from being
+  written: every one is tried, and the first error is returned.
 
 ### Fixed
 
@@ -348,8 +425,8 @@ by crate for clarity, not because crates version independently.
   Windows.** There a `MessageBox` is a native window of its own and its
   answer runs in it, so the documented `ctx.close_window_forced()` closed
   the dialog and left the document window open. The guide and the
-  `close-confirmation` example now capture the guarded window's id in the
-  guard and call `ctx.close_window_by_id(id)`.
+  `close-confirmation` example now defer the close and answer it through
+  its `CloseDecision`, which knows its window.
 - **`ctx.focus_window(id)` raises the window its handler runs in.** That
   window is out of the window list during its own dispatch, so raising it
   did nothing, which is the common case in a single-instance handler.
@@ -363,6 +440,12 @@ by crate for clarity, not because crates version independently.
   application did not quit under
   `QuitPolicy::LastWindowClosed`. A window the OS destroyed on its own
   (Windows destroys an owned window with its owner) stayed counted too.
+  A dialog closed with its window, by a forced close or a quit, is answered
+  through its own Cancel path first: a `MessageBox` reports its escape
+  button, dismissed programmatically, in the window's tree and as a native
+  modal window alike, where its result callback did not run at all. A
+  native modal window closed by any route runs its request's `on_dismiss`
+  too, as an in-tree one always did.
   **Behaviour change:** the close button of a window a dialog blocks (and
   Alt+F4, Cmd+W, `ctx.close_window()` on it) brings the dialog forward and
   closes nothing, as on macOS and Windows natively; close the window by id

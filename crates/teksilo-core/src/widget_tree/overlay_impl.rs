@@ -2143,6 +2143,21 @@ impl WidgetTree {
         self.dismiss_overlay_with_ops(id, &mut noop);
     }
 
+    /// Dismiss every overlay, running each one's dismissal callback with
+    /// `reason` and `ops`: a dialog in the tree answers as dismissed (a
+    /// `MessageBox` reports its escape button). Used by the application
+    /// before it closes the window, so a dialog still up answers through
+    /// its own Cancel path rather than going with the window unanswered.
+    #[doc(hidden)]
+    pub fn dismiss_all_overlays_with_ops(
+        &mut self,
+        reason: crate::overlay::DismissReason,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        let dismissed = self.overlay_manager.dismiss_all_because(reason);
+        self.dormant_dismissed_content(&dismissed, &mut *ops);
+    }
+
     /// Dispatch-path variant that threads `ops` through to the
     /// focus-loss handler fired during dismissal.
     pub fn dismiss_overlay_with_ops(

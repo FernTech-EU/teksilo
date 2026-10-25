@@ -48,16 +48,18 @@ struct PendingClose {
 }
 
 /// Pure close-verdict logic used by
-/// [`WindowManager::evaluate_close_guard`]. Returns `true` if the close
-/// should proceed, `false` to veto.
+/// [`WindowManager::evaluate_close_guard`]: what the window's guard says
+/// of the close.
 ///
 /// Precedence:
-/// 1. [`can_close`](teksilo_core::WindowConfig::can_close) sugar — a
-///    `Some(false)` signal vetoes and fires `on_close_blocked` (the
-///    only side effect here).
+/// 1. [`can_close`](teksilo_core::WindowConfig::can_close) sugar: a
+///    `Some(false)` signal vetoes, or, with `on_close_blocked` set,
+///    runs it with a fresh
+///    [`CloseDecision`](teksilo_core::CloseDecision) and defers on that
+///    decision (the only side effect here).
 /// 2. the [`on_close_requested`](teksilo_core::WindowConfig::on_close_requested)
 ///    guard's [`CloseResponse`].
-/// 3. no guard configured → close.
+/// 3. no guard configured: close.
 ///
 /// Factored out of `evaluate_close_guard` so the decision can be
 /// unit-tested headlessly with a `NoopWindowOps`-backed `EventContext`,
@@ -67,19 +69,21 @@ fn close_verdict(
     on_close_blocked: &Option<CloseBlockedCallback>,
     close_guard: &Option<CloseGuard>,
     ctx: &mut teksilo_core::widget::EventContext,
-) -> bool {
+) -> CloseResponse {
     if let Some(may_close) = can_close
         && !may_close.get()
     {
         if let Some(on_blocked) = on_close_blocked {
-            on_blocked(ctx);
+            let decision = teksilo_core::CloseDecision::new();
+            on_blocked(ctx, decision.clone());
+            return CloseResponse::Defer(decision);
         }
-        return false;
+        return CloseResponse::Veto;
     }
     if let Some(guard) = close_guard {
-        return matches!(guard(ctx), CloseResponse::Close);
+        return guard(ctx);
     }
-    true
+    CloseResponse::Close
 }
 
 /// The title-bar buttons `config` offers: always close, minimise and
@@ -299,12 +303,13 @@ pub(crate) struct ManagedWindow {
     pub close_guard: Option<CloseGuard>,
     /// Optional reactive "may this window close?" signal from
     /// [`WindowConfig::can_close`](teksilo_core::WindowConfig::can_close).
-    /// When present and `false`, a guarded close is vetoed and
-    /// [`on_close_blocked`](Self::on_close_blocked) fires. Evaluated
+    /// When present and `false`, a guarded close is blocked: vetoed, or
+    /// deferred to [`on_close_blocked`](Self::on_close_blocked) when that
+    /// is set. Evaluated
     /// before [`close_guard`](Self::close_guard).
     pub can_close: Option<Prop<bool>>,
-    /// Optional notification fired when [`can_close`](Self::can_close)
-    /// blocks a close, from
+    /// Optional hook run when [`can_close`](Self::can_close) blocks a
+    /// close; it answers the close's `CloseDecision`. From
     /// [`WindowConfig::on_close_blocked`](teksilo_core::WindowConfig::on_close_blocked).
     pub on_close_blocked: Option<CloseBlockedCallback>,
     /// Optional teardown hook from
@@ -313,6 +318,13 @@ pub(crate) struct ManagedWindow {
     /// after this window is fully gone from every `WindowManager`
     /// registry — see that method's doc comment for why.
     pub on_removed: Option<teksilo_core::WindowRemovedCallback>,
+    /// For a window presenting a modal request (a native modal window, or
+    /// a plain window hosting the application tree's), the request's
+    /// [`on_dismiss`](teksilo_core::modal::ModalRequest::on_dismiss), run
+    /// with this window's context as it closes, whatever closes it: the
+    /// dialog's own Cancel path, which a `MessageBox` answers with its
+    /// escape button.
+    pub(crate) modal_on_dismiss: Option<teksilo_core::overlay::OverlayDismissCallback>,
     /// Glyph-atlas content version last uploaded to THIS window's
     /// renderer (`AtlasInfo::version`). Each window compares this
     /// against the shared bridge's current version on its own redraw
@@ -736,8 +748,26 @@ pub struct WindowManager {
     /// (a window opened from one of its handlers resolving the OS theme)
     /// reaches it when it is put back.
     app_tree_theme_generation: u64,
+    /// The closes guards deferred
+    /// ([`CloseResponse::Defer`]),
+    /// by window, waiting on their answer; settled by
+    /// [`process_pending`](Self::process_pending). A window closing by any
+    /// route drops its entry, and a late answer then changes nothing.
+    deferred_closes: HashMap<TeksiloWindowId, teksilo_core::window::CloseDecisionReceipt>,
+    /// The application's quit guard, from
+    /// [`TeksiloAppBuilder::on_quit_requested`](crate::TeksiloAppBuilder::on_quit_requested),
+    /// asked in the application tree before any window.
+    app_quit_guard: Option<CloseGuard>,
+    /// The answer the application's quit guard deferred, while the quit
+    /// waits on it.
+    app_quit_deferral: Option<teksilo_core::window::CloseDecisionReceipt>,
     /// The quit under way, if any; see [`crate::quit`].
     quit: Option<crate::quit::PendingQuit>,
+    /// Told how the quit under way ends.
+    quit_replies: Vec<crate::quit::QuitReply>,
+    /// The quit under way has reported running into its step bound; see
+    /// [`advance_quit`](Self::advance_quit).
+    quit_bound_reported: bool,
     /// The last [`PendingQuit::generation`](crate::quit::PendingQuit) handed
     /// out.
     quit_generation: u64,
@@ -812,7 +842,12 @@ impl WindowManager {
             application_scope: teksilo_core::ApplicationScope::new(),
             theme_generation: 0,
             app_tree_theme_generation: 0,
+            deferred_closes: HashMap::new(),
+            app_quit_guard: None,
+            app_quit_deferral: None,
             quit: None,
+            quit_replies: Vec::new(),
+            quit_bound_reported: false,
             quit_generation: 0,
             quit_completed: false,
         }
@@ -1372,6 +1407,11 @@ impl WindowManager {
     /// to post `CloseWindowRequest` back through the event loop.
     pub fn set_event_proxy(&mut self, proxy: AppEventProxy) {
         self.event_proxy = Some(proxy);
+    }
+
+    /// The event-loop proxy, once installed.
+    pub(crate) fn event_proxy(&self) -> Option<&AppEventProxy> {
+        self.event_proxy.as_ref()
     }
 
     /// Start the session watch, on the main thread, once the event proxy is
@@ -2210,6 +2250,7 @@ impl WindowManager {
             can_close,
             on_close_blocked,
             on_removed,
+            modal_on_dismiss: None,
             atlas_uploaded_version: primed_atlas_version,
             redraw: crate::redraw_gate::RedrawGate::default(),
             app_shortcuts,
@@ -2376,6 +2417,8 @@ impl WindowManager {
         // See `WindowConfig::on_removed` for why "after" is load-bearing.
         let mut removed_hook: Option<(teksilo_core::WindowRemovedCallback, Option<String>)> = None;
         self.recency.forget(teksilo_id);
+        // A close it deferred no longer waits: a late answer changes nothing.
+        self.deferred_closes.remove(&teksilo_id);
         if let Some(winit_id) = self.teksilo_to_winit.remove(&teksilo_id)
             && let Some(mut managed) = self.windows.remove(&winit_id)
         {
@@ -2452,6 +2495,84 @@ impl WindowManager {
         }
     }
 
+    /// Close `teksilo_id` as [`close_window`](Self::close_window) does,
+    /// after answering the dialogs still up in it and over it through their
+    /// own dismissal: the native modal windows it owns, deepest first, run
+    /// their request's `on_dismiss`, and every overlay in their trees and
+    /// its own is dismissed with its callbacks, all with
+    /// [`DismissReason::Programmatic`](teksilo_core::overlay::DismissReason).
+    /// So a `MessageBox` still up when a quit or a forced close of its
+    /// window takes it reports its escape button (Cancel), as Escape would,
+    /// rather than going unanswered. A dialog window closing by itself runs
+    /// its own `on_dismiss` the same way, which a dialog that already
+    /// answered ignores.
+    pub(crate) fn close_window_answering(
+        &mut self,
+        teksilo_id: TeksiloWindowId,
+        target: &winit::event_loop::ActiveEventLoop,
+    ) {
+        let mut chain = self.modal_descendants(teksilo_id);
+        chain.push(teksilo_id);
+        for window in chain {
+            self.answer_dialogs_in(window, target);
+        }
+        self.close_window(teksilo_id);
+    }
+
+    /// The native modal windows `teksilo_id` owns, at any depth, deepest
+    /// first.
+    fn modal_descendants(&self, teksilo_id: TeksiloWindowId) -> Vec<TeksiloWindowId> {
+        let mut found: Vec<TeksiloWindowId> = Vec::new();
+        let mut frontier = vec![teksilo_id];
+        // A modal chain is short and acyclic; the bound only keeps a
+        // corrupt map from hanging the loop.
+        for _ in 0..64 {
+            let next: Vec<TeksiloWindowId> = self
+                .modal_parents
+                .iter()
+                .filter(|(child, parent)| frontier.contains(parent) && !found.contains(child))
+                .map(|(child, _)| *child)
+                .collect();
+            if next.is_empty() {
+                break;
+            }
+            found.extend(next.iter().copied());
+            frontier = next;
+        }
+        found.reverse();
+        found
+    }
+
+    /// Answer the dialogs `teksilo_id` presents: its modal request's
+    /// `on_dismiss` if it is a dialog window, and every overlay in its
+    /// tree, with its own context. See
+    /// [`close_window_answering`](Self::close_window_answering).
+    fn answer_dialogs_in(
+        &mut self,
+        teksilo_id: TeksiloWindowId,
+        target: &winit::event_loop::ActiveEventLoop,
+    ) {
+        let Some(&winit_id) = self.teksilo_to_winit.get(&teksilo_id) else {
+            return;
+        };
+        let Some(mut managed) = self.take_managed(winit_id) else {
+            return;
+        };
+        let on_dismiss = managed.modal_on_dismiss.take();
+        let current_arc = Some(managed.platform_window.window_arc());
+        {
+            let mut ops = WindowOpsImpl::new(self, target, teksilo_id, current_arc);
+            let reason = teksilo_core::overlay::DismissReason::Programmatic;
+            managed.tree.dismiss_all_overlays_with_ops(reason, &mut ops);
+            if let Some(on_dismiss) = on_dismiss {
+                managed
+                    .tree
+                    .run_with_event_context(&mut ops, |ctx| on_dismiss(reason, ctx));
+            }
+        }
+        self.reinsert_managed(winit_id, managed);
+    }
+
     /// Queue an **unconditional** window closure (processed in the next
     /// event loop tick). The window's close guard is *not* consulted —
     /// use this for explicit programmatic closes and framework-internal
@@ -2460,7 +2581,6 @@ impl WindowManager {
     /// [`on_close_requested`](teksilo_core::WindowConfig::on_close_requested)
     /// can veto, use [`request_close`](Self::request_close).
     pub fn queue_close(&mut self, teksilo_id: TeksiloWindowId) {
-        self.note_close_request(teksilo_id);
         self.pending_closes.push(PendingClose {
             id: teksilo_id,
             force: true,
@@ -2474,7 +2594,9 @@ impl WindowManager {
     /// [`WindowConfig::on_close_requested`](teksilo_core::WindowConfig::on_close_requested)
     /// / [`can_close`](teksilo_core::WindowConfig::can_close)); a
     /// [`CloseResponse::Veto`](teksilo_core::CloseResponse) keeps the
-    /// window open. Used for the interactive close gestures: the OS
+    /// window open and a
+    /// [`CloseResponse::Defer`] keeps it
+    /// open until its answer. Used for the interactive close gestures: the OS
     /// close button, a custom-chrome close button, and
     /// [`EventContext::close_window`](teksilo_core::widget::EventContext::close_window).
     ///
@@ -2488,7 +2610,6 @@ impl WindowManager {
             self.refocus_modal_child(teksilo_id);
             return;
         }
-        self.note_close_request(teksilo_id);
         self.pending_closes.push(PendingClose {
             id: teksilo_id,
             force: false,
@@ -2589,71 +2710,287 @@ impl WindowManager {
     }
 
     /// Process pending window closures. Called from the event loop
-    /// each tick. Creation does not need a drain path — `open_window`
+    /// each tick. Creation does not need a drain path: `open_window`
     /// from handler code goes through [`WindowOpsImpl`] and calls
     /// [`create_window`](Self::create_window) synchronously inside the
     /// same dispatch.
     ///
-    /// A *forced* close ([`queue_close`](Self::queue_close)) tears the
-    /// window down immediately. A *guarded* close
+    /// The closes guards deferred are settled first: one whose decision
+    /// proceeded closes here, and a quit waiting on one cancelled is
+    /// abandoned. Then a *forced* close
+    /// ([`queue_close`](Self::queue_close)) tears the window down
+    /// immediately, and a *guarded* one
     /// ([`request_close`](Self::request_close)) first runs the window's
-    /// close guard via `evaluate_close_guard`; a
-    /// [`CloseResponse::Veto`](teksilo_core::CloseResponse) keeps the
-    /// window open. Guards are strictly per-window, so this is correct
-    /// for multi-window apps: each pending close consults only its own
-    /// window's guard.
+    /// close guard via `evaluate_close_guard`: `Close` closes, `Veto` keeps
+    /// the window open, and `Defer` keeps it open until its decision is
+    /// answered. A guarded close of a window whose earlier close is still
+    /// deferred asks nothing and brings the window forward: the user is
+    /// already being asked. Guards are strictly per-window, so this is
+    /// correct for multi-window apps: each pending close consults only its
+    /// own window's guard.
     pub fn process_pending(&mut self, target: &winit::event_loop::ActiveEventLoop) {
+        self.settle_deferred_closes();
+        self.process_closes(target);
+    }
+
+    /// Carry out the closes queued so far; see
+    /// [`process_pending`](Self::process_pending).
+    fn process_closes(&mut self, target: &winit::event_loop::ActiveEventLoop) {
         let closes = std::mem::take(&mut self.pending_closes);
         for pending in closes {
+            if pending.force {
+                self.close_window_answering(pending.id, target);
+                continue;
+            }
             // A guarded close of a window its dialog still blocks (the
             // dialog's own close was vetoed this turn) is refused, as
             // `request_close` refuses it.
-            if !pending.force && self.blocking_modal_child(pending.id).is_some() {
+            if self.blocking_modal_child(pending.id).is_some() {
                 self.refocus_modal_child(pending.id);
                 continue;
             }
-            if pending.force || self.evaluate_close_guard(pending.id, target) {
-                self.close_window(pending.id);
-            } else if let Some(quit) = self.quit
-                && quit.awaiting.is_none()
-                && !quit.skip_guards
-            {
-                // A guard asked in the same turn a quit was requested saw
-                // the quit and vetoed it; asking it again would open a
-                // second dialog, so the quit adopts the veto.
-                self.await_quit_at(pending.id);
+            if self.deferred_closes.contains_key(&pending.id) {
+                let front = self.frontmost_modal_of(pending.id);
+                self.bring_forward(front, None);
+                continue;
             }
-            // Vetoed guarded close → the window stays open. The app may
-            // have opened a confirmation dialog from inside the guard;
-            // its "close anyway" button calls
-            // `EventContext::close_window_forced`, which re-queues this
-            // window as a forced close on a later tick.
+            match self.evaluate_close_guard(pending.id, target) {
+                CloseResponse::Close => self.close_window_answering(pending.id, target),
+                CloseResponse::Veto => {}
+                CloseResponse::Defer(decision) => self.defer_close(pending.id, &decision),
+            }
         }
     }
 
-    /// Ask the application to quit; see
-    /// [`EventContext::request_quit`](teksilo_core::widget::EventContext::request_quit).
-    /// A guarded request while a quit is under way
-    /// changes nothing; a forced one makes the quit under way forced.
-    /// Carried out by [`advance_quit`](Self::advance_quit).
-    pub fn request_quit(&mut self, forced: bool) {
+    /// Record that `teksilo_id`'s guard deferred its close with `decision`,
+    /// and have its answer wake the event loop, from whatever thread gives
+    /// it, so the turn that follows settles it.
+    fn defer_close(&mut self, teksilo_id: TeksiloWindowId, decision: &teksilo_core::CloseDecision) {
+        let receipt = self.wake_on_answer(decision);
+        self.deferred_closes.insert(teksilo_id, receipt);
+    }
+
+    /// `decision`'s receipt, set to wake the event loop when it is
+    /// answered, from whatever thread answers it, so the turn that follows
+    /// settles it.
+    fn wake_on_answer(
+        &self,
+        decision: &teksilo_core::CloseDecision,
+    ) -> teksilo_core::window::CloseDecisionReceipt {
+        let receipt = decision.receipt();
+        if let Some(proxy) = self.event_proxy.clone() {
+            let wake: std::sync::Arc<dyn Fn() + Send + Sync> = std::sync::Arc::new(move || {
+                proxy.send_external_boxed(Box::new(crate::app::CloseAnswered));
+            });
+            receipt.on_answer(wake.clone());
+            // Answered already (by the guard itself, or by a thread before
+            // the wake was set): no answer is coming to wake the loop, and
+            // the turn may be the last before it sleeps.
+            if receipt.answer().is_some() {
+                wake();
+            }
+        }
+        receipt
+    }
+
+    /// Act on the answers given to deferred closes: a window whose decision
+    /// proceeded is queued to close, without its guard (it gave its
+    /// answer), and a quit waiting on it goes on; one cancelled, or whose
+    /// decision was dropped unanswered, stays open, and a quit waiting on
+    /// it is abandoned. The application's answer to a quit is settled the
+    /// same way: proceed and the quit goes on to the windows, cancel and it
+    /// is abandoned.
+    fn settle_deferred_closes(&mut self) {
+        use crate::quit::Awaited;
+        if let Some(answer) = self
+            .app_quit_deferral
+            .as_ref()
+            .and_then(|receipt| receipt.answer())
+        {
+            self.app_quit_deferral = None;
+            let awaited = self
+                .quit
+                .is_some_and(|quit| quit.awaiting == Some(Awaited::Application));
+            if awaited {
+                match answer {
+                    teksilo_core::window::CloseAnswer::Proceed => {
+                        if let Some(quit) = &mut self.quit {
+                            quit.awaiting = None;
+                            quit.application_agreed = true;
+                        }
+                    }
+                    teksilo_core::window::CloseAnswer::Cancel => self.end_quit(),
+                    teksilo_core::window::CloseAnswer::Dropped => {
+                        #[cfg(debug_assertions)]
+                        eprintln!(
+                            "teksilo-app: the application's quit guard deferred its answer and \
+                             dropped the CloseDecision without answering; the quit is \
+                             cancelled. Call proceed() or cancel() on it."
+                        );
+                        self.end_quit();
+                    }
+                }
+            }
+        }
+        let answered: Vec<(TeksiloWindowId, teksilo_core::window::CloseAnswer)> = self
+            .deferred_closes
+            .iter()
+            .filter_map(|(id, receipt)| receipt.answer().map(|answer| (*id, answer)))
+            .collect();
+        for (id, answer) in answered {
+            self.deferred_closes.remove(&id);
+            let awaited = self
+                .quit
+                .is_some_and(|quit| quit.awaiting == Some(Awaited::Window(id)));
+            match answer {
+                teksilo_core::window::CloseAnswer::Proceed => {
+                    if awaited && let Some(quit) = &mut self.quit {
+                        quit.awaiting = None;
+                    }
+                    self.queue_close(id);
+                }
+                teksilo_core::window::CloseAnswer::Cancel => {
+                    if awaited {
+                        self.end_quit();
+                    }
+                }
+                teksilo_core::window::CloseAnswer::Dropped => {
+                    #[cfg(debug_assertions)]
+                    eprintln!(
+                        "teksilo-app: the close guard of window {} deferred its answer and \
+                         dropped the CloseDecision without answering; the close is cancelled. \
+                         Call proceed() or cancel() on it.",
+                        id.raw()
+                    );
+                    if awaited {
+                        self.end_quit();
+                    }
+                }
+            }
+        }
+    }
+
+    /// Ask the application to quit through the close guards; see
+    /// [`EventContext::quit`](teksilo_core::widget::EventContext::quit).
+    /// Changes nothing while a quit is under way or once one has completed.
+    /// Carried out by
+    /// [`advance_quit`](Self::advance_quit).
+    pub fn quit(&mut self) {
+        self.request_quit_from(
+            crate::quit::QuitSource::Application,
+            crate::quit::QuitMode::Guarded,
+            None,
+        );
+    }
+
+    /// Quit without asking any close guard; see
+    /// [`EventContext::quit_forced`](teksilo_core::widget::EventContext::quit_forced).
+    /// Makes a quit under way forced.
+    pub fn quit_forced(&mut self) {
+        self.request_quit_from(
+            crate::quit::QuitSource::Application,
+            crate::quit::QuitMode::Forced,
+            None,
+        );
+    }
+
+    /// Ask the application to quit on behalf of `source`, treating the
+    /// guards (the application's, then every window's) as `mode` says;
+    /// `reply` is told how the quit ends. The one entry of every quit
+    /// source; see [`crate::quit`]. A request while a quit is under way
+    /// joins it, and one in a stronger mode makes it that mode, read by
+    /// the guards as coming from `source`; either way its `reply` hears how
+    /// that quit ends. Once a quit has completed, a request starts nothing
+    /// and its `reply` hears [`Completed`](crate::quit::QuitOutcome::Completed)
+    /// at once. Carried out by [`advance_quit`](Self::advance_quit)
+    /// after the next [`process_pending`](Self::process_pending).
+    pub(crate) fn request_quit_from(
+        &mut self,
+        source: crate::quit::QuitSource,
+        mode: crate::quit::QuitMode,
+        reply: Option<crate::quit::QuitReply>,
+    ) {
+        // The application is ending: a request after its quit completed
+        // (a SIGHUP on the heels of a SIGTERM) asks nobody again.
+        if self.quit_completed {
+            if let Some(reply) = reply {
+                reply(crate::quit::QuitOutcome::Completed);
+            }
+            return;
+        }
+        self.quit_replies.extend(reply);
         match &mut self.quit {
-            Some(quit) if forced && !quit.skip_guards => {
+            Some(quit) if mode > quit.mode => {
+                // What the quit waited on is not awaited any more: an
+                // overruling quit asks again, a forced one asks nobody.
                 self.quit_generation += 1;
-                quit.skip_guards = true;
+                quit.mode = mode;
+                quit.source = source;
                 quit.awaiting = None;
                 quit.generation = self.quit_generation;
+                self.app_quit_deferral = None;
             }
             Some(_) => {}
             None => {
                 self.quit_generation += 1;
+                self.quit_bound_reported = false;
                 self.quit = Some(crate::quit::PendingQuit {
-                    skip_guards: forced,
+                    mode,
+                    application_agreed: false,
                     awaiting: None,
+                    source,
                     generation: self.quit_generation,
                 });
             }
         }
+    }
+
+    /// The quit under way ends without completing: abandoned by a guard, or
+    /// cancelled. An answer the application's guard still owes it is
+    /// forgotten.
+    fn end_quit(&mut self) {
+        self.quit = None;
+        self.app_quit_deferral = None;
+        self.reply_to_quit(crate::quit::QuitOutcome::Cancelled);
+    }
+
+    /// Tell every reply of the quit that just ended how it ended.
+    fn reply_to_quit(&mut self, outcome: crate::quit::QuitOutcome) {
+        for reply in std::mem::take(&mut self.quit_replies) {
+            reply(outcome);
+        }
+    }
+
+    /// The source of the quit under way, if any.
+    pub(crate) fn quit_source(&self) -> Option<crate::quit::QuitSource> {
+        self.quit.map(|quit| quit.source)
+    }
+
+    /// Install the application's quit guard; see
+    /// [`TeksiloAppBuilder::on_quit_requested`](crate::TeksiloAppBuilder::on_quit_requested).
+    pub(crate) fn set_app_quit_guard(&mut self, guard: Option<CloseGuard>) {
+        self.app_quit_guard = guard;
+    }
+
+    /// Ask the application's quit guard, in the application tree, and
+    /// return its answer: `Close` with no guard or no application tree.
+    fn evaluate_app_quit_guard(
+        &mut self,
+        target: &winit::event_loop::ActiveEventLoop,
+    ) -> CloseResponse {
+        let Some(guard) = self.app_quit_guard.clone() else {
+            return CloseResponse::Close;
+        };
+        let Some(mut tree) = self.take_app_tree() else {
+            return CloseResponse::Close;
+        };
+        let mut response = CloseResponse::Close;
+        {
+            let mut ops = WindowOpsImpl::windowless(self, target);
+            tree.run_with_event_context(&mut ops, |ctx| response = guard(ctx));
+        }
+        self.reinsert_app_tree(tree);
+        response
     }
 
     /// Whether a quit is under way: requested, and neither completed nor
@@ -2662,9 +2999,23 @@ impl WindowManager {
         self.quit.is_some()
     }
 
-    /// Abandon the quit under way, if any.
+    /// Abandon the quit under way if it is guarded; see
+    /// [`EventContext::cancel_quit`](teksilo_core::widget::EventContext::cancel_quit).
+    /// An overruling or forced quit goes on: a guard or a dialog's Cancel
+    /// arm run as its window closes cannot stop what no guard may refuse.
     pub fn cancel_quit(&mut self) {
-        self.quit = None;
+        match self.quit {
+            Some(quit) if quit.mode == crate::quit::QuitMode::Guarded => self.end_quit(),
+            Some(_quit) => {
+                #[cfg(debug_assertions)]
+                eprintln!(
+                    "teksilo-app: cancel_quit() during a quit no guard may refuse \
+                     ({:?}, {:?}); the quit goes on",
+                    _quit.source, _quit.mode
+                );
+            }
+            None => {}
+        }
     }
 
     /// Whether a quit ran to completion, closing every window. The event
@@ -2674,14 +3025,12 @@ impl WindowManager {
         self.quit_completed
     }
 
-    /// A close was requested for `teksilo_id`: abandon a quit that awaits
-    /// another window. See [`crate::quit::close_abandons`].
-    fn note_close_request(&mut self, teksilo_id: TeksiloWindowId) {
-        if let Some(quit) = self.quit
-            && crate::quit::close_abandons(quit.awaiting, teksilo_id, |w| self.modal_parent_of(w))
-        {
-            self.quit = None;
-        }
+    /// Forget that a quit completed, as if the application had just
+    /// started: the loop test goes on quitting after its loop was told to
+    /// end, which an application never does.
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) fn forget_completed_quit(&mut self) {
+        self.quit_completed = false;
     }
 
     /// The window `teksilo_id` is a modal child of, if any. Read from
@@ -2784,24 +3133,26 @@ impl WindowManager {
         }
     }
 
-    /// The quit stops at `teksilo_id`, whose guard vetoed: wait on it, and
-    /// make sure the user can see its question. A minimised window is
-    /// restored and the dialog raised (or the window, while its dialog is
-    /// still queued); the redraw brings the `post_event` that presents a
-    /// queued dialog.
+    /// The quit stops at `teksilo_id`, whose guard deferred its answer: wait
+    /// on it, and make sure the user can see its question. A minimised
+    /// window is restored and the dialog raised (or the window, while its
+    /// dialog is still queued); the redraw brings the `post_event` that
+    /// presents a queued dialog.
     fn await_quit_at(&mut self, teksilo_id: TeksiloWindowId) {
         if let Some(quit) = &mut self.quit {
-            quit.awaiting = Some(teksilo_id);
+            quit.awaiting = Some(crate::quit::Awaited::Window(teksilo_id));
         }
         let front = self.frontmost_modal_of(teksilo_id);
         self.bring_forward(front, None);
     }
 
     /// What the quit sees of the open windows; see
-    /// [`QuitWindow`](crate::quit::QuitWindow).
+    /// [`QuitWindow`](crate::quit::QuitWindow). A window closing this turn
+    /// is not one: it is not asked.
     fn quit_windows(&self) -> Vec<crate::quit::QuitWindow> {
         self.windows
             .values()
+            .filter(|managed| !self.is_closing(managed.teksilo_id))
             .map(|managed| {
                 let id = managed.teksilo_id;
                 let mut modal_depth = 0;
@@ -2816,18 +3167,17 @@ impl WindowManager {
                     id,
                     modal_depth,
                     recency: self.recency.stamp(id).unwrap_or(0),
-                    dialog_open: self.modal_parents.values().any(|parent| *parent == id)
-                        || managed.tree.has_modal_overlay()
-                        || managed.tree.has_pending_modal_requests(),
+                    deferred: self.deferred_closes.contains_key(&id),
                 }
             })
             .collect()
     }
 
     /// Carry the quit under way as far as it goes now: close the windows
-    /// that agree, and stop at one whose guard vetoes, or at its dialog.
-    /// Runs after every [`process_pending`](Self::process_pending), outside
-    /// any dispatch, so every window is in the map.
+    /// that agree, abandon the quit at one whose guard vetoes, and stop at
+    /// one whose answer is deferred. Runs after every
+    /// [`process_pending`](Self::process_pending), outside any dispatch, so
+    /// every window is in the map.
     pub fn advance_quit(&mut self, target: &winit::event_loop::ActiveEventLoop) {
         use crate::quit::QuitStep;
 
@@ -2837,84 +3187,152 @@ impl WindowManager {
             let Some(quit) = self.quit else {
                 return;
             };
+            // A guard may have closed another window (by id): that window
+            // is closing, not asked, and closes before the next step, so
+            // the quit counts it gone.
+            if !self.pending_closes.is_empty() {
+                self.process_closes(target);
+                continue;
+            }
             match crate::quit::step(&quit, &self.quit_windows()) {
                 QuitStep::Complete => {
                     self.quit = None;
                     self.quit_completed = true;
-                    return;
-                }
-                QuitStep::Abandon => {
-                    self.quit = None;
+                    self.reply_to_quit(crate::quit::QuitOutcome::Completed);
                     return;
                 }
                 QuitStep::Wait => return,
-                QuitStep::Ask(id) => {
-                    if let Some(quit) = &mut self.quit {
-                        quit.awaiting = None;
+                QuitStep::AskApplication => {
+                    let response = self.evaluate_app_quit_guard(target);
+                    let same_quit = self
+                        .quit
+                        .is_some_and(|now| now.generation == quit.generation);
+                    if !same_quit {
+                        continue;
                     }
-                    let closes = quit.skip_guards || self.evaluate_close_guard(id, target);
-                    if closes {
-                        self.close_window(id);
-                    }
-                    // The guard may have changed the quit: cancelled it,
-                    // or made it forced. Only the quit that asked waits on
-                    // a veto.
-                    match self.quit {
-                        Some(now) if now.generation == quit.generation && !closes => {
-                            self.await_quit_at(id);
+                    // An overruling quit asked so the application could
+                    // save; its answer does not stop it.
+                    let response = match response {
+                        _ if quit.mode == crate::quit::QuitMode::Overruling => CloseResponse::Close,
+                        response => response,
+                    };
+                    match response {
+                        CloseResponse::Close => {
+                            if let Some(quit) = &mut self.quit {
+                                quit.application_agreed = true;
+                            }
+                        }
+                        CloseResponse::Veto => {
+                            self.end_quit();
                             return;
                         }
-                        _ => {}
+                        CloseResponse::Defer(decision) => {
+                            self.app_quit_deferral = Some(self.wake_on_answer(&decision));
+                            if let Some(quit) = &mut self.quit {
+                                quit.awaiting = Some(crate::quit::Awaited::Application);
+                            }
+                            return;
+                        }
+                    }
+                }
+                QuitStep::Adopt(id) => {
+                    self.await_quit_at(id);
+                    return;
+                }
+                QuitStep::Ask(id) => {
+                    let response = if quit.mode == crate::quit::QuitMode::Forced {
+                        CloseResponse::Close
+                    } else {
+                        self.evaluate_close_guard(id, target)
+                    };
+                    // The guard may have changed the quit: cancelled it,
+                    // or made it forced. Only the quit that asked acts on
+                    // its answer; the window's own close follows it anyway.
+                    let same_quit = self
+                        .quit
+                        .is_some_and(|now| now.generation == quit.generation);
+                    // An overruling quit asked so the window could save; a
+                    // refusal or a deferred answer is overruled, and the
+                    // dialog a deferring guard presented answers Cancel as
+                    // its window closes.
+                    let response = match response {
+                        _ if same_quit && quit.mode == crate::quit::QuitMode::Overruling => {
+                            CloseResponse::Close
+                        }
+                        response => response,
+                    };
+                    match response {
+                        CloseResponse::Close => self.close_window_answering(id, target),
+                        CloseResponse::Veto => {
+                            if same_quit {
+                                self.end_quit();
+                                return;
+                            }
+                        }
+                        CloseResponse::Defer(decision) => {
+                            self.defer_close(id, &decision);
+                            if same_quit {
+                                self.await_quit_at(id);
+                                return;
+                            }
+                        }
                     }
                 }
             }
         }
-        #[cfg(debug_assertions)]
-        eprintln!(
-            "teksilo-app: a quit was still opening windows after 4096 steps; it goes on next turn"
-        );
+        // In every build, once per quit: the symptom (an application that
+        // will not quit) is the user's, in a release build too, and this is
+        // the only account of it.
+        if !self.quit_bound_reported {
+            self.quit_bound_reported = true;
+            eprintln!(
+                "teksilo-app: a quit was still going after 4096 steps, its close guards opening \
+                 a window for each one closed; it goes on at the next turn"
+            );
+        }
     }
 
     /// Run the close guard for `teksilo_id` (if it declared one) and
-    /// return whether the close should proceed.
+    /// return its answer.
     ///
-    /// A window with no guard returns `true` without building an
+    /// A window with no guard answers `Close` without building an
     /// `EventContext`. Otherwise the guard runs with a real
     /// [`EventContext`](teksilo_core::widget::EventContext) for the
     /// window's own tree (so it can open a confirmation dialog, set
     /// signals, fire intents…), and the verdict is:
     ///
     /// 1. [`can_close`](teksilo_core::WindowConfig::can_close) sugar: a
-    ///    `false` signal vetoes and fires
-    ///    [`on_close_blocked`](teksilo_core::WindowConfig::on_close_blocked).
+    ///    `false` signal vetoes, or, with
+    ///    [`on_close_blocked`](teksilo_core::WindowConfig::on_close_blocked)
+    ///    set, defers on the decision that callback answers.
     /// 2. otherwise the
     ///    [`on_close_requested`](teksilo_core::WindowConfig::on_close_requested)
     ///    guard's [`CloseResponse`].
-    /// 3. otherwise `true` (close).
+    /// 3. otherwise `Close`.
     ///
-    /// Strictly per-window — only `teksilo_id`'s own guard is consulted.
+    /// Strictly per-window: only `teksilo_id`'s own guard is consulted.
     fn evaluate_close_guard(
         &mut self,
         teksilo_id: TeksiloWindowId,
         target: &winit::event_loop::ActiveEventLoop,
-    ) -> bool {
+    ) -> CloseResponse {
         let Some(&winit_id) = self.teksilo_to_winit.get(&teksilo_id) else {
-            // Unknown / already-gone window — let `close_window` no-op.
-            return true;
+            // Unknown / already-gone window: let `close_window` no-op.
+            return CloseResponse::Close;
         };
         // Fast path: no guard configured → close immediately, without
         // paying for an EventContext.
         match self.windows.get(&winit_id) {
             Some(managed) if managed.close_guard.is_none() && managed.can_close.is_none() => {
-                return true;
+                return CloseResponse::Close;
             }
-            None => return true,
+            None => return CloseResponse::Close,
             _ => {}
         }
         // Take the window out of the map so we can borrow `&mut self`
         // for `WindowOpsImpl` while still holding the window's tree.
         let Some(mut managed) = self.take_managed(winit_id) else {
-            return true;
+            return CloseResponse::Close;
         };
 
         let current_arc = Some(managed.platform_window.window_arc());
@@ -2926,16 +3344,16 @@ impl WindowManager {
         let can_close = managed.can_close.clone();
         let on_close_blocked = managed.on_close_blocked.clone();
 
-        let mut should_close = true;
+        let mut response = CloseResponse::Close;
         {
             let mut ops = WindowOpsImpl::new(self, target, teksilo_id, current_arc);
             managed.tree.run_with_event_context(&mut ops, |ctx| {
-                should_close = close_verdict(&can_close, &on_close_blocked, &close_guard, ctx);
+                response = close_verdict(&can_close, &on_close_blocked, &close_guard, ctx);
             });
         }
 
         self.reinsert_managed(winit_id, managed);
-        should_close
+        response
     }
 
     /// Get a mutable ManagedWindow for a winit WindowId.
@@ -3714,7 +4132,10 @@ impl WindowManager {
         all_requests
     }
 
-    /// Drain native modal-window dismiss requests from all windows.
+    /// Drain native modal-window dismiss requests from all windows, and
+    /// the application tree's, which closes nothing: its dialogs are
+    /// presented in a window's tree or a window of their own, where their
+    /// answer asks for the dismissal.
     pub fn drain_pending_modal_dismissals(&mut self) -> Vec<TeksiloWindowId> {
         let mut windows_to_close = Vec::new();
         for managed in self.windows.values_mut() {
@@ -3723,6 +4144,15 @@ impl WindowManager {
             {
                 windows_to_close.push(managed.teksilo_id);
             }
+        }
+        if let Some(tree) = &mut self.app_tree
+            && tree.drain_pending_modal_dismissal()
+        {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "teksilo-app: dismiss_modal called from the application tree, which presents \
+                 no dialog of its own; nothing closed"
+            );
         }
         windows_to_close
     }
@@ -3760,7 +4190,7 @@ impl WindowManager {
                 eprintln!(
                     "teksilo-app: close_window called from the application tree, which is no \
                      window's; nothing closed. Close a window by id (close_window_by_id) or \
-                     quit (request_quit)."
+                     quit the application (quit)."
                 );
             }
             #[cfg(not(debug_assertions))]
@@ -4103,12 +4533,20 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
         }
     }
 
-    fn request_quit(&mut self, forced: bool) {
-        self.wm.request_quit(forced);
+    fn quit(&mut self) {
+        self.wm.quit();
+    }
+
+    fn quit_forced(&mut self) {
+        self.wm.quit_forced();
     }
 
     fn quit_in_progress(&self) -> bool {
         self.wm.quit_in_progress()
+    }
+
+    fn quit_source(&self) -> Option<teksilo_core::QuitSource> {
+        self.wm.quit_source()
     }
 
     fn cancel_quit(&mut self) {
@@ -4728,16 +5166,24 @@ mod close_guard_tests {
     use teksilo_core::{CloseResponse, NoopWindowOps, WidgetTree};
 
     /// Drive `close_verdict` inside a real (headless) `EventContext` and
-    /// return its boolean verdict. Mirrors the `run_with_event_context`
-    /// path `process_pending` uses, but with a `NoopWindowOps` sink and
-    /// no winit event loop.
+    /// return whether it lets the close through. Mirrors the
+    /// `run_with_event_context` path `process_pending` uses, but with a
+    /// `NoopWindowOps` sink and no winit event loop.
     fn verdict(
         can_close: Option<Prop<bool>>,
         on_blocked: Option<CloseBlockedCallback>,
         guard: Option<CloseGuard>,
     ) -> bool {
+        matches!(response(can_close, on_blocked, guard), CloseResponse::Close)
+    }
+
+    fn response(
+        can_close: Option<Prop<bool>>,
+        on_blocked: Option<CloseBlockedCallback>,
+        guard: Option<CloseGuard>,
+    ) -> CloseResponse {
         let mut tree = WidgetTree::new();
-        let mut out = true;
+        let mut out = CloseResponse::Close;
         tree.run_with_event_context(&mut NoopWindowOps, |ctx: &mut EventContext| {
             out = close_verdict(&can_close, &on_blocked, &guard, ctx);
         });
@@ -4761,16 +5207,59 @@ mod close_guard_tests {
         assert!(!verdict(None, None, Some(guard)));
     }
 
+    /// The guard's deferred answer reaches the manager with the very
+    /// decision the guard handed out.
+    #[test]
+    fn guard_defer_hands_its_decision_over() {
+        let decision = teksilo_core::CloseDecision::new();
+        let handed = decision.clone();
+        let guard: CloseGuard = Rc::new(move |_ctx| CloseResponse::Defer(handed.clone()));
+        let CloseResponse::Defer(received) = response(None, None, Some(guard)) else {
+            panic!("a deferring guard defers");
+        };
+        decision.proceed();
+        assert_eq!(
+            received.receipt().answer(),
+            Some(teksilo_core::window::CloseAnswer::Proceed)
+        );
+    }
+
     #[test]
     fn can_close_false_vetoes_and_fires_blocked() {
         let fired = Rc::new(Cell::new(false));
         let flag = fired.clone();
-        let on_blocked: CloseBlockedCallback = Rc::new(move |_ctx| flag.set(true));
+        let on_blocked: CloseBlockedCallback = Rc::new(move |_ctx, decision| {
+            flag.set(true);
+            decision.cancel();
+        });
 
         let should_close = verdict(Some(Prop::from(Signal::new(false))), Some(on_blocked), None);
 
-        assert!(!should_close, "can_close == false must veto");
+        assert!(!should_close, "can_close == false must not close");
         assert!(fired.get(), "on_close_blocked must fire on a vetoed close");
+    }
+
+    /// Without `on_close_blocked` a blocked close is a plain veto, final
+    /// for a quit too.
+    #[test]
+    fn can_close_false_without_on_blocked_vetoes() {
+        let out = response(Some(Prop::from(Signal::new(false))), None, None);
+        assert!(matches!(out, CloseResponse::Veto));
+    }
+
+    /// With `on_close_blocked` the blocked close defers, on the decision
+    /// the callback was handed: its answer is the close's answer.
+    #[test]
+    fn can_close_false_with_on_blocked_defers_on_the_callbacks_decision() {
+        let on_blocked: CloseBlockedCallback = Rc::new(|_ctx, decision| decision.proceed());
+        let out = response(Some(Prop::from(Signal::new(false))), Some(on_blocked), None);
+        let CloseResponse::Defer(decision) = out else {
+            panic!("a blocked close with a callback defers");
+        };
+        assert_eq!(
+            decision.receipt().answer(),
+            Some(teksilo_core::window::CloseAnswer::Proceed)
+        );
     }
 
     #[test]
@@ -4807,12 +5296,42 @@ mod close_guard_tests {
         // on_close_blocked is set but must NOT fire when the signal is true.
         let fired = Rc::new(Cell::new(false));
         let flag = fired.clone();
-        let on_blocked: CloseBlockedCallback = Rc::new(move |_ctx| flag.set(true));
+        let on_blocked: CloseBlockedCallback = Rc::new(move |_ctx, _decision| flag.set(true));
 
         let should_close = verdict(Some(Prop::from(Signal::new(true))), Some(on_blocked), None);
 
         assert!(should_close, "a permissive signal with no guard closes");
         assert!(!fired.get(), "on_close_blocked must not fire when allowed");
+    }
+
+    /// A modal dismissal the application tree asks for (its own dialog
+    /// window's answer runs elsewhere, so this is only ever a stray
+    /// `dismiss_modal`) closes nothing, and is drained like a window's so
+    /// the turn does not owe another pass for it.
+    #[test]
+    fn the_application_trees_modal_dismissal_is_drained() {
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        wm.install_app_tree(|tree| tree.add(crate::app::AppTreeAnchor));
+        wm.app_tree_mut()
+            .expect("installed")
+            .run_with_event_context(&mut NoopWindowOps, |ctx| ctx.dismiss_modal());
+        assert!(
+            wm.app_tree()
+                .expect("installed")
+                .has_pending_modal_dismissal(),
+            "the request is recorded"
+        );
+        assert!(wm.owes_turn_work());
+        assert!(
+            wm.drain_pending_modal_dismissals().is_empty(),
+            "no window to close"
+        );
+        assert!(
+            !wm.app_tree()
+                .expect("installed")
+                .has_pending_modal_dismissal()
+        );
+        assert!(!wm.owes_turn_work(), "drained, the turn owes nothing");
     }
 
     #[test]

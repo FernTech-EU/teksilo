@@ -1150,9 +1150,8 @@ impl<'ops> EventContext<'ops> {
     /// via
     /// [`WindowConfig::on_close_requested`](crate::window::WindowConfig::on_close_requested)
     /// or [`can_close`](crate::window::WindowConfig::can_close), that
-    /// guard runs first and may veto the close. To skip the guard (e.g.
-    /// from the confirmation dialog the guard itself opened), use
-    /// [`close_window_forced`](Self::close_window_forced).
+    /// guard runs first and may veto the close or defer its answer. To skip
+    /// the guard, use [`close_window_forced`](Self::close_window_forced).
     pub fn close_window(&mut self) {
         self.close_window_requested = true;
     }
@@ -1163,15 +1162,12 @@ impl<'ops> EventContext<'ops> {
     /// / [`can_close`](crate::window::WindowConfig::can_close).
     ///
     /// It closes the window this context belongs to, which for the answer
-    /// of a confirmation dialog is not always the guarded window: a
-    /// `MessageBox` is a native modal window of its own on macOS and
-    /// Windows, and its answer runs there. The second half of the
-    /// veto-then-reissue pattern (the guard returns
-    /// [`CloseResponse::Veto`](crate::window::CloseResponse::Veto) and opens
-    /// a dialog, whose "close anyway" answer closes the window without
-    /// re-triggering the guard) therefore captures the guarded window's id
-    /// in the guard and calls [`close_window_by_id`](Self::close_window_by_id),
-    /// which is unguarded too.
+    /// of a dialog is not always the window it is about: a `MessageBox` is
+    /// a native modal window of its own on macOS and Windows, and its answer
+    /// runs there. A close guard that asks the user answers through its
+    /// [`CloseDecision`](crate::window::CloseDecision) instead, which knows
+    /// the window it is for; to close another window from an answer, name it
+    /// with [`close_window_by_id`](Self::close_window_by_id).
     pub fn close_window_forced(&mut self) {
         self.force_close_requested = true;
     }
@@ -1335,10 +1331,13 @@ impl<'ops> EventContext<'ops> {
             .unwrap_or_default()
     }
 
-    /// Ask the application to quit, the way a Quit menu item does.
+    /// Ask the application to quit, the way a Quit menu item does: the
+    /// guarded quit, as [`close_window`](Self::close_window) is the guarded
+    /// close.
     ///
-    /// Every open window is asked in turn, as if the user closed it: its
-    /// close guard
+    /// The application's quit guard (`TeksiloAppBuilder::on_quit_requested`)
+    /// is asked first, then every open window in turn, as if the user closed
+    /// it: its close guard
     /// ([`WindowConfig::on_close_requested`](crate::window::WindowConfig::on_close_requested),
     /// [`can_close`](crate::window::WindowConfig::can_close)) runs, and a
     /// window that agrees closes. Modal windows are asked before the windows
@@ -1346,35 +1345,33 @@ impl<'ops> EventContext<'ops> {
     /// application quits once no window is left, whatever its quit policy
     /// (`teksilo_app::QuitPolicy`).
     ///
-    /// A guard that vetoes stops the quit at its window. If it opened a
-    /// dialog there (a modal overlay or a native modal window), the quit
-    /// waits: when the window then closes (the dialog's answer closing it
-    /// by id, see [`close_window_forced`](Self::close_window_forced), or a
-    /// [`close_window`](Self::close_window) the guard now lets through), the
-    /// quit goes on to the next window. It is abandoned when the window
-    /// is left open with no dialog (the guard vetoed without asking, or its
-    /// dialog was cancelled), when another window is closed meanwhile, or by
-    /// [`cancel_quit`](Self::cancel_quit). A dialog that closes before the
-    /// window does (a save run in the background, then a forced close)
-    /// abandons the quit too; ask again with `request_quit` once it is done.
+    /// A guard that vetoes abandons the quit at once. A guard that defers
+    /// ([`CloseResponse::Defer`](crate::window::CloseResponse::Defer)) holds
+    /// the quit at its window, brought to the front, until its
+    /// [`CloseDecision`](crate::window::CloseDecision) is answered: `proceed`
+    /// closes the window and the quit goes on, `cancel` abandons the quit.
+    /// A window whose own close is already waiting on such an answer is not
+    /// asked again; the quit waits on that answer. [`cancel_quit`](Self::cancel_quit)
+    /// abandons it from anywhere.
     ///
     /// Requesting a quit while one is under way changes nothing; use
-    /// [`quit`](Self::quit) to stop asking.
-    pub fn request_quit(&mut self) {
+    /// [`quit_forced`](Self::quit_forced) to stop asking.
+    pub fn quit(&mut self) {
         match self.window_ops.as_deref_mut() {
-            Some(ops) => ops.request_quit(false),
-            None => Self::warn_without_ops("request_quit"),
+            Some(ops) => ops.quit(),
+            None => Self::warn_without_ops("quit"),
         }
     }
 
     /// Quit the application without asking any close guard: every window
-    /// closes, and the application quits. Also turns a
-    /// [`request_quit`](Self::request_quit) under way into this one, which
-    /// is what a guard's "Quit anyway" answer calls.
-    pub fn quit(&mut self) {
+    /// closes, and the application quits. The forced quit, as
+    /// [`close_window_forced`](Self::close_window_forced) is the forced
+    /// close. Also turns a [`quit`](Self::quit) under way into this one,
+    /// which is what a guard's "Quit anyway" answer calls.
+    pub fn quit_forced(&mut self) {
         match self.window_ops.as_deref_mut() {
-            Some(ops) => ops.request_quit(true),
-            None => Self::warn_without_ops("quit"),
+            Some(ops) => ops.quit_forced(),
+            None => Self::warn_without_ops("quit_forced"),
         }
     }
 
@@ -1387,8 +1384,45 @@ impl<'ops> EventContext<'ops> {
             .is_some_and(|ops| ops.quit_in_progress())
     }
 
-    /// Abandon the quit under way, if any: a dialog's Cancel answer says it
-    /// this way rather than leaving the quit to notice.
+    /// The source of the quit under way, `None` when no quit is under way
+    /// (or in a context with no application behind it). A window the user
+    /// closes by its own button while a quit is under way reads the quit's
+    /// source too.
+    ///
+    /// A close guard, or the guard of
+    /// [`on_quit_requested`](https://docs.rs/teksilo/latest/teksilo/struct.TeksiloAppBuilder.html#method.on_quit_requested),
+    /// reads it to decide whether to ask. When the session is ending
+    /// ([`SessionEnd`](crate::window::QuitSource::SessionEnd)) or the
+    /// process was told to terminate
+    /// ([`Signal`](crate::window::QuitSource::Signal)) nobody is there to
+    /// answer a "Save changes?" dialog, so the guard can save directly and
+    /// return [`Close`](crate::window::CloseResponse::Close), as AppKit and
+    /// Qt applications do.
+    ///
+    /// ```ignore
+    /// .on_close_requested(move |ctx| {
+    ///     if !dirty.get() {
+    ///         return CloseResponse::Close;
+    ///     }
+    ///     if matches!(ctx.quit_source(), Some(QuitSource::SessionEnd | QuitSource::Signal)) {
+    ///         save();
+    ///         return CloseResponse::Close;
+    ///     }
+    ///     // ... ask the user, and defer
+    /// })
+    /// ```
+    pub fn quit_source(&self) -> Option<crate::window::QuitSource> {
+        self.window_ops.as_deref().and_then(|ops| ops.quit_source())
+    }
+
+    /// Abandon the quit under way, if it is a guarded one
+    /// ([`quit`](Self::quit), the App menu's Quit, the macOS Dock's Quit or
+    /// a logout). A quit no guard may refuse goes on: a forced one
+    /// ([`quit_forced`](Self::quit_forced)) and one for a source that leaves
+    /// no time to ask (a termination signal, a Windows session ending now),
+    /// so a guard, or a dialog's Cancel arm run as its window closes, cannot
+    /// stop it half done. A close guard's own dialog answers through its
+    /// [`CloseDecision`](crate::window::CloseDecision) instead.
     pub fn cancel_quit(&mut self) {
         if let Some(ops) = self.window_ops.as_deref_mut() {
             ops.cancel_quit();
@@ -1445,9 +1479,8 @@ impl<'ops> EventContext<'ops> {
         }
     }
 
-    /// Close a specific window by id. Equivalent to
-    /// [`close_window`](Self::close_window) when `id` is the current
-    /// window's id.
+    /// Close a specific window by id, unconditionally: its close guard is
+    /// not asked, as for [`close_window_forced`](Self::close_window_forced).
     pub fn close_window_by_id(&mut self, id: crate::window::TeksiloWindowId) {
         if let Some(ops) = self.window_ops.as_deref_mut() {
             ops.close_window_by_id(id);
@@ -2533,9 +2566,10 @@ mod multi_window_tests {
         open_calls: RefCell<Vec<WindowConfig>>,
         focus_calls: RefCell<Vec<TeksiloWindowId>>,
         close_calls: RefCell<Vec<TeksiloWindowId>>,
-        /// Each `request_quit`'s `forced` argument, in order.
+        /// Each quit asked for, `true` for a forced one, in order.
         quit_calls: RefCell<Vec<bool>>,
         cancel_quit_calls: RefCell<usize>,
+        source: RefCell<Option<crate::window::QuitSource>>,
         next_id: RefCell<u64>,
         // A fake registry so `find_window` / `window_state` / `windows`
         // can return values.
@@ -2593,8 +2627,12 @@ mod multi_window_tests {
             self.close_calls.borrow_mut().push(id);
         }
 
-        fn request_quit(&mut self, forced: bool) {
-            self.quit_calls.borrow_mut().push(forced);
+        fn quit(&mut self) {
+            self.quit_calls.borrow_mut().push(false);
+        }
+
+        fn quit_forced(&mut self) {
+            self.quit_calls.borrow_mut().push(true);
         }
 
         fn quit_in_progress(&self) -> bool {
@@ -2602,13 +2640,18 @@ mod multi_window_tests {
             quits > *self.cancel_quit_calls.borrow()
         }
 
+        fn quit_source(&self) -> Option<crate::window::QuitSource> {
+            *self.source.borrow()
+        }
+
         fn cancel_quit(&mut self) {
             *self.cancel_quit_calls.borrow_mut() += 1;
         }
     }
 
-    /// `request_quit` asks with the guards, `quit` without, and both reach
-    /// the application through the ops sink, as do the query and the cancel.
+    /// `quit` asks with the guards, `quit_forced` without, as `close_window`
+    /// and `close_window_forced` do, and both reach the application through
+    /// the ops sink, as do the query and the cancel.
     #[test]
     fn quit_requests_route_through_ops() {
         let mut ops = RecordingOps::default();
@@ -2616,14 +2659,31 @@ mod multi_window_tests {
             let mut ctx =
                 EventContext::new().with_window_context(&mut ops, Some(make_state(1, None)));
             assert!(!ctx.quit_in_progress());
-            ctx.request_quit();
+            ctx.quit();
             assert!(ctx.quit_in_progress());
             ctx.cancel_quit();
             assert!(!ctx.quit_in_progress());
-            ctx.quit();
+            ctx.quit_forced();
         }
         assert_eq!(*ops.quit_calls.borrow(), [false, true]);
         assert_eq!(*ops.cancel_quit_calls.borrow(), 1);
+    }
+
+    /// `quit_source` reads the source the sink reports, and is `None` when
+    /// no quit is under way or no application stands behind the context.
+    #[test]
+    fn quit_source_reads_what_the_ops_sink_reports() {
+        let mut ops = RecordingOps::default();
+        *ops.source.borrow_mut() = Some(crate::window::QuitSource::SessionEnd);
+        let ctx = EventContext::new().with_window_context(&mut ops, Some(make_state(1, None)));
+        assert_eq!(
+            ctx.quit_source(),
+            Some(crate::window::QuitSource::SessionEnd)
+        );
+        let mut ops = RecordingOps::default();
+        let ctx = EventContext::new().with_window_context(&mut ops, Some(make_state(1, None)));
+        assert_eq!(ctx.quit_source(), None);
+        assert_eq!(EventContext::new().quit_source(), None);
     }
 
     /// With no application behind the context there is nothing to quit, and
@@ -2631,8 +2691,8 @@ mod multi_window_tests {
     #[test]
     fn quit_without_ops_is_a_harmless_no_op() {
         let mut ctx = EventContext::new();
-        ctx.request_quit();
         ctx.quit();
+        ctx.quit_forced();
         ctx.cancel_quit();
         assert!(!ctx.quit_in_progress());
     }

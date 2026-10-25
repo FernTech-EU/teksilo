@@ -454,10 +454,14 @@ impl TextInput {
         self
     }
 
-    /// The composite's own commit (a date field's parse), run on focus loss
-    /// and before a click on a control that takes no focus runs its command.
-    /// Forwarded to `TextInputField::on_commit_fn`.
-    pub(crate) fn on_commit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+    /// Editing is finished, commit: run once per edit, after the
+    /// [validator](Self::validator) and before [`on_blur_fn`](Self::on_blur_fn).
+    /// It runs before the command of a click on a control that takes no focus
+    /// (`focus_on_click(false)`, a toolbar button) while the field keeps
+    /// focus, or on a real blur, whichever comes first; a blur right after
+    /// such a commit, with nothing typed since, does not run it again.
+    /// `on_blur_fn` means focus left. Forwarded to `TextInputField`.
+    pub fn on_commit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_commit = Some(Box::new(f));
         self
     }

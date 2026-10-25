@@ -512,7 +512,7 @@ impl StandardMenu {
     /// equivalent.
     ///
     /// By default Quit asks the application to quit, as
-    /// `EventContext::request_quit` does: every window's close guard is asked
+    /// `EventContext::quit` does: every window's close guard is asked
     /// in turn, and the application ends once no window is left. Set an
     /// intent when quitting has to pass through the app first in a way the
     /// guards do not cover: a session to write out, a background job to stop.

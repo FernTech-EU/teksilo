@@ -388,8 +388,10 @@ mod tests {
             &mut two_copies,
         );
         assert!(app.override_for("app.new").is_none(), "a reset applies too");
-        assert_eq!(primary(&one), Some(KeyStroke::ctrl(Key::N)));
-        assert_eq!(primary(&two), Some(KeyStroke::ctrl(Key::N)));
+        // The declared Ctrl+N resolves to the platform's accelerator (⌘N on
+        // macOS); the override above was literal.
+        assert_eq!(primary(&one), Some(KeyStroke::command(Key::N)));
+        assert_eq!(primary(&two), Some(KeyStroke::command(Key::N)));
     }
 
     /// An override the application tree's registry holds (one an app loaded

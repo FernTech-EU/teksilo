@@ -1,56 +1,140 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! The application-level quit: [`EventContext::request_quit`] and
-//! [`EventContext::quit`], carried out by the window manager over the ticks
-//! that follow.
+//! The application-level quit: [`EventContext::quit`] and
+//! [`EventContext::quit_forced`], carried out by the window manager over the
+//! ticks that follow.
 //!
-//! A quit asks every open window in turn, as if the user closed it. The order
+//! A quit asks the application first, through the guard declared with
+//! [`TeksiloAppBuilder::on_quit_requested`](crate::TeksiloAppBuilder::on_quit_requested),
+//! then every open window in turn, as if the user closed it. The order
 //! is recomputed from the live windows at every step, so a window opened or
 //! closed meanwhile is simply in the next list or not: modal windows first,
 //! deepest first, so a dialog closes before the window it blocks; then the
 //! others from the most recently used.
 //!
-//! A close guard that vetoes stops the quit at its window, which it then
-//! *awaits*. The guard has usually opened a dialog (veto-then-reissue: the
-//! dialog's answer closes the window, or does not), and nothing tells the
-//! framework that the dialog was cancelled, so the quit reads the window
-//! instead:
+//! The application is asked before any window closes, as Qt's
+//! `QEvent::Quit` reaches the application before its windows are closed and
+//! Electron's `before-quit` precedes the windows' `close`: a quit closes the
+//! windows as it goes, so an application asked last could only refuse with
+//! its windows already gone. (AppKit asks its delegate's
+//! `applicationShouldTerminate:` after the document controller has reviewed
+//! the documents, but that review saves documents and closes no window.)
 //!
-//! - the window closed: the quit goes on with the next one;
-//! - it is still open with a dialog up (a native modal child, a modal
-//!   overlay, or a modal request still queued for presentation): it waits;
-//! - it is still open with no dialog: the guard vetoed without asking, or
-//!   the dialog was cancelled, and the quit is abandoned.
+//! Each guard, the application's and the windows', answers as a window's
+//! does for a close
+//! ([`CloseResponse`](teksilo_core::CloseResponse)):
 //!
-//! Closing any other window meanwhile also abandons it; a close of the
-//! awaited window or of its modal children is the dialog at work, not a new
-//! request. A second guarded request while a quit is under way changes
-//! nothing, since asking the awaited window again would only open a second
-//! dialog; a forced one ([`EventContext::quit`]) turns the quit under way
-//! into a forced one.
+//! - `Close`: the window closes and the quit goes on with the next one;
+//! - `Veto`: the quit is abandoned at once;
+//! - `Defer`: the quit *awaits* the window until its
+//!   [`CloseDecision`](teksilo_core::CloseDecision) is answered: `proceed`
+//!   closes it and the quit goes on, `cancel` (or dropping the decision)
+//!   abandons the quit. The window is brought to the front meanwhile.
+//!
+//! A window whose own close is already deferred (its guard is waiting on the
+//! user's answer to a close button) is not asked again: the quit adopts that
+//! answer and awaits it first, so the user sees one question. The window
+//! being awaited closed by another route (its dialog closing it by id) lets
+//! the quit go on.
+//!
+//! A quit runs in one of three [`QuitMode`]s: guarded (the above), forced
+//! ([`EventContext::quit_forced`]: no guard is asked, nothing is awaited),
+//! or overruling, for a source that leaves no time to ask (a session
+//! ending now, a termination signal): every guard is asked once, so it can
+//! save, but whatever it answers its window closes. A request while a quit
+//! is under way joins it, and one in a stronger mode makes the quit under
+//! way that mode, on behalf of its own source. Once a quit has completed
+//! the application is ending, and a request starts nothing: a service
+//! manager that sends `SIGTERM` and `SIGHUP` together gets its guards asked
+//! once.
 //!
 //! [`step`] is the decision, a pure function of the quit and of what the
 //! windows look like; `WindowManager::advance_quit` carries it out.
 //!
-//! [`EventContext::request_quit`]: teksilo_core::widget::EventContext::request_quit
+//! # Where a quit comes from
+//!
+//! Every source asks through one entry,
+//! `WindowManager::request_quit_from(source, forced, reply)`: the
+//! application (`ctx.quit()`, `ctx.quit_forced()`, the App menu's Quit) and
+//! the platform's own sources ([`QuitSource`], also read by guards through
+//! [`EventContext::quit_source`](teksilo_core::widget::EventContext::quit_source)). A source that must answer
+//! the operating system once the quit is decided (AppKit's
+//! `NSTerminateLater` then `replyToApplicationShouldTerminate:`) passes a
+//! [`QuitReply`], told how the quit ends: [`QuitOutcome::Completed`] once
+//! every window has closed, [`QuitOutcome::Cancelled`] when a guard refuses
+//! or the quit is cancelled. A source with no time to ask (a session ending
+//! now, Windows' `WM_ENDSESSION`, a termination signal) calls
+//! `TeksiloAppHandler::quit_now`, which runs an overruling quit to its end
+//! before it returns: every guard is asked once and reads the source, so a
+//! document's guard saves without asking; a refusal or a deferred answer is
+//! overruled, and every dialog still up answers through its own Cancel path
+//! as its window closes.
+//!
 //! [`EventContext::quit`]: teksilo_core::widget::EventContext::quit
+//! [`EventContext::quit_forced`]: teksilo_core::widget::EventContext::quit_forced
 
 use crate::window_config::TeksiloWindowId;
+
+pub(crate) use teksilo_core::QuitSource;
+
+/// How a quit treats the guards it asks. Ordered from the weakest: a
+/// request in a stronger mode makes the quit under way that mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum QuitMode {
+    /// Every guard is asked, and can refuse the quit or defer its answer.
+    Guarded,
+    /// Every guard is asked once, so it can save, and cannot refuse: a
+    /// veto or a deferred answer is overruled and the window closes. For a
+    /// source that leaves no time to ask.
+    Overruling,
+    /// No guard is asked.
+    Forced,
+}
+
+/// How a quit ended, told to its [`QuitReply`]s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QuitOutcome {
+    /// Every window closed: the application is ending.
+    Completed,
+    /// A guard refused, a deferred answer cancelled, or the quit was
+    /// cancelled: the application goes on.
+    Cancelled,
+}
+
+/// Told how the quit it was passed with ends, once, on the event loop's
+/// thread. A request made while a quit is under way adds its reply to that
+/// quit's.
+pub(crate) type QuitReply = Box<dyn FnOnce(QuitOutcome)>;
+
+/// Whose deferred answer a quit waits on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Awaited {
+    /// The application's guard.
+    Application,
+    /// A window's guard.
+    Window(TeksiloWindowId),
+}
 
 /// A quit under way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PendingQuit {
-    /// Close every window without asking its guard.
-    pub(crate) skip_guards: bool,
-    /// The window whose guard vetoed, which the quit waits on.
-    pub(crate) awaiting: Option<TeksiloWindowId>,
+    /// How the guards are treated.
+    pub(crate) mode: QuitMode,
+    /// The application agreed to the quit (or has no guard to ask).
+    pub(crate) application_agreed: bool,
+    /// Whose deferred answer the quit waits on.
+    pub(crate) awaiting: Option<Awaited>,
+    /// Who asked for it first, or the request that made it overruling or
+    /// forced: what a guard reads.
+    pub(crate) source: QuitSource,
     /// Bumped whenever the quit is replaced or made forced, so a step that
     /// ran a guard can tell whether the guard changed the quit under it.
     pub(crate) generation: u64,
 }
 
-/// What the quit sees of one open window.
+/// What the quit sees of one open window. A window already closing this
+/// turn is not one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct QuitWindow {
     pub(crate) id: TeksiloWindowId,
@@ -59,9 +143,8 @@ pub(crate) struct QuitWindow {
     pub(crate) modal_depth: usize,
     /// Its place in the activation order, higher for a window used later.
     pub(crate) recency: u64,
-    /// A dialog is up in or over it: a native modal child, a modal overlay,
-    /// or a modal request queued for presentation.
-    pub(crate) dialog_open: bool,
+    /// Its guard deferred a close whose answer has not come yet.
+    pub(crate) deferred: bool,
 }
 
 /// What a quit does next.
@@ -69,56 +152,46 @@ pub(crate) struct QuitWindow {
 pub(crate) enum QuitStep {
     /// No window is left: the quit is complete and the application ends.
     Complete,
-    /// The awaited window is open with no dialog: give up.
-    Abandon,
-    /// The awaited window still has its dialog up.
+    /// The awaited guard has not answered yet.
     Wait,
-    /// Ask this window (or close it, for a forced quit).
+    /// Ask the application's guard.
+    AskApplication,
+    /// This window's guard already deferred a close: await that answer
+    /// instead of asking again. A guarded quit only.
+    Adopt(TeksiloWindowId),
+    /// Ask this window (or close it, for a forced quit; ask it and close
+    /// it whatever it answers, for an overruling one).
     Ask(TeksiloWindowId),
 }
 
 /// The next step of `quit`, given the open windows.
 pub(crate) fn step(quit: &PendingQuit, windows: &[QuitWindow]) -> QuitStep {
+    match quit.awaiting {
+        Some(Awaited::Application) => return QuitStep::Wait,
+        Some(Awaited::Window(awaited)) if windows.iter().any(|window| window.id == awaited) => {
+            return QuitStep::Wait;
+        }
+        _ => {}
+    }
+    if quit.mode != QuitMode::Forced && !quit.application_agreed {
+        return QuitStep::AskApplication;
+    }
     if windows.is_empty() {
         return QuitStep::Complete;
     }
-    if let Some(awaited) = quit.awaiting
-        && let Some(window) = windows.iter().find(|window| window.id == awaited)
+    if quit.mode == QuitMode::Guarded
+        && let Some(deferred) = windows
+            .iter()
+            .filter(|window| window.deferred)
+            .max_by_key(|window| (window.recency, window.id.raw()))
     {
-        return if window.dialog_open {
-            QuitStep::Wait
-        } else {
-            QuitStep::Abandon
-        };
+        return QuitStep::Adopt(deferred.id);
     }
     let next = windows
         .iter()
         .max_by_key(|window| (window.modal_depth, window.recency, window.id.raw()))
         .expect("not empty");
     QuitStep::Ask(next.id)
-}
-
-/// Whether a close request for `closing` abandons a quit awaiting
-/// `awaiting`. `parent_of` gives a window's modal parent.
-pub(crate) fn close_abandons(
-    awaiting: Option<TeksiloWindowId>,
-    closing: TeksiloWindowId,
-    parent_of: impl Fn(TeksiloWindowId) -> Option<TeksiloWindowId>,
-) -> bool {
-    let Some(awaited) = awaiting else {
-        return false;
-    };
-    let mut window = Some(closing);
-    // A modal chain is short and acyclic; the bound only keeps a corrupt
-    // map from hanging the loop.
-    for _ in 0..64 {
-        match window {
-            Some(id) if id == awaited => return false,
-            Some(id) => window = parent_of(id),
-            None => return true,
-        }
-    }
-    true
 }
 
 #[cfg(test)]
@@ -134,23 +207,114 @@ mod tests {
             id: id(raw),
             modal_depth: 0,
             recency,
-            dialog_open: false,
+            deferred: false,
         }
     }
 
+    fn deferred(raw: u64, recency: u64) -> QuitWindow {
+        QuitWindow {
+            deferred: true,
+            ..window(raw, recency)
+        }
+    }
+
+    /// A guarded quit the application has agreed to.
     fn quit() -> PendingQuit {
         PendingQuit {
-            skip_guards: false,
+            mode: QuitMode::Guarded,
+            application_agreed: true,
             awaiting: None,
+            source: QuitSource::Application,
             generation: 0,
         }
     }
 
     fn awaiting(raw: u64) -> PendingQuit {
         PendingQuit {
-            awaiting: Some(id(raw)),
+            awaiting: Some(Awaited::Window(id(raw))),
             ..quit()
         }
+    }
+
+    fn forced() -> PendingQuit {
+        PendingQuit {
+            mode: QuitMode::Forced,
+            ..quit()
+        }
+    }
+
+    fn overruling() -> PendingQuit {
+        PendingQuit {
+            mode: QuitMode::Overruling,
+            ..quit()
+        }
+    }
+
+    /// The application is asked first, before any window, and with no
+    /// window open too.
+    #[test]
+    fn the_application_is_asked_before_any_window() {
+        let fresh = PendingQuit {
+            application_agreed: false,
+            ..quit()
+        };
+        assert_eq!(step(&fresh, &[window(1, 5)]), QuitStep::AskApplication);
+        assert_eq!(step(&fresh, &[deferred(1, 5)]), QuitStep::AskApplication);
+        assert_eq!(step(&fresh, &[]), QuitStep::AskApplication);
+    }
+
+    #[test]
+    fn a_quit_waits_on_the_application_whatever_the_windows() {
+        let waiting = PendingQuit {
+            application_agreed: false,
+            awaiting: Some(Awaited::Application),
+            ..quit()
+        };
+        assert_eq!(step(&waiting, &[window(1, 5)]), QuitStep::Wait);
+        assert_eq!(step(&waiting, &[]), QuitStep::Wait);
+    }
+
+    /// A forced quit asks nobody, the application included.
+    #[test]
+    fn a_forced_quit_does_not_ask_the_application() {
+        let forced = PendingQuit {
+            application_agreed: false,
+            ..forced()
+        };
+        assert_eq!(step(&forced, &[window(1, 5)]), QuitStep::Ask(id(1)));
+        assert_eq!(step(&forced, &[]), QuitStep::Complete);
+    }
+
+    /// An overruling quit asks the application, so it can save, and
+    /// every window, but awaits no answer: a window whose own close waits
+    /// on the user is asked again rather than adopted, dialogs first.
+    #[test]
+    fn an_overruling_quit_asks_everyone_and_adopts_nothing() {
+        let fresh = PendingQuit {
+            application_agreed: false,
+            ..overruling()
+        };
+        assert_eq!(step(&fresh, &[window(1, 5)]), QuitStep::AskApplication);
+        assert_eq!(step(&fresh, &[]), QuitStep::AskApplication);
+        let its_box = QuitWindow {
+            modal_depth: 1,
+            ..window(4, 1)
+        };
+        assert_eq!(
+            step(&overruling(), &[deferred(2, 9), its_box]),
+            QuitStep::Ask(id(4))
+        );
+        assert_eq!(
+            step(&overruling(), &[deferred(2, 9), window(3, 1)]),
+            QuitStep::Ask(id(2))
+        );
+        assert_eq!(step(&overruling(), &[]), QuitStep::Complete);
+    }
+
+    #[test]
+    fn the_modes_are_ordered_from_the_weakest() {
+        assert!(QuitMode::Guarded < QuitMode::Overruling);
+        assert!(QuitMode::Overruling < QuitMode::Forced);
     }
 
     #[test]
@@ -183,20 +347,13 @@ mod tests {
         );
     }
 
+    /// The awaited window waits for its answer, whatever else is open: an
+    /// unrelated dialog or palette has no say in it.
     #[test]
-    fn the_awaited_window_with_its_dialog_up_is_waited_on() {
-        let awaited = QuitWindow {
-            dialog_open: true,
-            ..window(1, 9)
-        };
-        assert_eq!(step(&awaiting(1), &[awaited, window(2, 1)]), QuitStep::Wait);
-    }
-
-    #[test]
-    fn the_awaited_window_left_without_a_dialog_abandons_the_quit() {
+    fn the_awaited_window_open_is_waited_on() {
         assert_eq!(
-            step(&awaiting(1), &[window(1, 9), window(2, 1)]),
-            QuitStep::Abandon
+            step(&awaiting(1), &[deferred(1, 9), window(2, 1)]),
+            QuitStep::Wait
         );
     }
 
@@ -208,6 +365,35 @@ mod tests {
         );
     }
 
+    /// A window whose own close is waiting on the user is not asked a
+    /// second question, even when a dialog of it would be asked first: the
+    /// dialog is the question.
+    #[test]
+    fn a_window_already_deferred_is_adopted_before_anything_is_asked() {
+        let its_box = QuitWindow {
+            modal_depth: 1,
+            ..window(4, 10)
+        };
+        assert_eq!(
+            step(&quit(), &[window(1, 9), deferred(2, 3), its_box]),
+            QuitStep::Adopt(id(2))
+        );
+        assert_eq!(
+            step(&quit(), &[deferred(1, 3), deferred(2, 5)]),
+            QuitStep::Adopt(id(2)),
+            "the one used last first"
+        );
+    }
+
+    /// A forced quit asks nobody, so it adopts nothing either: it closes.
+    #[test]
+    fn a_forced_quit_closes_a_deferred_window_rather_than_waiting() {
+        assert_eq!(
+            step(&forced(), &[deferred(1, 3), window(2, 1)]),
+            QuitStep::Ask(id(1))
+        );
+    }
+
     /// Equal recency (never true of two live windows, but the order must
     /// not depend on the slice's order either way).
     #[test]
@@ -215,36 +401,16 @@ mod tests {
         let a = [window(1, 4), window(2, 4)];
         let b = [window(2, 4), window(1, 4)];
         assert_eq!(step(&quit(), &a), step(&quit(), &b));
+        let a = [deferred(1, 4), deferred(2, 4)];
+        let b = [deferred(2, 4), deferred(1, 4)];
+        assert_eq!(step(&quit(), &a), step(&quit(), &b));
     }
 
-    #[test]
-    fn closing_another_window_abandons_but_the_dialog_at_work_does_not() {
-        // 1 is awaited; 4 is a dialog over 1; 5 a dialog over 4; 2 another
-        // window.
-        let parent_of = |w: TeksiloWindowId| match w.raw() {
-            4 => Some(id(1)),
-            5 => Some(id(4)),
-            _ => None,
-        };
-        assert!(!close_abandons(Some(id(1)), id(1), parent_of));
-        assert!(!close_abandons(Some(id(1)), id(4), parent_of));
-        assert!(!close_abandons(Some(id(1)), id(5), parent_of));
-        assert!(close_abandons(Some(id(1)), id(2), parent_of));
-        assert!(
-            !close_abandons(None, id(2), parent_of),
-            "a quit that awaits nothing is not disturbed"
-        );
-    }
-
-    #[test]
-    fn a_cyclic_parent_map_does_not_hang() {
-        let parent_of = |w: TeksiloWindowId| Some(id(if w.raw() == 7 { 8 } else { 7 }));
-        assert!(close_abandons(Some(id(1)), id(7), parent_of));
-    }
-
-    /// Exhaustive over small window sets: whatever the windows, a quit whose
-    /// awaited window is gone never waits or abandons, a step never asks a
-    /// window that is not open, and only an empty set completes.
+    /// Exhaustive over small window sets: a step never names a window that
+    /// is not open, only an empty set completes, a quit waits only on an
+    /// open awaited window, only a guarded quit waits or adopts, a forced
+    /// quit never asks the application, and only a quit the application has
+    /// not agreed to asks it.
     #[test]
     fn exhaustive_small_sets() {
         for count in 0..=4u64 {
@@ -254,21 +420,41 @@ mod tests {
                         id: id(i + 1),
                         modal_depth: ((mask >> (i * 2)) & 1) as usize,
                         recency: (i * 7 + mask as u64) % 5,
-                        dialog_open: (mask >> (i * 2 + 1)) & 1 == 1,
+                        deferred: (mask >> (i * 2 + 1)) & 1 == 1,
                     })
                     .collect();
+                let open = |w: TeksiloWindowId| windows.iter().any(|x| x.id == w);
                 for awaited in 0..=count + 1 {
-                    let quit = PendingQuit {
-                        awaiting: (awaited > 0).then(|| id(awaited)),
-                        ..quit()
-                    };
-                    let open = |w: TeksiloWindowId| windows.iter().any(|x| x.id == w);
-                    match step(&quit, &windows) {
-                        QuitStep::Complete => assert!(windows.is_empty()),
-                        QuitStep::Ask(w) => assert!(open(w)),
-                        QuitStep::Wait | QuitStep::Abandon => {
-                            let w = quit.awaiting.expect("only an awaiting quit waits");
-                            assert!(open(w), "a closed awaited window never stalls the quit");
+                    for (mode, application_agreed) in
+                        [QuitMode::Guarded, QuitMode::Overruling, QuitMode::Forced]
+                            .into_iter()
+                            .flat_map(|mode| [(mode, false), (mode, true)])
+                    {
+                        let guarded = mode == QuitMode::Guarded;
+                        let quit = PendingQuit {
+                            mode,
+                            application_agreed,
+                            awaiting: (awaited > 0 && guarded)
+                                .then(|| Awaited::Window(id(awaited))),
+                            ..quit()
+                        };
+                        match step(&quit, &windows) {
+                            QuitStep::Complete => assert!(windows.is_empty()),
+                            QuitStep::AskApplication => {
+                                assert!(mode != QuitMode::Forced && !application_agreed);
+                            }
+                            QuitStep::Ask(w) => assert!(open(w)),
+                            QuitStep::Adopt(w) => {
+                                assert!(guarded, "only a guarded quit adopts");
+                                assert!(open(w));
+                            }
+                            QuitStep::Wait => {
+                                assert!(guarded, "only a guarded quit waits");
+                                let Some(Awaited::Window(w)) = quit.awaiting else {
+                                    panic!("only an awaiting quit waits");
+                                };
+                                assert!(open(w), "a closed awaited window never stalls the quit");
+                            }
                         }
                     }
                 }

@@ -62,7 +62,7 @@ impl Widget for AppRoot {
         ctx.register_action_global(Action::new("app.new").on_invoke(|_, ctx| {
             ctx.open_window(document_window());
         }));
-        ctx.register_action_global(Action::new("app.quit").on_invoke(|_, ctx| ctx.request_quit()));
+        ctx.register_action_global(Action::new("app.quit").on_invoke(|_, ctx| ctx.quit()));
 
         // The same handle at every build: declaring it again changes nothing.
         ctx.set_application_menu(self.menu.clone());
@@ -436,16 +436,23 @@ Settings command uses and the two stay one command.
 ### Quit
 
 The App menu's **Quit** asks the application to quit, as
-`EventContext::request_quit` does: every window's close guard is asked in turn,
-and the application ends once no window is left. It is never AppKit's
-`terminate:`, which would exit past every guard and past winit's exit path.
+`EventContext::quit` does: the application's quit guard
+(`TeksiloAppBuilder::on_quit_requested`) is asked first, then every window's
+close guard in turn, any of which can refuse or defer its answer
+(`CloseResponse::Defer`), and the application ends once no window is left.
+See "Quitting the application" in the [multi-window guide](multi-window.md).
+The row is the application's own command, not AppKit's `terminate:`, so it
+can carry the app's quit intent (below). A `terminate:` sent from elsewhere
+(the Dock menu's Quit, AppleScript's `quit`, a logout) asks the same quit:
+AppKit asks the application before it ends, and the quit's outcome is its
+answer (see "When the operating system asks" in the multi-window guide).
 
 An in-app ⌘Q shortcut does **not** replace it. AppKit dispatches main-menu key
 equivalents *before* the responder chain, so the App menu's item wins and the
 app's own shortcut never sees the keystroke. The same is true of a Quit row the
 app puts in its own File menu.
 
-An app that must do more than its close guards do before exiting (a session to
+An app that must do more than its guards do before exiting (a session to
 flush, a job to stop) routes the item to its own command:
 
 ```rust

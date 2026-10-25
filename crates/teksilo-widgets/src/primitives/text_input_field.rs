@@ -29,7 +29,8 @@
 //! - Commit hooks: Enter fires
 //!   [`on_submit_fn`](TextInputField::on_submit_fn) and focus loss
 //!   fires [`on_blur_fn`](TextInputField::on_blur_fn), only on a real
-//!   focus loss. The [validator](TextInputField::validator) runs on focus
+//!   focus loss. [`on_commit_fn`](TextInputField::on_commit_fn) runs once per
+//!   edit, on whichever of a no-focus command and a blur comes first. The [validator](TextInputField::validator) runs on focus
 //!   loss and also when a click on a control that takes no focus (a toolbar
 //!   button) is about to run its command, so the command sees the value
 //!   committed.
@@ -471,14 +472,20 @@ impl TextInputField {
         self
     }
 
-    /// The composite's own commit, run after the validator: a `SpinBox`
-    /// parses, clamps and reformats its text here, a date field its date.
-    /// Run on a focus loss, before [`on_blur_fn`](Self::on_blur_fn), and
-    /// while the field keeps focus before a click on a control that takes
-    /// no focus runs its command (AppKit's `commitEditing`), so that command
-    /// sees the value. A focus loss right after such a commit, with nothing
-    /// typed since, does not run it again.
-    pub(crate) fn on_commit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+    /// Editing is finished, commit: run once per edit, after the
+    /// [validator](Self::validator) and before the app's
+    /// [`on_blur_fn`](Self::on_blur_fn). Use it for what must happen when the
+    /// user is done with the text, such as saving it or parsing it into a
+    /// value.
+    ///
+    /// It runs at the first of two moments. While the field keeps focus, it
+    /// runs before the command of a click on a control that takes no focus
+    /// (`focus_on_click(false)`: a toolbar button, a menu bar title), so that
+    /// command sees the value (AppKit's `commitEditing`). On a real blur it
+    /// runs unless such a click already ran it and nothing was typed since.
+    /// `on_blur_fn` means focus left and waits for a real blur; a composite
+    /// such as `SpinBox` commits its parse through this same hook.
+    pub fn on_commit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_commit = Some(Box::new(f));
         self
     }

@@ -27,7 +27,7 @@ use teksilo_widgets::button::Button;
 use teksilo_widgets::common::datetime::{Date, Time};
 use teksilo_widgets::primitives::HStack;
 use teksilo_widgets::{
-    DateEdit, DateRange, DateRangeEdit, DateTimeEdit, HexColorInput, SpinBox, TimeEdit,
+    DateEdit, DateRange, DateRangeEdit, DateTimeEdit, HexColorInput, SpinBox, TextInput, TimeEdit,
 };
 
 fn tick(tree: &mut WidgetTree) {
@@ -194,4 +194,46 @@ fn without_the_click_the_blur_commits() {
     tree.focus(tree.first_focusable_descendant(sink).unwrap());
     tick(&mut tree);
     assert_eq!((value.get(), changes.get()), (35, 1));
+}
+
+/// An app's own `on_commit_fn` on a plain `TextInput`: it runs before the
+/// command of a control that takes no focus, and once on the blur that
+/// follows, not twice.
+#[test]
+fn an_apps_on_commit_fn_runs_before_the_command_and_once() {
+    let log = Rc::new(std::cell::RefCell::new(Vec::<&'static str>::new()));
+    let text = Signal::new(String::new());
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let tool = tree.add(
+        Button::new(lit!("tool"))
+            .on_activate_fn({
+                let log = log.clone();
+                move |_| log.borrow_mut().push("command")
+            })
+            .focus_on_click(false),
+    );
+    let sink = tree.add(Button::new(lit!("sink")).on_activate_fn(|_| {}));
+    let input = tree.add(TextInput::new(text.clone()).on_commit_fn({
+        let log = log.clone();
+        move |_| log.borrow_mut().push("commit")
+    }));
+    tree.add(HStack::new().child(tool).child(sink).child(input));
+    tick(&mut tree);
+    let field = tree.first_focusable_descendant(input).unwrap();
+    let sink = tree.first_focusable_descendant(sink).unwrap();
+    let b = tree.bounds(tool);
+    let at = Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
+
+    tree.focus(field);
+    tree.type_text(field, "hello");
+    tick(&mut tree);
+    assert!(log.borrow().is_empty());
+
+    tree.tap_with(PointerKind::Mouse, at);
+    tick(&mut tree);
+    assert_eq!(*log.borrow(), ["commit", "command"]);
+
+    tree.focus(sink);
+    tick(&mut tree);
+    assert_eq!(*log.borrow(), ["commit", "command"], "the blur adds none");
 }

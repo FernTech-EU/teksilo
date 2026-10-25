@@ -171,14 +171,17 @@ pub trait WindowOps {
         SoftKeyboardSupport::None
     }
 
-    /// Ask the application to quit. With `forced` false, every open
-    /// window's close guard is asked in turn, and a veto stops the quit
-    /// until that window closes; with `forced` true, the guards are skipped.
-    /// The application quits once no window is left. See
-    /// [`EventContext::request_quit`](crate::widget::EventContext::request_quit).
+    /// Ask the application to quit, asking every open window's close guard
+    /// in turn. See [`EventContext::quit`](crate::widget::EventContext::quit).
     ///
     /// Default: no-op, for a sink with no application behind it.
-    fn request_quit(&mut self, _forced: bool) {}
+    fn quit(&mut self) {}
+
+    /// Quit the application without asking any close guard. See
+    /// [`EventContext::quit_forced`](crate::widget::EventContext::quit_forced).
+    ///
+    /// Default: no-op, for a sink with no application behind it.
+    fn quit_forced(&mut self) {}
 
     /// Whether a quit is under way: requested, and neither finished nor
     /// abandoned. Default: `false`.
@@ -186,7 +189,15 @@ pub trait WindowOps {
         false
     }
 
-    /// Abandon the quit under way, if any. Default: no-op.
+    /// Where the quit under way came from, or `None` when no quit is under
+    /// way. Default: `None`.
+    fn quit_source(&self) -> Option<crate::window::QuitSource> {
+        None
+    }
+
+    /// Abandon the quit under way, if it is a guarded one; see
+    /// [`EventContext::cancel_quit`](crate::widget::EventContext::cancel_quit).
+    /// Default: no-op.
     fn cancel_quit(&mut self) {}
 
     /// Take the activation token the event being dispatched carried, while

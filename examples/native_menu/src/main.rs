@@ -160,7 +160,7 @@ impl Widget for AppRoot {
                 Action::new(id).on_invoke(move |_, _| status.set(format!("{label} chosen"))),
             );
         }
-        ctx.register_action_global(Action::new("app.quit").on_invoke(|_, ctx| ctx.request_quit()));
+        ctx.register_action_global(Action::new("app.quit").on_invoke(|_, ctx| ctx.quit()));
         ctx.register_action_global(Action::new("app.inspector").on_invoke(|_, ctx| {
             match ctx.find_window("inspector") {
                 Some(id) => ctx.focus_window(id),

@@ -16,6 +16,8 @@ pub(crate) mod linux_helpers;
 pub(crate) mod linux_portal;
 #[cfg(feature = "native-menu")]
 pub mod native_menu;
+#[doc(hidden)]
+pub mod os_quit;
 pub mod os_theme;
 pub mod pen;
 pub mod pointer_backend;

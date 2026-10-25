@@ -215,13 +215,25 @@ impl std::fmt::Debug for OpenedSettings {
 }
 
 impl OpenedSettings {
-    /// Synchronously flush every active service.
+    /// Synchronously flush every active service, then whatever any other
+    /// settings file of the process still holds: the `SettingsFile`,
+    /// `PersistedListModel` or `MruList` handles the application opened
+    /// itself. Those flush when dropped too, but a process can end without
+    /// dropping them (AppKit ending the application after its last
+    /// window, a Windows session ending), and `teksilo-app` calls this on
+    /// every way out.
+    ///
+    /// One that cannot be written does not keep the others from being
+    /// tried: every one is, and the first error is returned.
     pub fn flush_all(&self) -> Result<(), SettingsBundleError> {
-        self.store.flush_now()?;
-        if let Some(w) = &self.window_state {
-            w.flush_now()?;
-        }
-        Ok(())
+        let store = self.store.flush_now().map_err(SettingsBundleError::from);
+        let window_state = self
+            .window_state
+            .as_ref()
+            .map_or(Ok(()), |w| w.flush_now().map_err(SettingsBundleError::from));
+        let others = crate::flush::flush_every_writer()
+            .map_err(|e| SettingsBundleError::File(SettingsFileError::Flush(e)));
+        store.and(window_state).and(others)
     }
 }
 
@@ -338,6 +350,39 @@ mod tests {
         let restored = window_state.state_for("main").unwrap();
         assert_eq!(restored.width, 800);
         assert_eq!(restored.height, 600);
+    }
+
+    /// A file the application opened itself (a recent-files list, a
+    /// `SettingsFile`) reaches the disk with the bundle's own: the process
+    /// may end without dropping it (AppKit's terminate, the end of a
+    /// Windows session), so its `Drop` flush cannot be relied on.
+    #[test]
+    fn flush_all_writes_what_every_writer_holds() {
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::for_testing(dir.path());
+        let opened = SettingsBundle::new()
+            .with_debounce(Duration::from_secs(3600))
+            .open(&paths)
+            .unwrap();
+        let own =
+            SettingsStore::open_with_delay(paths.config_file("own"), Duration::from_secs(3600))
+                .unwrap();
+        own.signal_for(&NAME).set("kept".to_string());
+        opened.store.signal_for(&NAME).set("also kept".to_string());
+
+        opened.flush_all().unwrap();
+
+        let on_disk = std::fs::read_to_string(paths.config_file("own")).unwrap_or_default();
+        assert!(
+            on_disk.contains("kept"),
+            "the application's own file: {on_disk:?}"
+        );
+        let on_disk = std::fs::read_to_string(opened.store.path()).unwrap_or_default();
+        assert!(
+            on_disk.contains("also kept"),
+            "the bundle's store: {on_disk:?}"
+        );
+        drop(own);
     }
 
     /// Dropping every clone of an `OpenedSettings` must deregister its

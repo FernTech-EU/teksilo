@@ -26,7 +26,7 @@
 //! origin or further. An intent its action sends there is that tree's own and
 //! may cross back; a chain of them stops after 64 crossings in all, so two
 //! actions that answer each other across the trees cannot go on for the
-//! application's life. One nobody takes is dropped, and a debug build names it
+//! application's life, and the framework says so in every build. One nobody takes is dropped, and a debug build names it
 //! once. A shortcut's intent is offered only when the application tree takes
 //! it, as the window reads from the
 //! [`ApplicationScope`](teksilo_core::ApplicationScope) the window manager

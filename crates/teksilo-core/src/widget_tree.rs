@@ -4025,7 +4025,9 @@ impl WidgetTree {
         ops: &mut dyn crate::window::WindowOps,
     ) {
         if intent.crossings() >= MAX_INTENT_CROSSINGS {
-            #[cfg(debug_assertions)]
+            // In every build, once each time a chain reaches the bound (the
+            // chain ends here): the symptom, a command that runs over and
+            // over or stops, is the user's in a release build too.
             eprintln!(
                 "teksilo: intent `{}` was not offered to another tree: {MAX_INTENT_CROSSINGS} \
                  crossings between trees led to it, so two actions in two trees are likely \

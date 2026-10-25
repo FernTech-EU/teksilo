@@ -300,7 +300,9 @@ fn a_rebind_in_a_window_applies_to_the_application() {
         Some(KeyStroke::ctrl(Key::M)),
         "the application tree's registry holds the rebind"
     );
-    f.app.tree.press_key(Key::M, Modifiers::COMMAND);
+    // A user's rebind is literal: Ctrl+M is the physical Control key on
+    // macOS too.
+    f.app.tree.press_key(Key::M, Modifiers::CTRL);
     f.app.route_unclaimed_intents();
     assert_eq!(f.heard(), ["the application makes a new document"]);
 }

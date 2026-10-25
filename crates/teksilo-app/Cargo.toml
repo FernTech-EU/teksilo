@@ -110,6 +110,9 @@ serde = { workspace = true }
 # the same x11rb teksilo-platform links, so it adds no crate.
 [target.'cfg(all(unix, not(target_os = "macos")))'.dev-dependencies]
 x11rb = "0.14"
+# The signal tests start their child application with `SIGHUP` ignored, as
+# `nohup` does. Already in the tree.
+libc = "0.2"
 
 [package.metadata.docs.rs]
 all-features = true

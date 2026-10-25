@@ -156,12 +156,45 @@
 //!   intent goes from the window;
 //! - **(aa)** the application tree is ticked by `about_to_wait` and by the
 //!   wake its waker posts, which the loop takes so the next one posts;
-//! - **(y)** a quit closes a window with no guard, stops at one whose guard
-//!   vetoed and presented a `MessageBox`, restoring it if it was minimised,
-//!   waits while the box is queued and
-//!   while it is up, is abandoned when Escape cancels the box, and, asked
-//!   again, completes once Enter picks Discard, which closes the window by
-//!   id, and that ends the loop even under `Explicit`.
+//! - **(y)** a `MessageBox` up when its window closes answers Cancel, as
+//!   dismissed programmatically: in the window's tree for a forced close,
+//!   in a native modal window over it for a quit;
+//!   a guard that answers its own close by asking for a quit and
+//!   refusing is asked again by that quit and its window closes; a window a
+//!   guard closes by id during the quit is not asked; a quit asks the
+//!   application's guard first, in the application
+//!   tree, and is abandoned by its veto with no window asked, waits on its
+//!   deferred answer and goes on to the windows or stops with it; a quit
+//!   is abandoned at once by a window guard that vetoes, a dialog
+//!   open in its window notwithstanding; it closes a window with no guard,
+//!   waits on one whose guard deferred and presented a `MessageBox` while
+//!   the box is queued and while it is up, is abandoned when Escape cancels
+//!   the box and when a guard drops its decision unanswered; a window whose
+//!   own close is deferred is asked nothing more, by a second close or by a
+//!   quit, which adopts the answer, restoring the window if it was
+//!   minimised; Enter picks Discard, which proceeds, and the quit completes
+//!   and ends the loop even under `Explicit`; the replies a quit was asked
+//!   with hear it cancelled or completed; `quit_now`, run for Windows'
+//!   `SessionEndNow` through `user_event`, closes every window
+//!   before it returns, asking each guard and the application's once with
+//!   its source and overruling a refusal or a deferral, and answering a
+//!   box Cancel; `ctx.cancel_quit()` from a guard abandons a guarded quit
+//!   but not an overruling one, nor, from a dialog's Cancel arm run as its
+//!   window closes, a forced one; once a quit has completed, a second
+//!   `quit_now` and a guarded request ask nobody, the latter's reply
+//!   hearing it completed; the settings are on disk when `quit_now`
+//!   returns and when `exiting` does.
+//!
+//! winit builds one event loop per process, so every claim above lives in
+//! the one test that builds it. The two signal tests,
+//! [`a_termination_signal_quits_through_the_guards`] and
+//! [`a_hangup_ignored_before_the_application_started_stays_ignored`], run
+//! their application in a child process instead, which also keeps the
+//! signals' registration out of this one: `SIGTERM` sent to a running
+//! application asks its guard once with `QuitSource::Signal`, overrules its
+//! refusal, writes the settings, and the process exits normally; a
+//! `SIGHUP` the child inherited as ignored, as under `nohup`, asks nothing
+//! and ends nothing.
 //!
 //! Two are weaker than they look, and the reason is not fixable from here.
 //! **(c)**, the safe area, and the missing-override half of **(d)** compare a
@@ -954,7 +987,19 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
     > = Rc::default();
     let exit_flood_in = exit_flood.clone();
     let counter = app_events_seen.clone();
-    let builder = app_with_recorder(&log, &waker_at_build).on_app_event(move |event| {
+    // Claim (y)'s settings: an hour's debounce, so only a flush writes them.
+    let settings_dir = tempfile::tempdir().expect("a scratch directory");
+    let settings_path =
+        teksilo_settings::AppPaths::for_testing(settings_dir.path()).config_file("settings");
+    let builder = app_with_recorder(&log, &waker_at_build)
+        .app_paths(teksilo_settings::AppPaths::for_testing(settings_dir.path()))
+        .settings(
+            teksilo_settings::SettingsBundle::new()
+                .with_store_name("settings")
+                .with_debounce(Duration::from_secs(3600)),
+        )
+        .settings_watch(false);
+    let builder = builder.on_app_event(move |event| {
         if matches!(event, AppEvent::External(_)) {
             counter.set(counter.get() + 1);
         }
@@ -3754,14 +3799,215 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             "under QuitPolicy::Explicit the loop outlives its last window"
         );
 
-        // (y) A quit asks every window. `guarded`'s guard vetoes and
-        // presents a `MessageBox`, the veto-then-reissue shape (in the
-        // window's own tree on X11, the Linux path); `plain` has no guard.
-        // The box is answered with keys, the way a user answers it: Escape
-        // for Cancel, Enter for its default button, Discard, which closes
-        // the guarded window by id. Removing `advance_quit` from
+        // (y) A quit asks every window, and each guard answers as it does a
+        // close: `Veto` is a final no, `Defer` hands over a `CloseDecision`
+        // the guard's dialog answers later. The boxes are answered with keys,
+        // the way a user answers them: Escape for Cancel, Enter for the
+        // default button, Discard. Removing `advance_quit` from
         // `process_pending` leaves `plain` open after the first step.
         use teksilo_widgets::{EventContextMessageBoxExt, MessageBox, MessageBoxButtons};
+        let open = |app: &TeksiloAppHandler, id| app.wm.winit_id_for_teksilo(id).is_some();
+        let has_box = |app: &TeksiloAppHandler, id| {
+            let winit = app.wm.winit_id_for_teksilo(id).expect("open");
+            app.wm.windows_map()[&winit].tree.has_modal_overlay()
+        };
+        let key = |key| teksilo_core::event::WidgetEvent::KeyDown {
+            key,
+            modifiers: teksilo_core::event::Modifiers::empty(),
+            text: None,
+        };
+
+        // A veto is final, whatever dialog is up: a window that refuses while
+        // an unrelated box is open in it abandons the quit at once, where the
+        // quit used to wait for the box to close.
+        let vetoing = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: vetoing")
+                .size(200, 120)
+                .on_close_requested(|_ctx| teksilo_core::CloseResponse::Veto)
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        let vetoing_winit = app.wm.winit_id_for_teksilo(vetoing).expect("open");
+        app.run_in_window(vetoing_winit, event_loop, |tree, ops| {
+            tree.run_with_event_context(ops, |ctx| {
+                ctx.present_message_box(MessageBox::information(teksilo_i18n::lit!("Unrelated")));
+            });
+        });
+        app.post_event(event_loop);
+        app.window_event(event_loop, vetoing_winit, WindowEvent::RedrawRequested);
+        assert!(has_box(app, vetoing), "an unrelated box is up");
+        app.wm.quit();
+        app.process_pending(event_loop);
+        assert!(open(app, vetoing));
+        assert!(
+            !app.wm.quit_in_progress(),
+            "a veto abandons the quit at once, the box in its window notwithstanding"
+        );
+
+        // A guard that answers its window's own close by asking the
+        // application to quit, and refuses this close, is asked again by
+        // that quit, now knowing it, and agrees: its window closes, and the
+        // quit goes on to `vetoing`, which refuses. Taking the first refusal
+        // as the quit's own, as the quit did before `Defer`, left the window
+        // open.
+        let self_quitting = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: self-quitting")
+                .size(200, 120)
+                .on_close_requested(|ctx| {
+                    if ctx.quit_in_progress() {
+                        teksilo_core::CloseResponse::Close
+                    } else {
+                        ctx.quit();
+                        teksilo_core::CloseResponse::Veto
+                    }
+                })
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        app.wm.request_close(self_quitting);
+        app.process_pending(event_loop);
+        assert!(
+            !open(app, self_quitting),
+            "the quit its guard asked for closed it"
+        );
+        assert!(open(app, vetoing));
+        assert!(!app.wm.quit_in_progress(), "`vetoing` refused");
+
+        // A guard that closes another window by id while the quit asks it:
+        // that window is closing, and the quit does not ask it too.
+        let closed_by_id_asks = Rc::new(Cell::new(0_usize));
+        let closed_by_id = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: closed by id")
+                .size(200, 120)
+                .on_close_requested({
+                    let asks = closed_by_id_asks.clone();
+                    move |_ctx| {
+                        asks.set(asks.get() + 1);
+                        teksilo_core::CloseResponse::Close
+                    }
+                })
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        let closer = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: closer")
+                .size(200, 120)
+                .on_close_requested(move |ctx| {
+                    ctx.close_window_by_id(closed_by_id);
+                    teksilo_core::CloseResponse::Close
+                })
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        app.wm.quit();
+        app.process_pending(event_loop);
+        assert!(!open(app, closer));
+        assert!(!open(app, closed_by_id), "closed by the other guard");
+        assert_eq!(
+            closed_by_id_asks.get(),
+            0,
+            "a window already closing is not asked"
+        );
+        assert!(!app.wm.quit_in_progress(), "`vetoing` refused");
+        app.wm.queue_close(vetoing);
+        app.process_pending(event_loop);
+
+        // A dialog still up when its window closes is answered through its
+        // own Cancel path, as if dismissed: its `on_result` reports the
+        // escape button, dismissed programmatically. In the window's tree
+        // (the Linux presentation) for a forced close of the window, and as
+        // a native modal window over it, opened here by hand (X11 presents
+        // none by itself), for a quit, which closes the dialog window first.
+        // Closing the window outright left both boxes unanswered.
+        type Answers = Rc<RefCell<Vec<(teksilo_widgets::StandardButton, MessageBoxDismissal)>>>;
+        use teksilo_widgets::MessageBoxDismissal;
+        let answers: Answers = Default::default();
+        let present_box = |app: &mut TeksiloAppHandler, winit, answers: &Answers| {
+            let answers = answers.clone();
+            app.run_in_window(winit, event_loop, move |tree, ops| {
+                tree.run_with_event_context(ops, move |ctx| {
+                    ctx.present_message_box(
+                        MessageBox::question(teksilo_i18n::lit!("Answer me"))
+                            .buttons(MessageBoxButtons::OkCancel)
+                            .on_result(move |result, _ctx| {
+                                answers.borrow_mut().push((result.button, result.dismissal));
+                            }),
+                    );
+                });
+            });
+        };
+        let owner = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: owner")
+                .size(300, 200)
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        let owner_winit = app.wm.winit_id_for_teksilo(owner).expect("open");
+        present_box(app, owner_winit, &answers);
+        app.post_event(event_loop);
+        app.window_event(event_loop, owner_winit, WindowEvent::RedrawRequested);
+        assert!(has_box(app, owner));
+        app.wm.queue_close(owner);
+        app.process_pending(event_loop);
+        assert!(!open(app, owner));
+        assert_eq!(
+            *answers.borrow(),
+            [(
+                teksilo_widgets::StandardButton::Cancel,
+                MessageBoxDismissal::Programmatic
+            )],
+            "the box in the window's tree answered Cancel as the window closed"
+        );
+        let holder = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: holder")
+                .size(200, 120)
+                .on_close_requested(|_ctx| teksilo_core::CloseResponse::Veto)
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        let host = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: host")
+                .size(300, 200)
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        let host_winit = app.wm.winit_id_for_teksilo(host).expect("open");
+        present_box(app, host_winit, &answers);
+        for (_, requests) in app.wm.drain_pending_modal_requests() {
+            for queued in requests {
+                app.open_modal_window(Some(host), queued.request, event_loop);
+            }
+        }
+        let native_box = app.wm.frontmost_modal_of(host);
+        assert_ne!(native_box, host, "the box is a native modal window");
+        app.wm.quit();
+        app.process_pending(event_loop);
+        assert!(!open(app, native_box) && !open(app, host));
+        assert_eq!(
+            answers.borrow().len(),
+            2,
+            "the native box answered as the quit closed it"
+        );
+        assert_eq!(
+            answers.borrow()[1],
+            (
+                teksilo_widgets::StandardButton::Cancel,
+                MessageBoxDismissal::Programmatic
+            )
+        );
+        assert!(open(app, holder));
+        assert!(!app.wm.quit_in_progress(), "`holder` refused");
+        app.wm.queue_close(holder);
+        app.process_pending(event_loop);
+
+        // `guarded` defers and asks with a box; `plain` has no guard.
         let asks = Rc::new(Cell::new(0_usize));
         let guarded = app.wm.create_window(
             WindowConfig::new()
@@ -3771,23 +4017,25 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                     let asks = asks.clone();
                     move |ctx| {
                         asks.set(asks.get() + 1);
-                        assert!(
-                            ctx.quit_in_progress(),
-                            "a guard asked by a quit can tell it from a close"
-                        );
-                        let window = ctx.window().expect("the guard runs in its window").id();
+                        let question = if ctx.quit_in_progress() {
+                            teksilo_i18n::lit!("Quit?")
+                        } else {
+                            teksilo_i18n::lit!("Close?")
+                        };
+                        let decision = teksilo_core::CloseDecision::new();
+                        let answer = decision.clone();
                         ctx.present_message_box(
-                            MessageBox::question(teksilo_i18n::lit!("Quit?"))
+                            MessageBox::question(question)
                                 .buttons(MessageBoxButtons::SaveDiscardCancel)
                                 .default_button(teksilo_widgets::StandardButton::Discard)
                                 .escape_button(teksilo_widgets::StandardButton::Cancel)
-                                .on_result(move |result, ctx| {
-                                    if result.button == teksilo_widgets::StandardButton::Discard {
-                                        ctx.close_window_by_id(window);
-                                    }
+                                .on_result(move |result, _ctx| match result.button {
+                                    teksilo_widgets::StandardButton::Discard
+                                    | teksilo_widgets::StandardButton::Save => answer.proceed(),
+                                    _ => answer.cancel(),
                                 }),
                         );
-                        teksilo_core::CloseResponse::Veto
+                        teksilo_core::CloseResponse::Defer(decision)
                     }
                 })
                 .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
@@ -3800,68 +4048,188 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                 .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
             event_loop,
         );
-        let open = |app: &TeksiloAppHandler, id| app.wm.winit_id_for_teksilo(id).is_some();
         let guarded_winit = app.wm.winit_id_for_teksilo(guarded).expect("open");
-        let has_box = |app: &TeksiloAppHandler| {
-            app.wm.windows_map()[&guarded_winit]
-                .tree
-                .has_modal_overlay()
-        };
-        let key = |key| teksilo_core::event::WidgetEvent::KeyDown {
-            key,
-            modifiers: teksilo_core::event::Modifiers::empty(),
-            text: None,
-        };
 
-        app.wm.request_quit(false);
+        // Asked as the platform's quit sources ask (a Dock Quit, a logout),
+        // with a reply that hears how the quit ends: the OS is answered
+        // through it.
+        let outcomes: Rc<RefCell<Vec<crate::quit::QuitOutcome>>> = Default::default();
+        let reply = |outcomes: &Rc<RefCell<Vec<crate::quit::QuitOutcome>>>| {
+            let outcomes = outcomes.clone();
+            Box::new(move |outcome| outcomes.borrow_mut().push(outcome)) as crate::quit::QuitReply
+        };
+        app.wm.request_quit_from(
+            crate::quit::QuitSource::UserQuit,
+            crate::quit::QuitMode::Guarded,
+            Some(reply(&outcomes)),
+        );
         app.process_pending(event_loop);
         assert!(
             !open(app, plain),
             "the window used last, with no guard, closed"
         );
-        assert!(open(app, guarded), "the window whose guard vetoed is open");
-        assert!(app.wm.quit_in_progress(), "the quit waits on it");
-        assert!(!has_box(app), "its box is still queued");
+        assert!(
+            open(app, guarded),
+            "the window whose guard deferred is open"
+        );
+        assert!(app.wm.quit_in_progress(), "the quit waits on its answer");
+        assert!(!has_box(app, guarded), "its box is still queued");
 
         // The turn that presents the box: the quit goes on waiting.
         app.post_event(event_loop);
         app.window_event(event_loop, guarded_winit, WindowEvent::RedrawRequested);
-        assert!(has_box(app), "the box is up");
-        assert!(
-            app.wm.quit_in_progress(),
-            "its dialog up, the quit goes on waiting"
-        );
+        assert!(has_box(app, guarded), "the box is up");
+        assert!(app.wm.quit_in_progress(), "unanswered, the quit waits");
         assert_eq!(asks.get(), 1, "and asks nothing again");
 
-        // Escape: Cancel. The box goes, the window stays.
+        // Escape: Cancel. The answer abandons the quit; the window stays.
         app.dispatch_in_window(
             guarded_winit,
             key(teksilo_core::event::Key::Escape),
             event_loop,
         );
         app.post_event(event_loop);
-        assert!(!has_box(app));
+        assert!(!has_box(app, guarded));
         assert!(open(app, guarded));
         assert!(
             !app.wm.quit_in_progress(),
-            "the awaited window open with no dialog: the quit is abandoned"
+            "a cancelled decision abandons the quit"
+        );
+        assert_eq!(
+            *outcomes.borrow(),
+            [crate::quit::QuitOutcome::Cancelled],
+            "and its reply hears it"
         );
 
-        // Again, and Enter this time: Discard closes the window by id, and
-        // the quit goes on to completion. The window is minimised meanwhile,
-        // and the quit stopping at it brings it back. Taking the restore
-        // out of `await_quit_at` leaves it minimised.
-        app.wm.get_by_teksilo_mut(guarded).expect("open").minimized = true;
-        app.wm.request_quit(false);
-        app.process_pending(event_loop);
-        assert_eq!(asks.get(), 2, "a new quit asks the guard again");
-        assert!(
-            !app.wm.get_by_teksilo_mut(guarded).expect("open").minimized,
-            "the quit restores the minimised window it stops at"
+        // A guard that defers and drops its decision unanswered has
+        // cancelled: the quit stops there (and a debug build says so).
+        let dropper = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: dropper")
+                .size(200, 120)
+                .on_close_requested(|_ctx| {
+                    teksilo_core::CloseResponse::Defer(teksilo_core::CloseDecision::new())
+                })
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
         );
+        app.wm.quit();
+        app.process_pending(event_loop);
+        app.process_pending(event_loop);
+        assert!(open(app, dropper));
+        assert!(
+            !app.wm.quit_in_progress(),
+            "a decision dropped unanswered abandons the quit"
+        );
+        assert_eq!(asks.get(), 1, "the quit stopped before `guarded`");
+        app.wm.queue_close(dropper);
+        app.process_pending(event_loop);
+
+        // The application is asked before any window, through the guard
+        // `TeksiloAppBuilder::on_quit_requested` installs. A veto abandons
+        // the quit with every window open and unasked.
+        let app_asks = Rc::new(Cell::new(0_usize));
+        app.wm.set_app_quit_guard(Some(Rc::new({
+            let app_asks = app_asks.clone();
+            move |ctx: &mut teksilo_core::widget::EventContext| {
+                app_asks.set(app_asks.get() + 1);
+                assert!(ctx.window().is_none(), "it runs in the application tree");
+                teksilo_core::CloseResponse::Veto
+            }
+        })));
+        app.wm.quit();
+        app.process_pending(event_loop);
+        assert_eq!(app_asks.get(), 1);
+        assert_eq!(asks.get(), 1, "no window was asked");
+        assert!(!app.wm.quit_in_progress(), "the application refused");
+        // A deferred answer holds the quit, windows unasked, until it comes:
+        // proceed, and the quit goes on to the windows; cancel, and it is
+        // abandoned.
+        let app_decision: Rc<RefCell<Option<teksilo_core::CloseDecision>>> = Default::default();
+        app.wm.set_app_quit_guard(Some(Rc::new({
+            let app_asks = app_asks.clone();
+            let app_decision = app_decision.clone();
+            move |_ctx: &mut teksilo_core::widget::EventContext| {
+                app_asks.set(app_asks.get() + 1);
+                let decision = teksilo_core::CloseDecision::new();
+                *app_decision.borrow_mut() = Some(decision.clone());
+                teksilo_core::CloseResponse::Defer(decision)
+            }
+        })));
+        app.wm.quit();
+        app.process_pending(event_loop);
+        assert_eq!(app_asks.get(), 2);
+        assert!(
+            app.wm.quit_in_progress(),
+            "the quit waits on the application"
+        );
+        app.process_pending(event_loop);
+        assert_eq!(asks.get(), 1, "no window is asked meanwhile");
+        app_decision
+            .borrow_mut()
+            .take()
+            .expect("deferred")
+            .proceed();
+        app.about_to_wait(event_loop);
+        assert_eq!(asks.get(), 2, "agreed, the quit asks the windows");
         app.post_event(event_loop);
         app.window_event(event_loop, guarded_winit, WindowEvent::RedrawRequested);
-        assert!(has_box(app));
+        assert!(has_box(app, guarded));
+        app.dispatch_in_window(
+            guarded_winit,
+            key(teksilo_core::event::Key::Escape),
+            event_loop,
+        );
+        app.post_event(event_loop);
+        assert!(
+            !app.wm.quit_in_progress(),
+            "the window's Cancel abandons it"
+        );
+        app.wm.quit();
+        app.process_pending(event_loop);
+        assert_eq!(app_asks.get(), 3, "a new quit asks the application again");
+        app_decision.borrow_mut().take().expect("deferred").cancel();
+        app.about_to_wait(event_loop);
+        assert!(!app.wm.quit_in_progress(), "the application cancelled");
+        assert_eq!(asks.get(), 2, "and no window was asked");
+        app.wm.set_app_quit_guard(None);
+
+        // The user closes `guarded`: its guard defers and asks. While that
+        // box is up, another close asks nothing, and a quit adopts the
+        // answer instead of asking a second question. The window is
+        // minimised meanwhile, and the quit stopping at it brings it back;
+        // taking the restore out of `await_quit_at` leaves it minimised.
+        app.wm.request_close(guarded);
+        app.process_pending(event_loop);
+        assert_eq!(asks.get(), 3, "its own close asks its guard");
+        app.post_event(event_loop);
+        app.window_event(event_loop, guarded_winit, WindowEvent::RedrawRequested);
+        assert!(has_box(app, guarded));
+        app.wm.request_close(guarded);
+        app.process_pending(event_loop);
+        assert_eq!(asks.get(), 3, "a second close waits for the first answer");
+        app.wm.get_by_teksilo_mut(guarded).expect("open").minimized = true;
+        app.wm.request_quit_from(
+            crate::quit::QuitSource::SessionEnd,
+            crate::quit::QuitMode::Guarded,
+            Some(reply(&outcomes)),
+        );
+        // A second request while it is under way adds its reply.
+        app.wm.quit();
+        app.wm.request_quit_from(
+            crate::quit::QuitSource::Application,
+            crate::quit::QuitMode::Guarded,
+            Some(reply(&outcomes)),
+        );
+        app.process_pending(event_loop);
+        assert_eq!(asks.get(), 3, "the quit adopts the answer pending");
+        assert!(app.wm.quit_in_progress());
+        assert!(
+            !app.wm.get_by_teksilo_mut(guarded).expect("open").minimized,
+            "the quit restores the minimised window it waits on"
+        );
+        // Enter: Discard proceeds, which closes the window and lets the quit
+        // complete.
         app.dispatch_in_window(
             guarded_winit,
             key(teksilo_core::event::Key::Enter),
@@ -3875,10 +4243,394 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             app.wm.quit_completed(),
             "with the awaited window closed and nothing else open, the quit completes"
         );
+        assert_eq!(
+            *outcomes.borrow(),
+            [
+                crate::quit::QuitOutcome::Cancelled,
+                crate::quit::QuitOutcome::Completed,
+                crate::quit::QuitOutcome::Completed
+            ],
+            "every reply of the quit hears it complete"
+        );
+        // The quit is over; the next claims ask for new ones, as a newly
+        // started application would.
+        app.wm.forget_completed_quit();
+
+        // `can_close(false)` with an `on_close_blocked` that proceeds: the
+        // window's part in a quit is answered by the callback, and the quit
+        // completes. Without `on_close_blocked` the same window refuses and
+        // the quit stops there.
+        let blocked_asks = Rc::new(Cell::new(0_usize));
+        let blocked = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: can_close blocked")
+                .size(200, 120)
+                .can_close(false)
+                .on_close_blocked({
+                    let asks = blocked_asks.clone();
+                    move |_ctx, decision| {
+                        asks.set(asks.get() + 1);
+                        decision.proceed();
+                    }
+                })
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        app.wm.quit();
+        app.process_pending(event_loop);
+        app.about_to_wait(event_loop);
+        assert_eq!(blocked_asks.get(), 1, "the quit asked on_close_blocked");
+        assert!(!open(app, blocked), "its proceed let the window close");
+        assert!(app.wm.quit_completed(), "and the quit completed");
+        app.wm.forget_completed_quit();
+        let stubborn = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: can_close, no callback")
+                .size(200, 120)
+                .can_close(false)
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        app.wm.quit();
+        app.process_pending(event_loop);
+        app.about_to_wait(event_loop);
+        assert!(
+            open(app, stubborn),
+            "a blocked close with no callback stays"
+        );
+        assert!(!app.wm.quit_in_progress(), "and the quit stopped there");
+        app.wm.close_window(stubborn);
+
+        // A guard reads where the quit came from: the source that asked
+        // while a quit is under way, nothing when no quit is.
+        let seen_sources: Rc<RefCell<Vec<Option<teksilo_core::QuitSource>>>> = Default::default();
+        let sourced = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: reads the quit source")
+                .size(200, 120)
+                .on_close_requested({
+                    let seen = seen_sources.clone();
+                    move |ctx| {
+                        seen.borrow_mut().push(ctx.quit_source());
+                        teksilo_core::CloseResponse::Veto
+                    }
+                })
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        app.wm.request_close(sourced);
+        app.process_pending(event_loop);
+        app.wm.request_quit_from(
+            crate::quit::QuitSource::UserQuit,
+            crate::quit::QuitMode::Guarded,
+            None,
+        );
+        app.process_pending(event_loop);
+        app.wm.quit();
+        app.process_pending(event_loop);
+        assert_eq!(
+            *seen_sources.borrow(),
+            [
+                None,
+                Some(teksilo_core::QuitSource::UserQuit),
+                Some(teksilo_core::QuitSource::Application)
+            ],
+            "None for a close with no quit under way, then the source of each quit"
+        );
+
+        // AppKit's `applicationShouldTerminate:` (macOS) posts a
+        // `TerminateRequest`: a guarded quit, `UserQuit` for a Dock Quit or
+        // an AppleScript `quit`, `SessionEnd` for a logout, whose outcome
+        // is AppKit's answer. Routed through `user_event` as the hook posts
+        // it, so the routing is decided on this host too.
+        let terminate_replies: Arc<std::sync::Mutex<Vec<bool>>> = Default::default();
+        let terminate = |session_end: bool| {
+            let replies = terminate_replies.clone();
+            AppEvent::External(Box::new(teksilo_platform::os_quit::TerminateRequest::new(
+                session_end,
+                move |terminate| replies.lock().expect("not poisoned").push(terminate),
+            )))
+        };
+        app.user_event(event_loop, terminate(false));
+        app.user_event(event_loop, terminate(true));
+        assert_eq!(
+            seen_sources.borrow()[3..],
+            [
+                Some(teksilo_core::QuitSource::UserQuit),
+                Some(teksilo_core::QuitSource::SessionEnd)
+            ],
+            "the guard read a Dock Quit, then a logout"
+        );
+        assert_eq!(
+            *terminate_replies.lock().expect("not poisoned"),
+            [false, false],
+            "refused, AppKit is told the application goes on, each time"
+        );
+        assert!(!app.wm.quit_in_progress());
+        app.wm.close_window(sourced);
+
+        // A terminate request the windows agree to completes, and AppKit
+        // is told the application ends once the settings are on disk.
+        let agreeing = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: agrees to quit")
+                .size(200, 120)
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        let written_early = app.settings.as_ref().expect("opened").store.signal_for(
+            &teksilo_settings::SettingsKey::<String>::new("test.terminate", String::new),
+        );
+        written_early.set("before AppKit ends the process".to_string());
+        app.user_event(event_loop, terminate(false));
+        assert!(!open(app, agreeing));
+        assert!(app.wm.quit_completed());
+        assert_eq!(
+            *terminate_replies.lock().expect("not poisoned"),
+            [false, false, true],
+            "AppKit is told the application ends"
+        );
+        assert!(
+            std::fs::read_to_string(&settings_path)
+                .unwrap_or_default()
+                .contains("before AppKit ends the process"),
+            "with the settings already on disk"
+        );
+        app.wm.forget_completed_quit();
+
+        // `ctx.cancel_quit()` abandons a guarded quit only. A guard that
+        // calls it and lets its window close stops a quit asked by the
+        // application, leaving the other window open; an overruling quit (a
+        // termination signal) and a forced one close every window all the
+        // same, whether the call comes from a guard or from a dialog's
+        // Cancel arm run as its window closes. Ending any quit there left
+        // the second window open.
+        let cancelling = |app: &mut TeksiloAppHandler, title: &'static str| {
+            app.wm.create_window(
+                WindowConfig::new()
+                    .title(title)
+                    .size(200, 120)
+                    .on_close_requested(|ctx| {
+                        ctx.cancel_quit();
+                        teksilo_core::CloseResponse::Close
+                    })
+                    .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                event_loop,
+            )
+        };
+        let first = cancelling(app, "teksilo loop test: cancels the quit, first");
+        let second = cancelling(app, "teksilo loop test: cancels the quit, second");
+        app.wm.quit();
+        app.process_pending(event_loop);
+        assert_eq!(
+            [open(app, first), open(app, second)]
+                .iter()
+                .filter(|open| **open)
+                .count(),
+            1,
+            "the guard that cancelled closed its window and abandoned the quit"
+        );
+        assert!(!app.wm.quit_in_progress());
+        let third = cancelling(app, "teksilo loop test: cancels the quit, third");
+        app.quit_now(crate::quit::QuitSource::Signal, event_loop);
+        assert!(
+            !open(app, first) && !open(app, second) && !open(app, third),
+            "an overruling quit is not cancelled by a guard"
+        );
+        assert!(app.wm.quit_completed());
+        app.wm.forget_completed_quit();
+        let cancelling_box = |app: &mut TeksiloAppHandler, title: &'static str| {
+            let id = app.wm.create_window(
+                WindowConfig::new()
+                    .title(title)
+                    .size(200, 120)
+                    .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                event_loop,
+            );
+            let winit = app.wm.winit_id_for_teksilo(id).expect("open");
+            app.run_in_window(winit, event_loop, |tree, ops| {
+                tree.run_with_event_context(ops, |ctx| {
+                    ctx.present_message_box(
+                        MessageBox::question(teksilo_i18n::lit!("Cancel the quit?"))
+                            .buttons(MessageBoxButtons::OkCancel)
+                            .on_result(|result, ctx| {
+                                if result.button == teksilo_widgets::StandardButton::Cancel {
+                                    ctx.cancel_quit();
+                                }
+                            }),
+                    );
+                });
+            });
+            app.post_event(event_loop);
+            app.window_event(event_loop, winit, WindowEvent::RedrawRequested);
+            assert!(has_box(app, id));
+            id
+        };
+        let first = cancelling_box(app, "teksilo loop test: its box cancels, first");
+        let second = cancelling_box(app, "teksilo loop test: its box cancels, second");
+        app.wm.quit_forced();
+        app.process_pending(event_loop);
+        assert!(
+            !open(app, first) && !open(app, second),
+            "a forced quit is not cancelled by a dialog's Cancel arm"
+        );
+        assert!(app.wm.quit_completed());
+
+        // Once a quit has completed the application is ending: a request
+        // after it (systemd ends a session with SIGTERM and SIGHUP at once)
+        // asks nobody again, and its reply hears the quit completed.
+        let app_asks = Rc::new(Cell::new(0_usize));
+        app.wm.forget_completed_quit();
+        app.wm.set_app_quit_guard(Some(Rc::new({
+            let asks = app_asks.clone();
+            move |_ctx: &mut teksilo_core::widget::EventContext| {
+                asks.set(asks.get() + 1);
+                teksilo_core::CloseResponse::Close
+            }
+        })));
+        app.quit_now(crate::quit::QuitSource::Signal, event_loop);
+        app.quit_now(crate::quit::QuitSource::Signal, event_loop);
+        assert_eq!(
+            app_asks.get(),
+            1,
+            "the application's guard was asked by the first quit only"
+        );
+        let late = Rc::new(RefCell::new(Vec::new()));
+        app.wm.request_quit_from(
+            crate::quit::QuitSource::UserQuit,
+            crate::quit::QuitMode::Guarded,
+            Some(Box::new({
+                let late = late.clone();
+                move |outcome| late.borrow_mut().push(outcome)
+            })),
+        );
+        app.process_pending(event_loop);
+        assert_eq!(app_asks.get(), 1, "nor by a guarded one");
+        assert_eq!(
+            *late.borrow(),
+            [crate::quit::QuitOutcome::Completed],
+            "its reply heard the quit completed"
+        );
+        assert!(!app.wm.quit_in_progress());
+        app.wm.set_app_quit_guard(None);
+        app.wm.forget_completed_quit();
+
+        // A source with no time to ask (a session ending now, posted as
+        // Windows' session-end window does) quits at once
+        // (`quit_now`): the refusing guard is asked once, reading the source, so
+        // it could save, and is overruled; the box up in the window
+        // answers Cancel, and every window is closed when `quit_now`
+        // returns. A guard that defers is overruled too, and so is the
+        // application's.
+        let refuser_asks = Rc::new(Cell::new(0_usize));
+        let refuser_sources: Rc<RefCell<Vec<Option<teksilo_core::QuitSource>>>> =
+            Default::default();
+        let refuser = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: refuser")
+                .size(200, 120)
+                .on_close_requested({
+                    let asks = refuser_asks.clone();
+                    let sources = refuser_sources.clone();
+                    move |ctx| {
+                        asks.set(asks.get() + 1);
+                        sources.borrow_mut().push(ctx.quit_source());
+                        teksilo_core::CloseResponse::Veto
+                    }
+                })
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        let refuser_winit = app.wm.winit_id_for_teksilo(refuser).expect("open");
+
+        let deferrer_asks = Rc::new(Cell::new(0_usize));
+        let _deferrer = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: deferrer")
+                .size(200, 120)
+                .on_close_requested({
+                    let asks = deferrer_asks.clone();
+                    move |_ctx| {
+                        asks.set(asks.get() + 1);
+                        teksilo_core::CloseResponse::Defer(teksilo_core::CloseDecision::new())
+                    }
+                })
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        let app_sources: Rc<RefCell<Vec<Option<teksilo_core::QuitSource>>>> = Default::default();
+        app.wm.set_app_quit_guard(Some(Rc::new({
+            let sources = app_sources.clone();
+            move |ctx: &mut teksilo_core::widget::EventContext| {
+                sources.borrow_mut().push(ctx.quit_source());
+                teksilo_core::CloseResponse::Veto
+            }
+        })));
+        present_box(app, refuser_winit, &answers);
+        app.post_event(event_loop);
+        app.window_event(event_loop, refuser_winit, WindowEvent::RedrawRequested);
+        assert!(has_box(app, refuser));
+        const WRITTEN: teksilo_settings::SettingsKey<String> =
+            teksilo_settings::SettingsKey::new("test.written", String::new);
+        let on_disk = || std::fs::read_to_string(&settings_path).unwrap_or_default();
+        let written = app
+            .settings
+            .as_ref()
+            .expect("opened")
+            .store
+            .signal_for(&WRITTEN);
+        written.set("before the session ended".to_string());
+        // As Windows' `WM_ENDSESSION` asks: the window procedure posts
+        // `SessionEndNow` and runs the messages until it is finished.
+        let session_ended = Arc::new(AtomicBool::new(false));
+        app.user_event(
+            event_loop,
+            AppEvent::External(Box::new(teksilo_platform::os_quit::SessionEndNow::new(
+                session_ended.clone(),
+            ))),
+        );
+        assert!(
+            session_ended.load(Ordering::Acquire),
+            "the request is finished when the loop has handled it"
+        );
+        assert!(
+            on_disk().contains("before the session ended"),
+            "the settings are on disk when `quit_now` returns"
+        );
+        assert!(app.wm.is_empty(), "every window closed before it returned");
+        assert_eq!(refuser_asks.get(), 1, "the refusing guard was asked once");
+        assert_eq!(
+            *refuser_sources.borrow(),
+            [Some(teksilo_core::QuitSource::SessionEnd)],
+            "and read where the quit came from"
+        );
+        assert_eq!(deferrer_asks.get(), 1, "the deferring guard was asked once");
+        assert_eq!(
+            *app_sources.borrow(),
+            [Some(teksilo_core::QuitSource::SessionEnd)],
+            "the application's guard was asked once, and overruled"
+        );
+        app.wm.set_app_quit_guard(None);
+        assert_eq!(
+            answers.borrow().last(),
+            Some(&(
+                teksilo_widgets::StandardButton::Cancel,
+                MessageBoxDismissal::Programmatic
+            )),
+            "the box answered Cancel"
+        );
         assert!(!app.wm.quit_in_progress());
         assert!(
             event_loop.exiting(),
             "a completed quit ends the loop, under QuitPolicy::Explicit too"
+        );
+        // `exiting` writes them too: on macOS AppKit ends the process right
+        // after it, and `run` never returns to flush.
+        written.set("before exiting".to_string());
+        app.exiting(event_loop);
+        assert!(
+            on_disk().contains("before exiting"),
+            "the settings are on disk when `exiting` returns"
         );
 
         for (id, managed) in aside {
@@ -3926,4 +4678,227 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
     producer
         .join()
         .expect("a producer committing as the loop ended must not panic");
+}
+
+/// Names the scratch directory of the child process the signal tests
+/// ([`a_termination_signal_quits_through_the_guards`],
+/// [`a_hangup_ignored_before_the_application_started_stays_ignored`]) run;
+/// set, the test is that child.
+const SIGNAL_CHILD: &str = "TEKSILO_LOOP_TEST_SIGNAL_CHILD";
+
+/// `SIGTERM` sent to a running application quits it: its window's guard is
+/// asked once, reads `QuitSource::Signal`, and is overruled when it
+/// refuses; the settings reach the disk; the process exits normally rather
+/// than dying of the signal. The application runs in a child process (this
+/// same test, told so by [`SIGNAL_CHILD`]), since the signal's
+/// registration is the whole process's.
+#[test]
+#[ignore = "needs a display server and a wgpu adapter; CI runs it under Xvfb \
+            (see the test-x11 job in .github/workflows/ci.yml)"]
+fn a_termination_signal_quits_through_the_guards() {
+    if let Some(dir) = std::env::var_os(SIGNAL_CHILD) {
+        signal_child(std::path::PathBuf::from(dir));
+        return;
+    }
+    let (dir, mut child) =
+        start_signal_child("a_termination_signal_quits_through_the_guards", false);
+    send_signal(&child, "-TERM");
+    end_of_signal_child(&dir, &mut child);
+}
+
+/// A process started with `SIGHUP` ignored (`nohup`, a daemon's parent)
+/// keeps ignoring it: the application does not take the signal over, so
+/// `SIGHUP` asks no guard and ends nothing, while `SIGTERM` still quits
+/// through the guards. Registering both signals whatever their inherited
+/// disposition made `SIGHUP` quit the application under `nohup`, and kill
+/// it once the loop had ended.
+#[test]
+#[ignore = "needs a display server and a wgpu adapter; CI runs it under Xvfb \
+            (see the test-x11 job in .github/workflows/ci.yml)"]
+fn a_hangup_ignored_before_the_application_started_stays_ignored() {
+    if let Some(dir) = std::env::var_os(SIGNAL_CHILD) {
+        signal_child(std::path::PathBuf::from(dir));
+        return;
+    }
+    let (dir, mut child) = start_signal_child(
+        "a_hangup_ignored_before_the_application_started_stays_ignored",
+        true,
+    );
+    send_signal(&child, "-HUP");
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(
+        child.try_wait().expect("the child is ours").is_none(),
+        "the ignored SIGHUP left the application running"
+    );
+    assert!(!dir.path().join("guard").exists(), "and asked no guard");
+    send_signal(&child, "-TERM");
+    end_of_signal_child(&dir, &mut child);
+}
+
+/// Start the signal test named `test` again as the child application, with
+/// `SIGHUP` ignored from before `exec` when `ignore_hangup` is set, and
+/// wait until it says it is ready.
+fn start_signal_child(test: &str, ignore_hangup: bool) -> (tempfile::TempDir, std::process::Child) {
+    use std::os::unix::process::CommandExt;
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let name = format!(
+        "{}::{test}",
+        module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, rest)| rest)
+    );
+    let mut command = std::process::Command::new(std::env::current_exe().expect("this test"));
+    command
+        .args([name.as_str(), "--exact", "--ignored", "--test-threads=1"])
+        .env(SIGNAL_CHILD, dir.path())
+        .stdout(std::process::Stdio::null());
+    if ignore_hangup {
+        // SAFETY: between fork and exec only async-signal-safe calls are
+        // allowed, and `signal` is one; an ignored disposition survives
+        // `exec`, as `nohup` relies on.
+        unsafe {
+            command.pre_exec(|| {
+                libc::signal(libc::SIGHUP, libc::SIG_IGN);
+                Ok(())
+            });
+        }
+    }
+    let mut child = command.spawn().expect("the child starts");
+    let ready = dir.path().join("ready");
+    let started = Instant::now();
+    while !ready.exists() {
+        if started.elapsed() > Duration::from_secs(60) || child.try_wait().ok().flatten().is_some()
+        {
+            let _ = child.kill();
+            panic!("the child application never got going");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    (dir, child)
+}
+
+/// Send the signal `flag` (as `kill` spells it) to `child`.
+fn send_signal(child: &std::process::Child, flag: &str) {
+    let killed = std::process::Command::new("kill")
+        .args([flag, &child.id().to_string()])
+        .status()
+        .expect("kill runs");
+    assert!(killed.success());
+}
+
+/// Wait for the child application sent `SIGTERM` to end, and check it
+/// quit through its guard and wrote its settings.
+fn end_of_signal_child(dir: &tempfile::TempDir, child: &mut std::process::Child) {
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("the child is ours") {
+            break status;
+        }
+        if started.elapsed() > Duration::from_secs(90) {
+            let _ = child.kill();
+            panic!("SIGTERM did not end the application");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(
+        status.success(),
+        "the application quit and its test passed, rather than dying of the signal: {status:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("guard"))
+            .ok()
+            .as_deref(),
+        Some("Some(Signal)"),
+        "the window's guard was asked once, and read where the quit came from"
+    );
+    let settings = std::fs::read_to_string(
+        teksilo_settings::AppPaths::for_testing(dir.path()).config_file("settings"),
+    )
+    .unwrap_or_default();
+    assert!(
+        settings.contains("written before the signal"),
+        "the settings reached the disk: {settings:?}"
+    );
+}
+
+/// The child of the signal tests: an
+/// application with one refusing guard and an hour's settings debounce,
+/// which says it is ready once its loop turns, then runs until something
+/// ends it.
+fn signal_child(dir: std::path::PathBuf) {
+    const KEY: teksilo_settings::SettingsKey<String> =
+        teksilo_settings::SettingsKey::new("test.written", String::new);
+    let guard_file = dir.join("guard");
+    let builder = TeksiloAppBuilder::new()
+        .theme(teksilo_core::presets::intui::light())
+        .app_paths(teksilo_settings::AppPaths::for_testing(&dir))
+        .settings(
+            teksilo_settings::SettingsBundle::new()
+                .with_store_name("settings")
+                .with_debounce(Duration::from_secs(3600)),
+        )
+        .settings_watch(false)
+        .initial_window(
+            WindowConfig::new()
+                .title("teksilo loop test: signal child")
+                .size(200, 120)
+                .on_close_requested(move |ctx| {
+                    let _ = std::fs::write(&guard_file, format!("{:?}", ctx.quit_source()));
+                    teksilo_core::CloseResponse::Veto
+                })
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+        );
+
+    /// Forwards every callback; on the first `about_to_wait` writes the
+    /// setting and says it is ready.
+    struct Child<'a> {
+        app: &'a mut TeksiloAppHandler,
+        ready: Option<std::path::PathBuf>,
+    }
+    impl ApplicationHandler<AppEvent> for Child<'_> {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            self.app.resumed(event_loop);
+        }
+        fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+            self.app.new_events(event_loop, cause);
+        }
+        fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
+            self.app.user_event(event_loop, event);
+        }
+        fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+            self.app.window_event(event_loop, id, event);
+        }
+        fn exiting(&mut self, event_loop: &ActiveEventLoop) {
+            self.app.exiting(event_loop);
+        }
+        fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+            self.app.about_to_wait(event_loop);
+            if let Some(ready) = self.ready.take() {
+                let store = &self.app.settings.as_ref().expect("opened").store;
+                store
+                    .signal_for(&KEY)
+                    .set("written before the signal".to_string());
+                std::fs::write(ready, "").expect("the ready file");
+            }
+        }
+    }
+
+    builder.run_with(
+        || {
+            EventLoop::<AppEvent>::with_user_event()
+                .with_x11()
+                .with_any_thread(true)
+                .build()
+                .expect("winit could not build an X11 event loop (is DISPLAY set?)")
+        },
+        |mut event_loop, app| {
+            let mut child = Child {
+                app,
+                ready: Some(dir.join("ready")),
+            };
+            event_loop
+                .run_app_on_demand(&mut child)
+                .expect("winit event loop exited with error");
+        },
+    );
 }

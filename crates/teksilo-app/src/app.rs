@@ -39,6 +39,24 @@ pub enum ThemeMode {
 
 /// When the application quits on its own. Set with
 /// [`TeksiloAppBuilder::quit_policy`].
+///
+/// Whatever the policy, a quit that completes ends the application: the
+/// guarded [`EventContext::quit`](teksilo_core::widget::EventContext::quit)
+/// (what a Quit row and the macOS App menu's Quit ask for) once the
+/// application's quit guard
+/// ([`TeksiloAppBuilder::on_quit_requested`]) and every window's close guard
+/// have agreed and every window has closed, any of them able to refuse or to
+/// defer its answer, or the forced
+/// [`EventContext::quit_forced`](teksilo_core::widget::EventContext::quit_forced).
+/// The policy decides only what closing the last window does by itself.
+///
+/// [`TeksiloAppBuilder::initial_window`] is optional under either policy:
+/// the application tree may open the first window from
+/// [`run_after_mount`](teksilo_core::BuildContext::run_after_mount). Under
+/// `LastWindowClosed`, an application with no window open once it has
+/// started (the initial window created and the application tree's mount
+/// actions run) panics on its first turn, since it would quit before
+/// showing anything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum QuitPolicy {
@@ -49,10 +67,9 @@ pub enum QuitPolicy {
     /// Closing the last window does not quit: the application keeps running
     /// with no window open, the way a background service or a tray
     /// application does, until it asks to with
-    /// [`EventContext::request_quit`](teksilo_core::widget::EventContext::request_quit)
-    /// or [`EventContext::quit`](teksilo_core::widget::EventContext::quit).
-    /// It also lets the application start with no window at all
-    /// ([`TeksiloAppBuilder::initial_window`] is then optional).
+    /// [`EventContext::quit`](teksilo_core::widget::EventContext::quit)
+    /// or [`EventContext::quit_forced`](teksilo_core::widget::EventContext::quit_forced).
+    /// It may also run with no window at all from the start.
     Explicit,
 }
 
@@ -67,17 +84,21 @@ impl QuitPolicy {
             }
     }
 
-    /// Why an application with this policy cannot start without an initial
-    /// window, `None` when it can.
-    fn refuses_no_initial_window(self) -> Option<&'static str> {
+    /// Why an application with this policy cannot go on with
+    /// `open_windows` windows open once it has started (its initial window
+    /// created and the application tree's mount actions run), `None` when
+    /// it can.
+    fn refuses_startup_without_window(self, open_windows: usize) -> Option<&'static str> {
         match self {
-            QuitPolicy::LastWindowClosed => Some(
-                "TeksiloAppBuilder: no initial_window, and the quit policy is \
-                 QuitPolicy::LastWindowClosed, so the application would quit before \
-                 showing anything. Give it an initial_window, or set \
-                 quit_policy(QuitPolicy::Explicit) to start with no window.",
+            QuitPolicy::LastWindowClosed if open_windows == 0 => Some(
+                "TeksiloAppBuilder: no window is open once the application has started \
+                 (no initial_window, and the application tree's run_after_mount opened \
+                 none), and the quit policy is QuitPolicy::LastWindowClosed, so the \
+                 application would quit before showing anything. Give it an \
+                 initial_window, open one from the application tree's run_after_mount, \
+                 or set quit_policy(QuitPolicy::Explicit) to run with no window.",
             ),
-            QuitPolicy::Explicit => None,
+            QuitPolicy::LastWindowClosed | QuitPolicy::Explicit => None,
         }
     }
 }
@@ -89,7 +110,7 @@ pub type AppRootBuilder = Box<dyn FnOnce(&mut WidgetTree) -> teksilo_core::Widge
 /// with no root drops every intent sent from an application callback, so
 /// there is always one.
 #[derive(Debug)]
-struct AppTreeAnchor;
+pub(crate) struct AppTreeAnchor;
 
 impl teksilo_core::widget::Widget for AppTreeAnchor {
     fn layout_response(
@@ -128,6 +149,13 @@ pub(crate) fn run_tree_logic_frame(
 /// with a tick of the application tree. At most one is in flight.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AppTreeWake;
+
+/// Posted when a deferred close is answered
+/// ([`CloseDecision`](teksilo_core::CloseDecision)), from whatever thread
+/// answers it. Private to the framework; it only wakes the loop, whose
+/// `about_to_wait` then settles the answer.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CloseAnswered;
 
 /// The application tree's waker: posts one [`AppTreeWake`] until the loop
 /// has taken it, whatever the [`WakeKind`](teksilo_canvas::wake::WakeKind),
@@ -964,6 +992,9 @@ struct TeksiloAppHandler {
     external_ctx_handler: Option<ExternalCtxHandler>,
     initial_window: Option<WindowConfig>,
     initial_created: bool,
+    /// The first `resumed` has run, and with it the startup check of
+    /// [`QuitPolicy::refuses_startup_without_window`].
+    started: bool,
     /// When the loop ends on its own; see [`QuitPolicy`].
     quit_policy: QuitPolicy,
     /// The intents dropped by the routing between trees that a debug build
@@ -1013,6 +1044,23 @@ struct TeksiloAppHandler {
     /// under Wayland), and holds back the keys the reader took. One per
     /// application: a key pressed in one window can come up in another.
     key_report: teksilo_platform::key_report::KeyReportGate,
+    /// The settings the builder opened, flushed by
+    /// [`flush_settings`](Self::flush_settings) on every way out: the
+    /// operating system may end the process before `run` returns.
+    settings: Option<teksilo_settings::OpenedSettings>,
+    /// Whether `resumed` starts [`quit_signals`](Self::quit_signals); see
+    /// [`TeksiloAppBuilder::termination_signals`].
+    termination_signals: bool,
+    /// `SIGTERM` and `SIGHUP` turned into a quit while the loop runs
+    /// (Unix), each unless the process ignored it when the watch started.
+    #[cfg(unix)]
+    quit_signals: Option<teksilo_platform::os_quit::SignalWatch>,
+    /// AppKit's `terminate:` asks the application (macOS).
+    #[cfg(target_os = "macos")]
+    terminate_hooked: bool,
+    /// Hears the session end (Windows).
+    #[cfg(target_os = "windows")]
+    session_end_watch: Option<teksilo_platform::os_quit::SessionEndWatch>,
 }
 
 impl TeksiloAppHandler {
@@ -1050,6 +1098,7 @@ impl TeksiloAppHandler {
             external_ctx_handler: None,
             initial_window,
             initial_created: false,
+            started: false,
             quit_policy,
             dropped_intents: Default::default(),
             #[cfg(debug_assertions)]
@@ -1066,7 +1115,129 @@ impl TeksiloAppHandler {
             pen_recheck_at: None,
             osk_polled_at: None,
             key_report: teksilo_platform::key_report::KeyReportGate::for_platform(),
+            settings: None,
+            termination_signals: false,
+            #[cfg(unix)]
+            quit_signals: None,
+            #[cfg(target_os = "macos")]
+            terminate_hooked: false,
+            #[cfg(target_os = "windows")]
+            session_end_watch: None,
         }
+    }
+
+    /// Listen for the operating system's own requests to quit, once:
+    /// AppKit's `terminate:` on macOS, the session ending on Windows,
+    /// termination signals on Unix.
+    fn watch_os_quit(&mut self) {
+        #[cfg(target_os = "windows")]
+        if self.session_end_watch.is_none()
+            && let Some(proxy) = self.wm.event_proxy().cloned()
+        {
+            let settings = self.settings.clone();
+            self.session_end_watch = teksilo_platform::os_quit::SessionEndWatch::new(
+                move |request| {
+                    teksilo_core::AppEventPoster::post_external(&proxy, Box::new(request));
+                },
+                // The loop did not get to the request in time (its handler
+                // is busy in a native modal of the application's own): the
+                // settings at least are written before the process ends.
+                move || {
+                    if let Some(opened) = &settings
+                        && let Err(e) = opened.flush_all()
+                    {
+                        eprintln!("teksilo-app: settings flush on exit failed: {e}");
+                    }
+                },
+            );
+        }
+        #[cfg(target_os = "macos")]
+        if !self.terminate_hooked
+            && let Some(proxy) = self.wm.event_proxy().cloned()
+        {
+            self.terminate_hooked =
+                teksilo_platform::os_quit::install_terminate_hook(move |request| {
+                    teksilo_core::AppEventPoster::post_external(&proxy, Box::new(request));
+                });
+        }
+        #[cfg(unix)]
+        if self.termination_signals && self.quit_signals.is_none() {
+            let proxy = self.wm.event_proxy().cloned();
+            if let Some(proxy) = proxy {
+                match teksilo_platform::os_quit::SignalWatch::new(move |signal| {
+                    teksilo_core::AppEventPoster::post_external(&proxy, Box::new(signal));
+                }) {
+                    Ok(watch) => self.quit_signals = Some(watch),
+                    Err(e) => eprintln!(
+                        "teksilo-app: termination signals keep their default meaning: {e}"
+                    ),
+                }
+            }
+        }
+    }
+
+    /// Write every pending settings change to disk now: the bundle's store
+    /// and window state, and the settings files the application opened
+    /// itself. Called where the process may end before `run` returns (a
+    /// quit with no time to ask, winit's `exiting`, which AppKit reaches
+    /// just before it ends the process) and once more after the loop; a
+    /// flush with nothing pending writes nothing.
+    pub(crate) fn flush_settings(&self) {
+        if let Some(opened) = &self.settings
+            && let Err(e) = opened.flush_all()
+        {
+            eprintln!("teksilo-app: settings flush on exit failed: {e}");
+        }
+    }
+
+    /// Quit now, for a source with no time to ask (a session ending now,
+    /// Windows' `WM_ENDSESSION`, a termination signal): an overruling quit
+    /// on behalf of `source`, carried out before this returns. The
+    /// application's guard and every window's are asked once and read
+    /// `source` through `ctx.quit_source()`, so a document's guard can save
+    /// without asking; whatever a guard answers, its window closes, and
+    /// every dialog still up answers through its own Cancel path as its
+    /// window closes. A quit already under way is made overruling. Every
+    /// window is closed when it returns, the quit has completed, the
+    /// settings are on disk, and the loop ends at the end of the turn.
+    pub(crate) fn quit_now(
+        &mut self,
+        source: crate::quit::QuitSource,
+        event_loop: &ActiveEventLoop,
+    ) {
+        self.wm
+            .request_quit_from(source, crate::quit::QuitMode::Overruling, None);
+        self.process_pending(event_loop);
+        self.flush_settings();
+    }
+
+    /// AppKit asked whether the application may end (a Dock Quit,
+    /// `terminate:`, AppleScript's `quit`, a logout): a guarded quit on its
+    /// behalf, `SessionEnd` for a logout, restart or shutdown and
+    /// `UserQuit` otherwise, which joins a quit already under way. AppKit
+    /// hears the outcome once the quit is decided; told the application
+    /// ends, it ends the process, so the settings are written first.
+    fn os_terminate_request(&mut self, request: teksilo_platform::os_quit::TerminateRequest) {
+        let source = if request.session_end() {
+            crate::quit::QuitSource::SessionEnd
+        } else {
+            crate::quit::QuitSource::UserQuit
+        };
+        let settings = self.settings.clone();
+        self.wm.request_quit_from(
+            source,
+            crate::quit::QuitMode::Guarded,
+            Some(Box::new(move |outcome| {
+                let completed = outcome == crate::quit::QuitOutcome::Completed;
+                if completed
+                    && let Some(opened) = &settings
+                    && let Err(e) = opened.flush_all()
+                {
+                    eprintln!("teksilo-app: settings flush on exit failed: {e}");
+                }
+                request.reply(completed);
+            })),
+        );
     }
 
     fn process_pending(&mut self, event_loop: &ActiveEventLoop) {
@@ -1131,6 +1302,7 @@ impl TeksiloAppHandler {
             size,
             focus_target,
             close_behavior,
+            on_dismiss,
             ..
         } = request;
 
@@ -1192,6 +1364,11 @@ impl TeksiloAppHandler {
         );
         if parent.is_none() {
             self.wm.mark_modal_host(id);
+        }
+        // Run as the window closes, however it closes (see
+        // `WindowManager::close_window_answering`).
+        if let Some(managed) = self.wm.get_by_teksilo_mut(id) {
+            managed.modal_on_dismiss = on_dismiss;
         }
     }
 
@@ -2984,7 +3161,7 @@ impl TeksiloAppHandler {
         {
             return false;
         }
-        self.wm.request_quit(false);
+        self.wm.quit();
         true
     }
 
@@ -3618,7 +3795,7 @@ impl TeksiloAppHandler {
             // nothing on screen) and keep its owner blocked.
             WindowEvent::Destroyed => {
                 if let Some(fid) = teksilo_id {
-                    self.wm.close_window(fid);
+                    self.wm.close_window_answering(fid, event_loop);
                 }
             }
             WindowEvent::Resized(new_size) => {
@@ -3990,6 +4167,8 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         // Before the first window, so that it is born knowing whether anything
         // on screen can be seen. A no-op once watching.
         self.wm.watch_session();
+        // The operating system's own requests to quit, from the first turn.
+        self.watch_os_quit();
         // Likewise for the desktop's appearance, while the theme follows it.
         self.wm.sync_os_theme_watch();
 
@@ -4007,6 +4186,20 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         // window.
         self.process_pending_mount_actions(event_loop);
         self.post_event(event_loop);
+        // Started: an application that would quit before showing anything
+        // is a programming error every run hits on its first turn, not a
+        // runtime condition, so it fails loudly rather than exiting with
+        // status zero and nothing on screen. Judged here rather than before
+        // the loop, so an application root can open the first window.
+        if !self.started {
+            self.started = true;
+            if let Some(why) = self
+                .quit_policy
+                .refuses_startup_without_window(self.wm.window_count())
+            {
+                panic!("{why}");
+            }
+        }
     }
 
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
@@ -4053,6 +4246,39 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
                     // again rather than being lost.
                     self.wm.take_app_tree_wake();
                     self.post_event(event_loop);
+                    return;
+                }
+                Err(payload) if payload.is::<CloseAnswered>() => {
+                    // A deferred close was answered; the `about_to_wait`
+                    // that follows settles it.
+                    return;
+                }
+                Err(payload) if payload.is::<teksilo_platform::os_quit::TerminationSignal>() => {
+                    // No one is there to answer a question: every guard is
+                    // asked once and saves, and the application ends.
+                    self.quit_now(crate::quit::QuitSource::Signal, event_loop);
+                    return;
+                }
+                Err(payload) if payload.is::<teksilo_platform::os_quit::TerminateRequest>() => {
+                    if let Ok(request) =
+                        payload.downcast::<teksilo_platform::os_quit::TerminateRequest>()
+                    {
+                        self.os_terminate_request(*request);
+                        self.process_pending(event_loop);
+                    }
+                    return;
+                }
+                Err(payload) if payload.is::<teksilo_platform::os_quit::SessionEndNow>() => {
+                    // The session ends now (Windows' `WM_ENDSESSION`): the
+                    // window procedure that posted this runs the messages
+                    // until it is finished, and the process may end as
+                    // soon as that procedure returns.
+                    self.quit_now(crate::quit::QuitSource::SessionEnd, event_loop);
+                    if let Ok(request) =
+                        payload.downcast::<teksilo_platform::os_quit::SessionEndNow>()
+                    {
+                        request.finished();
+                    }
                     return;
                 }
                 Err(payload) if payload.is::<WmStateChanged>() => {
@@ -4356,6 +4582,17 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
     /// one.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.wm.disconnect_redraw_wakers();
+        // On macOS this is the last moment: AppKit ends the process right
+        // after its `applicationWillTerminate:`, which reaches here, so
+        // `run` never returns to flush.
+        self.flush_settings();
+        // A signal from now on ends the process, as it would with no loop:
+        // only once the settings are on disk, or a signal arriving during
+        // the flush would end it with nothing written.
+        #[cfg(unix)]
+        {
+            self.quit_signals = None;
+        }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
@@ -4669,6 +4906,12 @@ pub struct TeksiloAppBuilder {
     quit_policy: QuitPolicy,
     /// The application tree's root; see [`app_root`](Self::app_root).
     app_root: Option<AppRootBuilder>,
+    /// The application's quit guard; see
+    /// [`on_quit_requested`](Self::on_quit_requested).
+    quit_guard: Option<teksilo_core::CloseGuard>,
+    /// Whether a termination signal quits the application; see
+    /// [`termination_signals`](Self::termination_signals).
+    termination_signals: bool,
     /// Type-erased adapter for the application's backend event source.
     /// Installed via `event_source<S>(source)`.
     event_source: Option<EventSourceAdapter>,
@@ -4735,6 +4978,8 @@ impl TeksiloAppBuilder {
             initial_window: None,
             quit_policy: QuitPolicy::default(),
             app_root: None,
+            quit_guard: None,
+            termination_signals: true,
             event_source: None,
             app_state_registry: HashMap::new(),
             i18n: None,
@@ -5273,9 +5518,14 @@ impl TeksiloAppBuilder {
     /// Configure the window the application opens at startup: build a
     /// [`WindowConfig`] and pass it here.
     ///
-    /// Required under the default [`QuitPolicy::LastWindowClosed`], where an
-    /// application with no window quits at once: [`run`](Self::run) panics
-    /// without one. Optional under [`QuitPolicy::Explicit`].
+    /// Optional. Under the default [`QuitPolicy::LastWindowClosed`] an
+    /// application without one must open its first window from the
+    /// application tree's
+    /// [`run_after_mount`](teksilo_core::BuildContext::run_after_mount)
+    /// (see [`app_root`](Self::app_root)): with no window open once startup
+    /// has run, [`run`](Self::run) panics on its first turn, since the
+    /// application would quit before showing anything. Under
+    /// [`QuitPolicy::Explicit`] it may run with no window at all.
     ///
     /// ```ignore
     /// TeksiloAppBuilder::new()
@@ -5318,8 +5568,8 @@ impl TeksiloAppBuilder {
     /// and run code once the tree is mounted with
     /// [`BuildContext::run_after_mount`](teksilo_core::BuildContext::run_after_mount):
     /// that runs at startup, after the initial window if there is one, and
-    /// can open the first window of an application started with
-    /// [`QuitPolicy::Explicit`] and no initial window.
+    /// can open the first window of an application started with no initial
+    /// window, under either [`QuitPolicy`].
     ///
     /// What needs a window is not drawn there. A modal request
     /// ([`EventContext::present_modal`](teksilo_core::widget::EventContext::present_modal),
@@ -5343,6 +5593,85 @@ impl TeksiloAppBuilder {
         root: impl FnOnce(&mut WidgetTree) -> teksilo_core::WidgetId + 'static,
     ) -> Self {
         self.app_root = Some(Box::new(root));
+        self
+    }
+
+    /// Install the application's **quit guard**, asked when a guarded quit
+    /// ([`EventContext::quit`](teksilo_core::widget::EventContext::quit),
+    /// the App menu's Quit) begins, before any window's close guard and
+    /// before any window closes, as a window's
+    /// [`on_close_requested`](teksilo_core::WindowConfig::on_close_requested)
+    /// guard is asked before the window closes. It runs in the application
+    /// tree (see [`app_root`](Self::app_root)), so it can present a dialog
+    /// with no window open, and answers with the same
+    /// [`CloseResponse`](teksilo_core::CloseResponse): `Close` lets the quit
+    /// go on to the windows, `Veto` abandons it, and `Defer` holds it until
+    /// its [`CloseDecision`](teksilo_core::CloseDecision) is answered. A
+    /// forced quit
+    /// ([`quit_forced`](teksilo_core::widget::EventContext::quit_forced))
+    /// does not ask it. A quit the operating system leaves no time to ask
+    /// for (a session ending now, a termination signal) asks it once, so
+    /// the application can save, and goes on whatever it answers.
+    ///
+    /// The application is asked first, as Qt's `QEvent::Quit` reaches the
+    /// application before its windows are closed and Electron's
+    /// `before-quit` precedes the windows' `close` events: the windows close
+    /// as the quit goes, so a refusal asked last would come with them gone.
+    ///
+    /// ```ignore
+    /// .on_quit_requested(move |ctx| {
+    ///     if !downloads.is_busy() {
+    ///         return CloseResponse::Close;
+    ///     }
+    ///     let decision = CloseDecision::new();
+    ///     let answer = decision.clone();
+    ///     ctx.present_message_box(
+    ///         MessageBox::question(lit!("Downloads are running. Quit anyway?"))
+    ///             .buttons(MessageBoxButtons::YesNo)
+    ///             .on_result(move |r, _ctx| match r.button {
+    ///                 StandardButton::Yes => answer.proceed(),
+    ///                 _ => answer.cancel(),
+    ///             }),
+    ///     );
+    ///     CloseResponse::Defer(decision)
+    /// })
+    /// ```
+    ///
+    /// The guard reads
+    /// [`ctx.quit_source()`](teksilo_core::widget::EventContext::quit_source)
+    /// to tell a user's quit from a session ending, when it can save
+    /// without asking.
+    ///
+    /// Not consulted by [`build_headless`](Self::build_headless), which has
+    /// no quit.
+    pub fn on_quit_requested(
+        mut self,
+        guard: impl Fn(&mut teksilo_core::widget::EventContext) -> teksilo_core::CloseResponse + 'static,
+    ) -> Self {
+        self.quit_guard = Some(std::rc::Rc::new(guard));
+        self
+    }
+
+    /// Whether `SIGTERM` and `SIGHUP` quit the application through its
+    /// guards (Unix; ignored elsewhere). On by default: while the event
+    /// loop runs, either signal asks the application's guard and every
+    /// window's once, with
+    /// [`QuitSource::Signal`](teksilo_core::QuitSource::Signal), so a
+    /// document's guard can save without asking; nothing can refuse, the
+    /// settings are written, and the application ends. Without it they end
+    /// the process at once, as they do for any program, with nothing
+    /// saved. `SIGINT` (Ctrl+C in the terminal that started the
+    /// application) keeps its default either way.
+    ///
+    /// Turn it off for an application that handles these signals itself
+    /// (with its own `signal-hook` registration, for instance); its
+    /// handlers then run alone. Before the loop starts and once it has
+    /// ended, the two signals keep their default meaning. One the process
+    /// was started with ignored (`SIGHUP` under `nohup`) is left ignored
+    /// throughout.
+    #[doc(hidden)]
+    pub fn termination_signals(mut self, handled: bool) -> Self {
+        self.termination_signals = handled;
         self
     }
 
@@ -5611,15 +5940,6 @@ impl TeksiloAppBuilder {
         build_loop: impl FnOnce() -> winit::event_loop::EventLoop<AppEvent>,
         drive: impl FnOnce(winit::event_loop::EventLoop<AppEvent>, &mut TeksiloAppHandler),
     ) {
-        // Before anything touches the display: an application that would
-        // quit before showing anything is a programming error, not a
-        // runtime condition.
-        if self.initial_window.is_none()
-            && let Some(why) = self.quit_policy.refuses_no_initial_window()
-        {
-            panic!("{why}");
-        }
-
         // Install the tooltip registry before the window manager
         // starts building trees — rich tooltips read from it during
         // their first build.
@@ -5834,6 +6154,9 @@ impl TeksiloAppBuilder {
         app.wm.set_pen_batching(self.pen_batching);
         app.wm.set_native_theme(self.native_theme);
         app.wm.set_records_announcements(self.records_announcements);
+        app.wm.set_app_quit_guard(self.quit_guard);
+        app.settings = opened_settings;
+        app.termination_signals = self.termination_signals;
         app.external_ctx_handler = self.external_ctx_handler;
         // After the app context, typesetter and theme mode are in place, so
         // the tree is seeded like a window's.
@@ -5855,15 +6178,12 @@ impl TeksiloAppBuilder {
         app.wm.disconnect_redraw_wakers();
 
         // Flush any pending settings writes synchronously before the
-        // process exits. The `DebouncedWriter` background threads also
+        // process exits. `exiting` flushed already; this catches what the
+        // windows' teardown above wrote since, and a driver that never
+        // calls `exiting`. The `DebouncedWriter` background threads also
         // flush on Drop, but doing it synchronously here also surfaces
-        // any I/O errors to stderr before the binding goes out of
-        // scope.
-        if let Some(opened) = opened_settings
-            && let Err(e) = opened.flush_all()
-        {
-            eprintln!("teksilo-app: settings flush on exit failed: {e}");
-        }
+        // any I/O errors to stderr.
+        app.flush_settings();
     }
 }
 
@@ -7774,18 +8094,35 @@ mod quit_policy_tests {
         }
     }
 
-    /// Without the check, the default policy would open the loop, find no
-    /// window and quit at once: a silent exit with status zero. The check
-    /// runs before the loop is built, so this needs no display.
+    /// With no initial window, the default policy still reaches the loop: an
+    /// application root may open the first window from its mount actions,
+    /// which run at startup. The check waits for them (see
+    /// `startup_without_a_window_is_judged_by_the_windows_left`).
     #[test]
-    #[should_panic(expected = "quit_policy(QuitPolicy::Explicit)")]
-    fn no_initial_window_under_the_default_policy_panics_before_the_loop() {
+    #[should_panic(expected = "reached the event loop")]
+    fn no_initial_window_under_the_default_policy_reaches_the_loop() {
         TeksiloAppBuilder::new().run_with(
-            || -> winit::event_loop::EventLoop<AppEvent> {
-                unreachable!("the event loop must not be built")
-            },
-            |_, _| unreachable!("the event loop must not run"),
+            || -> winit::event_loop::EventLoop<AppEvent> { panic!("reached the event loop") },
+            |_, _| unreachable!(),
         );
+    }
+
+    /// After startup (the initial window, then the application tree's mount
+    /// actions), the default policy refuses to go on with no window open:
+    /// it would quit at once, a silent exit with status zero. `Explicit`
+    /// lives with none.
+    #[test]
+    fn startup_without_a_window_is_judged_by_the_windows_left() {
+        let refusal = QuitPolicy::LastWindowClosed
+            .refuses_startup_without_window(0)
+            .expect("no window after startup");
+        assert!(refusal.contains("quit_policy(QuitPolicy::Explicit)"));
+        assert!(refusal.contains("run_after_mount"));
+        assert_eq!(
+            QuitPolicy::LastWindowClosed.refuses_startup_without_window(1),
+            None
+        );
+        assert_eq!(QuitPolicy::Explicit.refuses_startup_without_window(0), None);
     }
 
     /// The same builder under `Explicit` gets past the check: it reaches the

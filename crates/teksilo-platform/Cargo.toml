@@ -135,6 +135,10 @@ objc2-foundation = { version = "0.3", features = [
     # distributed ones a locked screen posts.
     "NSNotification",
     "NSDistributedNotificationCenter",
+    # Why AppKit is terminating (`os_quit/macos.rs`): the quit Apple Event's
+    # `keyAEQuitReason`, which tells a logout from a Dock Quit.
+    "NSAppleEventManager",
+    "NSAppleEventDescriptor",
 ] }
 # The session watch's reading of the display's sleep and the session's lock
 # and console flags. Both already resolve through objc2-app-kit.
@@ -151,6 +155,13 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = [
     "CGDisplayConfiguration",
     "CGSession",
 ] }
+
+# `SIGTERM` and `SIGHUP` as a quit request (`os_quit/signals.rs`), on every
+# Unix. Already in the tree through `alacritty_terminal`. libc reads a
+# signal's inherited disposition there.
+[target.'cfg(unix)'.dependencies]
+signal-hook = { workspace = true }
+libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { workspace = true, features = [
@@ -170,6 +181,7 @@ windows = { workspace = true, features = [
     "Win32_UI_HiDpi",
     "Win32_UI_Controls",                  # MARGINS
     "Win32_UI_Shell",                     # SetWindowSubclass / DefSubclassProc / RemoveWindowSubclass / DragQueryFileW / HDROP
+    "Win32_System_LibraryLoader",         # GetModuleHandleW, for the session-end window's class (`os_quit/windows.rs`)
     "Win32_UI_Input_KeyboardAndMouse",    # TrackMouseEvent / TRACKMOUSEEVENT / TME_*
     "Win32_Foundation",
     # External (OS) drag-and-drop: OLE drop target.

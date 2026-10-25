@@ -41,6 +41,7 @@
 | `Self` | [`on_submit_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinput-on_submit_fn) |
 | `Self` | [`on_access_set_value(f: impl Fn(&str, &mut EventContext) -> bool + 'static)`](#textinput-on_access_set_value) |
 | `Self` | [`on_blur_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinput-on_blur_fn) |
+| `Self` | [`on_commit_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinput-on_commit_fn) |
 | `Self` | [`char_filter(f: impl Fn(char) -> bool + 'static)`](#textinput-char_filter) |
 | `Self` | [`suffix(text: impl Into<String>)`](#textinput-suffix) |
 | `Self` | [`input_mask(mask: impl Into<String>)`](#textinput-input_mask) |
@@ -354,6 +355,18 @@ Closure invoked once per focus loss, after the field has committed
 invokes it: a click on a control that takes no focus (a toolbar
 button) has the field commit while it keeps focus, and this waits for
 focus to leave. Forwarded to `TextInputField`.
+
+<a id="textinput-on_commit_fn"></a>
+
+#### `pub fn on_commit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
+
+Editing is finished, commit: run once per edit, after the
+`validator` and before `on_blur_fn`.
+It runs before the command of a click on a control that takes no focus
+(`focus_on_click(false)`, a toolbar button) while the field keeps
+focus, or on a real blur, whichever comes first; a blur right after
+such a commit, with nothing typed since, does not run it again.
+`on_blur_fn` means focus left. Forwarded to `TextInputField`.
 
 <a id="textinput-char_filter"></a>
 

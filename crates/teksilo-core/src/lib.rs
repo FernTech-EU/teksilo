@@ -149,10 +149,10 @@ pub use widget_tree::pan_arbiter::ScrollDelivery;
 pub use widget_tree::touch_route::LongPressRole;
 pub use window::state::WindowStateInit;
 pub use window::{
-    CloseBlockedCallback, CloseGuard, CloseResponse, DecorationsMode, ModalConfig, NoopWindowOps,
-    PostRootBuilder, RootBuilder, SizeToContent, TeksiloWindowId, UserAttentionKind, WindowCommand,
-    WindowConfig, WindowIcon, WindowOps, WindowPlacement, WindowRemovedCallback,
-    WindowRemovedEvent, WindowState,
+    CloseBlockedCallback, CloseDecision, CloseGuard, CloseResponse, DecorationsMode, ModalConfig,
+    NoopWindowOps, PostRootBuilder, QuitSource, RootBuilder, SizeToContent, TeksiloWindowId,
+    UserAttentionKind, WindowCommand, WindowConfig, WindowIcon, WindowOps, WindowPlacement,
+    WindowRemovedCallback, WindowRemovedEvent, WindowState,
 };
 pub use window_chrome::{
     ControlTarget, HitRegions, PlatformError, PlatformTitleBarHost, ResizeBorders, ResizeEdge,

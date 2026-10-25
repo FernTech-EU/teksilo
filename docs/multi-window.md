@@ -67,12 +67,12 @@ Notes:
 
 | Policy | Last window closed | Initial window |
 |---|---|---|
-| `QuitPolicy::LastWindowClosed` (default) | the app quits | required: `run()` panics without one, since the app would quit before showing anything |
+| `QuitPolicy::LastWindowClosed` (default) | the app quits | optional, but a window must be open once startup has run (the initial window, or one the application tree's `run_after_mount` opens): `run()` panics on its first turn otherwise, since the app would quit before showing anything |
 | `QuitPolicy::Explicit` | the app keeps running with no window | optional |
 
 `Explicit` is for an application whose life is not tied to its windows: a
 background service, or an application that lives in the system tray. Under
-either policy, `ctx.request_quit()` and `ctx.quit()` end the application;
+either policy, `ctx.quit()` and `ctx.quit_forced()` end the application;
 see "Quitting the application" below.
 
 ---
@@ -97,7 +97,7 @@ impl Widget for AppActions {
             ctx.open_window(document_window());
         }));
         ctx.register_action_global(Action::new("app.quit").on_invoke(|_, ctx| {
-            ctx.request_quit();
+            ctx.quit();
         }));
         // Runs once at startup: an app with no initial window opens its
         // first one here.
@@ -114,7 +114,7 @@ Without `app_root` the tree still exists, with an empty root of its own.
 
 The tree is never painted. Its handlers run with `ctx.window()` `None`:
 everything that names a window by id works (opening, finding and focusing
-one, `close_window_by_id`, `request_quit`), and nothing about "this window"
+one, `close_window_by_id`, `quit`), and nothing about "this window"
 does (`close_window` closes nothing). It shares the application's theme,
 locale, text scale, accessibility preferences and app state with the
 windows, and a request it makes for an application-wide change
@@ -138,8 +138,8 @@ It receives:
   crosses once and never comes back; one nobody takes is dropped, and a debug
   build names it (the framework's own `teksilo.` intents excepted). An intent
   the action that took it sends may cross in its turn, up to 64 crossings in
-  one chain, after which a debug build says that two actions seem to answer
-  each other. A
+  one chain, after which the framework says, in every build, that two
+  actions seem to answer each other. A
   shortcut's intent crosses too, when an enabled action of the application
   tree takes it: Ctrl+N bound in a window to `app.new`, which only the
   application tree implements, opens the window. When the application tree
@@ -276,7 +276,7 @@ pub struct WindowConfig {
     pub post_root_builder: Option<PostRootBuilder>,
     pub on_close_requested: Option<CloseGuard>,        // see "Intercepting close / quit"
     pub can_close: Option<Prop<bool>>,
-    pub on_close_blocked: Option<CloseBlockedCallback>,
+    pub on_close_blocked: Option<CloseBlockedCallback>,  // Fn(&mut EventContext, CloseDecision)
     pub on_removed: Option<WindowRemovedCallback>,     // fires once, after teardown
 }
 ```
@@ -780,8 +780,12 @@ and has no minimise of its own. It goes and comes back with its owner.
   owner on Windows: the dialog is answered first. A close the dialog has
   already queued for itself lets the owner's through. A forced close of the
   owner (`ctx.close_window_by_id(owner)`, `close_window_forced()` in its
-  tree, `WindowState::close()`, `ctx.quit()`) closes its dialogs first,
-  without asking their close guards or running their answer callbacks. A
+  tree, `WindowState::close()`, `ctx.quit_forced()`) closes its dialogs first,
+  without asking their close guards, and answers each through its own
+  Cancel path: its `on_dismiss` runs as if it had been dismissed, so a
+  `MessageBox` reports its escape button (Cancel), dismissed
+  programmatically. A dialog presented in the window's own tree is
+  answered the same way. A
   window the OS destroys on its own (Windows destroys an owned window with
   its owner) is forgotten as if closed.
 - **A dialog minimised anyway** (a window manager that offers to, or a
@@ -808,26 +812,35 @@ tears the window down:
 
 - the OS close button, `Alt+F4`, `Cmd+W` (winit `CloseRequested`);
 - a custom-chrome (Teksilo-drawn) title-bar close button;
-- a handler calling `ctx.close_window()`.
+- a handler calling `ctx.close_window()`;
+- a guarded quit (`ctx.quit()`), which asks every window in turn (below).
 
-The guard returns `CloseResponse::Close` to let the close proceed, or
-`CloseResponse::Veto` to cancel it. Under the default quit policy,
-quitting the app is the last window closing, so a guard that vetoes the
-final window's close also keeps the app alive.
+The guard answers with a `CloseResponse`:
+
+| Answer | Meaning |
+| --- | --- |
+| `CloseResponse::Close` | the window closes |
+| `CloseResponse::Veto` | a final no: the window stays open, and a quit that asked is abandoned |
+| `CloseResponse::Defer(decision)` | the answer comes later, through the `CloseDecision` |
+
+Under the default quit policy, quitting the app is the last window
+closing, so a guard that refuses the final window's close also keeps the
+app alive.
 
 Guards are **strictly per-window**, closing one window never consults
 another's guard, so this is correct for multi-window apps: an editor
-window with unsaved changes can veto its own close while a tool palette
+window with unsaved changes can refuse its own close while a tool palette
 beside it closes freely.
 
-### Veto-then-reissue (the async-confirmation pattern)
+### Asking first: `Defer` and `CloseDecision`
 
 A confirmation dialog is asynchronous, it waits for a click, so the
-guard cannot answer "close?" synchronously. The idiomatic shape is to
-**veto now, confirm, then re-issue a forced close**:
+guard cannot answer "close?" on the spot. It **defers**: it returns
+`CloseResponse::Defer` with a `CloseDecision`, and the dialog's answer
+calls `proceed()` or `cancel()` on a clone of it:
 
 ```rust
-use teksilo::prelude::*;                 // CloseResponse
+use teksilo::prelude::*;                 // CloseResponse, CloseDecision
 use teksilo::widgets::{MessageBox, MessageBoxButtons, StandardButton,
                        EventContextMessageBoxExt};
 
@@ -835,37 +848,44 @@ WindowConfig::new()
     .title("Editor")
     .on_close_requested(move |ctx| {
         if !dirty.get() {
-            return CloseResponse::Close;     // nothing unsaved → just close
+            return CloseResponse::Close;     // nothing unsaved: just close
         }
-        // The window being closed. The answer below may run in another one.
-        let Some(window) = ctx.window().map(|w| w.id()) else {
-            return CloseResponse::Close;
-        };
+        let decision = CloseDecision::new();
+        let answer = decision.clone();
         ctx.present_message_box(
             MessageBox::question(lit!("Close window?"))
                 .text(lit!("The document has unsaved changes."))
                 .buttons(MessageBoxButtons::SaveDiscardCancel)
-                .on_result(move |r, ctx| match r.button {
-                    StandardButton::Save    => { save(); ctx.close_window_by_id(window); }
-                    StandardButton::Discard => ctx.close_window_by_id(window),
-                    _                       => {}   // Cancel → stay open
+                .on_result(move |r, _ctx| match r.button {
+                    StandardButton::Save    => { save(); answer.proceed(); }
+                    StandardButton::Discard => answer.proceed(),
+                    _                       => answer.cancel(),   // stay open
                 }),
         );
-        CloseResponse::Veto                  // hold the window open for now
+        CloseResponse::Defer(decision)       // answered by the box
     });
 ```
 
-`ctx.close_window_by_id(window)` is the escape hatch: it closes the window
-**unconditionally**, bypassing the guard, so the second close (from the
-dialog's button) actually goes through instead of re-prompting.
+- `proceed()` closes the window, without asking the guard again.
+- `cancel()` leaves it open.
+- The first answer counts; later ones are ignored.
+- Dropping every clone without answering is a cancel, and a debug build
+  says so: a guard that defers owes an answer.
+- While the answer is pending, another close of the window (a second click
+  on its close button) asks nothing and brings it forward, so the user
+  never sees two questions.
+- The decision is `Clone + Send + 'static`: answer it from a dialog, an
+  async completion (`spawn_local_with`), or another thread. An answer from
+  outside the event loop wakes it.
+- A decision whose window has closed meanwhile (closed by id, or by a
+  forced quit) is answered into the void: nothing happens.
 
-Name the window by its id rather than calling `ctx.close_window_forced()`
-from the answer: that closes the window the answer *runs in*. A
-`MessageBox` is presented in the guarded window's own tree on Linux, but in
-a native modal window of its own on macOS and Windows, so there
-`close_window_forced()` would close the dialog and leave the document
-window open. `close_window_forced()` is right where the code runs in the
-window to close, such as the guard itself.
+The decision knows which window it is for, so it does not matter where the
+answer runs. A `MessageBox` is presented in the guarded window's own tree on
+Linux, but in a native modal window of its own on macOS and Windows, where a
+`ctx.close_window_forced()` from its answer would close the dialog rather
+than the document window. To close a window from code that runs elsewhere,
+name it: `ctx.close_window_by_id(id)` closes it unconditionally.
 
 ### Reactive sugar: `can_close` + `on_close_blocked`
 
@@ -875,30 +895,44 @@ When the gate is a single reactive flag, skip the closure:
 let may_close = dirty.not();              // Signal<bool>
 
 WindowConfig::new()
-    .can_close(may_close)                 // false → veto
-    .on_close_blocked(move |ctx| {        // fired only when blocked
-        ctx.present_message_box(/* confirmation … */);
+    .can_close(may_close)                 // false: veto
+    .on_close_blocked(move |ctx, decision| { // run only when blocked
+        ctx.present_message_box(/* why, or a confirmation; its answer ends in
+                                   decision.proceed() or decision.cancel() */);
     });
 ```
 
 `can_close` is evaluated *before* `on_close_requested`: a `false` signal
-short-circuits to a veto and fires `on_close_blocked`; a `true` signal
-(or no signal) falls through to the guard, then to closing.
+blocks the close; a `true` signal (or no signal) falls through to the guard,
+then to closing. What a block does depends on `on_close_blocked`:
+
+- Not set: the close is vetoed. The veto is final, so a quit that reaches
+  the blocked window is abandoned.
+- Set: the close defers. The callback gets a `CloseDecision` for it and
+  answers it, now or from a dialog's result callback: `proceed()` closes the
+  window without asking again and lets a quit go on, `cancel()` keeps the
+  window and abandons a quit. A callback that only says why calls `cancel()`
+  at once; one that drops the decision unanswered cancels, and a debug build
+  warns.
 
 ### Which closes are guarded
 
 | Close origin | Guarded? |
 | --- | --- |
-| OS close button / `Alt+F4` / `Cmd+W` | Yes yes |
-| Custom-chrome title-bar close button | Yes yes |
-| `ctx.close_window()` | Yes yes |
-| `ctx.close_window_forced()` | No bypasses |
-| `ctx.close_window_by_id(id)` | No bypasses (explicit programmatic close) |
-| `WindowState::close()` | No bypasses |
-| Modal-dismissal / framework teardown | No bypasses |
-| A window's dialogs, when the window closes | No bypasses (closed with it) |
-| `ctx.request_quit()` | Yes, each window in turn (below) |
-| `ctx.quit()` | No bypasses |
+| OS close button / `Alt+F4` / `Cmd+W` | Yes |
+| Custom-chrome title-bar close button | Yes |
+| `ctx.close_window()` | Yes |
+| `ctx.close_window_forced()` | No, bypasses |
+| `ctx.close_window_by_id(id)` | No, bypasses (explicit programmatic close) |
+| `WindowState::close()` | No, bypasses |
+| `CloseDecision::proceed()` | No (the guard has answered) |
+| Modal-dismissal / framework teardown | No, bypasses |
+| A window's dialogs, when the window closes | No (closed with it, answered through their Cancel path) |
+| `ctx.quit()` | Yes, each window in turn (below) |
+| `ctx.quit_forced()` | No, bypasses |
+| macOS Dock Quit, AppleScript `quit`, `terminate:`, logout | Yes, each window in turn, as `ctx.quit()` |
+| Windows sign out, restart, shut down | Asked once, cannot refuse (an overruling quit, below) |
+| `SIGTERM`, `SIGHUP` (Unix), unless the process was started with it ignored | Asked once, cannot refuse (an overruling quit, below) |
 
 A window with no guard configured always closes immediately, the guard
 machinery only runs when `on_close_requested` or `can_close` is set. A
@@ -908,28 +942,179 @@ the dialog is brought forward instead (see
 
 ### Quitting the application
 
-`ctx.request_quit()` is what a Quit menu item calls. It asks every open
-window in turn, as if the user closed it, and the application ends once no
-window is left, whatever its `QuitPolicy`. Modal windows are asked before
-the windows they block, then the others from the most recently used.
+`ctx.quit()` is what a Quit menu item calls, the guarded quit, as
+`ctx.close_window()` is the guarded close. It asks the application first
+(below), then every open window in turn, as if the user closed it, and the
+application ends once no window is left, whatever its `QuitPolicy`. Modal
+windows are asked before the windows they block, then the others from the
+most recently used. Each guard answers as it does a close:
 
-A guard that vetoes stops the quit at its window, and the veto-then-reissue
-pattern above carries on from there:
+- `Close`: the window closes and the quit goes on with the next one;
+- `Veto`: the quit is abandoned at once;
+- `Defer`: the quit waits on that window, brought to the front (restored
+  if minimised) so the user sees the question. `proceed()` closes it and
+  the quit goes on; `cancel()` abandons the quit. A window closed another
+  way meanwhile (by id) lets the quit go on too.
 
-- while the guard's dialog is up (a modal overlay, or a native modal
-  window), the quit waits;
-- when the window then closes, closed by id as above, the quit goes on
-  with the next window;
-- when the window is left open with no dialog (the guard vetoed without
-  asking, or the dialog was cancelled), the quit is abandoned. So is it
-  when another window is closed meanwhile, or by `ctx.cancel_quit()`.
+A window whose own close is already deferred when the quit comes (the user
+clicked its close button and its question is up) is not asked again: the
+quit waits on that answer. A window already closing (a guard closed it by
+id) is not asked either. A guard may itself ask for the quit (closing the
+last document window quits the application) and refuse its window's close:
+the quit then asks it again, `ctx.quit_in_progress()` now true.
+
+#### The application can refuse
+
+`TeksiloAppBuilder::on_quit_requested` installs the application's quit
+guard, declared on the builder as a window's guard is declared on its
+`WindowConfig`. It is asked before any window, in the application tree (so
+it can present a dialog with no window open), and answers with the same
+`CloseResponse`: `Close` lets the quit go on to the windows, `Veto`
+abandons it with every window still open, and `Defer` holds it until its
+`CloseDecision` is answered. A forced quit does not ask it.
+
+```rust
+TeksiloAppBuilder::new()
+    .on_quit_requested(move |ctx| {
+        if !downloads.is_busy() {
+            return CloseResponse::Close;
+        }
+        let decision = CloseDecision::new();
+        let answer = decision.clone();
+        ctx.present_message_box(
+            MessageBox::question(lit!("Downloads are running. Quit anyway?"))
+                .buttons(MessageBoxButtons::YesNo)
+                .on_result(move |r, _ctx| match r.button {
+                    StandardButton::Yes => answer.proceed(),
+                    _ => answer.cancel(),
+                }),
+        );
+        CloseResponse::Defer(decision)
+    })
+```
+
+The application is asked first because the quit closes windows as it goes:
+asked last, it could only refuse with the windows already gone. Qt does
+the same (`QEvent::Quit` reaches the application before its windows are
+closed), and so does Electron (`before-quit` before the windows' `close`).
+AppKit asks its delegate's `applicationShouldTerminate:` after reviewing
+the documents, but that review saves documents and closes no window.
+
+#### Where a quit comes from
+
+- `ctx.quit()`, from any handler of a window or of the application tree:
+  the guarded quit above. A Quit row or a tray menu's Quit runs an action
+  that calls it.
+- The macOS App menu's Quit: sends its `quit_intent` if the app declared
+  one and something takes it, and otherwise asks for the guarded quit
+  itself (see the [native menu guide](native-menu.md#quit)).
+- `ctx.quit_forced()`: closes every window without asking any guard.
+- The operating system's own requests, below.
+
+Every source goes through one request inside `teksilo-app`, which names
+the source and can report how the quit ended, so a request from the
+operating system is answered once it is decided.
+
+#### When the operating system asks
+
+| Platform | What asks | How the quit goes | `ctx.quit_source()` |
+| --- | --- | --- | --- |
+| macOS | the Dock menu's Quit, AppleScript's `quit app`, a menu item or another app sending `terminate:` | guarded; AppKit is told the outcome | `UserQuit` |
+| macOS | log out, restart, shut down | guarded; a refusal cancels the logout, as AppKit applications do | `SessionEnd` |
+| Windows | sign out, restart, shut down (`WM_ENDSESSION`) | overruling | `SessionEnd` |
+| Windows | `taskkill` without `/F` (`WM_CLOSE` to each window) | each window's own guarded close, as its close button | `None` |
+| Linux, macOS, other Unix | `SIGTERM` (`kill`, a service manager, the session ending), `SIGHUP` (the terminal or the login session that started the app closed), each unless the process was started with it ignored (`nohup`) | overruling | `Signal` |
+| Linux, macOS, other Unix | `SIGINT` (Ctrl+C in the terminal that started the app), `SIGKILL` | the process ends at once, nothing asked or written | |
+
+An **overruling** quit is for a source that leaves no time to ask: it is
+carried out at once, in one turn. The application's guard and then every
+window's (dialogs first) are asked **once**, and read the source, so a
+guard can save; whatever a guard answers, its window closes: a `Veto` or
+a `Defer` is overruled, and a dialog still up answers through its own
+Cancel path. A guard that would ask "Save changes?" therefore saves (or
+writes a recovery copy) for `SessionEnd` and `Signal` and returns `Close`,
+as the guard in "Where the quit came from" below does. The application ends once every window has
+closed, under either quit policy.
+
+**Settings are written on every way out**: a quit that ends the
+application, an overruling quit before it returns, and the end of the
+event loop. That covers the `SettingsBundle`'s store and window state and
+the settings files the application opened itself (`SettingsFile`,
+`PersistedListModel`, `MruList`).
+
+**macOS.** AppKit asks before it ends the application, for the Dock
+menu's Quit, AppleScript's `quit app "…"`, any `terminate:` (a menu item
+of the app's own, another application) and a logout, restart or shutdown.
+Teksilo answers that it will say later (`NSTerminateLater`) and runs a
+guarded quit, so a guard can ask "Save changes?" and the user can answer
+it: the windows and their dialogs keep working meanwhile. A logout is told
+apart by the reason AppKit gives (`SessionEnd`), so a guard can also save
+without asking. AppKit hears the outcome once the quit is decided: when it
+completes, the settings are written and AppKit ends the process; when a
+guard refuses or the user cancels, the application goes on (a logout is
+then cancelled, and macOS says which application cancelled it). The App
+menu's Quit row and ⌘Q are the application's own Quit, as before; see
+the [native menu guide](native-menu.md#quit).
+
+**Windows.** A session ending (sign out, restart, shut down) is heard on
+a hidden window of Teksilo's own, so an application with no window open
+hears it too. Teksilo does not hold the session up: Microsoft asks
+applications to let it end, and a block puts the user in front of the
+full-screen "this app is preventing shutdown" list, where they end the
+session anyway. When Windows says the session really ends
+(`WM_ENDSESSION`), the application runs an overruling quit with
+`SessionEnd` before it answers, because Windows may end the process as
+soon as it does: every guard is asked once and should save, the settings
+are written, and Windows allows a few seconds for all of it. `taskkill`
+without `/F` sends `WM_CLOSE` to every window of the process, which closes
+each window through its guard as its close button does; the application
+then ends under the default quit policy once its last window closes.
+`taskkill /F` ends the process at once, as it ends any program.
+
+**Termination signals.** `SIGTERM` and `SIGHUP` quit through the guards
+while the event loop runs. A service manager sends `SIGTERM`, waits, then
+sends `SIGKILL`: a guarded quit that opened a dialog nobody sees would
+wait for the kill, which is why the quit is overruling. A signal that
+arrives once the quit has completed (systemd ends a login session with
+`SIGTERM` and `SIGHUP` together) asks nobody again. Before the loop
+starts and once it has ended they keep their default meaning (the process
+ends). A signal the process was started with ignored stays ignored, during
+the loop and after it: under `nohup`, `SIGHUP` neither quits the
+application nor ends it. `SIGINT` keeps its default too, as in Qt and GTK applications:
+Ctrl+C in a terminal is a developer stopping the program. An application
+that handles these signals itself turns this off with
+`TeksiloAppBuilder::termination_signals(false)`, and its own handlers then
+run alone.
+
+**Logging out on Linux.** Teksilo does not register with a session
+manager (XSMP, GNOME's `org.gnome.SessionManager`, the desktop portal's
+`Inhibit` monitor), so a logout does not ask its guards before the
+desktop's logout screen, and nothing holds the logout for an unsaved
+document. The logout reaches the application in one of two ways: its
+processes are stopped (systemd stopping the session's or the
+application's scope sends `SIGTERM`, with `SIGHUP` for a login session,
+and `SIGKILL` after its timeout), which is the `Signal` quit above; or the
+display server goes away first (the X server or the Wayland compositor
+exits), which ends the event loop with no guard asked, after which `run`
+writes the settings and returns.
+
+#### Dialogs still up
+
+A dialog still up in or over a window the quit closes is answered through
+its own Cancel path before it goes, as for a forced close of its owner: a
+`MessageBox` reports Cancel, dismissed programmatically. A native dialog
+window is asked before the window it blocks, and closes this way.
+
+#### Wording, forcing, cancelling
 
 A guard reads `ctx.quit_in_progress()` to word its question for the whole
-application, and a dialog's "Quit anyway" answer calls `ctx.quit()`, which
-closes every window without asking. A dialog that closes before its window
-does, to save in the background and close the window afterwards, abandons
-the quit; call `ctx.request_quit()` again once the save is done. Asking for
-a guarded quit while one is under way changes nothing.
+application, and a dialog's "Quit anyway" answer calls `ctx.quit_forced()`,
+which closes every window without asking. `ctx.cancel_quit()` abandons a
+guarded quit from anywhere; it does nothing to a forced quit or to one for
+a source that leaves no time to ask (a termination signal, a Windows
+session ending now), so a dialog's Cancel arm run as its window closes
+cannot stop such a quit with half the windows closed. Asking for a guarded
+quit while one is under way changes nothing.
 
 ```rust
 // The guard of the close-confirmation demo, quit-aware:
@@ -937,29 +1122,56 @@ a guarded quit while one is under way changes nothing.
     if !dirty.get() {
         return CloseResponse::Close;
     }
-    let Some(window) = ctx.window().map(|w| w.id()) else {
-        return CloseResponse::Close;
-    };
     let question = if ctx.quit_in_progress() {
         lit!("Quit with unsaved changes?")
     } else {
         lit!("Close window?")
     };
+    let decision = CloseDecision::new();
+    let answer = decision.clone();
     ctx.present_message_box(
         MessageBox::question(question)
             .buttons(MessageBoxButtons::SaveDiscardCancel)
-            .on_result(move |result, ctx| match result.button {
-                StandardButton::Save | StandardButton::Discard => ctx.close_window_by_id(window),
-                _ => ctx.cancel_quit(),
+            .on_result(move |result, _ctx| match result.button {
+                StandardButton::Save | StandardButton::Discard => answer.proceed(),
+                _ => answer.cancel(),
             }),
     );
-    CloseResponse::Veto
+    CloseResponse::Defer(decision)
 })
 ```
 
-Working demo: `cargo run -p close-confirmation` (main window: full
-`on_close_requested` + Save/Discard/Cancel, and a Quit button; second
-window: the `can_close` sugar).
+#### Where the quit came from
+
+`ctx.quit_source()` is the source of the quit under way, `None` when no
+quit is under way (a guard asked for a window the user closes during a
+quit reads the quit's source too). `QuitSource` says who asked: `Application`
+(`ctx.quit()`, `ctx.quit_forced()`, the App menu's Quit), `UserQuit` (the
+macOS Dock menu's Quit, AppKit's `terminate:`), `SessionEnd` (log out,
+restart, shut down) or `Signal` (`SIGTERM`, `SIGHUP`); the enum is
+`#[non_exhaustive]`. A guard for a document skips its dialog when the user
+is not there to answer it, as AppKit and Qt applications do: for
+`SessionEnd` and `Signal` it saves directly and returns `Close` (an
+overruling quit, above, closes the window whatever it answers, so a
+dialog shown then is never answered). The guard of `on_quit_requested`
+reads it the same way.
+
+```rust
+.on_close_requested(move |ctx| {
+    if !dirty.get() {
+        return CloseResponse::Close;
+    }
+    if matches!(ctx.quit_source(), Some(QuitSource::SessionEnd | QuitSource::Signal)) {
+        save();
+        return CloseResponse::Close;
+    }
+    // ... ask the user, and defer
+})
+```
+
+Working demo: `cargo run -p close-confirmation` (main window: a deferring
+`on_close_requested` with Save/Discard/Cancel, and a Quit button; second
+window: the `can_close` sugar, whose `on_close_blocked` answers the close's `CloseDecision`).
 
 ---
 
@@ -969,8 +1181,9 @@ window: the `can_close` sugar).
 2. On `resumed()`, the handler calls
    `WindowManager::create_window(initial_window_config, event_loop)`,
    synchronous winit creation, widget tree built, first paint requested.
-   An app under `QuitPolicy::Explicit` may have no initial window, and
-   skips this.
+   An app with no initial window skips this. The application tree's
+   mount actions run next (they may open the first window); under
+   `QuitPolicy::LastWindowClosed`, no window open after them is a panic.
 3. On every `winit::WindowEvent`:
    - Event translation → `WidgetEvent`.
    - `dispatch_in_window(winit_id, evt, event_loop)`, temporarily
@@ -989,7 +1202,7 @@ window: the `can_close` sugar).
      any source: `ctx.close_window()`, `ctx.close_window_by_id(id)`,
      close requests via `TitleBarHostCallbacks::request_close`). Each
      entry is either *guarded* (interactive gestures, runs the window's
-     close guard, may be vetoed) or *forced* (explicit programmatic
+     close guard, may be vetoed or deferred) or *forced* (explicit programmatic
      closes + framework teardown, unconditional). See **Intercepting
      close / quit** above.
    - Runs queued post-mount actions.
@@ -1002,8 +1215,9 @@ window: the `can_close` sugar).
 , both thread ops through, so state-change-triggered handlers
    (data-driven rebuilds, delayed overlays, drag-tick) can open
    windows too.
-6. After each `process_pending`, a quit under way takes its next steps
-   (`WindowManager::advance_quit`). At the end of `post_event` and of
+6. Each `process_pending` first settles the closes guards deferred whose
+   `CloseDecision` was answered; after it, a quit under way takes its next
+   steps (`WindowManager::advance_quit`). At the end of `post_event` and of
    `about_to_wait`, the loop ends once a quit has completed, or when the
    quit policy says so: under `QuitPolicy::LastWindowClosed`, once no window
    is open.

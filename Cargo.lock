@@ -11762,6 +11762,7 @@ name = "teksilo-app"
 version = "0.20.0"
 dependencies = [
  "base64 0.23.1",
+ "libc",
  "png",
  "pollster 1.0.1",
  "serde",
@@ -12033,6 +12034,7 @@ dependencies = [
  "pollster 1.0.1",
  "raw-window-handle",
  "rfd",
+ "signal-hook",
  "teksilo-automation",
  "teksilo-canvas",
  "teksilo-core",

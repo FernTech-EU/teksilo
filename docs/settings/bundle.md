@@ -222,4 +222,13 @@ Other fields are not public.
 
 #### `pub fn flush_all(&self) -> Result<(), SettingsBundleError>`
 
-Synchronously flush every active service.
+Synchronously flush every active service, then whatever any other
+settings file of the process still holds: the `SettingsFile`,
+`PersistedListModel` or `MruList` handles the application opened
+itself. Those flush when dropped too, but a process can end without
+dropping them (AppKit ending the application after its last
+window, a Windows session ending), and `teksilo-app` calls this on
+every way out.
+
+One that cannot be written does not keep the others from being
+tried: every one is, and the first error is returned.

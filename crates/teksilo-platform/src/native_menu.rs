@@ -208,9 +208,10 @@ pub enum NativeMenuNode {
         /// quit intent, and asks the application to quit through every
         /// window's close guard when nothing takes the intent or there is none
         /// ([`NativeMenuActivation::quits`]). A main-menu key equivalent is
-        /// dispatched by the platform before the responder chain, and
-        /// `terminate:` does not run winit's exit path, so the platform's own
-        /// item would skip every guard.
+        /// dispatched by the platform before the responder chain, so an
+        /// app-side ⌘Q never sees the keystroke; and the platform's own item
+        /// (`terminate:`, which asks the quit through `os_quit` when
+        /// `teksilo-app` runs the loop) could not send the app's quit intent.
         ///
         /// `None` binds the item to the platform's terminate selector
         /// (`terminate:` on macOS), for a snapshot built by other means.
