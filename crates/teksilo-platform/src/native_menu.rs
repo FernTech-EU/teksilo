@@ -242,11 +242,20 @@ pub struct MenuItemDelta {
 /// `Rc`), so the router can pull a copy out of the handle and run it.
 pub type MenuActionFn = Rc<dyn Fn(&mut EventContext)>;
 
+/// What choosing a native menu item does: an intent, an action, or both.
+///
+/// `teksilo-app` runs `action` in the window whose menu the item is in, where
+/// the state it captured lives, then sends `intent` from the focused widget of
+/// the window with the OS focus, which may be another one (a dialog with no
+/// menu of its own).
 #[derive(Clone, Default)]
 pub struct NativeMenuActivation {
-    /// Fire this intent by name through the `Action`/`Intent` pipeline.
+    /// Fire this intent by name through the `Action`/`Intent` pipeline, from
+    /// the focused widget of the window with the OS focus. Dispatched after
+    /// `action` has run.
     pub intent: Option<&'static str>,
-    /// Or run this closure directly (the escape hatch). Runs after `intent`.
+    /// Or run this closure directly (the escape hatch), in the window whose
+    /// menu the item is in, anchored at that window's root.
     pub action: Option<MenuActionFn>,
 }
 
@@ -555,8 +564,9 @@ impl MemoryNativeMenuBackend {
         self.inner.borrow().menus.get(&window_id).cloned()
     }
 
-    /// The window whose menu is active (last `activate_window`, or the window
-    /// of the first `set_window_menu` if none was activated).
+    /// The window whose menu is active (last `activate_window` of a window
+    /// that has a menu, or the window of the first `set_window_menu` if none
+    /// was activated).
     pub fn active_window(&self) -> Option<TeksiloWindowId> {
         self.inner.borrow().active
     }
@@ -593,7 +603,12 @@ impl NativeMenuBackend for MemoryNativeMenuBackend {
         }
     }
     fn activate_window(&mut self, window_id: TeksiloWindowId) {
-        self.inner.borrow_mut().active = Some(window_id);
+        // As macOS: a window with no menu of its own leaves the bar showing
+        // the menu it showed.
+        let mut rec = self.inner.borrow_mut();
+        if rec.menus.contains_key(&window_id) {
+            rec.active = Some(window_id);
+        }
     }
     fn clear_window(&mut self, window_id: TeksiloWindowId) {
         let mut rec = self.inner.borrow_mut();
@@ -704,6 +719,22 @@ mod tests {
         assert_eq!(backend.cleared(), vec![win(2)]);
         assert!(handle.activation(win(2), id).is_none());
         assert!(backend.menu_for(win(2)).is_none());
+    }
+
+    /// macOS keeps the bar it shows when a window with no menu of its own
+    /// becomes key; the recording backend says the same.
+    #[test]
+    fn activating_a_window_without_a_menu_keeps_the_menu_shown() {
+        let backend = MemoryNativeMenuBackend::new();
+        let handle = NativeMenuHandle::new(backend.clone());
+        handle.set_window_menu(
+            win(1),
+            sample_snapshot(MenuItemId::next()),
+            HashMap::new(),
+            poster(),
+        );
+        handle.activate_window(win(2));
+        assert_eq!(backend.active_window(), Some(win(1)));
     }
 
     #[test]

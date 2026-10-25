@@ -48,7 +48,15 @@ let bar = ctx.add(
 Item activations route through the usual `Intent`/`Action` pipeline (with
 `IntentSource::Menu`), so the **same** `Action::new("app.new")` fires whether the
 item was chosen from the native menu, the in-window menu, or its keyboard
-shortcut.
+shortcut. All three send the intent from the focused widget (for the native
+menu, of the window that has the OS focus: see [Multi-window](#multi-window)): an action on the
+focused widget or one of its ancestors takes it first (Edit ▸ Copy copies in the
+focused field), and `register_action` on the window's root is enough for an
+app-wide command. A click on the in-window menu bar leaves focus in the widget
+the user was working in (its titles take no focus from a click), and a menu
+opened from the keyboard (F10, Alt) hands focus back to that widget once a
+command is chosen, so the intent starts there. With nothing focused it starts at
+the window's own root.
 
 Demo: `cargo run -p native-menu`.
 
@@ -66,7 +74,7 @@ tree of `MenuNode`s with a `version: Signal<u64>`:
 
 | method | effect |
 | --- | --- |
-| `.intent("app.x")` | fire intent by name on activation |
+| `.intent("app.x")` | fire intent by name on activation, from the focused widget |
 | `.on_activate(\|ctx\| …)` | run a closure (after the intent) |
 | `.shortcut("app.x")` | display + bind the `ShortcutRegistry` chord |
 | `.enabled(prop)` | static or `Signal<bool>`, greys out **reactively** (both surfaces) |
@@ -200,6 +208,17 @@ window installs its own snapshot (`NativeMenuHandle::set_window_menu`), and
 window's menu becomes `mainMenu`. The menu + its activation map are dropped when
 the window closes.
 
+A window with no menu of its own (a secondary window, a `WindowConfig::modal`
+dialog) leaves the bar showing the last menu, as macOS does, and ⌘ key
+equivalents still go to that bar. An item chosen there acts in two places. Its
+`.on_activate` closure, and the state write a check or radio entry makes, run in
+the window whose menu it is, where the state they captured lives, anchored at
+that window's root (an overlay it shows belongs to the window, not to a popover
+that happens to hold focus). Its intent is then sent from the focused widget of
+the window that has the OS focus, the dialog in front, as the item's shortcut
+would be. With no window focused (all minimised), the intent goes to the window
+whose menu it is.
+
 An application left running with no window (`QuitPolicy::Explicit`) keeps an
 App menu: each install also hands its App menu to
 `NativeMenuHandle::set_app_menu`, and the bar shows that menu while no window's
@@ -322,4 +341,5 @@ said where the chord comes from, and it says none right now.
 The platform boundary type is plain, already-resolved data, `teksilo-platform`
 never sees the widgets model. The macOS item callback posts a
 `NativeMenuEventPayload` through `AppEventPoster::post_external`, routed back into
-the originating window's tree exactly like the file-dialog / external-DnD paths.
+the window whose menu it is (the action) and the focused window (the intent),
+like the file-dialog / external-DnD paths.

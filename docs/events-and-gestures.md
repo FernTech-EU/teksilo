@@ -283,6 +283,7 @@ Plus a handful of flag-like attachments that don't take event-data closures:
 | Flag | Purpose |
 |---|---|
 | `.focusable(true)` | Opt the node into tab order |
+| `.focus_on_click(false)` | A click or tap that would focus the widget activates it without moving focus; a focusable widget inside it keeps its own setting; Tab, focus requests and assistive technology still focus it (see §6) |
 | `.tab_index(n)` | Explicit tab index, **scoped to the nearest `FocusScope`** (see §6), `Some` sorts before unindexed, ascending |
 | `.cursor(CursorIcon::Pointer)` | Cursor when pointer is over the widget |
 | `.clips_children_on(true)` | Scissor clipping to bounds (ScrollArea, MaxSize). The `WidgetBuilder` trait spells it `clips_children_on` because `Widget::clips_children` is already the `&self` query; `HandlerSet` and `WidgetWithHandlers` also accept `.clips_children(true)` |
@@ -359,7 +360,7 @@ The factory is `Fn` (re-entrant) and called fresh on every right-click, the menu
 .context_menu(|_, _| if disabled.get() { None } else { Some(build_menu()) })
 ```
 
-If every factory on the chain returns `None`, no menu opens and the press falls through to normal dispatch (any intents or signal writes the factories queued are still applied).
+If every factory on the chain returns `None`, no menu opens and the press falls through to normal dispatch (any intents or signal writes the factories queued are still applied; the intents start at the widget the menu was asked for, so every factory's widget is on their way to the root). The intents a factory sends when it returns a menu start at that factory's widget, and so do the menu's own rows': the menu is attached to that widget, and a walk from an overlay goes on from the widget it is attached to.
 
 ### 3.2 HandlerSet: handlers from inside `build()`
 
@@ -1046,7 +1047,7 @@ Via `EventContext`, any handler can:
 - `ctx.request_focus(widget_id)`, programmatic focus transfer (overlay content on open, first error field on submit). A target on a page the same handler is showing is focused once the next layout has woken it (§6).
 - `ctx.clear_focus()`, drop keyboard focus so that nothing is focused (§6).
 - `ctx.dismiss_all_overlays()`, useful after menu item activation.
-- `ctx.send_intent(AppIntent::X)`, fire a typed intent; framework walks source → root invoking any matching `Action`. See [shortcut-intent-action.md](shortcut-intent-action.md).
+- `ctx.send_intent(AppIntent::X)`, fire a typed intent; framework walks source → root invoking any matching `Action`, going on from an overlay's content to the widget the overlay is attached to (a context menu's rows reach the right-clicked widget's actions). See [shortcut-intent-action.md](shortcut-intent-action.md).
 - `ctx.request_frame()`, ask the event loop to pump one more frame (caret blink restart, drag auto-scroll, pending document events).
 - `ctx.app_state::<T>()`, look up an app-scoped value registered on `TeksiloAppBuilder` by `TypeId`.
 - `ctx.set_cursor(icon)` / `ctx.release_cursor()`, override the cursor, or hand it back to the hovered node's own declaration (§3.1.3).
@@ -1069,6 +1070,7 @@ Focus is a single `Option<WidgetId>` stored on the tree. Tab / Shift+Tab moves i
 - The currently focused node id (read via `tree.focused()`).
 - **Focus origin**, `#[non_exhaustive] FocusOrigin { Keyboard, Pointer(PointerKind), Programmatic, Accessibility }`, so a consumer matches with a `_` arm and `Pointer(_)` where the device does not matter. `Keyboard` and `Accessibility` reveal the focus ring; `Pointer(_)` hides it (a direct-pointer focus assignment sets `focus_visible` *false*, one tree-level signal, so it has to be set rather than merely not set, or a keyboard focus followed by a tap would leave a ring behind); `Programmatic` carries no modality of its own and leaves the ring as the last real interaction left it, which is what `:focus-visible` does for `element.focus()`. `FocusOrigin::POINTER` is the constant for a site that knows the keyboard was not involved and cannot know which device was, it says `Pointer(PointerKind::Unknown)` rather than claiming a finger was a mouse.
 - For a **direct** pointer, focus is assigned on the `PointerUp`, guarded by "the release landed on the same focusable as the press".
+- A click or tap whose focusable widget (the one it lands on, or the nearest focusable ancestor) was built with `.focus_on_click(false)` moves no focus at all, from either pointer path (GTK's `focus-on-click`, Qt's `Qt::TabFocus`). The flag is read on that one node: a text field inside a container built with it still takes focus from a click, and a composite whose focusable node is a child of its own (`PopoverButton`, `PopoverIconButton`) passes the flag on to it. The widget is activated as usual and stays focusable from the keyboard, by request and by assistive technology. A menu bar's triggers and a toolbar's buttons are built this way, so clicking them leaves focus in the editor they act on. Such a click blurs nothing, so before it is dispatched the focused widget commits the edit it holds, as a blur would make it (a spin box's typed number, a field's `on_blur_fn`): the command the click runs sees it. A widget that asks for focus in its own press handler still gets it.
 - **Focus-gained / focus-lost** events dispatched to widgets via `on_focus(gained: bool, ctx)`.
 
 Programmatic focus transfer goes through `ctx.request_focus(id)`. The framework also exposes `first_focusable_descendant(id)` for modal openers (dialogs that should land focus on the primary action button, it returns the widget Tab would land on *first*, respecting the scope rules below) and `ScrollIntoView` synthesized on focus change so that tab-focusing an offscreen widget scrolls the nearest clipping ancestor to reveal it.

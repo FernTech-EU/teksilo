@@ -70,7 +70,8 @@ impl Widget for Root {
         );
 
         // Actions invoked whether the item is chosen from the native menu, the
-        // in-window menu, or its keyboard shortcut.
+        // in-window menu, or its keyboard shortcut. Each sends its intent from
+        // the focused widget, whose walk ends at this root.
         for (id, label) in [
             ("app.new", "New"),
             ("app.open", "Open"),

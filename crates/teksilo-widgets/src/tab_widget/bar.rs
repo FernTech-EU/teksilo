@@ -61,7 +61,7 @@ use teksilo_core::widget::{
     EventContext, LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget,
     WidgetPlacement,
 };
-use teksilo_core::widget_builder::HandlerSet;
+use teksilo_core::widget_builder::{HandlerSet, WidgetBuilder};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_data::{ListDataSource, ListModel};
 use teksilo_i18n::LocalizedString;
@@ -2750,6 +2750,8 @@ fn build_scroll_arrow(
             lit!("Scroll tabs down")
         }
     };
+    // Takes no focus from a click (Qt's tab bar scroll buttons take none
+    // either): scrolling the strip leaves focus where it was.
     let button = IconButton::new(icon)
         .embedded()
         .size(IconButtonSize::Compact)
@@ -2766,7 +2768,7 @@ fn build_scroll_arrow(
             // `animate_to` is supported.
             scroll_main.animate_to(target, duration, easing);
         });
-    ctx.add(button)
+    ctx.add(button.focus_on_click(false))
 }
 
 /// One entry in the overflow dropdown — a stable [`TabId`], the

@@ -129,6 +129,16 @@ so it sizes compactly to the currently-collapsed rows, carries standard
 menu chrome, takes focus when opened, and supports arrow / `Home` / `End` /
 `Enter` keyboard navigation (skipping the hidden rows).
 
+**Focus.** The bar's buttons, dropdowns and chevron take no focus from a
+click (`focus_on_click(false)`), as Qt's and GTK's tool buttons take none:
+a command acts on the widget the user is working in, which keeps focus, so
+one sent with `ctx.send_intent_from_focus` reaches it, and a dropdown or
+the overflow menu gives focus back to it when it closes. Since the click
+blurs nothing, a field that commits on blur (a spin box, a date field)
+commits what was typed in it before the command runs. The keyboard still
+reaches them (below). A pinned or collapsible custom widget keeps its own
+behaviour.
+
 **Accessibility (ARIA toolbar pattern).** The bar emits `Role::Toolbar`
 with its orientation and name. It is a single Tab stop with **roving
 tab-index**: arrow keys move focus among the visible controls (and the

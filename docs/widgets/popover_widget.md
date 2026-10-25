@@ -110,6 +110,11 @@ because the activate slot is owned by the popover wiring. Use
 `on_close_with` also says why the popover closed (a `DismissReason`:
 an outside press, Escape, the popover closing itself, a cascade).
 
+`.focus_on_click(false)` set on the popover widget is passed on to the
+inner trigger: the flag holds for the node it is set on, and the trigger's
+button is the node a click would focus. A toolbar's dropdown buttons are
+built this way.
+
 ### Per-trigger differences (the `PopoverTrigger` trait)
 
 `Button` and `IconButton` differ only in: the default `has_popup`
@@ -363,10 +368,13 @@ no way to wire the second half. Action handlers are the one place that
 requires — so the action runs the identical toggle the trigger runs, and
 the two can never drift.
 
-Registered with `register_action_global`, deliberately: intents walk
-source-widget → root, and a menu renders in an **overlay** that is a
-sibling of the popover's own subtree, so a plain `register_action` would
-never be reached from a menu item. Pair it with
+Registered with `register_action_global`, deliberately: an intent
+walks from where it starts (the focused widget, for a shortcut and for
+a menu row alike) up to the window's root, and the popover sits off
+to the side of that walk, never above the focused widget, so a plain
+`register_action` on it would not be reached. A window-global action
+is reached from anywhere in the window, except from inside an
+in-window dialog the popover is not in. Pair it with
 `register_shortcut_global` in the app for the keystroke.
 
 ```ignore

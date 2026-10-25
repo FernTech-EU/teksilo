@@ -55,8 +55,13 @@ by crate for clarity, not because crates version independently.
   subscription registered there. Its dialogs are presented in the window used
   last, or in a window of their own. An intent a window leaves unclaimed is
   offered to it once, and one it leaves goes to the window used last, so a
-  window's menu can fire a command only the application tree implements;
-  shortcuts' intents stay where they were sent.
+  window's menu can fire a command only the application tree implements. A
+  shortcut's intent nothing in the window takes goes to it too when one of
+  its enabled actions takes it, so Ctrl+N bound in a window can run the
+  application tree's `app.new` (not with focus in a dialog presented in the
+  window, where the page's shortcuts do not apply); otherwise the key still
+  goes to the focused widget. A chain of intents that actions on the two sides send in
+  answer to each other stops after 64 crossings, and a debug build says so.
 - **`WindowConfig::minimizable` and `maximizable`**, whether the title bar
   offers those buttons, on Windows and macOS. **Behaviour change:** a modal
   window, and a native dialog the framework opens, now has only a close
@@ -64,14 +69,30 @@ by crate for clarity, not because crates version independently.
   `maximizable(true)`. A minimisable dialog is minimised with the window it
   blocks, and restoring either one brings both back.
 - **`WithActivationToken`, an external payload with the activation token that
-  came with it.** `on_external_with_ctx` sees the payload, and the first
-  window its handler raises or opens is activated with the token, so a
-  single-instance application's second launch brings its window forward on
-  Wayland instead of only asking for attention. `HeadlessApp::app_tree` makes an app root
+  came with it.** `on_external_with_ctx`, `on_app_event` and the app-event
+  observers see the payload, and the first window the handler raises or
+  opens is activated with the token, so a single-instance application's
+  second launch brings its window forward on Wayland instead of only asking
+  for attention. An intent the handler sends that the application tree (or
+  a window) takes carries the token there, so the window that action opens
+  is activated too. `HeadlessApp::app_tree` makes an app root
   testable. See "The application tree" in the multi-window guide.
 
 #### Core
 
+- **`focus_on_click(false)`, a control a click activates without taking
+  focus.** On `WidgetBuilder`, `HandlerSet` and `WidgetWithHandlers`, as
+  GTK's `focus-on-click` and Qt's `Qt::TabFocus`: a click or tap that
+  would focus the widget activates it and leaves focus where it was, while
+  Tab, a focus request and assistive technology still focus it. It belongs
+  to the one widget: a text field inside a container built with it still
+  takes focus from a click, and `PopoverButton` and `PopoverIconButton` pass
+  it on to their inner button. Since such a click blurs nothing, the
+  focused field first commits what was typed in it, as a blur would (a
+  `SpinBox`, a `DateEdit`, a `TextInput` with an `on_blur_fn`), so the
+  command the click runs reads the new value. For controls that act on
+  another widget's content, such as menu bar triggers and toolbar
+  buttons.
 - **`WidgetTree::next_unpainted_deadline`**, the timers of a tree that is never
   painted, and `TreeAppContext::ctx_subscription_target`, which tells a
   context-bearing subscription registered with no window from none at all.
@@ -83,6 +104,54 @@ by crate for clarity, not because crates version independently.
 
 ### Changed
 
+#### Core
+
+- **An intent sent from a menu or a popover reaches the actions of the
+  widget it is attached to.** Its walk to the root used to stop at the
+  overlay's content, so only window-global actions could take it; it now goes
+  on from the widget the overlay is attached to, up to the window's root: a
+  context menu's rows reach the right-clicked widget and its ancestors, a
+  popover's buttons the button that opened it. This holds when the handler
+  closes the overlay as it sends the intent. Scoped shortcuts do not cross:
+  a key pressed in a popover goes to the popover's field, never to a scoped
+  shortcut of the widget it is attached to. **Behaviour change:**
+  an action registered with `register_action` on such a widget or an
+  ancestor now takes these intents before a window-global one does.
+- **A dialog presented in the window keeps the page's commands out, as a
+  dialog in a native window of its own does** on macOS and Windows. While it
+  is open, an intent sent inside it (or inside the command palette), and a
+  key pressed or a command sent from focus with focus in it or with nothing
+  focused, reach its own
+  actions and the window-global actions and global shortcuts registered by
+  widgets inside it; none of the page's, scoped or global. An intent nothing
+  in the window takes still goes to the application tree; a key goes there
+  only through a shortcut that applies in the dialog, so the page's Ctrl+N
+  bound to an application-tree action does not fire inside it. The standard
+  edit shortcuts work everywhere. An intent sent as the dialog closes (its
+  button closes it, then sends; a palette row) is dispatched once it has,
+  and is the page's: it walks on from the widget the dialog was attached
+  to, or, sent from focus, starts at the focus the dialog gave back, or at
+  the window's root when nothing was focused. An intent sent from the page
+  while a dialog is up (only a programmatic send can be) reaches every
+  window-global action, as before. **Behaviour change:** a
+  `register_action_global` action or a `register_shortcut_global` shortcut
+  of the page no longer takes an intent or a key from inside an in-window
+  dialog or the command palette. Register the action in the dialog or in
+  the application tree, and the shortcut in the dialog; or have the
+  dialog's button close the dialog before it sends the intent. The command
+  palette answers the chord of the command that presented it, so the key
+  that opened it still closes it from inside.
+- **`EventContext::send_intent_from_focus` reads the focus after every
+  overlay the handler closes has given it back.** A menu row that closed its
+  menu and sent from focus started at the row, inside the closing menu.
+- **`EventContext::dismiss_all_except_hosts` gives back the focus it takes
+  away.** Focus held in one of the overlays it closes goes back where it was
+  when the lowest of them opened, as Escape gives it back. It was left with
+  nothing focused.
+- **A context-menu factory that declines sends its intents from the widget
+  the menu was asked for**, so every factory's widget is on their way to the
+  root. They started at the window's root.
+
 #### App
 
 - **Breaking.** `WindowManager::refocus_modal_child` takes `&mut self`, since
@@ -92,6 +161,25 @@ by crate for clarity, not because crates version independently.
 
 - **Breaking.** `MenuItemState` has a new variant, so an exhaustive `match`
   on it needs a `ReflectRadio` arm.
+- **A `MenuModel` entry chosen in the window sends its intent from the
+  focused widget,** as its shortcut and the macOS menu bar do: Edit ▸ Copy
+  copies in the focused field, and `register_action` on the window's root is
+  enough for a menu command. Its intent started at the menu row and reached
+  only window-global actions.
+- **A click on a toolbar command leaves focus where it was.** A
+  `Toolbar`'s buttons, dropdown buttons and overflow chevron, and a tab
+  bar's scroll arrows, take no focus from a click, so a command sent from
+  focus acts on the editor the user was working in, and a toolbar dropdown
+  or overflow menu gives focus back to it. The keyboard still reaches them.
+- **A click on a menu bar leaves focus where it was.** Its titles, and a
+  collapsed bar's hamburger, take no focus from a click, so a menu opened
+  with the mouse or a finger gives focus back to the widget the user was
+  working in, however it closes. After F10, a bare Alt tap or Alt+letter,
+  Escape closes the open menu and leaves focus on its title, and Escape on a
+  title gives focus back to the widget focused before; choosing a command,
+  or clicking the menu away, gives it back too, before the command is sent.
+  A press on a title used to focus it, the menu gave focus back to the
+  title, and Escape on a title did nothing.
 
 #### Platform
 
@@ -99,6 +187,9 @@ by crate for clarity, not because crates version independently.
   field: a native menu item is installed hidden rather than left out, and
   shown or hidden in place. Code that builds an item, or a delta without
   `..Default::default()`, has to set it.
+- **`MemoryNativeMenuBackend::activate_window` leaves the active menu alone
+  for a window that has none,** as the macOS backend does. It made that
+  window active.
 
 ### Fixed
 
@@ -179,6 +270,25 @@ by crate for clarity, not because crates version independently.
 - **`WindowConfig::skip_taskbar` keeps the window out of the taskbar** on
   Windows and X11. It had no effect anywhere. Wayland and macOS have nothing
   per window to apply it to, as its documentation now says.
+- **A command from the macOS menu bar acts in the window you are working
+  in.** A native menu item's intent started at the first root of the window
+  whose menu it was: the debug inspector's wrapper once the inspector is
+  installed, so an action registered with `register_action` on the app's
+  root never ran, and that window even while a dialog or a window with no
+  menu of its own was in front. The intent now starts at the focused widget
+  of the window with the OS focus, as the item's shortcut does (Edit ▸ Copy
+  copies in the focused field of the dialog in front), and at that window's
+  root when nothing is focused. An intent nothing in that window takes goes
+  on to the application tree, not to the window whose menu it is. The
+  item's `on_activate`, and the state
+  write of a check or radio entry, run in the window whose menu it is,
+  anchored at its root, so an overlay they show no longer closes with a
+  popover that happened to hold focus.
+- **Intents sent from app callbacks start at the app's root, inside any
+  wrapper around it.** Close guards, file dialog results, external payloads,
+  a global shortcut with nothing focused, and an intent another tree left
+  unclaimed with nothing focused started at the debug inspector's or the
+  toast host's wrapper, and missed actions registered on the app's root.
 
 ## [0.20.0] - 2026-10-19
 

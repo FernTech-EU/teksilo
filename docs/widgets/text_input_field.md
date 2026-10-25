@@ -118,7 +118,8 @@ Features:
   (`TextInputField::read_only`).
 - Commit hooks: Enter fires
   `on_submit_fn` and focus loss
-  fires `on_blur_fn`.
+  fires `on_blur_fn`, as does a click on
+  a control that takes no focus (a toolbar button), before its command.
 - Non-editable trailing
   `suffix`, rendered flush-right inside
   the field's bounds (Qt's `QSpinBox::suffix`). Caret cannot
@@ -316,6 +317,12 @@ edit and revert.
 Closure fired once per focus-loss, after selection/scroll
 have been reset. SpinBox-style callers parse and reformat
 here; validators revalidate here.
+
+Also fired, with the field keeping focus, when a click lands on a
+control built with `focus_on_click(false)` (a toolbar button, a menu
+bar title): such a click blurs nothing, and the command it runs must
+still see the value this commits, as AppKit's `commitEditing`
+ensures.
 
 <a id="textinputfield-char_filter"></a>
 

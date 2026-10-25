@@ -64,6 +64,7 @@ pub fn is_widget_builder_method(name: &str) -> bool {
             | "no_hit_slop"
             // Framework-level node properties
             | "focusable"
+            | "focus_on_click"
             | "tab_index"
             | "cursor"
             | "clips_children_on"

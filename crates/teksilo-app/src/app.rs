@@ -2282,6 +2282,8 @@ impl TeksiloAppHandler {
         };
         // A payload that came with an activation token: the handler sees
         // what it wraps, and the token waits for its first raise or open.
+        // `user_event` unwraps it before any handler; this catches one
+        // handed here directly.
         let payload = match payload.downcast_ref::<WithActivationToken>() {
             Some(wrapped) => {
                 self.wm.set_dispatch_activation_token(wrapped.token.clone());
@@ -2466,7 +2468,8 @@ impl TeksiloAppHandler {
     /// Offer what each tree left unclaimed to the other side: the windows'
     /// to the application tree, the application tree's to the window the
     /// user works with. Repeats while a routed intent's handler sends new
-    /// ones across, within a bound. See [`crate::intent_routing`].
+    /// ones across, for 16 rounds in a turn; the trees stop keeping a chain
+    /// of intents after 64 crossings in all. See [`crate::intent_routing`].
     fn forward_unclaimed_intents(&mut self, event_loop: &ActiveEventLoop) {
         use crate::intent_routing::offer;
         for _ in 0..16 {
@@ -2522,7 +2525,8 @@ impl TeksiloAppHandler {
         {
             eprintln!(
                 "teksilo-app: the windows and the application tree kept sending each other \
-                 intents for 16 rounds; the rest wait for the next turn"
+                 intents for 16 rounds; the rest wait for the next turn, and a chain of them \
+                 stops after 64 crossings"
             );
         }
     }
@@ -2746,10 +2750,10 @@ impl TeksiloAppHandler {
     /// posted when the user chose an item in the platform's native menu bar.
     /// Resolves the item's [`MenuItemId`](teksilo_core::MenuItemId) to its
     /// recorded intent / action via the [`NativeMenuHandle`](teksilo_platform::native_menu::NativeMenuHandle)
-    /// and fires it inside the originating window's `EventContext` with
-    /// `IntentSource::Menu` — the same pipeline an in-window `MenuItem` uses.
-    /// Same take/run-with-context/reinsert shape as the file-dialog router; any
-    /// miss is dropped silently. A
+    /// and fires it with `IntentSource::Menu`, as
+    /// [`native_menu_route`](crate::native_menu_route) describes: the action in
+    /// the window whose menu it is, the intent from the focused widget of the
+    /// window with the OS focus. Any miss is dropped silently. A
     /// [`NativeAppMenuEventPayload`](teksilo_platform::native_menu::NativeAppMenuEventPayload),
     /// from the menu shown while no window's menu is, goes to
     /// [`Self::route_app_menu_item`].
@@ -2758,8 +2762,7 @@ impl TeksiloAppHandler {
         payload: Box<dyn std::any::Any + Send>,
         event_loop: &ActiveEventLoop,
     ) -> Result<(), Box<dyn std::any::Any + Send>> {
-        use teksilo_core::Intent;
-        use teksilo_core::telemetry::IntentSource;
+        use crate::native_menu_route::{fire_native_menu_item, native_menu_intent_window};
         use teksilo_platform::native_menu::{
             NativeAppMenuEventPayload, NativeMenuEventPayload, NativeMenuHandle,
         };
@@ -2773,15 +2776,7 @@ impl TeksiloAppHandler {
             }
         };
 
-        let target_winit = self
-            .wm
-            .teksilo_to_winit_map()
-            .get(&payload.window_id_owner)
-            .copied();
-        let Some(winit_id) = target_winit else {
-            return Ok(());
-        };
-
+        let owner = payload.window_id_owner;
         let handle = self
             .wm
             .app_context_template()
@@ -2789,38 +2784,35 @@ impl TeksiloAppHandler {
         let Some(handle) = handle else {
             return Ok(());
         };
-        let Some(activation) = handle.activation(payload.window_id_owner, payload.item_id) else {
+        let Some(activation) = handle.activation(owner, payload.item_id) else {
             // Item not found (menu replaced / window torn down) — drop.
             return Ok(());
         };
-
-        let Some(mut current) = self.wm.take_managed(winit_id) else {
+        let winit_of = |wm: &crate::window_manager::WindowManager, id| {
+            wm.teksilo_to_winit_map().get(&id).copied()
+        };
+        let Some(owner_winit) = winit_of(&self.wm, owner) else {
             return Ok(());
         };
-        let current_id = current.teksilo_id;
+        let target = native_menu_intent_window(owner, self.wm.focused_window());
+        let target_winit = winit_of(&self.wm, target).unwrap_or(owner_winit);
 
-        let current_arc = Some(current.platform_window.window_arc());
-
-        {
-            let mut ops = crate::window_manager::WindowOpsImpl::new(
-                &mut self.wm,
-                event_loop,
-                current_id,
-                current_arc,
-            );
-            current.tree.run_with_event_context(&mut ops, |ctx| {
-                ctx.with_intent_source(IntentSource::Menu, |ctx| {
-                    if let Some(name) = activation.intent {
-                        ctx.send_intent(Intent::new(name));
-                    }
-                    if let Some(action) = &activation.action {
-                        action(ctx);
-                    }
+        if target_winit == owner_winit {
+            self.run_in_window(owner_winit, event_loop, |tree, ops| {
+                fire_native_menu_item(tree, ops, activation.action.as_ref(), activation.intent);
+            });
+        } else {
+            // The action first, in the tree that holds its state, so the
+            // intent's actions read what it wrote, as they do in one tree.
+            if let Some(action) = activation.action.as_ref() {
+                self.run_in_window(owner_winit, event_loop, |tree, ops| {
+                    fire_native_menu_item(tree, ops, Some(action), None);
                 });
+            }
+            self.run_in_window(target_winit, event_loop, |tree, ops| {
+                fire_native_menu_item(tree, ops, None, activation.intent);
             });
         }
-
-        self.wm.reinsert_managed(winit_id, current);
         Ok(())
     }
 
@@ -3892,6 +3884,12 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
+        // A payload that came with an activation token: every handler sees
+        // what it wraps, and the token waits for the first raise or open.
+        let (event, token) = unwrap_activation_token(event);
+        if let Some(token) = token {
+            self.wm.set_dispatch_activation_token(token);
+        }
         // Framework-private, so taken before any app handler or observer
         // sees an event.
         let event = match event {
@@ -4175,6 +4173,12 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
             }
             _ => {}
         }
+        // No `on_external_with_ctx` ran to end it (none installed, or a
+        // framework arm took the payload): the token is left to a
+        // `WindowState::focus()` for this turn only, as after a handler.
+        if self.wm.holds_dispatch_activation_token() {
+            self.wm.end_dispatch_activation();
+        }
         if let Some(trace) = &mut self.idle_trace {
             trace.note_request_redraw_all();
         }
@@ -4298,12 +4302,17 @@ pub(crate) struct SessionChanged;
 /// launch forwards its request together with the token its launcher gave it
 /// (`XDG_ACTIVATION_TOKEN` on Wayland, `DESKTOP_STARTUP_ID` on X11).
 ///
-/// [`TeksiloAppBuilder::on_external_with_ctx`] sees the inner payload. While
-/// its handler runs, and until the turn ends, the token is held for the
-/// first window operation that can use it: `ctx.focus_window`, a
-/// `WindowState::focus()` with no token of its own, or `ctx.open_window`.
-/// Without it a Wayland compositor treats the raise as unsolicited and only
-/// asks for attention. Elsewhere the token is ignored.
+/// Every handler sees the inner payload: [`TeksiloAppBuilder::on_app_event`],
+/// the observers of [`TeksiloAppBuilder::register_app_event_observer`] and
+/// [`TeksiloAppBuilder::on_external_with_ctx`]. The token is held for the
+/// first window operation of the `on_external_with_ctx` handler that can use
+/// it: `ctx.focus_window` or `ctx.open_window`. One it leaves unused goes, for
+/// the rest of the turn only, to a `WindowState::focus()` with no token of its
+/// own. An intent the handler sends that its tree leaves to another (the
+/// application tree, or a window) takes the unused token with it, so the
+/// action that takes it there can open or raise the window with it. Without
+/// it a Wayland compositor treats the raise as unsolicited and only asks for
+/// attention. Elsewhere the token is ignored.
 pub struct WithActivationToken {
     token: String,
     payload: Box<dyn std::any::Any + Send>,
@@ -4326,6 +4335,22 @@ impl WithActivationToken {
     /// The wrapped payload.
     pub fn payload(&self) -> &(dyn std::any::Any + Send) {
         &*self.payload
+    }
+}
+
+/// `event` with a [`WithActivationToken`] taken apart: the event carrying
+/// the payload it wraps, and its token. Any other event comes back as it is,
+/// with no token.
+fn unwrap_activation_token(event: AppEvent) -> (AppEvent, Option<String>) {
+    match event {
+        AppEvent::External(payload) => match payload.downcast::<WithActivationToken>() {
+            Ok(wrapped) => {
+                let WithActivationToken { token, payload } = *wrapped;
+                (AppEvent::External(payload), Some(token))
+            }
+            Err(payload) => (AppEvent::External(payload), None),
+        },
+        event => (event, None),
     }
 }
 
@@ -5303,10 +5328,13 @@ impl TeksiloAppBuilder {
         // The application tree, as `run` builds it, minus the window
         // manager: no window, never painted. Both trees keep what they leave
         // unclaimed, for `HeadlessApp::route_unclaimed_intents`.
+        let application_scope = teksilo_core::ApplicationScope::new();
         if let (Some(app_tree), Some(root)) = (app_tree.as_mut(), self.app_root.take()) {
             app_tree.set_records_unclaimed_intents(true);
             tree.set_records_unclaimed_intents(true);
+            tree.set_application_scope(Some(application_scope.clone()));
             root(app_tree);
+            app_tree.publish_application_scope(&application_scope);
         }
 
         // Build the root from the `initial_window`'s builder if one was
@@ -5339,6 +5367,7 @@ impl TeksiloAppBuilder {
             theme: self.theme,
             i18n_manager,
             settings: opened_settings,
+            application_scope,
         }
     }
 
@@ -5688,6 +5717,10 @@ pub struct HeadlessApp {
     /// was used. Held here so the underlying `SettingsFile` clones
     /// (and their I/O threads) live as long as the headless app.
     pub settings: Option<teksilo_settings::OpenedSettings>,
+    /// What the application tree takes, read by [`tree`](Self::tree)'s
+    /// shortcuts. Published when the application tree is built and by
+    /// [`route_unclaimed_intents`](Self::route_unclaimed_intents).
+    application_scope: teksilo_core::ApplicationScope,
 }
 
 impl HeadlessApp {
@@ -5700,6 +5733,11 @@ impl HeadlessApp {
     /// running application does after every dispatch, until neither leaves
     /// anything (at most 16 rounds). Returns the names nobody took. Without
     /// an application tree nothing is kept, and this returns nothing.
+    ///
+    /// A shortcut pressed in `tree` whose intent nothing there takes is
+    /// kept when the application tree takes it, as it was when this last
+    /// ran (or when the application tree was built); this publishes what
+    /// the application tree takes again once it is done.
     ///
     /// The window operations are a no-op sink, as everywhere in a headless
     /// app.
@@ -5726,6 +5764,7 @@ impl HeadlessApp {
                 &mut ops,
             ));
         }
+        app_tree.publish_application_scope(&self.application_scope);
         dropped
     }
 
@@ -6762,6 +6801,162 @@ mod tests {
         assert_eq!(runs.get(), 1, "the action around the field ran the command");
     }
 
+    /// **A palette opened with nothing focused runs its command from the
+    /// window's root.**
+    ///
+    /// Closing it gives no focus back, so the intent starts where one with no
+    /// source does, and reaches the root's own action and the window's global
+    /// one: the palette, closed, is no longer a barrier. Before, it started at
+    /// the palette's row and stopped at the closed palette.
+    #[test]
+    fn a_palette_command_with_nothing_focused_runs_from_the_root() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use teksilo_core::event::Key;
+        use teksilo_core::shortcut::Shortcut;
+        use teksilo_widgets::CommandPalette;
+
+        type Heard = Rc<RefCell<Vec<&'static str>>>;
+        /// Answers `doc.save` itself and `doc.export` window-wide.
+        #[derive(Debug)]
+        struct Page(Heard);
+        impl teksilo_core::widget::Widget for Page {
+            fn build(&mut self, ctx: &mut teksilo_core::BuildContext) -> Vec<WidgetId> {
+                let heard = self.0.clone();
+                ctx.register_action(
+                    teksilo_core::Action::new("doc.save")
+                        .on_invoke(move |_, _| heard.borrow_mut().push("save")),
+                );
+                let heard = self.0.clone();
+                ctx.register_action_global(
+                    teksilo_core::Action::new("doc.export")
+                        .on_invoke(move |_, _| heard.borrow_mut().push("export")),
+                );
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &teksilo_core::LayoutContext,
+            ) -> teksilo_core::LayoutResponse {
+                proposal.resolve(800.0, 600.0).into()
+            }
+        }
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        for (id, name) in [
+            ("doc.save", "Save document"),
+            ("doc.export", "Export document"),
+        ] {
+            tree.shortcut_registry_mut()
+                .register(Shortcut::new(id).name(name).category("Document").build());
+        }
+        let heard = Heard::default();
+        tree.add(Page(heard.clone()));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_eq!(tree.focused(), None);
+
+        for query in ["save document", "export document"] {
+            tree.run_with_event_context(&mut teksilo_core::window::NoopWindowOps, |ctx| {
+                CommandPalette::new().present(ctx)
+            });
+            for queued in tree.drain_pending_modal_requests() {
+                present_in_tree_modal_request(&mut tree, queued.source_widget, queued.request);
+            }
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+            let field = tree.focused().expect("the palette took focus");
+            tree.type_text(field, query);
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+            tree.press_key(Key::Enter, Default::default());
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+            assert!(tree.active_overlays().is_empty(), "the palette closed");
+        }
+        assert_eq!(*heard.borrow(), ["save", "export"]);
+    }
+
+    /// **The palette's own chord closes it again from inside.**
+    ///
+    /// The palette is modal, so the page's shortcut that opened it does not
+    /// apply with focus in it; the palette answers that chord itself (and
+    /// the intent, for a shortcut registered with no owner, which still
+    /// fires there), as a toggle the user expects to press twice.
+    #[test]
+    fn the_palette_toggle_closes_it_from_inside() {
+        use teksilo_core::event::{Key, Modifiers};
+        use teksilo_core::shortcut::{KeyStroke, Shortcut};
+        use teksilo_widgets::CommandPalette;
+
+        /// Opens the palette on `app.palette`, registering its chord itself
+        /// when `owned`.
+        #[derive(Debug)]
+        struct Page {
+            owned: bool,
+        }
+        impl teksilo_core::widget::Widget for Page {
+            fn build(&mut self, ctx: &mut teksilo_core::BuildContext) -> Vec<WidgetId> {
+                if self.owned {
+                    ctx.register_shortcut_global(
+                        Shortcut::new("app.palette")
+                            .primary(KeyStroke::new(
+                                Key::P,
+                                Modifiers::COMMAND | Modifiers::SHIFT,
+                            ))
+                            .build(),
+                    );
+                }
+                ctx.register_action(
+                    teksilo_core::Action::new("app.palette")
+                        .on_invoke(|_, ctx| CommandPalette::new().present(ctx)),
+                );
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &teksilo_core::LayoutContext,
+            ) -> teksilo_core::LayoutResponse {
+                proposal.resolve(800.0, 600.0).into()
+            }
+        }
+
+        for owned in [true, false] {
+            let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+            if !owned {
+                tree.shortcut_registry_mut().register(
+                    Shortcut::new("app.palette")
+                        .primary(KeyStroke::new(
+                            Key::P,
+                            Modifiers::COMMAND | Modifiers::SHIFT,
+                        ))
+                        .build(),
+                );
+            }
+            tree.add(Page { owned });
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+
+            tree.press_key(Key::P, Modifiers::COMMAND | Modifiers::SHIFT);
+            for queued in tree.drain_pending_modal_requests() {
+                present_in_tree_modal_request(&mut tree, queued.source_widget, queued.request);
+            }
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+            assert!(
+                !tree.active_overlays().is_empty(),
+                "owned {owned}: it opened"
+            );
+
+            tree.press_key(Key::P, Modifiers::COMMAND | Modifiers::SHIFT);
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+            assert!(
+                tree.drain_pending_modal_requests().is_empty(),
+                "owned {owned}: no second palette"
+            );
+            assert!(
+                tree.active_overlays().is_empty(),
+                "owned {owned}: the same chord closed it"
+            );
+        }
+    }
+
     /// **A modal whose content is a text editor opens with the caret in it.**
     ///
     /// The editors are the one focusable widget family that carries no label,
@@ -7508,6 +7703,93 @@ mod app_root_tests {
             "taken by nobody"
         );
         assert_eq!(pings.get(), 1, "app.ping crossed to the app root");
+    }
+
+    /// A window root binding Ctrl+N to `app.ping` with a global shortcut,
+    /// with no action for it, over a focused field recording its keys.
+    #[derive(Debug)]
+    struct ShortcutWindow {
+        keys: Rc<std::cell::RefCell<Vec<teksilo_core::Key>>>,
+        field: Rc<Cell<Option<WidgetId>>>,
+    }
+
+    impl Widget for ShortcutWindow {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            use teksilo_core::shortcut::{KeyStroke, Shortcut};
+            use teksilo_core::widget_builder::WidgetBuilder;
+            use teksilo_core::{EventResponse, Key, WidgetEvent};
+            ctx.register_shortcut_global(
+                Shortcut::new("app.ping")
+                    .primary(KeyStroke::ctrl(Key::N))
+                    .build(),
+            );
+            let keys = self.keys.clone();
+            let field = ctx.add(teksilo_widgets::RectWidget::new().focusable(true).on_key(
+                move |event, _| {
+                    if let WidgetEvent::KeyDown { key, .. } = event {
+                        keys.borrow_mut().push(*key);
+                    }
+                    EventResponse::Handled
+                },
+            ));
+            self.field.set(Some(field));
+            vec![field]
+        }
+
+        fn layout_response(
+            &self,
+            proposal: teksilo_canvas::SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> LayoutResponse {
+            proposal.resolve(200.0, 100.0).into()
+        }
+    }
+
+    /// A shortcut nothing in the window takes runs the application tree's
+    /// action, and one nobody takes (`edit.copy`, bound in every tree) still
+    /// reaches the focused widget as its key.
+    #[test]
+    fn a_shortcut_only_the_app_root_takes_runs_there_and_one_nobody_takes_falls_through() {
+        use teksilo_core::{Key, Modifiers};
+        let pings = Rc::new(Cell::new(0));
+        let root = pings.clone();
+        let mut app = TeksiloAppBuilder::new()
+            .app_root(move |tree| tree.add(PingRoot(root)))
+            .build_headless();
+        let keys = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let field = Rc::new(Cell::new(None));
+        app.tree.add(ShortcutWindow {
+            keys: keys.clone(),
+            field: field.clone(),
+        });
+        app.tree
+            .layout(teksilo_canvas::SizeProposal::exact(200.0, 100.0));
+        app.tree.focus(field.get().expect("built"));
+
+        app.tree.press_key(Key::N, Modifiers::COMMAND);
+        assert!(app.route_unclaimed_intents().is_empty());
+        assert_eq!(pings.get(), 1, "Ctrl+N ran the app root's action");
+        assert!(keys.borrow().is_empty(), "and the field never heard it");
+
+        app.tree.press_key(Key::C, Modifiers::COMMAND);
+        assert!(app.route_unclaimed_intents().is_empty(), "nothing kept");
+        assert_eq!(*keys.borrow(), [Key::C], "Ctrl+C reached the field");
+    }
+
+    /// `on_app_event` and the app-event observers see what a
+    /// `WithActivationToken` wraps, as `on_external_with_ctx` does.
+    #[test]
+    fn an_app_event_handler_sees_the_payload_an_activation_token_wraps() {
+        struct Payload;
+        let wrapped =
+            super::AppEvent::External(Box::new(super::WithActivationToken::new("tok", Payload)));
+        let (event, token) = super::unwrap_activation_token(wrapped);
+        assert_eq!(token.as_deref(), Some("tok"));
+        assert!(matches!(event, super::AppEvent::External(payload) if payload.is::<Payload>()));
+        let (event, token) =
+            super::unwrap_activation_token(super::AppEvent::External(Box::new(Payload)));
+        assert_eq!(token, None);
+        assert!(matches!(event, super::AppEvent::External(payload) if payload.is::<Payload>()));
     }
 
     #[test]

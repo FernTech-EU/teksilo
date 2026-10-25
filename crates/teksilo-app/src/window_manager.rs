@@ -106,6 +106,25 @@ pub(crate) fn ime_should_skip_empty_preedit(last_empty: &mut bool, empty_preedit
     repeat
 }
 
+/// Wrap the root a window's builder made in the window's post-root hook:
+/// its own `post_root`, else the app-wide default (none for a modal
+/// window). Returns the wrapped root. The tree remembers the unwrapped one
+/// as its [content root](WidgetTree::set_content_root), where intents with
+/// no source widget start.
+fn wrap_root(
+    tree: &mut WidgetTree,
+    root_id: WidgetId,
+    post_root: Option<teksilo_core::window::PostRootBuilder>,
+    default_post_root: Option<crate::DefaultPostRoot>,
+) -> WidgetId {
+    tree.set_content_root(root_id);
+    match (post_root, default_post_root) {
+        (Some(post_root), _) => post_root(tree, root_id),
+        (None, Some(default_post_root)) => (default_post_root.0)(tree, root_id),
+        (None, None) => root_id,
+    }
+}
+
 /// Where keyboard focus lands when a freshly built window is shown, or `None`
 /// to leave the window with nothing focused.
 ///
@@ -636,8 +655,10 @@ pub struct WindowManager {
     /// An activation token the event being routed carried (see
     /// [`WithActivationToken`](crate::WithActivationToken)), for the first
     /// window operation of its handler that raises or opens a window to
-    /// use. Cleared at the end of the `post_event` that follows the
-    /// dispatch, used or not.
+    /// use; also the token an intent routed from another tree carried, for
+    /// the actions it reaches ([`WindowOps::hold_activation_token`](teksilo_core::WindowOps::hold_activation_token)).
+    /// Cleared at the end of the `post_event` that follows the dispatch,
+    /// used or not.
     dispatch_activation_token: Option<String>,
     /// What [`dispatch_activation_token`](Self::dispatch_activation_token)
     /// left once its handler returned: only a `WindowState::focus()` with no
@@ -645,10 +666,19 @@ pub struct WindowManager {
     /// a window the framework opens meanwhile (a native dialog, the
     /// application tree's tick) cannot.
     focus_command_token: Option<String>,
+    /// The activation tokens window operations used, oldest first: what a
+    /// test asserts a token reached.
+    #[cfg(test)]
+    pub(crate) used_activation_tokens: Vec<String>,
     /// Intents a window left unclaimed and could not hand over before it
     /// closed (a close guard's, sent as the window went): they still go to
     /// the application tree.
     orphan_intents: Vec<teksilo_core::Intent>,
+    /// What the application tree takes, shared with every window's tree so
+    /// a shortcut nothing in a window takes goes to it, and published from
+    /// the application tree whenever it has run. See
+    /// [`ApplicationScope`](teksilo_core::ApplicationScope).
+    application_scope: teksilo_core::ApplicationScope,
     /// Bumped whenever [`theme`](Self::theme) changes.
     theme_generation: u64,
     /// The [`theme_generation`](Self::theme_generation) the application
@@ -718,7 +748,10 @@ impl WindowManager {
             app_tree_wake_pending: Default::default(),
             dispatch_activation_token: None,
             focus_command_token: None,
+            #[cfg(test)]
+            used_activation_tokens: Vec::new(),
             orphan_intents: Vec::new(),
+            application_scope: teksilo_core::ApplicationScope::new(),
             theme_generation: 0,
             app_tree_theme_generation: 0,
             quit: None,
@@ -771,9 +804,11 @@ impl WindowManager {
     fn new_window_tree(&self, theme: Theme) -> WidgetTree {
         let mut tree = WidgetTree::new().with_theme(theme);
         tree.set_records_announcements(self.records_announcements);
-        // What no action of a tree takes is offered to the other side; see
+        // What no action of a tree takes is offered to the other side, a
+        // shortcut's when the application tree takes it; see
         // `crate::intent_routing`.
         tree.set_records_unclaimed_intents(true);
+        tree.set_application_scope(Some(self.application_scope.clone()));
         // The standard edit shortcuts arrive with English names; the settings
         // UI shows them in the user's language.
         teksilo_widgets::localize_standard_shortcuts(tree.shortcut_registry_mut());
@@ -833,6 +868,8 @@ impl WindowManager {
         }
         let mut tree = self.new_window_tree(self.theme.clone());
         tree.set_records_announcements(false);
+        // It is the application scope, not one of its readers.
+        tree.set_application_scope(None);
         self.seed_tree(&mut tree);
         if let Some(typesetter) = self.typesetter.as_ref() {
             tree = tree.with_text_backend(typesetter.as_text_backend());
@@ -846,6 +883,7 @@ impl WindowManager {
             })));
         }
         let root_id = root(&mut tree);
+        tree.publish_application_scope(&self.application_scope);
         self.app_tree = Some(tree);
         self.app_tree_theme_generation = self.theme_generation;
         root_id
@@ -881,7 +919,10 @@ impl WindowManager {
     }
 
     /// Put back the tree [`take_app_tree`](Self::take_app_tree) took.
+    /// The tree has run, so what it takes is published again for the
+    /// windows' shortcuts.
     pub(crate) fn reinsert_app_tree(&mut self, tree: WidgetTree) {
+        tree.publish_application_scope(&self.application_scope);
         self.app_tree = Some(tree);
         self.sync_app_tree_theme();
     }
@@ -899,11 +940,33 @@ impl WindowManager {
         self.dispatch_activation_token.take()
     }
 
+    /// [`take_dispatch_activation_token`](Self::take_dispatch_activation_token)
+    /// for a window operation that activates a window with it (opening or
+    /// raising one). A test build records the tokens used.
+    pub(crate) fn use_dispatch_activation_token(&mut self) -> Option<String> {
+        let token = self.take_dispatch_activation_token();
+        #[cfg(test)]
+        if let Some(token) = &token {
+            self.used_activation_tokens.push(token.clone());
+        }
+        token
+    }
+
+    /// Whether the routed event's activation token is still held for its
+    /// handler's operations.
+    pub(crate) fn holds_dispatch_activation_token(&self) -> bool {
+        self.dispatch_activation_token.is_some()
+    }
+
     /// The routed event's handler returned: a token it did not use waits,
     /// for this turn's command drain only, for a `WindowState::focus()`
-    /// it queued.
+    /// it queued. A handler that used its token (or never had one) leaves a
+    /// token already waiting there, which an earlier handler of this turn
+    /// left for the focus it queued.
     pub(crate) fn end_dispatch_activation(&mut self) {
-        self.focus_command_token = self.dispatch_activation_token.take();
+        if let Some(token) = self.dispatch_activation_token.take() {
+            self.focus_command_token = Some(token);
+        }
     }
 
     /// Drop the routed event's activation token, used or not: a token is
@@ -1541,7 +1604,7 @@ impl WindowManager {
         // activation token from the environment so a window spawned by
         // another instance's "open in new window" comes up focused on
         // Wayland. No-op off Wayland/X11 or when the env is unset.
-        if let Some(token) = self.take_dispatch_activation_token() {
+        if let Some(token) = self.use_dispatch_activation_token() {
             window_attrs = teksilo_platform::window_activation::apply_token(window_attrs, token);
         } else if config.activate_from_env {
             window_attrs =
@@ -1740,16 +1803,19 @@ impl WindowManager {
             // anchored to the wrong window. An app that genuinely wants
             // chrome on a specific modal can still set a per-window
             // override on that window's `WindowConfig`.
-            if let Some(post_root) = config.take_post_root_builder() {
-                root_id = post_root(&mut tree, root_id);
-            } else if !is_modal
-                && let Some(default_post_root) = self
-                    .app_context_template
-                    .as_ref()
-                    .and_then(|t| t.app_state::<crate::DefaultPostRoot>().cloned())
-            {
-                root_id = (default_post_root.0)(&mut tree, root_id);
-            }
+            let default_post_root = (!is_modal)
+                .then(|| {
+                    self.app_context_template
+                        .as_ref()
+                        .and_then(|t| t.app_state::<crate::DefaultPostRoot>().cloned())
+                })
+                .flatten();
+            root_id = wrap_root(
+                &mut tree,
+                root_id,
+                config.take_post_root_builder(),
+                default_post_root,
+            );
 
             if let Some(id) = initial_window_focus(&tree, root_id, is_modal, modal_focus_target) {
                 tree.focus(id);
@@ -2789,6 +2855,21 @@ impl WindowManager {
         self.recency.most_recent()
     }
 
+    /// The window that has the OS focus now (macOS's key window), `None`
+    /// when no open window does: of the windows whose last focus report
+    /// said focused, the one focused last. A window is born claiming focus
+    /// until the OS says otherwise, and the most recent claim is the one the
+    /// OS made last. A window a handler is running in is out of the map
+    /// meanwhile and does not count.
+    pub(crate) fn focused_window(&self) -> Option<TeksiloWindowId> {
+        self.recency.most_recent_where(|id| {
+            self.teksilo_to_winit
+                .get(&id)
+                .and_then(|winit| self.windows.get(winit))
+                .is_some_and(|window| window.focused)
+        })
+    }
+
     /// Record that the OS reported `teksilo_id` focused, making it the
     /// [most recent window](Self::most_recent_window).
     pub(crate) fn note_window_focused(&mut self, teksilo_id: TeksiloWindowId) {
@@ -3429,7 +3510,7 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
         };
         // The routed event's activation token, if it carried one: on
         // Wayland the raise is otherwise only an attention request.
-        let token = self.wm.take_dispatch_activation_token();
+        let token = self.wm.use_dispatch_activation_token();
         teksilo_platform::window_activation::raise(&window, token.as_deref());
     }
 
@@ -3481,6 +3562,18 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
 
     fn cancel_quit(&mut self) {
         self.wm.cancel_quit();
+    }
+
+    fn take_activation_token(&mut self) -> Option<String> {
+        self.wm.take_dispatch_activation_token()
+    }
+
+    fn hold_activation_token(&mut self, token: String) {
+        self.wm.set_dispatch_activation_token(token);
+    }
+
+    fn release_activation_token(&mut self) {
+        self.wm.end_dispatch_activation();
     }
 
     fn close_window_by_id(&mut self, id: TeksiloWindowId) {
@@ -3740,6 +3833,86 @@ mod caption_button_tests {
             caption_buttons(&WindowConfig::new().minimizable(false)),
             WindowButtons::CLOSE | WindowButtons::MAXIMIZE
         );
+    }
+}
+
+#[cfg(test)]
+mod wrap_root_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use teksilo_canvas::SizeProposal;
+    use teksilo_core::build_context::BuildContext;
+    use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget};
+    use teksilo_core::{Action, Intent};
+    use teksilo_widgets::primitives::VStack;
+
+    /// An app root answering `test.open` with a scoped action, as the
+    /// native-menu example's root does.
+    #[derive(Debug)]
+    struct AppRoot(Rc<Cell<u32>>);
+
+    impl Widget for AppRoot {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let runs = self.0.clone();
+            ctx.register_action(Action::new("test.open").on_invoke(move |_, _| {
+                runs.set(runs.get() + 1);
+            }));
+            vec![]
+        }
+
+        fn layout_response(&self, proposal: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(10.0, 10.0).into()
+        }
+    }
+
+    /// A post-root hook wrapping the root in a container, as the debug
+    /// inspector's does.
+    fn wrapper() -> crate::DefaultPostRoot {
+        crate::DefaultPostRoot::new(|tree, root| tree.add(VStack::new().child(root)))
+    }
+
+    fn open_from_a_callback(post_root: Option<crate::DefaultPostRoot>) -> u32 {
+        let runs = Rc::new(Cell::new(0));
+        let mut tree = WidgetTree::new();
+        let root = tree.add(AppRoot(runs.clone()));
+        let wrapped = wrap_root(&mut tree, root, None, post_root);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert_eq!(tree.roots().first(), Some(&wrapped));
+        tree.run_with_event_context(&mut teksilo_core::window::NoopWindowOps, |ctx| {
+            ctx.send_intent(Intent::new("test.open"))
+        });
+        runs.get()
+    }
+
+    #[test]
+    fn a_callback_reaches_the_app_root_through_a_post_root_wrapper() {
+        assert_eq!(open_from_a_callback(None), 1);
+        assert_eq!(open_from_a_callback(Some(wrapper())), 1);
+    }
+
+    #[test]
+    fn a_window_post_root_wins_over_the_app_default() {
+        let runs = Rc::new(Cell::new(0));
+        let mut tree = WidgetTree::new();
+        let root = tree.add(AppRoot(runs.clone()));
+        let own: teksilo_core::window::PostRootBuilder =
+            Box::new(|tree, root| tree.add(VStack::new().child(root)));
+        let default_ran = Rc::new(Cell::new(false));
+        let ran = default_ran.clone();
+        let default = crate::DefaultPostRoot::new(move |_, root| {
+            ran.set(true);
+            root
+        });
+        let wrapped = wrap_root(&mut tree, root, Some(own), Some(default));
+        assert_ne!(wrapped, root);
+        assert!(!default_ran.get());
+        // The app's root is still where a callback's intent starts.
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.run_with_event_context(&mut teksilo_core::window::NoopWindowOps, |ctx| {
+            ctx.send_intent(Intent::new("test.open"))
+        });
+        assert_eq!(runs.get(), 1);
     }
 }
 
@@ -4898,5 +5071,24 @@ mod activation_token_slot_tests {
         wm.set_dispatch_activation_token("unused".into());
         wm.clear_dispatch_activation_token();
         assert_eq!(wm.take_dispatch_activation_token(), None);
+    }
+
+    /// A handler left its event's token for the focus it queued; an intent
+    /// routed afterwards in the same turn, whose action used the token it
+    /// carried, does not take that one away when it is released.
+    #[test]
+    fn a_routed_intents_release_keeps_the_token_left_for_a_queued_focus() {
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        wm.set_dispatch_activation_token("event".into());
+        wm.end_dispatch_activation();
+        // `WindowOps::hold_activation_token`, its action raising a window,
+        // then `release_activation_token`.
+        wm.set_dispatch_activation_token("routed".into());
+        assert_eq!(
+            wm.use_dispatch_activation_token().as_deref(),
+            Some("routed")
+        );
+        wm.end_dispatch_activation();
+        assert_eq!(wm.focus_command_token.as_deref(), Some("event"));
     }
 }

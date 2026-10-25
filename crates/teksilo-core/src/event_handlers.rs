@@ -71,6 +71,11 @@ pub(crate) struct EventHandlers {
     /// per-widget hook.
     pub on_key_preview: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_focus: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
+    /// Commit the edit this widget holds without being blurred: a click on a
+    /// control that takes no focus (`focus_on_click(false)`) is about to run
+    /// a command while focus stays here. See
+    /// [`HandlerSet::on_commit_edit`](crate::widget_builder::HandlerSet::on_commit_edit).
+    pub on_commit_edit: Option<Box<dyn FnMut(&mut EventContext)>>,
     /// Low-level escape hatch for the raw pointer stream, run *before* gesture
     /// recognition. Unlike most handlers it fires in the **preview pass** on
     /// every strict ancestor of the target (root → parent-of-target) for
@@ -186,6 +191,7 @@ impl EventHandlers {
             on_key,
             on_key_preview,
             on_focus,
+            on_commit_edit,
             on_pointer_event,
             on_scroll,
             on_access_action,
@@ -217,6 +223,7 @@ impl EventHandlers {
             on_key: None,
             on_key_preview: None,
             on_focus: None,
+            on_commit_edit: None,
             on_pointer_event: None,
             on_scroll: None,
             on_access_action: None,
@@ -248,6 +255,7 @@ impl EventHandlers {
             on_key: merge_event_handler(self.on_key, other.on_key),
             on_key_preview: merge_event_handler(self.on_key_preview, other.on_key_preview),
             on_focus: merge_focus_handler(self.on_focus, other.on_focus),
+            on_commit_edit: merge_ctx_handler(self.on_commit_edit, other.on_commit_edit),
             on_pointer_event: merge_event_handler(self.on_pointer_event, other.on_pointer_event),
             on_scroll: merge_event_handler(self.on_scroll, other.on_scroll),
             on_access_action: merge_access_handler(self.on_access_action, other.on_access_action),
@@ -483,6 +491,7 @@ impl std::fmt::Debug for EventHandlers {
             .field("on_key", &self.on_key.is_some())
             .field("on_key_preview", &self.on_key_preview.is_some())
             .field("on_focus", &self.on_focus.is_some())
+            .field("on_commit_edit", &self.on_commit_edit.is_some())
             .field("on_pointer_event", &self.on_pointer_event.is_some())
             .field("on_scroll", &self.on_scroll.is_some())
             .field("on_access_action", &self.on_access_action.is_some())

@@ -328,13 +328,19 @@ impl crate::widget::Widget for Editor {
     }
 }
 
-/// A page whose focused control answers `test.run`, and a modal over it whose
-/// one control closes it and sends `test.run` the way `send` says.
-fn run_from_modal(send: fn(&mut crate::widget::EventContext)) -> u32 {
+/// A page whose focused control and another control (the one the modal is
+/// attached to) both answer `test.run`, and a modal over it whose one control
+/// closes it and sends `test.run` the way `send` says. Returns how often the
+/// focused control and the modal's anchor each ran it.
+fn run_from_modal(send: fn(&mut crate::widget::EventContext)) -> (u32, u32) {
     let mut tree = WidgetTree::new();
     let runs = Rc::new(Cell::new(0));
+    let anchor_runs = Rc::new(Cell::new(0));
     let editor = tree.add(Editor { runs: runs.clone() });
-    tree.add(StackWidget::new().child(editor));
+    let opener = tree.add(Editor {
+        runs: anchor_runs.clone(),
+    });
+    tree.add(StackWidget::new().child(editor).child(opener));
     let run = tree.add(
         FillWidget::new()
             .label("Run")
@@ -353,7 +359,7 @@ fn run_from_modal(send: fn(&mut crate::widget::EventContext)) -> u32 {
     tree.activate(panel);
     tree.show_overlay(overlay(
         panel,
-        editor,
+        opener,
         OverlayPlacement::TopCenter { offset: 40.0 },
     ));
     tree.overlay_manager_mut().set_top_focus_restore(editor);
@@ -371,27 +377,28 @@ fn run_from_modal(send: fn(&mut crate::widget::EventContext)) -> u32 {
         Some(editor),
         "closing the modal hands focus back to the page"
     );
-    runs.get()
+    (runs.get(), anchor_runs.get())
 }
 
 #[test]
 fn an_intent_sent_from_focus_reaches_what_the_modal_was_opened_over() {
     assert_eq!(
         run_from_modal(|ctx| ctx.send_intent_from_focus(crate::intent::Intent::new("test.run"))),
-        1,
+        (1, 0),
         "dispatched after the dismissal, from the focus it restored: the editor's \
          own action answers"
     );
 }
 
 #[test]
-fn an_intent_sent_from_a_closing_modal_reaches_no_page_action() {
-    // The contrast that makes the one above worth having: `send_intent`
-    // starts the walk at the modal's control, which the dismissal has
-    // already parked, so a scoped action on the page never hears it.
+fn an_intent_sent_from_a_closing_modal_walks_on_from_its_anchor() {
+    // The contrast with the one above: `send_intent` starts the walk at the
+    // modal's control, which the dismissal has already parked. A modal is a
+    // barrier only while it is open, so once it has closed the walk goes on
+    // from the widget it was attached to, not from the focus it gave back.
     assert_eq!(
         run_from_modal(|ctx| ctx.send_intent(crate::intent::Intent::new("test.run"))),
-        0
+        (0, 1)
     );
 }
 

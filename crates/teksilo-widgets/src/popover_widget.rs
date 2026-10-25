@@ -49,6 +49,11 @@
 //! `on_close_with` also says why the popover closed (a [`DismissReason`]:
 //! an outside press, Escape, the popover closing itself, a cascade).
 //!
+//! `.focus_on_click(false)` set on the popover widget is passed on to the
+//! inner trigger: the flag holds for the node it is set on, and the trigger's
+//! button is the node a click would focus. A toolbar's dropdown buttons are
+//! built this way.
+//!
 //! # Per-trigger differences (the `PopoverTrigger` trait)
 //!
 //! `Button` and `IconButton` differ only in: the default `has_popup`
@@ -486,10 +491,13 @@ impl<T: PopoverTrigger> PopoverWidget<T> {
     /// requires — so the action runs the identical toggle the trigger runs, and
     /// the two can never drift.
     ///
-    /// Registered with `register_action_global`, deliberately: intents walk
-    /// source-widget → root, and a menu renders in an **overlay** that is a
-    /// sibling of the popover's own subtree, so a plain `register_action` would
-    /// never be reached from a menu item. Pair it with
+    /// Registered with `register_action_global`, deliberately: an intent
+    /// walks from where it starts (the focused widget, for a shortcut and for
+    /// a menu row alike) up to the window's root, and the popover sits off
+    /// to the side of that walk, never above the focused widget, so a plain
+    /// `register_action` on it would not be reached. A window-global action
+    /// is reached from anywhere in the window, except from inside an
+    /// in-window dialog the popover is not in. Pair it with
     /// `register_shortcut_global` in the app for the keystroke.
     ///
     /// ```ignore
@@ -726,6 +734,18 @@ impl Widget for PopoverBody {
     }
 }
 
+/// Pass `focus_on_click(false)`, set on the popover widget, on to the
+/// focusable button inside `trigger`: the flag holds only for the node it is
+/// set on, and the popover widget's own node is not the one a click focuses.
+fn forward_focus_on_click(ctx: &mut BuildContext, trigger: WidgetId) {
+    if ctx.focus_on_click() {
+        return;
+    }
+    if let Some(button) = ctx.first_focus_capable_descendant(trigger) {
+        ctx.apply_handlers(button, HandlerSet::new().focus_on_click(false));
+    }
+}
+
 impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let content = self
@@ -924,6 +944,7 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                 });
             let trigger_id = ctx.add(trigger);
             opener.set(Some(trigger_id));
+            forward_focus_on_click(ctx, trigger_id);
             let caret_id = ctx.add(DisclosureCaret { role: role_signal });
             let root_id = ctx.add(ZStack::new().child(trigger_id).child(caret_id));
             self.root_child_id = Some(root_id);
@@ -953,6 +974,7 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
             .with_on_activate(move |c: &mut EventContext| activate(c));
         let trigger_id = ctx.add(trigger);
         opener.set(Some(trigger_id));
+        forward_focus_on_click(ctx, trigger_id);
         self.root_child_id = Some(trigger_id);
         if let Some(content) = self.composite_tooltip_content.take() {
             let delay = ctx.theme().motion.tooltip_delay_heavy;

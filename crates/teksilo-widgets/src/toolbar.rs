@@ -44,6 +44,16 @@
 //! menu chrome, takes focus when opened, and supports arrow / `Home` / `End` /
 //! `Enter` keyboard navigation (skipping the hidden rows).
 //!
+//! **Focus.** The bar's buttons, dropdowns and chevron take no focus from a
+//! click (`focus_on_click(false)`), as Qt's and GTK's tool buttons take none:
+//! a command acts on the widget the user is working in, which keeps focus, so
+//! one sent with `ctx.send_intent_from_focus` reaches it, and a dropdown or
+//! the overflow menu gives focus back to it when it closes. Since the click
+//! blurs nothing, a field that commits on blur (a spin box, a date field)
+//! commits what was typed in it before the command runs. The keyboard still
+//! reaches them (below). A pinned or collapsible custom widget keeps its own
+//! behaviour.
+//!
 //! **Accessibility (ARIA toolbar pattern).** The bar emits `Role::Toolbar`
 //! with its orientation and name. It is a single Tab stop with **roving
 //! tab-index**: arrow keys move focus among the visible controls (and the
@@ -299,7 +309,10 @@ impl ToolbarAction {
     /// Build this action's inline button — an icon-only [`IconButton`] at the
     /// toolbar-wide `size` and optional `style`. The label is applied as the
     /// accessible name (icon-only buttons have no visible text); the tooltip is
-    /// the explicit tooltip, or the label when none was set.
+    /// the explicit tooltip, or the label when none was set. Like every
+    /// command on the bar it takes no focus from a click
+    /// (`focus_on_click(false)`), as Qt's and GTK's tool buttons do: the
+    /// command acts on the widget the user is working in, which keeps focus.
     fn make_button(
         &self,
         size: IconButtonSize,
@@ -336,7 +349,7 @@ impl ToolbarAction {
                 .bare()
                 .content(menu())
                 .placement(OverlayPlacement::BelowPreferred);
-            return Box::new(pop.access_label(self.label.clone()));
+            return Box::new(pop.access_label(self.label.clone()).focus_on_click(false));
         }
         // Command action: click runs `on_activate`. `IconButton::toggle`
         // auto-flips `state` on click, then `on_activate` fires (post-flip) — so
@@ -348,7 +361,7 @@ impl ToolbarAction {
         btn = btn.on_activate_fn(move |ctx| act(ctx));
         // The accessible name is always the label (a rich / composite tooltip
         // would otherwise leave an icon-only button unnamed).
-        Box::new(btn.access_label(self.label.clone()))
+        Box::new(btn.access_label(self.label.clone()).focus_on_click(false))
     }
 
     /// Build this action's overflow row — a `MenuItem` that runs the action
@@ -863,7 +876,9 @@ impl Widget for Toolbar {
                 .bare()
                 .placement(OverlayPlacement::BelowPreferred)
                 .has_popup_kind(HasPopup::Menu);
-            let chevron_id = ctx.add(chevron);
+            // Takes no focus from a click, like the commands: the menu gives
+            // focus back to the widget the user is working in.
+            let chevron_id = ctx.add(chevron.focus_on_click(false));
             let is_of = self.is_overflowing.clone();
             ctx.visible_when(chevron_id, is_of);
             // Chevron is the roving stop when roving == action_count.

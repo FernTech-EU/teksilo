@@ -51,6 +51,15 @@ pub struct Intent {
     /// `intent.dispatched` events.
     pub source: crate::telemetry::IntentSource,
     payload: Option<Rc<dyn Any>>,
+    /// The window whose tree it was sent in, noted by that tree.
+    origin_window: Option<crate::window::TeksiloWindowId>,
+    /// The activation token the event it was sent for carried, noted when
+    /// its tree keeps it for another; see
+    /// [`activation_token`](Self::activation_token).
+    activation_token: Option<String>,
+    /// How many times it, or the routed intents whose actions sent it, have
+    /// crossed from one tree to another.
+    crossings: usize,
 }
 
 impl Intent {
@@ -62,6 +71,9 @@ impl Intent {
             name,
             source: crate::telemetry::IntentSource::Programmatic,
             payload: None,
+            origin_window: None,
+            activation_token: None,
+            crossings: 0,
         }
     }
 
@@ -73,6 +85,9 @@ impl Intent {
             name,
             source: crate::telemetry::IntentSource::Programmatic,
             payload: Some(Rc::new(payload)),
+            origin_window: None,
+            activation_token: None,
+            crossings: 0,
         }
     }
 
@@ -103,6 +118,63 @@ impl Intent {
     pub fn has_payload(&self) -> bool {
         self.payload.is_some()
     }
+
+    /// The window it was sent in: the window whose tree dispatched it
+    /// first. `None` for an intent sent in the application tree, or in a
+    /// tree with no window, and before any tree has dispatched it.
+    ///
+    /// An intent a window leaves unclaimed keeps it as it crosses, so an
+    /// action of the application tree knows which window a command came
+    /// from: the one a menu row or a shortcut was used in, the window with
+    /// the OS focus for a macOS menu bar item. An intent re-sent from its
+    /// action keeps the window it was first sent in.
+    #[doc(hidden)]
+    pub fn origin_window(&self) -> Option<crate::window::TeksiloWindowId> {
+        self.origin_window
+    }
+
+    /// Note `window` as the window it was sent in, unless one is noted.
+    pub(crate) fn note_origin_window(&mut self, window: Option<crate::window::TeksiloWindowId>) {
+        if self.origin_window.is_none() {
+            self.origin_window = window;
+        }
+    }
+
+    /// The activation token it carries across to another tree: the token
+    /// of the event it was sent for (see `WithActivationToken` in
+    /// `teksilo-app`), noted when its tree kept it unclaimed while that
+    /// token was still unused. The tree it is
+    /// [routed](crate::WidgetTree::dispatch_routed_intent) to holds it for
+    /// the first window its actions open or raise, as the first tree would
+    /// have.
+    #[doc(hidden)]
+    pub fn activation_token(&self) -> Option<&str> {
+        self.activation_token.as_deref()
+    }
+
+    /// Take the activation token it carries, leaving none.
+    pub(crate) fn take_activation_token(&mut self) -> Option<String> {
+        self.activation_token.take()
+    }
+
+    /// How many crossings between trees led to it: those it made, and
+    /// those of the routed intent whose action sent it. See
+    /// [`WidgetTree::dispatch_routed_intent`](crate::WidgetTree::dispatch_routed_intent).
+    pub(crate) fn crossings(&self) -> usize {
+        self.crossings
+    }
+
+    /// Note that `crossings` crossings led to it, unless more did.
+    pub(crate) fn note_crossings(&mut self, crossings: usize) {
+        self.crossings = self.crossings.max(crossings);
+    }
+
+    /// Note `token` as the one it carries, unless it carries one.
+    pub(crate) fn note_activation_token(&mut self, token: Option<String>) {
+        if self.activation_token.is_none() {
+            self.activation_token = token;
+        }
+    }
 }
 
 impl Clone for Intent {
@@ -112,6 +184,9 @@ impl Clone for Intent {
             source: self.source,
             // Rc<dyn Any> is cheaply clonable — bumps the refcount.
             payload: self.payload.clone(),
+            origin_window: self.origin_window,
+            activation_token: self.activation_token.clone(),
+            crossings: self.crossings,
         }
     }
 }

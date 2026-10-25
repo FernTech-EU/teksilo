@@ -868,6 +868,20 @@ impl Widget for TextInputField {
                 }
                 ctx.request_frame();
             })
+            // A click on a control that takes no focus (a toolbar button)
+            // blurs nothing, so the command it runs would miss what a blur
+            // commits: the framework asks for that commit here first, and it
+            // is the blur callback's own (a spin box's parse, a date field's,
+            // an app's `on_blur_fn`), run while the field keeps focus.
+            .on_commit_edit({
+                let state = self.state().clone();
+                move |ctx| {
+                    let commit = state.borrow().on_blur.clone();
+                    if let Some(commit) = commit {
+                        commit(ctx);
+                    }
+                }
+            })
             .on_pointer_event(move |event, ctx| {
                 mouse::handle_pointer_event(&state_for_pointer, &touch_for_pointer, event, ctx)
             })

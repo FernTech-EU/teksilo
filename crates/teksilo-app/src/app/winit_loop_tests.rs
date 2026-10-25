@@ -111,12 +111,14 @@
 //!   asks for is presented by `about_to_wait`;
 //! - **(ad)** an intent a window's actions leave reaches the application
 //!   tree, and one the application tree's handler sends reaches the window,
-//!   in `post_event` and in `about_to_wait`; a shortcut's stays where it was
-//!   sent; a window closing that turn is passed over, and a close guard's
-//!   intent outlives its window;
+//!   in `post_event` and in `about_to_wait`; a shortcut's crosses when the
+//!   application tree takes it; a window closing that turn is passed over,
+//!   and a close guard's intent outlives its window;
 //! - **(ae)** a payload wrapped with an activation token reaches the handler
-//!   unwrapped, and the token is taken by the window it opens or raises, or
-//!   dropped at the end of the turn;
+//!   unwrapped, `on_app_event` too, and the token is taken by the window it
+//!   opens or raises, or dropped at the end of the turn; an intent the
+//!   handler leaves to the application tree carries the token, so the window
+//!   that tree's action opens takes it;
 //! - **(ah)** with no window open, the application menu's Quit runs the
 //!   application tree's action for its intent, and with no application tree
 //!   starts a quit;
@@ -1953,6 +1955,84 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         let outside = app.wm.find_window("from-outside").expect("opened above");
         app.wm.close_window(outside);
 
+        // (ae) continued: the token crosses with an intent. The handler,
+        // running in a window, sends an intent only the application tree
+        // takes, whose action opens a window: that window takes the token,
+        // after the handler returned. And `on_app_event` sees the payload
+        // the token wraps. Not carrying the token on the intent leaves
+        // `used_activation_tokens` empty.
+        #[derive(Debug)]
+        struct OpensFromApp;
+        impl teksilo_core::widget::Widget for OpensFromApp {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                ctx.register_action_global(
+                    teksilo_core::Action::new("app.open_from_token").on_invoke(|_, ctx| {
+                        ctx.open_window(
+                            WindowConfig::new()
+                                .id("from-app")
+                                .title("teksilo loop test: from the application tree")
+                                .size(160, 100)
+                                .root(|tree, _state| {
+                                    tree.add(logging_leaf(&Default::default(), false))
+                                }),
+                        );
+                    }),
+                );
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+        }
+        app.wm.install_app_tree(|tree| tree.add(OpensFromApp));
+        let host = app.wm.create_window(
+            WindowConfig::new()
+                .title("teksilo loop test: token host")
+                .size(160, 100)
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+            event_loop,
+        );
+        app.external_ctx_handler = Some(Box::new(|payload, ctx| {
+            assert!(payload.is::<OpenFromOutside>());
+            assert!(ctx.window().is_some(), "runs in the open window");
+            ctx.send_intent(teksilo_core::Intent::new("app.open_from_token"));
+            true
+        }));
+        let heard: Rc<Cell<bool>> = Rc::default();
+        app.app_event_handler = Some(Box::new({
+            let heard = heard.clone();
+            move |event| {
+                if let AppEvent::External(payload) = event
+                    && payload.is::<OpenFromOutside>()
+                {
+                    heard.set(true);
+                }
+            }
+        }));
+        app.wm.used_activation_tokens.clear();
+        app.user_event(
+            event_loop,
+            AppEvent::External(Box::new(wrapped("for-the-application"))),
+        );
+        assert!(heard.get(), "on_app_event saw the wrapped payload");
+        let from_app = app
+            .wm
+            .find_window("from-app")
+            .expect("the application tree's action opened a window");
+        assert_eq!(
+            app.wm.used_activation_tokens,
+            ["for-the-application"],
+            "and that window took the token"
+        );
+        app.app_event_handler = None;
+        app.external_ctx_handler = None;
+        app.wm.close_window(from_app);
+        app.wm.close_window(host);
+
         // (ah) The application menu, the one macOS shows once the last
         // window has closed: its routed Quit runs in the application tree,
         // and with no application tree asks the application to quit. Without
@@ -2051,6 +2131,115 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             );
             app.wm.cancel_quit();
             app.wm.reinsert_app_tree(tree);
+        }
+
+        // (ai) A native menu item chosen while a window other than the one
+        // whose menu it is has the OS focus (a secondary window with no menu
+        // of its own, which macOS leaves the previous bar up for): its
+        // `on_activate` runs in the menu's window, its intent in the focused
+        // one. `try_route_native_menu_payload` choosing the menu's window
+        // for the intent sends it to the owner's action instead.
+        {
+            use teksilo_platform::native_menu::{
+                MenuActionFn, NativeMenuActivation, NativeMenuEventPayload, NativeMenuHandle,
+                NativeMenuSnapshot,
+            };
+            type Heard = Rc<std::cell::RefCell<Vec<&'static str>>>;
+            struct NoPoster;
+            impl teksilo_core::AppEventPoster for NoPoster {
+                fn post_subscription_event(
+                    &self,
+                    _: teksilo_core::SubscriptionId,
+                    _: Box<dyn std::any::Any + Send>,
+                ) {
+                }
+                fn post_external(&self, _: Box<dyn std::any::Any + Send>) {}
+            }
+            /// A window's root answering `test.native` with its name.
+            #[derive(Debug)]
+            struct Answers(&'static str, Heard);
+            impl teksilo_core::widget::Widget for Answers {
+                fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                    let (name, heard) = (self.0, self.1.clone());
+                    ctx.register_action(
+                        teksilo_core::Action::new("test.native")
+                            .on_invoke(move |_, _| heard.borrow_mut().push(name)),
+                    );
+                    Vec::new()
+                }
+                fn layout_response(
+                    &self,
+                    proposal: SizeProposal,
+                    _ctx: &LayoutContext,
+                ) -> LayoutResponse {
+                    proposal.resolve(10.0, 10.0).into()
+                }
+            }
+            let heard = Heard::default();
+            let open = |app: &mut TeksiloAppHandler, name: &'static str| {
+                let heard = heard.clone();
+                app.wm.create_window(
+                    WindowConfig::new()
+                        .title(format!("teksilo loop test: {name}"))
+                        .size(320, 240)
+                        .root(move |tree, _state| tree.add(Answers(name, heard.clone()))),
+                    event_loop,
+                )
+            };
+            let owner = open(app, "owner");
+            let focused = open(app, "focused");
+            let winit = |app: &TeksiloAppHandler, id| app.wm.winit_id_for_teksilo(id).unwrap();
+            let (owner_winit, focused_winit) = (winit(app, owner), winit(app, focused));
+            app.window_event(event_loop, owner_winit, WindowEvent::Focused(false));
+            app.window_event(event_loop, focused_winit, WindowEvent::Focused(true));
+            assert_eq!(app.wm.focused_window(), Some(focused), "precondition");
+
+            let handle = app
+                .wm
+                .app_context_template()
+                .and_then(|t| t.app_state::<NativeMenuHandle>().cloned())
+                .expect("the test app has a native menu handle");
+            let item = teksilo_core::MenuItemId::next();
+            let action: MenuActionFn = {
+                let heard = heard.clone();
+                Rc::new(move |ctx| {
+                    let here = ctx.window().map(|w| w.id());
+                    heard.borrow_mut().push(if here == Some(owner) {
+                        "action in owner"
+                    } else {
+                        "action elsewhere"
+                    });
+                })
+            };
+            handle.set_window_menu(
+                owner,
+                NativeMenuSnapshot { roots: Vec::new() },
+                [(
+                    item,
+                    NativeMenuActivation {
+                        intent: Some("test.native"),
+                        action: Some(action),
+                    },
+                )]
+                .into_iter()
+                .collect(),
+                Arc::new(NoPoster),
+            );
+            app.user_event(
+                event_loop,
+                AppEvent::External(Box::new(NativeMenuEventPayload {
+                    window_id_owner: owner,
+                    item_id: item,
+                })),
+            );
+            assert_eq!(
+                *heard.borrow(),
+                ["action in owner", "focused"],
+                "the action in the menu's window, the intent in the focused one"
+            );
+            handle.clear_window(owner);
+            app.wm.close_window(owner);
+            app.wm.close_window(focused);
         }
 
         // (ac) A modal request from the application tree has no window of
@@ -2184,9 +2373,12 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         // (ad) Intents cross between a window and the application tree in
         // `post_event`: one the window's actions leave reaches the
         // application tree, and one the application tree's handler sends
-        // that only the window takes reaches the window. A shortcut's never
-        // crosses. Removing the forwarding from `post_event` leaves the
-        // application tree's action unrun.
+        // that only the window takes reaches the window. A shortcut's
+        // crosses because the application tree takes it, which the window
+        // reads from the scope the application tree published. Removing the
+        // forwarding from `post_event` leaves the application tree's action
+        // unrun; not sharing the scope with the window keeps the shortcut's
+        // intent in it.
         #[derive(Debug)]
         struct Takes {
             label: &'static str,
@@ -2257,8 +2449,13 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         app.post_event(event_loop);
         assert_eq!(
             *crossed.borrow(),
-            ["app:app.from_window", "window:doc.from_app"],
-            "across and back, once; the shortcut's intent stayed in its window"
+            [
+                "app:app.from_window",
+                "app:app.from_window",
+                "window:doc.from_app",
+                "window:doc.from_app"
+            ],
+            "across and back, once each, the shortcut's intent too"
         );
 
         // Input dispatched outside a window event (a pen tap, a timed

@@ -1011,6 +1011,20 @@ impl<'a> BuildContext<'a> {
         self.tree.first_focusable_descendant(root)
     }
 
+    /// Whether the widget being built takes keyboard focus from a click, as
+    /// [`focus_on_click`](crate::widget_builder::HandlerSet::focus_on_click)
+    /// set it on its own node (`true` unless set). The flag holds only for the
+    /// node it is set on, so a composite whose focusable node is a child of
+    /// its own (a popover button around its button) reads it here and passes
+    /// it on to that child.
+    #[doc(hidden)]
+    pub fn focus_on_click(&self) -> bool {
+        self.tree
+            .arena
+            .get(self.self_id())
+            .is_none_or(|node| node.focus_on_click)
+    }
+
     /// Find the first widget within the subtree rooted at `root`, in
     /// depth-first order, that is declared focusable, **whether or not it can
     /// take focus right now**: a disabled control, or one kept out of the Tab
@@ -1122,19 +1136,25 @@ impl<'a> BuildContext<'a> {
     }
 
     /// Register a **window-global** [`Action`](crate::action::Action), owned by
-    /// the widget being built. Unlike [`register_action`](Self::register_action)
-    /// — which only fires when this widget is on the intent's source→root walk —
-    /// a global action is consulted as a dispatch *fallback*, so it is reachable
-    /// no matter where the intent originated: a menu-bar dropdown (which renders
-    /// in an overlay, not under the registering widget), deep content, or a
-    /// global shortcut anchored at the root when nothing is focused.
+    /// the widget being built. Unlike [`register_action`](Self::register_action),
+    /// which only fires when this widget is on the intent's walk to the root, a
+    /// global action is consulted as a dispatch *fallback*, so it is reachable
+    /// no matter where in the window the intent originated, with one
+    /// exception: an intent sent inside a modal overlay (a dialog presented in
+    /// the window, the command palette) reaches only the global actions
+    /// registered by widgets inside that modal, as a native modal window's
+    /// tree has only its own.
     ///
-    /// This is the action-side counterpart to
-    /// [`register_shortcut_global`](Self::register_shortcut_global): use it for
-    /// app-wide commands (`app.save`, `view.toggle_sidebar`) whose handler lives
-    /// at the app root but whose triggers (menu, toolbar, shortcut) are scattered
-    /// across the tree and chrome. Ownership applies: the action is torn down
-    /// when this widget rebuilds or is destroyed.
+    /// An action on the window's root needs no global form: every walk in the
+    /// window ends there, a menu's and a popover's included (the walk from an
+    /// overlay goes on from the widget it is attached to; a modal's stops at
+    /// its content), and a menu bar's rows send from the focused widget. Use this when the handler's
+    /// widget is off to the side of the walk: a popover's open action fired from
+    /// a menu row or a shortcut, or an action below the root reached by a global
+    /// shortcut fired with nothing focused. This is the action-side counterpart
+    /// to [`register_shortcut_global`](Self::register_shortcut_global).
+    /// Ownership applies: the action is torn down when this widget rebuilds or
+    /// is destroyed.
     pub fn register_action_global(&mut self, action: crate::action::Action) {
         let id = self.self_id();
         self.tree.push_global_action(id, action);
@@ -1169,7 +1189,10 @@ impl<'a> BuildContext<'a> {
     /// Register a [`Shortcut`](crate::shortcut::Shortcut) with
     /// explicit global scope, owned by the widget being built. Unlike
     /// [`BuildContext::register_shortcut`], this does not rewrite the
-    /// scope — the shortcut fires regardless of focus position.
+    /// scope: the shortcut fires wherever focus is, except in a modal overlay
+    /// (a dialog presented in the window, the command palette) this widget is
+    /// not inside, as a native modal window has only its own widgets'
+    /// shortcuts.
     ///
     /// Ownership still applies: the shortcut is torn down when this
     /// widget goes away.

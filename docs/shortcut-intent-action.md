@@ -16,7 +16,10 @@ Teksilo's input-to-behavior pipeline has three first-class concepts:
 - **[`Action`](../crates/teksilo-core/src/action.rs)**, a widget-owned
   handler bound to an intent name. When an intent dispatches, the
   framework walks **source-widget → root** and lets the first matching
-  enabled action consume (or propagate) it.
+  enabled action consume (or propagate) it. From an overlay's content
+  (a menu, a popover) the walk goes on from the widget the overlay is
+  attached to; an open modal overlay (a dialog in the window, the command
+  palette) is a barrier, as a native modal window is.
 
 Pipeline in one line: `KeyStroke → Shortcut → Intent → Action handler`.
 
@@ -37,8 +40,10 @@ intent came from. The three firing paths:
 | Path                          | How the intent is built                                     | Anchor for source→root walk     |
 |-------------------------------|-------------------------------------------------------------|---------------------------------|
 | **Shortcut** (keyboard chord) | Registry invokes `on_activate` or synthesizes `Intent::new` | Focused widget or root fallback |
-| **Widget handler** (`ctx.send_intent`) | Handler builds or returns an `Into<Intent>` value           | The originating widget          |
-| **Programmatic** (tests, tools)        | Build `Intent` by hand or via `IntentKind::into_intent`     | First arena root (`WidgetTree::run_with_event_context`) |
+| **Widget handler** (`ctx.send_intent`) | Handler builds or returns an `Into<Intent>` value           | The originating widget; from an overlay, on through the widget it is attached to |
+| **From focus** (`ctx.send_intent_from_focus`: a menu-bar row, the command palette) | As above                                   | The focused widget once the handler's overlays have closed, else the originating widget |
+| **Native menu item** (macOS menu bar)  | The item's intent, by name                                  | Focused widget of the window with the OS focus, else that window's root (its `on_activate` runs in the window whose menu it is) |
+| **Programmatic** (tests, tools, app callbacks) | Build `Intent` by hand or via `IntentKind::into_intent`     | The app's root (`WidgetTree::run_with_event_context`) |
 
 The **name** is the dispatch key; the **payload** (if any) is
 downcastable data the handler extracts when it needs typed fields.
@@ -150,6 +155,11 @@ Key fields ([source](../crates/teksilo-core/src/shortcut.rs)):
   slot independently.
 - **`scope: ShortcutScope`**, `Global` (fires regardless of focus) or
   `Scoped(WidgetId)` (fires only when focus is inside that subtree).
+  An overlay's content is outside the scopes of the widget it is attached
+  to, as a Qt popup is a window of its own and a GTK popover's entry hears
+  the key first: a list's scoped Delete does not fire from the field of a
+  rename popover attached to a row, which gets the key. The intents sent
+  from that field still cross to the row and its ancestors.
   Widget-declared shortcuts default to scoped; app-level declarations
   use global.
 - **`on_activate`**, optional closure invoked at activation time.
@@ -377,8 +387,15 @@ dispatcher resolves them by **focus and scope specificity**, not by id
 order:
 
 1. **Applicability first.** A `Scoped(id)` binding is a candidate only
-   when the focused widget is inside `id`'s subtree. A `Global` binding
-   is always a candidate.
+   when the focused widget is inside `id`'s subtree, by its own parents:
+   an overlay's content is not inside the widget it is attached to. A
+   `Global` binding is a candidate wherever focus is, except in a modal
+   overlay (a dialog in the window, the command palette): there only a
+   global binding registered by a widget inside that modal is, or one
+   registered with no owner (the standard edit shortcuts), as in a native
+   modal window's tree (see "Scoped vs global actions"). With nothing
+   focused while a modal is open, the key is judged as if focus were in the
+   topmost modal.
 2. **Most-specific scope wins.** An applicable `Scoped` binding beats a
    `Global` one. Among nested applicable scopes, the one closest to the
    focused widget (deepest) wins.
@@ -611,21 +628,58 @@ Key bits:
 `ctx.register_action(action)` attaches the action to the **registering widget's
 node**, it only fires when that widget is on the intent's source→root walk.
 That's right for actions co-located with their UI (a panel handling a command
-fired from within itself).
+fired from within itself), and for app-wide commands registered on the window's
+root, which every walk in the window ends at: an overlay's walk goes on from
+the widget the overlay is attached to, so a menu or a popover reaches the root
+too. A **modal** overlay (a dialog presented in the window, the command palette)
+is the exception: the walk stops at its content, so an in-window dialog behaves
+like the native modal window macOS and Windows present it in, whose tree has
+its own widgets' actions and shortcuts and none of the window it blocks. An
+intent sent inside it, or from a key with focus in it, reaches the actions on
+its walk inside the modal, then the window-global actions and global shortcuts
+registered by widgets inside the modal, never those of the page; the scoped
+shortcuts of the page do not fire either. With nothing focused while a
+modal is up, a key is judged as if focus were in the topmost modal. An
+intent nothing in the window takes still goes to the application tree, as
+from a native dialog window. A key does not: it becomes an intent only
+through a shortcut that applies in the modal, and the page's do not, so the
+page's Ctrl+N bound to an application-tree action does not fire inside an
+in-window dialog (a shortcut registered in the application tree never fires
+at all). The standard edit shortcuts, which the tree registers itself, apply
+everywhere.
 
-`ctx.register_action_global(action)` registers an **app-global** action consulted
-as a dispatch **fallback**, *after* the source→root walk finds no consuming node
-action, so it fires no matter where the intent originated. Use it for app-wide
-commands whose handler lives at the app root but whose triggers are scattered
-across the tree **and the window chrome**:
+A modal is a barrier only while it is open when the intent is dispatched.
+An intent sent as the modal closes (a dialog's button that closes the dialog
+and then asks the page for something, a command palette's row) is dispatched
+once it has closed, and is the page's: `ctx.send_intent(..)` walks on from
+the widget the modal was attached to, and `ctx.send_intent_from_focus(..)`
+starts at the focus the modal gave back, or at the window's root when it
+gave none back. An intent sent from outside the modal while it is up (only a
+programmatic send can be: no input reaches the page) is the page's and
+reaches every window-global action.
 
-- A **menu-bar dropdown** renders in an *overlay*, not under the widget that
-  built the menu, so a `MenuEntry::intent("app.x")` dispatched from it will
-  **not** reach an action registered with `register_action` on a sibling widget
-  (e.g. the app body). This is the most common footgun: the menu item looks
-  wired but nothing happens.
-- A **global shortcut** with no widget focused anchors at the arena root; a
+`ctx.register_action_global(action)` registers a **window-global** action
+consulted as a dispatch **fallback**, *after* the source→root walk finds no
+consuming node action, so it fires no matter where in the window the intent
+originated, except inside a modal overlay that the registering widget is not
+in (above). Use it when the widget that owns the handler is not on the walk:
+
+- A **global shortcut** with no widget focused starts at the window's root; a
   scoped action deep in the tree won't be on that walk.
+- A command whose handler belongs to a widget off to the side, such as a
+  popover's [`open_action`](../crates/teksilo-widgets/src/popover_widget.rs),
+  fired from a menu row or a shortcut.
+
+A **menu bar** needs neither. A `MenuModel` entry chosen in the window sends its
+intent from the focused widget, as its shortcut does, once the menu has closed
+and given focus back to the widget the user was working in (the bar's titles
+take no focus from a click, and after F10 or Alt the bar hands focus back as a
+command is chosen): an action on that widget, one of its ancestors or the
+window's root takes it. A hand-built
+`MenuItem` row does the same with `ctx.send_intent_from_focus(...)` in its
+`on_activate_fn`; sent with `ctx.send_intent(...)`, its walk goes from the row to
+the bar's trigger and up the bar's ancestors, which reaches the window's root but
+not a sibling of the bar, such as an editor.
 
 `register_action_global` is the action-side counterpart to
 `register_shortcut_global`. Ownership applies: the action is torn down when the
@@ -672,7 +726,18 @@ Action::new("app.open").on_invoke(|intent, _ctx| {
 From
 [`widget_tree::dispatch_intent`](../crates/teksilo-core/src/widget_tree.rs):
 
-1. Build the chain `source → parent → … → root`.
+1. Build the chain `source → parent → … → root`. When it reaches the
+   content root of an open overlay, which has no parent, it continues
+   from the widget the overlay is attached to (its anchor), and through
+   every overlay that widget is in (a submenu is attached to a row of its
+   parent menu). The anchor is the link, not the widget focus returns to
+   when the overlay closes: that one can be unrelated to the popup (a
+   context menu opened on a list row while a search field had focus).
+   An intent sent by a handler that also closes its overlay still
+   crosses it: the crossing is noted when the intent is sent. An open
+   modal overlay ends the chain at its content; one that has closed by
+   the time the intent is dispatched is crossed to its anchor like any
+   other.
 2. For each `id` in the chain:
    - Skip if the node is inactive or disabled.
    - Find the first action on that node whose `intent == intent.name`.
@@ -685,8 +750,10 @@ From
    window-global actions (registered via `register_action_global`) in
    registration order. First enabled match handles it (`Handled` → stop,
    `Propagated` → next global). This is position-independent, so it catches
-   intents from menu-bar overlays and root-anchored shortcuts that the
-   source→root walk would otherwise miss.
+   intents whose walk never passes the widget that registered the action
+   (a popover's open action, fired from a menu row or a shortcut). For an
+   intent whose chain ends at an open modal overlay, only the global actions registered
+   inside that modal are consulted.
 
 Handlers may call `ctx.send_intent(...)` from inside; those intents
 queue and drain after the current one, until the queue empties. FIFO
@@ -695,21 +762,37 @@ ordering.
 ### Source anchoring
 
 - **Shortcut path**: anchor is the focused widget for scoped shortcuts.
-  Global shortcuts use the focused widget when present, otherwise fall
-  back to the first arena root, so global shortcuts fire even before
-  anything has been focused or after the focused widget is destroyed
-  by a rebuild.
+  Global shortcuts use the focused widget when present, otherwise the
+  content of the topmost open modal overlay, otherwise the window's root
+  (the app's own, inside any wrapper a post-root hook put around it), so
+  global shortcuts fire even before anything has been focused or after the
+  focused widget is destroyed by a rebuild.
 - **`ctx.send_intent(...)`**: anchor is the widget whose handler ran.
   Default `propagate_when_disabled = true`, programmatic sends have
   no shortcut to consult and take the least-surprising path.
-  Note:️ When the handler runs in an **overlay** (menu dropdown, popover), the
-  anchor is the overlay's content, whose source→root walk does **not** pass
-  through the widget that opened it, register an app-global action
-  (`register_action_global`) for commands fired from menus/chrome.
+  When the handler runs in an **overlay** (menu dropdown, popover),
+  the walk goes from the overlay's content on to the widget the overlay is
+  attached to and its ancestors, so a context menu's rows reach the actions
+  of the widget that was right-clicked, and a popover's buttons those of the
+  button that opened it. A modal overlay (a dialog in the window) stops the
+  walk at its content while it is open; one the handler closed is crossed
+  like the others.
+- **`ctx.send_intent_from_focus(...)`**: anchor is the widget that holds
+  focus once everything the handler did has been applied, every overlay it
+  closed included, so a row of a closing menu sends from the widget the menu
+  gave focus back to. A `MenuModel` entry and the command palette send their
+  commands this way. With nothing focused while a modal overlay is up, it
+  starts in the topmost modal, as if focus were there (unless the handler
+  is in a modal itself). Otherwise, with nothing focused, it falls back to
+  the handler's widget, crossing the overlays it was in as they were when
+  it ran; when the handler closed the modal it was in, it starts at the
+  window's root instead, as an intent with no source widget does.
 - **Outside any handler** (a test, an app-layer hook): `WidgetTree::dispatch_intent`
   is crate-internal; call `ctx.send_intent(...)` inside
-  `tree.run_with_event_context(ops, |ctx| …)`, which anchors at the first
-  arena root.
+  `tree.run_with_event_context(ops, |ctx| …)`, which anchors at the app's
+  root: the widget the window's root builder made, inside any wrapper a
+  post-root hook (the debug inspector, the toast host) put around it. A
+  global shortcut with nothing focused starts there too.
 
 ### Focus invalidation on destroy
 
@@ -731,10 +814,15 @@ A KeyDown event flows through three stages, in this order:
    [Same-chord precedence](#same-chord-precedence) above). If an
    applicable shortcut is found, its intent is dispatched, and the key
    event is consumed **if an action handled the intent**. When nothing
-   did (no action matched, or every one returned `Propagated`), the
+   in the window did (no action matched, or every one returned
+   `Propagated`), the intent goes to the
+   [application tree](multi-window.md#the-application-tree) if an
+   enabled action there takes it, and the key is consumed; otherwise the
    event falls through to stage 2 as if no shortcut had matched. So
    does an event for which no candidate applies (every match is a
-   `Scoped` binding outside the focused subtree).
+   `Scoped` binding outside the focused subtree). The application
+   tree's answer is what it registered when it last ran; an action there
+   that returns `Propagated` when it runs still uses the key.
 2. **Ancestor key preview.** If no shortcut matched, the framework
    walks the focused widget's strict ancestors root → parent-of-target,
    firing `on_key_preview` on each. Returning `EventResponse::Handled`
@@ -841,11 +929,14 @@ walk ends at the application's action. A rename box in a table cell, a
 search field, an input inside a dialog the application did not write: each
 undoes itself, without the application knowing it exists.
 
-Two cases still need the application to ask which widget holds the caret:
+A `Toolbar` command sent from focus (`ctx.send_intent_from_focus`) takes this
+route too: the bar's buttons take no focus from a click, so the editor still
+holds it, as it does under a menu bar's menu. A button of the application's own
+beside the editor needs `.focus_on_click(false)` for the same: a click on a
+button that takes focus moves it there, and the walk starts at the button.
 
-- **Menus and toolbars.** A menu row's intent starts its walk in the menu's
-  overlay, which never passes through the editor, so it reaches only the
-  global action.
+One case still needs the application to ask which widget holds the caret:
+
 - **A refused history.** An editor whose filter refuses Undo (a
   forward-only writing mode, a read-only review pass) declines it, and the
   intent then reaches the application's action. Routing it to the
@@ -941,10 +1032,9 @@ impl Widget for Root {
         );
 
         // --- Actions ---
-        // Global: the File menu below renders in an overlay, so its intent's
-        // source→root walk never passes through `Root` (see "Scoped vs global
-        // actions").
-        ctx.register_action_global(
+        // The File menu below renders in an overlay attached to its trigger
+        // in the menu bar, so its row's walk reaches `Root` through the bar.
+        ctx.register_action(
             Action::new("app.save")
                 .on_invoke(|_intent, _ctx| println!("saved")),
         );
@@ -1001,8 +1091,9 @@ impl Widget for Root {
 | Declare a handler                          | `Action::new("id").on_invoke(\|intent, ctx\| …)`                     |
 | Propagate after observing                  | `.on_invoke_with_response(\|i, c\| IntentResponse::Propagated)`      |
 | Register handler on widget                 | `ctx.register_action(action)`                                        |
-| Register app-global handler (menu/chrome)  | `ctx.register_action_global(action)`                                 |
+| Register window-global handler (owner off the walk) | `ctx.register_action_global(action)`                        |
 | Fire programmatically                      | `ctx.send_intent(AppIntent::X)`                                      |
+| Fire from focus (menu row, palette)        | `ctx.send_intent_from_focus(AppIntent::X)`                           |
 | Typed enum bridge                          | `#[derive(IntentKind)]` + `#[name = "…"]` on each variant            |
 | Recover typed variant                      | `AppIntent::from_intent(intent)`                                     |
 | Raw payload lookup                         | `intent.payload::<T>()`                                              |

@@ -980,9 +980,10 @@ fn collapsible_hamburger_accessibility() {
     );
     assert!(first_descendant_with_role(&t, mb, Role::MenuBar).is_some());
 
-    // Dismiss with Escape: expanded back to false, focus restored to
-    // the hamburger (not lost in the now-hidden bar). The dismissal is
-    // deferred for the roll-back tween, so advance past it first.
+    // Dismiss with Escape: expanded back to false, focus back where it was
+    // before the click (nothing: the hamburger takes no focus from a click,
+    // like the bar's titles), not lost in the now-hidden bar. The dismissal
+    // is deferred for the roll-back tween, so advance past it first.
     t.press_key(Key::Escape, Modifiers::NONE);
     t.advance_time(std::time::Duration::from_secs(1));
     t.layout(SizeProposal::exact(800.0, 100.0));
@@ -992,8 +993,8 @@ fn collapsible_hamburger_accessibility() {
     );
     assert_eq!(
         t.focused(),
-        Some(hamburger),
-        "focus returns to the hamburger after the bar is dismissed"
+        None,
+        "focus goes back where it was after the bar is dismissed"
     );
 }
 
@@ -1719,4 +1720,503 @@ fn entering_a_submenu_keeps_its_menu_reported_open() {
         t.accessibility_node(file).is_expanded(),
         "File reports its menu open while its submenu has focus"
     );
+}
+
+// A model-built menu bar's commands, chosen in the window, reach the
+// window's own actions: a scoped one on its root, and the focused widget's.
+
+type Heard = std::rc::Rc<std::cell::RefCell<Vec<&'static str>>>;
+
+/// A focusable editor answering `app.copy` itself.
+#[derive(Debug)]
+struct CopyingEditor(Heard);
+
+impl Widget for CopyingEditor {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let heard = self.0.clone();
+        ctx.register_action(
+            teksilo_core::Action::new("app.copy")
+                .on_invoke(move |_, _| heard.borrow_mut().push("editor copies")),
+        );
+        ctx.apply_self_handlers(teksilo_core::widget_builder::HandlerSet::new().focusable(true));
+        vec![]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        proposal.resolve(200.0, 40.0).into()
+    }
+}
+
+/// A window's root: `app.save` answered by a scoped action on it, a menu bar
+/// with File > Save and Edit > Copy, and an editor below it.
+struct MenuWindow {
+    heard: Heard,
+    editor: std::rc::Rc<std::cell::Cell<Option<WidgetId>>>,
+    /// Build the bar collapsed to its hamburger.
+    collapsed: bool,
+    /// The bar's model, kept for a test that changes it.
+    model: std::rc::Rc<std::cell::RefCell<Option<crate::menu::MenuModel>>>,
+}
+
+impl std::fmt::Debug for MenuWindow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MenuWindow")
+    }
+}
+
+impl Widget for MenuWindow {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let heard = self.heard.clone();
+        ctx.register_action(
+            teksilo_core::Action::new("app.save")
+                .on_invoke(move |_, _| heard.borrow_mut().push("root saves")),
+        );
+        let model = crate::menu::MenuModel::new()
+            .menu(lit!("&File"), |m| {
+                m.item(crate::menu::MenuEntry::new(lit!("Save")).intent("app.save"))
+            })
+            .menu(lit!("&Edit"), |m| {
+                m.item(crate::menu::MenuEntry::new(lit!("Copy")).intent("app.copy"))
+            });
+        *self.model.borrow_mut() = Some(model.clone());
+        let editor = ctx.add(CopyingEditor(self.heard.clone()));
+        self.editor.set(Some(editor));
+        let mut bar = MenuBar::from_model(model);
+        if self.collapsed {
+            bar = bar.collapse_policy(CollapsePolicy::Always);
+        }
+        let column = ctx.add(crate::primitives::VStack::new().child(bar).child(editor));
+        vec![column]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        proposal.resolve(800.0, 600.0).into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: teksilo_canvas::Rect,
+        _proposal: SizeProposal,
+        children: &mut [teksilo_core::widget::WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+}
+
+/// Focus the editor, open the menu titled `menu` and click its row `row`.
+/// Returns what the actions heard.
+fn choose_with_the_editor_focused(menu: &str, row: &str) -> Vec<&'static str> {
+    let heard = Heard::default();
+    let editor = std::rc::Rc::new(std::cell::Cell::new(None));
+    let mut t = tree_with_window();
+    t.add(MenuWindow {
+        heard: heard.clone(),
+        editor: editor.clone(),
+        collapsed: false,
+        model: Default::default(),
+    });
+    let proposal = teksilo_canvas::SizeProposal::exact(800.0, 600.0);
+    t.layout(proposal);
+    let editor = editor.get().expect("the editor was built");
+    t.focus(editor);
+    let trigger = t.find_by_label(menu).expect("the menu's trigger");
+    t.click(trigger);
+    t.layout(proposal);
+    let row = t.find_by_label(row).expect("the menu's row");
+    t.click(row);
+    t.layout(proposal);
+    assert_eq!(
+        t.focused(),
+        Some(editor),
+        "closing the menu gives focus back"
+    );
+    heard.borrow().clone()
+}
+
+#[test]
+fn a_model_menu_row_reaches_a_scoped_action_on_the_window_root() {
+    assert_eq!(
+        choose_with_the_editor_focused("File", "Save"),
+        ["root saves"]
+    );
+}
+
+#[test]
+fn a_model_menu_row_reaches_the_focused_widgets_action_first() {
+    assert_eq!(
+        choose_with_the_editor_focused("Edit", "Copy"),
+        ["editor copies"]
+    );
+}
+
+#[test]
+fn a_menu_opened_by_a_click_gives_focus_back_to_the_editor_on_escape() {
+    let heard = Heard::default();
+    let editor = std::rc::Rc::new(std::cell::Cell::new(None));
+    let mut t = tree_with_window();
+    t.add(MenuWindow {
+        heard,
+        editor: editor.clone(),
+        collapsed: false,
+        model: Default::default(),
+    });
+    let proposal = teksilo_canvas::SizeProposal::exact(800.0, 600.0);
+    t.layout(proposal);
+    let editor = editor.get().expect("the editor was built");
+    t.focus(editor);
+    let trigger = t.find_by_label("File").expect("the File trigger");
+    t.click(trigger);
+    t.layout(proposal);
+    assert_ne!(t.focused(), Some(editor), "the open menu holds focus");
+    t.press_key(Key::Escape, Modifiers::NONE);
+    t.layout(proposal);
+    assert_eq!(
+        t.focused(),
+        Some(editor),
+        "not the trigger the click focused on its way"
+    );
+}
+
+/// With a menu bar's menu open, `can_handle` answers for the editor the menu
+/// gives focus back to, where a row's command will be sent from: the
+/// editor's own `app.copy`, the root's `app.save`, nothing else.
+#[test]
+fn with_a_menu_open_can_handle_answers_for_the_editor_under_it() {
+    let editor = std::rc::Rc::new(std::cell::Cell::new(None));
+    let mut t = tree_with_window();
+    t.add(MenuWindow {
+        heard: Heard::default(),
+        editor: editor.clone(),
+        collapsed: false,
+        model: Default::default(),
+    });
+    let proposal = teksilo_canvas::SizeProposal::exact(800.0, 600.0);
+    t.layout(proposal);
+    let editor = editor.get().expect("the editor was built");
+    t.focus(editor);
+    let trigger = t.find_by_label("Edit").expect("the Edit trigger");
+    t.click(trigger);
+    t.layout(proposal);
+    assert_ne!(t.focused(), Some(editor), "the open menu holds focus");
+    assert!(t.can_handle("app.copy"), "the editor's own action");
+    assert!(t.can_handle("app.save"), "the root's");
+    assert!(!t.can_handle("app.nobody"));
+    let focus = t.focused().expect("a row has focus");
+    assert!(
+        !t.can_handle_from(focus, "app.copy"),
+        "from the row itself the editor is off the walk"
+    );
+}
+
+// ── Where focus goes: a click leaves it in the editor, F10 takes it ──
+//
+// Triggers are built with `focus_on_click(false)`: a click opens a menu and
+// the editor keeps focus, so the menu gives focus back to the editor and a
+// row's command, sent from focus, acts on it. F10, a bare Alt tap and
+// Alt+letter focus the bar on purpose, as on Windows: Escape in an open menu
+// goes back to its title, a second Escape back to the editor, and a chosen
+// row ends with the editor focused and acting.
+
+/// A window with a model menu bar (`&File` > Save, `&Edit` > Copy) over an
+/// editor answering `app.copy`, the editor focused.
+struct Bar {
+    t: WidgetTree,
+    heard: Heard,
+    editor: WidgetId,
+    model: crate::menu::MenuModel,
+}
+
+impl Bar {
+    fn new(collapsed: bool) -> Self {
+        let heard = Heard::default();
+        let editor = std::rc::Rc::new(std::cell::Cell::new(None));
+        let model = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let mut t = collapsible_tree();
+        t.add(MenuWindow {
+            heard: heard.clone(),
+            editor: editor.clone(),
+            collapsed,
+            model: model.clone(),
+        });
+        t.layout(WINDOW);
+        let editor = editor.get().expect("the editor was built");
+        let model = model.borrow().clone().expect("the bar's model");
+        let mut bar = Bar {
+            t,
+            heard,
+            editor,
+            model,
+        };
+        bar.settle();
+        bar.t.focus(editor);
+        bar
+    }
+
+    fn settle(&mut self) {
+        self.t.layout(WINDOW);
+        self.t.advance_time(std::time::Duration::from_secs(1));
+        self.t.layout(WINDOW);
+    }
+
+    fn trigger(&self, label: &str) -> WidgetId {
+        self.t.find_by_label(label).expect("the trigger")
+    }
+
+    fn click(&mut self, label: &str) {
+        let id = self
+            .t
+            .find_by_label(label)
+            .expect("a widget with that label");
+        self.t.click(id);
+        self.settle();
+    }
+
+    fn key(&mut self, key: Key, modifiers: Modifiers) {
+        self.t.press_key(key, modifiers);
+        self.settle();
+    }
+
+    /// What the window does with a key the bar's dispatcher takes (F10, Alt
+    /// tap, Alt+letter), as `teksilo-app`'s `apply_menubar_action` does it:
+    /// reveal a collapsed bar, focus the trigger, and for a mnemonic ask the
+    /// trigger to expand.
+    fn menubar_key(&mut self, key: Key, modifiers: Modifiers) {
+        let action = self
+            .t
+            .window_state()
+            .and_then(|w| w.menubar_dispatcher())
+            .and_then(|d| d.try_handle(&MenubarKeyEvent { key, modifiers }))
+            .expect("the bar's dispatcher takes the key");
+        let (trigger, reveal, open) = match action {
+            MenubarAction::FocusTrigger { trigger_id, reveal } => (trigger_id, reveal, false),
+            MenubarAction::OpenMenu { trigger_id, reveal } => (trigger_id, reveal, true),
+            MenubarAction::Intercept => panic!("the key matched no menu"),
+        };
+        if let Some(reveal) = reveal {
+            self.t
+                .run_with_event_context(&mut teksilo_core::window::NoopWindowOps, |ctx| {
+                    reveal(ctx)
+                });
+            self.t.layout(WINDOW);
+        }
+        self.t.focus(trigger);
+        if open {
+            self.t.dispatch_access_action(
+                teksilo_core::accessibility::widget_id_to_node_id(trigger),
+                teksilo_core::accesskit::Action::Expand,
+                None,
+                &mut teksilo_core::window::NoopWindowOps,
+            );
+        }
+        self.settle();
+    }
+
+    fn heard(&self) -> Vec<&'static str> {
+        self.heard.borrow().clone()
+    }
+}
+
+#[test]
+fn a_click_on_a_trigger_never_takes_focus_from_the_editor() {
+    let mut b = Bar::new(false);
+    b.click("Edit");
+    assert!(
+        focus_is_in_menu_holding(&b.t, "Copy"),
+        "precondition: Edit is open"
+    );
+    // A second click on the open menu's title closes it.
+    b.click("Edit");
+    assert!(b.t.active_overlays().is_empty(), "precondition: closed");
+    assert_eq!(b.t.focused(), Some(b.editor));
+}
+
+#[test]
+fn a_menu_opened_by_a_click_acts_on_the_editor_and_leaves_it_focused() {
+    let mut b = Bar::new(false);
+    b.click("Edit");
+    b.click("Copy");
+    assert_eq!(b.heard(), ["editor copies"]);
+    assert_eq!(b.t.focused(), Some(b.editor));
+}
+
+#[test]
+fn the_triggers_stay_tab_stops() {
+    let b = Bar::new(false);
+    let stops = b.t.tab_stops_within(b.t.roots()[0]);
+    for label in ["File", "Edit"] {
+        assert!(stops.contains(&b.trigger(label)), "{label}");
+    }
+}
+
+#[test]
+fn f10_then_escape_goes_back_to_the_editor() {
+    let mut b = Bar::new(false);
+    b.menubar_key(Key::F10, Modifiers::NONE);
+    assert_eq!(
+        b.t.focused(),
+        Some(b.trigger("File")),
+        "F10 focuses the bar"
+    );
+    b.key(Key::Escape, Modifiers::NONE);
+    assert_eq!(b.t.focused(), Some(b.editor));
+}
+
+#[test]
+fn after_f10_escape_closes_the_menu_then_leaves_the_bar() {
+    let mut b = Bar::new(false);
+    b.menubar_key(Key::F10, Modifiers::NONE);
+    b.key(Key::ArrowDown, Modifiers::NONE);
+    assert!(
+        focus_is_in_menu_holding(&b.t, "Save"),
+        "precondition: File is open"
+    );
+    b.key(Key::Escape, Modifiers::NONE);
+    assert!(
+        b.t.active_overlays().is_empty(),
+        "the first Escape closes File"
+    );
+    assert_eq!(
+        b.t.focused(),
+        Some(b.trigger("File")),
+        "and stays on its title"
+    );
+    b.key(Key::Escape, Modifiers::NONE);
+    assert_eq!(b.t.focused(), Some(b.editor), "the second leaves the bar");
+}
+
+#[test]
+fn after_f10_a_chosen_command_acts_on_the_editor_and_leaves_it_focused() {
+    let mut b = Bar::new(false);
+    b.menubar_key(Key::F10, Modifiers::NONE);
+    b.key(Key::ArrowRight, Modifiers::NONE);
+    assert!(
+        focus_is_in_menu_holding(&b.t, "Copy"),
+        "precondition: Edit is open"
+    );
+    b.key(Key::ArrowDown, Modifiers::NONE);
+    b.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(b.heard(), ["editor copies"]);
+    assert_eq!(b.t.focused(), Some(b.editor));
+}
+
+#[test]
+fn after_moving_to_the_next_menu_escape_lands_on_its_title() {
+    let mut b = Bar::new(false);
+    b.menubar_key(Key::F10, Modifiers::NONE);
+    b.key(Key::ArrowDown, Modifiers::NONE);
+    b.key(Key::ArrowRight, Modifiers::NONE);
+    assert!(
+        focus_is_in_menu_holding(&b.t, "Copy"),
+        "precondition: Edit is open"
+    );
+    b.key(Key::Escape, Modifiers::NONE);
+    assert_eq!(b.t.focused(), Some(b.trigger("Edit")));
+    b.key(Key::Escape, Modifiers::NONE);
+    assert_eq!(b.t.focused(), Some(b.editor));
+}
+
+/// A model change rebuilds the bar while F10 holds focus on a title: the
+/// widget focused before F10 is still the one Escape gives focus back to.
+#[test]
+fn after_f10_a_rebuilt_bar_still_leaves_for_the_editor() {
+    let mut b = Bar::new(false);
+    b.menubar_key(Key::F10, Modifiers::NONE);
+    let before = b.trigger("File");
+    assert_eq!(b.t.focused(), Some(before), "precondition: F10");
+    b.model.push_menu(lit!("&View"), |m| {
+        m.item(crate::menu::MenuEntry::new(lit!("Zoom")).intent("app.zoom"))
+    });
+    b.settle();
+    assert_ne!(
+        b.trigger("File"),
+        before,
+        "precondition: the bar was rebuilt"
+    );
+    assert_eq!(
+        b.t.focused(),
+        Some(b.trigger("File")),
+        "precondition: focus came back to the new title"
+    );
+    b.key(Key::Escape, Modifiers::NONE);
+    assert_eq!(b.t.focused(), Some(b.editor));
+}
+
+/// Hovering from one open menu's title to the next opens that one in its
+/// place, as a click-opened menu bar does; Escape then closes it, and focus,
+/// never taken by a click, is back in the editor.
+#[test]
+fn a_menu_switched_by_hover_closes_on_escape_back_to_the_editor() {
+    let mut b = Bar::new(false);
+    b.click("File");
+    assert!(
+        focus_is_in_menu_holding(&b.t, "Save"),
+        "precondition: File is open"
+    );
+    let edit = b.trigger("Edit");
+    let at = {
+        let r = b.t.bounds(edit);
+        teksilo_canvas::Point::new(r.x + r.width / 2.0, r.y + r.height / 2.0)
+    };
+    b.t.dispatch_event(teksilo_core::event::WidgetEvent::pointer_move(at));
+    b.settle();
+    assert!(
+        focus_is_in_menu_holding(&b.t, "Copy"),
+        "hovering Edit opened it in File's place"
+    );
+    b.key(Key::Escape, Modifiers::NONE);
+    assert!(b.t.active_overlays().is_empty(), "Escape closed Edit");
+    assert_eq!(b.t.focused(), Some(b.editor));
+}
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn a_menu_opened_by_its_mnemonic_acts_on_the_editor() {
+    let mut b = Bar::new(false);
+    b.menubar_key(Key::Character('e'), Modifiers::ALT);
+    assert!(
+        focus_is_in_menu_holding(&b.t, "Copy"),
+        "precondition: Edit is open"
+    );
+    b.click("Copy");
+    assert_eq!(b.heard(), ["editor copies"]);
+    assert_eq!(b.t.focused(), Some(b.editor));
+}
+
+#[test]
+fn a_collapsed_bar_acts_on_the_editor_and_gives_it_focus_back() {
+    let mut b = Bar::new(true);
+    b.click("Menu");
+    b.click("Edit");
+    assert!(
+        focus_is_in_menu_holding(&b.t, "Copy"),
+        "precondition: Edit is open"
+    );
+    b.click("Copy");
+    assert_eq!(b.heard(), ["editor copies"]);
+    assert_eq!(b.t.focused(), Some(b.editor));
+}
+
+#[test]
+fn a_collapsed_bar_closed_by_escape_gives_the_editor_focus_back() {
+    let mut b = Bar::new(true);
+    b.click("Menu");
+    assert_eq!(
+        b.t.focused(),
+        Some(b.trigger("File")),
+        "precondition: revealing the bar focuses its first title"
+    );
+    b.key(Key::Escape, Modifiers::NONE);
+    assert_eq!(b.t.focused(), Some(b.editor));
 }

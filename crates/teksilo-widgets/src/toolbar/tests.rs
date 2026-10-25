@@ -892,3 +892,192 @@ fn an_overflowed_toggle_action_flips_once_before_on_activate_runs() {
         "on_activate reads the new value, as it does inline"
     );
 }
+
+// ── A click on the toolbar leaves focus in the editor it acts on ─────────────
+
+type Heard = Rc<RefCell<Vec<&'static str>>>;
+
+/// A focusable editor answering the toolbar's three commands.
+#[derive(Debug)]
+struct Editor(Heard);
+
+impl Widget for Editor {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        for (intent, said) in [
+            ("fmt.bold", "bold"),
+            ("sort.name", "sorted"),
+            ("text.wrap", "wrapped"),
+        ] {
+            let heard = self.0.clone();
+            ctx.register_action(
+                teksilo_core::Action::new(intent)
+                    .on_invoke(move |_, _| heard.borrow_mut().push(said)),
+            );
+        }
+        ctx.apply_self_handlers(HandlerSet::new().focusable(true));
+        vec![]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(400.0, 100.0).into()
+    }
+}
+
+/// A toolbar with an inline command (Bold), a dropdown (Sort > By name) and
+/// a command in the overflow menu (Wrap), each sending from focus, over an
+/// editor that has focus.
+struct EditorBar {
+    tree: WidgetTree,
+    toolbar: WidgetId,
+    editor: WidgetId,
+    heard: Heard,
+}
+
+fn editor_bar() -> EditorBar {
+    use teksilo_core::intent::Intent;
+    let heard = Heard::default();
+    let toolbar = Toolbar::new()
+        .action(
+            ToolbarAction::new(lit!("Bold"), || IconWidget::checkmark(16.0))
+                .on_activate(|ctx| ctx.send_intent_from_focus(Intent::new("fmt.bold"))),
+        )
+        .action(
+            ToolbarAction::new(lit!("Sort"), || IconWidget::checkmark(16.0)).menu(|| {
+                MenuList::new().item(
+                    MenuItem::new(lit!("By name"))
+                        .on_activate_fn(|ctx| ctx.send_intent_from_focus(Intent::new("sort.name"))),
+                )
+            }),
+        )
+        .action(
+            ToolbarAction::new(lit!("Wrap"), || IconWidget::checkmark(16.0))
+                .always_overflow()
+                .on_activate(|ctx| ctx.send_intent_from_focus(Intent::new("text.wrap"))),
+        );
+    let mut tree = themed_tree();
+    let toolbar = tree.add(toolbar);
+    let editor = tree.add(Editor(heard.clone()));
+    tree.add(
+        crate::primitives::VStack::new()
+            .child(toolbar)
+            .child(editor),
+    );
+    let mut bar = EditorBar {
+        tree,
+        toolbar,
+        editor,
+        heard,
+    };
+    bar.settle();
+    bar.tree.focus(editor);
+    bar
+}
+
+impl EditorBar {
+    fn settle(&mut self) {
+        self.tree.layout(SizeProposal::exact(400.0, 300.0));
+        self.tree.advance_time(std::time::Duration::from_secs(1));
+        self.tree.layout(SizeProposal::exact(400.0, 300.0));
+    }
+
+    fn click(&mut self, id: WidgetId) {
+        self.tree.click(id);
+        self.settle();
+    }
+
+    fn chevron(&mut self) -> WidgetId {
+        let update = self.tree.sync_accessibility();
+        update
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == teksilo_core::accesskit::Role::Button
+                    && node.has_popup() == Some(HasPopup::Menu)
+                    && node.label().is_none_or(|l| l != "Sort")
+            })
+            .and_then(|(id, _)| teksilo_core::accessibility::node_id_to_widget_id_maybe(*id))
+            .expect("the overflow chevron")
+    }
+}
+
+#[test]
+fn a_click_on_a_toolbar_command_leaves_focus_in_the_editor() {
+    let mut b = editor_bar();
+    let bold = published(&mut b.tree, teksilo_core::accesskit::Role::Button, "Bold");
+    b.click(bold);
+    assert_eq!(*b.heard.borrow(), vec!["bold"]);
+    assert_eq!(b.tree.focused(), Some(b.editor));
+}
+
+#[test]
+fn a_toolbar_dropdown_gives_focus_back_to_the_editor() {
+    let mut b = editor_bar();
+    let sort = b.tree.find_by_label("Sort").expect("the Sort dropdown");
+    b.click(sort);
+    let row = b
+        .tree
+        .find_by_label("By name")
+        .expect("the dropdown is open");
+    b.click(row);
+    assert_eq!(*b.heard.borrow(), vec!["sorted"]);
+    assert_eq!(b.tree.focused(), Some(b.editor));
+}
+
+#[test]
+fn the_overflow_menu_gives_focus_back_to_the_editor() {
+    let mut b = editor_bar();
+    let chevron = b.chevron();
+    b.click(chevron);
+    let row = b
+        .tree
+        .find_by_label("Wrap")
+        .expect("the overflow menu is open");
+    b.click(row);
+    assert_eq!(*b.heard.borrow(), vec!["wrapped"]);
+    assert_eq!(b.tree.focused(), Some(b.editor));
+}
+
+/// The commands take no focus from a click but stay reachable from the
+/// keyboard: the toolbar is one Tab stop, its first command.
+#[test]
+fn the_toolbar_commands_stay_reachable_from_the_keyboard() {
+    let mut b = editor_bar();
+    let bold = published(&mut b.tree, teksilo_core::accesskit::Role::Button, "Bold");
+    assert_eq!(b.tree.tab_stops_within(b.toolbar), vec![bold]);
+}
+
+/// A click on a toolbar command leaves focus in the spin box the user is
+/// typing in, so it blurs nothing; the spin box still commits the number
+/// typed before the command runs, as Enter or a blur would, and the command
+/// reads it. Qt's `NoFocus` tool buttons famously ran the command first.
+#[test]
+fn a_toolbar_command_sees_the_number_typed_in_a_spin_box() {
+    use teksilo_core::event::{Key, Modifiers};
+    let value = Signal::new(10_i32);
+    let read = Rc::new(Cell::new(None));
+    let toolbar = {
+        let (value, read) = (value.clone(), read.clone());
+        Toolbar::new().action(
+            ToolbarAction::new(lit!("Apply"), || IconWidget::checkmark(16.0))
+                .on_activate(move |_| read.set(Some(value.get()))),
+        )
+    };
+    let mut tree = themed_tree();
+    let toolbar = tree.add(toolbar);
+    let spin = tree.add(crate::SpinBox::new(value.clone(), 0, 100).label(lit!("Count")));
+    tree.add(crate::primitives::VStack::new().child(toolbar).child(spin));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let field = tree
+        .first_focusable_descendant(spin)
+        .expect("the spin box's field");
+    tree.focus(field);
+    tree.press_key(Key::A, Modifiers::COMMAND);
+    tree.type_text(field, "35");
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(value.get(), 10, "typed, not committed");
+
+    let apply = published(&mut tree, teksilo_core::accesskit::Role::Button, "Apply");
+    tree.click(apply);
+    assert_eq!(tree.focused(), Some(field), "the click took no focus");
+    assert_eq!(read.get(), Some(35), "the command saw the number typed");
+}

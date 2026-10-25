@@ -20,8 +20,10 @@
 //!   per-character input filter, which only the default parser has:
 //!   a custom [`value_from_text`](SpinBox::value_from_text) is handed
 //!   every character). The value is *committed* on
-//!   [`Enter`](teksilo_core::event::Key::Enter) or on focus loss —
-//!   at commit time the text is parsed, clamped into `[min, max]`
+//!   [`Enter`](teksilo_core::event::Key::Enter), on focus loss, and
+//!   before a click on a control that takes no focus (a toolbar
+//!   button) runs its command, so the command reads the number typed.
+//!   At commit time the text is parsed, clamped into `[min, max]`
 //!   (or wrapped, per [`WrapMode`]), and reformatted. Invalid input
 //!   reverts to the last known good value.
 //! - **Stepping over typed text**: every step (key, wheel, button,

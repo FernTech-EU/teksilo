@@ -26,9 +26,13 @@ mod announcement_ring_tests;
 #[cfg(test)]
 mod announcer_tests;
 #[cfg(test)]
+mod can_handle_tests;
+#[cfg(test)]
 mod device_scale_tests;
 mod drag_drop_impl;
 mod focus_impl;
+#[cfg(test)]
+mod focus_on_click_tests;
 #[cfg(test)]
 mod focus_request_tests;
 pub(crate) use focus_impl::FocusRequestMode;
@@ -45,6 +49,8 @@ mod local_frame_tests;
 #[cfg(test)]
 mod modal_tests;
 mod overlay_impl;
+#[cfg(test)]
+mod overlay_intent_tests;
 pub mod pan_arbiter;
 mod pointer_cancel;
 mod pointer_router;
@@ -96,6 +102,34 @@ impl AnimatedRegistration {
             .upgrade()
             .is_some_and(|signal| signal.has_pending_animation())
     }
+}
+
+/// How many crossings between trees a chain of intents may make: an intent
+/// that many crossings led to is not kept for another tree. Two actions in
+/// two trees that answer each other's intents would otherwise go on, a few
+/// rounds each turn, for as long as the application runs.
+pub(crate) const MAX_INTENT_CROSSINGS: usize = 64;
+
+/// An intent waiting for [`WidgetTree::drain_pending_intents`].
+struct PendingIntent {
+    /// The widget its walk starts at.
+    source: WidgetId,
+    intent: crate::intent::Intent,
+    /// The firing shortcut's `propagate_when_disabled` policy.
+    propagate_when_disabled: bool,
+    /// The overlays the walk from `source` crossed when the intent was sent,
+    /// with the modal it stopped at, if any: a modal that has closed by the
+    /// time the intent is dispatched is crossed to its anchor.
+    crossings: Vec<OverlayCrossing>,
+}
+
+/// A step an intent's walk takes from an overlay's content root, which has
+/// no parent, to the widget the overlay is attached to. See
+/// [`WidgetTree::intent_walk`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OverlayCrossing {
+    pub(crate) content: WidgetId,
+    pub(crate) anchor: WidgetId,
 }
 
 // (line 33, above `struct AnimatedRegistration`) — remove entirely
@@ -160,6 +194,11 @@ pub struct WidgetTree {
     /// inactive. Mutated only by `set_window_active`.
     window_active_signal: crate::signal::Signal<bool>,
     text_backend: Option<Rc<RefCell<dyn teksilo_canvas::TextBackend>>>,
+    /// The widget the window's own root builder made, when a wrapper (the
+    /// debug inspector's shell, the toast host) is the tree's first root
+    /// instead. Set through [`Self::set_content_root`]; read through
+    /// [`Self::intent_anchor`].
+    content_root: Option<WidgetId>,
     focused: Option<WidgetId>,
     /// Reactive mirror of `focused`. Same pattern as `hovered_signal`
     /// — kept in sync via `set_focused`. Drives the inspector's Focus
@@ -250,15 +289,20 @@ pub struct WidgetTree {
     /// keystroke interception path (`dispatch_event` for KeyDown) or
     /// by handlers calling `ctx.send_intent(...)`. Drained between
     /// event-handler calls by [`WidgetTree::drain_pending_intents`].
-    /// The tuple carries the source widget (dispatch anchor), the
-    /// intent itself, and the firing shortcut's
-    /// `propagate_when_disabled` policy.
-    pending_intents: Vec<(WidgetId, crate::intent::Intent, bool)>,
+    pending_intents: Vec<PendingIntent>,
     /// Intents this tree's drain dispatched and no action took, kept for
     /// the application layer to offer to another tree; `None` (the
     /// default) keeps none. See
     /// [`set_records_unclaimed_intents`](Self::set_records_unclaimed_intents).
     unclaimed_intents: Option<Vec<crate::intent::Intent>>,
+    /// What the application tree takes, read by a shortcut nothing in this
+    /// tree takes. See
+    /// [`set_application_scope`](Self::set_application_scope).
+    application_scope: Option<crate::action::ApplicationScope>,
+    /// While a routed intent's actions run, the crossings that led to the
+    /// intents they send. See
+    /// [`dispatch_routed_intent`](Self::dispatch_routed_intent).
+    routed_crossings: Option<usize>,
     /// Window-global actions registered via
     /// [`BuildContext::register_action_global`](crate::BuildContext::register_action_global).
     /// Consulted as a fallback at the end of every intent dispatch — *after* the
@@ -994,6 +1038,7 @@ impl WidgetTree {
             // selection muted) before the first focus event arrives.
             window_active_signal: crate::signal::Signal::new(true),
             text_backend: None,
+            content_root: None,
             focused: None,
             focused_signal: focused_signal.clone(),
             pointers: crate::pointer::table::PointerTable::new(),
@@ -1018,6 +1063,8 @@ impl WidgetTree {
             },
             pending_intents: Vec::new(),
             unclaimed_intents: None,
+            application_scope: None,
+            routed_crossings: None,
             global_actions: Vec::new(),
             text_surfaces: crate::text_surface::TextSurfaces::new(focused_signal.clone()),
             key_capture: None,
@@ -1171,15 +1218,54 @@ impl WidgetTree {
     /// async-result callbacks (file dialogs, future background
     /// tasks) on the main thread with full handler-equivalent
     /// semantics. There is no source widget for app-level events,
-    /// so intents are anchored at the tree's first root id (or
-    /// silently dropped when the tree is empty).
+    /// so intents start at the window's [content root](Self::set_content_root)
+    /// (or are silently dropped when the tree is empty). A callback that
+    /// gives the user's command (a native menu item) sends it with
+    /// [`EventContext::send_intent_from_focus`](crate::widget::EventContext::send_intent_from_focus)
+    /// so that it starts at the focused widget, while its other effects stay
+    /// anchored at the root.
     pub fn run_with_event_context<F>(&mut self, ops: &mut dyn crate::window::WindowOps, f: F)
     where
         F: FnOnce(&mut crate::widget::EventContext),
     {
+        let anchor = self.intent_anchor();
+        self.run_with_event_context_from(anchor, ops, f);
+    }
+
+    /// Record `id` as the widget the window's own root builder made, when
+    /// the tree's first root is a wrapper around it (the debug inspector's
+    /// shell, the toast host, any post-root hook). `teksilo-app` sets it as
+    /// it builds the window.
+    ///
+    /// Intents with no source widget (app callbacks, a global shortcut or a
+    /// native menu item with nothing focused, an intent routed from another
+    /// tree with nothing focused) start there rather than at the wrapper: the walk up from the wrapper never reaches an action
+    /// the app registered on its own root, which made such an action
+    /// unreachable in every debug build that installed the inspector.
+    #[doc(hidden)]
+    pub fn set_content_root(&mut self, id: WidgetId) {
+        self.content_root = Some(id);
+    }
+
+    /// Where an intent with no source widget starts its walk to the root:
+    /// the [content root](Self::set_content_root) while it is in the tree,
+    /// else the tree's first root. `None` for an empty tree.
+    pub(crate) fn intent_anchor(&self) -> Option<WidgetId> {
+        self.content_root
+            .filter(|&id| self.arena.get(id).is_some())
+            .or_else(|| self.arena.roots().first().copied())
+    }
+
+    fn run_with_event_context_from<F>(
+        &mut self,
+        anchor: Option<WidgetId>,
+        ops: &mut dyn crate::window::WindowOps,
+        f: F,
+    ) where
+        F: FnOnce(&mut crate::widget::EventContext),
+    {
         let mut ctx = self.make_event_context(ops);
         f(&mut ctx);
-        let anchor = self.arena.roots().first().copied();
         if let Some(anchor_id) = anchor {
             self.collect_from_ctx(ctx, anchor_id);
             // App callbacks (including close guards) have no enclosing input
@@ -3743,14 +3829,131 @@ impl WidgetTree {
     /// Enqueue an intent for dispatch from `source`. Called from
     /// `collect_from_ctx` after a handler runs `ctx.send_intent(...)`
     /// and from the KeyDown shortcut-interception path.
+    ///
+    /// The overlays the walk from `source` crosses are recorded now, so
+    /// the intent still reaches the widget an overlay is attached to when
+    /// the handler that sent it also closed that overlay.
     pub(crate) fn enqueue_intent(
         &mut self,
         source: WidgetId,
         intent: crate::intent::Intent,
         propagate_when_disabled: bool,
     ) {
-        self.pending_intents
-            .push((source, intent, propagate_when_disabled));
+        let crossings = self.intent_walk(source, &[]).1;
+        self.enqueue_intent_crossing(source, intent, propagate_when_disabled, crossings);
+    }
+
+    /// [`enqueue_intent`](Self::enqueue_intent) with the overlay crossings
+    /// recorded earlier, before the overlays they name were closed.
+    pub(crate) fn enqueue_intent_crossing(
+        &mut self,
+        source: WidgetId,
+        intent: crate::intent::Intent,
+        propagate_when_disabled: bool,
+        crossings: Vec<OverlayCrossing>,
+    ) {
+        let mut intent = intent;
+        if let Some(routed) = self.routed_crossings {
+            intent.note_crossings(routed);
+        }
+        self.pending_intents.push(PendingIntent {
+            source,
+            intent,
+            propagate_when_disabled,
+            crossings,
+        });
+    }
+
+    /// The widgets an intent sent from `source` walks through, `source`
+    /// first, the overlays the walk crosses on the way (with the open modal
+    /// it stopped at, if any), and the content of that modal.
+    ///
+    /// From a widget the walk goes to its parent. From the content root of
+    /// an open overlay, which has none, it goes on to the widget the overlay
+    /// is attached to (its [anchor](crate::overlay::OverlayRequest::anchor)),
+    /// so a menu row or a popover's button reaches the actions of the
+    /// widget the popup belongs to and of its ancestors, up to
+    /// the window's root; nested overlays are crossed the same way (a
+    /// submenu's anchor is a row of its parent menu). A content root whose
+    /// overlay has closed is crossed by `recorded`, the crossings noted when
+    /// the intent was sent. The anchor, not the widget focus goes back to
+    /// when the overlay closes: that one may be unrelated to the popup (a
+    /// context menu opened on a row while a search field has focus), and an
+    /// overlay that took no focus has none.
+    ///
+    /// The walk stops at a root with no overlay, at a widget it has already
+    /// passed (an overlay attached to a widget of its own content), and at
+    /// the content of an open [modal](crate::overlay::OverlayPlacement::is_modal)
+    /// overlay (a dialog in the window, a command palette): a modal is a
+    /// barrier while it is open, as a native modal window is, whose tree
+    /// never reaches the actions of the window it blocks. Its own actions
+    /// take what is sent inside it, and of the window-global actions only
+    /// those registered inside it ([`global_applies`](Self::global_applies)).
+    /// Its crossing to its anchor is recorded all the same, so an intent sent
+    /// as the modal closes (a dialog's button closing the dialog, then asking
+    /// the page for something) walks on from the widget it was attached to
+    /// once it has closed, as one sent from the window it blocked would.
+    pub(crate) fn intent_walk(
+        &self,
+        source: WidgetId,
+        recorded: &[OverlayCrossing],
+    ) -> (Vec<WidgetId>, Vec<OverlayCrossing>, Option<WidgetId>) {
+        let mut chain = vec![source];
+        let mut crossings = Vec::new();
+        let mut modal = None;
+        let mut current = source;
+        loop {
+            let next = match self.arena.parent(current) {
+                Some(parent) => parent,
+                None => {
+                    let open = self
+                        .overlay_manager
+                        .find_by_content(current)
+                        .and_then(|id| self.overlay_manager.overlay(id));
+                    // An open modal is a barrier, as a native modal window
+                    // is; its crossing is noted for when it has closed.
+                    if let Some(overlay) = open.filter(|overlay| overlay.placement.is_modal()) {
+                        crossings.push(OverlayCrossing {
+                            content: current,
+                            anchor: overlay.anchor,
+                        });
+                        modal = Some(current);
+                        break;
+                    }
+                    let anchor = open.map(|overlay| overlay.anchor).or_else(|| {
+                        recorded
+                            .iter()
+                            .find(|crossing| crossing.content == current)
+                            .map(|crossing| crossing.anchor)
+                    });
+                    let Some(anchor) = anchor else { break };
+                    crossings.push(OverlayCrossing {
+                        content: current,
+                        anchor,
+                    });
+                    anchor
+                }
+            };
+            // Only a crossing can lead back into the chain; a tree's own
+            // parent links cannot.
+            if !crossings.is_empty() && chain.contains(&next) {
+                break;
+            }
+            chain.push(next);
+            current = next;
+        }
+        (chain, crossings, modal)
+    }
+
+    /// Whether a window-global action or shortcut registered by `owner`
+    /// applies to an intent or a key whose walk stopped at the modal
+    /// `modal`: always with no modal, and otherwise only when `owner` sits
+    /// inside that modal (on the walk from `owner`, which crosses popovers
+    /// opened inside it). A native modal window's tree has the global
+    /// actions and shortcuts of its own widgets and none of the window it
+    /// blocks; an in-tree modal behaves the same.
+    pub(crate) fn global_applies(&self, owner: WidgetId, modal: Option<WidgetId>) -> bool {
+        modal.is_none_or(|modal| self.intent_walk(owner, &[]).2 == Some(modal))
     }
 
     /// Dispatch every queued intent. Handlers may call
@@ -3761,25 +3964,239 @@ impl WidgetTree {
     ///
     /// With [`set_records_unclaimed_intents`](Self::set_records_unclaimed_intents)
     /// on, an intent no action took is kept for
-    /// [`take_unclaimed_intents`](Self::take_unclaimed_intents), unless a
-    /// shortcut sent it: an unclaimed shortcut already falls through to the
-    /// focused widget as its key (`Ctrl+C` copies in an editor), and acting
-    /// on it in another tree as well would run two things for one chord.
-    /// Shortcuts do not dispatch through this drain anyway; the check
-    /// covers an intent re-sent with the shortcut's source.
+    /// [`take_unclaimed_intents`](Self::take_unclaimed_intents). One with a
+    /// shortcut's source is kept on the shortcut's terms
+    /// ([`keeps_unclaimed`](Self::keeps_unclaimed)): only when the
+    /// application tree takes it. Shortcuts do not dispatch through this
+    /// drain; the check covers an intent re-sent with the shortcut's source.
     pub(crate) fn drain_pending_intents(&mut self, ops: &mut dyn crate::window::WindowOps) {
         while !self.pending_intents.is_empty() {
-            let (source, intent, propagate) = self.pending_intents.remove(0);
-            let keep = (self.unclaimed_intents.is_some()
-                && intent.source != crate::telemetry::IntentSource::Shortcut)
-                .then(|| intent.clone());
-            let consumed = self.dispatch_intent(source, intent, propagate, &mut *ops);
-            if !consumed
-                && let (Some(intent), Some(unclaimed)) = (keep, self.unclaimed_intents.as_mut())
-            {
-                unclaimed.push(intent);
+            let PendingIntent {
+                source,
+                intent,
+                propagate_when_disabled,
+                crossings,
+            } = self.pending_intents.remove(0);
+            let intent = self.sent_here(intent);
+            let keep = self.keeps_unclaimed(&intent).then(|| intent.clone());
+            let consumed = self.dispatch_intent_with(
+                source,
+                intent,
+                propagate_when_disabled,
+                &mut *ops,
+                true,
+                &crossings,
+            );
+            if !consumed && let Some(intent) = keep {
+                self.keep_unclaimed(intent, &mut *ops);
             }
         }
+    }
+
+    /// Whether `intent`, once no action of this tree takes it, is kept for
+    /// [`take_unclaimed_intents`](Self::take_unclaimed_intents): always while
+    /// recording is on, except a shortcut's. That one is kept only when the
+    /// [application scope](Self::set_application_scope) takes it; otherwise
+    /// its key falls through to the focused widget (`Ctrl+C` copies in an
+    /// editor), and acting on it in another tree as well would run two
+    /// things for one chord.
+    pub(crate) fn keeps_unclaimed(&self, intent: &crate::intent::Intent) -> bool {
+        self.unclaimed_intents.is_some()
+            && (intent.source != crate::telemetry::IntentSource::Shortcut
+                || self
+                    .application_scope
+                    .as_ref()
+                    .is_some_and(|scope| scope.takes(intent.name)))
+    }
+
+    /// Keep `intent`, which no action of this tree took, for
+    /// [`take_unclaimed_intents`](Self::take_unclaimed_intents), with the
+    /// activation token of the event being dispatched while `ops` still
+    /// holds it unused, taken from `ops`, so the tree it crosses to can
+    /// activate a window with it and nothing else uses it twice.
+    pub(crate) fn keep_unclaimed(
+        &mut self,
+        mut intent: crate::intent::Intent,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        if intent.crossings() >= MAX_INTENT_CROSSINGS {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "teksilo: intent `{}` was not offered to another tree: {MAX_INTENT_CROSSINGS} \
+                 crossings between trees led to it, so two actions in two trees are likely \
+                 answering each other's intents",
+                intent.name
+            );
+            return;
+        }
+        if let Some(unclaimed) = self.unclaimed_intents.as_mut() {
+            intent.note_activation_token(ops.take_activation_token());
+            unclaimed.push(intent);
+        }
+    }
+
+    /// `intent`, sent in this tree, with this tree's window noted as
+    /// [the one it was sent in](crate::intent::Intent::origin_window) unless
+    /// it names one already.
+    pub(crate) fn sent_here(&self, mut intent: crate::intent::Intent) -> crate::intent::Intent {
+        intent.note_origin_window(self.window_state.as_ref().map(|state| state.id()));
+        intent
+    }
+
+    /// Share `scope`, what the application tree takes, with this tree: a
+    /// shortcut whose intent nothing in this tree takes is kept for the
+    /// application tree when the scope takes it, and its key falls through
+    /// to the focused widget otherwise. `None` (the default) offers no
+    /// shortcut to the application tree. `teksilo-app` sets one scope on
+    /// every window's tree.
+    #[doc(hidden)]
+    pub fn set_application_scope(&mut self, scope: Option<crate::action::ApplicationScope>) {
+        self.application_scope = scope;
+    }
+
+    /// Fill `scope` with what this tree, as the application tree, takes:
+    /// the actions an intent [routed](Self::dispatch_routed_intent) here
+    /// would be offered (on the walk from the focused widget, or from the
+    /// content root, to the root, then the global actions), as
+    /// [`can_handle_from`](Self::can_handle_from) would find them. Call it again
+    /// whenever this tree may have changed its actions or its focus;
+    /// `teksilo-app` does each time the application tree has run.
+    #[doc(hidden)]
+    pub fn publish_application_scope(&self, scope: &crate::action::ApplicationScope) {
+        let actions = self
+            .routed_anchor()
+            .map(|anchor| {
+                self.actions_on_route(anchor, &[], true)
+                    .into_iter()
+                    .map(|action| (action.intent, action.enabled_when.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        scope.replace(actions);
+    }
+
+    /// Where an intent routed from another tree starts: the focused widget,
+    /// else the [content root](Self::set_content_root).
+    fn routed_anchor(&self) -> Option<WidgetId> {
+        self.focused
+            .filter(|id| self.arena.is_active(*id))
+            .or_else(|| self.intent_anchor())
+    }
+
+    /// The actions an intent sent from `source` is offered, in the order
+    /// [`dispatch_intent`](Self::dispatch_intent) offers them: on each
+    /// active, enabled widget of its [walk](Self::intent_walk), the first
+    /// action of each intent name (a second one for the same name on the
+    /// same widget is never reached), then the window-global actions: those
+    /// registered inside the modal the walk stops at, every one with no
+    /// modal or for an intent `routed` from another tree. Enabled or not: the
+    /// caller reads [`Action::is_enabled`](crate::action::Action::is_enabled)
+    /// when it needs to.
+    pub(crate) fn actions_on_route(
+        &self,
+        source: WidgetId,
+        crossings: &[OverlayCrossing],
+        routed: bool,
+    ) -> Vec<&crate::action::Action> {
+        let mut actions = Vec::new();
+        let (chain, _, modal) = self.intent_walk(source, crossings);
+        let modal = modal.filter(|_| !routed);
+        for id in chain {
+            if !self.arena.is_active(id) || !self.arena.is_enabled(id) {
+                continue;
+            }
+            let Some(node) = self.arena.get(id) else {
+                continue;
+            };
+            for (index, action) in node.actions.iter().enumerate() {
+                if node.actions[..index]
+                    .iter()
+                    .all(|earlier| earlier.intent != action.intent)
+                {
+                    actions.push(action);
+                }
+            }
+        }
+        actions.extend(
+            self.global_actions
+                .iter()
+                .filter(|(owner, _)| self.global_applies(*owner, modal))
+                .map(|(_, action)| action),
+        );
+        actions
+    }
+
+    /// Whether an intent named `name`, sent from the focused widget, would be
+    /// handled, by the same lookup a dispatch makes and without running
+    /// anything: an enabled action on the walk from the logical focus to the
+    /// root (crossing from a popup to the widget it is attached to, stopping
+    /// at a modal), a window-global one (from inside a modal, one registered
+    /// inside it), or, for a window with an
+    /// [application scope](Self::set_application_scope), one of the
+    /// application tree's. What a menu row asks to grey itself out.
+    ///
+    /// The logical focus is where a command chosen in a menu is sent from:
+    /// the focused widget, except while focus is in an open menu or popup,
+    /// where it is the widget that menu gives focus back to when it closes
+    /// with every menu it was opened from (the editor under a menu bar's
+    /// dropdown opened with a click; the bar's title when the keyboard opened
+    /// it, since the bar passes focus on to the editor only as a command is
+    /// chosen); the focused widget itself when that one is gone; with nothing
+    /// focused, the content of the topmost open modal overlay, as if focus
+    /// were in it, else the [content root](Self::set_content_root). To ask
+    /// from the focused widget as it is, as a native menu bar sends, use
+    /// [`can_handle_from`](Self::can_handle_from).
+    ///
+    /// Two answers are approximate, and say "handled": an action built with
+    /// [`on_invoke_with_response`](crate::action::ActionBuilder::on_invoke_with_response),
+    /// which may decline when it runs (a text field's `edit.copy` with
+    /// nothing selected), and an application action, as the application tree
+    /// last published it. A disabled action never handles it, as for an
+    /// intent sent from focus, which passes a disabled action by.
+    #[doc(hidden)]
+    pub fn can_handle(&self, name: &str) -> bool {
+        self.command_focus()
+            .is_some_and(|source| self.can_handle_from(source, name))
+    }
+
+    /// [`can_handle`](Self::can_handle), for an intent sent from `source`.
+    #[doc(hidden)]
+    pub fn can_handle_from(&self, source: WidgetId, name: &str) -> bool {
+        self.actions_on_route(source, &[], false)
+            .into_iter()
+            .any(|action| action.intent == name && action.is_enabled())
+            || self
+                .application_scope
+                .as_ref()
+                .is_some_and(|scope| scope.takes(name))
+    }
+
+    /// The logical focus of [`can_handle`](Self::can_handle): where
+    /// `send_intent_from_focus` from a menu row would start once the row's
+    /// menu chain (up to a modal or a host surface such as a menu bar) has
+    /// closed and given focus back.
+    fn command_focus(&self) -> Option<WidgetId> {
+        let Some(focus) = self.focus_or_modal() else {
+            return self.intent_anchor();
+        };
+        let mut outermost = None;
+        let mut current = self.overlay_ancestor_for_widget(focus);
+        while let Some(id) = current {
+            let Some(overlay) = self.overlay_manager.overlay(id) else {
+                break;
+            };
+            if self.overlay_is_host_surface(id) {
+                break;
+            }
+            outermost = Some(overlay);
+            current = overlay.parent_overlay;
+        }
+        Some(
+            outermost
+                .and_then(|overlay| overlay.focus_restore)
+                .filter(|id| self.arena.is_active(*id))
+                .unwrap_or(focus),
+        )
     }
 
     /// Keep the intents no action takes, for
@@ -3801,7 +4218,9 @@ impl WidgetTree {
 
     /// Take the intents kept since the last call, oldest first: each was
     /// sent in this tree, and neither an action on its way to the root nor
-    /// a global one took it. Empty when recording is off.
+    /// a global one took it (a shortcut's, only when the
+    /// [application scope](Self::set_application_scope) takes it). Empty
+    /// when recording is off.
     pub fn take_unclaimed_intents(&mut self) -> Vec<crate::intent::Intent> {
         self.unclaimed_intents
             .as_mut()
@@ -3811,32 +4230,50 @@ impl WidgetTree {
 
     /// Dispatch an intent another tree sent and left unclaimed, as if sent
     /// here: from the focused widget to the root, then the global actions;
-    /// from the first root when nothing is focused. Returns whether an
-    /// action took it.
+    /// from the [content root](Self::set_content_root) when nothing is
+    /// focused. Returns whether an action took it.
     ///
     /// It is not counted again by telemetry, which counted it where it was
     /// sent, and it is not kept as unclaimed here: an intent is offered to
-    /// one other tree at most. Intents its handlers send are this tree's
-    /// own, dispatched before this returns.
+    /// one other tree at most. An intent its actions send counts this
+    /// crossing, and one that 64 crossings led to is not kept for another
+    /// tree, so two trees whose actions answer each
+    /// other stop. It keeps the
+    /// [window it was sent in](crate::intent::Intent::origin_window). Its
+    /// [activation token](crate::intent::Intent::activation_token), if any,
+    /// is held through `ops` for the first window its actions open or
+    /// raise, and released once they have run. Intents its handlers send
+    /// are this tree's own, dispatched before this returns.
     pub fn dispatch_routed_intent(
         &mut self,
-        intent: crate::intent::Intent,
+        mut intent: crate::intent::Intent,
         ops: &mut dyn crate::window::WindowOps,
     ) -> bool {
-        let anchor = self
-            .focused
-            .filter(|id| self.arena.is_active(*id))
-            .or_else(|| self.arena.roots().first().copied());
-        let Some(anchor) = anchor else {
+        let Some(anchor) = self.routed_anchor() else {
             return false;
         };
-        let consumed = self.dispatch_intent_with(anchor, intent, true, &mut *ops, false);
-        self.drain_pending_intents(ops);
+        let token = intent.take_activation_token();
+        let holds = token.is_some();
+        if let Some(token) = token {
+            ops.hold_activation_token(token);
+        }
+        // What its actions send was led to by one more crossing.
+        let outer = self.routed_crossings.replace(intent.crossings() + 1);
+        // Sent in another tree, so from outside any modal of this one: every
+        // window-global action is offered (no tap).
+        let consumed = self.dispatch_intent_with(anchor, intent, true, &mut *ops, false, &[]);
+        self.drain_pending_intents(&mut *ops);
+        self.routed_crossings = outer;
+        if holds {
+            ops.release_activation_token();
+        }
         consumed
     }
 
     /// Walk `source → root` invoking any [`Action`](crate::action::Action)
-    /// whose `intent` name matches. The first enabled, `Handled`
+    /// whose `intent` name matches, crossing from an overlay's content to
+    /// the widget the overlay is attached to (see
+    /// [`intent_walk`](Self::intent_walk)). The first enabled, `Handled`
     /// response stops the walk. A `Propagated` or disabled action
     /// (when the shortcut's `propagate_when_disabled` is true) lets
     /// the walk continue. A disabled action with
@@ -3853,11 +4290,17 @@ impl WidgetTree {
         propagate_when_disabled: bool,
         ops: &mut dyn crate::window::WindowOps,
     ) -> bool {
-        self.dispatch_intent_with(source, intent, propagate_when_disabled, ops, true)
+        self.dispatch_intent_with(source, intent, propagate_when_disabled, ops, true, &[])
     }
 
-    /// [`dispatch_intent`](Self::dispatch_intent), telemetry tap optional:
-    /// an intent routed from another tree was counted there.
+    /// [`dispatch_intent`](Self::dispatch_intent), telemetry tap optional,
+    /// crossing the overlays `crossings` recorded when the intent was sent.
+    /// An intent with the tap is this tree's own: of the window-global
+    /// actions it is offered only those registered inside the modal its walk
+    /// stops at now, all of them with none open on its way. One without is
+    /// [routed](Self::dispatch_routed_intent) from another tree, which counted
+    /// it, and was sent outside any modal of this one: every window-global
+    /// action is offered.
     fn dispatch_intent_with(
         &mut self,
         source: WidgetId,
@@ -3865,6 +4308,7 @@ impl WidgetTree {
         propagate_when_disabled: bool,
         ops: &mut dyn crate::window::WindowOps,
         tap: bool,
+        crossings: &[OverlayCrossing],
     ) -> bool {
         // Telemetry tap. Single insertion point catches every intent
         // (shortcut-driven, programmatic via `send_intent`, etc.)
@@ -3874,18 +4318,13 @@ impl WidgetTree {
         if tap {
             self.tap_intent_dispatched(&intent);
         }
+        let intent = if tap { self.sent_here(intent) } else { intent };
 
         // Pre-compute the source → root chain so the walk doesn't
-        // need to hold any arena borrow while invoking handlers.
-        let chain: Vec<WidgetId> = {
-            let mut v = vec![source];
-            let mut current = self.arena.parent(source);
-            while let Some(id) = current {
-                v.push(id);
-                current = self.arena.parent(id);
-            }
-            v
-        };
+        // need to hold any arena borrow while invoking handlers. A modal on
+        // the way is a barrier only while it is open, so it is read now.
+        let (chain, _, modal) = self.intent_walk(source, crossings);
+        let modal = modal.filter(|_| tap);
 
         for id in chain {
             if !self.arena.is_active(id) || !self.arena.is_enabled(id) {
@@ -3917,6 +4356,7 @@ impl WidgetTree {
             }
 
             let mut ctx = self.make_event_context(&mut *ops);
+            ctx.handling_intent = Some(intent.name);
             let response = (action.handler)(&intent, &mut ctx);
             if let Some(node) = self.arena.get_mut(id) {
                 node.actions.insert(idx, action);
@@ -3931,13 +4371,17 @@ impl WidgetTree {
 
         // Fallback: window-global actions (registered via
         // `register_action_global`). The source→root walk found no consuming
-        // node action, so consult app-global commands — reachable regardless of
-        // where the intent originated (menu-bar overlay, content, shortcut).
+        // node action, so consult the window's commands, reachable wherever
+        // in the window the intent originated (menu-bar overlay, content,
+        // shortcut), except that an intent sent inside a modal reaches only
+        // those registered inside it.
         let mut i = 0;
         while i < self.global_actions.len() {
             let matches = {
-                let (_, action) = &self.global_actions[i];
-                action.intent == intent.name && action.is_enabled()
+                let (owner, action) = &self.global_actions[i];
+                action.intent == intent.name
+                    && action.is_enabled()
+                    && self.global_applies(*owner, modal)
             };
             if !matches {
                 i += 1;
@@ -3947,6 +4391,7 @@ impl WidgetTree {
             // borrow on `self`; reinsert at its slot afterwards.
             let (owner, mut action) = self.global_actions.remove(i);
             let mut ctx = self.make_event_context(&mut *ops);
+            ctx.handling_intent = Some(intent.name);
             let response = (action.handler)(&intent, &mut ctx);
             self.global_actions.insert(i, (owner, action));
             self.collect_from_ctx(ctx, owner);
@@ -4086,6 +4531,9 @@ impl WidgetTree {
                         }
                         if let Some(dead_zone) = handler_set.gesture_dead_zone {
                             node.gesture_dead_zone = dead_zone;
+                        }
+                        if let Some(focus_on_click) = handler_set.focus_on_click {
+                            node.focus_on_click = focus_on_click;
                         }
                         if let Some(role) = handler_set.long_press_role {
                             node.long_press_role = role;
@@ -4274,6 +4722,9 @@ impl WidgetTree {
                         }
                         if let Some(dead_zone) = handler_set.gesture_dead_zone {
                             node.gesture_dead_zone = dead_zone;
+                        }
+                        if let Some(focus_on_click) = handler_set.focus_on_click {
+                            node.focus_on_click = focus_on_click;
                         }
                         if let Some(role) = handler_set.long_press_role {
                             node.long_press_role = role;
@@ -5940,6 +6391,109 @@ mod app_callback_intent_tests {
             &["quit", "confirm"],
             "dispatch exactly once"
         );
+    }
+
+    /// Answers `test.copy` by recording `name`; with `field`, also builds a
+    /// focusable child answering it as "field", and reports the child's id.
+    #[derive(Debug)]
+    struct Copier {
+        name: &'static str,
+        calls: Rc<RefCell<Vec<&'static str>>>,
+        field: Option<Rc<Cell<Option<WidgetId>>>>,
+    }
+
+    impl Widget for Copier {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let (name, calls) = (self.name, self.calls.clone());
+            ctx.register_action(Action::new("test.copy").on_invoke(move |_, _| {
+                calls.borrow_mut().push(name);
+            }));
+            ctx.apply_self_handlers(
+                crate::widget_builder::HandlerSet::new().focusable(self.field.is_none()),
+            );
+            let Some(field) = &self.field else {
+                return vec![];
+            };
+            let id = ctx.add(Copier {
+                name: "field",
+                calls: self.calls.clone(),
+                field: None,
+            });
+            field.set(Some(id));
+            vec![id]
+        }
+
+        fn layout_response(&self, _: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+            Size::new(0.0, 0.0).into()
+        }
+    }
+
+    /// A window's tree as `teksilo-app` builds it with a post-root hook: the
+    /// app's root (answering `test.copy`, holding a focusable field that
+    /// answers it too) inside a wrapper. Returns the tree, the app's root
+    /// and the field.
+    fn wrapped(calls: &Rc<RefCell<Vec<&'static str>>>) -> (WidgetTree, WidgetId, WidgetId) {
+        let mut tree = WidgetTree::new();
+        let field = Rc::new(Cell::new(None));
+        let content = tree.add(Copier {
+            name: "root",
+            calls: calls.clone(),
+            field: Some(field.clone()),
+        });
+        tree.add(crate::test_widgets::StackWidget::new().child(content));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert_ne!(
+            tree.roots().first(),
+            Some(&content),
+            "the wrapper is the first root"
+        );
+        (tree, content, field.get().expect("the field was built"))
+    }
+
+    fn send_copy(ctx: &mut crate::widget::EventContext) {
+        ctx.send_intent(Intent::new("test.copy"));
+    }
+
+    #[test]
+    fn an_app_callback_reaches_an_action_on_the_app_root_under_a_wrapper() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let (mut tree, content, _) = wrapped(&calls);
+        let mut ops = crate::window::NoopWindowOps;
+
+        // Without the content root, the walk starts at the wrapper and
+        // misses the action below it: the bug this pins.
+        tree.run_with_event_context(&mut ops, send_copy);
+        assert!(calls.borrow().is_empty());
+
+        tree.set_content_root(content);
+        assert_eq!(tree.intent_anchor(), Some(content));
+        tree.run_with_event_context(&mut ops, send_copy);
+        assert_eq!(&*calls.borrow(), &["root"]);
+    }
+
+    fn send_copy_from_focus(ctx: &mut crate::widget::EventContext) {
+        ctx.send_intent_from_focus(Intent::new("test.copy"));
+    }
+
+    #[test]
+    fn a_command_from_focus_reaches_the_focused_widget_first() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let (mut tree, content, field) = wrapped(&calls);
+        tree.set_content_root(content);
+        let mut ops = crate::window::NoopWindowOps;
+
+        // Nothing focused: it starts at the app's root.
+        tree.run_with_event_context(&mut ops, send_copy_from_focus);
+        assert_eq!(&*calls.borrow(), &["root"]);
+
+        // The focused field answers before the root does.
+        tree.focus(field);
+        tree.run_with_event_context(&mut ops, send_copy_from_focus);
+        assert_eq!(&*calls.borrow(), &["root", "field"]);
+
+        // An app callback still starts at the root, whatever has focus.
+        tree.run_with_event_context(&mut ops, send_copy);
+        assert_eq!(&*calls.borrow(), &["root", "field", "root"]);
     }
 
     #[test]

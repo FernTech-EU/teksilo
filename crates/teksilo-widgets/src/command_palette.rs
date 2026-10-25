@@ -35,7 +35,8 @@
 //! intent from there, as its keystroke would have been sent
 //! ([`EventContext::send_intent_from_focus`]). So a command answers wherever
 //! its action is registered: on the editor the palette was opened over, on
-//! one of that editor's ancestors, or window-wide.
+//! one of that editor's ancestors, or window-wide. Opened with nothing
+//! focused, it sends from the window's root.
 //!
 //! That is also why a presented palette lists the commands that act on the
 //! focused editor: the standard edit commands every tree registers
@@ -48,10 +49,13 @@
 //! # Presenting it
 //!
 //! [`CommandPalette::present`] shows it as a modal near the top of the window,
-//! dismissed by Escape or a click outside:
+//! dismissed by Escape or a click outside. On the window's root, a plain
+//! `register_action` is reached from everywhere the palette is opened from: a
+//! shortcut and a menu bar's row both send from the focused widget, whose walk
+//! ends at the root:
 //!
 //! ```ignore
-//! ctx.register_action_global(Action::new("app.command_palette").on_invoke(|_, ctx| {
+//! ctx.register_action(Action::new("app.command_palette").on_invoke(|_, ctx| {
 //!     CommandPalette::new().present(ctx);
 //! }));
 //! ```
@@ -100,7 +104,10 @@
 //! palette's own handler, which moves the highlight (wrapping at either end) and
 //! scrolls it into view; PageUp and PageDown move it a viewport at a time. Home and
 //! End stay with the field, which moves its caret with them. Enter runs the
-//! highlighted command; Escape dismisses.
+//! highlighted command; Escape dismisses. A palette presented by a command's
+//! action (Ctrl+Shift+P bound to `app.command_palette`) is dismissed by that
+//! command's chord too, so the key that opened it closes it: the palette is
+//! modal, and the page's own shortcut does not reach into it.
 //!
 //! Typing re-filters the list and nothing else: the list is a sibling of the search
 //! field, not its parent, so the field keeps its caret, its selection and an input
@@ -217,6 +224,11 @@ struct PaletteState {
     /// palette hands focus back before a command runs; an embedded one keeps
     /// it.
     presented: Rc<Cell<bool>>,
+    /// The command whose action presented this palette (`app.palette` bound
+    /// to Ctrl+Shift+P), if an action did: its chord, pressed in the palette,
+    /// closes it again, as the toggle it is to the user. The palette is modal,
+    /// so the page's own shortcut does not reach into it.
+    toggle: Rc<Cell<Option<&'static str>>>,
     on_dismiss: Rc<RefCell<Option<DismissFn>>>,
     /// Whether the dismissal hook has already run.
     ///
@@ -245,6 +257,7 @@ impl PaletteState {
             list: Rc::new(RefCell::new(None)),
             page_rows: Rc::new(Cell::new(1)),
             presented: Rc::new(Cell::new(false)),
+            toggle: Rc::new(Cell::new(None)),
             on_dismiss: Rc::new(RefCell::new(None)),
             dismissed: Rc::new(Cell::new(false)),
             listbox_id: Signal::new(None),
@@ -416,6 +429,7 @@ impl CommandPalette {
     /// click outside. See the [module docs](self) on why this is window-level.
     pub fn present(self, ctx: &mut EventContext) {
         self.state.presented.set(true);
+        self.state.toggle.set(ctx.handling_intent());
         // The palette's own Escape handler never runs for a presented palette:
         // the overlay system claims Escape first and tears the modal down
         // without it, and the same is true of a press outside. So a caller's
@@ -539,13 +553,38 @@ impl Widget for CommandPalette {
         self.results_id =
             Some(ctx.add(PaletteResults::new(self.state.clone(), config).access_live(Live::Off)));
 
+        // The command that presented the palette closes it again, by its
+        // chord (the page's shortcut does not apply in a modal, so the key
+        // falls through to here) and by its intent (sent here when its
+        // shortcut has no owner, and so applies everywhere).
+        let toggle_keys: Vec<KeyStroke> = match self.state.toggle.get() {
+            Some(toggle) => {
+                let close_state = self.state.clone();
+                ctx.register_action(
+                    teksilo_core::Action::new(toggle)
+                        .on_invoke(move |_, ctx| close_state.dismiss(ctx)),
+                );
+                ctx.shortcut_registry()
+                    .iter_effective()
+                    .filter(|shortcut| shortcut.shortcut.intent_name() == toggle)
+                    .flat_map(|shortcut| [shortcut.primary, shortcut.secondary])
+                    .flatten()
+                    .collect()
+            }
+            None => Vec::new(),
+        };
+
         let key_state = self.state.clone();
         ctx.apply_self_handlers(HandlerSet::new().on_key(move |ev, ctx| {
             // Home and End are not here: they belong to the search field,
             // which moves its caret with them.
-            let WidgetEvent::KeyDown { key, .. } = ev else {
+            let WidgetEvent::KeyDown { key, modifiers, .. } = ev else {
                 return EventResponse::Ignored;
             };
+            if toggle_keys.contains(&KeyStroke::new(*key, *modifiers)) {
+                key_state.dismiss(ctx);
+                return EventResponse::Handled;
+            }
             match key {
                 Key::ArrowDown => key_state.step(true),
                 Key::ArrowUp => key_state.step(false),

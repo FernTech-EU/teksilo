@@ -442,7 +442,10 @@ impl TextInput {
         self
     }
 
-    /// Closure invoked on focus loss. Forwarded to `TextInputField`.
+    /// Closure invoked on focus loss, and while the field keeps focus before
+    /// a click on a control that takes none (a toolbar button) runs its
+    /// command, so that command sees what this commits. Forwarded to
+    /// `TextInputField`.
     pub fn on_blur_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_blur = Some(Box::new(f));
         self

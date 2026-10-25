@@ -3565,3 +3565,35 @@ fn the_int_ui_header_padding_follows_the_density_ladder() {
         }
     }
 }
+
+/// The scroll arrows take no focus from a click: they scroll the strip and
+/// focus stays in the page.
+#[test]
+fn a_click_on_a_scroll_arrow_leaves_focus_where_it_was() {
+    let field: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let mut tabs = TabWidget::new(selected).static_tab(
+        TabInfo::new().title(label("Tab 0")),
+        FocusableLeaf {
+            id_out: field.clone(),
+        },
+    );
+    for i in 1..20 {
+        tabs = tabs.static_tab(
+            TabInfo::new().title(label(&format!("Tab {i}"))),
+            FixedLeaf(100.0, 40.0),
+        );
+    }
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    tree.add(tabs.show_overflow_dropdown(false));
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    let field = field.get().expect("the first tab's field");
+    tree.focus(field);
+    let arrow = tree
+        .find_by_label("Scroll tabs right")
+        .expect("the strip overflows and shows its arrows");
+    tree.click(arrow);
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    assert_eq!(tree.focused(), Some(field));
+}

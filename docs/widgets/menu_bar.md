@@ -47,13 +47,22 @@ dropdown `MenuList` as an overlay. Menus can be added via the fluent
 `from_model` + `native_on_macos`). Leading and trailing slots accept
 arbitrary widget content (an app icon or a search field, for example).
 
+**Focus.** A trigger takes no focus from a click (`focus_on_click(false)`):
+a menu opened with the mouse or a finger opens over the widget the user is
+working in, which keeps focus, and gets it back when the menu closes,
+however it closes. A command chosen there, sent from focus, acts on it.
+
 **Keyboard.** F10 and bare-Alt-tap focus the first trigger without opening
 a menu; Alt+letter opens the menu whose label carries a matching mnemonic
 marker (`&File` → Alt+F). On macOS the Alt+letter branch is suppressed
-because the OS rewrites Option+letter for accented character composition —
+because the OS rewrites Option+letter for accented character composition;
 F10 and bare-Alt-tap continue to work. Once a dropdown is open, ArrowLeft
 and ArrowRight cycle between top-level menus, and Escape closes the active
-one and returns focus to the trigger.
+one and leaves focus on its trigger, as Windows menu bars do; Escape on a
+trigger gives focus back to the widget focused before the bar took it.
+Choosing a command, or clicking the menu away, gives it back too, before
+the command is sent, so it acts on that widget. The triggers stay Tab
+stops.
 
 **Hamburger / collapsible mode.** Call `.collapsible()` to let the bar
 collapse to a single hamburger `IconButton` when its intrinsic width

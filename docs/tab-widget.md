@@ -636,7 +636,9 @@ Two `IconButton`s (chevron-leading, chevron-trailing, embedded mode) flank the
 scrollable region. **Visibility is dynamic**: leading visible iff
 `scroll_x > 0`, trailing visible iff `scroll_x < max_scroll_x`. Click
 animates `scroll_x` by ~one tab-width via `Signal::animate_to` with
-`MotionTokens::duration_normal`.
+`MotionTokens::duration_normal`. The arrows take no focus from a click
+(`focus_on_click(false)`, as Qt's tab bar scroll buttons take none), so
+scrolling the strip leaves focus where it was.
 
 ```rust
 .show_scroll_arrows(true)   // default

@@ -66,7 +66,8 @@ back to whatever the user was working in, and then sends the command's
 intent from there, as its keystroke would have been sent
 (`EventContext::send_intent_from_focus`). So a command answers wherever
 its action is registered: on the editor the palette was opened over, on
-one of that editor's ancestors, or window-wide.
+one of that editor's ancestors, or window-wide. Opened with nothing
+focused, it sends from the window's root.
 
 That is also why a presented palette lists the commands that act on the
 focused editor: the standard edit commands every tree registers
@@ -79,10 +80,13 @@ those commands would act on the query, so it leaves them out.
 ### Presenting it
 
 `CommandPalette::present` shows it as a modal near the top of the window,
-dismissed by Escape or a click outside:
+dismissed by Escape or a click outside. On the window's root, a plain
+`register_action` is reached from everywhere the palette is opened from: a
+shortcut and a menu bar's row both send from the focused widget, whose walk
+ends at the root:
 
 ```ignore
-ctx.register_action_global(Action::new("app.command_palette").on_invoke(|_, ctx| {
+ctx.register_action(Action::new("app.command_palette").on_invoke(|_, ctx| {
     CommandPalette::new().present(ctx);
 }));
 ```
@@ -131,7 +135,10 @@ like one. Arrow keys are not editing keys for the field, so they bubble to the
 palette's own handler, which moves the highlight (wrapping at either end) and
 scrolls it into view; PageUp and PageDown move it a viewport at a time. Home and
 End stay with the field, which moves its caret with them. Enter runs the
-highlighted command; Escape dismisses.
+highlighted command; Escape dismisses. A palette presented by a command's
+action (Ctrl+Shift+P bound to `app.command_palette`) is dismissed by that
+command's chord too, so the key that opened it closes it: the palette is
+modal, and the page's own shortcut does not reach into it.
 
 Typing re-filters the list and nothing else: the list is a sibling of the search
 field, not its parent, so the field keeps its caret, its selection and an input

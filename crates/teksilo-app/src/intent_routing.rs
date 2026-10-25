@@ -19,9 +19,15 @@
 //! The receiving tree dispatches it from its focus
 //! ([`WidgetTree::dispatch_routed_intent`](teksilo_core::WidgetTree::dispatch_routed_intent))
 //! and does not keep it as unclaimed again, so it never travels back to its
-//! origin or further. One nobody takes is dropped, and a debug build names it
-//! once. A shortcut's intent is never offered: the tree that heard the key
-//! hands it to the focused widget instead.
+//! origin or further. An intent its action sends there is that tree's own and
+//! may cross back; a chain of them stops after 64 crossings in all, so two
+//! actions that answer each other across the trees cannot go on for the
+//! application's life. One nobody takes is dropped, and a debug build names it
+//! once. A shortcut's intent is offered only when the application tree takes
+//! it, as the window reads from the
+//! [`ApplicationScope`](teksilo_core::ApplicationScope) the window manager
+//! publishes each time the application tree has run; otherwise the tree that
+//! heard the key hands it to the focused widget instead.
 
 use std::collections::HashSet;
 

@@ -153,12 +153,18 @@ impl fmt::Display for KeyStroke {
 /// focus is inside a specific widget's subtree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShortcutScope {
-    /// Reachable regardless of focus. Used by app-level shortcuts.
+    /// Reachable regardless of focus, except in a modal overlay none of the
+    /// widgets that registered it is inside (one registered with no owner is
+    /// reachable there too), and with nothing focused while such a modal is
+    /// open. Used by app-level shortcuts.
     Global,
     /// Reachable only when focus is inside this widget (or one of its
-    /// descendants). Used by widget-declared shortcuts — the widget
-    /// that calls `register_shortcut` scopes to itself by default but
-    /// may scope to any [`WidgetId`] it knows (child, sibling, etc.).
+    /// descendants), by the focused widget's own parents: an overlay
+    /// attached to the widget (a popover, a context menu) is not inside it,
+    /// as a popup is a window of its own for the keyboard. Used by
+    /// widget-declared shortcuts: the widget that calls `register_shortcut`
+    /// scopes to itself by default but may scope to any [`WidgetId`] it
+    /// knows (child, sibling, etc.).
     Scoped(WidgetId),
 }
 
@@ -889,6 +895,16 @@ impl ShortcutRegistry {
     /// The widget id that currently owns `id`, if any.
     pub fn owner_of(&self, id: &str) -> Option<WidgetId> {
         self.owner_by_id.get(id).copied()
+    }
+
+    /// Every widget keeping shortcut `id` registered: its one owner, or the
+    /// owners of a [shared](Self::register_shared) one. Empty for a shortcut
+    /// registered with no owner (the tree's standard edit shortcuts).
+    pub(crate) fn owners(&self, id: &str) -> Vec<WidgetId> {
+        match self.owner_by_id.get(id) {
+            Some(owner) => vec![*owner],
+            None => self.shared_owners.get(id).cloned().unwrap_or_default(),
+        }
     }
 
     pub fn len(&self) -> usize {

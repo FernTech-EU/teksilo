@@ -10,6 +10,7 @@ pub mod default_post_root;
 pub(crate) mod input_loop;
 pub(crate) mod input_routing;
 pub(crate) mod intent_routing;
+pub(crate) mod native_menu_route;
 pub mod native_theme;
 pub(crate) mod quit;
 pub(crate) mod redraw_gate;

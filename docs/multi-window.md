@@ -132,12 +132,19 @@ It receives:
   application tree leaves goes to the window used last (at its frontmost
   native dialog), so its handlers can send a window a command. An intent
   crosses once and never comes back; one nobody takes is dropped, and a debug
-  build names it (the framework's own `teksilo.` intents excepted). A
-  shortcut's intent never crosses: an unclaimed shortcut already reaches the
-  focused widget as its key. On macOS a chord that is also a native menu
-  item's key equivalent arrives as that menu choice, not as a shortcut, so
-  there it does cross. In a test, `HeadlessApp::route_unclaimed_intents`
-  does the crossing;
+  build names it (the framework's own `teksilo.` intents excepted). An intent
+  the action that took it sends may cross in its turn, up to 64 crossings in
+  one chain, after which a debug build says that two actions seem to answer
+  each other. A
+  shortcut's intent crosses too, when an enabled action of the application
+  tree takes it: Ctrl+N bound in a window to `app.new`, which only the
+  application tree implements, opens the window. When the application tree
+  does not take it either, the key goes to the focused widget instead, as
+  any shortcut nobody handles does (the standard edit shortcuts depend on
+  it: Ctrl+C copies in an editor that copies from its own key handler). On
+  macOS a chord that is also a native menu item's key equivalent arrives as
+  that menu choice, not as a shortcut, and crosses as a menu intent. In a
+  test, `HeadlessApp::route_unclaimed_intents` does the crossing;
 - `on_external_with_ctx` payloads while no window is open (see the
   single-instance recipe below);
 - events of a `subscribe_event_with_ctx` subscription registered in it;
@@ -153,7 +160,7 @@ What needs a window is not drawn there:
 | an overlay, an animated widget | never shown; a debug build says so |
 | a tooltip, a `WebView` | never shown |
 | `spawn_local_with` | its completion is delivered to windows only, and is lost here; use `spawn_local` and a `Signal` |
-| a shortcut registered there | never fires: keys reach window trees only |
+| a shortcut registered there | never fires: keys reach window trees only; register it in each window, and the application tree's action takes it when the window has none (not from inside a dialog presented in the window, where the page's shortcuts do not apply) |
 
 The application tree's actions do not appear in `ShortcutSettings` or a
 command palette, which read the window's registry.
@@ -577,11 +584,15 @@ Notes:
   compositor treats the raise as unsolicited and only asks for attention.
   Forward it with the request and post both as one payload,
   `AppEventProxy::send_external(WithActivationToken::new(token, request))`.
-  The handler sees the request, and the token goes to the first window it
+  The handler sees the request (so do `on_app_event` and the observers of
+  `register_app_event_observer`), and the token goes to the first window it
   raises or opens: `ctx.focus_window(id)` (the window the handler runs in
   included), a `WindowState::focus()` with no token of its own, or
-  `ctx.open_window(...)`. An unused token is dropped at the end of the
-  turn.
+  `ctx.open_window(...)`. When the handler sends an intent that its tree
+  leaves to the other side (a window's to the application tree, or the
+  other way), the intent takes the unused token with it, and the window the
+  action there opens or raises is activated with it. An unused token is
+  dropped at the end of the turn.
 
 **Cross-window read** (dim the inspector when the main window is
 fullscreen):
@@ -621,6 +632,28 @@ ctx.open_modal(ModalRequest {
 For the general case (may land in-tree or in a native window),
 `ctx.present_modal(request)` picks the presentation at dispatch time
 based on `ModalPresentation::Auto` and platform capability.
+
+Commands sent in a dialog route the same way whichever presentation it got.
+A native modal window has a tree of its own: an intent sent there, or a key
+pressed there, reaches that tree's actions and shortcuts, then the
+application tree, and never the window it blocks. A dialog presented in the
+window (Linux) behaves the same while it is open: from inside it, the walk
+stops at its content, and of the window's global actions and global
+shortcuts only those registered by widgets inside the dialog apply. An
+intent nothing in the window takes still goes to the application tree; a
+key goes there only through a shortcut that applies in the dialog, and the
+page's do not, so the page's Ctrl+N bound to an application-tree action does
+not fire inside an in-window dialog. An intent sent from the page while the
+dialog is up (only a programmatic send can be) still reaches every global
+action of the window.
+
+The two differ once the dialog closes. An intent sent as an in-window dialog
+closes (its button closes it, then sends) is dispatched after it has closed,
+and is the page's: it walks on from the widget the dialog was attached to,
+or, sent from focus, starts at the focus the dialog gave back. One sent as a
+native dialog window closes is that window's, and goes to the application
+tree when nothing there takes it. See "Scoped vs global actions" in the
+[shortcut guide](shortcut-intent-action.md).
 
 A modal window has a close button and no minimise or maximise button, on
 Windows and macOS, unless its config asks for them with `minimizable(true)`

@@ -426,6 +426,9 @@ pub struct HandlerSet {
     /// drag/swipe on any ancestor above it (a *gesture dead zone*). See
     /// [`super::arena::WidgetNode::gesture_dead_zone`].
     pub(crate) gesture_dead_zone: Option<bool>,
+    /// When `Some(false)`, a click or tap activates the node without moving
+    /// keyboard focus to it. See [`HandlerSet::focus_on_click`].
+    pub(crate) focus_on_click: Option<bool>,
     /// When `Some(..)`, selects what a **hold** on this node's subtree means for
     /// the tree-owned long-press route. See
     /// [`super::arena::WidgetNode::long_press_role`].
@@ -512,6 +515,7 @@ impl HandlerSet {
             ime,
             event_pass_through,
             gesture_dead_zone,
+            focus_on_click,
             long_press_role,
             touch_action,
             pan_claim,
@@ -555,6 +559,7 @@ impl HandlerSet {
             ime: None,
             event_pass_through: None,
             gesture_dead_zone: None,
+            focus_on_click: None,
             long_press_role: None,
             drag_activation: None,
             touch_action: None,
@@ -742,6 +747,23 @@ impl HandlerSet {
         self
     }
 
+    /// Commit the edit this widget holds, as losing focus would, while it
+    /// keeps focus. For a field that commits on blur (a spin box, a date
+    /// field, a text field with an `on_blur_fn`).
+    ///
+    /// A click on a control built with
+    /// [`focus_on_click(false)`](Self::focus_on_click) (a toolbar button, a
+    /// menu bar title) blurs nothing, so a value typed and not yet committed
+    /// would be missed by the command it runs. Before that click is
+    /// dispatched, the framework calls this on the focused widget and on each
+    /// of its ancestors that set one, innermost first: AppKit's
+    /// `commitEditing`, and the fix for Qt's `NoFocus` tool button pitfall.
+    #[doc(hidden)]
+    pub fn on_commit_edit(mut self, f: impl FnMut(&mut EventContext) + 'static) -> Self {
+        self.handlers.on_commit_edit = Some(Box::new(f));
+        self
+    }
+
     /// Set the on_pointer_event handler (low-level escape hatch).
     pub fn on_pointer_event(
         mut self,
@@ -837,6 +859,38 @@ impl HandlerSet {
     /// `PointerSequence` member enrolment; see the `DeadZone` wrapper widget.
     pub fn gesture_dead_zone(mut self, dead_zone: bool) -> Self {
         self.gesture_dead_zone = Some(dead_zone);
+        self
+    }
+
+    /// Whether a click or a tap moves keyboard focus to this widget. Default
+    /// `true`.
+    ///
+    /// With `false`, a click of any pointer (mouse, finger, pen) that would
+    /// focus this widget (one on it, or on a part of it that is not itself
+    /// focusable) activates what it lands on as usual and leaves focus where
+    /// it was: focus moves neither to the widget nor to a focusable ancestor.
+    /// The flag belongs to this node only, as GTK's is: a focusable widget
+    /// inside it (a text field in a toolbar) still takes focus from a click
+    /// unless built with the flag itself. A composite whose focusable node is
+    /// one of its own children passes the flag on to it; `PopoverButton` and
+    /// `PopoverIconButton` do. The widget stays focusable: Tab reaches it, a
+    /// focus request lands on it, and an assistive technology's focus action
+    /// moves to it. This is GTK's `focus-on-click` property and Qt's
+    /// `Qt::TabFocus` policy.
+    ///
+    /// For a control that acts on another widget's content, so that a click
+    /// on it must not take the focus that content holds: a menu bar's
+    /// triggers, a toolbar's buttons. Ordinary push buttons and form controls
+    /// keep the default, as on every desktop. Since such a click blurs
+    /// nothing, the focused widget first commits the edit it holds (a spin
+    /// box's typed number, a field with an `on_blur_fn`), so the command the
+    /// click runs sees it.
+    ///
+    /// Only the framework's own focus move is affected. A widget that asks for
+    /// focus in its own press handler (a text field placing its caret) still
+    /// gets it.
+    pub fn focus_on_click(mut self, focus_on_click: bool) -> Self {
+        self.focus_on_click = Some(focus_on_click);
         self
     }
 
@@ -1415,6 +1469,13 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// [`HandlerSet::gesture_dead_zone`].
     pub fn gesture_dead_zone(mut self, dead_zone: bool) -> Self {
         self.handler_set.gesture_dead_zone = Some(dead_zone);
+        self
+    }
+
+    /// Whether a click or a tap moves keyboard focus to this widget. See
+    /// [`HandlerSet::focus_on_click`].
+    pub fn focus_on_click(mut self, focus_on_click: bool) -> Self {
+        self.handler_set.focus_on_click = Some(focus_on_click);
         self
     }
 
@@ -2359,6 +2420,17 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     /// [`HandlerSet::gesture_dead_zone`].
     fn gesture_dead_zone(self, dead_zone: bool) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).gesture_dead_zone(dead_zone)
+    }
+
+    /// Whether a click or a tap moves keyboard focus to this widget. Default
+    /// `true`. With `false` a click on it activates it and leaves focus where
+    /// it was, while Tab, a focus request and an assistive technology still
+    /// focus it (GTK's `focus-on-click`, Qt's `Qt::TabFocus`). For this node
+    /// only: a focusable widget inside it keeps its own setting. For controls
+    /// that act on another widget's content, such as menu bar triggers and
+    /// toolbar buttons. See [`HandlerSet::focus_on_click`].
+    fn focus_on_click(self, focus_on_click: bool) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).focus_on_click(focus_on_click)
     }
 
     /// Select what a hold on this widget's subtree means. See

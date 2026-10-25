@@ -116,22 +116,46 @@ struct BubbleGates {
 impl WidgetTree {
     /// Hops from `focus` up to `scope_id` (0 when equal), or `None` when
     /// `scope_id` is not an ancestor-or-self of `focus`. Fewer hops means
-    /// the scope sits closer to focus — i.e. a more specific binding.
+    /// the scope sits closer to focus, i.e. a more specific binding.
+    ///
+    /// Up the widget's own parents only: an overlay's content is not inside
+    /// the scopes of the widget the overlay is attached to, as a key pressed
+    /// in a Qt popup (a window of its own) or in a GTK popover (whose entry
+    /// hears it first) does not reach the shortcuts of the widget below. A
+    /// list's scoped Delete must not fire from the field of a rename popover
+    /// attached to one of its rows. An intent still crosses; see
+    /// [`intent_walk`](Self::intent_walk).
     fn scope_distance_from_focus(&self, focus: WidgetId, scope_id: WidgetId) -> Option<usize> {
         let mut hops = 0usize;
         let mut current = Some(focus);
-        while let Some(c) = current {
-            if c == scope_id {
+        while let Some(id) = current {
+            if id == scope_id {
                 return Some(hops);
             }
-            current = self.arena.parent(c);
+            current = self.arena.parent(id);
             hops += 1;
         }
         None
     }
 
+    /// Where a key's shortcut is judged from, and a command sent from focus
+    /// starts: the focused widget, or, with nothing focused while a modal
+    /// overlay is open, the topmost modal's content, as if focus were in it.
+    /// A dialog that holds no focus is still in front of the page, whose
+    /// commands stay out of it as they do with focus inside.
+    pub(crate) fn focus_or_modal(&self) -> Option<WidgetId> {
+        self.focused
+            .filter(|id| self.arena.is_active(*id))
+            .or_else(|| {
+                self.overlay_manager
+                    .topmost_modal()
+                    .map(|overlay| overlay.content_id)
+            })
+    }
+
     /// From every same-chord shortcut candidate, choose the one whose
-    /// scope applies to the current focus, preferring the most specific
+    /// scope applies to the current focus (for a global one, see
+    /// [`global_applies`](Self::global_applies)), preferring the most specific
     /// scope: a `Scoped` binding whose subtree contains focus beats a
     /// `Global` one, and among nested applicable scopes the one closest
     /// to focus (fewest hops) wins. Equal-specificity ties keep the
@@ -145,15 +169,29 @@ impl WidgetTree {
     ) -> Option<(&'static str, crate::shortcut::ShortcutScope, bool)> {
         use crate::shortcut::ShortcutScope;
         let mut best: Option<(usize, (&'static str, ShortcutScope, bool))> = None;
+        // With focus in a modal, a global shortcut applies only when one of
+        // the widgets that registered it is inside that modal, or when none
+        // did (the tree's own, such as the standard edit shortcuts): a
+        // native modal window has its own widgets' shortcuts and not those
+        // of the window it blocks. With nothing focused, judged from the
+        // topmost modal.
+        let focus = self.focus_or_modal();
+        let modal = focus.and_then(|f| self.intent_walk(f, &[]).2);
         for &(id, scope, propagate) in candidates {
             // Specificity score, higher = more specific. Global is the
             // least-specific fallback (0); any applicable scoped binding
             // outranks it (`usize::MAX - hops`, so fewer hops = deeper
             // scope = higher score). Tree depth is tiny, so no overflow.
             let score = match scope {
-                ShortcutScope::Global => Some(0usize),
-                ShortcutScope::Scoped(scope_id) => self
-                    .focused
+                ShortcutScope::Global => {
+                    let owners = self.shortcut_registry.owners(id);
+                    (owners.is_empty()
+                        || owners
+                            .iter()
+                            .any(|&owner| self.global_applies(owner, modal)))
+                    .then_some(0usize)
+                }
+                ShortcutScope::Scoped(scope_id) => focus
                     .and_then(|f| self.scope_distance_from_focus(f, scope_id))
                     .map(|hops| usize::MAX - hops),
             };
@@ -707,8 +745,8 @@ impl WidgetTree {
             let mut cap_ctx = self.make_event_context(&mut *ops);
             callback(keystroke, self.shortcut_registry_mut(), &mut cap_ctx);
             // Route side effects of the callback through the
-            // focused widget (or an arbitrary root if no focus).
-            let anchor = self.focused.or_else(|| self.arena.roots().first().copied());
+            // focused widget (or the intent anchor if no focus).
+            let anchor = self.focused.or_else(|| self.intent_anchor());
             if let Some(anchor_id) = anchor {
                 self.collect_from_ctx(cap_ctx, anchor_id);
                 self.drain_pending_intents(&mut *ops);
@@ -731,8 +769,9 @@ impl WidgetTree {
         // the focused widget is consumed here: the shortcut's
         // `on_activate` runs (producing an `Intent`), its ctx side
         // effects are collected, and the intent walks source-widget →
-        // root firing any matching `Action`. Otherwise the focused
-        // widget sees the raw KeyDown below.
+        // root firing any matching `Action`. An intent nothing here takes
+        // is kept for the application tree when that tree takes it.
+        // Otherwise the focused widget sees the raw KeyDown below.
         //
         // Two-phase: the registry is inspected first (immutable read)
         // to resolve `id / scope / propagate_when_disabled`. Only if
@@ -766,14 +805,15 @@ impl WidgetTree {
                 let anchor = match scope {
                     // Global shortcuts fire regardless of focus. If no
                     // widget is currently focused, anchor the intent
-                    // walk at an arbitrary root so actions registered
-                    // at the top of the tree still see the intent.
+                    // walk in the topmost modal, or at the intent anchor so
+                    // actions registered at the top of the app's tree still
+                    // see the intent.
                     crate::shortcut::ShortcutScope::Global => {
-                        self.focused.or_else(|| self.arena.roots().first().copied())
+                        self.focus_or_modal().or_else(|| self.intent_anchor())
                     }
-                    crate::shortcut::ShortcutScope::Scoped(scope_id) => {
-                        self.focused.filter(|f| self.is_descendant_of(*f, scope_id))
-                    }
+                    crate::shortcut::ShortcutScope::Scoped(scope_id) => self
+                        .focus_or_modal()
+                        .filter(|f| self.scope_distance_from_focus(*f, scope_id).is_some()),
                 };
                 if let Some(anchor_id) = anchor {
                     let mut act_ctx = self.make_event_context(&mut *ops);
@@ -789,7 +829,10 @@ impl WidgetTree {
                         // Tag shortcut origin so analytics can
                         // distinguish keyboard-driven activations from
                         // button / menu / programmatic ones.
-                        let intent = intent.with_source(crate::telemetry::IntentSource::Shortcut);
+                        let intent = self.sent_here(
+                            intent.with_source(crate::telemetry::IntentSource::Shortcut),
+                        );
+                        let keep = self.keeps_unclaimed(&intent).then(|| intent.clone());
                         let consumed = self.dispatch_intent(
                             anchor_id,
                             intent,
@@ -800,10 +843,16 @@ impl WidgetTree {
                         if consumed {
                             return;
                         }
+                        // Nothing in this tree took it, but the application
+                        // tree does: kept for it, and the key is used.
+                        if let Some(intent) = keep {
+                            self.keep_unclaimed(intent, &mut *ops);
+                            return;
+                        }
                         // No action took the intent: the key is the focused
                         // widget's after all, delivered below as if no
                         // shortcut had matched. The standard edit shortcuts
-                        // depend on this — Ctrl+C is bound in every tree, and
+                        // depend on this: Ctrl+C is bound in every tree, and
                         // a widget that copies from its own `on_key` must
                         // still see it.
                     }
@@ -1003,15 +1052,20 @@ impl WidgetTree {
                     // on a control and slides away has not chosen it, and
                     // moving focus at touch-down would leave the ring — and
                     // the caret — on a control the user never activated. See
-                    // `focus_on_release`.
+                    // `focus_on_release`. A widget built with
+                    // `focus_on_click(false)` takes no focus from either.
                     if !pressing.kind.is_direct()
                         && let Some(focusable) = focusable
                     {
-                        self.focus_with_origin_ops(
-                            focusable,
-                            crate::focus::FocusOrigin::Pointer(pressing.kind),
-                            &mut *ops,
-                        );
+                        if self.click_may_focus(focusable) {
+                            self.focus_with_origin_ops(
+                                focusable,
+                                crate::focus::FocusOrigin::Pointer(pressing.kind),
+                                &mut *ops,
+                            );
+                        } else {
+                            self.commit_pending_edit(&mut *ops);
+                        }
                     }
                     self.dispatch_to_widget(target, &event, &mut *ops);
                     // Enrol the competitors that only become knowable once the
@@ -1432,12 +1486,10 @@ impl WidgetTree {
 
         // Drain ctx side effects regardless of whether a menu showed —
         // a factory that returns `None` may still have queued intents,
-        // updated signals, or requested a frame.
-        let drain_anchor = menu_decision
-            .as_ref()
-            .map(|(id, _)| *id)
-            .or_else(|| self.arena.roots().first().copied())
-            .unwrap_or(target);
+        // updated signals, or requested a frame. With no menu, they start
+        // where the menu was asked for, so every factory the walk called
+        // (each one an ancestor of `target`) is on their way to the root.
+        let drain_anchor = menu_decision.as_ref().map(|(id, _)| *id).unwrap_or(target);
         self.collect_from_ctx(ctx, drain_anchor);
 
         let Some((owner_id, menu_widget)) = menu_decision else {
@@ -1809,6 +1861,64 @@ impl WidgetTree {
         self.presses.next_deadline().map(|t| self.instant_for(t))
     }
 
+    /// The click about to be dispatched lands on a control that takes no
+    /// focus from it, so it blurs nothing: have the focused widget, and each
+    /// of its ancestors, commit the edit it holds
+    /// ([`on_commit_edit`](crate::widget_builder::HandlerSet::on_commit_edit)),
+    /// innermost first, as a blur would have made it, so that the command
+    /// the click runs sees the value typed (AppKit's `commitEditing`).
+    pub(crate) fn commit_pending_edit(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        let Some(focus) = self.focused.filter(|id| self.arena.is_active(*id)) else {
+            return;
+        };
+        let mut chain = vec![focus];
+        let mut current = focus;
+        while let Some(parent) = self.arena.parent(current) {
+            chain.push(parent);
+            current = parent;
+        }
+        for id in chain {
+            for external in [true, false] {
+                let handler = self.arena.get_mut(id).and_then(|node| {
+                    let handlers = if external {
+                        &mut node.external_handlers
+                    } else {
+                        &mut node.handlers
+                    };
+                    handlers.on_commit_edit.take()
+                });
+                let Some(mut handler) = handler else { continue };
+                let mut ctx = self.make_event_context(&mut *ops).with_dispatch_node(id);
+                handler(&mut ctx);
+                if let Some(node) = self.arena.get_mut(id) {
+                    let handlers = if external {
+                        &mut node.external_handlers
+                    } else {
+                        &mut node.handlers
+                    };
+                    // A rebuild the commit caused installed a new one: keep it.
+                    if handlers.on_commit_edit.is_none() {
+                        handlers.on_commit_edit = Some(handler);
+                    }
+                }
+                self.collect_from_ctx(ctx, id);
+            }
+        }
+    }
+
+    /// Whether a click or a tap may move focus to `focusable`, the focusable
+    /// widget it landed on or in: false when that widget was built with
+    /// [`focus_on_click(false)`](crate::widget_builder::HandlerSet::focus_on_click),
+    /// which a pointer activates without focusing. Asked of that one node, as
+    /// GTK's `focus-on-click` is, so a text field inside a toolbar built with
+    /// the flag still takes focus; a composite whose focusable node is a child
+    /// of its own forwards the flag to it.
+    fn click_may_focus(&self, focusable: WidgetId) -> bool {
+        self.arena
+            .get(focusable)
+            .is_none_or(|node| node.focus_on_click)
+    }
+
     /// Assign the focus a direct pointer's press deferred, if the release
     /// earned it.
     ///
@@ -1818,7 +1928,10 @@ impl WidgetTree {
     /// recognizer applies to activation, applied to focus so the two cannot
     /// disagree. A press that found no focusable defers nothing.
     ///
-    /// A no-op for an indirect pointer, which focused at press.
+    /// A no-op for an indirect pointer, which focused at press. For a widget
+    /// built with `focus_on_click(false)` it moves no focus and has the
+    /// focused widget commit its pending edit instead
+    /// ([`commit_pending_edit`](Self::commit_pending_edit)).
     fn focus_on_release(&mut self, position: Point, ops: &mut dyn crate::window::WindowOps) {
         let releasing = self.current_input.pointer;
         if !releasing.kind.is_direct() {
@@ -1828,10 +1941,15 @@ impl WidgetTree {
         let Some(pressed) = self.presses.get(pointer).and_then(|p| p.focusable) else {
             return;
         };
-        let released_on = self
-            .hit_test_for(position, &releasing)
-            .and_then(|target| self.find_focusable_at_or_above(target));
-        if released_on == Some(pressed) {
+        let Some(target) = self.hit_test_for(position, &releasing) else {
+            return;
+        };
+        if self.find_focusable_at_or_above(target) != Some(pressed) {
+            return;
+        }
+        if !self.click_may_focus(pressed) {
+            self.commit_pending_edit(&mut *ops);
+        } else {
             self.focus_with_origin_ops(
                 pressed,
                 crate::focus::FocusOrigin::Pointer(releasing.kind),
@@ -2889,19 +3007,20 @@ impl WidgetTree {
                     request,
                 }
             }));
+        // `send_intent_from_focus` falls back to the handler's widget when
+        // the dismissals below leave nothing focused. Its walk is noted
+        // before they close the overlay it may be in, so it still goes on
+        // from the widget that overlay was attached to; and the modal it
+        // stopped at, which, once closed, sends it to the content root.
+        let focus_intents = std::mem::take(&mut ctx.pending_focus_intents);
+        let (fallback_crossings, fallback_modal) = if focus_intents.is_empty() {
+            (Vec::new(), None)
+        } else {
+            let (_, crossings, modal) = self.intent_walk(source_widget, &[]);
+            (crossings, modal)
+        };
         if ctx.dismiss_modal && !self.dismiss_modal_for_source(source_widget, &mut *ops) {
             self.pending_modal_dismissal = true;
-        }
-        // After the dismissal above, which hands focus back to whatever the
-        // modal was opened over: `send_intent_from_focus` means that widget.
-        if !ctx.pending_focus_intents.is_empty() {
-            let from = self
-                .focused
-                .filter(|id| self.arena.is_active(*id))
-                .unwrap_or(source_widget);
-            for intent in ctx.pending_focus_intents {
-                self.enqueue_intent(from, intent, true);
-            }
         }
         for callback in ctx.idle_callbacks {
             self.idle_queue.push_boxed(callback);
@@ -2962,6 +3081,41 @@ impl WidgetTree {
         }
         for preserve_content in ctx.dismiss_descendant_overlays {
             self.dismiss_child_overlays_for_source(source_widget, preserve_content, &mut *ops);
+        }
+        // After every dismissal above, each of which may hand focus back to
+        // what its overlay was opened over (a modal, a menu closing its
+        // chain): `send_intent_from_focus` means that widget, not the row in
+        // the closing menu that still held focus when the handler ran. With
+        // nothing focused, it is the handler's widget, across the overlays
+        // it was in; but a modal that has closed was the whole window to its
+        // rows (a palette opened with nothing focused), so the intent starts
+        // where one with no source does, at the content root.
+        if !focus_intents.is_empty() {
+            let modal_closed = fallback_modal
+                .is_some_and(|content| self.overlay_manager.find_by_content(content).is_none());
+            let start = match self.focused.filter(|id| self.arena.is_active(*id)) {
+                Some(focus) => Some((focus, None)),
+                None if modal_closed => self.intent_anchor().map(|root| (root, None)),
+                // A handler outside the modal that is up (an app callback at
+                // the content root, a native menu item): as if focus were in
+                // the modal, which is in front of everything else.
+                None if fallback_modal.is_none()
+                    && self.overlay_manager.topmost_modal().is_some() =>
+                {
+                    self.focus_or_modal().map(|modal| (modal, None))
+                }
+                None => Some((source_widget, Some(fallback_crossings))),
+            };
+            if let Some((start, crossings)) = start {
+                for intent in focus_intents {
+                    match &crossings {
+                        None => self.enqueue_intent(start, intent, true),
+                        Some(crossings) => {
+                            self.enqueue_intent_crossing(start, intent, true, crossings.clone())
+                        }
+                    }
+                }
+            }
         }
         let deferred_row_activations =
             self.apply_tree_mutations(std::mem::take(&mut ctx.tree_mutations));

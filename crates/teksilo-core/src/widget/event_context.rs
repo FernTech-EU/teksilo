@@ -347,6 +347,9 @@ pub struct EventContext<'ops> {
     /// the tree holds once this handler's effects, a modal dismissal among
     /// them, have been applied.
     pub(crate) pending_focus_intents: Vec<crate::intent::Intent>,
+    /// The name of the intent whose action is running this handler, if it
+    /// is an action's. See [`handling_intent`](EventContext::handling_intent).
+    pub(crate) handling_intent: Option<&'static str>,
     /// The dispatcher sets this to the appropriate
     /// [`IntentSource`](crate::telemetry::IntentSource) before
     /// invoking a typed handler (menu select → `Menu`, AccessKit
@@ -568,6 +571,7 @@ impl<'ops> EventContext<'ops> {
             app_context: None,
             pending_intents: Vec::new(),
             pending_focus_intents: Vec::new(),
+            handling_intent: None,
             current_source: None,
             pending_key_capture: None,
             cancel_key_capture: false,
@@ -1008,16 +1012,38 @@ impl<'ops> EventContext<'ops> {
     /// back to the editor the palette was opened over, and the intent then
     /// walks from that editor, so the actions it registered answer. Sent with
     /// `send_intent`, the same intent would start from the palette, which is
-    /// gone by the time the walk runs, and only window-global actions could
-    /// catch it.
+    /// gone by the time the walk runs, and walk on from the widget the palette
+    /// was attached to rather than from the editor.
     ///
-    /// Falls back to this handler's widget when nothing is focused.
+    /// A menu row is the other such surface. It closes its menu
+    /// ([`dismiss_self_overlay_chain`](Self::dismiss_self_overlay_chain)),
+    /// which gives focus back to the widget the menu was opened over, and its
+    /// command starts there: a menu bar's Edit ▸ Copy copies in the focused
+    /// field. The focus is read after every overlay this handler closes has
+    /// given focus back, whatever order the handler asked for things in.
+    ///
+    /// With nothing focused, it starts in the topmost modal overlay that is
+    /// up when this handler is not in one (as if focus were there: a dialog
+    /// is in front of the page), and otherwise falls back to this handler's
+    /// widget, its walk crossing the overlays it was in as they were when the
+    /// handler ran; when the handler closed the modal it was in (a palette
+    /// opened with nothing focused), to the window's root instead, where an
+    /// intent with no source widget starts.
     pub fn send_intent_from_focus(&mut self, intent: impl Into<crate::intent::Intent>) {
         let mut intent: crate::intent::Intent = intent.into();
         if let Some(src) = self.current_source {
             intent.source = src;
         }
         self.pending_focus_intents.push(intent);
+    }
+
+    /// The name of the intent this handler is the action of, `None` outside
+    /// an [`Action`](crate::action::Action)'s handler. What a surface opened
+    /// by a command reads to know which command opened it: the command
+    /// palette closes again on the chord of the command that presented it.
+    #[doc(hidden)]
+    pub fn handling_intent(&self) -> Option<&'static str> {
+        self.handling_intent
     }
 
     /// Run a closure with the given `IntentSource` active. Any
@@ -1937,6 +1963,13 @@ impl<'ops> EventContext<'ops> {
     }
 
     /// Dismiss the current framework-owned modal presentation.
+    ///
+    /// For a modal presented in the window, an intent this handler sends is
+    /// dispatched once the modal has closed, so it is no longer kept inside
+    /// it: [`send_intent`](Self::send_intent) walks on from the widget the
+    /// modal was attached to, and
+    /// [`send_intent_from_focus`](Self::send_intent_from_focus) starts at the
+    /// focus the modal gave back.
     pub fn dismiss_modal(&mut self) {
         self.dismiss_modal = true;
     }

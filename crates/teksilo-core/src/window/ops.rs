@@ -188,6 +188,30 @@ pub trait WindowOps {
 
     /// Abandon the quit under way, if any. Default: no-op.
     fn cancel_quit(&mut self) {}
+
+    /// Take the activation token the event being dispatched carried, while
+    /// no window operation has used it: an intent kept for another tree takes
+    /// it with it, and nothing else can use it afterwards (a token is good
+    /// for one activation). Default: `None`, for a sink with no application
+    /// behind it.
+    #[doc(hidden)]
+    fn take_activation_token(&mut self) -> Option<String> {
+        None
+    }
+
+    /// Hold `token`, which an intent routed from another tree carried, for
+    /// the first window the actions it reaches open or raise. Paired with
+    /// [`release_activation_token`](Self::release_activation_token).
+    /// Default: no-op.
+    #[doc(hidden)]
+    fn hold_activation_token(&mut self, _token: String) {}
+
+    /// The routed intent's actions have run: a token they did not use is
+    /// left to a `WindowState::focus()` they queued, for this turn only, as
+    /// after any event that carried one. One they used leaves in place a
+    /// token already waiting for such a focus. Default: no-op.
+    #[doc(hidden)]
+    fn release_activation_token(&mut self) {}
 }
 
 /// What a platform can do about an on-screen keyboard.

@@ -119,6 +119,58 @@ impl ActionBuilder {
     }
 }
 
+/// The intents the application tree's actions take, as a window's tree sees
+/// them.
+///
+/// A shortcut whose intent nothing in its window takes is offered to the
+/// application tree when that tree takes it, and its key falls through to the
+/// focused widget otherwise. The window decides while it dispatches the key,
+/// when the application tree cannot be borrowed, so `teksilo-app` shares one
+/// of these between the application tree, which fills it whenever it has run
+/// ([`WidgetTree::publish_application_scope`](crate::WidgetTree::publish_application_scope)),
+/// and every window's tree, which reads it
+/// ([`WidgetTree::set_application_scope`](crate::WidgetTree::set_application_scope)).
+///
+/// It keeps each action's [enabled predicate](ActionBuilder::enabled_when),
+/// not its value, so an action enabled or disabled since the last publish is
+/// answered for as it is now. An action that may decline when it runs
+/// ([`on_invoke_with_response`](ActionBuilder::on_invoke_with_response)) counts
+/// as taking the intent.
+#[doc(hidden)]
+#[derive(Clone, Default)]
+pub struct ApplicationScope {
+    actions: std::rc::Rc<std::cell::RefCell<Vec<(&'static str, Option<Prop<bool>>)>>>,
+}
+
+impl ApplicationScope {
+    /// An empty scope: the application takes nothing.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether an enabled application action takes intents named `name`.
+    pub fn takes(&self, name: &str) -> bool {
+        self.actions.borrow().iter().any(|(intent, enabled)| {
+            *intent == name && enabled.as_ref().is_none_or(|enabled| enabled.get())
+        })
+    }
+
+    /// Replace what the application takes with `actions`, intent names
+    /// with their enabled predicates.
+    pub(crate) fn replace(&self, actions: Vec<(&'static str, Option<Prop<bool>>)>) {
+        *self.actions.borrow_mut() = actions;
+    }
+}
+
+impl std::fmt::Debug for ApplicationScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let actions = self.actions.borrow();
+        f.debug_list()
+            .entries(actions.iter().map(|(intent, _)| intent))
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

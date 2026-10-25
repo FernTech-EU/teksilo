@@ -28,7 +28,8 @@
 //!   ([`TextInputField::read_only`]).
 //! - Commit hooks: Enter fires
 //!   [`on_submit_fn`](TextInputField::on_submit_fn) and focus loss
-//!   fires [`on_blur_fn`](TextInputField::on_blur_fn).
+//!   fires [`on_blur_fn`](TextInputField::on_blur_fn), as does a click on
+//!   a control that takes no focus (a toolbar button), before its command.
 //! - Non-editable trailing
 //!   [`suffix`](TextInputField::suffix), rendered flush-right inside
 //!   the field's bounds (Qt's `QSpinBox::suffix`). Caret cannot
@@ -455,6 +456,12 @@ impl TextInputField {
     /// Closure fired once per focus-loss, after selection/scroll
     /// have been reset. SpinBox-style callers parse and reformat
     /// here; validators revalidate here.
+    ///
+    /// Also fired, with the field keeping focus, when a click lands on a
+    /// control built with `focus_on_click(false)` (a toolbar button, a menu
+    /// bar title): such a click blurs nothing, and the command it runs must
+    /// still see the value this commits, as AppKit's `commitEditing`
+    /// ensures.
     pub fn on_blur_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_blur = Some(Box::new(f));
         self

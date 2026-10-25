@@ -60,6 +60,8 @@ pub mod window_chrome;
 pub(crate) mod test_widgets;
 
 pub use accessibility::{AccessNodeBuilder, AccessibilityInfo, Announcement};
+#[doc(hidden)]
+pub use action::ApplicationScope;
 pub use action::{Action, ActionBuilder, ActionHandler};
 pub use animated_quad::{AnimatedQuadHandle, AnimatedQuadKind, AnimatedQuadRegistry};
 pub use animation::AnimationRequest;

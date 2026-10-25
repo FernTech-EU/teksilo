@@ -211,6 +211,12 @@ pub struct WidgetNode {
     /// `-webkit-app-region: no-drag`. Default `false`. See the `DeadZone`
     /// wrapper widget.
     pub gesture_dead_zone: bool,
+    /// When `false`, a click or a tap that lands on this node or anywhere in
+    /// its subtree moves no focus: not to this node, not to a focusable node
+    /// inside it, not to a focusable ancestor. Keyboard focus, programmatic
+    /// focus and an assistive technology's focus still reach it. Default
+    /// `true`. Set with `.focus_on_click(..)`.
+    pub focus_on_click: bool,
     /// What a **hold** on this node's subtree means when the widget itself does
     /// not say — the selector for the tree-owned long-press route. Default
     /// `LongPressRole::Auto`. Set via `.long_press_role(..)`. A node's own
@@ -521,6 +527,7 @@ impl WidgetNode {
             ime: None,
             event_pass_through: false,
             gesture_dead_zone: false,
+            focus_on_click: true,
             long_press_role: crate::widget_tree::touch_route::LongPressRole::Auto,
             touch_action: TouchAction::AUTO,
             pan_claim: None,
@@ -2228,6 +2235,9 @@ impl WidgetArena {
             }
             if let Some(dead_zone) = handler_set.gesture_dead_zone {
                 node.gesture_dead_zone = dead_zone;
+            }
+            if let Some(focus_on_click) = handler_set.focus_on_click {
+                node.focus_on_click = focus_on_click;
             }
             if let Some(role) = handler_set.long_press_role {
                 node.long_press_role = role;

@@ -1079,6 +1079,9 @@ impl WidgetTree {
     /// pre-show cleanup paths, where the broad "dismiss everything"
     /// semantics also closed an outer composite tooltip or modal
     /// hosting the trigger.
+    ///
+    /// Focus held inside one of them goes back where it was when the
+    /// lowest of them opened.
     pub(super) fn dismiss_all_overlays_except_hosts(
         &mut self,
         ops: &mut dyn crate::window::WindowOps,
@@ -1091,9 +1094,25 @@ impl WidgetTree {
             .filter(|&id| !self.overlay_is_host_surface(id))
             .collect();
 
+        // Focus inside one of them is cleared with it. It goes back where it
+        // was when the lowest of them opened (the stack runs bottom to top),
+        // as Escape would give it back, rather than being left nowhere: a
+        // menu bar's menu replaced by its neighbour, or closed from its
+        // title, comes through here.
+        let focus_before = self.focused;
+        let mut restore = None;
         for overlay_id in to_dismiss {
-            let dismissed = self.overlay_manager.dismiss(overlay_id);
+            let (dismissed, focus_restore) =
+                self.overlay_manager.dismiss_with_focus_restore(overlay_id);
             self.dormant_dismissed_content(&dismissed, &mut *ops);
+            restore = restore.or(focus_restore);
+        }
+        if focus_before.is_some()
+            && self.focused.is_none()
+            && let Some(restore_id) = restore
+            && self.arena.is_active(restore_id)
+        {
+            self.focus_ops(restore_id, &mut *ops);
         }
     }
 
@@ -2285,6 +2304,7 @@ impl WidgetTree {
 mod tests {
     use super::*;
     use crate::test_widgets::FillWidget;
+    use crate::test_widgets::StackWidget;
 
     #[test]
     fn is_visible_reflects_dormancy() {
@@ -2574,6 +2594,112 @@ mod tests {
             !tree.overlay_is_host_surface(dropdown),
             "a plain dropdown overlay is not a host surface"
         );
+    }
+
+    /// A field, and an overlay opened over it with a focusable `inside`.
+    fn overlay_over_a_field(tree: &mut WidgetTree) -> (WidgetId, WidgetId, WidgetId) {
+        let field = tree.add(FillWidget::new().focusable());
+        let inside = tree.add(FillWidget::new().focusable());
+        let content = tree.add(StackWidget::new().child(inside));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(field);
+        tree.show_overlay_from_source(
+            field,
+            crate::overlay::OverlayRequest::new(
+                content,
+                field,
+                crate::overlay::OverlayPlacement::Below,
+                crate::overlay::DismissBehavior::EscapeOrClickOutside,
+            ),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        (field, content, inside)
+    }
+
+    fn dismiss_all_except_hosts(tree: &mut WidgetTree) {
+        tree.run_with_event_context(&mut crate::window::NoopWindowOps, |ctx| {
+            ctx.dismiss_all_except_hosts();
+        });
+    }
+
+    /// Closing the overlays with `dismiss_all_except_hosts` while focus is in
+    /// one gives focus back to where it was when the first of them opened, as
+    /// Escape does, rather than leaving the window with nothing focused. A
+    /// menu bar's menu replaced by its neighbour, or closed by a click on its
+    /// title, goes through here.
+    #[test]
+    fn dismissing_all_except_hosts_gives_back_the_focus_it_took_away() {
+        let mut tree = WidgetTree::new();
+        let (field, content, inside) = overlay_over_a_field(&mut tree);
+        let nested = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(inside);
+        tree.show_overlay_from_source(
+            inside,
+            crate::overlay::OverlayRequest::new(
+                nested,
+                inside,
+                crate::overlay::OverlayPlacement::Below,
+                crate::overlay::DismissBehavior::EscapeOrClickOutside,
+            ),
+        );
+        tree.focus(nested);
+        assert!(tree.is_active(content), "precondition");
+        dismiss_all_except_hosts(&mut tree);
+        assert!(tree.active_overlays().is_empty());
+        assert_eq!(tree.focused(), Some(field));
+    }
+
+    /// Of several unrelated overlays, focus goes back where it was when the
+    /// lowest opened, not where the one holding it would give it back: the
+    /// window as it was before any of them, as closing them one by one with
+    /// Escape would leave it.
+    #[test]
+    fn dismissing_all_except_hosts_gives_focus_back_as_the_lowest_overlay_found_it() {
+        let mut tree = WidgetTree::new();
+        let first_field = tree.add(FillWidget::new().focusable());
+        let second_field = tree.add(FillWidget::new().focusable());
+        let open_over = |tree: &mut WidgetTree, field: WidgetId| {
+            let inside = tree.add(FillWidget::new().focusable());
+            let content = tree.add(StackWidget::new().child(inside));
+            tree.layout(SizeProposal::exact(200.0, 100.0));
+            tree.focus(field);
+            // Placed in the viewport, so focus leaving it does not close it.
+            tree.show_overlay_from_source(
+                field,
+                crate::overlay::OverlayRequest::new(
+                    content,
+                    field,
+                    crate::overlay::OverlayPlacement::BottomCenter,
+                    crate::overlay::DismissBehavior::Manual,
+                ),
+            );
+            tree.layout(SizeProposal::exact(200.0, 100.0));
+            inside
+        };
+        open_over(&mut tree, first_field);
+        let second_inside = open_over(&mut tree, second_field);
+        tree.focus(second_inside);
+        assert_eq!(tree.active_overlays().len(), 2, "two overlays, unrelated");
+        dismiss_all_except_hosts(&mut tree);
+        assert!(tree.active_overlays().is_empty());
+        assert_eq!(
+            tree.focused(),
+            Some(first_field),
+            "the lowest overlay's focus, not the top one's"
+        );
+    }
+
+    /// With focus outside the overlays they close, it stays where it is.
+    #[test]
+    fn dismissing_all_except_hosts_leaves_focus_outside_them_alone() {
+        let mut tree = WidgetTree::new();
+        let (_field, _content, _inside) = overlay_over_a_field(&mut tree);
+        let other = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(other);
+        dismiss_all_except_hosts(&mut tree);
+        assert_eq!(tree.focused(), Some(other));
     }
 
     #[test]

@@ -122,6 +122,15 @@ impl Widget for MenuBarTrigger {
                             menu_ctx.navigate(right_delta, ctx);
                             EventResponse::Handled
                         }
+                        // Leave the bar for the widget focused before it took
+                        // focus: the second Escape after F10, the first after
+                        // F10 with no menu opened.
+                        WidgetEvent::KeyDown {
+                            key: Key::Escape, ..
+                        } => {
+                            menu_ctx.leave(ctx);
+                            EventResponse::Handled
+                        }
                         _ => EventResponse::Ignored,
                     }
                 }
@@ -154,7 +163,21 @@ impl Widget for MenuBarTrigger {
                     }
                 }
             })
+            .on_focus({
+                let menu_ctx = menu_ctx.clone();
+                let self_id = ctx.self_id();
+                move |gained: bool, ctx: &mut EventContext| {
+                    if gained {
+                        menu_ctx.take_handoff(self_id, ctx);
+                    }
+                }
+            })
+            // A click opens the menu over the editor the user is working in
+            // and leaves it focused, so the menu gives focus back to it and a
+            // command chosen there acts on it. F10 and Alt still focus the
+            // trigger, and so does Tab.
             .focusable(true)
+            .focus_on_click(false)
             .cursor(CursorIcon::Pointer);
 
         ctx.apply_self_handlers(handler_set);

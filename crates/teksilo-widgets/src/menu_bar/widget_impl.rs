@@ -45,7 +45,7 @@ impl Widget for MenuBar {
         let theme_signal = ctx.theme_signal();
 
         let open_index: Signal<Option<usize>> = ctx.signal(None);
-        let menu_ctx = MenuContext::new(open_index);
+        let menu_ctx = MenuContext::new(open_index, self.menu_focus.clone());
 
         // Build the full row: [leading_slot | triggers... | Spacer | trailing_slot]
         let mut row = HStack::new().spacing(2.0);
@@ -125,6 +125,17 @@ impl Widget for MenuBar {
         for (i, (&tid, &cid)) in trigger_ids.iter().zip(content_ids.iter()).enumerate() {
             menu_ctx.register(i, tid, cid, cid);
         }
+
+        // Follow the window's focus: where it was before the bar took it, so
+        // Escape and a chosen row give it back there, and the moves that tell
+        // a trigger it got focus back from a closing menu (see `MenuContext`).
+        // The text-surface handle is the tree's focus signal.
+        let focus = ctx.text_surfaces().focus_signal();
+        menu_ctx.prime_focus(focus.get());
+        ctx.effect(&focus, {
+            let menu_ctx = menu_ctx.clone();
+            move |focus| menu_ctx.note_focus(*focus)
+        });
 
         // Spacer pushes triggers left, trailing slot right
         row = row.child(Spacer::new());
@@ -257,14 +268,18 @@ impl Widget for MenuBar {
             // an accessible name ("Menu"). Binding `expanded_when(revealed)`
             // completes the ARIA disclosure pattern: the button reports
             // `expanded=true` while the bar is shown, `false` while collapsed.
+            // Takes no focus from a click, like the triggers: the revealed
+            // bar then gives focus back to the editor when it closes.
             let hamburger = IconButton::menu()
                 .size(self.hamburger_size)
                 .expanded_when(revealed.clone())
                 .on_activate_fn({
                     let reveal = reveal.clone();
                     move |ctx| reveal(ctx)
-                });
+                })
+                .focus_on_click(false);
             let hamburger_id = ctx.add(hamburger);
+            menu_ctx.set_hamburger(hamburger_id);
             anchor_cell.set(Some(hamburger_id));
             // Let the bar's `RevealHeightBox` measure the hamburger so the
             // floating overlay's height matches the button.

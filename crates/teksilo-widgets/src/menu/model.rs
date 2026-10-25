@@ -95,6 +95,13 @@ impl MenuEntry {
     }
 
     /// Fire this intent by name when the item is chosen (in-window or native).
+    ///
+    /// It is sent from the focused widget, as the entry's shortcut is, once
+    /// an in-window menu has closed and given focus back to the widget the
+    /// user was working in: an action on that widget, on one of its
+    /// ancestors or on the window's root takes it, so
+    /// [`register_action`](teksilo_core::BuildContext::register_action) on
+    /// the root is enough for an app-wide command.
     pub fn intent(mut self, name: &'static str) -> Self {
         self.intent = Some(name);
         self
@@ -184,6 +191,13 @@ impl MenuEntry {
     }
 
     /// Build the live [`MenuItem`] widget for the in-window menu.
+    ///
+    /// The row sends its intent from the window's focus, as the entry's
+    /// shortcut and the native menu bar do, resolved once the menu has closed
+    /// and given focus back: Edit ▸ Copy copies in the focused field, and an
+    /// action registered on the window's root or anywhere between it and the
+    /// focus answers. Sent from the row, the intent would walk from the menu
+    /// to the bar's trigger and miss the focused widget.
     pub(crate) fn to_menu_item(&self) -> MenuItem {
         // Pass the enabled `Prop` through (not its current value) so a bound
         // signal greys the in-window item out reactively.
@@ -195,7 +209,7 @@ impl MenuEntry {
         let action = self.action.clone();
         mi = mi.on_activate_fn(move |ctx| {
             if let Some(name) = intent {
-                ctx.send_intent(Intent::new(name));
+                ctx.send_intent_from_focus(Intent::new(name));
             }
             if let Some(a) = &action {
                 a(ctx);
@@ -970,7 +984,9 @@ mod tests {
         }
 
         /// Choose the entry in the native menu bar: run its activation the way
-        /// `teksilo-app`'s `try_route_native_menu_payload` does.
+        /// `teksilo-app`'s `native_menu_route::fire_native_menu_item` does
+        /// when the window whose menu it is has the focus, the action
+        /// anchored at the root and then the intent from focus.
         fn choose_natively(&mut self) {
             let activation = self.entry.native_activation();
             assert_eq!(
@@ -981,11 +997,11 @@ mod tests {
             self.tree
                 .run_with_event_context(&mut teksilo_core::window::NoopWindowOps, |ctx| {
                     ctx.with_intent_source(IntentSource::Menu, |ctx| {
-                        if let Some(name) = activation.intent {
-                            ctx.send_intent(Intent::new(name));
-                        }
                         if let Some(action) = &activation.action {
                             action(ctx);
+                        }
+                        if let Some(name) = activation.intent {
+                            ctx.send_intent_from_focus(Intent::new(name));
                         }
                     });
                 });
