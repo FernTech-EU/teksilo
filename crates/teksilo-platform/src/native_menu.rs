@@ -33,13 +33,16 @@
 //! action inside the originating window's `EventContext` — the same
 //! `Action`/`Intent` pipeline an in-window `MenuItem` uses.
 //!
-//! # Multi-window
+//! # The application menu and the windows' menus
 //!
-//! On macOS there is exactly one global menu bar; it must reflect the *focused*
-//! window. Each window registers its snapshot via [`NativeMenuHandle::set_window_menu`];
-//! `teksilo-app` calls [`NativeMenuHandle::activate_window`] on focus change so
-//! the focused window's menu becomes `mainMenu`. Single-window apps work with
-//! set-on-build alone.
+//! On macOS there is exactly one global menu bar. It shows the
+//! **application menu** ([`NativeMenuHandle::set_app_menu`]), which
+//! `teksilo-app` installs from the application tree, whenever the key window
+//! has no menu of its own and while no window is open. A window with a menu
+//! of its own ([`NativeMenuHandle::set_window_menu`], from a `MenuBar` built
+//! with `MenuBar::from_model`) replaces it while that window is key.
+//! `teksilo-app` calls [`NativeMenuHandle::activate_window`] on every focus
+//! change, which picks between the two.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -91,12 +94,16 @@ pub struct NativeKeyEquivalent {
 }
 
 /// Standard, platform-defined menus with required placement/behaviour (the
-/// macOS App / Window / Help menus, with their About / Hide / Quit /
-/// window-management items wired to system selectors). The backend supplies the
+/// macOS App / Window / Help menus, with their About / Services / Hide /
+/// Hide Others / Show All / Quit and window-management items wired to system
+/// selectors). The backend supplies the
 /// native structure; the in-window `MenuBar` ignores these.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StandardMenuRole {
-    /// The application menu (About / Hide / Quit). Must be first.
+    /// The application menu (About, Settings, Services, Hide, Hide Others,
+    /// Show All, Quit). The macOS backend shows
+    /// it first in the bar wherever the snapshot declares it, since AppKit
+    /// shows the bar's first menu as the application menu.
     App,
     /// The Window menu (Minimize / Zoom / window list).
     Window,
@@ -117,10 +124,17 @@ pub struct StandardLabels {
     pub about: String,
     /// "Settings…" / "Preferences…" (App). Only rendered when the snapshot
     /// also carries a `settings_item` — the platform has no default action
-    /// for it, unlike About / Hide / Quit.
+    /// for it, unlike About, Hide and the rest.
     pub settings: String,
+    /// "Services" (App): the submenu AppKit fills with the services that
+    /// apply to the current selection.
+    pub services: String,
     /// "Hide …" (App).
     pub hide: String,
+    /// "Hide Others" (App).
+    pub hide_others: String,
+    /// "Show All" (App).
+    pub show_all: String,
     /// "Quit …" (App).
     pub quit: String,
     /// "Minimize" (Window).
@@ -148,6 +162,10 @@ pub struct StandardRoutedItem {
 }
 
 /// One node of a native menu tree.
+// A standard menu's labels make it the large variant. A snapshot is built
+// once per install and holds a handful of standard menus, so boxing them
+// would cost every construction for no measurable saving.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum NativeMenuNode {
     /// A leaf command.
@@ -181,21 +199,21 @@ pub enum NativeMenuNode {
         role: StandardMenuRole,
         /// Localized display strings (supplied by the widget layer).
         labels: StandardLabels,
-        /// App menu only: route **Quit** back to the app under this item
-        /// instead of firing the platform's own terminate selector.
+        /// App menu only: build **Quit** as an ordinary routed item under this
+        /// id (the activation recorded for it, and the key equivalent the
+        /// widget layer resolved), instead of the platform's own terminate
+        /// selector.
         ///
-        /// `None` — the default — keeps the system behaviour: on macOS the item
-        /// is bound to `terminate:`, which works with no app wiring at all and
-        /// is why ⌘Q is live even for an app that declares no menus.
+        /// The widget layer always routes it: the activation sends the app's
+        /// quit intent, and asks the application to quit through every
+        /// window's close guard when nothing takes the intent or there is none
+        /// ([`NativeMenuActivation::quits`]). A main-menu key equivalent is
+        /// dispatched by the platform before the responder chain, and
+        /// `terminate:` does not run winit's exit path, so the platform's own
+        /// item would skip every guard.
         ///
-        /// `Some(..)` builds Quit as an ordinary routed item — same id → the
-        /// activation recorded for it, and the key equivalent the widget layer
-        /// resolved. **An app with anything to lose on exit must set this**: a
-        /// main-menu key equivalent is dispatched by the platform before the
-        /// responder chain, and `terminate:` does not run winit's exit path, so
-        /// an in-app quit shortcut is shadowed rather than merely duplicated.
-        /// Whatever the app routes to then owes the exit itself — nothing here
-        /// terminates.
+        /// `None` binds the item to the platform's terminate selector
+        /// (`terminate:` on macOS), for a snapshot built by other means.
         quit_item: Option<StandardRoutedItem>,
         /// App menu only: build a **Settings…** item under this id, placed where
         /// the platform expects it (on macOS: after About), with the key
@@ -244,10 +262,11 @@ pub type MenuActionFn = Rc<dyn Fn(&mut EventContext)>;
 
 /// What choosing a native menu item does: an intent, an action, or both.
 ///
-/// `teksilo-app` runs `action` in the window whose menu the item is in, where
-/// the state it captured lives, then sends `intent` from the focused widget of
-/// the window with the OS focus, which may be another one (a dialog with no
-/// menu of its own).
+/// `teksilo-app` runs `action` where the state it captured lives (the window
+/// whose menu the item is in, or the application tree for an item of the
+/// application menu), then sends `intent` from the focused widget of the
+/// window with the OS focus, which may be another one (a dialog with no menu
+/// of its own), or in the application tree when no window has the focus.
 #[derive(Clone, Default)]
 pub struct NativeMenuActivation {
     /// Fire this intent by name through the `Action`/`Intent` pipeline, from
@@ -255,8 +274,13 @@ pub struct NativeMenuActivation {
     /// `action` has run.
     pub intent: Option<&'static str>,
     /// Or run this closure directly (the escape hatch), in the window whose
-    /// menu the item is in, anchored at that window's root.
+    /// menu the item is in, anchored at that window's root, or in the
+    /// application tree for an item of the application menu.
     pub action: Option<MenuActionFn>,
+    /// The App menu's Quit row: when nothing on the route takes `intent`, or
+    /// there is none, `teksilo-app` asks the application to quit, through
+    /// every window's close guard, instead.
+    pub quits: bool,
 }
 
 impl std::fmt::Debug for NativeMenuActivation {
@@ -264,6 +288,7 @@ impl std::fmt::Debug for NativeMenuActivation {
         f.debug_struct("NativeMenuActivation")
             .field("intent", &self.intent)
             .field("action", &self.action.as_ref().map(|_| "<closure>"))
+            .field("quits", &self.quits)
             .finish()
     }
 }
@@ -285,7 +310,9 @@ pub struct NativeMenuEventPayload {
 
 /// Boxed inside `AppEvent::External` when the user picks an item of the
 /// [application menu](NativeMenuBackend::set_app_menu), the menu shown while
-/// no window's menu is. `teksilo-app` routes it to the application tree.
+/// no window's own menu is. `teksilo-app` runs the item's action in the
+/// application tree and sends its intent from the focus of the window with
+/// the OS focus, or in the application tree when none has it.
 #[derive(Debug, Clone)]
 pub struct NativeAppMenuEventPayload {
     /// The chosen item.
@@ -298,11 +325,13 @@ pub struct NativeAppMenuEventPayload {
 
 /// Swappable native-menu backend. One instance serves the whole app.
 pub trait NativeMenuBackend {
-    /// Build (or replace) the native menu for `window_id` from `menu`. For
-    /// every item the user later chooses, the backend MUST post a
-    /// [`NativeMenuEventPayload`] — with `window_id_owner == window_id` —
-    /// through `poster`. If `window_id` is (or becomes) the active window, the
-    /// backend should also make this menu the visible one.
+    /// Build (or replace) the native menu of `window_id`, a window with a
+    /// menu of its own, from `menu`. For every item the user later chooses,
+    /// the backend MUST post a [`NativeMenuEventPayload`], with
+    /// `window_id_owner == window_id`, through `poster`. If `window_id` is
+    /// the key window (the last one [`activate_window`](Self::activate_window)
+    /// named), or no window has been activated yet, the backend shows this
+    /// menu.
     fn set_window_menu(
         &mut self,
         window_id: TeksiloWindowId,
@@ -310,23 +339,61 @@ pub trait NativeMenuBackend {
         poster: Arc<dyn AppEventPoster>,
     );
 
-    /// Make `window_id`'s previously-set menu the active/visible one (focus
-    /// follows window). No-op if that window never set a menu.
+    /// `window_id` became the key window (focus follows window): show the
+    /// bar [`key_window_bar`] picks, its own menu if it set one, else the
+    /// menu of the window it belongs to (see
+    /// [`set_window_owner`](Self::set_window_owner)), else the
+    /// [application menu](Self::set_app_menu), or, when the application
+    /// declared none, the bar shown before.
     fn activate_window(&mut self, window_id: TeksiloWindowId);
 
-    /// Forget `window_id`'s menu (window closed).
+    /// `window_id` belongs to `owner` (a modal dialog to the window it
+    /// blocks), or to no window (`None`). While `window_id` is key and has
+    /// no menu of its own, the bar shows its owner's, as AppKit keeps the
+    /// menu bar for a panel or a sheet. `teksilo-app` calls it as it opens a
+    /// modal window; the relation goes with
+    /// [`clear_window`](Self::clear_window). The default ignores it, for a
+    /// backend whose menus belong to windows alone.
+    #[doc(hidden)]
+    fn set_window_owner(&mut self, window_id: TeksiloWindowId, owner: Option<TeksiloWindowId>) {
+        let _ = (window_id, owner);
+    }
+
+    /// Forget `window_id`'s menu (the window closed, or no longer has a menu
+    /// of its own). If it was showing, show the
+    /// [application menu](Self::set_app_menu) until another window becomes
+    /// key.
     fn clear_window(&mut self, window_id: TeksiloWindowId);
 
-    /// Apply a reactive delta to a single already-installed item.
+    /// Apply a reactive delta to a single already-installed item, in every
+    /// menu that carries it, the application menu included.
     fn update_item(&mut self, id: MenuItemId, delta: MenuItemDelta);
 
-    /// Set the application menu: the menu shown while no window's menu is,
-    /// after the last window closed. Replaces any earlier one. For every item
-    /// the user later chooses in it, the backend MUST post a
+    /// Whether this backend shows a menu bar the user can open. `false` for
+    /// one that renders nothing ([`NoopNativeMenuBackend`]): `teksilo-app`
+    /// then keeps no row's availability up to date.
+    #[doc(hidden)]
+    fn shows_bar(&self) -> bool {
+        true
+    }
+
+    /// Set the application menu: the menu shown whenever the key window has
+    /// no menu of its own nor an owner with one, and while no window is
+    /// open. `teksilo-app` sets it from the application tree at startup and
+    /// again whenever it changes; it replaces any earlier one. `declared`
+    /// says whether the application declared it: `false` for the default
+    /// App menu `teksilo-app` supplies when it declared none, which a key
+    /// window without a menu does not bring up (see [`key_window_bar`]).
+    /// For every item the user later chooses in it, the backend MUST post a
     /// [`NativeAppMenuEventPayload`] through `poster`. The default does
     /// nothing, for a backend whose menus belong to windows alone.
-    fn set_app_menu(&mut self, menu: NativeMenuSnapshot, poster: Arc<dyn AppEventPoster>) {
-        let _ = (menu, poster);
+    fn set_app_menu(
+        &mut self,
+        menu: NativeMenuSnapshot,
+        poster: Arc<dyn AppEventPoster>,
+        declared: bool,
+    ) {
+        let _ = (menu, poster, declared);
     }
 }
 
@@ -344,14 +411,25 @@ impl NativeMenuBackend for Box<dyn NativeMenuBackend> {
     fn activate_window(&mut self, window_id: TeksiloWindowId) {
         (**self).activate_window(window_id)
     }
+    fn set_window_owner(&mut self, window_id: TeksiloWindowId, owner: Option<TeksiloWindowId>) {
+        (**self).set_window_owner(window_id, owner)
+    }
     fn clear_window(&mut self, window_id: TeksiloWindowId) {
         (**self).clear_window(window_id)
     }
     fn update_item(&mut self, id: MenuItemId, delta: MenuItemDelta) {
         (**self).update_item(id, delta)
     }
-    fn set_app_menu(&mut self, menu: NativeMenuSnapshot, poster: Arc<dyn AppEventPoster>) {
-        (**self).set_app_menu(menu, poster)
+    fn shows_bar(&self) -> bool {
+        (**self).shows_bar()
+    }
+    fn set_app_menu(
+        &mut self,
+        menu: NativeMenuSnapshot,
+        poster: Arc<dyn AppEventPoster>,
+        declared: bool,
+    ) {
+        (**self).set_app_menu(menu, poster, declared)
     }
 }
 
@@ -362,14 +440,33 @@ impl NativeMenuBackend for Box<dyn NativeMenuBackend> {
 /// Per-window map from item id to its activation.
 type WindowActivations = HashMap<MenuItemId, NativeMenuActivation>;
 
+/// A row whose only effect is its intent, enabled only while something on
+/// the intent's route takes it. See [`NativeMenuHandle::refresh_availability`].
+struct Gate {
+    intent: &'static str,
+    /// The row's own enabled state (its `enabled` signal).
+    own: bool,
+    /// Whether the route took the intent at the last refresh.
+    handled: bool,
+    /// What the backend was last told.
+    shown: bool,
+}
+
 struct NativeMenuState {
     backend: RefCell<Box<dyn NativeMenuBackend>>,
     /// Per-window: item id → what to do when chosen.
     activations: RefCell<HashMap<TeksiloWindowId, WindowActivations>>,
     /// The application menu's items → what to do when chosen.
     app_activations: RefCell<WindowActivations>,
-    /// The application menu's Quit row, when the app routes it.
-    app_quit_item: std::cell::Cell<Option<MenuItemId>>,
+    /// The rows that grey out when nothing takes their intent, by id.
+    gates: RefCell<HashMap<MenuItemId, Gate>>,
+    /// The intents taken at the last refresh, `None` once a menu installed
+    /// since has gates the refresh has not evaluated: while it holds the
+    /// same answer, a refresh has nothing to do.
+    refreshed: RefCell<Option<Vec<&'static str>>>,
+    /// How many rows the refreshes evaluated, for the tests.
+    #[cfg(test)]
+    evaluations: std::cell::Cell<usize>,
 }
 
 /// Per-app native-menu service. Registered in app-state by
@@ -388,7 +485,10 @@ impl NativeMenuHandle {
                 backend: RefCell::new(Box::new(backend)),
                 activations: RefCell::new(HashMap::new()),
                 app_activations: RefCell::new(HashMap::new()),
-                app_quit_item: std::cell::Cell::new(None),
+                gates: RefCell::new(HashMap::new()),
+                refreshed: RefCell::new(None),
+                #[cfg(test)]
+                evaluations: std::cell::Cell::new(0),
             }),
         }
     }
@@ -402,6 +502,7 @@ impl NativeMenuHandle {
         activations: HashMap<MenuItemId, NativeMenuActivation>,
         poster: Arc<dyn AppEventPoster>,
     ) {
+        self.gate_rows(&menu, &activations);
         self.inner
             .activations
             .borrow_mut()
@@ -412,53 +513,184 @@ impl NativeMenuHandle {
             .set_window_menu(window_id, menu, poster);
     }
 
-    /// Make `window_id`'s menu the visible one (focus-follows-window).
+    /// `window_id` became the key window: show the bar
+    /// [`key_window_bar`] picks for it.
     pub fn activate_window(&self, window_id: TeksiloWindowId) {
         self.inner.backend.borrow_mut().activate_window(window_id);
+    }
+
+    /// `window_id` belongs to `owner` (a modal dialog to the window it
+    /// blocks): see [`NativeMenuBackend::set_window_owner`].
+    #[doc(hidden)]
+    pub fn set_window_owner(&self, window_id: TeksiloWindowId, owner: Option<TeksiloWindowId>) {
+        self.inner
+            .backend
+            .borrow_mut()
+            .set_window_owner(window_id, owner);
     }
 
     /// Forget a window's menu + activations (window closed).
     pub fn clear_window(&self, window_id: TeksiloWindowId) {
         self.inner.activations.borrow_mut().remove(&window_id);
+        self.forget_dead_gates();
         self.inner.backend.borrow_mut().clear_window(window_id);
     }
 
-    /// Apply a reactive delta to one installed item.
-    pub fn update_item(&self, id: MenuItemId, delta: MenuItemDelta) {
+    /// Apply a reactive delta to one installed item. For a row that greys
+    /// out when nothing takes its intent, a new `enabled` is the row's own
+    /// state, and what reaches the backend is that state and whether the
+    /// intent was taken at the last
+    /// [`refresh_availability`](Self::refresh_availability).
+    pub fn update_item(&self, id: MenuItemId, mut delta: MenuItemDelta) {
+        if let Some(own) = delta.enabled
+            && let Some(gate) = self.inner.gates.borrow_mut().get_mut(&id)
+        {
+            gate.own = own;
+            gate.shown = own && gate.handled;
+            delta.enabled = Some(gate.shown);
+        }
         self.inner.backend.borrow_mut().update_item(id, delta);
     }
 
-    /// Set the application menu, shown while no window's menu is (see
+    /// Grey out or enable again every installed row whose only effect is
+    /// its intent (an item with an intent, no action, and not the App menu's
+    /// Quit), from `handled`, the sorted intent names something on the route
+    /// takes now, combined with the row's own enabled state. Only a row
+    /// whose state changes reaches the backend, through
+    /// [`NativeMenuBackend::update_item`].
+    ///
+    /// `teksilo-app` calls it once per event-loop turn, with what the route
+    /// a chosen row's intent takes answers (the focused window's
+    /// `WidgetTree::handled_intents`, else the application tree's), so the
+    /// menu is current whenever the user opens it: focus, the key window and
+    /// the actions only change while the loop runs. With the same `handled`
+    /// as the last call and no menu installed since, nothing can have
+    /// changed (a row's own state reaches the backend through
+    /// [`update_item`](Self::update_item)), and no row is evaluated.
+    #[doc(hidden)]
+    pub fn refresh_availability(&self, handled: &[&'static str]) {
+        if self
+            .inner
+            .refreshed
+            .borrow()
+            .as_deref()
+            .is_some_and(|last| last == handled)
+        {
+            return;
+        }
+        *self.inner.refreshed.borrow_mut() = Some(handled.to_vec());
+        let mut changed = Vec::new();
+        for (id, gate) in self.inner.gates.borrow_mut().iter_mut() {
+            #[cfg(test)]
+            self.inner.evaluations.set(self.inner.evaluations.get() + 1);
+            gate.handled = handled.binary_search(&gate.intent).is_ok();
+            let shown = gate.own && gate.handled;
+            if shown != gate.shown {
+                gate.shown = shown;
+                changed.push((*id, shown));
+            }
+        }
+        let mut backend = self.inner.backend.borrow_mut();
+        for (id, enabled) in changed {
+            backend.update_item(
+                id,
+                MenuItemDelta {
+                    enabled: Some(enabled),
+                    ..Default::default()
+                },
+            );
+        }
+    }
+
+    /// Whether the backend shows a menu bar at all
+    /// ([`NativeMenuBackend::shows_bar`]): `teksilo-app` refreshes the rows'
+    /// availability only then.
+    #[doc(hidden)]
+    pub fn shows_bar(&self) -> bool {
+        self.inner.backend.borrow().shows_bar()
+    }
+
+    /// How many rows the availability refreshes evaluated.
+    #[cfg(test)]
+    fn evaluations(&self) -> usize {
+        self.inner.evaluations.get()
+    }
+
+    /// The enabled state the backend was last given for a row that greys
+    /// out when nothing takes its intent; `None` for any other item.
+    #[doc(hidden)]
+    pub fn gated_enabled(&self, id: MenuItemId) -> Option<bool> {
+        self.inner.gates.borrow().get(&id).map(|gate| gate.shown)
+    }
+
+    /// Record the rows of `menu` that grey out when nothing takes their
+    /// intent, enabled as `menu` installs them until the next refresh.
+    fn gate_rows(&self, menu: &NativeMenuSnapshot, activations: &WindowActivations) {
+        fn own_enabled(nodes: &[NativeMenuNode], id: MenuItemId) -> Option<bool> {
+            nodes.iter().find_map(|node| match node {
+                NativeMenuNode::Item {
+                    id: item, enabled, ..
+                } if *item == id => Some(*enabled),
+                NativeMenuNode::Submenu { children, .. } => own_enabled(children, id),
+                _ => None,
+            })
+        }
+        let mut gates = self.inner.gates.borrow_mut();
+        // The new rows start enabled: the next refresh evaluates them,
+        // whatever it is told.
+        *self.inner.refreshed.borrow_mut() = None;
+        for (id, activation) in activations {
+            let (Some(intent), None, false) =
+                (activation.intent, &activation.action, activation.quits)
+            else {
+                continue;
+            };
+            let own = own_enabled(&menu.roots, *id).unwrap_or(true);
+            gates.insert(
+                *id,
+                Gate {
+                    intent,
+                    own,
+                    handled: true,
+                    shown: own,
+                },
+            );
+        }
+    }
+
+    /// Forget the gates of rows no installed menu holds any more.
+    fn forget_dead_gates(&self) {
+        let windows = self.inner.activations.borrow();
+        let app = self.inner.app_activations.borrow();
+        self.inner.gates.borrow_mut().retain(|id, _| {
+            app.contains_key(id) || windows.values().any(|menu| menu.contains_key(id))
+        });
+    }
+
+    /// Set the application menu, shown whenever the key window has no menu
+    /// of its own and while no window is open (see
     /// [`NativeMenuBackend::set_app_menu`]), recording its activations.
-    /// Replaces any earlier one.
+    /// Replaces any earlier one. `teksilo-app` calls it from the application
+    /// tree's declaration; a window's menu never sets it.
     pub fn set_app_menu(
         &self,
         menu: NativeMenuSnapshot,
         activations: HashMap<MenuItemId, NativeMenuActivation>,
         poster: Arc<dyn AppEventPoster>,
+        declared: bool,
     ) {
-        let quit = menu.roots.iter().find_map(|node| match node {
-            NativeMenuNode::Standard {
-                role: StandardMenuRole::App,
-                quit_item,
-                ..
-            } => quit_item.as_ref().map(|item| item.id),
-            _ => None,
-        });
-        self.inner.app_quit_item.set(quit);
+        self.gate_rows(&menu, &activations);
         *self.inner.app_activations.borrow_mut() = activations;
-        self.inner.backend.borrow_mut().set_app_menu(menu, poster);
+        self.forget_dead_gates();
+        self.inner
+            .backend
+            .borrow_mut()
+            .set_app_menu(menu, poster, declared);
     }
 
     /// The activation for an item chosen in the application menu.
     pub fn app_activation(&self, id: MenuItemId) -> Option<NativeMenuActivation> {
         self.inner.app_activations.borrow().get(&id).cloned()
-    }
-
-    /// The application menu's Quit row, when the app routes it rather than
-    /// leaving it to the platform.
-    pub fn app_quit_item(&self) -> Option<MenuItemId> {
-        self.inner.app_quit_item.get()
     }
 
     /// Look up (and clone) the activation for a chosen item, for the router.
@@ -481,6 +713,45 @@ impl std::fmt::Debug for NativeMenuHandle {
             .field("windows", &self.inner.activations.borrow().len())
             .finish_non_exhaustive()
     }
+}
+
+// ============================================================
+// Which bar a key window shows (pure, so every OS tests it)
+// ============================================================
+
+/// The bar to show while `key` is the key window: `Some(window)` for that
+/// window's own menu, `None` for the application menu.
+///
+/// The key window's own menu if it has one (`has_menu`); else the menu of
+/// the window it belongs to, following `owner` (a modal dialog's owner, then
+/// that window's owner); else the application menu when the application
+/// declared one (`app_declared`), or `shown`, the bar shown before, when it
+/// did not: AppKit keeps `mainMenu` up while a panel or a sheet is key, so
+/// an app that declared no application menu keeps its window's File and
+/// Edit while a dialog or a secondary window is key.
+#[doc(hidden)]
+pub fn key_window_bar(
+    key: TeksiloWindowId,
+    has_menu: impl Fn(TeksiloWindowId) -> bool,
+    owner: impl Fn(TeksiloWindowId) -> Option<TeksiloWindowId>,
+    app_declared: bool,
+    shown: Option<TeksiloWindowId>,
+) -> Option<TeksiloWindowId> {
+    let mut window = key;
+    let mut visited = vec![window];
+    loop {
+        if has_menu(window) {
+            return Some(window);
+        }
+        match owner(window) {
+            Some(next) if !visited.contains(&next) => {
+                visited.push(next);
+                window = next;
+            }
+            _ => break,
+        }
+    }
+    if app_declared { None } else { shown }
 }
 
 // ============================================================
@@ -512,6 +783,120 @@ impl NativeMenuBackend for NoopNativeMenuBackend {
     fn activate_window(&mut self, _window_id: TeksiloWindowId) {}
     fn clear_window(&mut self, _window_id: TeksiloWindowId) {}
     fn update_item(&mut self, _id: MenuItemId, _delta: MenuItemDelta) {}
+    fn shows_bar(&self) -> bool {
+        false
+    }
+}
+
+// ============================================================
+// The macOS bar's layout (pure, so every OS tests it)
+// ============================================================
+
+/// The top-level menus of a snapshot as the macOS menu bar shows them.
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug)]
+pub(crate) struct MacBarPlan<'a> {
+    /// The menus in bar order: the first App-role menu, then every other
+    /// submenu and standard menu in the order the snapshot declares them.
+    pub(crate) menus: Vec<&'a NativeMenuNode>,
+    /// The index in `menus` of the menu AppKit keeps the window list in
+    /// (`NSApp.windowsMenu`): the first Window-role menu. `None`: the bar
+    /// declares none, and the backend adds a hidden one, so the Dock icon's
+    /// menu still lists the windows.
+    pub(crate) windows_menu: Option<usize>,
+    /// The index in `menus` of the menu registered as `NSApp.helpMenu`: the
+    /// first Help-role menu.
+    pub(crate) help_menu: Option<usize>,
+}
+
+/// Lay out `snapshot` for the macOS menu bar.
+///
+/// AppKit shows the bar's first menu as the bold application menu, under
+/// the application's name, whatever that menu holds. So the App-role menu
+/// goes first wherever the model declared it: declared after File, File's
+/// rows would sit under the application's name and About, Hide and Quit in
+/// a second, ordinary menu. A later App-role menu is left out, since a bar
+/// has one application menu. A leaf or separator at the top level is left
+/// out too: the bar holds menus only.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn mac_bar_plan(snapshot: &NativeMenuSnapshot) -> MacBarPlan<'_> {
+    let is_app = |node: &NativeMenuNode| {
+        matches!(
+            node,
+            NativeMenuNode::Standard {
+                role: StandardMenuRole::App,
+                ..
+            }
+        )
+    };
+    let app = snapshot.roots.iter().find(|node| is_app(node));
+    let rest = snapshot.roots.iter().filter(|node| {
+        !is_app(node)
+            && matches!(
+                node,
+                NativeMenuNode::Submenu { .. } | NativeMenuNode::Standard { .. }
+            )
+    });
+    let menus: Vec<&NativeMenuNode> = app.into_iter().chain(rest).collect();
+    let first = |wanted: StandardMenuRole| {
+        menus.iter().position(
+            |node| matches!(node, NativeMenuNode::Standard { role, .. } if *role == wanted),
+        )
+    };
+    MacBarPlan {
+        windows_menu: first(StandardMenuRole::Window),
+        help_menu: first(StandardMenuRole::Help),
+        menus,
+    }
+}
+
+/// Whether the macOS backend evaluates a window again for the Window menu
+/// it registers, by flipping its `excludedFromWindowsMenu`: a window that
+/// is not excluded (as a dialog is) and that AppKit lists, on screen
+/// (`visible`) or in the Dock (`miniaturized`). AppKit adds a row for a
+/// window it evaluates with the flag off, so flipping a hidden window's
+/// would list a window the app hid.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn mac_relists_window(excluded: bool, visible: bool, miniaturized: bool) -> bool {
+    !excluded && (visible || miniaturized)
+}
+
+/// A row of the macOS App menu. See [`mac_app_menu_rows`].
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MacAppMenuRow {
+    /// About, AppKit's `orderFrontStandardAboutPanel:`.
+    About,
+    /// Settings, routed to the app.
+    Settings,
+    /// The Services submenu, registered as `NSApp.servicesMenu`.
+    Services,
+    /// Hide <App>, `hide:`, ⌘H.
+    Hide,
+    /// Hide Others, `hideOtherApplications:`, ⌥⌘H.
+    HideOthers,
+    /// Show All, `unhideAllApplications:`.
+    ShowAll,
+    /// Quit, routed to the app.
+    Quit,
+    /// A separator.
+    Separator,
+}
+
+/// The rows of the macOS App menu, in the order AppKit's own application
+/// menu has them: About; Settings in a group of its own when the app routes
+/// it; Services; Hide, Hide Others and Show All; Quit.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn mac_app_menu_rows(settings: bool) -> Vec<MacAppMenuRow> {
+    use MacAppMenuRow::*;
+    let mut rows = vec![About, Separator];
+    if settings {
+        rows.extend([Settings, Separator]);
+    }
+    rows.extend([
+        Services, Separator, Hide, HideOthers, ShowAll, Separator, Quit,
+    ]);
+    rows
 }
 
 // ============================================================
@@ -548,9 +933,29 @@ pub struct MemoryNativeMenuBackend {
 struct MemoryRecording {
     menus: HashMap<TeksiloWindowId, NativeMenuSnapshot>,
     app_menu: Option<NativeMenuSnapshot>,
+    /// The last window `activate_window` named.
+    key: Option<TeksiloWindowId>,
+    /// The window whose menu shows; `None` while the application menu does.
     active: Option<TeksiloWindowId>,
+    /// The window each window belongs to (`set_window_owner`).
+    owners: HashMap<TeksiloWindowId, TeksiloWindowId>,
+    /// Whether the application menu set last was declared by the app.
+    app_declared: bool,
     deltas: Vec<(MenuItemId, MenuItemDelta)>,
     cleared: Vec<TeksiloWindowId>,
+}
+
+impl MemoryRecording {
+    /// The bar shown while `key` is key, by [`key_window_bar`].
+    fn bar_for(&self, key: TeksiloWindowId) -> Option<TeksiloWindowId> {
+        key_window_bar(
+            key,
+            |window| self.menus.contains_key(&window),
+            |window| self.owners.get(&window).copied(),
+            self.app_declared,
+            self.active,
+        )
+    }
 }
 
 impl MemoryNativeMenuBackend {
@@ -564,11 +969,18 @@ impl MemoryNativeMenuBackend {
         self.inner.borrow().menus.get(&window_id).cloned()
     }
 
-    /// The window whose menu is active (last `activate_window` of a window
-    /// that has a menu, or the window of the first `set_window_menu` if none
-    /// was activated).
+    /// The window whose own menu shows, as on macOS: the one
+    /// [`key_window_bar`] picks for the key window (the last
+    /// `activate_window`), or a window that set one before any was
+    /// activated. `None` while the application menu shows.
     pub fn active_window(&self) -> Option<TeksiloWindowId> {
         self.inner.borrow().active
+    }
+
+    /// Whether the application menu is the one showing: no window's own
+    /// menu is ([`active_window`](Self::active_window) is `None`).
+    pub fn shows_app_menu(&self) -> bool {
+        self.inner.borrow().active.is_none()
     }
 
     /// All item deltas applied so far, in order.
@@ -596,33 +1008,51 @@ impl NativeMenuBackend for MemoryNativeMenuBackend {
     ) {
         let mut rec = self.inner.borrow_mut();
         rec.menus.insert(window_id, menu);
-        // First menu set becomes active by default (mirrors the real backend
-        // installing the first window's menu as mainMenu).
-        if rec.active.is_none() {
-            rec.active = Some(window_id);
-        }
+        // As the macOS backend: the bar the key window shows, and a
+        // window's menu set before any window was activated.
+        rec.active = match rec.key {
+            Some(key) => rec.bar_for(key),
+            None => Some(window_id),
+        };
     }
     fn activate_window(&mut self, window_id: TeksiloWindowId) {
-        // As macOS: a window with no menu of its own leaves the bar showing
-        // the menu it showed.
         let mut rec = self.inner.borrow_mut();
-        if rec.menus.contains_key(&window_id) {
-            rec.active = Some(window_id);
-        }
+        rec.key = Some(window_id);
+        rec.active = rec.bar_for(window_id);
+    }
+    fn set_window_owner(&mut self, window_id: TeksiloWindowId, owner: Option<TeksiloWindowId>) {
+        let mut rec = self.inner.borrow_mut();
+        match owner {
+            Some(owner) => rec.owners.insert(window_id, owner),
+            None => rec.owners.remove(&window_id),
+        };
     }
     fn clear_window(&mut self, window_id: TeksiloWindowId) {
         let mut rec = self.inner.borrow_mut();
         rec.menus.remove(&window_id);
+        rec.owners.remove(&window_id);
         rec.cleared.push(window_id);
         if rec.active == Some(window_id) {
+            // Never the dead window's menu: the key window's bar, or the
+            // application menu, declared or not.
             rec.active = None;
+            if let Some(key) = rec.key.filter(|key| *key != window_id) {
+                rec.active = rec.bar_for(key);
+            }
         }
     }
     fn update_item(&mut self, id: MenuItemId, delta: MenuItemDelta) {
         self.inner.borrow_mut().deltas.push((id, delta));
     }
-    fn set_app_menu(&mut self, menu: NativeMenuSnapshot, _poster: Arc<dyn AppEventPoster>) {
-        self.inner.borrow_mut().app_menu = Some(menu);
+    fn set_app_menu(
+        &mut self,
+        menu: NativeMenuSnapshot,
+        _poster: Arc<dyn AppEventPoster>,
+        declared: bool,
+    ) {
+        let mut rec = self.inner.borrow_mut();
+        rec.app_menu = Some(menu);
+        rec.app_declared = declared;
     }
 }
 
@@ -687,6 +1117,7 @@ mod tests {
                 action: Some(Rc::new(move |_ctx: &mut EventContext| {
                     *fired2.lock().unwrap() = true;
                 })),
+                quits: false,
             },
         );
 
@@ -721,20 +1152,383 @@ mod tests {
         assert!(backend.menu_for(win(2)).is_none());
     }
 
-    /// macOS keeps the bar it shows when a window with no menu of its own
-    /// becomes key; the recording backend says the same.
+    /// A window with no menu of its own, nor an owner with one, shows the
+    /// application menu the app declared when it becomes key, as the macOS
+    /// backend does: the previous window's menu used to stay up, its items
+    /// acting on a window the user had left.
     #[test]
-    fn activating_a_window_without_a_menu_keeps_the_menu_shown() {
+    fn activating_a_window_without_a_menu_shows_the_application_menu() {
         let backend = MemoryNativeMenuBackend::new();
         let handle = NativeMenuHandle::new(backend.clone());
+        handle.set_app_menu(
+            sample_snapshot(MenuItemId::next()),
+            HashMap::new(),
+            poster(),
+            true,
+        );
         handle.set_window_menu(
             win(1),
             sample_snapshot(MenuItemId::next()),
             HashMap::new(),
             poster(),
         );
+        handle.activate_window(win(1));
+        assert_eq!(backend.active_window(), Some(win(1)));
+        handle.activate_window(win(2));
+        assert_eq!(backend.active_window(), None);
+        assert!(backend.shows_app_menu());
+        handle.activate_window(win(1));
+        assert_eq!(backend.active_window(), Some(win(1)), "and back");
+    }
+
+    /// A window that installs its menu while another is key does not take
+    /// the bar; the key window that closes leaves the application menu.
+    #[test]
+    fn the_key_window_decides_and_its_close_leaves_the_application_menu() {
+        let backend = MemoryNativeMenuBackend::new();
+        let handle = NativeMenuHandle::new(backend.clone());
+        handle.activate_window(win(1));
+        handle.set_window_menu(
+            win(2),
+            sample_snapshot(MenuItemId::next()),
+            HashMap::new(),
+            poster(),
+        );
+        assert!(backend.shows_app_menu(), "window 1 is key and has none");
+        handle.set_window_menu(
+            win(1),
+            sample_snapshot(MenuItemId::next()),
+            HashMap::new(),
+            poster(),
+        );
+        assert_eq!(backend.active_window(), Some(win(1)));
+        handle.clear_window(win(1));
+        assert!(backend.shows_app_menu());
+    }
+
+    /// A row whose only effect is its intent greys out while nothing takes
+    /// the intent, its own enabled state still counting; a row with an
+    /// action, and the App menu's Quit, never do.
+    #[test]
+    fn an_intent_only_row_greys_out_while_nothing_takes_its_intent() {
+        let backend = MemoryNativeMenuBackend::new();
+        let handle = NativeMenuHandle::new(backend.clone());
+        let (plain, with_action, quit) =
+            (MenuItemId::next(), MenuItemId::next(), MenuItemId::next());
+        let activation = |action: bool, quits: bool| NativeMenuActivation {
+            intent: Some("app.print"),
+            action: action.then(|| -> MenuActionFn { Rc::new(|_| {}) }),
+            quits,
+        };
+        handle.set_window_menu(
+            win(1),
+            sample_snapshot(plain),
+            [
+                (plain, activation(false, false)),
+                (with_action, activation(true, false)),
+                (quit, activation(false, true)),
+            ]
+            .into_iter()
+            .collect(),
+            poster(),
+        );
+        let enabled_deltas = |backend: &MemoryNativeMenuBackend| {
+            backend
+                .deltas()
+                .into_iter()
+                .filter_map(|(id, delta)| delta.enabled.map(|enabled| (id, enabled)))
+                .collect::<Vec<_>>()
+        };
+        handle.refresh_availability(&["app.print"]);
+        assert!(enabled_deltas(&backend).is_empty(), "nothing changed");
+        handle.refresh_availability(&[]);
+        assert_eq!(enabled_deltas(&backend), [(plain, false)]);
+        assert_eq!(handle.gated_enabled(plain), Some(false));
+        assert_eq!(handle.gated_enabled(with_action), None);
+        assert_eq!(handle.gated_enabled(quit), None);
+
+        // Its own state turning true does not enable it while nothing takes
+        // the intent; the intent taken again does.
+        handle.update_item(
+            plain,
+            MenuItemDelta {
+                enabled: Some(true),
+                ..Default::default()
+            },
+        );
+        assert_eq!(enabled_deltas(&backend).last(), Some(&(plain, false)));
+        handle.refresh_availability(&["app.print"]);
+        assert_eq!(enabled_deltas(&backend).last(), Some(&(plain, true)));
+
+        // Its own state turning false greys it out whatever the route says.
+        handle.update_item(
+            plain,
+            MenuItemDelta {
+                enabled: Some(false),
+                ..Default::default()
+            },
+        );
+        handle.refresh_availability(&["app.print"]);
+        assert_eq!(enabled_deltas(&backend).last(), Some(&(plain, false)));
+
+        handle.clear_window(win(1));
+        assert_eq!(handle.gated_enabled(plain), None, "forgotten with its menu");
+    }
+
+    fn standard(role: StandardMenuRole, title: &str) -> NativeMenuNode {
+        NativeMenuNode::Standard {
+            role,
+            labels: StandardLabels {
+                title: title.into(),
+                ..Default::default()
+            },
+            quit_item: None,
+            settings_item: None,
+        }
+    }
+
+    fn bar_titles(plan: &MacBarPlan<'_>) -> Vec<String> {
+        plan.menus
+            .iter()
+            .map(|node| match node {
+                NativeMenuNode::Submenu { title, .. } => title.clone(),
+                NativeMenuNode::Standard { labels, .. } => labels.title.clone(),
+                other => panic!("the bar holds menus only, got {other:?}"),
+            })
+            .collect()
+    }
+
+    /// AppKit shows the bar's first menu as the application menu, so the
+    /// App-role menu goes first wherever the model declares it. Declared
+    /// after File, File's rows sat under the application's name and About,
+    /// Hide and Quit in a second, ordinary menu (macOS findings, item 2).
+    #[test]
+    fn the_app_menu_is_first_in_the_mac_bar_wherever_it_is_declared() {
+        let mut file = sample_snapshot(MenuItemId::next()).roots;
+        let snapshot = NativeMenuSnapshot {
+            roots: vec![
+                file.remove(0),
+                NativeMenuNode::Separator,
+                standard(StandardMenuRole::Window, "Window"),
+                standard(StandardMenuRole::App, "Probe"),
+                standard(StandardMenuRole::Help, "Help"),
+                standard(StandardMenuRole::App, "Second"),
+            ],
+        };
+        assert_eq!(
+            bar_titles(&mac_bar_plan(&snapshot)),
+            ["Probe", "File", "Window", "Help"],
+            "App first, the rest in declared order, one App menu, no top-level separator"
+        );
+
+        let declared_first = NativeMenuSnapshot {
+            roots: vec![
+                standard(StandardMenuRole::App, "Probe"),
+                sample_snapshot(MenuItemId::next()).roots.remove(0),
+            ],
+        };
+        assert_eq!(
+            bar_titles(&mac_bar_plan(&declared_first)),
+            ["Probe", "File"]
+        );
+    }
+
+    /// A window registered again in the Window menu is one AppKit lists:
+    /// not excluded, and on screen or in the Dock. A hidden window (ordered
+    /// out, not miniaturized) is left alone: flipping its flag lists it,
+    /// since AppKit keeps a row for every window it evaluates with the flag
+    /// off, and a window the app hid would show in the Window and Dock
+    /// menus.
+    #[test]
+    fn the_mac_window_menu_relists_only_shown_or_miniaturized_windows() {
+        assert!(mac_relists_window(false, true, false), "on screen");
+        assert!(mac_relists_window(false, false, true), "in the Dock");
+        assert!(!mac_relists_window(false, false, false), "hidden");
+        assert!(
+            !mac_relists_window(true, true, false),
+            "excluded (a dialog)"
+        );
+    }
+
+    /// The App menu's rows in AppKit's order: About; Settings in a group of
+    /// its own; Services; Hide, Hide Others and Show All; Quit.
+    #[test]
+    fn the_mac_app_menu_has_appkits_rows_in_appkits_order() {
+        use MacAppMenuRow::*;
+        assert_eq!(
+            mac_app_menu_rows(true),
+            [
+                About, Separator, Settings, Separator, Services, Separator, Hide, HideOthers,
+                ShowAll, Separator, Quit,
+            ]
+        );
+        assert_eq!(
+            mac_app_menu_rows(false),
+            [
+                About, Separator, Services, Separator, Hide, HideOthers, ShowAll, Separator, Quit,
+            ],
+            "no Settings row, and no empty group for it"
+        );
+    }
+
+    /// AppKit keeps the window list in the menu registered as `windowsMenu`,
+    /// and the Dock icon's menu lists the windows from it: the bar's first
+    /// Window-role menu when it declares one, else a hidden one the backend
+    /// adds (Qt's `insertWindowMenu`), so the Dock still lists the windows
+    /// (macOS findings, item 3).
+    #[test]
+    fn the_mac_bar_keeps_the_window_list_in_its_window_menu_or_a_hidden_one() {
+        let snapshot = NativeMenuSnapshot {
+            roots: vec![
+                sample_snapshot(MenuItemId::next()).roots.remove(0),
+                standard(StandardMenuRole::Window, "Window"),
+                standard(StandardMenuRole::App, "Probe"),
+                standard(StandardMenuRole::Window, "Second window menu"),
+                standard(StandardMenuRole::Help, "Help"),
+            ],
+        };
+        let plan = mac_bar_plan(&snapshot);
+        assert_eq!(
+            plan.windows_menu,
+            Some(2),
+            "the first Window menu, in bar order"
+        );
+        assert_eq!(plan.help_menu, Some(4));
+
+        let no_window_menu = NativeMenuSnapshot {
+            roots: vec![
+                sample_snapshot(MenuItemId::next()).roots.remove(0),
+                standard(StandardMenuRole::App, "Probe"),
+            ],
+        };
+        let plan = mac_bar_plan(&no_window_menu);
+        assert_eq!(plan.windows_menu, None, "a hidden one is added");
+        assert_eq!(plan.help_menu, None);
+    }
+
+    /// The bar a key window shows: its own menu; else the menu of the window
+    /// it belongs to (a modal dialog's owner, up the chain of owners); else
+    /// the application menu, or, when the application declared none, the bar
+    /// shown before, as AppKit keeps `mainMenu` up for its panels and
+    /// sheets. A dialog used to show the application menu, so an app with
+    /// no application menu lost File and Edit whenever one was key.
+    #[test]
+    fn a_key_window_without_a_menu_shows_its_owners_or_the_applications() {
+        let menus = [win(1)];
+        let has_menu = |w: TeksiloWindowId| menus.contains(&w);
+        // 2 is a dialog of 1, 3 a dialog of 2; 4 is a secondary window.
+        let owner = |w: TeksiloWindowId| match w.raw() {
+            2 => Some(win(1)),
+            3 => Some(win(2)),
+            _ => None,
+        };
+        let bar = |key, declared, shown| key_window_bar(key, has_menu, owner, declared, shown);
+        assert_eq!(bar(win(1), true, None), Some(win(1)), "its own");
+        assert_eq!(bar(win(2), true, None), Some(win(1)), "its owner's");
+        assert_eq!(bar(win(3), true, None), Some(win(1)), "up the chain");
+        assert_eq!(bar(win(4), true, Some(win(1))), None, "the application's");
+        assert_eq!(
+            bar(win(4), false, Some(win(1))),
+            Some(win(1)),
+            "none declared: the bar shown before stays"
+        );
+        assert_eq!(bar(win(4), false, None), None);
+
+        // An owner relation that loops ends the walk rather than the loop.
+        let looping = |w: TeksiloWindowId| Some(if w == win(5) { win(6) } else { win(5) });
+        assert_eq!(key_window_bar(win(5), has_menu, looping, true, None), None);
+    }
+
+    /// `MemoryNativeMenuBackend` follows the same rule as the macOS one.
+    #[test]
+    fn the_memory_backend_shows_a_dialogs_owners_menu() {
+        let backend = MemoryNativeMenuBackend::new();
+        let handle = NativeMenuHandle::new(backend.clone());
+        handle.set_app_menu(
+            sample_snapshot(MenuItemId::next()),
+            HashMap::new(),
+            poster(),
+            false,
+        );
+        handle.set_window_menu(
+            win(1),
+            sample_snapshot(MenuItemId::next()),
+            HashMap::new(),
+            poster(),
+        );
+        handle.set_window_owner(win(2), Some(win(1)));
+        handle.activate_window(win(1));
+        handle.activate_window(win(2));
+        assert_eq!(
+            backend.active_window(),
+            Some(win(1)),
+            "the dialog's owner's"
+        );
+        handle.activate_window(win(3));
+        assert_eq!(
+            backend.active_window(),
+            Some(win(1)),
+            "no application menu declared: a secondary window keeps the bar"
+        );
+        handle.set_app_menu(
+            sample_snapshot(MenuItemId::next()),
+            HashMap::new(),
+            poster(),
+            true,
+        );
+        handle.activate_window(win(3));
+        assert!(backend.shows_app_menu(), "declared: the application's");
         handle.activate_window(win(2));
         assert_eq!(backend.active_window(), Some(win(1)));
+        handle.clear_window(win(1));
+        assert!(backend.shows_app_menu(), "the owner's menu went with it");
+    }
+
+    /// A refresh whose inputs are the last refresh's (the same intents
+    /// taken, no menu installed since) evaluates no row: the loop asks every
+    /// turn, and most turns change nothing. A menu installed since, or
+    /// another answer, is evaluated again.
+    #[test]
+    fn an_unchanged_refresh_evaluates_nothing() {
+        let backend = MemoryNativeMenuBackend::new();
+        let handle = NativeMenuHandle::new(backend.clone());
+        let row = MenuItemId::next();
+        let intent_only = || NativeMenuActivation {
+            intent: Some("app.print"),
+            action: None,
+            quits: false,
+        };
+        handle.set_window_menu(
+            win(1),
+            sample_snapshot(row),
+            [(row, intent_only())].into_iter().collect(),
+            poster(),
+        );
+        handle.refresh_availability(&["app.print"]);
+        assert_eq!(handle.evaluations(), 1);
+        handle.refresh_availability(&["app.print"]);
+        assert_eq!(handle.evaluations(), 1, "nothing changed: no row evaluated");
+
+        let other = MenuItemId::next();
+        handle.set_window_menu(
+            win(2),
+            sample_snapshot(other),
+            [(other, intent_only())].into_iter().collect(),
+            poster(),
+        );
+        handle.refresh_availability(&["app.print"]);
+        assert_eq!(handle.evaluations(), 3, "a menu installed since: both rows");
+        handle.refresh_availability(&[]);
+        assert_eq!(handle.evaluations(), 5, "another answer");
+        assert_eq!(handle.gated_enabled(other), Some(false));
+    }
+
+    /// The no-op backend shows no menu bar, so the loop skips the
+    /// availability refresh altogether where it is the backend.
+    #[test]
+    fn only_a_backend_with_a_menu_bar_says_it_shows_one() {
+        assert!(!NativeMenuHandle::new(NoopNativeMenuBackend::new()).shows_bar());
+        assert!(NativeMenuHandle::new(MemoryNativeMenuBackend::new()).shows_bar());
     }
 
     #[test]

@@ -376,6 +376,11 @@ pub struct OverlayRequest {
     /// The overlay takes no input. Set with [`OverlayRequest::inert`], which
     /// says what that means.
     pub inert: bool,
+    /// Where a command chosen in this overlay is sent from, when that is not
+    /// where the overlay gives focus back. Set with
+    /// [`OverlayRequest::command_source`].
+    #[doc(hidden)]
+    pub command_source: Option<WidgetId>,
 }
 
 impl OverlayRequest {
@@ -429,7 +434,20 @@ impl OverlayRequest {
             on_dismiss: None,
             fade_duration: None,
             inert: false,
+            command_source: None,
         }
+    }
+
+    /// Where a command chosen in this overlay is sent from, and so what
+    /// `WidgetTree::can_handle` answers for while it is open, when that is
+    /// not the widget the overlay gives focus back to. A menu bar's menu
+    /// opened from the keyboard gives focus back to its title, and its
+    /// command goes to the widget focused before the bar took focus, which
+    /// the bar names here. Default: `None`, where focus goes back.
+    #[doc(hidden)]
+    pub fn command_source(mut self, id: WidgetId) -> Self {
+        self.command_source = Some(id);
+        self
     }
 
     /// Render the overlay on `layer`. Default: [`OverlayLayer::InTree`].
@@ -564,6 +582,8 @@ pub(crate) struct ActiveOverlay {
     /// Widget that had focus before this overlay was shown.
     /// Used to restore focus when the overlay is dismissed.
     pub focus_restore: Option<WidgetId>,
+    /// [`OverlayRequest::command_source`].
+    pub command_source: Option<WidgetId>,
     /// When pointer-leave dismissal started (real time).
     pub pointer_leave_started_real: Option<std::time::Instant>,
     /// When pointer-leave dismissal started (simulated time).
@@ -834,6 +854,7 @@ impl OverlayManager {
             parent_overlay: request.parent_overlay,
             bounds: Rect::ZERO,
             focus_restore: None,
+            command_source: request.command_source,
             pointer_leave_started_real: None,
             pointer_leave_started_sim: None,
             safe_apex: None,

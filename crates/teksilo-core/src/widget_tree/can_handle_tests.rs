@@ -298,3 +298,55 @@ fn with_a_modal_up_and_nothing_focused_the_page_handles_nothing() {
     );
     assert!(!window.tree.can_handle("test.global"));
 }
+
+/// `handled_intents` names exactly the intents `can_handle` answers true for,
+/// whatever the focus, so a caller that asks for many names can walk once.
+#[test]
+fn handled_intents_names_what_can_handle_takes() {
+    #[derive(Debug)]
+    struct AppRoot;
+    impl Widget for AppRoot {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            ctx.register_action(Action::new("app.new").on_invoke(|_, _| unreachable!()));
+            ctx.register_action(
+                Action::new("app.off")
+                    .enabled_when(Signal::new(false))
+                    .on_invoke(|_, _| unreachable!()),
+            );
+            vec![]
+        }
+        fn layout_response(&self, proposal: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+    let mut window = window();
+    let mut app = WidgetTree::new();
+    app.add(AppRoot);
+    let scope = ApplicationScope::new();
+    app.publish_application_scope(&scope);
+    window.tree.set_application_scope(Some(scope));
+    let names = [
+        "test.editor",
+        "test.root",
+        "test.global",
+        "test.disabled",
+        "test.declines",
+        "test.nobody",
+        "app.new",
+        "app.off",
+    ];
+    for focus in [None, Some(window.button), Some(window.editor)] {
+        if let Some(focus) = focus {
+            window.tree.focus(focus);
+        }
+        let handled = window.tree.handled_intents();
+        for name in names {
+            assert_eq!(
+                handled.contains(&name),
+                window.tree.can_handle(name),
+                "{name} with focus on {focus:?}"
+            );
+        }
+        assert!(handled.is_sorted(), "sorted, so two answers compare");
+    }
+}

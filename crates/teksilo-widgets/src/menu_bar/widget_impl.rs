@@ -15,13 +15,39 @@ use super::*;
 
 impl Widget for MenuBar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // An application bar reads the application menu afresh at each build,
+        // and rebuilds when the application declares another one.
+        let origin = if self.application {
+            let holder = ctx.app_state::<crate::menu::ApplicationMenu>().cloned();
+            let holder = holder.unwrap_or_default();
+            holder.generation().bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                teksilo_core::BindingLevel::Rebuild,
+            );
+            self.model = holder.model();
+            if self.model.is_none() {
+                holder.warn_undeclared();
+            }
+            crate::menu::model::RowOrigin::Application(holder)
+        } else {
+            crate::menu::model::RowOrigin::Window
+        };
+
         // Mirror the model into the native OS menu bar (macOS) when requested.
-        // The bridge is a no-op without a `NativeMenuHandle` in app-state.
+        // The bridge is a no-op without a `NativeMenuHandle` in app-state. An
+        // application bar mirrors nothing: the application menu is the global
+        // bar already, installed from the application tree.
         if self.native_mode.installs_native()
             && cfg!(target_os = "macos")
+            && !self.application
             && let Some(model) = &self.model
         {
             *self.native_binding.borrow_mut() = crate::menu::native::install(model, ctx);
+        }
+
+        if let Some(model) = &self.model {
+            model.warn_second_app_menu();
         }
 
         // A runtime structural change (`MenuModel::push_item`/`remove`/…) bumps
@@ -37,8 +63,14 @@ impl Widget for MenuBar {
 
         // On macOS with `Suppress`, the global menu bar IS the menu — render
         // only the optional leading/trailing slots in-window (no triggers, no
-        // F10/Alt dispatcher).
-        if self.native_mode.suppresses_in_window() {
+        // F10/Alt dispatcher). For an application bar, only where the
+        // application menu is in the global bar, which takes a native menu.
+        if self.native_mode.suppresses_in_window()
+            && (!self.application
+                || ctx
+                    .app_state::<teksilo_platform::native_menu::NativeMenuHandle>()
+                    .is_some())
+        {
             return self.build_suppressed(ctx);
         }
 
@@ -67,7 +99,10 @@ impl Widget for MenuBar {
         // model, classic `.menu()` bars iterate their retained entries by
         // reference. Consuming `self.entries` here (the old `mem::take`)
         // left the bar empty on the next theme / locale rebuild.
-        let model_entries = self.model.as_ref().map(Self::model_entries);
+        let model_entries = self
+            .model
+            .as_ref()
+            .map(|model| Self::model_entries(model, &origin));
         let entries: &[MenuBarEntry] = match &model_entries {
             Some(derived) => derived,
             None => &self.entries,

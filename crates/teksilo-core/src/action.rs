@@ -155,6 +155,17 @@ impl ApplicationScope {
         })
     }
 
+    /// Every intent name an enabled application action takes, in the order
+    /// they were published, possibly more than once.
+    pub fn taken(&self) -> Vec<&'static str> {
+        self.actions
+            .borrow()
+            .iter()
+            .filter(|(_, enabled)| enabled.as_ref().is_none_or(|enabled| enabled.get()))
+            .map(|(intent, _)| *intent)
+            .collect()
+    }
+
     /// Replace what the application takes with `actions`, intent names
     /// with their enabled predicates.
     pub(crate) fn replace(&self, actions: Vec<(&'static str, Option<Prop<bool>>)>) {

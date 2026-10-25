@@ -14,11 +14,14 @@
 //! [`AppEventPoster`]. `teksilo-app` routes the payload back into the window's
 //! widget tree, where the item's intent / action fires.
 //!
-//! The conventional application menu (About / Hide / Quit) comes from the
-//! snapshot's [`StandardMenuRole::App`] root, which the widget layer guarantees —
+//! The conventional application menu (About, Settings, Services, Hide, Hide
+//! Others, Show All, Quit) comes from the
+//! snapshot's [`StandardMenuRole::App`] root, which the widget layer guarantees:
 //! it injects one with localized labels when the model declares none, so this
-//! backend never fabricates user-visible strings of its own — and the app always
-//! has the conventional first menu with a working ⌘Q.
+//! backend never fabricates user-visible strings of its own, and the app always
+//! has the conventional first menu with a working ⌘Q. The backend puts that
+//! root first in the bar wherever the model declares it, since AppKit shows
+//! the bar's first menu as the application menu whatever it holds.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,13 +33,16 @@ use teksilo_core::window::TeksiloWindowId;
 use objc2::rc::Retained;
 use objc2::runtime::{NSObject, NSObjectProtocol, Sel};
 use objc2::{DefinedClass, MainThreadMarker, define_class, msg_send, sel};
-use objc2_app_kit::{NSApplication, NSControlStateValue, NSEventModifierFlags, NSMenu, NSMenuItem};
+use objc2_app_kit::{
+    NSApplication, NSControlStateValue, NSEventModifierFlags, NSMenu, NSMenuItem, NSWindow,
+};
 use objc2_foundation::{NSString, ns_string};
 
 use super::{
-    MenuItemDelta, NativeAppMenuEventPayload, NativeCheck, NativeKeyEquivalent, NativeMenuBackend,
-    NativeMenuEventPayload, NativeMenuNode, NativeMenuSnapshot, StandardLabels, StandardMenuRole,
-    StandardRoutedItem,
+    MacAppMenuRow, MenuItemDelta, NativeAppMenuEventPayload, NativeCheck, NativeKeyEquivalent,
+    NativeMenuBackend, NativeMenuEventPayload, NativeMenuNode, NativeMenuSnapshot, StandardLabels,
+    StandardMenuRole, StandardRoutedItem, key_window_bar, mac_app_menu_rows, mac_bar_plan,
+    mac_relists_window,
 };
 
 // ============================================================
@@ -102,10 +108,73 @@ impl TeksiloMenuTarget {
 
 struct WindowMenu {
     menu: Retained<NSMenu>,
+    /// The submenu AppKit keeps the window list in while this bar shows:
+    /// the bar's Window menu, or a hidden one. See [`register_windows_menu`].
+    windows_menu: Retained<NSMenu>,
+    /// The bar's Help menu, registered as `NSApp.helpMenu` while it shows.
+    help_menu: Option<Retained<NSMenu>>,
+    /// The App menu's Services submenu, registered as `NSApp.servicesMenu`
+    /// while the bar shows, so AppKit fills it.
+    services_menu: Option<Retained<NSMenu>>,
     /// Kept alive for the menu's lifetime (items reference it as their target).
     _target: Retained<TeksiloMenuTarget>,
     /// Leaf items by id, for `update_item`.
     items: HashMap<MenuItemId, Retained<NSMenuItem>>,
+}
+
+impl WindowMenu {
+    /// Make this bar `mainMenu`, with the menus AppKit fills in itself.
+    fn show(&self, mtm: MainThreadMarker) {
+        let app = NSApplication::sharedApplication(mtm);
+        app.setMainMenu(Some(&self.menu));
+        app.setHelpMenu(self.help_menu.as_deref());
+        if let Some(services) = &self.services_menu {
+            app.setServicesMenu(Some(services));
+        }
+        register_windows_menu(&app, &self.windows_menu);
+    }
+}
+
+/// Register `menu` as the one AppKit keeps the window list in, and fill it.
+///
+/// AppKit adds a window's row to the registered `windowsMenu` when the
+/// window is ordered in, and removes it when the window closes; the Dock
+/// icon's menu lists the same windows. A window ordered in while another
+/// menu was registered, or none (the window a mount action opens at
+/// startup, before the first bar exists), is never added by itself. So, as
+/// Qt does in `insertWindowMenu`, flip `excludedFromWindowsMenu` on every
+/// listed window, which makes AppKit evaluate it again: once while the
+/// outgoing menu is still registered, so its rows go away and a window that
+/// closes while it is not registered leaves no stale row in it, and once
+/// with `menu` registered, so every window that belongs there is added. A
+/// window excluded on purpose (a dialog) is left alone, and so is a hidden
+/// one (ordered out, not miniaturized), which the flip would list: see
+/// [`mac_relists_window`].
+fn register_windows_menu(app: &NSApplication, menu: &NSMenu) {
+    if app
+        .windowsMenu()
+        .is_some_and(|current| std::ptr::eq(&*current, menu))
+    {
+        return;
+    }
+    let listed: Vec<Retained<NSWindow>> = app
+        .windows()
+        .iter()
+        .filter(|window| {
+            mac_relists_window(
+                window.isExcludedFromWindowsMenu(),
+                window.isVisible(),
+                window.isMiniaturized(),
+            )
+        })
+        .collect();
+    for window in &listed {
+        window.setExcludedFromWindowsMenu(true);
+    }
+    app.setWindowsMenu(Some(menu));
+    for window in &listed {
+        window.setExcludedFromWindowsMenu(false);
+    }
 }
 
 // ============================================================
@@ -116,10 +185,20 @@ struct WindowMenu {
 #[derive(Default)]
 pub struct MacOsNativeMenuBackend {
     windows: HashMap<TeksiloWindowId, WindowMenu>,
+    /// The window whose own menu is `mainMenu`; `None` while the
+    /// application menu is.
     active: Option<TeksiloWindowId>,
+    /// The last window `activate_window` named: the key window.
+    key: Option<TeksiloWindowId>,
     /// Shown while no window's menu is: see
     /// [`NativeMenuBackend::set_app_menu`].
     app: Option<WindowMenu>,
+    /// Whether the application declared [`app`](Self::app), rather than
+    /// `teksilo-app` supplying a default App menu.
+    app_declared: bool,
+    /// The window each window belongs to: see
+    /// [`NativeMenuBackend::set_window_owner`].
+    owners: HashMap<TeksiloWindowId, TeksiloWindowId>,
 }
 
 impl MacOsNativeMenuBackend {
@@ -127,16 +206,38 @@ impl MacOsNativeMenuBackend {
         Self::default()
     }
 
+    /// The bar shown while `key` is key, by [`key_window_bar`].
+    fn bar_for(&self, key: TeksiloWindowId) -> Option<TeksiloWindowId> {
+        key_window_bar(
+            key,
+            |window| self.windows.contains_key(&window),
+            |window| self.owners.get(&window).copied(),
+            self.app_declared,
+            self.active,
+        )
+    }
+
+    /// Show `bar` (`None`: the application menu) and remember it.
+    fn show(&mut self, mtm: MainThreadMarker, bar: Option<TeksiloWindowId>) {
+        self.active = bar;
+        match bar {
+            Some(window_id) => self.apply_main_menu(mtm, window_id),
+            None => self.apply_app_menu(mtm),
+        }
+    }
+
     fn apply_main_menu(&self, mtm: MainThreadMarker, window_id: TeksiloWindowId) {
         if let Some(wm) = self.windows.get(&window_id) {
-            let app = NSApplication::sharedApplication(mtm);
-            app.setMainMenu(Some(&wm.menu));
+            wm.show(mtm);
         }
     }
 
     /// Show the application menu, or no menu when the app set none.
     fn apply_app_menu(&self, mtm: MainThreadMarker) {
-        NSApplication::sharedApplication(mtm).setMainMenu(self.app.as_ref().map(|m| &*m.menu));
+        match &self.app {
+            Some(app) => app.show(mtm),
+            None => NSApplication::sharedApplication(mtm).setMainMenu(None),
+        }
     }
 
     fn build(
@@ -147,9 +248,12 @@ impl MacOsNativeMenuBackend {
     ) -> WindowMenu {
         let target = TeksiloMenuTarget::new(mtm, window_id, poster);
         let mut items = HashMap::new();
-        let root = build_root_menu(mtm, menu, &target, &mut items);
+        let bar = build_root_menu(mtm, menu, &target, &mut items);
         WindowMenu {
-            menu: root,
+            menu: bar.menu,
+            windows_menu: bar.windows_menu,
+            help_menu: bar.help_menu,
+            services_menu: bar.services_menu,
             _target: target,
             items,
         }
@@ -169,14 +273,16 @@ impl NativeMenuBackend for MacOsNativeMenuBackend {
         self.windows
             .insert(window_id, Self::build(mtm, Some(window_id), &menu, poster));
 
-        // First menu becomes active; an already-active window keeps focus.
-        let make_active = match self.active {
-            None => true,
-            Some(active) => active == window_id,
+        // The bar the key window shows (this menu when it is the key
+        // window's or its owner's), and a window's menu set before any
+        // window was activated (the first window's, built before its first
+        // `Focused`).
+        let bar = match self.key {
+            Some(key) => self.bar_for(key),
+            None => Some(window_id),
         };
-        if make_active {
-            self.active = Some(window_id);
-            self.apply_main_menu(mtm, window_id);
+        if bar == Some(window_id) || bar != self.active {
+            self.show(mtm, bar);
         }
     }
 
@@ -184,38 +290,54 @@ impl NativeMenuBackend for MacOsNativeMenuBackend {
         let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
-        if self.windows.contains_key(&window_id) {
-            self.active = Some(window_id);
-            self.apply_main_menu(mtm, window_id);
-        }
+        self.key = Some(window_id);
+        // Its own menu, its owner's, the application menu, or, with none
+        // declared, the bar shown before: see `key_window_bar`.
+        let bar = self.bar_for(window_id);
+        self.show(mtm, bar);
+    }
+
+    fn set_window_owner(&mut self, window_id: TeksiloWindowId, owner: Option<TeksiloWindowId>) {
+        match owner {
+            Some(owner) => self.owners.insert(window_id, owner),
+            None => self.owners.remove(&window_id),
+        };
     }
 
     fn clear_window(&mut self, window_id: TeksiloWindowId) {
         self.windows.remove(&window_id);
+        self.owners.remove(&window_id);
         if self.active != Some(window_id) {
             return;
         }
-        self.active = None;
-        // The closed window owned the visible menu (its target object is now
-        // dropped). Hand the bar to any remaining window, or to the
-        // application menu, so we never leave `mainMenu` pointing at a dead
-        // target, and an app left with no window keeps its App menu and ⌘Q.
         let Some(mtm) = MainThreadMarker::new() else {
+            self.active = None;
             return;
         };
-        if let Some(&next) = self.windows.keys().next() {
-            self.active = Some(next);
-            self.apply_main_menu(mtm, next);
-        } else {
-            self.apply_app_menu(mtm);
-        }
+        // The closed window owned the visible menu (its target object is now
+        // dropped), so it never stays up, even with no application menu
+        // declared: the key window's bar if another window is key, else the
+        // application menu, until the window AppKit makes key next is
+        // activated; an app left with no window keeps the application menu.
+        self.active = None;
+        let bar = self
+            .key
+            .filter(|key| *key != window_id)
+            .and_then(|key| self.bar_for(key));
+        self.show(mtm, bar);
     }
 
-    fn set_app_menu(&mut self, menu: NativeMenuSnapshot, poster: Arc<dyn AppEventPoster>) {
+    fn set_app_menu(
+        &mut self,
+        menu: NativeMenuSnapshot,
+        poster: Arc<dyn AppEventPoster>,
+        declared: bool,
+    ) {
         let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
         self.app = Some(Self::build(mtm, None, &menu, poster));
+        self.app_declared = declared;
         if self.active.is_none() {
             self.apply_app_menu(mtm);
         }
@@ -223,8 +345,8 @@ impl NativeMenuBackend for MacOsNativeMenuBackend {
 
     fn update_item(&mut self, id: MenuItemId, delta: MenuItemDelta) {
         // A `MenuModel` cloned across windows shares item ids, so update every
-        // window that carries this item (single-window apps match exactly once).
-        for wm in self.windows.values() {
+        // menu that carries this item, the application menu's included.
+        for wm in self.windows.values().chain(self.app.as_ref()) {
             let Some(item) = wm.items.get(&id) else {
                 continue;
             };
@@ -251,19 +373,32 @@ impl NativeMenuBackend for MacOsNativeMenuBackend {
 // Menu construction
 // ============================================================
 
+/// A built bar and the submenus AppKit is told about while it shows.
+struct BuiltBar {
+    menu: Retained<NSMenu>,
+    windows_menu: Retained<NSMenu>,
+    help_menu: Option<Retained<NSMenu>>,
+    services_menu: Option<Retained<NSMenu>>,
+}
+
 /// Build the top-level `mainMenu`: a bar whose items each carry a submenu.
 fn build_root_menu(
     mtm: MainThreadMarker,
     snapshot: &NativeMenuSnapshot,
     target: &TeksiloMenuTarget,
     items: &mut HashMap<MenuItemId, Retained<NSMenuItem>>,
-) -> Retained<NSMenu> {
+) -> BuiltBar {
     let bar = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), ns_string!(""));
     bar.setAutoenablesItems(false);
+    let plan = mac_bar_plan(snapshot);
+    let mut windows_menu = None;
+    let mut help_menu = None;
+    let mut services_menu = None;
 
-    // The widget layer guarantees a leading App menu (with localized labels), so
-    // the platform never fabricates user-visible strings of its own.
-    for node in &snapshot.roots {
+    // The widget layer guarantees an App menu (with localized labels), so
+    // the platform never fabricates user-visible strings of its own; the
+    // plan puts it first, where AppKit shows the application menu.
+    for (index, node) in plan.menus.iter().copied().enumerate() {
         match node {
             NativeMenuNode::Standard {
                 role: StandardMenuRole::App,
@@ -271,14 +406,16 @@ fn build_root_menu(
                 quit_item,
                 settings_item,
             } => {
-                bar.addItem(&app_menu_item(
+                let (item, services) = app_menu_item(
                     mtm,
                     labels,
                     quit_item.as_ref(),
                     settings_item.as_ref(),
                     target,
                     items,
-                ));
+                );
+                bar.addItem(&item);
+                services_menu = Some(services);
             }
             NativeMenuNode::Standard {
                 role: StandardMenuRole::Window,
@@ -298,12 +435,21 @@ fn build_root_menu(
                     &labels.minimize,
                     sel!(performMiniaturize:),
                     "m",
+                    NSEventModifierFlags::Command,
                 ));
-                sub.addItem(&standard_item(mtm, &labels.zoom, sel!(performZoom:), ""));
+                sub.addItem(&standard_item(
+                    mtm,
+                    &labels.zoom,
+                    sel!(performZoom:),
+                    "",
+                    NSEventModifierFlags::Command,
+                ));
                 sub.addItem(&NSMenuItem::separatorItem(mtm));
                 item.setSubmenu(Some(&sub));
                 bar.addItem(&item);
-                NSApplication::sharedApplication(mtm).setWindowsMenu(Some(&sub));
+                if plan.windows_menu == Some(index) {
+                    windows_menu = Some(sub);
+                }
             }
             NativeMenuNode::Standard {
                 role: StandardMenuRole::Help,
@@ -318,7 +464,9 @@ fn build_root_menu(
                 sub.setAutoenablesItems(false);
                 item.setSubmenu(Some(&sub));
                 bar.addItem(&item);
-                NSApplication::sharedApplication(mtm).setHelpMenu(Some(&sub));
+                if plan.help_menu == Some(index) {
+                    help_menu = Some(sub);
+                }
             }
             NativeMenuNode::Submenu { title, children } => {
                 let item = top_level_item(mtm, title);
@@ -326,13 +474,34 @@ fn build_root_menu(
                 item.setSubmenu(Some(&sub));
                 bar.addItem(&item);
             }
-            // A leaf or separator at top level isn't meaningful in a menu bar;
-            // skip it (the bar holds submenus only).
+            // The plan leaves leaves and separators out of the bar.
             NativeMenuNode::Item { .. } | NativeMenuNode::Separator => {}
         }
     }
 
-    bar
+    // A bar with no Window menu still registers one, hidden, so the Dock
+    // icon's menu lists the windows (Qt's `insertWindowMenu` does the same).
+    let windows_menu = windows_menu.unwrap_or_else(|| {
+        let item = top_level_item(mtm, "");
+        item.setHidden(true);
+        let sub = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), ns_string!(""));
+        sub.setAutoenablesItems(false);
+        // `setWindowsMenu:` reads the menu's last item without checking for
+        // an empty menu (Qt works around FB13369198 the same way).
+        let dummy = top_level_item(mtm, "");
+        dummy.setHidden(true);
+        sub.addItem(&dummy);
+        item.setSubmenu(Some(&sub));
+        bar.addItem(&item);
+        sub
+    });
+
+    BuiltBar {
+        menu: bar,
+        windows_menu,
+        help_menu,
+        services_menu,
+    }
 }
 
 fn build_submenu(
@@ -453,16 +622,19 @@ fn control_state(check: NativeCheck) -> NSControlStateValue {
     }
 }
 
-/// Build the conventional macOS application menu (About / Hide / Quit) from
-/// localized `labels`. About and Hide target the standard responder-chain
-/// selectors, so they work without any app wiring.
+/// Build the conventional macOS application menu from localized `labels`,
+/// with the rows of [`mac_app_menu_rows`] in AppKit's order. About, Services,
+/// Hide, Hide Others and Show All target the standard responder-chain
+/// selectors, so they work without any app wiring. Returns the bar item and
+/// the Services submenu, which AppKit fills once it is registered as
+/// `NSApp.servicesMenu` (see [`WindowMenu::show`]).
 ///
 /// Quit has two shapes. With `quit_item` `None` it is `terminate:` like its
-/// neighbours — the behaviour every app gets for free, including one that
-/// declares no menu model at all. With `Some(id)` it becomes an ordinary routed
-/// item under that id, keeping ⌘Q, so an app that must ask before exiting hears
-/// about it; see `NativeMenuNode::Standard::quit_item` for why an app-side ⌘Q
-/// shortcut cannot do that job itself.
+/// neighbours, for a snapshot built by other means. With `Some(id)`, which
+/// the widget layer always sends, it becomes an ordinary routed item under
+/// that id, keeping ⌘Q, so the app's close guards hear about it; see
+/// `NativeMenuNode::Standard::quit_item` for why an app-side ⌘Q shortcut
+/// cannot do that job itself.
 fn app_menu_item(
     mtm: MainThreadMarker,
     labels: &StandardLabels,
@@ -470,35 +642,65 @@ fn app_menu_item(
     settings_item: Option<&StandardRoutedItem>,
     target: &TeksiloMenuTarget,
     items: &mut HashMap<MenuItemId, Retained<NSMenuItem>>,
-) -> Retained<NSMenuItem> {
+) -> (Retained<NSMenuItem>, Retained<NSMenu>) {
     let bar_item = top_level_item(mtm, &labels.title);
     let menu = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), &NSString::from_str(&labels.title));
     menu.setAutoenablesItems(false);
+    // AppKit fills the Services menu and enables each service from the
+    // current selection, so it keeps AppKit's own enabling; no delta of
+    // the app's ever reaches it.
+    let services =
+        NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), &NSString::from_str(&labels.services));
+    let command = NSEventModifierFlags::Command;
 
-    menu.addItem(&standard_item(
-        mtm,
-        &labels.about,
-        sel!(orderFrontStandardAboutPanel:),
-        "",
-    ));
-    // Settings sits directly under About in its own group — the placement every
-    // Mac app shares, and the one users reach for without looking. Routed or
-    // absent: AppKit has no selector that opens an arbitrary app's settings, so
-    // an unrouted slot could only ever render a dead row.
-    if let Some(routed) = settings_item {
-        menu.addItem(&NSMenuItem::separatorItem(mtm));
-        menu.addItem(&routed_item(mtm, &labels.settings, routed, target, items));
-    }
-    menu.addItem(&NSMenuItem::separatorItem(mtm));
-    menu.addItem(&standard_item(mtm, &labels.hide, sel!(hide:), "h"));
-    menu.addItem(&NSMenuItem::separatorItem(mtm));
-    match quit_item {
-        None => menu.addItem(&standard_item(mtm, &labels.quit, sel!(terminate:), "q")),
-        Some(routed) => menu.addItem(&routed_item(mtm, &labels.quit, routed, target, items)),
+    for row in mac_app_menu_rows(settings_item.is_some()) {
+        let item = match row {
+            MacAppMenuRow::About => standard_item(
+                mtm,
+                &labels.about,
+                sel!(orderFrontStandardAboutPanel:),
+                "",
+                command,
+            ),
+            // Settings sits directly under About in its own group, routed
+            // or absent: AppKit has no selector that opens an arbitrary
+            // app's settings, so an unrouted slot could only ever render a
+            // dead row.
+            MacAppMenuRow::Settings => match settings_item {
+                Some(routed) => routed_item(mtm, &labels.settings, routed, target, items),
+                None => continue,
+            },
+            MacAppMenuRow::Services => {
+                let item = top_level_item(mtm, &labels.services);
+                item.setSubmenu(Some(&services));
+                item
+            }
+            MacAppMenuRow::Hide => standard_item(mtm, &labels.hide, sel!(hide:), "h", command),
+            MacAppMenuRow::HideOthers => standard_item(
+                mtm,
+                &labels.hide_others,
+                sel!(hideOtherApplications:),
+                "h",
+                command | NSEventModifierFlags::Option,
+            ),
+            MacAppMenuRow::ShowAll => standard_item(
+                mtm,
+                &labels.show_all,
+                sel!(unhideAllApplications:),
+                "",
+                command,
+            ),
+            MacAppMenuRow::Quit => match quit_item {
+                None => standard_item(mtm, &labels.quit, sel!(terminate:), "q", command),
+                Some(routed) => routed_item(mtm, &labels.quit, routed, target, items),
+            },
+            MacAppMenuRow::Separator => NSMenuItem::separatorItem(mtm),
+        };
+        menu.addItem(&item);
     }
 
     bar_item.setSubmenu(Some(&menu));
-    bar_item
+    (bar_item, services)
 }
 
 /// A row inside a standard menu that the app routes: the window's action
@@ -529,12 +731,14 @@ fn routed_item(
 }
 
 /// A leaf item bound to a standard responder-chain selector (target nil so the
-/// action travels up to NSApp).
+/// action travels up to NSApp), with `key` and `modifiers` as its key
+/// equivalent (an empty `key` has none).
 fn standard_item(
     mtm: MainThreadMarker,
     title: &str,
     action: Sel,
     key: &str,
+    modifiers: NSEventModifierFlags,
 ) -> Retained<NSMenuItem> {
     let item = mtm.alloc::<NSMenuItem>();
     let item: Retained<NSMenuItem> = unsafe {
@@ -546,7 +750,7 @@ fn standard_item(
         )
     };
     if !key.is_empty() {
-        item.setKeyEquivalentModifierMask(NSEventModifierFlags::Command);
+        item.setKeyEquivalentModifierMask(modifiers);
     }
     item
 }

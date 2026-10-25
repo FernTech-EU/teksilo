@@ -150,6 +150,15 @@ fn wrap_root(
 ///
 /// Extracted from `create_window` so the policy is unit-testable without a winit
 /// event loop.
+/// Whether the macOS Window menu and the Dock icon's menu list a window
+/// opened from `config`. A modal dialog is not listed, as AppKit's sheets
+/// and panels are not: it comes forward with the window it blocks. Nor is a
+/// window kept out of the taskbar (`WindowConfig::skip_taskbar`, a tool
+/// palette), which the user does not switch to either.
+fn listed_in_window_menu(config: &WindowConfig) -> bool {
+    !config.is_modal() && !config.skip_taskbar
+}
+
 fn initial_window_focus(
     tree: &WidgetTree,
     root_id: WidgetId,
@@ -313,6 +322,9 @@ pub(crate) struct ManagedWindow {
     /// is hidden, a pending non-visual tick; see [`crate::redraw_gate`].
     /// Every request goes through [`ManagedWindow::request_redraw`].
     pub(crate) redraw: crate::redraw_gate::RedrawGate,
+    /// This window's copies of the shortcuts the application menu's rows
+    /// name; see [`crate::application_menu`].
+    pub(crate) app_shortcuts: crate::application_menu::MirroredShortcuts,
 }
 
 /// The shortest interval between two `is_minimized` queries of one unfocused
@@ -988,6 +1000,7 @@ impl WindowManager {
     /// purpose.
     pub(crate) fn owes_turn_work(&self) -> bool {
         !self.orphan_intents.is_empty()
+            || self.has_pending_application_menu_rows()
             || self.windows.values().any(|managed| {
                 managed.tree.has_unclaimed_intents() || managed.tree.has_pending_dispatch_requests()
             })
@@ -1008,6 +1021,143 @@ impl WindowManager {
     pub(crate) fn take_app_tree_wake(&self) -> bool {
         self.app_tree_wake_pending
             .swap(false, std::sync::atomic::Ordering::AcqRel)
+    }
+
+    /// The application menu's holder, registered in app-state by the
+    /// builder.
+    pub(crate) fn application_menu(&self) -> Option<teksilo_widgets::menu::ApplicationMenu> {
+        self.app_context_template.as_ref().and_then(|t| {
+            t.app_state::<teksilo_widgets::menu::ApplicationMenu>()
+                .cloned()
+        })
+    }
+
+    /// Bring one window's copies of the application menu's shortcuts in
+    /// line with the menu and the application tree's declarations; see
+    /// [`crate::application_menu`]. A no-op with no application tree.
+    fn sync_window_shortcuts(
+        &self,
+        mirrored: &mut crate::application_menu::MirroredShortcuts,
+        tree: &mut WidgetTree,
+    ) {
+        let (Some(menu), Some(app_tree)) = (self.application_menu(), self.app_tree.as_ref()) else {
+            return;
+        };
+        let (generation, version) = menu.revision();
+        let app = app_tree.shortcut_registry();
+        mirrored.sync(
+            (generation, version, app.version().get()),
+            || menu.shortcut_ids(),
+            app,
+            tree.shortcut_registry_mut(),
+        );
+    }
+
+    /// Bring what the application menu reaches in line with the menu and the
+    /// application tree's declarations: every window's copies of the
+    /// shortcuts its rows name, and the native application menu, when the
+    /// app installed a native menu. A user's rebind of a copy, made in a
+    /// window's `ShortcutSettings`, goes to the application tree's registry
+    /// first, so every window and the native menu follow it (see
+    /// [`crate::application_menu::sync_all`]). Cheap when nothing changed, so
+    /// the loop calls it after every turn's handlers. A no-op with no
+    /// application tree.
+    pub(crate) fn sync_application_menu(&mut self) {
+        let (Some(menu), Some(app_tree)) = (self.application_menu(), self.app_tree.as_mut()) else {
+            return;
+        };
+        let mut windows: Vec<_> = self
+            .windows
+            .values_mut()
+            .map(|managed| {
+                (
+                    &mut managed.app_shortcuts,
+                    managed.tree.shortcut_registry_mut(),
+                )
+            })
+            .collect();
+        crate::application_menu::sync_all(
+            menu.revision(),
+            || menu.shortcut_ids(),
+            app_tree.shortcut_registry_mut(),
+            &mut windows,
+        );
+        drop(windows);
+        let app = app_tree.shortcut_registry();
+        let template = self.app_context_template.as_ref();
+        if let (Some(handle), Some(poster)) = (
+            template.and_then(|t| t.app_state::<teksilo_platform::native_menu::NativeMenuHandle>()),
+            template.and_then(|t| t.poster()),
+        ) {
+            menu.sync_native(handle, poster.clone(), app.version().get(), &|id| {
+                app.effective(id).and_then(|shortcut| shortcut.primary)
+            });
+        }
+    }
+
+    /// Grey out or enable again the native menu's rows whose only effect is
+    /// their intent, from [`native_menu_handled_intents`](Self::native_menu_handled_intents):
+    /// what the route a chosen row's intent takes answers now. A no-op
+    /// without a native menu, or with one that shows no bar (every platform
+    /// but macOS); the handle evaluates no row when the answer is the last
+    /// one's. See [`NativeMenuHandle::refresh_availability`](teksilo_platform::native_menu::NativeMenuHandle::refresh_availability).
+    pub(crate) fn refresh_native_menu_availability(&self) {
+        if let Some(handle) = self
+            .app_context_template
+            .as_ref()
+            .and_then(|t| t.app_state::<teksilo_platform::native_menu::NativeMenuHandle>())
+            .filter(|handle| handle.shows_bar())
+        {
+            handle.refresh_availability(&self.native_menu_handled_intents());
+        }
+    }
+
+    /// Every intent a row chosen in the native menu bar would have handled,
+    /// sorted: what [`native_menu_command_handled`](Self::native_menu_command_handled)
+    /// answers true for, with no fallback window, in one walk.
+    fn native_menu_handled_intents(&self) -> Vec<&'static str> {
+        match self
+            .focused_window()
+            .and_then(|id| self.teksilo_to_winit.get(&id))
+            .and_then(|winit_id| self.windows.get(winit_id))
+        {
+            Some(managed) => managed.tree.handled_intents(),
+            None => {
+                let mut names = self.application_scope.taken();
+                names.sort_unstable();
+                names.dedup();
+                names
+            }
+        }
+    }
+
+    /// Whether an intent named `name`, chosen in the native menu bar, would
+    /// be handled: by the focused window (else `fallback`, the window whose
+    /// own menu the row is in), from its focus as a menu row sends it, its
+    /// application scope included; by the application tree when there is
+    /// no such window. What the App menu's Quit asks before sending its
+    /// intent.
+    pub(crate) fn native_menu_command_handled(
+        &self,
+        name: &str,
+        fallback: Option<TeksiloWindowId>,
+    ) -> bool {
+        match self
+            .focused_window()
+            .or(fallback)
+            .and_then(|id| self.teksilo_to_winit.get(&id))
+            .and_then(|winit_id| self.windows.get(winit_id))
+        {
+            Some(managed) => managed.tree.can_handle(name),
+            None => self.application_scope.takes(name),
+        }
+    }
+
+    /// Whether a row of the application menu chosen in a window waits for
+    /// the application tree to run its closure.
+    pub(crate) fn has_pending_application_menu_rows(&self) -> bool {
+        self.application_menu()
+            .is_some_and(|menu| menu.has_pending())
     }
 
     /// The application tree, if one was installed.
@@ -1617,6 +1767,9 @@ impl WindowManager {
         // Still unmapped: the window is shown once its accessibility adapter
         // exists, in `new_with_a11y` below.
         teksilo_platform::taskbar::skip_taskbar_before_show(&window, config.skip_taskbar);
+        // A modal dialog and a window kept out of the taskbar are not listed
+        // in the macOS Window and Dock menus: see `listed_in_window_menu`.
+        teksilo_platform::set_listed_in_window_menu(&window, listed_in_window_menu(&config));
         if let Some(parent_window) = self.parent_window(modal_parent, dispatching) {
             teksilo_platform::set_transient_for_before_show(&window, parent_window);
         }
@@ -1784,6 +1937,11 @@ impl WindowManager {
         // against its own window signals via `ctx.window()`.
         tree.set_window_state(state.clone());
 
+        // The application menu's shortcuts, before the root builds, so a
+        // menu row naming one shows its chord from the first frame.
+        let mut app_shortcuts = crate::application_menu::MirroredShortcuts::default();
+        self.sync_window_shortcuts(&mut app_shortcuts, &mut tree);
+
         if let Some(root_builder) = config.take_root_builder() {
             let mut root_id = root_builder(&mut tree, state.clone());
 
@@ -1839,6 +1997,15 @@ impl WindowManager {
         if let Some(parent_id) = modal_parent {
             self.modal_blocked.insert(parent_id, teksilo_id);
             self.modal_parents.insert(teksilo_id, parent_id);
+            // On macOS the bar shows the owner's menu while the dialog,
+            // which has none, is key.
+            if let Some(handle) = self
+                .app_context_template
+                .as_ref()
+                .and_then(|t| t.app_state::<teksilo_platform::native_menu::NativeMenuHandle>())
+            {
+                handle.set_window_owner(teksilo_id, Some(parent_id));
+            }
         }
 
         // Install the auto-save observers if persistence is wired and
@@ -1884,6 +2051,7 @@ impl WindowManager {
             on_removed,
             atlas_uploaded_version: primed_atlas_version,
             redraw: crate::redraw_gate::RedrawGate::default(),
+            app_shortcuts,
         };
 
         let mut managed = managed;
@@ -4369,6 +4537,26 @@ mod window_close_subscription_purge_tests {
             0,
             "and the second window's on its own close"
         );
+    }
+}
+
+#[cfg(test)]
+mod window_menu_tests {
+    use super::*;
+
+    /// The macOS Window and Dock menus list the windows a user switches
+    /// between: not a modal dialog, which comes forward with the window it
+    /// blocks, nor a window kept out of the taskbar (a palette), which AppKit
+    /// does not list as a panel either.
+    #[test]
+    fn dialogs_and_windows_kept_out_of_the_taskbar_are_not_listed() {
+        assert!(listed_in_window_menu(&WindowConfig::new()));
+        assert!(!listed_in_window_menu(
+            &WindowConfig::new().modal_to(teksilo_core::window::TeksiloWindowId::new(1))
+        ));
+        assert!(!listed_in_window_menu(
+            &WindowConfig::new().skip_taskbar(true)
+        ));
     }
 }
 

@@ -447,9 +447,11 @@ impl WindowConfig {
     ///
     /// Honoured on Windows and X11, when the window is created. Wayland has
     /// no protocol open to every client for it, so the compositor decides.
-    /// macOS has nothing to hide: the Dock lists applications, not windows,
-    /// and keeping the application itself out of the Dock is its activation
-    /// policy, not this setting.
+    /// On macOS, where the Dock lists applications, the window is kept out
+    /// of the Window menu and the Dock icon's menu, the lists of windows a
+    /// user switches between, as AppKit's panels are; keeping the
+    /// application itself out of the Dock is its activation policy, not
+    /// this setting.
     ///
     /// On Windows a window with no taskbar button is also left out of
     /// Alt+Tab, so once minimised the user has no way to bring it back. Give

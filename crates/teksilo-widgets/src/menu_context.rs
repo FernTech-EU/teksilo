@@ -291,13 +291,20 @@ impl MenuContext {
         // `open_index` first — that is the signal the deferred host reveals on.
         ctx.materialize_now(content_id);
         ctx.activate(content_id);
-        let request = OverlayRequest::new(
+        let mut request = OverlayRequest::new(
             content_id,
             trigger_id,
             OverlayPlacement::BelowPreferred,
             DismissBehavior::EscapeOrClickOutside,
         )
         .on_dismiss(on_dismiss);
+        // A command chosen here acts on the widget focused before the bar,
+        // also when the keyboard focused a title and the menu gives focus
+        // back to it: so a row asks whether that widget's route handles its
+        // command, not the bar's.
+        if let Some(outside) = self.focus.outside_focus.get() {
+            request = request.command_source(outside);
+        }
         ctx.show_overlay(request);
         // Focus the inner MenuList (not the host) so it receives key events
         // first. ArrowLeft/Escape bubble from MenuList → host for cross-menu nav.

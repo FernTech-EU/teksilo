@@ -199,8 +199,8 @@ pub use language_switcher::LanguageSwitcher;
 pub use link::Link;
 pub use list_view::{ListView, ListViewHandle};
 pub use menu::{
-    MenuEntry, MenuItemState, MenuItems, MenuModel, MenuNode, NativeMenuMode, StandardMenu,
-    StandardMenuRole,
+    ApplicationMenuExt, MenuEntry, MenuItemState, MenuItems, MenuModel, MenuNode, NativeMenuMode,
+    StandardMenu, StandardMenuRole,
 };
 pub use menu_bar::{CollapsePolicy, MenuBar};
 pub use menu_item::MenuItem;

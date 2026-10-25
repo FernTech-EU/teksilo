@@ -1563,6 +1563,10 @@ impl TeksiloAppHandler {
             let had_follow_system = self.wm.drain_pending_follow_system_requests();
             let had_text_scale = self.wm.drain_pending_text_scale_requests();
             let had_commands = self.wm.drain_close_window_requests();
+            // The application menu's rows chosen in a window whose closure is
+            // the application tree's, before the intents left unclaimed: a
+            // row's intent may be one of them.
+            self.run_application_menu_rows(event_loop);
             // What a dispatch left unclaimed goes to the other side after the
             // close flags are queued, so a window closing this turn is no
             // target, and before the modal and close processing, which then
@@ -1589,6 +1593,11 @@ impl TeksiloAppHandler {
                 || had_modal_requests
                 || had_modal_dismissals;
         }
+        // The application tree may have declared another menu or registered
+        // a shortcut, and a handler may have changed the menu: every window
+        // holds the shortcuts its rows name, and the native menu bar shows
+        // the menu as it is.
+        self.wm.sync_application_menu();
         if redraw_all {
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_request_redraw_all();
@@ -2788,6 +2797,9 @@ impl TeksiloAppHandler {
             // Item not found (menu replaced / window torn down) — drop.
             return Ok(());
         };
+        if self.quit_instead(&activation, Some(owner)) {
+            return Ok(());
+        }
         let winit_of = |wm: &crate::window_manager::WindowManager, id| {
             wm.teksilo_to_winit_map().get(&id).copied()
         };
@@ -2816,18 +2828,57 @@ impl TeksiloAppHandler {
         Ok(())
     }
 
-    /// Fire an item chosen in the application menu, the menu shown while no
-    /// window's menu is (its App menu: Quit, Settings). It runs in the
-    /// application tree, as an intent no window claimed does. With no
-    /// application tree, Quit asks the application to quit, through every
-    /// window's guard as `request_quit` does, so ⌘Q still works.
+    /// Run the rows of the application menu chosen in a window whose
+    /// closure belongs to the application tree, oldest first: each closure
+    /// in the application tree, then its row's intent from the focus of the
+    /// window it was chosen in, or in the application tree when that window
+    /// has closed. With no application tree the closure runs in that window.
+    fn run_application_menu_rows(&mut self, event_loop: &ActiveEventLoop) {
+        use crate::native_menu_route::fire_native_menu_item;
+
+        let Some(menu) = self.wm.application_menu() else {
+            return;
+        };
+        for row in menu.take_pending() {
+            let window = row.window.and_then(|id| self.wm.winit_id_for_teksilo(id));
+            if let Some(action) = row.action.as_ref() {
+                if self.wm.app_tree().is_some() {
+                    self.run_in_app_tree(event_loop, |tree, ops| {
+                        fire_native_menu_item(tree, ops, Some(action), None);
+                    });
+                } else if let Some(winit_id) = window {
+                    self.run_in_window(winit_id, event_loop, |tree, ops| {
+                        fire_native_menu_item(tree, ops, Some(action), None);
+                    });
+                }
+            }
+            if row.intent.is_some() {
+                match window {
+                    Some(winit_id) => self.run_in_window(winit_id, event_loop, |tree, ops| {
+                        fire_native_menu_item(tree, ops, None, row.intent);
+                    }),
+                    None => self.run_in_app_tree(event_loop, |tree, ops| {
+                        fire_native_menu_item(tree, ops, None, row.intent);
+                    }),
+                }
+            }
+        }
+    }
+
+    /// Fire an item chosen in the native application menu, the menu shown
+    /// whenever the key window has no menu of its own and while no window is
+    /// open: its action in the application tree, where the state it captured
+    /// lives, then its intent from the focus of the window with the OS
+    /// focus, or in the application tree when no window has it, as an
+    /// in-window row of the application menu does. The App menu's Quit asks
+    /// the application to quit when nothing takes its intent, or it has none
+    /// ([`Self::quit_instead`]).
     fn route_app_menu_item(
         &mut self,
         item: teksilo_core::MenuItemId,
         event_loop: &ActiveEventLoop,
     ) {
-        use teksilo_core::Intent;
-        use teksilo_core::telemetry::IntentSource;
+        use crate::native_menu_route::fire_native_menu_item;
         use teksilo_platform::native_menu::NativeMenuHandle;
 
         let Some(handle) = self
@@ -2840,24 +2891,51 @@ impl TeksiloAppHandler {
         let Some(activation) = handle.app_activation(item) else {
             return;
         };
-        if self.wm.app_tree().is_none() {
-            if handle.app_quit_item() == Some(item) {
-                self.wm.request_quit(false);
-            }
+        if self.quit_instead(&activation, None) {
             return;
         }
-        self.run_in_app_tree(event_loop, |tree, ops| {
-            tree.run_with_event_context(ops, |ctx| {
-                ctx.with_intent_source(IntentSource::Menu, |ctx| {
-                    if let Some(name) = activation.intent {
-                        ctx.send_intent(Intent::new(name));
-                    }
-                    if let Some(action) = &activation.action {
-                        action(ctx);
-                    }
-                });
+        if let Some(action) = activation.action.as_ref() {
+            self.run_in_app_tree(event_loop, |tree, ops| {
+                fire_native_menu_item(tree, ops, Some(action), None);
             });
-        });
+        }
+        if activation.intent.is_none() {
+            return;
+        }
+        match self
+            .wm
+            .focused_window()
+            .and_then(|id| self.wm.winit_id_for_teksilo(id))
+        {
+            Some(winit_id) => self.run_in_window(winit_id, event_loop, |tree, ops| {
+                fire_native_menu_item(tree, ops, None, activation.intent);
+            }),
+            None => self.run_in_app_tree(event_loop, |tree, ops| {
+                fire_native_menu_item(tree, ops, None, activation.intent);
+            }),
+        }
+    }
+
+    /// For the App menu's Quit row (`activation.quits`): ask the application
+    /// to quit, through every window's close guard, when its intent is
+    /// missing or nothing on the native menu's route would take it, and
+    /// say so. A row that is not Quit, or whose intent something takes,
+    /// answers `false` and is fired as any row is. `owner` is the window
+    /// whose own menu the row is in, `None` for the application menu.
+    fn quit_instead(
+        &mut self,
+        activation: &teksilo_platform::native_menu::NativeMenuActivation,
+        owner: Option<crate::TeksiloWindowId>,
+    ) -> bool {
+        if !activation.quits
+            || activation
+                .intent
+                .is_some_and(|name| self.wm.native_menu_command_handled(name, owner))
+        {
+            return false;
+        }
+        self.wm.request_quit(false);
+        true
     }
 
     /// Try to interpret an `AppEvent::External` payload as an
@@ -4218,6 +4296,9 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         // control flow below, is served when it wakes the loop. What it asks
         // for is drained below.
         self.tick_app_tree(event_loop);
+        // The application menu as the application tree declared it, from the
+        // first turn on, in the native menu bar too.
+        self.wm.sync_application_menu();
         // Once per event-loop turn, which is what the shim's own contract
         // asks for. A digitizer reads on its own thread and buffers; this is
         // the only place that asks it what it saw.
@@ -4231,6 +4312,10 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         if self.wm.owes_turn_work() {
             self.post_event(event_loop);
         }
+        // Once the turn's handlers have run: a native menu row greys out when
+        // nothing on its route takes its intent, read now, so the menu is
+        // current when the user opens it.
+        self.wm.refresh_native_menu_availability();
         // A redraw becomes withheld with time alone, so the wake targets learn
         // it here, before the ticks that serve a window drawing nothing.
         let now = Instant::now();
@@ -5301,6 +5386,11 @@ impl TeksiloAppBuilder {
             std::any::TypeId::of::<SharedTypesetter>(),
             Box::new(typesetter),
         );
+        // Every application has an application menu's holder, empty until
+        // the application tree declares one.
+        self.app_state_registry
+            .entry(std::any::TypeId::of::<teksilo_widgets::menu::ApplicationMenu>())
+            .or_insert_with(|| Box::new(teksilo_widgets::menu::ApplicationMenu::new()));
 
         // Install the i18n manager (if any) and seed the tree with the
         // resolved initial locale and layout direction. Must happen before
@@ -5336,6 +5426,13 @@ impl TeksiloAppBuilder {
             root(app_tree);
             app_tree.publish_application_scope(&application_scope);
         }
+        // The shortcuts the application menu's rows name, before the
+        // window's root builds, as a window of a running application gets
+        // them.
+        let mut app_shortcuts = crate::application_menu::MirroredShortcuts::default();
+        if let Some(app_tree) = app_tree.as_mut() {
+            sync_headless_shortcuts(app_tree, &mut tree, &mut app_shortcuts);
+        }
 
         // Build the root from the `initial_window`'s builder if one was
         // provided. Headless apps without an `initial_window` run with an
@@ -5368,6 +5465,7 @@ impl TeksiloAppBuilder {
             i18n_manager,
             settings: opened_settings,
             application_scope,
+            app_shortcuts,
         }
     }
 
@@ -5568,6 +5666,11 @@ impl TeksiloAppBuilder {
             std::any::TypeId::of::<SharedTypesetter>(),
             Box::new(typesetter.clone()),
         );
+        // Every application has an application menu's holder, empty until
+        // the application tree declares one.
+        self.app_state_registry
+            .entry(std::any::TypeId::of::<teksilo_widgets::menu::ApplicationMenu>())
+            .or_insert_with(|| Box::new(teksilo_widgets::menu::ApplicationMenu::new()));
 
         // Auto-install a system clipboard handle so `RichTextEditor::editor`
         // (and any future clipboard-aware widget) can reach it via
@@ -5667,6 +5770,9 @@ impl TeksiloAppBuilder {
 #[cfg(all(test, target_os = "linux"))]
 mod winit_loop_tests;
 
+#[cfg(test)]
+mod application_menu_tests;
+
 impl Default for TeksiloAppBuilder {
     fn default() -> Self {
         Self::new()
@@ -5721,6 +5827,34 @@ pub struct HeadlessApp {
     /// shortcuts. Published when the application tree is built and by
     /// [`route_unclaimed_intents`](Self::route_unclaimed_intents).
     application_scope: teksilo_core::ApplicationScope,
+    /// [`tree`](Self::tree)'s copies of the shortcuts the application
+    /// menu's rows name, kept in line by
+    /// [`route_unclaimed_intents`](Self::route_unclaimed_intents).
+    app_shortcuts: crate::application_menu::MirroredShortcuts,
+}
+
+/// Bring a headless app's window tree's copies of the application menu's
+/// shortcuts in line with `app_tree`'s declarations, after taking a rebind
+/// of a copy made in the window to `app_tree`, as a running application
+/// does.
+fn sync_headless_shortcuts(
+    app_tree: &mut WidgetTree,
+    tree: &mut WidgetTree,
+    mirrored: &mut crate::application_menu::MirroredShortcuts,
+) {
+    let Some(menu) = app_tree
+        .app_context()
+        .app_state::<teksilo_widgets::menu::ApplicationMenu>()
+        .cloned()
+    else {
+        return;
+    };
+    crate::application_menu::sync_all(
+        menu.revision(),
+        || menu.shortcut_ids(),
+        app_tree.shortcut_registry_mut(),
+        &mut [(mirrored, tree.shortcut_registry_mut())],
+    );
 }
 
 impl HeadlessApp {
@@ -5739,6 +5873,12 @@ impl HeadlessApp {
     /// ran (or when the application tree was built); this publishes what
     /// the application tree takes again once it is done.
     ///
+    /// A row of the [application menu](teksilo_widgets::menu::ApplicationMenuExt)
+    /// chosen in `tree` whose closure belongs to the application tree runs
+    /// first: the closure in the application tree, then the row's intent
+    /// from `tree`'s focus. Last, `tree`'s copies of the shortcuts the
+    /// application menu names are brought in line with it.
+    ///
     /// The window operations are a no-op sink, as everywhere in a headless
     /// app.
     pub fn route_unclaimed_intents(&mut self) -> Vec<&'static str> {
@@ -5747,6 +5887,26 @@ impl HeadlessApp {
         };
         let mut dropped = Vec::new();
         let mut ops = teksilo_core::NoopWindowOps;
+        if let Some(menu) = app_tree
+            .app_context()
+            .app_state::<teksilo_widgets::menu::ApplicationMenu>()
+            .cloned()
+        {
+            for row in menu.take_pending() {
+                crate::native_menu_route::fire_native_menu_item(
+                    app_tree,
+                    &mut ops,
+                    row.action.as_ref(),
+                    None,
+                );
+                crate::native_menu_route::fire_native_menu_item(
+                    &mut self.tree,
+                    &mut ops,
+                    None,
+                    row.intent,
+                );
+            }
+        }
         for _ in 0..16 {
             let from_window = self.tree.take_unclaimed_intents();
             let from_app = app_tree.take_unclaimed_intents();
@@ -5765,6 +5925,7 @@ impl HeadlessApp {
             ));
         }
         app_tree.publish_application_scope(&self.application_scope);
+        sync_headless_shortcuts(app_tree, &mut self.tree, &mut self.app_shortcuts);
         dropped
     }
 

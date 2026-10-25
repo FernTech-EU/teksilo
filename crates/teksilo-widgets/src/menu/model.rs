@@ -16,6 +16,8 @@ use teksilo_platform::native_menu::{MenuActionFn, NativeMenuActivation, Standard
 use crate::menu_item::MenuItem;
 use crate::menu_list::MenuList;
 
+use super::application::{ApplicationMenu, ApplicationMenuActivation};
+
 /// Checkable / radio state for a menu item, mirroring the [`MenuItem`] modes.
 #[derive(Clone)]
 pub enum MenuItemState {
@@ -101,14 +103,34 @@ impl MenuEntry {
     /// user was working in: an action on that widget, on one of its
     /// ancestors or on the window's root takes it, so
     /// [`register_action`](teksilo_core::BuildContext::register_action) on
-    /// the root is enough for an app-wide command.
+    /// the root is enough for a command of the window. An intent the window
+    /// leaves goes to the application tree, where the
+    /// [application menu](crate::menu::ApplicationMenuExt)'s commands live.
+    ///
+    /// A row with an intent and no [`on_activate`](Self::on_activate)
+    /// closure is enabled only while something on that route takes the
+    /// intent: an enabled action on the walk from the focus to the window's
+    /// root, a global action of the window, or one of the application
+    /// tree's. In the window the row follows that while its menu is open
+    /// (focus, the actions, the application's); in the macOS menu bar it is
+    /// brought up to date after every turn of the event loop. An action that
+    /// may decline when it runs (`on_invoke_with_response`, such as a text
+    /// field's `edit.copy` with nothing selected) counts as taking it, so the
+    /// row stays enabled. Its own [`enabled`](Self::enabled) state still
+    /// applies on top. A row with a closure always does something, and so
+    /// does a two-way [`checkable`](Self::checkable),
+    /// [`tri_checkable`](Self::tri_checkable) or [`radio`](Self::radio) row,
+    /// which writes its state when chosen: only `enabled` decides for those.
     pub fn intent(mut self, name: &'static str) -> Self {
         self.intent = Some(name);
         self
     }
 
-    /// Run this closure when the item is chosen. Runs after `intent`, if both
-    /// are set. The escape hatch for behaviour that isn't a plain intent.
+    /// Run this closure when the item is chosen, before the `intent` is
+    /// dispatched if both are set. The escape hatch for behaviour that isn't
+    /// a plain intent. In a window's own menu it runs in that window; in the
+    /// [application menu](crate::menu::ApplicationMenuExt) it runs in the
+    /// application tree, where the state it captured lives.
     pub fn on_activate(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.action = Some(Rc::new(f));
         self
@@ -198,16 +220,35 @@ impl MenuEntry {
     /// action registered on the window's root or anywhere between it and the
     /// focus answers. Sent from the row, the intent would walk from the menu
     /// to the bar's trigger and miss the focused widget.
-    pub(crate) fn to_menu_item(&self) -> MenuItem {
+    ///
+    /// A row of the [application menu](crate::menu::ApplicationMenuExt) with
+    /// a closure hands both to the application tree instead (`origin`): the
+    /// closure runs there, then the intent goes from the window's focus.
+    pub(crate) fn to_menu_item(&self, origin: &RowOrigin) -> MenuItem {
         // Pass the enabled `Prop` through (not its current value) so a bound
         // signal greys the in-window item out reactively.
         let mut mi = MenuItem::new(self.title.clone()).enabled(self.enabled.clone());
         if let Some(id) = self.shortcut_id {
             mi = mi.for_shortcut(id);
         }
+        // A row whose only effect is its intent greys out while nothing on
+        // the intent's route takes it. A closure always does something, and
+        // so does the state write of a two-way check or radio row.
+        if let Some(name) = self.only_sends() {
+            mi = mi.enabled_while_handled(name);
+        }
         let intent = self.intent;
         let action = self.action.clone();
+        let origin = origin.clone();
         mi = mi.on_activate_fn(move |ctx| {
+            if let (RowOrigin::Application(menu), Some(action)) = (&origin, &action) {
+                menu.queue(ApplicationMenuActivation {
+                    window: ctx.window().map(|window| window.id()),
+                    intent,
+                    action: Some(action.clone()),
+                });
+                return;
+            }
             if let Some(name) = intent {
                 ctx.send_intent_from_focus(Intent::new(name));
             }
@@ -216,6 +257,20 @@ impl MenuEntry {
             }
         });
         self.state.bind(mi)
+    }
+
+    /// The intent this row sends, when sending it is all choosing the row
+    /// does: no closure, and no state write (a two-way check, tri-state or
+    /// radio row writes its state). Such a row greys out while nothing on
+    /// the intent's route takes it, in the window and in the native bar,
+    /// where [`native_activation`](Self::native_activation) folds the write
+    /// into the action.
+    fn only_sends(&self) -> Option<&'static str> {
+        let writes = matches!(
+            self.state,
+            MenuItemState::Check(_) | MenuItemState::TriCheck(_) | MenuItemState::Radio { .. }
+        );
+        self.intent.filter(|_| self.action.is_none() && !writes)
     }
 
     /// What choosing this item in the native menu bar does: the intent, and
@@ -245,11 +300,16 @@ impl MenuEntry {
         NativeMenuActivation {
             intent: self.intent,
             action,
+            quits: false,
         }
     }
 }
 
 /// One node of the menu tree.
+// A standard menu's labels make it the large variant. A model holds a
+// handful of standard menus, so boxing them would cost every declaration for
+// no measurable saving.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum MenuNode {
     /// A leaf command.
@@ -272,9 +332,10 @@ pub enum MenuNode {
 }
 
 /// A platform-standard menu (macOS App / Window / Help) with **localized**
-/// labels. The framework wires the system selectors (About / Hide / Quit,
-/// Minimize / Zoom); you supply the strings — defaults are English `lit!`s, so
-/// pass `tr!`-resolved [`LocalizedString`]s for a localized app menu. This keeps
+/// labels. The framework wires the system selectors (About, Services, Hide,
+/// Hide Others, Show All; Minimize, Zoom) and routes Quit and Settings; you
+/// supply the strings. The defaults are English `lit!`s, so pass
+/// `tr!`-resolved [`LocalizedString`]s for a localized app menu. This keeps
 /// the OS menu bar inside the i18n net like every other widget.
 #[derive(Clone)]
 pub struct StandardMenu {
@@ -282,15 +343,20 @@ pub struct StandardMenu {
     title: LocalizedString,
     about: LocalizedString,
     settings: LocalizedString,
+    services: LocalizedString,
     hide: LocalizedString,
+    hide_others: LocalizedString,
+    show_all: LocalizedString,
     quit: LocalizedString,
     minimize: LocalizedString,
     zoom: LocalizedString,
-    /// Set by [`quit_intent`](Self::quit_intent): the intent to fire, paired
-    /// with the id the native item is built under. Minted once here rather than
-    /// per install, so the id an activation is recorded against survives every
-    /// rebuild of the model.
-    quit_route: Option<(&'static str, MenuItemId)>,
+    /// Set by [`quit_intent`](Self::quit_intent): the intent the Quit row
+    /// fires. `None` asks the application to quit directly.
+    quit_route: Option<&'static str>,
+    /// The id the App menu's Quit row is built under. Minted once here rather
+    /// than per install, so the id an activation is recorded against survives
+    /// every rebuild of the model.
+    quit_id: MenuItemId,
     /// Set by [`settings_intent`](Self::settings_intent), same shape as
     /// `quit_route`. `None` omits the item entirely — there is no platform
     /// default to fall back on.
@@ -303,19 +369,25 @@ pub struct StandardMenu {
 }
 
 impl StandardMenu {
-    /// The application menu (About / Hide / Quit). `title` is the bold app-name
-    /// submenu label — set it to your localized app name.
+    /// The application menu: About, Services, Hide, Hide Others, Show All and
+    /// Quit, plus Settings when [`settings_intent`](Self::settings_intent) is
+    /// set, in the order macOS has them. `title` is the bold app-name submenu
+    /// label: set it to your localized app name.
     pub fn app() -> Self {
         Self {
             role: StandardMenuRole::App,
             title: LocalizedString::literal("App"),
             about: LocalizedString::literal("About"),
             settings: LocalizedString::literal("Settings…"),
+            services: LocalizedString::literal("Services"),
             hide: LocalizedString::literal("Hide"),
+            hide_others: LocalizedString::literal("Hide Others"),
+            show_all: LocalizedString::literal("Show All"),
             quit: LocalizedString::literal("Quit"),
             minimize: LocalizedString::literal(""),
             zoom: LocalizedString::literal(""),
             quit_route: None,
+            quit_id: MenuItemId::next(),
             settings_route: None,
             quit_shortcut: None,
             settings_shortcut: None,
@@ -329,11 +401,15 @@ impl StandardMenu {
             title: LocalizedString::literal("Window"),
             about: LocalizedString::literal(""),
             settings: LocalizedString::literal(""),
+            services: LocalizedString::literal(""),
             hide: LocalizedString::literal(""),
+            hide_others: LocalizedString::literal(""),
+            show_all: LocalizedString::literal(""),
             quit: LocalizedString::literal(""),
             minimize: LocalizedString::literal("Minimize"),
             zoom: LocalizedString::literal("Zoom"),
             quit_route: None,
+            quit_id: MenuItemId::next(),
             settings_route: None,
             quit_shortcut: None,
             settings_shortcut: None,
@@ -347,11 +423,15 @@ impl StandardMenu {
             title: LocalizedString::literal("Help"),
             about: LocalizedString::literal(""),
             settings: LocalizedString::literal(""),
+            services: LocalizedString::literal(""),
             hide: LocalizedString::literal(""),
+            hide_others: LocalizedString::literal(""),
+            show_all: LocalizedString::literal(""),
             quit: LocalizedString::literal(""),
             minimize: LocalizedString::literal(""),
             zoom: LocalizedString::literal(""),
             quit_route: None,
+            quit_id: MenuItemId::next(),
             settings_route: None,
             quit_shortcut: None,
             settings_shortcut: None,
@@ -391,9 +471,25 @@ impl StandardMenu {
         self.settings = label.into();
         self
     }
+    /// "Services" label (App): the submenu macOS fills with the services
+    /// that apply to the current selection.
+    pub fn services(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.services = label.into();
+        self
+    }
     /// "Hide …" label (App).
     pub fn hide(mut self, label: impl Into<LocalizedString>) -> Self {
         self.hide = label.into();
+        self
+    }
+    /// "Hide Others" label (App).
+    pub fn hide_others(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.hide_others = label.into();
+        self
+    }
+    /// "Show All" label (App).
+    pub fn show_all(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.show_all = label.into();
         self
     }
     /// "Quit …" label (App).
@@ -412,23 +508,29 @@ impl StandardMenu {
         self
     }
 
-    /// Route the App menu's **Quit** through `intent` instead of the platform's
-    /// terminate selector, keeping its ⌘Q key equivalent.
+    /// Send `intent` from the App menu's **Quit** row, keeping its ⌘Q key
+    /// equivalent.
     ///
-    /// Set this whenever quitting has to pass through the app first — unsaved
-    /// work to confirm, a session to write out, a background job to stop. By
-    /// default the item is the platform's own (`terminate:` on macOS), which
-    /// exits immediately: it never reaches winit's exit path, so no
-    /// `LoopExiting` hook and nothing the app registered runs.
+    /// By default Quit asks the application to quit, as
+    /// `EventContext::request_quit` does: every window's close guard is asked
+    /// in turn, and the application ends once no window is left. Set an
+    /// intent when quitting has to pass through the app first in a way the
+    /// guards do not cover: a session to write out, a background job to stop.
+    /// The intent is sent from the focused window's focus, or in the
+    /// application tree with no window focused, like any row's.
+    ///
+    /// When nothing on that route takes the intent, Quit still asks the
+    /// application to quit, so ⌘Q never goes dead, also with no window open
+    /// in an application that handles its quit command in its windows only.
+    /// An action that takes the intent owns the exit: nothing quits on the
+    /// app's behalf once it has run. Register that action in the application
+    /// tree: the intent is never sent to a window other than the focused
+    /// one, so an action only some windows register is skipped (and the
+    /// application quits directly) while another window is key.
     ///
     /// An in-app ⌘Q shortcut is **not** a substitute. AppKit dispatches
     /// main-menu key equivalents before the responder chain, so the App menu's
-    /// item wins and the app's own shortcut never sees the keystroke — the app
-    /// looks wired up and is not. Routing the item is the only place that
-    /// decision can be taken.
-    ///
-    /// Whatever `intent` resolves to now owns the exit — nothing terminates on
-    /// the app's behalf once this is set.
+    /// item wins and the app's own shortcut never sees the keystroke.
     ///
     /// ```ignore
     /// StandardMenu::app()
@@ -437,25 +539,24 @@ impl StandardMenu {
     ///     .quit_intent("app.quit")   // the guarded action, same as File ▸ Quit
     /// ```
     pub fn quit_intent(mut self, intent: &'static str) -> Self {
-        self.quit_route = Some((intent, MenuItemId::next()));
+        self.quit_route = Some(intent);
         self
     }
 
     /// The intent [`quit_intent`](Self::quit_intent) installed, or `None` if
-    /// Quit is still the platform's own terminate selector.
+    /// Quit asks the application to quit directly.
     ///
-    /// Public so an app can *test* that its Quit is guarded. Everything the
+    /// Public so an app can *test* where its Quit goes. Everything the
     /// routing does happens on macOS, where a downstream test suite generally
-    /// does not run, so without a getter the difference between a guarded ⌘Q and
-    /// an unguarded one is invisible from the app's side — which is the same
-    /// blind spot that let the unrouted default ship in the first place.
+    /// does not run, so without a getter the wiring would be invisible from
+    /// the app's side.
     pub fn quit_intent_name(&self) -> Option<&'static str> {
-        self.quit_route.map(|(intent, _)| intent)
+        self.quit_route
     }
 
-    /// The intent + item id [`quit_intent`](Self::quit_intent) installed, if any.
-    pub(crate) fn quit_route(&self) -> Option<(&'static str, MenuItemId)> {
-        self.quit_route
+    /// The id the App menu's Quit row is built under.
+    pub(crate) fn quit_id(&self) -> MenuItemId {
+        self.quit_id
     }
 
     /// Put **Settings…** in the App menu, routed through `intent`, with the
@@ -494,10 +595,8 @@ impl StandardMenu {
         self.settings_route.map(|(intent, _)| intent)
     }
 
-    /// Advertise the registered shortcut `id` on the routed **Quit** row,
-    /// instead of the platform's conventional chord (⌘Q on macOS).
-    /// The intent + item id [`settings_intent`](Self::settings_intent)
-    /// installed, if any.)
+    /// Advertise the registered shortcut `id` on the **Quit** row, instead
+    /// of the platform's conventional chord (⌘Q on macOS).
     ///
     /// Worth naming whenever the app registers a quit shortcut of its own —
     /// which is to say whenever [`quit_intent`](Self::quit_intent) is set, since
@@ -542,7 +641,10 @@ impl StandardMenu {
             title: self.title.resolve_now(),
             about: self.about.resolve_now(),
             settings: self.settings.resolve_now(),
+            services: self.services.resolve_now(),
             hide: self.hide.resolve_now(),
+            hide_others: self.hide_others.resolve_now(),
+            show_all: self.show_all.resolve_now(),
             quit: self.quit.resolve_now(),
             minimize: self.minimize.resolve_now(),
             zoom: self.zoom.resolve_now(),
@@ -626,6 +728,11 @@ impl Default for MenuModel {
 }
 
 impl MenuModel {
+    /// Whether `self` and `other` are handles to the same model.
+    pub(crate) fn same(&self, other: &MenuModel) -> bool {
+        Rc::ptr_eq(&self.nodes, &other.nodes)
+    }
+
     /// An empty model.
     pub fn new() -> Self {
         Self {
@@ -682,6 +789,45 @@ impl MenuModel {
     /// [`StandardMenu::for_role`] when the labels stay at their defaults.
     pub fn standard_menus(self, menus: impl IntoIterator<Item = StandardMenu>) -> Self {
         menus.into_iter().fold(self, Self::standard_menu)
+    }
+
+    /// What a debug build says about a model that declares more than one
+    /// App menu ([`StandardMenu::app`] at the top level): the macOS menu bar
+    /// has one application menu and shows the first, and the in-window bar
+    /// shows none, so the others would vanish without a word on every
+    /// platform. `None` for a model with one or none.
+    pub(crate) fn second_app_menu_warning(&self) -> Option<String> {
+        let app_menus = self
+            .nodes
+            .borrow()
+            .iter()
+            .filter(|node| {
+                matches!(node, MenuNode::Standard(menu) if menu.role() == StandardMenuRole::App)
+            })
+            .count();
+        (app_menus > 1).then(|| {
+            format!(
+                "teksilo: a MenuModel declares {app_menus} App menus (StandardMenu::app()); \
+                 the macOS menu bar shows the first and drops the others. Declare one."
+            )
+        })
+    }
+
+    /// Say [`second_app_menu_warning`](Self::second_app_menu_warning) once
+    /// per process, in a debug build. Called wherever a model is shown or
+    /// declared, on every platform, so a developer who never runs macOS
+    /// hears of it too.
+    pub(crate) fn warn_second_app_menu(&self) {
+        #[cfg(debug_assertions)]
+        {
+            static WARNED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if let Some(warning) = self.second_app_menu_warning()
+                && !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed)
+            {
+                eprintln!("{warning}");
+            }
+        }
     }
 
     /// A `Signal<u64>` bumped whenever the tree's *structure* changes. The
@@ -874,16 +1020,28 @@ fn remove_by_id(nodes: &mut Vec<MenuNode>, id: MenuItemId) -> bool {
     false
 }
 
+/// Where the rows of an in-window menu built from a model come from, which
+/// decides where a row's closure runs.
+#[derive(Clone)]
+pub(crate) enum RowOrigin {
+    /// A window's own menu ([`MenuBar::from_model`](crate::menu_bar::MenuBar::from_model)):
+    /// a closure runs in the window.
+    Window,
+    /// The application menu ([`MenuBar::application`](crate::menu_bar::MenuBar::application)):
+    /// a closure runs in the application tree.
+    Application(ApplicationMenu),
+}
+
 /// Build the in-window dropdown [`MenuList`] for a slice of nodes. Standard
 /// roles are skipped (they only exist in the native bar).
-pub(crate) fn build_menu_list(nodes: &[MenuNode]) -> MenuList {
+pub(crate) fn build_menu_list(nodes: &[MenuNode], origin: &RowOrigin) -> MenuList {
     let mut list = MenuList::new();
     for node in nodes {
         match node {
             MenuNode::Item(entry) => {
                 // `item_when` gates visibility reactively (Static(true) ⇒ always
                 // shown, equivalent to `.item`).
-                list = list.item_when(entry.to_menu_item(), entry.visible.clone());
+                list = list.item_when(entry.to_menu_item(origin), entry.visible.clone());
             }
             MenuNode::Separator => {
                 list = list.separator();
@@ -892,8 +1050,9 @@ pub(crate) fn build_menu_list(nodes: &[MenuNode]) -> MenuList {
                 title, children, ..
             } => {
                 let children = children.clone();
+                let origin = origin.clone();
                 list = list.item(MenuItem::submenu(title.clone(), move || {
-                    Box::new(build_menu_list(&children))
+                    Box::new(build_menu_list(&children, &origin))
                 }));
             }
             MenuNode::Standard(_) => {}
@@ -1010,7 +1169,7 @@ mod tests {
         /// Choose the entry in the in-window menu: click its row.
         fn choose_in_window(&mut self) {
             self.tree
-                .add(MenuList::new().item(self.entry.to_menu_item()));
+                .add(MenuList::new().item(self.entry.to_menu_item(&RowOrigin::Window)));
             self.tree.layout(SizeProposal::exact(400.0, 300.0));
             let row = self.tree.find_by_label("Pages").expect("the entry's row");
             self.tree.click(row);
@@ -1229,5 +1388,63 @@ mod tests {
             panic!("expected submenu");
         };
         assert!(matches!(children[0], MenuNode::Submenu { .. }));
+    }
+
+    /// A row greys out while nothing takes its intent in the window exactly
+    /// when it does in the native bar: when choosing it does nothing but
+    /// send the intent. A two-way check or radio row writes its state, which
+    /// the native bar folds into the row's action, so it never greys out in
+    /// either.
+    #[test]
+    fn a_row_greys_out_in_the_window_exactly_when_it_does_natively() {
+        let check = Signal::new(false);
+        let tri = Signal::new(CheckState::Unchecked);
+        let selected = Signal::new(0usize);
+        let states = [
+            ("plain", MenuItemState::Plain),
+            ("two-way check", MenuItemState::Check(check.clone())),
+            ("reflect check", MenuItemState::ReflectCheck(check.clone())),
+            ("tri-state", MenuItemState::TriCheck(tri)),
+            (
+                "two-way radio",
+                MenuItemState::Radio {
+                    value: 1,
+                    selected: selected.clone(),
+                },
+            ),
+            (
+                "reflect radio",
+                MenuItemState::ReflectRadio { value: 1, selected },
+            ),
+        ];
+        for (what, state) in states {
+            for closure in [false, true] {
+                let mut entry = MenuEntry::new(lit!("Row")).intent(CHOSEN);
+                entry.state = state.clone();
+                if closure {
+                    entry = entry.on_activate(|_| {});
+                }
+                let in_window = entry.to_menu_item(&RowOrigin::Window).gated_by().is_some();
+                let native = entry.native_activation();
+                let natively = native.intent.is_some() && native.action.is_none() && !native.quits;
+                assert_eq!(
+                    in_window, natively,
+                    "a {what} row, closure {closure}: in the window {in_window}, natively {natively}"
+                );
+            }
+        }
+    }
+
+    /// A model that declares a second App menu is reported (in a debug build,
+    /// by `warn_second_app_menu`): the macOS bar drops it silently.
+    #[test]
+    fn a_second_app_menu_is_reported() {
+        let one = MenuModel::new()
+            .standard_menu(StandardMenu::app())
+            .standard_menu(StandardMenu::for_role(StandardMenuRole::Window));
+        assert_eq!(one.second_app_menu_warning(), None);
+        let two = one.standard_menu(StandardMenu::app());
+        let warning = two.second_app_menu_warning().expect("reported");
+        assert!(warning.contains("2 App menus"), "{warning}");
     }
 }

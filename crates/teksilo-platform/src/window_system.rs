@@ -176,6 +176,43 @@ pub fn attach_child_window(parent: &winit::window::Window, child: &winit::window
     }
 }
 
+/// Keep `window` out of the Window menu's window list and the Dock icon's
+/// menu on macOS, or list it there again; nothing on other platforms.
+///
+/// AppKit lists every titled window it orders in, and `teksilo-app` keeps
+/// a modal dialog and a window kept out of the taskbar (a palette) out, as
+/// AppKit's own sheets and panels are: the list is for the windows a user
+/// switches between, and a dialog comes forward with the window it blocks. Call it before the window is first shown, so its
+/// row never appears.
+#[doc(hidden)]
+pub fn set_listed_in_window_menu(window: &winit::window::Window, listed: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::rc::Retained;
+        use objc2_app_kit::NSView;
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+        let Ok(handle) = window.window_handle() else {
+            return;
+        };
+        let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+            return;
+        };
+        // SAFETY: the ns_view pointer is valid while `window` is alive, and
+        // the caller holds it for the duration of this call.
+        let view: Option<Retained<NSView>> =
+            unsafe { Retained::retain(appkit.ns_view.as_ptr().cast()) };
+        if let Some(ns_window) = view.and_then(|view| view.window()) {
+            ns_window.setExcludedFromWindowsMenu(!listed);
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (window, listed);
+    }
+}
+
 /// Make `child` a transient window of `parent` on X11 (ICCCM
 /// `WM_TRANSIENT_FOR`), before `child` is shown for the first time; nothing
 /// on other window systems.

@@ -79,7 +79,7 @@ see "Quitting the application" below.
 
 ## The application tree
 
-Code that must run with no window open (an application-level menu's
+Code that must run with no window open (the application menu and its
 actions, a single-instance handler, a quit) lives in the **application
 tree**: a widget tree that belongs to no window. Give it a root with
 `TeksiloAppBuilder::app_root`, which takes the same kind of builder as a
@@ -160,10 +160,65 @@ What needs a window is not drawn there:
 | an overlay, an animated widget | never shown; a debug build says so |
 | a tooltip, a `WebView` | never shown |
 | `spawn_local_with` | its completion is delivered to windows only, and is lost here; use `spawn_local` and a `Signal` |
-| a shortcut registered there | never fires: keys reach window trees only; register it in each window, and the application tree's action takes it when the window has none (not from inside a dialog presented in the window, where the page's shortcuts do not apply) |
+| a shortcut registered there | fires in a window when a row of the application menu names it: every window gets a copy (see below). Any other never fires, since keys reach window trees only: register it in each window, and the application tree's action takes it when the window has none (not from inside a dialog presented in the window, where the page's shortcuts do not apply) |
 
-The application tree's actions do not appear in `ShortcutSettings` or a
-command palette, which read the window's registry.
+The application tree's actions do not appear in a command palette, which reads
+the window's registry; `ShortcutSettings` lists the application menu's
+shortcuts through the window's copies.
+
+### The application menu
+
+The application tree declares the application's one menu from its build with
+`ctx.set_application_menu(model)` (the `ApplicationMenuExt` trait, in the
+prelude). What the application tree registers with `register_action` or
+`register_action_global` is the application's action scope: the commands of
+the menu's rows that no window takes go there.
+
+```rust
+impl Widget for AppActions {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        ctx.register_shortcut_global(
+            Shortcut::new("app.new_window").primary(KeyStroke::ctrl(Key::N)).build(),
+        );
+        ctx.register_action_global(Action::new("app.new_window").on_invoke(|_, ctx| {
+            ctx.open_window(document_window());
+        }));
+        ctx.set_application_menu(MenuModel::new().menu(tr!(file()), |m| {
+            m.item(MenuEntry::new(tr!(new_window())).intent("app.new_window").shortcut("app.new_window"))
+        }));
+        vec![]
+    }
+}
+```
+
+- A window shows it with `MenuBar::application()`, or a menu of its own with
+  `MenuBar::from_model(m)`. On Windows and Linux nothing is put in a window by
+  itself; on macOS, with `install_native_menu()`, it is the global menu bar
+  whenever the key window has no menu of its own, and while no window is open.
+- A row's intent is sent from the window's focus: the window's actions take it
+  first (Edit ▸ Copy copies in the focused field), the application tree what
+  the window leaves. A row's `on_activate` closure runs in the application
+  tree, where the signals it captured live, then its intent goes from the
+  window's focus.
+- A shortcut a row names, registered in the application tree, works in every
+  window: each window gets a copy of its declaration unless it registers that
+  id itself, owned or shared. A user's rebind of the copy in one window
+  applies to the application, so every window follows it. A window's own
+  registration of the id, even scoped to one widget, replaces the copy in
+  that whole window.
+- Register an app-wide command such as Quit or New in the application tree: a
+  row's intent goes from the key window's focus and then to the application
+  tree, never to another window, so an action only some windows register is
+  missed while another window is key (Quit then asks the application to quit
+  directly).
+- A row with an intent, no closure and no state to write (a two-way check or
+  radio row writes one) is greyed out while nothing on that route takes the
+  intent.
+- Calling `set_application_menu` from a window's tree does nothing, and panics
+  in a debug build.
+
+The [native menu guide](native-menu.md) has the details: what macOS shows with
+no window open, and the Quit row.
 
 ## `WindowConfig`
 
@@ -248,7 +303,7 @@ WindowConfig::new()
     .decorations(DecorationsMode::CustomChrome)
     .resizable(true)
     .always_on_top(true)                       // floating tool palette
-    .skip_taskbar(true)                        // not in the taskbar (Windows, X11)
+    .skip_taskbar(true)                        // not in the taskbar (Windows, X11) nor the macOS Window menu
     .minimizable(false)                        // ...so nothing to minimise it to (Windows, macOS)
     .icon(WindowIcon::from_rgba(rgba, w, h))
     .root(|tree, state| tree.add(Inspector::new(state)))

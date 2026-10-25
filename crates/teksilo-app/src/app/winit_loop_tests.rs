@@ -40,7 +40,8 @@
 //!   (`input_loop::wire_translator`);
 //! - **(b)** the modal-blocked guard both swallows input and still delivers
 //!   `Resized`, and a click on the blocked window, or its taking the focus,
-//!   brings back a modal child the user minimised;
+//!   brings back a modal child the user minimised; the key modal child
+//!   shows its owner's native menu;
 //! - **(d)** a *wrong* soft-keyboard row is caught;
 //! - **(g)** a window awaiting a redraw it requested does not make
 //!   `update_control_flow` sleep until a deadline already due, so it cannot
@@ -119,9 +120,17 @@
 //!   opens or raises, or dropped at the end of the turn; an intent the
 //!   handler leaves to the application tree carries the token, so the window
 //!   that tree's action opens takes it;
-//! - **(ah)** with no window open, the application menu's Quit runs the
-//!   application tree's action for its intent, and with no application tree
-//!   starts a quit;
+//! - **(ah)** the menu the application tree declares reaches the native
+//!   application menu; its Quit runs the action that takes its intent, and
+//!   starts a quit when nothing takes it or it has none; a row's action runs
+//!   in the application tree and its intent goes from the focused window,
+//!   else to the application tree;
+//! - **(ak)** a native menu row whose only effect is its intent greys out
+//!   while nothing on its route takes it, refreshed by `about_to_wait`;
+//! - **(aj)** a window opened under an application menu holds the shortcut
+//!   a row names, and loses it once the menu stops naming it; a row whose
+//!   closure is the application tree's runs there in `post_event`, then its
+//!   intent goes from the window;
 //! - **(aa)** the application tree is ticked by `about_to_wait` and by the
 //!   wake its waker posts, which the loop takes so the next one posts;
 //! - **(y)** a quit closes a window with no guard, stops at one whose guard
@@ -317,11 +326,15 @@ fn only_window(app: &TeksiloAppHandler) -> WindowId {
 fn app_with_recorder(log: &Shared, waker_at_build: &Rc<Cell<usize>>) -> TeksiloAppBuilder {
     let log = log.clone();
     let waker_at_build = waker_at_build.clone();
+    // The backend is kept in app-state too, so a claim can read what the
+    // menu bar shows.
+    let backend = teksilo_platform::native_menu::MemoryNativeMenuBackend::new();
     TeksiloAppBuilder::new()
         .theme(teksilo_core::presets::intui::light())
         .app_state(teksilo_platform::native_menu::NativeMenuHandle::new(
-            teksilo_platform::native_menu::MemoryNativeMenuBackend::new(),
+            backend.clone(),
         ))
+        .app_state(backend)
         .initial_window(
             WindowConfig::new()
                 .title("teksilo winit-loop test")
@@ -1675,6 +1688,57 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             "the modal child should have blocked its parent"
         );
 
+        // On macOS the dialog, key and with no menu of its own, shows its
+        // owner's menu, not the application menu. Leaving out the window
+        // manager's `set_window_owner` shows the application menu.
+        {
+            use teksilo_platform::native_menu::{
+                MemoryNativeMenuBackend, NativeMenuHandle, NativeMenuSnapshot,
+            };
+            struct NoPoster;
+            impl teksilo_core::AppEventPoster for NoPoster {
+                fn post_subscription_event(
+                    &self,
+                    _: teksilo_core::SubscriptionId,
+                    _: Box<dyn std::any::Any + Send>,
+                ) {
+                }
+                fn post_external(&self, _: Box<dyn std::any::Any + Send>) {}
+            }
+            let template = app.wm.app_context_template().expect("a template");
+            let handle = template
+                .app_state::<NativeMenuHandle>()
+                .cloned()
+                .expect("the test app's native menu");
+            let backend = template
+                .app_state::<MemoryNativeMenuBackend>()
+                .cloned()
+                .expect("the test app's recording backend");
+            handle.set_app_menu(
+                NativeMenuSnapshot { roots: Vec::new() },
+                Default::default(),
+                Arc::new(NoPoster),
+                true,
+            );
+            handle.set_window_menu(
+                parent_id,
+                NativeMenuSnapshot { roots: Vec::new() },
+                Default::default(),
+                Arc::new(NoPoster),
+            );
+            let dialog = app
+                .wm
+                .winit_id_for_teksilo(modal_child)
+                .expect("the dialog is open");
+            app.window_event(event_loop, dialog, WindowEvent::Focused(true));
+            assert_eq!(
+                backend.active_window(),
+                Some(parent_id),
+                "the key dialog shows its owner's menu"
+            );
+            handle.clear_window(parent_id);
+        }
+
         // Input is swallowed: neither a motion sample nor a press reaches the
         // blocked parent's tree.
         recorder.borrow_mut().phases.clear();
@@ -2033,17 +2097,24 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         app.wm.close_window(from_app);
         app.wm.close_window(host);
 
-        // (ah) The application menu, the one macOS shows once the last
-        // window has closed: its routed Quit runs in the application tree,
-        // and with no application tree asks the application to quit. Without
-        // it ⌘Q did nothing in an app left with no window. Dropping the
-        // payload from `try_route_native_menu_payload` leaves the action
-        // unrun; dropping the fallback leaves no quit.
+        // (ah) The native application menu, the one macOS shows while no
+        // window is open (and whenever the key window has no menu of its
+        // own). What the application tree declares reaches it, with an App
+        // menu whose Quit is routed even when none was declared. Its Quit
+        // runs the action that takes its intent, and asks the application to
+        // quit when nothing takes the intent or it has none, so ⌘Q never
+        // goes dead. A row's action runs in the application tree and its
+        // intent goes from the focused window's focus. Taking the sync out of
+        // `post_event` leaves the declared row out of the native menu;
+        // taking `quit_instead` out leaves no quit; routing the intent to the
+        // application tree regardless of focus sends it past the window.
         {
             use teksilo_platform::native_menu::{
-                NativeAppMenuEventPayload, NativeMenuActivation, NativeMenuHandle, NativeMenuNode,
-                NativeMenuSnapshot, StandardMenuRole, StandardRoutedItem,
+                MenuActionFn, NativeAppMenuEventPayload, NativeMenuActivation, NativeMenuHandle,
+                NativeMenuNode, NativeMenuSnapshot, StandardMenuRole, StandardRoutedItem,
             };
+            use teksilo_widgets::menu::{ApplicationMenuExt, MenuEntry, MenuModel};
+            type Heard = Rc<std::cell::RefCell<Vec<&'static str>>>;
             struct NoPoster;
             impl teksilo_core::AppEventPoster for NoPoster {
                 fn post_subscription_event(
@@ -2054,14 +2125,31 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                 }
                 fn post_external(&self, _: Box<dyn std::any::Any + Send>) {}
             }
-            #[derive(Debug)]
-            struct AnswersQuit(Rc<Cell<u32>>);
-            impl teksilo_core::widget::Widget for AnswersQuit {
+            /// Takes `test.app_quit` and `test.app_row`, and declares a
+            /// menu holding `row`, with no App menu.
+            struct AppRoot(Heard, MenuEntry);
+            impl std::fmt::Debug for AppRoot {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("AppRoot")
+                }
+            }
+            impl teksilo_core::widget::Widget for AppRoot {
                 fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-                    let runs = self.0.clone();
-                    ctx.register_action_global(
-                        teksilo_core::Action::new("test.app_quit")
-                            .on_invoke(move |_, _| runs.set(runs.get() + 1)),
+                    for name in ["test.app_quit", "test.app_row"] {
+                        let heard = self.0.clone();
+                        ctx.register_action_global(teksilo_core::Action::new(name).on_invoke(
+                            move |intent, _| {
+                                heard.borrow_mut().push(if intent.name == "test.app_quit" {
+                                    "quit action"
+                                } else {
+                                    "row in the application tree"
+                                })
+                            },
+                        ));
+                    }
+                    let row = self.1.clone();
+                    ctx.set_application_menu(
+                        MenuModel::new().menu(teksilo_i18n::lit!("File"), |m| m.item(row)),
                     );
                     Vec::new()
                 }
@@ -2073,64 +2161,206 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                     proposal.resolve(0.0, 0.0).into()
                 }
             }
+            /// A window's root taking `test.app_row`.
+            #[derive(Debug)]
+            struct Takes(Heard);
+            impl teksilo_core::widget::Widget for Takes {
+                fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                    let heard = self.0.clone();
+                    ctx.register_action(
+                        teksilo_core::Action::new("test.app_row")
+                            .on_invoke(move |_, _| heard.borrow_mut().push("row in the window")),
+                    );
+                    Vec::new()
+                }
+                fn layout_response(
+                    &self,
+                    proposal: SizeProposal,
+                    _ctx: &LayoutContext,
+                ) -> LayoutResponse {
+                    proposal.resolve(10.0, 10.0).into()
+                }
+            }
             assert!(app.wm.is_empty(), "no window is open");
             let handle = app
                 .wm
                 .app_context_template()
                 .and_then(|t| t.app_state::<NativeMenuHandle>().cloned())
                 .expect("the test app has a native menu handle");
-            let quit = teksilo_core::MenuItemId::next();
+            let heard = Heard::default();
+            let row = MenuEntry::new(teksilo_i18n::lit!("Row")).intent("test.app_row");
+            let row_id = row.id();
+            {
+                let heard = heard.clone();
+                app.wm
+                    .install_app_tree(move |tree| tree.add(AppRoot(heard, row)));
+            }
+            app.post_event(event_loop);
+            assert!(
+                handle.app_activation(row_id).is_some(),
+                "the declared row is in the native application menu"
+            );
+
+            // Quit, as the application menu would hold it: routed to an
+            // intent the application tree takes, to one nobody takes, and to
+            // none.
+            let set_quit = |intent: Option<&'static str>| {
+                let quit = teksilo_core::MenuItemId::next();
+                handle.set_app_menu(
+                    NativeMenuSnapshot {
+                        roots: vec![NativeMenuNode::Standard {
+                            role: StandardMenuRole::App,
+                            labels: Default::default(),
+                            quit_item: Some(StandardRoutedItem {
+                                id: quit,
+                                key_equiv: None,
+                            }),
+                            settings_item: None,
+                        }],
+                    },
+                    [(
+                        quit,
+                        NativeMenuActivation {
+                            intent,
+                            action: None,
+                            quits: true,
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                    Arc::new(NoPoster),
+                    true,
+                );
+                quit
+            };
+            let choose = |app: &mut TeksiloAppHandler, item| {
+                app.user_event(
+                    event_loop,
+                    AppEvent::External(Box::new(NativeAppMenuEventPayload { item_id: item })),
+                );
+            };
+            let quit = set_quit(Some("test.app_quit"));
+            choose(app, quit);
+            assert_eq!(*heard.borrow(), ["quit action"]);
+            assert!(!app.wm.quit_in_progress(), "and the action owns the quit");
+            // Routed directly rather than through `user_event`, so the quit is
+            // not carried out (with no window it would end the loop) and can
+            // be withdrawn.
+            for intent in [Some("test.nobody_quits"), None] {
+                let quit = set_quit(intent);
+                let left = app.try_route_native_menu_payload(
+                    Box::new(NativeAppMenuEventPayload { item_id: quit }),
+                    event_loop,
+                );
+                assert!(left.is_ok(), "the payload is the native menu's");
+                assert!(
+                    app.wm.quit_in_progress(),
+                    "Quit routed to {intent:?} asked the application to quit"
+                );
+                app.wm.cancel_quit();
+            }
+            assert_eq!(*heard.borrow(), ["quit action"], "nothing else ran");
+
+            // A row: its action in the application tree, its intent from the
+            // focused window, else in the application tree.
+            heard.borrow_mut().clear();
+            let item = teksilo_core::MenuItemId::next();
+            let action: MenuActionFn = {
+                let heard = heard.clone();
+                Rc::new(move |ctx| {
+                    heard.borrow_mut().push(if ctx.window().is_none() {
+                        "action in the application tree"
+                    } else {
+                        "action in a window"
+                    })
+                })
+            };
             handle.set_app_menu(
-                NativeMenuSnapshot {
-                    roots: vec![NativeMenuNode::Standard {
-                        role: StandardMenuRole::App,
-                        labels: Default::default(),
-                        quit_item: Some(StandardRoutedItem {
-                            id: quit,
-                            key_equiv: None,
-                        }),
-                        settings_item: None,
-                    }],
-                },
+                NativeMenuSnapshot { roots: Vec::new() },
                 [(
-                    quit,
+                    item,
                     NativeMenuActivation {
-                        intent: Some("test.app_quit"),
-                        action: None,
+                        intent: Some("test.app_row"),
+                        action: Some(action),
+                        quits: false,
                     },
                 )]
                 .into_iter()
                 .collect(),
                 Arc::new(NoPoster),
+                true,
             );
-            let runs = Rc::new(Cell::new(0));
-            {
-                let runs = runs.clone();
-                app.wm
-                    .install_app_tree(move |tree| tree.add(AnswersQuit(runs)));
-            }
-            app.user_event(
-                event_loop,
-                AppEvent::External(Box::new(NativeAppMenuEventPayload { item_id: quit })),
+            choose(app, item);
+            assert_eq!(
+                *heard.borrow(),
+                [
+                    "action in the application tree",
+                    "row in the application tree"
+                ],
+                "with no window focused"
             );
-            assert_eq!(runs.get(), 1, "Quit ran the application tree's action");
-            assert!(!app.wm.quit_in_progress(), "and the action owns the quit");
+            heard.borrow_mut().clear();
+            let window = {
+                let heard = heard.clone();
+                app.wm.create_window(
+                    WindowConfig::new()
+                        .title("teksilo loop test: key window")
+                        .size(160, 100)
+                        .root(move |tree, _state| tree.add(Takes(heard))),
+                    event_loop,
+                )
+            };
+            let window_winit = app.wm.winit_id_for_teksilo(window).expect("open");
+            app.window_event(event_loop, window_winit, WindowEvent::Focused(true));
+            assert_eq!(app.wm.focused_window(), Some(window), "precondition");
+            choose(app, item);
+            assert_eq!(
+                *heard.borrow(),
+                ["action in the application tree", "row in the window"],
+                "with a window focused"
+            );
+            app.wm.close_window(window);
 
-            // No application tree: Quit asks the application to quit. Routed
-            // directly, so the quit is not carried out (with no window it
-            // would end the loop) and can be withdrawn.
-            let tree = app.wm.take_app_tree().expect("installed above");
-            let left = app.try_route_native_menu_payload(
-                Box::new(NativeAppMenuEventPayload { item_id: quit }),
-                event_loop,
+            // (ak) Rows whose only effect is their intent grey out, each
+            // turn, while nothing on their route takes it: here the
+            // application tree, no window being open. Taking the refresh out
+            // of `about_to_wait` leaves the row nobody takes enabled.
+            let (taken, untaken) = (
+                teksilo_core::MenuItemId::next(),
+                teksilo_core::MenuItemId::next(),
             );
-            assert!(left.is_ok(), "the payload is the native menu's");
-            assert!(
-                app.wm.quit_in_progress(),
-                "Quit asked the application to quit"
+            let row = |id, title: &str| NativeMenuNode::Item {
+                id,
+                title: title.into(),
+                key_equiv: None,
+                enabled: true,
+                visible: true,
+                check: Default::default(),
+            };
+            let intent_only = |intent| NativeMenuActivation {
+                intent: Some(intent),
+                action: None,
+                quits: false,
+            };
+            handle.set_app_menu(
+                NativeMenuSnapshot {
+                    roots: vec![NativeMenuNode::Submenu {
+                        title: "File".into(),
+                        children: vec![row(taken, "Taken"), row(untaken, "Untaken")],
+                    }],
+                },
+                [
+                    (taken, intent_only("test.app_row")),
+                    (untaken, intent_only("test.nobody")),
+                ]
+                .into_iter()
+                .collect(),
+                Arc::new(NoPoster),
+                true,
             );
-            app.wm.cancel_quit();
-            app.wm.reinsert_app_tree(tree);
+            app.about_to_wait(event_loop);
+            assert_eq!(handle.gated_enabled(taken), Some(true));
+            assert_eq!(handle.gated_enabled(untaken), Some(false));
         }
 
         // (ai) A native menu item chosen while a window other than the one
@@ -2219,6 +2449,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                     NativeMenuActivation {
                         intent: Some("test.native"),
                         action: Some(action),
+                        quits: false,
                     },
                 )]
                 .into_iter()
@@ -2240,6 +2471,128 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             handle.clear_window(owner);
             app.wm.close_window(owner);
             app.wm.close_window(focused);
+        }
+
+        // (aj) The application menu reaches a window opened under it: the
+        // window holds the shortcut a row names, which the application tree
+        // registered, and drops it once the menu no longer names it; a row
+        // chosen in the window whose closure is the application tree's runs
+        // there in `post_event`, then sends its intent from the window.
+        // Taking the copy out of `create_window` leaves the window without
+        // the shortcut; taking the drain out of `post_event` leaves the row
+        // unrun.
+        {
+            use teksilo_widgets::menu::{
+                ApplicationMenuActivation, ApplicationMenuExt, MenuEntry, MenuModel,
+            };
+            type Heard = Rc<std::cell::RefCell<Vec<&'static str>>>;
+            #[derive(Debug)]
+            struct Declares;
+            impl teksilo_core::widget::Widget for Declares {
+                fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                    ctx.register_shortcut_global(
+                        teksilo_core::shortcut::Shortcut::new("test.aj")
+                            .primary(teksilo_core::shortcut::KeyStroke::ctrl(
+                                teksilo_core::Key::J,
+                            ))
+                            .build(),
+                    );
+                    ctx.set_application_menu(MenuModel::new().menu(
+                        teksilo_i18n::lit!("File"),
+                        |m| {
+                            m.item(
+                                MenuEntry::new(teksilo_i18n::lit!("Jump"))
+                                    .intent("test.aj")
+                                    .shortcut("test.aj"),
+                            )
+                        },
+                    ));
+                    Vec::new()
+                }
+                fn layout_response(
+                    &self,
+                    proposal: SizeProposal,
+                    _ctx: &LayoutContext,
+                ) -> LayoutResponse {
+                    proposal.resolve(0.0, 0.0).into()
+                }
+            }
+            #[derive(Debug)]
+            struct TakesRow(Heard);
+            impl teksilo_core::widget::Widget for TakesRow {
+                fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                    let heard = self.0.clone();
+                    ctx.register_action(
+                        teksilo_core::Action::new("test.aj_row")
+                            .on_invoke(move |_, _| heard.borrow_mut().push("the window")),
+                    );
+                    Vec::new()
+                }
+                fn layout_response(
+                    &self,
+                    proposal: SizeProposal,
+                    _ctx: &LayoutContext,
+                ) -> LayoutResponse {
+                    proposal.resolve(10.0, 10.0).into()
+                }
+            }
+            app.wm.install_app_tree(|tree| tree.add(Declares));
+            let heard = Heard::default();
+            let window = {
+                let heard = heard.clone();
+                app.wm.create_window(
+                    WindowConfig::new()
+                        .title("teksilo loop test: application menu")
+                        .size(200, 120)
+                        .root(move |tree, _state| tree.add(TakesRow(heard))),
+                    event_loop,
+                )
+            };
+            let holds = |app: &TeksiloAppHandler| {
+                app.wm
+                    .iter()
+                    .find(|managed| managed.teksilo_id == window)
+                    .expect("open")
+                    .tree
+                    .shortcut_registry()
+                    .get_default("test.aj")
+                    .is_some()
+            };
+            assert!(holds(app), "the window holds the row's shortcut");
+
+            let holder = app
+                .wm
+                .application_menu()
+                .expect("every application has the holder");
+            holder.queue(ApplicationMenuActivation {
+                window: Some(window),
+                intent: Some("test.aj_row"),
+                action: Some(Rc::new({
+                    let heard = heard.clone();
+                    move |ctx| {
+                        heard.borrow_mut().push(if ctx.window().is_none() {
+                            "the application tree"
+                        } else {
+                            "a window"
+                        })
+                    }
+                })),
+            });
+            app.post_event(event_loop);
+            assert_eq!(
+                *heard.borrow(),
+                ["the application tree", "the window"],
+                "the closure where its state lives, the intent from the window"
+            );
+
+            app.run_in_app_tree(event_loop, |tree, ops| {
+                tree.run_with_event_context(ops, |ctx| {
+                    ctx.set_application_menu(MenuModel::new());
+                });
+            });
+            app.post_event(event_loop);
+            assert!(!holds(app), "a menu that no longer names it takes it back");
+            app.wm.close_window(window);
         }
 
         // (ac) A modal request from the application tree has no window of

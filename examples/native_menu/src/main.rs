@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Native (OS) menu bar
+//! The application menu
 //!
-//! Demonstrates [`MenuBar::from_model`] + [`MenuBar::native_on_macos`]: one
-//! declarative [`MenuModel`] drives both the in-window menu bar and — on macOS —
-//! the global menu bar at the top of the screen (`NSMenu`).
+//! Demonstrates the application menu: one declarative [`MenuModel`], declared
+//! by the application tree (`TeksiloAppBuilder::app_root`) with
+//! `ctx.set_application_menu(model)`, shown in a window with
+//! [`MenuBar::application`]. On macOS it is the global menu bar at the top of
+//! the screen (`NSMenu`), also while the key window has no menu of its own.
+//! On other platforms it renders in the window that asks for it.
 //!
 //! Run with: `cargo run -p native-menu`
 //!
-//! On macOS the menus appear in the system menu bar (File / Edit / View, after
-//! the standard application menu). Choosing an item updates the status line
-//! below; toggling "Show Grid" flips the native check mark live. On other
-//! platforms the same model renders as the usual in-window bar (the native
-//! backend is a no-op there).
+//! Choosing an item updates the status line. File ▸ Save is greyed out until
+//! "Toggle Save enabled" turns it on; Edit ▸ Paste is greyed out because
+//! nothing takes `app.paste`. Window ▸ Inspector opens a second window with
+//! a menu of its own ([`MenuBar::from_model`]), which replaces the
+//! application menu while that window is key.
 
 use teksilo::core::Action;
 use teksilo::core::MenuItemId;
@@ -24,78 +27,43 @@ use teksilo::widgets::{
     StandardMenu, StatusBar, TextWidget, VStack,
 };
 
-#[derive(Debug)]
-struct Root {
-    root_child_id: Option<WidgetId>,
+/// The state the application tree and the windows share: signals are
+/// cheap handles, so each side keeps a clone.
+#[derive(Clone)]
+struct Shared {
+    /// The status line the commands write to, so activations are visible.
+    status: Signal<String>,
+    /// Reactive check state of View ▸ Show Grid.
+    grid_visible: Signal<bool>,
+    /// Reactive enabled state of File ▸ Save.
+    can_save: Signal<bool>,
+    /// The id of File ▸ Open Recent, so a window can push rows into it.
+    recent_menu: MenuItemId,
+    /// The application menu, kept so a window can change it at runtime.
+    model: MenuModel,
 }
 
-impl Root {
+impl Shared {
     fn new() -> Self {
-        Self {
-            root_child_id: None,
-        }
-    }
-}
-
-impl Widget for Root {
-    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // A status line the actions write to, so menu activations are visible.
-        let status = ctx.signal("Choose a menu item…".to_string());
-        // Reactive check state shared by the menu item and the body label.
-        let grid_visible = ctx.signal(true);
-        // Reactive enabled state for File ▸ Save (greys out live).
-        let can_save = ctx.signal(false);
-        // Pre-allocated id for the "Open Recent" submenu, so handlers can push
-        // items into it at runtime.
+        let status = Signal::new("Choose a menu item…".to_string());
+        let grid_visible = Signal::new(true);
+        let can_save = Signal::new(false);
         let recent_menu = MenuItemId::next();
-
-        // Shortcuts → become ⌘N / ⌘O / ⌘Q key equivalents on the native menu.
-        ctx.register_shortcut_global(
-            Shortcut::new("app.new")
-                .name("New")
-                .primary(KeyStroke::ctrl(Key::N))
-                .build(),
-        );
-        ctx.register_shortcut_global(
-            Shortcut::new("app.open")
-                .name("Open")
-                .primary(KeyStroke::ctrl(Key::O))
-                .build(),
-        );
-        ctx.register_shortcut_global(
-            Shortcut::new("app.quit")
-                .name("Quit")
-                .primary(KeyStroke::ctrl(Key::Q))
-                .build(),
-        );
-
-        // Actions invoked whether the item is chosen from the native menu, the
-        // in-window menu, or its keyboard shortcut. Each sends its intent from
-        // the focused widget, whose walk ends at this root.
-        for (id, label) in [
-            ("app.new", "New"),
-            ("app.open", "Open"),
-            ("app.save", "Save"),
-            ("app.cut", "Cut"),
-            ("app.copy", "Copy"),
-            ("app.paste", "Paste"),
-        ] {
-            let status = status.clone();
-            ctx.register_action(
-                Action::new(id).on_invoke(move |_, _| status.set(format!("{label} chosen"))),
-            );
-        }
-        ctx.register_action(Action::new("app.quit").on_invoke(|_, ctx| ctx.close_window()));
-        {
-            let status = status.clone();
-            ctx.register_action(
-                Action::new("app.settings")
-                    .on_invoke(move |_, _| status.set("Settings chosen".to_string())),
-            );
-        }
-
-        // One declarative model, shared by the in-window bar and the OS menu.
         let model = MenuModel::new()
+            // The macOS App menu. Its labels go through i18n (pass `tr!` for
+            // a localized app). Quit asks the application to quit through
+            // every window's close guard; `quit_intent` sends `app.quit`
+            // first, and Quit still asks to quit if nothing takes it.
+            // `settings_intent` puts a Settings… row on ⌘,, a placement and
+            // chord an ordinary MenuEntry cannot reach.
+            .standard_menu(
+                StandardMenu::app()
+                    .title(lit!("Native Menu"))
+                    .quit_intent("app.quit")
+                    .quit_shortcut("app.quit")
+                    .settings(lit!("Settings…"))
+                    .settings_intent("app.settings"),
+            )
             .menu(lit!("&File"), |m| {
                 m.item(
                     MenuEntry::new(lit!("&New"))
@@ -107,13 +75,13 @@ impl Widget for Root {
                         .intent("app.open")
                         .shortcut("app.open"),
                 )
-                // Reactively enabled — greys out until "Allow Save" is on.
+                // Greyed out until "Toggle Save enabled" turns it on.
                 .item(
                     MenuEntry::new(lit!("&Save"))
                         .intent("app.save")
                         .enabled(can_save.clone()),
                 )
-                // Empty submenu populated at runtime (see the body buttons).
+                // Empty submenu populated at runtime (see the window's buttons).
                 .submenu_with_id(recent_menu, lit!("Open &Recent"), |s| s)
                 .separator()
                 .item(
@@ -122,6 +90,8 @@ impl Widget for Root {
                         .shortcut("app.quit"),
                 )
             })
+            // Commands of the window: its root takes Cut and Copy. Nothing
+            // takes Paste, so its row is greyed out.
             .menu(lit!("&Edit"), |m| {
                 m.item(MenuEntry::new(lit!("Cu&t")).intent("app.cut"))
                     .item(MenuEntry::new(lit!("&Copy")).intent("app.copy"))
@@ -132,50 +102,139 @@ impl Widget for Root {
                 // the native bar and the in-window bar alike.
                 m.item(MenuEntry::new(lit!("Show &Grid")).checkable(grid_visible.clone()))
             })
-            // Standard macOS menus — labels go through i18n (pass `tr!` for a
-            // localized app); the framework wires the system selectors. The
-            // App menu is auto-injected, but declaring it lets us localize it.
-            // `settings_intent` puts a Settings… row in the macOS App menu on
-            // ⌘, — placement and chord an ordinary MenuEntry cannot reach.
-            // Unlike Quit it has no system fallback, so an unrouted slot would
-            // only render a dead row: leaving it unset omits the item.
-            .standard_menu(
-                StandardMenu::app()
-                    .title(lit!("Native Menu"))
-                    .settings(lit!("Settings…"))
-                    .settings_intent("app.settings"),
-            )
+            .menu(lit!("&Window"), |m| {
+                m.item(MenuEntry::new(lit!("&Inspector")).intent("app.inspector"))
+            })
+            // Minimize / Zoom and the window list, on macOS.
             .standard_menu(StandardMenu::window());
+        Self {
+            status,
+            grid_visible,
+            can_save,
+            recent_menu,
+            model,
+        }
+    }
+}
 
-        // Keep a handle so window buttons can mutate the menu at runtime.
-        let model_handle = model.clone();
+/// The application tree's root: the application's commands, their
+/// shortcuts, and the application menu.
+struct AppRoot(Shared);
 
-        // `Suppress` ⇒ on macOS the OS menu bar carries the menus and the
-        // in-window strip is hidden; elsewhere the in-window bar renders.
-        let menu_bar =
-            ctx.add(MenuBar::from_model(model).native_on_macos(NativeMenuMode::Suppress));
+impl std::fmt::Debug for AppRoot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AppRoot")
+    }
+}
 
-        // Runtime controls: toggle Save's enabled state, and add/clear items in
-        // the "Open Recent" submenu — both reflected in the native menu live.
+impl Widget for AppRoot {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let shared = &self.0;
+
+        // Registered here, the shortcuts work in every window: each window
+        // gets the ones the application menu's rows name. On macOS they are
+        // the native menu's ⌘N / ⌘O / ⌘Q key equivalents too.
+        for (id, label, key) in [
+            ("app.new", "New", Key::N),
+            ("app.open", "Open", Key::O),
+            ("app.quit", "Quit", Key::Q),
+        ] {
+            ctx.register_shortcut_global(
+                Shortcut::new(id)
+                    .name(label)
+                    .primary(KeyStroke::ctrl(key))
+                    .build(),
+            );
+        }
+
+        // The application's commands. A row's intent goes from the focused
+        // window first; these take what the window leaves.
+        for (id, label) in [
+            ("app.new", "New"),
+            ("app.open", "Open"),
+            ("app.save", "Save"),
+            ("app.settings", "Settings"),
+        ] {
+            let status = shared.status.clone();
+            ctx.register_action_global(
+                Action::new(id).on_invoke(move |_, _| status.set(format!("{label} chosen"))),
+            );
+        }
+        ctx.register_action_global(Action::new("app.quit").on_invoke(|_, ctx| ctx.request_quit()));
+        ctx.register_action_global(Action::new("app.inspector").on_invoke(|_, ctx| {
+            match ctx.find_window("inspector") {
+                Some(id) => ctx.focus_window(id),
+                None => {
+                    ctx.open_window(
+                        WindowConfig::new()
+                            .id("inspector")
+                            .title("Teksilo: Inspector")
+                            .size(360, 240)
+                            .root(|tree, _state| tree.add(Inspector::default())),
+                    );
+                }
+            }
+        }));
+
+        ctx.set_application_menu(shared.model.clone());
+        Vec::new()
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+}
+
+/// The main window: the application menu, a body, a status line.
+#[derive(Debug)]
+struct Root {
+    shared: Shared,
+    root_child_id: Option<WidgetId>,
+}
+
+impl std::fmt::Debug for Shared {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Shared")
+    }
+}
+
+impl Widget for Root {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let shared = self.shared.clone();
+
+        // Commands of this window, taken before the application's.
+        for (id, label) in [("app.cut", "Cut"), ("app.copy", "Copy")] {
+            let status = shared.status.clone();
+            ctx.register_action(
+                Action::new(id).on_invoke(move |_, _| status.set(format!("{label} chosen"))),
+            );
+        }
+
+        // The application menu. On macOS, where it is the global menu bar,
+        // this renders nothing in the window.
+        let menu_bar = ctx.add(MenuBar::application());
+
+        // Runtime controls: toggle Save's enabled state, and add items to
+        // File ▸ Open Recent, reflected in every window and the native menu.
         let recent_count = ctx.signal(0_usize);
         let controls = ctx.add(
             HStack::new()
                 .spacing(8.0)
                 .child(Button::new(lit!("Toggle Save enabled")).on_activate_fn({
-                    let can_save = can_save.clone();
+                    let can_save = shared.can_save.clone();
                     move |_| can_save.set(!can_save.get())
                 }))
                 .child(Button::new(lit!("Add recent file")).on_activate_fn({
-                    let model = model_handle.clone();
+                    let shared = shared.clone();
                     let recent_count = recent_count.clone();
-                    let status = status.clone();
                     move |_| {
                         let n = recent_count.get() + 1;
                         recent_count.set(n);
                         let name = format!("document-{n}.txt");
-                        let status = status.clone();
-                        model.push_item(
-                            recent_menu,
+                        let status = shared.status.clone();
+                        // The closure runs in the application tree.
+                        shared.model.push_item(
+                            shared.recent_menu,
                             MenuEntry::new(LocalizedString::literal(name.clone()))
                                 .on_activate(move |_| status.set(format!("Opened {name}"))),
                         );
@@ -183,7 +242,7 @@ impl Widget for Root {
                 })),
         );
 
-        let grid_label = grid_visible.map(|v| {
+        let grid_label = shared.grid_visible.map(|v| {
             if *v {
                 "Grid: visible (toggle via View ▸ Show Grid)".to_string()
             } else {
@@ -197,16 +256,17 @@ impl Widget for Root {
                     VStack::new()
                         .spacing(12.0)
                         .child(
-                            TextWidget::new(lit!("Native menu bar"))
+                            TextWidget::new(lit!("The application menu"))
                                 .style(TextStyleRole::BodyBold)
                                 .color(TextRole::Primary),
                         )
                         .child(
                             TextWidget::new(lit!(
-                                "On macOS the menus live in the system menu bar at the top of \
-                                 the screen. Choosing an item updates the status line; the View \
-                                 ▸ Show Grid check mark reflects the bound signal. On other \
-                                 platforms the same model renders inline above."
+                                "The application tree declares one menu for the whole \
+                                 application. On macOS it is the system menu bar at the top of \
+                                 the screen, also with no window open; elsewhere it renders \
+                                 above. Edit ▸ Paste is greyed out: nothing takes its command. \
+                                 Window ▸ Inspector opens a window with a menu of its own."
                             ))
                             .style(TextStyleRole::Body)
                             .color(TextRole::Primary),
@@ -220,7 +280,7 @@ impl Widget for Root {
                         )
                         .child(
                             TextWidget::new(lit!(
-                                "Runtime control — these mutate the menu live (enable Save, or add \
+                                "Runtime control: these change the menu live (enable Save, or add \
                                  items to File ▸ Open Recent):"
                             ))
                             .style(TextStyleRole::Small)
@@ -238,7 +298,7 @@ impl Widget for Root {
                 .child(
                     StatusBar::new().child(
                         TextWidget::new(lit!(""))
-                            .text(status)
+                            .text(shared.status.clone())
                             .style(TextStyleRole::Tiny)
                             .color(TextRole::Primary),
                     ),
@@ -259,17 +319,76 @@ impl Widget for Root {
     }
 }
 
+/// A window with a menu of its own: while it is key, its menu replaces the
+/// application menu in the macOS menu bar.
+#[derive(Debug, Default)]
+struct Inspector {
+    root_child_id: Option<WidgetId>,
+}
+
+impl Widget for Inspector {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let refreshed = ctx.signal(0_u32);
+        {
+            let refreshed = refreshed.clone();
+            ctx.register_action(
+                Action::new("inspector.refresh")
+                    .on_invoke(move |_, _| refreshed.set(refreshed.get() + 1)),
+            );
+        }
+        ctx.register_action(Action::new("inspector.close").on_invoke(|_, ctx| ctx.close_window()));
+        let model = MenuModel::new().menu(lit!("&Inspector"), |m| {
+            m.item(MenuEntry::new(lit!("&Refresh")).intent("inspector.refresh"))
+                .separator()
+                .item(MenuEntry::new(lit!("&Close")).intent("inspector.close"))
+        });
+        let label = refreshed.map(|n| format!("Refreshed {n} times"));
+        let root = ctx.add(
+            VStack::new()
+                .child(MenuBar::from_model(model).native_on_macos(NativeMenuMode::Suppress))
+                .child(
+                    Padding::uniform(20.0).child(
+                        TextWidget::new(lit!(""))
+                            .text(label)
+                            .style(TextStyleRole::Body)
+                            .color(TextRole::Primary),
+                    ),
+                ),
+        );
+        self.root_child_id = Some(root);
+        vec![root]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        match self.root_child_id {
+            Some(id) => ctx
+                .child_size(id, proposal)
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
+            None => proposal.resolve(0.0, 0.0),
+        }
+        .into()
+    }
+}
+
 fn main() {
+    let shared = Shared::new();
+    let for_window = shared.clone();
     TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
         .install_native_menu()
         .install_inspector_in_debug()
         .theme(teksilo::presets::intui::light())
+        .app_root(move |tree| tree.add(AppRoot(shared)))
         .initial_window(
             WindowConfig::new()
-                .title("Teksilo — Native Menu")
+                .title("Teksilo: Native Menu")
                 .size(720, 480)
-                .root(|tree, _state| tree.add(Root::new())),
+                .root(move |tree, _state| {
+                    tree.add(Root {
+                        shared: for_window.clone(),
+                        root_child_id: None,
+                    })
+                }),
         )
         .run();
 }

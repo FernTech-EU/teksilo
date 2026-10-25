@@ -788,6 +788,16 @@ impl<'a> BuildContext<'a> {
         self.tree.effective_enabled_signal(id)
     }
 
+    /// Whether an intent named `name`, sent from the window's logical focus,
+    /// would be handled, as a signal the tree keeps current while the widget
+    /// being built is active: what a menu row binds to grey itself out. See
+    /// [`WidgetTree::command_available_signal`](crate::WidgetTree::command_available_signal).
+    #[doc(hidden)]
+    pub fn command_available(&mut self, name: &'static str) -> Signal<bool> {
+        let id = self.self_id();
+        self.tree.command_available_signal(id, name)
+    }
+
     /// Bind a widget's Tab-key participation to a boolean prop.
     /// When false, the widget is removed
     /// from Tab / Shift+Tab traversal but remains reachable via

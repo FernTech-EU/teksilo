@@ -17,6 +17,38 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **The application menu.** The application tree declares one menu for the
+  whole application with `ctx.set_application_menu(model)` (the
+  `ApplicationMenuExt` trait, in the prelude), and a window shows it with
+  `MenuBar::application()`, or shows a menu of its own instead with
+  `MenuBar::from_model`. A row's intent is sent from the window's focus, so
+  an action of the window takes it and the application tree's actions take
+  what the window leaves; a row's `on_activate` closure runs in the
+  application tree. A shortcut a row names, registered in the application
+  tree, works in every window; a window that registers the same id itself,
+  owned or shared (as its editors share their commands), keeps its own. A
+  user's rebind of such a shortcut in a window's `ShortcutSettings` applies
+  to the application: the application tree's registry holds it, and every
+  window and the macOS menu bar show and take the new chord.
+  On macOS, where the application menu is the menu bar once the app calls
+  `install_native_menu`, `MenuBar::application()` defaults to
+  `NativeMenuMode::Suppress` and renders only its leading and trailing slots
+  in the window; `.native_on_macos(NativeMenuMode::Coexist)` keeps the strip.
+  Declaring the menu from a window's tree does nothing, and panics in a
+  debug build. On macOS, with `install_native_menu`, the application menu
+  is the menu bar whenever the key window has no menu of its own (no
+  `MenuBar::from_model` mirrored into the global bar), nor belongs to a
+  window that has one (a modal dialog shows its owner's), and
+  while no window is open; its rows' closures run in the application tree
+  and their intents go from the focused window's focus, or to the
+  application tree with no window focused. A window's own menu that
+  declares no App menu shows the application menu's, and follows it when
+  the application menu is declared again or changes.
+- **Services, Hide Others and Show All in the macOS App menu.** The App
+  menu has AppKit's rows in AppKit's order: About, Settings, the Services
+  submenu, Hide (⌘H), Hide Others (⌥⌘H), Show All and Quit.
+  `StandardMenu::services`, `hide_others` and `show_all` set their labels,
+  in English by default.
 - **Reflect-only radio menu items.** `MenuItem::reflect_radio` and
   `MenuEntry::reflect_radio` make a radio item whose dot follows a
   `Signal<usize>` but which does not write it when chosen: its `on_activate`
@@ -31,10 +63,9 @@ by crate for clarity, not because crates version independently.
 - **`QuitPolicy`, set with `TeksiloAppBuilder::quit_policy`.** The default,
   `LastWindowClosed`, quits when the last window closes, as before.
   `Explicit` keeps the application running with no window open, and makes
-  `initial_window` optional. On macOS the menu bar then keeps the App menu
-  of the last window's native menu, with About, Settings, Hide and a working
-  ⌘Q; a routed Quit or Settings runs in the application tree, and with none
-  Quit asks the application to quit.
+  `initial_window` optional. On macOS the menu bar then shows the
+  application menu (see "The application menu" under Widgets), with a
+  working ⌘Q.
 - **Quitting the application from a handler.** `EventContext::request_quit`
   asks every open window's close guard in turn, as closing each window
   would, and ends the application once no window is left, under either
@@ -161,6 +192,24 @@ by crate for clarity, not because crates version independently.
 
 - **Breaking.** `MenuItemState` has a new variant, so an exhaustive `match`
   on it needs a `ReflectRadio` arm.
+- **A `MenuModel` row whose only effect is its intent greys out while
+  nothing takes the intent**: no enabled action on its route from the
+  window's focus, no global action of the window, none of the application
+  tree's. The in-window row follows that while its menu is open; the macOS
+  menu bar is brought up to date after every turn of the event loop. A row
+  with an `on_activate` closure stays enabled (its `enabled` alone decides),
+  and so does a two-way `checkable`, `tri_checkable` or `radio` row, which
+  writes its state when chosen, in the window as in the macOS menu bar. An
+  action that may decline when it runs counts as taking the intent.
+  After F10, a menu's rows answer for the widget focused before the bar,
+  where a chosen command goes, not for the bar's title.
+- **The macOS App menu's Quit asks the application to quit.** It goes
+  through every window's close guard, as `EventContext::request_quit` does,
+  instead of AppKit's `terminate:`, which ended the process past the guards
+  and past winit's exit. With `StandardMenu::quit_intent` it sends that
+  intent, and still asks the application to quit when nothing takes it, so
+  ⌘Q works with no window open in an app that handles its quit command in
+  its windows only.
 - **A `MenuModel` entry chosen in the window sends its intent from the
   focused widget,** as its shortcut and the macOS menu bar do: Edit ▸ Copy
   copies in the focused field, and `register_action` on the window's root is
@@ -183,13 +232,29 @@ by crate for clarity, not because crates version independently.
 
 #### Platform
 
+- **Breaking.** `StandardLabels` has `services`, `hide_others` and
+  `show_all` fields, for the App menu's new rows.
 - **Breaking.** `NativeMenuNode::Item` and `MenuItemDelta` have a `visible`
   field: a native menu item is installed hidden rather than left out, and
   shown or hidden in place. Code that builds an item, or a delta without
   `..Default::default()`, has to set it.
-- **`MemoryNativeMenuBackend::activate_window` leaves the active menu alone
-  for a window that has none,** as the macOS backend does. It made that
-  window active.
+- **A key window with no menu of its own shows its owner's menu or the
+  application menu on macOS.** A modal dialog shows the menu of the window
+  it blocks (up the chain of owners), as AppKit keeps the bar for a sheet or
+  a panel; another window shows the application menu, or, when the app
+  declared none, keeps the bar shown before, so File and Edit no longer
+  vanish while a dialog or a secondary window is key. The bar shows the
+  application menu while no window is open, whichever window installed its
+  menu last. `MemoryNativeMenuBackend` follows the same rule
+  (`shows_app_menu`). A window's
+  menu no longer sets the application menu, and closing the key window
+  never leaves its menu up.
+- **Breaking.** `NativeMenuBackend::set_app_menu` and
+  `NativeMenuHandle::set_app_menu` take a `declared` flag: `false` for the
+  default App menu `teksilo-app` supplies when the app declared none.
+- **Breaking.** `NativeMenuActivation` has a `quits` field, and
+  `NativeMenuHandle::app_quit_item` is gone: the activation of a Quit row
+  says it is one.
 
 ### Fixed
 
@@ -289,6 +354,22 @@ by crate for clarity, not because crates version independently.
   a global shortcut with nothing focused, and an intent another tree left
   unclaimed with nothing focused started at the debug inspector's or the
   toast host's wrapper, and missed actions registered on the app's root.
+
+#### Platform
+
+- **The App menu is first in the macOS menu bar wherever the model declares
+  it.** Declared after File, File's rows showed under the application's name
+  and About, Hide and Quit in a second, ordinary menu. A second App menu in
+  one model is left out, and a debug build now says so, on every platform.
+- **The macOS Window menu and the Dock icon's menu list the application's
+  windows.** A window's row went into the Window menu of the bar shown when
+  it opened, not of the one shown afterwards, and the window opened at
+  startup was in neither, so documents were missing from both lists. A bar
+  with no Window menu now registers a hidden one, so the Dock icon's menu
+  lists the windows too. A modal dialog and a window opened with
+  `WindowConfig::skip_taskbar` are not listed, as AppKit's sheets and panels
+  are not, and neither is a window the app hid (one minimised to the Dock
+  is).
 
 ## [0.20.0] - 2026-10-19
 

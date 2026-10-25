@@ -4,10 +4,14 @@
 //! Bridge from a [`MenuModel`] to the platform native menu (`teksilo-platform`'s
 //! [`NativeMenuHandle`]).
 //!
-//! Resolves the model into a plain [`NativeMenuSnapshot`] (titles localized +
-//! mnemonic-stripped, shortcuts resolved to key equivalents), installs it for
-//! the current window, and wires reactive `Signal`s so a toggled check, a
-//! disabled item or a hidden one updates the native item in place.
+//! Resolves a model into a plain [`NativeMenuSnapshot`] (titles localized +
+//! mnemonic-stripped, shortcuts resolved to key equivalents), installs it,
+//! and wires reactive `Signal`s so a toggled check, a disabled item or a
+//! hidden one updates the native item in place. Two kinds of menu are
+//! installed: the [application menu](super::ApplicationMenuExt), from the
+//! application tree, shown whenever the key window has no menu of its own;
+//! and a window's own menu, from a `MenuBar::from_model` bar, shown while
+//! that window is key.
 
 use std::collections::HashMap;
 
@@ -65,28 +69,99 @@ pub(crate) struct NativeMenuBinding {
     _observers: Vec<ObserverHandle>,
 }
 
-/// Resolve `model` into a native menu, install it for the current window, and
-/// wire reactive updates. Returns `None` (no-op) when there is no
-/// [`NativeMenuHandle`] in app-state, or no window / poster — e.g. in headless
-/// tests, or when the app did not call `install_native_menu()`.
+/// Resolve `model` into a native menu, install it as the current window's
+/// own menu, and wire reactive updates. Returns `None` (no-op) when there is
+/// no [`NativeMenuHandle`] in app-state, or no window / poster: e.g. in
+/// headless tests, or when the app did not call `install_native_menu()`.
+///
+/// macOS needs a leading App menu in every bar. A model that declares none
+/// gets the application menu's App menu, or a default one when the
+/// application declared none either. The widget installing it (the bar) is
+/// rebuilt, and so installs again, whenever the application menu is
+/// declared again or changes in place, so the borrowed App menu follows it.
 pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMenuBinding> {
     let handle = ctx.app_state::<NativeMenuHandle>()?.clone();
     let window_id = ctx.window()?.id();
     let poster = ctx.poster()?.clone();
+    let holder = ctx.app_state::<super::application::ApplicationMenu>();
+    if let Some(holder) = holder {
+        let rebuild = |signal: &teksilo_core::signal::Signal<u64>| {
+            signal.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                teksilo_core::BindingLevel::Rebuild,
+            )
+        };
+        rebuild(&holder.generation());
+        if let Some(application) = holder.model() {
+            rebuild(&application.version());
+        }
+    }
+    let application_app_menu = holder
+        .and_then(|holder| holder.model())
+        .and_then(|model| app_menu_of(&model));
+    let resolved = resolve_model(
+        Some(model),
+        || application_app_menu.unwrap_or_else(StandardMenu::app),
+        &|id| ctx.effective_shortcut(id).and_then(|eff| eff.primary),
+    );
+    handle.set_window_menu(window_id, resolved.snapshot, resolved.activations, poster);
+    Some(NativeMenuBinding {
+        _observers: wire_observers(resolved.reactive, &handle),
+    })
+}
 
+/// Resolve the application menu (`None`: the application declared none)
+/// into the native application menu, install it, and wire reactive updates.
+/// `shortcut` looks a shortcut id up in the application tree's registry.
+///
+/// A model with no App menu gets a default one, whose Quit asks the
+/// application to quit.
+pub(crate) fn install_application(
+    model: Option<&MenuModel>,
+    handle: &NativeMenuHandle,
+    poster: std::sync::Arc<dyn teksilo_core::AppEventPoster>,
+    shortcut: &dyn Fn(&str) -> Option<KeyStroke>,
+) -> NativeMenuBinding {
+    let resolved = resolve_model(model, StandardMenu::app, shortcut);
+    handle.set_app_menu(
+        resolved.snapshot,
+        resolved.activations,
+        poster,
+        model.is_some(),
+    );
+    NativeMenuBinding {
+        _observers: wire_observers(resolved.reactive, handle),
+    }
+}
+
+/// A model resolved for the platform: the snapshot, what each item does, and
+/// the items whose state follows a signal.
+struct Resolved {
+    snapshot: NativeMenuSnapshot,
+    activations: HashMap<MenuItemId, NativeMenuActivation>,
+    reactive: Vec<ReactiveItem>,
+}
+
+/// Resolve `model` (none: an empty one) into a snapshot with a leading App
+/// menu, `app_menu()` when the model declares none.
+fn resolve_model(
+    model: Option<&MenuModel>,
+    app_menu: impl FnOnce() -> StandardMenu,
+    shortcut: &dyn Fn(&str) -> Option<KeyStroke>,
+) -> Resolved {
     let mut activations = HashMap::new();
     let mut reactive = Vec::new();
-    let mut roots: Vec<NativeMenuNode> = {
-        let nodes = model.nodes();
-        nodes
+    let mut roots: Vec<NativeMenuNode> = match model {
+        Some(model) => model
+            .nodes()
             .iter()
-            .filter_map(|n| resolve_node(n, ctx, &mut activations, &mut reactive))
-            .collect()
+            .filter_map(|n| resolve_node(n, shortcut, &mut activations, &mut reactive))
+            .collect(),
+        None => Vec::new(),
     };
-    // macOS requires a leading application menu. If the model didn't declare one,
-    // inject a default (English `lit!` labels; the app overrides via
-    // `MenuModel::standard_menu(StandardMenu::app()...)`). Resolving here keeps
-    // every user-visible string in the i18n layer.
+    // macOS requires a leading application menu. Resolving the injected one
+    // here keeps every user-visible string in the i18n layer.
     let has_app = roots.iter().any(|n| {
         matches!(
             n,
@@ -97,33 +172,26 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
         )
     });
     if !has_app {
-        roots.insert(
-            0,
-            NativeMenuNode::Standard {
-                role: StandardMenuRole::App,
-                labels: StandardMenu::app().resolve_labels(),
-                // Deliberately unrouted: a model that declares no App menu has
-                // declared no quit handler either, so `terminate:` is the only
-                // thing that can still make ⌘Q work here.
-                quit_item: None,
-                // Likewise no Settings row: with no App menu declared there is
-                // no intent to route it to, and an unrouted one would do
-                // nothing.
-                settings_item: None,
-            },
-        );
+        roots.insert(0, resolve_standard(&app_menu(), &mut activations, shortcut));
     }
-    let snapshot = NativeMenuSnapshot { roots };
+    Resolved {
+        snapshot: NativeMenuSnapshot { roots },
+        activations,
+        reactive,
+    }
+}
 
-    // The App menu is also what the app keeps once its last window has
-    // closed (an app that stays open without a window), with its routed
-    // rows reaching the application tree.
-    let (app_menu, app_activations) = app_menu_of(&snapshot, &activations);
-    handle.set_window_menu(window_id, snapshot, activations, poster.clone());
-    handle.set_app_menu(app_menu, app_activations, poster);
+/// The App menu `model` declares, if any.
+fn app_menu_of(model: &MenuModel) -> Option<StandardMenu> {
+    model.nodes().iter().find_map(|node| match node {
+        MenuNode::Standard(menu) if menu.role() == StandardMenuRole::App => Some(menu.clone()),
+        _ => None,
+    })
+}
 
-    // Wire reactive per-item updates (title / enabled / visible / check /
-    // radio).
+/// Wire reactive per-item updates (title / enabled / visible / check /
+/// radio) into `handle`.
+fn wire_observers(reactive: Vec<ReactiveItem>, handle: &NativeMenuHandle) -> Vec<ObserverHandle> {
     let mut observers = Vec::new();
     for item in reactive {
         // The title first, and by the same delta mechanism as the rest: a menu
@@ -213,10 +281,7 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
             }
         }
     }
-
-    Some(NativeMenuBinding {
-        _observers: observers,
-    })
+    observers
 }
 
 /// Attach one live-update observer, or leave the row at the value already
@@ -233,41 +298,6 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
 /// the state it was resolved with and simply does not follow later changes,
 /// in the global bar only. The in-window menu binds it directly and stays live
 /// either way.
-/// The application menu a window's menu leaves behind: its App menu alone,
-/// with the activations of the rows the App menu routes (Quit, Settings).
-fn app_menu_of(
-    snapshot: &NativeMenuSnapshot,
-    activations: &HashMap<MenuItemId, NativeMenuActivation>,
-) -> (
-    NativeMenuSnapshot,
-    HashMap<MenuItemId, NativeMenuActivation>,
-) {
-    let app = snapshot.roots.iter().find(|node| {
-        matches!(
-            node,
-            NativeMenuNode::Standard {
-                role: StandardMenuRole::App,
-                ..
-            }
-        )
-    });
-    let mut app_activations = HashMap::new();
-    if let Some(NativeMenuNode::Standard {
-        quit_item,
-        settings_item,
-        ..
-    }) = app
-    {
-        for item in quit_item.iter().chain(settings_item) {
-            if let Some(activation) = activations.get(&item.id) {
-                app_activations.insert(item.id, activation.clone());
-            }
-        }
-    }
-    let roots = app.cloned().into_iter().collect();
-    (NativeMenuSnapshot { roots }, app_activations)
-}
-
 fn push_observer<T: 'static>(
     observers: &mut Vec<ObserverHandle>,
     signal: &Signal<T>,
@@ -293,22 +323,20 @@ struct ReactiveItem {
 
 fn resolve_node(
     node: &MenuNode,
-    ctx: &BuildContext,
+    shortcut: &dyn Fn(&str) -> Option<KeyStroke>,
     activations: &mut HashMap<MenuItemId, NativeMenuActivation>,
     reactive: &mut Vec<ReactiveItem>,
 ) -> Option<NativeMenuNode> {
     match node {
         MenuNode::Separator => Some(NativeMenuNode::Separator),
-        MenuNode::Standard(sm) => Some(resolve_standard(sm, activations, |id| {
-            ctx.effective_shortcut(id).and_then(|eff| eff.primary)
-        })),
+        MenuNode::Standard(sm) => Some(resolve_standard(sm, activations, shortcut)),
         MenuNode::Submenu {
             title, children, ..
         } => Some(NativeMenuNode::Submenu {
             title: strip_title(&title.resolve_now()),
             children: children
                 .iter()
-                .filter_map(|n| resolve_node(n, ctx, activations, reactive))
+                .filter_map(|n| resolve_node(n, shortcut, activations, reactive))
                 .collect(),
         }),
         // A hidden item is installed hidden rather than left out, so its
@@ -333,10 +361,7 @@ fn resolve_node(
                     }
                 }
             };
-            let key_equiv = entry
-                .shortcut_id
-                .and_then(|id| ctx.effective_shortcut(id).and_then(|eff| eff.primary))
-                .map(native_key_equiv);
+            let key_equiv = entry.shortcut_id.and_then(shortcut).map(native_key_equiv);
 
             activations.insert(entry.id, entry.native_activation());
             reactive.push(ReactiveItem {
@@ -390,40 +415,54 @@ fn conventional_chord(key: &str) -> NativeKeyEquivalent {
 fn resolve_standard(
     sm: &StandardMenu,
     activations: &mut HashMap<MenuItemId, NativeMenuActivation>,
-    shortcut: impl Fn(&str) -> Option<KeyStroke>,
+    shortcut: &dyn Fn(&str) -> Option<KeyStroke>,
 ) -> NativeMenuNode {
-    // A routed row is an ordinary activation under an id the model minted once,
-    // so it survives every rebuild — unlike the rest of a standard menu, which
-    // the platform fills in from labels alone.
-    let mut route = |entry: Option<(&'static str, MenuItemId)>,
-                     shortcut_id: Option<&'static str>,
-                     fallback: &str|
-     -> Option<StandardRoutedItem> {
-        let (intent, id) = entry?;
+    // The registry's answer, resolved through the primary-accelerator
+    // convention exactly as `MenuEntry`'s chord is, so this row cannot
+    // advertise one chord while the dispatcher fires another. An id that
+    // resolves to nothing (unregistered, or unbound by the user) leaves the
+    // row with no key equivalent rather than resurrecting the convention: the
+    // app said where the chord comes from, and it currently says none.
+    let chord = |shortcut_id: Option<&'static str>, fallback: &str| match shortcut_id {
+        Some(sid) => shortcut(sid).map(native_key_equiv),
+        None => Some(conventional_chord(fallback)),
+    };
+
+    // A routed row is an ordinary activation under an id the model minted
+    // once, so it survives every rebuild, unlike the rest of a standard menu,
+    // which the platform fills in from labels alone. The App menu's Quit is
+    // always routed: to its intent, and to a quit of the application when
+    // nothing takes that intent or there is none.
+    let quit_item = (sm.role() == StandardMenuRole::App).then(|| {
+        activations.insert(
+            sm.quit_id(),
+            NativeMenuActivation {
+                intent: sm.quit_intent_name(),
+                action: None,
+                quits: true,
+            },
+        );
+        StandardRoutedItem {
+            id: sm.quit_id(),
+            key_equiv: chord(sm.quit_shortcut_id(), "q"),
+        }
+    });
+    // Settings is routed only when the app routes it: the platform has no
+    // selector of its own to fall back on.
+    let settings_item = sm.settings_route().map(|(intent, id)| {
         activations.insert(
             id,
             NativeMenuActivation {
                 intent: Some(intent),
                 action: None,
+                quits: false,
             },
         );
-        // The registry's answer, resolved through the primary-accelerator
-        // convention exactly as `MenuEntry`'s chord is — so this row cannot
-        // advertise one chord while the dispatcher fires another. An id that
-        // resolves to nothing (unregistered, or unbound by the user) leaves the
-        // row with no key equivalent rather than resurrecting the convention:
-        // the app said where the chord comes from, and it currently says none.
-        let key_equiv = match shortcut_id {
-            Some(sid) => shortcut(sid).map(native_key_equiv),
-            None => Some(conventional_chord(fallback)),
-        };
-        Some(StandardRoutedItem { id, key_equiv })
-    };
-
-    let quit_item = route(sm.quit_route(), sm.quit_shortcut_id(), "q");
-    // Settings is routed the same way, and only ever routed — the platform has
-    // no selector of its own to fall back on.
-    let settings_item = route(sm.settings_route(), sm.settings_shortcut_id(), ",");
+        StandardRoutedItem {
+            id,
+            key_equiv: chord(sm.settings_shortcut_id(), ","),
+        }
+    });
 
     NativeMenuNode::Standard {
         role: sm.role(),
@@ -547,6 +586,21 @@ mod tests {
         None
     }
 
+    /// A poster that drops what it is given.
+    fn null_poster() -> std::sync::Arc<dyn teksilo_core::AppEventPoster> {
+        struct NullPoster;
+        impl teksilo_core::AppEventPoster for NullPoster {
+            fn post_subscription_event(
+                &self,
+                _: teksilo_core::SubscriptionId,
+                _: Box<dyn std::any::Any + Send>,
+            ) {
+            }
+            fn post_external(&self, _: Box<dyn std::any::Any + Send>) {}
+        }
+        std::sync::Arc::new(NullPoster)
+    }
+
     /// A registry holding exactly one chord, under `id`.
     fn only(id: &'static str, ks: KeyStroke) -> impl Fn(&str) -> Option<KeyStroke> {
         move |asked| (asked == id).then_some(ks)
@@ -595,6 +649,7 @@ mod tests {
     /// alive.
     fn install_recorded(
         model: MenuModel,
+        holder: Option<super::super::application::ApplicationMenu>,
     ) -> (
         teksilo_platform::native_menu::MemoryNativeMenuBackend,
         NativeMenuHandle,
@@ -621,6 +676,12 @@ mod tests {
         let handle = NativeMenuHandle::new(backend.clone());
         let mut app_state: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
         app_state.insert(TypeId::of::<NativeMenuHandle>(), Box::new(handle.clone()));
+        if let Some(holder) = holder {
+            app_state.insert(
+                TypeId::of::<super::super::application::ApplicationMenu>(),
+                Box::new(holder),
+            );
+        }
         let poster: Arc<dyn AppEventPoster> = Arc::new(NullPoster);
         let mut tree = teksilo_core::widget_tree::WidgetTree::new()
             .with_theme(teksilo_core::presets::intui::light());
@@ -648,32 +709,9 @@ mod tests {
         (backend, handle, tree)
     }
 
-    /// The App menu is what the app keeps once its last window has closed:
-    /// the window's App menu alone, wherever the model declared it, its
-    /// routed rows still routed and nothing else. With none, ⌘Q went dead
-    /// in an app left open with no window.
-    #[test]
-    fn the_app_menu_is_the_windows_app_menu_alone_with_its_routed_rows() {
-        use crate::menu::{MenuEntry, StandardMenu};
-        use teksilo_i18n::lit;
-
-        let model = MenuModel::new()
-            .menu(lit!("File"), |m| {
-                m.item(MenuEntry::new(lit!("New")).intent("app.new"))
-            })
-            .standard_menu(
-                StandardMenu::app()
-                    .quit_intent("app.quit")
-                    .settings_intent("app.settings"),
-            );
-        let (backend, handle, _tree) = install_recorded(model);
-
-        let window = backend
-            .menu_for(teksilo_core::window::TeksiloWindowId::new(1))
-            .expect("the window's menu");
-        let app = backend.app_menu().expect("an app menu is set");
-        assert_eq!(app.roots.len(), 1, "the App menu and nothing else");
-        let app_node = window
+    /// The App menu among a snapshot's roots.
+    fn app_node(snapshot: &NativeMenuSnapshot) -> &NativeMenuNode {
+        snapshot
             .roots
             .iter()
             .find(|node| {
@@ -685,45 +723,197 @@ mod tests {
                     }
                 )
             })
-            .expect("the window's App menu");
-        let quit = quit_item_of(app_node).expect("quit id");
-        let settings = settings_item_of(app_node).expect("settings id");
-        assert_eq!(quit_item_of(&app.roots[0]), Some(quit));
-        assert_eq!(settings_item_of(&app.roots[0]), Some(settings));
-
-        assert_eq!(handle.app_quit_item(), Some(quit));
-        let intent = |id| handle.app_activation(id).and_then(|a| a.intent);
-        assert_eq!(intent(quit), Some("app.quit"));
-        assert_eq!(intent(settings), Some("app.settings"));
-        let (new, _, _) = items_of(&window, "File")[0].clone();
-        assert!(
-            handle.app_activation(new).is_none(),
-            "a window's own rows are not in the app menu"
-        );
+            .expect("an App menu")
     }
 
-    /// A model with no App menu gets the injected one in the app menu too,
-    /// with Quit left to the platform.
+    /// A window's own menu is the window's alone: it never sets the
+    /// application menu. It did, so the application menu with no window
+    /// open was the App menu of whichever window installed last.
     #[test]
-    fn an_app_menu_from_a_model_without_one_leaves_quit_to_the_platform() {
-        use crate::menu::MenuEntry;
+    fn a_windows_menu_never_sets_the_application_menu() {
+        use crate::menu::{MenuEntry, StandardMenu};
         use teksilo_i18n::lit;
 
+        let model = MenuModel::new()
+            .standard_menu(StandardMenu::app().quit_intent("app.quit"))
+            .menu(lit!("File"), |m| {
+                m.item(MenuEntry::new(lit!("New")).intent("app.new"))
+            });
+        let (backend, _handle, _tree) = install_recorded(model, None);
+        assert!(
+            backend
+                .menu_for(teksilo_core::window::TeksiloWindowId::new(1))
+                .is_some()
+        );
+        assert!(backend.app_menu().is_none());
+    }
+
+    /// A window's menu that declares no App menu borrows the application
+    /// menu's, so its Quit is the application's.
+    #[test]
+    fn a_windows_menu_without_an_app_menu_shows_the_applications() {
+        use crate::menu::{MenuEntry, StandardMenu};
+        use teksilo_i18n::lit;
+
+        let declared = StandardMenu::app().quit_intent("app.quit");
+        let quit = declared.quit_id();
+        let holder = super::super::application::ApplicationMenu::new();
+        holder.set(MenuModel::new().standard_menu(declared));
         let model = MenuModel::new().menu(lit!("File"), |m| {
             m.item(MenuEntry::new(lit!("New")).intent("app.new"))
         });
-        let (backend, handle, _tree) = install_recorded(model);
-        let app = backend.app_menu().expect("an app menu is set");
-        assert_eq!(app.roots.len(), 1);
-        assert!(matches!(
-            app.roots[0],
-            NativeMenuNode::Standard {
-                role: StandardMenuRole::App,
-                quit_item: None,
-                ..
+        let (backend, handle, _tree) = install_recorded(model, Some(holder));
+        let window = teksilo_core::window::TeksiloWindowId::new(1);
+        let snapshot = backend.menu_for(window).expect("installed");
+        assert_eq!(quit_item_of(app_node(&snapshot)), Some(quit));
+        let activation = handle.activation(window, quit).expect("routed");
+        assert_eq!(activation.intent, Some("app.quit"));
+        assert!(activation.quits);
+    }
+
+    /// A window's menu that borrows the application menu's App menu follows
+    /// the application menu: declared again, or changed in place, the
+    /// window's native menu is installed again with the new App menu. It
+    /// kept the App menu it was first installed with.
+    #[test]
+    fn a_windows_menu_follows_the_application_menu_it_borrows_from() {
+        use crate::menu::{MenuEntry, StandardMenu};
+        use teksilo_i18n::lit;
+
+        let holder = super::super::application::ApplicationMenu::new();
+        holder.set(MenuModel::new().standard_menu(StandardMenu::app().quit_intent("app.quit")));
+        let model = MenuModel::new().menu(lit!("File"), |m| {
+            m.item(MenuEntry::new(lit!("New")).intent("app.new"))
+        });
+        let (backend, handle, mut tree) = install_recorded(model, Some(holder.clone()));
+        let window = teksilo_core::window::TeksiloWindowId::new(1);
+        let quit_intent = |backend: &teksilo_platform::native_menu::MemoryNativeMenuBackend| {
+            let snapshot = backend.menu_for(window).expect("installed");
+            let quit = quit_item_of(app_node(&snapshot)).expect("a Quit row");
+            handle.activation(window, quit).and_then(|a| a.intent)
+        };
+        assert_eq!(quit_intent(&backend), Some("app.quit"));
+
+        // Declared again.
+        let again = MenuModel::new().standard_menu(StandardMenu::app().quit_intent("app.leave"));
+        holder.set(again.clone());
+        tree.layout(teksilo_canvas::SizeProposal::exact(800.0, 600.0));
+        assert_eq!(quit_intent(&backend), Some("app.leave"));
+
+        // Changed in place.
+        again.modify(|nodes| {
+            nodes.clear();
+            nodes.push(MenuNode::Standard(
+                StandardMenu::app().quit_intent("app.exit"),
+            ));
+        });
+        tree.layout(teksilo_canvas::SizeProposal::exact(800.0, 600.0));
+        assert_eq!(quit_intent(&backend), Some("app.exit"));
+    }
+
+    /// The application menu is installed whole, every row's activation
+    /// recorded, from the application tree's declaration.
+    #[test]
+    fn the_application_menu_is_installed_whole() {
+        use crate::menu::{MenuEntry, StandardMenu};
+        use teksilo_i18n::lit;
+
+        let new = MenuEntry::new(lit!("New")).intent("app.new");
+        let new_id = new.id();
+        let app = StandardMenu::app().settings_intent("app.settings");
+        let quit = app.quit_id();
+        let model = MenuModel::new()
+            .standard_menu(app)
+            .menu(lit!("File"), |m| m.item(new));
+        let backend = teksilo_platform::native_menu::MemoryNativeMenuBackend::new();
+        let handle = NativeMenuHandle::new(backend.clone());
+        let _binding = install_application(Some(&model), &handle, null_poster(), &no_shortcuts);
+
+        let installed = backend.app_menu().expect("the application menu");
+        assert_eq!(installed.roots.len(), 2, "the App menu and File");
+        assert_eq!(items_of(&installed, "File")[0].0, new_id);
+        assert_eq!(
+            handle.app_activation(new_id).and_then(|a| a.intent),
+            Some("app.new")
+        );
+        let quit = handle.app_activation(quit).expect("Quit is routed");
+        assert_eq!(
+            quit.intent, None,
+            "no intent: it asks the application to quit"
+        );
+        assert!(quit.quits);
+    }
+
+    /// With no application menu declared, the native one is a default App
+    /// menu whose Quit asks the application to quit.
+    #[test]
+    fn with_no_application_menu_declared_quit_still_quits() {
+        let backend = teksilo_platform::native_menu::MemoryNativeMenuBackend::new();
+        let handle = NativeMenuHandle::new(backend.clone());
+        let _binding = install_application(None, &handle, null_poster(), &no_shortcuts);
+        let installed = backend.app_menu().expect("the application menu");
+        assert_eq!(installed.roots.len(), 1);
+        let quit = quit_item_of(app_node(&installed)).expect("a Quit row");
+        let activation = handle.app_activation(quit).expect("routed");
+        assert!(activation.quits);
+    }
+
+    /// The application menu is the application tree's, whatever the windows
+    /// install and in whatever order: two windows with App menus of their
+    /// own, installed and cleared, leave it as declared.
+    #[test]
+    fn the_application_menu_does_not_follow_the_windows_installs() {
+        use crate::menu::StandardMenu;
+
+        let declared = StandardMenu::app().quit_intent("app.quit");
+        let quit = declared.quit_id();
+        let holder = super::super::application::ApplicationMenu::new();
+        holder.set(MenuModel::new().standard_menu(declared));
+        let backend = teksilo_platform::native_menu::MemoryNativeMenuBackend::new();
+        let handle = NativeMenuHandle::new(backend.clone());
+        holder.sync_native(&handle, null_poster(), 0, &no_shortcuts);
+        for (window, intent) in [(1, "window.one.quit"), (2, "window.two.quit")] {
+            let window = teksilo_core::window::TeksiloWindowId::new(window);
+            let model = MenuModel::new().standard_menu(StandardMenu::app().quit_intent(intent));
+            let mut activations = HashMap::new();
+            let snapshot = resolve_model(Some(&model), StandardMenu::app, &no_shortcuts);
+            activations.extend(snapshot.activations);
+            handle.set_window_menu(window, snapshot.snapshot, activations, null_poster());
+        }
+        handle.clear_window(teksilo_core::window::TeksiloWindowId::new(2));
+        handle.clear_window(teksilo_core::window::TeksiloWindowId::new(1));
+        let installed = backend.app_menu().expect("the application menu");
+        assert_eq!(quit_item_of(app_node(&installed)), Some(quit));
+        assert_eq!(
+            handle.app_activation(quit).and_then(|a| a.intent),
+            Some("app.quit")
+        );
+    }
+
+    /// The application menu is installed again only when what it is built
+    /// from changed.
+    #[test]
+    fn the_application_menu_is_installed_again_only_when_it_changed() {
+        use crate::menu::MenuEntry;
+        use teksilo_i18n::lit;
+
+        let holder = super::super::application::ApplicationMenu::new();
+        let model = MenuModel::new().menu(lit!("File"), |m| m);
+        holder.set(model.clone());
+        let backend = teksilo_platform::native_menu::MemoryNativeMenuBackend::new();
+        let handle = NativeMenuHandle::new(backend.clone());
+        let file_rows = |backend: &teksilo_platform::native_menu::MemoryNativeMenuBackend| {
+            items_of(&backend.app_menu().expect("installed"), "File").len()
+        };
+        holder.sync_native(&handle, null_poster(), 0, &no_shortcuts);
+        assert_eq!(file_rows(&backend), 0);
+        model.modify(|nodes| {
+            if let Some(MenuNode::Submenu { children, .. }) = nodes.first_mut() {
+                children.push(MenuNode::Item(MenuEntry::new(lit!("New"))));
             }
-        ));
-        assert_eq!(handle.app_quit_item(), None);
+        });
+        holder.sync_native(&handle, null_poster(), 0, &no_shortcuts);
+        assert_eq!(file_rows(&backend), 1, "the model changed");
     }
 
     /// The first menu named `menu`'s items, as `(id, title, visible)`.
@@ -760,7 +950,7 @@ mod tests {
                 .item(MenuEntry::new(lit!("Recent")).visible(shown.clone()))
                 .item(MenuEntry::new(lit!("Never")).visible(false))
         });
-        let (backend, _, _tree) = install_recorded(model);
+        let (backend, _, _tree) = install_recorded(model, None);
 
         let snapshot = backend
             .menu_for(teksilo_core::window::TeksiloWindowId::new(1))
@@ -797,7 +987,7 @@ mod tests {
     #[test]
     fn a_standard_app_menu_has_no_settings_row_by_default() {
         let mut activations = HashMap::new();
-        let node = resolve_standard(&StandardMenu::app(), &mut activations, no_shortcuts);
+        let node = resolve_standard(&StandardMenu::app(), &mut activations, &no_shortcuts);
         assert_eq!(settings_item_of(&node), None);
     }
 
@@ -808,7 +998,7 @@ mod tests {
         let node = resolve_standard(
             &StandardMenu::app().settings_intent("app.settings"),
             &mut activations,
-            no_shortcuts,
+            &no_shortcuts,
         );
         let id = settings_item_of(&node).expect("a routed settings carries an item id");
         assert_eq!(
@@ -827,7 +1017,7 @@ mod tests {
                 .quit_intent("app.quit")
                 .settings_intent("app.settings"),
             &mut activations,
-            no_shortcuts,
+            &no_shortcuts,
         );
         let quit = quit_item_of(&node).expect("quit id");
         let settings = settings_item_of(&node).expect("settings id");
@@ -845,8 +1035,8 @@ mod tests {
         let mut first = HashMap::new();
         let mut second = HashMap::new();
         assert_eq!(
-            settings_item_of(&resolve_standard(&menu, &mut first, no_shortcuts)),
-            settings_item_of(&resolve_standard(&menu, &mut second, no_shortcuts)),
+            settings_item_of(&resolve_standard(&menu, &mut first, &no_shortcuts)),
+            settings_item_of(&resolve_standard(&menu, &mut second, &no_shortcuts)),
         );
     }
 
@@ -859,23 +1049,63 @@ mod tests {
         let node = resolve_standard(
             &StandardMenu::app().settings(LocalizedString::literal("Réglages…")),
             &mut activations,
-            no_shortcuts,
+            &no_shortcuts,
         );
         assert_eq!(labels_of(&node).settings, "Réglages…");
     }
 
-    /// The default is the platform's own Quit. An app that declared no handler
-    /// still gets a working ⌘Q out of `terminate:`, and that guarantee is what
-    /// the auto-injected App menu rests on.
+    /// Services, Hide Others and Show All are labelled like the rest of the
+    /// App menu's chrome: English defaults, replaced through the widget
+    /// layer, so the platform crate sees no English literal of its own.
     #[test]
-    fn a_standard_app_menu_routes_nothing_by_default() {
+    fn the_app_menu_labels_services_hide_others_and_show_all() {
         let mut activations = HashMap::new();
-        let node = resolve_standard(&StandardMenu::app(), &mut activations, no_shortcuts);
-        assert_eq!(quit_item_of(&node), None);
-        assert!(
-            activations.is_empty(),
-            "an unrouted standard menu owns no activation"
+        let node = resolve_standard(&StandardMenu::app(), &mut activations, &no_shortcuts);
+        let labels = labels_of(&node);
+        assert_eq!(
+            [&labels.services, &labels.hide_others, &labels.show_all],
+            ["Services", "Hide Others", "Show All"]
         );
+
+        let node = resolve_standard(
+            &StandardMenu::app()
+                .services(LocalizedString::literal("Services (fr)"))
+                .hide_others(LocalizedString::literal("Masquer les autres"))
+                .show_all(LocalizedString::literal("Tout afficher")),
+            &mut activations,
+            &no_shortcuts,
+        );
+        let labels = labels_of(&node);
+        assert_eq!(
+            [&labels.services, &labels.hide_others, &labels.show_all],
+            ["Services (fr)", "Masquer les autres", "Tout afficher"]
+        );
+    }
+
+    /// By default Quit asks the application to quit: it is routed with no
+    /// intent and marked as Quit, never left to `terminate:`, which ends the
+    /// process past every close guard and past winit's exit.
+    #[test]
+    fn a_standard_app_menus_quit_asks_the_application_to_quit_by_default() {
+        let mut activations = HashMap::new();
+        let node = resolve_standard(&StandardMenu::app(), &mut activations, &no_shortcuts);
+        let id = quit_item_of(&node).expect("Quit is routed");
+        assert_eq!(activations[&id].intent, None);
+        assert!(activations[&id].quits);
+        assert_eq!(chord(quit_of(&node)), Some(("q".into(), true, false)));
+    }
+
+    /// Only the App menu has a Quit row.
+    #[test]
+    fn a_window_or_help_menu_has_no_quit_row() {
+        let mut activations = HashMap::new();
+        for menu in [StandardMenu::window(), StandardMenu::help()] {
+            assert_eq!(
+                quit_item_of(&resolve_standard(&menu, &mut activations, &no_shortcuts)),
+                None
+            );
+        }
+        assert!(activations.is_empty());
     }
 
     /// With a quit intent the item carries an id, and that id resolves to the
@@ -887,13 +1117,14 @@ mod tests {
         let node = resolve_standard(
             &StandardMenu::app().quit_intent("app.quit"),
             &mut activations,
-            no_shortcuts,
+            &no_shortcuts,
         );
         let id = quit_item_of(&node).expect("a routed quit carries an item id");
         let activation = activations
             .get(&id)
             .expect("the routed id resolves to an activation");
         assert_eq!(activation.intent, Some("app.quit"));
+        assert!(activation.quits, "and asks to quit when nothing takes it");
         assert!(
             activation.action.is_none(),
             "routing by name only — no closure to run on the side"
@@ -910,8 +1141,8 @@ mod tests {
         let mut first = HashMap::new();
         let mut second = HashMap::new();
         assert_eq!(
-            quit_item_of(&resolve_standard(&menu, &mut first, no_shortcuts)),
-            quit_item_of(&resolve_standard(&menu, &mut second, no_shortcuts)),
+            quit_item_of(&resolve_standard(&menu, &mut first, &no_shortcuts)),
+            quit_item_of(&resolve_standard(&menu, &mut second, &no_shortcuts)),
         );
     }
 
@@ -924,12 +1155,12 @@ mod tests {
         let a = resolve_standard(
             &StandardMenu::app().quit_intent("app.quit"),
             &mut activations,
-            no_shortcuts,
+            &no_shortcuts,
         );
         let b = resolve_standard(
             &StandardMenu::app().quit_intent("app.quit"),
             &mut activations,
-            no_shortcuts,
+            &no_shortcuts,
         );
         assert_ne!(quit_item_of(&a), quit_item_of(&b));
         assert_eq!(activations.len(), 2);
@@ -945,7 +1176,7 @@ mod tests {
                 .quit(LocalizedString::literal("Quitter"))
                 .quit_intent("app.quit"),
             &mut activations,
-            no_shortcuts,
+            &no_shortcuts,
         );
         assert_eq!(labels_of(&node).quit, "Quitter");
     }
@@ -963,7 +1194,7 @@ mod tests {
                 .quit_intent("app.quit")
                 .settings_intent("app.settings"),
             &mut activations,
-            no_shortcuts,
+            &no_shortcuts,
         );
         assert_eq!(chord(quit_of(&node)), Some(("q".into(), true, false)));
         assert_eq!(chord(settings_of(&node)), Some((",".into(), true, false)));
@@ -980,7 +1211,7 @@ mod tests {
                 .quit_intent("app.quit")
                 .quit_shortcut("app.quit"),
             &mut activations,
-            only("app.quit", KeyStroke::command(Key::Q)),
+            &only("app.quit", KeyStroke::command(Key::Q)),
         );
         assert_eq!(chord(quit_of(&node)), Some(("q".into(), true, false)));
     }
@@ -998,7 +1229,7 @@ mod tests {
                 .quit_intent("app.quit")
                 .quit_shortcut("app.quit"),
             &mut activations,
-            only("app.quit", KeyStroke::command_shift(Key::Q)),
+            &only("app.quit", KeyStroke::command_shift(Key::Q)),
         );
         assert_eq!(
             chord(quit_of(&node)),
@@ -1019,7 +1250,7 @@ mod tests {
                 .quit_intent("app.quit")
                 .quit_shortcut("app.quit"),
             &mut activations,
-            no_shortcuts,
+            &no_shortcuts,
         );
         assert!(quit_of(&node).is_some(), "the row is still there");
         assert_eq!(chord(quit_of(&node)), None, "it just has no chord");
@@ -1036,7 +1267,7 @@ mod tests {
                 .settings_intent("app.settings")
                 .settings_shortcut("app.settings"),
             &mut activations,
-            only("app.settings", KeyStroke::command(Key::Character(','))),
+            &only("app.settings", KeyStroke::command(Key::Character(','))),
         );
         assert_eq!(chord(quit_of(&node)), None, "quit's id resolves to nothing");
         assert_eq!(chord(settings_of(&node)), Some((",".into(), true, false)));

@@ -465,7 +465,10 @@ the newer capture. The pre-built
 widget packages this flow: each chord is a control that records a new
 chord when activated, refuses keys that cannot be shortcuts (a bare
 letter, Shift plus a letter, reserved chords such as Ctrl+Tab), asks
-before taking a chord from another command, and resets a changed row.
+before taking a chord from another command, and resets a changed row. A
+rebind of a shortcut the [application menu](native-menu.md#shortcuts-and-key-equivalents)
+names applies to the whole application: `teksilo-app` takes it from the
+window's registry to the application tree's, and every window follows.
 
 ---
 
@@ -644,9 +647,10 @@ intent nothing in the window takes still goes to the application tree, as
 from a native dialog window. A key does not: it becomes an intent only
 through a shortcut that applies in the modal, and the page's do not, so the
 page's Ctrl+N bound to an application-tree action does not fire inside an
-in-window dialog (a shortcut registered in the application tree never fires
-at all). The standard edit shortcuts, which the tree registers itself, apply
-everywhere.
+in-window dialog. A shortcut registered in the application tree fires in a
+window only when a row of the [application menu](native-menu.md) names it:
+the window then holds an unowned copy, which, like the standard edit
+shortcuts the tree registers itself, applies everywhere, in a dialog too.
 
 A modal is a barrier only while it is open when the intent is dispatched.
 An intent sent as the modal closes (a dialog's button that closes the dialog
@@ -675,7 +679,11 @@ intent from the focused widget, as its shortcut does, once the menu has closed
 and given focus back to the widget the user was working in (the bar's titles
 take no focus from a click, and after F10 or Alt the bar hands focus back as a
 command is chosen): an action on that widget, one of its ancestors or the
-window's root takes it. A hand-built
+window's root takes it, and what the window leaves goes to the application
+tree, where the [application menu](native-menu.md)'s commands live. Such a row
+with no closure, and no state to write (a two-way check or radio row writes
+one), is greyed out while nothing on that route takes its intent
+(`WidgetTree::can_handle`). A hand-built
 `MenuItem` row does the same with `ctx.send_intent_from_focus(...)` in its
 `on_activate_fn`; sent with `ctx.send_intent(...)`, its walk goes from the row to
 the bar's trigger and up the bar's ancestors, which reaches the window's root but

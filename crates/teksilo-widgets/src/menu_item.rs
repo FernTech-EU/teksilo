@@ -287,6 +287,9 @@ pub struct MenuItem {
     /// reactively (paint and AT follow). Cursor stays `Pointer` — see
     /// the cursor assignment in `build` for why it is not derived from this.
     enabled: Prop<bool>,
+    /// Set by [`enabled_while_handled`](Self::enabled_while_handled): the
+    /// row is enabled only while something on its route takes this intent.
+    enabled_while_handled: Option<&'static str>,
     /// Plain / Check / Radio — see [`MenuItemMode`].
     mode: MenuItemMode,
     /// Sibling ids for radio-group AT announcement. Set by
@@ -382,6 +385,7 @@ impl MenuItem {
             composite_tooltip_content: None,
             action: None,
             enabled: Prop::Static(true),
+            enabled_while_handled: None,
             mode: MenuItemMode::Plain,
             radio_group_ids: None,
             submenu_factory: None,
@@ -523,6 +527,24 @@ impl MenuItem {
         self
     }
 
+    /// Enable the row only while something on the route of an intent named
+    /// `intent` takes it, as well as by [`enabled`](Self::enabled): the
+    /// window's logical focus up to its root, the window's global actions,
+    /// and the application scope (see `WidgetTree::can_handle`). Followed
+    /// while the row is shown. What a `MenuModel` entry with an intent and
+    /// no closure uses.
+    pub(crate) fn enabled_while_handled(mut self, intent: &'static str) -> Self {
+        self.enabled_while_handled = Some(intent);
+        self
+    }
+
+    /// The intent [`enabled_while_handled`](Self::enabled_while_handled)
+    /// named, if any.
+    #[cfg(test)]
+    pub(crate) fn gated_by(&self) -> Option<&'static str> {
+        self.enabled_while_handled
+    }
+
     /// Per-call style override. Replaces the theme-wide default
     /// `MenuItemStyle` for just this MenuItem instance.
     pub fn style(mut self, style: impl teksilo_core::styles::MenuItemStyle) -> Self {
@@ -605,6 +627,7 @@ impl MenuItem {
             composite_tooltip_content: None,
             action: None,
             enabled: Prop::Static(true),
+            enabled_while_handled: None,
             mode: MenuItemMode::Plain,
             radio_group_ids: None,
             submenu_factory: Some(Box::new(factory)),

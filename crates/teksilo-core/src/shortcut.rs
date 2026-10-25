@@ -897,6 +897,14 @@ impl ShortcutRegistry {
         self.owner_by_id.get(id).copied()
     }
 
+    /// Whether a widget keeps shortcut `id` registered: an
+    /// [owned](Self::register_owned) or a [shared](Self::register_shared)
+    /// registration, unlike one made with [`register`](Self::register).
+    #[doc(hidden)]
+    pub fn has_owner(&self, id: &str) -> bool {
+        self.owner_by_id.contains_key(id) || self.shared_owners.contains_key(id)
+    }
+
     /// Every widget keeping shortcut `id` registered: its one owner, or the
     /// owners of a [shared](Self::register_shared) one. Empty for a shortcut
     /// registered with no owner (the tree's standard edit shortcuts).
@@ -1601,6 +1609,22 @@ mod tests {
             reg.effective("format.bold").unwrap().secondary,
             Some(KeyStroke::ctrl(Key::G))
         );
+    }
+
+    #[test]
+    fn has_owner_answers_for_owned_and_shared_registrations() {
+        use slotmap::KeyData;
+        let editor: WidgetId = KeyData::from_ffi(41).into();
+        let mut reg = ShortcutRegistry::new();
+        reg.register(Shortcut::new("a").build());
+        reg.register_owned(Shortcut::new("b").build(), editor);
+        reg.register_shared(Shortcut::new("c").build(), editor);
+        assert!(!reg.has_owner("a"));
+        assert!(reg.has_owner("b"));
+        assert!(reg.has_owner("c"));
+        assert!(!reg.has_owner("missing"));
+        reg.register(Shortcut::new("c").build());
+        assert!(!reg.has_owner("c"), "an anonymous upsert takes it over");
     }
 
     #[test]

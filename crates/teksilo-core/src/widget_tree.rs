@@ -299,6 +299,10 @@ pub struct WidgetTree {
     /// tree takes. See
     /// [`set_application_scope`](Self::set_application_scope).
     application_scope: Option<crate::action::ApplicationScope>,
+    /// What [`command_available_signal`](Self::command_available_signal)
+    /// handed out: the widget it is for, the intent name, and the signal
+    /// kept equal to `can_handle(name)` while the widget is active.
+    command_watchers: Vec<(WidgetId, &'static str, crate::signal::Signal<bool>)>,
     /// While a routed intent's actions run, the crossings that led to the
     /// intents they send. See
     /// [`dispatch_routed_intent`](Self::dispatch_routed_intent).
@@ -1064,6 +1068,7 @@ impl WidgetTree {
             pending_intents: Vec::new(),
             unclaimed_intents: None,
             application_scope: None,
+            command_watchers: Vec::new(),
             routed_crossings: None,
             global_actions: Vec::new(),
             text_surfaces: crate::text_surface::TextSurfaces::new(focused_signal.clone()),
@@ -4159,6 +4164,29 @@ impl WidgetTree {
             .is_some_and(|source| self.can_handle_from(source, name))
     }
 
+    /// Every intent name [`can_handle`](Self::can_handle) answers true for
+    /// now, sorted, each once: one walk from the logical focus, for a caller
+    /// that would otherwise ask for many names (the native menu bar's rows),
+    /// and an answer two turns can compare to see that nothing changed.
+    #[doc(hidden)]
+    pub fn handled_intents(&self) -> Vec<&'static str> {
+        let Some(source) = self.command_focus() else {
+            return Vec::new();
+        };
+        let mut names: Vec<&'static str> = self
+            .actions_on_route(source, &[], false)
+            .into_iter()
+            .filter(|action| action.is_enabled())
+            .map(|action| action.intent)
+            .collect();
+        if let Some(scope) = &self.application_scope {
+            names.extend(scope.taken());
+        }
+        names.sort_unstable();
+        names.dedup();
+        names
+    }
+
     /// [`can_handle`](Self::can_handle), for an intent sent from `source`.
     #[doc(hidden)]
     pub fn can_handle_from(&self, source: WidgetId, name: &str) -> bool {
@@ -4169,6 +4197,63 @@ impl WidgetTree {
                 .application_scope
                 .as_ref()
                 .is_some_and(|scope| scope.takes(name))
+    }
+
+    /// A signal that says whether an intent named `name` would be handled,
+    /// as [`can_handle`](Self::can_handle) answers, for widget `id`: a menu
+    /// row that greys out when nothing on its route takes its command.
+    ///
+    /// The tree keeps it current at the start of every layout pass while
+    /// `id` is active, before the bindings are flushed, so a row bound to it
+    /// is right on the frame it is first drawn and follows focus, the
+    /// actions on the route and the application scope from then on. While
+    /// `id` is dormant (a closed menu) the signal keeps its last value.
+    /// Asked again for the same widget and name, it returns the same signal;
+    /// it goes with the widget.
+    #[doc(hidden)]
+    pub fn command_available_signal(
+        &mut self,
+        id: WidgetId,
+        name: &'static str,
+    ) -> crate::signal::Signal<bool> {
+        if let Some((_, _, signal)) = self
+            .command_watchers
+            .iter()
+            .find(|(watcher, intent, _)| *watcher == id && *intent == name)
+        {
+            return signal.clone();
+        }
+        let signal = crate::signal::Signal::new(self.can_handle(name));
+        self.command_watchers.push((id, name, signal.clone()));
+        signal
+    }
+
+    /// Bring every active widget's
+    /// [`command_available_signal`](Self::command_available_signal) in line
+    /// with what [`can_handle`](Self::can_handle) answers now, and forget
+    /// the widgets that are gone. Values are computed first and set
+    /// afterwards, as `flush_effective_enabled_signals` does: an observer may
+    /// change the tree.
+    pub(crate) fn flush_command_availability(&mut self) {
+        let arena = &self.arena;
+        self.command_watchers
+            .retain(|(id, _, _)| arena.get(*id).is_some());
+        if self.command_watchers.is_empty() {
+            return;
+        }
+        let source = self.command_focus();
+        let updates: Vec<(crate::signal::Signal<bool>, bool)> = self
+            .command_watchers
+            .iter()
+            .filter(|(id, _, _)| self.arena.is_active(*id))
+            .filter_map(|(_, name, signal)| {
+                let now = source.is_some_and(|source| self.can_handle_from(source, name));
+                (signal.get() != now).then(|| (signal.clone(), now))
+            })
+            .collect();
+        for (signal, value) in updates {
+            signal.set(value);
+        }
     }
 
     /// The logical focus of [`can_handle`](Self::can_handle): where
@@ -4193,7 +4278,12 @@ impl WidgetTree {
         }
         Some(
             outermost
-                .and_then(|overlay| overlay.focus_restore)
+                .and_then(|overlay| {
+                    overlay
+                        .command_source
+                        .filter(|id| self.arena.is_active(*id))
+                        .or(overlay.focus_restore)
+                })
                 .filter(|id| self.arena.is_active(*id))
                 .unwrap_or(focus),
         )

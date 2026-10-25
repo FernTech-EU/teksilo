@@ -4,6 +4,7 @@
 
 pub mod app;
 pub mod app_event_observers;
+pub(crate) mod application_menu;
 #[cfg(feature = "automation")]
 pub mod automation_bridge;
 pub mod default_post_root;

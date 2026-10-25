@@ -4,11 +4,26 @@
 //! MenuBar — a horizontal application menu bar with keyboard-driven dropdowns.
 //!
 //! `MenuBar` renders a row of labelled trigger buttons; activating one opens a
-//! dropdown `MenuList` as an overlay. Menus can be added via the fluent
-//! `.menu(label, factory)` API or built from a declarative `MenuModel`
-//! (the single source of truth shared with the native macOS menu bar via
-//! `from_model` + `native_on_macos`). Leading and trailing slots accept
+//! dropdown `MenuList` as an overlay. Leading and trailing slots accept
 //! arbitrary widget content (an app icon or a search field, for example).
+//!
+//! **What it shows.** `MenuBar::application()` shows the application menu,
+//! the one declarative `MenuModel` the application tree declares with
+//! `ctx.set_application_menu(model)`, and follows it when it changes. On
+//! Windows and Linux this is how a window shows the application menu: nothing
+//! puts it in a window by itself. On macOS the application menu is the global
+//! menu bar already, so by default the bar renders only its slots there.
+//! `MenuBar::from_model(model)` shows a menu of the window's own instead, which
+//! `native_on_macos` mirrors into the global bar while the window is key.
+//! Menus can also be added one by one with the fluent `.menu(label, factory)`
+//! API, for a bar that is no model's.
+//!
+//! **Rows of a model.** A row's intent is sent from the window's focus, so the
+//! window's actions take it first and the application tree takes what the
+//! window leaves; a row of the application menu runs its `on_activate`
+//! closure in the application tree. A row with an intent and no closure is
+//! greyed out while nothing on that route takes the intent, and follows it
+//! while its menu is open.
 //!
 //! **Focus.** A trigger takes no focus from a click (`focus_on_click(false)`):
 //! a menu opened with the mouse or a finger opens over the widget the user is
@@ -37,6 +52,14 @@
 //! The bar carries `Role::MenuBar`; each trigger is `Role::MenuItem` with
 //! `set_has_popup(Menu)` and `set_expanded` tracking the open dropdown.
 //! Mnemonic letters are announced via `set_access_key` for Windows Narrator.
+//!
+//! ```rust
+//! # use teksilo_widgets::MenuBar;
+//! // In a window's build: the application menu.
+//! let _bar = MenuBar::application();
+//! ```
+//!
+//! A bar built by hand, with no model:
 //!
 //! ```rust
 //! # use teksilo_widgets::{MenuBar, MenuList, MenuItem};
@@ -179,8 +202,13 @@ pub struct MenuBar {
     /// Defaults to [`IconButtonSize::Default`] (matching a bare `IconButton`).
     hamburger_size: IconButtonSize,
     /// The declarative source model, when this bar was built via
-    /// [`from_model`](Self::from_model). Drives the native menu mirror.
+    /// [`from_model`](Self::from_model), or the application menu as the last
+    /// build found it for [`application`](Self::application). Drives the
+    /// native menu mirror of a `from_model` bar.
     model: Option<crate::menu::MenuModel>,
+    /// Set by [`application`](Self::application): the bar shows the
+    /// application menu, read from app-state at each build.
+    application: bool,
     /// macOS native-menu behaviour (mirror to / suppress in-window).
     native_mode: crate::menu::NativeMenuMode,
     /// RAII binding keeping the native menu's reactive observers alive while
@@ -212,6 +240,7 @@ impl MenuBar {
             hamburger_id: None,
             hamburger_size: IconButtonSize::Default,
             model: None,
+            application: false,
             native_mode: crate::menu::NativeMenuMode::Off,
             native_binding: RefCell::new(None),
             menu_focus: Default::default(),
@@ -233,11 +262,43 @@ impl MenuBar {
         bar
     }
 
+    /// A bar showing the application menu, the one the application tree
+    /// declares with
+    /// [`set_application_menu`](crate::menu::ApplicationMenuExt::set_application_menu).
+    ///
+    /// It renders that menu as [`from_model`](Self::from_model) renders a
+    /// model, and follows it: a menu declared again, or a model changed in
+    /// place, rebuilds the bar in every window that shows one. A row's intent
+    /// is sent from this window's focus, so an action of the window takes it
+    /// (Edit ▸ Copy copies in the focused field) and the application tree's
+    /// actions take what the window leaves; a row's
+    /// [`on_activate`](crate::menu::MenuEntry::on_activate) closure runs in
+    /// the application tree.
+    ///
+    /// On Windows and Linux this is how a window shows the application menu:
+    /// nothing puts it in a window by itself. On macOS, in an application
+    /// that called `install_native_menu()`, the application menu is the
+    /// global menu bar already, so by default this bar renders only its
+    /// leading and trailing slots there; `.native_on_macos(NativeMenuMode::Coexist)`
+    /// keeps the in-window bar too.
+    ///
+    /// With no application menu declared the bar shows no menu (and a debug
+    /// build says so once).
+    pub fn application() -> Self {
+        let mut bar = Self::new();
+        bar.application = true;
+        bar.native_mode = crate::menu::NativeMenuMode::Suppress;
+        bar
+    }
+
     /// Derive the in-window menu entries from the model's top-level menus. Each
     /// `Submenu` node becomes a dropdown whose factory builds a `MenuList` from
     /// its children. `Standard` roles + bare items/separators at top level have
     /// no in-window representation.
-    fn model_entries(model: &crate::menu::MenuModel) -> Vec<MenuBarEntry> {
+    fn model_entries(
+        model: &crate::menu::MenuModel,
+        origin: &crate::menu::model::RowOrigin,
+    ) -> Vec<MenuBarEntry> {
         model
             .nodes()
             .iter()
@@ -246,10 +307,11 @@ impl MenuBar {
                     title, children, ..
                 } => {
                     let children = children.clone();
+                    let origin = origin.clone();
                     Some(MenuBarEntry {
                         label: title.clone(),
                         factory: Box::new(move || {
-                            Box::new(crate::menu::model::build_menu_list(&children))
+                            Box::new(crate::menu::model::build_menu_list(&children, &origin))
                         }),
                     })
                 }
@@ -291,9 +353,17 @@ impl MenuBar {
 
     /// Choose how this bar behaves on macOS, where the convention is a global
     /// menu bar at the top of the screen. Requires the bar to have been built
-    /// with [`from_model`](Self::from_model) and the app to have called
+    /// with [`from_model`](Self::from_model) or
+    /// [`application`](Self::application) and the app to have called
     /// `install_native_menu()`. No effect on other platforms (the in-window bar
     /// renders there regardless).
+    ///
+    /// For a `from_model` bar the mode decides whether the window's model is
+    /// mirrored into the global bar while the window is key. An
+    /// `application` bar mirrors nothing (the application menu is the global
+    /// bar already), so its mode only decides whether the in-window bar shows
+    /// too: [`Suppress`](crate::menu::NativeMenuMode::Suppress), its default,
+    /// hides it, the other two keep it.
     pub fn native_on_macos(mut self, mode: crate::menu::NativeMenuMode) -> Self {
         self.native_mode = mode;
         self

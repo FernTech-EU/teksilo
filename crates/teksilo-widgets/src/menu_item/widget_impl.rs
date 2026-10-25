@@ -59,7 +59,18 @@ impl Widget for MenuItem {
         // Forward enabled (static or signal-bound) into the arena. A bound
         // signal makes enable/disable reactive — the framework's
         // effective_enabled drives paint / AT (and event gating).
-        ctx.enabled_when(self_id, self.enabled.clone());
+        let enabled = match self.enabled_while_handled {
+            Some(intent) => {
+                let handled = ctx.command_available(intent);
+                match &self.enabled {
+                    Prop::Static(false) => Prop::Static(false),
+                    Prop::Static(true) => Prop::Bound(handled),
+                    Prop::Bound(own) => Prop::Bound(own.and(&handled)),
+                }
+            }
+            None => self.enabled.clone(),
+        };
+        ctx.enabled_when(self_id, enabled);
         let effective_enabled = ctx.effective_enabled_signal(self_id);
 
         // Interaction seeds to Idle; the framework's effective_enabled

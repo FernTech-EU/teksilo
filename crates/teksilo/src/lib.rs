@@ -223,6 +223,10 @@ pub mod prelude {
         SettingsKey, SettingsStore, TEXT_SCALE_KEY, WindowStateService,
     };
 
+    // The application menu: `ctx.set_application_menu(model)` from the
+    // application tree's build.
+    pub use teksilo_widgets::menu::ApplicationMenuExt;
+
     // Multi-window API
     pub use teksilo_core::{
         CloseResponse, DecorationsMode, ModalConfig, SizeToContent, TeksiloWindowId,

@@ -7,6 +7,12 @@ impl WidgetTree {
     /// Process dirty state bindings: mark bound widgets for repaint, relayout,
     /// or rebuild. Called automatically at the start of layout().
     pub(super) fn process_state_changes(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        // Whether a command would be handled, for the menu rows that grey out
+        // from it, first: a row's enabled state is bound to it, and both the
+        // effective-enabled refresh and the binding flush below must see the
+        // new value in this pass.
+        self.flush_command_availability();
+
         // Refresh the node-resident `effective_enabled_signal`s FIRST, so a
         // widget bound to one is dirty-marked in time for the binding flush
         // immediately below to drain it in this same pass, rather than a frame

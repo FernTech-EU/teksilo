@@ -1347,12 +1347,19 @@ fn native_install_records_localized_snapshot() {
 
     let grid = Signal::new(true);
     let model = MenuModel::new()
-        // App menu with a localized Quit — must NOT be hardcoded English.
-        .standard_menu(StandardMenu::app().quit(lit!("Quitter")))
+        // App menu with localized labels: none may be hardcoded English.
+        // Declared after File, so the snapshot keeps it there and the macOS
+        // backend moves it first.
         .menu(lit!("&File"), |m| {
             m.item(MenuEntry::new(lit!("&New")).intent("app.new"))
                 .item(MenuEntry::new(lit!("Show &Grid")).checkable(grid.clone()))
-        });
+        })
+        .standard_menu(
+            StandardMenu::app()
+                .quit(lit!("Quitter"))
+                .hide_others(lit!("Masquer les autres"))
+                .show_all(lit!("Tout afficher")),
+        );
 
     let backend = MemoryNativeMenuBackend::new();
     let handle = NativeMenuHandle::new(backend.clone());
@@ -1373,21 +1380,33 @@ fn native_install_records_localized_snapshot() {
         .menu_for(TeksiloWindowId::new(1))
         .expect("native snapshot recorded for the window");
 
-    // App menu is first, with the localized Quit label (not "Quit"), and an
-    // unrouted Quit — this model set no quit intent, so the item stays on
-    // the platform's `terminate:` selector.
-    match &snap.roots[0] {
+    // The App menu keeps its declared place in the snapshot (the macOS
+    // backend puts it first), with the localized labels (not "Quit"), the
+    // defaults resolved, and a routed Quit: this model set no quit intent,
+    // so the row asks the application to quit.
+    assert_eq!(snap.roots.len(), 2, "the declared App menu, none injected");
+    match &snap.roots[1] {
         NativeMenuNode::Standard {
             role: StandardMenuRole::App,
             labels,
             quit_item,
-            ..
+            settings_item,
         } => {
             assert_eq!(labels.quit, "Quitter", "Quit label routes through i18n");
+            assert_eq!(labels.hide_others, "Masquer les autres");
+            assert_eq!(labels.show_all, "Tout afficher");
             assert_eq!(labels.about, "About", "default About label resolved");
-            assert!(quit_item.is_none(), "no quit intent declared, no routing");
+            assert_eq!(labels.services, "Services", "default Services label");
+            assert_eq!(labels.hide, "Hide", "default Hide label");
+            let quit = quit_item.as_ref().expect("Quit is always routed");
+            assert_eq!(
+                quit.key_equiv.as_ref().map(|k| (k.key.as_str(), k.command)),
+                Some(("q", true)),
+                "the conventional ⌘Q, no quit shortcut named"
+            );
+            assert!(settings_item.is_none(), "no settings intent, no row");
         }
-        other => panic!("expected leading App menu, got {other:?}"),
+        other => panic!("expected the declared App menu, got {other:?}"),
     }
 
     // File submenu: mnemonics stripped, checkable reflects the bound signal.
@@ -2219,4 +2238,140 @@ fn a_collapsed_bar_closed_by_escape_gives_the_editor_focus_back() {
     );
     b.key(Key::Escape, Modifiers::NONE);
     assert_eq!(b.t.focused(), Some(b.editor));
+}
+
+// ── A model row greys out when nothing on its route takes its intent ──
+
+/// Add File > Print (`app.print`, which nothing in the window takes) and
+/// File > Export (`app.print` with a closure) to the bar's model.
+fn add_print_rows(b: &mut Bar) {
+    use crate::menu::{MenuEntry, MenuNode};
+    b.model.modify(|nodes| {
+        if let Some(MenuNode::Submenu { children, .. }) = nodes.first_mut() {
+            children.push(MenuNode::Item(
+                MenuEntry::new(lit!("Print")).intent("app.print"),
+            ));
+            children.push(MenuNode::Item(
+                MenuEntry::new(lit!("Export"))
+                    .intent("app.print")
+                    .on_activate(|_| {}),
+            ));
+        }
+    });
+    b.settle();
+}
+
+fn row_enabled(b: &Bar, label: &str) -> bool {
+    let row = b.t.find_by_label(label).expect("the row is showing");
+    b.t.is_enabled(row)
+}
+
+#[test]
+fn a_model_row_greys_out_while_nothing_on_its_route_takes_its_intent() {
+    let mut b = Bar::new(false);
+    add_print_rows(&mut b);
+    b.click("File");
+    assert!(row_enabled(&b, "Save"), "the root takes app.save");
+    assert!(!row_enabled(&b, "Print"), "nothing takes app.print");
+    assert!(
+        row_enabled(&b, "Export"),
+        "a row with a closure stays enabled"
+    );
+}
+
+/// After F10 the menu gives focus back to its title, but its rows act on
+/// the editor focused before the bar: Edit > Copy, which only the editor
+/// takes, is enabled. It read the title's route, which misses the editor.
+#[test]
+fn after_f10_a_row_answers_for_the_editor_not_the_title() {
+    let mut b = Bar::new(false);
+    b.menubar_key(Key::F10, Modifiers::NONE);
+    b.key(Key::ArrowRight, Modifiers::NONE);
+    b.key(Key::ArrowDown, Modifiers::NONE);
+    assert!(
+        focus_is_in_menu_holding(&b.t, "Copy"),
+        "precondition: Edit is open from the keyboard"
+    );
+    assert!(row_enabled(&b, "Copy"));
+}
+
+/// An open menu's rows follow what their route takes while it is open: an
+/// application action disabled meanwhile greys its row out.
+#[test]
+fn an_open_menus_rows_follow_the_application_scope() {
+    #[derive(Debug)]
+    struct Prints(Signal<bool>);
+    impl Widget for Prints {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            ctx.register_action_global(
+                teksilo_core::Action::new("app.print")
+                    .enabled_when(self.0.clone())
+                    .on_invoke(|_, _| {}),
+            );
+            vec![]
+        }
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+    let can_print = Signal::new(true);
+    let mut application = WidgetTree::new();
+    application.add(Prints(can_print.clone()));
+    let scope = teksilo_core::ApplicationScope::new();
+    application.publish_application_scope(&scope);
+
+    let mut b = Bar::new(false);
+    b.t.set_application_scope(Some(scope));
+    add_print_rows(&mut b);
+    b.click("File");
+    assert!(row_enabled(&b, "Print"), "the application takes app.print");
+    can_print.set(false);
+    b.settle();
+    assert!(
+        !row_enabled(&b, "Print"),
+        "and stops while the menu is open"
+    );
+}
+
+/// A two-way check or radio row with an intent nobody takes stays enabled:
+/// choosing it writes its state, which is something to do, as in the native
+/// bar, where that write is the row's action. A reflect-only row writes
+/// nothing, so it greys out like a plain one.
+#[test]
+fn a_two_way_check_or_radio_row_never_greys_out() {
+    use crate::menu::{MenuEntry, MenuNode};
+    let mut b = Bar::new(false);
+    let grid = Signal::new(false);
+    let density = Signal::new(0usize);
+    b.model.modify(|nodes| {
+        if let Some(MenuNode::Submenu { children, .. }) = nodes.first_mut() {
+            children.push(MenuNode::Item(
+                MenuEntry::new(lit!("Grid"))
+                    .checkable(grid.clone())
+                    .intent("app.print"),
+            ));
+            children.push(MenuNode::Item(
+                MenuEntry::new(lit!("Dense"))
+                    .radio(1, density.clone())
+                    .intent("app.print"),
+            ));
+            children.push(MenuNode::Item(
+                MenuEntry::new(lit!("Ruler"))
+                    .checked(grid.clone())
+                    .intent("app.print"),
+            ));
+        }
+    });
+    b.settle();
+    b.click("File");
+    assert!(row_enabled(&b, "Grid"), "a two-way check row");
+    assert!(row_enabled(&b, "Dense"), "a two-way radio row");
+    assert!(
+        !row_enabled(&b, "Ruler"),
+        "a reflect-only row writes nothing"
+    );
 }
