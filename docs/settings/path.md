@@ -20,6 +20,8 @@ OS-correct path resolution for application config and data directories.
 | `&Path` | [`data_dir()`](#apppaths-data_dir) |
 | `PathBuf` | [`config_file(name: &str)`](#apppaths-config_file) |
 | `PathBuf` | [`data_file(name: &str)`](#apppaths-data_file) |
+| `Option<&Path>` | [`runtime_dir()`](#apppaths-runtime_dir) |
+| `io::Result<Option<&Path>>` | [`create_runtime_dir()`](#apppaths-create_runtime_dir) |
 
 ## Detailed description
 
@@ -38,6 +40,10 @@ settings files live. In production, `AppPaths::new` asks the OS, through
 `<qualifier>.<organization in lower case>.<Application>`, spaces made
 hyphens in both: `AppPaths::new("eu", "FernTech", "Skribisto")` gives
 `~/.config/skribisto` and `~/Library/Application Support/eu.ferntech.Skribisto`.
+
+For sockets and lock files, `AppPaths::runtime_dir` gives a short,
+per-user directory emptied at logout or restart, `$XDG_RUNTIME_DIR/<app>`
+on Linux; its documentation says where it is on each platform.
 
 #### The move to Application Support on macOS
 
@@ -82,7 +88,8 @@ assert_eq!(paths.config_file("settings"), tmp.path().join("settings.toml"));
 
 **Import:** `use teksilo::prelude::AppPaths;` — in `teksilo::prelude::*`.
 
-Resolved OS-correct application directories (config and data).
+Resolved OS-correct application directories (config, data, and the
+runtime directory for sockets and locks).
 
 Construct with `AppPaths::new` for production code, or
 `AppPaths::for_testing` in tests and headless CI environments.
@@ -119,7 +126,7 @@ with an in-process directory.
 
 Construct an `AppPaths` rooted at an arbitrary directory. Used by
 tests so that no test ever touches the user's real config tree.
-Both `config_dir` and `data_dir` resolve to `root`.
+`config_dir`, `data_dir` and `runtime_dir` all resolve to `root`.
 
 <a id="apppaths-from_dirs"></a>
 
@@ -127,6 +134,7 @@ Both `config_dir` and `data_dir` resolve to `root`.
 
 Construct from explicit config and data directories. Useful when
 an application wants to override one or both (e.g. portable mode).
+It has no `runtime_dir`.
 
 <a id="apppaths-config_dir"></a>
 
@@ -154,3 +162,43 @@ Resolve a per-concern config file by name (without extension).
 #### `pub fn data_file(&self, name: &str) -> PathBuf`
 
 Resolve a per-concern data file by name (without extension).
+
+<a id="apppaths-runtime_dir"></a>
+
+#### `pub fn runtime_dir(&self) -> Option<&Path>`
+
+A short, per-user directory for the application's sockets and lock
+files, what `$XDG_RUNTIME_DIR` is on Linux. `None` where the platform
+gives none: on Windows, where a named pipe needs no directory, and on
+a Unix without `$XDG_RUNTIME_DIR`. It is not created here:
+`create_runtime_dir` does that, private to
+the user.
+
+| Platform | Runtime directory |
+|---|---|
+| Linux and other Unix | `$XDG_RUNTIME_DIR/<app>`, usually `/run/user/<uid>/<app>` |
+| macOS | `<per-user temporary directory>/<bundle id>`, the directory under `/var/folders/` |
+| Windows | none |
+
+Short, because a Unix socket's path has to be: macOS takes 104 bytes
+of it with the closing NUL, Linux 108, and `bind` fails beyond that.
+The macOS per-user temporary directory is about 49 bytes, while the
+data directory under Application Support is over 80 before the user's
+name is counted. On macOS it is read from the system
+(`confstr(_CS_DARWIN_USER_TEMP_DIR)`), not from `$TMPDIR`, which a
+shell can point at the shared `/tmp`.
+
+What is left there goes when the user logs out or the machine
+restarts, and the system may clean up what sits unused for days, so
+make a socket or a lock afresh at each start.
+
+<a id="apppaths-create_runtime_dir"></a>
+
+#### `pub fn create_runtime_dir(&self) -> io::Result<Option<&Path>>`
+
+Create `runtime_dir` if it does not exist, private
+to the user, and return it; `Ok(None)` where there is none. On Unix it
+is made `0700`, and one that exists already is taken only when it is a
+directory, not a symbolic link, that the user owns; it is made `0700`
+if it is not. The directory it goes in must exist, as
+`$XDG_RUNTIME_DIR` and the macOS per-user temporary directory do.

@@ -56,4 +56,24 @@ fn the_old_directories_move_to_application_support_once() {
         "a = 1\n"
     );
     assert!(old_config.join("general.toml").exists());
+
+    // The runtime directory is the per-user temporary one's, short enough
+    // for a socket path (104 bytes with the NUL), made private to the user.
+    let runtime = again.runtime_dir().unwrap();
+    assert!(runtime.ends_with("eu.ferntech.Test-App"));
+    assert!(
+        runtime.starts_with("/var/folders") || runtime.starts_with("/private/var/folders"),
+        "{} is under /var/folders",
+        runtime.display()
+    );
+    assert!(
+        runtime.as_os_str().len() < 80,
+        "{} is short",
+        runtime.display()
+    );
+    assert_eq!(again.create_runtime_dir().unwrap(), Some(runtime));
+    let mode =
+        std::os::unix::fs::PermissionsExt::mode(&fs::metadata(runtime).unwrap().permissions());
+    assert_eq!(mode & 0o777, 0o700);
+    fs::remove_dir(runtime).unwrap();
 }

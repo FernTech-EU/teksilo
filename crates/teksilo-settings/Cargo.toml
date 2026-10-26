@@ -26,6 +26,12 @@ thiserror = { workspace = true }
 fs2 = { workspace = true }
 notify = { workspace = true }
 
+# `AppPaths::create_runtime_dir` checks the directory's owner against
+# `geteuid`, and on macOS `runtime_dir` reads the per-user temporary
+# directory with `confstr`. Already in the tree.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 serde = { workspace = true }
 

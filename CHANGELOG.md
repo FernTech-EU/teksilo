@@ -23,6 +23,17 @@ by crate for clarity, not because crates version independently.
   build can overflow it while building its first window. The app guide's
   *Adding Teksilo* has the same snippet.
 
+#### Settings
+
+- **`AppPaths::runtime_dir()` and `AppPaths::create_runtime_dir()`: a short,
+  per-user directory for an application's sockets and lock files.** It is
+  `$XDG_RUNTIME_DIR/<app>` on Linux and the macOS per-user temporary
+  directory (under `/var/folders/`) with the bundle id on macOS; Windows has
+  none. A Unix socket's path holds 104 bytes on macOS, which the data
+  directory under Application Support can leave too little of.
+  `create_runtime_dir` makes it private to the user and refuses a symbolic
+  link, a file, or a directory another user owns.
+
 ### Changed
 
 #### Settings

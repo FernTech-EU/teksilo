@@ -12132,6 +12132,7 @@ version = "0.21.0"
 dependencies = [
  "etcetera",
  "fs2",
+ "libc",
  "notify",
  "serde",
  "teksilo-core",
