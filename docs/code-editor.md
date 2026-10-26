@@ -212,7 +212,10 @@ having any content (Paste aside: the clipboard it reads is not visible from here
 so it offers Cut with no selection. The toolbar **omits** what
 it cannot offer, which is what every platform's touch toolbar does, and it is the
 stricter of the two on state: Cut and Copy need a selection, Paste needs an
-editable surface, and Select All is offered only while nothing is selected. So a
+editable surface, and Select All is offered only while nothing is selected.
+The Edit rows of the application menu and of a window's `MenuBar` grey by the
+editor's own rules too (Copy, Cut and Select All need text, Undo and Redo
+history, Paste an editable surface); the keyboard is unaffected. So a
 hold on an editable surface puts up Cut / Copy / Paste, and a hold on a read-only
 one, a viewer, a `LogView`, puts up Copy alone. A tap on a read-only surface
 raises **no** handle at all: the caret handle is the one that moves a caret, and

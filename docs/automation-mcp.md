@@ -577,8 +577,8 @@ with `inject_key { "key": "escape" }` or by clicking elsewhere.
 ### Multi-window routing
 
 Every tool accepts an optional `window_id` (the `TeksiloWindowId` raw value
-from `list_windows`). `window_id: None` resolves to the focused window, else
-the primary. Headless is single-tree, so routing is always unambiguous there.
+from `list_windows`). `window_id: None` resolves to the window opened or
+focused last, else the primary. Headless is single-tree, so routing is always unambiguous there.
 
 ## The settle model
 

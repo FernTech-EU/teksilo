@@ -96,13 +96,3 @@ Build a surface for a single live toast entry. Called by `ToastHost`
 once per live registry entry during each rebuild pass. `leading_widget` is `Some` for
 `Toast::loading` (a spinner) and `None` for severity-glyph entries (a `SeverityBadge`
 is synthesised in `build`). `closable_on_escape` mirrors the matching `Toast` field.
-
-<a id="_default_dismiss"></a>
-
-## `pub fn _default_dismiss(...)`  *(hidden)*
-
-Convert milliseconds to a Duration — used for default tests.
-
-```rust
-pub fn _default_dismiss() -> std::time::Duration;
-```

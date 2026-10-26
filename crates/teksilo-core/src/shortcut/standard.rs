@@ -15,8 +15,9 @@
 //! - an application handles a command where no editor has focus by
 //!   registering an `Action` for the same id higher up (on its root, or with
 //!   `register_action_global`);
-//! - when no `Action` handles the intent, the key reaches the focused widget
-//!   as a plain `KeyDown`, exactly as it would with no shortcut bound.
+//! - when no `Action` handles the intent (in the window, or in the
+//!   application tree it goes on to), the key reaches the focused widget as a
+//!   plain `KeyDown`, exactly as it would with no shortcut bound.
 //!
 //! An application that used to bind Ctrl+C to a shortcut of its own should
 //! handle `edit.copy` instead: two shortcuts on one chord conflict.

@@ -1043,7 +1043,7 @@ Via `EventContext`, any handler can:
 
 - `ctx.set_theme(theme)`, swap the app theme in every window; the trees are dirty-marked for relayout and repaint, not rebuilt, so focus and scroll offsets survive.
 - `ctx.set_locale(id)`, switch i18n locale; dirty-marks locale-bound signals.
-- `ctx.close_window()`, request the owning window close.
+- `ctx.close_window()`, request the owning window close, through its close guard (which may refuse or answer later); a window a modal dialog blocks brings the dialog forward and closes nothing. `ctx.quit()` asks the whole application to quit, `ctx.quit_forced()` asks no guard; see [multi-window.md](multi-window.md).
 - `ctx.request_focus(widget_id)`, programmatic focus transfer (overlay content on open, first error field on submit). A target on a page the same handler is showing is focused once the next layout has woken it (§6).
 - `ctx.clear_focus()`, drop keyboard focus so that nothing is focused (§6).
 - `ctx.dismiss_all_overlays()`, useful after menu item activation.

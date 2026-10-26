@@ -98,9 +98,10 @@ cargo teksilo show docs/guide-index.md       # task -> the guide that covers it
 **Never conclude from silence that Teksilo lacks something.** Before adding a
 dependency or writing infrastructure yourself (an async runtime, a background
 thread, persistence, file dialogs, the clipboard, notifications, menus, a
-terminal, a web view), run `cargo teksilo search "<what you need>"`. Several
-subsystems are off by default and invisible until you look; the table below
-names them.
+"save changes?" prompt on close or quit, handling `SIGTERM` or the session
+ending, a terminal, a web view), run `cargo teksilo search "<what you need>"`.
+Several subsystems are off by default and invisible until you look; the table
+below names them.
 
 ## Optional subsystems
 

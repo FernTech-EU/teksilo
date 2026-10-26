@@ -33,7 +33,8 @@ its feature table and catalog section cover the same ground less completely.
 **Never conclude from silence that Teksilo lacks something.** Before adding a
 dependency or writing infrastructure yourself (an async runtime, a background
 thread, persistence, file dialogs, the clipboard, notifications, menus, a
-terminal, a web view), run `cargo teksilo search "<what you need>"`. Several
+"save changes?" prompt on close or quit, handling `SIGTERM` or the session
+ending, a terminal, a web view), run `cargo teksilo search "<what you need>"`. Several
 subsystems are off by default and invisible until you look: the async executor
 and its Tokio / async-std adapters (`teksilo-tokio`, `teksilo-async-std`),
 `web-view`, `terminal`, the automation bridge, the Material 3 / Fluent / macOS / KDE

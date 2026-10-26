@@ -362,6 +362,8 @@ its shortcuts with `ctx.register_shortcut_global(..)`; its handlers run with
 button's `send_intent`, a shortcut only the application handles) goes on to the
 application tree, so register an app-wide command (New, Quit, Settings) there once,
 not in every window. An intent a dialog leaves goes to the window it blocks first.
+`intent.origin_window()` tells the application tree's action which window a command
+came from (the one a menu row or a shortcut was used in).
 
 **The application menu.** Build one `MenuModel` once, keep it in a field of the
 application root, and declare it from `build()`:
@@ -406,6 +408,11 @@ impl Widget for AppRoot {
   command would reach, the focused text widget when it takes the command. A field with
   nothing selected greys Copy even when the page has its own Copy, and a read-only
   field leaves Cut to the page.
+- An action of your own says the same: `Action::new("doc.copy").available_when(|| ..)`
+  answers whether it has anything to act on now (cheap, run on every query, never by
+  dispatch), and `.passes_on_when(|| ..)` whether its `on_invoke_with_response` handler
+  would pass the intent on. A toolbar button or any other control greys itself from the
+  same answer: `IconButton::new(icon).enabled(ctx.command_available("doc.copy"))`.
 
 **Controls that leave focus alone.** `.focus_on_click(false)` on any widget lets a
 click activate it without taking keyboard focus; Tab, focus requests and assistive
@@ -455,7 +462,10 @@ owner.
   quit overrules one already waiting, an answer a guard already gave stands (a guard
   that agreed is not asked again); a guard whose answer is pending is asked again with
   the new source, so it can save without asking. A box a guard queues as its window
-  closes answers Cancel.
+  closes answers Cancel. An app that handles `SIGTERM` / `SIGHUP` itself turns this off
+  with `TeksiloAppBuilder::handle_termination_signals(false)`. A `taskkill` that reaches
+  the app's hidden window while windows are open asks the guards, as the Dock's Quit
+  does (`QuitSource::UserQuit`).
 - A window's guard is `WindowConfig::on_close_requested(|ctx| -> CloseResponse)`. The
   application's is `TeksiloAppBuilder::on_quit_requested(|ctx| -> CloseResponse)`, asked
   before any window (downloads running, a sync not done).
@@ -499,7 +509,9 @@ owner.
   final veto.
 - Every way out (a quit, a termination signal, a session end, the end of the event
   loop) writes the settings files the app opened itself, and with a `SettingsBundle`
-  its settings store and window state too.
+  its settings store and window state too. A program using the settings crates without
+  `teksilo-app` (a CLI, a test) calls `teksilo_settings::flush_every_writer()` before
+  it ends.
 - On macOS `run()` may not return: after a quit AppKit carries out (the Dock's Quit, a
   logout), the process ends right after the event loop's end. Put shutdown work in a
   guard, in `on_quit_requested`, or in the `Drop` of an `app_state` service, never after
@@ -1197,6 +1209,13 @@ and assert on the child's bounds, which are its own size.
 Test helpers (not in the prelude): `WidgetTree` and `LayoutContext::for_testing(&theme)`
 live under `teksilo::core`; `MockTextBackend::new()` (fixed 8px char width) lives under
 `teksilo::canvas`.
+
+**Testing the application tree.** `TeksiloAppBuilder::build_headless()` gives a
+`HeadlessApp` whose `tree` is the window and whose `app_tree` is the application tree, when
+the builder has an `app_root`. Intents do not cross between them by themselves: after a
+dispatch, call `app.route_unclaimed_intents()`, which offers what each tree left to the
+other as a running application does, and returns the names nobody took. That is how a test
+sees a menu row or a shortcut reach an application-wide action.
 
 ### Agent / CI automation (MCP)
 

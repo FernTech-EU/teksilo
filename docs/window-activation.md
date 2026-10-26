@@ -35,7 +35,9 @@ no app-wide fan-out, unlike theme or text-scale).
 
 It starts `true`, a window must not be born inactive before its first focus
 event arrives. A flip triggers a **repaint only** (never a relayout): geometry is
-unchanged, so the caret keeps its space and nothing reflows.
+unchanged, so the caret keeps its space and nothing reflows. Deactivation also
+pauses looping animations, cancels the window's live pointers (a drag in
+progress unwinds through `on_pointer_cancel`) and retires transient tooltips.
 
 ## Automatic behaviour (no opt-in)
 

@@ -104,7 +104,9 @@ policy applied. What that comes to here:
 
 * A **right-click** opens a menu of Copy and Select All. Cut and Paste are absent
   because the surface's own `Ctrl+X` and `Ctrl+V` are refused by the same filter
-  the menu asks. Before this there was no menu at all, so `Ctrl+C` was the only
+  the menu asks. In the application menu and a window's `MenuBar`, the Edit
+  rows follow the same rule: Copy and Select All are enabled while the log has
+  text, the others grey. Before this there was no menu at all, so `Ctrl+C` was the only
   way to get a line out of a log, and on a touch device there is no `Ctrl`.
 * A **hold** selects the word under the finger, raises the two selection handles
   that adjust the range, and puts up a toolbar of **Copy**, Select All is offered

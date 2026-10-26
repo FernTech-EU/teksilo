@@ -859,7 +859,9 @@ A KeyDown event flows through three stages, in this order:
    does an event for which no candidate applies (every match is a
    `Scoped` binding outside the focused subtree). The application
    tree's answer is what it registered when it last ran; an action there
-   that returns `Propagated` when it runs still uses the key.
+   that returns `Propagated` when it runs still uses the key. The action
+   learns which window the key was pressed in from
+   `intent.origin_window()`.
 2. **Ancestor key preview.** If no shortcut matched, the framework
    walks the focused widget's strict ancestors root → parent-of-target,
    firing `on_key_preview` on each. Returning `EventResponse::Handled`
@@ -1019,7 +1021,7 @@ One case still needs the application to ask which widget holds the caret:
 
 Every text widget calls
 [`BuildContext::register_text_surface`](../crates/teksilo-core/src/build_context.rs),
-so the tree answers both completely:
+so the tree answers it completely:
 
 ```rust
 // Once, during build, the handle shares the tree's focus signal, so it

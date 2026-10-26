@@ -59,7 +59,10 @@
 //! let _bar = MenuBar::application();
 //! ```
 //!
-//! A bar built by hand, with no model:
+//! A bar built by hand, with no model. Its rows send with
+//! `send_intent_from_focus`, from the widget the menu was opened over (the
+//! editor), as a model's rows do; `send_intent` would start at the menu bar,
+//! where Edit ▸ Cut reaches no editor:
 //!
 //! ```rust
 //! # use teksilo_widgets::{MenuBar, MenuList, MenuItem};
@@ -68,13 +71,13 @@
 //! let _w = MenuBar::new()
 //!     .menu(lit!("File"), || Box::new(
 //!         MenuList::new()
-//!             .item(MenuItem::new(lit!("New")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.new"))))
+//!             .item(MenuItem::new(lit!("New")).on_activate_fn(|ctx| ctx.send_intent_from_focus(Intent::new("app.new"))))
 //!             .separator()
-//!             .item(MenuItem::new(lit!("Quit")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.quit"))))
+//!             .item(MenuItem::new(lit!("Quit")).on_activate_fn(|ctx| ctx.send_intent_from_focus(Intent::new("app.quit"))))
 //!     ))
 //!     .menu(lit!("Edit"), || Box::new(
 //!         MenuList::new()
-//!             .item(MenuItem::new(lit!("Cut")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.cut"))))
+//!             .item(MenuItem::new(lit!("Cut")).on_activate_fn(|ctx| ctx.send_intent_from_focus(Intent::new("edit.cut"))))
 //!     ));
 //! ```
 

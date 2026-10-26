@@ -28,10 +28,12 @@
 //!
 //! When the user picks a native menu item, the backend posts a
 //! [`NativeMenuEventPayload`] through [`teksilo_core::AppEventPoster::post_external`].
-//! `teksilo-app` picks it up in its `AppEvent::External` arm, looks the
-//! [`MenuItemId`] up in the [`NativeMenuHandle`], and fires the item's intent /
-//! action inside the originating window's `EventContext` — the same
-//! `Action`/`Intent` pipeline an in-window `MenuItem` uses.
+//! `teksilo-app` picks it up in its `AppEvent::External` arm and looks the
+//! [`MenuItemId`] up in the [`NativeMenuHandle`]. It runs the item's action
+//! in the window whose menu it is (in the application tree for an item of the
+//! application menu), and sends the item's intent from the focused widget of
+//! the window with the OS focus, as the item's shortcut would be; see
+//! `teksilo-app`'s `native_menu_route`.
 //!
 //! # The application menu and the windows' menus
 //!
@@ -299,8 +301,9 @@ impl std::fmt::Debug for NativeMenuActivation {
 // ============================================================
 
 /// Boxed inside `AppEvent::External` when the user picks a native menu item.
-/// `teksilo-app` downcasts to this and routes the [`MenuItemId`] back to the
-/// originating window's tree.
+/// `teksilo-app` downcasts to this, runs the item's action in the window whose
+/// menu it is, and sends its intent from the window with the OS focus (see
+/// the [module](self) doc).
 #[derive(Debug, Clone)]
 pub struct NativeMenuEventPayload {
     /// The window whose menu was active when the item was chosen.

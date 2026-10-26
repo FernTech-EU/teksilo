@@ -273,3 +273,15 @@ rule from the other end: only the inline axis resolves through a direction.
 
 Helpers: `InlineDirection::{side, to_swipe, from_swipe}`,
 `SelectionHandleKind::{inline, side}`, `inline_edge_band`, `inline_band_at`.
+
+## 8. Commands and focus
+
+An intent sent from an overlay's content walks on from the widget the
+overlay is attached to (its anchor): a context menu's row reaches the
+right-clicked widget's actions, as a popover's button reaches the page's.
+Keys and scoped shortcuts do not cross: a key pressed in a popover stays in
+the popover. A menu row sends its command from the widget the menu was
+opened over (`ctx.send_intent_from_focus`), once the menu has given focus
+back, so Edit, Copy copies in the focused field. When overlays close, focus
+goes back to where the lowest of them found it. See
+[shortcut-intent-action.md](shortcut-intent-action.md), "Dispatch walk".

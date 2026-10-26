@@ -107,7 +107,7 @@ underline 'S' when Alt is held; `&&` → literal `&`). The enclosing
 # use teksilo_i18n::lit;
 # use teksilo_core::Intent;
 let _w = MenuItem::new(lit!("&Save"))
-    .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.save")));
+    .on_activate_fn(|ctx| ctx.send_intent_from_focus(Intent::new("app.save")));
 ```
 
 ## Density

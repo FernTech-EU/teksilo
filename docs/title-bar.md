@@ -191,7 +191,7 @@ This is also why per-button publishing from `ControlButton::paint` would be wron
 
 The close button on `WindowControls` has two paths:
 
-1. **Default**, the button's `on_tap` calls [`EventContext::close_window`](../crates/teksilo-core/src/widget.rs), which queues a `WindowCommand::Close` on the window's `WindowState`. The app drains the queue on the next event-loop tick (winit 0.30 has no synchronous `Window::request_close`, so we hop through the command queue).
+1. **Default**, the button's `on_tap` calls [`EventContext::close_window`](../crates/teksilo-core/src/widget/event_context.rs), the guarded close: the window's close guard runs first and may refuse or answer later with a `CloseDecision`, and a window a modal dialog blocks brings the dialog forward and closes nothing (see [multi-window.md](multi-window.md), "Intercepting close / quit"). The app carries the request out after the handler returns.
 2. **Override**, `TitleBar::close_action(|ctx| …)` replaces the default `on_tap` entirely. Useful when the app wants to confirm unsaved work first, or to send an `Intent` for a root-level `Action`:
 
 ```rust
@@ -211,7 +211,8 @@ The override fires on **every** backend including Windows: when the OS reports `
 ```rust
 let is_maximized_signal = ctx
     .window()
-    .map(|w| w.placement().map(|p| p.is_maximized()))
+    // Fullscreen offers Restore too.
+    .map(|w| w.placement().map(|p| p.is_maximized() || p.is_fullscreen()))
     .unwrap_or_else(|| Signal::new(false));
 ```
 
@@ -244,7 +245,7 @@ user clicks maximize ─► ControlButton on_tap fires:
 
 OS-initiated maximizes (macOS green-light zoom, Windows drag-to-top snap, Wayland `xdg_toplevel.state` changes) all flow through the same `WindowEvent::Resized` arm, so the placement signal is always consistent with the OS. Applications can subscribe to drive their own iconography from the same signal.
 
-> **macOS caveat.** `NSWindow.isZoomed` tracks traffic-light zoom only. Native fullscreen (green light + Option, or `-[NSWindow toggleFullScreen:]`) puts the window on its own Space and leaves `isZoomed` false. The title bar isn't visible during fullscreen anyway, so we don't track that state.
+> **macOS caveat.** `NSWindow.isZoomed` tracks traffic-light zoom only. Native fullscreen (green light + Option, or `-[NSWindow toggleFullScreen:]`) puts the window on its own Space and leaves `isZoomed` false; it reads as `WindowPlacement::Fullscreen`, which the maximize button treats as maximized (it offers Restore).
 
 > **Glyph fallback.** Both Switcher children currently use `□` (U+25A1, Geometric Shapes). The semantically nicer "two stacked squares" glyphs (`❐` U+2750 Dingbats, `⧉` U+29C9 Math Symbols, `🗗` U+1F5D7 Symbols and Pictographs) and even neighbouring Geometric Shapes glyphs like `▭` U+25AD all render as missing on Windows because text-typeset's font fallback chain only reliably hits `□` from Segoe UI's basic geometric coverage (same root cause as the close button using U+00D7 instead of U+2715). State is still distinguished by the OS window itself, the action toggling correctly via `WindowState::placement`, and the reactive a11y name (`Maximize` / `Restore` via `tr_widget!`). A future pass can swap to custom rect-primitive icons to restore the visual delta.
 
@@ -252,7 +253,7 @@ OS-initiated maximizes (macOS green-light zoom, Windows drag-to-top snap, Waylan
 
 ## `WindowFrame`: edge resize for borderless windows
 
-On Wayland and (eventually) Windows, a borderless window has no OS-drawn frame, so nothing catches clicks at the 1-pixel edge for a resize. [`WindowFrame`](../crates/teksilo-widgets/src/title_bar/window_frame.rs) solves that with an invisible overlay of resize strips along the four edges and four corners.
+On Wayland and X11 (with custom chrome), a borderless window has no OS-drawn frame, so nothing catches clicks at the 1-pixel edge for a resize. [`WindowFrame`](../crates/teksilo-widgets/src/title_bar/window_frame.rs) solves that with an invisible overlay of resize strips along the four edges and four corners.
 
 ```rust
 match tree.title_bar_host() {

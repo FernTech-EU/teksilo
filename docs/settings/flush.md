@@ -15,6 +15,7 @@ Debounced, **cross-process-safe** atomic file writer.
 | `type` | [`LandedStamp`](#landedstamp) — The `(mtime, len)` stamp `disk_stamp` computes for a settings file — named so every `Arc<Mutex<...>>` wrapping it (here and in `WindowStateService`) reads as… |
 | `type` | [`WriteLandedSink`](#writelandedsink) — Invoked on the shared worker thread the instant a `DebouncedWriter`'s queued patches land successfully, with the fresh on-disk `(mtime, len)` stamp (one extra… |
 | `struct` | [`DebouncedWriter`](#debouncedwriter) — Atomic, debounced single-file writer |
+| `fn` | [`flush_every_writer`](#flush_every_writer) — Force the queued patches of every writer in the process to disk synchronously, whoever owns it: for a process about to end without dropping its writers (a… |
 
 ## Public functions
 
@@ -268,3 +269,27 @@ The destination path this writer flushes to.
 The debounce window configured at construction; `Duration::ZERO`
 means every scheduled payload is written on the worker's next
 iteration (useful in tests).
+
+<a id="flush_every_writer"></a>
+
+## `pub fn flush_every_writer(...)`
+
+**Import:** `use teksilo::settings::flush_every_writer;`
+
+Force the queued patches of every writer in the process to disk
+synchronously, whoever owns it: for a process about to end without
+dropping its writers (a `SettingsFile`, `PersistedListModel`, `MruList`
+or `SettingsStore` the application opened itself). Every writer is
+tried; the first error is returned and the others are logged. A process
+that never opened a writer has nothing to write, and no writer thread is
+started for it.
+
+`OpenedSettings::flush_all` calls it
+after the bundle's own services; `teksilo-app` calls it on every way out
+of an application that has no bundle. A program that opens writers
+without `teksilo-app` (a command-line tool, a test) calls it before it
+ends.
+
+```rust
+pub fn flush_every_writer() -> Result<(), FlushError>;
+```

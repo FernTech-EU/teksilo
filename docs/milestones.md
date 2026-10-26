@@ -3,7 +3,7 @@
 
 # Roadmap
 
-Updated 6 October 2026.
+Updated 26 October 2026.
 
 ## Toward V1
 
@@ -24,20 +24,20 @@ reproduction, Teksilo version, platform, and expected behavior where possible.
 
 ## Delivered
 
-These groups summarize the Git history by theme through 6 October 2026.
+These groups summarize the Git history by theme through 26 October 2026.
 Periods overlap because the areas developed together; improvements continue
 in each area. All dates below are in 2026.
 
 | Theme | Main achievements | Period |
 | --- | --- | --- |
 | Framework foundations | Retained widget tree, reactive state, layout, GPU rendering, focus, events, scrolling, and animation. Later work improved API consistency and GPU/backend fallbacks. | March to April; refinements through September |
-| Desktop widgets and application integration | Controls, menus, dialogs, tabs, pickers, actions and shortcuts, multiple windows, settings, async execution, native desktop integration, and OS drag-and-drop. | April to July |
+| Desktop widgets and application integration | Controls, menus, dialogs, tabs, pickers, actions and shortcuts, multiple windows, settings, async execution, native desktop integration, and OS drag-and-drop. Rebindable edit and editor shortcuts, and keyboard cursors and scroll handles for the data views, in 0.17.0. An application lifecycle for the next release: an application tree and one application menu (the macOS menu bar), one guarded quit for every source (a Quit row, the Dock, a logout, the end of a Windows session, `SIGTERM`), close guards that can answer later, toolbars and menus that leave the editor its focus, dialogs that follow their window, and tray-style applications that stay alive with no window. | April to July; October for shortcuts, data views and the application lifecycle |
 | Rich text and internationalization | Rich-text editing, clipboard interchange, IME integration, bidirectional caret movement, search, inline images, translation checks, reactive language changes, and locale-aware formatting. | April to August |
-| Styling and themes | Reactive themes, semantic colors, configurable paint recipes, and widget style protocols. Material 3, Fluent, macOS, and KDE Plasma presets alongside Int UI, and a Native mode that follows the live desktop. | April to October |
+| Styling and themes | Reactive themes, semantic colors, configurable paint recipes, and widget style protocols. Material 3, Fluent, macOS, and KDE Plasma (Breeze, 0.20.0) presets alongside Int UI, and a Native mode that follows the live desktop and updates as it changes. | April to October |
 | Data views, docking, and graphics | Virtualized data views, keyed selection, pluggable sources, editable tables, docking, charts, and a scene canvas with selection, snapping, transforms, and ink. Specialized surfaces include code editing, terminal, and log viewing. | April to July; scene extensions in September |
-| Developer tooling and automation | Widget previewer, runtime inspector, DSL formatter and language server, screenshots, cross-platform MCP automation, and cargo teksilo. Documentation and onboarding consolidated in September and October. | April to October |
+| Developer tooling and automation | Widget previewer, runtime inspector, DSL formatter and language server, screenshots, cross-platform MCP automation, and cargo teksilo, whose API lookups list fields, variant payloads, macros and import paths (0.17.0) and whose `update` refreshes an app's installed tooling (0.20.0). Documentation and onboarding consolidated in September and October. | April to October |
 | Accessibility and input | Keyboard navigation, focus scopes, contrast checks, accessible text and actions, and screen-reader corrections. Unified touch, pen, and trackpad support shipped in 0.10.0; physical hardware validation remains pending. | Foundations in April; major extensions June to September |
-| Off-thread content and live pictures | `LiveImage` for pictures another thread rewrites at display rate (VM screens, video, camera previews), uploading only what changed and freeing textures at the first frame without them. `RepaintTrigger` for off-thread content a single widget shows, with the terminal on it. Hidden windows draw nothing. Automation aims at and reads back a picture's pixels. | September to October |
+| Off-thread content and live pictures | `LiveImage` for pictures another thread rewrites at display rate (VM screens, video, camera previews), uploading only what changed and freeing textures at the first frame without them. `RepaintTrigger` for off-thread content a single widget shows, with the terminal on it. Hidden windows draw nothing. Automation aims at and reads back a picture's pixels. The Servo web engine renders pages into a live picture inside the window, with input, dialogs and accessibility (0.19.0). | September to October |
 
 Teksilo began on 31 March as FernUI, became Bastyde in May, and adopted the
 Teksilo name on 8 August. See [status and limitations](status-and-limitations.md)
@@ -45,8 +45,8 @@ for current restrictions, including the prototype web view and verification gaps
 
 ## Release history
 
-As of 2 October 2026, the latest tagged release is **0.14.2**, dated
-28 September. See the
+As of 26 October 2026, the latest tagged release is **0.20.0**, dated
+19 October: ten releases since 2 October (0.14.3 to 0.20.0). See the
 [changelog](https://github.com/ferntech-eu/teksilo/blob/main/CHANGELOG.md)
 for individual versions and detailed changes. The
 [Git history](https://github.com/ferntech-eu/teksilo/commits/main/)

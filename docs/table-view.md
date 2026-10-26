@@ -642,7 +642,9 @@ let table = TableView::from_source(proxy)
 
 let column = Column::new("amount", lit!("Amount"), move |row, ctx| {
     if ctx.is_editing {
-        // Swap in your editor while editing_cell_signal matches.
+        // Swap in your editor while editing_cell_signal matches. Write the
+        // value back in `on_commit_fn`: it runs when the editor loses focus
+        // and before a command from a toolbar button, which takes no focus.
         Box::new(TextInputField::new(state_for(row.id)))
     } else {
         Box::new(TextWidget::new(lit!(format!("{}", row.amount))))

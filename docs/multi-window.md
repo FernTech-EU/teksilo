@@ -462,6 +462,20 @@ impl WindowState {
 }
 ```
 
+What the geometry signals hold:
+
+- `position` is the frame's top-left corner on every platform (what
+  `WindowConfig::position` sets and what the saved geometry records).
+  A window opened with no position holds the one the window system
+  gave it from the start, so a never-moved window saves where it is.
+- A minimised window keeps the size and position it had when shown
+  (Windows reports a minimise as a move to (-32000, -32000) and a size
+  of zero, which the state does not take), so a window minimised at
+  quit comes back where it was.
+- `ctx.focus_window(id)` (and `WindowState::focus`) brings a minimised
+  window back first, then raises it; on macOS it also activates the
+  application.
+
 ### Binding widgets to window state
 
 At `build()` time, pick up the state from `ctx.window()` and build
@@ -726,15 +740,14 @@ built into a fresh tree). Use it when you already have a
 `ModalRequest` in hand:
 
 ```rust
-ctx.open_modal(ModalRequest {
-    content: ModalContent::Deferred(Box::new(|tree| tree.add(ConfirmQuit::new()))),
-    presentation: ModalPresentation::NativeWindow,
-    close_behavior: ModalCloseBehavior::EscapeOrClickOutside,
-    title: Some("Confirm quit".into()),
-    size: Some((420, 180)),
-    focus_target: Some(ok_button_id),
-    on_dismiss: None,
-});
+ctx.open_modal(
+    ModalRequest::deferred(|tree| tree.add(ConfirmQuit::new()))
+        .presentation(ModalPresentation::NativeWindow)
+        .close_behavior(ModalCloseBehavior::EscapeOrClickOutside)
+        .title("Confirm quit")
+        .size(420, 180)
+        .focus_target(ok_button_id),
+);
 ```
 
 For the general case (may land in-tree or in a native window),
@@ -1146,7 +1159,7 @@ completes, the settings are written, the application's state is dropped
 without `run()` returning; when a
 guard refuses or the user cancels, the application goes on (a logout is
 then cancelled, and macOS says which application cancelled it). The App
-menu's Quit row and ⌘Q are the application's own Quit, as before; see
+menu's Quit row and ⌘Q ask the application to quit, as `ctx.quit()` does; see
 the [native menu guide](native-menu.md#quit).
 
 **Windows.** A session ending (sign out, restart, shut down) is heard on
@@ -1525,7 +1538,7 @@ installing an observer through the current window's build context.
   [`examples/multi_window`](../examples/multi_window/src/main.rs).
 - Implementation:
   - Types, [`crates/teksilo-core/src/window/`](../crates/teksilo-core/src/window/)
-  - Dispatch, [`crates/teksilo-core/src/widget_tree/pointer_router.rs`](../crates/teksilo-core/src/widget_tree/pointer_router.rs)
+  - Dispatch into a window's tree, `TeksiloAppHandler::dispatch_in_window` in [`crates/teksilo-app/src/app.rs`](../crates/teksilo-app/src/app.rs)
   - Window manager, [`crates/teksilo-app/src/window_manager.rs`](../crates/teksilo-app/src/window_manager.rs)
   - `EventContext` methods, [`crates/teksilo-core/src/widget/event_context.rs`](../crates/teksilo-core/src/widget/event_context.rs)
 - Related docs:

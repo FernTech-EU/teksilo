@@ -65,7 +65,7 @@
 //! # use teksilo_i18n::lit;
 //! # use teksilo_core::Intent;
 //! let _w = MenuItem::new(lit!("&Save"))
-//!     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.save")));
+//!     .on_activate_fn(|ctx| ctx.send_intent_from_focus(Intent::new("app.save")));
 //! ```
 
 use std::rc::Rc;

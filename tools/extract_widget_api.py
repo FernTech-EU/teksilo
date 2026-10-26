@@ -3286,21 +3286,32 @@ def _emit_items_md(
     out: list[str],
     anchors: "dict[int, str] | None" = None,
     source: "Path | None" = None,
+    skip_hidden: bool = False,
 ) -> None:
     """Render the struct/enum/type/const/fn items of a file as Markdown.
 
     Shared by `format_markdown` (the `--format md` output) and
     `format_catalog_markdown` (the mdBook catalog pages) so both render the API
     surface identically. The catalog passes `anchors`, the ids its table of
-    contents links to, keyed by `id()` of each item and method.
+    contents links to, keyed by `id()` of each item and method, and
+    `skip_hidden`: a published page leaves `#[doc(hidden)]` items and methods
+    out, as rustdoc does, where the maintainer's `--format md` marks them.
     """
     for it in items:
+        if skip_hidden and it.hidden:
+            continue
+        if (
+            skip_hidden
+            and it.kind == "external"
+            and all(m.hidden for m in it.methods)
+        ):
+            continue
         if it.kind == "external":
             # Type defined elsewhere, but has methods in this file.
             _emit_anchor(anchors, it, out)
             out.append(f"## `impl {it.name}`  *(methods defined in this file)*")
             out.append("")
-            _emit_methods_md(it, out, anchors)
+            _emit_methods_md(it, out, anchors, skip_hidden)
             continue
 
         flags: list[str] = []
@@ -3387,7 +3398,7 @@ def _emit_items_md(
             out.append("")
 
         if it.methods:
-            _emit_methods_md(it, out, anchors)
+            _emit_methods_md(it, out, anchors, skip_hidden)
 
 
 def _impl_group_title(doc: str) -> "tuple[str | None, str]":
@@ -3404,12 +3415,17 @@ def _impl_group_title(doc: str) -> "tuple[str | None, str]":
 
 
 def _emit_methods_md(
-    it: Item, out: list[str], anchors: "dict[int, str] | None" = None
+    it: Item,
+    out: list[str],
+    anchors: "dict[int, str] | None" = None,
+    skip_hidden: bool = False,
 ) -> None:
     plain = "### Associated items" if it.kind == "trait" else "### Methods"
     current: "str | None" = None
     headed = False
     for m in it.methods:
+        if skip_hidden and m.hidden:
+            continue
         if m.group != current:
             current = m.group
             title, body = _impl_group_title(m.group) if m.group else (None, "")
@@ -4156,7 +4172,7 @@ def format_catalog_markdown(
         f"({_rustdoc_module_url(api_base, pf.file_path, api_dir)})"
     )
     out.append("")
-    _emit_items_md(pf.items, out, anchors, source=pf.file_path)
+    _emit_items_md(pf.items, out, anchors, source=pf.file_path, skip_hidden=True)
 
     # The module header + item docs were swept from rustdoc-style source, so they
     # carry links that don't resolve in the book — reduce them to plain code.
@@ -4512,6 +4528,49 @@ def _test_prune() -> None:
         assert (img / "button.png").exists()
         assert (img / "popover.png").exists(), "prune must never reach into img/"
         assert (img / "nested.md").exists(), "prune must not recurse below out_dir"
+
+
+def _test_hidden_items_on_catalog_pages() -> None:
+    """A published catalog page leaves `#[doc(hidden)]` items and methods
+    out, as rustdoc does; the maintainer's `--format md` still lists them,
+    marked hidden. A hidden item used to appear on its page, marked."""
+    import tempfile
+
+    src = """//! A module.
+
+/// Shown.
+pub struct Shown;
+
+impl Shown {
+    /// A public method.
+    pub fn visible(&self) {}
+
+    /// A hidden method.
+    #[doc(hidden)]
+    pub fn secret_method(&self) {}
+}
+
+/// A hidden function.
+#[doc(hidden)]
+pub fn secret_fn() {}
+"""
+    with tempfile.TemporaryDirectory() as td:
+        fp = Path(td) / "shown.rs"
+        fp.write_text(src, encoding="utf-8")
+        pf = parse_file(fp, "shown", [])
+        # The page links the module's rustdoc, which needs a file in the crate.
+        pf.file_path = build_registry().module_to_file["button"]
+        page = format_catalog_markdown(
+            pf, title="Shown", slug="shown", api_base="../api", img_dir=Path(td)
+        )
+        assert "visible" in page, "the public method is on the page"
+        assert "secret_method" not in page, "a hidden method is not"
+        assert "secret_fn" not in page, "nor a hidden item"
+        md = format_markdown(pf)
+        assert "secret_method" in md and "secret_fn" in md, (
+            "--format md still lists hidden items"
+        )
+        assert "*(hidden)*" in md, "marked hidden"
 
 
 def _test_density_images() -> None:
@@ -4976,6 +5035,7 @@ def run_self_tests() -> int:
     _test_split_impls()
     _test_prune()
     _test_density_images()
+    _test_hidden_items_on_catalog_pages()
     _test_summary_scope()
     reg = build_registry()
     slider = reg.module_to_file["slider"]

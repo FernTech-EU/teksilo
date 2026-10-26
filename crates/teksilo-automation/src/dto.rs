@@ -1156,8 +1156,8 @@ impl AutomationReply {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct AutomationRequest {
-    /// Target window (`TeksiloWindowId` raw). `None` → the focused window,
-    /// else the primary. Ignored in headless mode (single tree).
+    /// Target window (`TeksiloWindowId` raw). `None` → the window opened or
+    /// focused last, else the primary. Ignored in headless mode (single tree).
     #[serde(default)]
     pub window_id: Option<u64>,
     /// The operation to perform.

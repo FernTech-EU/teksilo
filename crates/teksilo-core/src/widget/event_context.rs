@@ -1153,8 +1153,10 @@ impl<'ops> EventContext<'ops> {
     /// via
     /// [`WindowConfig::on_close_requested`](crate::window::WindowConfig::on_close_requested)
     /// or [`can_close`](crate::window::WindowConfig::can_close), that
-    /// guard runs first and may veto the close or defer its answer. To skip
-    /// the guard, use [`close_window_forced`](Self::close_window_forced).
+    /// guard runs first and may veto the close or defer its answer. While a
+    /// modal dialog window blocks this window, the request brings the dialog
+    /// forward and closes nothing, as a click on its close button does. To
+    /// skip the guard, use [`close_window_forced`](Self::close_window_forced).
     pub fn close_window(&mut self) {
         self.close_window_requested = true;
     }
