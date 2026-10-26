@@ -34,7 +34,7 @@ wgpu = { workspace = true }
 # in the tree via `teksilo-render` and `rfd`.
 pollster = { workspace = true }
 accesskit = { workspace = true }
-accesskit_winit = "0.34.1"
+accesskit_winit = "0.34.2"
 arboard = { workspace = true, optional = true }
 raw-window-handle = "0.6"
 # rfd 0.17 dropped the `async-std` / `tokio` runtime-selection features: it no
