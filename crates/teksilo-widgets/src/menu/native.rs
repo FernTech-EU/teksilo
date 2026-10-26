@@ -76,9 +76,14 @@ pub(crate) struct NativeMenuBinding {
 ///
 /// macOS needs a leading App menu in every bar. A model that declares none
 /// gets the application menu's App menu, or a default one when the
-/// application declared none either. The widget installing it (the bar) is
-/// rebuilt, and so installs again, whenever the application menu is
-/// declared again or changes in place, so the borrowed App menu follows it,
+/// application declared none either. A model that declares no Window or Help
+/// menu gets the application menu's, when it has one: a Mac app keeps them in
+/// every window's bar, and a window minimised while another window with a
+/// menu of its own was key came back only from the Dock. Only those standard
+/// menus are borrowed; the application's own rows under the same title are
+/// not, their actions running in the application tree. The widget installing
+/// it (the bar) is rebuilt, and so installs again, whenever the application
+/// menu is declared again or changes in place, so the borrowed menus follow it,
 /// and on a locale change (or a reload of the translations), so the menus'
 /// titles and the App menu's labels, which have no item to update in place,
 /// follow it too.
@@ -103,9 +108,10 @@ pub(crate) fn install(model: &MenuModel, ctx: &mut BuildContext) -> Option<Nativ
             rebuild(&application.version());
         }
     }
-    let application_app_menu = holder
-        .and_then(|holder| holder.model())
-        .and_then(|model| app_menu_of(&model));
+    let application = holder.and_then(|holder| holder.model());
+    let application_app_menu = application
+        .as_ref()
+        .and_then(|model| standard_menu_of(model, StandardMenuRole::App));
     // The shortcuts the rows name, looked up in the window's registry, which
     // can come to hold one after this runs: the application menu's copies
     // reach a window an action of the application tree opens only once the
@@ -115,6 +121,11 @@ pub(crate) fn install(model: &MenuModel, ctx: &mut BuildContext) -> Option<Nativ
     let resolved = resolve_model(
         Some(model),
         || application_app_menu.unwrap_or_else(StandardMenu::app),
+        &|role| {
+            application
+                .as_ref()
+                .and_then(|model| standard_menu_of(model, role))
+        },
         &|id| {
             asked.borrow_mut().push(id);
             ctx.effective_shortcut(id).and_then(|eff| eff.primary)
@@ -146,7 +157,7 @@ pub(crate) fn install_application(
     poster: std::sync::Arc<dyn teksilo_core::AppEventPoster>,
     shortcut: &dyn Fn(&str) -> Option<KeyStroke>,
 ) -> NativeMenuBinding {
-    let resolved = resolve_model(model, StandardMenu::app, &|id| shortcut(id));
+    let resolved = resolve_model(model, StandardMenu::app, &|_| None, &|id| shortcut(id));
     handle.set_app_menu(
         resolved.snapshot,
         resolved.activations,
@@ -167,10 +178,12 @@ struct Resolved {
 }
 
 /// Resolve `model` (none: an empty one) into a snapshot with a leading App
-/// menu, `app_menu()` when the model declares none.
+/// menu, `app_menu()` when the model declares none, and the Window and Help
+/// menus `borrow` gives for those it does not declare.
 fn resolve_model(
     model: Option<&MenuModel>,
     app_menu: impl FnOnce() -> StandardMenu,
+    borrow: &dyn Fn(StandardMenuRole) -> Option<StandardMenu>,
     shortcut: &dyn Fn(&'static str) -> Option<KeyStroke>,
 ) -> Resolved {
     let mut activations = HashMap::new();
@@ -183,19 +196,42 @@ fn resolve_model(
             .collect(),
         None => Vec::new(),
     };
+    let has = |roots: &[NativeMenuNode], wanted: StandardMenuRole| {
+        roots
+            .iter()
+            .any(|n| matches!(n, NativeMenuNode::Standard { role, .. } if *role == wanted))
+    };
     // macOS requires a leading application menu. Resolving the injected one
     // here keeps every user-visible string in the i18n layer.
-    let has_app = roots.iter().any(|n| {
-        matches!(
-            n,
-            NativeMenuNode::Standard {
-                role: StandardMenuRole::App,
-                ..
-            }
-        )
-    });
-    if !has_app {
+    if !has(&roots, StandardMenuRole::App) {
         roots.insert(0, resolve_standard(&app_menu(), &mut activations, shortcut));
+    }
+    // Window before Help, which the bar ends with.
+    for role in [StandardMenuRole::Window, StandardMenuRole::Help] {
+        if has(&roots, role) {
+            continue;
+        }
+        let Some(menu) = borrow(role) else {
+            continue;
+        };
+        let node = resolve_standard(&menu, &mut activations, shortcut);
+        let at = if role == StandardMenuRole::Window {
+            roots
+                .iter()
+                .position(|n| {
+                    matches!(
+                        n,
+                        NativeMenuNode::Standard {
+                            role: StandardMenuRole::Help,
+                            ..
+                        }
+                    )
+                })
+                .unwrap_or(roots.len())
+        } else {
+            roots.len()
+        };
+        roots.insert(at, node);
     }
     Resolved {
         snapshot: NativeMenuSnapshot { roots },
@@ -204,10 +240,10 @@ fn resolve_model(
     }
 }
 
-/// The App menu `model` declares, if any.
-fn app_menu_of(model: &MenuModel) -> Option<StandardMenu> {
+/// The first standard menu of `role` `model` declares, if any.
+fn standard_menu_of(model: &MenuModel, role: StandardMenuRole) -> Option<StandardMenu> {
     model.nodes().iter().find_map(|node| match node {
-        MenuNode::Standard(menu) if menu.role() == StandardMenuRole::App => Some(menu.clone()),
+        MenuNode::Standard(menu) if menu.role() == role => Some(menu.clone()),
         _ => None,
     })
 }
@@ -832,6 +868,78 @@ mod tests {
         assert!(activation.quits);
     }
 
+    /// A window's menu that declares no Window or Help menu shows the
+    /// application menu's, Window before Help, at the end of its bar; one it
+    /// declares itself is kept, and the application's own rows under the same
+    /// title are not borrowed. The `native-menu` example's Inspector window
+    /// had no Window menu, so a window minimised while it was key came back
+    /// only from the Dock.
+    #[test]
+    fn a_windows_menu_keeps_the_applications_window_and_help_menus() {
+        use crate::menu::{MenuEntry, StandardMenu};
+        use teksilo_i18n::lit;
+
+        let titles = |snapshot: &NativeMenuSnapshot| -> Vec<String> {
+            snapshot
+                .roots
+                .iter()
+                .map(|node| match node {
+                    NativeMenuNode::Submenu { title, .. } => title.clone(),
+                    NativeMenuNode::Standard { role, labels, .. } => match role {
+                        StandardMenuRole::App => "App".to_string(),
+                        _ => labels.title.clone(),
+                    },
+                    other => panic!("a menu, got {other:?}"),
+                })
+                .collect()
+        };
+        let application = || {
+            MenuModel::new()
+                .standard_menu(StandardMenu::app())
+                .menu(lit!("&Window"), |m| {
+                    m.item(MenuEntry::new(lit!("Inspector")).intent("app.inspector"))
+                })
+                .standard_menu(StandardMenu::help())
+                .standard_menu(StandardMenu::window())
+        };
+        let window = teksilo_core::window::TeksiloWindowId::new(1);
+
+        let holder = super::super::application::ApplicationMenu::new();
+        holder.set(application());
+        let model = MenuModel::new().menu(lit!("Inspector"), |m| {
+            m.item(MenuEntry::new(lit!("Refresh")).intent("inspector.refresh"))
+        });
+        let (backend, _handle, _tree) = install_recorded(model, Some(holder));
+        assert_eq!(
+            titles(&backend.menu_for(window).expect("installed")),
+            ["App", "Inspector", "Window", "Help"]
+        );
+
+        // A Help menu of its own: the borrowed Window menu goes before it.
+        let holder = super::super::application::ApplicationMenu::new();
+        holder.set(application());
+        let model = MenuModel::new()
+            .menu(lit!("Inspector"), |m| {
+                m.item(MenuEntry::new(lit!("Refresh")).intent("inspector.refresh"))
+            })
+            .standard_menu(StandardMenu::help().title(lit!("Inspector Help")));
+        let (backend, _handle, _tree) = install_recorded(model, Some(holder));
+        assert_eq!(
+            titles(&backend.menu_for(window).expect("installed")),
+            ["App", "Inspector", "Window", "Inspector Help"]
+        );
+
+        // No application menu: nothing to borrow.
+        let model = MenuModel::new().menu(lit!("Inspector"), |m| {
+            m.item(MenuEntry::new(lit!("Refresh")).intent("inspector.refresh"))
+        });
+        let (backend, _handle, _tree) = install_recorded(model, None);
+        assert_eq!(
+            titles(&backend.menu_for(window).expect("installed")),
+            ["App", "Inspector"]
+        );
+    }
+
     /// A window's menu that borrows the application menu's App menu follows
     /// the application menu: declared again, or changed in place, the
     /// window's native menu is installed again with the new App menu. It
@@ -937,7 +1045,7 @@ mod tests {
             let window = teksilo_core::window::TeksiloWindowId::new(window);
             let model = MenuModel::new().standard_menu(StandardMenu::app().quit_intent(intent));
             let mut activations = HashMap::new();
-            let snapshot = resolve_model(Some(&model), StandardMenu::app, &no_shortcuts);
+            let snapshot = resolve_model(Some(&model), StandardMenu::app, &|_| None, &no_shortcuts);
             activations.extend(snapshot.activations);
             handle.set_window_menu(window, snapshot.snapshot, activations, null_poster());
         }

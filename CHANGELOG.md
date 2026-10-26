@@ -26,6 +26,14 @@ by crate for clarity, not because crates version independently.
 
 #### Platform
 
+- **A window with a menu of its own keeps the Window and Help menus on
+  macOS.** Its bar showed only its own menus, so a window minimised while it
+  was in front came back only from the Dock. A window's menu that declares
+  no Window or Help menu now shows the application menu's.
+- **macOS no longer merges an application's windows into tabs by default.**
+  The Window menu loses the tab rows (Show Previous Tab, Merge All Windows
+  and the rest). `TeksiloAppBuilder::window_tabbing(true)` turns tabbing back
+  on.
 - **A menu titled like the standard Window or Help menu shows once in the
   macOS menu bar.** A model with its own Window menu, for the in-window bar,
   and `StandardMenu::window()` showed two Window menus on macOS. The own

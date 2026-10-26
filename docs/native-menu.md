@@ -371,8 +371,13 @@ whenever it changes, and calls `activate_window` on `WindowEvent::Focused`:
 A window's own menu never replaces the application menu itself: what the bar
 shows with no window open does not depend on which window was open last. A
 window's model that declares no App menu borrows the application menu's, and
-follows it: the window's menu is installed again whenever the application
-menu is declared again or changes in place. An
+one that declares no Window or Help menu borrows the application menu's
+standard Window and Help menus, so Minimize, Zoom and the window list are in
+every window's bar, as in any Mac app. Only those standard menus are
+borrowed: rows of the application's own under the same title (an ordinary
+`.menu` titled Window) are not, since their actions run in the application
+tree. The window's menu follows what it borrows: it is installed again
+whenever the application menu is declared again or changes in place. An
 application that declares no application menu still gets an App menu, whose
 Quit asks the application to quit.
 
@@ -416,7 +421,8 @@ MenuModel::new()
 - A default **App** menu is auto-injected as the leading menu if the model
   declares none (so ⌘Q always works), labels resolved through the widget layer,
   not the platform crate. A window's own model borrows the application menu's
-  App menu instead, when there is one.
+  App menu instead, when there is one, and its standard Window and Help menus
+  when it declares none of its own.
 - The **App** menu is first in the macOS bar wherever the model declares it.
   AppKit shows the bar's first menu as the application menu, under the
   application's name, whatever it holds; declared after File, it would have
@@ -431,7 +437,11 @@ MenuModel::new()
   (`unhideAllApplications:`); Quit (below).
 - **Window** adds Minimize (⌘M, `performMiniaturize:`) + Zoom (`performZoom:`)
   and registers the menu with AppKit so the live window list appears (see
-  below).
+  below). macOS adds rows of its own for arranging windows (Fill, Center,
+  Move & Resize and the like). It adds the tab rows (Show Previous Tab, Merge
+  All Windows and the rest) only when the application lets it merge windows
+  into tabs, `TeksiloAppBuilder::window_tabbing(true)`; that is off by
+  default.
 - **Help** is a localized titled submenu registered as the help menu.
 - **Your own Window or Help rows** go in an ordinary `.menu(...)` with the same
   title as the standard menu. On macOS its rows are shown inside the standard

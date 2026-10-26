@@ -5410,6 +5410,9 @@ pub struct TeksiloAppBuilder {
     /// Whether a termination signal quits the application; see
     /// [`handle_termination_signals`](Self::handle_termination_signals).
     termination_signals: bool,
+    /// Whether macOS may merge the windows into tabs; see
+    /// [`window_tabbing`](Self::window_tabbing).
+    window_tabbing: bool,
     /// Type-erased adapter for the application's backend event source.
     /// Installed via `event_source<S>(source)`.
     event_source: Option<EventSourceAdapter>,
@@ -5478,6 +5481,7 @@ impl TeksiloAppBuilder {
             app_root: None,
             quit_guard: None,
             termination_signals: true,
+            window_tabbing: false,
             event_source: None,
             app_state_registry: HashMap::new(),
             i18n: None,
@@ -6186,6 +6190,18 @@ impl TeksiloAppBuilder {
         self
     }
 
+    /// Let macOS merge the application's windows into tabs, its automatic
+    /// window tabbing: the user can then merge them from the Window menu,
+    /// which also gets the tab rows (Show Previous Tab, Move Tab to New
+    /// Window, Merge All Windows). Off by default, so each window stays a
+    /// window and the Window menu has no tab rows; the rows macOS adds for
+    /// arranging windows (Fill, Center, Move & Resize) stay either way.
+    /// Ignored on other platforms.
+    pub fn window_tabbing(mut self, allowed: bool) -> Self {
+        self.window_tabbing = allowed;
+        self
+    }
+
     /// Open the configured settings bundle (if any) and register
     /// each service in the app-state registry.
     fn install_settings(&mut self) -> Option<teksilo_settings::OpenedSettings> {
@@ -6510,6 +6526,8 @@ impl TeksiloAppBuilder {
 
         let event_loop = build_loop();
         event_loop.set_control_flow(ControlFlow::Wait);
+        // Before the first window: AppKit reads it as windows are ordered in.
+        teksilo_platform::set_automatic_window_tabbing(self.window_tabbing);
 
         // Always create a proxy: it's needed by both `on_ready` (if set)
         // and by the event-source poster (if a source is registered). The

@@ -216,6 +216,28 @@ pub fn attach_child_window(parent: &winit::window::Window, child: &winit::window
     }
 }
 
+/// Whether macOS may merge the application's windows into tabs (AppKit's
+/// automatic window tabbing, `NSWindow.allowsAutomaticWindowTabbing`), which
+/// also decides whether the Window menu carries its tab rows (Show Previous
+/// Tab, Merge All Windows and the rest); nothing on other platforms.
+///
+/// Process-wide. Call it on the main thread before the first window is
+/// created; off the main thread it does nothing.
+#[doc(hidden)]
+pub fn set_automatic_window_tabbing(allowed: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(mtm) = objc2::MainThreadMarker::new() {
+            objc2_app_kit::NSWindow::setAllowsAutomaticWindowTabbing(allowed, mtm);
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = allowed;
+    }
+}
+
 /// Keep `window` out of the Window menu's window list and the Dock icon's
 /// menu on macOS, or list it there again; nothing on other platforms.
 ///
