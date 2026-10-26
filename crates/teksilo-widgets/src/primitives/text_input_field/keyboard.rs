@@ -296,12 +296,37 @@ pub(crate) fn standard_edit_available(state: &SharedState, command: StandardEdit
     }
 }
 
-/// Run one of the standard edit commands for the field, as its `edit.*`
-/// action does. Returns whether the command ran: a read-only field declines
-/// every command that would change its text, which passes the intent on, and
-/// with `empty_history_passes_on` (the tree's
+/// Whether the field declines a standard edit command now, which passes the
+/// intent on: a read-only field declines every command that would change its
+/// text, and with `empty_history_passes_on` (the tree's
 /// [`TextSurfaces::set_empty_history_passes_on`](teksilo_core::text_surface::TextSurfaces::set_empty_history_passes_on))
-/// so does Undo with nothing to undo and Redo with nothing to redo.
+/// it declines Undo with nothing to undo and Redo with nothing to redo.
+/// [`run_standard_edit`] declines exactly these, and a menu row asks this to
+/// know whether the field is where its command stops. `false` while the state
+/// is borrowed.
+pub(crate) fn standard_edit_passes_on(
+    state: &SharedState,
+    command: StandardEdit,
+    empty_history_passes_on: bool,
+) -> bool {
+    state
+        .try_borrow()
+        .is_ok_and(|st| declines(&st, command, empty_history_passes_on))
+}
+
+fn declines(st: &TextInputState, command: StandardEdit, empty_history_passes_on: bool) -> bool {
+    match command {
+        StandardEdit::SelectAll | StandardEdit::Copy => false,
+        StandardEdit::Cut | StandardEdit::Paste | StandardEdit::PastePlain => st.read_only,
+        StandardEdit::Undo => st.read_only || (empty_history_passes_on && !st.document.can_undo()),
+        StandardEdit::Redo => st.read_only || (empty_history_passes_on && !st.document.can_redo()),
+        _ => true,
+    }
+}
+
+/// Run one of the standard edit commands for the field, as its `edit.*`
+/// action does. Returns whether the command ran: it declines what
+/// [`standard_edit_passes_on`] says it does, which passes the intent on.
 pub(crate) fn run_standard_edit(
     state: &SharedState,
     command: StandardEdit,
@@ -310,23 +335,19 @@ pub(crate) fn run_standard_edit(
 ) -> bool {
     {
         let mut st = state.borrow_mut();
-        let read_only = st.read_only;
+        if declines(&st, command, empty_history_passes_on) {
+            return false;
+        }
         match command {
             StandardEdit::SelectAll => st.cursor.select(SelectionType::Document),
             StandardEdit::Copy => clipboard_copy(&mut st, ctx),
-            StandardEdit::Cut if !read_only => clipboard_cut(&mut st, ctx),
+            StandardEdit::Cut => clipboard_cut(&mut st, ctx),
             // A plain field has no formatting to strip.
-            StandardEdit::Paste | StandardEdit::PastePlain if !read_only => {
-                clipboard_paste(&mut st, ctx)
-            }
-            StandardEdit::Undo
-                if !read_only && (st.document.can_undo() || !empty_history_passes_on) =>
-            {
+            StandardEdit::Paste | StandardEdit::PastePlain => clipboard_paste(&mut st, ctx),
+            StandardEdit::Undo => {
                 let _ = st.document.undo();
             }
-            StandardEdit::Redo
-                if !read_only && (st.document.can_redo() || !empty_history_passes_on) =>
-            {
+            StandardEdit::Redo => {
                 let _ = st.document.redo();
             }
             _ => return false,

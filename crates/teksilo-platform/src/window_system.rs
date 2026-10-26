@@ -115,6 +115,41 @@ pub fn supports_native_modal_windows() -> bool {
     }
 }
 
+/// Show `window`, built hidden, without making it the key or focused window:
+/// on macOS `orderFront:`, where winit's `set_visible(true)` is
+/// `makeKeyAndOrderFront:`. Elsewhere winit's `set_visible(true)`, which on
+/// Windows shows a window built with `with_active(false)` with
+/// `SW_SHOWNOACTIVATE` the first time, and on X11 and Wayland leaves the
+/// focus to the window manager or compositor.
+pub(crate) fn show_without_activating(window: &winit::window::Window) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::rc::Retained;
+        use objc2_app_kit::NSView;
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+        if let Ok(handle) = window.window_handle()
+            && let RawWindowHandle::AppKit(appkit) = handle.as_raw()
+        {
+            // SAFETY: the ns_view pointer is valid while `window` is alive,
+            // which the caller holds for this call; winit runs on the main
+            // thread, as AppKit requires.
+            unsafe {
+                if let Some(view) = Retained::<NSView>::retain(appkit.ns_view.as_ptr().cast())
+                    && let Some(ns_window) = view.window()
+                {
+                    ns_window.orderFront(None);
+                    return;
+                }
+            }
+        }
+        window.set_visible(true);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    window.set_visible(true);
+}
+
 /// Attach `child` as a child window of `parent` using
 /// `NSWindowOrderingMode::Above` on macOS. Call this *after* both
 /// windows' AccessKit adapters have been created (and thus after the

@@ -171,7 +171,7 @@ What needs a window is not drawn there:
 
 | From the application tree | Happens |
 |---|---|
-| a modal request (`MessageBox`, `present_modal`) | presented in the window used last of those not minimised, else in the window used last. Asked in answer to the user's input (a click, a key, a menu row, a screen reader's action, a payload with an activation token), that window is restored and brought to the front; otherwise (a timer, another thread) it asks for attention (the Dock icon bounces and the taskbar button flashes until the user comes to the application; an urgency hint on X11) and stays where it is, as a background application's does. A dialog that would open a window of its own (macOS, Windows) over a minimised window waits instead: shown, in front, on the first turn a window of the application takes the focus, over the window chosen then; a quit answers one still waiting as dismissed (a `MessageBox` reports its escape button). In a window of its own when none is open. Content must be `ModalRequest::deferred` |
+| a modal request (`MessageBox`, `present_modal`) | presented in the window used last of those not minimised, else in the window used last. Asked in answer to the user's input (a click, a key, a menu row, a screen reader's action, a payload with an activation token), that window is restored and brought to the front; asked over that window while it or a dialog of it has the focus, it opens in front; otherwise (a timer, another thread) it asks for attention (the Dock icon bounces and the taskbar button flashes until the user comes to the application; an urgency hint on X11) and stays where it is, as a background application's does. A dialog that would open a window of its own (macOS, Windows) over a minimised window waits instead: shown, in front, on the first turn a window of the application takes the focus, over the window chosen then; a quit answers one still waiting as dismissed (a `MessageBox` reports its escape button). With every window minimised, switching to the application (Cmd-Tab on macOS) gives no window the focus, so the dialog waits until a window is restored (a click on the Dock icon restores one), as macOS does. In a window of its own when none is open. Content must be `ModalRequest::deferred` |
 | a file dialog | refused with an error: no parent window |
 | a toast | shown in every window |
 | an overlay, an animated widget | never shown; a debug build says so |
@@ -250,8 +250,9 @@ fn application_menu() -> MenuModel {
   missed while another window is key (Quit then asks the application to quit
   directly).
 - A row with an intent, no closure and no state to write (a two-way check or
-  radio row writes one) is greyed out while nothing on that route takes the
-  intent.
+  radio row writes one) is greyed out while choosing it would do nothing:
+  nothing on that route takes the intent, or the action it would stop at has
+  nothing to act on.
 - Calling `set_application_menu` from a window's tree does nothing, and panics
   in a debug build.
 
@@ -757,7 +758,9 @@ shortcut's intent reaches nothing of the page. So the page's Ctrl+N bound to
 an application-tree action does not fire inside an in-window dialog, while a
 dialog button that sends `app.new` reaches it. A row chosen in the macOS
 menu bar is input as a key is: over an in-window dialog its intent stops at
-the dialog, and the row is greyed out when only the page would take it. An
+the dialog, and the row is greyed out when only the page would take it.
+What a native dialog window leaves of a key's or a menu bar row's intent
+goes to the application tree only, not to the windows it blocks. An
 intent sent from the page while the dialog is up (only a programmatic send
 can be) is the page's and reaches every global action of the window.
 
@@ -776,13 +779,47 @@ and has no minimise of its own. It goes and comes back with its owner.
 
 - **Opening it** brings it to the front when it is opened in answer to the
   user's input (a click, a key, a menu row, a screen reader's action, an
-  activation token), over a window that has the focus, or for a quit
-  waiting on its answer. Opened otherwise (a timer's dialog, another
-  thread's, while the user is in another application), it opens over its
-  owner without taking the focus. On macOS a dialog is not attached to an
-  owner that is in the Dock, since AppKit would draw the owner too while
-  leaving it minimised; a debug build says so, and the application tree's
-  dialogs wait for the user in that case (see the table above).
+  activation token), over a window that has the focus (itself or through a
+  dialog of its own), or for a quit waiting on its answer. Opened otherwise
+  (a timer's dialog, another thread's, while the user is in another
+  application), it opens over its owner without taking the focus: it is
+  neither brought forward nor made the key window, so the keyboard stays
+  with the window the user is typing in, of this application or another
+  (macOS orders it front without making it key, Windows shows it without
+  activating it; on X11 and Wayland the window manager decides). A dialog
+  a window's tree asks for that way (`present_message_box`,
+  `present_modal`) is presented as the application tree's is (see the
+  table above), in a window of its own (macOS, Windows) or in the window's
+  own tree alike. While its window is not focused, itself or through one
+  of its dialogs (the application in the background, another of its
+  windows focused, or the window minimised), the window asks for attention
+  once for the dialog (the Dock icon bounces and the taskbar button
+  flashes until the user comes to the application; an urgency hint on
+  X11, withdrawn when the window or a dialog of it takes the focus), as
+  AppKit does for a modal panel of an application in the background. On
+  macOS that attention shows only while the application is in the
+  background: with another of its windows focused, the Dock icon does not
+  bounce, and the dialog waits behind the window the user is in. On
+  Windows the window's taskbar button flashes until it comes to the front.
+  So a timer's second dialog from a window whose first dialog has the
+  focus opens in front and asks for nothing. A dialog in a window of its
+  own opens over its window visible without the focus; over its window
+  minimised it waits: the dialog is shown, in front, on the first turn its
+  window takes the focus; its window closing, by itself or for a quit,
+  answers it as dismissed (a `MessageBox` reports its escape button). One
+  asked for the user (in answer to their input, or a quit's question)
+  waits for nothing: its window is restored, the dialog opens over it in
+  front, and it goes ahead of the dialogs the window owes. With every
+  window minimised, switching to the application (Cmd-Tab on macOS) gives
+  no window the focus, so the dialog waits until its window is restored (a
+  click on the Dock icon restores one), as macOS does. A dialog in the
+  window's own tree waits there, minimised with it. A dialog raised while
+  the window system still hides it (on macOS a child window while its
+  owner comes back from the Dock) is raised again once it is shown. On
+  macOS a window opened with `modal_to` over an owner that is in the Dock,
+  or still coming back from it, is attached to it only once the owner is
+  back, since AppKit would draw the owner too while leaving it minimised;
+  a debug build says so when the owner was known to be minimised.
 
 - **Its title bar** has a close button and no minimise button, whatever its
   config says (`minimizable(true)` on a modal config is ignored, and a debug
@@ -1069,8 +1106,17 @@ An **overruling** quit is for a source that leaves no time to ask: it is
 carried out at once, in one turn. The application's guard and then every
 window's (dialogs first) are asked **once**, and read the source, so a
 guard can save; whatever a guard answers, its window closes: a `Veto` or
-a `Defer` is overruled, and a dialog still up answers through its own
-Cancel path. A guard that would ask "Save changes?" therefore saves (or
+a `Defer` is overruled, and a dialog still up, or asked by the guard and
+not shown yet, answers through its own Cancel path. When such a source
+comes while a guarded quit is waiting, the quit becomes overruling, and an
+answer already given stands while a pending one is asked again: a window
+whose guard already answered (the user chose Don't Save, a stored
+`proceed()`) closes without being asked again, an application guard that
+already agreed is not asked again, and a guard whose question is still up
+is asked again with the new source, so it can save, while its box answers
+Cancel. Should guards keep opening windows as theirs close, the quit gives
+up after 4096 steps in the turn and says so on standard error, leaving
+those windows open. A guard that would ask "Save changes?" therefore saves (or
 writes a recovery copy) for `SessionEnd` and `Signal` and returns `Close`,
 as the guard in "Where the quit came from" below does. The application ends once every window has
 closed, under either quit policy.
@@ -1090,7 +1136,9 @@ guarded quit, so a guard can ask "Save changes?" and the user can answer
 it: the windows and their dialogs keep working meanwhile. A logout is told
 apart by the reason AppKit gives (`SessionEnd`), so a guard can also save
 without asking. AppKit hears the outcome once the quit is decided: when it
-completes, the settings are written and AppKit ends the process; when a
+completes, the settings are written, the application's state is dropped
+(see "`TeksiloAppBuilder::run()` lifecycle"), and AppKit ends the process
+without `run()` returning; when a
 guard refuses or the user cancels, the application goes on (a logout is
 then cancelled, and macOS says which application cancelled it). The App
 menu's Quit row and ⌘Q are the application's own Quit, as before; see
@@ -1104,7 +1152,7 @@ full-screen "this app is preventing shutdown" list, where they end the
 session anyway. When Windows says the session really ends
 (`WM_ENDSESSION`), the application runs an overruling quit with
 `SessionEnd` before it answers, because Windows may end the process as
-soon as it does: every guard is asked once and should save, the settings
+soon as it does: every guard is asked and should save, the settings
 are written, and Windows allows a few seconds for all of it. `taskkill`
 without `/F` sends `WM_CLOSE` to every window of the process, which closes
 each window through its guard as its close button does; the application
@@ -1139,8 +1187,10 @@ writes the settings and returns.
 
 #### Dialogs still up
 
-A dialog still up in or over a window the quit closes is answered through
-its own Cancel path before it goes, as for a forced close of its owner: a
+A dialog still up in or over a window the quit closes, or asked there and
+not shown yet (a close guard's box queued in the turn an overruling quit
+closes its window), is answered through its own Cancel path before it
+goes, as for a forced close of its owner: a
 `MessageBox` reports its escape button (Cancel, or No for a Yes/No box),
 dismissed programmatically. A native dialog
 window is asked before the window it blocks, and closes this way.
@@ -1263,6 +1313,22 @@ window: the `can_close` sugar, whose `on_close_blocked` answers the close's `Clo
    `about_to_wait`, the loop ends once a quit has completed, or when the
    quit policy says so: under `QuitPolicy::LastWindowClosed`, once no window
    is open.
+7. As the loop ends (winit's `exiting`), the settings are written and the
+   application's state is dropped: every window's widget tree, the
+   application tree, the handlers given to the builder, and the services
+   registered with `app_state` (and those the builder installs, such as
+   telemetry), so each service's `Drop` runs there (an analytics adapter's
+   final send, a watcher thread stopping). Then `run()` returns.
+
+**On macOS `run()` may not return.** When AppKit carries out a quit (the
+Dock menu's Quit, AppleScript's `quit app`, a `terminate:`, a logout),
+it ends the process itself once Teksilo has told it the quit completed,
+right after `exiting`. The code after `run()` in `main` does not run
+then, and nothing is dropped after `exiting`. Put what must happen on the
+way out in a close guard, in `TeksiloAppBuilder::on_quit_requested`, or in
+the `Drop` of a service registered with `app_state`, not after `run()`.
+A quit the application asks for itself (`ctx.quit()`, the App menu's
+Quit) ends the loop and `run()` returns, as on every other platform.
 
 ---
 

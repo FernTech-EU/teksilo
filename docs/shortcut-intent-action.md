@@ -662,7 +662,10 @@ too: the standard edit shortcuts the tree registers itself, and the unowned
 copy a window holds of a shortcut registered in the application tree when a
 row of the [application menu](native-menu.md) names it. A row chosen in the
 macOS menu bar is input too: its intent stops at the modal as a shortcut's
-does, and its row is greyed out when only the page would take it.
+does, and its row is greyed out when only the page would take it. The same
+holds in a native dialog window: what it leaves of a shortcut's intent or a
+menu bar row's goes to the application tree only, never to the windows the
+dialog blocks.
 
 An intent sent as the modal closes (a dialog's button that closes the dialog
 and then asks the page for something, a command palette's row) is dispatched
@@ -695,8 +698,10 @@ command is chosen): an action on that widget, one of its ancestors or the
 window's root takes it, and what the window leaves goes to the application
 tree, where the [application menu](native-menu.md)'s commands live. Such a row
 with no closure, and no state to write (a two-way check or radio row writes
-one), is greyed out while nothing on that route takes its intent (the
-lookup a dispatch makes, run without invoking anything). A hand-built
+one), is greyed out while choosing it would do nothing: nothing on that
+route takes its intent, or the action the intent would stop at (the first
+enabled one, past any that pass it on) has nothing to act on (the lookup a
+dispatch makes, run without invoking anything). A hand-built
 `MenuItem` row sends from focus the same way with
 `ctx.send_intent_from_focus(...)` in its `on_activate_fn`, but does not grey
 out by itself (give it `.enabled(..)` for that); sent with `ctx.send_intent(...)`, its walk goes from the row to
@@ -911,9 +916,17 @@ what greys out an Edit menu row for it (in a window's `MenuBar` and in the
 macOS menu bar): Copy with nothing selected, Cut also in a read-only widget,
 Paste in a read-only one, Select All in an empty one, Undo and Redo with no
 history that way. A code editor and a log view copy the caret's line, so
-their Copy and Cut need text, not a selection. This changes no dispatch: a
-shortcut whose command has nothing to act on still reaches the focused
-widget's action, which handles or declines it as above.
+their Copy and Cut need text, not a selection. The row asks the action its
+command would stop at, the first on the route that does not pass the
+command on: a field with nothing selected greys Copy even when the page
+above it has a Copy of its own, because Copy chosen there stops at the
+field and the page's never runs; a read-only field passes Cut on, so the
+Cut row is enabled exactly when the action it passes Cut to would act. The
+same holds for Undo with `set_empty_history_passes_on`: on, an empty
+history leaves the row to the application's Undo; off, the widget keeps
+Undo and the row greys. This changes no dispatch: a shortcut whose command
+has nothing to act on still reaches the focused widget's action, which
+handles or declines it as above.
 
 A widget of your own that copies, pastes or selects all should do the
 same: register an `Action` for the `edit.*` id rather than match the

@@ -734,8 +734,10 @@ impl Widget for CodeEditor {
         {
             let state = self.state.clone();
             let available = state.clone();
+            let passes_on = state.clone();
             let touch = self.touch.clone();
             let surfaces = ctx.text_surfaces();
+            let passes_on_surfaces = surfaces.clone();
             crate::common::standard_edit::register_standard_edit_actions(
                 ctx,
                 move |command, ctx| {
@@ -753,6 +755,13 @@ impl Widget for CodeEditor {
                     ran
                 },
                 move |command| super::keyboard::standard_edit_available(&available, command),
+                move |command| {
+                    super::keyboard::standard_edit_passes_on(
+                        &passes_on,
+                        command,
+                        passes_on_surfaces.empty_history_passes_on(),
+                    )
+                },
             );
         }
 

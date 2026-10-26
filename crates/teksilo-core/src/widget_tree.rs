@@ -4185,6 +4185,7 @@ impl WidgetTree {
                             action.intent,
                             action.enabled_when.clone(),
                             action.availability(),
+                            action.pass_on(),
                         )
                     })
                     .collect()
@@ -4273,15 +4274,21 @@ impl WidgetTree {
     /// sends, pass [`live_command_focus`](Self::live_command_focus) to
     /// [`can_handle_from`](Self::can_handle_from).
     ///
-    /// A disabled action never handles it, as for an intent sent from focus,
-    /// which passes a disabled action by, and neither does one with nothing
-    /// to act on now ([`available_when`](crate::action::ActionBuilder::available_when):
-    /// a text field's `edit.copy` with nothing selected), which a dispatch
-    /// would still run. Two answers are approximate, and say "handled": an
+    /// The answer is the one of the action a dispatch would stop at: the
+    /// first on the route that is enabled (a disabled one is passed by, as
+    /// a dispatch passes it) and does not
+    /// [pass the intent on](crate::action::ActionBuilder::passes_on_when)
+    /// now (a read-only field's Cut). That action handles it when it
+    /// [has something to act on](crate::action::ActionBuilder::available_when);
+    /// when it has not (a text field's `edit.copy` with nothing selected),
+    /// the intent is not handled, though a page's own Copy further up would
+    /// be: a Copy chosen there stops at the field, which a dispatch would
+    /// still run. With no such action on the route, the application tree's
+    /// answer counts. Two answers are approximate, and say "handled": an
     /// action built with
-    /// [`on_invoke_with_response`](crate::action::ActionBuilder::on_invoke_with_response),
-    /// which may decline when it runs, and an application action, as the
-    /// application tree last published it.
+    /// [`on_invoke_with_response`](crate::action::ActionBuilder::on_invoke_with_response)
+    /// that may decline when it runs without saying when, and an application
+    /// action, as the application tree last published it.
     #[doc(hidden)]
     pub fn can_handle(&self, name: &str) -> bool {
         self.command_focus()
@@ -4309,14 +4316,24 @@ impl WidgetTree {
     }
 
     fn handled_intents_on_route(&self, source: WidgetId, past_modals: bool) -> Vec<&'static str> {
-        let mut names: Vec<&'static str> = self
-            .actions_on_route(source, &[], past_modals)
-            .into_iter()
-            .filter(|action| action.is_available())
-            .map(|action| action.intent)
+        // Each name is decided by the action a dispatch would stop at.
+        let mut decided: Vec<(&'static str, bool)> = Vec::new();
+        for action in self.actions_on_route(source, &[], past_modals) {
+            if !action.passes_on() && decided.iter().all(|(name, _)| *name != action.intent) {
+                decided.push((action.intent, action.is_available()));
+            }
+        }
+        let mut names: Vec<&'static str> = decided
+            .iter()
+            .filter_map(|(name, available)| available.then_some(*name))
             .collect();
         if let Some(scope) = &self.application_scope {
-            names.extend(scope.taken());
+            names.extend(
+                scope
+                    .taken()
+                    .into_iter()
+                    .filter(|name| decided.iter().all(|(decided, _)| decided != name)),
+            );
         }
         names.sort_unstable();
         names.dedup();
@@ -4352,13 +4369,17 @@ impl WidgetTree {
     }
 
     fn can_handle_on_route(&self, source: WidgetId, name: &str, past_modals: bool) -> bool {
-        self.actions_on_route(source, &[], past_modals)
+        match self
+            .actions_on_route(source, &[], past_modals)
             .into_iter()
-            .any(|action| action.intent == name && action.is_available())
-            || self
+            .find(|action| action.intent == name && !action.passes_on())
+        {
+            Some(action) => action.is_available(),
+            None => self
                 .application_scope
                 .as_ref()
-                .is_some_and(|scope| scope.offers(name))
+                .is_some_and(|scope| scope.offers(name)),
+        }
     }
 
     /// A signal that says whether an intent named `name` would be handled,

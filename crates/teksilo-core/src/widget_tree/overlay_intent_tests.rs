@@ -957,7 +957,10 @@ fn global_actions_and_shortcuts_registered_inside_a_modal_apply_in_it() {
 fn a_modals_intent_nothing_in_the_window_takes_goes_to_the_application() {
     let mut window = Window::new().with_global_commands();
     let scope = crate::action::ApplicationScope::new();
-    scope.replace(vec![("test.app", None, None), ("test.global", None, None)]);
+    scope.replace(vec![
+        ("test.app", None, None, None),
+        ("test.global", None, None, None),
+    ]);
     window.tree.set_application_scope(Some(scope));
     window.tree.set_records_unclaimed_intents(true);
     let button = window.button;

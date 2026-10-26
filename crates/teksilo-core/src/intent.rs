@@ -126,9 +126,13 @@ impl Intent {
         self
     }
 
-    /// Whether an open modal overlay keeps it: a shortcut's, or one marked
-    /// [`kept_in_modal`](Self::kept_in_modal).
-    pub(crate) fn stays_in_modal(&self) -> bool {
+    /// Whether an open modal keeps it: a shortcut's, or one marked
+    /// [`kept_in_modal`](Self::kept_in_modal). What a dialog leaves of it
+    /// goes to the application tree only: an open modal overlay keeps it
+    /// from the page, and `teksilo-app` keeps it from the windows a native
+    /// dialog window blocks.
+    #[doc(hidden)]
+    pub fn stays_in_modal(&self) -> bool {
         self.kept_in_modal || self.source == crate::telemetry::IntentSource::Shortcut
     }
 

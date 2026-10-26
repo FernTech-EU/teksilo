@@ -767,9 +767,19 @@ impl PlatformWindow {
 
     /// Create a new platform window from a winit window.
     /// The `event_loop` parameter is needed for the AccessKit adapter.
+    ///
+    /// The window, built hidden, is shown once its adapter exists: made key
+    /// and brought to the front with `activate`, otherwise shown without
+    /// taking the focus (a dialog opened while the user is elsewhere). On
+    /// macOS the inactive show orders the window front without making it
+    /// key; on Windows it is the first show of a window built with
+    /// `with_active(false)`, which winit makes with `SW_SHOWNOACTIVATE`, so
+    /// the caller builds it so. X11 and Wayland leave focus to the window
+    /// manager or compositor either way.
     pub async fn new_with_a11y(
         window: Window,
         event_loop: &winit::event_loop::ActiveEventLoop,
+        activate: bool,
     ) -> Self {
         let window = Arc::new(window);
         let scale_factor = window.scale_factor();
@@ -813,7 +823,11 @@ impl PlatformWindow {
         );
 
         // Show the window now that the adapter is created
-        window.set_visible(true);
+        if activate {
+            window.set_visible(true);
+        } else {
+            crate::window_system::show_without_activating(&window);
+        }
 
         Self {
             window,

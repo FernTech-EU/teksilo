@@ -278,19 +278,35 @@ fn a_masked_field_offers_no_copy() {
     assert!(f.offers(StandardEdit::Paste));
 }
 
-/// Greying is all availability changes: Ctrl+C with nothing selected still
-/// reaches the field, which takes it, so the application's own Copy above
-/// it still does not run, and the clipboard is left alone.
+/// Copy with nothing selected stops at the field, which takes it and copies
+/// nothing, so the application's own Copy above it does not run, and the
+/// row greys: choosing it would run nothing. Once something is selected, the
+/// field copies it and the row is enabled.
 #[test]
 fn copy_with_nothing_selected_is_still_the_fields() {
     let mut f = Field::new(false);
     f.clipboard.set_text("before").unwrap();
     assert!(
-        f.offers(StandardEdit::Copy),
-        "the application's Copy is on the route"
+        !f.offers(StandardEdit::Copy),
+        "the field takes Copy and has nothing to copy"
     );
     f.press(Key::C, Modifiers::COMMAND);
     assert_eq!(f.clipboard(), "before");
     assert_eq!(f.app_copies.get(), 0, "the field took the chord");
     assert_eq!(f.text.get(), "hello", "and typed no `c`");
+
+    f.press(Key::A, Modifiers::COMMAND);
+    assert!(f.offers(StandardEdit::Copy), "something to copy");
+    f.press(Key::C, Modifiers::COMMAND);
+    assert_eq!(f.clipboard(), "hello");
+    assert_eq!(f.app_copies.get(), 0);
+}
+
+/// A read-only field passes Cut on, so the Cut row is the application's.
+#[test]
+fn a_read_only_field_leaves_the_cut_row_to_the_application() {
+    let mut f = Field::new(true);
+    assert!(f.offers(StandardEdit::Cut), "the application's Cut");
+    f.press(Key::X, Modifiers::COMMAND);
+    assert_eq!(f.app_cuts.get(), 1, "choosing it runs it");
 }

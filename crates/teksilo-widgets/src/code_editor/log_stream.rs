@@ -712,6 +712,13 @@ pub(crate) fn log_standard_edit_available(state: &SharedState, command: Standard
     }
 }
 
+/// Whether a log view declines a standard edit command, which passes the
+/// intent on: every one but Select All and Copy, a log being read-only.
+/// [`run_log_standard_edit`] declines exactly these.
+pub(crate) fn log_standard_edit_passes_on(command: StandardEdit) -> bool {
+    !matches!(command, StandardEdit::SelectAll | StandardEdit::Copy)
+}
+
 /// Select-all and copy for a log view, as their `edit.*` actions run them.
 /// Every other standard edit command is declined: a log is read-only.
 pub(crate) fn run_log_standard_edit(

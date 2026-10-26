@@ -208,7 +208,7 @@ tree of `MenuNode`s with a `version: Signal<u64>`:
 
 | method | effect |
 | --- | --- |
-| `.intent("app.x")` | fire intent by name on activation, from the focused widget; with no closure and no state to write (a two-way check or radio row writes one), the row greys out while nothing takes it |
+| `.intent("app.x")` | fire intent by name on activation, from the focused widget; with no closure and no state to write (a two-way check or radio row writes one), the row greys out while choosing it would do nothing (nothing takes it, or what it would reach has nothing to act on) |
 | `.on_activate(\|ctx\| …)` | run a closure, before the intent is dispatched (in the application tree for the application menu) |
 | `.shortcut("app.x")` | display + bind the `ShortcutRegistry` chord |
 | `.enabled(prop)` | static or `Signal<bool>`, greys out **reactively** (both surfaces) |

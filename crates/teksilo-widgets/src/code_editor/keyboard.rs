@@ -384,14 +384,49 @@ pub(super) fn standard_edit_available(state: &SharedState, command: StandardEdit
     }
 }
 
+/// Whether the editor declines a standard edit command now, which passes the
+/// intent on to an ancestor's action and then to the plain key: a command
+/// the policy's filter rejects (Cut, Paste, Undo and Redo in a read-only
+/// viewer), and with `empty_history_passes_on` (the tree's
+/// [`TextSurfaces::set_empty_history_passes_on`](teksilo_core::text_surface::TextSurfaces::set_empty_history_passes_on))
+/// Undo with nothing to undo and Redo with nothing to redo.
+/// [`run_standard_edit`] declines exactly these, and a menu row asks this to
+/// know whether the editor is where its command stops. `false` while the
+/// state is borrowed.
+pub(super) fn standard_edit_passes_on(
+    state: &SharedState,
+    command: StandardEdit,
+    empty_history_passes_on: bool,
+) -> bool {
+    state
+        .try_borrow()
+        .is_ok_and(|st| declines(&st, command, empty_history_passes_on))
+}
+
+fn declines(st: &CodeEditorState, command: StandardEdit, empty_history_passes_on: bool) -> bool {
+    let filter = st.policy.command_filter;
+    let kind = match command {
+        StandardEdit::SelectAll => CodeCommand::SelectAll,
+        StandardEdit::Copy => CodeCommand::Copy,
+        StandardEdit::Cut => CodeCommand::Cut,
+        StandardEdit::Paste | StandardEdit::PastePlain => CodeCommand::Paste,
+        StandardEdit::Undo => CodeCommand::Undo,
+        StandardEdit::Redo => CodeCommand::Redo,
+        _ => return true,
+    };
+    !filter.accepts(kind)
+        || (empty_history_passes_on
+            && match command {
+                StandardEdit::Undo => !st.document.can_undo(),
+                StandardEdit::Redo => !st.document.can_redo(),
+                _ => false,
+            })
+}
+
 /// Run one of the standard edit commands, as its `edit.*` action does.
 ///
-/// Returns whether it ran: a command the policy's filter rejects (Cut, Paste,
-/// Undo and Redo in a read-only viewer) is declined, which passes the intent
-/// on to an ancestor's action and then to the plain key. With
-/// `empty_history_passes_on` (the tree's
-/// [`TextSurfaces::set_empty_history_passes_on`](teksilo_core::text_surface::TextSurfaces::set_empty_history_passes_on)),
-/// Undo with nothing to undo and Redo with nothing to redo are declined too.
+/// Returns whether it ran: it declines what [`standard_edit_passes_on`] says
+/// it does, which passes the intent on.
 pub(super) fn run_standard_edit(
     state: &SharedState,
     command: StandardEdit,
@@ -400,9 +435,11 @@ pub(super) fn run_standard_edit(
 ) -> bool {
     {
         let mut st = state.borrow_mut();
-        let filter = st.policy.command_filter;
+        if declines(&st, command, empty_history_passes_on) {
+            return false;
+        }
         match command {
-            StandardEdit::SelectAll if filter.accepts(CodeCommand::SelectAll) => {
+            StandardEdit::SelectAll => {
                 // No escalation ladder: that is a rich-text affordance for
                 // climbing out of a table cell, and there are no cells here.
                 st.clear_extra_carets();
@@ -411,31 +448,23 @@ pub(super) fn run_standard_edit(
             // Copy is not a mutation, so a read-only viewer's filter accepts
             // it (and rejects Cut / Paste). With no selection, Copy and Cut
             // act on the whole current line — the desktop convention.
-            StandardEdit::Copy if filter.accepts(CodeCommand::Copy) => {
+            StandardEdit::Copy => {
                 clipboard::copy(&st, ctx);
             }
-            StandardEdit::Cut if filter.accepts(CodeCommand::Cut) => {
+            StandardEdit::Cut => {
                 clipboard::cut(&mut st, ctx);
             }
             // Code has no formatting to strip.
-            StandardEdit::Paste | StandardEdit::PastePlain
-                if filter.accepts(CodeCommand::Paste) =>
-            {
+            StandardEdit::Paste | StandardEdit::PastePlain => {
                 clipboard::paste(&mut st, ctx);
             }
-            StandardEdit::Undo
-                if filter.accepts(CodeCommand::Undo)
-                    && (st.document.can_undo() || !empty_history_passes_on) =>
-            {
+            StandardEdit::Undo => {
                 // Undoing text under several carets would leave them pointing
                 // at offsets the undone edit invented; collapse first.
                 st.clear_extra_carets();
                 let _ = st.document.undo();
             }
-            StandardEdit::Redo
-                if filter.accepts(CodeCommand::Redo)
-                    && (st.document.can_redo() || !empty_history_passes_on) =>
-            {
+            StandardEdit::Redo => {
                 st.clear_extra_carets();
                 let _ = st.document.redo();
             }

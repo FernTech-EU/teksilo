@@ -217,7 +217,7 @@ fn generate_session_id() -> String {
 /// native window of its own here
 /// ([`supports_native_modal_windows`](teksilo_platform::supports_native_modal_windows)).
 /// A test build can answer yes on X11, to run that path there
-/// ([`native_modal_override`]).
+/// (`native_modal_override`).
 fn native_modal_windows_supported() -> bool {
     #[cfg(test)]
     if let Some(supported) = native_modal_override::get() {
@@ -271,6 +271,131 @@ fn resolve_modal_presentation(
                 ResolvedModalPresentation::InTree
             }
         }
+    }
+}
+
+/// The size, in logical pixels, a window sizing itself to its content
+/// ([`SizeToContent`]) wants at its `current` size: its content's height at
+/// its width, the width kept. With `width_floor`, the width follows the
+/// content too, never narrower than the floor: a native dialog window,
+/// whose requested size is the floor and whose content (a dialog panel's
+/// padding around a `MessageBox` of the requested width) can be wider.
+/// `None` when the tree has nothing to measure.
+fn size_to_content_target(
+    tree: &WidgetTree,
+    current: (f32, f32),
+    width_floor: Option<u32>,
+) -> Option<(u32, u32)> {
+    let mut width = current.0.round() as u32;
+    if let Some(floor) = width_floor {
+        // What the content takes at the window's width: a rigid column
+        // reports its own width, padding included, past the proposal.
+        let wanted = tree.measure_root_intrinsic(SizeProposal {
+            width: Some(current.0),
+            height: None,
+        })?;
+        width = (wanted.width.ceil().max(1.0) as u32).max(floor);
+    }
+    let intrinsic = tree.measure_root_intrinsic(SizeProposal {
+        width: Some(width as f32),
+        height: None,
+    })?;
+    Some((width, intrinsic.height.ceil().max(1.0) as u32))
+}
+
+/// What one size-to-content frame does; see [`autosize_step`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AutosizeStep {
+    /// The size to ask the window system for, and to make the window's
+    /// minimum: the user may not shrink it below its content, and a
+    /// programmatic shrink (a details expander folding) lowers the minimum
+    /// with it. `None` asks nothing.
+    pub(crate) ask: Option<(u32, u32)>,
+    /// The centre the dialog was opened on no longer applies
+    /// ([`autosize_centre`](crate::window_manager::ManagedWindow::autosize_centre)):
+    /// its size settled, or the window system answered the last request with
+    /// another size (it refused it, or clamped it to the screen), so a later
+    /// change keeps the corner.
+    pub(crate) centre_ends: bool,
+}
+
+/// One size-to-content frame of a window: `now` its size, `target` the size
+/// its content wants ([`size_to_content_target`]), `asked` the size last
+/// asked for and `asked_from` the size the window had then. A request still
+/// in flight (the window at `asked_from`) is not asked again; one the window
+/// system answered with a third size is not waited on.
+pub(crate) fn autosize_step(
+    now: (u32, u32),
+    target: (u32, u32),
+    asked: Option<(u32, u32)>,
+    asked_from: Option<(u32, u32)>,
+) -> AutosizeStep {
+    if target == now {
+        return AutosizeStep {
+            ask: None,
+            centre_ends: true,
+        };
+    }
+    let answered_otherwise =
+        asked.is_some_and(|asked| asked != now) && asked_from.is_some_and(|from| from != now);
+    AutosizeStep {
+        ask: (asked != Some(target)).then_some(target),
+        centre_ends: answered_otherwise,
+    }
+}
+
+#[cfg(test)]
+mod autosize_step_tests {
+    use super::{AutosizeStep, autosize_step};
+
+    #[test]
+    fn a_dialog_grows_to_its_content_once() {
+        assert_eq!(
+            autosize_step((300, 200), (340, 220), None, None),
+            AutosizeStep {
+                ask: Some((340, 220)),
+                centre_ends: false
+            },
+            "asked, and centred on the size it grows to"
+        );
+        assert_eq!(
+            autosize_step((300, 200), (340, 220), Some((340, 220)), Some((300, 200))),
+            AutosizeStep {
+                ask: None,
+                centre_ends: false
+            },
+            "in flight: not asked again"
+        );
+        assert_eq!(
+            autosize_step((340, 220), (340, 220), Some((340, 220)), Some((300, 200))),
+            AutosizeStep {
+                ask: None,
+                centre_ends: true
+            },
+            "settled"
+        );
+    }
+
+    /// The window system answered with another size (a screen too small for
+    /// the content): the centre ends, so the next change keeps the corner,
+    /// and the size it settled on is not asked for again.
+    #[test]
+    fn a_size_the_window_system_refuses_ends_the_centre() {
+        assert_eq!(
+            autosize_step((320, 210), (340, 220), Some((340, 220)), Some((300, 200))),
+            AutosizeStep {
+                ask: None,
+                centre_ends: true
+            }
+        );
+        assert_eq!(
+            autosize_step((320, 210), (330, 230), Some((340, 220)), Some((300, 200))),
+            AutosizeStep {
+                ask: Some((330, 230)),
+                centre_ends: true
+            },
+            "a new size its content wants then is asked without the centre"
+        );
     }
 }
 
@@ -1219,13 +1344,20 @@ impl TeksiloAppHandler {
     /// Quit now, for a source with no time to ask (a session ending now,
     /// Windows' `WM_ENDSESSION`, a termination signal): an overruling quit
     /// on behalf of `source`, carried out before this returns. The
-    /// application's guard and every window's are asked once and read
-    /// `source` through `ctx.quit_source()`, so a document's guard can save
-    /// without asking; whatever a guard answers, its window closes, and
-    /// every dialog still up answers through its own Cancel path as its
-    /// window closes. A quit already under way is made overruling. Every
-    /// window is closed when it returns, the quit has completed, the
-    /// settings are on disk, and the loop ends at the end of the turn.
+    /// application's guard and every window's are asked and read `source`
+    /// through `ctx.quit_source()`, so a document's guard can save without
+    /// asking; whatever a guard answers, its window closes, and every
+    /// dialog still up, or asked and not shown yet, answers through its own
+    /// Cancel path as its window closes. A quit already under way is made
+    /// overruling: an answer already given stands (a window whose guard
+    /// already proceeded closes unasked, an application guard that already
+    /// agreed is not asked again), and a pending one is asked again with
+    /// `source`. When it returns every window is closed, the quit has
+    /// completed, the settings are on disk, and the loop ends at the end of
+    /// the turn, unless guards kept opening windows as theirs closed: the
+    /// quit gives up after 4096 steps in one turn, says so on standard
+    /// error, and returns with windows still open (a Windows session end is
+    /// told it is finished all the same).
     pub(crate) fn quit_now(
         &mut self,
         source: crate::quit::QuitSource,
@@ -1274,11 +1406,46 @@ impl TeksiloAppHandler {
         self.wm.advance_quit(event_loop);
     }
 
+    /// Present the modal requests the windows' trees queued, each over the
+    /// window that asked, in its tree or as a native modal child as the
+    /// request resolves.
+    ///
+    /// Each is presented as the application tree's is
+    /// ([`app_dialog_presentation`](crate::window_manager::app_dialog_presentation)):
+    /// raised, if native, when asked in answer to the user's input or while
+    /// its window or a dialog of it has the focus
+    /// ([`knows_focused_with_dialogs`](crate::window_manager::WindowManager::knows_focused_with_dialogs)).
+    /// Asked otherwise, it opens without taking the focus and the window
+    /// asks for attention, once for the dialog; a native one over its
+    /// window minimised is owed: not shown, the window asking for
+    /// attention, and presented, raised, on the first turn that window
+    /// takes the focus (see
+    /// [`owe_window_dialog`](crate::window_manager::WindowManager::owe_window_dialog)).
+    /// The owed ones due come first, and a native one asked while its window
+    /// owes some waits with them, so the order they were asked in holds,
+    /// unless it is raised: one for the user (their input, a quit's
+    /// question) is presented at once, its window restored first if
+    /// minimised, as the application tree's is. A dialog in the window's
+    /// own tree waits there, minimised with it.
     fn process_modal_requests(&mut self, event_loop: &ActiveEventLoop) -> bool {
         let native_supported = native_modal_windows_supported();
+        let due = self.wm.take_due_owed_dialogs();
         let requests = self.wm.drain_pending_modal_requests();
-        let had_requests = !requests.is_empty();
+        let had_requests = !requests.is_empty() || !due.is_empty();
 
+        // The user is back in the window: what it owes them comes forward.
+        for (window, owed) in due {
+            for request in owed {
+                self.wm.set_raise_next_modal(true);
+                self.open_modal_window(Some(window), request, event_loop);
+                self.wm.set_raise_next_modal(false);
+            }
+        }
+
+        let for_user = self.wm.acts_for_user() || self.wm.quit_awaits_answer();
+        if !requests.is_empty() {
+            self.wm.refresh_minimised_windows();
+        }
         for (source_window, requests) in requests {
             for queued in requests {
                 let resolved = resolve_modal_presentation(
@@ -1289,6 +1456,18 @@ impl TeksiloAppHandler {
 
                 match resolved {
                     ResolvedModalPresentation::InTree => {
+                        // Waiting in its tree over a window the user is not
+                        // in (minimised with it, or behind), it asks for
+                        // their attention as a native one does.
+                        if crate::window_manager::app_dialog_presentation(
+                            for_user,
+                            self.wm.knows_focused_with_dialogs(source_window),
+                            self.wm.knows_minimised(source_window),
+                            false,
+                        ) == crate::window_manager::AppDialogPresentation::Quiet
+                        {
+                            self.wm.ask_attention_for_dialog(source_window);
+                        }
                         if let Some(managed) = self.wm.get_by_teksilo_mut(source_window) {
                             present_in_tree_modal_request(
                                 &mut managed.tree,
@@ -1298,7 +1477,46 @@ impl TeksiloAppHandler {
                         }
                     }
                     ResolvedModalPresentation::NativeWindow => {
-                        self.open_modal_window(Some(source_window), queued.request, event_loop);
+                        use crate::window_manager::AppDialogPresentation;
+                        let presentation = match crate::window_manager::app_dialog_presentation(
+                            for_user,
+                            self.wm.knows_focused_with_dialogs(source_window),
+                            self.wm.knows_minimised(source_window),
+                            true,
+                        ) {
+                            // One for the user (their input, a quit's
+                            // question) goes now; any other waits behind
+                            // those the window owes, so their order holds.
+                            AppDialogPresentation::Raise => AppDialogPresentation::Raise,
+                            _ if self.wm.owes_window_dialogs(source_window) => {
+                                AppDialogPresentation::Owe
+                            }
+                            presentation => presentation,
+                        };
+                        match presentation {
+                            AppDialogPresentation::Owe => {
+                                self.wm.owe_window_dialog(source_window, queued.request);
+                            }
+                            AppDialogPresentation::Raise | AppDialogPresentation::Quiet => {
+                                if presentation == AppDialogPresentation::Quiet {
+                                    self.wm.ask_attention_for_dialog(source_window);
+                                } else {
+                                    // Its window comes back first, as the
+                                    // application tree's does: a dialog is
+                                    // shown only with the window it blocks.
+                                    self.wm.restore_with_owners(source_window);
+                                }
+                                self.wm.set_raise_next_modal(
+                                    presentation == AppDialogPresentation::Raise,
+                                );
+                                self.open_modal_window(
+                                    Some(source_window),
+                                    queued.request,
+                                    event_loop,
+                                );
+                                self.wm.set_raise_next_modal(false);
+                            }
+                        }
                     }
                 }
             }
@@ -1346,21 +1564,24 @@ impl TeksiloAppHandler {
             config = config.title(title);
         }
         if let Some((width, height)) = size {
-            // Native modals size their height to content: the
-            // requested (width, height) is the floor and the OS
-            // window grows to fit taller content (e.g. a
-            // MessageBox "Show details" expander). Without this
-            // the fixed height clips content that exceeds it:
-            // the footer buttons fall below the client edge and
-            // stop receiving clicks. NOTE: deliberately NOT
-            // `resizable(false)`: winit encodes that as
-            // min==max size hints on X11, which would clamp away
-            // the programmatic growth this relies on.
+            // Native modals size to their content on both axes (the
+            // width through `autosize_width_floor`, set below): the
+            // requested (width, height) is the floor, and the OS window
+            // grows to fit content that is taller (a MessageBox "Show
+            // details" expander) or wider (a dialog panel's padding
+            // around content of the requested width). Without this the
+            // fixed size clips the content: the footer buttons fall
+            // below the client edge, or the panel is centred past the
+            // window's sides with its buttons against the edges. NOTE:
+            // deliberately NOT `resizable(false)`: winit encodes that as
+            // min==max size hints on X11, which would clamp away the
+            // programmatic growth this relies on.
             config = config
                 .size(width, height)
                 .min_size(width, height)
                 .size_to_content(SizeToContent::Height);
         }
+        let width_floor = size.map(|(width, _)| width);
         // Honour the request's `ModalCloseBehavior`. Only the
         // Escape half of it is expressible for a native
         // window: there is no "outside" to click, because the
@@ -1392,6 +1613,7 @@ impl TeksiloAppHandler {
         // `WindowManager::close_window_answering`).
         if let Some(managed) = self.wm.get_by_teksilo_mut(id) {
             managed.modal_on_dismiss = on_dismiss;
+            managed.autosize_width_floor = width_floor;
         }
     }
 
@@ -1409,7 +1631,8 @@ impl TeksiloAppHandler {
     /// [`app_dialog_presentation`](crate::window_manager::app_dialog_presentation)
     /// decides: restored and in front when the user asked for it (their
     /// input, an activation token, a window of the application taking the
-    /// focus, a quit waiting on its answer) or the window has the focus;
+    /// focus, a quit waiting on its answer) or the window or a dialog of it
+    /// has the focus;
     /// otherwise shown where it is while the application asks for
     /// attention; and owed, not shown, when it would open a window of its
     /// own over a minimised window. Owed dialogs come first, so the order
@@ -1460,7 +1683,7 @@ impl TeksiloAppHandler {
             );
             let presentation = crate::window_manager::app_dialog_presentation(
                 for_user,
-                self.wm.knows_focused(window),
+                self.wm.knows_focused_with_dialogs(window),
                 self.wm.knows_minimised(window),
                 resolved == ResolvedModalPresentation::NativeWindow,
             );
@@ -2081,6 +2304,7 @@ impl TeksiloAppHandler {
             return None;
         }
         self.wm.note_window_focused(teksilo_id);
+        self.wm.note_attention_answered(teksilo_id);
         Some(teksilo_id)
     }
 
@@ -2799,6 +3023,12 @@ impl TeksiloAppHandler {
     /// closing this turn is passed over. Each offer is
     /// [routed](WidgetTree::dispatch_routed_intent), so a window that does
     /// not take it does not keep it.
+    ///
+    /// An intent that stays in a modal
+    /// ([`stays_in_modal`](teksilo_core::Intent::stays_in_modal): a key's, a
+    /// native menu row's) is input to the dialog, and is offered to none of
+    /// the windows it blocks: it goes to the application tree only, as an
+    /// in-window dialog keeps it from the page.
     fn offer_to_dialog_owners(
         &mut self,
         intents: Vec<(teksilo_core::Intent, Vec<TeksiloWindowId>)>,
@@ -2806,6 +3036,11 @@ impl TeksiloAppHandler {
     ) -> Vec<teksilo_core::Intent> {
         let mut left = Vec::new();
         for (intent, owners) in intents {
+            let owners = if intent.stays_in_modal() {
+                Vec::new()
+            } else {
+                owners
+            };
             let mut taken = false;
             for up in owners {
                 if self.wm.is_closing(up) {
@@ -3565,22 +3800,50 @@ impl TeksiloAppHandler {
         // reaches the OS window on its own — a `MessageBox` taller than its
         // fixed height clips, dropping the footer buttons below the client edge.
         // Drive the size through the reactive `WindowState::size()` → `SetSize`
-        // path (drained in `post_event`); `last_autosize_height` guards against
-        // a measure → resize → re-measure oscillation.
+        // path (drained in `post_event`); `last_autosize` guards against
+        // a measure → resize → re-measure oscillation. A dialog centred over
+        // its owner stays centred on each size it grows to until its size
+        // settles (`autosize_centre`), so a dialog wider than it asked for
+        // does not hang off to one side; a later change keeps its corner.
         if current.size_to_content.sizes_height() {
-            let width_logical = size.0 as f32 / sf;
-            if let Some(intrinsic) = current.tree.measure_root_intrinsic(SizeProposal {
-                width: Some(width_logical),
-                height: None,
-            }) {
-                let target_h = intrinsic.height.ceil().max(1.0) as u32;
-                let cur_h = (size.1 as f32 / sf).round() as u32;
-                if target_h != cur_h && current.last_autosize_height != Some(target_h) {
-                    current.last_autosize_height = Some(target_h);
-                    current
-                        .state
-                        .size()
-                        .set((width_logical.round() as u32, target_h));
+            let logical = (size.0 as f32 / sf, size.1 as f32 / sf);
+            if let Some(target) =
+                size_to_content_target(&current.tree, logical, current.autosize_width_floor)
+            {
+                let now = (logical.0.round() as u32, logical.1.round() as u32);
+                let step = autosize_step(
+                    now,
+                    target,
+                    current.last_autosize,
+                    current.autosize_asked_from,
+                );
+                if step.centre_ends {
+                    current.autosize_centre = None;
+                }
+                if let Some(target) = step.ask {
+                    current.last_autosize = Some(target);
+                    current.autosize_asked_from = Some(now);
+                    // A native dialog cannot be made smaller than its
+                    // content; its requested size stays the floor, as the
+                    // minimum it opened with.
+                    if current.autosize_width_floor.is_some() {
+                        current.platform_window.window().set_min_inner_size(Some(
+                            winit::dpi::LogicalSize::new(target.0, target.1),
+                        ));
+                    }
+                    current.state.size().set(target);
+                    if let Some(centre) = current.autosize_centre {
+                        current
+                            .state
+                            .position()
+                            .set(crate::window_manager::centred_on(
+                                centre,
+                                target,
+                                crate::window_manager::frame_insets(
+                                    current.platform_window.window(),
+                                ),
+                            ));
+                    }
                 }
             }
         }
@@ -4104,8 +4367,10 @@ impl TeksiloAppHandler {
                 // click in the window.
                 if focused && let Some(fid) = self.wm.teksilo_id_for_winit(window_id) {
                     // The user is back: the dialogs the application tree
-                    // owes them are presented in this turn.
+                    // owes them, and those this window owes, are presented
+                    // in this turn.
                     self.wm.note_app_focus_gained();
+                    self.wm.note_owed_dialogs_focus(fid);
                     self.wm.note_focus_gained(fid);
                     self.wm
                         .note_dialog_sign(fid, crate::window_manager::DialogSign::Focused);
@@ -4654,7 +4919,17 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         self.wm.disconnect_redraw_wakers();
         // On macOS this is the last moment: AppKit ends the process right
         // after its `applicationWillTerminate:`, which reaches here, so
-        // `run` never returns to flush.
+        // `run` never returns to flush, and nothing the application holds
+        // is dropped after it.
+        self.flush_settings();
+        // So the application's state is dropped here, on every platform:
+        // each service's `Drop` runs (an analytics adapter's shutdown
+        // flush), with the trees and the closures that hold clones of it.
+        // What their teardown wrote is flushed after.
+        self.app_event_handler = None;
+        self.external_ctx_handler = None;
+        self.loop_tick = None;
+        self.wm.shut_down_app_state();
         self.flush_settings();
         // A signal from now on ends the process, as it would with no loop:
         // only once the settings are on disk, or a signal arriving during
@@ -5979,7 +6254,21 @@ impl TeksiloAppBuilder {
         }
     }
 
-    /// Build and run the application with windowed rendering.
+    /// Build and run the application with windowed rendering, until its
+    /// event loop ends: a quit completed, or the
+    /// [`QuitPolicy`] saying so with no window open.
+    ///
+    /// As the loop ends the settings are written and the application's
+    /// state is dropped: the widget trees, the handlers given to the
+    /// builder, and every service in the app state, whose `Drop` runs then.
+    ///
+    /// On macOS this may not return. When AppKit carries out a quit (the
+    /// Dock menu's Quit, AppleScript's `quit app`, a `terminate:`, a
+    /// logout), it ends the process once Teksilo has answered that the quit
+    /// completed, and the code after `run()` does not run. Do the work of
+    /// the way out in a close guard,
+    /// [`on_quit_requested`](Self::on_quit_requested), or the `Drop` of a
+    /// service registered with [`app_state`](Self::app_state).
     pub fn run(self) {
         self.run_with(
             || {
@@ -6880,6 +7169,76 @@ mod tests {
         assert!(
             tree.has_pending_modal_dismissal(),
             "an unclaimed Escape inside a native modal must ask to close its window"
+        );
+    }
+
+    /// A `MessageBox` in a native dialog window asks for 460 wide, the size
+    /// its own column is; the dialog panel pads it 24 on each side, so the
+    /// window must grow to 508 wide or the box starts at x = 0, its buttons
+    /// against the window's edges. Built as `open_modal_window` builds it,
+    /// sized as the frame loop sizes it. With the width left fixed the box
+    /// sits at x = 0.
+    #[test]
+    fn a_native_message_box_window_is_as_wide_as_its_padded_content() {
+        use teksilo_widgets::{EventContextMessageBoxExt, MessageBox, MessageBoxButtons};
+        let theme = teksilo_core::presets::intui::light();
+        let mut asking = WidgetTree::new().with_theme(theme.clone());
+        let ask = asking.add(Button::new(lit!("Close")).on_activate_fn(|ctx| {
+            ctx.present_message_box(
+                MessageBox::question(lit!("Save the changes before closing?"))
+                    .buttons(MessageBoxButtons::OkCancel),
+            );
+        }));
+        asking.layout(teksilo_canvas::SizeProposal::exact(200.0, 100.0));
+        asking.click(ask);
+        let request = asking
+            .drain_pending_modal_requests()
+            .pop()
+            .expect("a modal request")
+            .request;
+        let floor = request.size.expect("a requested size");
+        let ModalContent::Deferred(builder) = request.content else {
+            panic!("deferred content");
+        };
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let content = builder(&mut tree);
+        wrap_native_modal_in_escape_route(&mut tree, content);
+
+        let mut size = floor;
+        for _ in 0..4 {
+            tree.layout(teksilo_canvas::SizeProposal::exact(
+                size.0 as f32,
+                size.1 as f32,
+            ));
+            match size_to_content_target(&tree, (size.0 as f32, size.1 as f32), Some(floor.0)) {
+                Some(target) if target != size => size = target,
+                _ => break,
+            }
+        }
+        tree.layout(teksilo_canvas::SizeProposal::exact(
+            size.0 as f32,
+            size.1 as f32,
+        ));
+        let mut stack = tree.roots();
+        let mut message_box = None;
+        while let Some(id) = stack.pop() {
+            if tree
+                .widget_type_name(id)
+                .is_some_and(|name| name.ends_with("MessageBox"))
+            {
+                message_box = Some(id);
+                break;
+            }
+            stack.extend(tree.children(id));
+        }
+        let bounds = tree.bounds(message_box.expect("the MessageBox"));
+        assert!(
+            bounds.x >= 24.0 - 0.5 && bounds.x + bounds.width <= size.0 as f32 - 24.0 + 0.5,
+            "the box inside the panel's padding: {bounds:?} in a window {size:?}"
+        );
+        assert!(
+            size.0 >= floor.0 && size.1 >= 1,
+            "never below the request: {size:?}"
         );
     }
 

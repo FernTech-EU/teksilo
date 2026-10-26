@@ -146,6 +146,13 @@ impl ModalRequest {
         self
     }
 
+    /// The size, in logical pixels, of the native window the modal opens
+    /// in when it is presented as one: its floor, since the window grows
+    /// on either axis to fit its content (a dialog panel's padding around
+    /// content of this width, an expander opened). It is centred over the
+    /// window it blocks on the size it first grows to; an expander opened
+    /// later keeps its corner. Ignored in-tree, where the overlay takes its
+    /// content's size.
     pub fn size(mut self, width: u32, height: u32) -> Self {
         self.size = Some((width, height));
         self

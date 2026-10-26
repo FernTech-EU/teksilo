@@ -41,10 +41,17 @@
 //! A quit runs in one of three [`QuitMode`]s: guarded (the above), forced
 //! ([`EventContext::quit_forced`]: no guard is asked, nothing is awaited),
 //! or overruling, for a source that leaves no time to ask (a session
-//! ending now, a termination signal): every guard is asked once, so it can
+//! ending now, a termination signal): every guard is asked, so it can
 //! save, but whatever it answers its window closes. A request while a quit
 //! is under way joins it, and one in a stronger mode makes the quit under
-//! way that mode, on behalf of its own source. Once a quit has completed
+//! way that mode, on behalf of its own source. Upgraded so, an answer
+//! already given stands and a pending one is asked again: a window whose
+//! guard already answered (a stored `proceed()`, Don't Save) closes without
+//! being asked again, and an application guard that already agreed is not
+//! asked again, while a guard whose answer is still pending (its box up) is
+//! asked again with the new source, so it can save, and its box answers
+//! Cancel as its window closes. A fresh overruling quit asks every guard
+//! once. Once a quit has completed
 //! the application is ending, and a request starts nothing: a service
 //! manager that sends `SIGTERM` and `SIGHUP` together gets its guards asked
 //! once.
@@ -66,10 +73,11 @@
 //! or the quit is cancelled. A source with no time to ask (a session ending
 //! now, Windows' `WM_ENDSESSION`, a termination signal) calls
 //! `TeksiloAppHandler::quit_now`, which runs an overruling quit to its end
-//! before it returns: every guard is asked once and reads the source, so a
+//! before it returns: every guard not already answered is asked and reads
+//! the source (once, unless a pending answer is asked again, as above), so a
 //! document's guard saves without asking; a refusal or a deferred answer is
-//! overruled, and every dialog still up answers through its own Cancel path
-//! as its window closes.
+//! overruled, and every dialog still up, or asked and not shown yet,
+//! answers through its own Cancel path as its window closes.
 //!
 //! [`EventContext::quit`]: teksilo_core::widget::EventContext::quit
 //! [`EventContext::quit_forced`]: teksilo_core::widget::EventContext::quit_forced
@@ -84,9 +92,11 @@ pub(crate) use teksilo_core::QuitSource;
 pub(crate) enum QuitMode {
     /// Every guard is asked, and can refuse the quit or defer its answer.
     Guarded,
-    /// Every guard is asked once, so it can save, and cannot refuse: a
-    /// veto or a deferred answer is overruled and the window closes. For a
-    /// source that leaves no time to ask.
+    /// Every guard is asked, so it can save, and cannot refuse: a veto or
+    /// a deferred answer is overruled and the window closes. For a source
+    /// that leaves no time to ask. A quit upgraded to it keeps the answers
+    /// already given and asks the pending ones again (see the module
+    /// documentation).
     Overruling,
     /// No guard is asked.
     Forced,

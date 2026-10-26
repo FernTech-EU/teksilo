@@ -82,7 +82,7 @@ pub(crate) struct NativeMenuBinding {
 /// and on a locale change (or a reload of the translations), so the menus'
 /// titles and the App menu's labels, which have no item to update in place,
 /// follow it too.
-pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMenuBinding> {
+pub(crate) fn install(model: &MenuModel, ctx: &mut BuildContext) -> Option<NativeMenuBinding> {
     let handle = ctx.app_state::<NativeMenuHandle>()?.clone();
     let window_id = ctx.window()?.id();
     let poster = ctx.poster()?.clone();
@@ -106,11 +106,28 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
     let application_app_menu = holder
         .and_then(|holder| holder.model())
         .and_then(|model| app_menu_of(&model));
+    // The shortcuts the rows name, looked up in the window's registry, which
+    // can come to hold one after this runs: the application menu's copies
+    // reach a window an action of the application tree opens only once the
+    // tree is back. Each one asked is followed, so the bar installs again
+    // when it changes.
+    let asked = std::cell::RefCell::new(Vec::new());
     let resolved = resolve_model(
         Some(model),
         || application_app_menu.unwrap_or_else(StandardMenu::app),
-        &|id| ctx.effective_shortcut(id).and_then(|eff| eff.primary),
+        &|id| {
+            asked.borrow_mut().push(id);
+            ctx.effective_shortcut(id).and_then(|eff| eff.primary)
+        },
     );
+    for id in asked.into_inner() {
+        let chord = ctx.effective_shortcut_signal(id);
+        chord.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            teksilo_core::BindingLevel::Rebuild,
+        );
+    }
     handle.set_window_menu(window_id, resolved.snapshot, resolved.activations, poster);
     Some(NativeMenuBinding {
         _observers: wire_observers(resolved.reactive, &handle),
@@ -129,7 +146,7 @@ pub(crate) fn install_application(
     poster: std::sync::Arc<dyn teksilo_core::AppEventPoster>,
     shortcut: &dyn Fn(&str) -> Option<KeyStroke>,
 ) -> NativeMenuBinding {
-    let resolved = resolve_model(model, StandardMenu::app, shortcut);
+    let resolved = resolve_model(model, StandardMenu::app, &|id| shortcut(id));
     handle.set_app_menu(
         resolved.snapshot,
         resolved.activations,
@@ -154,7 +171,7 @@ struct Resolved {
 fn resolve_model(
     model: Option<&MenuModel>,
     app_menu: impl FnOnce() -> StandardMenu,
-    shortcut: &dyn Fn(&str) -> Option<KeyStroke>,
+    shortcut: &dyn Fn(&'static str) -> Option<KeyStroke>,
 ) -> Resolved {
     let mut activations = HashMap::new();
     let mut reactive = Vec::new();
@@ -329,7 +346,7 @@ struct ReactiveItem {
 
 fn resolve_node(
     node: &MenuNode,
-    shortcut: &dyn Fn(&str) -> Option<KeyStroke>,
+    shortcut: &dyn Fn(&'static str) -> Option<KeyStroke>,
     activations: &mut HashMap<MenuItemId, NativeMenuActivation>,
     reactive: &mut Vec<ReactiveItem>,
 ) -> Option<NativeMenuNode> {
@@ -421,7 +438,7 @@ fn conventional_chord(key: &str) -> NativeKeyEquivalent {
 fn resolve_standard(
     sm: &StandardMenu,
     activations: &mut HashMap<MenuItemId, NativeMenuActivation>,
-    shortcut: &dyn Fn(&str) -> Option<KeyStroke>,
+    shortcut: &dyn Fn(&'static str) -> Option<KeyStroke>,
 ) -> NativeMenuNode {
     // The registry's answer, resolved through the primary-accelerator
     // convention exactly as `MenuEntry`'s chord is, so this row cannot
@@ -730,6 +747,44 @@ mod tests {
                 )
             })
             .expect("an App menu")
+    }
+
+    /// A window's bar follows its registry: a shortcut a row names that the
+    /// window comes to hold after the bar installed (the application menu's
+    /// copy, given to a window an application-tree action opened) reaches
+    /// the native row. The App menu's Quit had no ⌘Q until the window was
+    /// built again. Leaving out the per-id bindings in `install` leaves it
+    /// without.
+    #[test]
+    fn a_windows_bar_follows_a_shortcut_its_window_comes_to_hold() {
+        use crate::menu::StandardMenu;
+        use teksilo_core::event::Key;
+        use teksilo_core::shortcut::Shortcut;
+
+        let model = MenuModel::new().standard_menu(
+            StandardMenu::app()
+                .quit_intent("app.quit")
+                .quit_shortcut("app.quit"),
+        );
+        let (backend, _handle, mut tree) = install_recorded(model, None);
+        let quit = |backend: &teksilo_platform::native_menu::MemoryNativeMenuBackend| {
+            let snapshot = backend
+                .menu_for(teksilo_core::window::TeksiloWindowId::new(1))
+                .expect("installed");
+            chord(quit_of(app_node(&snapshot)))
+        };
+        assert_eq!(quit(&backend), None, "no shortcut held yet");
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.quit")
+                .primary(KeyStroke::ctrl(Key::Q))
+                .build(),
+        );
+        tree.layout(teksilo_canvas::SizeProposal::exact(800.0, 600.0));
+        assert_eq!(
+            quit(&backend),
+            Some(("q".to_string(), true, false)),
+            "the row shows the chord the window now holds"
+        );
     }
 
     /// A window's own menu is the window's alone: it never sets the

@@ -490,6 +490,7 @@ impl Widget for LogView {
                 ctx,
                 move |command, ctx| log_stream::run_log_standard_edit(&state, command, ctx),
                 move |command| log_stream::log_standard_edit_available(&available, command),
+                log_stream::log_standard_edit_passes_on,
             );
         }
 

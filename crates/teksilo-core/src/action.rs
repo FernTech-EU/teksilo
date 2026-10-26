@@ -43,9 +43,14 @@ pub struct Action {
     /// menu row and never by dispatch. See
     /// [`ActionBuilder::available_when`]. `None` means available.
     available_when: Option<Availability>,
+    /// Whether the handler passes the intent on now, asked by what greys a
+    /// menu row. See [`ActionBuilder::passes_on_when`]. `None` means it
+    /// never does.
+    passes_on_when: Option<Availability>,
 }
 
-/// The predicate behind [`ActionBuilder::available_when`].
+/// The predicate behind [`ActionBuilder::available_when`] and
+/// [`ActionBuilder::passes_on_when`].
 pub(crate) type Availability = Rc<dyn Fn() -> bool>;
 
 impl std::fmt::Debug for Action {
@@ -55,6 +60,7 @@ impl std::fmt::Debug for Action {
             .field("handler", &"<closure>")
             .field("enabled_when", &self.enabled_when.is_some())
             .field("available_when", &self.available_when.is_some())
+            .field("passes_on_when", &self.passes_on_when.is_some())
             .finish()
     }
 }
@@ -68,6 +74,7 @@ impl Action {
             handler: None,
             enabled_when: None,
             available_when: None,
+            passes_on_when: None,
         }
     }
 
@@ -88,9 +95,26 @@ impl Action {
                 .is_none_or(|available| available())
     }
 
+    /// Whether a dispatch reaching this action now would go past it: it
+    /// is disabled, or its handler [passes the intent on](ActionBuilder::passes_on_when).
+    /// The first action on a route this answers `false` for is the one a
+    /// sent intent stops at, and the one a menu row asks.
+    pub(crate) fn passes_on(&self) -> bool {
+        !self.is_enabled()
+            || self
+                .passes_on_when
+                .as_ref()
+                .is_some_and(|passes_on| passes_on())
+    }
+
     /// The [availability predicate](ActionBuilder::available_when), shared.
     pub(crate) fn availability(&self) -> Option<Availability> {
         self.available_when.clone()
+    }
+
+    /// The [pass-on predicate](ActionBuilder::passes_on_when), shared.
+    pub(crate) fn pass_on(&self) -> Option<Availability> {
+        self.passes_on_when.clone()
     }
 }
 
@@ -103,6 +127,7 @@ pub struct ActionBuilder {
     handler: Option<ActionHandler>,
     enabled_when: Option<Prop<bool>>,
     available_when: Option<Availability>,
+    passes_on_when: Option<Availability>,
 }
 
 impl ActionBuilder {
@@ -130,6 +155,27 @@ impl ActionBuilder {
     #[doc(hidden)]
     pub fn available_when(mut self, available: impl Fn() -> bool + 'static) -> Self {
         self.available_when = Some(Rc::new(available));
+        self
+    }
+
+    /// Whether the handler, built with
+    /// [`on_invoke_with_response`](Self::on_invoke_with_response), would
+    /// pass the intent on if it ran now (a read-only field's Cut, an
+    /// editor's Undo with nothing to undo when the tree passes those on).
+    /// It must answer as the handler decides: what greys a menu row asks it
+    /// to find the action a dispatch would stop at, which is the first
+    /// enabled action on the route this answers `false` for, and asks that
+    /// action's [availability](Self::available_when). So a field with
+    /// nothing selected, under a page with its own Copy, greys Copy (Copy
+    /// chosen there reaches the field and stops), and a read-only field
+    /// leaves Cut to whatever its Cut goes on to.
+    ///
+    /// Dispatch never asks it: the handler alone decides. Like `available`,
+    /// it runs outside every event handler, on every query, and must be
+    /// cheap. Without it, the action is taken never to pass anything on.
+    #[doc(hidden)]
+    pub fn passes_on_when(mut self, passes_on: impl Fn() -> bool + 'static) -> Self {
+        self.passes_on_when = Some(Rc::new(passes_on));
         self
     }
 
@@ -164,6 +210,7 @@ impl ActionBuilder {
                 .expect("ActionBuilder requires on_invoke or on_invoke_with_response"),
             enabled_when: self.enabled_when,
             available_when: self.available_when,
+            passes_on_when: self.passes_on_when,
         }
     }
 }
@@ -183,10 +230,11 @@ impl ActionBuilder {
 /// It keeps each action's [enabled predicate](ActionBuilder::enabled_when),
 /// not its value, so an action enabled or disabled since the last publish is
 /// answered for as it is now, and its
-/// [availability](ActionBuilder::available_when) the same way, for what greys
-/// a menu row. An action that may decline when it runs
-/// ([`on_invoke_with_response`](ActionBuilder::on_invoke_with_response)) counts
-/// as taking the intent.
+/// [availability](ActionBuilder::available_when) and
+/// [pass-on predicate](ActionBuilder::passes_on_when) the same way, for what
+/// greys a menu row. An action that may decline when it runs
+/// ([`on_invoke_with_response`](ActionBuilder::on_invoke_with_response))
+/// without saying when counts as taking the intent.
 #[doc(hidden)]
 #[derive(Clone, Default)]
 pub struct ApplicationScope {
@@ -194,8 +242,13 @@ pub struct ApplicationScope {
 }
 
 /// One action of an [`ApplicationScope`]: its intent name, its enabled
-/// predicate and its availability.
-pub(crate) type ScopedAction = (&'static str, Option<Prop<bool>>, Option<Availability>);
+/// predicate, its availability and its pass-on predicate.
+pub(crate) type ScopedAction = (
+    &'static str,
+    Option<Prop<bool>>,
+    Option<Availability>,
+    Option<Availability>,
+);
 
 impl ApplicationScope {
     /// An empty scope: the application takes nothing.
@@ -207,40 +260,57 @@ impl ApplicationScope {
     /// what decides where a shortcut's intent goes. Availability does not
     /// count, as it does not in a dispatch.
     pub fn takes(&self, name: &str) -> bool {
-        self.actions.borrow().iter().any(|(intent, enabled, _)| {
-            *intent == name && enabled.as_ref().is_none_or(|enabled| enabled.get())
-        })
+        self.actions
+            .borrow()
+            .iter()
+            .any(|(intent, enabled, _, _)| *intent == name && Self::enabled(enabled))
     }
 
     /// Whether a menu row for intents named `name` shows enabled for what
-    /// the application takes: an enabled application action that
-    /// [has something to act on](ActionBuilder::available_when) takes them.
+    /// the application takes: the first enabled application action for it
+    /// that does not [pass it on](ActionBuilder::passes_on_when), the one an
+    /// intent sent there stops at,
+    /// [has something to act on](ActionBuilder::available_when).
     pub(crate) fn offers(&self, name: &str) -> bool {
         self.actions
             .borrow()
             .iter()
-            .any(|action| action.0 == name && Self::available(action))
+            .find(|action| action.0 == name && Self::stops(action))
+            .is_some_and(Self::available)
     }
 
-    /// Every intent name an enabled application action with something to
-    /// act on takes, in the order they were published, possibly more than
-    /// once: what greys the menu rows.
+    /// Every intent name the application [offers](Self::offers), in the
+    /// order they were published, each once: what greys the menu rows.
     pub fn taken(&self) -> Vec<&'static str> {
-        self.actions
-            .borrow()
-            .iter()
-            .filter(|action| Self::available(action))
-            .map(|(intent, _, _)| *intent)
+        let actions = self.actions.borrow();
+        let mut decided: Vec<(&'static str, bool)> = Vec::new();
+        for action in actions.iter().filter(|action| Self::stops(action)) {
+            if decided.iter().all(|(name, _)| *name != action.0) {
+                decided.push((action.0, Self::available(action)));
+            }
+        }
+        decided
+            .into_iter()
+            .filter_map(|(name, available)| available.then_some(name))
             .collect()
     }
 
-    fn available((_, enabled, available): &ScopedAction) -> bool {
+    fn enabled(enabled: &Option<Prop<bool>>) -> bool {
         enabled.as_ref().is_none_or(|enabled| enabled.get())
-            && available.as_ref().is_none_or(|available| available())
+    }
+
+    /// Whether an intent reaching `action` stops there: it is enabled and
+    /// does not pass the intent on now.
+    fn stops((_, enabled, _, passes_on): &ScopedAction) -> bool {
+        Self::enabled(enabled) && passes_on.as_ref().is_none_or(|passes_on| !passes_on())
+    }
+
+    fn available((_, _, available, _): &ScopedAction) -> bool {
+        available.as_ref().is_none_or(|available| available())
     }
 
     /// Replace what the application takes with `actions`, intent names
-    /// with their enabled predicates and availability.
+    /// with their enabled predicates, availability and pass-on predicates.
     pub(crate) fn replace(&self, actions: Vec<ScopedAction>) {
         *self.actions.borrow_mut() = actions;
     }
@@ -250,7 +320,7 @@ impl std::fmt::Debug for ApplicationScope {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let actions = self.actions.borrow();
         f.debug_list()
-            .entries(actions.iter().map(|(intent, _, _)| intent))
+            .entries(actions.iter().map(|(intent, _, _, _)| intent))
             .finish()
     }
 }

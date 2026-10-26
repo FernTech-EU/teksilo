@@ -72,8 +72,11 @@ by crate for clarity, not because crates version independently.
   Unix.** While the event loop runs, either signal asks the application's
   quit guard and every window's close guard once, with
   `QuitSource::Signal`, so a guard can save without asking; a refusal or a
-  deferred answer is overruled, the settings are written, and the
-  application ends normally instead of dying with nothing saved. Both
+  deferred answer is overruled (a box the guard asked for answers Cancel,
+  shown or not yet), the settings are written, and the application ends
+  normally instead of dying with nothing saved. Arriving while a quit waits
+  on a guard's answer, it asks that guard again with the new source;
+  answers already given stand. Both
   signals at once (systemd ends a login session with both) quit once. A
   signal the process was started with ignored (`SIGHUP` under `nohup`)
   stays ignored. `SIGINT` (Ctrl+C) keeps its default. An option that leaves
@@ -297,7 +300,9 @@ by crate for clarity, not because crates version independently.
   application tree, as an in-window dialog's leftover intent walks on to the
   page. It was dropped, so a `MessageBox` answer on macOS and Windows that
   sent the document a command instead of closing it by id reached no action
-  of the document.
+  of the document. A key's intent, and a macOS menu bar row's, is the
+  dialog's input: what the dialog leaves of it goes to the application tree
+  only, as an in-window dialog keeps it from the page.
 - **Breaking.** `WindowManager::refocus_modal_child` takes `&mut self`, since
   it may restore the window it raises.
 
@@ -313,9 +318,9 @@ by crate for clarity, not because crates version independently.
 - **Breaking.** `MenuItemState` has a new variant, so an exhaustive `match`
   on it needs a `ReflectRadio` arm.
 - **A `MenuModel` row whose only effect is its intent greys out while
-  nothing takes the intent**: no enabled action on its route from the
+  choosing it would do nothing**: no enabled action on its route from the
   window's focus, no global action of the window, none of the application
-  tree's. The in-window row follows that while its menu is open; the macOS
+  tree's, or the action the intent would stop at has nothing to act on. The in-window row follows that while its menu is open; the macOS
   menu bar is brought up to date after every turn of the event loop, from
   the key window's focused widget as it is, where its rows send their
   intent (a field in an open popover included), so a row there greys out
@@ -376,6 +381,10 @@ by crate for clarity, not because crates version independently.
 - **Breaking.** `NativeMenuActivation` has a `quits` field: the activation
   of the App menu's Quit row says it is one. Code that builds an activation
   has to set it.
+- **Breaking.** `PlatformWindow::new_with_a11y` takes an `activate` flag:
+  `false` shows the window without making it the key or focused window
+  (macOS, and on Windows for a window built with `with_active(false)`).
+  Pass `true` for the previous behaviour.
 
 #### Settings
 
@@ -432,6 +441,20 @@ by crate for clarity, not because crates version independently.
 - **A `MenuModel` entry hidden with `visible` reappears in the macOS menu
   bar when its signal turns true.** It was left out of the native menu, and
   came back only when something rebuilt the menu.
+- **Edit menu rows for cut, copy, paste, paste unformatted, select all, undo
+  and redo, in a window's `MenuBar` and in the macOS menu bar, are greyed out
+  when the focused text widget has nothing for them to act on**: Copy with
+  nothing selected or in a masked password field, Cut also in a read-only
+  widget, Paste in a read-only widget, Select All in an empty one, Undo and
+  Redo with nothing to undo or redo. This covers `TextInputField` (and
+  `TextInput`, `PasswordField`, `SpinBox`, `SearchField`), `RichTextEditor`,
+  `CodeEditor` and `LogView`; a code editor and a log view copy the caret's
+  line, so their Copy needs text, not a selection. A row asks the action its
+  command would stop at: a field with nothing selected greys Copy even under
+  the application's own Copy, which choosing it would never reach, and a
+  widget that passes a command on (Cut in a read-only field, Undo with no
+  history under `set_empty_history_passes_on(true)`) leaves the row to the
+  action it passes it to. The shortcuts behave as before.
 
 #### Core
 
@@ -460,14 +483,47 @@ by crate for clarity, not because crates version independently.
 - **A dialog window opened with no input from the user no longer takes the
   focus from another application.** A modal window comes to the front when
   it opens in answer to the user's input or over a window that has the
-  focus; otherwise (a timer's, another thread's) it opens where it is. On
-  macOS a dialog opened over a minimised window is no longer drawn with that
-  window still in the Dock.
+  focus, itself or through one of its dialogs; otherwise (a timer's,
+  another thread's) it opens where it is, without taking the keyboard from
+  the window the user is typing in (on macOS and Windows; on X11 and
+  Wayland the window manager decides). On macOS a dialog opened over a
+  minimised window is no longer drawn with that window still in the Dock.
+  A window's `MessageBox` or `present_modal` asked that way is presented as
+  the application tree's is, in a window of its own (macOS, Windows) or in
+  the window alike. While its window is not focused, itself or through one
+  of its dialogs, the application asks for attention once for it (the Dock
+  icon bounces, only while the application is in the background; the
+  window's taskbar button flashes until it comes to the front; on X11 an
+  urgency hint, withdrawn when the window or a dialog of it takes the
+  focus); a second dialog from a window whose first dialog has the focus
+  opens in front and asks for nothing. One
+  that would open a window of its own over its window minimised waits: the
+  dialog is shown, in front, when its window takes the focus; its window
+  closing, or a quit, answers it as dismissed (Cancel). One asked in answer
+  to the user's input, or a quit's question, does not wait: its window is
+  restored and the dialog shown over it in front, ahead of any the window
+  owes.
 - **A restored window opens where it was on macOS.** It opened a title
   bar higher each time: macOS placed the content's corner at the saved
   position, which is the frame's. A `WindowConfig::position` is now the
   frame's corner there too, as on every platform, and a dialog opens
   centred over its owner rather than half a title bar above.
+- **The application's services are dropped as the event loop ends**, on
+  every platform, so a service's `Drop` runs (the analytics adapters'
+  final send): on macOS, AppKit ends the process after a Dock Quit, a
+  logout or an Apple-event quit without `run()` returning, and nothing was
+  dropped then. Code after `run()` in `main` still does not run in that
+  case on macOS; the guides say where to put it.
+- **A `MessageBox` in a window of its own (macOS, Windows) has room for its
+  padding.** Its window was the requested width, the panel's padding left
+  out, so the box was centred past the window's sides and its buttons
+  touched the edges. A native dialog window now grows to its content on
+  both axes, never below the requested size, and its frame is centred on
+  its window's frame on the size it grows to (computed from the content's
+  size, it sat half a title bar low). The user cannot shrink it below its
+  content. Once the window system gives it another size than the one
+  asked for (a screen too small), a later change of its content keeps its
+  corner.
 - **A small window comes back at its own size.** A window configured
   smaller than 320 x 240 with no `min_size` (a tool palette) was restored
   at least 320 x 240, so it grew on its first restore. The floor is now the

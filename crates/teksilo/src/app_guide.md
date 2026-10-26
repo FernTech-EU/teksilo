@@ -343,7 +343,8 @@ impl Widget for Root {
   yourself: handle the app's own undo with `Action::new(StandardEdit::Undo.id())` (e.g.
   `register_action_global`). A focused text widget's action answers first; yours runs when
   focus is elsewhere. A shortcut whose intent no action handles leaves its key to the
-  focused widget.
+  focused widget. The built-in text widgets grey their Edit menu rows when there is
+  nothing to act on; the shortcut still reaches the widget.
 - While an editable `RichTextEditor` exists the tree also binds `format.bold` / `italic` /
   `underline` / `insert_paragraph` (`FormatShortcut`), and `CodeEditor` binds
   `code.toggle_comment` / `code.duplicate` (`CodeShortcut`). Same rule: don't bind Ctrl+B or
@@ -422,7 +423,14 @@ application of either. For a question, `ctx.present_message_box(MessageBox::ques
 or `ctx.present_modal(..)` picks a native or in-window presentation per platform, and
 works from the application tree too. A forced close of the owner closes its dialogs
 first, each answering through its own Cancel path (a `MessageBox` reports its escape
-button, dismissed programmatically).
+button, dismissed programmatically). A dialog the app raises without the user's input (a
+timer, another thread) takes no focus from another application: it asks for the user's
+attention, and over a minimised window it waits, shown in front once the user comes back
+to that window (answered Cancel if the window closes or the app quits first).
+
+**Placement.** `WindowConfig::position(x, y)` is the frame's top-left corner, title bar
+included, on every platform (Wayland ignores it). A dialog with none is centred over its
+owner.
 
 **Closing and quitting.**
 
@@ -481,6 +489,10 @@ button, dismissed programmatically).
 - Every way out (a quit, a termination signal, a session end, the end of the event
   loop) writes the settings files the app opened itself, and with a `SettingsBundle`
   its settings store and window state too.
+- On macOS `run()` may not return: after a quit AppKit carries out (the Dock's Quit, a
+  logout), the process ends right after the event loop's end. Put shutdown work in a
+  guard, in `on_quit_requested`, or in the `Drop` of an `app_state` service, never after
+  `run()`.
 
 ## Theming
 

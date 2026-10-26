@@ -171,6 +171,24 @@ pub(crate) fn sync_all(
     }
 }
 
+/// What the windows' copies are made from while the application tree is
+/// taken out (one of its handlers runs): the copies of the application
+/// tree's declarations of the `wanted` shortcut ids, with its user overrides
+/// of them. A window an action of the application tree opens is created
+/// then, and gets its copies from this.
+pub(crate) fn declarations(wanted: Vec<&'static str>, app: &ShortcutRegistry) -> ShortcutRegistry {
+    let mut declared = ShortcutRegistry::new();
+    for id in wanted {
+        if let Some(shortcut) = app.get_default(id) {
+            declared.register(mirror(shortcut));
+            if let Some(override_) = app.override_for(id) {
+                declared.put_override(id, override_);
+            }
+        }
+    }
+    declared
+}
+
 /// Whether `copy` is what [`mirror`] makes of `declared`: the same fields,
 /// a text or a predicate the same value or the same signal. A text or a
 /// predicate derived from signals compares unequal, so its copy is made

@@ -552,16 +552,52 @@ pub(super) fn standard_edit_available(state: &SharedState, command: StandardEdit
     }
 }
 
+/// Whether the editor declines a standard edit command now, which passes the
+/// intent on to an ancestor's action and then to the plain key: a command
+/// the editor's [`CommandFilter`](crate::common::editor_runtime::CommandFilter)
+/// refuses (an application that must not route a refused Undo elsewhere asks
+/// the focused text surface's `history_frozen` in its own action), and with
+/// `empty_history_passes_on` (the tree's
+/// [`TextSurfaces::set_empty_history_passes_on`](teksilo_core::text_surface::TextSurfaces::set_empty_history_passes_on))
+/// Undo with nothing to undo and Redo with nothing to redo.
+/// [`run_standard_edit`] declines exactly these, and a menu row asks this to
+/// know whether the editor is where its command stops. `false` while the
+/// state is borrowed.
+pub(super) fn standard_edit_passes_on(
+    state: &SharedState,
+    command: StandardEdit,
+    empty_history_passes_on: bool,
+) -> bool {
+    state
+        .try_borrow()
+        .is_ok_and(|st| declines(&st, command, empty_history_passes_on))
+}
+
+fn declines(st: &EditorState, command: StandardEdit, empty_history_passes_on: bool) -> bool {
+    let filter = st.policy.command_filter;
+    let kind = match command {
+        StandardEdit::SelectAll => EditCommandKind::SelectAll,
+        StandardEdit::Copy => EditCommandKind::Copy,
+        StandardEdit::Cut => EditCommandKind::Cut,
+        StandardEdit::Paste => EditCommandKind::Paste,
+        StandardEdit::PastePlain => EditCommandKind::PasteUnformatted,
+        StandardEdit::Undo => EditCommandKind::Undo,
+        StandardEdit::Redo => EditCommandKind::Redo,
+        _ => return true,
+    };
+    !filter.accepts(kind)
+        || (empty_history_passes_on
+            && match command {
+                StandardEdit::Undo => !st.document.can_undo(),
+                StandardEdit::Redo => !st.document.can_redo(),
+                _ => false,
+            })
+}
+
 /// Run one of the standard edit commands, as its `edit.*` action does.
 ///
-/// Returns whether it ran. A command the editor's
-/// [`CommandFilter`](crate::common::editor_runtime::CommandFilter) refuses is declined, which
-/// passes the intent on to an ancestor's action and then to the plain key —
-/// an application that must not route a refused Undo elsewhere asks the
-/// focused text surface's `history_frozen` in its own action. With
-/// `empty_history_passes_on` (the tree's
-/// [`TextSurfaces::set_empty_history_passes_on`](teksilo_core::text_surface::TextSurfaces::set_empty_history_passes_on)),
-/// Undo with nothing to undo and Redo with nothing to redo are declined too.
+/// Returns whether it ran: it declines what [`standard_edit_passes_on`] says
+/// it does, which passes the intent on.
 pub(super) fn run_standard_edit(
     state: &SharedState,
     command: StandardEdit,
@@ -576,9 +612,11 @@ pub(super) fn run_standard_edit(
             st.select_all_level = 0;
             st.select_all_anchor_cell = None;
         }
-        let filter = st.policy.command_filter;
+        if declines(&st, command, empty_history_passes_on) {
+            return false;
+        }
         match command {
-            StandardEdit::SelectAll if filter.accepts(EditCommandKind::SelectAll) => {
+            StandardEdit::SelectAll => {
                 apply_select_all_ladder(&mut st);
                 // Horizontal motion is invalidated regardless.
                 st.preferred_x = None;
@@ -588,33 +626,27 @@ pub(super) fn run_standard_edit(
                 // which was just incremented.
                 KeyAction::KeepPreferredX
             }
-            StandardEdit::Copy if filter.accepts(EditCommandKind::Copy) => {
+            StandardEdit::Copy => {
                 clipboard::copy(&mut st, ctx);
                 KeyAction::ClearPreferredX
             }
-            StandardEdit::Cut if filter.accepts(EditCommandKind::Cut) => {
+            StandardEdit::Cut => {
                 clipboard::cut(&mut st, ctx);
                 KeyAction::ClearPreferredX
             }
-            StandardEdit::Paste if filter.accepts(EditCommandKind::Paste) => {
+            StandardEdit::Paste => {
                 clipboard::paste(&mut st, ctx);
                 KeyAction::ClearPreferredX
             }
-            StandardEdit::PastePlain if filter.accepts(EditCommandKind::PasteUnformatted) => {
+            StandardEdit::PastePlain => {
                 clipboard::paste_unformatted(&mut st, ctx);
                 KeyAction::ClearPreferredX
             }
-            StandardEdit::Undo
-                if filter.accepts(EditCommandKind::Undo)
-                    && (st.document.can_undo() || !empty_history_passes_on) =>
-            {
+            StandardEdit::Undo => {
                 let _ = st.document.undo();
                 KeyAction::ClearPreferredX
             }
-            StandardEdit::Redo
-                if filter.accepts(EditCommandKind::Redo)
-                    && (st.document.can_redo() || !empty_history_passes_on) =>
-            {
+            StandardEdit::Redo => {
                 let _ = st.document.redo();
                 KeyAction::ClearPreferredX
             }

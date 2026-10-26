@@ -209,10 +209,24 @@ pub(crate) struct ManagedWindow {
     /// with a wake timer so the last one is not left undelivered.
     pub a11y_delivered_walk: u64,
     pub a11y_delivered_at: Option<std::time::Instant>,
-    /// Last height (logical px) applied by the size-to-content auto-resize.
-    /// Guards against a measure → resize → re-measure oscillation: a resize is
+    /// Last size (logical px) applied by the size-to-content auto-resize.
+    /// Guards against a measure, resize, re-measure oscillation: a resize is
     /// only issued when the freshly-measured target differs from this.
-    pub last_autosize_height: Option<u32>,
+    pub(crate) last_autosize: Option<(u32, u32)>,
+    /// The window's size when [`last_autosize`](Self::last_autosize) was
+    /// asked for: a size other than either since means the window system
+    /// answered with its own (see [`autosize_step`](crate::app::autosize_step)).
+    pub(crate) autosize_asked_from: Option<(u32, u32)>,
+    /// With size-to-content, the width follows the content too, never
+    /// narrower than this: a native dialog window, whose requested width is
+    /// the floor. `None` keeps the width.
+    pub(crate) autosize_width_floor: Option<u32>,
+    /// For a dialog window centred over its owner, the point (logical, in
+    /// the desktop's coordinates) it is centred on, until its size to
+    /// content settles: each size it grows to is centred there too (see
+    /// [`centred_on`]), so a dialog wider than it asked for is not off to
+    /// one side. A later change (a details expander) keeps its corner.
+    pub(crate) autosize_centre: Option<(f64, f64)>,
     /// Custom-chrome host, if the window opted in via
     /// `WindowConfig::decorations(DecorationsMode::CustomChrome)` and the
     /// platform supports it.
@@ -325,6 +339,18 @@ pub(crate) struct ManagedWindow {
     /// dialog's own Cancel path, which a `MessageBox` answers with its
     /// escape button.
     pub(crate) modal_on_dismiss: Option<teksilo_core::overlay::OverlayDismissCallback>,
+    /// This window's own dialogs waiting for the user, oldest first: native
+    /// dialog windows its tree asked for with no input while it was
+    /// minimised. See [`WindowManager::owe_window_dialog`].
+    pub(crate) owed_dialogs: Vec<teksilo_core::modal::ModalRequest>,
+    /// This window, or a dialog of it, took the focus since its owed dialogs
+    /// were last looked at: they are presented in this turn.
+    pub(crate) owed_dialogs_due: bool,
+    /// The window asked for the user's attention
+    /// ([`ask_attention`](Self::ask_attention)) and has not had the focus
+    /// since: the request is withdrawn when it, or a dialog of it, takes
+    /// the focus.
+    pub(crate) attention_asked: bool,
     /// Glyph-atlas content version last uploaded to THIS window's
     /// renderer (`AtlasInfo::version`). Each window compares this
     /// against the shared bridge's current version on its own redraw
@@ -437,6 +463,25 @@ impl ManagedWindow {
             self.sync_hidden();
         }
         self.request_redraw();
+    }
+
+    /// Ask for the user's attention for this window
+    /// ([`request_window_attention`]), and remember it, so the request is
+    /// [withdrawn](Self::clear_attention) once the user comes to it.
+    pub(crate) fn ask_attention(&mut self) {
+        self.attention_asked = true;
+        request_window_attention(self.platform_window.window());
+    }
+
+    /// Withdraw the attention this window asked for, if it asked
+    /// ([`clear_window_attention`]): the user came to it. On X11 the
+    /// urgency hint stays set until it is withdrawn; elsewhere the request
+    /// ends by itself as the window comes to the front, and this is
+    /// harmless.
+    pub(crate) fn clear_attention(&mut self) {
+        if std::mem::take(&mut self.attention_asked) {
+            clear_window_attention(self.platform_window.window());
+        }
     }
 
     /// [Restore](Self::restore) the window if teksilo-app knows it
@@ -621,6 +666,11 @@ pub struct WindowManager {
     /// Dialogs raised while the window system hid them, which owe a raise
     /// for when they are shown again. See [`owed_raise`].
     raise_owed: std::collections::HashSet<TeksiloWindowId>,
+    /// macOS: dialogs opened while AppKit still reported the window they
+    /// block miniaturised (just restored, its animation still running), each
+    /// with that window: attached to it as a child window once it is not.
+    /// See [`pay_owed_attach`](Self::pay_owed_attach). Empty elsewhere.
+    attach_owed: HashMap<TeksiloWindowId, TeksiloWindowId>,
     /// The application tree's dialogs waiting for the user, oldest first:
     /// asked with no input while the window they were to open over was
     /// minimised. See [`owe_app_dialog`](Self::owe_app_dialog).
@@ -636,6 +686,14 @@ pub struct WindowManager {
     /// the focus and was minimised as it was taken out, for a dialog opened
     /// over it. See [`knows_focused`](Self::knows_focused).
     taken_out: HashMap<TeksiloWindowId, TakenOut>,
+    /// The application menu's shortcuts as the application tree declared
+    /// them at the last [`sync_application_menu`](Self::sync_application_menu),
+    /// with what they were made from, for a window created while the tree is
+    /// taken out. See [`crate::application_menu::declarations`].
+    app_menu_declarations: Option<(
+        crate::application_menu::Source,
+        teksilo_core::shortcut::ShortcutRegistry,
+    )>,
     /// OS-level accessibility preferences, queried at startup and re-queried
     /// on every window focus gain by
     /// [`refresh_accessibility_preferences`](Self::refresh_accessibility_preferences).
@@ -824,10 +882,12 @@ impl WindowManager {
             modal_hosts: Default::default(),
             owners_seen: HashMap::new(),
             raise_owed: Default::default(),
+            attach_owed: HashMap::new(),
             owed_app_dialogs: Vec::new(),
             owed_app_dialogs_due: false,
             raise_next_modal: false,
             taken_out: HashMap::new(),
+            app_menu_declarations: None,
             a11y_prefs,
             user_text_scale: 1.0,
             theme_mode: ThemeMode::Manual,
@@ -1211,17 +1271,34 @@ impl WindowManager {
         mirrored: &mut crate::application_menu::MirroredShortcuts,
         tree: &mut WidgetTree,
     ) {
-        let (Some(menu), Some(app_tree)) = (self.application_menu(), self.app_tree.as_ref()) else {
+        let Some(menu) = self.application_menu() else {
             return;
         };
-        let (generation, version) = menu.revision();
-        let app = app_tree.shortcut_registry();
-        mirrored.sync(
-            (generation, version, app.version().get()),
-            || menu.shortcut_ids(),
-            app,
-            tree.shortcut_registry_mut(),
-        );
+        match self.app_tree.as_ref() {
+            Some(app_tree) => {
+                let (generation, version) = menu.revision();
+                let app = app_tree.shortcut_registry();
+                mirrored.sync(
+                    (generation, version, app.version().get()),
+                    || menu.shortcut_ids(),
+                    app,
+                    tree.shortcut_registry_mut(),
+                );
+            }
+            // Taken out while one of its handlers runs, which is when an
+            // action of the application tree opens a window: the copies
+            // come from what it declared as the turn began.
+            None => {
+                if let Some((source, declared)) = &self.app_menu_declarations {
+                    mirrored.sync(
+                        *source,
+                        || menu.shortcut_ids(),
+                        declared,
+                        tree.shortcut_registry_mut(),
+                    );
+                }
+            }
+        }
     }
 
     /// Bring what the application menu reaches in line with the menu and the
@@ -1255,6 +1332,18 @@ impl WindowManager {
         );
         drop(windows);
         let app = app_tree.shortcut_registry();
+        let (generation, version) = menu.revision();
+        let source = (generation, version, app.version().get());
+        if self
+            .app_menu_declarations
+            .as_ref()
+            .is_none_or(|(made_from, _)| *made_from != source)
+        {
+            self.app_menu_declarations = Some((
+                source,
+                crate::application_menu::declarations(menu.shortcut_ids(), app),
+            ));
+        }
         let template = self.app_context_template.as_ref();
         if let (Some(handle), Some(poster)) = (
             template.and_then(|t| t.app_state::<teksilo_platform::native_menu::NativeMenuHandle>()),
@@ -1751,24 +1840,30 @@ impl WindowManager {
         let modal_parent = config.modal_parent();
         let modal_focus_target = config.modal_focus_target();
         // A dialog comes to the front only for the user: asked in answer to
-        // their input, or over a window that has the focus (the application
-        // is in front). Raising it otherwise (macOS's
-        // `activateIgnoringOtherApps`, Windows' `SetForegroundWindow`) would
-        // take the focus from the application the user is in, and on macOS
-        // cancel the attention the application asked for. Read before the
-        // activation token is used below.
+        // their input, or over a window that has the focus, itself or
+        // through a dialog of it (the application is in front). Raising it
+        // otherwise (macOS's `activateIgnoringOtherApps`, Windows'
+        // `SetForegroundWindow`) would take the focus from the application
+        // the user is in, and on macOS cancel the attention the application
+        // asked for. Read before the activation token is used below.
         let raise_modal = is_modal
             && (std::mem::take(&mut self.raise_next_modal)
                 || self.acts_for_user()
                 || self.quit_awaits_answer()
-                || modal_parent.is_some_and(|owner| self.knows_focused(owner)));
+                || modal_parent.is_some_and(|owner| self.knows_focused_with_dialogs(owner)));
         let owner_minimised = modal_parent.is_some_and(|owner| self.knows_minimised(owner));
+        // A dialog not raised opens without taking the focus either: shown,
+        // it would become the key window (macOS's `makeKeyAndOrderFront:`,
+        // Windows' `SW_SHOW`) and take the keyboard from the window the user
+        // is typing in, of this application or another.
+        let activate = !is_modal || raise_modal;
 
         // Center modal windows over their parent when the caller did not
-        // request a specific position. Approximates the modal's outer
-        // rect with its inner (client) size — close enough visually
-        // since decoration thickness is small relative to the dialog.
-        // No-op on Wayland (compositor owns positioning).
+        // request a specific position: the dialog's frame on the parent's
+        // frame. No-op on Wayland (compositor owns positioning).
+        // The centre is kept for the size the dialog grows to (see
+        // `ManagedWindow::autosize_centre`).
+        let mut modal_centre = None;
         if config.position.is_none()
             && let Some(parent_window) = self.parent_window(modal_parent, dispatching)
             && let Ok(parent_outer_pos) = parent_window.outer_position()
@@ -1779,11 +1874,12 @@ impl WindowManager {
             let p_y = parent_outer_pos.y as f64 / parent_sf;
             let p_w = parent_outer_size.width as f64 / parent_sf;
             let p_h = parent_outer_size.height as f64 / parent_sf;
-            let m_w = config.size.0 as f64;
-            let m_h = config.size.1 as f64;
-            let x = (p_x + (p_w - m_w) / 2.0).round() as i32;
-            let y = (p_y + (p_h - m_h) / 2.0).round() as i32;
-            config.position = Some((x, y));
+            let centre = (p_x + p_w / 2.0, p_y + p_h / 2.0);
+            // The dialog's frame is not there yet: its owner's stands for
+            // it, the same window system drawing both. The size it grows to
+            // is centred with its own (`autosize_centre`).
+            config.position = Some(centred_on(centre, config.size, frame_insets(parent_window)));
+            modal_centre = Some(centre);
         }
 
         let mut window_attrs = winit::window::Window::default_attributes()
@@ -1791,7 +1887,8 @@ impl WindowManager {
             .with_inner_size(winit::dpi::LogicalSize::new(config.size.0, config.size.1))
             .with_resizable(config.resizable)
             .with_enabled_buttons(caption_buttons(&config))
-            .with_visible(false); // Must be invisible for AccessKit adapter creation
+            .with_visible(false) // Must be invisible for AccessKit adapter creation
+            .with_active(activate);
 
         // The id the desktop matches this window against. On Wayland it is the
         // toplevel's `app_id`, and without it the shell cannot tie the window
@@ -2023,7 +2120,11 @@ impl WindowManager {
             self.new_window_theme(window_hint, OsQueries::PLATFORM);
 
         // Create with AccessKit adapter (shows window after adapter is ready)
-        let mut pw = pollster::block_on(PlatformWindow::new_with_a11y(window, target));
+        let mut pw = pollster::block_on(PlatformWindow::new_with_a11y(window, target, activate));
+        #[cfg(test)]
+        if !activate {
+            activation_log::note(winit_id, activation_log::Activation::ShownInactive);
+        }
         // Where the window system put it (macOS centres a window given no
         // position, Windows cascades it): a window never moved sends no
         // `Moved`, and its state is what its saved geometry records. Wayland
@@ -2082,21 +2183,39 @@ impl WindowManager {
         //
         // Never onto a miniaturised parent: AppKit orders the parent in
         // without deminiaturising it, and draws both while the parent stays
-        // in the Dock. The application tree's dialogs wait for the user in
-        // that case (`AppDialogPresentation::Owe`); anything else opening a
-        // dialog over a minimised window gets it unattached.
+        // in the Dock. The application tree's dialogs and a window's own
+        // wait for the user in that case (`AppDialogPresentation::Owe`); a
+        // window opened with `modal_to` over a minimised window gets it
+        // unattached. AppKit is asked too, not only what the manager knows:
+        // a window that took the focus on a Dock click, or that was just
+        // restored for a dialog, still reports itself miniaturised until
+        // its animation ends. The attach is owed then, and made on the
+        // dialog's first sign once the parent is back
+        // (`pay_owed_attach`).
         #[cfg(target_os = "macos")]
-        if let Some(parent_window) = self.parent_window(modal_parent, dispatching) {
-            if owner_minimised {
-                #[cfg(debug_assertions)]
-                eprintln!(
-                    "teksilo-app: window `{}` is modal to a minimised window; it is not \
-                     attached to it, as AppKit would draw the minimised window too. Open \
-                     a dialog once its window is back",
-                    config.title
-                );
-            } else {
-                teksilo_platform::attach_child_window(parent_window, pw.window());
+        {
+            let parent_state = self
+                .parent_window(modal_parent, dispatching)
+                .map(|parent| parent.is_minimized() == Some(true));
+            match (parent_state, modal_parent) {
+                (Some(os_minimised), Some(owner)) if owner_minimised || os_minimised => {
+                    #[cfg(debug_assertions)]
+                    if owner_minimised {
+                        eprintln!(
+                            "teksilo-app: window `{}` is modal to a minimised window; it is \
+                             attached to it once that window is back, as AppKit would draw \
+                             the minimised window too",
+                            config.title
+                        );
+                    }
+                    self.attach_owed.insert(teksilo_id, owner);
+                }
+                (Some(_), _) => {
+                    if let Some(parent_window) = self.parent_window(modal_parent, dispatching) {
+                        teksilo_platform::attach_child_window(parent_window, pw.window());
+                    }
+                }
+                (None, _) => {}
             }
         }
         #[cfg(not(target_os = "macos"))]
@@ -2107,6 +2226,14 @@ impl WindowManager {
             // on `with_window_level` above. The owner relationship
             // already keeps the modal ordered above its parent.
             raise_window(pw.window(), None);
+            // Hidden still (a macOS child window while the window it
+            // blocks comes back from the Dock, an X11 window before its map
+            // arrives), it did not take the raise: owe it, as
+            // `raise_modal_child` does, and pay it on its first sign of
+            // being on screen.
+            if pw.window().is_visible() == Some(false) {
+                self.raise_owed.insert(teksilo_id);
+            }
         }
 
         // Construct the platform title bar host if custom chrome was
@@ -2301,7 +2428,10 @@ impl WindowManager {
             size_to_content: config.size_to_content,
             a11y_delivered_walk: 0,
             a11y_delivered_at: None,
-            last_autosize_height: None,
+            last_autosize: None,
+            autosize_width_floor: None,
+            autosize_asked_from: None,
+            autosize_centre: modal_centre,
             title_bar_host,
             focused: true,
             occluded: false,
@@ -2320,6 +2450,9 @@ impl WindowManager {
             on_close_blocked,
             on_removed,
             modal_on_dismiss: None,
+            owed_dialogs: Vec::new(),
+            owed_dialogs_due: false,
+            attention_asked: false,
             atlas_uploaded_version: primed_atlas_version,
             redraw: crate::redraw_gate::RedrawGate::default(),
             app_shortcuts,
@@ -2545,6 +2678,7 @@ impl WindowManager {
         let was_in_a_pair = self.modal_parents.remove(&teksilo_id).is_some();
         self.owners_seen.remove(&teksilo_id);
         self.raise_owed.remove(&teksilo_id);
+        self.attach_owed.remove(&teksilo_id);
         self.modal_hosts.remove(&teksilo_id);
         if was_in_a_pair {
             self.sync_wm_state_watch();
@@ -2572,7 +2706,9 @@ impl WindowManager {
     /// [`DismissReason::Programmatic`](teksilo_core::overlay::DismissReason).
     /// So a `MessageBox` still up when a quit or a forced close of its
     /// window takes it reports its escape button (Cancel), as Escape would,
-    /// rather than going unanswered. A dialog window closing by itself runs
+    /// rather than going unanswered, and so does one asked and not shown
+    /// yet (owed to the user, or queued in this turn by the window's close
+    /// guard). A dialog window closing by itself runs
     /// its own `on_dismiss` the same way, which a dialog that already
     /// answered ignores.
     pub(crate) fn close_window_answering(
@@ -2612,9 +2748,11 @@ impl WindowManager {
         found
     }
 
-    /// Answer the dialogs `teksilo_id` presents: its modal request's
-    /// `on_dismiss` if it is a dialog window, and every overlay in its
-    /// tree, with its own context. See
+    /// Answer the dialogs `teksilo_id` presents: the dialogs it owes the
+    /// user ([`owe_window_dialog`](Self::owe_window_dialog)) and those its
+    /// tree asked for and has not presented yet, its modal
+    /// request's `on_dismiss` if it is a dialog window, and every overlay in
+    /// its tree, with its own context. See
     /// [`close_window_answering`](Self::close_window_answering).
     fn answer_dialogs_in(
         &mut self,
@@ -2628,10 +2766,23 @@ impl WindowManager {
             return;
         };
         let on_dismiss = managed.modal_on_dismiss.take();
+        let owed = std::mem::take(&mut managed.owed_dialogs);
+        // And those asked and not presented yet: a close guard's question
+        // queued in the turn its window closes (a quit with no time to ask
+        // closes it at once).
+        let queued = managed.tree.drain_pending_modal_requests();
         let current_arc = Some(managed.platform_window.window_arc());
         {
             let mut ops = WindowOpsImpl::new(self, target, teksilo_id, current_arc);
             let reason = teksilo_core::overlay::DismissReason::Programmatic;
+            // The dialogs it still owes the user, never shown, first: they
+            // would have been in front of everything else.
+            for request in owed
+                .into_iter()
+                .chain(queued.into_iter().map(|queued| queued.request))
+            {
+                answer_unshown_dialog(request, &mut managed.tree, &mut ops);
+            }
             managed.tree.dismiss_all_overlays_with_ops(reason, &mut ops);
             if let Some(on_dismiss) = on_dismiss {
                 managed
@@ -3161,6 +3312,18 @@ impl WindowManager {
     /// then raise it, activated with `token` where the window system needs
     /// one.
     pub(crate) fn bring_forward(&mut self, teksilo_id: TeksiloWindowId, token: Option<&str>) {
+        self.restore_with_owners(teksilo_id);
+        if let Some(managed) = self.get_by_teksilo_mut(teksilo_id) {
+            raise_window(managed.platform_window.window(), token);
+        }
+    }
+
+    /// Restore `teksilo_id` and every window up its chain of modal owners
+    /// if minimised (a dialog is shown only with its owner), asking the
+    /// window system as well as what the manager knows
+    /// ([`ManagedWindow::restore`]), and raise nothing: the window a dialog
+    /// is about to open over, for the user, comes back first.
+    pub(crate) fn restore_with_owners(&mut self, teksilo_id: TeksiloWindowId) {
         let mut owner = self.modal_parent_of(teksilo_id);
         for _ in 0..64 {
             let Some(up) = owner else { break };
@@ -3171,7 +3334,6 @@ impl WindowManager {
         }
         if let Some(managed) = self.get_by_teksilo_mut(teksilo_id) {
             managed.restore();
-            raise_window(managed.platform_window.window(), token);
         }
     }
 
@@ -3203,8 +3365,21 @@ impl WindowManager {
                 self.bring_forward(window, token.as_deref());
             }
             AppDialogPresentation::Quiet | AppDialogPresentation::Owe => {
-                request_window_attention(managed.platform_window.window());
+                managed.ask_attention();
             }
+        }
+    }
+
+    /// A dialog is about to open over `window` without taking the focus
+    /// ([`AppDialogPresentation::Quiet`]): `window` asks for the user's
+    /// attention, as [`show_for_app_tree_dialog`](Self::show_for_app_tree_dialog)
+    /// does for the application tree's. For a window's own dialog, in its
+    /// tree or in a native window of its own, as AppKit asks for a modal
+    /// panel of an application in the background. Nothing when `window` is
+    /// not open.
+    pub(crate) fn ask_attention_for_dialog(&mut self, window: TeksiloWindowId) {
+        if let Some(managed) = self.get_by_teksilo_mut(window) {
+            managed.ask_attention();
         }
     }
 
@@ -3227,6 +3402,21 @@ impl WindowManager {
     pub(crate) fn knows_focused(&self, teksilo_id: TeksiloWindowId) -> bool {
         self.known_state(teksilo_id)
             .is_some_and(|known| known.focused)
+    }
+
+    /// Whether `teksilo_id` or a dialog of it has the focus, as far as the
+    /// manager knows (see [`knows_focused`](Self::knows_focused)): the user
+    /// is with `teksilo_id`, as [`note_owed_dialogs_focus`](Self::note_owed_dialogs_focus)
+    /// counts it. A dialog asked over it is raised and asks for no
+    /// attention ([`app_dialog_presentation`]).
+    pub(crate) fn knows_focused_with_dialogs(&self, teksilo_id: TeksiloWindowId) -> bool {
+        self.teksilo_to_winit
+            .keys()
+            .chain(self.taken_out.keys())
+            .any(|&id| {
+                self.knows_focused(id)
+                    && (id == teksilo_id || self.owner_chain(id).contains(&teksilo_id))
+            })
     }
 
     /// Whether `teksilo_id` is minimised, as far as the manager knows (see
@@ -3294,13 +3484,9 @@ impl WindowManager {
     }
 
     /// Answer every owed dialog (see [`owe_app_dialog`](Self::owe_app_dialog))
-    /// as dismissed, in the application tree that asked for it: its
-    /// `on_dismiss` runs with
-    /// [`DismissReason::Programmatic`](teksilo_core::overlay::DismissReason::Programmatic),
-    /// as for a dialog whose window closes, so a `MessageBox` reports its
-    /// Escape button (Cancel). Its content is built first, in a tree nothing
-    /// shows, since a dialog answers from the state its content holds.
-    /// Run as a quit completes.
+    /// as dismissed, in the application tree that asked for it
+    /// ([`answer_unshown_dialog`]), so a `MessageBox` reports its Escape
+    /// button (Cancel). Run as a quit completes.
     fn answer_owed_app_dialogs(&mut self, target: &winit::event_loop::ActiveEventLoop) {
         let owed = std::mem::take(&mut self.owed_app_dialogs);
         if owed.is_empty() {
@@ -3311,19 +3497,89 @@ impl WindowManager {
         };
         {
             let mut ops = WindowOpsImpl::windowless(self, target);
-            let reason = teksilo_core::overlay::DismissReason::Programmatic;
             for request in owed {
-                let Some(on_dismiss) = request.on_dismiss else {
-                    continue;
-                };
-                if let teksilo_core::modal::ModalContent::Deferred(builder) = request.content {
-                    let mut unshown = WidgetTree::new();
-                    builder(&mut unshown);
-                }
-                tree.run_with_event_context(&mut ops, |ctx| on_dismiss(reason, ctx));
+                answer_unshown_dialog(request, &mut tree, &mut ops);
             }
         }
         self.reinsert_app_tree(tree);
+    }
+
+    /// Keep `window`'s own `request` until the user comes back to it: a
+    /// native dialog window its tree asked for with no input while it was
+    /// minimised ([`AppDialogPresentation::Owe`]). The first one owed asks
+    /// for the user's attention, which lasts until they come back. It is
+    /// presented, raised, on the first turn `window` or a dialog of it takes
+    /// the focus ([`note_owed_dialogs_focus`](Self::note_owed_dialogs_focus));
+    /// `window` closing, by itself or for a quit, answers it as dismissed
+    /// ([`close_window_answering`](Self::close_window_answering)). Nothing
+    /// when `window` is not open.
+    pub(crate) fn owe_window_dialog(
+        &mut self,
+        window: TeksiloWindowId,
+        request: teksilo_core::modal::ModalRequest,
+    ) {
+        let Some(managed) = self.get_by_teksilo_mut(window) else {
+            return;
+        };
+        if managed.owed_dialogs.is_empty() {
+            managed.ask_attention();
+        }
+        managed.owed_dialogs.push(request);
+    }
+
+    /// Whether `window` owes the user dialogs not yet due: a native dialog it
+    /// asks for now waits behind them, so the order they were asked in
+    /// holds.
+    pub(crate) fn owes_window_dialogs(&self, window: TeksiloWindowId) -> bool {
+        self.teksilo_to_winit
+            .get(&window)
+            .and_then(|winit| self.windows.get(winit))
+            .is_some_and(|managed| !managed.owed_dialogs.is_empty() && !managed.owed_dialogs_due)
+    }
+
+    /// `teksilo_id` took the focus: the user came to it, and to every
+    /// window it is a dialog of, so the attention any of them asked for is
+    /// withdrawn ([`ManagedWindow::clear_attention`]).
+    pub(crate) fn note_attention_answered(&mut self, teksilo_id: TeksiloWindowId) {
+        let mut chain = self.owner_chain(teksilo_id);
+        chain.push(teksilo_id);
+        for window in chain {
+            if let Some(managed) = self.get_by_teksilo_mut(window) {
+                managed.clear_attention();
+            }
+        }
+    }
+
+    /// `teksilo_id` took the focus: the dialogs it owes, and those every
+    /// window it is a dialog of owes, are presented in this turn.
+    pub(crate) fn note_owed_dialogs_focus(&mut self, teksilo_id: TeksiloWindowId) {
+        let mut chain = self.owner_chain(teksilo_id);
+        chain.push(teksilo_id);
+        for window in chain {
+            if let Some(managed) = self.get_by_teksilo_mut(window)
+                && !managed.owed_dialogs.is_empty()
+            {
+                managed.owed_dialogs_due = true;
+            }
+        }
+    }
+
+    /// Take the owed dialogs of every window that took the focus since
+    /// (see [`note_owed_dialogs_focus`](Self::note_owed_dialogs_focus)),
+    /// oldest first, to present them.
+    pub(crate) fn take_due_owed_dialogs(
+        &mut self,
+    ) -> Vec<(TeksiloWindowId, Vec<teksilo_core::modal::ModalRequest>)> {
+        let mut due = Vec::new();
+        for managed in self.windows.values_mut() {
+            if std::mem::take(&mut managed.owed_dialogs_due) {
+                due.push((
+                    managed.teksilo_id,
+                    std::mem::take(&mut managed.owed_dialogs),
+                ));
+            }
+        }
+        due
     }
 
     /// The quit stops at `teksilo_id`, whose guard deferred its answer: wait
@@ -3699,11 +3955,20 @@ impl WindowManager {
         }
     }
 
+    /// Whether `id` owes a raise the window system did not take (see
+    /// [`note_dialog_sign`](Self::note_dialog_sign)). Read by the winit
+    /// loop tests, which only a Linux test build has.
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) fn owes_raise(&self, id: TeksiloWindowId) -> bool {
+        self.raise_owed.contains(&id)
+    }
+
     /// `id` showed a sign of being on screen: pay the raise it owes, if
     /// any, once it can take it. See [`owed_raise`]. Owed only while the
     /// application is active: with no window of it focused, the raise is
     /// dropped (see [`drop_owed_raises_if_inactive`](Self::drop_owed_raises_if_inactive)).
     pub(crate) fn note_dialog_sign(&mut self, id: TeksiloWindowId, sign: DialogSign) {
+        self.pay_owed_attach(id);
         self.drop_owed_raises_if_inactive();
         if !self.raise_owed.contains(&id) {
             return;
@@ -3723,6 +3988,30 @@ impl WindowManager {
                 self.raise_owed.remove(&id);
             }
         }
+    }
+
+    /// macOS: attach `id` to the window it blocks as a child window, if
+    /// the attach is owed ([`attach_owed`](Self::attach_owed)) and that
+    /// window is no longer miniaturised. Run on each of `id`'s signs of
+    /// being on screen. Nothing is ever owed elsewhere.
+    fn pay_owed_attach(&mut self, id: TeksiloWindowId) {
+        let Some(&owner) = self.attach_owed.get(&id) else {
+            return;
+        };
+        let (Some(owner_window), Some(dialog_window)) = (
+            self.parent_window(Some(owner), None),
+            self.parent_window(Some(id), None),
+        ) else {
+            if self.winit_id_for_teksilo(owner).is_none() {
+                self.attach_owed.remove(&id);
+            }
+            return;
+        };
+        if owner_window.is_minimized() == Some(true) {
+            return;
+        }
+        teksilo_platform::attach_child_window(owner_window, dialog_window);
+        self.attach_owed.remove(&id);
     }
 
     /// Forget every raise a dialog is owed when no window of the application
@@ -4145,6 +4434,34 @@ impl WindowManager {
         self.windows
             .get(&winit_id)
             .and_then(|w| w.title_bar_host.clone())
+    }
+
+    /// Drop what the application holds, for when the event loop ends: every
+    /// window's widget tree and the application tree (with every widget and
+    /// the closures they captured), the windows' guards and callbacks, and
+    /// the application's state, so each service's `Drop` runs (an analytics
+    /// adapter's shutdown flush, a watcher thread's join). Run by winit's
+    /// `exiting`, which on macOS is the last code to run when AppKit ends
+    /// the process (a Dock Quit, a logout, an Apple-event quit). The
+    /// platform windows stay, each with an empty tree, until the handler is
+    /// dropped. Idempotent.
+    pub(crate) fn shut_down_app_state(&mut self) {
+        for managed in self.windows.values_mut() {
+            drop(std::mem::replace(&mut managed.tree, WidgetTree::new()));
+            managed._persist_handles.clear();
+            managed.close_guard = None;
+            managed.can_close = None;
+            managed.on_close_blocked = None;
+            managed.on_removed = None;
+            managed.modal_on_dismiss = None;
+            managed.owed_dialogs.clear();
+        }
+        self.app_tree = None;
+        self.app_quit_guard = None;
+        self.owed_app_dialogs.clear();
+        self.orphan_intents.clear();
+        self.app_menu_declarations = None;
+        self.app_context_template = None;
     }
 
     /// Make every window's waker a no-op, for when the event loop ends: winit
@@ -4881,6 +5198,16 @@ pub(crate) fn request_window_attention(window: &winit::window::Window) {
     window.request_user_attention(Some(winit::window::UserAttentionType::Critical));
 }
 
+/// Withdraw the attention [`request_window_attention`] asked for `window`:
+/// the user came to it. On X11 this clears the urgency hint, which
+/// otherwise stays set; macOS and Windows end the request themselves as the
+/// window comes to the front. A test build records it (`activation_log`).
+pub(crate) fn clear_window_attention(window: &winit::window::Window) {
+    #[cfg(test)]
+    activation_log::note(window.id(), activation_log::Activation::AttentionCleared);
+    window.request_user_attention(None);
+}
+
 /// What a test build saw teksilo-app ask of the window system to bring a
 /// window to the user: the raises and attention requests, oldest first, on
 /// the thread that made them (the event loop's).
@@ -4895,6 +5222,13 @@ pub(crate) mod activation_log {
         Raised,
         /// [`request_window_attention`](super::request_window_attention).
         Attention,
+        /// A new window shown without taking the focus: a dialog opened
+        /// quietly ([`AppDialogPresentation::Quiet`](super::AppDialogPresentation::Quiet)).
+        ShownInactive,
+        /// [`clear_window_attention`](super::clear_window_attention): the
+        /// window, or a dialog of it, took the focus, so the attention it
+        /// asked for ends.
+        AttentionCleared,
     }
 
     thread_local! {
@@ -4957,6 +5291,68 @@ pub(crate) fn follow_owner(was: bool, now: bool, went_with: bool, os_keeps: bool
     }
 }
 
+/// Answer a dialog request never shown as dismissed, in `tree`, the tree
+/// that asked for it: its `on_dismiss` runs with
+/// [`DismissReason::Programmatic`](teksilo_core::overlay::DismissReason::Programmatic),
+/// as for a dialog whose window closes, so a `MessageBox` reports its Escape
+/// button (Cancel). Its content is built first, in a tree nothing shows,
+/// since a dialog answers from the state its content holds.
+fn answer_unshown_dialog(
+    request: teksilo_core::modal::ModalRequest,
+    tree: &mut WidgetTree,
+    ops: &mut WindowOpsImpl,
+) {
+    let Some(on_dismiss) = request.on_dismiss else {
+        return;
+    };
+    if let teksilo_core::modal::ModalContent::Deferred(builder) = request.content {
+        let mut unshown = WidgetTree::new();
+        builder(&mut unshown);
+    }
+    let reason = teksilo_core::overlay::DismissReason::Programmatic;
+    tree.run_with_event_context(ops, |ctx| on_dismiss(reason, ctx));
+}
+
+/// Where a window whose content is `size` wide and high (logical) goes to
+/// be centred on `centre`: its frame's corner, rounded to the logical
+/// pixel, the corner every position teksilo-app asks for names. `insets`
+/// is what the frame adds to the content on each axis (logical, see
+/// [`frame_insets`]).
+pub(crate) fn centred_on(centre: (f64, f64), size: (u32, u32), insets: (f64, f64)) -> (i32, i32) {
+    (
+        (centre.0 - (size.0 as f64 + insets.0) / 2.0).round() as i32,
+        (centre.1 - (size.1 as f64 + insets.1) / 2.0).round() as i32,
+    )
+}
+
+/// What `window`'s frame adds to its content on each axis, logical: its
+/// outer size less its inner size, both as the window system reports them
+/// (nothing on Wayland, where the compositor draws or the client does).
+pub(crate) fn frame_insets(window: &winit::window::Window) -> (f64, f64) {
+    let sf = window.scale_factor();
+    let (outer, inner) = (window.outer_size(), window.inner_size());
+    (
+        outer.width.saturating_sub(inner.width) as f64 / sf,
+        outer.height.saturating_sub(inner.height) as f64 / sf,
+    )
+}
+
+#[cfg(test)]
+mod centred_on_tests {
+    use super::centred_on;
+
+    /// The frame is centred, not the content: a 28 dp macOS title bar puts
+    /// the corner 14 dp higher than the content alone would, and a frame's
+    /// borders widen it.
+    #[test]
+    fn the_frame_is_centred_not_the_content() {
+        let centre = (500.0, 400.0);
+        assert_eq!(centred_on(centre, (300, 200), (0.0, 0.0)), (350, 300));
+        assert_eq!(centred_on(centre, (300, 200), (0.0, 28.0)), (350, 286));
+        assert_eq!(centred_on(centre, (300, 200), (16.0, 39.0)), (342, 281));
+    }
+}
+
 /// What [`WindowManager::take_managed`] remembers of a window it takes out
 /// of the map while a handler runs in it.
 #[derive(Debug, Clone, Copy)]
@@ -4965,29 +5361,34 @@ pub(crate) struct TakenOut {
     minimized: bool,
 }
 
-/// How the application tree's dialog is presented over the window it goes
-/// to; see [`app_dialog_presentation`].
+/// How the application tree's dialog, or a window's own, is presented over
+/// the window it goes to; see [`app_dialog_presentation`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AppDialogPresentation {
-    /// Shown and brought to the front, the window restored first if
-    /// minimised.
+    /// Shown and brought to the front (a window's own in its tree is shown
+    /// there, its window left as it is); for the application tree's, the
+    /// window it goes to is restored first if minimised.
     Raise,
-    /// Shown where it is, without taking the focus; the application asks
-    /// for the user's attention.
+    /// Shown where it is, without taking the focus; the window it goes to
+    /// asks for the user's attention, once for the dialog.
     Quiet,
-    /// Not shown yet: kept until a window of the application takes the
-    /// focus, the application asking for attention meanwhile.
+    /// Not shown yet: kept until the user comes back (a window of the
+    /// application takes the focus, or, for a window's own dialog, that
+    /// window), the application asking for attention meanwhile.
     Owe,
 }
 
-/// How a dialog the application tree asked for is presented over `target`:
-/// raised when it comes from the user's input (`for_user`) or `target`
-/// has the focus (the application is in front, and raising takes the focus
-/// from no other); otherwise shown quietly, unless it would open a window
-/// of its own (`own_window`) over a minimised `target`: such a window would
-/// be drawn without the window it belongs to (AppKit orders a child window
-/// in over its miniaturised parent), so it is owed until the user comes
-/// back. A dialog in `target`'s own tree waits there, minimised with it.
+/// How a dialog the application tree asked for, or a window's own, is
+/// presented over `target`: raised when it comes from the user's input
+/// (`for_user`) or `target` or a dialog of it has the focus
+/// (`target_focused`, see [`WindowManager::knows_focused_with_dialogs`]: the
+/// application is in front, and raising takes the focus from no other);
+/// otherwise shown quietly, the window asking for attention, unless it
+/// would open a window of its own (`own_window`) over a minimised `target`:
+/// such a window would be drawn without the window it belongs to (AppKit
+/// orders a child window in over its miniaturised parent), so it is owed
+/// until the user comes back. A dialog in `target`'s own tree waits there,
+/// minimised with it.
 pub(crate) fn app_dialog_presentation(
     for_user: bool,
     target_focused: bool,

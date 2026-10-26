@@ -22,29 +22,40 @@ use teksilo_i18n::{LocalizedString, tr_widget};
 /// Register, on the widget being built, an action for every standard edit
 /// command. `run` performs one and says whether it did; `available` says
 /// whether one has anything to act on now (Copy a selection, Paste an
-/// editable field), which is what greys its menu rows.
+/// editable field), and `passes_on` whether `run` would decline it now (Cut
+/// in a read-only field): together they are what greys its menu rows.
 ///
 /// A command `run` declines is passed on: to an ancestor's action (an
 /// application's own Paste, say), and failing that to the focused widget as
-/// the plain key it was. `available` changes none of that: a command it says
-/// no to still reaches `run` when its shortcut is pressed, and `run` decides.
-/// It is asked outside every handler, once per event-loop turn by the native
-/// menu bar, so it reads state and does nothing else.
+/// the plain key it was. `passes_on` must answer as `run` decides, since a
+/// menu row asks the first action on the route that does not pass the
+/// command on: a command this widget takes and has nothing to act on greys
+/// its row, even under an application's own action for it, which a command
+/// chosen there would never reach. `available` and `passes_on` change
+/// nothing a pressed shortcut does: `run` alone decides. They are asked
+/// outside every handler, once per event-loop turn by the native menu bar,
+/// so they read state and do nothing else.
 pub(crate) fn register_standard_edit_actions(
     ctx: &mut BuildContext,
     run: impl Fn(StandardEdit, &mut EventContext) -> bool + 'static,
     available: impl Fn(StandardEdit) -> bool + 'static,
+    passes_on: impl Fn(StandardEdit) -> bool + 'static,
 ) {
     let run = Rc::new(run);
     let available = Rc::new(available);
+    let passes_on = Rc::new(passes_on);
     for command in StandardEdit::ALL {
         let run = Rc::clone(&run);
         let available = Rc::clone(&available);
+        let passes_on = Rc::clone(&passes_on);
         register_action(
             ctx,
             command.id(),
             move |ctx| run(command, ctx),
-            Some(Box::new(move || available(command))),
+            Some((
+                Box::new(move || available(command)),
+                Box::new(move || passes_on(command)),
+            )),
         );
     }
 }
@@ -73,15 +84,19 @@ pub(crate) fn register_command_action(
     register_action(ctx, id, run, None);
 }
 
+/// What a menu row asks of a command: whether it has anything to act on,
+/// and whether its action would pass it on.
+type RowQuestions = (Box<dyn Fn() -> bool>, Box<dyn Fn() -> bool>);
+
 fn register_action(
     ctx: &mut BuildContext,
     id: &'static str,
     mut run: impl FnMut(&mut EventContext) -> bool + 'static,
-    available: Option<Box<dyn Fn() -> bool>>,
+    row: Option<RowQuestions>,
 ) {
     let mut action = Action::new(id);
-    if let Some(available) = available {
-        action = action.available_when(available);
+    if let Some((available, passes_on)) = row {
+        action = action.available_when(available).passes_on_when(passes_on);
     }
     ctx.register_action(action.on_invoke_with_response(move |_intent, ctx| {
         if run(ctx) {

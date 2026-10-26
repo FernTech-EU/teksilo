@@ -430,3 +430,145 @@ fn an_unavailable_action_greys_its_row_and_still_runs() {
     assert!(tree.can_handle("test.copy"), "asked again on every query");
     assert!(tree.handled_intents_from(field).contains(&"test.copy"));
 }
+
+/// A row is enabled exactly when choosing it runs something: greying asks
+/// the action a dispatch would reach, the first enabled one on the route
+/// that does not pass the intent on, and not every action on the route. A
+/// field with nothing to copy, under a page that copies too, greys Copy,
+/// because Copy chosen there reaches the field and stops; one that passes
+/// Copy on (read-only, say) leaves the row to the page's Copy, and to the
+/// application's after it.
+#[test]
+fn a_row_asks_the_action_a_dispatch_would_reach() {
+    use std::cell::Cell;
+
+    #[derive(Debug)]
+    struct Field {
+        available: Rc<Cell<bool>>,
+        passes_on: Rc<Cell<bool>>,
+        ran: Rc<Cell<u32>>,
+    }
+    impl Widget for Field {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let available = Rc::clone(&self.available);
+            let passes_on = Rc::clone(&self.passes_on);
+            let declines = Rc::clone(&self.passes_on);
+            let ran = Rc::clone(&self.ran);
+            ctx.register_action(
+                Action::new("test.copy")
+                    .available_when(move || available.get())
+                    .passes_on_when(move || passes_on.get())
+                    .on_invoke_with_response(move |_, _| {
+                        if declines.get() {
+                            IntentResponse::Propagated
+                        } else {
+                            ran.set(ran.get() + 1);
+                            IntentResponse::Handled
+                        }
+                    }),
+            );
+            ctx.apply_self_handlers(crate::widget_builder::HandlerSet::new().focusable(true));
+            vec![]
+        }
+        fn layout_response(&self, proposal: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(100.0, 20.0).into()
+        }
+    }
+    #[derive(Debug)]
+    struct Page {
+        field: Option<Field>,
+        page_copy: bool,
+        ran: Rc<Cell<u32>>,
+    }
+    impl Widget for Page {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            if self.page_copy {
+                let ran = Rc::clone(&self.ran);
+                ctx.register_action(
+                    Action::new("test.copy").on_invoke(move |_, _| ran.set(ran.get() + 1)),
+                );
+            }
+            vec![ctx.add(self.field.take().expect("built once"))]
+        }
+        fn layout_response(&self, proposal: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(400.0, 300.0).into()
+        }
+    }
+    #[derive(Debug)]
+    struct AppRoot {
+        ran: Rc<Cell<u32>>,
+    }
+    impl Widget for AppRoot {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let ran = Rc::clone(&self.ran);
+            ctx.register_action(
+                Action::new("test.copy").on_invoke(move |_, _| ran.set(ran.get() + 1)),
+            );
+            vec![]
+        }
+        fn layout_response(&self, proposal: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+
+    for page_copy in [false, true] {
+        for application in [false, true] {
+            for available in [false, true] {
+                for passes_on in [false, true] {
+                    let field_ran = Rc::new(Cell::new(0));
+                    let page_ran = Rc::new(Cell::new(0));
+                    let mut tree = WidgetTree::new();
+                    let root = tree.add(Page {
+                        field: Some(Field {
+                            available: Rc::new(Cell::new(available)),
+                            passes_on: Rc::new(Cell::new(passes_on)),
+                            ran: Rc::clone(&field_ran),
+                        }),
+                        page_copy,
+                        ran: Rc::clone(&page_ran),
+                    });
+                    let app_ran = Rc::new(Cell::new(0));
+                    if application {
+                        let mut app = WidgetTree::new();
+                        app.add(AppRoot {
+                            ran: Rc::clone(&app_ran),
+                        });
+                        let scope = ApplicationScope::new();
+                        app.publish_application_scope(&scope);
+                        tree.set_application_scope(Some(scope));
+                    }
+                    tree.layout(SizeProposal::exact(400.0, 300.0));
+                    let field = tree.first_focusable_descendant(root).unwrap();
+                    tree.focus(field);
+
+                    let case = format!(
+                        "page copy {page_copy}, application {application}, \
+                         available {available}, passes on {passes_on}"
+                    );
+                    let row = tree.can_handle("test.copy");
+                    assert_eq!(
+                        row,
+                        tree.handled_intents_from(field).contains(&"test.copy"),
+                        "{case}: the two questions agree"
+                    );
+                    tree.dispatch_intent(
+                        field,
+                        crate::intent::Intent::new("test.copy"),
+                        true,
+                        &mut crate::window::NoopWindowOps,
+                    );
+                    // The application tree's actions run in their own tree;
+                    // here the intent reaching it is the window's dispatch
+                    // finding nothing that takes it.
+                    let reaches_application =
+                        application && field_ran.get() == 0 && page_ran.get() == 0;
+                    let runs_something = (field_ran.get() == 1 && available)
+                        || page_ran.get() == 1
+                        || reaches_application;
+                    assert_eq!(row, runs_something, "{case}");
+                    assert_eq!(app_ran.get(), 0, "{case}: another tree");
+                }
+            }
+        }
+    }
+}
