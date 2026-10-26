@@ -186,6 +186,13 @@ click on an open right-click trigger closes it, and a right click on an open
 left-click trigger closes it and falls through, to the trigger's context menu
 for instance.
 
+A modal's anchor is the widget that presented it, which can be the whole page
+(an app that presents a card from its root). So for a modal the press is
+consumed only when the anchor is the first widget, from the one pressed up,
+whose tap takes that button: a click on the button that opened a dialog only
+closes it, and a click on a list row of the page that presented a card closes
+the card and selects the row.
+
 ### 6.1.1 A trigger that opens on another button
 
 `OverlayTrigger` opens on whichever buttons the widget it wraps accepts taps

@@ -1588,8 +1588,9 @@ impl WidgetTree {
                 .suppress_beneath;
         }
 
-        let (dismissed, focus_restore, toggle_anchors) =
-            self.overlay_manager.dismiss_outside_press(position, &busy);
+        let (dismissed, focus_restore, toggle_anchors) = self
+            .overlay_manager
+            .dismiss_outside_press_toggles(position, &busy);
         if dismissed.is_empty() {
             return false;
         }
@@ -1611,14 +1612,58 @@ impl WidgetTree {
         // other button only where the trigger opens on it, so a
         // right click on a left-click trigger still dismisses and
         // falls through to the trigger's context menu.
-        toggle_anchors.iter().any(|&anchor| {
-            self.arena.is_active(anchor)
-                && self.arena.bounds(anchor).contains(position)
-                && (button == PointerButton::Primary
-                    || self
-                        .anchor_tap_buttons(anchor, position, &pressing)
-                        .contains(button))
-        })
+        toggle_anchors
+            .iter()
+            .any(|&toggle| self.press_reopens(toggle, position, button, &pressing))
+    }
+
+    /// Whether a press at `position` that has just dismissed the overlay
+    /// anchored on `toggle` would open it again, and so is taken for the
+    /// toggle rather than falling through.
+    ///
+    /// A popover's anchor is its trigger: a press anywhere on it is taken, a
+    /// primary one always and any other where the trigger opens on it. A
+    /// modal's anchor is whatever presented it, which may be the whole page
+    /// (an app that presents a card from its root), so a press inside it is
+    /// taken only when the anchor is the first widget on its way up that
+    /// answers the button: the dialog's own opener is, a list row on the
+    /// page that presented a card is not, and gets the click.
+    fn press_reopens(
+        &self,
+        toggle: crate::overlay::ToggleAnchor,
+        position: Point,
+        button: PointerButton,
+        pointer: &crate::pointer::PointerInfo,
+    ) -> bool {
+        let anchor = toggle.anchor;
+        if !self.arena.is_active(anchor) || !self.arena.bounds(anchor).contains(position) {
+            return false;
+        }
+        if toggle.modal {
+            return self.first_tapper(position, button, pointer) == Some(anchor);
+        }
+        button == PointerButton::Primary
+            || self
+                .anchor_tap_buttons(anchor, position, pointer)
+                .contains(button)
+    }
+
+    /// The first widget at or above the one hit at `position` whose tap
+    /// answers `button`: the one a click there would activate.
+    fn first_tapper(
+        &self,
+        position: Point,
+        button: PointerButton,
+        pointer: &crate::pointer::PointerInfo,
+    ) -> Option<WidgetId> {
+        let mut node = self.hit_test_for(position, pointer);
+        while let Some(id) = node {
+            if self.tap_buttons(id).contains(button) {
+                return Some(id);
+            }
+            node = self.arena.parent(id);
+        }
+        None
     }
 
     /// The buttons a tap at `position` would be recognized for on its way up

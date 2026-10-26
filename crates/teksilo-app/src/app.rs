@@ -7709,6 +7709,112 @@ mod tests {
         );
     }
 
+    /// A page with a button in its top-leading corner, and a modal closed
+    /// by a click outside presented over it from the page itself or from
+    /// the button. Returns the tree, the button and how often it was
+    /// activated.
+    fn button_under_a_click_outside_modal(
+        from_button: bool,
+    ) -> (WidgetTree, WidgetId, std::rc::Rc<std::cell::Cell<u32>>) {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let activations = Rc::new(Cell::new(0u32));
+        let count = activations.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let button = tree
+            .add(Button::new(lit!("Beneath")).on_activate_fn(move |_| count.set(count.get() + 1)));
+        let page = tree.add(teksilo_widgets::VStack::new().child(button));
+        tree.set_content_root(page);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        present_in_tree_modal_request(
+            &mut tree,
+            if from_button { button } else { page },
+            ModalRequest::deferred(|tree| {
+                tree.add(teksilo_widgets::TextWidget::new(lit!(
+                    "Where the book stands"
+                )))
+            })
+            .presentation(ModalPresentation::InTree)
+            .close_behavior(ModalCloseBehavior::EscapeOrClickOutside),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_eq!(
+            tree.active_overlays().len(),
+            2,
+            "precondition: scrim + panel"
+        );
+        (tree, button, activations)
+    }
+
+    fn click_at(tree: &mut WidgetTree, at: teksilo_canvas::Point) {
+        use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+        tree.pointer_move(at);
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            at,
+            PointerButton::Primary,
+            Modifiers::default(),
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            at,
+            PointerButton::Primary,
+            Modifiers::default(),
+        ));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+    }
+
+    /// A click outside a modal the page presented closes it and reaches the
+    /// control beneath, as it does for a menu: one click, not two. 0.21.0
+    /// took the page, the modal's anchor, for the opener of a click-opened
+    /// overlay and kept every press in the window from the page (Skribisto's
+    /// "Where the book stands" card: the first click into the binder only
+    /// closed the card).
+    #[test]
+    fn a_click_outside_a_modal_the_page_presented_reaches_the_control_beneath() {
+        let (mut tree, button, activations) = button_under_a_click_outside_modal(false);
+        let at = tree.bounds(button).center();
+        click_at(&mut tree, at);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "the click closed the modal"
+        );
+        assert_eq!(activations.get(), 1, "and activated the button beneath");
+    }
+
+    /// A click on the control that opened the modal only closes it: that
+    /// control would open it again (click-the-trigger-to-close, as for a
+    /// popover).
+    #[test]
+    fn a_click_on_a_modals_opener_only_closes_it() {
+        let (mut tree, button, activations) = button_under_a_click_outside_modal(true);
+        let at = tree.bounds(button).center();
+        click_at(&mut tree, at);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "the click closed the modal"
+        );
+        assert_eq!(activations.get(), 0, "and did not open it again");
+    }
+
+    /// A finger's tap outside the modal closes it and reaches nothing beneath:
+    /// the finger covered the control, so the user did not aim at it.
+    #[test]
+    fn a_tap_outside_a_modal_the_page_presented_only_closes_it() {
+        let (mut tree, button, activations) = button_under_a_click_outside_modal(false);
+        let at = tree.bounds(button).center();
+        let finger = tree.new_contact();
+        tree.touch_down(finger, at);
+        tree.touch_up(finger, at);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "the tap closed the modal"
+        );
+        assert_eq!(activations.get(), 0, "and reached nothing beneath");
+        tree.assert_no_leaked_pointer_state();
+    }
+
     /// The page behind an in-tree message box, as a screen reader meets it.
     /// `tools/reader/` (dialogs-08, in `dialogs-and-popovers`): with "Save
     /// changes?" up, an AT-SPI click on the page's "Welcome" opened a second

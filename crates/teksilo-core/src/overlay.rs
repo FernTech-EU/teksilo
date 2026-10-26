@@ -726,6 +726,18 @@ pub struct DismissArm {
     pub suppress_beneath: bool,
 }
 
+/// The anchor of a click-opened overlay an outside press dismissed, and
+/// whether that overlay is a modal ([`OverlayPlacement::is_modal`]).
+///
+/// The dispatcher asks it whether the press would open the overlay again. A
+/// popover's anchor is its trigger; a modal's is whatever presented it, which
+/// may be the whole page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ToggleAnchor {
+    pub(crate) anchor: WidgetId,
+    pub(crate) modal: bool,
+}
+
 /// An outside press that has not completed yet.
 struct ArmedDismiss {
     pointer: PointerId,
@@ -735,7 +747,11 @@ struct ArmedDismiss {
     overlays: Vec<OverlayId>,
     /// The click-opened overlays' anchors, carried so the commit can report
     /// them exactly as the press-time path does.
-    anchors: Vec<WidgetId>,
+    anchors: Vec<ToggleAnchor>,
+}
+
+fn anchors_of(toggles: Vec<ToggleAnchor>) -> Vec<WidgetId> {
+    toggles.into_iter().map(|toggle| toggle.anchor).collect()
 }
 
 pub struct OverlayManager {
@@ -1703,6 +1719,17 @@ impl OverlayManager {
         point: Point,
         busy: &[Point],
     ) -> (Vec<WidgetId>, Option<WidgetId>, Vec<WidgetId>) {
+        let (dismissed, focus_restore, toggles) = self.dismiss_outside_press_toggles(point, busy);
+        (dismissed, focus_restore, anchors_of(toggles))
+    }
+
+    /// [`dismiss_outside_press`](Self::dismiss_outside_press), with each
+    /// anchor saying whether its overlay is a modal.
+    pub(crate) fn dismiss_outside_press_toggles(
+        &mut self,
+        point: Point,
+        busy: &[Point],
+    ) -> (Vec<WidgetId>, Option<WidgetId>, Vec<ToggleAnchor>) {
         let (to_dismiss, toggle_anchors) = self.outside_press_targets(point, busy);
         self.apply_outside_press(to_dismiss, toggle_anchors)
     }
@@ -1713,7 +1740,7 @@ impl OverlayManager {
         &self,
         point: Point,
         busy: &[Point],
-    ) -> (Vec<OverlayId>, Vec<WidgetId>) {
+    ) -> (Vec<OverlayId>, Vec<ToggleAnchor>) {
         if self.stack.is_empty() {
             return (Vec::new(), Vec::new());
         }
@@ -1761,7 +1788,7 @@ impl OverlayManager {
         // overlays (`PointerLeave`) are not click toggles, so their
         // anchors are omitted and a press there falls through.
         let mut to_dismiss: Vec<OverlayId> = Vec::new();
-        let mut toggle_anchors: Vec<WidgetId> = Vec::new();
+        let mut toggle_anchors: Vec<ToggleAnchor> = Vec::new();
         for (i, o) in self.stack.iter().enumerate() {
             // Skip the hit overlay and everything beneath it — the press
             // landed inside them (or was covered by them), so they survive.
@@ -1779,7 +1806,10 @@ impl OverlayManager {
             match o.dismiss {
                 DismissBehavior::ClickOutside | DismissBehavior::EscapeOrClickOutside => {
                     to_dismiss.push(o.id);
-                    toggle_anchors.push(o.anchor);
+                    toggle_anchors.push(ToggleAnchor {
+                        anchor: o.anchor,
+                        modal: o.placement.is_modal(),
+                    });
                 }
                 DismissBehavior::PointerLeave { .. } => to_dismiss.push(o.id),
                 DismissBehavior::EscapeKey | DismissBehavior::Manual => {}
@@ -1793,8 +1823,8 @@ impl OverlayManager {
     fn apply_outside_press(
         &mut self,
         to_dismiss: Vec<OverlayId>,
-        toggle_anchors: Vec<WidgetId>,
-    ) -> (Vec<WidgetId>, Option<WidgetId>, Vec<WidgetId>) {
+        toggle_anchors: Vec<ToggleAnchor>,
+    ) -> (Vec<WidgetId>, Option<WidgetId>, Vec<ToggleAnchor>) {
         if to_dismiss.is_empty() {
             return (Vec::new(), None, Vec::new());
         }
@@ -1879,7 +1909,8 @@ impl OverlayManager {
         } else {
             arm.anchors
         };
-        self.apply_outside_press(to_dismiss, anchors)
+        let (dismissed, focus_restore, toggles) = self.apply_outside_press(to_dismiss, anchors);
+        (dismissed, focus_restore, anchors_of(toggles))
     }
 
     /// Drop `pointer`'s arm without dismissing anything. Returns whether there

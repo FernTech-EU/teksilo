@@ -15,6 +15,15 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+#### Core
+
+- **A click outside an in-window modal reaches the control beneath again.**
+  Since 0.21.0 a click outside a modal presented from the page (from the
+  window's root, for instance) closed the modal and went nowhere, so the user
+  had to click twice. It closes the modal and reaches the control under the
+  pointer, as in 0.20.0; a click on the control that opened the modal still
+  only closes it.
+
 #### Platform
 
 - **A menu titled like the standard Window or Help menu shows once in the
