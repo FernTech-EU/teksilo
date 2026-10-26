@@ -235,11 +235,17 @@ jobs:
       # A single x11rb in the graph. Teksilo and winit both depend on it, and a
       # version fork would silently double the X11 code in every binary and make
       # any future type shared across the boundary fail to compile.
+      # Not `cargo tree -i x11rb`: with two versions in the graph it fails as
+      # ambiguous, and a step that hid that error read the empty output as one
+      # version and passed (x11rb 0.13 and 0.14 sat side by side unnoticed).
       - name: Assert a single x11rb version
         run: |
-          versions=$(cargo tree --workspace -i x11rb --depth 0 2>/dev/null \
+          set -euo pipefail
+          versions=$(cargo tree --workspace --target all --edges normal,build,dev \
+                       --prefix none --format '{p}' \
                      | grep -oE '^x11rb v[0-9.]+' | sort -u)
           echo "$versions"
+          [ -n "$versions" ] || { echo "::error::no x11rb in the dependency graph"; exit 1; }
           [ "$(echo "$versions" | wc -l)" -eq 1 ] || {
             echo "::error::x11rb has forked into multiple versions"; exit 1; }
 

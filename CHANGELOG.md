@@ -560,6 +560,10 @@ by crate for clarity, not because crates version independently.
   position (-32000, -32000) and zero size, so it came back 320 x 240 in the
   middle of the screen. A minimised window's `WindowState` keeps the size
   and position it has when shown.
+- **Linux builds compile one copy of x11rb again.** Since 0.17.0 teksilo
+  depended on x11rb 0.14 while winit uses 0.13, so every build compiled
+  both. Teksilo is back on winit's 0.13 line, and CI's check for a single
+  x11rb, which passed despite the two, now catches a fork.
 - **The menu bar title that holds the keyboard focus is drawn highlighted.**
   After F10 or Alt the focus was on a title drawn like the others.
 - **Signing out of Windows no longer kills the application after five
