@@ -23,7 +23,10 @@
 #     checked before and after the run, and the run fails if it went missing;
 #   * no `DISPLAY` and a private `WAYLAND_DISPLAY`, served by a private
 #     `kwin_wayland --virtual`, which renders to no screen but sends frame
-#     callbacks, so everything that waits on a frame runs as on a desktop;
+#     callbacks, so everything that waits on a frame runs as on a desktop.
+#     With `TEKSILO_READER_XWAYLAND=1` that KWin also serves an Xwayland
+#     display of the run's own, named in `TEKSILO_READER_X11_DISPLAY` for a
+#     scenario to hand its example; `DISPLAY` itself stays unset;
 #   * `GSETTINGS_BACKEND=memory`: turning accessibility on is a GSettings
 #     write (`org.a11y.Status.IsEnabled` is stored as `toolkit-accessibility`),
 #     and through dconf it would land in the user's own settings for good;
@@ -110,8 +113,19 @@ kwin_log="$log_dir/private-kwin-$$.log"
 # them, which is how `fake_key` presses real keys. This KWin serves this run's
 # private session and nothing else, so what it lets a client do reaches
 # nothing outside the run; the desktop's KWin is not touched.
-env -u WAYLAND_DISPLAY KWIN_WAYLAND_NO_PERMISSION_CHECKS=1 kwin_wayland --virtual --no-lockscreen --no-global-shortcuts \
-    --socket "$socket" --width 1280 --height 900 >"$kwin_log" 2>&1 &
+kwin_args=(--virtual --no-lockscreen --no-global-shortcuts --socket "$socket" --width 1280 --height 900)
+# An X11 display of the run's own, for a scenario that runs its example on X11
+# (`TEKSILO_READER_XWAYLAND=1`): the private KWin then serves Xwayland too,
+# started on the first connection, and manages its windows as the desktop's
+# does. Its number is whichever was free; it is read below from the one socket
+# that appears, so an example is never pointed at the desktop's own X server.
+x11_before=""
+if [[ -n "${TEKSILO_READER_XWAYLAND:-}" ]]; then
+    kwin_args+=(--xwayland)
+    x11_before="$(ls /tmp/.X11-unix 2>/dev/null | sort)"
+fi
+env -u WAYLAND_DISPLAY KWIN_WAYLAND_NO_PERMISSION_CHECKS=1 kwin_wayland "${kwin_args[@]}" \
+    >"$kwin_log" 2>&1 &
 kwin=$!
 
 cleanup() {
@@ -141,6 +155,22 @@ if [[ ! -S "$XDG_RUNTIME_DIR/$socket" ]]; then
     echo "private_session.sh: the private KWin did not start; its log is $kwin_log" >&2
     tail -n 20 "$kwin_log" >&2
     exit 1
+fi
+
+if [[ -n "${TEKSILO_READER_XWAYLAND:-}" ]]; then
+    x11_new=""
+    for _ in $(seq 1 50); do
+        x11_new="$(comm -13 <(printf '%s\n' "$x11_before") <(ls /tmp/.X11-unix 2>/dev/null | sort) \
+            | grep -x 'X[0-9]\+')"
+        [[ -n "$x11_new" ]] && break
+        sleep 0.1
+    done
+    if [[ -z "$x11_new" || "$x11_new" == *$'\n'* ]]; then
+        echo "private_session.sh: could not tell the private KWin's X11 socket apart" \
+            "(new sockets: ${x11_new:-none})" >&2
+        exit 1
+    fi
+    export TEKSILO_READER_X11_DISPLAY=":${x11_new#X}"
 fi
 
 # Accessibility on, in memory only: `accesskit_unix` exposes the window on the

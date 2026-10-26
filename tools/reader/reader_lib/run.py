@@ -748,17 +748,53 @@ class Run:
         self.acts.append(act)
         return tree
 
-    def close_window(self) -> None:
-        """Ask the private KWin to close this application's windows, as the
-        close button or Alt+F4 would."""
+    def hold(self, key: str) -> None:
+        """Press a real key and keep it down until `release`: `run.hold("Alt")`."""
+        assert self.keyboard is not None
+        self._step(f"hold {key}")
+        self.keyboard.send([f"+{keymap.code(key)}"])
+
+    def release(self, key: str) -> None:
+        assert self.keyboard is not None
+        self._step(f"release {key}")
+        self.keyboard.send([f"-{keymap.code(key)}"])
+
+    def close_window(self, caption: str | None = None) -> None:
+        """Ask the private KWin to close this application's windows, or its one
+        window titled `caption`, as the close button or Alt+F4 would."""
         assert self.app is not None
-        self._step("close the window through KWin")
-        script = self.work / f"close-{self.app.pid}.js"
+        self._step("close the window through KWin" if caption is None
+                   else f"close the window {caption!r} through KWin")
+        script = self.work / f"close-{self.app.pid}-{uuid.uuid4().hex[:8]}.js"
         script.write_text(
             "const wins = workspace.windowList ? workspace.windowList() : workspace.clientList();\n"
-            f"wins.forEach(w => {{ if (w.pid === {self.app.pid}) w.closeWindow(); }});\n",
+            f"wins.forEach(w => {{ if ({self._kwin_match(caption)}) w.closeWindow(); }});\n",
             encoding="utf-8")
         self._kwin_script(script)
+
+    def activate_window(self, caption: str) -> None:
+        """Ask the private KWin to make this application's window titled
+        `caption` the active one, as Alt+Tab or a click on it would."""
+        assert self.app is not None
+        self._step(f"activate the window {caption!r} through KWin")
+        script = self.work / f"activate-{self.app.pid}-{uuid.uuid4().hex[:8]}.js"
+        script.write_text(
+            "const wins = workspace.windowList ? workspace.windowList() : workspace.clientList();\n"
+            f"wins.forEach(w => {{ if ({self._kwin_match(caption)}) {{\n"
+            "  if ('activeWindow' in workspace) workspace.activeWindow = w;\n"
+            "  else workspace.activeClient = w;\n"
+            "} });\n",
+            encoding="utf-8")
+        self._kwin_script(script)
+
+    def _kwin_match(self, caption: str | None) -> str:
+        """A KWin script condition for this application's windows, or its one
+        window titled `caption`."""
+        assert self.app is not None
+        condition = f"w.pid === {self.app.pid}"
+        if caption is not None:
+            condition += f" && w.caption === {json.dumps(caption)}"
+        return condition
 
     def resize_window(self, width: int, height: int) -> None:
         """Ask the private KWin to resize this application's windows, keeping

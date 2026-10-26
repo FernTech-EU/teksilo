@@ -62,7 +62,11 @@ make. The session has:
   socket before and after every run and fails loudly if it went missing;
 - its **own KWin** (`kwin_wayland --virtual`), which draws to no screen but
   sends frame callbacks, so everything that waits on a frame runs as on a
-  desktop; **no `DISPLAY`**;
+  desktop; **no `DISPLAY`**. With `TEKSILO_READER_XWAYLAND=1` that KWin also
+  serves an Xwayland display of the run's own, named in
+  `TEKSILO_READER_X11_DISPLAY`, for a scenario that runs its example on X11
+  (`fix-alt-tap-x11` hands it to the example as `DISPLAY`, with an empty
+  `WAYLAND_DISPLAY`);
 - its **own configuration and data homes**, a US keyboard layout and English
   messages (`TEKSILO_READER_LANG` overrides the language);
 - **settings in memory** (`GSETTINGS_BACKEND=memory`): turning accessibility
@@ -141,8 +145,11 @@ Three ways to act, which are not the same thing to a screen reader:
 
 `run.find(...)`, `run.find_all(...)`, `run.wait_for(...)` and `run.snapshot(label)`
 read the bus; `run.close_window()` and `run.resize_window(w, h)` ask the
-private KWin to close or resize the window, as its decorations would, and
-`run.pointer_to(x, y)` moves the pointer (it is parked in the output's
+private KWin to close or resize the window, as its decorations would
+(`run.close_window(caption)` closes only the window with that title, and
+`run.activate_window(caption)` makes it the active one, as Alt+Tab would),
+`run.hold(key)` and `run.release(key)` keep a real key down across other
+steps, and `run.pointer_to(x, y)` moves the pointer (it is parked in the output's
 bottom-right corner at the start, so nothing opens a hover tooltip by itself).
 
 Keep every step inside an act, scene setting included (label it "scene: ..."):
