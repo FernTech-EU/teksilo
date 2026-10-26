@@ -23,6 +23,20 @@ by crate for clarity, not because crates version independently.
   build can overflow it while building its first window. The app guide's
   *Adding Teksilo* has the same snippet.
 
+### Changed
+
+#### Settings
+
+- **On macOS, settings and data now live in `~/Library/Application Support`,
+  and are moved there.** `AppPaths::new` gave the Linux directories on macOS
+  (`~/.config/<app>` and `~/.local/share/<app>`), where its documentation
+  promised Application Support. They are now
+  `~/Library/Application Support/<bundle id>/config` and `.../data`, the
+  bundle id being `<qualifier>.<organization in lower case>.<Application>`.
+  The first start moves an application's existing settings and data there,
+  once; from another volume it copies them and leaves the originals. Linux
+  and Windows are unchanged.
+
 ### Fixed
 
 #### Core

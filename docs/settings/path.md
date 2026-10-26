@@ -23,12 +23,31 @@ OS-correct path resolution for application config and data directories.
 
 ## Detailed description
 
-`AppPaths` wraps `etcetera`'s native `AppStrategy` so the rest of the
-crate has a single point of truth for where settings files live. In
-production, `AppPaths::new` queries the OS (XDG on Linux,
-`%APPDATA%` on Windows, `~/Library/Application Support` on macOS); in
-tests, `AppPaths::for_testing` roots everything inside a `tempdir` so no
-test ever touches the user's real config tree.
+`AppPaths` is the rest of the crate's single point of truth for where
+settings files live. In production, `AppPaths::new` asks the OS, through
+`etcetera`; in tests, `AppPaths::for_testing` roots everything inside a
+`tempdir` so no test ever touches the user's real config tree.
+
+| Platform | Config directory | Data directory |
+|---|---|---|
+| Linux and other Unix | `$XDG_CONFIG_HOME/<app>`, by default `~/.config/<app>` | `$XDG_DATA_HOME/<app>`, by default `~/.local/share/<app>` |
+| Windows | `%APPDATA%\<Organization>\<Application>\config` | `%APPDATA%\<Organization>\<Application>\data` |
+| macOS | `~/Library/Application Support/<bundle id>/config` | `~/Library/Application Support/<bundle id>/data` |
+
+`<app>` is the application's name in lower case, and the bundle id is
+`<qualifier>.<organization in lower case>.<Application>`, spaces made
+hyphens in both: `AppPaths::new("eu", "FernTech", "Skribisto")` gives
+`~/.config/skribisto` and `~/Library/Application Support/eu.ferntech.Skribisto`.
+
+#### The move to Application Support on macOS
+
+Up to 0.21.0 a macOS application's config and data went to the Linux
+directories, `~/.config/<app>` and `~/.local/share/<app>`. On macOS,
+`AppPaths::new` brings each of those it finds to its new place, once:
+only while the new directory does not exist yet. It is a rename where both
+are on one volume, and otherwise a copy that leaves the old directory
+where it was. A move that fails is reported on standard error and leaves
+the old directory as it was, to be tried again at the next start.
 
 #### Usage
 
@@ -80,12 +99,14 @@ pub struct AppPaths { /* fields */ }
 
 #### `pub fn new(qualifier: &str, organization: &str, application: &str) -> Option<Self>`
 
-Resolve directories from the OS. The `(qualifier, organization,
-application)` triple feeds `etcetera::AppStrategyArgs` as
-`(top_level_domain, author, app_name)` — same fields, different
-names — and selects the platform-native strategy (XDG on Linux,
-`%APPDATA%`-based on Windows, `~/Library/Application Support`
-on macOS).
+Resolve directories from the OS; the module documentation says where
+they are on each platform. The `(qualifier, organization, application)`
+triple feeds `etcetera::AppStrategyArgs` as `(top_level_domain,
+author, app_name)`, the same fields under other names.
+
+On macOS it first moves the directories it gave up to 0.21.0, under
+`~/.config` and `~/.local/share`, to Application Support, when they
+are there and their new places are not.
 
 Returns `None` when no usable home directory could be detected
 (a sandboxed or unconfigured environment). Callers who want to
@@ -111,8 +132,8 @@ an application wants to override one or both (e.g. portable mode).
 
 #### `pub fn config_dir(&self) -> &Path`
 
-The platform-correct config directory (XDG_CONFIG_HOME, %APPDATA%,
-`~/Library/Preferences`, etc.).
+The platform-correct config directory; the module documentation says
+where it is on each platform.
 
 <a id="apppaths-data_dir"></a>
 
