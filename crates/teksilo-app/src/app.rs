@@ -56,7 +56,7 @@ pub enum ThemeMode {
 /// `LastWindowClosed`, an application with no window open once it has
 /// started (the initial window created and the application tree's mount
 /// actions run) panics on its first turn, since it would quit before
-/// showing anything.
+/// showing anything; one that quit while starting ends normally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum QuitPolicy {
@@ -87,10 +87,15 @@ impl QuitPolicy {
     /// Why an application with this policy cannot go on with
     /// `open_windows` windows open once it has started (its initial window
     /// created and the application tree's mount actions run), `None` when
-    /// it can.
-    fn refuses_startup_without_window(self, open_windows: usize) -> Option<&'static str> {
+    /// it can. An application that quit while starting (`quit_completed`)
+    /// closed its windows on purpose: the loop ends, as asked.
+    fn refuses_startup_without_window(
+        self,
+        open_windows: usize,
+        quit_completed: bool,
+    ) -> Option<&'static str> {
         match self {
-            QuitPolicy::LastWindowClosed if open_windows == 0 => Some(
+            QuitPolicy::LastWindowClosed if open_windows == 0 && !quit_completed => Some(
                 "TeksiloAppBuilder: no window is open once the application has started \
                  (no initial_window, and the application tree's run_after_mount opened \
                  none), and the quit policy is QuitPolicy::LastWindowClosed, so the \
@@ -1215,12 +1220,16 @@ struct TeksiloAppHandler {
     /// (Unix), each unless the process ignored it when the watch started.
     #[cfg(unix)]
     quit_signals: Option<teksilo_platform::os_quit::SignalWatch>,
-    /// AppKit's `terminate:` asks the application (macOS).
+    /// AppKit's `terminate:` asks the application (macOS): the hook was
+    /// tried, whether it took or not (a failure is said once).
     #[cfg(target_os = "macos")]
     terminate_hooked: bool,
     /// Hears the session end (Windows).
     #[cfg(target_os = "windows")]
     session_end_watch: Option<teksilo_platform::os_quit::SessionEndWatch>,
+    /// The console handler (Windows): see [`ConsoleWatch`](teksilo_platform::os_quit::ConsoleWatch).
+    #[cfg(target_os = "windows")]
+    console_watch: Option<teksilo_platform::os_quit::ConsoleWatch>,
 }
 
 impl TeksiloAppHandler {
@@ -1283,6 +1292,8 @@ impl TeksiloAppHandler {
             terminate_hooked: false,
             #[cfg(target_os = "windows")]
             session_end_watch: None,
+            #[cfg(target_os = "windows")]
+            console_watch: None,
         }
     }
 
@@ -1295,6 +1306,7 @@ impl TeksiloAppHandler {
             && let Some(proxy) = self.wm.event_proxy().cloned()
         {
             let settings = self.settings.clone();
+            let closing = proxy.clone();
             self.session_end_watch = teksilo_platform::os_quit::SessionEndWatch::new(
                 move |request| {
                     teksilo_core::AppEventPoster::post_external(&proxy, Box::new(request));
@@ -1303,16 +1315,64 @@ impl TeksiloAppHandler {
                 // is busy in a native modal of the application's own): the
                 // settings at least are written before the process ends.
                 move || flush_settings_on_exit(settings.as_ref()),
+                // `WM_CLOSE` on winit's hidden window: `taskkill` without
+                // `/F`, decided in `user_event`.
+                move || {
+                    teksilo_core::AppEventPoster::post_external(
+                        &closing,
+                        Box::new(teksilo_platform::os_quit::HiddenWindowClose),
+                    );
+                },
+            );
+            // In release builds too, as for the macOS hook: without the
+            // watch a sign-out ends the application past every guard, and
+            // without winit's window kept, `taskkill` leaves it deaf.
+            match &self.session_end_watch {
+                None => eprintln!(
+                    "teksilo-app: could not create the session-end window; signing out, \
+                     restarting or shutting down ends the application without asking its \
+                     close guards or writing its settings"
+                ),
+                Some(watch) if !watch.keeps_winit_target() => eprintln!(
+                    "teksilo-app: winit's hidden event-loop window was not found; `taskkill` \
+                     with no window open may leave the application running but deaf"
+                ),
+                Some(_) => {}
+            }
+        }
+        #[cfg(target_os = "windows")]
+        if self.console_watch.is_none()
+            && let Some(proxy) = self.wm.event_proxy().cloned()
+        {
+            self.console_watch = teksilo_platform::os_quit::ConsoleWatch::new(
+                move |request| {
+                    teksilo_core::AppEventPoster::post_external(&proxy, Box::new(request));
+                },
+                // From the handler's thread: the writers' pool is shared.
+                || {
+                    let _ = teksilo_settings::flush_every_writer();
+                },
             );
         }
         #[cfg(target_os = "macos")]
         if !self.terminate_hooked
             && let Some(proxy) = self.wm.event_proxy().cloned()
         {
-            self.terminate_hooked =
-                teksilo_platform::os_quit::install_terminate_hook(move |request| {
-                    teksilo_core::AppEventPoster::post_external(&proxy, Box::new(request));
-                });
+            self.terminate_hooked = true;
+            let hooked = teksilo_platform::os_quit::install_terminate_hook(move |request| {
+                teksilo_core::AppEventPoster::post_external(&proxy, Box::new(request));
+            });
+            if !hooked {
+                // In release builds too: without the hook the Dock's Quit, a
+                // logout and AppleScript's `quit` end the process past every
+                // close guard, with nothing saved.
+                eprintln!(
+                    "teksilo-app: could not hook applicationShouldTerminate: on the \
+                     application delegate (winit's delegate may implement it already); \
+                     the Dock's Quit, AppleScript's quit and a logout end the application \
+                     without asking its close guards or writing its settings"
+                );
+            }
         }
         #[cfg(unix)]
         if self.termination_signals && self.quit_signals.is_none() {
@@ -1342,7 +1402,7 @@ impl TeksiloAppHandler {
     }
 
     /// Quit now, for a source with no time to ask (a session ending now,
-    /// Windows' `WM_ENDSESSION`, a termination signal): an overruling quit
+    /// Windows' `WM_QUERYENDSESSION`, a termination signal): an overruling quit
     /// on behalf of `source`, carried out before this returns. The
     /// application's guard and every window's are asked and read `source`
     /// through `ctx.quit_source()`, so a document's guard can save without
@@ -1353,11 +1413,11 @@ impl TeksiloAppHandler {
     /// already proceeded closes unasked, an application guard that already
     /// agreed is not asked again), and a pending one is asked again with
     /// `source`. When it returns every window is closed, the quit has
-    /// completed, the settings are on disk, and the loop ends at the end of
-    /// the turn, unless guards kept opening windows as theirs closed: the
-    /// quit gives up after 4096 steps in one turn, says so on standard
-    /// error, and returns with windows still open (a Windows session end is
-    /// told it is finished all the same).
+    /// completed, the settings are on disk, and the loop has been told to
+    /// end, unless guards kept opening windows as theirs closed: the quit
+    /// gives up after 4096 steps in one turn, says so on standard error,
+    /// and returns with windows still open (a Windows session end is told
+    /// it is finished all the same).
     pub(crate) fn quit_now(
         &mut self,
         source: crate::quit::QuitSource,
@@ -1367,6 +1427,11 @@ impl TeksiloAppHandler {
             .request_quit_from(source, crate::quit::QuitMode::Overruling, None);
         self.process_pending(event_loop);
         self.flush_settings();
+        // Ended in this callback, not at the turn's end: winit on Windows
+        // checks its exit flag only after the next message, and an
+        // application with no window open (a tray application quit by
+        // `taskkill`) may get none.
+        self.maybe_exit(event_loop);
     }
 
     /// AppKit asked whether the application may end (a Dock Quit,
@@ -1773,7 +1838,7 @@ impl TeksiloAppHandler {
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_tick();
             }
-            self.run_nonvisual_frame(&mut current, event_loop);
+            let _ = self.run_nonvisual_frame(&mut current, event_loop);
             self.wm.reinsert_managed(window_id, current);
         }
         self.post_event(event_loop);
@@ -3766,16 +3831,25 @@ impl TeksiloAppHandler {
     /// accessibility sync and delivery, and the IME reconcile. A shown
     /// window runs it before rendering; a hidden one runs only this, so its
     /// app state, timers and accessibility tree stay current while it costs
-    /// no GPU or compositor time. See [`crate::redraw_gate`].
+    /// no GPU or compositor time. See [`crate::redraw_gate`]. `true` when
+    /// the window took another size after this frame's layout, so the frame
+    /// is not to be drawn.
     fn run_nonvisual_frame(
         &mut self,
         current: &mut crate::window_manager::ManagedWindow,
         event_loop: &ActiveEventLoop,
-    ) {
+    ) -> bool {
+        let mut resized_after_layout = false;
         let current_id = current.teksilo_id;
         let current_arc = Some(current.platform_window.window_arc());
         current.redraw.ran_frame(Instant::now());
 
+        // macOS: a size the window took without a `Resized` reaching us
+        // (one raised inside a handler while a quit waits on AppKit's reply)
+        // is the size this frame lays out and draws at. One frame-rect read,
+        // and nothing when the size has not changed.
+        #[cfg(target_os = "macos")]
+        current.take_window_size();
         let size = current.platform_window.surface_size();
         let sf = current.platform_window.scale_factor() as f32;
         let proposal = SizeProposal::exact(size.0 as f32 / sf, size.1 as f32 / sf);
@@ -3830,6 +3904,12 @@ impl TeksiloAppHandler {
                         current.platform_window.window().set_min_inner_size(Some(
                             winit::dpi::LogicalSize::new(target.0, target.1),
                         ));
+                        // On macOS that grew the window already: this
+                        // frame was laid out at the old size, so it is not
+                        // drawn (the redraw the resize asked for is).
+                        let before = current.platform_window.surface_size();
+                        current.take_window_size();
+                        resized_after_layout = current.platform_window.surface_size() != before;
                     }
                     current.state.size().set(target);
                     if let Some(centre) = current.autosize_centre {
@@ -3918,6 +3998,7 @@ impl TeksiloAppHandler {
         // through `dispatch_in_window`. Layout has settled, so the focused
         // node's descriptor is current. Cheap + deduped, safe every frame.
         Self::settle_ime(current);
+        resized_after_layout
     }
 
     fn handle_redraw_requested(&mut self, window_id: WindowId, event_loop: &ActiveEventLoop) {
@@ -3940,7 +4021,13 @@ impl TeksiloAppHandler {
         if let Some(trace) = &mut self.idle_trace {
             trace.note_redraw_requested();
         }
-        self.run_nonvisual_frame(&mut current, event_loop);
+        let resized_after_layout = self.run_nonvisual_frame(&mut current, event_loop);
+        // Laid out at the size the window had before the frame grew it: the
+        // redraw that resize asked for draws it at its size instead.
+        if resized_after_layout {
+            self.wm.reinsert_managed(window_id, current);
+            return;
+        }
         // A hidden window draws nothing past the one frame it owes on its way
         // to hidden. Its state is current; its pixels wait for the reveal.
         if current.redraw.is_hidden() && !current.redraw.take_transition_frame() {
@@ -4142,11 +4229,17 @@ impl TeksiloAppHandler {
                     // the Switcher glyph swap on `TitleBar`'s maximize
                     // button (bound to `WindowState::placement`) stays
                     // in sync.
-                    let sf = managed.platform_window.scale_factor();
-                    let logical_w = (new_size.width as f64 / sf).round().max(0.0) as u32;
-                    let logical_h = (new_size.height as f64 / sf).round().max(0.0) as u32;
-                    managed.state.set_size_from_os((logical_w, logical_h));
                     let placement = query_window_placement(managed.platform_window.window());
+                    // A minimised window keeps the size it has when shown:
+                    // Windows reports a minimise as a resize to zero, which
+                    // the saved geometry would keep, so the window came
+                    // back at the smallest size the restore allows.
+                    if !placement.is_minimized() {
+                        let sf = managed.platform_window.scale_factor();
+                        let logical_w = (new_size.width as f64 / sf).round().max(0.0) as u32;
+                        let logical_h = (new_size.height as f64 / sf).round().max(0.0) as u32;
+                        managed.state.set_size_from_os((logical_w, logical_h));
+                    }
                     managed.state.set_placement_from_os(placement);
                     // Windows reports a minimise as a resize to zero, and a
                     // restore as a resize back.
@@ -4164,7 +4257,20 @@ impl TeksiloAppHandler {
                 }
             }
             WindowEvent::Moved(pos) => {
-                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id)
+                    // A minimised window keeps the position it has when
+                    // shown: Windows moves it to (-32000, -32000), which the
+                    // saved geometry would keep. On Windows the window is
+                    // asked (a flag read): the move comes before the resize
+                    // that marks the window minimised, and on a restore
+                    // before the one that marks it shown, whose position
+                    // must be taken. Elsewhere what the manager knows.
+                    && !(if cfg!(target_os = "windows") {
+                        managed.platform_window.window().is_minimized() == Some(true)
+                    } else {
+                        managed.minimized
+                    })
+                {
                     let sf = managed.platform_window.scale_factor();
                     let lx = (pos.x as f64 / sf).round() as i32;
                     let ly = (pos.y as f64 / sf).round() as i32;
@@ -4530,7 +4636,7 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
             self.started = true;
             if let Some(why) = self
                 .quit_policy
-                .refuses_startup_without_window(self.wm.window_count())
+                .refuses_startup_without_window(self.wm.window_count(), self.wm.quit_completed())
             {
                 panic!("{why}");
             }
@@ -4588,6 +4694,28 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
                     // that follows settles it.
                     return;
                 }
+                Err(payload) if payload.is::<teksilo_platform::os_quit::HiddenWindowClose>() => {
+                    // `taskkill` without `/F`: Windows' polite request to
+                    // quit. With no window open it is read as `SIGTERM` is
+                    // on Unix, nobody there to answer. With windows open
+                    // (it picked this window, every other one minimised
+                    // below it, or a sender closing every window) the user
+                    // may be there: the guards are asked and may refuse, as
+                    // for the Dock's Quit, and overruling them would lose
+                    // what they ask about.
+                    if self.wm.window_count() == 0 {
+                        self.quit_now(crate::quit::QuitSource::Signal, event_loop);
+                    } else {
+                        self.wm.request_quit_from(
+                            crate::quit::QuitSource::UserQuit,
+                            crate::quit::QuitMode::Guarded,
+                            None,
+                        );
+                        self.process_pending(event_loop);
+                        self.post_event(event_loop);
+                    }
+                    return;
+                }
                 Err(payload) if payload.is::<teksilo_platform::os_quit::TerminationSignal>() => {
                     // No one is there to answer a question: every guard is
                     // asked once and saves, and the application ends.
@@ -4604,14 +4732,36 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
                     return;
                 }
                 Err(payload) if payload.is::<teksilo_platform::os_quit::SessionEndNow>() => {
-                    // The session ends now (Windows' `WM_ENDSESSION`): the
+                    // The session ends now (Windows' `WM_QUERYENDSESSION`): the
                     // window procedure that posted this runs the messages
                     // until it is finished, and the process may end as
-                    // soon as that procedure returns.
-                    self.quit_now(crate::quit::QuitSource::SessionEnd, event_loop);
+                    // soon as that procedure returns. One the procedure
+                    // stopped waiting for (this loop was busy in a native
+                    // modal) is for a session end already over, perhaps
+                    // cancelled: it asks nothing.
                     if let Ok(request) =
                         payload.downcast::<teksilo_platform::os_quit::SessionEndNow>()
                     {
+                        if !request.is_expired() {
+                            self.quit_now(crate::quit::QuitSource::SessionEnd, event_loop);
+                        }
+                        request.finished();
+                    }
+                    return;
+                }
+                Err(payload) if payload.is::<teksilo_platform::os_quit::ConsoleClosing>() => {
+                    // The console closes (Windows), or the session ends
+                    // while the application runs in one: Windows ends the
+                    // process once its handler returns.
+                    if let Ok(request) =
+                        payload.downcast::<teksilo_platform::os_quit::ConsoleClosing>()
+                    {
+                        let source = if request.session_end() {
+                            crate::quit::QuitSource::SessionEnd
+                        } else {
+                            crate::quit::QuitSource::Signal
+                        };
+                        self.quit_now(source, event_loop);
                         request.finished();
                     }
                     return;
@@ -4941,6 +5091,9 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // The dialogs of the windows that took the focus this turn, now the
+        // window system has finished giving it.
+        self.wm.refocus_after_turn();
         // Drive any registered per-turn closure (the async executor poll when
         // `teksilo-async` is installed) before computing the next control
         // flow. A `true` return means tasks advanced and may have mutated
@@ -5876,7 +6029,8 @@ impl TeksiloAppBuilder {
     /// [`run_after_mount`](teksilo_core::BuildContext::run_after_mount)
     /// (see [`app_root`](Self::app_root)): with no window open once startup
     /// has run, [`run`](Self::run) panics on its first turn, since the
-    /// application would quit before showing anything. Under
+    /// application would quit before showing anything (a quit asked for
+    /// while starting ends the run normally). Under
     /// [`QuitPolicy::Explicit`] it may run with no window at all.
     ///
     /// ```ignore
@@ -6020,7 +6174,9 @@ impl TeksiloAppBuilder {
     /// handlers then run alone. Before the loop starts and once it has
     /// ended, the two signals keep their default meaning. One the process
     /// was started with ignored (`SIGHUP` under `nohup`) is left ignored
-    /// throughout.
+    /// throughout. One the application sets to ignored, or hands to a
+    /// handler of its own, after the loop has started takes it from the
+    /// watch from then on, silently: that is the application's choice.
     #[doc(hidden)]
     pub fn termination_signals(mut self, handled: bool) -> Self {
         self.termination_signals = handled;
@@ -7180,14 +7336,27 @@ mod tests {
     /// sits at x = 0.
     #[test]
     fn a_native_message_box_window_is_as_wide_as_its_padded_content() {
-        use teksilo_widgets::{EventContextMessageBoxExt, MessageBox, MessageBoxButtons};
+        use teksilo_widgets::{MessageBox, MessageBoxButtons};
+        message_box_window_pads(|| {
+            MessageBox::question(lit!("Save the changes before closing?"))
+                .buttons(MessageBoxButtons::OkCancel)
+        });
+        // Three buttons, whose row is wider than the box's own 460.
+        message_box_window_pads(|| {
+            MessageBox::question(lit!("Quit with unsaved changes?"))
+                .text(lit!("This document has unsaved changes."))
+                .buttons(MessageBoxButtons::SaveDiscardCancel)
+        });
+    }
+
+    /// The check of [`a_native_message_box_window_is_as_wide_as_its_padded_content`]
+    /// for the box `make` builds.
+    fn message_box_window_pads(make: fn() -> teksilo_widgets::MessageBox) {
+        use teksilo_widgets::EventContextMessageBoxExt;
         let theme = teksilo_core::presets::intui::light();
         let mut asking = WidgetTree::new().with_theme(theme.clone());
-        let ask = asking.add(Button::new(lit!("Close")).on_activate_fn(|ctx| {
-            ctx.present_message_box(
-                MessageBox::question(lit!("Save the changes before closing?"))
-                    .buttons(MessageBoxButtons::OkCancel),
-            );
+        let ask = asking.add(Button::new(lit!("Close")).on_activate_fn(move |ctx| {
+            ctx.present_message_box(make());
         }));
         asking.layout(teksilo_canvas::SizeProposal::exact(200.0, 100.0));
         asking.click(ask);
@@ -7200,7 +7369,12 @@ mod tests {
         let ModalContent::Deferred(builder) = request.content else {
             panic!("deferred content");
         };
-        let mut tree = WidgetTree::new().with_theme(theme);
+        // Text with widths, so the buttons are as wide as their labels.
+        let mut tree = WidgetTree::new()
+            .with_theme(theme)
+            .with_text_backend(Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )));
         let content = builder(&mut tree);
         wrap_native_modal_in_escape_route(&mut tree, content);
 
@@ -7236,6 +7410,25 @@ mod tests {
             bounds.x >= 24.0 - 0.5 && bounds.x + bounds.width <= size.0 as f32 - 24.0 + 0.5,
             "the box inside the panel's padding: {bounds:?} in a window {size:?}"
         );
+        // And what it holds: a button row wider than the box spilled past
+        // it, to the window's edges.
+        let mut buttons = 0;
+        let mut stack = tree.roots();
+        while let Some(id) = stack.pop() {
+            if tree
+                .widget_type_name(id)
+                .is_some_and(|name| name.ends_with("Button"))
+            {
+                buttons += 1;
+                let button = tree.bounds(id);
+                assert!(
+                    button.x >= 24.0 - 0.5 && button.x + button.width <= size.0 as f32 - 24.0 + 0.5,
+                    "a button inside the panel's padding: {button:?} in a window {size:?}"
+                );
+            }
+            stack.extend(tree.children(id));
+        }
+        assert!(buttons >= 2, "the box's buttons were found");
         assert!(
             size.0 >= floor.0 && size.1 >= 1,
             "never below the request: {size:?}"
@@ -8592,15 +8785,33 @@ mod quit_policy_tests {
     #[test]
     fn startup_without_a_window_is_judged_by_the_windows_left() {
         let refusal = QuitPolicy::LastWindowClosed
-            .refuses_startup_without_window(0)
+            .refuses_startup_without_window(0, false)
             .expect("no window after startup");
         assert!(refusal.contains("quit_policy(QuitPolicy::Explicit)"));
         assert!(refusal.contains("run_after_mount"));
         assert_eq!(
-            QuitPolicy::LastWindowClosed.refuses_startup_without_window(1),
+            QuitPolicy::LastWindowClosed.refuses_startup_without_window(1, false),
             None
         );
-        assert_eq!(QuitPolicy::Explicit.refuses_startup_without_window(0), None);
+        assert_eq!(
+            QuitPolicy::Explicit.refuses_startup_without_window(0, false),
+            None
+        );
+    }
+
+    /// An application that quits while it starts (a mount action that
+    /// handled its command line and has nothing to show) closed its windows
+    /// on purpose: no policy calls that a startup without a window.
+    #[test]
+    fn a_quit_while_starting_is_no_startup_without_a_window() {
+        assert_eq!(
+            QuitPolicy::LastWindowClosed.refuses_startup_without_window(0, true),
+            None
+        );
+        assert_eq!(
+            QuitPolicy::Explicit.refuses_startup_without_window(0, true),
+            None
+        );
     }
 
     /// The same builder under `Explicit` gets past the check: it reaches the

@@ -31,7 +31,6 @@
 //! modes too.
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -40,7 +39,7 @@ use objc2::{msg_send, sel};
 use objc2_app_kit::{NSApplication, NSApplicationTerminateReply};
 use objc2_foundation::{NSAppleEventDescriptor, NSAppleEventManager};
 
-use super::TerminateRequest;
+use super::{OwedReplies, TerminateRequest};
 
 /// Where a request goes, set by [`install_terminate_hook`].
 type Post = Box<dyn Fn(TerminateRequest)>;
@@ -50,9 +49,10 @@ thread_local! {
     static POST: RefCell<Option<Post>> = const { RefCell::new(None) };
 }
 
-/// An `NSTerminateLater` is waiting for its reply: a second reply, which
-/// AppKit would take as a new decision, is not given.
-static AWAITING_REPLY: AtomicBool = AtomicBool::new(false);
+/// The `NSTerminateLater`s waiting for their reply: each request replies
+/// once, and a reply owed to nothing, which AppKit would take as a new
+/// decision, is not given.
+static OWED_REPLIES: OwedReplies = OwedReplies::new();
 
 /// A four-character Apple Event code.
 const fn four_cc(code: &[u8; 4]) -> u32 {
@@ -147,7 +147,7 @@ extern "C-unwind" fn application_should_terminate(
     let posted = POST.with(|slot| match slot.try_borrow() {
         Ok(slot) => match slot.as_ref() {
             Some(post) => {
-                AWAITING_REPLY.store(true, Ordering::Release);
+                OWED_REPLIES.owe();
                 post(TerminateRequest::new(session_end, reply_on_main_queue));
                 true
             }
@@ -162,10 +162,12 @@ extern "C-unwind" fn application_should_terminate(
     }
 }
 
-/// Give AppKit its answer, from the main dispatch queue, once.
+/// Give AppKit its answer to one request, from the main dispatch queue:
+/// one reply for each `NSTerminateLater` (a second `terminate:` while the
+/// first waits gets one too, both from the one quit they joined).
 fn reply_on_main_queue(terminate: bool) {
     dispatch2::DispatchQueue::main().exec_async(move || {
-        if !AWAITING_REPLY.swap(false, Ordering::AcqRel) {
+        if !OWED_REPLIES.take() {
             return;
         }
         if let Some(mtm) = MainThreadMarker::new() {

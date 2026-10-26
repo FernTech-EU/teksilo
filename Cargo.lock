@@ -11782,6 +11782,7 @@ dependencies = [
  "tempfile",
  "uuid",
  "wgpu",
+ "windows 0.62.2",
  "winit",
  "x11rb 0.14.0",
 ]

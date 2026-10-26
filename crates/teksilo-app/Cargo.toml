@@ -106,18 +106,29 @@ uuid = { workspace = true, optional = true }
 name = "os_window_position"
 harness = false
 
+# Runs the event loop, which Windows allows on the main thread only.
+[[test]]
+name = "os_taskkill"
+harness = false
+
 [dev-dependencies]
 tempfile = { workspace = true }
 wgpu = { workspace = true }
 serde = { workspace = true }
 
-# The winit loop test plays the part of an X11 window manager (claim (am)):
-# the same x11rb teksilo-platform links, so it adds no crate.
+# The winit loop test plays the part of an X11 window manager (claim (am)),
+# and holds a key through XTest: the same x11rb teksilo-platform links, so it
+# adds no crate.
 [target.'cfg(all(unix, not(target_os = "macos")))'.dev-dependencies]
-x11rb = "0.14"
+x11rb = { version = "0.14", features = ["xtest"] }
 # The signal tests start their child application with `SIGHUP` ignored, as
 # `nohup` does. Already in the tree.
 libc = "0.2"
+
+# The taskkill test finds winit's hidden window and posts it `WM_CLOSE`:
+# the same windows crate and features teksilo-platform links.
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
 [package.metadata.docs.rs]
 all-features = true

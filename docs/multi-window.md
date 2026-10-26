@@ -68,7 +68,7 @@ Notes:
 
 | Policy | Last window closed | Initial window |
 |---|---|---|
-| `QuitPolicy::LastWindowClosed` (default) | the app quits | optional, but a window must be open once startup has run (the initial window, or one the application tree's `run_after_mount` opens): `run()` panics on its first turn otherwise, since the app would quit before showing anything |
+| `QuitPolicy::LastWindowClosed` (default) | the app quits | optional, but a window must be open once startup has run (the initial window, or one the application tree's `run_after_mount` opens): `run()` panics on its first turn otherwise, since the app would quit before showing anything; a quit asked for while starting ends the run normally |
 | `QuitPolicy::Explicit` | the app keeps running with no window | optional |
 
 `Explicit` is for an application whose life is not tied to its windows: a
@@ -1097,8 +1097,10 @@ operating system is answered once it is decided.
 | --- | --- | --- | --- |
 | macOS | the Dock menu's Quit, AppleScript's `quit app`, a menu item or another app sending `terminate:` | guarded; AppKit is told the outcome | `UserQuit` |
 | macOS | log out, restart, shut down | guarded; a refusal cancels the logout, as AppKit applications do | `SessionEnd` |
-| Windows | sign out, restart, shut down (`WM_ENDSESSION`) | overruling | `SessionEnd` |
-| Windows | `taskkill` without `/F` (`WM_CLOSE` to each window) | each window's own guarded close, as its close button | `None` |
+| Windows | sign out, restart, shut down (`WM_QUERYENDSESSION`) | overruling | `SessionEnd` |
+| Windows | `taskkill` without `/F` (`WM_CLOSE` to a window) | that window's own guarded close, as its close button | `None` |
+| Windows | `taskkill` without `/F` with no window open; the console of a console program closing | overruling | `Signal` |
+| Windows | `taskkill` without `/F` reaching the event loop's hidden window while windows are open (it may pick that window when every other one is minimised) | guarded | `UserQuit` |
 | Linux, macOS, other Unix | `SIGTERM` (`kill`, a service manager, the session ending), `SIGHUP` (the terminal or the login session that started the app closed), each unless the process was started with it ignored (`nohup`) | overruling | `Signal` |
 | Linux, macOS, other Unix | `SIGINT` (Ctrl+C in the terminal that started the app), `SIGKILL` | the process ends at once, nothing asked or written | |
 
@@ -1149,15 +1151,23 @@ a hidden window of Teksilo's own, so an application with no window open
 hears it too. Teksilo does not hold the session up: Microsoft asks
 applications to let it end, and a block puts the user in front of the
 full-screen "this app is preventing shutdown" list, where they end the
-session anyway. When Windows says the session really ends
-(`WM_ENDSESSION`), the application runs an overruling quit with
-`SessionEnd` before it answers, because Windows may end the process as
-soon as it does: every guard is asked and should save, the settings
-are written, and Windows allows a few seconds for all of it. `taskkill`
-without `/F` sends `WM_CLOSE` to every window of the process, which closes
-each window through its guard as its close button does; the application
-then ends under the default quit policy once its last window closes.
-`taskkill /F` ends the process at once, as it ends any program.
+session anyway. When Windows asks whether the session may end
+(`WM_QUERYENDSESSION`), the application runs an overruling quit with
+`SessionEnd` before it answers, because Windows may end the process soon
+after without saying more (a sign-out on Windows 11 sends no
+`WM_ENDSESSION` to an application it ends): every guard is asked and
+should save, the settings are written, and Windows allows a few seconds
+for all of it. Should another application then cancel the sign-out, this
+one has quit with its work saved. `taskkill` without `/F` sends
+`WM_CLOSE` to a window of the process, which closes that window through
+its guard as its close button does; with no window open, it quits the
+application as `SIGTERM` does (`QuitSource::Signal`). Should it pick
+Teksilo's hidden event-loop window while windows are open (every other one
+minimised below it), the application runs a guarded quit
+(`QuitSource::UserQuit`), as for the Dock's Quit. An application
+built as a console program and run from a console quits the same way
+when that console closes. `taskkill /F` ends the process at once, as it
+ends any program.
 
 **Termination signals.** `SIGTERM` and `SIGHUP` quit through the guards
 while the event loop runs. A service manager sends `SIGTERM`, waits, then
@@ -1237,8 +1247,10 @@ quit while one is under way changes nothing.
 quit is under way (a guard asked for a window the user closes during a
 quit reads the quit's source too). `QuitSource` says who asked: `Application`
 (`ctx.quit()`, `ctx.quit_forced()`, the App menu's Quit), `UserQuit` (the
-macOS Dock menu's Quit, AppKit's `terminate:`), `SessionEnd` (log out,
-restart, shut down) or `Signal` (`SIGTERM`, `SIGHUP`); the enum is
+macOS Dock menu's Quit, AppKit's `terminate:`, a Windows `taskkill` that
+reaches the hidden event-loop window while windows are open), `SessionEnd` (log out,
+restart, shut down) or `Signal` (`SIGTERM`, `SIGHUP`; on Windows `taskkill`
+with no window open, or a console program's console closing); the enum is
 `#[non_exhaustive]`. A guard for a document skips its dialog when the user
 is not there to answer it, as AppKit and Qt applications do: for
 `SessionEnd` and `Signal` it saves directly and returns `Close` (on

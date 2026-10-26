@@ -182,6 +182,7 @@ windows = { workspace = true, features = [
     "Win32_UI_Controls",                  # MARGINS
     "Win32_UI_Shell",                     # SetWindowSubclass / DefSubclassProc / RemoveWindowSubclass / DragQueryFileW / HDROP
     "Win32_System_LibraryLoader",         # GetModuleHandleW, for the session-end window's class (`os_quit/windows.rs`)
+    "Win32_System_Console",               # SetConsoleCtrlHandler, for the console close / logoff handler (`os_quit/windows.rs`)
     "Win32_UI_Input_KeyboardAndMouse",    # TrackMouseEvent / TRACKMOUSEEVENT / TME_*
     "Win32_Foundation",
     # External (OS) drag-and-drop: OLE drop target.

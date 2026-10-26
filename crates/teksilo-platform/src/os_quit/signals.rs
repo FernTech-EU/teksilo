@@ -15,6 +15,13 @@
 //! for the program it runs, and a daemon's parent may leave `SIGTERM`) is
 //! left alone: it is not registered, so it stays ignored, during the loop
 //! and after it.
+//!
+//! A disposition the application sets itself once the listener runs (a
+//! `signal(SIGTERM, SIG_IGN)` of its own, or a handler of another library)
+//! replaces the registration, and is the application's choice: the watch
+//! hears that signal no more, and nothing says so. An application that
+//! handles the two signals itself turns the watch off instead
+//! (`TeksiloAppBuilder::termination_signals(false)`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -102,10 +109,13 @@ impl SignalWatch {
     /// cannot be registered or the thread cannot start.
     pub fn new(post: impl Fn(TerminationSignal) + Send + 'static) -> std::io::Result<Self> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
-        start_listener()?;
         let number = NEXT.fetch_add(1, Ordering::Relaxed);
+        // In place before the listener starts: a signal it read before
+        // finding a watch would end the process as the default does.
         *post_slot() = Some((number, Box::new(post)));
-        Ok(Self { number })
+        let watch = Self { number };
+        start_listener()?;
+        Ok(watch)
     }
 }
 

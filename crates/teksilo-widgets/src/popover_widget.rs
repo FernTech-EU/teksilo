@@ -875,10 +875,10 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
             }
         });
 
-        // The named-action door. Registered global, not local: intents walk
-        // source-widget → root, and a menu renders in an overlay that is a
-        // sibling of this widget's subtree, so a plain `register_action` would
-        // never be reached from a menu item.
+        // The named-action door. Registered global, not local: an intent
+        // walks from the focused widget to the root, and this widget is never
+        // above the focused one, so a plain `register_action` would not be
+        // reached from a shortcut or a menu row (see `open_action`).
         if let Some(intent) = self.open_action {
             let act = activate.clone();
             ctx.register_action_global(
@@ -1157,10 +1157,10 @@ mod tests {
     /// `open_action` opens the popover from a **sibling** widget's intent.
     ///
     /// The sibling placement is the test, not incidental scenery: intents walk
-    /// source-widget → root, so a locally-registered action would never be
-    /// reached from a menu — which renders in an overlay that is a sibling of
-    /// the popover's subtree, exactly like this button. Firing from a child of
-    /// the popover would pass with either registration and prove nothing.
+    /// from where they start up to the root, so a locally registered action
+    /// would not be reached from a widget beside the popover, which is where a
+    /// shortcut or a menu row starts (the focused widget). Firing from a child
+    /// of the popover would pass with either registration and prove nothing.
     #[test]
     fn open_action_opens_the_popover_from_a_sibling_intent() {
         use crate::primitives::VStack;

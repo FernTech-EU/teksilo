@@ -1444,7 +1444,8 @@ impl<'ops> EventContext<'ops> {
         let _ = what;
     }
 
-    /// Raise a window to the front and give it keyboard focus.
+    /// Raise a window to the front and give it keyboard focus, restoring it
+    /// first if it is minimised.
     pub fn focus_window(&mut self, id: crate::window::TeksiloWindowId) {
         self.warn_if_context_change_in_focus_dispatch("focus_window");
         if let Some(ops) = self.window_ops.as_deref_mut() {

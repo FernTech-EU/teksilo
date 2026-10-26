@@ -465,6 +465,44 @@ impl ManagedWindow {
         self.request_redraw();
     }
 
+    /// The window system applied a resize this window asked for at once,
+    /// to `size`: the surface follows now, rather than on the `Resized`
+    /// that reports it. On macOS winit queues that event, raised inside the
+    /// handler that asked, for AppKit's default run-loop mode, which a
+    /// quit waiting on its reply to AppKit (a logout, a Dock Quit) never
+    /// runs: every frame was drawn at the old size and stretched. The event,
+    /// once it comes, finds nothing left to do.
+    pub(crate) fn took_own_resize(&mut self, size: winit::dpi::PhysicalSize<u32>) {
+        if self.platform_window.surface_size() == (size.width, size.height) {
+            return;
+        }
+        // The window moved to a display of another scale, whose
+        // `ScaleFactorChanged` (held back the same way) has not reached us:
+        // the size is in a scale the surface and the layout are not in yet.
+        // That event resizes all of them together.
+        if self.platform_window.window().scale_factor() != self.platform_window.scale_factor() {
+            return;
+        }
+        self.platform_window.resize(size);
+        let sf = self.platform_window.scale_factor();
+        let logical_w = (size.width as f64 / sf).round().max(0.0) as u32;
+        let logical_h = (size.height as f64 / sf).round().max(0.0) as u32;
+        self.state.set_size_from_os((logical_w, logical_h));
+        self.request_redraw();
+    }
+
+    /// Take the window's own size, when its surface has another: a resize
+    /// made inside a handler whose `Resized` winit holds back (see
+    /// [`took_own_resize`](Self::took_own_resize)). On macOS winit's
+    /// `set_min_inner_size` grows a smaller window itself, so the resize
+    /// that follows changes nothing and reports nothing.
+    pub(crate) fn take_window_size(&mut self) {
+        let size = self.platform_window.window().inner_size();
+        if size.width > 0 && size.height > 0 {
+            self.took_own_resize(size);
+        }
+    }
+
     /// Ask for the user's attention for this window
     /// ([`request_window_attention`]), and remember it, so the request is
     /// [withdrawn](Self::clear_attention) once the user comes to it.
@@ -686,6 +724,9 @@ pub struct WindowManager {
     /// the focus and was minimised as it was taken out, for a dialog opened
     /// over it. See [`knows_focused`](Self::knows_focused).
     taken_out: HashMap<TeksiloWindowId, TakenOut>,
+    /// Windows that took the focus this turn: their modal child is raised
+    /// at its end ([`refocus_after_turn`](Self::refocus_after_turn)).
+    refocus_due: Vec<TeksiloWindowId>,
     /// The application menu's shortcuts as the application tree declared
     /// them at the last [`sync_application_menu`](Self::sync_application_menu),
     /// with what they were made from, for a window created while the tree is
@@ -887,6 +928,7 @@ impl WindowManager {
             owed_app_dialogs_due: false,
             raise_next_modal: false,
             taken_out: HashMap::new(),
+            refocus_due: Vec::new(),
             app_menu_declarations: None,
             a11y_prefs,
             user_text_scale: 1.0,
@@ -2922,10 +2964,12 @@ impl WindowManager {
                 },
                 cmd => cmd,
             };
-            let Some(managed) = self.windows.get(&winit_id) else {
+            let Some(managed) = self.windows.get_mut(&winit_id) else {
                 continue;
             };
-            apply_window_command(managed.platform_window.window(), cmd);
+            if let Some(size) = apply_window_command(managed.platform_window.window(), cmd) {
+                managed.took_own_resize(size);
+            }
         }
     }
 
@@ -3840,10 +3884,32 @@ impl WindowManager {
         Some(managed)
     }
 
+    /// The window `teksilo_id`, out of the map while its handler runs, was
+    /// restored from minimised: the manager knows it at once, and the
+    /// window's own record when it is [put back](Self::reinsert_managed).
+    pub(crate) fn note_taken_out_restored(&mut self, teksilo_id: TeksiloWindowId) {
+        if let Some(taken) = self.taken_out.get_mut(&teksilo_id) {
+            taken.minimized = false;
+        }
+    }
+
     /// Re-insert a `ManagedWindow` previously extracted via
     /// [`take_managed`](Self::take_managed).
-    pub(crate) fn reinsert_managed(&mut self, id: winit::window::WindowId, managed: ManagedWindow) {
-        self.taken_out.remove(&managed.teksilo_id);
+    pub(crate) fn reinsert_managed(
+        &mut self,
+        id: winit::window::WindowId,
+        mut managed: ManagedWindow,
+    ) {
+        // Restored while out (`WindowOps::focus_window` on the dispatching
+        // window): what the manager knows follows.
+        if let Some(taken) = self.taken_out.remove(&managed.teksilo_id)
+            && managed.minimized
+            && !taken.minimized
+        {
+            managed.minimized = false;
+            managed.minimized_probed_at = None;
+            managed.sync_hidden();
+        }
         self.windows.insert(id, managed);
         #[cfg(all(unix, not(target_os = "macos")))]
         if self.wm_state_watch_stale {
@@ -4029,8 +4095,32 @@ impl WindowManager {
     /// Alt+Tab and its taskbar button reach it only as focus. Asks the window
     /// system nothing: the child is restored only if the manager knows it
     /// minimised.
+    ///
+    /// At the end of the turn ([`refocus_after_turn`](Self::refocus_after_turn)),
+    /// not now: on macOS a raise made while the focus event is handled (a
+    /// click on the Dock icon activating the application, a click on the
+    /// blocked window's title bar) left the blocked window key, AppKit
+    /// finishing the activation after it, and the dialog in front without
+    /// the keyboard (traced on the Mac; the same raise at the end of the
+    /// turn makes the dialog key).
     pub(crate) fn note_focus_gained(&mut self, id: TeksiloWindowId) {
-        self.raise_modal_child(id, false);
+        if !self.refocus_due.contains(&id) {
+            self.refocus_due.push(id);
+        }
+    }
+
+    /// The raises [`note_focus_gained`](Self::note_focus_gained) left for
+    /// the end of the turn, each made if its window still has the focus.
+    /// Run by `about_to_wait`.
+    pub(crate) fn refocus_after_turn(&mut self) {
+        for id in std::mem::take(&mut self.refocus_due) {
+            if self
+                .get_by_teksilo_mut(id)
+                .is_some_and(|managed| managed.focused)
+            {
+                self.raise_modal_child(id, false);
+            }
+        }
     }
 
     /// Watch the window state of exactly the windows in a modal pair (each
@@ -4855,10 +4945,16 @@ impl WindowManager {
     }
 }
 
-/// Translate a [`WindowCommand`] into the appropriate winit call.
+/// Translate a [`WindowCommand`] into the appropriate winit call: the new
+/// inner size of a resize the window system applied at once (as winit
+/// reports it, or as the window's size changed under the call), `None`
+/// otherwise.
 ///
 /// `Close` is handled elsewhere (see [`WindowManager::drain_window_commands`]).
-fn apply_window_command(win: &winit::window::Window, cmd: WindowCommand) {
+fn apply_window_command(
+    win: &winit::window::Window,
+    cmd: WindowCommand,
+) -> Option<winit::dpi::PhysicalSize<u32>> {
     use winit::window::{Fullscreen, UserAttentionType, WindowLevel};
     match cmd {
         WindowCommand::SetPlacement(p) => match p {
@@ -4882,7 +4978,13 @@ fn apply_window_command(win: &winit::window::Window, cmd: WindowCommand) {
         },
         WindowCommand::SetTitle(title) => win.set_title(&title),
         WindowCommand::SetSize(w, h) => {
-            let _ = win.request_inner_size(winit::dpi::LogicalSize::new(w, h));
+            // winit says when it applied the size at once on some
+            // platforms only (macOS applies it and answers `None`): a size
+            // that changed under the request was applied.
+            let before = win.inner_size();
+            return win
+                .request_inner_size(winit::dpi::LogicalSize::new(w, h))
+                .or_else(|| Some(win.inner_size()).filter(|now| *now != before));
         }
         WindowCommand::SetPosition(x, y) => {
             win.set_outer_position(winit::dpi::LogicalPosition::new(x, y));
@@ -4909,6 +5011,7 @@ fn apply_window_command(win: &winit::window::Window, cmd: WindowCommand) {
             // Handled in drain_window_commands; unreachable here.
         }
     }
+    None
 }
 
 /// App-level implementation of [`teksilo_core::WindowOps`] handed into
@@ -5004,14 +5107,29 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
         // and raising it is the common case (a single-instance handler
         // routed to the document window it was asked to show): its own
         // handle is kept for that.
+        // A minimised window comes back first: winit's `focus_window`
+        // leaves it in the Dock or the taskbar, and on macOS does not even
+        // activate the application.
         let window = if self.current_id == Some(id) {
-            self.current_window_arc.clone()
+            let window = self.current_window_arc.clone();
+            if let Some(window) = &window
+                && (self.wm.knows_minimised(id) || window.is_minimized() == Some(true))
+            {
+                window.set_minimized(false);
+                self.wm.note_taken_out_restored(id);
+            }
+            window
         } else {
-            self.wm
+            let managed = self
+                .wm
                 .teksilo_to_winit_map()
                 .get(&id)
-                .and_then(|winit_id| self.wm.windows_map().get(winit_id))
-                .map(|managed| managed.platform_window.window_arc())
+                .copied()
+                .and_then(|winit_id| self.wm.get_by_winit_mut(winit_id));
+            managed.map(|managed| {
+                managed.restore();
+                managed.platform_window.window_arc()
+            })
         };
         let Some(window) = window else {
             return;

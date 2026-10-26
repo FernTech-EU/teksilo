@@ -2538,3 +2538,46 @@ fn edit_rows_follow_the_fields_selection() {
     assert!(enabled(&t, "Copy"), "after select all");
     assert!(enabled(&t, "Cut"), "after select all");
 }
+
+/// A title holding the keyboard focus is drawn highlighted, as Windows draws
+/// the title F10 selects. It was highlighted only while its menu was open, so
+/// F10 and Alt put the focus somewhere nothing showed (WCAG 2.2 SC 2.4.7).
+#[test]
+fn a_focused_title_is_drawn_highlighted() {
+    let mut t = tree_with_window();
+    let mb = t.add(MenuBar::new().menu(lit!("&File"), || {
+        Box::new(MenuList::new().item(MenuItem::new(lit!("New"))))
+    }));
+    let after = t.add(FocusableLeaf);
+    t.layout(teksilo_canvas::SizeProposal::exact(800.0, 600.0));
+    let trigger = collect_descendants_with_role(&t, mb, Role::MenuItem)[0];
+    let bounds = t.bounds(trigger);
+    let fills_under_title = |t: &mut WidgetTree| {
+        let frame = t.render();
+        let inside = |x: f32, y: f32| bounds.contains(teksilo_canvas::Point::new(x, y));
+        frame
+            .decorations
+            .iter()
+            .filter(|d| d.color[3] > 0.0 && inside(d.rect[0] + 0.5, d.rect[1] + 0.5))
+            .count()
+            + frame
+                .shapes
+                .iter()
+                .filter(|s| s.color[3] > 0.0 && inside(s.screen[0] + 0.5, s.screen[1] + 0.5))
+                .count()
+    };
+    let at_rest = fills_under_title(&mut t);
+    t.focus(trigger);
+    t.layout(teksilo_canvas::SizeProposal::exact(800.0, 600.0));
+    assert!(
+        fills_under_title(&mut t) > at_rest,
+        "the focused title has a background drawn under it"
+    );
+    t.focus(after);
+    t.layout(teksilo_canvas::SizeProposal::exact(800.0, 600.0));
+    assert_eq!(
+        fills_under_title(&mut t),
+        at_rest,
+        "and loses it with the focus"
+    );
+}

@@ -150,7 +150,11 @@ those, in the window as in the macOS menu bar.
   event loop, with the route a chosen row's intent would take, so a menu is
   current when the user opens it. That route starts at the key window's focused
   widget as it is: the menu bar is outside the window, so a field focused in an
-  open popover is where Edit ▸ Copy goes, and what the row asks. The route is walked once a turn, and the rows
+  open popover is where Edit ▸ Copy goes, and what the row asks. The route is
+  walked once a turn, asking the actions on it whether they pass a command on
+  and whether they have anything to act on, so those checks run on every turn
+  of the event loop
+  (every frame while something animates) and must only read state; the rows
   are evaluated only when what it takes changed or a menu was installed since;
   where the backend shows no bar (every platform but macOS) nothing is
   refreshed. With no window open, a command that only
@@ -311,10 +315,10 @@ addressable.
   App menu's labels, which have nothing to update in place, by installing the
   menu again: the application menu at the end of the turn, a window's own
   `from_model` menu as its bar is rebuilt for the change.
-- **A rebind of a key equivalent** in a window's own `from_model` menu is
-  re-resolved on that bar's next rebuild (the in-window bar reflects it
-  immediately). Trigger a refresh sooner by touching the model (e.g. any
-  mutator) if needed.
+- **A rebind of a key equivalent** in a window's own `from_model` menu
+  applies at once: the native bar installs again when the user rebinds a
+  shortcut one of its rows names (the in-window bar reflects it
+  immediately too).
 
 ## Shortcuts and key equivalents
 

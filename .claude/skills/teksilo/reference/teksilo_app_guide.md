@@ -402,6 +402,10 @@ impl Widget for AppRoot {
 - A row with an intent and no `on_activate` closure greys out while nothing on that
   route takes its intent: register an `Action` for every such row. The shortcuts the
   rows name, registered in the application tree, fire in every window.
+- A row is enabled exactly when choosing it runs something: it greys from the action the
+  command would reach, the focused text widget when it takes the command. A field with
+  nothing selected greys Copy even when the page has its own Copy, and a read-only
+  field leaves Cut to the page.
 
 **Controls that leave focus alone.** `.focus_on_click(false)` on any widget lets a
 click activate it without taking keyboard focus; Tab, focus requests and assistive
@@ -426,7 +430,9 @@ first, each answering through its own Cancel path (a `MessageBox` reports its es
 button, dismissed programmatically). A dialog the app raises without the user's input (a
 timer, another thread) takes no focus from another application: it asks for the user's
 attention, and over a minimised window it waits, shown in front once the user comes back
-to that window (answered Cancel if the window closes or the app quits first).
+to that window (answered Cancel if the window closes or the app quits first). It takes
+neither the keyboard nor the foreground; the attention request shows while the app is in
+the background.
 
 **Placement.** `WindowConfig::position(x, y)` is the frame's top-left corner, title bar
 included, on every platform (Wayland ignores it). A dialog with none is centred over its
@@ -443,8 +449,13 @@ owner.
 - `ctx.close_window()` and `ctx.quit()` ask the guards; `ctx.close_window_forced()` and
   `ctx.quit_forced()` do not. The App menu's Quit (⌘Q) sends its `quit_intent` when one
   is set and otherwise asks for the guarded quit; the Dock's Quit and a macOS logout
-  run the guarded quit. `SIGTERM` / `SIGHUP` on Unix and the end of a Windows
-  session ask every guard once and then close everything, whatever the answers.
+  run the guarded quit. `SIGTERM` / `SIGHUP` on Unix, the end of a Windows
+  session, and on Windows `taskkill` with no window open or a console program's
+  console closing ask every guard and then close everything, whatever the answers. When such a
+  quit overrules one already waiting, an answer a guard already gave stands (a guard
+  that agreed is not asked again); a guard whose answer is pending is asked again with
+  the new source, so it can save without asking. A box a guard queues as its window
+  closes answers Cancel.
 - A window's guard is `WindowConfig::on_close_requested(|ctx| -> CloseResponse)`. The
   application's is `TeksiloAppBuilder::on_quit_requested(|ctx| -> CloseResponse)`, asked
   before any window (downloads running, a sync not done).
@@ -492,7 +503,8 @@ owner.
 - On macOS `run()` may not return: after a quit AppKit carries out (the Dock's Quit, a
   logout), the process ends right after the event loop's end. Put shutdown work in a
   guard, in `on_quit_requested`, or in the `Drop` of an `app_state` service, never after
-  `run()`.
+  `run()`. A Windows console program signing out with its console open may end even
+  before that `Drop`: its guards still run and its settings are written.
 
 ## Theming
 

@@ -71,7 +71,7 @@
 //! [`QuitReply`], told how the quit ends: [`QuitOutcome::Completed`] once
 //! every window has closed, [`QuitOutcome::Cancelled`] when a guard refuses
 //! or the quit is cancelled. A source with no time to ask (a session ending
-//! now, Windows' `WM_ENDSESSION`, a termination signal) calls
+//! now, Windows' `WM_QUERYENDSESSION`, a termination signal) calls
 //! `TeksiloAppHandler::quit_now`, which runs an overruling quit to its end
 //! before it returns: every guard not already answered is asked and reads
 //! the source (once, unless a pending answer is asked again, as above), so a

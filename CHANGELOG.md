@@ -88,8 +88,11 @@ by crate for clarity, not because crates version independently.
   application runs a guarded quit, with `QuitSource::UserQuit`, or
   `QuitSource::SessionEnd` for a logout, restart or shutdown: a guard can
   ask the user, and a refusal keeps the application running (and cancels a
-  logout). Once the quit completes the settings are written and AppKit ends
-  the process.
+  logout); a second request while the first waits (a logout during a
+  quit) joins it and is answered with it. Once the quit completes the
+  settings are written and AppKit ends the process. Should the hook find
+  the application delegate already answering the question itself, the
+  application says so on standard error, in release builds too.
 - **On Windows the end of the session quits the application through its
   guards.** Signing out, restarting or shutting down ended the process with
   nothing asked or written. When Windows says the session ends, every guard
@@ -109,7 +112,7 @@ by crate for clarity, not because crates version independently.
   `initial_window` is optional under either policy: under the default one,
   the application tree may open the first window from `run_after_mount`,
   and `run` panics on its first turn only when no window is open once
-  startup has run. On macOS the menu bar then shows the
+  startup has run and no quit closed them. On macOS the menu bar then shows the
   application menu (see "The application menu" under Widgets), with a
   working ⌘Q.
 - **Quitting the application from a handler.** `EventContext::quit`
@@ -506,8 +509,9 @@ by crate for clarity, not because crates version independently.
 - **A restored window opens where it was on macOS.** It opened a title
   bar higher each time: macOS placed the content's corner at the saved
   position, which is the frame's. A `WindowConfig::position` is now the
-  frame's corner there too, as on every platform, and a dialog opens
-  centred over its owner rather than half a title bar above.
+  frame's corner there too, as on Windows and X11 (Wayland ignores a
+  position), and a dialog opens centred over its owner rather than half a
+  title bar above.
 - **The application's services are dropped as the event loop ends**, on
   every platform, so a service's `Drop` runs (the analytics adapters'
   final send): on macOS, AppKit ends the process after a Dock Quit, a
@@ -531,11 +535,42 @@ by crate for clarity, not because crates version independently.
 - **A window that was never moved saves where it was.** A window opened
   with no position and left where the window system put it (macOS centres
   it, Windows cascades it) saved its position as (0, 0), and reopened in the
-  corner of the screen. Its `WindowState::position` now holds the window
-  system's position from the start.
+  corner of the screen. Its `WindowState::position` now holds the position
+  the window system gave it as it opened, on macOS and Windows; on X11 the
+  window manager may place it after that, which the state follows once the
+  move is reported, and Wayland reports no position at all.
 - **`ctx.focus_window(id)` raises the window its handler runs in.** That
   window is out of the window list during its own dispatch, so raising it
   did nothing, which is the common case in a single-instance handler.
+- **`ctx.focus_window(id)` brings back a minimised window.** It stayed in
+  the Dock or the taskbar, and on macOS the application was not activated.
+- **A window minimised when the application quit comes back where it was,
+  at its size** (Windows). Its saved geometry held the minimised window's
+  position (-32000, -32000) and zero size, so it came back 320 x 240 in the
+  middle of the screen. A minimised window's `WindowState` keeps the size
+  and position it has when shown.
+- **The menu bar title that holds the keyboard focus is drawn highlighted.**
+  After F10 or Alt the focus was on a title drawn like the others.
+- **Signing out of Windows no longer kills the application after five
+  seconds.** wgpu's OpenGL backend keeps a hidden window on Windows that
+  never answers, and Windows waited on it, then ended the process without
+  telling the application. The OpenGL backend is now left out on Windows
+  when Direct3D 12 or Vulkan works (an explicit `WGPU_BACKEND` still
+  decides), and the application saves and quits as soon as Windows asks
+  whether the session may end.
+- **`taskkill` without `/F` quits an application with no window open**
+  (Windows), as `SIGTERM` does on Unix: its guards are asked once with
+  `QuitSource::Signal` and the application ends. It destroyed winit's hidden
+  event-loop window, and the application kept running but heard nothing
+  more, not even the end of the session. A `taskkill` that reaches that
+  window while windows are open asks the guards, as the Dock's Quit does
+  (`QuitSource::UserQuit`).
+- **Closing the console an application runs in quits it through its
+  guards** (Windows; an application built as a console program and run from
+  a console, as `cargo run` does). Windows ended it at once, the guards
+  never asked and nothing saved, and a sign-out did the same, as it closes
+  the console first. A closing console reads as `QuitSource::Signal`, a
+  logoff or shutdown heard there as `QuitSource::SessionEnd`.
 - **A minimised dialog comes back when the window it blocks is clicked,**
   when that window takes the focus some other way (its title bar, Alt+Tab,
   its taskbar button), and when a quit stops at its window. Raising it left it

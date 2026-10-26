@@ -763,8 +763,10 @@ From
    An intent sent by a handler that also closes its overlay still
    crosses it: the crossing is noted when the intent is sent. An open
    modal overlay ends this walk at its content. Unless the intent is a
-   shortcut's, a further walk follows, once the modal's own actions and the
-   global actions registered inside it (step 3) have passed it by: from the
+   shortcut's or a native menu bar row's (both input, as a key is, and
+   kept in the modal), a further walk follows, once the modal's own
+   actions and the global actions registered inside it (step 3) have
+   passed it by: from the
    widget the modal is attached to, or, when that one is gone, the widget
    focus goes back to when it closes, or else the window's root. A modal
    that has closed by the time the intent is dispatched is crossed to the

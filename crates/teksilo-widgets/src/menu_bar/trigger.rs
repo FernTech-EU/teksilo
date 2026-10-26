@@ -14,11 +14,20 @@ impl Widget for MenuBarTrigger {
         let index = self.index;
         let menu_ctx = self.menu_ctx.clone();
 
-        // Background role: `AccentSubtle` when open (the Int UI token for
-        // highlighted menu-bar entries) or `Transparent` at rest. Replaces
-        // the previous hand-mixed `accent.with_alpha(0.12)` wash.
-        let bg_role = menu_ctx.open_index.map(move |open| {
-            if *open == Some(index) {
+        // Whether the title holds the keyboard focus (F10, Alt, Tab; a click
+        // gives it none). Drawn as an open title is, as Windows draws the
+        // title F10 selects: a focus with no sign was invisible.
+        let focused = ctx.signal(false);
+        let highlighted = menu_ctx
+            .open_index
+            .zip(&focused)
+            .map(move |(open, focused)| *open == Some(index) || *focused);
+
+        // Background role: `AccentSubtle` when open or focused (the Int UI
+        // token for highlighted menu-bar entries) or `Transparent` at rest.
+        // Replaces the previous hand-mixed `accent.with_alpha(0.12)` wash.
+        let bg_role = highlighted.map(|highlighted| {
+            if *highlighted {
                 SurfaceRole::AccentSubtle
             } else {
                 SurfaceRole::Transparent
@@ -30,16 +39,13 @@ impl Widget for MenuBarTrigger {
         // TextRole::Secondary, which is a different hue). Keep a direct
         // `theme_signal` map for the blended case.
         let theme_signal = ctx.theme_signal();
-        let text_color = menu_ctx
-            .open_index
-            .zip(&theme_signal)
-            .map(move |(open, t)| {
-                if *open == Some(index) {
-                    t.colors.text_primary
-                } else {
-                    t.colors.text_primary.with_alpha(0.8)
-                }
-            });
+        let text_color = highlighted.zip(&theme_signal).map(move |(highlighted, t)| {
+            if *highlighted {
+                t.colors.text_primary
+            } else {
+                t.colors.text_primary.with_alpha(0.8)
+            }
+        });
 
         // Label. Uses `MenuLabel` so a single `&` in the trigger
         // string acts as a mnemonic marker — stripped from the
@@ -167,6 +173,7 @@ impl Widget for MenuBarTrigger {
                 let menu_ctx = menu_ctx.clone();
                 let self_id = ctx.self_id();
                 move |gained: bool, ctx: &mut EventContext| {
+                    focused.set(gained);
                     if gained {
                         menu_ctx.take_handoff(self_id, ctx);
                     }

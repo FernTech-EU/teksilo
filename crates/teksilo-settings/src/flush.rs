@@ -272,15 +272,15 @@ struct PoolState {
     landed_sinks: HashMap<WriterId, WriteLandedSink>,
 }
 
+/// The writer thread's inbox, once a writer has started it.
+static POOL: OnceLock<Sender<PoolMsg>> = OnceLock::new();
+
 /// Lazily-started shared I/O worker. Returns the sender side of the
 /// pool channel. The receiver lives inside the worker thread and the
 /// thread itself is detached: the process exit teardown closes any
 /// in-flight resources, but every `DebouncedWriter::Drop` synchronously
 /// flushes its own payload first via the `Unregister` ack, so no data
 /// is lost in normal teardown.
-/// The writer thread's inbox, once a writer has started it.
-static POOL: OnceLock<Sender<PoolMsg>> = OnceLock::new();
-
 fn pool() -> &'static Sender<PoolMsg> {
     POOL.get_or_init(|| {
         let (tx, rx) = mpsc::channel();

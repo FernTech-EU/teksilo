@@ -200,6 +200,11 @@ pub fn attach_child_window(parent: &winit::window::Window, child: &winit::window
                 return;
             };
             if let (Some(pw), Some(cw)) = (parent_view.window(), child_view.window()) {
+                // Just above the parent first: a dialog shown without
+                // activating went in front of every window but the active
+                // application's front one, and its parent came up with it,
+                // above the active application's other windows.
+                cw.orderWindow_relativeTo(NSWindowOrderingMode::Above, pw.windowNumber());
                 pw.addChildWindow_ordered(&cw, NSWindowOrderingMode::Above);
             }
         }

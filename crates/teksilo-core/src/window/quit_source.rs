@@ -20,8 +20,10 @@ pub enum QuitSource {
     /// menu's Quit row.
     Application,
     /// The user quit from outside the application's own controls: macOS's
-    /// Dock menu Quit, AppleScript's `quit`, or another `terminate:`. A
-    /// guarded quit: a guard can ask, and refuse.
+    /// Dock menu Quit, AppleScript's `quit`, or another `terminate:`; on
+    /// Windows, `taskkill` without `/F` reaching the event loop's hidden
+    /// window while a window of the application is open. A guarded quit: a
+    /// guard can ask, and refuse.
     UserQuit,
     /// The session ends (log out, restart, shut down). On macOS a guarded
     /// quit (AppKit waits for the answer, and a refusal cancels the
@@ -29,7 +31,9 @@ pub enum QuitSource {
     /// since the session ends whatever the application answers.
     SessionEnd,
     /// A termination signal on Unix (`SIGTERM`, `SIGHUP`), heard while the
-    /// event loop runs. Nobody is there to answer: every guard is asked
-    /// once and cannot refuse.
+    /// event loop runs; on Windows, `taskkill` without `/F` while no window
+    /// of the application is open, or the console it runs in closing.
+    /// Nobody is there to answer: every guard is asked once and cannot
+    /// refuse.
     Signal,
 }

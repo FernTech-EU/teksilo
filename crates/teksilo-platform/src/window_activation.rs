@@ -40,7 +40,48 @@ pub fn raise(window: &Window, token: Option<&str>) {
     }
 
     let _ = token;
+    #[cfg(target_os = "macos")]
+    if window.is_minimized() == Some(true) && raise_miniaturized(window) {
+        return;
+    }
     window.focus_window();
+}
+
+/// macOS: bring back and raise a window still miniaturised, which winit's
+/// `focus_window` leaves alone (it neither activates the application nor
+/// orders the window in while `isMiniaturized` holds, as it does for the
+/// whole of a restore's animation). `makeKeyAndOrderFront:` brings it back
+/// from the Dock. `false` when the window has no AppKit handle.
+#[cfg(target_os = "macos")]
+fn raise_miniaturized(window: &Window) -> bool {
+    use objc2::MainThreadMarker;
+    use objc2::rc::Retained;
+    use objc2_app_kit::{NSApplication, NSView};
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return false;
+    };
+    let Ok(handle) = window.window_handle() else {
+        return false;
+    };
+    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+        return false;
+    };
+    // SAFETY: the ns_view pointer is valid while `window` is alive, which the
+    // caller holds for this call; on the main thread, as AppKit requires.
+    unsafe {
+        let Some(view) = Retained::<NSView>::retain(appkit.ns_view.as_ptr().cast()) else {
+            return false;
+        };
+        let Some(ns_window) = view.window() else {
+            return false;
+        };
+        #[allow(deprecated)]
+        NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
+        ns_window.makeKeyAndOrderFront(None);
+    }
+    true
 }
 
 /// Create the window with `token`, an activation token a launcher or

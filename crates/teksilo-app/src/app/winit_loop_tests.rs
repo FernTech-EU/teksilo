@@ -716,6 +716,37 @@ fn owners_followed_through_the_window_manager(
                             Some(&LoopSeen::WmStateChanged),
                             "the iconify reached the loop through the window-state watch"
                         );
+                        // What Windows reports of a minimise, a move to
+                        // (-32000, -32000) and a resize to zero, leaves the
+                        // geometry the window has when shown, which is what
+                        // its saved state keeps. Taking either made a window
+                        // minimised at quit come back 320 x 240 in the middle
+                        // of the screen.
+                        let owner = chain[0];
+                        let state = app
+                            .wm
+                            .get_by_teksilo_mut(owner)
+                            .expect("open")
+                            .state
+                            .clone();
+                        let (size, position) = (state.size().get(), state.position().get());
+                        let winit_id = app.wm.winit_id_for_teksilo(owner).expect("open");
+                        app.window_event(
+                            event_loop,
+                            winit_id,
+                            WindowEvent::Moved(winit::dpi::PhysicalPosition::new(-32000, -32000)),
+                        );
+                        app.window_event(
+                            event_loop,
+                            winit_id,
+                            WindowEvent::Resized(winit::dpi::PhysicalSize::new(0, 0)),
+                        );
+                        assert_eq!(
+                            (state.size().get(), state.position().get()),
+                            (size, position),
+                            "a minimised window keeps its shown geometry"
+                        );
+                        assert!(state.placement().get().is_minimized());
                     }
                     ask_window_manager(xid(app, chain[0]), false);
                     phase = 3;
@@ -2375,14 +2406,24 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             "a click on the blocked window brings back its minimised dialog"
         );
         // So does the blocked window taking the focus with no press reaching
-        // it: a click on its title bar, Alt+Tab, its taskbar button.
-        // Deleting the `Focused` arm's `refocus_modal_child` leaves it
-        // minimised.
+        // it: a click on its title bar, Alt+Tab, its taskbar button, at the
+        // end of the turn (on macOS a raise made inside the focus event left
+        // the blocked window key). Deleting the `Focused` arm's
+        // `note_focus_gained`, or the `refocus_after_turn` in
+        // `about_to_wait`, leaves it minimised.
         app.wm
             .get_by_teksilo_mut(modal_child)
             .expect("the modal child")
             .minimized = true;
         app.window_event(event_loop, window, WindowEvent::Focused(true));
+        assert!(
+            app.wm
+                .get_by_teksilo_mut(modal_child)
+                .expect("the modal child")
+                .minimized,
+            "not inside the focus event"
+        );
+        app.about_to_wait(event_loop);
         assert!(
             !app.wm
                 .get_by_teksilo_mut(modal_child)
@@ -2716,6 +2757,44 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             None,
             "raising the open window took the token"
         );
+        // A minimised window is brought back by `focus_window`, not raised
+        // where it is: winit's raise leaves it minimised (and on macOS does
+        // not activate the application). Dropping the restore from
+        // `focus_window` leaves it minimised.
+        let from_outside = app.wm.find_window("from-outside").expect("open");
+        app.wm
+            .get_by_teksilo_mut(from_outside)
+            .expect("open")
+            .minimized = true;
+        app.route_external_with_ctx(&OpenFromOutside, event_loop);
+        assert!(
+            !app.wm.knows_minimised(from_outside),
+            "focus_window restored the minimised window"
+        );
+        // A resize the window system applied at once reaches the surface and
+        // the window's state without the `Resized` that reports it, which
+        // macOS holds back while a quit waits on its reply to AppKit.
+        // Without it the surface keeps its old size until that event.
+        {
+            let managed = app.wm.get_by_teksilo_mut(from_outside).expect("open");
+            let (w, h) = managed.platform_window.surface_size();
+            let grown = winit::dpi::PhysicalSize::new(w + 24, h + 16);
+            managed.took_own_resize(grown);
+            assert_eq!(
+                managed.platform_window.surface_size(),
+                (w + 24, h + 16),
+                "the surface follows the resize at once"
+            );
+            let sf = managed.platform_window.scale_factor();
+            assert_eq!(
+                managed.state.size().get(),
+                (
+                    ((w + 24) as f64 / sf).round() as u32,
+                    ((h + 16) as f64 / sf).round() as u32
+                ),
+                "and so does the window's state"
+            );
+        }
         app.external_ctx_handler = Some(Box::new(|_, _| true));
         app.route_external_with_ctx(&wrapped("for-nothing"), event_loop);
         assert_eq!(
@@ -5441,8 +5520,24 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             .store
             .signal_for(&WRITTEN);
         written.set("before the session ended".to_string());
-        // As Windows' `WM_ENDSESSION` asks: the window procedure posts
-        // `SessionEndNow` and runs the messages until it is finished.
+        // A request its window procedure stopped waiting for (the budget ran
+        // out while the loop was busy in a native modal) arrives later, for
+        // a session end already over and perhaps cancelled: it asks nobody
+        // and closes nothing. Dropping the `is_expired` check quits here.
+        let stale = Arc::new(AtomicBool::new(false));
+        let expired = teksilo_platform::os_quit::SessionEndNow::new(stale.clone());
+        expired.expire();
+        let windows_before = app.wm.window_count();
+        app.user_event(event_loop, AppEvent::External(Box::new(expired)));
+        assert!(
+            stale.load(Ordering::Acquire),
+            "an expired request is still answered"
+        );
+        assert_eq!(app.wm.window_count(), windows_before, "it closed nothing");
+        assert_eq!(refuser_asks.get(), 0, "and asked no guard");
+        // As Windows' session end asks (`WM_QUERYENDSESSION`, or a lone
+        // `WM_ENDSESSION`): the window procedure posts `SessionEndNow` and
+        // runs the messages until it is finished.
         let session_ended = Arc::new(AtomicBool::new(false));
         app.user_event(
             event_loop,
@@ -5767,4 +5862,630 @@ fn signal_child(dir: std::path::PathBuf) {
                 .expect("winit event loop exited with error");
         },
     );
+}
+
+/// Set, the test [`a_quit_from_the_first_mount_action_ends_the_run`] is its
+/// own child process.
+const STARTUP_QUIT_CHILD: &str = "TEKSILO_LOOP_TEST_STARTUP_QUIT_CHILD";
+
+/// A window's mount action that quits on the first turn (an application
+/// that handled its command line and has nothing to show) ends the run
+/// normally. The startup check read the windows the quit had closed as an
+/// application that would quit before showing anything, and panicked; on
+/// macOS the panic crossed AppKit's launch callback and aborted the
+/// process. The application runs in a child process, as winit builds one
+/// event loop per process.
+#[test]
+#[ignore = "needs a display server and a wgpu adapter; CI runs it under Xvfb \
+            (see the test-x11 job in .github/workflows/ci.yml)"]
+fn a_quit_from_the_first_mount_action_ends_the_run() {
+    if std::env::var_os(STARTUP_QUIT_CHILD).is_some() {
+        startup_quit_child();
+        return;
+    }
+    let name = format!(
+        "{}::a_quit_from_the_first_mount_action_ends_the_run",
+        module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, rest)| rest)
+    );
+    let mut child = std::process::Command::new(std::env::current_exe().expect("this test"))
+        .args([name.as_str(), "--exact", "--ignored", "--test-threads=1"])
+        .env(STARTUP_QUIT_CHILD, "1")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .expect("the child starts");
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("the child is ours") {
+            break status;
+        }
+        if started.elapsed() > Duration::from_secs(60) {
+            let _ = child.kill();
+            panic!("the application that quit while starting never ended");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(
+        status.success(),
+        "the application ended normally rather than panicking: {status:?}"
+    );
+}
+
+/// The child of [`a_quit_from_the_first_mount_action_ends_the_run`]: one
+/// window, whose root quits from its mount action.
+fn startup_quit_child() {
+    #[derive(Debug)]
+    struct QuitsAtOnce;
+    impl teksilo_core::widget::Widget for QuitsAtOnce {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            ctx.run_after_mount(|ctx| ctx.quit_forced());
+            Vec::new()
+        }
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+    TeksiloAppBuilder::new()
+        .theme(teksilo_core::presets::intui::light())
+        .initial_window(
+            WindowConfig::new()
+                .title("teksilo loop test: quits while starting")
+                .size(200, 120)
+                .root(|tree, _state| tree.add(QuitsAtOnce)),
+        )
+        .run_with(
+            || {
+                EventLoop::<AppEvent>::with_user_event()
+                    .with_x11()
+                    .with_any_thread(true)
+                    .build()
+                    .expect("winit could not build an X11 event loop (is DISPLAY set?)")
+            },
+            |mut event_loop, app| {
+                event_loop
+                    .run_app_on_demand(app)
+                    .expect("winit event loop exited with error");
+                assert!(app.wm.quit_completed(), "the run ended by the quit");
+            },
+        );
+}
+
+/// Set, the test [`a_signal_with_no_window_open_ends_the_loop_in_its_callback`]
+/// is its own child process.
+const SIGNAL_NO_WINDOW_CHILD: &str = "TEKSILO_LOOP_TEST_SIGNAL_NO_WINDOW_CHILD";
+
+/// A quit carried out at once (a termination signal, `taskkill` on
+/// Windows) with no window open tells the loop to end in the callback that
+/// carried it out. It was told at the turn's end, in `about_to_wait`, and
+/// winit on Windows reads its exit flag only after the next message: an
+/// idle application with no window, quit by `taskkill`, hung until
+/// something else woke it. Runs in a child process, as winit builds one
+/// event loop per process.
+#[test]
+#[ignore = "needs a display server and a wgpu adapter; CI runs it under Xvfb \
+            (see the test-x11 job in .github/workflows/ci.yml)"]
+fn a_signal_with_no_window_open_ends_the_loop_in_its_callback() {
+    run_no_window_child(
+        "a_signal_with_no_window_open_ends_the_loop_in_its_callback",
+        "signal",
+    );
+}
+
+/// The request Windows' console handler posts as the console closes
+/// ([`ConsoleClosing`](teksilo_platform::os_quit::ConsoleClosing)) quits the
+/// application at once, as a termination signal does, and says it has
+/// finished, which the handler waits for before it lets Windows end the
+/// process. Windows' default handler ended the process there, past every
+/// guard. The handler itself is Windows-only, checked on a Windows run;
+/// this is its routing, which is the same on every host.
+#[test]
+#[ignore = "needs a display server and a wgpu adapter; CI runs it under Xvfb \
+            (see the test-x11 job in .github/workflows/ci.yml)"]
+fn a_console_closing_request_quits_and_says_it_has_finished() {
+    run_no_window_child(
+        "a_console_closing_request_quits_and_says_it_has_finished",
+        "console",
+    );
+}
+
+/// `taskkill` without `/F` reaching winit's hidden window
+/// ([`HiddenWindowClose`](teksilo_platform::os_quit::HiddenWindowClose)):
+/// with no window open it quits as `SIGTERM` does, the loop told to end in
+/// that callback; with a window open it runs a guarded quit as
+/// `QuitSource::UserQuit`, which a guard may refuse, and the application
+/// goes on. It was an overruling quit either way, so a `taskkill` that
+/// picked that window (every other one minimised below it) overruled a
+/// document's guard.
+#[test]
+#[ignore = "needs a display server and a wgpu adapter; CI runs it under Xvfb \
+            (see the test-x11 job in .github/workflows/ci.yml)"]
+fn taskkill_on_the_hidden_window_quits_by_whether_a_window_is_open() {
+    // As the child, the one case it was started for: winit builds one
+    // event loop per process.
+    if let Some(what) = std::env::var_os(SIGNAL_NO_WINDOW_CHILD) {
+        no_window_child(what.to_str().expect("ascii"));
+        return;
+    }
+    run_no_window_child(
+        "taskkill_on_the_hidden_window_quits_by_whether_a_window_is_open",
+        "hidden",
+    );
+    run_no_window_child(
+        "taskkill_on_the_hidden_window_quits_by_whether_a_window_is_open",
+        "hidden-with-window",
+    );
+}
+
+/// Run `test` again as [`no_window_child`], sending it `what`.
+fn run_no_window_child(test: &str, what: &str) {
+    if let Some(what) = std::env::var_os(SIGNAL_NO_WINDOW_CHILD) {
+        no_window_child(what.to_str().expect("ascii"));
+        return;
+    }
+    let name = format!(
+        "{}::{test}",
+        module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, rest)| rest)
+    );
+    let status = std::process::Command::new(std::env::current_exe().expect("this test"))
+        .args([name.as_str(), "--exact", "--ignored", "--test-threads=1"])
+        .env(SIGNAL_NO_WINDOW_CHILD, what)
+        .stdout(std::process::Stdio::null())
+        .status()
+        .expect("the child runs");
+    assert!(status.success(), "the child's claims held: {status:?}");
+}
+
+/// The child of [`a_signal_with_no_window_open_ends_the_loop_in_its_callback`]
+/// and [`a_console_closing_request_quits_and_says_it_has_finished`]: an application
+/// with no window, under `QuitPolicy::Explicit`, handed a termination
+/// signal (`what` is `signal`) or a closing console (`console`) on its
+/// first `about_to_wait`.
+fn no_window_child(what: &str) {
+    if what == "hidden-with-window" {
+        hidden_close_with_a_window_child();
+        return;
+    }
+    struct Child<'a> {
+        app: &'a mut TeksiloAppHandler,
+        sent: bool,
+        console: bool,
+        hidden: bool,
+    }
+    impl ApplicationHandler<AppEvent> for Child<'_> {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            self.app.resumed(event_loop);
+        }
+        fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+            self.app.new_events(event_loop, cause);
+        }
+        fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
+            self.app.user_event(event_loop, event);
+        }
+        fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+            self.app.window_event(event_loop, id, event);
+        }
+        fn exiting(&mut self, event_loop: &ActiveEventLoop) {
+            self.app.exiting(event_loop);
+        }
+        fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+            if !std::mem::replace(&mut self.sent, true) {
+                assert!(!event_loop.exiting(), "running with no window open");
+                if self.hidden {
+                    self.app.user_event(
+                        event_loop,
+                        AppEvent::External(Box::new(teksilo_platform::os_quit::HiddenWindowClose)),
+                    );
+                } else if self.console {
+                    let done = Arc::new(AtomicBool::new(false));
+                    self.app.user_event(
+                        event_loop,
+                        AppEvent::External(Box::new(
+                            teksilo_platform::os_quit::ConsoleClosing::new(false, done.clone()),
+                        )),
+                    );
+                    assert!(
+                        done.load(Ordering::Acquire),
+                        "the console handler is told the application has finished"
+                    );
+                } else {
+                    self.app.user_event(
+                        event_loop,
+                        AppEvent::External(Box::new(
+                            teksilo_platform::os_quit::TerminationSignal {
+                                signal: teksilo_platform::os_quit::SIGTERM,
+                            },
+                        )),
+                    );
+                }
+                assert!(
+                    event_loop.exiting(),
+                    "the request's own callback told the loop to end"
+                );
+            }
+            self.app.about_to_wait(event_loop);
+        }
+    }
+    TeksiloAppBuilder::new()
+        .theme(teksilo_core::presets::intui::light())
+        .quit_policy(crate::QuitPolicy::Explicit)
+        .run_with(
+            || {
+                EventLoop::<AppEvent>::with_user_event()
+                    .with_x11()
+                    .with_any_thread(true)
+                    .build()
+                    .expect("winit could not build an X11 event loop (is DISPLAY set?)")
+            },
+            |mut event_loop, app| {
+                let mut child = Child {
+                    app,
+                    sent: false,
+                    console: what == "console",
+                    hidden: what == "hidden",
+                };
+                event_loop
+                    .run_app_on_demand(&mut child)
+                    .expect("winit event loop exited with error");
+                assert!(child.sent, "the signal was sent");
+                assert!(child.app.wm.quit_completed(), "the run ended by the quit");
+            },
+        );
+}
+
+/// The child of [`taskkill_on_the_hidden_window_quits_by_whether_a_window_is_open`]
+/// with a window open whose guard refuses: `HiddenWindowClose` asks it once
+/// with `UserQuit`, the refusal stands, and the loop goes on.
+fn hidden_close_with_a_window_child() {
+    static ASKED: std::sync::Mutex<Vec<Option<teksilo_core::QuitSource>>> =
+        std::sync::Mutex::new(Vec::new());
+    struct Child<'a> {
+        app: &'a mut TeksiloAppHandler,
+        sent: bool,
+    }
+    impl ApplicationHandler<AppEvent> for Child<'_> {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            self.app.resumed(event_loop);
+        }
+        fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+            self.app.new_events(event_loop, cause);
+        }
+        fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
+            self.app.user_event(event_loop, event);
+        }
+        fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+            self.app.window_event(event_loop, id, event);
+        }
+        fn exiting(&mut self, event_loop: &ActiveEventLoop) {
+            self.app.exiting(event_loop);
+        }
+        fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+            if !std::mem::replace(&mut self.sent, true) {
+                assert_eq!(self.app.wm.window_count(), 1, "one window open");
+                self.app.user_event(
+                    event_loop,
+                    AppEvent::External(Box::new(teksilo_platform::os_quit::HiddenWindowClose)),
+                );
+                assert_eq!(
+                    *ASKED.lock().expect("not poisoned"),
+                    [Some(teksilo_core::QuitSource::UserQuit)],
+                    "the window's guard was asked, as for the Dock's Quit"
+                );
+                assert_eq!(
+                    self.app.wm.window_count(),
+                    1,
+                    "its refusal stands: the window stays open"
+                );
+                assert!(!event_loop.exiting(), "and the application goes on");
+                event_loop.exit();
+            }
+            self.app.about_to_wait(event_loop);
+        }
+    }
+    TeksiloAppBuilder::new()
+        .theme(teksilo_core::presets::intui::light())
+        .initial_window(
+            WindowConfig::new()
+                .title("teksilo loop test: taskkill with a window open")
+                .size(200, 120)
+                .on_close_requested(|ctx| {
+                    ASKED.lock().expect("not poisoned").push(ctx.quit_source());
+                    teksilo_core::CloseResponse::Veto
+                })
+                .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+        )
+        .run_with(
+            || {
+                EventLoop::<AppEvent>::with_user_event()
+                    .with_x11()
+                    .with_any_thread(true)
+                    .build()
+                    .expect("winit could not build an X11 event loop (is DISPLAY set?)")
+            },
+            |mut event_loop, app| {
+                let mut child = Child { app, sent: false };
+                event_loop
+                    .run_app_on_demand(&mut child)
+                    .expect("winit event loop exited with error");
+                assert!(child.sent, "the request was sent");
+            },
+        );
+}
+
+/// Set, the test [`a_key_held_into_a_blocked_window_reaches_nothing_there`]
+/// is its own child process.
+const HELD_KEY_CHILD: &str = "TEKSILO_LOOP_TEST_HELD_KEY_CHILD";
+
+/// A key held while the focus moves to a window a modal dialog blocks
+/// reaches nothing in that window, and the dialog comes forward. winit makes
+/// up a press for every key held as a window gains the focus (X11 and
+/// Windows, `is_synthetic`): Return held on a dialog's button, its window
+/// gone, used to activate what the window under it had focused. Driven with
+/// real X events: the key held through XTest on the dialog, then the X
+/// focus moved to the window it blocks. Where XTest holds no key (a
+/// rootless Xwayland injects only through libei) it says so and skips;
+/// where the key is held and no made-up press arrives, it fails. CI's
+/// Xvfb runs it. Runs in a child process, as winit builds one event loop
+/// per process.
+#[test]
+#[ignore = "needs a display server and a wgpu adapter; CI runs it under Xvfb \
+            (see the test-x11 job in .github/workflows/ci.yml)"]
+fn a_key_held_into_a_blocked_window_reaches_nothing_there() {
+    if std::env::var_os(HELD_KEY_CHILD).is_some() {
+        held_key_child();
+        return;
+    }
+    let name = format!(
+        "{}::a_key_held_into_a_blocked_window_reaches_nothing_there",
+        module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, rest)| rest)
+    );
+    let status = std::process::Command::new(std::env::current_exe().expect("this test"))
+        .args([name.as_str(), "--exact", "--ignored", "--test-threads=1"])
+        .env(HELD_KEY_CHILD, "1")
+        .stdout(std::process::Stdio::null())
+        .status()
+        .expect("the child runs");
+    assert!(status.success(), "the child's claims held: {status:?}");
+}
+
+/// The child of [`a_key_held_into_a_blocked_window_reaches_nothing_there`].
+fn held_key_child() {
+    use std::sync::atomic::AtomicUsize;
+    use teksilo_core::widget_builder::WidgetBuilder;
+    use x11rb::connection::Connection as _;
+    use x11rb::protocol::xproto::{ConnectionExt as _, InputFocus};
+    use x11rb::protocol::xtest::ConnectionExt as _;
+
+    /// The KeyDowns the owner's focused widget received.
+    static KEYS: AtomicUsize = AtomicUsize::new(0);
+    /// Return in the evdev keymap Xvfb and Xwayland start with.
+    const RETURN: u8 = 36;
+    const KEY_PRESS: u8 = 2;
+    const KEY_RELEASE: u8 = 3;
+
+    #[derive(Debug)]
+    struct Keys;
+    impl teksilo_core::widget::Widget for Keys {
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(100.0, 100.0).into()
+        }
+    }
+
+    enum Phase {
+        OpenDialog,
+        DialogFocused(Instant),
+        HoldKey(Instant),
+        OwnerFocused(Instant),
+        Settle(Instant),
+    }
+
+    struct Child<'a> {
+        app: &'a mut TeksiloAppHandler,
+        x: teksilo_platform::x11::X11Connection,
+        phase: Phase,
+        owner: Option<crate::TeksiloWindowId>,
+        dialog: Option<crate::TeksiloWindowId>,
+        /// A made-up press reached the owner window.
+        synthetic_press: bool,
+        done: bool,
+    }
+    impl Child<'_> {
+        fn focus_x(&self, window: crate::TeksiloWindowId) {
+            self.x
+                .conn()
+                .set_input_focus(InputFocus::PARENT, xid(self.app, window), 0u32)
+                .expect("send SetInputFocus");
+            self.x.conn().flush().expect("flush");
+        }
+        fn key(&self, type_: u8) {
+            self.x
+                .conn()
+                .xtest_fake_input(type_, RETURN, 0, self.x.root(), 0, 0, 0)
+                .expect("send XTest FakeInput");
+            self.x.conn().flush().expect("flush");
+        }
+        fn focused(&mut self, id: crate::TeksiloWindowId) -> bool {
+            self.app
+                .wm
+                .get_by_teksilo_mut(id)
+                .is_some_and(|managed| managed.focused)
+        }
+    }
+    impl ApplicationHandler<AppEvent> for Child<'_> {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            self.app.resumed(event_loop);
+        }
+        fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+            self.app.new_events(event_loop, cause);
+        }
+        fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
+            self.app.user_event(event_loop, event);
+        }
+        fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+            if let WindowEvent::KeyboardInput {
+                event: key,
+                is_synthetic: true,
+                ..
+            } = &event
+                && key.state == ElementState::Pressed
+                && self
+                    .owner
+                    .and_then(|owner| self.app.wm.winit_id_for_teksilo(owner))
+                    == Some(id)
+            {
+                self.synthetic_press = true;
+            }
+            self.app.window_event(event_loop, id, event);
+        }
+        fn exiting(&mut self, event_loop: &ActiveEventLoop) {
+            self.app.exiting(event_loop);
+        }
+        fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+            self.app.about_to_wait(event_loop);
+            if self.done {
+                return;
+            }
+            let now = Instant::now();
+            match self.phase {
+                Phase::OpenDialog => {
+                    let owner = self.app.wm.find_window("owner").expect("the owner is open");
+                    let dialog = self.app.wm.create_window(
+                        WindowConfig::new()
+                            .title("teksilo loop test: the dialog")
+                            .size(160, 100)
+                            .modal_to(owner)
+                            .root(|tree, _state| {
+                                tree.add(logging_leaf(&Default::default(), false))
+                            }),
+                        event_loop,
+                    );
+                    self.owner = Some(owner);
+                    self.dialog = Some(dialog);
+                    self.focus_x(dialog);
+                    self.phase = Phase::DialogFocused(now + Duration::from_secs(10));
+                }
+                Phase::DialogFocused(deadline) => {
+                    let dialog = self.dialog.expect("opened");
+                    if self.focused(dialog) {
+                        self.key(KEY_PRESS);
+                        self.phase = Phase::HoldKey(now + Duration::from_millis(300));
+                    } else {
+                        assert!(now < deadline, "the dialog never took the X focus");
+                        self.focus_x(dialog);
+                    }
+                }
+                Phase::HoldKey(until) => {
+                    if now >= until {
+                        // A rootless Xwayland lists XTest but injects through
+                        // libei, which a private session lacks: the key is
+                        // not down, and nothing here can be tested.
+                        let keymap = self
+                            .x
+                            .conn()
+                            .query_keymap()
+                            .expect("send QueryKeymap")
+                            .reply()
+                            .expect("read the keymap")
+                            .keys;
+                        if keymap[usize::from(RETURN / 8)] & (1 << (RETURN % 8)) == 0 {
+                            eprintln!(
+                                "a_key_held_into_a_blocked_window_reaches_nothing_there: \
+                                 XTest holds no key on this X server; skipped (CI's Xvfb runs it)"
+                            );
+                            self.done = true;
+                            event_loop.exit();
+                            return;
+                        }
+                        let owner = self.owner.expect("open");
+                        assert!(self.app.wm.is_blocked(owner), "the dialog blocks its owner");
+                        crate::window_manager::activation_log::take();
+                        self.focus_x(owner);
+                        self.phase = Phase::OwnerFocused(now + Duration::from_secs(10));
+                    }
+                }
+                Phase::OwnerFocused(deadline) => {
+                    if self.synthetic_press {
+                        self.phase = Phase::Settle(now + Duration::from_millis(300));
+                    } else {
+                        assert!(
+                            now < deadline,
+                            "no made-up press reached the owner as it took the focus \
+                             (does this X server have XTest?)"
+                        );
+                    }
+                }
+                Phase::Settle(until) => {
+                    if now >= until {
+                        self.key(KEY_RELEASE);
+                        assert_eq!(
+                            KEYS.load(Ordering::Acquire),
+                            0,
+                            "the held key reached nothing in the blocked window"
+                        );
+                        let dialog = self.dialog.expect("opened");
+                        let dialog_winit = self.app.wm.winit_id_for_teksilo(dialog).expect("open");
+                        assert!(
+                            crate::window_manager::activation_log::take().contains(&(
+                                dialog_winit,
+                                crate::window_manager::activation_log::Activation::Raised
+                            )),
+                            "and its dialog came forward"
+                        );
+                        self.done = true;
+                        event_loop.exit();
+                        return;
+                    }
+                }
+            }
+            event_loop.set_control_flow(ControlFlow::WaitUntil(now + Duration::from_millis(20)));
+        }
+    }
+
+    TeksiloAppBuilder::new()
+        .theme(teksilo_core::presets::intui::light())
+        .initial_window(
+            WindowConfig::new()
+                .id("owner")
+                .title("teksilo loop test: the blocked owner")
+                .size(240, 160)
+                .root(|tree, _state| {
+                    let keys = tree.add(Keys.focusable(true).on_key(|event, _ctx| {
+                        if matches!(event, teksilo_core::event::WidgetEvent::KeyDown { .. }) {
+                            KEYS.fetch_add(1, Ordering::AcqRel);
+                        }
+                        teksilo_core::event::EventResponse::Ignored
+                    }));
+                    tree.focus(keys);
+                    keys
+                }),
+        )
+        .run_with(
+            || {
+                EventLoop::<AppEvent>::with_user_event()
+                    .with_x11()
+                    .with_any_thread(true)
+                    .build()
+                    .expect("winit could not build an X11 event loop (is DISPLAY set?)")
+            },
+            |mut event_loop, app| {
+                let x = teksilo_platform::x11::X11Connection::open().expect("connect to $DISPLAY");
+                let mut child = Child {
+                    app,
+                    x,
+                    phase: Phase::OpenDialog,
+                    owner: None,
+                    dialog: None,
+                    synthetic_press: false,
+                    done: false,
+                };
+                event_loop
+                    .run_app_on_demand(&mut child)
+                    .expect("winit event loop exited with error");
+                assert!(child.done, "the claims ran to their end");
+            },
+        );
 }

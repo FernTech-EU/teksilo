@@ -45,7 +45,8 @@ pub trait WindowOps {
     /// Every live window's state, in creation order.
     fn windows(&self) -> Vec<WindowState>;
 
-    /// Raise a window and give it keyboard focus.
+    /// Raise a window and give it keyboard focus, restoring it first if it
+    /// is minimised.
     fn focus_window(&mut self, id: TeksiloWindowId);
 
     /// Request an `xdg_activation_v1` token for `id` — to hand to another window

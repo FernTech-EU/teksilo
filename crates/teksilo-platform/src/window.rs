@@ -244,20 +244,42 @@ pub fn install_display_handle(handle: winit::event_loop::OwnedDisplayHandle) {
 /// Its flags come from [`teksilo_render::instance_flags`] rather than from
 /// `_from_env` alone, so this instance and the offscreen one
 /// [`teksilo_render::test_support`] opens agree about them.
+///
+/// On Windows the OpenGL backend is left out when Direct3D 12 or Vulkan has
+/// an adapter, unless `WGPU_BACKEND` names the backends. wgpu's OpenGL
+/// backend there starts a thread that creates a hidden top-level window and
+/// never handles a message: every message Windows sends to all top-level
+/// windows waits on it, and a sign-out waited five seconds for its
+/// `WM_QUERYENDSESSION` answer, then ended the process, in every
+/// application, although Direct3D 12 drew. A machine with neither keeps
+/// OpenGL.
 fn shared_instance() -> &'static wgpu::Instance {
     static INSTANCE: OnceLock<wgpu::Instance> = OnceLock::new();
     INSTANCE.get_or_init(|| {
-        let mut descriptor = match DISPLAY_HANDLE.get() {
-            Some(display) => wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(
-                display.clone(),
-            )),
-            // No app layer installed one — an embedder driving `PlatformWindow`
-            // itself, or a test. Offscreen work is unaffected; only a GL-backed
-            // window needs the handle.
-            None => wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
+        let descriptor = || {
+            let mut descriptor = match DISPLAY_HANDLE.get() {
+                Some(display) => wgpu::InstanceDescriptor::new_with_display_handle_from_env(
+                    Box::new(display.clone()),
+                ),
+                // No app layer installed one: an embedder driving
+                // `PlatformWindow` itself, or a test. Offscreen work is
+                // unaffected; only a GL-backed window needs the handle.
+                None => wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
+            };
+            descriptor.flags = teksilo_render::instance_flags();
+            descriptor
         };
-        descriptor.flags = teksilo_render::instance_flags();
-        wgpu::Instance::new(descriptor)
+        #[cfg(target_os = "windows")]
+        if std::env::var_os("WGPU_BACKEND").is_none() {
+            let mut without_gl = descriptor();
+            without_gl.backends.remove(wgpu::Backends::GL);
+            let backends = without_gl.backends;
+            let instance = wgpu::Instance::new(without_gl);
+            if !pollster::block_on(instance.enumerate_adapters(backends)).is_empty() {
+                return instance;
+            }
+        }
+        wgpu::Instance::new(descriptor())
     })
 }
 
