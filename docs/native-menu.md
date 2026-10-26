@@ -102,7 +102,8 @@ shortcut.
   ancestors takes it first (Edit ▸ Copy copies in the focused field), then the
   window's root and global actions, then the **application tree**, whose
   actions are the application's action scope (nothing else registers it). With
-  no window focused, the native bar sends the intent in the application tree.
+  no window focused, the native bar sends an application menu row's intent in
+  the application tree, and a row of a window's own menu in that window.
   A click on the in-window menu bar leaves focus in the widget the user was
   working in (its titles take no focus from a click), and a menu opened from
   the keyboard (F10, Alt) hands focus back to that widget once a command is
@@ -240,7 +241,9 @@ changes. The in-window menu binds it directly and stays live either way.
 a `from_model` or `application` bar binds `version` at `Rebuild` level, so the
 in-window dropdowns re-derive, and the native menu re-installs automatically.
 Keep a clone of the application menu's model to change it from a window's
-handler, or declare another one with `set_application_menu`.
+handler with its mutators; declaring another model is done with
+`set_application_menu` from the application tree (a window's call does
+nothing).
 
 ```rust
 // Pre-allocate an id so you can address a submenu later:
@@ -503,7 +506,7 @@ said where the chord comes from, and it says none right now.
 | --- | --- | --- |
 | id token | `MenuItemId` | `teksilo-core` |
 | rich model | `MenuModel` / `MenuEntry` / `MenuItemState` | `teksilo-widgets` |
-| application menu holder | `ApplicationMenu` (app-state), `ApplicationMenuExt::set_application_menu` | `teksilo-widgets` |
+| application menu holder | `ApplicationMenuExt::set_application_menu` (the holder itself is internal app-state) | `teksilo-widgets` |
 | model → native bridge | `menu::native::install` / `install_application` (+ reactive observers) | `teksilo-widgets` |
 | boundary data | `NativeMenuSnapshot` / `NativeMenuNode` / `MenuItemDelta` | `teksilo-platform` |
 | trait + handle | `NativeMenuBackend` / `NativeMenuHandle` | `teksilo-platform` |

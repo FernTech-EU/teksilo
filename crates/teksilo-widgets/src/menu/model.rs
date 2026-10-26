@@ -151,10 +151,9 @@ impl MenuEntry {
     }
 
     /// Visibility (static or signal-bound). A hidden item collapses to zero
-    /// height in the in-window menu (reactively); on the native menu it is
-    /// omitted from the snapshot at build time (toggling it settles on the next
-    /// menu rebuild — for fully-dynamic native menus prefer
-    /// [`MenuModel::remove`] / [`MenuModel::push_item`]).
+    /// height in the in-window menu, and the native menu installs it hidden
+    /// and shows it again in place; both follow a bound signal as it
+    /// changes.
     pub fn visible(mut self, visible: impl Into<Prop<bool>>) -> Self {
         self.visible = visible.into();
         self

@@ -42,7 +42,7 @@ intent came from. The three firing paths:
 | **Shortcut** (keyboard chord) | Registry invokes `on_activate` or synthesizes `Intent::new` | Focused widget or root fallback |
 | **Widget handler** (`ctx.send_intent`) | Handler builds or returns an `Into<Intent>` value           | The originating widget; from an overlay, on through the widget it is attached to |
 | **From focus** (`ctx.send_intent_from_focus`: a menu-bar row, the command palette) | As above                                   | The focused widget once the handler's overlays have closed, else the originating widget |
-| **Native menu item** (macOS menu bar)  | The item's intent, by name                                  | Focused widget of the window with the OS focus, else that window's root (its `on_activate` runs in the window whose menu it is) |
+| **Native menu item** (macOS menu bar)  | The item's intent, by name                                  | Focused widget of the window with the OS focus, else that window's root; with no window focused, the window whose menu it is, or the application tree for the application menu (`on_activate` runs in the window whose menu it is, or in the application tree for the application menu) |
 | **Programmatic** (tests, tools, app callbacks) | Build `Intent` by hand or via `IntentKind::into_intent`     | The app's root (`WidgetTree::run_with_event_context`) |
 
 The **name** is the dispatch key; the **payload** (if any) is
@@ -684,10 +684,11 @@ command is chosen): an action on that widget, one of its ancestors or the
 window's root takes it, and what the window leaves goes to the application
 tree, where the [application menu](native-menu.md)'s commands live. Such a row
 with no closure, and no state to write (a two-way check or radio row writes
-one), is greyed out while nothing on that route takes its intent
-(`WidgetTree::can_handle`). A hand-built
-`MenuItem` row does the same with `ctx.send_intent_from_focus(...)` in its
-`on_activate_fn`; sent with `ctx.send_intent(...)`, its walk goes from the row to
+one), is greyed out while nothing on that route takes its intent (the
+lookup a dispatch makes, run without invoking anything). A hand-built
+`MenuItem` row sends from focus the same way with
+`ctx.send_intent_from_focus(...)` in its `on_activate_fn`, but does not grey
+out by itself (give it `.enabled(..)` for that); sent with `ctx.send_intent(...)`, its walk goes from the row to
 the bar's trigger and up the bar's ancestors, which reaches the window's root but
 not a sibling of the bar, such as an editor.
 

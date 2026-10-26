@@ -350,6 +350,137 @@ impl Widget for Root {
   Ctrl+D globally next to one; handle the intent. A command several of your own widgets run
   is declared with `ctx.register_shortcut_shared(..)`, which keeps it while any of them lives.
 
+## Windows, menus and quitting
+
+**The application tree.** Code that must run with no window open (the application
+menu and its actions, a single-instance handler, the quit guard) lives in a widget
+tree no window hosts: `TeksiloAppBuilder::app_root(|tree| tree.add(AppRoot::new()))`.
+Its root registers the application's actions with `ctx.register_action_global(..)` and
+its shortcuts with `ctx.register_shortcut_global(..)`; its handlers run with
+`ctx.window()` returning `None`. An intent nothing in a window takes (a menu row, a
+button's `send_intent`, a shortcut only the application handles) goes on to the
+application tree, so register an app-wide command (New, Quit, Settings) there once,
+not in every window. An intent a dialog leaves goes to the window it blocks first.
+
+**The application menu.** Build one `MenuModel` once, keep it in a field of the
+application root, and declare it from `build()`:
+
+```rust,ignore
+use teksilo::widgets::menu::{MenuEntry, MenuModel, StandardMenu};
+
+struct AppRoot { menu: MenuModel }   // built once, in AppRoot::new()
+
+impl Widget for AppRoot {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        ctx.register_action_global(Action::new("app.new").on_invoke(|_, ctx| {
+            ctx.open_window(document_window());
+        }));
+        ctx.register_action_global(Action::new("app.quit").on_invoke(|_, ctx| ctx.quit()));
+        ctx.set_application_menu(self.menu.clone());   // ApplicationMenuExt, in the prelude
+        vec![]
+    }
+    // layout_response: a zero size; the tree is never drawn.
+}
+```
+
+- A model built inside `build()` is a new declaration at every rebuild, which rebuilds
+  every bar showing it. Change the kept model with its mutators (`push_item`, `remove`)
+  or its entries' signals, and every window follows. From a window's tree,
+  `set_application_menu` does nothing (a debug build panics).
+- A window shows it with `MenuBar::application()`. On Windows and Linux nothing is
+  inserted by itself: a window without that bar has no menu. `MenuBar::from_model(m)`
+  gives one window a menu of its own instead.
+- With `.install_native_menu()` it is the macOS menu bar, and `MenuBar::application()`
+  hides its in-window strip there by default. The bar follows the key window: its own
+  menu, else its owner's (for a dialog), else the application menu, which is also the
+  bar while no window is open.
+- A row sends its intent from the window's focused widget, once the menu has given
+  focus back: the editor's action answers first (Edit > Copy copies its selection),
+  then the window's root and global actions, then the application tree. Menu commands
+  need no `register_action_global` in the window.
+- A row with an intent and no `on_activate` closure greys out while nothing on that
+  route takes its intent: register an `Action` for every such row. The shortcuts the
+  rows name, registered in the application tree, fire in every window.
+
+**Controls that leave focus alone.** `.focus_on_click(false)` on any widget lets a
+click activate it without taking keyboard focus; Tab, focus requests and assistive
+technology still focus it. Menu bar titles, toolbar buttons and tab-bar scroll arrows
+already work this way, so a command they send with `ctx.send_intent_from_focus(..)`
+reaches the editor. Give the flag to your own buttons that act on an editor (a
+formatting strip of `IconButton`s). Before such a click's command runs, the focused
+field commits its pending edit (a spin box's typed number). On `TextInput` and
+`TextInputField`, `.on_commit_fn(|ctx| ..)` means "editing is finished": it runs once
+per edit, on such a click or on a real blur. `.on_blur_fn(..)` means "focus left" and
+runs only when it does. Save a field's text in `on_commit_fn`, or read its bound
+`Signal<String>`.
+
+**Dialogs.** `WindowConfig::new().modal_to(owner_id)` (or `.modal(ModalConfig)`) opens
+a window owned by `owner_id`: the owner refuses input while it is up, and the dialog
+has no minimise button of its own (`minimizable(true)` is ignored). It is minimised,
+restored and closed with its owner, except on Wayland, where no protocol tells the
+application of either. For a question, `ctx.present_message_box(MessageBox::question(..))`
+or `ctx.present_modal(..)` picks a native or in-window presentation per platform, and
+works from the application tree too. A forced close of the owner closes its dialogs
+first, each answering through its own Cancel path (a `MessageBox` reports its escape
+button, dismissed programmatically).
+
+**Closing and quitting.**
+
+- `QuitPolicy::LastWindowClosed` (the default, on every platform, macOS included)
+  quits when the last window closes. An app that lives with no window open (Mac-style,
+  or in the system tray) sets `.quit_policy(QuitPolicy::Explicit)`: a tray icon does
+  not keep the application alive by itself. `initial_window` is optional under either
+  policy when the application tree opens the first window from `run_after_mount`.
+- `ctx.close_window()` and `ctx.quit()` ask the guards; `ctx.close_window_forced()` and
+  `ctx.quit_forced()` do not. The App menu's Quit (⌘Q) sends its `quit_intent` when one
+  is set and otherwise asks for the guarded quit; the Dock's Quit and a macOS logout
+  run the guarded quit. `SIGTERM` / `SIGHUP` on Unix and the end of a Windows
+  session ask every guard once and then close everything, whatever the answers.
+- A window's guard is `WindowConfig::on_close_requested(|ctx| -> CloseResponse)`. The
+  application's is `TeksiloAppBuilder::on_quit_requested(|ctx| -> CloseResponse)`, asked
+  before any window (downloads running, a sync not done).
+- A guard answers `CloseResponse::Close`, `Veto` (final: a quit that meets it ends at
+  once) or `Defer(decision)` to answer from a dialog:
+
+```rust,ignore
+.on_close_requested(move |ctx| {
+    if !dirty.get() {
+        return CloseResponse::Close;
+    }
+    if matches!(ctx.quit_source(), Some(QuitSource::SessionEnd | QuitSource::Signal)) {
+        save();                          // nobody is there to answer a dialog
+        return CloseResponse::Close;
+    }
+    let decision = CloseDecision::new();
+    let answer = decision.clone();       // Clone + Send; the first answer counts
+    ctx.present_message_box(
+        MessageBox::question(lit!("Save changes?"))
+            .buttons(MessageBoxButtons::SaveDiscardCancel)
+            .on_result(move |r, _ctx| match r.button {
+                StandardButton::Save => { save(); answer.proceed(); }
+                StandardButton::Discard => answer.proceed(),
+                _ => answer.cancel(),
+            }),
+    );
+    CloseResponse::Defer(decision)
+})
+```
+
+- Answer the decision in every arm, Cancel included. Do not call `ctx.cancel_quit()`
+  from a dialog's Cancel arm: that arm also runs when the window closes with its dialog
+  still up, and `cancel_quit` abandons a guarded quit only. A decision dropped
+  unanswered cancels (a debug build warns).
+- `ctx.quit_source()` names what asked (`QuitSource::Application`, `UserQuit`,
+  `SessionEnd`, `Signal`; `None` with no quit under way). `ctx.quit_in_progress()` lets
+  a guard word its question for the whole application.
+- `.can_close(signal)` is the reactive sugar: while the signal reads `false` a close is
+  blocked. With `.on_close_blocked(|ctx, decision| ..)` the callback answers the
+  decision (call `decision.cancel()` when it only explains); without it the block is a
+  final veto.
+- With a `SettingsBundle`, every way out (a quit, a termination signal, a session end,
+  the end of the event loop) writes the settings store, the window state and the
+  settings files the app opened itself.
+
 ## Theming
 
 Apps explicitly pick a preset — there is **no** `Theme::default()`:
@@ -1008,7 +1139,8 @@ full grammar and desugaring cheat sheet are the framework's `teksu-macro-referen
 Inside any handler, `EventContext` (`ctx`) offers ambient mutations:
 
 - `ctx.send_intent(...)`, `ctx.set_theme(...)`, `ctx.set_locale(...)`.
-- `ctx.open_window(WindowConfig...)`, `ctx.close_window()`.
+- `ctx.open_window(WindowConfig...)`, `ctx.close_window()` / `ctx.quit()` (guarded),
+  `ctx.close_window_forced()` / `ctx.quit_forced()` (not); see Windows, menus and quitting.
 - `ctx.with_widget_mut::<W>(id, BindingLevel, |w| ...)` — typed deferred mutation of a
   mounted widget (applied after the handler, then dirty-marked at the given level).
 - `ctx.request_accessibility_update()` — force an AccessKit re-walk after restructuring.

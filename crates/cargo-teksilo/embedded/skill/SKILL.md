@@ -243,6 +243,22 @@ Confirm the API with `cargo teksilo symbol` before relying on one.
   whole frames (a VM framebuffer, a remote screen) wraps its writer in a
   `LiveImageDiffWriter`, which commits only the rows that changed and nothing
   for an identical frame.
+- **App-wide commands and the menu live in the application tree**
+  (`TeksiloAppBuilder::app_root`), not in a window: register them there with
+  `register_action_global`, declare the menu with `ctx.set_application_menu(model)`
+  from a model built once and kept in a field, and show it in a window with
+  `MenuBar::application()`. A menu row sends from the window's focus, so it needs no
+  global action in the window; a row whose intent nothing takes is greyed out.
+- **Close and quit guards answer with a `CloseDecision`.** `ctx.quit()` asks the
+  guards, `ctx.quit_forced()` does not. A guard that shows a dialog returns
+  `CloseResponse::Defer(decision)` and calls `proceed()` / `cancel()` from every arm,
+  never `ctx.cancel_quit()`; `Veto` is final. For `ctx.quit_source()` of
+  `SessionEnd` or `Signal`, save and return `Close`. The app quits on its last
+  window by default, macOS included: staying alive with no window (a tray app) takes
+  `QuitPolicy::Explicit`. See the guide's *Windows, menus and quitting*.
+- **Save a field's text in `on_commit_fn`, not `on_blur_fn`.** Toolbar and menu bar
+  buttons take no focus from a click (`focus_on_click(false)`), so the field never
+  blurs; `on_commit_fn` runs before their command and on a real blur.
 - **Composing-widget invariant:** the id returned from `build()`, the root id
   used by `layout_response`, and `children()` must all be the same root child.
 - **Testing is headless:** `teksilo::core::{WidgetTree, LayoutContext::for_testing}`
@@ -306,6 +322,6 @@ binding and still reports success. Full catalog, error codes and probe workflow:
 
 | File | Read it when |
 |---|---|
-| `reference/teksilo_app_guide.md` | Anything about the app-author surface: entry point, Widget trait, layout model, Signal/Prop, events, intents & shortcuts, theming, animation, accessibility overrides, i18n, settings, data models, widget catalog, toasts, drag-and-drop, `EventContext`, breaking changes 0.9 → 0.13. The first bundled read, after the **Read first** guides. |
+| `reference/teksilo_app_guide.md` | Anything about the app-author surface: entry point, Widget trait, layout model, Signal/Prop, events, intents & shortcuts, windows, menus and quitting, theming, animation, accessibility overrides, i18n, settings, data models, widget catalog, toasts, drag-and-drop, `EventContext`, breaking changes 0.9 → 0.13. The first bundled read, after the **Read first** guides. |
 | `reference/teksu.md` | Writing, reading, translating or debugging a `teksu!` block. Routing rules, slot arity, diagnostics, limitations, the formatter. |
 | `reference/automation.md` | Driving or testing the running app: wiring the bridge, attaching, the tool catalog by job, error codes, and the probe harness workflow. |

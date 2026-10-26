@@ -29,8 +29,9 @@ Full end-to-end example:
 ## Canonical app shape
 
 A Teksilo app opens one initial window via
-`TeksiloAppBuilder::initial_window(WindowConfig)` (an app that starts with
-no window says so with its quit policy, below). Secondary windows are
+`TeksiloAppBuilder::initial_window(WindowConfig)` (an app may also start
+with none and open its first window from the application tree; see the quit
+policy, below). Secondary windows are
 opened from handler code via `EventContext::open_window`.
 
 ```rust
@@ -71,9 +72,10 @@ Notes:
 | `QuitPolicy::Explicit` | the app keeps running with no window | optional |
 
 `Explicit` is for an application whose life is not tied to its windows: a
-background service, or an application that lives in the system tray. Under
-either policy, `ctx.quit()` and `ctx.quit_forced()` end the application;
-see "Quitting the application" below.
+background service, or an application that lives in the system tray (a tray
+icon does not keep the application alive by itself). Under either policy,
+`ctx.quit()` (which the close guards may refuse) and `ctx.quit_forced()` end
+the application; see "Quitting the application" below.
 
 ---
 
@@ -82,8 +84,8 @@ see "Quitting the application" below.
 Code that must run with no window open (the application menu and its
 actions, a single-instance handler, a quit) lives in the **application
 tree**: a widget tree that belongs to no window. Give it a root with
-`TeksiloAppBuilder::app_root`, which takes the same kind of builder as a
-window's root:
+`TeksiloAppBuilder::app_root`, which takes a builder like a window's root,
+without the `WindowState` (the tree has no window):
 
 ```rust
 TeksiloAppBuilder::new()
@@ -99,8 +101,8 @@ impl Widget for AppActions {
         ctx.register_action_global(Action::new("app.quit").on_invoke(|_, ctx| {
             ctx.quit();
         }));
-        // Runs once at startup: an app with no initial window opens its
-        // first one here.
+        // Runs once this root is mounted (at startup, and again if it is
+        // rebuilt): an app with no initial window opens its first one here.
         ctx.run_after_mount(|ctx| {
             ctx.open_window(document_window());
         });
@@ -532,6 +534,11 @@ impl EventContext<'_> {
     pub fn close_window(&mut self);                         // current window, GUARDED
     pub fn close_window_forced(&mut self);                  // current window, bypasses the guard
     pub fn close_window_by_id(&mut self, id: TeksiloWindowId);
+    pub fn quit(&mut self);                                 // every window, GUARDED
+    pub fn quit_forced(&mut self);                          // every window, bypasses the guards
+    pub fn quit_in_progress(&self) -> bool;
+    pub fn quit_source(&self) -> Option<QuitSource>;        // the quit under way
+    pub fn cancel_quit(&mut self);                          // a guarded quit only
     pub fn window_state(&self, id: TeksiloWindowId) -> Option<WindowState>;
     pub fn windows(&self) -> Vec<WindowState>;
     pub fn request_activation_token(&mut self, id: TeksiloWindowId,
@@ -650,8 +657,8 @@ Notes:
 
 - Framework payload types (file-dialog results, external drag-and-drop events,
   async completions, native-menu choices, WebView and automation-bridge
-  payloads, `CloseWindowRequest`, title-bar synthetics, the deprecated
-  `RepaintWindowRequest`)
+  payloads, `CloseWindowRequest`, title-bar synthetics, the operating
+  system's quit requests, the deprecated `RepaintWindowRequest`)
   are handled *before* this hook and never reach it, so it never has to
   defend against them.
 - It is a **single slot**, like `on_app_event`, a second call replaces the
@@ -695,8 +702,9 @@ if let Some(main_state) = ctx.window_state(main_id) {
 `WindowConfig` with `ModalConfig { parent: ctx.window().id(), focus_target }`
 (plus the request's `title` / `size`) and calls `open_window`. It always
 opens a native window, so the request's `presentation` is not consulted,
-and it returns `None` outside a dispatch or for a
-`ModalContent::ExistingWidget` request (only `Deferred` content can be
+and it returns `None` when there is no current window (outside a
+dispatch, or in the application tree, which uses `present_modal` instead)
+or for a `ModalContent::ExistingWidget` request (only `Deferred` content can be
 built into a fresh tree). Use it when you already have a
 `ModalRequest` in hand:
 
@@ -783,8 +791,8 @@ and has no minimise of its own. It goes and comes back with its owner.
   tree, `WindowState::close()`, `ctx.quit_forced()`) closes its dialogs first,
   without asking their close guards, and answers each through its own
   Cancel path: its `on_dismiss` runs as if it had been dismissed, so a
-  `MessageBox` reports its escape button (Cancel), dismissed
-  programmatically. A dialog presented in the window's own tree is
+  `MessageBox` reports its escape button (Cancel, or No for a Yes/No box),
+  dismissed programmatically. A dialog presented in the window's own tree is
   answered the same way. A
   window the OS destroys on its own (Windows destroys an owned window with
   its owner) is forgotten as if closed.
@@ -1003,8 +1011,8 @@ the documents, but that review saves documents and closes no window.
 #### Where a quit comes from
 
 - `ctx.quit()`, from any handler of a window or of the application tree:
-  the guarded quit above. A Quit row or a tray menu's Quit runs an action
-  that calls it.
+  the guarded quit above. A Quit row (or the Quit of a tray menu the
+  application builds) runs an action that calls it.
 - The macOS App menu's Quit: sends its `quit_intent` if the app declared
   one and something takes it, and otherwise asks for the guarded quit
   itself (see the [native menu guide](native-menu.md#quit)).
@@ -1036,11 +1044,14 @@ writes a recovery copy) for `SessionEnd` and `Signal` and returns `Close`,
 as the guard in "Where the quit came from" below does. The application ends once every window has
 closed, under either quit policy.
 
-**Settings are written on every way out**: a quit that ends the
+**Settings are written on every way out** when the application has a
+`SettingsBundle` (`TeksiloAppBuilder::settings`): a quit that ends the
 application, an overruling quit before it returns, and the end of the
-event loop. That covers the `SettingsBundle`'s store and window state and
-the settings files the application opened itself (`SettingsFile`,
-`PersistedListModel`, `MruList`).
+event loop. That covers the bundle's store and window state and the
+settings files the application opened itself (`SettingsFile`,
+`PersistedListModel`, `MruList`). Without a bundle, those files are
+written only when they are dropped, which an overruling quit may not
+reach.
 
 **macOS.** AppKit asks before it ends the application, for the Dock
 menu's Quit, AppleScript's `quit app "…"`, any `terminate:` (a menu item
@@ -1082,9 +1093,8 @@ ends). A signal the process was started with ignored stays ignored, during
 the loop and after it: under `nohup`, `SIGHUP` neither quits the
 application nor ends it. `SIGINT` keeps its default too, as in Qt and GTK applications:
 Ctrl+C in a terminal is a developer stopping the program. An application
-that handles these signals itself turns this off with
-`TeksiloAppBuilder::termination_signals(false)`, and its own handlers then
-run alone.
+that handles these signals itself can turn this off on the builder, and
+its own handlers then run alone.
 
 **Logging out on Linux.** Teksilo does not register with a session
 manager (XSMP, GNOME's `org.gnome.SessionManager`, the desktop portal's
@@ -1102,7 +1112,8 @@ writes the settings and returns.
 
 A dialog still up in or over a window the quit closes is answered through
 its own Cancel path before it goes, as for a forced close of its owner: a
-`MessageBox` reports Cancel, dismissed programmatically. A native dialog
+`MessageBox` reports its escape button (Cancel, or No for a Yes/No box),
+dismissed programmatically. A native dialog
 window is asked before the window it blocks, and closes this way.
 
 #### Wording, forcing, cancelling
@@ -1151,9 +1162,11 @@ macOS Dock menu's Quit, AppKit's `terminate:`), `SessionEnd` (log out,
 restart, shut down) or `Signal` (`SIGTERM`, `SIGHUP`); the enum is
 `#[non_exhaustive]`. A guard for a document skips its dialog when the user
 is not there to answer it, as AppKit and Qt applications do: for
-`SessionEnd` and `Signal` it saves directly and returns `Close` (an
-overruling quit, above, closes the window whatever it answers, so a
-dialog shown then is never answered). The guard of `on_quit_requested`
+`SessionEnd` and `Signal` it saves directly and returns `Close` (on
+Windows and for a signal the quit is overruling, above, and closes the
+window whatever it answers, so a dialog shown then is never answered; a
+macOS logout waits for the answer, but nobody logging out expects a
+question). The guard of `on_quit_requested`
 reads it the same way.
 
 ```rust
@@ -1242,7 +1255,8 @@ pub trait WindowOps {
     fn close_window_by_id(&mut self, id: TeksiloWindowId);
     // …plus defaulted hooks: activation tokens, the parent window
     // handle (file dialogs), the IME cursor area, outbound OS drags,
-    // soft-keyboard support.
+    // soft-keyboard support, and the quit (quit, quit_forced,
+    // quit_in_progress, quit_source, cancel_quit).
 }
 ```
 

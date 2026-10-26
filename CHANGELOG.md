@@ -368,6 +368,15 @@ by crate for clarity, not because crates version independently.
   One that cannot be written no longer keeps the others from being
   written: every one is tried, and the first error is returned.
 
+#### cargo-teksilo
+
+- The agent instructions `cargo teksilo init` installs, and the application
+  guide on docs.rs, have a section on windows, menus and quitting: the
+  application tree and its menu, controls that take no focus from a click
+  and `on_commit_fn`, dialogs, close and quit guards answered with a
+  `CloseDecision`, `quit_source`, and `QuitPolicy`. `cargo teksilo update`
+  installs them.
+
 ### Fixed
 
 #### Widgets
