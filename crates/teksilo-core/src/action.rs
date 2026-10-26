@@ -139,9 +139,8 @@ impl ActionBuilder {
     }
 
     /// Whether the action has anything to act on now, asked each time a
-    /// menu row for its intent decides whether to grey out
-    /// ([`WidgetTree::can_handle`](crate::WidgetTree::can_handle),
-    /// [`WidgetTree::handled_intents_from`](crate::WidgetTree::handled_intents_from)):
+    /// menu row for its intent decides whether to grey out (and by
+    /// [`BuildContext::command_available`](crate::build_context::BuildContext::command_available)):
     /// a text field's Copy with nothing selected, its Paste while read-only.
     /// The row greys out while it answers `false`.
     ///
@@ -152,7 +151,6 @@ impl ActionBuilder {
     /// [`enabled_when`](Self::enabled_when), which passes the intent by.
     /// `available` runs outside every event handler, on every query (once
     /// per event-loop turn for the native menu bar), and must be cheap.
-    #[doc(hidden)]
     pub fn available_when(mut self, available: impl Fn() -> bool + 'static) -> Self {
         self.available_when = Some(Rc::new(available));
         self
@@ -173,7 +171,6 @@ impl ActionBuilder {
     /// Dispatch never asks it: the handler alone decides. Like `available`,
     /// it runs outside every event handler, on every query, and must be
     /// cheap. Without it, the action is taken never to pass anything on.
-    #[doc(hidden)]
     pub fn passes_on_when(mut self, passes_on: impl Fn() -> bool + 'static) -> Self {
         self.passes_on_when = Some(Rc::new(passes_on));
         self

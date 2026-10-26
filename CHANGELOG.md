@@ -79,9 +79,20 @@ by crate for clarity, not because crates version independently.
   answers already given stand. Both
   signals at once (systemd ends a login session with both) quit once. A
   signal the process was started with ignored (`SIGHUP` under `nohup`)
-  stays ignored. `SIGINT` (Ctrl+C) keeps its default. An option that leaves
-  both signals to an application that handles them itself exists, under a
-  name not settled yet.
+  stays ignored. `SIGINT` (Ctrl+C) keeps its default. The process exits
+  with status 0. `TeksiloAppBuilder::handle_termination_signals(false)`
+  leaves both signals to an application that handles them itself.
+- **Commands report whether they have anything to act on.**
+  `ActionBuilder::available_when` says whether an action can act now (a
+  Copy with nothing selected), and `ActionBuilder::passes_on_when` whether
+  its handler would pass the intent on; a menu row for the intent greys
+  out from them, and dispatch ignores both.
+  `BuildContext::command_available(name)` is the same answer as a
+  `Signal<bool>`, for a toolbar button or any control bound to a command.
+- **`Intent::origin_window()`** names the window an intent was sent in, so an
+  action of the application tree knows which window a command came from.
+- **`teksilo_settings::flush_every_writer()`** writes every settings writer
+  of the process, for a program that runs without `teksilo-app`.
 - **On macOS the Dock menu's Quit, AppleScript's `quit`, `terminate:` and a
   logout ask the application to quit.** AppKit ended the process at once,
   past every close guard and with nothing written. It now waits while the

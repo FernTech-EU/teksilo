@@ -21,7 +21,7 @@
 //! replaces the registration, and is the application's choice: the watch
 //! hears that signal no more, and nothing says so. An application that
 //! handles the two signals itself turns the watch off instead
-//! (`TeksiloAppBuilder::termination_signals(false)`).
+//! (`TeksiloAppBuilder::handle_termination_signals(false)`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};

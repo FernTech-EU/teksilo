@@ -85,6 +85,10 @@ or `SettingsFile::reload_if_stale` explicitly.
 - A write to one settings file is not a transaction across several files.
 - Use `SettingsFile::load_strict` when invalid data must be reported instead of
   falling back to defaults. Handle write errors and shutdown flushing explicitly.
+- `teksilo-app` writes every pending change on every way out (a quit, a
+  signal, the end of the session). A program that opens settings without it
+  (a command-line tool, a test) calls `teksilo_settings::flush_every_writer()`
+  before it ends.
 - Handles are intended for the UI thread. Do not share them across threads.
 
 ## Reference

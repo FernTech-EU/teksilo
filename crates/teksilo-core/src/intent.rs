@@ -157,7 +157,6 @@ impl Intent {
     /// from: the one a menu row or a shortcut was used in, the window with
     /// the OS focus for a macOS menu bar item. An intent re-sent from its
     /// action keeps the window it was first sent in.
-    #[doc(hidden)]
     pub fn origin_window(&self) -> Option<crate::window::TeksiloWindowId> {
         self.origin_window
     }

@@ -790,9 +790,12 @@ impl<'a> BuildContext<'a> {
 
     /// Whether an intent named `name`, sent from the window's logical focus,
     /// would be handled, as a signal the tree keeps current while the widget
-    /// being built is active: what a menu row binds to grey itself out. See
-    /// [`WidgetTree::command_available_signal`](crate::WidgetTree::command_available_signal).
-    #[doc(hidden)]
+    /// being built is active: what a menu row binds to grey itself out, and
+    /// what a toolbar button or any other control bound to a command uses to
+    /// grey itself the same way. "Handled" is what a dispatch would find: an
+    /// enabled action on the route from the focus (the window's own, then
+    /// the application's) that has something to act on
+    /// ([`ActionBuilder::available_when`](crate::action::ActionBuilder::available_when)).
     pub fn command_available(&mut self, name: &'static str) -> Signal<bool> {
         let id = self.self_id();
         self.tree.command_available_signal(id, name)

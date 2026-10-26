@@ -677,8 +677,9 @@ impl DebouncedWriter {
 ///
 /// [`OpenedSettings::flush_all`](crate::OpenedSettings::flush_all) calls it
 /// after the bundle's own services; `teksilo-app` calls it on every way out
-/// of an application that has no bundle.
-#[doc(hidden)]
+/// of an application that has no bundle. A program that opens writers
+/// without `teksilo-app` (a command-line tool, a test) calls it before it
+/// ends.
 pub fn flush_every_writer() -> Result<(), FlushError> {
     let Some(pool) = POOL.get() else {
         return Ok(());

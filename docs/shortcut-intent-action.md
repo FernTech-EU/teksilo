@@ -935,6 +935,27 @@ same: register an `Action` for the `edit.*` id rather than match the
 chord. A widget that still matches `Ctrl+C` keeps copying on it after the
 user has moved Copy elsewhere.
 
+An action of your own says the same two things on its builder.
+`ActionBuilder::available_when(|| ..)` answers whether it has anything to
+act on now; `ActionBuilder::passes_on_when(|| ..)` answers whether its
+handler (built with `on_invoke_with_response`) would pass the intent on.
+Both run on every query, outside any event handler, so they read state the
+action already holds and must be cheap; dispatch asks neither. A control
+other than a menu row greys itself from the same answer with
+`BuildContext::command_available("edit.copy")`, a `Signal<bool>` the tree
+keeps current from the window's focus:
+
+```rust,ignore
+let selection = self.selection.clone();
+ctx.register_action(
+    Action::new("doc.copy")
+        .available_when(move || !selection.get().is_empty())
+        .on_invoke(|_, ctx| copy_selection(ctx)),
+);
+let can_copy = ctx.command_available("doc.copy");
+ctx.add(IconButton::new(icon).enabled(can_copy));
+```
+
 ### Editor shortcuts: format and code commands
 
 The editors' own commands work the same way, with one difference: they

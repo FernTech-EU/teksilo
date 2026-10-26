@@ -1214,7 +1214,7 @@ struct TeksiloAppHandler {
     /// operating system may end the process before `run` returns.
     settings: Option<teksilo_settings::OpenedSettings>,
     /// Whether `resumed` starts [`quit_signals`](Self::quit_signals); see
-    /// [`TeksiloAppBuilder::termination_signals`].
+    /// [`TeksiloAppBuilder::handle_termination_signals`].
     termination_signals: bool,
     /// `SIGTERM` and `SIGHUP` turned into a quit while the loop runs
     /// (Unix), each unless the process ignored it when the watch started.
@@ -5408,7 +5408,7 @@ pub struct TeksiloAppBuilder {
     /// [`on_quit_requested`](Self::on_quit_requested).
     quit_guard: Option<teksilo_core::CloseGuard>,
     /// Whether a termination signal quits the application; see
-    /// [`termination_signals`](Self::termination_signals).
+    /// [`handle_termination_signals`](Self::handle_termination_signals).
     termination_signals: bool,
     /// Type-erased adapter for the application's backend event source.
     /// Installed via `event_source<S>(source)`.
@@ -6177,8 +6177,11 @@ impl TeksiloAppBuilder {
     /// throughout. One the application sets to ignored, or hands to a
     /// handler of its own, after the loop has started takes it from the
     /// watch from then on, silently: that is the application's choice.
-    #[doc(hidden)]
-    pub fn termination_signals(mut self, handled: bool) -> Self {
+    ///
+    /// A process that quit this way exits with status 0, as it ended
+    /// cleanly, not with the 143 of a process the signal killed; a service
+    /// manager (systemd) takes either as a normal stop.
+    pub fn handle_termination_signals(mut self, handled: bool) -> Self {
         self.termination_signals = handled;
         self
     }

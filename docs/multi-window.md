@@ -156,7 +156,10 @@ It receives:
   application tree implements, opens the window. When the application tree
   does not take it either, the key goes to the focused widget instead, as
   any shortcut nobody handles does (the standard edit shortcuts depend on
-  it: Ctrl+C copies in an editor that copies from its own key handler). On
+  it: Ctrl+C copies in an editor that copies from its own key handler). An
+  intent keeps the window it was sent in as it crosses:
+  `Intent::origin_window()` tells the application tree's action which
+  window a menu row or a shortcut was used in. On
   macOS a chord that is also a native menu item's key equivalent arrives as
   that menu choice, not as a shortcut, and crosses as a menu intent. In a
   test, `HeadlessApp::route_unclaimed_intents` does the crossing;
@@ -1179,9 +1182,11 @@ starts and once it has ended they keep their default meaning (the process
 ends). A signal the process was started with ignored stays ignored, during
 the loop and after it: under `nohup`, `SIGHUP` neither quits the
 application nor ends it. `SIGINT` keeps its default too, as in Qt and GTK applications:
-Ctrl+C in a terminal is a developer stopping the program. An application
-that handles these signals itself can turn this off on the builder, and
-its own handlers then run alone.
+Ctrl+C in a terminal is a developer stopping the program. A process that
+quits this way exits with status 0, as it ended cleanly. An application
+that handles these signals itself turns this off with
+`TeksiloAppBuilder::handle_termination_signals(false)`, and its own handlers
+then run alone.
 
 **Logging out on Linux.** Teksilo does not register with a session
 manager (XSMP, GNOME's `org.gnome.SessionManager`, the desktop portal's
