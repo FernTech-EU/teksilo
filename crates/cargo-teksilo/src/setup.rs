@@ -148,6 +148,10 @@ version-matched.
    is wrong, not the compiler.
 6. **Verify behaviour** where it matters: headless widget tests for layout and
    state logic, a probe for "the user clicks this and that happens on screen".
+7. **A stack overflow on Windows alone** ("thread 'main' has overflowed its
+   stack", in a debug build) → the app's `build.rs` must ask for a larger
+   main-thread stack; the app guide's *Adding Teksilo* has the snippet, and
+   `cargo teksilo init` prints it.
 
 If `cargo teksilo` is not installed, fall back to
 `cargo doc -p teksilo-widgets --no-deps --open`, or docs.rs at the pinned

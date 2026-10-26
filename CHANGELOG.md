@@ -13,6 +13,16 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### cargo-teksilo
+
+- **`cargo teksilo init` says when an app does not ask Windows for a larger
+  main-thread stack**, and prints the `build.rs` that does. Windows gives the
+  main thread 1 MiB, against 8 MiB on Linux and macOS, and a large app's debug
+  build can overflow it while building its first window. The app guide's
+  *Adding Teksilo* has the same snippet.
+
 ### Fixed
 
 #### Core

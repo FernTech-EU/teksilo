@@ -14,6 +14,7 @@ mod status;
 mod symbol;
 mod update;
 mod vectors;
+mod windows_stack;
 
 use clap::{Args, Parser, Subcommand};
 use std::{
@@ -490,6 +491,9 @@ fn run(dir: &Path, command: Command) -> Result<(), String> {
             let mut names = vec!["probe harness"];
             names.extend(targets.iter().map(|t| t.agent));
             success(format!("Installed: {}.", names.join(", ")));
+            if !windows_stack::reserves_stack(&root) {
+                output::note(windows_stack::hint());
+            }
             Ok(())
         }
         Command::Agent {

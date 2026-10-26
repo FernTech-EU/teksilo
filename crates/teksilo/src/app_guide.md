@@ -48,6 +48,30 @@ feature.)
 One widget escapes the flat re-export: `RichTextEditor`. The glob does not reach it, so
 import it by module path, `use teksilo::widgets::rich_text::RichTextEditor;`.
 
+### Windows: the main thread's stack
+
+Windows gives a program's main thread 1 MiB of stack unless the executable asks for more;
+Linux and macOS give 8 MiB. A large app's debug build can pass 1 MiB while it builds its
+first window, and then ends with "thread 'main' has overflowed its stack" on Windows alone.
+Teksilo cannot ask for the app (a dependency's link arguments never reach the app's
+executable), so put this in the app's `build.rs`, or add its body to the one it has. It
+asks for 8 MiB for every executable of the package. `cargo teksilo init` prints it when
+the project sets no stack size.
+
+```rust,ignore
+// build.rs
+fn main() {
+    // Windows gives the main thread 1 MiB of stack; Linux and macOS give 8.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        let stack = match std::env::var("CARGO_CFG_TARGET_ENV").as_deref() {
+            Ok("msvc") => "/STACK:8388608",
+            _ => "-Wl,--stack,8388608",
+        };
+        println!("cargo:rustc-link-arg-bins={stack}");
+    }
+}
+```
+
 ### Feature flags
 
 The default set is sensible for most apps: `widgets`, `i18n`, `inspector`, `toast`,

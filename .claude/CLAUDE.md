@@ -96,7 +96,9 @@ cargo teksilo status                 # project and search model status (read-onl
 cargo teksilo build-vectors          # MAINTAINER ONLY: re-encode the corpus (see below)
 ```
 
-`init` installs the harness and instructions for detected agents. Repeated
+`init` installs the harness and instructions for detected agents, and prints a
+`build.rs` snippet when no build script or `.cargo` configuration in the project
+sets a Windows main-thread stack size (`windows_stack.rs`). Repeated
 `--agent` options select targets explicitly and create missing directories;
 `-y` skips confirmation. `agent install <agents...>` installs only instructions,
 without a prompt. User scope supports `claude`, `vibe`, and `opencode` via
