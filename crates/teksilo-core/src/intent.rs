@@ -60,6 +60,9 @@ pub struct Intent {
     /// How many times it, or the routed intents whose actions sent it, have
     /// crossed from one tree to another.
     crossings: usize,
+    /// Whether an open modal overlay keeps it, as it keeps a key's; see
+    /// [`kept_in_modal`](Self::kept_in_modal).
+    kept_in_modal: bool,
 }
 
 impl Intent {
@@ -74,6 +77,7 @@ impl Intent {
             origin_window: None,
             activation_token: None,
             crossings: 0,
+            kept_in_modal: false,
         }
     }
 
@@ -88,6 +92,7 @@ impl Intent {
             origin_window: None,
             activation_token: None,
             crossings: 0,
+            kept_in_modal: false,
         }
     }
 
@@ -105,6 +110,26 @@ impl Intent {
     pub fn with_source(mut self, source: crate::telemetry::IntentSource) -> Self {
         self.source = source;
         self
+    }
+
+    /// Mark the intent as input the user gave the window, as a key is: an
+    /// open modal overlay in its tree (a dialog presented in the window, the
+    /// command palette) keeps it, as it keeps a shortcut's intent. Only the
+    /// actions inside the modal, and the window-global actions registered
+    /// inside it, are offered it; it never walks on to the page behind. What
+    /// the window leaves still goes to the application tree. `teksilo-app`
+    /// marks the intent of a row chosen in the native menu bar, which AppKit
+    /// disables in a document window while a modal panel is up.
+    #[doc(hidden)]
+    pub fn kept_in_modal(mut self) -> Self {
+        self.kept_in_modal = true;
+        self
+    }
+
+    /// Whether an open modal overlay keeps it: a shortcut's, or one marked
+    /// [`kept_in_modal`](Self::kept_in_modal).
+    pub(crate) fn stays_in_modal(&self) -> bool {
+        self.kept_in_modal || self.source == crate::telemetry::IntentSource::Shortcut
     }
 
     /// Borrow the payload as `&T`, or `None` if the intent has no
@@ -187,6 +212,7 @@ impl Clone for Intent {
             origin_window: self.origin_window,
             activation_token: self.activation_token.clone(),
             crossings: self.crossings,
+            kept_in_modal: self.kept_in_modal,
         }
     }
 }

@@ -5,9 +5,10 @@
 //! running anything.
 //!
 //! [`WidgetTree::can_handle`] looks where a dispatch would: the actions on the
-//! walk from the logical focus to the root, the window's global actions (only
-//! those registered inside a modal the focus is in), then what the application
-//! tree takes. With a menu open, focus is in the menu,
+//! walk from the logical focus to the root (from a modal the focus is in, its
+//! own and the global ones registered inside it, then on to the page from the
+//! widget the modal is attached to), the window's global actions, then what
+//! the application tree takes. With a menu open, focus is in the menu,
 //! and the logical focus is the widget the menu gives it back to, where a
 //! command chosen there is sent from.
 
@@ -227,19 +228,24 @@ fn a_menu_opened_over_nothing_starts_at_its_row() {
     assert!(!window.tree.can_handle("test.editor"));
 }
 
+/// What a modal leaves goes on to the page, from the widget the modal is
+/// attached to, as a dispatch sends it.
 #[test]
-fn focus_in_a_modal_reaches_none_of_the_pages_actions() {
+fn focus_in_a_modal_reaches_the_page_from_its_anchor() {
     let mut window = window();
     let (button, editor) = (window.button, window.editor);
     window.focused_overlay(button, Some(editor), None, OverlayPlacement::Centered);
     assert!(
-        !window.tree.can_handle("test.root"),
-        "the modal is a barrier"
+        window.tree.can_handle("test.root"),
+        "from the anchor up to the root"
     );
-    assert!(!window.tree.can_handle("test.editor"));
     assert!(
-        !window.tree.can_handle("test.global"),
-        "the page's global action is not the modal's"
+        !window.tree.can_handle("test.editor"),
+        "the anchor is the button, not the editor focus goes back to"
+    );
+    assert!(
+        window.tree.can_handle("test.global"),
+        "the page's global action"
     );
 }
 
@@ -282,21 +288,19 @@ fn focus_in_a_modal_reaches_the_global_actions_registered_inside_it() {
     );
 }
 
-/// With a modal up and nothing focused, the answer is the modal's, as if
-/// focus were in it: what a shortcut or a command sent from focus would
-/// reach then.
+/// With a modal up and nothing focused, the walk starts in the modal, as if
+/// focus were in it, and goes on to the page from its anchor: what a
+/// command sent from focus would reach then.
 #[test]
-fn with_a_modal_up_and_nothing_focused_the_page_handles_nothing() {
+fn with_a_modal_up_and_nothing_focused_the_walk_starts_in_it() {
     let mut window = window();
     let (button, editor) = (window.button, window.editor);
     window.focused_overlay(button, Some(editor), None, OverlayPlacement::Centered);
     window.tree.clear_focus();
     assert_eq!(window.tree.focused(), None);
-    assert!(
-        !window.tree.can_handle("test.root"),
-        "the modal is a barrier"
-    );
-    assert!(!window.tree.can_handle("test.global"));
+    assert!(window.tree.can_handle("test.root"));
+    assert!(window.tree.can_handle("test.global"));
+    assert!(!window.tree.can_handle("test.editor"));
 }
 
 /// `handled_intents_from` names exactly the intents `can_handle_from`

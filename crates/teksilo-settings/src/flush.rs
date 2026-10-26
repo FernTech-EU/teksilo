@@ -278,8 +278,10 @@ struct PoolState {
 /// in-flight resources, but every `DebouncedWriter::Drop` synchronously
 /// flushes its own payload first via the `Unregister` ack, so no data
 /// is lost in normal teardown.
+/// The writer thread's inbox, once a writer has started it.
+static POOL: OnceLock<Sender<PoolMsg>> = OnceLock::new();
+
 fn pool() -> &'static Sender<PoolMsg> {
-    static POOL: OnceLock<Sender<PoolMsg>> = OnceLock::new();
     POOL.get_or_init(|| {
         let (tx, rx) = mpsc::channel();
         thread::Builder::new()
@@ -667,12 +669,22 @@ impl DebouncedWriter {
 
 /// Force the queued patches of every writer in the process to disk
 /// synchronously, whoever owns it: for a process about to end without
-/// dropping its writers. Every writer is tried; the first error is
-/// returned and the others are logged.
-pub(crate) fn flush_every_writer() -> Result<(), FlushError> {
+/// dropping its writers (a `SettingsFile`, `PersistedListModel`, `MruList`
+/// or `SettingsStore` the application opened itself). Every writer is
+/// tried; the first error is returned and the others are logged. A process
+/// that never opened a writer has nothing to write, and no writer thread is
+/// started for it.
+///
+/// [`OpenedSettings::flush_all`](crate::OpenedSettings::flush_all) calls it
+/// after the bundle's own services; `teksilo-app` calls it on every way out
+/// of an application that has no bundle.
+#[doc(hidden)]
+pub fn flush_every_writer() -> Result<(), FlushError> {
+    let Some(pool) = POOL.get() else {
+        return Ok(());
+    };
     let (ack_tx, ack_rx) = mpsc::sync_channel(0);
-    pool()
-        .send(PoolMsg::FlushAll { ack: ack_tx })
+    pool.send(PoolMsg::FlushAll { ack: ack_tx })
         .map_err(|_| FlushError::Disconnected)?;
     match ack_rx.recv() {
         Ok(result) => result,

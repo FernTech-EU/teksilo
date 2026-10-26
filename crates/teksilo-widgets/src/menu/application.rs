@@ -122,9 +122,11 @@ impl RedeclareWatch {
     }
 }
 
-/// What [`ApplicationMenu::sync_native`] installed, and from what.
+/// What [`ApplicationMenu::sync_native`] installed, and from what: the
+/// model's generation and version, the shortcut registry's version and the
+/// translations' version (`None` with no translations installed).
 struct NativeInstall {
-    source: (u64, u64, u64),
+    source: (u64, u64, u64, Option<u64>),
     _binding: super::native::NativeMenuBinding,
 }
 
@@ -260,7 +262,10 @@ impl ApplicationMenu {
     /// the last call: the menu (or, with none declared, a default App menu
     /// whose Quit asks the application to quit), its key equivalents looked
     /// up with `shortcut` in the application tree's registry, whose version
-    /// is `registry_version`. `teksilo-app` calls it after every turn.
+    /// is `registry_version`, and the translations its titles are resolved
+    /// in (a locale change installs it again, so the menus' titles and the
+    /// App menu's labels follow; its rows' titles follow in place).
+    /// `teksilo-app` calls it after every turn.
     pub fn sync_native(
         &self,
         handle: &NativeMenuHandle,
@@ -269,7 +274,8 @@ impl ApplicationMenu {
         shortcut: &dyn Fn(&str) -> Option<KeyStroke>,
     ) {
         let (generation, version) = self.revision();
-        let source = (generation, version, registry_version);
+        let translations = teksilo_i18n::current_version_signal().map(|version| version.get());
+        let source = (generation, version, registry_version, translations);
         if self
             .inner
             .native

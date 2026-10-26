@@ -432,13 +432,16 @@ fn the_intent_of_a_declining_context_menu_factory_starts_where_the_menu_was_aske
     );
 }
 
-// An open modal overlay (a dialog, a command palette) is a barrier: the walk
-// from its content stops there, as a native modal window's tree never reaches
-// its parent's actions. Its own actions take its intents, and of the window's
-// global actions and shortcuts only those registered inside it apply: a
-// native modal window's tree has no others. The application tree still takes
-// the intents nothing in the window takes. Once the modal has closed, an
-// intent sent as it closed walks on as from any other overlay.
+// An open modal overlay (a dialog, a command palette) goes first: an intent
+// sent inside it is offered to its own actions, then to the window-global
+// actions registered inside it, and only what it leaves walks on to the page
+// behind it, from the widget the modal is attached to, then to the page's
+// global actions; what the window leaves goes to the application tree, as
+// with a native dialog window, whose leftovers go to the window it blocks.
+// Keys stop at the modal: of the window's shortcuts only those registered
+// inside it apply, and a shortcut's intent is offered to nothing behind it.
+// Once the modal has closed, an intent sent as it closed walks on as from any
+// other overlay.
 
 /// Registers a window-global action for `test.global` and a global shortcut
 /// (Ctrl+G) for it, recording "global".
@@ -491,26 +494,135 @@ impl Window {
     }
 }
 
+/// Nothing in the modal takes it: it walks on to the page, from the widget
+/// the modal is attached to, while the modal is still open.
 #[test]
-fn focus_in_a_modal_reaches_no_scoped_action_outside_it() {
+fn an_intent_a_modal_leaves_walks_on_to_the_page_from_its_anchor() {
     let mut window = Window::new();
     let button = window.button;
     window.focused_modal(button);
     window.send_save_from_focus();
-    assert!(
-        window.calls().is_empty(),
-        "the root's scoped action is behind the modal"
+    assert_eq!(
+        window.calls(),
+        ["root"],
+        "the root above the anchor, not the editor focus was on before"
     );
 }
 
 #[test]
-fn a_popover_inside_a_modal_stops_at_the_modal() {
+fn a_popover_inside_a_modal_walks_on_through_the_modal_to_the_page() {
     let mut window = Window::new();
     let button = window.button;
     let (_, field) = window.focused_modal(button);
     window.focused_popup(field);
     window.send_save_from_focus();
-    assert!(window.calls().is_empty());
+    assert_eq!(window.calls(), ["root"]);
+}
+
+/// The modal goes first: an action inside it takes its intent, and the
+/// page behind it never sees it.
+#[test]
+fn a_modals_own_action_takes_its_intent_before_the_page() {
+    let mut window = Window::new();
+    let button = window.button;
+    let editor = window.tree.add(Editor {
+        calls: window.calls.clone(),
+    });
+    let content = window.tree.add(StackWidget::new().child(editor));
+    window.tree.show_overlay(OverlayRequest::new(
+        content,
+        button,
+        OverlayPlacement::Centered,
+        DismissBehavior::Manual,
+    ));
+    window.tree.layout(SizeProposal::exact(400.0, 300.0));
+    window.tree.focus(editor);
+    window.send_save_from_focus();
+    assert_eq!(
+        window.calls(),
+        ["editor"],
+        "the dialog's editor, not the root"
+    );
+}
+
+/// A modal opened inside another walks on through both: the one below
+/// answers before the page.
+#[test]
+fn an_intent_walks_on_through_nested_modals() {
+    let mut window = Window::new().with_global_commands();
+    let button = window.button;
+    let editor = window.tree.add(Editor {
+        calls: window.calls.clone(),
+    });
+    let content = window.tree.add(StackWidget::new().child(editor));
+    window.tree.show_overlay(OverlayRequest::new(
+        content,
+        button,
+        OverlayPlacement::Centered,
+        DismissBehavior::Manual,
+    ));
+    window.tree.layout(SizeProposal::exact(400.0, 300.0));
+    window.focused_modal(editor);
+    window.send_save_from_focus();
+    window
+        .tree
+        .run_with_event_context(&mut NoopWindowOps, |ctx| {
+            ctx.send_intent_from_focus(Intent::new("test.global"));
+        });
+    assert_eq!(
+        window.calls(),
+        ["editor", "global"],
+        "the lower dialog's editor, then the page's global action"
+    );
+}
+
+/// A modal attached to a widget that is no longer up (a row of the menu
+/// that opened it, closed since) walks on from the focus it gives back,
+/// and with none from the content root; so does an intent sent as it
+/// closes.
+#[test]
+fn a_modal_whose_anchor_is_gone_walks_on_from_the_focus_it_gives_back() {
+    let mut window = Window::new();
+    let editor = window.editor;
+    let gone = window.tree.add(FillWidget::new());
+    window.tree.set_dormant(gone);
+    let field = window.tree.add(FillWidget::new().focusable());
+    let content = window.tree.add(StackWidget::new().child(field));
+    let modal = window.tree.show_overlay(OverlayRequest::new(
+        content,
+        gone,
+        OverlayPlacement::Centered,
+        DismissBehavior::Manual,
+    ));
+    window
+        .tree
+        .overlay_manager_mut()
+        .set_top_focus_restore(editor);
+    window.tree.layout(SizeProposal::exact(400.0, 300.0));
+    window.tree.focus(field);
+    window.send_save_from_focus();
+    assert_eq!(window.calls(), ["editor"], "from the focus it gives back");
+
+    window.tree.dismiss_overlay(modal);
+    window.tree.clear_focus();
+    window.calls.borrow_mut().clear();
+    let closing = window.tree.add(ClosingButton {
+        send: |ctx| ctx.send_intent(Intent::new("test.save")),
+    });
+    let content = window.tree.add(StackWidget::new().child(closing));
+    window.tree.show_overlay(OverlayRequest::new(
+        content,
+        gone,
+        OverlayPlacement::Centered,
+        DismissBehavior::Manual,
+    ));
+    window.tree.layout(SizeProposal::exact(400.0, 300.0));
+    window.tree.click(closing);
+    assert_eq!(
+        window.calls(),
+        ["root"],
+        "closing, with no focus to give back: from the content root"
+    );
 }
 
 #[test]
@@ -523,7 +635,7 @@ fn a_scoped_shortcut_outside_a_modal_does_not_apply_to_focus_in_it() {
 }
 
 #[test]
-fn a_modals_intent_reaches_no_global_action_of_the_page() {
+fn a_modals_leftover_intent_reaches_the_pages_global_action() {
     let mut window = Window::new().with_global_commands();
     let button = window.button;
     window.focused_modal(button);
@@ -532,7 +644,7 @@ fn a_modals_intent_reaches_no_global_action_of_the_page() {
         .run_with_event_context(&mut NoopWindowOps, |ctx| {
             ctx.send_intent_from_focus(Intent::new("test.global"));
         });
-    assert!(window.calls().is_empty());
+    assert_eq!(window.calls(), ["global"]);
 }
 
 #[test]
@@ -560,23 +672,119 @@ fn a_global_shortcut_of_the_page_does_not_fire_under_a_modal_with_nothing_focuse
 
 /// A command sent from focus with nothing focused while a modal is up (a
 /// native menu item, an app callback) starts in the modal, as if focus were
-/// there, not at the page's root behind it.
+/// there, not at the page's root behind it: the modal's own action answers
+/// first, and what it leaves goes on to the page.
 #[test]
 fn an_intent_from_focus_with_nothing_focused_under_a_modal_starts_in_it() {
     let mut window = Window::new().with_global_commands();
     let button = window.button;
-    window.focused_modal(button);
-    window.tree.clear_focus();
+    let content = window.tree.add(Editor {
+        calls: window.calls.clone(),
+    });
+    window.tree.show_overlay(OverlayRequest::new(
+        content,
+        button,
+        OverlayPlacement::Centered,
+        DismissBehavior::Manual,
+    ));
+    window.tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(window.tree.focused(), None);
     window
         .tree
         .run_with_event_context(&mut NoopWindowOps, |ctx| {
             ctx.send_intent_from_focus(Intent::new("test.save"));
             ctx.send_intent_from_focus(Intent::new("test.global"));
         });
-    assert!(
-        window.calls().is_empty(),
-        "neither the root nor the page's global"
+    assert_eq!(
+        window.calls(),
+        ["editor", "global"],
+        "the modal's own action, not the root's; then the page's global"
     );
+}
+
+/// Registers a global shortcut (Ctrl+K) for `test.page`, which nothing
+/// registering it takes.
+#[derive(Debug)]
+struct PageShortcut;
+
+impl Widget for PageShortcut {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        ctx.register_shortcut_global(
+            Shortcut::new("test.page")
+                .primary(KeyStroke::ctrl(Key::K))
+                .build(),
+        );
+        vec![]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+}
+
+/// Registers a window-global action for `test.page`, recording "page".
+#[derive(Debug)]
+struct PageCommand {
+    calls: Calls,
+}
+
+impl Widget for PageCommand {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let calls = self.calls.clone();
+        ctx.register_action_global(Action::new("test.page").on_invoke(move |_, _| {
+            calls.borrow_mut().push("page");
+        }));
+        vec![]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+}
+
+/// Keys stop at the modal: a shortcut the modal registers whose intent only
+/// the page takes runs nothing behind it, and its key reaches the focused
+/// field instead, while the same intent sent by a button there does reach
+/// the page.
+#[test]
+fn a_modals_shortcut_runs_nothing_behind_it() {
+    let mut window = Window::new();
+    window.tree.add(PageCommand {
+        calls: window.calls.clone(),
+    });
+    let button = window.button;
+    use crate::widget_builder::WidgetBuilder;
+    let keys = Calls::default();
+    let heard = keys.clone();
+    let field = window
+        .tree
+        .add(FillWidget::new().focusable().on_key(move |event, _| {
+            if let WidgetEvent::KeyDown { key: Key::K, .. } = event {
+                heard.borrow_mut().push("field");
+            }
+            EventResponse::Handled
+        }));
+    let shortcut = window.tree.add(PageShortcut);
+    let content = window
+        .tree
+        .add(StackWidget::new().child(field).child(shortcut));
+    window.tree.show_overlay(OverlayRequest::new(
+        content,
+        button,
+        OverlayPlacement::Centered,
+        DismissBehavior::Manual,
+    ));
+    window.tree.layout(SizeProposal::exact(400.0, 300.0));
+    window.tree.focus(field);
+    window.tree.press_key(Key::K, Modifiers::COMMAND);
+    assert!(window.calls().is_empty(), "the page's action did not run");
+    assert_eq!(*keys.borrow(), ["field"], "the key went to the field");
+    window
+        .tree
+        .run_with_event_context(&mut NoopWindowOps, |ctx| {
+            ctx.send_intent_from_focus(Intent::new("test.page"));
+        });
+    assert_eq!(window.calls(), ["page"], "an intent sent there does");
 }
 
 /// ... and a global shortcut registered inside the modal applies, its intent
@@ -743,12 +951,13 @@ fn global_actions_and_shortcuts_registered_inside_a_modal_apply_in_it() {
     assert_eq!(window.calls(), ["global", "global"]);
 }
 
-/// An intent nothing in the window takes still goes to the application tree.
+/// An intent nothing in the window takes, the modal or the page behind it,
+/// still goes to the application tree; one the page takes does not.
 #[test]
-fn a_modals_intent_nothing_in_it_takes_goes_to_the_application() {
+fn a_modals_intent_nothing_in_the_window_takes_goes_to_the_application() {
     let mut window = Window::new().with_global_commands();
     let scope = crate::action::ApplicationScope::new();
-    scope.replace(vec![("test.global", None)]);
+    scope.replace(vec![("test.app", None), ("test.global", None)]);
     window.tree.set_application_scope(Some(scope));
     window.tree.set_records_unclaimed_intents(true);
     let button = window.button;
@@ -756,16 +965,17 @@ fn a_modals_intent_nothing_in_it_takes_goes_to_the_application() {
     window
         .tree
         .run_with_event_context(&mut NoopWindowOps, |ctx| {
+            ctx.send_intent_from_focus(Intent::new("test.app"));
             ctx.send_intent_from_focus(Intent::new("test.global"));
         });
-    assert!(window.calls().is_empty(), "not the page's global action");
+    assert_eq!(window.calls(), ["global"], "the page's global action");
     let kept: Vec<_> = window
         .tree
         .take_unclaimed_intents()
         .into_iter()
         .map(|intent| intent.name)
         .collect();
-    assert_eq!(kept, ["test.global"]);
+    assert_eq!(kept, ["test.app"]);
 }
 
 /// An intent sent from outside the modal (programmatically: no input reaches

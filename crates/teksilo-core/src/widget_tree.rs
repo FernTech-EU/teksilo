@@ -118,18 +118,45 @@ struct PendingIntent {
     /// The firing shortcut's `propagate_when_disabled` policy.
     propagate_when_disabled: bool,
     /// The overlays the walk from `source` crossed when the intent was sent,
-    /// with the modal it stopped at, if any: a modal that has closed by the
-    /// time the intent is dispatched is crossed to its anchor.
+    /// the open modals on its way included: a modal that has closed by the
+    /// time the intent is dispatched is crossed as it would have been.
     crossings: Vec<OverlayCrossing>,
 }
 
 /// A step an intent's walk takes from an overlay's content root, which has
-/// no parent, to the widget the overlay is attached to. See
-/// [`WidgetTree::intent_walk`].
+/// no parent, to the widget the overlay is attached to (for a modal, where
+/// what it leaves goes on to). See [`WidgetTree::intent_walk`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OverlayCrossing {
     pub(crate) content: WidgetId,
     pub(crate) anchor: WidgetId,
+}
+
+/// The way an intent goes: [legs](IntentLeg) in order, and every overlay
+/// crossing they make. See [`WidgetTree::intent_route`].
+pub(crate) struct IntentRoute {
+    pub(crate) legs: Vec<IntentLeg>,
+    pub(crate) crossings: Vec<OverlayCrossing>,
+}
+
+/// One [walk](WidgetTree::intent_walk) of an [`IntentRoute`]: the widgets it
+/// passes, and the content of the open modal it stopped at, if any.
+pub(crate) struct IntentLeg {
+    pub(crate) chain: Vec<WidgetId>,
+    pub(crate) modal: Option<WidgetId>,
+}
+
+impl IntentRoute {
+    /// The content of every open modal the route stopped at, in order.
+    fn modals(&self) -> impl Iterator<Item = WidgetId> + '_ {
+        self.legs.iter().filter_map(|leg| leg.modal)
+    }
+
+    /// Whether the route ends at an open modal it does not go past: a key's,
+    /// or one whose way on to the page is lost.
+    fn ends_at_a_modal(&self) -> bool {
+        self.legs.last().is_some_and(|leg| leg.modal.is_some())
+    }
 }
 
 // (line 33, above `struct AnimatedRegistration`) — remove entirely
@@ -3844,7 +3871,7 @@ impl WidgetTree {
         intent: crate::intent::Intent,
         propagate_when_disabled: bool,
     ) {
-        let crossings = self.intent_walk(source, &[]).1;
+        let crossings = self.intent_route(source, &[], true).crossings;
         self.enqueue_intent_crossing(source, intent, propagate_when_disabled, crossings);
     }
 
@@ -3889,15 +3916,17 @@ impl WidgetTree {
     /// The walk stops at a root with no overlay, at a widget it has already
     /// passed (an overlay attached to a widget of its own content), and at
     /// the content of an open [modal](crate::overlay::OverlayPlacement::is_modal)
-    /// overlay (a dialog in the window, a command palette): a modal is a
-    /// barrier while it is open, as a native modal window is, whose tree
-    /// never reaches the actions of the window it blocks. Its own actions
-    /// take what is sent inside it, and of the window-global actions only
-    /// those registered inside it ([`global_applies`](Self::global_applies)).
-    /// Its crossing to its anchor is recorded all the same, so an intent sent
+    /// overlay (a dialog in the window, a command palette), which goes first
+    /// while it is open, as a native modal window does: its own actions take
+    /// what is sent inside it, then of the window-global actions those
+    /// registered inside it ([`global_applies_after`](Self::global_applies_after)), and
+    /// only what they leave goes on to the page
+    /// ([`intent_route`](Self::intent_route)). Its crossing is recorded, to
+    /// where its leftovers go on from
+    /// ([`modal_resume_point`](Self::modal_resume_point)), so an intent sent
     /// as the modal closes (a dialog's button closing the dialog, then asking
-    /// the page for something) walks on from the widget it was attached to
-    /// once it has closed, as one sent from the window it blocked would.
+    /// the page for something) walks on from there once it has closed, as
+    /// one it leaves while open does.
     pub(crate) fn intent_walk(
         &self,
         source: WidgetId,
@@ -3915,12 +3944,13 @@ impl WidgetTree {
                         .overlay_manager
                         .find_by_content(current)
                         .and_then(|id| self.overlay_manager.overlay(id));
-                    // An open modal is a barrier, as a native modal window
-                    // is; its crossing is noted for when it has closed.
+                    // An open modal ends this walk, as a native modal window's
+                    // tree ends; its crossing is noted for the route on to
+                    // the page, and for when it has closed.
                     if let Some(overlay) = open.filter(|overlay| overlay.placement.is_modal()) {
                         crossings.push(OverlayCrossing {
                             content: current,
-                            anchor: overlay.anchor,
+                            anchor: self.modal_resume_point(overlay),
                         });
                         modal = Some(current);
                         break;
@@ -3950,15 +3980,90 @@ impl WidgetTree {
         (chain, crossings, modal)
     }
 
-    /// Whether a window-global action or shortcut registered by `owner`
-    /// applies to an intent or a key whose walk stopped at the modal
-    /// `modal`: always with no modal, and otherwise only when `owner` sits
-    /// inside that modal (on the walk from `owner`, which crosses popovers
-    /// opened inside it). A native modal window's tree has the global
-    /// actions and shortcuts of its own widgets and none of the window it
-    /// blocks; an in-tree modal behaves the same.
+    /// Where what an open modal leaves goes on to the page from: the widget
+    /// it is attached to; when that one is not up any more (a row of the
+    /// closed menu that opened the dialog), the widget focus goes back to
+    /// when it closes; else the [content root](Self::set_content_root).
+    fn modal_resume_point(&self, overlay: &crate::overlay::ActiveOverlay) -> WidgetId {
+        [Some(overlay.anchor), overlay.focus_restore]
+            .into_iter()
+            .flatten()
+            .find(|id| self.arena.is_active(*id))
+            .or_else(|| self.intent_anchor())
+            .unwrap_or(overlay.anchor)
+    }
+
+    /// The way an intent sent from `source` goes: the [walk](Self::intent_walk)
+    /// from `source`, and, while `past_modals`, from each open modal it stops
+    /// at, a further walk from where the modal's leftovers go on
+    /// ([`modal_resume_point`](Self::modal_resume_point)): a dialog opened
+    /// over the page leaves the page what it does not take, and a dialog
+    /// opened over another leaves it to that one first. A key's intent stays
+    /// in the first modal (`past_modals` false), as a key pressed in a modal
+    /// window reaches nothing of the window it blocks, and so does a row of
+    /// the native menu bar's
+    /// ([`Intent::kept_in_modal`](crate::intent::Intent::kept_in_modal)). The route stops where
+    /// it would walk again through a widget it has passed.
+    pub(crate) fn intent_route(
+        &self,
+        source: WidgetId,
+        recorded: &[OverlayCrossing],
+        past_modals: bool,
+    ) -> IntentRoute {
+        let mut route = IntentRoute {
+            legs: Vec::new(),
+            crossings: Vec::new(),
+        };
+        let mut start = source;
+        loop {
+            let (chain, crossings, modal) = self.intent_walk(start, recorded);
+            route.crossings.extend(crossings);
+            route.legs.push(IntentLeg { chain, modal });
+            if modal.is_none() || !past_modals {
+                break;
+            }
+            // The last crossing is the modal's, to where its leftovers go.
+            let Some(next) = route.crossings.last().map(|crossing| crossing.anchor) else {
+                break;
+            };
+            if route.legs.iter().any(|leg| leg.chain.contains(&next)) {
+                break;
+            }
+            start = next;
+        }
+        route
+    }
+
+    /// The content of the first open modal on the walk from `owner`, if any:
+    /// the modal a window-global action or shortcut registered by `owner`
+    /// belongs to.
+    fn modal_of(&self, owner: WidgetId) -> Option<WidgetId> {
+        self.intent_walk(owner, &[]).2
+    }
+
+    /// Whether a window-global shortcut registered by `owner` applies to a
+    /// key whose walk stopped at the modal `modal`: always with no modal, and
+    /// otherwise only when `owner` sits inside that modal (on the walk from
+    /// `owner`, which crosses popovers opened inside it). A native modal
+    /// window's tree has the shortcuts of its own widgets and none of the
+    /// window it blocks; an in-tree modal behaves the same for keys. An
+    /// intent goes on past the modal ([`intent_route`](Self::intent_route)).
     pub(crate) fn global_applies(&self, owner: WidgetId, modal: Option<WidgetId>) -> bool {
-        modal.is_none_or(|modal| self.intent_walk(owner, &[]).2 == Some(modal))
+        modal.is_none_or(|modal| self.modal_of(owner) == Some(modal))
+    }
+
+    /// The window-global actions an intent on `route` is offered after the
+    /// walk `leg` (an index into `route.legs`): those registered inside the
+    /// modal the leg stopped at; after the last leg, unless the route ends at
+    /// a modal, every one not offered yet (all of them for a route with no
+    /// modal on its way).
+    fn global_applies_after(&self, owner: WidgetId, route: &IntentRoute, leg: usize) -> bool {
+        let owner_modal = self.modal_of(owner);
+        match route.legs[leg].modal {
+            Some(modal) if owner_modal == Some(modal) => true,
+            _ if leg + 1 < route.legs.len() || route.ends_at_a_modal() => false,
+            _ => owner_modal.is_none_or(|owner_modal| !route.modals().any(|m| m == owner_modal)),
+        }
     }
 
     /// Dispatch every queued intent. Handlers may call
@@ -4091,56 +4196,59 @@ impl WidgetTree {
     }
 
     /// The actions an intent sent from `source` is offered, in the order
-    /// [`dispatch_intent`](Self::dispatch_intent) offers them: on each
-    /// active, enabled widget of its [walk](Self::intent_walk), the first
-    /// action of each intent name (a second one for the same name on the
-    /// same widget is never reached), then the window-global actions: those
-    /// registered inside the modal the walk stops at, every one with no
-    /// modal or for an intent `routed` from another tree. Enabled or not: the
-    /// caller reads [`Action::is_enabled`](crate::action::Action::is_enabled)
-    /// when it needs to.
+    /// [`dispatch_intent`](Self::dispatch_intent) offers them, along its
+    /// [route](Self::intent_route): on each active, enabled widget of each
+    /// walk, the first action of each intent name (a second one for the
+    /// same name on the same widget is never reached), after a walk stopped
+    /// at an open modal the window-global actions registered inside it, and
+    /// last the other window-global actions. `past_modals` false asks for an
+    /// intent an open modal keeps (a shortcut's, a native menu bar row's),
+    /// which ends at the first one. Enabled or not: the caller reads
+    /// [`Action::is_enabled`](crate::action::Action::is_enabled) when it
+    /// needs to.
     pub(crate) fn actions_on_route(
         &self,
         source: WidgetId,
         crossings: &[OverlayCrossing],
-        routed: bool,
+        past_modals: bool,
     ) -> Vec<&crate::action::Action> {
         let mut actions = Vec::new();
-        let (chain, _, modal) = self.intent_walk(source, crossings);
-        let modal = modal.filter(|_| !routed);
-        for id in chain {
-            if !self.arena.is_active(id) || !self.arena.is_enabled(id) {
-                continue;
-            }
-            let Some(node) = self.arena.get(id) else {
-                continue;
-            };
-            for (index, action) in node.actions.iter().enumerate() {
-                if node.actions[..index]
-                    .iter()
-                    .all(|earlier| earlier.intent != action.intent)
-                {
-                    actions.push(action);
+        let route = self.intent_route(source, crossings, past_modals);
+        for (leg, IntentLeg { chain, .. }) in route.legs.iter().enumerate() {
+            for &id in chain {
+                if !self.arena.is_active(id) || !self.arena.is_enabled(id) {
+                    continue;
+                }
+                let Some(node) = self.arena.get(id) else {
+                    continue;
+                };
+                for (index, action) in node.actions.iter().enumerate() {
+                    if node.actions[..index]
+                        .iter()
+                        .all(|earlier| earlier.intent != action.intent)
+                    {
+                        actions.push(action);
+                    }
                 }
             }
+            actions.extend(
+                self.global_actions
+                    .iter()
+                    .filter(|(owner, _)| self.global_applies_after(*owner, &route, leg))
+                    .map(|(_, action)| action),
+            );
         }
-        actions.extend(
-            self.global_actions
-                .iter()
-                .filter(|(owner, _)| self.global_applies(*owner, modal))
-                .map(|(_, action)| action),
-        );
         actions
     }
 
     /// Whether an intent named `name`, sent from the focused widget, would be
     /// handled, by the same lookup a dispatch makes and without running
     /// anything: an enabled action on the walk from the logical focus to the
-    /// root (crossing from a popup to the widget it is attached to, stopping
-    /// at a modal), a window-global one (from inside a modal, one registered
-    /// inside it), or, for a window with an
-    /// [application scope](Self::set_application_scope), one of the
-    /// application tree's. What a menu row asks to grey itself out.
+    /// root (crossing from a popup to the widget it is attached to, and from
+    /// an open modal, after its own actions and the window-global ones
+    /// registered inside it, on to the page), a window-global one, or, for a
+    /// window with an [application scope](Self::set_application_scope), one
+    /// of the application tree's. What a menu row asks to grey itself out.
     ///
     /// The logical focus is where a command chosen in an in-window menu is
     /// sent from: the focused widget, except while focus is in an open menu
@@ -4175,8 +4283,23 @@ impl WidgetTree {
     /// and an answer two turns can compare to see that nothing changed.
     #[doc(hidden)]
     pub fn handled_intents_from(&self, source: WidgetId) -> Vec<&'static str> {
+        self.handled_intents_on_route(source, true)
+    }
+
+    /// [`handled_intents_from`](Self::handled_intents_from) for an intent an
+    /// open modal overlay keeps, as it keeps a key's
+    /// ([`Intent::kept_in_modal`](crate::intent::Intent::kept_in_modal)):
+    /// with focus in a dialog presented in the window, what the dialog and
+    /// the application tree take, none of the page's. What the native menu
+    /// bar's rows ask, which are input as a key is.
+    #[doc(hidden)]
+    pub fn handled_intents_kept_in_modal_from(&self, source: WidgetId) -> Vec<&'static str> {
+        self.handled_intents_on_route(source, false)
+    }
+
+    fn handled_intents_on_route(&self, source: WidgetId, past_modals: bool) -> Vec<&'static str> {
         let mut names: Vec<&'static str> = self
-            .actions_on_route(source, &[], false)
+            .actions_on_route(source, &[], past_modals)
             .into_iter()
             .filter(|action| action.is_enabled())
             .map(|action| action.intent)
@@ -4205,7 +4328,20 @@ impl WidgetTree {
     /// [`can_handle`](Self::can_handle), for an intent sent from `source`.
     #[doc(hidden)]
     pub fn can_handle_from(&self, source: WidgetId, name: &str) -> bool {
-        self.actions_on_route(source, &[], false)
+        self.can_handle_on_route(source, name, true)
+    }
+
+    /// [`can_handle_from`](Self::can_handle_from) for an intent an open
+    /// modal overlay keeps, as
+    /// [`handled_intents_kept_in_modal_from`](Self::handled_intents_kept_in_modal_from)
+    /// answers.
+    #[doc(hidden)]
+    pub fn can_handle_kept_in_modal_from(&self, source: WidgetId, name: &str) -> bool {
+        self.can_handle_on_route(source, name, false)
+    }
+
+    fn can_handle_on_route(&self, source: WidgetId, name: &str, past_modals: bool) -> bool {
+        self.actions_on_route(source, &[], past_modals)
             .into_iter()
             .any(|action| action.intent == name && action.is_enabled())
             || self
@@ -4364,8 +4500,8 @@ impl WidgetTree {
         }
         // What its actions send was led to by one more crossing.
         let outer = self.routed_crossings.replace(intent.crossings() + 1);
-        // Sent in another tree, so from outside any modal of this one: every
-        // window-global action is offered (no tap).
+        // Sent in another tree, so not a key of this one: it goes on past the
+        // modals of this one (no tap).
         let consumed = self.dispatch_intent_with(anchor, intent, true, &mut *ops, false, &[]);
         self.drain_pending_intents(&mut *ops);
         self.routed_crossings = outer;
@@ -4378,10 +4514,15 @@ impl WidgetTree {
     /// Walk `source → root` invoking any [`Action`](crate::action::Action)
     /// whose `intent` name matches, crossing from an overlay's content to
     /// the widget the overlay is attached to (see
-    /// [`intent_walk`](Self::intent_walk)). The first enabled, `Handled`
-    /// response stops the walk. A `Propagated` or disabled action
-    /// (when the shortcut's `propagate_when_disabled` is true) lets
-    /// the walk continue. A disabled action with
+    /// [`intent_walk`](Self::intent_walk)), and from an open modal on to the
+    /// page behind it once its own actions and the window-global ones
+    /// registered inside it have passed it by, except for a shortcut's
+    /// intent and one [kept in a modal](crate::intent::Intent::kept_in_modal),
+    /// which stay in the modal (see
+    /// [`intent_route`](Self::intent_route)); then the other window-global
+    /// actions. The first enabled, `Handled` response stops the walk. A
+    /// `Propagated` or disabled action (when the shortcut's
+    /// `propagate_when_disabled` is true) lets the walk continue. A disabled action with
     /// `propagate_when_disabled == false` consumes the intent at that
     /// level without invoking a handler.
     ///
@@ -4400,12 +4541,13 @@ impl WidgetTree {
 
     /// [`dispatch_intent`](Self::dispatch_intent), telemetry tap optional,
     /// crossing the overlays `crossings` recorded when the intent was sent.
-    /// An intent with the tap is this tree's own: of the window-global
-    /// actions it is offered only those registered inside the modal its walk
-    /// stops at now, all of them with none open on its way. One without is
-    /// [routed](Self::dispatch_routed_intent) from another tree, which counted
-    /// it, and was sent outside any modal of this one: every window-global
-    /// action is offered.
+    /// An intent with the tap is this tree's own, and a shortcut's among
+    /// them, or one [kept in a modal](crate::intent::Intent::kept_in_modal),
+    /// stops at the first open modal on its way: it is offered the
+    /// actions inside it and the window-global ones registered inside it
+    /// only. One without is [routed](Self::dispatch_routed_intent) from
+    /// another tree, which counted it: no key of this one, it goes on past
+    /// every modal.
     fn dispatch_intent_with(
         &mut self,
         source: WidgetId,
@@ -4425,13 +4567,36 @@ impl WidgetTree {
         }
         let intent = if tap { self.sent_here(intent) } else { intent };
 
-        // Pre-compute the source → root chain so the walk doesn't
-        // need to hold any arena borrow while invoking handlers. A modal on
-        // the way is a barrier only while it is open, so it is read now.
-        let (chain, _, modal) = self.intent_walk(source, crossings);
-        let modal = modal.filter(|_| tap);
+        // Pre-compute the route so the walk doesn't need to hold any arena
+        // borrow while invoking handlers. A modal on the way goes first only
+        // while it is open, so it is read now; a key stays in it.
+        let is_key = tap && intent.stays_in_modal();
+        let route = self.intent_route(source, crossings, !is_key);
 
-        for id in chain {
+        for leg in 0..route.legs.len() {
+            if let Some(consumed) =
+                self.offer_leg(&route, leg, &intent, propagate_when_disabled, &mut *ops)
+            {
+                return consumed;
+            }
+        }
+        false
+    }
+
+    /// Offer `intent` to the actions of the walk `leg` of `route`, then to
+    /// the window-global actions that follow it
+    /// ([`global_applies_after`](Self::global_applies_after)). `Some` with
+    /// whether it was consumed when the offer ends there, `None` when it
+    /// goes on.
+    fn offer_leg(
+        &mut self,
+        route: &IntentRoute,
+        leg: usize,
+        intent: &crate::intent::Intent,
+        propagate_when_disabled: bool,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> Option<bool> {
+        for &id in &route.legs[leg].chain {
             if !self.arena.is_active(id) || !self.arena.is_enabled(id) {
                 continue;
             }
@@ -4457,36 +4622,36 @@ impl WidgetTree {
                 if propagate_when_disabled {
                     continue;
                 }
-                return true;
+                return Some(true);
             }
 
             let mut ctx = self.make_event_context(&mut *ops);
             ctx.handling_intent = Some(intent.name);
-            let response = (action.handler)(&intent, &mut ctx);
+            let response = (action.handler)(intent, &mut ctx);
             if let Some(node) = self.arena.get_mut(id) {
                 node.actions.insert(idx, action);
             }
             self.collect_from_ctx(ctx, id);
 
             match response {
-                crate::intent::IntentResponse::Handled => return true,
+                crate::intent::IntentResponse::Handled => return Some(true),
                 crate::intent::IntentResponse::Propagated => continue,
             }
         }
 
         // Fallback: window-global actions (registered via
-        // `register_action_global`). The source→root walk found no consuming
-        // node action, so consult the window's commands, reachable wherever
-        // in the window the intent originated (menu-bar overlay, content,
-        // shortcut), except that an intent sent inside a modal reaches only
-        // those registered inside it.
+        // `register_action_global`). The walk found no consuming node
+        // action, so consult the window's commands, reachable wherever in
+        // the window the intent originated (menu-bar overlay, content,
+        // shortcut): after a walk that stopped at a modal, those registered
+        // inside it; after the last walk, the others.
         let mut i = 0;
         while i < self.global_actions.len() {
             let matches = {
                 let (owner, action) = &self.global_actions[i];
                 action.intent == intent.name
                     && action.is_enabled()
-                    && self.global_applies(*owner, modal)
+                    && self.global_applies_after(*owner, route, leg)
             };
             if !matches {
                 i += 1;
@@ -4497,18 +4662,18 @@ impl WidgetTree {
             let (owner, mut action) = self.global_actions.remove(i);
             let mut ctx = self.make_event_context(&mut *ops);
             ctx.handling_intent = Some(intent.name);
-            let response = (action.handler)(&intent, &mut ctx);
+            let response = (action.handler)(intent, &mut ctx);
             self.global_actions.insert(i, (owner, action));
             self.collect_from_ctx(ctx, owner);
             match response {
-                crate::intent::IntentResponse::Handled => return true,
+                crate::intent::IntentResponse::Handled => return Some(true),
                 crate::intent::IntentResponse::Propagated => {
                     i += 1;
                     continue;
                 }
             }
         }
-        false
+        None
     }
 
     /// Register a window-global [`Action`](crate::action::Action) owned by

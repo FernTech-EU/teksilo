@@ -1142,13 +1142,7 @@ impl TeksiloAppHandler {
                 // The loop did not get to the request in time (its handler
                 // is busy in a native modal of the application's own): the
                 // settings at least are written before the process ends.
-                move || {
-                    if let Some(opened) = &settings
-                        && let Err(e) = opened.flush_all()
-                    {
-                        eprintln!("teksilo-app: settings flush on exit failed: {e}");
-                    }
-                },
+                move || flush_settings_on_exit(settings.as_ref()),
             );
         }
         #[cfg(target_os = "macos")]
@@ -1177,17 +1171,14 @@ impl TeksiloAppHandler {
     }
 
     /// Write every pending settings change to disk now: the bundle's store
-    /// and window state, and the settings files the application opened
-    /// itself. Called where the process may end before `run` returns (a
+    /// and window state, if the application has a bundle, and the settings
+    /// files the application opened itself, whether it has one or not.
+    /// Called where the process may end before `run` returns (a
     /// quit with no time to ask, winit's `exiting`, which AppKit reaches
     /// just before it ends the process) and once more after the loop; a
     /// flush with nothing pending writes nothing.
     pub(crate) fn flush_settings(&self) {
-        if let Some(opened) = &self.settings
-            && let Err(e) = opened.flush_all()
-        {
-            eprintln!("teksilo-app: settings flush on exit failed: {e}");
-        }
+        flush_settings_on_exit(self.settings.as_ref());
     }
 
     /// Quit now, for a source with no time to ask (a session ending now,
@@ -1229,11 +1220,8 @@ impl TeksiloAppHandler {
             crate::quit::QuitMode::Guarded,
             Some(Box::new(move |outcome| {
                 let completed = outcome == crate::quit::QuitOutcome::Completed;
-                if completed
-                    && let Some(opened) = &settings
-                    && let Err(e) = opened.flush_all()
-                {
-                    eprintln!("teksilo-app: settings flush on exit failed: {e}");
+                if completed {
+                    flush_settings_on_exit(settings.as_ref());
                 }
                 request.reply(completed);
             })),
@@ -3061,7 +3049,7 @@ impl TeksiloAppHandler {
     /// window it was chosen in, or in the application tree when that window
     /// has closed. With no application tree the closure runs in that window.
     fn run_application_menu_rows(&mut self, event_loop: &ActiveEventLoop) {
-        use crate::native_menu_route::fire_native_menu_item;
+        use crate::native_menu_route::fire_window_menu_row;
 
         let Some(menu) = self.wm.application_menu() else {
             return;
@@ -3071,21 +3059,21 @@ impl TeksiloAppHandler {
             if let Some(action) = row.action.as_ref() {
                 if self.wm.app_tree().is_some() {
                     self.run_in_app_tree(event_loop, |tree, ops| {
-                        fire_native_menu_item(tree, ops, Some(action), None);
+                        fire_window_menu_row(tree, ops, Some(action), None);
                     });
                 } else if let Some(winit_id) = window {
                     self.run_in_window(winit_id, event_loop, |tree, ops| {
-                        fire_native_menu_item(tree, ops, Some(action), None);
+                        fire_window_menu_row(tree, ops, Some(action), None);
                     });
                 }
             }
             if row.intent.is_some() {
                 match window {
                     Some(winit_id) => self.run_in_window(winit_id, event_loop, |tree, ops| {
-                        fire_native_menu_item(tree, ops, None, row.intent);
+                        fire_window_menu_row(tree, ops, None, row.intent);
                     }),
                     None => self.run_in_app_tree(event_loop, |tree, ops| {
-                        fire_native_menu_item(tree, ops, None, row.intent);
+                        fire_window_menu_row(tree, ops, None, row.intent);
                     }),
                 }
             }
@@ -5313,10 +5301,17 @@ impl TeksiloAppBuilder {
     /// wrapping the platform's default backend (a real `NSMenu` on macOS, a
     /// no-op elsewhere) into the app-state registry.
     ///
-    /// Once installed, a [`MenuBar`](teksilo_widgets::MenuBar) built with
-    /// `from_model(..).native_on_macos(..)` mirrors its [`MenuModel`](teksilo_widgets::MenuModel) into the
-    /// global menu bar on macOS, and item activations route back through the
-    /// usual `Intent`/`Action` pipeline. The global menu follows window focus
+    /// Once installed, the macOS menu bar shows the application menu the
+    /// application tree declares (`ctx.set_application_menu(model)`, the
+    /// `ApplicationMenuExt` trait): whenever the key window has no menu of
+    /// its own (nor belongs to a window that has one, as a modal dialog
+    /// does), and while no window is open; with none declared, a default App
+    /// menu whose Quit asks the application to quit. A window's own
+    /// [`MenuBar`](teksilo_widgets::MenuBar) built with
+    /// `from_model(..).native_on_macos(..)` mirrors its
+    /// [`MenuModel`](teksilo_widgets::MenuModel) into the bar instead while
+    /// that window is key. Item activations route back through the usual
+    /// `Intent`/`Action` pipeline, and the bar follows window focus
     /// automatically (see the `WindowEvent::Focused` arm).
     ///
     /// Apps that ship a custom backend bypass this and call
@@ -6187,6 +6182,48 @@ impl TeksiloAppBuilder {
     }
 }
 
+/// Write every pending settings change to disk now, on a way out of the
+/// application: the bundle's services, when the application has a bundle
+/// (`settings`), then every other settings file of the process (a
+/// `SettingsFile`, `MruList` or store the application opened itself),
+/// bundle or not.
+pub(crate) fn flush_settings_on_exit(settings: Option<&teksilo_settings::OpenedSettings>) {
+    let result = match settings {
+        Some(opened) => opened.flush_all().map_err(|e| e.to_string()),
+        None => teksilo_settings::flush_every_writer().map_err(|e| e.to_string()),
+    };
+    if let Err(e) = result {
+        eprintln!("teksilo-app: settings flush on exit failed: {e}");
+    }
+}
+
+#[cfg(test)]
+mod flush_on_exit_tests {
+    use std::time::Duration;
+    use teksilo_settings::{AppPaths, SettingsKey, SettingsStore};
+
+    const KEPT: SettingsKey<String> = SettingsKey::new("test.kept", String::new);
+
+    /// An application with no `SettingsBundle` still has the settings files
+    /// it opened itself written on the way out: a quit that overrules the
+    /// guards, or AppKit ending the process, may never drop them.
+    #[test]
+    fn an_application_without_a_bundle_has_its_own_files_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_testing(dir.path());
+        let own =
+            SettingsStore::open_with_delay(paths.config_file("own"), Duration::from_secs(3600))
+                .unwrap();
+        own.signal_for(&KEPT).set("written on exit".to_string());
+
+        super::flush_settings_on_exit(None);
+
+        let on_disk = std::fs::read_to_string(paths.config_file("own")).unwrap_or_default();
+        assert!(on_disk.contains("written on exit"), "on disk: {on_disk:?}");
+        drop(own);
+    }
+}
+
 // Linux-only: it reaches for winit's X11 extension traits (`with_x11`,
 // `with_any_thread`), which exist on the free-unix backends and nowhere else.
 // The Windows and macOS jobs therefore never build it, which is also why the
@@ -6317,13 +6354,13 @@ impl HeadlessApp {
             .cloned()
         {
             for row in menu.take_pending() {
-                crate::native_menu_route::fire_native_menu_item(
+                crate::native_menu_route::fire_window_menu_row(
                     app_tree,
                     &mut ops,
                     row.action.as_ref(),
                     None,
                 );
-                crate::native_menu_route::fire_native_menu_item(
+                crate::native_menu_route::fire_window_menu_row(
                     &mut self.tree,
                     &mut ops,
                     None,
@@ -8258,6 +8295,73 @@ mod app_root_tests {
         assert_eq!(builds.get(), before + 1, "the binding rebuilt the root");
     }
 
+    /// A mount action the application root enqueues in `build` runs again
+    /// each time that root is rebuilt: what the multi-window guide's
+    /// `app_root` example relies on, which opens the first window from one
+    /// and guards it so a rebuild cannot open a second.
+    #[test]
+    fn an_app_roots_mount_action_runs_again_when_the_root_rebuilds() {
+        use teksilo_core::binding::BindingLevel;
+        use teksilo_core::signal::Signal;
+
+        #[derive(Debug)]
+        struct OpensFirstWindow {
+            generation: Signal<u32>,
+            mounts: Rc<Cell<u32>>,
+            opened_first_window: Rc<Cell<bool>>,
+            opens: Rc<Cell<u32>>,
+        }
+        impl Widget for OpensFirstWindow {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                self.generation.bind_to(
+                    ctx.self_id(),
+                    ctx.binding_registry(),
+                    BindingLevel::Rebuild,
+                );
+                let mounts = self.mounts.clone();
+                ctx.run_after_mount(move |_| mounts.set(mounts.get() + 1));
+                // The guide's guard.
+                let (opened, opens) = (self.opened_first_window.clone(), self.opens.clone());
+                ctx.run_after_mount(move |_| {
+                    if !opened.replace(true) {
+                        opens.set(opens.get() + 1);
+                    }
+                });
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                proposal: teksilo_canvas::SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+        }
+
+        let generation = Signal::new(0);
+        let (mounts, opens) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+        let root = OpensFirstWindow {
+            generation: generation.clone(),
+            mounts: mounts.clone(),
+            opened_first_window: Rc::default(),
+            opens: opens.clone(),
+        };
+        let mut app = TeksiloAppBuilder::new()
+            .app_root(move |tree| tree.add(root))
+            .build_headless();
+        let app_tree = app.app_tree.as_mut().expect("an app root was given");
+        let zero = teksilo_canvas::SizeProposal::exact(0.0, 0.0);
+        let budget = std::time::Duration::from_millis(4);
+        super::run_tree_logic_frame(app_tree, budget, zero, &mut NoopWindowOps);
+        app_tree.run_mount_actions(&mut NoopWindowOps);
+        assert_eq!((mounts.get(), opens.get()), (1, 1), "at startup");
+        generation.set(1);
+        super::run_tree_logic_frame(app_tree, budget, zero, &mut NoopWindowOps);
+        app_tree.run_mount_actions(&mut NoopWindowOps);
+        assert_eq!(mounts.get(), 2, "the rebuilt root's mount action ran again");
+        assert_eq!(opens.get(), 1, "the guarded one opened nothing more");
+    }
+
     /// However many wakes arrive before the loop takes the first, one is
     /// posted; once taken, the next posts again.
     #[test]
@@ -8392,6 +8496,148 @@ mod app_root_tests {
             super::unwrap_activation_token(super::AppEvent::External(Box::new(Payload)));
         assert_eq!(token, None);
         assert!(matches!(event, super::AppEvent::External(payload) if payload.is::<Payload>()));
+    }
+
+    /// A page that saves (`doc.save`, a scoped action, with Ctrl+K as a
+    /// global shortcut for it) and an Open button presenting an in-window
+    /// dialog over it. The dialog answers `dialog.own` itself and has a
+    /// button sending each of `doc.save`, `app.ping` and `dialog.own`.
+    #[derive(Debug)]
+    struct SavingPage {
+        log: Rc<std::cell::RefCell<Vec<&'static str>>>,
+    }
+
+    impl Widget for SavingPage {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            use teksilo_core::modal::{ModalPresentation, ModalRequest};
+            use teksilo_core::shortcut::{KeyStroke, Shortcut};
+            use teksilo_widgets::{Button, ModalContainer};
+            let log = self.log.clone();
+            ctx.register_action(Action::new("doc.save").on_invoke(move |_, _| {
+                log.borrow_mut().push("page:doc.save");
+            }));
+            ctx.register_shortcut_global(
+                Shortcut::new("doc.save")
+                    .primary(KeyStroke::ctrl(teksilo_core::Key::K))
+                    .build(),
+            );
+            let log = self.log.clone();
+            let open = ctx.add(Button::new(teksilo_i18n::lit!("Open")).on_activate_fn(
+                move |ctx| {
+                    let log = log.clone();
+                    ctx.present_modal(
+                        ModalRequest::deferred(move |tree| {
+                            tree.add(ModalContainer::new(DialogBody { log }))
+                        })
+                        .presentation(ModalPresentation::InTree),
+                    );
+                },
+            ));
+            vec![open]
+        }
+
+        fn layout_response(
+            &self,
+            proposal: teksilo_canvas::SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> LayoutResponse {
+            proposal.resolve(800.0, 600.0).into()
+        }
+    }
+
+    #[derive(Debug)]
+    struct DialogBody {
+        log: Rc<std::cell::RefCell<Vec<&'static str>>>,
+    }
+
+    impl Widget for DialogBody {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            use teksilo_widgets::{Button, VStack};
+            let log = self.log.clone();
+            ctx.register_action(Action::new("dialog.own").on_invoke(move |_, _| {
+                log.borrow_mut().push("dialog:dialog.own");
+            }));
+            let mut stack = VStack::new();
+            for name in ["doc.save", "app.ping", "dialog.own"] {
+                stack = stack.child(
+                    Button::new(teksilo_i18n::lit!(name))
+                        .on_activate_fn(move |ctx| ctx.send_intent(Intent::new(name))),
+                );
+            }
+            vec![ctx.add(stack)]
+        }
+
+        fn layout_response(
+            &self,
+            proposal: teksilo_canvas::SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> LayoutResponse {
+            proposal.resolve(300.0, 120.0).into()
+        }
+    }
+
+    /// The in-window counterpart of a native dialog window's leftovers going
+    /// to the window it blocks: an intent sent by a button of an in-window
+    /// dialog that is still open goes to the dialog's own action first, then
+    /// to the page behind it, then to the application tree. A key in the
+    /// dialog stops at it: the page's global shortcut does not fire there.
+    #[test]
+    fn an_open_in_window_dialogs_leftover_intent_reaches_the_page_then_the_application() {
+        use teksilo_core::accesskit::Action as AtAction;
+        use teksilo_core::{Key, Modifiers, WidgetEvent};
+        let pings = Rc::new(Cell::new(0));
+        let root = pings.clone();
+        let mut app = TeksiloAppBuilder::new()
+            .theme(teksilo_core::presets::intui::light())
+            .app_root(move |tree| tree.add(PingRoot(root)))
+            .build_headless();
+        let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+        app.tree.add(SavingPage { log: log.clone() });
+        let proposal = teksilo_canvas::SizeProposal::exact(800.0, 600.0);
+        app.tree.layout(proposal);
+        let click = |app: &mut super::HeadlessApp, label: &str| {
+            let target = app.tree.find_by_label(label).expect(label);
+            app.tree.dispatch_event(WidgetEvent::AccessAction {
+                action: AtAction::Click,
+                target: Some(target),
+                target_node: teksilo_core::accessibility::root_node_id(),
+                data: None,
+            });
+        };
+        click(&mut app, "Open");
+        for queued in app.tree.drain_pending_modal_requests() {
+            super::present_in_tree_modal_request(
+                &mut app.tree,
+                queued.source_widget,
+                queued.request,
+            );
+        }
+        app.tree.layout(proposal);
+        assert_eq!(app.tree.active_overlays().len(), 2, "the dialog is up");
+
+        click(&mut app, "dialog.own");
+        click(&mut app, "doc.save");
+        click(&mut app, "app.ping");
+        assert!(app.route_unclaimed_intents().is_empty(), "every one taken");
+        assert_eq!(
+            *log.borrow(),
+            ["dialog:dialog.own", "page:doc.save"],
+            "the dialog's own action, then the page's, the dialog open all along"
+        );
+        assert_eq!(pings.get(), 1, "app.ping reached the application tree");
+        assert_eq!(
+            app.tree.active_overlays().len(),
+            2,
+            "the dialog is still up"
+        );
+
+        log.borrow_mut().clear();
+        app.tree.press_key(Key::K, Modifiers::COMMAND);
+        assert!(app.route_unclaimed_intents().is_empty());
+        assert!(
+            log.borrow().is_empty(),
+            "the page's shortcut does not fire in the dialog"
+        );
     }
 
     #[test]

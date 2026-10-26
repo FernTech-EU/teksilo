@@ -108,6 +108,16 @@ shortcut.
   working in (its titles take no focus from a click), and a menu opened from
   the keyboard (F10, Alt) hands focus back to that widget once a command is
   chosen, so the intent starts there.
+- **A native bar row is input, as a key is.** While a dialog presented in the
+  key window (a modal overlay: an in-window dialog, the command palette) is
+  open, a native row's intent stops at the dialog, as its shortcut's would: the
+  dialog's own actions and the global actions registered inside it take it,
+  and what they leave goes to the application tree, never to the page behind
+  the dialog. A button of the dialog that sends the same intent does walk on to
+  the page; a row of the in-window menu bar cannot be chosen while the dialog
+  is up. A native dialog window has a tree of its own, which the row's intent
+  starts in. The App menu's Quit still asks the application to quit when
+  nothing it can reach takes its intent.
 - **A row's `on_activate` closure** runs where the state it captured lives: for
   the application menu, in the application tree, then the row's intent goes
   from the window's focus; for a window's own menu, in that window, anchored
@@ -144,7 +154,11 @@ those, in the window as in the macOS menu bar.
   where the backend shows no bar (every platform but macOS) nothing is
   refreshed. With no window open, a command that only
   windows implement is greyed out, and File ▸ New, which the application tree
-  implements, is live.
+  implements, is live. While a dialog presented in the key window is open, the
+  route stops at the dialog (see "Where a row's command goes"): a row only the
+  page behind it takes is greyed out, as AppKit disables a document's items
+  while a modal panel is up, and a row the dialog or the application tree
+  takes stays live.
 - An action that may decline when it runs (`on_invoke_with_response`, such as a
   text field's `edit.copy` with nothing selected) counts as taking the intent,
   so its row stays enabled.
@@ -281,10 +295,15 @@ addressable.
   application: every window's in-window rows and the native application menu
   show the new chord after the turn it was made in (see
   [Shortcuts and key equivalents](#shortcuts-and-key-equivalents)).
-- **Locale** of native *titles*, and a rebind of a key equivalent in a window's
-  own `from_model` menu, re-resolved on that bar's next rebuild (the in-window
-  bar reflects them immediately). Trigger a refresh sooner by touching the
-  model (e.g. any mutator) if needed.
+- **Locale**: native titles follow a locale change, and a reload of the
+  translations. A row's title is updated in place; the menus' titles and the
+  App menu's labels, which have nothing to update in place, by installing the
+  menu again: the application menu at the end of the turn, a window's own
+  `from_model` menu as its bar is rebuilt for the change.
+- **A rebind of a key equivalent** in a window's own `from_model` menu is
+  re-resolved on that bar's next rebuild (the in-window bar reflects it
+  immediately). Trigger a refresh sooner by touching the model (e.g. any
+  mutator) if needed.
 
 ## Shortcuts and key equivalents
 

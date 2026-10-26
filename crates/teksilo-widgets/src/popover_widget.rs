@@ -496,8 +496,9 @@ impl<T: PopoverTrigger> PopoverWidget<T> {
     /// a menu row alike) up to the window's root, and the popover sits off
     /// to the side of that walk, never above the focused widget, so a plain
     /// `register_action` on it would not be reached. A window-global action
-    /// is reached from anywhere in the window, except from inside an
-    /// in-window dialog the popover is not in. Pair it with
+    /// is reached from anywhere in the window: from inside an in-window
+    /// dialog the popover is not in, once nothing in the dialog has taken the
+    /// intent, and never by a key pressed in the dialog. Pair it with
     /// `register_shortcut_global` in the app for the keystroke.
     ///
     /// ```ignore

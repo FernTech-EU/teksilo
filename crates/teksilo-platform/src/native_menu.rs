@@ -566,8 +566,9 @@ impl NativeMenuHandle {
     ///
     /// `teksilo-app` calls it once per event-loop turn, with what the route
     /// a chosen row's intent takes answers (the focused window's
-    /// `WidgetTree::handled_intents_from` its live focus, where the row's
-    /// intent starts, else the application tree's), so the
+    /// `WidgetTree::handled_intents_kept_in_modal_from` its live focus, where
+    /// the row's intent starts and which a dialog open in the window keeps,
+    /// else the application tree's), so the
     /// menu is current whenever the user opens it: focus, the key window and
     /// the actions only change while the loop runs. With the same `handled`
     /// as the last call and no menu installed since, nothing can have

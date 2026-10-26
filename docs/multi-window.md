@@ -90,8 +90,13 @@ without the `WindowState` (the tree has no window):
 ```rust
 TeksiloAppBuilder::new()
     .quit_policy(QuitPolicy::Explicit)            // live with no window
-    .app_root(|tree| tree.add(AppActions::new()))
+    .app_root(|tree| tree.add(AppActions::default()))
     .run();
+
+#[derive(Debug, Default)]
+struct AppActions {
+    opened_first_window: Rc<Cell<bool>>,
+}
 
 impl Widget for AppActions {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
@@ -101,10 +106,14 @@ impl Widget for AppActions {
         ctx.register_action_global(Action::new("app.quit").on_invoke(|_, ctx| {
             ctx.quit();
         }));
-        // Runs once this root is mounted (at startup, and again if it is
-        // rebuilt): an app with no initial window opens its first one here.
-        ctx.run_after_mount(|ctx| {
-            ctx.open_window(document_window());
+        // Runs once this root is mounted, at startup, and again each time it
+        // is rebuilt: an app with no initial window opens its first one
+        // here, once.
+        let opened = self.opened_first_window.clone();
+        ctx.run_after_mount(move |ctx| {
+            if !opened.replace(true) {
+                ctx.open_window(document_window());
+            }
         });
         vec![]
     }
@@ -154,7 +163,9 @@ It receives:
 - `on_external_with_ctx` payloads while no window is open (see the
   single-instance recipe below);
 - events of a `subscribe_event_with_ctx` subscription registered in it;
-- its own mount actions (`run_after_mount`), at startup and after a rebuild.
+- its own mount actions (`run_after_mount`), at startup and after each
+  rebuild of the widget that enqueued them, so one that must run once (the
+  first window above) keeps a flag.
 
 What needs a window is not drawn there:
 
@@ -724,28 +735,36 @@ For the general case (may land in-tree or in a native window),
 `ctx.present_modal(request)` picks the presentation at dispatch time
 based on `ModalPresentation::Auto` and platform capability.
 
-Commands sent in a dialog route the same way whichever presentation it got,
-with one difference, below. A native modal window has a tree of its own: an
-intent sent there, or a key pressed there, reaches that tree's actions and
-shortcuts first, and the window it blocks has no part in that walk. A
-dialog presented in the window (Linux) behaves the same while it is open:
-from inside it, the walk stops at its content, and of the window's global
-actions and global shortcuts only those registered by widgets inside the
-dialog apply. A key goes on only through a shortcut that applies in the
-dialog, and the page's do not, so the page's Ctrl+N bound to an
-application-tree action does not fire inside an in-window dialog. An intent
-sent from the page while the dialog is up (only a programmatic send can be)
-still reaches every global action of the window.
+Commands sent in a dialog route the same way whichever presentation it got.
+A native modal window has a tree of its own: an intent sent there, or a key
+pressed there, reaches that tree's actions and shortcuts first. A dialog
+presented in the window (Linux) goes first in the same way while it is open:
+an intent sent inside it reaches the dialog's own actions, then the window's
+global actions registered by widgets inside the dialog. What they leave walks
+on to the page, from the widget the dialog was opened from, then reaches the
+page's other global actions, and what the window leaves goes to the
+application tree. An intent a native dialog window leaves unclaimed goes on
+to the window it blocks, dispatched from that window's focus, then up the
+chain of owners, then to the application tree. Either way the dialog's own
+handlers come first and the page's still answer the dialog's buttons.
 
-An intent sent as an in-window dialog closes (its button closes it, then
-sends) is dispatched after it has closed, and is the page's: it walks on
-from the widget the dialog was attached to, or, sent from focus, starts at
-the focus the dialog gave back. An intent a native dialog window leaves
-unclaimed, sent as it closes or while it is open, goes on to the window it
-blocks, dispatched from that window's focus, then up the chain of owners,
-and then to the application tree. An intent an in-window dialog leaves
-unclaimed while it is open goes to the application tree only. See "Scoped
-vs global actions" in the [shortcut guide](shortcut-intent-action.md).
+Keys stop at the dialog. In a native dialog window, the window it blocks has
+no part in a key's walk; in an in-window dialog, of the window's global
+shortcuts only those registered by widgets inside the dialog apply, and a
+shortcut's intent reaches nothing of the page. So the page's Ctrl+N bound to
+an application-tree action does not fire inside an in-window dialog, while a
+dialog button that sends `app.new` reaches it. A row chosen in the macOS
+menu bar is input as a key is: over an in-window dialog its intent stops at
+the dialog, and the row is greyed out when only the page would take it. An
+intent sent from the page while the dialog is up (only a programmatic send
+can be) is the page's and reaches every global action of the window.
+
+An intent sent as a dialog closes (its button closes it, then sends) goes
+the same way: from an in-window dialog, it is dispatched after it has closed
+and walks on from the widget the dialog was attached to, or, sent from focus,
+starts at the focus the dialog gave back; from a native dialog window, it
+goes on to the window it blocked. See "Scoped vs global actions" in the
+[shortcut guide](shortcut-intent-action.md).
 
 #### A dialog belongs to the window it blocks
 
@@ -1044,14 +1063,12 @@ writes a recovery copy) for `SessionEnd` and `Signal` and returns `Close`,
 as the guard in "Where the quit came from" below does. The application ends once every window has
 closed, under either quit policy.
 
-**Settings are written on every way out** when the application has a
-`SettingsBundle` (`TeksiloAppBuilder::settings`): a quit that ends the
+**Settings are written on every way out**: a quit that ends the
 application, an overruling quit before it returns, and the end of the
-event loop. That covers the bundle's store and window state and the
-settings files the application opened itself (`SettingsFile`,
-`PersistedListModel`, `MruList`). Without a bundle, those files are
-written only when they are dropped, which an overruling quit may not
-reach.
+event loop. That covers the settings files the application opened itself
+(`SettingsFile`, `PersistedListModel`, `MruList`, a `SettingsStore`),
+whether or not it has a `SettingsBundle` (`TeksiloAppBuilder::settings`),
+and with a bundle its store and window state too.
 
 **macOS.** AppKit asks before it ends the application, for the Dock
 menu's Quit, AppleScript's `quit app "…"`, any `terminate:` (a menu item

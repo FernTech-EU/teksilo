@@ -19,7 +19,8 @@ Teksilo's input-to-behavior pipeline has three first-class concepts:
   enabled action consume (or propagate) it. From an overlay's content
   (a menu, a popover) the walk goes on from the widget the overlay is
   attached to; an open modal overlay (a dialog in the window, the command
-  palette) is a barrier, as a native modal window is.
+  palette) goes first, as a native modal window does, and what it leaves
+  walks on to the page from the widget it was opened from. Keys stop at it.
 
 Pipeline in one line: `KeyStroke → Shortcut → Intent → Action handler`.
 
@@ -392,7 +393,8 @@ order:
    `Global` binding is a candidate wherever focus is, except in a modal
    overlay (a dialog in the window, the command palette): there only a
    global binding registered by a widget inside that modal is, or one
-   registered with no owner (the standard edit shortcuts), as in a native
+   registered with no owner (the standard edit shortcuts, a window's copies
+   of the application menu's shortcuts), as in a native
    modal window's tree (see "Scoped vs global actions"). With nothing
    focused while a modal is open, the key is judged as if focus were in the
    topmost modal.
@@ -635,40 +637,49 @@ fired from within itself), and for app-wide commands registered on the window's
 root, which every walk in the window ends at: an overlay's walk goes on from
 the widget the overlay is attached to, so a menu or a popover reaches the root
 too. A **modal** overlay (a dialog presented in the window, the command palette)
-is the exception: the walk stops at its content, so an in-window dialog behaves
-like the native modal window macOS and Windows present it in, whose tree has
-its own widgets' actions and shortcuts and none of the window it blocks. An
-intent sent inside it, or from a key with focus in it, reaches the actions on
-its walk inside the modal, then the window-global actions and global shortcuts
-registered by widgets inside the modal, never those of the page; the scoped
-shortcuts of the page do not fire either. With nothing focused while a
-modal is up, a key is judged as if focus were in the topmost modal. An
-intent nothing in the window takes still goes to the application tree (from
-a native dialog window, it goes to the window the dialog blocks first; see
-"Modal dialogs" in the [multi-window guide](multi-window.md)). A key does
-not: it becomes an intent only
-through a shortcut that applies in the modal, and the page's do not, so the
-page's Ctrl+N bound to an application-tree action does not fire inside an
-in-window dialog. A shortcut registered in the application tree fires in a
-window only when a row of the [application menu](native-menu.md) names it:
-the window then holds an unowned copy, which, like the standard edit
-shortcuts the tree registers itself, applies everywhere, in a dialog too.
+goes first while it is open, as the native modal window macOS and Windows
+present a dialog in does: an intent sent inside it reaches the actions on its
+walk inside the modal, then the window-global actions registered by widgets
+inside the modal. What they leave walks on to the page, from the widget the
+modal was opened from (when that one is gone, such as a row of the closed menu
+that opened the dialog, from the widget focus goes back to when the modal
+closes; else from the window's root), then reaches the page's other
+window-global actions, and what the window leaves goes to the application
+tree. A dialog opened over another dialog leaves its intents to that one
+first. A native dialog window's leftovers go the same way, to the window it
+blocks (see "Modal dialogs" in the [multi-window guide](multi-window.md)).
 
-A modal is a barrier only while it is open when the intent is dispatched.
+Keys stop at the modal. With focus in it, only the global shortcuts registered
+by widgets inside the modal apply, and the page's scoped shortcuts do not fire
+either; with nothing focused while a modal is up, a key is judged as if focus
+were in the topmost modal. A shortcut's intent reaches nothing behind the
+modal: it is offered the actions inside it and the global actions registered
+inside it, and what they leave goes to the application tree, not to the
+page. So the page's Ctrl+N bound to an application-tree action does
+not fire inside an in-window dialog, while a dialog button that sends
+`app.new` reaches it. Two kinds of shortcut apply everywhere, in a dialog
+too: the standard edit shortcuts the tree registers itself, and the unowned
+copy a window holds of a shortcut registered in the application tree when a
+row of the [application menu](native-menu.md) names it. A row chosen in the
+macOS menu bar is input too: its intent stops at the modal as a shortcut's
+does, and its row is greyed out when only the page would take it.
+
 An intent sent as the modal closes (a dialog's button that closes the dialog
 and then asks the page for something, a command palette's row) is dispatched
-once it has closed, and is the page's: `ctx.send_intent(..)` walks on from
-the widget the modal was attached to, and `ctx.send_intent_from_focus(..)`
-starts at the focus the modal gave back, or at the window's root when it
-gave none back. An intent sent from outside the modal while it is up (only a
-programmatic send can be: no input reaches the page) is the page's and
-reaches every window-global action.
+once it has closed, so the modal's own actions no longer take it:
+`ctx.send_intent(..)` walks on from the same widget an intent the open modal
+leaves would, and `ctx.send_intent_from_focus(..)` starts at the focus the
+modal gave back, or at the window's root when it gave none back. An intent
+sent from outside the modal while it is up (only a programmatic send can be:
+no input reaches the page) is the page's and reaches every window-global
+action.
 
 `ctx.register_action_global(action)` registers a **window-global** action
 consulted as a dispatch **fallback**, *after* the source→root walk finds no
 consuming node action, so it fires no matter where in the window the intent
-originated, except inside a modal overlay that the registering widget is not
-in (above). Use it when the widget that owns the handler is not on the walk:
+originated: from inside a modal overlay the registering widget is not in, only
+once the intent has walked on to the page, and never for a key pressed there
+(above). Use it when the widget that owns the handler is not on the walk:
 
 - A **global shortcut** with no widget focused starts at the window's root; a
   scoped action deep in the tree won't be on that walk.
@@ -746,9 +757,13 @@ From
    context menu opened on a list row while a search field had focus).
    An intent sent by a handler that also closes its overlay still
    crosses it: the crossing is noted when the intent is sent. An open
-   modal overlay ends the chain at its content; one that has closed by
-   the time the intent is dispatched is crossed to its anchor like any
-   other.
+   modal overlay ends this walk at its content. Unless the intent is a
+   shortcut's, a further walk follows, once the modal's own actions and the
+   global actions registered inside it (step 3) have passed it by: from the
+   widget the modal is attached to, or, when that one is gone, the widget
+   focus goes back to when it closes, or else the window's root. A modal
+   that has closed by the time the intent is dispatched is crossed to the
+   same widget like any other overlay.
 2. For each `id` in the chain:
    - Skip if the node is inactive or disabled.
    - Find the first action on that node whose `intent == intent.name`.
@@ -762,9 +777,11 @@ From
    registration order. First enabled match handles it (`Handled` → stop,
    `Propagated` → next global). This is position-independent, so it catches
    intents whose walk never passes the widget that registered the action
-   (a popover's open action, fired from a menu row or a shortcut). For an
-   intent whose chain ends at an open modal overlay, only the global actions registered
-   inside that modal are consulted.
+   (a popover's open action, fired from a menu row or a shortcut). After a
+   walk that ends at an open modal overlay, only the global actions
+   registered inside that modal are consulted, before the next walk; the
+   others come after the last walk, unless it ends at a modal (a
+   shortcut's intent, which stays in the modal).
 
 Handlers may call `ctx.send_intent(...)` from inside; those intents
 queue and drain after the current one, until the queue empties. FIFO
@@ -785,9 +802,11 @@ ordering.
   the walk goes from the overlay's content on to the widget the overlay is
   attached to and its ancestors, so a context menu's rows reach the actions
   of the widget that was right-clicked, and a popover's buttons those of the
-  button that opened it. A modal overlay (a dialog in the window) stops the
-  walk at its content while it is open; one the handler closed is crossed
-  like the others.
+  button that opened it. A modal overlay (a dialog in the window) goes
+  first while it is open: the walk reaches its content, then the global
+  actions registered inside it, and only then walks on from the widget the
+  modal was opened from; one the handler closed is crossed like the
+  others.
 - **`ctx.send_intent_from_focus(...)`**: anchor is the widget that holds
   focus once everything the handler did has been applied, every overlay it
   closed included, so a row of a closing menu sends from the widget the menu

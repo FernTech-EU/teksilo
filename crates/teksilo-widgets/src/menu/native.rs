@@ -78,20 +78,26 @@ pub(crate) struct NativeMenuBinding {
 /// gets the application menu's App menu, or a default one when the
 /// application declared none either. The widget installing it (the bar) is
 /// rebuilt, and so installs again, whenever the application menu is
-/// declared again or changes in place, so the borrowed App menu follows it.
+/// declared again or changes in place, so the borrowed App menu follows it,
+/// and on a locale change (or a reload of the translations), so the menus'
+/// titles and the App menu's labels, which have no item to update in place,
+/// follow it too.
 pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMenuBinding> {
     let handle = ctx.app_state::<NativeMenuHandle>()?.clone();
     let window_id = ctx.window()?.id();
     let poster = ctx.poster()?.clone();
     let holder = ctx.app_state::<super::application::ApplicationMenu>();
+    let rebuild = |signal: &teksilo_core::signal::Signal<u64>| {
+        signal.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            teksilo_core::BindingLevel::Rebuild,
+        )
+    };
+    if let Some(translations) = teksilo_i18n::current_version_signal() {
+        rebuild(&translations);
+    }
     if let Some(holder) = holder {
-        let rebuild = |signal: &teksilo_core::signal::Signal<u64>| {
-            signal.bind_to(
-                ctx.self_id(),
-                ctx.binding_registry(),
-                teksilo_core::BindingLevel::Rebuild,
-            )
-        };
         rebuild(&holder.generation());
         if let Some(application) = holder.model() {
             rebuild(&application.version());
@@ -914,6 +920,89 @@ mod tests {
         });
         holder.sync_native(&handle, null_poster(), 0, &no_shortcuts);
         assert_eq!(file_rows(&backend), 1, "the model changed");
+    }
+
+    /// An English and French catalog installed on this thread, with English
+    /// active, and a title resolved from it under `key`. The caller clears
+    /// the thread-local when it is done.
+    fn bilingual() -> (
+        std::rc::Rc<teksilo_i18n::I18nManager>,
+        impl Fn(&'static str) -> LocalizedString,
+    ) {
+        use teksilo_i18n::{I18nConfig, I18nManager, thread_local};
+        thread_local::clear();
+        let cfg = I18nConfig::test_only("en-US", &[("file", "File"), ("quit", "Quit")])
+            .with_locale("fr-FR", &[("file", "Fichier"), ("quit", "Quitter")]);
+        let mgr = I18nManager::from_config(&cfg);
+        thread_local::install(mgr.clone());
+        let title = |key: &'static str| {
+            teksilo_i18n::localized(move || teksilo_i18n::resolve_message(key, &[]))
+        };
+        (mgr, title)
+    }
+
+    /// The top-level titles of a snapshot, and its App menu's Quit label.
+    fn titles(snapshot: &NativeMenuSnapshot) -> (Vec<String>, String) {
+        let tops = snapshot
+            .roots
+            .iter()
+            .filter_map(|node| match node {
+                NativeMenuNode::Submenu { title, .. } => Some(title.clone()),
+                _ => None,
+            })
+            .collect();
+        (tops, labels_of(app_node(snapshot)).quit.clone())
+    }
+
+    /// The application menu's menu titles and App menu labels follow a
+    /// locale change: the menu is installed again at the next sync, as
+    /// `teksilo-app` makes after every turn. Only the rows' titles followed,
+    /// by their observers; a menu title has no id to update in place.
+    #[test]
+    fn the_application_menus_titles_follow_the_locale() {
+        use crate::menu::StandardMenu;
+        let (mgr, title) = bilingual();
+        let holder = super::super::application::ApplicationMenu::new();
+        holder.set(
+            MenuModel::new()
+                .standard_menu(StandardMenu::app().quit(title("quit")))
+                .menu(title("file"), |m| m),
+        );
+        let backend = teksilo_platform::native_menu::MemoryNativeMenuBackend::new();
+        let handle = NativeMenuHandle::new(backend.clone());
+        holder.sync_native(&handle, null_poster(), 0, &no_shortcuts);
+        assert_eq!(
+            titles(&backend.app_menu().expect("installed")),
+            (vec!["File".to_string()], "Quit".to_string())
+        );
+        mgr.set_locale("fr-FR".parse().unwrap());
+        holder.sync_native(&handle, null_poster(), 0, &no_shortcuts);
+        let after = titles(&backend.app_menu().expect("installed"));
+        teksilo_i18n::thread_local::clear();
+        assert_eq!(after, (vec!["Fichier".to_string()], "Quitter".to_string()));
+    }
+
+    /// A window's own `from_model` menu follows a locale change the same
+    /// way: its bar is built again and installs the menu again.
+    #[test]
+    fn a_windows_menu_titles_follow_the_locale() {
+        use crate::menu::StandardMenu;
+        let (mgr, title) = bilingual();
+        let model = MenuModel::new()
+            .standard_menu(StandardMenu::app().quit(title("quit")))
+            .menu(title("file"), |m| m);
+        let (backend, _handle, mut tree) = install_recorded(model, None);
+        let window = teksilo_core::window::TeksiloWindowId::new(1);
+        assert_eq!(
+            titles(&backend.menu_for(window).expect("installed")),
+            (vec!["File".to_string()], "Quit".to_string())
+        );
+        mgr.set_locale("fr-FR".parse().unwrap());
+        tree.set_locale("fr-FR".to_string());
+        tree.layout(teksilo_canvas::SizeProposal::exact(800.0, 600.0));
+        let after = titles(&backend.menu_for(window).expect("installed"));
+        teksilo_i18n::thread_local::clear();
+        assert_eq!(after, (vec!["Fichier".to_string()], "Quitter".to_string()));
     }
 
     /// The first menu named `menu`'s items, as `(id, title, visible)`.

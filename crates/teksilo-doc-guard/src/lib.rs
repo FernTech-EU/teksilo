@@ -14,7 +14,9 @@
 //! crate with its default features, without running it (`no_run`), since a
 //! quick start opens a window. Mark only complete programs that need nothing
 //! a reader would not have: a fragment, or a program that needs a non-default
-//! feature or a `.ftl` file, stays unmarked.
+//! feature or a `.ftl` file, stays unmarked. A build that finds no marked
+//! fence at all fails, so a checkout whose guides are not where the build
+//! script looks cannot pass by compiling nothing.
 
 #[cfg(doctest)]
 #[doc = include_str!(concat!(env!("OUT_DIR"), "/compile_checked.md"))]

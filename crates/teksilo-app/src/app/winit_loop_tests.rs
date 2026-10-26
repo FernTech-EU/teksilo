@@ -2826,7 +2826,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                     proposal.resolve(0.0, 0.0).into()
                 }
             }
-            /// A window's root taking `test.app_row`.
+            /// A window's root taking `test.app_row` and `test.window_quit`.
             #[derive(Debug)]
             struct Takes(Heard);
             impl teksilo_core::widget::Widget for Takes {
@@ -2835,6 +2835,11 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                     ctx.register_action(
                         teksilo_core::Action::new("test.app_row")
                             .on_invoke(move |_, _| heard.borrow_mut().push("row in the window")),
+                    );
+                    let heard = self.0.clone();
+                    ctx.register_action(
+                        teksilo_core::Action::new("test.window_quit")
+                            .on_invoke(move |_, _| heard.borrow_mut().push("quit in the window")),
                     );
                     Vec::new()
                 }
@@ -2983,6 +2988,57 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                 *heard.borrow(),
                 ["action in the application tree", "row in the window"],
                 "with a window focused"
+            );
+
+            // A dialog presented in the key window keeps the bar's input, as
+            // it keeps a key: the row's intent stops at the dialog, so the
+            // window behind it does not take it and the application tree
+            // does. Quit routed to an intent only that window takes asks the
+            // application to quit instead. Letting the row's intent walk on
+            // to the page runs "row in the window" and the window's quit.
+            {
+                use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
+                use teksilo_core::widget_builder::WidgetBuilder;
+                let tree = &mut app.wm.get_by_teksilo_mut(window).expect("open").tree;
+                let anchor = tree.roots()[0];
+                let field = tree.add(teksilo_widgets::primitives::Spacer::new().focusable(true));
+                tree.show_overlay(OverlayRequest::new(
+                    field,
+                    anchor,
+                    OverlayPlacement::Centered,
+                    DismissBehavior::Manual,
+                ));
+                tree.layout(SizeProposal::exact(160.0, 100.0));
+                tree.focus(field);
+            }
+            heard.borrow_mut().clear();
+            choose(app, item);
+            assert_eq!(
+                *heard.borrow(),
+                [
+                    "action in the application tree",
+                    "row in the application tree"
+                ],
+                "with a dialog open in the focused window"
+            );
+            let quit = set_quit(Some("test.window_quit"));
+            let left = app.try_route_native_menu_payload(
+                Box::new(NativeAppMenuEventPayload { item_id: quit }),
+                event_loop,
+            );
+            assert!(left.is_ok());
+            assert!(
+                app.wm.quit_in_progress(),
+                "Quit asked the application to quit over the dialog"
+            );
+            app.wm.cancel_quit();
+            assert_eq!(
+                *heard.borrow(),
+                [
+                    "action in the application tree",
+                    "row in the application tree"
+                ],
+                "and nothing ran in the window"
             );
             app.wm.close_window(window);
 

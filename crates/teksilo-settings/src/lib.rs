@@ -81,7 +81,7 @@ pub use crate::ext::SettingsExt;
 pub use crate::file::{SettingsFile, SettingsFileError};
 pub use crate::flush::{
     DebouncedWriter, FlushError, LandedStamp, WriteFailureSink, WriteLandedSink,
-    set_write_failure_sink,
+    flush_every_writer, set_write_failure_sink,
 };
 pub use crate::migration::{MigrationError, Migrator, Versioned};
 pub use crate::mru::{MruEntry, MruList};

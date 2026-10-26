@@ -14,8 +14,9 @@
 //!
 //! - a window's to the application tree; a native modal dialog window's to
 //!   the window it blocks first, up the chain of owners, then to the
-//!   application tree, as an in-tree dialog's intent sent as it closes walks
-//!   on to the page;
+//!   application tree, as an in-tree dialog's intent walks on to the page
+//!   before it leaves the window, sent while the dialog is open or as it
+//!   closes;
 //! - the application tree's to the window the user works with: the most
 //!   recent one not minimised (else the most recent one), at its frontmost
 //!   native dialog when it has one.

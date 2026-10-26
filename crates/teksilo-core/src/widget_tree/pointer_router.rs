@@ -3032,8 +3032,8 @@ impl WidgetTree {
         let (fallback_crossings, fallback_modal) = if focus_intents.is_empty() {
             (Vec::new(), None)
         } else {
-            let (_, crossings, modal) = self.intent_walk(source_widget, &[]);
-            (crossings, modal)
+            let modal = self.intent_walk(source_widget, &[]).2;
+            (self.intent_route(source_widget, &[], true).crossings, modal)
         };
         if ctx.dismiss_modal && !self.dismiss_modal_for_source(source_widget, &mut *ops) {
             self.pending_modal_dismissal = true;

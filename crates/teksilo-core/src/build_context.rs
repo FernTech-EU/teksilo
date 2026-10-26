@@ -1149,16 +1149,19 @@ impl<'a> BuildContext<'a> {
     /// the widget being built. Unlike [`register_action`](Self::register_action),
     /// which only fires when this widget is on the intent's walk to the root, a
     /// global action is consulted as a dispatch *fallback*, so it is reachable
-    /// no matter where in the window the intent originated, with one
-    /// exception: an intent sent inside a modal overlay (a dialog presented in
-    /// the window, the command palette) reaches only the global actions
-    /// registered by widgets inside that modal, as a native modal window's
-    /// tree has only its own.
+    /// no matter where in the window the intent originated. An intent sent
+    /// inside an open modal overlay (a dialog presented in the window, the
+    /// command palette) is offered the global actions registered by widgets
+    /// inside that modal first, as a native modal window's tree has its own,
+    /// and the others only once it has walked on to the page behind the
+    /// modal; a shortcut pressed inside a modal reaches only those registered
+    /// inside it.
     ///
     /// An action on the window's root needs no global form: every walk in the
     /// window ends there, a menu's and a popover's included (the walk from an
-    /// overlay goes on from the widget it is attached to; a modal's stops at
-    /// its content), and a menu bar's rows send from the focused widget. Use this when the handler's
+    /// overlay goes on from the widget it is attached to; a modal's, once its
+    /// content has passed the intent by, from the widget it was opened from),
+    /// and a menu bar's rows send from the focused widget. Use this when the handler's
     /// widget is off to the side of the walk: a popover's open action fired from
     /// a menu row or a shortcut, or an action below the root reached by a global
     /// shortcut fired with nothing focused. This is the action-side counterpart

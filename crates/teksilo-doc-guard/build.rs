@@ -13,23 +13,38 @@ const MARKER: &str = "<!-- compile-check -->";
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
-    let docs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs");
+    // Read at run time, not with `env!`: a compiler cache (sccache) can serve
+    // this script compiled in another checkout, whose path `env!` would have
+    // baked in, and that checkout may be gone.
+    let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR")
+        .expect("CARGO_MANIFEST_DIR is set by cargo for a build script");
+    let docs = Path::new(&manifest_dir).join("../../docs");
     let mut files = Vec::new();
     collect_markdown(&docs, &mut files);
     files.sort();
 
     let mut out = String::new();
+    let mut fences = 0;
     for file in &files {
         let text = std::fs::read_to_string(file)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
         let shown = file.strip_prefix(&docs).unwrap_or(file).display();
         for (line, code) in marked_fences(&text, &shown.to_string()) {
+            fences += 1;
             let _ = writeln!(
                 out,
                 "`docs/{shown}`, line {line}:\n\n```rust,no_run\n{code}```\n"
             );
         }
     }
+
+    // No fence at all means the guides were not found, not that none is
+    // marked: the gate would pass having compiled nothing.
+    assert!(
+        fences > 0,
+        "no `{MARKER}` fence found under {}: the guides are missing, or none is marked",
+        docs.display()
+    );
 
     let dest = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR is set by cargo"))
         .join("compile_checked.md");

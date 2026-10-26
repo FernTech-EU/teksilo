@@ -984,7 +984,10 @@ impl<'ops> EventContext<'ops> {
     /// widget pressed its keyboard shortcut. The framework walks
     /// source-widget → root after the current handler returns,
     /// invoking any matching [`Action`](crate::action::Action) it
-    /// finds. Unmatched intents are silently dropped.
+    /// finds. From inside an open modal presented in the window, what
+    /// nothing in the modal takes walks on to the page behind it, from the
+    /// widget the modal was opened from. Unmatched intents are silently
+    /// dropped.
     ///
     /// The intent's `source` is overridden by the dispatcher's
     /// current handler-source label (`current_source`) when one is
@@ -1998,9 +2001,10 @@ impl<'ops> EventContext<'ops> {
     /// Dismiss the current framework-owned modal presentation.
     ///
     /// For a modal presented in the window, an intent this handler sends is
-    /// dispatched once the modal has closed, so it is no longer kept inside
-    /// it: [`send_intent`](Self::send_intent) walks on from the widget the
-    /// modal was attached to, and
+    /// dispatched once the modal has closed, so the modal's own actions no
+    /// longer take it: [`send_intent`](Self::send_intent) walks on from the
+    /// widget the modal was attached to, as it would from the open modal once
+    /// nothing in it had taken it, and
     /// [`send_intent_from_focus`](Self::send_intent_from_focus) starts at the
     /// focus the modal gave back.
     pub fn dismiss_modal(&mut self) {

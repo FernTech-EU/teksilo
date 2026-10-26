@@ -430,7 +430,8 @@ button, dismissed programmatically).
   quits when the last window closes. An app that lives with no window open (Mac-style,
   or in the system tray) sets `.quit_policy(QuitPolicy::Explicit)`: a tray icon does
   not keep the application alive by itself. `initial_window` is optional under either
-  policy when the application tree opens the first window from `run_after_mount`.
+  policy when the application tree opens the first window from `run_after_mount`
+  (behind a flag: a mount action runs again each time its widget is rebuilt).
 - `ctx.close_window()` and `ctx.quit()` ask the guards; `ctx.close_window_forced()` and
   `ctx.quit_forced()` do not. The App menu's Quit (⌘Q) sends its `quit_intent` when one
   is set and otherwise asks for the guarded quit; the Dock's Quit and a macOS logout
@@ -477,9 +478,9 @@ button, dismissed programmatically).
   blocked. With `.on_close_blocked(|ctx, decision| ..)` the callback answers the
   decision (call `decision.cancel()` when it only explains); without it the block is a
   final veto.
-- With a `SettingsBundle`, every way out (a quit, a termination signal, a session end,
-  the end of the event loop) writes the settings store, the window state and the
-  settings files the app opened itself.
+- Every way out (a quit, a termination signal, a session end, the end of the event
+  loop) writes the settings files the app opened itself, and with a `SettingsBundle`
+  its settings store and window state too.
 
 ## Theming
 

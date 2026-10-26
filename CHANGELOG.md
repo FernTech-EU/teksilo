@@ -76,9 +76,9 @@ by crate for clarity, not because crates version independently.
   application ends normally instead of dying with nothing saved. Both
   signals at once (systemd ends a login session with both) quit once. A
   signal the process was started with ignored (`SIGHUP` under `nohup`)
-  stays ignored. `SIGINT` (Ctrl+C) keeps its default.
-  `TeksiloAppBuilder::termination_signals(false)` leaves both signals to an
-  application that handles them itself.
+  stays ignored. `SIGINT` (Ctrl+C) keeps its default. An option that leaves
+  both signals to an application that handles them itself exists, under a
+  name not settled yet.
 - **On macOS the Dock menu's Quit, AppleScript's `quit`, `terminate:` and a
   logout ask the application to quit.** AppKit ended the process at once,
   past every close guard and with nothing written. It now waits while the
@@ -96,7 +96,9 @@ by crate for clarity, not because crates version independently.
   it too.
 - **The settings are written on every way out**: also when a quit with no
   time to ask ends the application, and when the event loop ends, before the
-  operating system ends the process.
+  operating system ends the process. The settings files the application
+  opened itself (a `SettingsFile`, `PersistedListModel`, `MruList` or
+  `SettingsStore`) are written too, with or without a `SettingsBundle`.
 - **`WindowManager::most_recent_window`**, the window opened or focused last.
 - **`QuitPolicy`, set with `TeksiloAppBuilder::quit_policy`.** The default,
   `LastWindowClosed`, quits when the last window closes, as before.
@@ -163,8 +165,8 @@ by crate for clarity, not because crates version independently.
   second launch brings its window forward on Wayland instead of only asking
   for attention. An intent the handler sends that the application tree (or
   a window) takes carries the token there, so the window that action opens
-  is activated too. `HeadlessApp::app_tree` makes an app root
-  testable. See "The application tree" in the multi-window guide.
+  is activated too. The `HeadlessApp::app_tree` field holds the
+  application tree of a headless app, so an app root can be tested. See "The application tree" in the multi-window guide.
 
 #### Core
 
@@ -207,6 +209,14 @@ by crate for clarity, not because crates version independently.
 
 #### Platform
 
+- **The application menu for a native menu backend.**
+  `NativeMenuBackend::set_app_menu`, defaulted, receives the application
+  menu, with a `declared` flag that is `false` for the default App menu
+  `teksilo-app` supplies when the app declared none; the backend posts a
+  `NativeAppMenuEventPayload` for an item chosen in it.
+  `NativeMenuHandle::set_app_menu` installs it with its activations, and
+  `NativeMenuHandle::app_activation` answers for its items.
+  `MemoryNativeMenuBackend::app_menu` returns the one last set.
 - **`taskbar`**, the per-OS half of `WindowConfig::skip_taskbar`, and on X11
   `x11::ewmh::mark_skip_taskbar`, `x11::ewmh::net_wm_state` and
   `x11::ewmh::is_dialog_type`.
@@ -226,30 +236,34 @@ by crate for clarity, not because crates version independently.
   shortcut of the widget it is attached to. **Behaviour change:**
   an action registered with `register_action` on such a widget or an
   ancestor now takes these intents before a window-global one does.
-- **A dialog presented in the window keeps the page's commands out, as a
-  dialog in a native window of its own does** on macOS and Windows. While it
-  is open, an intent sent inside it (or inside the command palette), and a
-  key pressed or a command sent from focus with focus in it or with nothing
-  focused, reach its own
-  actions and the window-global actions and global shortcuts registered by
-  widgets inside it; none of the page's, scoped or global. An intent nothing
-  in the window takes still goes to the application tree; a key goes there
-  only through a shortcut that applies in the dialog, so the page's Ctrl+N
-  bound to an application-tree action does not fire inside it. The standard
-  edit shortcuts work everywhere. An intent sent as the dialog closes (its
-  button closes it, then sends; a palette row) is dispatched once it has,
-  and is the page's: it walks on from the widget the dialog was attached
-  to, or, sent from focus, starts at the focus the dialog gave back, or at
-  the window's root when nothing was focused. An intent sent from the page
-  while a dialog is up (only a programmatic send can be) reaches every
-  window-global action, as before. **Behaviour change:** a
-  `register_action_global` action or a `register_shortcut_global` shortcut
-  of the page no longer takes an intent or a key from inside an in-window
-  dialog or the command palette. Register the action in the dialog or in
-  the application tree, and the shortcut in the dialog; or have the
-  dialog's button close the dialog before it sends the intent. The command
-  palette answers the chord of the command that presented it, so the key
-  that opened it still closes it from inside.
+- **A dialog presented in the window goes first, as a dialog in a native
+  window of its own does** on macOS and Windows. While it is open, an intent
+  sent inside it (or inside the command palette) reaches its own actions,
+  then the window-global actions registered by widgets inside it; what they
+  leave walks on to the page, from the widget the dialog was opened from,
+  then reaches the page's other window-global actions, and then the
+  application tree. A dialog opened over another leaves its intents to that
+  one first. Keys stop at the dialog: with focus in it, or with nothing
+  focused while it is up, only the global shortcuts registered by widgets
+  inside it apply, none of the page's, scoped or global, and a shortcut's
+  intent reaches nothing of the page. A row chosen in the macOS menu bar is
+  input as a key is: its intent stops at the dialog too, and the row is
+  greyed out when only the page would take it. So the page's Ctrl+N bound to an
+  application-tree action does not fire inside the dialog, while a button
+  of the dialog that sends the same command reaches it. The standard edit
+  shortcuts and the application menu's shortcuts work everywhere. An intent
+  sent as the dialog closes (its button closes it, then sends; a palette
+  row) walks on from the same widget, or, sent from focus, starts at the
+  focus the dialog gave back, or at the window's root when nothing was
+  focused. An intent sent from the page while a dialog is up (only a
+  programmatic send can be) reaches every window-global action.
+  **Behaviour change:** an action the page registers with `register_action`
+  on the widget a dialog was opened from or an ancestor now takes the
+  dialog's intents, after the dialog's own actions, and a
+  `register_shortcut_global` shortcut of the page no longer fires inside an
+  in-window dialog or the command palette: register the shortcut in the
+  dialog. The command palette answers the chord of the command that
+  presented it, so the key that opened it still closes it from inside.
 - **`EventContext::send_intent_from_focus` reads the focus after every
   overlay the handler closes has given it back.** A menu row that closed its
   menu and sent from focus started at the row, inside the closing menu.
@@ -260,7 +274,6 @@ by crate for clarity, not because crates version independently.
 - **A context-menu factory that declines sends its intents from the widget
   the menu was asked for**, so every factory's widget is on their way to the
   root. They started at the window's root.
-
 - **Breaking.** `CloseResponse` has a third variant, `Defer(CloseDecision)`,
   and is no longer `Copy`, `PartialEq` or `Eq`. A `match` on it needs the
   new arm.
@@ -274,11 +287,11 @@ by crate for clarity, not because crates version independently.
 #### App
 
 - **An intent a native dialog window leaves unclaimed goes to the window it
-  blocks** (from that window's focus, then up its owners), and only then to
-  the application tree, as an intent sent as an in-window dialog closes
-  walks on to the page. It went to the application tree only, so a
-  `MessageBox` answer on macOS and Windows that sent the document a command
-  instead of closing it by id reached no action of the document.
+  blocks** (from that window's focus, then up its owners), and then to the
+  application tree, as an in-window dialog's leftover intent walks on to the
+  page. It was dropped, so a `MessageBox` answer on macOS and Windows that
+  sent the document a command instead of closing it by id reached no action
+  of the document.
 - **Breaking.** `WindowManager::refocus_modal_child` takes `&mut self`, since
   it may restore the window it raises.
 
@@ -300,7 +313,10 @@ by crate for clarity, not because crates version independently.
   menu bar is brought up to date after every turn of the event loop, from
   the key window's focused widget as it is, where its rows send their
   intent (a field in an open popover included), so a row there greys out
-  exactly when choosing it would do nothing. A row
+  exactly when choosing it would do nothing; while a dialog presented in the
+  key window is open, its intent stops at the dialog, so a row only the page
+  behind it takes greys out, as AppKit disables a document's items under a
+  modal panel. A row
   with an `on_activate` closure stays enabled (its `enabled` alone decides),
   and so does a two-way `checkable`, `tri_checkable` or `radio` row, which
   writes its state when chosen, in the window as in the macOS menu bar. An
@@ -345,20 +361,15 @@ by crate for clarity, not because crates version independently.
   application menu on macOS.** A modal dialog shows the menu of the window
   it blocks (up the chain of owners), as AppKit keeps the bar for a sheet or
   a panel; another window shows the application menu, or, when the app
-  declared none, keeps the bar shown before, so File and Edit no longer
-  vanish while a dialog or a secondary window is key; an application menu
-  declared meanwhile shows at once. The bar shows the
-  application menu while no window is open, whichever window installed its
-  menu last. `MemoryNativeMenuBackend` follows the same rule
-  (`shows_app_menu`). A window's
-  menu no longer sets the application menu, and closing the key window
-  never leaves its menu up.
-- **Breaking.** `NativeMenuBackend::set_app_menu` and
-  `NativeMenuHandle::set_app_menu` take a `declared` flag: `false` for the
-  default App menu `teksilo-app` supplies when the app declared none.
-- **Breaking.** `NativeMenuActivation` has a `quits` field, and
-  `NativeMenuHandle::app_quit_item` is gone: the activation of a Quit row
-  says it is one.
+  declared none, keeps the bar shown before; an application menu declared
+  meanwhile shows at once. Such a window kept the bar of the window key
+  before it. While no window is open the bar shows the application menu,
+  where it was empty, and closing the key window no longer hands the bar to
+  an arbitrary remaining window. `MemoryNativeMenuBackend` follows the same
+  rule (`shows_app_menu`).
+- **Breaking.** `NativeMenuActivation` has a `quits` field: the activation
+  of the App menu's Quit row says it is one. Code that builds an activation
+  has to set it.
 
 #### Settings
 
@@ -408,6 +419,10 @@ by crate for clarity, not because crates version independently.
 - **A `ToolBox` item follows its `ToolBoxItem::enabled` signal.** An item
   kept the state its signal had when the `ToolBox` was built, for clicks,
   arrow keys and the actions offered to assistive technology.
+- **The macOS menu bar's menu titles and App menu labels follow a locale
+  change.** Only the rows' titles did; File, Edit and the App menu's About,
+  Hide and Quit kept the language the menu was installed in until the menu
+  itself changed.
 - **A `MenuModel` entry hidden with `visible` reappears in the macOS menu
   bar when its signal turns true.** It was left out of the native menu, and
   came back only when something rebuilt the menu.
@@ -446,8 +461,8 @@ by crate for clarity, not because crates version independently.
   title bar did not raise it at all.
 - **Closing a window closes its dialogs.** A modal dialog stayed open,
   blocking nothing, when the window it blocks was closed by id, and the
-  application did not quit under
-  `QuitPolicy::LastWindowClosed`. A window the OS destroyed on its own
+  application did not quit when its last window closed. A window the OS
+  destroyed on its own
   (Windows destroys an owned window with its owner) stayed counted too.
   A dialog closed with its window, by a forced close or a quit, is answered
   through its own Cancel path first: a `MessageBox` reports its escape
@@ -488,10 +503,9 @@ by crate for clarity, not because crates version independently.
   copies in the focused field of the dialog in front), and at that window's
   root when nothing is focused. An intent nothing in that window takes goes
   on to the application tree, not to the window whose menu it is. The
-  item's `on_activate`, and the state
-  write of a check or radio entry, run in the window whose menu it is,
-  anchored at its root, so an overlay they show no longer closes with a
-  popover that happened to hold focus.
+  item's `on_activate`, and the state write of a check or radio entry, run
+  first, in the window whose menu it is, anchored at its root (the app's
+  root, inside any wrapper).
 - **Intents sent from app callbacks start at the app's root, inside any
   wrapper around it.** Close guards, file dialog results, external payloads,
   a global shortcut with nothing focused, and an intent another tree left
