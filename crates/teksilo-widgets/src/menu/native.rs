@@ -510,7 +510,7 @@ fn tri_to_native(state: CheckState) -> NativeCheck {
     }
 }
 
-fn strip_title(raw: &str) -> String {
+pub(crate) fn strip_title(raw: &str) -> String {
     parse_mnemonic(raw).stripped
 }
 

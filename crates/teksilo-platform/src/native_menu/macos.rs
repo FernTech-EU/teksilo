@@ -450,6 +450,13 @@ fn build_root_menu(
                     NSEventModifierFlags::Command,
                 ));
                 sub.addItem(&NSMenuItem::separatorItem(mtm));
+                // The app's own Window rows, between Zoom and the window
+                // list, set apart from the list.
+                let own = &plan.folded[index];
+                if !own.is_empty() {
+                    fill_menu(mtm, &sub, own.iter().copied(), target, items);
+                    sub.addItem(&NSMenuItem::separatorItem(mtm));
+                }
                 item.setSubmenu(Some(&sub));
                 bar.addItem(&item);
                 if plan.windows_menu == Some(index) {
@@ -467,6 +474,8 @@ fn build_root_menu(
                     &NSString::from_str(&labels.title),
                 );
                 sub.setAutoenablesItems(false);
+                // The app's own Help rows; AppKit adds its search field above.
+                fill_menu(mtm, &sub, plan.folded[index].iter().copied(), target, items);
                 item.setSubmenu(Some(&sub));
                 bar.addItem(&item);
                 if plan.help_menu == Some(index) {
@@ -518,6 +527,18 @@ fn build_submenu(
 ) -> Retained<NSMenu> {
     let menu = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), &NSString::from_str(title));
     menu.setAutoenablesItems(false);
+    fill_menu(mtm, &menu, nodes, target, items);
+    menu
+}
+
+/// Append `nodes` to `menu`, recording each leaf under its id.
+fn fill_menu<'a>(
+    mtm: MainThreadMarker,
+    menu: &NSMenu,
+    nodes: impl IntoIterator<Item = &'a NativeMenuNode>,
+    target: &TeksiloMenuTarget,
+    items: &mut HashMap<MenuItemId, Retained<NSMenuItem>>,
+) {
     for node in nodes {
         match node {
             NativeMenuNode::Separator => {
@@ -550,7 +571,6 @@ fn build_submenu(
             NativeMenuNode::Standard { .. } => {}
         }
     }
-    menu
 }
 
 /// A top-level / submenu-parent item (no action, just a title + submenu).

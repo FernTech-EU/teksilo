@@ -102,6 +102,8 @@ impl Shared {
                 // the native bar and the in-window bar alike.
                 m.item(MenuEntry::new(lit!("Show &Grid")).checkable(grid_visible.clone()))
             })
+            // On macOS this menu's rows join the standard Window menu below,
+            // under Minimize and Zoom, since the two have the same title.
             .menu(lit!("&Window"), |m| {
                 m.item(MenuEntry::new(lit!("&Inspector")).intent("app.inspector"))
             })

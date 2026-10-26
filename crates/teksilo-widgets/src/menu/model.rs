@@ -394,6 +394,11 @@ impl StandardMenu {
     }
 
     /// The Window menu (Minimize / Zoom + the live window list).
+    ///
+    /// For rows of your own in it, declare an ordinary menu with the same
+    /// title: on macOS its rows are shown in this menu, below Zoom, rather
+    /// than as a second Window menu, and the in-window bar, which ignores
+    /// standard menus, shows that menu.
     pub fn window() -> Self {
         Self {
             role: StandardMenuRole::Window,
@@ -415,7 +420,8 @@ impl StandardMenu {
         }
     }
 
-    /// The Help menu.
+    /// The Help menu. An ordinary menu with the same title has its rows
+    /// shown in it on macOS, as for [`window`](Self::window).
     pub fn help() -> Self {
         Self {
             role: StandardMenuRole::Help,
@@ -637,7 +643,9 @@ impl StandardMenu {
     /// resolution happens here, so the platform never hardcodes English).
     pub(crate) fn resolve_labels(&self) -> teksilo_platform::native_menu::StandardLabels {
         teksilo_platform::native_menu::StandardLabels {
-            title: self.title.resolve_now(),
+            // Without its `&` marker, as a submenu title is: the macOS bar
+            // folds an app menu of the same title into this one.
+            title: super::native::strip_title(&self.title.resolve_now()),
             about: self.about.resolve_now(),
             settings: self.settings.resolve_now(),
             services: self.services.resolve_now(),

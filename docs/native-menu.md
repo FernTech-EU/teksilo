@@ -432,8 +432,13 @@ MenuModel::new()
 - **Window** adds Minimize (⌘M, `performMiniaturize:`) + Zoom (`performZoom:`)
   and registers the menu with AppKit so the live window list appears (see
   below).
-- **Help** is a localized titled submenu registered as the help menu. Custom Help
-  items beyond that are best declared as a normal `.menu(...)`.
+- **Help** is a localized titled submenu registered as the help menu.
+- **Your own Window or Help rows** go in an ordinary `.menu(...)` with the same
+  title as the standard menu. On macOS its rows are shown inside the standard
+  menu, below Zoom in Window, instead of as a second menu of that name; the
+  in-window bar shows it as an ordinary menu. The titles are compared without
+  their `&` marker, so `.menu(tr!(window_menu()), …)` folds into
+  `StandardMenu::window().title(tr!(window_menu()))`.
 
 ### The Window and Dock menus list the windows
 

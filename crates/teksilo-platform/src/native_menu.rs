@@ -872,6 +872,11 @@ pub(crate) struct MacBarPlan<'a> {
     /// The index in `menus` of the menu registered as `NSApp.helpMenu`: the
     /// first Help-role menu.
     pub(crate) help_menu: Option<usize>,
+    /// For each entry of `menus`, the rows of the app's own menus folded into
+    /// it: a menu the app titles like a standard Window or Help menu in the
+    /// same snapshot, which the bar would otherwise show twice. Empty for
+    /// every other menu.
+    pub(crate) folded: Vec<Vec<&'a NativeMenuNode>>,
 }
 
 /// Lay out `snapshot` for the macOS menu bar.
@@ -883,6 +888,13 @@ pub(crate) struct MacBarPlan<'a> {
 /// a second, ordinary menu. A later App-role menu is left out, since a bar
 /// has one application menu. A leaf or separator at the top level is left
 /// out too: the bar holds menus only.
+///
+/// A menu of the app's own titled like a standard Window or Help menu of the
+/// same snapshot is not shown beside it: its rows go into the first standard
+/// menu with that title, where a Mac app keeps them (its Window commands
+/// under Minimize and Zoom). A model that gives the in-window bar a Window
+/// menu and macOS its standard one shows one Window menu on macOS, with
+/// both.
 #[cfg(any(target_os = "macos", test))]
 pub(crate) fn mac_bar_plan(snapshot: &NativeMenuSnapshot) -> MacBarPlan<'_> {
     let is_app = |node: &NativeMenuNode| {
@@ -902,7 +914,39 @@ pub(crate) fn mac_bar_plan(snapshot: &NativeMenuSnapshot) -> MacBarPlan<'_> {
                 NativeMenuNode::Submenu { .. } | NativeMenuNode::Standard { .. }
             )
     });
-    let menus: Vec<&NativeMenuNode> = app.into_iter().chain(rest).collect();
+    let candidates: Vec<&NativeMenuNode> = app.into_iter().chain(rest).collect();
+    // The first Window- or Help-role menu with this title, which an app menu
+    // of the same title folds into.
+    let host_of = |wanted: &str| {
+        candidates.iter().position(|node| {
+            matches!(
+                node,
+                NativeMenuNode::Standard { role: StandardMenuRole::Window | StandardMenuRole::Help, labels, .. }
+                    if labels.title == wanted
+            )
+        })
+    };
+    let mut menus = Vec::with_capacity(candidates.len());
+    let mut folded: Vec<Vec<&NativeMenuNode>> = Vec::with_capacity(candidates.len());
+    // `host_index[i]`: where `candidates[i]` landed in `menus`.
+    let mut host_index = vec![None; candidates.len()];
+    let mut pending: Vec<(usize, &[NativeMenuNode])> = Vec::new();
+    for (i, node) in candidates.iter().copied().enumerate() {
+        if let NativeMenuNode::Submenu { title, children } = node
+            && let Some(host) = host_of(title)
+        {
+            pending.push((host, children));
+            continue;
+        }
+        host_index[i] = Some(menus.len());
+        menus.push(node);
+        folded.push(Vec::new());
+    }
+    for (host, children) in pending {
+        if let Some(at) = host_index[host] {
+            folded[at].extend(children);
+        }
+    }
     let first = |wanted: StandardMenuRole| {
         menus.iter().position(
             |node| matches!(node, NativeMenuNode::Standard { role, .. } if *role == wanted),
@@ -912,6 +956,7 @@ pub(crate) fn mac_bar_plan(snapshot: &NativeMenuSnapshot) -> MacBarPlan<'_> {
         windows_menu: first(StandardMenuRole::Window),
         help_menu: first(StandardMenuRole::Help),
         menus,
+        folded,
     }
 }
 
@@ -1479,6 +1524,74 @@ mod tests {
         let plan = mac_bar_plan(&no_window_menu);
         assert_eq!(plan.windows_menu, None, "a hidden one is added");
         assert_eq!(plan.help_menu, None);
+    }
+
+    /// An app menu titled like the snapshot's standard Window or Help menu
+    /// is not shown beside it: its rows go into the standard menu. The
+    /// `native-menu` example gave the in-window bar a Window menu (Inspector)
+    /// and macOS its standard one, and the macOS bar showed Window twice.
+    #[test]
+    fn an_app_menu_titled_like_a_standard_one_folds_into_it_on_the_mac_bar() {
+        let inspector = MenuItemId::next();
+        let own = |title: &str, id: MenuItemId| NativeMenuNode::Submenu {
+            title: title.into(),
+            children: vec![NativeMenuNode::Item {
+                id,
+                title: "Row".into(),
+                key_equiv: None,
+                enabled: true,
+                visible: true,
+                check: NativeCheck::None,
+            }],
+        };
+        let manual = MenuItemId::next();
+        let snapshot = NativeMenuSnapshot {
+            roots: vec![
+                standard(StandardMenuRole::App, "Probe"),
+                own("Window", inspector),
+                own("Help", manual),
+                standard(StandardMenuRole::Window, "Window"),
+                standard(StandardMenuRole::Help, "Help"),
+                own("Tools", MenuItemId::next()),
+            ],
+        };
+        let plan = mac_bar_plan(&snapshot);
+        assert_eq!(
+            bar_titles(&plan),
+            ["Probe", "Window", "Help", "Tools"],
+            "one Window menu, one Help menu"
+        );
+        let ids = |rows: &[&NativeMenuNode]| -> Vec<MenuItemId> {
+            rows.iter()
+                .map(|node| match node {
+                    NativeMenuNode::Item { id, .. } => *id,
+                    other => panic!("expected a row, got {other:?}"),
+                })
+                .collect()
+        };
+        assert_eq!(
+            ids(&plan.folded[1]),
+            [inspector],
+            "into the standard Window menu"
+        );
+        assert_eq!(
+            ids(&plan.folded[2]),
+            [manual],
+            "into the standard Help menu"
+        );
+        assert!(plan.folded[0].is_empty() && plan.folded[3].is_empty());
+        assert_eq!((plan.windows_menu, plan.help_menu), (Some(1), Some(2)));
+
+        // With no standard Window menu, the app's own stays as it is.
+        let alone = NativeMenuSnapshot {
+            roots: vec![
+                standard(StandardMenuRole::App, "Probe"),
+                own("Window", MenuItemId::next()),
+            ],
+        };
+        let plan = mac_bar_plan(&alone);
+        assert_eq!(bar_titles(&plan), ["Probe", "Window"]);
+        assert_eq!(plan.windows_menu, None);
     }
 
     /// The bar a key window shows: its own menu; else the menu of the window

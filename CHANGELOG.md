@@ -13,6 +13,16 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Platform
+
+- **A menu titled like the standard Window or Help menu shows once in the
+  macOS menu bar.** A model with its own Window menu, for the in-window bar,
+  and `StandardMenu::window()` showed two Window menus on macOS. The own
+  menu's rows now go into the standard one, below Zoom; the in-window bar is
+  unchanged.
+
 ## [0.21.0] - 2026-10-26
 
 ### Added
