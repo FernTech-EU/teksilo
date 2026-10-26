@@ -115,9 +115,12 @@ pub(crate) struct WindowStateInner {
     ///
     /// - `MenuLabel` to show / hide mnemonic underlines while Alt is held
     ///   (matches the Win32 `WM_CHANGEUISTATE` underlining convention).
-    /// - `MenuBar` to detect bare-Alt-tap (true → false transition with
-    ///   `other_key_pressed_during_alt == false`) which focuses the
-    ///   first trigger.
+    /// - [`note_non_alt_keydown_during_alt`](WindowState::note_non_alt_keydown_during_alt),
+    ///   for the bare-Alt tap that focuses the menu bar's first trigger.
+    ///   The tap itself is read from the Alt key's own events
+    ///   ([`note_alt_key_from_os`](WindowState::note_alt_key_from_os)), not
+    ///   from this signal's falling edge: a window also hears of a held Alt
+    ///   here when it takes the focus with Alt down.
     alt_down: Signal<bool>,
 
     /// Sticky flag that records whether any non-Alt key was pressed
@@ -133,6 +136,15 @@ pub(crate) struct WindowStateInner {
     /// `Cell<bool>` rather than `Signal<bool>` — only the MenuBar
     /// effect reads it at the transition moment, never reactively.
     other_key_pressed_during_alt: Cell<bool>,
+
+    /// Whether this window saw the current Alt hold begin: a real press of
+    /// an Alt key while it had the focus. A window that takes the focus with
+    /// Alt already down (the one behind a window Alt+F4 closed, or the one
+    /// Alt+Tab brings forward) learns of the hold only from the modifier
+    /// state or from a synthetic key, and its release is no tap. Set by
+    /// [`note_alt_key_from_os`](WindowState::note_alt_key_from_os), cleared
+    /// by the release and by a change of focus.
+    alt_press_seen: Cell<bool>,
 
     /// At-most-one menubar dispatcher per window. See
     /// [`super::menubar_dispatcher`]. Wrapped in `Rc` so the slot
@@ -186,6 +198,7 @@ impl WindowState {
             caps_lock: Signal::new(false),
             alt_down: Signal::new(false),
             other_key_pressed_during_alt: Cell::new(false),
+            alt_press_seen: Cell::new(false),
             menubar_dispatcher: Rc::new(RefCell::new(None)),
             pending_os_commands: RefCell::new(Vec::new()),
             pending_activation_token: RefCell::new(None),
@@ -333,8 +346,9 @@ impl WindowState {
 
     /// Read whether any non-Alt key has been pressed during the
     /// current Alt-hold window. `false` means the user has not
-    /// composed a chord since pressing Alt; the next Alt-release
-    /// counts as a bare-Alt-tap. Read by the MenuBar dispatcher.
+    /// composed a chord since pressing Alt, so the next Alt release
+    /// is a bare-Alt tap if this window saw the press (see
+    /// [`note_alt_key_from_os`](Self::note_alt_key_from_os)).
     pub fn other_key_pressed_during_alt(&self) -> bool {
         self.inner.other_key_pressed_during_alt.get()
     }
@@ -489,6 +503,10 @@ impl WindowState {
     }
 
     pub fn set_focused_from_os(&self, focused: bool) {
+        if self.inner.focused.get() != focused {
+            // An Alt hold seen before the focus moved ends in no tap here.
+            self.inner.alt_press_seen.set(false);
+        }
         self.inner.with_os_guard(|| self.inner.focused.set(focused));
     }
 
@@ -534,6 +552,19 @@ impl WindowState {
         if self.inner.alt_down.get() {
             self.inner.other_key_pressed_during_alt.set(true);
         }
+    }
+
+    /// A real press or release of an Alt key in this window, never a
+    /// synthetic one (the keys a window is told are held as it takes or
+    /// loses the focus). Returns `true` for the release that ends a bare Alt
+    /// tap: this window saw the press, and no other key went down before
+    /// the release.
+    pub fn note_alt_key_from_os(&self, pressed: bool) -> bool {
+        if pressed {
+            self.inner.alt_press_seen.set(true);
+            return false;
+        }
+        self.inner.alt_press_seen.replace(false) && !self.inner.other_key_pressed_during_alt.get()
     }
 }
 
@@ -730,6 +761,62 @@ mod tests {
         let state = WindowState::new(init(1));
         state.note_non_alt_keydown_during_alt();
         assert!(!state.other_key_pressed_during_alt());
+    }
+
+    /// A bare tap, in both orders winit reports an Alt key and the modifier
+    /// state in.
+    #[test]
+    fn a_press_and_release_seen_here_with_nothing_between_is_a_tap() {
+        let state = WindowState::new(init(1));
+        state.set_focused_from_os(true);
+        // Windows: the modifier state, then the key.
+        state.set_alt_from_os(true);
+        assert!(!state.note_alt_key_from_os(true));
+        state.set_alt_from_os(false);
+        assert!(state.note_alt_key_from_os(false));
+        // Wayland: the key, then the modifier state.
+        assert!(!state.note_alt_key_from_os(true));
+        state.set_alt_from_os(true);
+        assert!(state.note_alt_key_from_os(false));
+        state.set_alt_from_os(false);
+    }
+
+    #[test]
+    fn a_chord_is_not_a_tap() {
+        let state = WindowState::new(init(1));
+        state.set_focused_from_os(true);
+        state.set_alt_from_os(true);
+        state.note_alt_key_from_os(true);
+        state.note_non_alt_keydown_during_alt();
+        state.set_alt_from_os(false);
+        assert!(!state.note_alt_key_from_os(false));
+    }
+
+    /// The window behind one Alt+F4 closed takes the focus with Alt held. It
+    /// hears of the hold only from the modifier state, so the release that
+    /// follows opens nothing.
+    #[test]
+    fn a_hold_begun_in_another_window_is_not_a_tap() {
+        let state = WindowState::new(init(1));
+        state.set_focused_from_os(false);
+        state.set_focused_from_os(true);
+        state.set_alt_from_os(true);
+        state.set_alt_from_os(false);
+        assert!(!state.note_alt_key_from_os(false));
+    }
+
+    /// Alt+Tab away and back: the press seen before the focus left is
+    /// forgotten.
+    #[test]
+    fn a_hold_the_focus_left_during_is_not_a_tap() {
+        let state = WindowState::new(init(1));
+        state.set_focused_from_os(true);
+        state.set_alt_from_os(true);
+        state.note_alt_key_from_os(true);
+        state.set_focused_from_os(false);
+        state.set_focused_from_os(true);
+        state.set_alt_from_os(false);
+        assert!(!state.note_alt_key_from_os(false));
     }
 
     #[test]

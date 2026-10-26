@@ -34,6 +34,16 @@ by crate for clarity, not because crates version independently.
   pointer, as in 0.20.0; a click on the control that opened the modal still
   only closes it.
 
+#### App
+
+- **Releasing Alt no longer puts a window into menu-bar mode when the Alt
+  press happened elsewhere.** After Alt+F4 closed a window, or Alt+Tab
+  brought one forward, the window that took the focus read the release of
+  Alt as a bare Alt tap and moved the keyboard focus to its menu bar, so the
+  next key typed went nowhere. On Windows, Alt+Tab away from a window did the
+  same to the window left behind. A tap now counts only when the window saw
+  both the press and the release of Alt, with no other key between.
+
 #### Platform
 
 - **A window with a menu of its own keeps the Window and Help menus on

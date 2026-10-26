@@ -3680,6 +3680,40 @@ impl TeksiloAppHandler {
         )
     }
 
+    /// A bare tap of Alt focuses the menu bar (`MenubarDispatcher::on_alt_tap`).
+    /// It is read from the Alt key's own press and release, both real and
+    /// both in this window: a window that takes the focus with Alt held (the
+    /// one behind a window Alt+F4 closed, the one Alt+Tab brings forward)
+    /// hears of the hold only as modifier state or synthetic keys, and its
+    /// release would otherwise open the menu bar. Synthetic keys are the
+    /// ones winit reports held as a window takes or loses the focus.
+    fn note_alt_key(
+        &mut self,
+        window_id: WindowId,
+        key_event: &winit::event::KeyEvent,
+        is_synthetic: bool,
+        event_loop: &ActiveEventLoop,
+    ) {
+        use winit::keyboard::{Key, NamedKey};
+        if is_synthetic || key_event.logical_key != Key::Named(NamedKey::Alt) {
+            return;
+        }
+        let pressed = key_event.state == winit::event::ElementState::Pressed;
+        let action = self.wm.get_by_winit_mut(window_id).and_then(|managed| {
+            if managed.state.note_alt_key_from_os(pressed) {
+                managed
+                    .state
+                    .menubar_dispatcher()
+                    .and_then(|d| d.on_alt_tap())
+            } else {
+                None
+            }
+        });
+        if let Some(action) = action {
+            self.apply_menubar_action(window_id, action, event_loop);
+        }
+    }
+
     /// What a key press says about the keyboard itself, kept whether or not
     /// the key reaches a widget: the OS toggles Caps Lock, and a chord made
     /// while Alt is held is not an Alt tap, even when a screen reader took
@@ -4310,40 +4344,18 @@ impl TeksiloAppHandler {
                 self.typesetter.set_scale_factor(scale_factor as f32);
             }
             WindowEvent::ModifiersChanged(mods) => {
-                // Capture state before the alt_down write so we can
-                // detect the falling edge without re-reading after.
-                let alt_tap_action = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.current_modifiers = mods.state();
                     managed
                         .translation_state
                         .set_modifiers(event_translation::translate_modifiers(mods.state()));
-
-                    let new_alt = mods.state().alt_key();
-                    let prev_alt = managed.state.alt_down().get();
-                    let other_pressed = managed.state.other_key_pressed_during_alt();
-                    // Alt-tap tracking: surface the OS Alt-held edge on
-                    // the window's `alt_down` signal so `MenuLabel` can
-                    // gate mnemonic underlines and `MenuBar` can detect
-                    // bare-Alt-tap on the falling edge. winit reports
-                    // Alt presses through `ModifiersChanged` (not as a
-                    // `Key::Alt` KeyDown, which doesn't exist in our
-                    // Key enum), so this is the only correct hook.
-                    managed.state.set_alt_from_os(new_alt);
-                    // Detect the bare-Alt-tap pattern: true → false
-                    // with no non-Alt KeyDowns during the hold.
-                    if prev_alt && !new_alt && !other_pressed {
-                        managed
-                            .state
-                            .menubar_dispatcher()
-                            .and_then(|d| d.on_alt_tap())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                if let Some(action) = alt_tap_action {
-                    self.apply_menubar_action(window_id, action, event_loop);
+                    // Surface the OS Alt-held state on the window's
+                    // `alt_down` signal so `MenuLabel` can gate mnemonic
+                    // underlines. The bare-Alt tap is read from the Alt
+                    // key's own events (`note_alt_key`): this one also
+                    // reports Alt held to a window that takes the focus
+                    // with Alt down.
+                    managed.state.set_alt_from_os(mods.state().alt_key());
                 }
             }
             WindowEvent::KeyboardInput {
@@ -4352,6 +4364,7 @@ impl TeksiloAppHandler {
                 ..
             } => {
                 self.note_physical_key(window_id, &key_event);
+                self.note_alt_key(window_id, &key_event, is_synthetic, event_loop);
                 // A synthetic press becomes nothing, here and for the
                 // menubar below: see `key_widget_event`.
                 let maybe_evt = self.wm.get_by_winit_mut(window_id).and_then(|managed| {
