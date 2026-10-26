@@ -57,6 +57,13 @@ by crate for clarity, not because crates version independently.
   next key typed went nowhere. On Windows, Alt+Tab away from a window did the
   same to the window left behind. A tap now counts only when the window saw
   both the press and the release of Alt, with no other key between.
+- **Alt+F4, or a window's close button, with an in-window modal open closes
+  the modal, not the window.** The window's close guard ran over the open
+  modal ("Save changes before closing?" over a settings dialog). A close the
+  user asks for now does what Escape would in the modal, as Alt+F4 closes a
+  dialog window and not the window behind it; a modal Escape cannot close
+  stays, and nothing closes. The next request reaches the window.
+  `ctx.close_window()` and a quit still ask the window's guard.
 
 #### Platform
 

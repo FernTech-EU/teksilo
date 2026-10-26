@@ -1032,6 +1032,18 @@ guarded close of a window a modal dialog blocks never reaches its guard:
 the dialog is brought forward instead (see
 [A dialog belongs to the window it blocks](#a-dialog-belongs-to-the-window-it-blocks)).
 
+A close the user asks for (the first two rows: the OS close button, `Alt+F4`,
+the taskbar's Close, the custom title bar's close button) while an in-window
+modal is open does what Escape would there, and nothing more. The modal goes
+through its own dismissal, `DismissReason::Escape`, its Cancel path, and the
+window's guard is not asked; a modal Escape cannot close
+(`ModalCloseBehavior::Manual`) stays, and nothing closes. The next request
+reaches the window once no modal is left. This is what `Alt+F4` does to a
+dialog window, which closes the dialog and not the window behind it, and
+how libadwaita answers a close request with one of its in-window dialogs
+open. `ctx.close_window()` and a quit are not the user's gesture on the
+window: they ask its guard as before, with the modal still up.
+
 ### Quitting the application
 
 `ctx.quit()` is what a Quit menu item calls, the guarded quit, as

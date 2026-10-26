@@ -2771,6 +2771,34 @@ impl TeksiloAppHandler {
     /// routers and the mount-action drain all share — keeping the reinsert
     /// (whose omission silently freezes a window) in exactly one place.
     /// No-op if `winit_id` is not a managed window.
+    /// A close of `window` the user asked for: Alt+F4, the OS's close button,
+    /// the taskbar's Close, or the custom title bar's close button. While the
+    /// window holds an in-window modal, the request does what Escape would
+    /// there and the window's guard is not asked, as Alt+F4 closes the dialog
+    /// of a native dialog window rather than its owner (libadwaita's in-window
+    /// dialogs answer it the same way). A window a native dialog blocks raises
+    /// that dialog instead (`WindowManager::request_close`). `ctx.close_window()`
+    /// and a quit are not the user's gesture on the window and ask its guard
+    /// directly.
+    fn request_close_by_user(
+        &mut self,
+        window: crate::window_config::TeksiloWindowId,
+        event_loop: &ActiveEventLoop,
+    ) {
+        if self.wm.blocking_modal_child(window).is_none()
+            && let Some(winit_id) = self.wm.winit_id_for_teksilo(window)
+        {
+            let mut answered = false;
+            self.run_in_window(winit_id, event_loop, |tree, ops| {
+                answered = tree.answer_close_request_with_modal(ops);
+            });
+            if answered {
+                return;
+            }
+        }
+        self.wm.request_close(window);
+    }
+
     fn run_in_window(
         &mut self,
         winit_id: winit::window::WindowId,
@@ -4235,8 +4263,9 @@ impl TeksiloAppHandler {
                     // is an interactive gesture, so it runs through the
                     // window's close guard (if any) on the next
                     // `process_pending` tick and may be vetoed. A window
-                    // its dialog blocks refuses it and raises the dialog.
-                    self.wm.request_close(fid);
+                    // its dialog blocks refuses it and raises the dialog,
+                    // and an open in-window modal takes it as Escape.
+                    self.request_close_by_user(fid, event_loop);
                 }
             }
             // The OS destroyed the window: Windows destroys an owned window
@@ -4994,7 +5023,7 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
                             // button — an interactive gesture, so it runs
                             // through the window's close guard (guarded
                             // close), matching the OS close button.
-                            self.wm.request_close(req.teksilo_id);
+                            self.request_close_by_user(req.teksilo_id, event_loop);
                         } else if let Some(evt) = payload.downcast_ref::<TitleBarSyntheticEvent>() {
                             // Windows custom-chrome wndproc sends this when
                             // `WM_NCLBUTTONUP` fires over a control-button
@@ -7844,6 +7873,104 @@ mod tests {
         );
         assert_eq!(activations.get(), 0, "and reached nothing beneath");
         tree.assert_no_leaked_pointer_state();
+    }
+
+    /// A page presenting an in-tree modal that records how it went.
+    fn page_with_a_modal(
+        close_behavior: ModalCloseBehavior,
+    ) -> (
+        WidgetTree,
+        std::rc::Rc<std::cell::RefCell<Vec<teksilo_core::overlay::DismissReason>>>,
+    ) {
+        let reasons = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let record = reasons.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let page = tree.add(teksilo_widgets::VStack::new().child(Button::new(lit!("Page"))));
+        tree.set_content_root(page);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        present_in_tree_modal_request(
+            &mut tree,
+            page,
+            ModalRequest::deferred(|tree| tree.add(Button::new(lit!("Settings"))))
+                .presentation(ModalPresentation::InTree)
+                .close_behavior(close_behavior)
+                .on_dismiss(std::rc::Rc::new(move |reason, _| {
+                    record.borrow_mut().push(reason)
+                })),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_eq!(
+            tree.active_overlays().len(),
+            2,
+            "precondition: scrim + panel"
+        );
+        (tree, reasons)
+    }
+
+    /// Alt+F4, or the close button, with an in-window modal open closes the
+    /// modal through its Escape path, and the window is not asked: the user
+    /// closes what is in front, as Alt+F4 closes a dialog window. Once no
+    /// modal is left, the next request is the window's. Skribisto's Settings:
+    /// Alt+F4 put "Save changes before closing the work?" over it.
+    #[test]
+    fn a_close_request_with_a_modal_open_closes_the_modal() {
+        use teksilo_core::overlay::DismissReason;
+        use teksilo_core::window::NoopWindowOps;
+
+        let (mut tree, reasons) = page_with_a_modal(ModalCloseBehavior::EscapeKey);
+        assert!(tree.answer_close_request_with_modal(&mut NoopWindowOps));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert!(tree.active_overlays().is_empty(), "the modal went");
+        assert_eq!(
+            *reasons.borrow(),
+            [DismissReason::Escape],
+            "by its Escape path"
+        );
+        assert!(
+            !tree.answer_close_request_with_modal(&mut NoopWindowOps),
+            "with no modal left, the next request is the window's"
+        );
+    }
+
+    /// A modal Escape cannot close stays, and nothing else closes: the
+    /// request is spent on it, as Alt+F4 on a dialog with no Cancel.
+    #[test]
+    fn a_close_request_leaves_a_modal_escape_cannot_close() {
+        use teksilo_core::window::NoopWindowOps;
+
+        let (mut tree, reasons) = page_with_a_modal(ModalCloseBehavior::Manual);
+        assert!(tree.answer_close_request_with_modal(&mut NoopWindowOps));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_eq!(tree.active_overlays().len(), 2, "the modal stayed");
+        assert!(reasons.borrow().is_empty());
+    }
+
+    /// A menu or a popover is no modal: the window's close goes ahead and
+    /// takes it along, as before.
+    #[test]
+    fn a_close_request_without_a_modal_is_the_windows() {
+        use teksilo_core::window::NoopWindowOps;
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let anchor = tree.add(Button::new(lit!("Open")));
+        let page = tree.add(teksilo_widgets::VStack::new().child(anchor));
+        tree.set_content_root(page);
+        let content = tree.add(Button::new(lit!("A row")));
+        tree.set_dormant(content);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        tree.show_overlay(OverlayRequest::new(
+            content,
+            anchor,
+            OverlayPlacement::Below,
+            DismissBehavior::EscapeOrClickOutside,
+        ));
+        assert_eq!(tree.active_overlays().len(), 1, "precondition: the popover");
+        assert!(!tree.answer_close_request_with_modal(&mut NoopWindowOps));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "and the popover is left to it"
+        );
     }
 
     /// The page behind an in-tree message box, as a screen reader meets it.

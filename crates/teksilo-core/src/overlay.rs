@@ -1090,6 +1090,13 @@ impl OverlayManager {
             .find(|overlay| overlay.placement.is_modal())
     }
 
+    /// Whether a modal overlay is open and not on its way out.
+    pub(crate) fn has_open_modal(&self) -> bool {
+        self.stack
+            .iter()
+            .any(|overlay| overlay.placement.is_modal() && !overlay.is_dismissing())
+    }
+
     /// Dismiss an overlay and all its children (cascade), returning the
     /// dismissed content widget IDs and the overlay's focus_restore target.
     pub fn dismiss_with_focus_restore(

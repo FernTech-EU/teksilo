@@ -552,6 +552,51 @@ impl WidgetTree {
         self.current_input = previous;
     }
 
+    /// Dismiss the top overlay Escape may close, as the Escape key does, and
+    /// give the focus back to where that overlay took it from. `false` when
+    /// nothing was dismissed.
+    fn dismiss_top_on_escape(&mut self, ops: &mut dyn crate::window::WindowOps) -> bool {
+        let Some((_id, content_ids, focus_restore)) =
+            self.overlay_manager.try_dismiss_top_on_escape()
+        else {
+            return false;
+        };
+        self.dormant_dismissed_content(&content_ids, ops);
+        if let Some(restore_id) = focus_restore
+            && self.arena.is_active(restore_id)
+        {
+            self.focus_ops(restore_id, ops);
+        }
+        true
+    }
+
+    /// Answer a request to close the window that the user made (Alt+F4, the
+    /// title bar's close button, the taskbar's Close) while a modal overlay is
+    /// open in it. It does what Escape would and nothing more, as Alt+F4 does
+    /// to a dialog window: the top overlay Escape may close goes through its
+    /// own dismissal (a modal's Cancel path), and a modal Escape cannot close
+    /// stays. Returns `true` when a modal was open, so the window's close is
+    /// not asked for: the next request reaches it once no modal is left.
+    /// `false` when none was open, and the window's close goes ahead.
+    ///
+    /// The window manager's seam, called for the user's own close gestures
+    /// only: `EventContext::close_window` and a quit ask the window directly.
+    #[doc(hidden)]
+    pub fn answer_close_request_with_modal(
+        &mut self,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> bool {
+        if !self.overlay_manager.has_open_modal() {
+            return false;
+        }
+        // As the Escape key does: a tooltip, and any overlay nothing can be
+        // done in, go first without being what the request is spent on.
+        self.tooltip_escape_pressed();
+        self.inert_overlays_escape_pressed(ops);
+        self.dismiss_top_on_escape(ops);
+        true
+    }
+
     fn dispatch_event_impl(&mut self, event: WidgetEvent, ops: &mut dyn crate::window::WindowOps) {
         // Admit the pointer this event belongs to into the table before
         // anything routes. A legacy `WidgetEvent` names no pointer, so
@@ -690,15 +735,8 @@ impl WidgetTree {
             key: Key::Escape, ..
         } = &event
             && !self.overlay_manager.is_empty()
-            && let Some((_id, content_ids, focus_restore)) =
-                self.overlay_manager.try_dismiss_top_on_escape()
+            && self.dismiss_top_on_escape(&mut *ops)
         {
-            self.dormant_dismissed_content(&content_ids, &mut *ops);
-            if let Some(restore_id) = focus_restore
-                && self.arena.is_active(restore_id)
-            {
-                self.focus_ops(restore_id, &mut *ops);
-            }
             return;
         }
 
