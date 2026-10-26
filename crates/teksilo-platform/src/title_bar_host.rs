@@ -158,7 +158,12 @@ pub fn create_title_bar_host(
 ) -> Result<Rc<dyn PlatformTitleBarHost>, PlatformError> {
     #[cfg(target_os = "windows")]
     {
-        WindowsHost::new(window, callbacks).map(|h| Rc::new(h) as Rc<dyn PlatformTitleBarHost>)
+        // teksilo-app builds a custom-chrome window undecorated for this
+        // host; without the host it needs its native frame back.
+        let undecorated = window.clone();
+        WindowsHost::new(window, callbacks)
+            .map(|h| Rc::new(h) as Rc<dyn PlatformTitleBarHost>)
+            .inspect_err(|_| undecorated.set_decorations(true))
     }
 
     #[cfg(target_os = "macos")]

@@ -2011,12 +2011,24 @@ impl WindowManager {
 
         // When the application opts into custom chrome, suppress the
         // server-side decorations on platforms where they're entirely
-        // client-drawn (Wayland, X11). On Windows we keep
-        // `with_decorations(true)` because the M4 recipe relies on the native
-        // frame still being present (DwmExtendFrameIntoClientArea +
-        // WM_NCCALCSIZE), and on macOS the M3 recipe sets the relevant
-        // attributes via `WindowAttributesExtMacOS` — neither needs the toggle
-        // here.
+        // client-drawn (Wayland, X11). On macOS the M3 recipe sets the
+        // relevant attributes via `WindowAttributesExtMacOS` instead (below).
+        //
+        // On Windows the title-bar host makes the whole window the client
+        // area (`WM_NCCALCSIZE`), so winit is told the window has no frame.
+        // An undecorated top-level window keeps the caption and sizing styles
+        // the host's recipe needs (aero snap, snap layouts, the DWM shadow);
+        // what changes is winit's size arithmetic, which then stops adding a
+        // frame the host has taken away. With the frame counted, the
+        // configured size, a restored size, `request_inner_size` and the
+        // minimum and maximum all came out larger by it (16 x 39 px at
+        // 100 %), and a window restored from its saved size grew by that on
+        // every launch. If the host cannot be installed,
+        // `create_title_bar_host` gives the window its frame back.
+        #[cfg(target_os = "windows")]
+        if wants_custom_chrome {
+            window_attrs = window_attrs.with_decorations(false);
+        }
         //
         // The window system has to be predicted from the environment rather
         // than read off a handle, because this decision is made *before* the

@@ -11,6 +11,11 @@
 //!
 //! ## Recipe
 //!
+//! 0. teksilo-app creates the window undecorated (`with_decorations(false)`).
+//!    winit keeps the caption and sizing styles of such a window, so snap
+//!    and the DWM frame below still work, and counts no frame in the sizes
+//!    it sets: the client area this host gives is the whole window, and a
+//!    size asked of winit is the window's.
 //! 1. `DwmExtendFrameIntoClientArea(hwnd, MARGINS{top: 1, ..0})` —
 //!    the 1-pixel top inset is what makes Win11 keep its rounded
 //!    corners; setting `0` gives square corners. This is the
@@ -178,8 +183,8 @@ impl WindowsHost {
         // Step 2: install the subclass FIRST, before triggering the
         // frame recompute. `SetWindowPos(SWP_FRAMECHANGED)` synchronously
         // sends `WM_NCCALCSIZE` — if the subclass isn't there yet,
-        // winit's default proc handles it and the OS leaves the native
-        // frame in place until the next resize. Installing the subclass
+        // winit's own proc answers it, with its rule for a maximised
+        // window rather than ours, until the next resize. Installing the subclass
         // first means our `WM_NCCALCSIZE` handler runs from the very
         // first frame.
         let subclass_id = NEXT_SUBCLASS_ID.fetch_add(1, Ordering::Relaxed);

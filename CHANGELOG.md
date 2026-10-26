@@ -49,6 +49,13 @@ by crate for clarity, not because crates version independently.
   and `StandardMenu::window()` showed two Window menus on macOS. The own
   menu's rows now go into the standard one, below Zoom; the in-window bar is
   unchanged.
+- **A custom-chrome window has the size it asks for on Windows, and no longer
+  grows on every launch.** A window with `DecorationsMode::CustomChrome`
+  opened larger than its configured size by the Windows frame (16 x 39 px at
+  100 %), and its minimum and maximum sizes and a size set through
+  `WindowState::size()` were off by the same amount. With saved window
+  state, the larger size was saved and grew again at each launch. A size
+  already saved that way is kept, not shrunk back.
 
 ## [0.21.0] - 2026-10-26
 
