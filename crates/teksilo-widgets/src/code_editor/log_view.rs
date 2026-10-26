@@ -485,9 +485,11 @@ impl Widget for LogView {
         // not as keys.
         {
             let state = self.state.clone();
+            let available = state.clone();
             crate::common::standard_edit::register_standard_edit_actions(
                 ctx,
                 move |command, ctx| log_stream::run_log_standard_edit(&state, command, ctx),
+                move |command| log_stream::log_standard_edit_available(&available, command),
             );
         }
 

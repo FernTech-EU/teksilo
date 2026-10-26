@@ -526,6 +526,32 @@ pub(super) fn handle_key(
     finish_key_action(state, ctx, action)
 }
 
+/// Whether one of the standard edit commands has anything to act on in the
+/// editor now, which is what greys its menu rows: a command the editor's
+/// [`CommandFilter`](crate::common::editor_runtime::CommandFilter) accepts,
+/// and for Copy and Cut a selection, for Select All some text, for Undo and
+/// Redo some history that way. Never asked by a dispatch, which runs
+/// [`run_standard_edit`] whatever this answers. `true` while the state is
+/// borrowed, the answer from before there was a question.
+pub(super) fn standard_edit_available(state: &SharedState, command: StandardEdit) -> bool {
+    let Ok(st) = state.try_borrow() else {
+        return true;
+    };
+    let filter = st.policy.command_filter;
+    match command {
+        StandardEdit::Copy => filter.accepts(EditCommandKind::Copy) && st.cursor.has_selection(),
+        StandardEdit::Cut => filter.accepts(EditCommandKind::Cut) && st.cursor.has_selection(),
+        StandardEdit::Paste => filter.accepts(EditCommandKind::Paste),
+        StandardEdit::PastePlain => filter.accepts(EditCommandKind::PasteUnformatted),
+        StandardEdit::SelectAll => {
+            filter.accepts(EditCommandKind::SelectAll) && st.document.character_count() > 0
+        }
+        StandardEdit::Undo => filter.accepts(EditCommandKind::Undo) && st.document.can_undo(),
+        StandardEdit::Redo => filter.accepts(EditCommandKind::Redo) && st.document.can_redo(),
+        _ => false,
+    }
+}
+
 /// Run one of the standard edit commands, as its `edit.*` action does.
 ///
 /// Returns whether it ran. A command the editor's

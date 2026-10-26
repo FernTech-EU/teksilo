@@ -136,7 +136,8 @@ shortcut.
 A row with an `.intent` and no `.on_activate` is **enabled only while something
 on its route takes the intent**: an enabled action between the focused widget
 and the window's root, a global action of the window, or one of the
-application tree's. Its own `.enabled` applies on top. A row with a closure
+application tree's, that has something to act on. Its own `.enabled` applies
+on top. A row with a closure
 always does something, and so does a two-way `.checkable`, `.tri_checkable` or
 `.radio` row, which writes its state when chosen: only `.enabled` decides for
 those, in the window as in the macOS menu bar.
@@ -159,9 +160,19 @@ those, in the window as in the macOS menu bar.
   page behind it takes is greyed out, as AppKit disables a document's items
   while a modal panel is up, and a row the dialog or the application tree
   takes stays live.
-- An action that may decline when it runs (`on_invoke_with_response`, such as a
-  text field's `edit.copy` with nothing selected) counts as taking the intent,
-  so its row stays enabled.
+- The text widgets say when an edit command has nothing to act on, as
+  AppKit's text views do: in a `TextInputField` (and the fields built on it),
+  a `RichTextEditor`, a `CodeEditor` or a `LogView` with focus, Edit ▸ Copy is
+  greyed out while nothing is selected (a masked password counts as nothing),
+  Cut also in a read-only one, Paste and Paste Unformatted in a read-only one,
+  Select All in an empty one, Undo and Redo while there is nothing to undo or
+  redo. A code editor and a log view copy the caret's line with nothing
+  selected, so there Copy and Cut need text only. Paste does not look at the
+  clipboard. This only greys rows: the shortcut still reaches the widget,
+  which does what it did before (Ctrl+C with nothing selected copies nothing
+  and goes no further).
+- Any other action that may decline when it runs (`on_invoke_with_response`)
+  counts as taking the intent, so its row stays enabled.
 
 ## A window's own menu
 

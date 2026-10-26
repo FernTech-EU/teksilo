@@ -23,21 +23,31 @@ use teksilo_platform::clipboard::{ClipboardHandle, MemoryClipboard};
 
 use super::TextInputField;
 
-/// A parent that handles `edit.cut` itself, as an application's own Cut
-/// would, and counts what reaches it.
+/// A parent that handles `edit.cut` and `edit.copy` itself, as an
+/// application's own Cut and Copy would, and counts what reaches them; or,
+/// without `app_actions`, a parent that takes nothing.
 #[derive(Debug)]
 struct AppCut {
     field: Option<TextInputField>,
+    app_actions: bool,
     cuts: Rc<Cell<u32>>,
+    copies: Rc<Cell<u32>>,
     child: Option<WidgetId>,
 }
 
 impl Widget for AppCut {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let cuts = self.cuts.clone();
-        ctx.register_action(
-            Action::new(StandardEdit::Cut.id()).on_invoke(move |_, _| cuts.set(cuts.get() + 1)),
-        );
+        if self.app_actions {
+            let cuts = self.cuts.clone();
+            ctx.register_action(
+                Action::new(StandardEdit::Cut.id()).on_invoke(move |_, _| cuts.set(cuts.get() + 1)),
+            );
+            let copies = self.copies.clone();
+            ctx.register_action(
+                Action::new(StandardEdit::Copy.id())
+                    .on_invoke(move |_, _| copies.set(copies.get() + 1)),
+            );
+        }
         let field = self.field.take().expect("built once");
         let child = ctx.add(field);
         self.child = Some(child);
@@ -58,15 +68,35 @@ impl Widget for AppCut {
 
 struct Field {
     tree: WidgetTree,
+    field: WidgetId,
     text: Signal<String>,
     clipboard: ClipboardHandle,
     app_cuts: Rc<Cell<u32>>,
+    app_copies: Rc<Cell<u32>>,
 }
 
 impl Field {
-    /// A focused field holding `hello`, inside a parent with its own Cut.
+    /// A focused field holding `hello`, inside a parent with its own Cut
+    /// and Copy.
     fn new(read_only: bool) -> Self {
-        let text = Signal::new("hello".to_string());
+        Self::with("hello", |field| field.read_only(read_only), true)
+    }
+
+    /// A focused field holding `text`, inside a parent that takes nothing,
+    /// so what the route takes is what the field takes.
+    fn alone(text: &str, read_only: bool) -> Self {
+        Self::with(text, |field| field.read_only(read_only), false)
+    }
+
+    /// A focused field holding `text`, made by `make`, inside a parent with
+    /// its own Cut and Copy when `app_actions`.
+    fn with(
+        text: &str,
+        make: impl FnOnce(TextInputField) -> TextInputField,
+        app_actions: bool,
+    ) -> Self {
+        let text = Signal::new(text.to_string());
+        let field = make(TextInputField::new(text.clone()));
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let clipboard = ClipboardHandle::new(MemoryClipboard::new());
         let mut registry: std::collections::HashMap<std::any::TypeId, Box<dyn std::any::Any>> =
@@ -79,9 +109,12 @@ impl Field {
             teksilo_core::event_source::TreeAppContext::empty().with_app_state(registry),
         ));
         let app_cuts = Rc::new(Cell::new(0));
+        let app_copies = Rc::new(Cell::new(0));
         let root = tree.add(AppCut {
-            field: Some(TextInputField::new(text.clone()).read_only(read_only)),
+            field: Some(field),
+            app_actions,
             cuts: app_cuts.clone(),
+            copies: app_copies.clone(),
             child: None,
         });
         tree.layout(SizeProposal::exact(300.0, 40.0));
@@ -91,10 +124,27 @@ impl Field {
         tree.focus(field);
         Self {
             tree,
+            field,
             text,
             clipboard,
             app_cuts,
+            app_copies,
         }
+    }
+
+    /// Whether a menu row for `command` shows enabled, as the native menu bar
+    /// and the in-window menus ask.
+    fn offers(&self, command: StandardEdit) -> bool {
+        let offered = self
+            .tree
+            .handled_intents_from(self.field)
+            .contains(&command.id());
+        assert_eq!(
+            offered,
+            self.tree.can_handle(command.id()),
+            "the two questions agree on {command:?}"
+        );
+        offered
     }
 
     fn press(&mut self, key: Key, modifiers: Modifiers) {
@@ -165,4 +215,82 @@ fn a_read_only_field_passes_cut_on_to_the_application() {
     assert_eq!(f.app_cuts.get(), 1, "the application's Cut runs instead");
     f.press(Key::C, Modifiers::COMMAND);
     assert_eq!(f.clipboard(), "hello", "copying is not editing");
+}
+
+#[test]
+fn copy_and_cut_grey_out_until_something_is_selected() {
+    let mut f = Field::alone("hello", false);
+    assert!(!f.offers(StandardEdit::Copy), "nothing selected");
+    assert!(!f.offers(StandardEdit::Cut), "nothing selected");
+    assert!(f.offers(StandardEdit::Paste), "an editable field");
+    assert!(f.offers(StandardEdit::PastePlain), "an editable field");
+    assert!(f.offers(StandardEdit::SelectAll), "the field holds text");
+
+    f.press(Key::A, Modifiers::COMMAND);
+    assert!(f.offers(StandardEdit::Copy), "after select all");
+    assert!(f.offers(StandardEdit::Cut), "after select all");
+
+    f.press(Key::ArrowRight, Modifiers::empty());
+    assert!(!f.offers(StandardEdit::Copy), "the selection collapsed");
+}
+
+#[test]
+fn a_read_only_field_offers_no_paste_and_no_cut() {
+    let mut f = Field::alone("hello", true);
+    f.press(Key::A, Modifiers::COMMAND);
+    assert!(f.offers(StandardEdit::Copy), "copying is not editing");
+    assert!(!f.offers(StandardEdit::Cut));
+    assert!(!f.offers(StandardEdit::Paste));
+    assert!(!f.offers(StandardEdit::PastePlain));
+}
+
+#[test]
+fn an_empty_field_offers_no_select_all() {
+    let f = Field::alone("", false);
+    assert!(!f.offers(StandardEdit::SelectAll));
+    assert!(!f.offers(StandardEdit::Copy));
+    assert!(f.offers(StandardEdit::Paste));
+}
+
+#[test]
+fn undo_and_redo_follow_the_history() {
+    let mut f = Field::alone("", false);
+    assert!(!f.offers(StandardEdit::Undo), "nothing to undo yet");
+    assert!(!f.offers(StandardEdit::Redo));
+    f.tree.type_text(f.field, "x");
+    f.tree.layout(SizeProposal::exact(300.0, 40.0));
+    assert_eq!(f.text.get(), "x");
+    assert!(f.offers(StandardEdit::Undo), "after typing");
+    f.press(Key::Z, Modifiers::COMMAND);
+    assert!(f.offers(StandardEdit::Redo), "after an undo");
+}
+
+#[test]
+fn a_masked_field_offers_no_copy() {
+    let mut f = Field::with(
+        "secret",
+        |field| field.secure(super::EchoMode::Masked),
+        false,
+    );
+    f.press(Key::A, Modifiers::COMMAND);
+    assert!(!f.offers(StandardEdit::Copy), "the plaintext stays put");
+    assert!(!f.offers(StandardEdit::Cut));
+    assert!(f.offers(StandardEdit::Paste));
+}
+
+/// Greying is all availability changes: Ctrl+C with nothing selected still
+/// reaches the field, which takes it, so the application's own Copy above
+/// it still does not run, and the clipboard is left alone.
+#[test]
+fn copy_with_nothing_selected_is_still_the_fields() {
+    let mut f = Field::new(false);
+    f.clipboard.set_text("before").unwrap();
+    assert!(
+        f.offers(StandardEdit::Copy),
+        "the application's Copy is on the route"
+    );
+    f.press(Key::C, Modifiers::COMMAND);
+    assert_eq!(f.clipboard(), "before");
+    assert_eq!(f.app_copies.get(), 0, "the field took the chord");
+    assert_eq!(f.text.get(), "hello", "and typed no `c`");
 }

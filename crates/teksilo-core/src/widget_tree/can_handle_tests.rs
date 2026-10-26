@@ -61,6 +61,11 @@ impl Widget for Root {
             Action::new("test.declines")
                 .on_invoke_with_response(|_, _| -> IntentResponse { unreachable!() }),
         );
+        ctx.register_action(
+            Action::new("test.unavailable")
+                .available_when(|| false)
+                .on_invoke(|_, _| unreachable!()),
+        );
         ctx.register_action_global(Action::new("test.global").on_invoke(|_, _| unreachable!()));
         let button = ctx.add(FillWidget::new().focusable());
         let editor = ctx.add(Editor);
@@ -318,6 +323,11 @@ fn handled_intents_from_names_what_can_handle_from_takes() {
                     .enabled_when(Signal::new(false))
                     .on_invoke(|_, _| unreachable!()),
             );
+            ctx.register_action(
+                Action::new("app.unavailable")
+                    .available_when(|| false)
+                    .on_invoke(|_, _| unreachable!()),
+            );
             vec![]
         }
         fn layout_response(&self, proposal: SizeProposal, _: &LayoutContext) -> LayoutResponse {
@@ -336,9 +346,11 @@ fn handled_intents_from_names_what_can_handle_from_takes() {
         "test.global",
         "test.disabled",
         "test.declines",
+        "test.unavailable",
         "test.nobody",
         "app.new",
         "app.off",
+        "app.unavailable",
     ];
     for focus in [None, Some(window.button), Some(window.editor)] {
         if let Some(focus) = focus {
@@ -354,5 +366,67 @@ fn handled_intents_from_names_what_can_handle_from_takes() {
             );
         }
         assert!(handled.is_sorted(), "sorted, so two answers compare");
+        assert!(!handled.contains(&"test.unavailable"));
+        assert!(!handled.contains(&"app.unavailable"));
     }
+}
+
+/// An action with nothing to act on greys the row for its intent, and
+/// dispatch still offers it the intent: availability is what a menu row
+/// asks, and the handler alone decides what a sent intent does.
+#[test]
+fn an_unavailable_action_greys_its_row_and_still_runs() {
+    #[derive(Debug)]
+    struct Field {
+        available: Rc<std::cell::Cell<bool>>,
+        ran: Rc<std::cell::Cell<u32>>,
+    }
+    impl Widget for Field {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let available = Rc::clone(&self.available);
+            let ran = Rc::clone(&self.ran);
+            ctx.register_action(
+                Action::new("test.copy")
+                    .available_when(move || available.get())
+                    .on_invoke(move |_, _| ran.set(ran.get() + 1)),
+            );
+            ctx.apply_self_handlers(crate::widget_builder::HandlerSet::new().focusable(true));
+            vec![]
+        }
+        fn layout_response(&self, proposal: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(100.0, 20.0).into()
+        }
+    }
+    let available = Rc::new(std::cell::Cell::new(false));
+    let ran = Rc::new(std::cell::Cell::new(0));
+    let mut tree = WidgetTree::new();
+    let field = tree.add(Field {
+        available: Rc::clone(&available),
+        ran: Rc::clone(&ran),
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(field);
+
+    assert!(!tree.can_handle("test.copy"));
+    assert!(!tree.can_handle_from(field, "test.copy"));
+    assert!(!tree.can_handle_kept_in_modal_from(field, "test.copy"));
+    assert!(!tree.handled_intents_from(field).contains(&"test.copy"));
+    assert!(
+        !tree
+            .handled_intents_kept_in_modal_from(field)
+            .contains(&"test.copy")
+    );
+
+    let consumed = tree.dispatch_intent(
+        field,
+        crate::intent::Intent::new("test.copy"),
+        true,
+        &mut crate::window::NoopWindowOps,
+    );
+    assert!(consumed, "dispatch does not ask availability");
+    assert_eq!(ran.get(), 1);
+
+    available.set(true);
+    assert!(tree.can_handle("test.copy"), "asked again on every query");
+    assert!(tree.handled_intents_from(field).contains(&"test.copy"));
 }

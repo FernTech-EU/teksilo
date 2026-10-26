@@ -137,7 +137,13 @@ by crate for clarity, not because crates version independently.
   of their own when none is open. Asked in answer to the user's input, or
   with an activation token, that window is restored and brought to the
   front; asked otherwise (a timer, another thread), it asks for the user's
-  attention and takes the focus from no other application. An
+  attention (the Dock icon bounces, the taskbar button flashes, until the
+  user comes to the application) and takes the focus from no other
+  application. A dialog that would open a window of its own (macOS,
+  Windows) over a window that is minimised waits instead: it is shown,
+  in front, on the first turn a window of the application takes the focus,
+  and a quit answers a dialog still waiting as dismissed (a `MessageBox`
+  reports its Escape button, Cancel). An
   intent a window leaves unclaimed is offered to it once, and one it leaves
   goes to the window used last (of those not minimised, when there is one),
   so a window's menu can fire a command only the application tree implements. A
@@ -451,6 +457,12 @@ by crate for clarity, not because crates version independently.
   the dialog and left the document window open. The guide and the
   `close-confirmation` example now defer the close and answer it through
   its `CloseDecision`, which knows its window.
+- **A dialog window opened with no input from the user no longer takes the
+  focus from another application.** A modal window comes to the front when
+  it opens in answer to the user's input or over a window that has the
+  focus; otherwise (a timer's, another thread's) it opens where it is. On
+  macOS a dialog opened over a minimised window is no longer drawn with that
+  window still in the Dock.
 - **`ctx.focus_window(id)` raises the window its handler runs in.** That
   window is out of the window list during its own dispatch, so raising it
   did nothing, which is the common case in a single-instance handler.

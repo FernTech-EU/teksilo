@@ -213,6 +213,41 @@ fn generate_session_id() -> String {
     uuid[..16].to_string()
 }
 
+/// Whether a modal request with deferred content can be presented as a
+/// native window of its own here
+/// ([`supports_native_modal_windows`](teksilo_platform::supports_native_modal_windows)).
+/// A test build can answer yes on X11, to run that path there
+/// ([`native_modal_override`]).
+fn native_modal_windows_supported() -> bool {
+    #[cfg(test)]
+    if let Some(supported) = native_modal_override::get() {
+        return supported;
+    }
+    teksilo_platform::supports_native_modal_windows()
+}
+
+/// What a test build answers for [`native_modal_windows_supported`] on the
+/// thread that set it, in place of the platform's answer.
+#[cfg(test)]
+pub(crate) mod native_modal_override {
+    use std::cell::Cell;
+
+    thread_local! {
+        static OVERRIDE: Cell<Option<bool>> = const { Cell::new(None) };
+    }
+
+    /// Answer `supported` from now on; `None` gives the platform's answer
+    /// back.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub(crate) fn set(supported: Option<bool>) {
+        OVERRIDE.with(|cell| cell.set(supported));
+    }
+
+    pub(super) fn get() -> Option<bool> {
+        OVERRIDE.with(Cell::get)
+    }
+}
+
 fn resolve_modal_presentation(
     requested: ModalPresentation,
     content: &ModalContent,
@@ -1240,7 +1275,7 @@ impl TeksiloAppHandler {
     }
 
     fn process_modal_requests(&mut self, event_loop: &ActiveEventLoop) -> bool {
-        let native_supported = teksilo_platform::supports_native_modal_windows();
+        let native_supported = native_modal_windows_supported();
         let requests = self.wm.drain_pending_modal_requests();
         let had_requests = !requests.is_empty();
 
@@ -1365,23 +1400,42 @@ impl TeksiloAppHandler {
     /// working with: the [most recent](crate::WindowManager::most_recent_window)
     /// one not about to close and not minimised, else the most recent one;
     /// over its frontmost native dialog if it has one, in its tree or as a
-    /// native modal child as the request resolves. That window is restored
-    /// and brought forward first when the user asked for the dialog, and
-    /// otherwise asks for the user's attention (see
-    /// [`show_for_app_tree_dialog`](crate::window_manager::WindowManager::show_for_app_tree_dialog)). With no window open, or every one closing,
-    /// it gets a plain window of its own, which its dismissal closes. A
-    /// request whose content is an existing widget of the application tree
-    /// cannot move to another tree, and is refused.
+    /// native modal child as the request resolves. With no window open, or
+    /// every one closing, it gets a plain window of its own, which its
+    /// dismissal closes. A request whose content is an existing widget of
+    /// the application tree cannot move to another tree, and is refused.
+    ///
+    /// Brought to the user as
+    /// [`app_dialog_presentation`](crate::window_manager::app_dialog_presentation)
+    /// decides: restored and in front when the user asked for it (their
+    /// input, an activation token, a window of the application taking the
+    /// focus, a quit waiting on its answer) or the window has the focus;
+    /// otherwise shown where it is while the application asks for
+    /// attention; and owed, not shown, when it would open a window of its
+    /// own over a minimised window. Owed dialogs come first, so the order
+    /// they were asked in holds; once one is owed, the ones after it wait
+    /// with it.
     fn process_app_tree_modal_requests(&mut self, event_loop: &ActiveEventLoop) -> bool {
-        let requests = self
+        let asked = self
             .wm
             .app_tree_mut()
             .map(|tree| tree.drain_pending_modal_requests())
             .unwrap_or_default();
-        let had_requests = !requests.is_empty();
-        let native_supported = teksilo_platform::supports_native_modal_windows();
-        for queued in requests {
-            let request = queued.request;
+        let owed = self.wm.take_owed_app_dialogs();
+        let came_back = self.wm.take_owed_app_dialogs_due();
+        if asked.is_empty() && owed.is_empty() {
+            return false;
+        }
+        let already_owing = !owed.is_empty();
+        let native_supported = native_modal_windows_supported();
+        let for_user = self.wm.acts_for_user() || came_back || self.wm.quit_awaits_answer();
+        self.wm.refresh_minimised_windows();
+        let mut presented = false;
+        let mut owing = false;
+        for request in owed
+            .into_iter()
+            .chain(asked.into_iter().map(|queued| queued.request))
+        {
             if matches!(request.content, ModalContent::ExistingWidget(_)) {
                 eprintln!(
                     "teksilo-app: a modal request from the application tree presents an \
@@ -1390,18 +1444,39 @@ impl TeksiloAppHandler {
                 );
                 continue;
             }
+            if owing {
+                self.wm.owe_app_dialog(request);
+                continue;
+            }
             let Some(window) = self.wm.app_modal_target() else {
                 self.open_modal_window(None, request, event_loop);
+                presented = true;
                 continue;
             };
-            // Where the user can see it: restored and in front when the
-            // user asked, else announced (see `show_for_app_tree_dialog`).
-            self.wm.show_for_app_tree_dialog(window);
-            match resolve_modal_presentation(
+            let resolved = resolve_modal_presentation(
                 request.presentation,
                 &request.content,
                 native_supported,
-            ) {
+            );
+            let presentation = crate::window_manager::app_dialog_presentation(
+                for_user,
+                self.wm.knows_focused(window),
+                self.wm.knows_minimised(window),
+                resolved == ResolvedModalPresentation::NativeWindow,
+            );
+            if presentation == crate::window_manager::AppDialogPresentation::Owe {
+                // The attention asked as the first is owed lasts until the
+                // user comes to the application.
+                if !already_owing {
+                    self.wm.show_for_app_tree_dialog(window, presentation);
+                }
+                owing = true;
+                self.wm.owe_app_dialog(request);
+                continue;
+            }
+            self.wm.show_for_app_tree_dialog(window, presentation);
+            presented = true;
+            match resolved {
                 ResolvedModalPresentation::InTree => {
                     if let Some(managed) = self.wm.get_by_teksilo_mut(window)
                         && let Some(&anchor) = managed.tree.roots().first()
@@ -1411,11 +1486,15 @@ impl TeksiloAppHandler {
                     }
                 }
                 ResolvedModalPresentation::NativeWindow => {
+                    self.wm.set_raise_next_modal(
+                        presentation == crate::window_manager::AppDialogPresentation::Raise,
+                    );
                     self.open_modal_window(Some(window), request, event_loop);
+                    self.wm.set_raise_next_modal(false);
                 }
             }
         }
-        had_requests
+        presented
     }
 
     fn process_modal_dismissals(&mut self) -> bool {
@@ -4024,6 +4103,9 @@ impl TeksiloAppHandler {
                 // taskbar button. The child comes back to the front, as for a
                 // click in the window.
                 if focused && let Some(fid) = self.wm.teksilo_id_for_winit(window_id) {
+                    // The user is back: the dialogs the application tree
+                    // owes them are presented in this turn.
+                    self.wm.note_app_focus_gained();
                     self.wm.note_focus_gained(fid);
                     self.wm
                         .note_dialog_sign(fid, crate::window_manager::DialogSign::Focused);

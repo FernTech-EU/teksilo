@@ -698,6 +698,20 @@ pub(crate) fn handle_log_key(
     }
 }
 
+/// Whether one of the standard edit commands has anything to act on in a log
+/// view now, which is what greys its menu rows: Select All and Copy (which
+/// takes the caret's line with no selection) once the log holds text, and
+/// nothing else, a log being read-only. Never asked by a dispatch. `true`
+/// for those two while the state is borrowed.
+pub(crate) fn log_standard_edit_available(state: &SharedState, command: StandardEdit) -> bool {
+    match command {
+        StandardEdit::SelectAll | StandardEdit::Copy => state
+            .try_borrow()
+            .map_or(true, |st| st.document.character_count() > 0),
+        _ => false,
+    }
+}
+
 /// Select-all and copy for a log view, as their `edit.*` actions run them.
 /// Every other standard edit command is declined: a log is read-only.
 pub(crate) fn run_log_standard_edit(

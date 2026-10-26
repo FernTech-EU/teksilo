@@ -2471,3 +2471,70 @@ fn an_application_bar_with_no_application_says_so_once() {
     let said = UNDECLARED_SAID.with(|said| said.get()) - before;
     assert!(said <= 1, "said {said} times");
 }
+
+/// Edit > Copy and Edit > Cut in a model bar, over a text field: greyed out
+/// while nothing is selected in the field, enabled once something is, as the
+/// field answers when the menu opens.
+#[test]
+fn edit_rows_follow_the_fields_selection() {
+    #[derive(Debug)]
+    struct FieldWindow(std::rc::Rc<std::cell::Cell<Option<WidgetId>>>);
+    impl Widget for FieldWindow {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            use teksilo_core::shortcut::StandardEdit;
+            let model = crate::menu::MenuModel::new().menu(lit!("&Edit"), |m| {
+                m.item(crate::menu::MenuEntry::new(lit!("Cut")).intent(StandardEdit::Cut.id()))
+                    .item(crate::menu::MenuEntry::new(lit!("Copy")).intent(StandardEdit::Copy.id()))
+                    .item(
+                        crate::menu::MenuEntry::new(lit!("Paste")).intent(StandardEdit::Paste.id()),
+                    )
+            });
+            let field = ctx.add(crate::primitives::TextInputField::new(Signal::new(
+                "hello".to_string(),
+            )));
+            self.0.set(Some(field));
+            let bar = MenuBar::from_model(model);
+            vec![ctx.add(crate::primitives::VStack::new().child(bar).child(field))]
+        }
+
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            proposal.resolve(800.0, 600.0).into()
+        }
+    }
+    let field = std::rc::Rc::new(std::cell::Cell::new(None));
+    let mut t = collapsible_tree();
+    t.add(FieldWindow(field.clone()));
+    t.layout(WINDOW);
+    let field = field.get().expect("the field was built");
+    let field = t.first_focusable_descendant(field).unwrap_or(field);
+    let settle = |t: &mut WidgetTree| {
+        t.layout(WINDOW);
+        t.advance_time(std::time::Duration::from_secs(1));
+        t.layout(WINDOW);
+    };
+    t.focus(field);
+    let edit = t.find_by_label("Edit").expect("the Edit title");
+    let enabled = |t: &WidgetTree, label: &str| {
+        t.is_enabled(t.find_by_label(label).expect("the row is showing"))
+    };
+
+    t.click(edit);
+    settle(&mut t);
+    assert!(!enabled(&t, "Copy"), "nothing is selected");
+    assert!(!enabled(&t, "Cut"), "nothing is selected");
+    assert!(enabled(&t, "Paste"), "the field is editable");
+    t.press_key(Key::Escape, Modifiers::NONE);
+    settle(&mut t);
+    assert_eq!(t.focused(), Some(field), "precondition: back in the field");
+
+    t.press_key(Key::A, Modifiers::COMMAND);
+    settle(&mut t);
+    t.click(edit);
+    settle(&mut t);
+    assert!(enabled(&t, "Copy"), "after select all");
+    assert!(enabled(&t, "Cut"), "after select all");
+}

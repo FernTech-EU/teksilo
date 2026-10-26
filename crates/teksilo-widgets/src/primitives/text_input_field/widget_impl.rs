@@ -974,6 +974,7 @@ impl Widget for TextInputField {
         // rebindable `edit.*` shortcuts, not as keys.
         {
             let state = self.state().clone();
+            let available = state.clone();
             let touch = self.touch.clone();
             let surfaces = ctx.text_surfaces();
             crate::common::standard_edit::register_standard_edit_actions(
@@ -992,6 +993,7 @@ impl Widget for TextInputField {
                     }
                     ran
                 },
+                move |command| keyboard::standard_edit_available(&available, command),
             );
         }
         Vec::new()

@@ -4180,7 +4180,13 @@ impl WidgetTree {
             .map(|anchor| {
                 self.actions_on_route(anchor, &[], true)
                     .into_iter()
-                    .map(|action| (action.intent, action.enabled_when.clone()))
+                    .map(|action| {
+                        (
+                            action.intent,
+                            action.enabled_when.clone(),
+                            action.availability(),
+                        )
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -4203,8 +4209,10 @@ impl WidgetTree {
     /// at an open modal the window-global actions registered inside it, and
     /// last the other window-global actions. `past_modals` false asks for an
     /// intent an open modal keeps (a shortcut's, a native menu bar row's),
-    /// which ends at the first one. Enabled or not: the caller reads
-    /// [`Action::is_enabled`](crate::action::Action::is_enabled) when it
+    /// which ends at the first one. Enabled or not, available or not: the
+    /// caller reads
+    /// [`Action::is_enabled`](crate::action::Action::is_enabled) (a
+    /// dispatch's question) or `Action::is_available` (a menu row's) when it
     /// needs to.
     pub(crate) fn actions_on_route(
         &self,
@@ -4265,12 +4273,15 @@ impl WidgetTree {
     /// sends, pass [`live_command_focus`](Self::live_command_focus) to
     /// [`can_handle_from`](Self::can_handle_from).
     ///
-    /// Two answers are approximate, and say "handled": an action built with
+    /// A disabled action never handles it, as for an intent sent from focus,
+    /// which passes a disabled action by, and neither does one with nothing
+    /// to act on now ([`available_when`](crate::action::ActionBuilder::available_when):
+    /// a text field's `edit.copy` with nothing selected), which a dispatch
+    /// would still run. Two answers are approximate, and say "handled": an
+    /// action built with
     /// [`on_invoke_with_response`](crate::action::ActionBuilder::on_invoke_with_response),
-    /// which may decline when it runs (a text field's `edit.copy` with
-    /// nothing selected), and an application action, as the application tree
-    /// last published it. A disabled action never handles it, as for an
-    /// intent sent from focus, which passes a disabled action by.
+    /// which may decline when it runs, and an application action, as the
+    /// application tree last published it.
     #[doc(hidden)]
     pub fn can_handle(&self, name: &str) -> bool {
         self.command_focus()
@@ -4301,7 +4312,7 @@ impl WidgetTree {
         let mut names: Vec<&'static str> = self
             .actions_on_route(source, &[], past_modals)
             .into_iter()
-            .filter(|action| action.is_enabled())
+            .filter(|action| action.is_available())
             .map(|action| action.intent)
             .collect();
         if let Some(scope) = &self.application_scope {
@@ -4343,11 +4354,11 @@ impl WidgetTree {
     fn can_handle_on_route(&self, source: WidgetId, name: &str, past_modals: bool) -> bool {
         self.actions_on_route(source, &[], past_modals)
             .into_iter()
-            .any(|action| action.intent == name && action.is_enabled())
+            .any(|action| action.intent == name && action.is_available())
             || self
                 .application_scope
                 .as_ref()
-                .is_some_and(|scope| scope.takes(name))
+                .is_some_and(|scope| scope.offers(name))
     }
 
     /// A signal that says whether an intent named `name` would be handled,

@@ -272,6 +272,30 @@ pub(crate) fn handle_key(
     }
 }
 
+/// Whether one of the standard edit commands has anything to act on in the
+/// field now, which is what greys its menu rows: Copy a selection a masked
+/// field does not hide, Cut that in an editable field, Paste an editable
+/// field, Select All some text, Undo and Redo an editable field with history
+/// that way. Never asked by a dispatch, which runs
+/// [`run_standard_edit`] whatever this answers. `true` while the state is
+/// borrowed, the answer from before there was a question.
+pub(crate) fn standard_edit_available(state: &SharedState, command: StandardEdit) -> bool {
+    let Ok(st) = state.try_borrow() else {
+        return true;
+    };
+    let editable = !st.read_only;
+    let copyable = st.cursor.has_selection() && st.copy_allowed();
+    match command {
+        StandardEdit::Copy => copyable,
+        StandardEdit::Cut => editable && copyable,
+        StandardEdit::Paste | StandardEdit::PastePlain => editable,
+        StandardEdit::SelectAll => st.document.character_count() > 0,
+        StandardEdit::Undo => editable && st.document.can_undo(),
+        StandardEdit::Redo => editable && st.document.can_redo(),
+        _ => false,
+    }
+}
+
 /// Run one of the standard edit commands for the field, as its `edit.*`
 /// action does. Returns whether the command ran: a read-only field declines
 /// every command that would change its text, which passes the intent on, and

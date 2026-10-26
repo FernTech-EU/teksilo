@@ -31,7 +31,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Thirty-seven claims, and they do not all carry the same weight. Verified by
+//! Thirty-eight claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -130,6 +130,12 @@
 //!   when focused, but not in one about to close, and is refused when it
 //!   presents an existing widget; one a rebuild in an `about_to_wait` tick
 //!   asks for is presented by `about_to_wait`;
+//! - **(an)** a new modal window is raised only for the user's input or over
+//!   a focused owner; the application tree's dialog in a native window of its
+//!   own (forced on X11 through `native_modal_override`) opens unraised over
+//!   a visible window with attention asked, is owed over a minimised one
+//!   (no window, attention asked once), is presented and raised on the first
+//!   focus, and is answered Cancel by a quit while still owed;
 //! - **(ad)** an intent a window's actions leave reaches the application
 //!   tree, and one the application tree's handler sends reaches the window,
 //!   in `post_event` and in `about_to_wait`; a shortcut's crosses when the
@@ -3561,6 +3567,169 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         let hosts: Vec<_> = app.wm.teksilo_ids().collect();
         assert_eq!(hosts.len(), 1, "about_to_wait presented the dialog");
         app.wm.close_window(hosts[0]);
+
+        // (an) A dialog takes no focus it was not given. A new modal window
+        // is raised only when the user asked for it or its owner has the
+        // focus (the raise is macOS's `activateIgnoringOtherApps` and
+        // Windows' `SetForegroundWindow`, which take the focus from the
+        // application the user is in). Deleting the condition on
+        // `create_window`'s raise logs a raise for the first window.
+        {
+            use crate::window_manager::activation_log::{self, Activation};
+            let owner = app.wm.create_window(
+                WindowConfig::new()
+                    .title("teksilo loop test: owner in the background")
+                    .size(320, 200)
+                    .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                event_loop,
+            );
+            let owner_winit = app.wm.winit_id_for_teksilo(owner).expect("open");
+            let focus = |app: &mut TeksiloAppHandler, focused: bool| {
+                app.wm.get_by_teksilo_mut(owner).expect("open").focused = focused;
+            };
+            let raised = |log: &[(WindowId, Activation)]| {
+                log.iter().any(|(_, what)| *what == Activation::Raised)
+            };
+            let dialog = |app: &mut TeksiloAppHandler| {
+                app.wm.create_window(
+                    WindowConfig::new()
+                        .title("teksilo loop test: background dialog")
+                        .size(160, 100)
+                        .modal_to(owner)
+                        .root(|tree, _state| tree.add(logging_leaf(&Default::default(), false))),
+                    event_loop,
+                )
+            };
+            focus(app, false);
+            activation_log::take();
+            let quiet = dialog(app);
+            assert!(
+                !raised(&activation_log::take()),
+                "no input, owner not focused: the dialog is not raised"
+            );
+            app.wm.close_window(quiet);
+            focus(app, true);
+            let in_front = dialog(app);
+            assert!(raised(&activation_log::take()), "the owner focused: raised");
+            app.wm.close_window(in_front);
+            focus(app, false);
+            app.wm.note_user_activation();
+            let asked = dialog(app);
+            app.wm.clear_user_activation();
+            assert!(raised(&activation_log::take()), "asked by the user: raised");
+            app.wm.close_window(asked);
+
+            // The application tree's dialog in a native window of its own
+            // (macOS and Windows; forced here on X11), asked with no input.
+            // Over a window the user can see, it is opened, not raised, and
+            // the application asks for attention. Over a minimised one it is
+            // owed: no window opens, attention is asked once, and the dialog
+            // is presented, raised, over the window that takes the focus
+            // first. A quit answers a dialog still owed through its Cancel
+            // arm. Presenting it whatever the owner's state opens a window
+            // over the minimised owner (the ghost window AppKit draws);
+            // leaving out the `Focused` arm's note never presents it.
+            crate::app::native_modal_override::set(Some(true));
+            let answers: Rc<RefCell<Vec<teksilo_widgets::StandardButton>>> = Rc::default();
+            let ask = |app: &mut TeksiloAppHandler, label: &'static str| {
+                let answers = answers.clone();
+                app.run_in_app_tree(event_loop, |tree, ops| {
+                    tree.run_with_event_context(ops, |ctx| {
+                        ctx.present_message_box(
+                            teksilo_widgets::MessageBox::question(teksilo_i18n::lit!(label))
+                                .buttons(teksilo_widgets::MessageBoxButtons::OkCancel)
+                                .on_result(move |result, _ctx| {
+                                    answers.borrow_mut().push(result.button);
+                                }),
+                        );
+                    });
+                });
+                app.post_event(event_loop);
+            };
+            let dialogs_of = |app: &TeksiloAppHandler| -> Vec<crate::TeksiloWindowId> {
+                // The second is a dialog of the first, over which the
+                // application's next dialog goes.
+                app.wm.teksilo_ids().filter(|id| *id != owner).collect()
+            };
+            activation_log::take();
+            ask(app, "Over a window in the background");
+            let opened = dialogs_of(app);
+            assert_eq!(opened.len(), 1, "opened over the visible owner");
+            assert_eq!(
+                activation_log::take(),
+                [(owner_winit, Activation::Attention)],
+                "attention, and no raise"
+            );
+            app.wm.close_window(opened[0]);
+
+            {
+                let window = app.wm.get_by_teksilo_mut(owner).expect("open");
+                window.minimized = true;
+                window.minimized_probed_at = Some(Instant::now());
+            }
+            ask(app, "Owed, first");
+            assert!(
+                dialogs_of(app).is_empty(),
+                "no window over a minimised owner"
+            );
+            assert_eq!(
+                activation_log::take(),
+                [(owner_winit, Activation::Attention)],
+                "the application asks for attention"
+            );
+            ask(app, "Owed, second");
+            assert!(dialogs_of(app).is_empty(), "still owed");
+            assert_eq!(activation_log::take(), [], "attention asked once");
+            app.about_to_wait(event_loop);
+            assert!(
+                dialogs_of(app).is_empty(),
+                "owed while nothing has the focus"
+            );
+
+            {
+                let window = app.wm.get_by_teksilo_mut(owner).expect("open");
+                window.minimized = false;
+            }
+            app.window_event(event_loop, owner_winit, WindowEvent::Focused(true));
+            let presented = dialogs_of(app);
+            assert_eq!(
+                presented.len(),
+                2,
+                "both owed dialogs presented on the focus"
+            );
+            let log = activation_log::take();
+            for id in &presented {
+                let winit = app.wm.winit_id_for_teksilo(*id).expect("open");
+                assert!(
+                    log.contains(&(winit, Activation::Raised)),
+                    "each one raised: {log:?}"
+                );
+            }
+            assert!(answers.borrow().is_empty(), "nothing answered yet");
+            app.wm.close_window(presented[0]);
+            app.wm.close_window(presented[1]);
+
+            {
+                let window = app.wm.get_by_teksilo_mut(owner).expect("open");
+                window.focused = false;
+                window.minimized = true;
+                window.minimized_probed_at = Some(Instant::now());
+            }
+            ask(app, "Owed when the quit comes");
+            assert!(dialogs_of(app).is_empty(), "owed");
+            app.wm.quit_forced();
+            app.process_pending(event_loop);
+            assert!(app.wm.quit_completed());
+            assert_eq!(
+                *answers.borrow(),
+                [teksilo_widgets::StandardButton::Cancel],
+                "the quit answered the owed dialog Cancel"
+            );
+            assert!(app.wm.is_empty(), "and opened no window for it");
+            app.wm.forget_completed_quit();
+            crate::app::native_modal_override::set(None);
+            activation_log::take();
+        }
 
         // (ad) Intents cross between a window and the application tree in
         // `post_event`: one the window's actions leave reaches the

@@ -14,6 +14,8 @@
 //! at a single level, if two actions match the same name, the first
 //! (by declaration order) wins.
 
+use std::rc::Rc;
+
 use crate::intent::{Intent, IntentResponse};
 use crate::signal::Prop;
 use crate::widget::EventContext;
@@ -37,7 +39,14 @@ pub struct Action {
     /// `propagate_when_disabled == false`, in which case the intent
     /// is consumed (dormant) at this level.
     pub enabled_when: Option<Prop<bool>>,
+    /// Whether the action has anything to act on now, asked by what greys a
+    /// menu row and never by dispatch. See
+    /// [`ActionBuilder::available_when`]. `None` means available.
+    available_when: Option<Availability>,
 }
+
+/// The predicate behind [`ActionBuilder::available_when`].
+pub(crate) type Availability = Rc<dyn Fn() -> bool>;
 
 impl std::fmt::Debug for Action {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -45,6 +54,7 @@ impl std::fmt::Debug for Action {
             .field("intent", &self.intent)
             .field("handler", &"<closure>")
             .field("enabled_when", &self.enabled_when.is_some())
+            .field("available_when", &self.available_when.is_some())
             .finish()
     }
 }
@@ -57,6 +67,7 @@ impl Action {
             intent,
             handler: None,
             enabled_when: None,
+            available_when: None,
         }
     }
 
@@ -64,6 +75,22 @@ impl Action {
     /// set; otherwise reads the signal.
     pub fn is_enabled(&self) -> bool {
         self.enabled_when.as_ref().map(|s| s.get()).unwrap_or(true)
+    }
+
+    /// Whether a menu row for this action's intent shows it enabled: the
+    /// action is [enabled](Self::is_enabled) and
+    /// [has something to act on](ActionBuilder::available_when) now.
+    pub(crate) fn is_available(&self) -> bool {
+        self.is_enabled()
+            && self
+                .available_when
+                .as_ref()
+                .is_none_or(|available| available())
+    }
+
+    /// The [availability predicate](ActionBuilder::available_when), shared.
+    pub(crate) fn availability(&self) -> Option<Availability> {
+        self.available_when.clone()
     }
 }
 
@@ -75,6 +102,7 @@ pub struct ActionBuilder {
     intent: &'static str,
     handler: Option<ActionHandler>,
     enabled_when: Option<Prop<bool>>,
+    available_when: Option<Availability>,
 }
 
 impl ActionBuilder {
@@ -82,6 +110,26 @@ impl ActionBuilder {
     /// action is skipped during dispatch.
     pub fn enabled_when(mut self, signal: impl Into<Prop<bool>>) -> Self {
         self.enabled_when = Some(signal.into());
+        self
+    }
+
+    /// Whether the action has anything to act on now, asked each time a
+    /// menu row for its intent decides whether to grey out
+    /// ([`WidgetTree::can_handle`](crate::WidgetTree::can_handle),
+    /// [`WidgetTree::handled_intents_from`](crate::WidgetTree::handled_intents_from)):
+    /// a text field's Copy with nothing selected, its Paste while read-only.
+    /// The row greys out while it answers `false`.
+    ///
+    /// Dispatch never asks it: an intent that reaches the action runs its
+    /// handler whatever `available` answers, and the handler decides, as
+    /// one built with [`on_invoke_with_response`](Self::on_invoke_with_response)
+    /// does. So a shortcut behaves the same with or without it, unlike
+    /// [`enabled_when`](Self::enabled_when), which passes the intent by.
+    /// `available` runs outside every event handler, on every query (once
+    /// per event-loop turn for the native menu bar), and must be cheap.
+    #[doc(hidden)]
+    pub fn available_when(mut self, available: impl Fn() -> bool + 'static) -> Self {
+        self.available_when = Some(Rc::new(available));
         self
     }
 
@@ -115,6 +163,7 @@ impl ActionBuilder {
                 .handler
                 .expect("ActionBuilder requires on_invoke or on_invoke_with_response"),
             enabled_when: self.enabled_when,
+            available_when: self.available_when,
         }
     }
 }
@@ -133,14 +182,20 @@ impl ActionBuilder {
 ///
 /// It keeps each action's [enabled predicate](ActionBuilder::enabled_when),
 /// not its value, so an action enabled or disabled since the last publish is
-/// answered for as it is now. An action that may decline when it runs
+/// answered for as it is now, and its
+/// [availability](ActionBuilder::available_when) the same way, for what greys
+/// a menu row. An action that may decline when it runs
 /// ([`on_invoke_with_response`](ActionBuilder::on_invoke_with_response)) counts
 /// as taking the intent.
 #[doc(hidden)]
 #[derive(Clone, Default)]
 pub struct ApplicationScope {
-    actions: std::rc::Rc<std::cell::RefCell<Vec<(&'static str, Option<Prop<bool>>)>>>,
+    actions: Rc<std::cell::RefCell<Vec<ScopedAction>>>,
 }
+
+/// One action of an [`ApplicationScope`]: its intent name, its enabled
+/// predicate and its availability.
+pub(crate) type ScopedAction = (&'static str, Option<Prop<bool>>, Option<Availability>);
 
 impl ApplicationScope {
     /// An empty scope: the application takes nothing.
@@ -148,27 +203,45 @@ impl ApplicationScope {
         Self::default()
     }
 
-    /// Whether an enabled application action takes intents named `name`.
+    /// Whether an enabled application action takes intents named `name`:
+    /// what decides where a shortcut's intent goes. Availability does not
+    /// count, as it does not in a dispatch.
     pub fn takes(&self, name: &str) -> bool {
-        self.actions.borrow().iter().any(|(intent, enabled)| {
+        self.actions.borrow().iter().any(|(intent, enabled, _)| {
             *intent == name && enabled.as_ref().is_none_or(|enabled| enabled.get())
         })
     }
 
-    /// Every intent name an enabled application action takes, in the order
-    /// they were published, possibly more than once.
+    /// Whether a menu row for intents named `name` shows enabled for what
+    /// the application takes: an enabled application action that
+    /// [has something to act on](ActionBuilder::available_when) takes them.
+    pub(crate) fn offers(&self, name: &str) -> bool {
+        self.actions
+            .borrow()
+            .iter()
+            .any(|action| action.0 == name && Self::available(action))
+    }
+
+    /// Every intent name an enabled application action with something to
+    /// act on takes, in the order they were published, possibly more than
+    /// once: what greys the menu rows.
     pub fn taken(&self) -> Vec<&'static str> {
         self.actions
             .borrow()
             .iter()
-            .filter(|(_, enabled)| enabled.as_ref().is_none_or(|enabled| enabled.get()))
-            .map(|(intent, _)| *intent)
+            .filter(|action| Self::available(action))
+            .map(|(intent, _, _)| *intent)
             .collect()
     }
 
+    fn available((_, enabled, available): &ScopedAction) -> bool {
+        enabled.as_ref().is_none_or(|enabled| enabled.get())
+            && available.as_ref().is_none_or(|available| available())
+    }
+
     /// Replace what the application takes with `actions`, intent names
-    /// with their enabled predicates.
-    pub(crate) fn replace(&self, actions: Vec<(&'static str, Option<Prop<bool>>)>) {
+    /// with their enabled predicates and availability.
+    pub(crate) fn replace(&self, actions: Vec<ScopedAction>) {
         *self.actions.borrow_mut() = actions;
     }
 }
@@ -177,7 +250,7 @@ impl std::fmt::Debug for ApplicationScope {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let actions = self.actions.borrow();
         f.debug_list()
-            .entries(actions.iter().map(|(intent, _)| intent))
+            .entries(actions.iter().map(|(intent, _, _)| intent))
             .finish()
     }
 }

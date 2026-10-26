@@ -906,6 +906,15 @@ its filter refuses, select-all in a single-selection list) returns
 `Propagated`: the intent goes on up the walk, and if nothing takes it the
 key reaches the focused widget as a plain `KeyDown`.
 
+The text widgets also say when a command has nothing to act on, which is
+what greys out an Edit menu row for it (in a window's `MenuBar` and in the
+macOS menu bar): Copy with nothing selected, Cut also in a read-only widget,
+Paste in a read-only one, Select All in an empty one, Undo and Redo with no
+history that way. A code editor and a log view copy the caret's line, so
+their Copy and Cut need text, not a selection. This changes no dispatch: a
+shortcut whose command has nothing to act on still reaches the focused
+widget's action, which handles or declines it as above.
+
 A widget of your own that copies, pastes or selects all should do the
 same: register an `Action` for the `edit.*` id rather than match the
 chord. A widget that still matches `Ctrl+C` keeps copying on it after the

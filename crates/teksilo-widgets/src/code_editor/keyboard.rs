@@ -360,6 +360,30 @@ pub(super) fn handle_key(
     response
 }
 
+/// Whether one of the standard edit commands has anything to act on in the
+/// editor now, which is what greys its menu rows: a command the policy's
+/// filter accepts, and for Copy, Cut and Select All some text (with no
+/// selection, Copy and Cut take the caret's line), for Undo and Redo some
+/// history that way. Never asked by a dispatch, which runs
+/// [`run_standard_edit`] whatever this answers. `true` while the state is
+/// borrowed, the answer from before there was a question.
+pub(super) fn standard_edit_available(state: &SharedState, command: StandardEdit) -> bool {
+    let Ok(st) = state.try_borrow() else {
+        return true;
+    };
+    let filter = st.policy.command_filter;
+    let has_text = st.document.character_count() > 0;
+    match command {
+        StandardEdit::Copy => filter.accepts(CodeCommand::Copy) && has_text,
+        StandardEdit::Cut => filter.accepts(CodeCommand::Cut) && has_text,
+        StandardEdit::Paste | StandardEdit::PastePlain => filter.accepts(CodeCommand::Paste),
+        StandardEdit::SelectAll => filter.accepts(CodeCommand::SelectAll) && has_text,
+        StandardEdit::Undo => filter.accepts(CodeCommand::Undo) && st.document.can_undo(),
+        StandardEdit::Redo => filter.accepts(CodeCommand::Redo) && st.document.can_redo(),
+        _ => false,
+    }
+}
+
 /// Run one of the standard edit commands, as its `edit.*` action does.
 ///
 /// Returns whether it ran: a command the policy's filter rejects (Cut, Paste,

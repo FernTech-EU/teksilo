@@ -20,24 +20,38 @@ use teksilo_core::widget::EventContext;
 use teksilo_i18n::{LocalizedString, tr_widget};
 
 /// Register, on the widget being built, an action for every standard edit
-/// command. `run` performs one and says whether it did.
+/// command. `run` performs one and says whether it did; `available` says
+/// whether one has anything to act on now (Copy a selection, Paste an
+/// editable field), which is what greys its menu rows.
 ///
 /// A command `run` declines is passed on: to an ancestor's action (an
 /// application's own Paste, say), and failing that to the focused widget as
-/// the plain key it was.
+/// the plain key it was. `available` changes none of that: a command it says
+/// no to still reaches `run` when its shortcut is pressed, and `run` decides.
+/// It is asked outside every handler, once per event-loop turn by the native
+/// menu bar, so it reads state and does nothing else.
 pub(crate) fn register_standard_edit_actions(
     ctx: &mut BuildContext,
     run: impl Fn(StandardEdit, &mut EventContext) -> bool + 'static,
+    available: impl Fn(StandardEdit) -> bool + 'static,
 ) {
     let run = Rc::new(run);
+    let available = Rc::new(available);
     for command in StandardEdit::ALL {
         let run = Rc::clone(&run);
-        register_standard_edit_action(ctx, command, move |ctx| run(command, ctx));
+        let available = Rc::clone(&available);
+        register_action(
+            ctx,
+            command.id(),
+            move |ctx| run(command, ctx),
+            Some(Box::new(move || available(command))),
+        );
     }
 }
 
 /// [`register_standard_edit_actions`] for a widget that implements one
-/// command only — a data view's select-all.
+/// command only (a data view's select-all), with no availability: its rows
+/// are enabled whenever the widget is on the route.
 pub(crate) fn register_standard_edit_action(
     ctx: &mut BuildContext,
     command: StandardEdit,
@@ -54,17 +68,28 @@ pub(crate) fn register_standard_edit_action(
 pub(crate) fn register_command_action(
     ctx: &mut BuildContext,
     id: &'static str,
-    mut run: impl FnMut(&mut EventContext) -> bool + 'static,
+    run: impl FnMut(&mut EventContext) -> bool + 'static,
 ) {
-    ctx.register_action(
-        Action::new(id).on_invoke_with_response(move |_intent, ctx| {
-            if run(ctx) {
-                IntentResponse::Handled
-            } else {
-                IntentResponse::Propagated
-            }
-        }),
-    );
+    register_action(ctx, id, run, None);
+}
+
+fn register_action(
+    ctx: &mut BuildContext,
+    id: &'static str,
+    mut run: impl FnMut(&mut EventContext) -> bool + 'static,
+    available: Option<Box<dyn Fn() -> bool>>,
+) {
+    let mut action = Action::new(id);
+    if let Some(available) = available {
+        action = action.available_when(available);
+    }
+    ctx.register_action(action.on_invoke_with_response(move |_intent, ctx| {
+        if run(ctx) {
+            IntentResponse::Handled
+        } else {
+            IntentResponse::Propagated
+        }
+    }));
 }
 
 /// Give the standard edit shortcuts in `registry` their names in the active

@@ -171,7 +171,7 @@ What needs a window is not drawn there:
 
 | From the application tree | Happens |
 |---|---|
-| a modal request (`MessageBox`, `present_modal`) | presented in the window used last of those not minimised, else in the window used last. Asked in answer to the user's input (a click, a key, a menu row, a screen reader's action, a payload with an activation token), that window is restored and brought to the front; otherwise (a timer, another thread) it asks for attention (taskbar button, Dock icon, urgency hint) and stays where it is, as a background application's does. In a window of its own when none is open. Content must be `ModalRequest::deferred` |
+| a modal request (`MessageBox`, `present_modal`) | presented in the window used last of those not minimised, else in the window used last. Asked in answer to the user's input (a click, a key, a menu row, a screen reader's action, a payload with an activation token), that window is restored and brought to the front; otherwise (a timer, another thread) it asks for attention (the Dock icon bounces and the taskbar button flashes until the user comes to the application; an urgency hint on X11) and stays where it is, as a background application's does. A dialog that would open a window of its own (macOS, Windows) over a minimised window waits instead: shown, in front, on the first turn a window of the application takes the focus, over the window chosen then; a quit answers one still waiting as dismissed (a `MessageBox` reports its escape button). In a window of its own when none is open. Content must be `ModalRequest::deferred` |
 | a file dialog | refused with an error: no parent window |
 | a toast | shown in every window |
 | an overlay, an animated widget | never shown; a debug build says so |
@@ -771,6 +771,16 @@ goes on to the window it blocked. See "Scoped vs global actions" in the
 A modal window is owned by the window it blocks, its parent, as a dialog is
 on every desktop: it stays in front of it, has no taskbar entry of its own,
 and has no minimise of its own. It goes and comes back with its owner.
+
+- **Opening it** brings it to the front when it is opened in answer to the
+  user's input (a click, a key, a menu row, a screen reader's action, an
+  activation token), over a window that has the focus, or for a quit
+  waiting on its answer. Opened otherwise (a timer's dialog, another
+  thread's, while the user is in another application), it opens over its
+  owner without taking the focus. On macOS a dialog is not attached to an
+  owner that is in the Dock, since AppKit would draw the owner too while
+  leaving it minimised; a debug build says so, and the application tree's
+  dialogs wait for the user in that case (see the table above).
 
 - **Its title bar** has a close button and no minimise button, whatever its
   config says (`minimizable(true)` on a modal config is ignored, and a debug
