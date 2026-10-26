@@ -463,6 +463,20 @@ by crate for clarity, not because crates version independently.
   focus; otherwise (a timer's, another thread's) it opens where it is. On
   macOS a dialog opened over a minimised window is no longer drawn with that
   window still in the Dock.
+- **A restored window opens where it was on macOS.** It opened a title
+  bar higher each time: macOS placed the content's corner at the saved
+  position, which is the frame's. A `WindowConfig::position` is now the
+  frame's corner there too, as on every platform, and a dialog opens
+  centred over its owner rather than half a title bar above.
+- **A small window comes back at its own size.** A window configured
+  smaller than 320 x 240 with no `min_size` (a tool palette) was restored
+  at least 320 x 240, so it grew on its first restore. The floor is now the
+  smaller of 320 x 240 and the window's configured size on each axis.
+- **A window that was never moved saves where it was.** A window opened
+  with no position and left where the window system put it (macOS centres
+  it, Windows cascades it) saved its position as (0, 0), and reopened in the
+  corner of the screen. Its `WindowState::position` now holds the window
+  system's position from the start.
 - **`ctx.focus_window(id)` raises the window its handler runs in.** That
   window is out of the window list during its own dispatch, so raising it
   did nothing, which is the common case in a single-instance handler.

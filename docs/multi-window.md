@@ -320,7 +320,9 @@ WindowConfig::new()
 ```
 
 With `position` left `None`, the WM picks the spot. This is the behaviour of
-Word, Firefox and most document apps.
+Word, Firefox and most document apps. A position names the top-left corner of
+the window's frame, its title bar included, on every platform, as
+`WindowState::position` and the saved geometry do.
 
 Per-*document* geometry (Scrivener, Sublime, the JetBrains IDEs) is a different
 design: it keys the slot on the document, so windows never collide and every one

@@ -1982,6 +1982,15 @@ impl WindowManager {
         let window = target
             .create_window(window_attrs)
             .expect("winit window creation failed");
+        // On macOS a position given at creation places the content's
+        // top-left corner, where every other platform, `Moved`, the saved
+        // geometry and the modal centring above mean the frame's: placed
+        // so, a restored window opened a title bar higher each time. The
+        // frame is moved there while the window is still hidden.
+        #[cfg(target_os = "macos")]
+        if let Some((x, y)) = config.position {
+            window.set_outer_position(winit::dpi::LogicalPosition::new(x, y));
+        }
         // Still unmapped: the window is shown once its accessibility adapter
         // exists, in `new_with_a11y` below.
         teksilo_platform::taskbar::skip_taskbar_before_show(&window, config.skip_taskbar);
@@ -2015,6 +2024,16 @@ impl WindowManager {
 
         // Create with AccessKit adapter (shows window after adapter is ready)
         let mut pw = pollster::block_on(PlatformWindow::new_with_a11y(window, target));
+        // Where the window system put it (macOS centres a window given no
+        // position, Windows cascades it): a window never moved sends no
+        // `Moved`, and its state is what its saved geometry records. Wayland
+        // answers nothing, and the state keeps the config's position.
+        if let Ok(outer) = pw.window().outer_position() {
+            state.set_position_from_os((
+                (outer.x as f64 / scale_factor).round() as i32,
+                (outer.y as f64 / scale_factor).round() as i32,
+            ));
+        }
         // The routes the window's wake target posts through: state wakes
         // always (a redraw request does not reach a window whose redraw the
         // compositor withholds), draw wakes made off the main thread on macOS

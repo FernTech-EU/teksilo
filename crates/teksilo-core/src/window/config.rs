@@ -373,8 +373,10 @@ impl WindowConfig {
         self
     }
 
-    /// Restored on-screen position in logical pixels. `None` lets the
-    /// window manager pick.
+    /// Restored on-screen position in logical pixels: the top-left corner
+    /// of the window's frame, its title bar included, on every platform, as
+    /// [`WindowState::position`](crate::window::WindowState::position) and
+    /// the saved geometry hold it. `None` lets the window manager pick.
     pub fn position(mut self, x: i32, y: i32) -> Self {
         self.position = Some((x, y));
         self

@@ -101,6 +101,11 @@ pollster = { workspace = true }
 # per-process token; pulled in with the `telemetry` or `automation` feature.
 uuid = { workspace = true, optional = true }
 
+# Creates windows, which macOS and Windows allow on the main thread only.
+[[test]]
+name = "os_window_position"
+harness = false
+
 [dev-dependencies]
 tempfile = { workspace = true }
 wgpu = { workspace = true }

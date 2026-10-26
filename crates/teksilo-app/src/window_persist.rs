@@ -29,7 +29,8 @@ use teksilo_core::ObserverHandle;
 use teksilo_core::{Signal, WindowConfig, WindowState};
 use teksilo_settings::{PerWindowState, WindowStateService};
 
-/// Default minimum sanitize size when the config doesn't supply one.
+/// Default minimum sanitize size when the config doesn't supply one, for a
+/// window configured at least this large (see [`restored_geometry`]).
 const DEFAULT_MIN_SIZE: (u32, u32) = (320, 240);
 
 /// Conservative work-area fallback when no winit monitor is available
@@ -69,9 +70,7 @@ pub(crate) fn apply_restored_geometry(
         return;
     };
 
-    let min_size = config.min_size.unwrap_or(DEFAULT_MIN_SIZE);
-    let work_area = monitor_work_area(target);
-    let sanitized = saved.sanitize(min_size, work_area);
+    let sanitized = restored_geometry(config, &saved, monitor_work_area(target));
 
     // Override the geometry fields. We never *clear* an explicit
     // app-supplied position to None — the saved state always carries
@@ -83,6 +82,23 @@ pub(crate) fn apply_restored_geometry(
     // already downgraded to Floating by `sanitize` so the app
     // doesn't appear to fail to start.
     config.initial_placement = sanitized.placement;
+}
+
+/// The geometry `saved` restores `config` to on a `work_area`: see
+/// [`PerWindowState::sanitize`]. The size is kept at least the config's
+/// minimum, else [`DEFAULT_MIN_SIZE`] on each axis where the window is
+/// configured at least that large: a window smaller by design (a tool
+/// palette) comes back at its own size.
+fn restored_geometry(
+    config: &WindowConfig,
+    saved: &PerWindowState,
+    work_area: (u32, u32),
+) -> PerWindowState {
+    let min_size = config.min_size.unwrap_or((
+        DEFAULT_MIN_SIZE.0.min(config.size.0),
+        DEFAULT_MIN_SIZE.1.min(config.size.1),
+    ));
+    saved.sanitize(min_size, work_area)
 }
 
 /// Install observers on `state`'s size / position / placement signals
@@ -185,4 +201,47 @@ fn record_snapshot(service: &WindowStateService, state: &WindowState, label: &st
         height: h,
         placement,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn saved(width: u32, height: u32) -> PerWindowState {
+        PerWindowState {
+            label: "palette".into(),
+            x: 100,
+            y: 80,
+            width,
+            height,
+            placement: teksilo_core::WindowPlacement::Floating,
+        }
+    }
+
+    /// A window smaller than the default floor (a tool palette) comes back
+    /// at its own size: the floor is never larger than the size the window
+    /// is configured with. It grew to 320 x 240 on every launch.
+    #[test]
+    fn a_window_smaller_than_the_default_floor_keeps_its_size() {
+        let config = WindowConfig::new().size(200, 150);
+        let restored = restored_geometry(&config, &saved(200, 150), (1920, 1080));
+        assert_eq!((restored.width, restored.height), (200, 150));
+    }
+
+    /// The floor is taken axis by axis: a wide, short window keeps the
+    /// default floor across and its own height down.
+    #[test]
+    fn the_floor_is_the_smaller_of_the_default_and_the_size_on_each_axis() {
+        let config = WindowConfig::new().size(600, 100);
+        let restored = restored_geometry(&config, &saved(10, 10), (1920, 1080));
+        assert_eq!((restored.width, restored.height), (320, 100));
+    }
+
+    /// A configured minimum wins over both.
+    #[test]
+    fn a_configured_minimum_is_the_floor() {
+        let config = WindowConfig::new().size(200, 150).min_size(120, 90);
+        let restored = restored_geometry(&config, &saved(10, 10), (1920, 1080));
+        assert_eq!((restored.width, restored.height), (120, 90));
+    }
 }
