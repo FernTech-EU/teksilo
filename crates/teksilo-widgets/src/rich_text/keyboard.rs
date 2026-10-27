@@ -198,6 +198,15 @@ pub(super) fn handle_key(
         let mut st = state.borrow_mut();
         st.select_all_level = 0;
         st.select_all_anchor_cell = None;
+        // A key that types text joins the batch below. Any other acts at
+        // once, so what was typed before it in this frame goes in first.
+        let types_text = !ctrl
+            && text
+                .as_deref()
+                .is_some_and(|t| t.chars().any(|c| !c.is_control()));
+        if !types_text {
+            super::frame_loop::flush_pending_chars(&mut st);
+        }
         let filter = st.policy.command_filter;
         match key {
             Key::ArrowLeft if filter.accepts(EditCommandKind::MoveLeft) => {
@@ -648,6 +657,8 @@ pub(super) fn run_standard_edit(
 ) -> bool {
     let action = {
         let mut st = state.borrow_mut();
+        // After what was typed before the command in this frame.
+        super::frame_loop::flush_pending_chars(&mut st);
         // Select-all is the one command that keeps climbing its ladder;
         // anything else in between starts it again at level 1.
         if command != StandardEdit::SelectAll {
@@ -709,6 +720,8 @@ pub(super) fn run_format_shortcut(
 ) -> bool {
     let action = {
         let mut st = state.borrow_mut();
+        // After what was typed before the command in this frame.
+        super::frame_loop::flush_pending_chars(&mut st);
         // Not select-all, so the select-all ladder starts again at level 1.
         st.select_all_level = 0;
         st.select_all_anchor_cell = None;
@@ -1246,6 +1259,8 @@ fn handle_ime_composition(
     }
     {
         let mut st = state.borrow_mut();
+        // The preedit goes in after what was typed before it in this frame.
+        super::frame_loop::flush_pending_chars(&mut st);
         // Group the remove+reinsert as a single undo step so a user
         // undo after composition pops the entire preedit, not each
         // intermediate candidate.

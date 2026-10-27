@@ -123,6 +123,12 @@ by crate for clarity, not because crates version independently.
   and any overlay that lets presses through, only where its handles are: the
   empty layer a finger leaves behind no longer hides a `WebView` either.
 
+- **In `RichTextEditor`, a key pressed in the same frame as typing comes
+  after the typing.** Typed characters wait for the next frame, and Enter,
+  Backspace, the arrows, an edit command such as Ctrl+Z or Ctrl+V and a
+  format command acted before them: typing "ab" and pressing Enter quickly
+  gave a new paragraph holding "ab". Fast typing, automation and remote
+  desktops could hit it.
 - **A single-line field keeps out a line or paragraph separator** (U+2028,
   U+2029) typed or pasted from another program, as it keeps out a `\n`.
   text-typeset 2.1 breaks the line at either, so the field showed two lines.

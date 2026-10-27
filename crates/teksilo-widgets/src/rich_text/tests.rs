@@ -578,6 +578,44 @@ fn editor_inserts_typed_characters_via_pending_chars_batch() {
     );
 }
 
+/// Typed characters wait for the next frame; a key or command that acts at
+/// once must still come after them. Typing "ab" and pressing Enter in one
+/// frame gave a new paragraph holding "ab".
+#[test]
+fn a_key_pressed_in_the_frame_of_typing_comes_after_the_typing() {
+    use teksilo_core::event::{Key, Modifiers};
+    fn type_then(key: Key, modifiers: Modifiers) -> (String, usize) {
+        let doc = TextDocument::new();
+        doc.set_plain_text("x").unwrap();
+        let editor = RichTextEditor::editor(doc.clone());
+        let handle = editor.handle();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        focus_editor(&mut tree, id);
+        handle.select_range(1, 1);
+        press_char(&mut tree, 'a');
+        press_char(&mut tree, 'b');
+        press_key(&mut tree, key, modifiers);
+        tick_once(&mut tree);
+        (
+            doc.to_plain_text().unwrap_or_default(),
+            handle.cursor_position(),
+        )
+    }
+    assert_eq!(type_then(Key::Enter, Modifiers::NONE).0, "xab\n");
+    assert_eq!(type_then(Key::Enter, Modifiers::SHIFT).0, "xab\u{2028}");
+    assert_eq!(type_then(Key::Backspace, Modifiers::NONE).0, "xa");
+    assert_eq!(
+        type_then(Key::ArrowLeft, Modifiers::NONE),
+        ("xab".into(), 2)
+    );
+    // An edit command (Ctrl+Z, a standard edit action) and a format command
+    // (Ctrl+Enter, `format.insert_paragraph`) come after the typing too.
+    assert_eq!(type_then(Key::Z, Modifiers::COMMAND).0, "x");
+    assert_eq!(type_then(Key::Enter, Modifiers::COMMAND).0, "xab\n");
+}
+
 #[test]
 fn editor_backspace_and_delete_remove_characters() {
     let doc = TextDocument::new();

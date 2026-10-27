@@ -34,26 +34,7 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     // subsequent `drain_events` see one `ContentsChanged` instead of
     // N, which matters for the incremental-relayout code path and
     // for debounced `text_changed` coalescing.
-    if !state.pending_chars.is_empty() {
-        let batch = std::mem::take(&mut state.pending_chars);
-        // Replacing an active selection with typed input is the
-        // expected editor behaviour (QTextEdit / every major editor).
-        // `insert_text` already removes the selection first when
-        // one exists — which is precisely why a forward-only filter has
-        // to collapse the selection here first, one layer above the
-        // insert that would otherwise swallow it.
-        let typed = std::mem::take(&mut state.pending_typed_chars);
-        let composed = std::mem::take(&mut state.pending_ime_chars);
-        super::keyboard::collapse_selection_before_insert(state);
-        let _ = state.cursor.insert_text(&batch);
-        // Counted as the characters went in, which is what was written. A caret
-        // delta would be a different number whenever the insert above replaced a
-        // selection, and the two routes are reported apart because a settled IME
-        // composition is not a keystroke.
-        state.report_inserted_chars(super::EditSource::Keyboard, typed);
-        state.report_inserted_chars(super::EditSource::Ime, composed);
-        state.pending_text_changed = true;
-    }
+    flush_pending_chars(state);
 
     // Step 2: drain the per-widget event queue populated by on_change.
     let (mut had_events, mut single_pos) = state.drain_events();
@@ -354,4 +335,34 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     // event loop can idle in `WaitUntil` between 500 ms toggles
     // instead of pumping at the OS's max rate.
     had_events || debounce_work_pending || drag_active
+}
+
+/// Insert the characters typed since the last frame, in one go.
+///
+/// Every tick starts with it. Anything that acts on the document or the caret
+/// at once does it first as well (a key such as Enter or an arrow, an edit or
+/// format command, an input method's preedit): otherwise it acts before the
+/// characters typed ahead of it in the same frame, and "ab" then Enter gave a
+/// new paragraph holding "ab".
+pub(crate) fn flush_pending_chars(state: &mut EditorState) {
+    if !state.pending_chars.is_empty() {
+        let batch = std::mem::take(&mut state.pending_chars);
+        // Replacing an active selection with typed input is the
+        // expected editor behaviour (QTextEdit / every major editor).
+        // `insert_text` already removes the selection first when
+        // one exists — which is precisely why a forward-only filter has
+        // to collapse the selection here first, one layer above the
+        // insert that would otherwise swallow it.
+        let typed = std::mem::take(&mut state.pending_typed_chars);
+        let composed = std::mem::take(&mut state.pending_ime_chars);
+        super::keyboard::collapse_selection_before_insert(state);
+        let _ = state.cursor.insert_text(&batch);
+        // Counted as the characters went in, which is what was written. A caret
+        // delta would be a different number whenever the insert above replaced a
+        // selection, and the two routes are reported apart because a settled IME
+        // composition is not a keystroke.
+        state.report_inserted_chars(super::EditSource::Keyboard, typed);
+        state.report_inserted_chars(super::EditSource::Ime, composed);
+        state.pending_text_changed = true;
+    }
 }
