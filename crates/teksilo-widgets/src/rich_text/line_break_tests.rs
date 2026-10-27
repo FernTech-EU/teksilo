@@ -213,20 +213,25 @@ fn up_and_down_move_between_the_lines_of_one_block() {
     assert!(ed.handle.insert_line_break());
     layout(&mut ed.tree);
 
+    let first_line = ed.caret_top(0);
+    let second_line = ed.caret_top(4);
+    assert!(second_line > first_line);
+
     ed.handle.select_range(1, 1);
     ed.press(Key::ArrowDown, Modifiers::NONE);
     assert!(
-        (4..=7).contains(&ed.caret()),
+        (4..=7).contains(&ed.caret()) && ed.drawn_caret_top() == second_line,
         "Down lands on the second line, got {}",
         ed.caret()
     );
 
     ed.press(Key::ArrowUp, Modifiers::NONE);
     assert!(
-        ed.caret() <= 3,
+        ed.caret() <= 3 && ed.drawn_caret_top() == first_line,
         "Up lands back on the first line, got {}",
         ed.caret()
     );
+    assert_eq!(ed.caret(), 1, "and back in the column it left");
 }
 
 #[test]
@@ -302,6 +307,51 @@ fn shift_enter_in_a_code_block_does_what_enter_does() {
 
     assert!(!ed.text().contains(LS));
     assert_eq!(ed.doc.block_count(), blocks + 1, "a new line of code");
+}
+
+/// At a block boundary the caret belongs to the block it ends, so the guard
+/// reads the right block on both sides of a code block.
+#[test]
+fn the_code_block_guard_holds_at_both_ends_of_a_line() {
+    let doc = TextDocument::new();
+    doc.set_markdown("Before\n\n```\ncode\n```\n\nAfter\n")
+        .unwrap()
+        .wait()
+        .unwrap();
+    let text = doc.to_plain_text().unwrap_or_default();
+    let code_end = text.find("code").unwrap() + "code".len();
+    let before_end = "Before".len();
+    let mut ed = Mounted::over(doc, RichTextEditor::editor, 0);
+
+    // The end of the code line: still the code block, so Enter's new line.
+    ed.handle.select_range(code_end, code_end);
+    assert!(!ed.handle.insert_line_break(), "the end of a code line");
+    // The end of the paragraph just before the code block: a line break.
+    ed.handle.select_range(before_end, before_end);
+    ed.press(Key::Enter, Modifiers::SHIFT);
+    assert!(
+        ed.text().starts_with(&format!("Before{LS}")),
+        "got {:?}",
+        ed.text()
+    );
+}
+
+/// The same for a table: the end of the paragraph before it is not in it.
+#[test]
+fn the_end_of_a_paragraph_before_a_table_takes_a_line_break() {
+    let doc = TextDocument::new();
+    doc.set_markdown("Before\n\n| a | b |\n|---|---|\n| c | d |\n")
+        .unwrap()
+        .wait()
+        .unwrap();
+    let mut ed = Mounted::over(doc, RichTextEditor::editor, 0);
+    ed.handle.select_range(6, 6);
+    assert!(ed.handle.insert_line_break());
+    assert!(
+        ed.text().starts_with(&format!("Before{LS}")),
+        "got {:?}",
+        ed.text()
+    );
 }
 
 #[test]
