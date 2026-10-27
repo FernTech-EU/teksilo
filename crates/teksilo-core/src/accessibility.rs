@@ -277,12 +277,13 @@ pub enum SyntheticKind {
     /// announces as the cell's content.
     RichTextCellText = 15,
     /// The text container inside a structural block-level node — a
-    /// `Role::Heading`, or a `Role::Blockquote`.
+    /// `Role::Heading`, a `Role::Blockquote` or a `Role::ListItem`.
     ///
     /// Exactly the problem [`SyntheticKind::RichTextCellText`] solves, in the
     /// other places a structural node sits between the editor and its runs:
-    /// neither role is text-range capable, so runs parented straight onto one
-    /// had every edit beneath it dropped before it reached a screen reader.
+    /// none of those roles is text-range capable, so runs parented straight
+    /// onto one had every edit beneath it dropped before it reached a screen
+    /// reader.
     /// Keyed by the **block's** own id — one per block, so a heading inside a
     /// blockquote still has exactly one — which is a different id space from a
     /// cell's packed `(table, row, column)`, so the two kinds stay distinct
@@ -300,6 +301,15 @@ pub enum SyntheticKind {
     /// Keyed by the page's own node id, so a node keeps its id across the
     /// engine's incremental updates.
     WebPageNode = 18,
+    /// A list in a rich-text document: consecutive items of one list at one
+    /// level, emitted from its blocks' `BlockSnapshot::list_info`.
+    ///
+    /// Keyed by the block id of the list's first item there, not by the
+    /// document's list id: a paragraph between two items of one list makes
+    /// two of these, and the list id would give both one `NodeId`.
+    RichTextList = 19,
+    /// One item of a [`SyntheticKind::RichTextList`], keyed by its block id.
+    RichTextListItem = 20,
 }
 
 /// A live-region announcement every platform adapter would have made.
@@ -1717,8 +1727,9 @@ impl AccessNodeBuilder {
     ///
     /// See [`SyntheticKind::RichTextBlockText`]. A heading keeps its own
     /// `Role::Heading` node — it is how a reader jumps through a document —
-    /// and a blockquote keeps its `Role::Blockquote`; this sits between either
-    /// and the runs so the text changes beneath still reach the platform.
+    /// a blockquote its `Role::Blockquote` and a list item its
+    /// `Role::ListItem`; this sits between any of them and the runs so the
+    /// text changes beneath still reach the platform.
     ///
     /// `element_id` is the **block's** id, so a heading nested in a blockquote
     /// still produces exactly one container.
@@ -1743,6 +1754,73 @@ impl AccessNodeBuilder {
         let node_id = synthetic_node_id(owner, element_id, SyntheticKind::RichTextBlockquote);
         let node = Node::new(Role::Blockquote);
         self.push_collected_child(parent, node_id, node)
+    }
+
+    /// Push a `Role::Heading` child at `level` (1 to 6), under `parent` when
+    /// given and under the widget's own node otherwise.
+    ///
+    /// The node [`Self::push_paragraph_child`] pushes and
+    /// [`Self::set_paragraph_as_heading`] makes a heading, same id and same
+    /// level, for a heading inside another node: `push_paragraph_child` hangs
+    /// every paragraph off the widget's own node, so a heading opening a
+    /// blockquote was read after the quote's other text.
+    pub fn push_heading_child(
+        &mut self,
+        parent: Option<NodeId>,
+        element_id: u64,
+        level: u8,
+    ) -> Option<NodeId> {
+        let owner = self.owner?;
+        let node_id = synthetic_node_id(owner, element_id, SyntheticKind::Paragraph);
+        let mut node = Node::new(Role::Heading);
+        node.set_level(to_accesskit_ordinal((level as usize).clamp(1, 6)));
+        self.push_collected_child(parent, node_id, node)
+    }
+
+    /// Push a `Role::List` child of `size_of_set` items, under `parent` when
+    /// given and under the widget's own node otherwise.
+    ///
+    /// `size_of_set` is the whole list's item count. Its items carry none
+    /// ([`Self::push_list_item_child`]): the AT-SPI and Windows adapters read
+    /// an item's set size from the nearest container that has one, and the
+    /// macOS adapter reads neither a size nor a position. A list a paragraph
+    /// interrupts is two list nodes with the one count, so the item after the
+    /// paragraph is still "3 of 5".
+    ///
+    /// `element_id` must be durable across edits: the rich-text walk passes
+    /// the block id of the list's first item.
+    pub fn push_list_child(
+        &mut self,
+        parent: Option<NodeId>,
+        element_id: u64,
+        size_of_set: usize,
+    ) -> Option<NodeId> {
+        let owner = self.owner?;
+        let node_id = synthetic_node_id(owner, element_id, SyntheticKind::RichTextList);
+        let mut node = Node::new(Role::List);
+        node.set_size_of_set(size_of_set);
+        self.push_collected_child(parent, node_id, node)
+    }
+
+    /// Push a `Role::ListItem` child under a list pushed by
+    /// [`Self::push_list_child`].
+    ///
+    /// **1-based** `level` (1 for an item of a top-level list, 2 for an item
+    /// of a list nested in one) and `position_in_set`, the builder's ordinal
+    /// convention (see [`Self::push_table_row_child`]).
+    pub fn push_list_item_child(
+        &mut self,
+        parent: NodeId,
+        element_id: u64,
+        level: usize,
+        position_in_set: usize,
+    ) -> Option<NodeId> {
+        let owner = self.owner?;
+        let node_id = synthetic_node_id(owner, element_id, SyntheticKind::RichTextListItem);
+        let mut node = Node::new(Role::ListItem);
+        node.set_level(to_accesskit_ordinal(level));
+        node.set_position_in_set(to_accesskit_ordinal(position_in_set));
+        self.push_collected_child(Some(parent), node_id, node)
     }
 
     /// Push one `Role::TextRun` child, under `parent` when given and
@@ -2402,6 +2480,52 @@ mod tests {
             assert_eq!(p.role(), Role::Heading);
             assert_eq!(p.level(), Some(expected), "h{heading}");
         }
+    }
+
+    /// A heading pushed under a parent is the node `push_paragraph_child` and
+    /// `set_paragraph_as_heading` make, same id and same level, in the parent.
+    #[test]
+    fn a_heading_under_a_parent_is_the_paragraph_heading_there() {
+        let mut flat = AccessNodeBuilder::for_widget(fake_widget(1));
+        let para = flat.push_paragraph_child(7);
+        flat.set_paragraph_as_heading(para, 2);
+        let (_id, _n, flat_children, _local) = flat.build(fake_widget(1));
+
+        let mut b = AccessNodeBuilder::for_widget(fake_widget(1));
+        let quote = b.push_blockquote_child(None, 3).unwrap();
+        let heading = b.push_heading_child(Some(quote), 7, 2).unwrap();
+        assert_eq!(heading, para);
+        let (_id, own, children, _local) = b.build(fake_widget(1));
+        let node = |id| children.iter().find(|(i, _)| *i == id).map(|(_, n)| n);
+        assert_eq!(own.children(), &[quote], "the heading is not the widget's");
+        assert_eq!(node(quote).unwrap().children(), &[heading]);
+        assert_eq!(node(heading), flat_children.first().map(|(_, n)| n));
+    }
+
+    /// An item says "2 of 3, level 2" in the ARIA convention, and AccessKit
+    /// gets its zero-based ordinals; the size is on the list, where every
+    /// adapter looks for it.
+    #[test]
+    fn a_list_item_s_ordinals_are_converted_and_its_list_holds_the_size() {
+        let mut b = AccessNodeBuilder::for_widget(fake_widget(1));
+        let list = b.push_list_child(None, 4, 3).unwrap();
+        let item = b.push_list_item_child(list, 5, 2, 2).unwrap();
+        let (_id, own, children, _local) = b.build(fake_widget(1));
+        let node = |id| {
+            children
+                .iter()
+                .find(|(i, _)| *i == id)
+                .map(|(_, n)| n)
+                .unwrap()
+        };
+        assert_eq!(own.children(), &[list]);
+        assert_eq!(node(list).role(), Role::List);
+        assert_eq!(node(list).size_of_set(), Some(3));
+        assert_eq!(node(list).children(), &[item]);
+        assert_eq!(node(item).role(), Role::ListItem);
+        assert_eq!(node(item).level(), Some(1));
+        assert_eq!(node(item).position_in_set(), Some(1));
+        assert_eq!(node(item).size_of_set(), None);
     }
 
     #[test]

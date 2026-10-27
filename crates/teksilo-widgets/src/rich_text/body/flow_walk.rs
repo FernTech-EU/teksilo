@@ -37,9 +37,21 @@
 //! so its content is emitted straight into the enclosing document rather than
 //! behind a node a reader would stop on for nothing.
 //!
-//! Three structural roles therefore carry a `Role::Label` between themselves
-//! and their runs — `Cell`, `Heading`, `Blockquote` — and the rule generalises:
-//! **anything given a node between the editor and its text needs one.**
+//! A list is not an element of the flow: its items are ordinary blocks, each
+//! naming its list in `BlockSnapshot::list_info`, and a nested list is another
+//! list with a deeper indent. The walk rebuilds the tree a reader expects from
+//! that: a `Role::List` per run of consecutive items of one list, a
+//! `Role::ListItem` per item, and a nested list inside the item before it.
+//! The marker (a bullet, a number, a task's box) is painted in the margin and
+//! is no character of the document, so each item's first line begins with one
+//! more run, a single character heard as the marker. A caret is never
+//! reported inside it, and a reader's caret put on it lands at the item's
+//! start, so a reader's offsets still map to the document's positions.
+//!
+//! Four structural roles therefore carry a `Role::Label` between themselves
+//! and their runs, `Cell`, `Heading`, `Blockquote` and `ListItem`, and the
+//! rule generalises: **anything given a node between the editor and its text
+//! needs one.**
 
 use std::collections::HashMap;
 
@@ -48,7 +60,8 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accessibility::text_runs::{TextRunSource, push_text_runs};
 use teksilo_core::accesskit::NodeId;
 use teksilo_text::text_document::{
-    BlockSnapshot, CellSnapshot, FlowElementSnapshot, FragmentContent, FrameSnapshot, TableSnapshot,
+    BlockSnapshot, CellSnapshot, FlowElementSnapshot, FragmentContent, FrameSnapshot, ListInfo,
+    MarkerType, TableSnapshot,
 };
 
 use super::state::{EditorState, SyntheticElementRef};
@@ -63,6 +76,52 @@ use super::state::{EditorState, SyntheticElementRef};
 fn packed_element_id(table_id: usize, row: usize, column: usize) -> u64 {
     const MASK: u64 = (1 << 21) - 1;
     ((table_id as u64 & MASK) << 42) | ((row as u64 & MASK) << 21) | (column as u64 & MASK)
+}
+
+/// The character a list marker's run holds, heard as the marker.
+///
+/// One character, so a reader steps over the marker in one move and never
+/// has a caret inside it.
+const MARKER_HOST: &str = "\u{FFFC}";
+
+/// What the typesetter paints in a block's margin, as a reader hears it: a
+/// task's box, else its list's marker.
+fn margin_marker(block: &BlockSnapshot) -> Option<String> {
+    match block.block_format.marker {
+        Some(MarkerType::Checked) => Some("\u{2611}".to_string()),
+        Some(MarkerType::Unchecked) => Some("\u{2610}".to_string()),
+        _ => block
+            .list_info
+            .as_ref()
+            .map(|info| info.marker.clone())
+            .filter(|marker| !marker.is_empty()),
+    }
+}
+
+/// Count every list's items in `elements`, tables and frames included.
+fn count_list_items(sizes: &mut HashMap<usize, usize>, elements: &[FlowElementSnapshot]) {
+    let mut blocks = Vec::new();
+    for elem in elements {
+        match elem {
+            FlowElementSnapshot::Block(block) => blocks.push(block),
+            FlowElementSnapshot::Table(table) => {
+                blocks.extend(table.cells.iter().flat_map(|c| &c.blocks))
+            }
+            FlowElementSnapshot::Frame(frame) => count_list_items(sizes, &frame.elements),
+        }
+    }
+    for info in blocks.into_iter().filter_map(|b| b.list_info.as_ref()) {
+        *sizes.entry(info.list_id).or_default() += 1;
+    }
+}
+
+/// A list the walk has open: its items so far hang off `node`, and a list
+/// nested in it goes into `item`, its latest item.
+struct OpenList {
+    list_id: usize,
+    indent: u8,
+    node: NodeId,
+    item: Option<NodeId>,
 }
 
 /// The text positions either side of a caret no block holds.
@@ -102,6 +161,9 @@ pub(super) struct FlowWalk<'a> {
     /// so a second push gives two children sharing a `NodeId`, which panics
     /// `accesskit_consumer`'s tree builder.
     annotation_bodies: HashMap<u64, NodeId>,
+    /// How many items each list has in the whole document, by list id: the
+    /// "of N" a reader is told on every item.
+    list_sizes: HashMap<usize, usize>,
 }
 
 impl<'a> FlowWalk<'a> {
@@ -124,7 +186,18 @@ impl<'a> FlowWalk<'a> {
             nearest: [Nearest::default(), Nearest::default()],
             syn_map: HashMap::new(),
             annotation_bodies: HashMap::new(),
+            list_sizes: HashMap::new(),
         }
+    }
+
+    /// Walk a whole document's flow.
+    pub(super) fn document(
+        &mut self,
+        builder: &mut AccessNodeBuilder,
+        elements: &[FlowElementSnapshot],
+    ) {
+        count_list_items(&mut self.list_sizes, elements);
+        self.elements(builder, elements, None, None);
     }
 
     /// The `(anchor, caret)` to report: where each landed, or for one no
@@ -144,20 +217,90 @@ impl<'a> FlowWalk<'a> {
     /// `parent` is the structural node new nodes attach under (`None` = the
     /// editor's own node). `cell_text` is a cell's shared text container, set
     /// only while walking that cell's blocks.
-    pub(super) fn elements(
+    fn elements(
         &mut self,
         builder: &mut AccessNodeBuilder,
         elements: &[FlowElementSnapshot],
         parent: Option<NodeId>,
         cell_text: Option<NodeId>,
     ) {
+        // The lists open at this point of the run, outermost first. Anything
+        // but a list item closes them all: a list does not go on across a
+        // paragraph, a table or a frame.
+        let mut lists = Vec::new();
         for elem in elements {
             match elem {
-                FlowElementSnapshot::Block(block) => self.block(builder, block, parent, cell_text),
-                FlowElementSnapshot::Table(table) => self.table(builder, table, parent),
-                FlowElementSnapshot::Frame(frame) => self.frame(builder, frame, parent, cell_text),
+                FlowElementSnapshot::Block(block) => {
+                    let item = match &block.list_info {
+                        Some(info) if cell_text.is_none() && self.emits_children => {
+                            self.list_item(builder, &mut lists, info, block, parent)
+                        }
+                        _ => {
+                            lists.clear();
+                            None
+                        }
+                    };
+                    self.block(builder, block, parent, cell_text, item);
+                }
+                FlowElementSnapshot::Table(table) => {
+                    lists.clear();
+                    self.table(builder, table, parent);
+                }
+                FlowElementSnapshot::Frame(frame) => {
+                    lists.clear();
+                    self.frame(builder, frame, parent, cell_text);
+                }
             }
         }
+    }
+
+    /// Push the `Role::ListItem` a list item's block hangs under, and its
+    /// `Role::List` when the item opens one.
+    ///
+    /// A deeper list goes inside the item before it, as a nested HTML list
+    /// does; an item at the depth of an open list of another id ends that
+    /// list and opens its own. `None` when the builder refused a node, and
+    /// the block is then emitted where it would be outside a list.
+    fn list_item(
+        &self,
+        builder: &mut AccessNodeBuilder,
+        lists: &mut Vec<OpenList>,
+        info: &ListInfo,
+        block: &BlockSnapshot,
+        parent: Option<NodeId>,
+    ) -> Option<NodeId> {
+        while lists.last().is_some_and(|open| {
+            open.indent > info.indent
+                || (open.indent == info.indent && open.list_id != info.list_id)
+        }) {
+            lists.pop();
+        }
+        if lists.last().is_none_or(|open| open.list_id != info.list_id) {
+            let holder = lists.last().and_then(|open| open.item).or(parent);
+            let size = self
+                .list_sizes
+                .get(&info.list_id)
+                .copied()
+                .unwrap_or(info.item_index + 1);
+            let node = builder.push_list_child(holder, block.block_id as u64, size)?;
+            lists.push(OpenList {
+                list_id: info.list_id,
+                indent: info.indent,
+                node,
+                item: None,
+            });
+        }
+        let level = lists.len();
+        let open = lists.last_mut()?;
+        let item = builder.push_list_item_child(
+            open.node,
+            block.block_id as u64,
+            level,
+            // 1-based: the builder's public ordinal convention.
+            info.item_index + 1,
+        )?;
+        open.item = Some(item);
+        Some(item)
     }
 
     /// Emit one frame.
@@ -311,7 +454,7 @@ impl<'a> FlowWalk<'a> {
                     builder.set_child_bounds_local(text_node, rect);
                 }
                 for block in &cell.blocks {
-                    self.block(builder, block, Some(cell_node), text_node);
+                    self.block(builder, block, Some(cell_node), text_node, None);
                 }
             }
         }
@@ -352,17 +495,46 @@ impl<'a> FlowWalk<'a> {
         )
     }
 
+    /// Push a margin marker's run under `parent`: one character heard as the
+    /// marker and a space. Every position on it is the item's start,
+    /// `position`.
+    fn marker_run(
+        &mut self,
+        builder: &mut AccessNodeBuilder,
+        parent: Option<NodeId>,
+        marker: &str,
+        position: usize,
+        id: u64,
+        rect: Rect,
+    ) -> Option<NodeId> {
+        let mut host = TextRunSource::flat(MARKER_HOST, !id).with_fallback_rect(rect);
+        host.speak_as(0, format!("{marker} "));
+        let run = push_text_runs(builder, parent, &host).runs.first()?.id;
+        self.syn_map.insert(
+            run,
+            SyntheticElementRef {
+                element_id: id,
+                absolute_start: position,
+                text: String::new(),
+            },
+        );
+        Some(run)
+    }
+
     /// Emit one block's text runs.
     ///
     /// `structural` is the node this block's own structure attaches under (a
     /// cell, a blockquote, or `None` for the editor); `cell_text` is a cell's
-    /// shared text container, which takes precedence when set.
+    /// shared text container, which takes precedence when set; `item` is the
+    /// list item a list item's block hangs under, which takes precedence over
+    /// `structural`.
     fn block(
         &mut self,
         builder: &mut AccessNodeBuilder,
         block: &BlockSnapshot,
         structural: Option<NodeId>,
         cell_text: Option<NodeId>,
+        item: Option<NodeId>,
     ) {
         // One lookup for both: a block nested in a cell or a frame has to be
         // *found* first, and that search is a walk rather than a hash lookup.
@@ -398,17 +570,28 @@ impl<'a> FlowWalk<'a> {
             block_left - self.scroll_x,
             (block_top - self.scroll_y) * self.zoom,
         );
+        // A marker gets no box of its own: the typesetter paints it without
+        // reporting where. It sits where its item's text starts.
+        let unlaid = Rect::new(
+            origin.x,
+            origin.y,
+            0.0,
+            self.st.engine.default_line_height(),
+        );
+        let marker_box = lines.first().map_or(unlaid, |line| {
+            Rect::new(
+                origin.x + line.rect[0],
+                origin.y + line.rect[1],
+                0.0,
+                line.rect[3],
+            )
+        });
         let mut source = if lines.is_empty() {
             // Not laid out: the text is still announced, and still ends its
             // paragraph, with a caret-shaped box rather than none at all.
             let mut flat = TextRunSource::flat(&text, block.block_id as u64);
             flat.lines[0].end = LineEnd::HardBreak { chars: 1, bytes: 1 };
-            flat.with_fallback_rect(Rect::new(
-                origin.x,
-                origin.y,
-                0.0,
-                self.st.engine.default_line_height(),
-            ))
+            flat.with_fallback_rect(unlaid)
         } else {
             let geometry = TextGeometry {
                 lines,
@@ -448,27 +631,48 @@ impl<'a> FlowWalk<'a> {
         // Otherwise a heading keeps a node of its own — it is how a reader
         // jumps through a document, and it carries a level no run does — with
         // a text container beneath it, because `Role::Heading` is not
-        // text-range capable either. A block directly inside a blockquote gets
-        // that same container under the quote node, for the same reason.
+        // text-range capable either. A block directly inside a blockquote or a
+        // list item gets that same container under the quote or the item, for
+        // the same reason, and a heading there goes inside it too: hung off
+        // the editor, a heading opening a quote was read after the quote.
+        let id = block.block_id as u64;
+        let marker = margin_marker(block);
+        let heading_level = block.block_format.heading_level;
+        let mut marker_run = None;
         let parent = if let Some(cell_text) = cell_text {
             Some(cell_text)
         } else if !self.emits_children {
             None
-        } else if let Some(level) = block.block_format.heading_level {
-            let heading = builder.push_paragraph_child(block.block_id as u64);
-            builder.set_paragraph_as_heading(heading, level);
-            builder
-                .push_block_text_child(heading, block.block_id as u64)
-                .or(Some(heading))
-        } else if let Some(structural) = structural {
-            builder
-                .push_block_text_child(structural, block.block_id as u64)
-                .or(Some(structural))
         } else {
-            None
+            let holder = item.or(structural);
+            // An item's marker is the item's, not its heading's, which would
+            // be heard as "• Title". It goes before the heading, in a
+            // container of its own keyed by the block id's complement, so it
+            // is not the heading's.
+            if let (Some(marker), Some(_)) = (&marker, heading_level) {
+                let container =
+                    holder.map(|node| builder.push_block_text_child(node, !id).unwrap_or(node));
+                marker_run =
+                    self.marker_run(builder, container, marker, block.position, id, marker_box);
+            }
+            let heading =
+                heading_level.and_then(|level| builder.push_heading_child(holder, id, level));
+            heading
+                .or(holder)
+                .map(|node| builder.push_block_text_child(node, id).unwrap_or(node))
         };
+        // Otherwise the marker's run is the first of the block's own, so it is
+        // the start of the item's first line.
+        if marker_run.is_none()
+            && let Some(marker) = &marker
+        {
+            marker_run = self.marker_run(builder, parent, marker, block.position, id, marker_box);
+        }
 
         let emission = push_text_runs(builder, parent, &source);
+        if let (Some(marker), Some(first)) = (marker_run, emission.runs.first()) {
+            builder.link_runs_on_line(&[marker, first.id]);
+        }
 
         for run in &emission.runs {
             let absolute_start = block.position + run.char_range.start;
@@ -516,21 +720,31 @@ impl<'a> FlowWalk<'a> {
         // emitter knows which run a character landed in, including the
         // chunk splits it made at 255 characters, so no call site has
         // to reproduce that arithmetic.
+        //
+        // A caret at an item's start is after its marker, on the text. The
+        // far end of a selection there is before it, so a selection running
+        // up to the item does not hold the item's marker.
+        let ranged = self.user_pos != self.user_anchor;
+        let far_end = self.user_pos.max(self.user_anchor);
+        let at_start = |user: usize| match marker_run {
+            Some(marker) if ranged && user == far_end => Some((marker, 0)),
+            _ => emission.position_of(0),
+        };
+        let at = |user: usize| match user - block.position {
+            0 => at_start(user),
+            offset => emission.position_of(offset),
+        };
         let block_chars = block.text.chars().count();
         if self.user_pos >= block.position && self.user_pos <= block.position + block_chars {
-            self.caret = emission
-                .position_of(self.user_pos - block.position)
-                .or(self.caret);
+            self.caret = at(self.user_pos).or(self.caret);
         }
         if self.user_anchor >= block.position && self.user_anchor <= block.position + block_chars {
-            self.anchor = emission
-                .position_of(self.user_anchor - block.position)
-                .or(self.anchor);
+            self.anchor = at(self.user_anchor).or(self.anchor);
         }
         for (index, user) in [self.user_pos, self.user_anchor].into_iter().enumerate() {
             let nearest = &mut self.nearest[index];
             if block.position > user && nearest.after.is_none() {
-                nearest.after = emission.position_of(0);
+                nearest.after = at_start(user);
             } else if block.position + block_chars < user {
                 nearest.before = emission.position_of(block_chars).or(nearest.before);
             }

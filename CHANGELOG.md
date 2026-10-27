@@ -13,6 +13,17 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Core
+
+- **`AccessNodeBuilder::push_list_child`, `push_list_item_child` and
+  `push_heading_child`** push a `Role::List`, a `Role::ListItem` (with its
+  level and position) and a `Role::Heading` under a parent of the caller's
+  choosing, keyed by the new `SyntheticKind::RichTextList` and
+  `SyntheticKind::RichTextListItem`. A `match` over `SyntheticKind` needs
+  the two new arms.
+
 ### Changed
 
 #### Core
@@ -43,6 +54,16 @@ by crate for clarity, not because crates version independently.
   Right from the paragraph before a table stops twice before the first cell,
   and a reader was told of no caret there; it is told the caret is at the
   first cell.
+- **A screen reader gets a `RichTextEditor`'s lists as lists.** Each item's
+  line starts with its marker as it is painted, its bullet, its number or
+  its task box, which a reader steps over in one move and the caret never
+  stops inside. Each list is a list node and each item an item node with its
+  level, its position and the list's size, and a nested list is inside the
+  item it follows. Items were read as plain paragraphs, with no marker and
+  no depth. In a table cell an item reads its marker and has no node of its
+  own, as a heading there has none.
+- **A heading that opens a blockquote in a `RichTextEditor` is read in its
+  place**, inside the quote. It was read after the quote's other text.
 
 ## [0.22.0] - 2026-10-27
 

@@ -618,8 +618,9 @@ pub(crate) struct EditorState {
     /// Cached flow snapshot used by the accessibility pass. The
     /// `Widget::accessibility` walk hands each block to the shared
     /// text-run emitter, which emits `Role::TextRun` children
-    /// directly under the editor's node (a `Role::Heading` block
-    /// keeps its heading node in between); the snapshot itself
+    /// directly under the editor's node (a heading, a blockquote, a
+    /// list item and a table cell keep their nodes in between, see
+    /// `body/flow_walk.rs`); the snapshot itself
     /// doesn't change between rebuilds triggered by focus / resize,
     /// so caching it avoids re-walking the document tree.
     /// Invalidated from `drain_events` when a `ContentsChanged` or
@@ -714,7 +715,9 @@ pub struct SyntheticElementRef {
     pub absolute_start: usize,
     /// The run's text, its paragraph break excluded, cached so the handler
     /// can clamp a character index to the run's characters without
-    /// re-querying the document.
+    /// re-querying the document. Empty for a list marker's run, which holds
+    /// no character of the document, so a caret put on it lands at
+    /// `absolute_start`, its item's start.
     pub text: String,
 }
 

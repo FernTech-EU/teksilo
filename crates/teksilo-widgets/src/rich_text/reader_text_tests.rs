@@ -268,3 +268,80 @@ fn a_read_only_viewer_separates_paragraphs_too() {
     let mut r = Reader::over(doc, RichTextEditor::read_only);
     assert_eq!(r.text(), "One\nTwo\n");
 }
+
+/// A list item's first line starts with its marker as it is painted, a bullet
+/// or a number and a space, nested items included (reader finding text-04).
+/// A markdown numbered list's markers have no full stop: text-document paints
+/// them as the bare number.
+#[test]
+fn a_list_item_is_heard_with_its_marker() {
+    let mut r = Reader::markdown("Intro\n\n- one\n- two\n  1. nested\n\n1. first\n2. second\n");
+    assert_eq!(
+        r.text(),
+        "Intro\n• one\n• two\n1 nested\n1 first\n2 second\n"
+    );
+    // The line a reader hears on Down onto the second item.
+    let chars: Vec<char> = r.text().chars().collect();
+    r.handle.select_range(10, 10);
+    let (start, end) = with_editor(&r.update(), |editor| {
+        let caret = editor.text_selection_focus().unwrap();
+        (
+            caret.backward_to_line_start().to_global_usv_index(),
+            caret.forward_to_line_end().to_global_usv_index(),
+        )
+    });
+    let line: String = chars[start..end].iter().collect();
+    assert_eq!(line, "• two\n");
+}
+
+/// The marker is one character no document position is. The caret at an
+/// item's start is reported after it, on the item's text; a reader's caret
+/// put on it lands at the item's start; every position still round-trips.
+#[test]
+fn a_caret_is_never_inside_a_marker() {
+    let mut r = Reader::markdown("Intro\n\n- one\n- two\n");
+    let text = r.text();
+    assert_eq!(text, "Intro\n• one\n• two\n");
+    let chars: Vec<char> = text.chars().collect();
+    for position in 0..=r.document_len() {
+        let offset = r.offset_of(position);
+        assert_ne!(chars.get(offset), Some(&'•'), "caret at {position}");
+        assert_ne!(chars.get(offset), Some(&' '), "caret at {position}");
+        assert_eq!(
+            r.select_from_reader(offset),
+            position,
+            "caret at {position}"
+        );
+    }
+    let one = "Intro\n".chars().count();
+    assert_eq!(chars[r.offset_of(one)], 'o');
+    let marker = "Intro\n".chars().count();
+    assert_eq!(chars[marker], '•');
+    assert_eq!(
+        r.select_from_reader(marker),
+        one,
+        "a caret put on the marker"
+    );
+}
+
+/// A selection running up to an item's start ends before the item's marker,
+/// so a reader hears what was selected and not the next item's bullet; one
+/// starting there starts after it.
+#[test]
+fn a_selection_up_to_an_item_holds_no_marker_of_it() {
+    let mut r = Reader::markdown("Intro\n\n- one\n- two\n");
+    let mut selected = |anchor: usize, focus: usize| {
+        r.handle.select_range(anchor, focus);
+        with_editor(&r.update(), |editor| {
+            editor
+                .text_selection()
+                .map(|s| s.text())
+                .unwrap_or_default()
+        })
+    };
+    assert_eq!(selected(0, 6), "Intro\n");
+    assert_eq!(selected(6, 0), "Intro\n");
+    assert_eq!(selected(6, 10), "one\n", "Shift+Down from the item's start");
+    assert_eq!(selected(10, 6), "one\n");
+    assert_eq!(selected(0, 13), "Intro\n• one\n• two");
+}

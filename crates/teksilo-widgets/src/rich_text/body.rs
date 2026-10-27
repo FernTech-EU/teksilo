@@ -827,7 +827,7 @@ impl Widget for RichTextEditorBody {
         // table that is thousands of layout queries for a tree nobody reads.
         let mut walk = FlowWalk::new(&st, emits_children, user_anchor, user_pos);
         if let (Some(snap), true) = (snap, emits_children) {
-            walk.elements(builder, &snap.elements, None, None);
+            walk.document(builder, &snap.elements);
         }
         let (anchor_pair, caret_pair) = walk.selection();
         let syn_map = walk.syn_map;

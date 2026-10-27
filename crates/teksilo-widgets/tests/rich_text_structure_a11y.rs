@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! A rich-text document's tables and blockquotes, as assistive technology
-//! sees them.
+//! A rich-text document's tables, blockquotes and lists, as assistive
+//! technology sees them.
 //!
 //! These drive the real `accesskit_consumer` rather than reading the
 //! `TreeUpdate` directly, because the two questions that matter here are
@@ -15,7 +15,7 @@ use accesskit_consumer::{NodeRef, Tree, common_filter};
 use teksilo_canvas::SizeProposal;
 use teksilo_core::accesskit::Role;
 use teksilo_core::widget_tree::WidgetTree;
-use teksilo_text::text_document::{BlockFormat, MoveMode, TextDocument};
+use teksilo_text::text_document::{BlockFormat, ListStyle, MarkerType, MoveMode, TextDocument};
 use teksilo_widgets::rich_text::RichTextEditor;
 
 /// An editor over `text`, laid out and rendered, plus its document.
@@ -872,4 +872,216 @@ fn a_code_editor_heading_s_edits_reach_a_text_range_capable_parent() {
         "a code-editor heading's runs must route their text changes somewhere \
          that supports text ranges. Unroutable: {bad:?}"
     );
+}
+
+// ── Lists ──────────────────────────────────────────────────────────
+
+/// An editor over a markdown document, laid out and rendered.
+fn markdown_editor(markdown: &str) -> (TextDocument, WidgetTree) {
+    let doc = TextDocument::new();
+    doc.set_markdown(markdown).unwrap().wait().unwrap();
+    let mut tree = WidgetTree::new();
+    let _ = tree.add(RichTextEditor::editor(doc.clone()));
+    settle(&mut tree);
+    (doc, tree)
+}
+
+/// The text of every run under `node`, in reading order.
+fn text_under(node: &NodeRef<'_>) -> String {
+    let mut text = String::new();
+    for child in node.children() {
+        if child.role() == Role::TextRun {
+            text.push_str(child.data().value().unwrap_or_default());
+        } else {
+            text.push_str(&text_under(&child));
+        }
+    }
+    text
+}
+
+/// The children of `node` with `role`, in order.
+fn children_with<'a>(node: &NodeRef<'a>, role: Role) -> Vec<NodeRef<'a>> {
+    node.children().filter(|c| c.role() == role).collect()
+}
+
+/// A list item's level, position and set size, 1-based, as a platform
+/// adapter reads them.
+fn item_facts(item: &NodeRef<'_>) -> (usize, usize, usize) {
+    (
+        item.data().level().expect("an item has a level") + 1,
+        item.position_in_set().expect("an item has a position") + 1,
+        item.size_of_set_from_container(&common_filter)
+            .expect("an item's list has a size"),
+    )
+}
+
+#[test]
+fn a_list_is_a_list_of_items_with_a_nested_list_in_its_item() {
+    let (_doc, mut tree) = markdown_editor("- one\n- two\n  1. two a\n  2. two b\n- three\n");
+    let consumer = Tree::new(tree.sync_accessibility(), false);
+    let editor = editor_node(consumer.state());
+
+    let lists = children_with(&editor, Role::List);
+    assert_eq!(lists.len(), 1, "one top-level list");
+    let items = children_with(&lists[0], Role::ListItem);
+    assert_eq!(items.len(), 3);
+    for (i, item) in items.iter().enumerate() {
+        assert_eq!(item_facts(item), (1, i + 1, 3), "item {i}");
+    }
+    assert_eq!(text_under(&items[0]), "• one\n");
+
+    // The nested list is inside the item it follows, after that item's text.
+    let nested = children_with(&items[1], Role::List);
+    assert_eq!(nested.len(), 1, "the nested list is in the second item");
+    assert_eq!(text_under(&items[1]), "• two\n1 two a\n2 two b\n");
+    let nested_items = children_with(&nested[0], Role::ListItem);
+    assert_eq!(nested_items.len(), 2);
+    for (i, item) in nested_items.iter().enumerate() {
+        assert_eq!(item_facts(item), (2, i + 1, 2), "nested item {i}");
+    }
+    assert!(children_with(&items[0], Role::List).is_empty());
+    assert!(children_with(&items[2], Role::List).is_empty());
+}
+
+#[test]
+fn two_lists_are_two_list_nodes() {
+    let (_doc, mut tree) = markdown_editor("- a\n- b\n\nBetween\n\n1. c\n");
+    let consumer = Tree::new(tree.sync_accessibility(), false);
+    let editor = editor_node(consumer.state());
+    let lists = children_with(&editor, Role::List);
+    assert_eq!(lists.len(), 2);
+    assert_eq!(text_under(&lists[0]), "• a\n• b\n");
+    assert_eq!(text_under(&lists[1]), "1 c\n");
+    assert_eq!(text_under(&editor), "• a\n• b\nBetween\n1 c\n");
+}
+
+#[test]
+fn a_list_item_s_edits_reach_a_text_range_capable_parent() {
+    // `Role::ListItem` is not text-range capable, so an item's runs, its
+    // marker's among them, cannot hang off it directly.
+    let (_doc, mut tree) = markdown_editor("- one\n- two\n");
+    let values = run_values(&mut tree);
+    assert!(
+        values.iter().any(|v| v == "• ") && values.iter().any(|v| v == "two\n"),
+        "the items' runs must exist before their routing means anything; got {values:?}"
+    );
+    let (bad, _) = runs_with_unroutable_parents(&mut tree);
+    assert!(bad.is_empty(), "unroutable runs in a list: {bad:?}");
+}
+
+#[test]
+fn indenting_an_item_moves_it_into_a_list_inside_the_item_before() {
+    let doc = TextDocument::new();
+    doc.set_markdown("- one\n- two\n").unwrap().wait().unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+    let mut tree = WidgetTree::new();
+    let _ = tree.add(editor);
+    settle(&mut tree);
+    let two = "one\n".chars().count();
+    handle.select_range(two, two);
+    handle.indent();
+    settle(&mut tree);
+
+    let consumer = Tree::new(tree.sync_accessibility(), false);
+    let editor = editor_node(consumer.state());
+    let items = children_with(&children_with(&editor, Role::List)[0], Role::ListItem);
+    assert_eq!(items.len(), 1, "the second item left the top-level list");
+    let nested = children_with(&children_with(&items[0], Role::List)[0], Role::ListItem);
+    assert_eq!(nested.len(), 1);
+    assert_eq!(item_facts(&nested[0]), (2, 1, 1));
+    assert_eq!(text_under(&nested[0]), "• two\n");
+}
+
+#[test]
+fn a_task_item_is_heard_with_its_box() {
+    let (doc, mut tree) = editor_with("Done\nTo do");
+    for (position, marker) in [(0, MarkerType::Checked), (5, MarkerType::Unchecked)] {
+        let c = doc.cursor_at(0);
+        c.set_position(position, MoveMode::MoveAnchor);
+        c.set_block_format(&BlockFormat {
+            marker: Some(marker),
+            ..Default::default()
+        })
+        .unwrap();
+    }
+    settle(&mut tree);
+    let consumer = Tree::new(tree.sync_accessibility(), false);
+    assert_eq!(
+        text_under(&editor_node(consumer.state())),
+        "\u{2611} Done\n\u{2610} To do\n"
+    );
+}
+
+#[test]
+fn a_list_in_a_table_cell_keeps_its_marker_in_the_cell_s_text() {
+    let (doc, mut tree) = table_document("Intro", &["Alpha", "Beta", "Gamma", "Delta"]);
+    let alpha = nth_cell_end(&doc, 0).unwrap();
+    {
+        let c = doc.cursor_at(0);
+        c.set_position(alpha, MoveMode::MoveAnchor);
+        c.create_list(ListStyle::Disc).unwrap();
+    }
+    settle(&mut tree);
+    let consumer = Tree::new(tree.sync_accessibility(), false);
+    let state = consumer.state();
+    let cells = collect(state.root(), &|n| n.role() == Role::Cell);
+    assert!(
+        cells.iter().any(|cell| text_under(cell) == "• Alpha\n"),
+        "the cell reads its item's marker"
+    );
+    // A cell's runs hang off its one text container, so the item gets no
+    // node of its own there, as a heading in a cell gets none.
+    assert!(collect(state.root(), &|n| n.role() == Role::ListItem).is_empty());
+    let (bad, _) = runs_with_unroutable_parents(&mut tree);
+    assert!(bad.is_empty(), "unroutable runs in the cell: {bad:?}");
+}
+
+/// A heading opening a blockquote is in the quote, and read where it stands:
+/// it hung off the editor, after the quote, and was read after the quote's
+/// other text.
+#[test]
+fn a_heading_in_a_blockquote_is_read_in_its_place() {
+    let (_doc, mut tree) = markdown_editor("> # Title\n> Quoted\n\nAfter\n");
+    let consumer = Tree::new(tree.sync_accessibility(), false);
+    let editor = editor_node(consumer.state());
+    assert_eq!(text_under(&editor), "Title\nQuoted\nAfter\n");
+    let quotes = children_with(&editor, Role::Blockquote);
+    assert_eq!(quotes.len(), 1);
+    let headings = children_with(&quotes[0], Role::Heading);
+    assert_eq!(headings.len(), 1, "the heading is in the quote");
+    assert_eq!(headings[0].data().level(), Some(0), "an H1");
+    let (bad, _) = runs_with_unroutable_parents(&mut tree);
+    assert!(bad.is_empty(), "unroutable runs in the quote: {bad:?}");
+}
+
+/// A list item that is a heading keeps its marker out of the heading, as an
+/// HTML item's marker is the item's: heading navigation hears "Title", and
+/// the item's line is still "• Title".
+#[test]
+fn a_heading_item_s_marker_is_the_item_s_not_the_heading_s() {
+    let (doc, mut tree) = editor_with("Title\nItem");
+    {
+        let c = doc.cursor_at(0);
+        c.set_position(0, MoveMode::MoveAnchor);
+        c.set_position("Title\nItem".chars().count(), MoveMode::KeepAnchor);
+        c.create_list(ListStyle::Disc).unwrap();
+        c.set_position(0, MoveMode::MoveAnchor);
+        c.set_block_format(&BlockFormat {
+            heading_level: Some(2),
+            ..Default::default()
+        })
+        .unwrap();
+    }
+    settle(&mut tree);
+    let consumer = Tree::new(tree.sync_accessibility(), false);
+    let editor = editor_node(consumer.state());
+    let items = children_with(&children_with(&editor, Role::List)[0], Role::ListItem);
+    assert_eq!(items.len(), 2);
+    assert_eq!(text_under(&items[0]), "• Title\n");
+    let headings = children_with(&items[0], Role::Heading);
+    assert_eq!(headings.len(), 1, "the heading is in its item");
+    assert_eq!(text_under(&headings[0]), "Title\n");
+    let (bad, _) = runs_with_unroutable_parents(&mut tree);
+    assert!(bad.is_empty(), "unroutable runs in the item: {bad:?}");
 }
