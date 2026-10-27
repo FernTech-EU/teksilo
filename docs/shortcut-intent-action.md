@@ -1066,6 +1066,14 @@ whichever widget holds the focus, whatever kind it is. Registrations are
 owned by the registering widget and torn down on its rebuild or destroy,
 exactly like `register_action_global`.
 
+`surface.accepts(command)` says whether that widget takes a command at all
+in its current mode, by the rule its own keys follow: a forward-only editor
+takes a paste and refuses a cut, a read-only one refuses both, a masked
+password refuses a copy. Grey an Edit row with it, as
+`!surface.accepts(StandardEdit::Cut) || !surface.has_selection()`. The
+surface's own `cut`, `paste`, `undo` and the others do nothing for a command
+it refuses, so a routed shortcut cannot go around the widget's mode.
+
 A custom text widget should call `register_text_surface` too. Failing to
 is not a compile error and will not be noticed until an application
 routes one of these commands from a menu and your widget quietly loses it.

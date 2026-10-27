@@ -1744,11 +1744,15 @@ impl teksilo_core::text_surface::TextSurface for TextFieldHandle {
     }
 
     fn undo(&self) {
-        TextFieldHandle::undo(self);
+        if self.accepts(StandardEdit::Undo) {
+            TextFieldHandle::undo(self);
+        }
     }
 
     fn redo(&self) {
-        TextFieldHandle::redo(self);
+        if self.accepts(StandardEdit::Redo) {
+            TextFieldHandle::redo(self);
+        }
     }
 
     fn has_selection(&self) -> bool {
@@ -1763,26 +1767,51 @@ impl teksilo_core::text_surface::TextSurface for TextFieldHandle {
         TextFieldHandle::allows_copy(self)
     }
 
+    /// What the field's keys take: nothing that writes into a read-only
+    /// field, no cut or copy of a masked password. The handle's own methods
+    /// stay as they are, for a host writing on its own account. `false` once
+    /// the field is gone; `true` while it is busy with its own state, as the
+    /// menu-row queries answer.
+    fn accepts(&self, command: StandardEdit) -> bool {
+        let slot = self.slot.borrow();
+        let Some(state) = slot.as_ref() else {
+            return false;
+        };
+        state
+            .try_borrow()
+            .map_or(true, |st| keyboard::accepts_standard_edit(&st, command))
+    }
+
     fn cut(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
-        TextFieldHandle::cut(self, ctx);
+        if self.accepts(StandardEdit::Cut) {
+            TextFieldHandle::cut(self, ctx);
+        }
     }
 
     fn copy(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
-        TextFieldHandle::copy(self, ctx);
+        if self.accepts(StandardEdit::Copy) {
+            TextFieldHandle::copy(self, ctx);
+        }
     }
 
     fn paste(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
-        TextFieldHandle::paste(self, ctx);
+        if self.accepts(StandardEdit::Paste) {
+            TextFieldHandle::paste(self, ctx);
+        }
     }
 
     /// A one-line field carries no formatting to strip, so the plain paste
     /// *is* the paste. Answering "nothing" here would make Edit ▸ Paste without
     /// formatting silently dead over a rename box.
     fn paste_plain(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
-        TextFieldHandle::paste(self, ctx);
+        if self.accepts(StandardEdit::PastePlain) {
+            TextFieldHandle::paste(self, ctx);
+        }
     }
 
     fn select_all(&self) {
-        TextFieldHandle::select_all(self);
+        if self.accepts(StandardEdit::SelectAll) {
+            TextFieldHandle::select_all(self);
+        }
     }
 }

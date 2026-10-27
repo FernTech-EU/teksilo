@@ -125,6 +125,7 @@ use teksilo_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
+use teksilo_core::shortcut::StandardEdit;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{
     RichTextEditorStyle, RichTextEditorStyleConfig, SharedRichTextEditorStyle,
@@ -4891,11 +4892,15 @@ impl teksilo_core::text_surface::TextSurface for EditorHandle {
     }
 
     fn undo(&self) {
-        EditorHandle::undo(self);
+        if self.accepts(StandardEdit::Undo) {
+            EditorHandle::undo(self);
+        }
     }
 
     fn redo(&self) {
-        EditorHandle::redo(self);
+        if self.accepts(StandardEdit::Redo) {
+            EditorHandle::redo(self);
+        }
     }
 
     /// The editor's own [`CommandFilter`]
@@ -4917,23 +4922,45 @@ impl teksilo_core::text_surface::TextSurface for EditorHandle {
         self.command_filter().accepts(EditCommandKind::Copy)
     }
 
+    /// What the editor's keys take: its [`CommandFilter`] and its clipboard
+    /// policy, so a routed Ctrl+X cannot take text from a forward-only editor
+    /// nor a routed Ctrl+V write into a read-only one. The handle's own
+    /// [`cut`](EditorHandle::cut) and [`paste`](EditorHandle::paste) stay
+    /// unfiltered, for a host writing on its own account. `true` while the
+    /// editor is busy with its own state, as the menu-row queries answer.
+    fn accepts(&self, command: StandardEdit) -> bool {
+        self.state
+            .try_borrow()
+            .map_or(true, |st| keyboard::accepts_standard_edit(&st, command))
+    }
+
     fn cut(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
-        EditorHandle::cut(self, ctx);
+        if self.accepts(StandardEdit::Cut) {
+            EditorHandle::cut(self, ctx);
+        }
     }
 
     fn copy(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
-        EditorHandle::copy(self, ctx);
+        if self.accepts(StandardEdit::Copy) {
+            EditorHandle::copy(self, ctx);
+        }
     }
 
     fn paste(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
-        EditorHandle::paste(self, ctx);
+        if self.accepts(StandardEdit::Paste) {
+            EditorHandle::paste(self, ctx);
+        }
     }
 
     fn paste_plain(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
-        EditorHandle::paste_unformatted(self, ctx);
+        if self.accepts(StandardEdit::PastePlain) {
+            EditorHandle::paste_unformatted(self, ctx);
+        }
     }
 
     fn select_all(&self) {
-        EditorHandle::select_all(self);
+        if self.accepts(StandardEdit::SelectAll) {
+            EditorHandle::select_all(self);
+        }
     }
 }

@@ -23,6 +23,12 @@ by crate for clarity, not because crates version independently.
   choosing, keyed by the new `SyntheticKind::RichTextList` and
   `SyntheticKind::RichTextListItem`. A `match` over `SyntheticKind` needs
   the two new arms.
+- **`TextSurface::accepts(StandardEdit)`** says whether the focused text
+  widget takes Cut, Copy, Paste, Undo or the others at all in its current
+  mode: a forward-only editor takes a paste and refuses a cut, which
+  `is_read_only` cannot say. A host routing Edit commands to the focused
+  surface greys its rows by it. It has a default, so an implementor written
+  before it keeps compiling.
 
 #### Widgets
 
@@ -45,6 +51,12 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A Cut, Paste or Undo a host routes to a `RichTextEditor` obeys its
+  command filter.** Routed through `TextSurface` (`ctx.text_surfaces()`),
+  Ctrl+X under `CommandFilter::ForwardOnly` took the selected text away, and
+  Ctrl+X and Ctrl+V wrote into a read-only editor. The surface's commands now
+  do what the editor's keys do; the handle's own `cut` and `paste` still
+  write, for a host acting on its own account.
 - **Under a forward-only filter, a line break over a selection reaching into a
   code block or a table cell no longer lands there.** Shift+Enter and
   `insert_line_break` judged the place by the caret, and the break goes in

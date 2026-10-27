@@ -53,6 +53,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use crate::shortcut::StandardEdit;
 use crate::signal::Signal;
 use crate::widget::EventContext;
 use crate::widget_id::WidgetId;
@@ -88,6 +89,40 @@ pub trait TextSurface {
     fn is_read_only(&self) -> bool;
     /// May its contents be copied at all? A password field says no.
     fn allows_copy(&self) -> bool;
+
+    /// Does this surface take `command` at all, in the mode it is in now?
+    ///
+    /// The surface's own answer to a command from any route, the one its keys
+    /// give: a forward-only editor takes a paste and refuses a cut, a
+    /// read-only one refuses both, a masked password field refuses a copy.
+    /// [`is_read_only`](Self::is_read_only) cannot say "takes a paste, refuses
+    /// a cut", which is why this exists.
+    ///
+    /// Not whether there is anything to act on: a host greys a Cut row with
+    /// `!accepts(Cut) || !has_selection()`, an Undo row with
+    /// [`can_undo`](Self::can_undo) as well.
+    ///
+    /// The surface's own commands obey it. [`cut`](Self::cut),
+    /// [`copy`](Self::copy), [`paste`](Self::paste),
+    /// [`paste_plain`](Self::paste_plain), [`undo`](Self::undo),
+    /// [`redo`](Self::redo) and [`select_all`](Self::select_all) do nothing
+    /// for a command this refuses, so a shortcut a host routes to the focused
+    /// surface cannot write into a read-only one or take text from a
+    /// forward-only one.
+    ///
+    /// The default answers from the other questions, for an implementor that
+    /// has no finer rule: a cut needs an editable surface that allows copying,
+    /// a paste an editable one, a copy one that allows copying, Undo and Redo a
+    /// history that is not frozen.
+    fn accepts(&self, command: StandardEdit) -> bool {
+        match command {
+            StandardEdit::Cut => !self.is_read_only() && self.allows_copy(),
+            StandardEdit::Copy => self.allows_copy(),
+            StandardEdit::Paste | StandardEdit::PastePlain => !self.is_read_only(),
+            StandardEdit::Undo | StandardEdit::Redo => !self.history_frozen(),
+            StandardEdit::SelectAll => true,
+        }
+    }
 
     fn cut(&self, ctx: &EventContext<'_>);
     fn copy(&self, ctx: &EventContext<'_>);
@@ -205,5 +240,88 @@ impl TextSurfaces {
     /// re-reads when focus moves.
     pub fn focus_signal(&self) -> Signal<Option<WidgetId>> {
         self.focused.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A surface with no rule of its own, answering only the older questions.
+    struct Plain {
+        read_only: bool,
+        allows_copy: bool,
+        frozen: bool,
+    }
+
+    impl TextSurface for Plain {
+        fn can_undo(&self) -> bool {
+            true
+        }
+        fn can_redo(&self) -> bool {
+            true
+        }
+        fn undo(&self) {}
+        fn redo(&self) {}
+        fn history_frozen(&self) -> bool {
+            self.frozen
+        }
+        fn has_selection(&self) -> bool {
+            true
+        }
+        fn is_read_only(&self) -> bool {
+            self.read_only
+        }
+        fn allows_copy(&self) -> bool {
+            self.allows_copy
+        }
+        fn cut(&self, _: &EventContext<'_>) {}
+        fn copy(&self, _: &EventContext<'_>) {}
+        fn paste(&self, _: &EventContext<'_>) {}
+        fn paste_plain(&self, _: &EventContext<'_>) {}
+        fn select_all(&self) {}
+    }
+
+    /// The default `accepts` follows the questions an implementor already
+    /// answers, so one written before it existed keeps meaning what it said.
+    #[test]
+    fn the_default_accepts_follows_the_older_questions() {
+        let editable = Plain {
+            read_only: false,
+            allows_copy: true,
+            frozen: false,
+        };
+        for command in [
+            StandardEdit::Cut,
+            StandardEdit::Copy,
+            StandardEdit::Paste,
+            StandardEdit::PastePlain,
+            StandardEdit::Undo,
+            StandardEdit::Redo,
+            StandardEdit::SelectAll,
+        ] {
+            assert!(editable.accepts(command), "{command:?}");
+        }
+
+        let read_only = Plain {
+            read_only: true,
+            allows_copy: true,
+            frozen: true,
+        };
+        assert!(!read_only.accepts(StandardEdit::Cut));
+        assert!(!read_only.accepts(StandardEdit::Paste));
+        assert!(!read_only.accepts(StandardEdit::PastePlain));
+        assert!(!read_only.accepts(StandardEdit::Undo));
+        assert!(read_only.accepts(StandardEdit::Copy));
+        assert!(read_only.accepts(StandardEdit::SelectAll));
+
+        let secret = Plain {
+            read_only: false,
+            allows_copy: false,
+            frozen: false,
+        };
+        assert!(!secret.accepts(StandardEdit::Copy));
+        assert!(!secret.accepts(StandardEdit::Cut), "a cut is a copy too");
+        assert!(secret.accepts(StandardEdit::Paste));
     }
 }

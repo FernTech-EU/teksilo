@@ -69,6 +69,7 @@ use std::rc::Rc;
 use teksilo_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::shortcut::StandardEdit;
 use teksilo_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_text::text_document::TextDocument;
@@ -646,11 +647,15 @@ impl teksilo_core::text_surface::TextSurface for CodeEditorHandle {
     }
 
     fn undo(&self) {
-        CodeEditorHandle::undo(self);
+        if self.accepts(StandardEdit::Undo) {
+            CodeEditorHandle::undo(self);
+        }
     }
 
     fn redo(&self) {
-        CodeEditorHandle::redo(self);
+        if self.accepts(StandardEdit::Redo) {
+            CodeEditorHandle::redo(self);
+        }
     }
 
     fn has_selection(&self) -> bool {
@@ -674,24 +679,45 @@ impl teksilo_core::text_surface::TextSurface for CodeEditorHandle {
             .accepts(policy::CodeCommand::Undo)
     }
 
+    /// What the editor's keys take: its command filter and its clipboard
+    /// policy, so a routed Ctrl+X or Ctrl+V cannot go around them. The
+    /// handle's own methods stay unfiltered, for a host writing on its own
+    /// account. `true` while the editor is busy with its own state, as the
+    /// menu-row queries answer.
+    fn accepts(&self, command: StandardEdit) -> bool {
+        self.state
+            .try_borrow()
+            .map_or(true, |st| keyboard::accepts_standard_edit(&st, command))
+    }
+
     fn cut(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
-        CodeEditorHandle::cut(self, ctx);
+        if self.accepts(StandardEdit::Cut) {
+            CodeEditorHandle::cut(self, ctx);
+        }
     }
 
     fn copy(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
-        CodeEditorHandle::copy(self, ctx);
+        if self.accepts(StandardEdit::Copy) {
+            CodeEditorHandle::copy(self, ctx);
+        }
     }
 
     fn paste(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
-        CodeEditorHandle::paste(self, ctx);
+        if self.accepts(StandardEdit::Paste) {
+            CodeEditorHandle::paste(self, ctx);
+        }
     }
 
     /// Code has no rich formatting to strip; the plain paste is the paste.
     fn paste_plain(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
-        CodeEditorHandle::paste(self, ctx);
+        if self.accepts(StandardEdit::PastePlain) {
+            CodeEditorHandle::paste(self, ctx);
+        }
     }
 
     fn select_all(&self) {
-        CodeEditorHandle::select_all(self);
+        if self.accepts(StandardEdit::SelectAll) {
+            CodeEditorHandle::select_all(self);
+        }
     }
 }

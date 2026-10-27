@@ -324,6 +324,19 @@ fn declines(st: &TextInputState, command: StandardEdit, empty_history_passes_on:
     }
 }
 
+/// Whether the field takes `command` at all, from any route: what its keys
+/// decline (a read-only field takes no cut, paste or history step), and a cut
+/// or a copy of a field whose text may not leave it (a masked password).
+/// `TextSurface::accepts` answers with it, and the surface's own commands obey
+/// it.
+pub(crate) fn accepts_standard_edit(st: &TextInputState, command: StandardEdit) -> bool {
+    !declines(st, command, false)
+        && match command {
+            StandardEdit::Cut | StandardEdit::Copy => st.copy_allowed(),
+            _ => true,
+        }
+}
+
 /// Run one of the standard edit commands for the field, as its `edit.*`
 /// action does. Returns whether the command ran: it declines what
 /// [`standard_edit_passes_on`] says it does, which passes the intent on.
