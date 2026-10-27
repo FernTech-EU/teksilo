@@ -4036,8 +4036,10 @@ impl Widget for RichTextEditor {
                         return false;
                     };
                     {
-                        let st = state.borrow();
-                        let _ = st.cursor.insert_text(text);
+                        let mut st = state.borrow_mut();
+                        self::frame_loop::flush_pending_chars(&mut st);
+                        // Another program's lines: each `\n` a paragraph.
+                        self::clipboard::insert_plain_text(&st, text);
                     }
                     sync_cursor_signals(&state);
                     state.borrow_mut().pending_text_changed = true;
@@ -4753,15 +4755,20 @@ fn handle_access_action_request(
             {
                 return EventResponse::Ignored;
             }
-            let st = state.borrow();
+            let mut st = state.borrow_mut();
+            self::frame_loop::flush_pending_chars(&mut st);
             st.cursor.select(SelectionType::Document);
-            let _ = st.cursor.insert_text(value.as_ref());
+            // The whole text, as the assistive technology read and edited it:
+            // a `\n` there ends a paragraph and a U+2028 breaks a line, as
+            // AccessKit reads a run's value, so the paragraphs come back as
+            // blocks rather than as one block holding newlines.
+            let arrived = self::clipboard::insert_plain_text(&st, value.as_ref());
             // For some people this **is** typing — dictation, a braille display —
             // and it is reported as itself rather than as `Keyboard` or as
             // nothing at all. A toolkit that folded it into typing would erase
             // how they work; one that reported nothing would leave anything
             // counting arrivals silently short for exactly those writers.
-            st.report_inserted(EditSource::Accessibility, value.as_ref());
+            st.report_inserted_chars(EditSource::Accessibility, arrived);
             drop(st);
             sync_cursor_signals(state);
             ctx.request_frame();
@@ -4769,20 +4776,22 @@ fn handle_access_action_request(
         }
         (Action::ReplaceSelectedText, Some(ActionData::Value(value))) => {
             // Insert at the caret, replacing the active selection (if
-            // any) — NOT the whole document like `SetValue`. The AT-SPI
-            // (Linux) / UIA (Windows) braille-keyboard & dictation
-            // insertion path; macOS routes insertion through `SetValue`.
-            // We advertise the action in `accessibility()`, so service it.
+            // any) — NOT the whole document like `SetValue`. No desktop
+            // adapter sends it today: AT-SPI's `EditableText.InsertText` is
+            // unsupported in accesskit_unix, and AT-SPI's `SetTextContents`,
+            // macOS's `setAccessibilityValue:` and UIA's `ValuePattern` all
+            // arrive as `SetValue`. We advertise the action in
+            // `accessibility()`, so service it for a client that does.
             let filter = state.borrow().policy.command_filter;
             if !filter.accepts(EditCommandKind::InsertChar) {
                 return EventResponse::Ignored;
             }
-            let st = state.borrow();
+            let mut st = state.borrow_mut();
+            self::frame_loop::flush_pending_chars(&mut st);
             self::keyboard::collapse_selection_before_insert(&st);
-            let _ = st.cursor.insert_text(value.as_ref());
-            // The AT-SPI / UIA insertion path, which is how a braille keyboard
-            // and most dictation write. Same reason as `SetValue` above.
-            st.report_inserted(EditSource::Accessibility, value.as_ref());
+            let arrived = self::clipboard::insert_plain_text(&st, value.as_ref());
+            // Same reason as `SetValue` above.
+            st.report_inserted_chars(EditSource::Accessibility, arrived);
             drop(st);
             sync_cursor_signals(state);
             ctx.request_frame();

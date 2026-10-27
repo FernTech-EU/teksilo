@@ -64,6 +64,8 @@ struct Mounted {
     handle: EditorHandle,
     state: SharedState,
     tree: WidgetTree,
+    id: WidgetId,
+    clipboard: teksilo_platform::clipboard::ClipboardHandle,
 }
 
 impl Mounted {
@@ -79,6 +81,7 @@ impl Mounted {
         let handle = editor.handle();
         let state = editor.state_handle();
         let mut tree = WidgetTree::new();
+        let clipboard = super::tests::ctx_with_memory_clipboard(&mut tree);
         let id = tree.add(editor);
         tree.layout(SizeProposal::exact(400.0, 300.0));
         focus(&mut tree, id);
@@ -88,6 +91,8 @@ impl Mounted {
             handle,
             state,
             tree,
+            id,
+            clipboard,
         }
     }
 
@@ -570,4 +575,93 @@ fn accessibility_reads_the_separator_as_a_hard_break() {
         "the break is one character of three bytes"
     );
     assert_eq!(first.character_lengths().len(), 4);
+}
+
+// ── Plain text from outside: paste, drop, assistive technology ──────────
+//
+// `insert_text` keeps every character in one block, a `\n` included, which the
+// typesetter shows as a line the document does not have. Text arriving from
+// another program, or written by an assistive technology, has its paragraph
+// breaks made blocks and its line breaks made `LINE_SEPARATOR`.
+
+#[test]
+fn a_plain_paste_makes_paragraphs_of_paragraph_breaks_and_keeps_line_breaks() {
+    let mut ed = Mounted::new("", 0);
+    ed.clipboard
+        .set_text("a\r\nb\u{2029}c\u{b}d\u{2028}e\u{c}f")
+        .unwrap();
+    ed.press(Key::V, Modifiers::COMMAND);
+    assert_eq!(ed.text(), format!("a\nb\nc{LS}d{LS}e\nf"));
+    assert_eq!(ed.doc.block_count(), 4);
+}
+
+#[test]
+fn a_text_drop_from_another_program_makes_its_lines_paragraphs() {
+    use teksilo_core::ExternalDropData;
+    use teksilo_core::window::NoopWindowOps;
+    let mut ed = Mounted::new("", 0);
+    let data = || ExternalDropData {
+        text: Some("one\ntwo".to_string()),
+        formats: vec!["text/plain".to_string()],
+        ..Default::default()
+    };
+    let at = teksilo_canvas::Point::new(40.0, 20.0);
+    ed.tree.begin_external_drag(at, data(), &mut NoopWindowOps);
+    ed.tree.end_external_drag(at, data(), &mut NoopWindowOps);
+    layout(&mut ed.tree);
+    assert_eq!(ed.text(), "one\ntwo");
+    assert_eq!(ed.doc.block_count(), 2);
+}
+
+fn access_action(ed: &mut Mounted, action: teksilo_core::accesskit::Action, value: &str) {
+    use teksilo_core::accessibility::widget_id_to_node_id;
+    use teksilo_core::accesskit::ActionData;
+    let mut ops = teksilo_core::window::NoopWindowOps;
+    assert!(ed.tree.dispatch_access_action(
+        widget_id_to_node_id(ed.id),
+        action,
+        Some(ActionData::Value(value.into())),
+        &mut ops,
+    ));
+    layout(&mut ed.tree);
+}
+
+/// An assistive technology writes the whole text back through `SetValue` on
+/// every desktop platform; AccessKit reads a `\n` ending a run as a paragraph
+/// end and anything else as a line end, so the two come back as such.
+#[test]
+fn set_value_keeps_paragraphs_and_line_breaks() {
+    let mut ed = Mounted::new("first", 0);
+    access_action(
+        &mut ed,
+        teksilo_core::accesskit::Action::SetValue,
+        &format!("alpha\nbeta{LS}gamma"),
+    );
+    assert_eq!(ed.text(), format!("alpha\nbeta{LS}gamma"));
+    assert_eq!(ed.doc.block_count(), 2);
+}
+
+#[test]
+fn replace_selected_text_keeps_paragraphs() {
+    let mut ed = Mounted::new("ab", 1);
+    access_action(
+        &mut ed,
+        teksilo_core::accesskit::Action::ReplaceSelectedText,
+        "X\nY",
+    );
+    assert_eq!(ed.text(), "aX\nYb");
+    assert_eq!(ed.doc.block_count(), 2);
+}
+
+#[test]
+fn a_typed_paragraph_separator_starts_a_paragraph() {
+    let mut ed = Mounted::new("ab", 1);
+    ed.tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::A,
+        modifiers: Modifiers::NONE,
+        text: Some("\u{2029}".to_string()),
+    });
+    layout(&mut ed.tree);
+    assert_eq!(ed.text(), "a\nb");
+    assert_eq!(ed.doc.block_count(), 2);
 }

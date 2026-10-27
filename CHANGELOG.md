@@ -130,6 +130,13 @@ by crate for clarity, not because crates version independently.
   before them: typing "ab" and pressing Enter quickly
   gave a new paragraph holding "ab". Fast typing, automation and remote
   desktops could hit it.
+- **Text from another program keeps its paragraphs and line breaks in
+  `RichTextEditor`.** Text dropped from another program, and text an
+  assistive technology writes (dictation, a braille display), went into one
+  paragraph with its newlines inside it. Each paragraph break (`\n`, `\r\n`,
+  U+2029) now starts a paragraph, as in a paste, and a line break (U+2028, or
+  the vertical tab Word writes for one) is a line break inside the
+  paragraph, in a paste too. A typed U+2029 starts a paragraph.
 - **A single-line field keeps out a line or paragraph separator** (U+2028,
   U+2029) typed or pasted from another program, as it keeps out a `\n`.
   text-typeset 2.1 breaks the line at either, so the field showed two lines.

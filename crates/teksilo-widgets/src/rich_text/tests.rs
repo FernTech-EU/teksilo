@@ -5152,8 +5152,8 @@ fn editor_on_change_fires_on_backspace_paragraph_merge() {
 fn editor_on_change_fires_on_accesskit_set_value_replace() {
     // The AT write path (a screen reader / braille keyboard / dictation
     // client replacing the document). `handle_access_action_request`
-    // services SetValue by select-all + insert_text, which crosses block
-    // boundaries here — so it lands as a structural edit and used to be
+    // services SetValue by select-all + `clipboard::insert_plain_text`, which
+    // crosses block boundaries here — so it lands as a structural edit and used to be
     // swallowed too. This is also the first coverage of the SetValue
     // handler at all.
     use teksilo_core::accessibility::widget_id_to_node_id;

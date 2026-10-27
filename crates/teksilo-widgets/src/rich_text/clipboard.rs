@@ -272,8 +272,11 @@ pub(crate) fn paste(state: &mut EditorState, ctx: &EventContext) {
         return;
     }
 
-    // 4. Plain-text fallback.
-    insert_multiline_plain(state, &text);
+    // 4. Plain-text fallback. Counted from the payload rather than measured
+    //    afterwards, because this is the one paste path where the text itself is
+    //    in hand. A paragraph break counts: it is text that arrived.
+    let arrived = insert_plain_text(state, &text);
+    state.report_inserted_chars(super::EditSource::Clipboard, arrived);
     state.cursor.clear_selection();
     state.pending_text_changed = true;
 }
@@ -328,7 +331,8 @@ pub(crate) fn paste_unformatted(state: &mut EditorState, ctx: &EventContext) {
     // As in `paste`: append after the selection rather than over it when the
     // filter forbids taking text away.
     super::keyboard::collapse_selection_before_insert(state);
-    insert_multiline_plain(state, &text);
+    let arrived = insert_plain_text(state, &text);
+    state.report_inserted_chars(super::EditSource::Clipboard, arrived);
     state.cursor.clear_selection();
     state.pending_text_changed = true;
 }
@@ -354,25 +358,23 @@ pub(crate) fn can_paste(ctx: &EventContext) -> bool {
         .unwrap_or(false)
 }
 
-/// Insert plain text that may contain line breaks, splitting on
-/// `\n` into separate blocks. `text-document::TextCursor::insert_text`
-/// treats `\n` as a literal scalar inside one block, so pasting a
-/// multi-line clipboard payload without this split leaves every line
-/// fused into one paragraph. Normalises `\r\n` and bare `\r` first so
-/// Windows- and classic-Mac clipboards round-trip cleanly.
-fn insert_multiline_plain(state: &mut EditorState, text: &str) {
-    let normalised = text.replace("\r\n", "\n").replace('\r', "\n");
-    // One paste, one undo step. Without the edit block each line is its own
+/// Insert plain text from outside the editor (a paste, a drop, an assistive
+/// technology) with its breaks in the document's own terms, as one undo step.
+/// Returns how many characters went in, a paragraph break counting as one.
+///
+/// `TextCursor::insert_text` puts every character into the one block, a `\n`
+/// included, which the typesetter then shows as a line break the document does
+/// not have and a save writes into the paragraph. So each paragraph break
+/// (`\r\n`, `\r`, `\n`, U+2029 PARAGRAPH SEPARATOR, NEL, a form feed) starts a
+/// new block, and each line break (U+2028 LINE SEPARATOR, or the vertical tab
+/// Word writes for one) becomes the document's [`LINE_SEPARATOR`].
+pub(super) fn insert_plain_text(state: &EditorState, text: &str) -> usize {
+    let normalised = plain_text_breaks(text);
+    // One insertion, one undo step. Without the edit block each line is its own
     // entry, so undoing a four-line paste took four presses of Ctrl+Z and left
     // three quarters of it behind — every other multi-step mutation in the
     // editor is grouped for exactly this reason.
     state.cursor.begin_edit_block();
-    // Counted from the payload rather than measured afterwards, because this is
-    // the one paste path where the text itself is in hand. The newlines count:
-    // a pasted paragraph break is text that arrived, and dropping it would make
-    // a five-paragraph paste report four characters short for no reason a reader
-    // could see.
-    state.report_inserted(super::EditSource::Clipboard, &normalised);
     let mut lines = normalised.split('\n');
     if let Some(first) = lines.next() {
         let _ = state.cursor.insert_text(first);
@@ -384,6 +386,26 @@ fn insert_multiline_plain(state: &mut EditorState, text: &str) {
         }
     }
     state.cursor.end_edit_block();
+    normalised.chars().count()
+}
+
+/// `text` with every paragraph break as one `\n` and every line break as
+/// [`LINE_SEPARATOR`]. See [`insert_plain_text`].
+fn plain_text_breaks(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\r' => {
+                chars.next_if_eq(&'\n');
+                out.push('\n');
+            }
+            '\n' | '\u{2029}' | '\u{85}' | '\u{c}' => out.push('\n'),
+            '\u{b}' => out.push(LINE_SEPARATOR),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// How many characters an insertion actually added, measured around it.
