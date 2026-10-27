@@ -52,6 +52,10 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A `RichTextEditor`'s context menu and touch selection toolbar offer no
+  Paste when its command filter refuses one.** An editor built editable and
+  switched to `CommandFilter::ReadOnly` kept its Paste and Paste Unformatted
+  rows, and they wrote into it.
 - **A Cut, Paste or Undo a host routes to a `RichTextEditor` obeys its
   command filter.** Routed through `TextSurface` (`ctx.text_surfaces()`),
   Ctrl+X under `CommandFilter::ForwardOnly` took the selected text away, and

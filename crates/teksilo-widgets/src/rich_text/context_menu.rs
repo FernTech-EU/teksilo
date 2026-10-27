@@ -171,12 +171,22 @@ fn build_menu(state: SharedState) -> MenuList {
     // Leave Paste always enabled when the policy allows; the closure
     // itself silently no-ops if the clipboard is empty (matches the
     // existing Ctrl+V behaviour).
-    if policy.clipboard_policy.allows_paste() {
+    //
+    // Both gates, as for Cut: a host that set `CommandFilter::ReadOnly` on an
+    // editor built editable keeps its full clipboard policy, and a Paste row
+    // there wrote into the read-only editor.
+    if policy.clipboard_policy.allows_paste()
+        && policy.command_filter.accepts(EditCommandKind::Paste)
+    {
         list = list.item(row_paste(&state));
     }
 
     // --- Paste Unformatted ---------------------------------------
-    if policy.clipboard_policy.allows_paste_unformatted() {
+    if policy.clipboard_policy.allows_paste_unformatted()
+        && policy
+            .command_filter
+            .accepts(EditCommandKind::PasteUnformatted)
+    {
         let state_for_pu = state.clone();
         list = list.item(
             MenuItem::new(tr_widget!(menu_paste_unformatted()))
@@ -351,7 +361,10 @@ pub(super) fn selection_toolbar(
             )
             .item_when(
                 row_paste(&state),
-                offers(TextAction::Paste, |p| p.clipboard_policy.allows_paste()),
+                offers(TextAction::Paste, |p| {
+                    p.clipboard_policy.allows_paste()
+                        && p.command_filter.accepts(EditCommandKind::Paste)
+                }),
             )
             .item_when(
                 row_select_all(&state),

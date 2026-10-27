@@ -2716,6 +2716,45 @@ fn editor_context_menu_copy_item_disabled_without_selection() {
     );
 }
 
+/// The command filter gates the menu's Paste rows as it gates Cut: an editor
+/// built editable keeps its full clipboard policy when a host sets
+/// `CommandFilter::ReadOnly` on it, and its menu offered a Paste that wrote.
+#[test]
+fn a_read_only_filter_hides_the_menus_paste_rows_too() {
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("quiet").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let _cb = ctx_with_memory_clipboard(&mut tree);
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    handle.set_command_filter(super::policy::CommandFilter::ReadOnly);
+
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(20.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let update = tree.sync_accessibility();
+    let labels: Vec<Option<&str>> = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == teksilo_core::accesskit::Role::MenuItem)
+        .map(|(_, n)| n.label())
+        .collect();
+    assert!(labels.contains(&Some("Copy")), "got {labels:?}");
+    for refused in ["Cut", "Paste", "Paste Unformatted"] {
+        assert!(!labels.contains(&Some(refused)), "{refused} in {labels:?}");
+    }
+}
+
 #[test]
 fn read_only_editor_context_menu_shape_hides_cut_and_paste() {
     // The read-only preset's `ClipboardPolicy::CopyAndSelectAllOnly`
