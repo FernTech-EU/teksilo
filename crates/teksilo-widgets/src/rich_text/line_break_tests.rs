@@ -344,7 +344,7 @@ fn the_end_of_a_paragraph_before_a_table_takes_a_line_break() {
         .unwrap()
         .wait()
         .unwrap();
-    let mut ed = Mounted::over(doc, RichTextEditor::editor, 0);
+    let ed = Mounted::over(doc, RichTextEditor::editor, 0);
     ed.handle.select_range(6, 6);
     assert!(ed.handle.insert_line_break());
     assert!(
