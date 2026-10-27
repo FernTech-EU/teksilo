@@ -1826,11 +1826,10 @@ impl WindowManager {
         // left it while letting the OS place any window opened alongside it —
         // instead of stacking them all on the same pixel — yet still have the
         // last-moved window be the one that reopens.
-        if let Some(svc) = persist_service.as_ref()
-            && config.restore_geometry
-        {
-            crate::window_persist::apply_restored_geometry(&mut config, svc, target);
-        }
+        let restored = persist_service.as_ref().is_some_and(|svc| {
+            config.restore_geometry
+                && crate::window_persist::apply_restored_geometry(&mut config, svc, target)
+        });
 
         let teksilo_id = self.alloc_id();
         // Drain the close-guard fields out of the config before any of
@@ -2141,6 +2140,13 @@ impl WindowManager {
         #[cfg(target_os = "macos")]
         if let Some((x, y)) = config.position {
             window.set_outer_position(winit::dpi::LogicalPosition::new(x, y));
+        }
+        // A restored window comes back inside the work area of its monitor,
+        // its frame included, which only now is known: the saved size is the
+        // content's, and the screen may have shrunk or the taskbar moved
+        // since. Done while the window is hidden, so it is not seen to move.
+        if restored {
+            crate::window_persist::keep_inside_work_area(&window, config.min_size);
         }
         // Still unmapped: the window is shown once its accessibility adapter
         // exists, in `new_with_a11y` below.

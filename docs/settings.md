@@ -53,8 +53,10 @@ Cloned handles share state. Register additional handles with `.app_state(...)`;
 - Implement `Versioned` and supply a `Migrator` for a typed file's schema changes.
 - Use `MruList::open` for recent documents or projects. See the
   [recent-projects example](../examples/recent_projects/src/main.rs).
-- Keep a window's `id` stable across launches. Restored geometry is checked
-  against the available monitors; Wayland controls final window placement.
+- Keep a window's `id` stable across launches. A restored window comes back
+  on the monitor it was on, else centred on the primary, and inside that
+  monitor's work area, its title bar included: clear of the taskbar, the Dock
+  and the menu bar, the panels. Wayland controls final window placement.
 
 ## Concurrent writes and reloads
 

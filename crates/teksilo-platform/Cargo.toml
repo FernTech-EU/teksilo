@@ -123,6 +123,9 @@ objc2-app-kit = { version = "0.3", features = [
     # key equivalents, on/off/mixed item state.
     "NSMenu",
     "NSMenuItem",
+    # Each screen's `visibleFrame`, the work area a restored window is kept
+    # inside (`desktop.rs`).
+    "NSScreen",
 ] }
 objc2-foundation = { version = "0.3", features = [
     "NSArray",

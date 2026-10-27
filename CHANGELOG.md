@@ -76,6 +76,14 @@ by crate for clarity, not because crates version independently.
   stays, and nothing closes. The next request reaches the window, and the
   Alt of that Alt+F4 does not put its menu bar in keyboard mode.
   `ctx.close_window()` and a quit still ask the window's guard.
+- **A restored window comes back on its own monitor, and inside the
+  screen.** A window saved on a second monitor came back centred on the
+  primary one, and a restored window could hang under the taskbar or past
+  the edge of a smaller screen: its saved size was checked against the
+  primary monitor's whole area, title bar not counted. It now comes back on
+  the monitor it was on, moved into that monitor's work area (the screen
+  less the taskbar, the Dock and the menu bar, the panels) and shrunk to fit
+  if it must be, title bar included. Wayland still places windows itself.
 
 #### Platform
 

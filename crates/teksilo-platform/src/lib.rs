@@ -5,6 +5,8 @@ pub mod accessibility_prefs;
 #[cfg(feature = "automation")]
 pub mod automation_transport;
 pub mod clipboard;
+#[doc(hidden)]
+pub mod desktop;
 pub mod event_translation;
 pub mod external_dnd;
 #[cfg(feature = "file-dialog")]
