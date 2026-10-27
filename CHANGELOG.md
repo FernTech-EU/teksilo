@@ -13,6 +13,37 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Changed
+
+#### Core
+
+- **`TextRunSource` has a new public field, `spoken_as`**, set with
+  `TextRunSource::speak_as`: a character a reader hears as other text, such
+  as an inline image's U+FFFC heard as its description, still one character.
+  Code that builds a `TextRunSource` with a struct literal needs the field.
+
+### Fixed
+
+#### Widgets
+
+- **A screen reader gets a `RichTextEditor`'s paragraphs apart.** The text
+  it reads had no character between two paragraphs, so the end of one and
+  the start of the next were one offset: End at the end of a paragraph read
+  the next one's first letter, Right across the break was silent, a word or a
+  paragraph ran on into the next one, and Enter added nothing a reader heard.
+  Each paragraph now ends with its line break, as AccessKit reads a
+  paragraph's end. The same holds in the read-only viewer and in table cells.
+- **An inline image or footnote marker in a `RichTextEditor` is read in its
+  place, once,** as its description. It was read after its paragraph, and
+  counted as a character the document does not have.
+- **A screen reader that moves the caret in a `RichTextEditor` puts it where
+  it asked** after an accented letter or any other character longer than a
+  byte. It landed one place further for each such character before it.
+- **A caret on a table's own positions is reported to a screen reader.**
+  Right from the paragraph before a table stops twice before the first cell,
+  and a reader was told of no caret there; it is told the caret is at the
+  first cell.
+
 ## [0.22.0] - 2026-10-27
 
 ### Added

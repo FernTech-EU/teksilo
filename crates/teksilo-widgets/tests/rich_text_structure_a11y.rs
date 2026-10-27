@@ -262,6 +262,9 @@ fn runs_with_unroutable_parents(tree: &mut WidgetTree) -> (Vec<String>, usize) {
 
 /// The text of every run under a node, so a test can say which runs it
 /// actually inspected rather than trusting that any existed.
+///
+/// A paragraph's last run ends with its break, a `\n`, which is how AccessKit
+/// reads a paragraph's end: a one-line paragraph "Alpha" is the run "Alpha\n".
 fn run_values(tree: &mut WidgetTree) -> Vec<String> {
     let update = tree.sync_accessibility();
     let consumer = Tree::new(update, false);
@@ -280,7 +283,7 @@ fn a_cell_s_edits_reach_a_text_range_capable_parent() {
     let values = run_values(&mut tree);
     for word in ["Alpha", "Beta", "Gamma", "Delta"] {
         assert!(
-            values.iter().any(|v| v == word),
+            values.iter().any(|v| *v == format!("{word}\n")),
             "expected a run for the cell {word:?}; got {values:?}"
         );
     }
@@ -344,7 +347,7 @@ fn a_blockquote_s_edits_reach_a_text_range_capable_parent() {
     settle(&mut tree);
     let values = run_values(&mut tree);
     assert!(
-        values.iter().any(|v| v == "Quoted line"),
+        values.iter().any(|v| v == "Quoted line\n"),
         "the blockquote's run must exist before its routing means anything; \
          got {values:?}"
     );
@@ -476,7 +479,7 @@ fn a_cell_s_runs_carry_their_own_boxes() {
 
     for word in ["Alpha", "Beta", "Gamma", "Delta"] {
         let run = collect(state.root(), &|n| {
-            n.role() == Role::TextRun && n.data().value() == Some(word)
+            n.role() == Role::TextRun && n.data().value() == Some(format!("{word}\n").as_str())
         })
         .into_iter()
         .next()
@@ -552,7 +555,7 @@ fn a_caret_inside_a_cell_is_reported_on_that_cell_s_run() {
 
     assert_eq!(
         focus_run.data().value(),
-        Some("Gamma"),
+        Some("Gamma\n"),
         "a caret at the end of the third cell belongs to that cell's run"
     );
 }
@@ -743,7 +746,7 @@ fn a_blockquote_is_announced_as_a_quotation() {
     assert_eq!(quotes.len(), 1, "the blockquote must announce itself");
 
     let quoted = collect(quotes[0], &|n| {
-        n.role() == Role::TextRun && n.data().value() == Some("Quoted line")
+        n.role() == Role::TextRun && n.data().value() == Some("Quoted line\n")
     });
     assert_eq!(
         quoted.len(),
@@ -754,7 +757,9 @@ fn a_blockquote_is_announced_as_a_quotation() {
     // Prose outside the quote must NOT have been swept into it.
     for word in ["Before", "After"] {
         assert!(
-            collect(quotes[0], &|n| n.data().value() == Some(word)).is_empty(),
+            collect(quotes[0], &|n| n.data().value()
+                == Some(format!("{word}\n").as_str()))
+            .is_empty(),
             "{word:?} is not part of the quotation"
         );
     }

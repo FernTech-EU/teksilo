@@ -3419,9 +3419,10 @@ fn a_caret_move_alone_rewalks_the_accessibility_selection() {
 
 #[test]
 fn accessibility_text_run_carries_value_and_character_lengths() {
-    // The TextRun for plain ASCII "foo" must carry `value = "foo"`
-    // and `character_lengths = [1, 1, 1]`. Locks the UTF-8
-    // byte-length contract.
+    // The TextRun for plain ASCII "foo" must carry `value = "foo\n"`
+    // and `character_lengths = [1, 1, 1, 1]`: the paragraph's text, then
+    // its break, one character a reader reads as the paragraph's end.
+    // Locks the UTF-8 byte-length contract.
     use teksilo_core::accesskit::Role;
 
     let doc = TextDocument::new();
@@ -3439,15 +3440,16 @@ fn accessibility_text_run_carries_value_and_character_lengths() {
         .iter()
         .find(|(_, n)| n.role() == Role::TextRun)
         .expect("at least one TextRun emitted");
-    assert_eq!(text_run.1.value(), Some("foo"));
-    assert_eq!(text_run.1.character_lengths(), &[1u8, 1, 1]);
+    assert_eq!(text_run.1.value(), Some("foo\n"));
+    assert_eq!(text_run.1.character_lengths(), &[1u8, 1, 1, 1]);
 }
 
 #[test]
 fn accessibility_multibyte_character_lengths_are_byte_counts() {
     // "café" has a multi-byte final character (é = 2 UTF-8 bytes).
     // AccessKit's `character_lengths` is one u8 per char, giving
-    // the byte count — so the expected slice is [1, 1, 1, 2].
+    // the byte count, so the expected slice is [1, 1, 1, 2, 1], the
+    // paragraph's break last.
     use teksilo_core::accesskit::Role;
 
     let doc = TextDocument::new();
@@ -3463,9 +3465,9 @@ fn accessibility_multibyte_character_lengths_are_byte_counts() {
     let text_run = update
         .nodes
         .iter()
-        .find(|(_, n)| n.role() == Role::TextRun && n.value() == Some("café"))
+        .find(|(_, n)| n.role() == Role::TextRun && n.value() == Some("café\n"))
         .expect("'café' text run emitted");
-    assert_eq!(text_run.1.character_lengths(), &[1u8, 1, 1, 2]);
+    assert_eq!(text_run.1.character_lengths(), &[1u8, 1, 1, 2, 1]);
 }
 
 #[test]
@@ -3490,14 +3492,14 @@ fn accessibility_text_run_carries_character_positions() {
     let text_run = update
         .nodes
         .iter()
-        .find(|(_, n)| n.role() == Role::TextRun && n.value() == Some("abc"))
+        .find(|(_, n)| n.role() == Role::TextRun && n.value() == Some("abc\n"))
         .expect("'abc' text run emitted");
     // character_positions length matches character_lengths (one
     // entry per char). May be empty if the test harness doesn't
     // fully exercise text-typeset layout, in which case the field
     // is None and the accessibility pass deliberately skips it.
     if let Some(positions) = text_run.1.character_positions() {
-        assert_eq!(positions.len(), 3);
+        assert_eq!(positions.len(), 4, "three letters and the break");
     }
 }
 
@@ -3521,7 +3523,10 @@ fn accessibility_signal_driven_rebuild_on_text_edit() {
 
     // Baseline: initial a11y tree contains "before".
     let first = tree.sync_accessibility();
-    let initial_has_before = first.nodes.iter().any(|(_, n)| n.value() == Some("before"));
+    let initial_has_before = first
+        .nodes
+        .iter()
+        .any(|(_, n)| n.value() == Some("before\n"));
     assert!(initial_has_before, "initial tree must contain 'before'");
 
     // Type "X" at end. The document_version bump during
@@ -3541,7 +3546,7 @@ fn accessibility_signal_driven_rebuild_on_text_edit() {
     let has_before_x = second
         .nodes
         .iter()
-        .any(|(_, n)| n.value() == Some("beforeX"));
+        .any(|(_, n)| n.value() == Some("beforeX\n"));
     assert!(
         has_before_x,
         "a11y rebuild after text edit must surface new content"

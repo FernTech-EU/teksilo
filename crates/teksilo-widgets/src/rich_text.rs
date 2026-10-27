@@ -96,6 +96,8 @@ mod lists_tests;
 #[cfg(test)]
 mod nesting_tests;
 #[cfg(test)]
+mod reader_text_tests;
+#[cfg(test)]
 mod table_selection_tests;
 #[cfg(test)]
 mod tests;
@@ -4718,17 +4720,15 @@ fn handle_access_action_request(
             let resolve = |pos: teksilo_core::accesskit::TextPosition| -> Option<usize> {
                 let st = state.borrow();
                 let map = st.synthetic_to_element.borrow();
-                let er = map.get(&pos.node)?.clone();
-                // Convert character_index (char units within the run)
-                // to a byte offset within the run's text, then add
-                // absolute_start to get the document position.
-                let byte_off = er
-                    .text
-                    .char_indices()
-                    .nth(pos.character_index)
-                    .map(|(i, _)| i)
-                    .unwrap_or(er.text.len());
-                Some(er.absolute_start + byte_off)
+                let er = map.get(&pos.node)?;
+                // `character_index` counts the run's characters, and so do
+                // document positions: one each, an inline object's
+                // description included. Adding the byte offset instead put
+                // the caret past where the reader asked after any character
+                // longer than a byte. `text` excludes the paragraph's break,
+                // so the clamp keeps the caret at the paragraph's end rather
+                // than past it.
+                Some(er.absolute_start + pos.character_index.min(er.text.chars().count()))
             };
             if let (Some(a), Some(f)) = (resolve(sel.anchor), resolve(sel.focus)) {
                 let st = state.borrow();

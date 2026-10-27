@@ -43,9 +43,9 @@
 
 use std::collections::HashMap;
 
-use teksilo_canvas::{Point, Rect, TextGeometry};
+use teksilo_canvas::{LineEnd, Point, Rect, TextGeometry};
+use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accessibility::text_runs::{TextRunSource, push_text_runs};
-use teksilo_core::accessibility::{AccessNodeBuilder, TextRunAttributes, TextRunSpec};
 use teksilo_core::accesskit::NodeId;
 use teksilo_text::text_document::{
     BlockSnapshot, CellSnapshot, FlowElementSnapshot, FragmentContent, FrameSnapshot, TableSnapshot,
@@ -65,6 +65,15 @@ fn packed_element_id(table_id: usize, row: usize, column: usize) -> u64 {
     ((table_id as u64 & MASK) << 42) | ((row as u64 & MASK) << 21) | (column as u64 & MASK)
 }
 
+/// The text positions either side of a caret no block holds.
+#[derive(Default, Clone, Copy)]
+struct Nearest {
+    /// The start of the first block after the caret.
+    after: Option<(NodeId, usize)>,
+    /// The end of the last block before it.
+    before: Option<(NodeId, usize)>,
+}
+
 /// The mutable state carried across one accessibility walk of the flow.
 pub(super) struct FlowWalk<'a> {
     st: &'a EditorState,
@@ -75,9 +84,16 @@ pub(super) struct FlowWalk<'a> {
     user_pos: usize,
     user_anchor: usize,
     /// The run and character offset the selection focus landed in.
-    pub(super) caret: Option<(NodeId, usize)>,
+    caret: Option<(NodeId, usize)>,
     /// The run and character offset the selection anchor landed in.
-    pub(super) anchor: Option<(NodeId, usize)>,
+    anchor: Option<(NodeId, usize)>,
+    /// Where to report the caret and the anchor when no block holds them: a
+    /// table's own positions before its first cell and after its last are
+    /// positions the caret stops on (Right from the paragraph before a table
+    /// takes two presses to reach the first cell), and no run has a character
+    /// there. The start of the next text, else the end of the last one, so a
+    /// reader is never left without a caret. See [`Self::selection`].
+    nearest: [Nearest; 2],
     /// Where each emitted run lives in the document, so an AT-initiated
     /// `SetTextSelection` can be resolved back to a document position.
     pub(super) syn_map: HashMap<NodeId, SyntheticElementRef>,
@@ -105,9 +121,22 @@ impl<'a> FlowWalk<'a> {
             user_anchor,
             caret: None,
             anchor: None,
+            nearest: [Nearest::default(), Nearest::default()],
             syn_map: HashMap::new(),
             annotation_bodies: HashMap::new(),
         }
+    }
+
+    /// The `(anchor, caret)` to report: where each landed, or for one no
+    /// block holds, the text nearest it.
+    pub(super) fn selection(&self) -> (Option<(NodeId, usize)>, Option<(NodeId, usize)>) {
+        let resolve = |landed: Option<(NodeId, usize)>, nearest: Nearest| {
+            landed.or(nearest.after).or(nearest.before)
+        };
+        (
+            resolve(self.anchor, self.nearest[1]),
+            resolve(self.caret, self.nearest[0]),
+        )
     }
 
     /// Walk a run of flow elements.
@@ -343,25 +372,70 @@ impl<'a> FlowWalk<'a> {
         // origin comes from the block rather than being assumed to be zero.
         // It *is* zero for a block in the document's own column, which is what
         // keeps this identical to the plain-prose case.
-        let (block_left, block_top, lines) = self
+        // The separator after the block is a character of the document, one
+        // position like any other, and a block snapshot's own text stops short
+        // of it. AccessKit reads a paragraph's end from a `\n` ending the
+        // line's last run (`is_paragraph_end`), so the separator goes there,
+        // as one hard break per the emitter's contract. Without it a reader
+        // got the paragraphs run together, and the end of one paragraph and
+        // the start of the next were one offset. It also makes the source's
+        // character space the document's, so a caret maps across with a
+        // subtraction. The code editor's walk does the same.
+        let mut text = block.text.clone();
+        text.push('\n');
+        let (block_left, block_top, mut lines) = self
             .st
             .engine
             .block_geometry(block.block_id, &block.text)
             .map(|(info, lines)| (info.x, info.y, lines))
             .unwrap_or((0.0, 0.0, Vec::new()));
-        let geometry = TextGeometry {
-            lines,
-            dropped_lines: 0,
-            source_len: block.text.len(),
-            rendered_text: None,
-            links: Vec::new(),
-        };
+        if let Some(last) = lines.last_mut() {
+            last.byte_range.end = text.len();
+            last.char_range.end += 1;
+            last.end = LineEnd::HardBreak { chars: 1, bytes: 1 };
+        }
         let origin = Point::new(
             block_left - self.scroll_x,
             (block_top - self.scroll_y) * self.zoom,
         );
-        let source =
-            TextRunSource::from_geometry(&block.text, &geometry, origin, block.block_id as u64);
+        let mut source = if lines.is_empty() {
+            // Not laid out: the text is still announced, and still ends its
+            // paragraph, with a caret-shaped box rather than none at all.
+            let mut flat = TextRunSource::flat(&text, block.block_id as u64);
+            flat.lines[0].end = LineEnd::HardBreak { chars: 1, bytes: 1 };
+            flat.with_fallback_rect(Rect::new(
+                origin.x,
+                origin.y,
+                0.0,
+                self.st.engine.default_line_height(),
+            ))
+        } else {
+            let geometry = TextGeometry {
+                lines,
+                dropped_lines: 0,
+                source_len: text.len(),
+                rendered_text: None,
+                links: Vec::new(),
+            };
+            TextRunSource::from_geometry(&text, &geometry, origin, block.block_id as u64)
+        };
+
+        // An inline object is one character of the document, its U+FFFC in
+        // the block's text: an image, or a footnote's marker. A reader hears
+        // it as its description, still one character, in its place in the
+        // run. A run of its own after the block's text read the description
+        // after the paragraph, and added a character the document does not
+        // have.
+        for frag in &block.fragments {
+            let (description, offset) = match frag {
+                FragmentContent::Image { alt, offset, .. } => (alt, *offset),
+                FragmentContent::FootnoteReference { marker, offset, .. } => (marker, *offset),
+                FragmentContent::Text { .. } => continue,
+            };
+            if let Some((byte, _)) = text.char_indices().nth(offset) {
+                source.speak_as(byte, description.clone());
+            }
+        }
 
         // Where the runs hang, in precedence order.
         //
@@ -453,128 +527,12 @@ impl<'a> FlowWalk<'a> {
                 .position_of(self.user_anchor - block.position)
                 .or(self.anchor);
         }
-
-        // Inline objects: one document character each, rendered as
-        // something a reader sees but cannot read out of the text — an
-        // image, or a footnote's marker.
-        //
-        // Announced as a single-character text run whose value is that
-        // description. `character_lengths` is one entry spanning the
-        // whole string on purpose: the object *is* one character of the
-        // document, however many letters stand in for it, and telling
-        // AccessKit otherwise would put every caret offset after it out
-        // by the difference.
-        for frag in &block.fragments {
-            let object_run = match frag {
-                FragmentContent::Image {
-                    alt,
-                    offset,
-                    element_id,
-                    format,
-                    ..
-                } => Some((alt.clone(), *offset, *element_id, format)),
-                FragmentContent::FootnoteReference {
-                    marker,
-                    offset,
-                    element_id,
-                    format,
-                    ..
-                } => Some((marker.clone(), *offset, *element_id, format)),
-                FragmentContent::Text { .. } => None,
-            };
-            let Some((value, offset, element_id, format)) = object_run else {
-                continue;
-            };
-            if !self.emits_children {
-                continue;
-            }
-
-            // Text attributes for AT (WCAG 1.3.1 / EN 301 549
-            // 11.5.2.9). AccessKit has no bold flag, so an explicit
-            // weight wins, else bold folds to 700.
-            let attrs = TextRunAttributes {
-                font_weight: format.font_weight.map(|w| w as u16),
-                bold: format.font_bold.unwrap_or(false),
-                italic: format.font_italic.unwrap_or(false),
-                underline: format.font_underline.unwrap_or(false),
-                strikethrough: format.font_strikeout.unwrap_or(false),
-            };
-
-            // An empty description would announce nothing at all, which
-            // is indistinguishable from a rendering fault. A single
-            // space is at least a spoken pause. The length rides in a
-            // `u8`, so a description longer than that loses its tail
-            // rather than making AccessKit's own invariant unsatisfiable.
-            let mut value = if value.is_empty() {
-                " ".to_string()
-            } else {
-                value
-            };
-            while value.len() > u8::MAX as usize {
-                value.pop();
-            }
-
-            // Geometry for the one character it occupies, anchored on
-            // the line it sits in: a run with no bounds empties
-            // `bounding_boxes()` for every range that touches it.
-            let byte_offset = block
-                .text
-                .char_indices()
-                .nth(offset)
-                .map(|(index, _)| index)
-                .unwrap_or(block.text.len());
-            let line = source
-                .lines
-                .iter()
-                .find(|line| line.byte_range.contains(&byte_offset))
-                .or_else(|| source.lines.last());
-            let glyph = self
-                .st
-                .engine
-                .character_geometry(block.block_id, offset, offset + 1);
-            let (position, width) = glyph
-                .first()
-                .map(|g| (g.position, g.width))
-                .unwrap_or((0.0, 0.0));
-            let bounds = match line {
-                Some(line) => {
-                    Rect::new(line.rect.x + position, line.rect.y, width, line.rect.height)
-                }
-                None => Rect::new(origin.x + position, origin.y, width, 0.0),
-            };
-
-            let Some(node_id) = builder.push_text_run(
-                parent,
-                TextRunSpec {
-                    element_id,
-                    character_lengths: vec![value.len() as u8],
-                    word_starts: vec![0],
-                    character_positions: vec![0.0],
-                    character_widths: vec![width],
-                    value: value.clone(),
-                    bounds,
-                    bounds_are_absolute: false,
-                    text_direction: source.base_direction,
-                    attrs,
-                },
-            ) else {
-                continue;
-            };
-
-            let absolute_start = block.position + offset;
-            self.syn_map.insert(
-                node_id,
-                SyntheticElementRef {
-                    element_id,
-                    absolute_start,
-                    text: value,
-                },
-            );
-            if self.user_pos >= absolute_start && self.user_pos <= absolute_start + 1 {
-                self.caret = Some((node_id, self.user_pos - absolute_start));
-            }
-            if self.user_anchor >= absolute_start && self.user_anchor <= absolute_start + 1 {
-                self.anchor = Some((node_id, self.user_anchor - absolute_start));
+        for (index, user) in [self.user_pos, self.user_anchor].into_iter().enumerate() {
+            let nearest = &mut self.nearest[index];
+            if block.position > user && nearest.after.is_none() {
+                nearest.after = emission.position_of(0);
+            } else if block.position + block_chars < user {
+                nearest.before = emission.position_of(block_chars).or(nearest.before);
             }
         }
     }

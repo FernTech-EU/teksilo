@@ -712,8 +712,9 @@ pub struct SyntheticElementRef {
     /// Absolute character position of the run's first character
     /// within the full document.
     pub absolute_start: usize,
-    /// The run's text, cached so the handler can convert a char
-    /// index to a byte offset without re-querying the document.
+    /// The run's text, its paragraph break excluded, cached so the handler
+    /// can clamp a character index to the run's characters without
+    /// re-querying the document.
     pub text: String,
 }
 

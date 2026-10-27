@@ -738,7 +738,8 @@ mod rich_text_in_a_card {
             let state = consumer.state();
             let mut stack = vec![state.root()];
             while let Some(n) = stack.pop() {
-                if n.role() == Role::TextRun && n.data().value() == Some("Intro") {
+                // The paragraph's run ends with its break.
+                if n.role() == Role::TextRun && n.data().value() == Some("Intro\n") {
                     return state
                         .locate_node(n.id())
                         .map(|(local, _)| local)

@@ -829,8 +829,7 @@ impl Widget for RichTextEditorBody {
         if let (Some(snap), true) = (snap, emits_children) {
             walk.elements(builder, &snap.elements, None, None);
         }
-        let caret_pair = walk.caret;
-        let anchor_pair = walk.anchor;
+        let (anchor_pair, caret_pair) = walk.selection();
         let syn_map = walk.syn_map;
 
         // Attach the text selection on the editor itself, referencing the

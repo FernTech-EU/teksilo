@@ -565,8 +565,9 @@ fn accessibility_reads_the_separator_as_a_hard_break() {
         .collect();
     assert_eq!(
         values,
-        [format!("abc{LS}"), "def".to_string()],
-        "two lines, the break ending the first as one character"
+        [format!("abc{LS}"), "def\n".to_string()],
+        "two lines, the break ending the first as one character, the \
+         paragraph's own ending the second"
     );
     let first = runs[0];
     assert_eq!(

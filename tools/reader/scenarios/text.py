@@ -908,7 +908,9 @@ def body_editor_structure(run: Any) -> None:
                  "the reader hears the item's number and depth")
     line_through("Down onto a line with a link", "carry an anchor_href",
                  ["link"], "the reader hears that the line holds a link")
-    line_through("Down into the table's second row", "Bold**text**",
+    # Each cell's text ends with its line break, so two cells of a row are
+    # "Bold\n**text**", no longer "Bold**text**" (text-03).
+    line_through("Down into the table's second row", "Bold\n**text**",
                  ["Bold"], "the reader hears the first body row's first cell")
     line_through("Down onto the blockquote", "A single-level blockquote",
                  ["quote", "block quote"], "the reader hears that the text is quoted")

@@ -116,6 +116,10 @@ pub struct TextRunSource<'a> {
     /// The base direction, announced on the owning node. Falls back to
     /// the first line's first segment when the caller does not set it.
     pub base_direction: TextDirection,
+    /// Characters a reader hears as other text, by byte offset into
+    /// [`text`](Self::text), in ascending order. Set through
+    /// [`speak_as`](Self::speak_as), which keeps the order and the limits.
+    pub spoken_as: Vec<(usize, String)>,
 }
 
 /// A retained layout one widget can lend to another widget's
@@ -217,6 +221,7 @@ impl<'a> TextRunSource<'a> {
             id_seed,
             rects_are_absolute: false,
             base_direction: TextDirection::LeftToRight,
+            spoken_as: Vec::new(),
         }
     }
 
@@ -299,6 +304,7 @@ impl<'a> TextRunSource<'a> {
             id_seed,
             rects_are_absolute: false,
             base_direction,
+            spoken_as: Vec::new(),
         }
     }
 
@@ -326,6 +332,7 @@ impl<'a> TextRunSource<'a> {
                     id_seed,
                     rects_are_absolute: true,
                     base_direction: owned.base_direction,
+                    spoken_as: owned.spoken_as,
                 }
             }
             None => {
@@ -371,6 +378,36 @@ impl<'a> TextRunSource<'a> {
     pub fn with_base_direction(mut self, direction: TextDirection) -> Self {
         self.base_direction = direction;
         self
+    }
+
+    /// Have the character at byte `offset` of the text heard as `spoken`.
+    ///
+    /// It stays **one** character, whose text is `spoken`: an inline image's
+    /// U+FFFC heard as its description, which a reader steps over in one move
+    /// and which leaves the run's character indices the source's. An empty
+    /// `spoken` becomes a space, at least a spoken
+    /// pause, and one longer than 255 bytes loses its tail, because AccessKit
+    /// gives a character's length one byte.
+    pub fn speak_as(&mut self, offset: usize, spoken: impl Into<String>) {
+        let mut spoken = spoken.into();
+        if spoken.is_empty() {
+            spoken.push(' ');
+        }
+        while spoken.len() > u8::MAX as usize {
+            spoken.pop();
+        }
+        match self.spoken_as.binary_search_by_key(&offset, |(at, _)| *at) {
+            Ok(index) => self.spoken_as[index].1 = spoken,
+            Err(index) => self.spoken_as.insert(index, (offset, spoken)),
+        }
+    }
+
+    /// What the character at byte `offset` is heard as, when not itself.
+    fn spoken_at(&self, offset: usize) -> Option<&str> {
+        self.spoken_as
+            .binary_search_by_key(&offset, |(at, _)| *at)
+            .ok()
+            .map(|index| self.spoken_as[index].1.as_str())
     }
 }
 
@@ -646,9 +683,19 @@ pub fn push_text_runs(
             let carries_break = break_bytes > 0 && index == last_chunk;
 
             let mut value = String::with_capacity(slice.len() + break_bytes);
-            value.push_str(slice);
-            let mut character_lengths: Vec<u8> =
-                slice.chars().map(|c| c.len_utf8() as u8).collect();
+            let mut character_lengths: Vec<u8> = Vec::with_capacity(char_count + 1);
+            for (offset, c) in slice.char_indices() {
+                match source.spoken_at(range.start + offset) {
+                    Some(spoken) => {
+                        value.push_str(spoken);
+                        character_lengths.push(spoken.len() as u8);
+                    }
+                    None => {
+                        value.push(c);
+                        character_lengths.push(c.len_utf8() as u8);
+                    }
+                }
+            }
             if carries_break {
                 let break_slice = &text[body_end..body_end + break_bytes];
                 value.push_str(break_slice);
@@ -950,6 +997,40 @@ mod tests {
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].1.value(), Some("Hello"));
         assert_eq!(children[0].1.character_lengths(), &[1, 1, 1, 1, 1]);
+    }
+
+    /// A character heard as other text stays one character, with its text's
+    /// length, so the character indices after it are the source's: an inline
+    /// image's U+FFFC heard as its description.
+    #[test]
+    fn a_character_spoken_as_text_stays_one_character() {
+        let mut b = label_builder();
+        let text = "a\u{FFFC}b";
+        let mut source = TextRunSource::flat(text, 0);
+        source.speak_as(1, "a cat");
+        source.speak_as(1, "a dog");
+        let emission = push_text_runs(&mut b, None, &source);
+        assert_eq!(emission.value, "aa dogb");
+        assert_eq!(emission.runs[0].char_range, 0..3);
+        assert_eq!(emission.position_of(2).map(|(_, at)| at), Some(2));
+        let (_, _, children, _) = b.build(owner());
+        assert_eq!(children[0].1.value(), Some("aa dogb"));
+        assert_eq!(children[0].1.character_lengths(), &[1, 5, 1]);
+    }
+
+    /// An empty description is a spoken pause, and one past a character
+    /// length's byte loses its tail on a character boundary.
+    #[test]
+    fn a_spoken_text_is_never_empty_nor_longer_than_a_length_byte() {
+        let mut source = TextRunSource::flat("\u{FFFC}\u{FFFC}", 0);
+        source.speak_as(0, "");
+        source.speak_as(3, "é".repeat(200));
+        assert_eq!(source.spoken_as[0].1, " ");
+        assert_eq!(source.spoken_as[1].1.len(), 254);
+        let mut b = label_builder();
+        push_text_runs(&mut b, None, &source);
+        let (_, _, children, _) = b.build(owner());
+        assert_eq!(children[0].1.character_lengths(), &[1, 254]);
     }
 
     #[test]
