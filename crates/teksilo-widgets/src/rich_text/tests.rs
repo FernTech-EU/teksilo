@@ -1098,7 +1098,7 @@ fn caret_color_follows_theme_in_dark_mode() {
 // Phase B tests — clipboard, double/triple tap, drag-select, Ctrl+A ladder.
 // ---------------------------------------------------------------------------
 
-fn ctx_with_memory_clipboard(
+pub(super) fn ctx_with_memory_clipboard(
     tree: &mut WidgetTree,
 ) -> teksilo_platform::clipboard::ClipboardHandle {
     use std::any::TypeId;

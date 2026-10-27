@@ -21,6 +21,10 @@ pub enum EditCommandKind {
     /// app that wants only one of the two behaviours can gate them
     /// independently through the `CommandFilter`.
     InsertBlockForced,
+    /// A line break inside the block (Shift+Enter): the next line is more of
+    /// the same paragraph. Separate from `InsertBlock` so a surface can take
+    /// one without the other.
+    InsertLineBreak,
     /// Literal tab insertion (Tab key outside tables and lists).
     InsertTab,
     /// Navigate to an adjacent table cell (Tab / Shift+Tab when the
@@ -103,9 +107,9 @@ impl crate::common::editor_runtime::EditorCommand for EditCommandKind {
     /// [`mutates_document`](crate::common::editor_runtime::EditorCommand::mutates_document):
     ///
     /// * **Inserts are never regressive.** `InsertChar`/`InsertBlock`/
-    ///   `InsertTab`/`Paste` only add — the type-over case (inserting *over* a
-    ///   selection) is handled by collapsing the selection at the insert site,
-    ///   not by rejecting the keystroke.
+    ///   `InsertLineBreak`/`InsertTab`/`Paste` only add: the type-over case
+    ///   (inserting *over* a selection) is handled by collapsing the selection
+    ///   at the insert site, not by rejecting the keystroke.
     /// * **Structure commands are not regressive.** `ExitList`, `ExitFrame`,
     ///   the blockquote depth pair and `IndentBlock`/`DedentBlock` re-shape a
     ///   block without dropping any of its characters. Rejecting them would
@@ -137,6 +141,7 @@ impl crate::common::editor_runtime::EditorCommand for EditCommandKind {
             Self::InsertChar
                 | Self::InsertBlock
                 | Self::InsertBlockForced
+                | Self::InsertLineBreak
                 | Self::InsertTab
                 | Self::ExitList
                 | Self::ExitFrame
@@ -180,6 +185,7 @@ mod tests {
     fn read_only_filter_blocks_mutations() {
         let f = CommandFilter::ReadOnly;
         assert!(!f.accepts(EditCommandKind::InsertChar));
+        assert!(!f.accepts(EditCommandKind::InsertLineBreak));
         assert!(!f.accepts(EditCommandKind::DeletePrev));
         assert!(!f.accepts(EditCommandKind::ToggleBold));
         assert!(!f.accepts(EditCommandKind::Cut));
@@ -225,6 +231,7 @@ mod tests {
             EditCommandKind::InsertChar,
             EditCommandKind::InsertBlock,
             EditCommandKind::InsertBlockForced,
+            EditCommandKind::InsertLineBreak,
             EditCommandKind::InsertTab,
             EditCommandKind::Paste,
             EditCommandKind::PasteUnformatted,
@@ -265,6 +272,7 @@ mod tests {
             EditCommandKind::InsertChar,
             EditCommandKind::InsertBlock,
             EditCommandKind::InsertBlockForced,
+            EditCommandKind::InsertLineBreak,
             EditCommandKind::InsertTab,
             EditCommandKind::NavigateTableCell,
             EditCommandKind::NavigateTableCellDown,

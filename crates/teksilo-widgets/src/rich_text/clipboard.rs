@@ -37,6 +37,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use teksilo_core::widget::EventContext;
 use teksilo_platform::clipboard::ClipboardHandle;
+use teksilo_text::text_document::{DocumentFragment, LINE_SEPARATOR};
 
 use super::state::EditorState;
 
@@ -67,7 +68,7 @@ pub(crate) fn copy(state: &mut EditorState, ctx: &EventContext) {
         return;
     }
     let fragment = state.cursor.selection();
-    let plain = fragment.to_plain_text().to_string();
+    let plain = plain_text_for_other_programs(&fragment);
     let marker = new_marker();
     let html = format!(
         "{MARKER_PREFIX}{marker}{MARKER_SUFFIX}{}",
@@ -91,6 +92,17 @@ pub(crate) fn copy(state: &mut EditorState, ctx: &EventContext) {
     state.rich_clipboard_fragment = Some(fragment);
     state.rich_clipboard_marker = Some(marker);
     state.rich_clipboard_plain = (!carries_marker).then_some(plain);
+}
+
+/// The fragment's text as another program reads it, for the OS clipboard's and
+/// a drag's `text/plain`.
+///
+/// A line break inside a block is [`LINE_SEPARATOR`] in the document, which few
+/// programs show as a new line; it goes out as a `\n`, so another program gets
+/// the lines. The fragment itself keeps the character, and a paste back into an
+/// editor reads the fragment, not this.
+pub(crate) fn plain_text_for_other_programs(fragment: &DocumentFragment) -> String {
+    fragment.to_plain_text().replace(LINE_SEPARATOR, "\n")
 }
 
 /// Generate a per-copy marker from the wall clock, in nanoseconds.

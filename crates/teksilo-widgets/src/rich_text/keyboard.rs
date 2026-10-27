@@ -20,7 +20,8 @@ use teksilo_core::shortcut::StandardEdit;
 use crate::editor_shortcuts::FormatShortcut;
 use teksilo_core::widget::EventContext;
 use teksilo_text::text_document::{
-    BlockFormat, ListFormat, MoveMode, MoveOperation, SelectionType, TableCellRef, TextFormat,
+    BlockFormat, InsertionOrigin, ListFormat, MoveMode, MoveOperation, SelectionType, TableCellRef,
+    TextFormat,
 };
 use teksilo_text::{CursorAffinity, TextDirection};
 
@@ -72,6 +73,20 @@ pub(super) enum KeyAction {
     PageMotion,
     /// The key was not handled.
     Unhandled,
+}
+
+/// Whether a line break (Shift+Enter) can go in at the caret.
+///
+/// Not in a table cell, which Djot writes as one line, nor in a code block,
+/// whose every line is a block of its own. There Shift+Enter does what Enter
+/// does, and [`EditorHandle::insert_line_break`](super::EditorHandle::insert_line_break)
+/// does nothing.
+pub(super) fn line_break_fits_at_caret(state: &EditorState) -> bool {
+    state.cursor.current_table_cell().is_none()
+        && !state
+            .cursor
+            .block_format()
+            .is_ok_and(|format| format.is_code_block == Some(true))
 }
 
 /// Under a filter that forbids taking text away, move the caret to the end of
@@ -366,14 +381,33 @@ pub(super) fn handle_key(
             // The forced paragraph insert (Ctrl+Enter) is not a key here:
             // it is the `format.insert_paragraph` action
             // (`run_format_shortcut`), so the user can rebind it.
+            //
+            // Shift+Enter: a line break inside the block, so the next line is
+            // more of the same paragraph, list item or quotation. It stays a
+            // key arm and is not a rebindable shortcut: a global shortcut
+            // resolves before the focused widget, and would take Shift+Enter
+            // away from every other text field (a find bar's "previous
+            // match"). Where a line break cannot be kept it falls through to
+            // Enter below.
+            Key::Enter
+                if shift
+                    && !ctrl
+                    && filter.accepts(EditCommandKind::InsertLineBreak)
+                    && line_break_fits_at_caret(&st) =>
+            {
+                collapse_selection_before_insert(&st);
+                let _ = st
+                    .cursor
+                    .insert_line_break_with_origin(InsertionOrigin::Typed);
+                KeyAction::ClearPreferredX
+            }
             Key::Enter if !ctrl && filter.accepts(EditCommandKind::InsertBlock) => {
                 // Enter (without Ctrl) inside a table cell: move to
                 // the cell in the same column one row down, or (on
                 // the last row) step out of the table to the block
                 // that follows. Outside a table, fall through to
-                // `insert_block`. Shift+Enter falls through to the
-                // normal insert_block path — matches godot's
-                // behaviour where Shift+Enter is treated like Enter.
+                // `insert_block`. Shift+Enter arrives here in a table
+                // cell or a code block, and does the same.
                 let cell_info = st
                     .cursor
                     .current_table_cell()
@@ -1637,11 +1671,12 @@ fn neighbour_line_center_y(
     };
 
     // A position just outside the current visual line sits on the neighbouring one — but where
-    // "just outside" is depends on how the line ended. `end` is exclusive: after a **soft wrap**
-    // it is already the next line's first character, while after a **hard break** it is the
-    // block's own end, which still maps back to the line being left. So going down, try both and
-    // take the first that is genuinely lower; going up, the character before the line's start is
-    // on the previous line either way.
+    // "just outside" is depends on how the line ended. `end` is where End stops: after a **soft
+    // wrap** it is already the next line's first character, while before a **hard break** (a line
+    // break inside the block, or the block's own end) it still maps back to the line being left,
+    // and the next line starts one character on, past the break. So going down, try both and take
+    // the first that is genuinely lower; going up, the character before the line's start is on the
+    // previous line either way.
     let candidates: [usize; 2] = if direction > 0 {
         [end, end.saturating_add(1)]
     } else if start == 0 {

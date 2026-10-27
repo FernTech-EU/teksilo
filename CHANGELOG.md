@@ -34,7 +34,24 @@ by crate for clarity, not because crates version independently.
   `create_runtime_dir` makes it private to the user and refuses a symbolic
   link, a file, or a directory another user owns.
 
+#### Widgets
+
+- **Shift+Enter in `RichTextEditor` breaks the line inside a paragraph**,
+  list item or quotation, for verse, a letter or song lyrics, as in
+  LibreOffice, Word and Qt. It used to start a new paragraph, as Enter does.
+  `RichTextEditor::insert_line_break` and `EditorHandle::insert_line_break`
+  insert one from a menu row. In a table cell and a code block Shift+Enter
+  still does what Enter does. Copied or dragged to another program, the break
+  is a new line. A host that claims Enter in `on_key_preview`, such as a chat
+  composer, now gets a line break from Shift+Enter instead of a paragraph.
+  Needs text-document 1.14 and text-typeset 2.1.
+
 ### Changed
+
+#### Widgets
+
+- **`EditCommandKind` has a new variant, `InsertLineBreak`**, so a `match`
+  over it needs an arm for it.
 
 #### Settings
 

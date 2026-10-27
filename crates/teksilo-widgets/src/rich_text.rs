@@ -28,6 +28,27 @@
 //!     .wrap_mode(WrapMode::Word);
 //! ```
 //!
+//! ## Line breaks
+//!
+//! Enter starts a new paragraph. Shift+Enter breaks the line inside the
+//! paragraph, list item or quotation, for verse, an address or song lyrics. The
+//! document holds the break as one `LINE_SEPARATOR` (U+2028) in the block's
+//! text, as Qt's `QTextDocument` does, and every writer puts it out as its own
+//! format's line break. [`RichTextEditor::insert_line_break`] and
+//! [`EditorHandle::insert_line_break`] insert one from a menu row or a toolbar
+//! button, in one undo step.
+//!
+//! A table cell holds one line and each line of a code block is a block of its
+//! own, so there Shift+Enter does what Enter does, and `insert_line_break`
+//! changes nothing and returns `false`. End stops before a break and Home starts
+//! after it. Copied or dragged to another program, a break is a `\n`.
+//!
+//! A host that claims Enter in its `on_key_preview`, as a chat composer that
+//! sends on Enter does, still lets Shift+Enter reach the editor, which now
+//! breaks the line instead of starting a paragraph. A host that wants a new
+//! paragraph there claims Shift+Enter as well and calls
+//! [`EditorHandle::insert_block`].
+//!
 //! ## Pan to scroll
 //!
 //! The surface installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior)
@@ -68,6 +89,8 @@ pub(crate) mod touch_mount;
 
 pub use self::lists::list_style_is_ordered;
 
+#[cfg(test)]
+mod line_break_tests;
 #[cfg(test)]
 mod lists_tests;
 #[cfg(test)]
@@ -1076,6 +1099,22 @@ impl RichTextEditor {
         let _ = st.cursor.insert_block();
         drop(st);
         sync_cursor_signals(&self.state);
+    }
+
+    /// Insert a line break at the widget's caret, as Shift+Enter does: the next
+    /// line is more of the same paragraph, list item or quotation, where
+    /// [`insert_block`](Self::insert_block) starts a new one. Replaces any
+    /// selection, in one undo step.
+    ///
+    /// Returns `false`, and changes nothing, in a table cell or a code block,
+    /// where a line break cannot be kept.
+    pub fn insert_line_break(&self) -> bool {
+        let inserted = {
+            let st = self.state.borrow();
+            keyboard::line_break_fits_at_caret(&st) && st.cursor.insert_line_break().is_ok()
+        };
+        sync_cursor_signals(&self.state);
+        inserted
     }
 
     /// Insert an inline image by logical resource name. `width` and
@@ -2576,6 +2615,24 @@ impl EditorHandle {
             let _ = st.cursor.insert_block();
         }
         sync_cursor_signals(&self.state);
+    }
+
+    /// Insert a line break at the caret, as Shift+Enter does: the next line is
+    /// more of the same paragraph, list item or quotation, where
+    /// [`insert_block`](Self::insert_block) starts a new one. Replaces any
+    /// selection, in one undo step. The
+    /// [`RichTextEditor::insert_line_break`](RichTextEditor::insert_line_break)
+    /// counterpart, for a menu row or a toolbar button.
+    ///
+    /// Returns `false`, and changes nothing, in a table cell or a code block,
+    /// where a line break cannot be kept.
+    pub fn insert_line_break(&self) -> bool {
+        let inserted = {
+            let st = self.state.borrow();
+            keyboard::line_break_fits_at_caret(&st) && st.cursor.insert_line_break().is_ok()
+        };
+        sync_cursor_signals(&self.state);
+        inserted
     }
 
     /// Insert `text` as a **paragraph of its own** at the caret: split here, fill

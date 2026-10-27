@@ -884,6 +884,30 @@ in the registry: a messenger composer claiming Enter that nobody
 registered as a shortcut, a list view consuming arrow keys that no
 ancestor declared.
 
+A composer built on `RichTextEditor` claims plain Enter (send) and leaves
+Shift+Enter to the editor, which breaks the line inside the paragraph, as
+chat composers do:
+
+```rust
+let composer = VStack::new()
+    .child(RichTextEditor::editor(doc).min_lines(1).max_lines(6))
+    .on_key_preview(move |event, ctx| match event {
+        WidgetEvent::KeyDown { key: Key::Enter, modifiers, .. }
+            if *modifiers == Modifiers::NONE =>
+        {
+            ctx.send_intent(ChatIntent::Send);
+            EventResponse::Handled
+        }
+        _ => EventResponse::Ignored,
+    });
+```
+
+To have Shift+Enter start a new paragraph instead, claim it in the same
+`on_key_preview` and call `EditorHandle::insert_block()`. Shift+Enter is a
+key of the editor, not a shortcut, for the same reason: a shortcut would
+resolve before the focused widget and take Shift+Enter from every text
+field in the window.
+
 ### Standard edit shortcuts: cut, copy, paste, undo, redo, select all
 
 Every widget tree registers seven global shortcuts at creation, one per

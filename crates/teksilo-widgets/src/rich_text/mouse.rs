@@ -289,7 +289,7 @@ fn start_text_drag(state: &SharedState, ctx: &mut EventContext) {
         let (a, b) = (st.cursor.anchor(), st.cursor.position());
         let range = if a <= b { (a, b) } else { (b, a) };
         let fragment = st.cursor.selection();
-        let text = fragment.to_plain_text().to_string();
+        let text = super::clipboard::plain_text_for_other_programs(&fragment);
         if text.is_empty() {
             return;
         }
