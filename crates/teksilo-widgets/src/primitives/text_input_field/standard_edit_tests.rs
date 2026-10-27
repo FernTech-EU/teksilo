@@ -310,3 +310,16 @@ fn a_read_only_field_leaves_the_cut_row_to_the_application() {
     f.press(Key::X, Modifiers::COMMAND);
     assert_eq!(f.app_cuts.get(), 1, "choosing it runs it");
 }
+
+/// Text from another program can carry a line or paragraph separator, which
+/// the typesetter breaks the line at. A single-line field keeps them out, as
+/// it keeps out a `\n`.
+#[test]
+fn a_paste_leaves_line_separators_out_of_the_field() {
+    let mut f = Field::alone("", false);
+    f.clipboard
+        .set_text("one\u{2028}two\u{2029}three\nfour")
+        .unwrap();
+    f.press(Key::V, Modifiers::COMMAND);
+    assert_eq!(f.text.get(), "onetwothreefour");
+}

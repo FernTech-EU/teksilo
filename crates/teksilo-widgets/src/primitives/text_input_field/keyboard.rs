@@ -190,7 +190,7 @@ pub(crate) fn handle_key(
                         // optional per-character filter rejects.
                         let clean: String = t
                             .chars()
-                            .filter(|c| !c.is_control() && *c != '\n' && *c != '\r')
+                            .filter(|c| single_line_admits(*c))
                             .filter(|c| st.char_filter_admits(*c))
                             .collect();
                         if !clean.is_empty() {
@@ -223,7 +223,7 @@ pub(crate) fn handle_key(
                                 st.pending_chars.push_str(&clean);
                             }
                             true
-                        } else if t.chars().any(|c| !c.is_control()) {
+                        } else if t.chars().any(single_line_admits) {
                             // Real text, rejected wholesale by the
                             // filter or the max length: swallow it, so a
                             // digits-only field doesn't let a rejected
@@ -381,9 +381,7 @@ fn handle_ime_composition(
     // re-arms that very loop, a repaint — is pure waste. Bail before any of it.
     {
         let st = state.borrow();
-        let empty = text
-            .chars()
-            .all(|c| c.is_control() || c == '\n' || c == '\r');
+        let empty = text.chars().all(|c| !single_line_admits(c));
         if empty && st.ime_preedit_range.is_none() {
             return EventResponse::Ignored;
         }
@@ -406,7 +404,7 @@ fn handle_ime_composition(
         // Single-line cleaning + per-character filter.
         let clean: String = text
             .chars()
-            .filter(|c| !c.is_control() && *c != '\n' && *c != '\r')
+            .filter(|c| single_line_admits(*c))
             .filter(|c| st.char_filter_admits(*c))
             .collect();
         // Max-length: cap against remaining capacity (the old preedit has
@@ -474,7 +472,7 @@ fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -
     let clean: String = {
         let st = state.borrow();
         text.chars()
-            .filter(|c| !c.is_control() && *c != '\n' && *c != '\r')
+            .filter(|c| single_line_admits(*c))
             .filter(|c| st.char_filter_admits(*c))
             .collect()
     };
@@ -548,6 +546,16 @@ pub(crate) fn clipboard_cut(state: &mut TextInputState, ctx: &EventContext) {
     state.pending_text_changed = true;
 }
 
+/// Whether a single-line field keeps `c`.
+///
+/// Not a control character (a `\n`, a tab, a NUL), nor a line or paragraph
+/// separator (U+2028, U+2029): the typesetter breaks the line at either, and a
+/// single-line field would show two. Typing, input methods and paste all ask
+/// this, so they keep out the same characters.
+fn single_line_admits(c: char) -> bool {
+    !c.is_control() && !matches!(c, '\u{2028}' | '\u{2029}')
+}
+
 pub(crate) fn clipboard_paste(state: &mut TextInputState, ctx: &EventContext) {
     let Some(cb) = ctx.app_state::<ClipboardHandle>() else {
         return;
@@ -565,7 +573,7 @@ pub(crate) fn clipboard_paste(state: &mut TextInputState, ctx: &EventContext) {
     // `char_filter` hook can't re-admit them — it only rejects).
     let clean: String = system
         .chars()
-        .filter(|c| !c.is_control() && *c != '\n' && *c != '\r')
+        .filter(|c| single_line_admits(*c))
         .filter(|c| state.char_filter_admits(*c))
         .collect();
     if clean.is_empty() {

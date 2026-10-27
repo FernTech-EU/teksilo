@@ -123,6 +123,12 @@ by crate for clarity, not because crates version independently.
   and any overlay that lets presses through, only where its handles are: the
   empty layer a finger leaves behind no longer hides a `WebView` either.
 
+- **A single-line field keeps out a line or paragraph separator** (U+2028,
+  U+2029) typed or pasted from another program, as it keeps out a `\n`.
+  text-typeset 2.1 breaks the line at either, so the field showed two lines.
+  Applies to `TextInput`, `PasswordField`, `SpinBox` and everything else
+  built on `TextInputField`.
+
 #### Platform
 
 - **A window with a menu of its own keeps the Window and Help menus on
