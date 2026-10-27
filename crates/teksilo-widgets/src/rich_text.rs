@@ -1105,7 +1105,7 @@ impl RichTextEditor {
     /// line is more of the same paragraph, list item or quotation, where
     /// [`insert_block`](Self::insert_block) starts a new one. Replaces any
     /// selection, or goes in after it under
-    /// [`CommandFilter::ForwardOnly`](policy::CommandFilter::ForwardOnly), in
+    /// [`CommandFilter::ForwardOnly`], in
     /// one undo step.
     ///
     /// Returns `false`, and changes nothing, in a table cell or a code block,
@@ -2623,7 +2623,7 @@ impl EditorHandle {
     /// more of the same paragraph, list item or quotation, where
     /// [`insert_block`](Self::insert_block) starts a new one. Replaces any
     /// selection, or goes in after it under
-    /// [`CommandFilter::ForwardOnly`](policy::CommandFilter::ForwardOnly), in
+    /// [`CommandFilter::ForwardOnly`], in
     /// one undo step. The
     /// [`RichTextEditor::insert_line_break`](RichTextEditor::insert_line_break)
     /// counterpart, for a menu row or a toolbar button.
