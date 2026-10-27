@@ -1129,7 +1129,9 @@ Split the current block at the widget's caret, as pressing Enter does.
 Insert a line break at the widget's caret, as Shift+Enter does: the next
 line is more of the same paragraph, list item or quotation, where
 `insert_block` starts a new one. Replaces any
-selection, in one undo step.
+selection, or goes in after it under
+`CommandFilter::ForwardOnly`, in
+one undo step.
 
 Returns `false`, and changes nothing, in a table cell or a code block,
 where a line break cannot be kept.
@@ -2240,7 +2242,9 @@ Split the current block at the caret, as pressing Enter does.
 Insert a line break at the caret, as Shift+Enter does: the next line is
 more of the same paragraph, list item or quotation, where
 `insert_block` starts a new one. Replaces any
-selection, in one undo step. The
+selection, or goes in after it under
+`CommandFilter::ForwardOnly`, in
+one undo step. The
 `RichTextEditor::insert_line_break`
 counterpart, for a menu row or a toolbar button.
 
