@@ -1018,7 +1018,10 @@ impl RichTextEditor {
 
     // --- Selection helpers (allowed under both presets) -----------------
 
-    /// Currently selected text, or an empty string if nothing is selected.
+    /// Currently selected text, or an empty string if nothing is selected. A
+    /// line break inside a paragraph is
+    /// [`LINE_SEPARATOR`](teksilo_text::text_document::LINE_SEPARATOR)
+    /// (U+2028), as in the document.
     pub fn selected_text(&self) -> String {
         self.state
             .borrow()
@@ -2448,7 +2451,10 @@ impl EditorHandle {
     /// offset (a caret, a selection, a click) and needs to know what is there.
     /// An inline image appears as its `U+FFFC`, so offsets into this string are
     /// offsets into the document, character for character — which the `.txt`
-    /// export's view deliberately is not.
+    /// export's view deliberately is not. A line break inside a paragraph is
+    /// [`LINE_SEPARATOR`](teksilo_text::text_document::LINE_SEPARATOR)
+    /// (U+2028) here, for the same reason; text meant for another program
+    /// wants it as a `\n`.
     ///
     /// Empty string on error, for the same reason `to_djot` returns one.
     pub fn to_plain_text(&self) -> String {
@@ -2685,7 +2691,11 @@ impl EditorHandle {
     ///
     /// O(selection), not O(document). Pairs with [`selection`](Self::selection)
     /// for a caller that needs the range *and* what is in it — a link dialog
-    /// pre-filling its display name from what the writer highlighted, say.
+    /// pre-filling its display name from what the writer highlighted, say. A
+    /// line break inside a paragraph is
+    /// [`LINE_SEPARATOR`](teksilo_text::text_document::LINE_SEPARATOR)
+    /// (U+2028), as in the document; text meant for another program wants it
+    /// as a `\n`.
     pub fn selected_text(&self) -> String {
         self.state
             .borrow()
