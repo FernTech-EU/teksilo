@@ -1124,6 +1124,20 @@ impl RichTextEditor {
         inserted
     }
 
+    /// Whether [`insert_line_break`](Self::insert_line_break) would insert at
+    /// the caret now: `false` in a table cell or a code block, where it
+    /// changes nothing and Shift+Enter does what Enter does. It asks the same
+    /// question as that call and the key, so a menu row greyed by it never
+    /// disagrees with them.
+    ///
+    /// Like `insert_line_break`, it does not consult the command filter. A
+    /// host that honours one also asks whether the
+    /// [`command_filter`](Self::command_filter) accepts
+    /// [`EditCommandKind::InsertLineBreak`].
+    pub fn can_insert_line_break(&self) -> bool {
+        keyboard::line_break_fits_at_caret(&self.state.borrow())
+    }
+
     /// Insert an inline image by logical resource name. `width` and
     /// `height` are in logical pixels.
     ///
@@ -2645,6 +2659,20 @@ impl EditorHandle {
         };
         sync_cursor_signals(&self.state);
         inserted
+    }
+
+    /// Whether [`insert_line_break`](Self::insert_line_break) would insert at
+    /// the caret now: `false` in a table cell or a code block, where it
+    /// changes nothing and Shift+Enter does what Enter does. It asks the same
+    /// question as that call and the key, so a menu row greyed by it never
+    /// disagrees with them.
+    ///
+    /// Like `insert_line_break`, it does not consult the command filter. A
+    /// host that honours one also asks whether the
+    /// [`command_filter`](Self::command_filter) accepts
+    /// [`EditCommandKind::InsertLineBreak`].
+    pub fn can_insert_line_break(&self) -> bool {
+        keyboard::line_break_fits_at_caret(&self.state.borrow())
     }
 
     /// Insert `text` as a **paragraph of its own** at the caret: split here, fill

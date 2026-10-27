@@ -92,6 +92,7 @@ Rich text editor and viewer widget.
 |  | [`insert_djot(djot: &str)`](#richtexteditor-insert_djot) |
 |  | [`insert_block()`](#richtexteditor-insert_block) |
 | `bool` | [`insert_line_break()`](#richtexteditor-insert_line_break) |
+| `bool` | [`can_insert_line_break()`](#richtexteditor-can_insert_line_break) |
 |  | [`insert_image(name: &str, alt: &str, width: u32, height: u32)`](#richtexteditor-insert_image) |
 |  | [`delete_selection()`](#richtexteditor-delete_selection) |
 |  | [`select_word()`](#richtexteditor-select_word) |
@@ -205,6 +206,7 @@ Rich text editor and viewer widget.
 |  | [`insert_djot(djot: &str)`](#editorhandle-insert_djot) |
 |  | [`insert_block()`](#editorhandle-insert_block) |
 | `bool` | [`insert_line_break()`](#editorhandle-insert_line_break) |
+| `bool` | [`can_insert_line_break()`](#editorhandle-can_insert_line_break) |
 | `bool` | [`insert_paragraph(text: &str)`](#editorhandle-insert_paragraph) |
 | `(usize, usize)` | [`selection()`](#editorhandle-selection) |
 | `String` | [`selected_text()`](#editorhandle-selected_text) |
@@ -1138,6 +1140,21 @@ one undo step.
 
 Returns `false`, and changes nothing, in a table cell or a code block,
 where a line break cannot be kept.
+
+<a id="richtexteditor-can_insert_line_break"></a>
+
+#### `pub fn can_insert_line_break(&self) -> bool`
+
+Whether `insert_line_break` would insert at
+the caret now: `false` in a table cell or a code block, where it
+changes nothing and Shift+Enter does what Enter does. It asks the same
+question as that call and the key, so a menu row greyed by it never
+disagrees with them.
+
+Like `insert_line_break`, it does not consult the command filter. A
+host that honours one also asks whether the
+`command_filter` accepts
+`EditCommandKind::InsertLineBreak`.
 
 <a id="richtexteditor-insert_image"></a>
 
@@ -2256,6 +2273,21 @@ counterpart, for a menu row or a toolbar button.
 
 Returns `false`, and changes nothing, in a table cell or a code block,
 where a line break cannot be kept.
+
+<a id="editorhandle-can_insert_line_break"></a>
+
+#### `pub fn can_insert_line_break(&self) -> bool`
+
+Whether `insert_line_break` would insert at
+the caret now: `false` in a table cell or a code block, where it
+changes nothing and Shift+Enter does what Enter does. It asks the same
+question as that call and the key, so a menu row greyed by it never
+disagrees with them.
+
+Like `insert_line_break`, it does not consult the command filter. A
+host that honours one also asks whether the
+`command_filter` accepts
+`EditCommandKind::InsertLineBreak`.
 
 <a id="editorhandle-insert_paragraph"></a>
 

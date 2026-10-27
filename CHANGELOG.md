@@ -24,6 +24,14 @@ by crate for clarity, not because crates version independently.
   `SyntheticKind::RichTextListItem`. A `match` over `SyntheticKind` needs
   the two new arms.
 
+#### Widgets
+
+- **`RichTextEditor::can_insert_line_break` and
+  `EditorHandle::can_insert_line_break`** say whether `insert_line_break`
+  would insert at the caret now: not in a table cell or a code block. A menu
+  row for it can grey itself out where it would do nothing. Like the call,
+  they leave the command filter to the host.
+
 ### Changed
 
 #### Core

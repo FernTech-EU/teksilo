@@ -666,3 +666,98 @@ fn a_typed_paragraph_separator_starts_a_paragraph() {
     assert_eq!(ed.text(), "a\nb");
     assert_eq!(ed.doc.block_count(), 2);
 }
+
+// ── can_insert_line_break: the query a menu row greys itself by ─────────
+
+/// An editor over `markdown`, mounted, with the caret on `needle`'s second
+/// character (or at the start when `needle` is empty).
+fn mounted_markdown(markdown: &str, needle: &str) -> Mounted {
+    let doc = TextDocument::new();
+    doc.set_markdown(markdown).unwrap().wait().unwrap();
+    let text = doc.to_plain_text().unwrap_or_default();
+    let caret = text
+        .find(needle)
+        .map(|byte| text[..byte].chars().count() + 1)
+        .unwrap_or(0);
+    Mounted::over(doc, RichTextEditor::editor, caret)
+}
+
+/// The query answers exactly what `insert_line_break` then does, in each
+/// kind of block: yes in a paragraph, a list item and a quotation, no in a
+/// table cell and a code block.
+#[test]
+fn can_insert_line_break_agrees_with_insert_line_break() {
+    for (markdown, needle, expected) in [
+        ("A plain paragraph\n", "plain", true),
+        ("- first item\n- second item\n", "second", true),
+        ("> a quotation\n", "quotation", true),
+        ("Before\n\n```\nlet x = 1;\n```\n", "let", false),
+    ] {
+        let ed = mounted_markdown(markdown, needle);
+        assert_eq!(
+            ed.handle.can_insert_line_break(),
+            expected,
+            "query in {markdown:?}"
+        );
+        assert_eq!(
+            ed.handle.insert_line_break(),
+            expected,
+            "call in {markdown:?}"
+        );
+    }
+
+    // A table cell, entered the way the table tests enter one.
+    let doc = TextDocument::new();
+    doc.set_plain_text("").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    editor.insert_table(2, 2);
+    let handle = editor.handle();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus(&mut tree, id);
+    assert!(!handle.can_insert_line_break(), "query in a table cell");
+    assert!(!handle.insert_line_break(), "call in a table cell");
+}
+
+/// The widget's own copy asks the same question, before it is mounted too.
+#[test]
+fn the_widget_answers_can_insert_line_break_as_its_handle_does() {
+    let doc = TextDocument::new();
+    doc.set_markdown("```\ncode\n```\n")
+        .unwrap()
+        .wait()
+        .unwrap();
+    let editor = RichTextEditor::editor(doc);
+    editor.set_caret_position(2);
+    assert!(!editor.can_insert_line_break());
+    assert_eq!(
+        editor.can_insert_line_break(),
+        editor.handle().can_insert_line_break()
+    );
+
+    let prose = RichTextEditor::editor({
+        let doc = TextDocument::new();
+        doc.set_plain_text("prose").unwrap();
+        doc
+    });
+    prose.set_caret_position(2);
+    assert!(prose.can_insert_line_break());
+    assert!(prose.insert_line_break());
+}
+
+/// The query ignores the command filter, as the call does: a read-only
+/// editor still says a line break fits, and its host checks the filter.
+#[test]
+fn can_insert_line_break_does_not_consult_the_filter() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("fixed").unwrap();
+    let ed = Mounted::over(doc, RichTextEditor::read_only, 2);
+    assert!(ed.handle.can_insert_line_break());
+    assert!(
+        !ed.handle
+            .command_filter()
+            .accepts(super::policy::EditCommandKind::InsertLineBreak),
+        "the filter is the host's to check"
+    );
+}
