@@ -40,8 +40,10 @@
 //!
 //! A table cell holds one line and each line of a code block is a block of its
 //! own, so there Shift+Enter does what Enter does, and `insert_line_break`
-//! changes nothing and returns `false`. End stops before a break and Home starts
-//! after it. Copied or dragged to another program, a break is a `\n`.
+//! changes nothing and returns `false`; [`EditorHandle::can_insert_line_break`]
+//! says so beforehand, for a menu row to grey itself out. End stops before a
+//! break and Home starts after it. Copied or dragged to another program, a break
+//! is a `\n`.
 //!
 //! A host that claims Enter in its `on_key_preview`, as a chat composer that
 //! sends on Enter does, still lets Shift+Enter reach the editor, which now
@@ -1127,15 +1129,21 @@ impl RichTextEditor {
     /// Whether [`insert_line_break`](Self::insert_line_break) would insert at
     /// the caret now: `false` in a table cell or a code block, where it
     /// changes nothing and Shift+Enter does what Enter does. It asks the same
-    /// question as that call and the key, so a menu row greyed by it never
-    /// disagrees with them.
+    /// question as that call, so a menu row greyed by it never disagrees with
+    /// it.
     ///
-    /// Like `insert_line_break`, it does not consult the command filter. A
-    /// host that honours one also asks whether the
-    /// [`command_filter`](Self::command_filter) accepts
+    /// Like `insert_line_break`, it does not consult the command filter,
+    /// which Shift+Enter also obeys. A host that honours the filter also asks
+    /// whether the [`command_filter`](Self::command_filter) accepts
     /// [`EditCommandKind::InsertLineBreak`].
+    ///
+    /// Safe to ask from `on_change`, `on_text_inserted` or a signal observer,
+    /// which can run while the editor is busy with its own state: it answers
+    /// `true` then, the answer a menu row had before the question.
     pub fn can_insert_line_break(&self) -> bool {
-        keyboard::line_break_fits_at_caret(&self.state.borrow())
+        self.state
+            .try_borrow()
+            .map_or(true, |st| keyboard::line_break_fits_at_caret(&st))
     }
 
     /// Insert an inline image by logical resource name. `width` and
@@ -2255,6 +2263,9 @@ impl RichTextEditor {
 ///   [`apply_block_format`](Self::apply_block_format),
 ///   [`insert_list`](Self::insert_list),
 ///   [`indent`](Self::indent) / [`outdent`](Self::outdent).
+/// * Line breaks — [`insert_line_break`](Self::insert_line_break), plus
+///   [`can_insert_line_break`](Self::can_insert_line_break) for its enable
+///   state.
 /// * Tables — [`insert_table`](Self::insert_table) and the per-row /
 ///   per-column / remove operations, plus [`is_in_table`](Self::is_in_table)
 ///   for contextual UI enable state.
@@ -2664,15 +2675,21 @@ impl EditorHandle {
     /// Whether [`insert_line_break`](Self::insert_line_break) would insert at
     /// the caret now: `false` in a table cell or a code block, where it
     /// changes nothing and Shift+Enter does what Enter does. It asks the same
-    /// question as that call and the key, so a menu row greyed by it never
-    /// disagrees with them.
+    /// question as that call, so a menu row greyed by it never disagrees with
+    /// it.
     ///
-    /// Like `insert_line_break`, it does not consult the command filter. A
-    /// host that honours one also asks whether the
-    /// [`command_filter`](Self::command_filter) accepts
+    /// Like `insert_line_break`, it does not consult the command filter,
+    /// which Shift+Enter also obeys. A host that honours the filter also asks
+    /// whether the [`command_filter`](Self::command_filter) accepts
     /// [`EditCommandKind::InsertLineBreak`].
+    ///
+    /// Safe to ask from `on_change`, `on_text_inserted` or a signal observer,
+    /// which can run while the editor is busy with its own state: it answers
+    /// `true` then, the answer a menu row had before the question.
     pub fn can_insert_line_break(&self) -> bool {
-        keyboard::line_break_fits_at_caret(&self.state.borrow())
+        self.state
+            .try_borrow()
+            .map_or(true, |st| keyboard::line_break_fits_at_caret(&st))
     }
 
     /// Insert `text` as a **paragraph of its own** at the caret: split here, fill

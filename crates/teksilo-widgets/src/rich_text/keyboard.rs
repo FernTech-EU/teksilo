@@ -81,10 +81,29 @@ pub(super) enum KeyAction {
 /// whose every line is a block of its own. There Shift+Enter does what Enter
 /// does, and [`EditorHandle::insert_line_break`](super::EditorHandle::insert_line_break)
 /// does nothing.
+///
+/// Asked where the break would go in, not where the caret is: over a
+/// selection that is its start, since the insertion replaces it, or its end
+/// under a filter that keeps a selection (see
+/// [`collapse_selection_before_insert`]). A forward-only selection reaching
+/// into a code block would otherwise have put the break in the code block.
 pub(super) fn line_break_fits_at_caret(state: &EditorState) -> bool {
-    state.cursor.current_table_cell().is_none()
-        && !state
-            .cursor
+    let cursor = &state.cursor;
+    let (position, anchor) = (cursor.position(), cursor.anchor());
+    let at = if position == anchor {
+        position
+    } else if state
+        .policy
+        .command_filter
+        .collapses_selection_before_insert()
+    {
+        position.max(anchor)
+    } else {
+        position.min(anchor)
+    };
+    let probe = state.document.cursor_at(at);
+    probe.current_table_cell().is_none()
+        && !probe
             .block_format()
             .is_ok_and(|format| format.is_code_block == Some(true))
 }

@@ -45,6 +45,10 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **Under a forward-only filter, a line break over a selection reaching into a
+  code block or a table cell no longer lands there.** Shift+Enter and
+  `insert_line_break` judged the place by the caret, and the break goes in
+  after the selection.
 - **A screen reader gets a `RichTextEditor`'s paragraphs apart.** The text
   it reads had no character between two paragraphs, so the end of one and
   the start of the next were one offset: End at the end of a paragraph read

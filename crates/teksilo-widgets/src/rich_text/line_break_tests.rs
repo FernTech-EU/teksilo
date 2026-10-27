@@ -78,6 +78,10 @@ impl Mounted {
 
     fn over(doc: TextDocument, make: fn(TextDocument) -> RichTextEditor, caret: usize) -> Self {
         let editor = make(doc.clone());
+        Self::with_editor(doc, editor, caret)
+    }
+
+    fn with_editor(doc: TextDocument, editor: RichTextEditor, caret: usize) -> Self {
         let handle = editor.handle();
         let state = editor.state_handle();
         let mut tree = WidgetTree::new();
@@ -760,4 +764,84 @@ fn can_insert_line_break_does_not_consult_the_filter() {
             .accepts(super::policy::EditCommandKind::InsertLineBreak),
         "the filter is the host's to check"
     );
+}
+
+/// Asked where the break would go in: over a selection reaching into a code
+/// block that is the selection's start, unless a forward-only filter keeps
+/// the selection and the break goes in after it, inside the code.
+#[test]
+fn can_insert_line_break_asks_where_the_break_would_go_in() {
+    let markdown = "Before\n\n```\nlet x = 1;\n```\n";
+    let into_code = |ed: &Mounted| {
+        let text = ed.text();
+        let code = text.find("let").unwrap() + 2;
+        ed.handle.select_range(2, code);
+    };
+
+    let ed = mounted_markdown(markdown, "");
+    into_code(&ed);
+    assert!(
+        ed.handle.can_insert_line_break(),
+        "replacing it: in 'Before'"
+    );
+    assert!(ed.handle.insert_line_break());
+    assert!(ed.text().starts_with(&format!("Be{LS}")), "{:?}", ed.text());
+
+    let ed = mounted_markdown(markdown, "");
+    ed.handle
+        .set_command_filter(super::policy::CommandFilter::ForwardOnly);
+    into_code(&ed);
+    let before = ed.text();
+    assert!(!ed.handle.can_insert_line_break(), "after it: in the code");
+    assert!(!ed.handle.insert_line_break());
+    assert_eq!(ed.text(), before, "nothing went into the code block");
+}
+
+/// A host greys its row from `on_change`, which runs while the editor is
+/// busy with its own state: the query answers rather than panicking.
+#[test]
+fn can_insert_line_break_is_safe_from_on_change() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let answers = Rc::new(Cell::new(0u32));
+    let doc = TextDocument::new();
+    doc.set_plain_text("ab").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+    let editor = editor.on_change({
+        let answers = answers.clone();
+        move || {
+            let _ = handle.can_insert_line_break();
+            answers.set(answers.get() + 1);
+        }
+    });
+    let mut ed = Mounted::with_editor(doc, editor, 2);
+    type_text(&mut ed.tree, "c");
+    layout(&mut ed.tree);
+    assert_eq!(ed.text(), "abc");
+    assert!(answers.get() > 0, "on_change ran and asked");
+}
+
+/// The table half of the guard holds at every caret position a table has,
+/// each cell's end included, and only there.
+#[test]
+fn can_insert_line_break_refuses_everywhere_in_a_table() {
+    let ed = mounted_markdown(
+        "Before\n\n| ab | cd |\n|---|---|\n| ef | gh |\n\nAfter\n",
+        "",
+    );
+    let mut position = 0;
+    while {
+        ed.handle.select_range(position, position);
+        ed.handle.cursor_position() == position
+    } {
+        let in_table = ed.state.borrow().cursor.current_table().is_some();
+        assert_eq!(
+            ed.handle.can_insert_line_break(),
+            !in_table,
+            "caret at {position}"
+        );
+        position += 1;
+    }
+    assert!(position > 20, "the walk reached past the table");
 }
