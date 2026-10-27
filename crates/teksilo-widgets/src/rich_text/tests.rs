@@ -616,6 +616,29 @@ fn a_key_pressed_in_the_frame_of_typing_comes_after_the_typing() {
     assert_eq!(type_then(Key::Enter, Modifiers::COMMAND).0, "xab\n");
 }
 
+/// The same for a paste from outside the key path (the context menu, a host's
+/// `paste`): it lands after what was typed before it in the frame.
+#[test]
+fn a_paste_in_the_frame_of_typing_comes_after_the_typing() {
+    use teksilo_core::window::NoopWindowOps;
+    let doc = TextDocument::new();
+    doc.set_plain_text("x").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    handle.select_range(1, 1);
+    clipboard.set_text("P").unwrap();
+    press_char(&mut tree, 'a');
+    press_char(&mut tree, 'b');
+    tree.run_with_event_context(&mut NoopWindowOps, |ctx| handle.paste(ctx));
+    tick_once(&mut tree);
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "xabP");
+}
+
 #[test]
 fn editor_backspace_and_delete_remove_characters() {
     let doc = TextDocument::new();

@@ -125,8 +125,9 @@ by crate for clarity, not because crates version independently.
 
 - **In `RichTextEditor`, a key pressed in the same frame as typing comes
   after the typing.** Typed characters wait for the next frame, and Enter,
-  Backspace, the arrows, an edit command such as Ctrl+Z or Ctrl+V and a
-  format command acted before them: typing "ab" and pressing Enter quickly
+  Backspace, the arrows, an edit command such as Ctrl+Z, a paste (by key,
+  from the context menu or from the application) and a format command acted
+  before them: typing "ab" and pressing Enter quickly
   gave a new paragraph holding "ab". Fast typing, automation and remote
   desktops could hit it.
 - **A single-line field keeps out a line or paragraph separator** (U+2028,

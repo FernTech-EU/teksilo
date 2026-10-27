@@ -64,6 +64,9 @@ const MARKER_SUFFIX: &str = "-->";
 /// copy/paste pair re-inserts the original `DocumentFragment`
 /// rather than round-tripping through HTML (cheaper and bit-exact).
 pub(crate) fn copy(state: &mut EditorState, ctx: &EventContext) {
+    // After what was typed before it in this frame, from any route: a key,
+    // the context menu, a host's `paste`.
+    super::frame_loop::flush_pending_chars(state);
     if !state.cursor.has_selection() {
         return;
     }
@@ -159,6 +162,9 @@ fn payload_marker(html: &str) -> Option<&str> {
 /// is set so the debounce drain publishes a `text_changed` command once
 /// the 150 ms window closes. No-op with no selection.
 pub(crate) fn cut(state: &mut EditorState, ctx: &EventContext) {
+    // After what was typed before it in this frame, from any route: a key,
+    // the context menu, a host's `paste`.
+    super::frame_loop::flush_pending_chars(state);
     if !state.cursor.has_selection() {
         return;
     }
@@ -196,6 +202,9 @@ pub(crate) fn cut(state: &mut EditorState, ctx: &EventContext) {
 /// the end of the pasted content rather than keeping the newly inserted
 /// range selected — matches godot behaviour.
 pub(crate) fn paste(state: &mut EditorState, ctx: &EventContext) {
+    // After what was typed before it in this frame, from any route: a key,
+    // the context menu, a host's `paste`.
+    super::frame_loop::flush_pending_chars(state);
     let Some(cb) = ctx.app_state::<ClipboardHandle>() else {
         return;
     };
@@ -293,6 +302,9 @@ fn insert_stored_fragment(state: &mut EditorState) -> bool {
 /// for plain text, so even if the clipboard has a richer payload
 /// we insert `get_text()` verbatim.
 pub(crate) fn paste_unformatted(state: &mut EditorState, ctx: &EventContext) {
+    // After what was typed before it in this frame, from any route: a key,
+    // the context menu, a host's `paste`.
+    super::frame_loop::flush_pending_chars(state);
     let Some(cb) = ctx.app_state::<ClipboardHandle>() else {
         return;
     };
