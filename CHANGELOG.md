@@ -166,6 +166,15 @@ by crate for clarity, not because crates version independently.
   state, the larger size was saved and grew again at each launch. A size
   already saved that way is kept, not shrunk back.
 
+### Security
+
+- **`Cargo.lock` moves rustls, rustls-webpki, webpki-roots,
+  webpki-root-certs, ctutils, crypto-bigint, zstd, zstd-safe and zstd-sys
+  past their RustSec advisories**, which matters to the binaries installed
+  with `cargo install --locked` (`cargo-teksilo`,
+  `teksilo-automation-mcp`). The `zip` advisories remain: `zip` 6 and 8 come
+  from text-document's EPUB and DOCX exporters.
+
 ## [0.21.0] - 2026-10-26
 
 ### Added
