@@ -301,8 +301,43 @@ fn the_scrim_is_not_over_the_chrome() {
     let mut window = Window::new();
     window.open_modal();
     let full = Rect::new(0.0, 0.0, 400.0, 300.0);
-    let overlays = window.tree.overlay_manager_mut();
 
-    assert!(overlays.interactive_rects().contains(&full));
-    assert!(!overlays.interactive_rects_over_chrome().contains(&full));
+    let rects = window.tree.overlay_rects_for_view();
+
+    assert!(rects.all.contains(&full), "a web view still stands down");
+    assert!(!rects.over_chrome.contains(&full));
+}
+
+/// A pass-through layer over the window (a text editor's touch handles)
+/// covers only what in it takes a press. Counted whole, the layer an editor
+/// mounted covered the whole caption (on Windows the title bar became client
+/// area and offered no Snap layouts) and hid an embedded web view.
+#[test]
+fn a_pass_through_layer_covers_only_what_takes_a_press() {
+    let mut window = Window::new();
+    let handle = window.tree.add(FillWidget::new());
+    let hidden = window.tree.add(FillWidget::new());
+    let layer = window
+        .tree
+        .add(Row(vec![handle, hidden]).event_pass_through(true));
+    window.tree.set_dormant(layer);
+    window.overlay(layer, OverlayPlacement::FullViewport);
+    window.tree.set_dormant(hidden);
+    window.tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let handle_bounds = window.tree.bounds(handle);
+    assert!(handle_bounds.width > 0.0 && handle_bounds.height > 0.0);
+    let rects = window.tree.overlay_rects_for_view();
+    assert_eq!(rects.over_chrome, vec![handle_bounds]);
+    assert_eq!(rects.all, vec![handle_bounds]);
+
+    window.tree.set_dormant(handle);
+    window.tree.layout(SizeProposal::exact(400.0, 300.0));
+    let rects = window.tree.overlay_rects_for_view();
+    assert_eq!(
+        rects.over_chrome,
+        Vec::<Rect>::new(),
+        "an empty layer covers nothing"
+    );
+    assert_eq!(rects.all, Vec::<Rect>::new());
 }

@@ -252,6 +252,33 @@ fn a_mouse_raises_no_affordances() {
     assert!(h.toolbar_actions().is_empty(), "nor a selection toolbar");
 }
 
+/// Typing in an editor no finger has touched mounts no touch layer. The layer
+/// is a full-window overlay, and a keystroke left one standing for the
+/// editor's life: a custom title bar reads every overlay as covering its
+/// caption, so on Windows the whole bar became client area and offered no Snap
+/// layouts, and an embedded `WebView` hides under any overlay. The code editor
+/// shares this host.
+#[test]
+fn typing_mounts_no_touch_layer() {
+    use teksilo_core::event::{Key, Modifiers};
+
+    // A render after each key: the editor lays its text out in `paint`, and
+    // End finds the line's end in that layout.
+    let mut h = Harness::focused("hello world");
+    h.tree.press_key(Key::End, Modifiers::NONE);
+    h.render();
+    h.tree.type_text(h.editor, "!");
+    h.render();
+    h.tree.press_key(Key::A, Modifiers::COMMAND);
+    h.render();
+    assert_eq!(h.selection(), 0..12, "the keys reached the editor");
+    assert!(
+        h.tree.active_overlays().is_empty(),
+        "no overlay may stand over the window: {:?}",
+        h.tree.active_overlays()
+    );
+}
+
 /// A mouse hold is not a word selection. The gesture arena installs a
 /// long-press recognizer on the *presence* of the handler, with no pointer-kind
 /// condition, so the controller's own guard is the only thing between a resting

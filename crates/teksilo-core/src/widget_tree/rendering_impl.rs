@@ -150,10 +150,7 @@ impl WidgetTree {
         // (`TitleBar`) subtract them from the geometry they publish to
         // the OS — an overlay floats above the caption, so its pixels
         // must not be reported as draggable chrome.
-        let overlay_rects = crate::widget::OverlayRects {
-            all: self.overlay_manager.interactive_rects(),
-            over_chrome: self.overlay_manager.interactive_rects_over_chrome(),
-        };
+        let overlay_rects = self.overlay_rects_for_view();
 
         for root_id in self.arena.roots() {
             // Don't descend into overlay content via its anchor parent — it
@@ -261,6 +258,62 @@ impl WidgetTree {
             .should_arm_frame_tick(&self.arena, self.paint_epoch)
         {
             self.frame_tick_armed_by_subscribers = true;
+        }
+    }
+
+    /// The overlay rects `after_paint` reads through `WidgetTreeView`, taken
+    /// once a frame: what of each open overlay takes a press.
+    ///
+    /// A pass-through overlay takes a press only where something in it does,
+    /// as the hit test falls through it everywhere else, so it counts only by
+    /// its outermost active nodes that are not pass-through themselves (a
+    /// text-affordance layer's handles, while they show). Counted whole, the
+    /// full-window layer a text field mounts covered everything: on Windows a
+    /// custom title bar became client area and lost its Snap layouts, and an
+    /// embedded `WebView` hid for as long as the layer stood.
+    ///
+    /// `over_chrome` leaves out a modal's scrim as well, the window's chrome
+    /// staying live above it; `all` keeps it, so a `WebView` stands down
+    /// under a modal.
+    pub(crate) fn overlay_rects_for_view(&self) -> crate::widget::OverlayRects {
+        let mut rects = crate::widget::OverlayRects::default();
+        for overlay in self.overlay_manager.interactive() {
+            let content = overlay.content_id;
+            let mut parts = Vec::new();
+            if self
+                .arena
+                .get(content)
+                .is_some_and(|node| node.event_pass_through)
+            {
+                self.collect_press_takers(content, &mut parts);
+            } else {
+                parts.push(overlay.bounds);
+            }
+            parts.retain(|r| r.width > 0.0 && r.height > 0.0);
+            if !self.overlay_manager.is_modal_scrim(overlay) {
+                rects.over_chrome.extend(parts.iter().copied());
+            }
+            rects.all.extend(parts);
+        }
+        rects
+    }
+
+    /// The bounds of `id`'s outermost active descendants that are not
+    /// pass-through, into `out`.
+    fn collect_press_takers(&self, id: WidgetId, out: &mut Vec<Rect>) {
+        for &child in self.arena.children(id) {
+            if !self.arena.is_active(child) {
+                continue;
+            }
+            if self
+                .arena
+                .get(child)
+                .is_some_and(|node| node.event_pass_through)
+            {
+                self.collect_press_takers(child, out);
+            } else {
+                out.push(self.arena.bounds(child));
+            }
         }
     }
 }

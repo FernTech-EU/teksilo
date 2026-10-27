@@ -1651,17 +1651,9 @@ impl OverlayManager {
             .collect()
     }
 
-    /// [`interactive_rects`](Self::interactive_rects) less every modal's
-    /// scrim, which the window's chrome stays live above.
-    pub(crate) fn interactive_rects_over_chrome(&self) -> Vec<Rect> {
-        self.interactive()
-            .filter(|o| !self.is_modal_scrim(o))
-            .map(|o| o.bounds)
-            .filter(|r| r.width > 0.0 && r.height > 0.0)
-            .collect()
-    }
-
-    fn interactive(&self) -> impl Iterator<Item = &ActiveOverlay> {
+    /// The overlays open and not fading out: what
+    /// [`interactive_rects`](Self::interactive_rects) measures.
+    pub(crate) fn interactive(&self) -> impl Iterator<Item = &ActiveOverlay> {
         self.stack.iter().filter(|o| {
             !o.inert
                 && o.fade

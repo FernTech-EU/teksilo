@@ -235,6 +235,18 @@ what it used to prescribe.
    them for the hit-test walk to descend, and it does not have to be re-placed as
    a handle moves.
 
+   Mount it only when the controller has something to show
+   (`TouchSelection::affordances().is_empty()` is false). A refresh after a
+   keystroke, an edit command or an assistive request reaches the host in an
+   editor no finger has touched, and the layer it mounted stood over the window
+   for the editor's life: a custom title bar counted it as covering its caption
+   (on Windows the whole bar became client area and lost its Snap layouts), and
+   an embedded `WebView` hides under any overlay. A layer a finger did raise
+   stays mounted, empty, after its handles retire; `WidgetTreeView`'s overlay
+   rects, which the title bar and a `WebView` read, count a pass-through
+   overlay only by what in it is not pass-through, so that one covers only its
+   handles.
+
    This is the step that was wrong, and the shape of the correction matters
    because it is what the router now guarantees. An overlay is chosen by its
    *bounds*, `OverlayManager::hit_test` picks the topmost overlay whose rectangle

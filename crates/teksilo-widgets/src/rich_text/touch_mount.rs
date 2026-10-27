@@ -328,6 +328,12 @@ impl EditorTouch {
     /// a keystroke, an undo, an assistive client's `SetTextSelection`, the
     /// editor's own multi-tap. A no-op until something has been raised, so an
     /// untouched editor pays nothing.
+    ///
+    /// Nothing to show mounts nothing. The layer is a full-window overlay, and
+    /// one mounted by a keystroke stayed for the editor's life: a custom title
+    /// bar reads every overlay as covering its caption, so on Windows the
+    /// whole bar became client area (no Snap layouts), and a `WebView` hides
+    /// under any overlay.
     pub(crate) fn refresh(self: &Rc<Self>, ctx: &mut EventContext<'_>, toolbar: ToolbarIntent) {
         if !self.surface.geometry_is_meaningful() {
             self.dismiss();
@@ -335,6 +341,9 @@ impl EditorTouch {
         }
         let direction = ctx.layout_direction();
         self.with_source(|controller, source| controller.refresh(direction, source));
+        if self.controller.borrow().affordances().is_empty() {
+            return;
+        }
         self.mount_overlays(ctx, toolbar);
     }
 

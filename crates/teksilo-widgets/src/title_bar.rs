@@ -1602,6 +1602,61 @@ mod tests {
         assert!(regions.minimize.is_some() && regions.close.is_some());
     }
 
+    /// A text field's touch layer is a full-window overlay that takes a press
+    /// only on its handles, and it stays mounted once a finger has raised
+    /// them. Counted whole, it punched the whole caption out: on Windows the
+    /// title bar became client area and offered no Snap layouts. Its handles
+    /// still take their presses: a caret handle reaching into the bar is a
+    /// hole of its own size.
+    #[test]
+    fn a_text_fields_touch_layer_leaves_the_caption_to_the_window_system() {
+        use crate::primitives::{TextInputField, VStack};
+
+        let host = Rc::new(TestHost::default());
+        let mut tree = WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light())
+            .with_text_backend(Rc::new(
+                RefCell::new(teksilo_canvas::MockTextBackend::new()),
+            ));
+        let bar =
+            tree.add(TitleBar::new(host.clone() as Rc<dyn PlatformTitleBarHost>).height(40.0));
+        let field = tree.add(TextInputField::new(Signal::new("hello world".to_string())));
+        tree.add(
+            VStack::new()
+                .spacing(0.0)
+                .child(bar)
+                .child(FixedSize::new().width(300.0).height(40.0).child(field)),
+        );
+        paint_once(&mut tree);
+
+        let input = tree
+            .first_focusable_descendant(field)
+            .expect("the field is focusable");
+        tree.focus(input);
+        paint_once(&mut tree);
+        let at = tree.bounds(input).center();
+        crate::button::press_test_support::touch_tap(&mut tree, at);
+        paint_once(&mut tree);
+        assert!(
+            !tree.active_overlays().is_empty(),
+            "the finger's tap raised the touch layer"
+        );
+        let regions = host.last_regions.borrow();
+        let caption = [
+            regions.drag[0].center(),
+            regions.minimize.expect("a minimise button").center(),
+            regions.maximize.expect("a maximise button").center(),
+            regions.close.expect("a close button").center(),
+        ];
+        for point in caption {
+            assert!(
+                !regions.no_drag.iter().any(|hole| hole.contains(point)),
+                "the touch layer must leave {point:?} to the window system, holes {:?}",
+                regions.no_drag
+            );
+        }
+    }
+
     #[test]
     fn a_modal_leaves_the_window_buttons_working() {
         let host = Rc::new(TestHost::default());

@@ -393,6 +393,10 @@ impl FieldTouch {
     /// Recompute the affordances after a change the controller did not make —
     /// a keystroke, an undo, an assistive-technology selection. A no-op until
     /// something has been raised, so an untouched field pays nothing.
+    ///
+    /// Nothing to show mounts nothing: see `rich_text::touch_mount`'s
+    /// `EditorTouch::refresh`, whose full-window layer a keystroke left
+    /// standing over the window the same way.
     pub(crate) fn refresh(self: &Rc<Self>, ctx: &mut EventContext<'_>, toolbar: ToolbarIntent) {
         if !self.geometry_is_meaningful() {
             self.dismiss();
@@ -400,6 +404,9 @@ impl FieldTouch {
         }
         let direction = ctx.layout_direction();
         self.with_source(|controller, source| controller.refresh(direction, source));
+        if self.controller.borrow().affordances().is_empty() {
+            return;
+        }
         self.mount(ctx, toolbar);
     }
 

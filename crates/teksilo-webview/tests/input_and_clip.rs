@@ -391,6 +391,55 @@ fn an_overlay_standing_over_the_page_hides_the_engine_subview() {
     );
 }
 
+/// A pass-through layer over the window (the one holding a text field's touch
+/// handles) stands over the page only where something in it takes a press.
+/// Counted whole, the empty layer a text field leaves mounted hid the page for
+/// as long as it stood.
+#[test]
+fn a_pass_through_layer_hides_the_page_only_where_it_takes_a_press() {
+    use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
+
+    let (registry, records) = memory_registry();
+    let mut tree = tree_with_registry(registry);
+
+    let webview = WebView::new().url("about:blank");
+    let wv_id = webview.id();
+    let anchor = tree.add(webview);
+    let handle = tree.add(MinSize::new(40.0, 40.0));
+    let layer = tree.add(WidgetBuilder::event_pass_through(
+        ZStack::new().child(handle),
+        true,
+    ));
+    tree.set_dormant(layer);
+    layout(&mut tree);
+    let _ = tree.render();
+
+    tree.activate(layer);
+    tree.set_dormant(handle);
+    tree.show_overlay(OverlayRequest::new(
+        layer,
+        anchor,
+        OverlayPlacement::FullViewport,
+        DismissBehavior::Manual,
+    ));
+    layout(&mut tree);
+    let _ = tree.render();
+    assert_eq!(
+        records.visibility_log(wv_id),
+        Vec::<bool>::new(),
+        "an empty layer covers nothing"
+    );
+
+    tree.activate(handle);
+    layout(&mut tree);
+    let _ = tree.render();
+    assert_eq!(
+        records.visibility_log(wv_id),
+        vec![false],
+        "a handle over the page stands the subview down"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // the two focus rings
 // ---------------------------------------------------------------------------

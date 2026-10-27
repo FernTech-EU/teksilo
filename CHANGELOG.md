@@ -94,6 +94,17 @@ by crate for clarity, not because crates version independently.
   and `WindowFrame` edges work, and the close button closes the modal as
   Escape would, whatever `TitleBar::close_action` it was given. What the app
   put in the title bar stays behind the modal.
+- **Typing in a text field no longer takes the Snap layouts from a custom
+  title bar on Windows.** A key, an edit command or an accessibility request
+  in a `TextInputField`, `RichTextEditor` or `CodeEditor` mounted the
+  window-wide layer that holds the touch selection handles, with no handle
+  to show, and it stayed for the editor's life. A custom title bar counted
+  it as covering its caption, so on Windows the whole bar answered as client
+  area: no Snap layouts, and the caption buttons and drag worked only through
+  the app. An embedded `WebView` hid under it too. The layer now mounts only
+  once a finger raises a handle, and the title bar and a `WebView` count it,
+  and any overlay that lets presses through, only where its handles are: the
+  empty layer a finger leaves behind no longer hides a `WebView` either.
 
 #### Platform
 

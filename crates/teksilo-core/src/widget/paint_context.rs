@@ -187,7 +187,12 @@ impl<'a> WidgetTreeView<'a> {
     /// them from the caption it publishes, or a revealed hamburger
     /// `MenuBar` (any overlay over the title bar) would hit-test as
     /// `HTCAPTION` on Windows and the OS would swallow its clicks as a
-    /// window drag.
+    /// window drag, and a `WebView` hides its engine's page under them.
+    ///
+    /// A pass-through overlay (one whose content root lets presses through,
+    /// such as the full-window layer holding a text field's touch handles)
+    /// counts only by what in it is not pass-through: its visible handles,
+    /// nothing while it is empty.
     pub fn overlay_rects(&self) -> &[Rect] {
         &self.overlay_rects.all
     }

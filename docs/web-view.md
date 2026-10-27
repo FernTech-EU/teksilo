@@ -463,17 +463,19 @@ two overlap, and the OS would route a press over that region to the engine rathe
 than to the overlay.
 
 So the subview **stands down while an interactive overlay covers the page**: the
-widget intersects its own bounds with `OverlayManager::interactive_rects()` in
+widget intersects its own bounds with `WidgetTreeView::overlay_rects()` in
 `after_paint` and issues `set_visible(false)` for as long as one of them overlaps,
 restoring the page when the overlay goes. That is the only way a menu or a dialog
 over a web view is both visible and operable; nothing in the toolkit can reach
 over a native child.
 
-Two consequences worth stating. The page is *hidden*, not dimmed, an overlay
+Three consequences worth stating. The page is *hidden*, not dimmed, an overlay
 covering a corner of a large web view blanks all of it, because visibility is the
-only lever the embedding APIs give us. And a fading overlay does not count:
-`interactive_rects` excludes overlays whose fade-out has begun, so a dismissing
-tooltip gives the page straight back.
+only lever the embedding APIs give us. A fading overlay does not count: the rects
+exclude overlays whose fade-out has begun, so a dismissing tooltip gives the page
+straight back. And a pass-through overlay counts only by what in it takes a
+press: the full-window layer a text field mounts for its touch handles covers the
+page only where a handle shows, and hid it whole before.
 
 An app that wants a Teksilo overlay to sit *beside* a live page rather than
 replace it should keep the two regions disjoint, or open the overlay as a popup OS

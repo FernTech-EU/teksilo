@@ -1464,7 +1464,9 @@ impl Widget for WebView {
         // a press over that region to the engine, not to the overlay. Standing
         // the subview down while one covers the page is what makes such an
         // overlay both visible and operable; nothing else in the toolkit can
-        // reach over a native child.
+        // reach over a native child. A pass-through overlay (a text field's
+        // full-window touch layer) is in `overlay_rects` only by its handles,
+        // so an empty one leaves the page shown.
         //
         // This is the one thing that cannot be decided in `place_children`:
         // overlays are positioned *after* the main tree is laid out, so a
