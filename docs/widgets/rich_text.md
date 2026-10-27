@@ -91,6 +91,7 @@ Rich text editor and viewer widget.
 |  | [`insert_html(html: &str)`](#richtexteditor-insert_html) |
 |  | [`insert_djot(djot: &str)`](#richtexteditor-insert_djot) |
 |  | [`insert_block()`](#richtexteditor-insert_block) |
+| `bool` | [`insert_line_break()`](#richtexteditor-insert_line_break) |
 |  | [`insert_image(name: &str, alt: &str, width: u32, height: u32)`](#richtexteditor-insert_image) |
 |  | [`delete_selection()`](#richtexteditor-delete_selection) |
 |  | [`select_word()`](#richtexteditor-select_word) |
@@ -203,6 +204,7 @@ Rich text editor and viewer widget.
 | `bool` | [`has_image_resource(name: &str)`](#editorhandle-has_image_resource) |
 |  | [`insert_djot(djot: &str)`](#editorhandle-insert_djot) |
 |  | [`insert_block()`](#editorhandle-insert_block) |
+| `bool` | [`insert_line_break()`](#editorhandle-insert_line_break) |
 | `bool` | [`insert_paragraph(text: &str)`](#editorhandle-insert_paragraph) |
 | `(usize, usize)` | [`selection()`](#editorhandle-selection) |
 | `String` | [`selected_text()`](#editorhandle-selected_text) |
@@ -341,6 +343,27 @@ let editor = RichTextEditor::editor(doc)
     .max_lines(8)
     .wrap_mode(WrapMode::Word);
 ```
+
+#### Line breaks
+
+Enter starts a new paragraph. Shift+Enter breaks the line inside the
+paragraph, list item or quotation, for verse, an address or song lyrics. The
+document holds the break as one `LINE_SEPARATOR` (U+2028) in the block's
+text, as Qt's `QTextDocument` does, and every writer puts it out as its own
+format's line break. `RichTextEditor::insert_line_break` and
+`EditorHandle::insert_line_break` insert one from a menu row or a toolbar
+button, in one undo step.
+
+A table cell holds one line and each line of a code block is a block of its
+own, so there Shift+Enter does what Enter does, and `insert_line_break`
+changes nothing and returns `false`. End stops before a break and Home starts
+after it. Copied or dragged to another program, a break is a `\n`.
+
+A host that claims Enter in its `on_key_preview`, as a chat composer that
+sends on Enter does, still lets Shift+Enter reach the editor, which now
+breaks the line instead of starting a paragraph. A host that wants a new
+paragraph there claims Shift+Enter as well and calls
+`EditorHandle::insert_block`.
 
 #### Pan to scroll
 
@@ -1098,6 +1121,18 @@ does produce new blocks rather than literal newlines in one paragraph.
 #### `pub fn insert_block(&self)`
 
 Split the current block at the widget's caret, as pressing Enter does.
+
+<a id="richtexteditor-insert_line_break"></a>
+
+#### `pub fn insert_line_break(&self) -> bool`
+
+Insert a line break at the widget's caret, as Shift+Enter does: the next
+line is more of the same paragraph, list item or quotation, where
+`insert_block` starts a new one. Replaces any
+selection, in one undo step.
+
+Returns `false`, and changes nothing, in a table cell or a code block,
+where a line break cannot be kept.
 
 <a id="richtexteditor-insert_image"></a>
 
@@ -2197,6 +2232,20 @@ inserting a standalone paragraph really does create one.
 #### `pub fn insert_block(&self)`
 
 Split the current block at the caret, as pressing Enter does.
+
+<a id="editorhandle-insert_line_break"></a>
+
+#### `pub fn insert_line_break(&self) -> bool`
+
+Insert a line break at the caret, as Shift+Enter does: the next line is
+more of the same paragraph, list item or quotation, where
+`insert_block` starts a new one. Replaces any
+selection, in one undo step. The
+`RichTextEditor::insert_line_break`
+counterpart, for a menu row or a toolbar button.
+
+Returns `false`, and changes nothing, in a table cell or a code block,
+where a line break cannot be kept.
 
 <a id="editorhandle-insert_paragraph"></a>
 
