@@ -89,6 +89,17 @@ pub(super) fn line_break_fits_at_caret(state: &EditorState) -> bool {
             .is_ok_and(|format| format.is_code_block == Some(true))
 }
 
+/// Insert a line break at the caret, as Shift+Enter does: over the selection,
+/// or after it under a filter that forbids taking text away. `false`, with
+/// nothing changed, where [`line_break_fits_at_caret`] says no.
+pub(super) fn insert_line_break(state: &EditorState, origin: InsertionOrigin) -> bool {
+    if !line_break_fits_at_caret(state) {
+        return false;
+    }
+    collapse_selection_before_insert(state);
+    state.cursor.insert_line_break_with_origin(origin).is_ok()
+}
+
 /// Under a filter that forbids taking text away, move the caret to the end of
 /// the selection instead of letting the imminent insertion replace it.
 ///
@@ -395,10 +406,7 @@ pub(super) fn handle_key(
                     && filter.accepts(EditCommandKind::InsertLineBreak)
                     && line_break_fits_at_caret(&st) =>
             {
-                collapse_selection_before_insert(&st);
-                let _ = st
-                    .cursor
-                    .insert_line_break_with_origin(InsertionOrigin::Typed);
+                insert_line_break(&st, InsertionOrigin::Typed);
                 KeyAction::ClearPreferredX
             }
             Key::Enter if !ctrl && filter.accepts(EditCommandKind::InsertBlock) => {

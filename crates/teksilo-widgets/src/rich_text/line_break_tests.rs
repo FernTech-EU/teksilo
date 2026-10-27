@@ -314,7 +314,7 @@ fn a_read_only_editor_refuses_shift_enter() {
 }
 
 #[test]
-fn forward_only_takes_shift_enter_and_keeps_the_selection() {
+fn forward_only_takes_shift_enter_and_keeps_the_selected_text() {
     let mut ed = Mounted::new("never lost", 0);
     ed.handle
         .set_command_filter(super::policy::CommandFilter::ForwardOnly);
@@ -325,6 +325,17 @@ fn forward_only_takes_shift_enter_and_keeps_the_selection() {
         format!("never{LS} lost"),
         "the break goes in after the selection, not over it"
     );
+}
+
+/// The menu row's way in keeps the selected text too, as the key does.
+#[test]
+fn forward_only_insert_line_break_keeps_the_selected_text() {
+    let ed = Mounted::new("never lost", 0);
+    ed.handle
+        .set_command_filter(super::policy::CommandFilter::ForwardOnly);
+    ed.handle.select_range(0, 5);
+    assert!(ed.handle.insert_line_break());
+    assert_eq!(ed.text(), format!("never{LS} lost"));
 }
 
 /// The memory clipboard carries HTML, so a paste back is the stored fragment.
