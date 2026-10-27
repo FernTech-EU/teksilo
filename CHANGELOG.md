@@ -13,6 +13,8 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-27
+
 ### Added
 
 #### Core
@@ -6430,7 +6432,8 @@ building them exposed.
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
 
-[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/FernTech-EU/teksilo/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/FernTech-EU/teksilo/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/FernTech-EU/teksilo/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/FernTech-EU/teksilo/compare/v0.19.0...v0.20.0

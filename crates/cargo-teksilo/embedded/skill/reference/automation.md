@@ -17,7 +17,7 @@ Two ways in, and they are complements:
 | **MCP server** — `teksilo-automation-mcp` | An MCP server an agent talks to directly, tool by tool | Exploring, diagnosing, one-off "what does the app actually do here" questions |
 | **Python probe** — `cargo teksilo probe install` | A script that launches the app, attaches, drives it and asserts | Anything you want to re-run: a regression test, a de-risking experiment, a CI gate |
 
-This copy ships with teksilo **0.22.0**.
+This copy ships with teksilo **0.23.0**.
 
 ---
 
