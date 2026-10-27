@@ -100,6 +100,7 @@ found a gap, its correction is part of the same commit.
 
 | commit | what a reader gets now | findings | tests written first |
 |---|---|---|---|
+| `851a4629` | A rich-text document's lists reach a reader as lists: each item's line starts with its bullet or number as it is painted, which the caret never stops in, and the tree holds list and list item nodes with a nested list inside its item. A heading opening a blockquote is read in its place. | [text-04](reader-findings/text.md#text-04) (a nested item's depth is still not spoken), [catalog-b-10](reader-findings/catalog-b.md#catalog-b-10) | `a_list_item_is_heard_with_its_marker`, `a_caret_is_never_inside_a_marker`, `a_list_is_a_list_of_items_with_a_nested_list_in_its_item` and 8 more |
 | `67fb9c4b` | A rich-text document's paragraphs reach a reader apart: the character at a paragraph's end is its line break, Right across it moves on, word and paragraph reading stop at it, and Enter is heard. An inline image is read once, as its description, in its place. | [text-03](reader-findings/text.md#text-03), [catalog-b-10](reader-findings/catalog-b.md#catalog-b-10) (its paragraphs; its lists stay open) | `paragraphs_reach_a_reader_with_a_break_between_them`, `a_readers_offset_is_the_document_position`, `the_character_at_a_paragraphs_end_is_its_break` and 6 more |
 | `7545b207` | Every message the framework's announcer says is heard, not only the first of a session: each comes from a node the platform has never seen. | [catalog-b-08](reader-findings/catalog-b.md#catalog-b-08), [sceneetc-10](reader-findings/scene-and-more.md#sceneetc-10) | announcer_tests (5), accessibility_impl announcer tests |
 | `89a567cd` | A window is announced by its title, not as a bare "frame". | [sceneetc-13](reader-findings/scene-and-more.md#sceneetc-13) | window_name_tests (3) |
@@ -169,9 +170,11 @@ id links to its entry.
   project ([misc-10](reader-findings/misc.md#misc-10)), a snackbar timing out under the reader's focus
   ([dialogs-07](reader-findings/dialogs.md#dialogs-07)), a banner dismissed ([newkit-01](reader-findings/new-widgets-kit.md#newkit-01)), Enter on a corkboard card
   ([sceneetc-06](reader-findings/scene-and-more.md#sceneetc-06)), Alt+letter on a collapsed menu bar ([chrome-16](reader-findings/chrome.md#chrome-16)).
-- **Text without its structure.** Rich text drops lists, links and formatting
-  ([text-04](reader-findings/text.md#text-04), [text-05](reader-findings/text.md#text-05), [text-06](reader-findings/text.md#text-06), [catalog-b-10](reader-findings/catalog-b.md#catalog-b-10)); its paragraphs no
-  longer run together ([text-03](reader-findings/text.md#text-03), fixed by `67fb9c4b`); terminal rows are glued ([console-03](reader-findings/console.md#console-03)) and its
+- **Text without its structure.** Rich text drops links and formatting
+  ([text-05](reader-findings/text.md#text-05), [text-06](reader-findings/text.md#text-06)); its paragraphs no
+  longer run together ([text-03](reader-findings/text.md#text-03), fixed by `67fb9c4b`), and its lists are lists, though a
+  nested item's depth is not spoken ([text-04](reader-findings/text.md#text-04), partly fixed, and [catalog-b-10](reader-findings/catalog-b.md#catalog-b-10), fixed, by
+  `851a4629`); terminal rows are glued ([console-03](reader-findings/console.md#console-03)) and its
   way out is published only as a shortcut no adapter exports ([console-06](reader-findings/console.md#console-06));
   a wrapped Arabic paragraph's text is garbled ([winintl-02](reader-findings/windows-i18n.md#winintl-02)).
 - **Other.** A tab move that did not happen is announced as done

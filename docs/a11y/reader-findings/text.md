@@ -16,7 +16,7 @@ How to read an entry, and what the words mean, is in
 | [text-01](#text-01) | rich-text-editor | Keyboard focus into a RichTextEditor (editor or read-only viewer) lands on an unnamed 'section', not on the text: no caret or selection event ever follows | critical | Linux | fixed |
 | [text-02](#text-02) | rich-text-editor | Coming back to an editor or viewer is silent: the wrapper node is removed when focus leaves and returns under the same id, which libatspi holds as defunct | high | Linux | fixed |
 | [text-03](#text-03) | rich-text-editor | No character separates paragraphs in the text a reader gets: the end of one paragraph and the start of the next are one offset | high | Linux | fixed |
-| [text-04](#text-04) | rich-text-editor | Lists reach the reader as plain paragraphs: no bullet, no number, no depth, no list node | high | Linux | open |
+| [text-04](#text-04) | rich-text-editor | Lists reach the reader as plain paragraphs: no bullet, no number, no depth, no list node | high | Linux | partly fixed |
 | [text-05](#text-05) | rich-text-editor | Links in rich text are not exposed: no link node, no Hypertext, read as plain text | high | Linux | open |
 | [text-06](#text-06) | rich-text-editor | Character formatting (bold, italic, underline, spelling marks) is not exposed as text attributes | high | Linux | open |
 | [text-07](#text-07) | rich-text-editor | Both rich text panes are unnamed, and RichTextEditor offers no way to name its text node | high | Linux | fixed |
@@ -179,9 +179,20 @@ Lists reach the reader as plain paragraphs: no bullet, no number, no depth, no l
 - **The reader got (`261a218f`):** Orca reads 'First item at indent 0', 'First numbered item' and 'Nested decimal at indent 1' with no marker. The tree holds no list or list item node, and the text has no marker. The nested numbered list's own '1.' and its depth are lost, so a numbered procedure cannot be followed by number.
 - **Platform:** Linux AT-SPI/Orca 46.1 measured. The missing tree content applies to every platform (the AccessKit tree has no list nodes and no marker text).
 - **Severity:** high; **layer:** framework
-- **Status:** Open.
-- **Now (`c198e4d1`):** List items are still read as plain lines: 'First item at indent 0', 'First numbered item', 'Nested decimal at indent 1', with no marker and no depth. The tree has no list or list item node, in the editor or the viewer, and changing an item's depth with Tab puts nothing on the bus.
-- **Measured again:** text-editor-structure 2 of 2, text-viewer 2 of 2, verify-text-list-indent 2 of 2
+- **Status:** Partly fixed by `851a4629` (lists). What remains is under **Now**.
+- **Now (`851a4629`):** Each item's line starts with its marker as it is painted, one character heard as the marker and a space, which no caret stops in. Orca reads '• First item at indent 0', '1 First numbered item' and '• Mouse wheel scrolling.' in the viewer. The tree has a list node per list and a list item node per item, with posinset and setsize, and a nested list inside the item it follows (AT-SPI exports no level). Tab on an item moves it into a nested list, and the bus carries the parent and children changes. Two things remain. A nested item is read '1 Nested decimal at indent 1': the number has no full stop because text-document paints a markdown numbered list's marker without one, so the reader hears what is drawn; and its depth reaches Orca only through the tree, since Orca reads a line of an entry as its text. Orca also says nothing when Tab changes an item's depth.
+- **Measured again:** text-editor-structure, text-viewer and verify-text-list-indent, 2 of 2 runs each on `851a4629`, against 1 run each on `3c629d8c`: the list checks fail on `3c629d8c` and pass on `851a4629`, and the scenarios' other checks are the same on both.
+- **Evidence (`851a4629`):**
+  - `pass1 text-editor-structure 'Down onto the first bullet item': +95.1 ms ORCA SAYS: '• First item at indent 0'; pass Orca says '•' or 'bullet' or 'list item'`
+  - `pass1 text-editor-structure 'Down onto the first numbered item': +96.1 ms ORCA SAYS: '1 First numbered item'; pass Orca says '1.' or '1 ' or 'one' or 'list item'`
+  - `pass1 text-editor-structure 'Down onto a nested numbered item': +113.5 ms ORCA SAYS: '1 Nested decimal at indent 1'; FAIL Orca says '1.' or 'nesting level' or 'level 2'`
+  - `pass1 and pass2 text-editor-structure 'the document's structure in the tree': pass the lists are lists (a list or list item node)`
+  - `pass2 text-editor-structure: +72.7 ms ORCA SAYS: '• First item at indent 0'; +98.7 ms '1 First numbered item'; +72.7 ms '1 Nested decimal at indent 1'`
+  - `pass1 text-viewer 'Down onto a bullet item': +25.5 ms ORCA SAYS: '• Mouse wheel scrolling.'; pass Orca says the bullet; pass2 +24.7 ms the same; every check of the scenario passes in both`
+  - `pass1 verify-text-list-indent 'Tab on a list item': +302.3 ms object:property-change:accessible-parent [list] '' -> [list item] ''; +302.7 ms object:children-changed:remove [list item] '' -> [list] ''; pass something on the bus changes for the new depth; FAIL Orca says something`
+  - `3c629d8c, 1 run each: 'Down onto the first bullet item' ORCA SAYS: 'First item at indent 0'; 'Down onto a bullet item' (viewer) FAIL Orca says the bullet; 'Tab on a list item' FAIL something on the bus changes: no event`
+- **Before the fix (`c198e4d1`):** List items are still read as plain lines: 'First item at indent 0', 'First numbered item', 'Nested decimal at indent 1', with no marker and no depth. The tree has no list or list item node, in the editor or the viewer, and changing an item's depth with Tab puts nothing on the bus.
+- **Measured before the fix:** text-editor-structure 2 of 2, text-viewer 2 of 2, verify-text-list-indent 2 of 2
 - **Evidence (`c198e4d1`):**
   - `pass1 text-editor-structure 'Down onto the first bullet item': 16:34:06.581690 Orca said: 'First item at indent 0'`
   - `pass1 text-editor-structure 'Down onto the first numbered item': 16:34:13.181226 Orca said: 'First numbered item'`
