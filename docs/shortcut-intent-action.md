@@ -1069,8 +1069,9 @@ exactly like `register_action_global`.
 `surface.accepts(command)` says whether that widget takes a command at all
 in its current mode, by the rule its own keys follow: a forward-only editor
 takes a paste and refuses a cut, a read-only one refuses both, a masked
-password refuses a copy. Grey an Edit row with it, as
-`!surface.accepts(StandardEdit::Cut) || !surface.has_selection()`. The
+password refuses a copy. A row it refuses is greyed; whether there is
+anything to act on is a second question (`has_selection` for a rich editor
+or a field, while a code editor cuts the caret's line without one). The
 surface's own `cut`, `paste`, `undo` and the others do nothing for a command
 it refuses, so a routed shortcut cannot go around the widget's mode.
 

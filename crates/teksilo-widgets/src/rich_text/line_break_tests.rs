@@ -787,10 +787,13 @@ fn can_insert_line_break_asks_where_the_break_would_go_in() {
     assert!(ed.handle.insert_line_break());
     assert!(ed.text().starts_with(&format!("Be{LS}")), "{:?}", ed.text());
 
+    // Selected backwards, the caret in "Before" and the far end in the code:
+    // the caret alone would say yes, and the break would go into the code.
     let ed = mounted_markdown(markdown, "");
     ed.handle
         .set_command_filter(super::policy::CommandFilter::ForwardOnly);
-    into_code(&ed);
+    let code = ed.text().find("let").unwrap() + 2;
+    ed.handle.select_range(code, 2);
     let before = ed.text();
     assert!(!ed.handle.can_insert_line_break(), "after it: in the code");
     assert!(!ed.handle.insert_line_break());
@@ -804,14 +807,16 @@ fn can_insert_line_break_is_safe_from_on_change() {
     use std::cell::Cell;
     use std::rc::Rc;
     let answers = Rc::new(Cell::new(0u32));
+    let all_true = Rc::new(Cell::new(true));
     let doc = TextDocument::new();
     doc.set_plain_text("ab").unwrap();
     let editor = RichTextEditor::editor(doc.clone());
     let handle = editor.handle();
     let editor = editor.on_change({
         let answers = answers.clone();
+        let all_true = all_true.clone();
         move || {
-            let _ = handle.can_insert_line_break();
+            all_true.set(all_true.get() && handle.can_insert_line_break());
             answers.set(answers.get() + 1);
         }
     });
@@ -820,6 +825,10 @@ fn can_insert_line_break_is_safe_from_on_change() {
     layout(&mut ed.tree);
     assert_eq!(ed.text(), "abc");
     assert!(answers.get() > 0, "on_change ran and asked");
+    assert!(
+        all_true.get(),
+        "while the editor is busy it answers `true`, the row's answer before"
+    );
 }
 
 /// The table half of the guard holds at every caret position a table has,

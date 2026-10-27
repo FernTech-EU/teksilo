@@ -102,18 +102,20 @@ pub trait TextSurface {
     /// `!accepts(Cut) || !has_selection()`, an Undo row with
     /// [`can_undo`](Self::can_undo) as well.
     ///
-    /// The surface's own commands obey it. [`cut`](Self::cut),
+    /// An implementor's own commands must obey it: [`cut`](Self::cut),
     /// [`copy`](Self::copy), [`paste`](Self::paste),
     /// [`paste_plain`](Self::paste_plain), [`undo`](Self::undo),
     /// [`redo`](Self::redo) and [`select_all`](Self::select_all) do nothing
     /// for a command this refuses, so a shortcut a host routes to the focused
     /// surface cannot write into a read-only one or take text from a
-    /// forward-only one.
+    /// forward-only one. The trait cannot enforce that; the framework's text
+    /// widgets do it.
     ///
-    /// The default answers from the other questions, for an implementor that
-    /// has no finer rule: a cut needs an editable surface that allows copying,
-    /// a paste an editable one, a copy one that allows copying, Undo and Redo a
-    /// history that is not frozen.
+    /// The default answers from the other questions: a cut needs an editable
+    /// surface that allows copying, a paste an editable one, a copy one that
+    /// allows copying, Undo and Redo a history that is not frozen. It is only
+    /// as fine as they are, and cannot say "takes a paste, refuses a cut": an
+    /// implementor with such a mode overrides it.
     fn accepts(&self, command: StandardEdit) -> bool {
         match command {
             StandardEdit::Cut => !self.is_read_only() && self.allows_copy(),

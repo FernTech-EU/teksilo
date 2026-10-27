@@ -424,18 +424,11 @@ fn declines(st: &CodeEditorState, command: StandardEdit, empty_history_passes_on
 }
 
 /// Whether the editor takes `command` at all, from any route: what its keys
-/// decline (the command filter), and a cut, copy or paste its clipboard policy
-/// forbids. `TextSurface::accepts` answers with it, and the surface's own
-/// commands obey it.
+/// take, by the same rule ([`declines`], the command filter). `TextSurface::accepts`
+/// answers with it, and the surface's own commands obey it, so a routed command
+/// and the key agree.
 pub(super) fn accepts_standard_edit(st: &CodeEditorState, command: StandardEdit) -> bool {
-    let clipboard = st.policy.clipboard_policy;
     !declines(st, command, false)
-        && match command {
-            StandardEdit::Cut => clipboard.allows_cut(),
-            StandardEdit::Copy => clipboard.allows_copy(),
-            StandardEdit::Paste | StandardEdit::PastePlain => clipboard.allows_paste(),
-            _ => true,
-        }
 }
 
 /// Run one of the standard edit commands, as its `edit.*` action does.

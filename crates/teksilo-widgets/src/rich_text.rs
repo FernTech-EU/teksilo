@@ -1127,9 +1127,10 @@ impl RichTextEditor {
         inserted
     }
 
-    /// Whether [`insert_line_break`](Self::insert_line_break) would insert at
-    /// the caret now: `false` in a table cell or a code block, where it
-    /// changes nothing and Shift+Enter does what Enter does. It asks the same
+    /// Whether [`insert_line_break`](Self::insert_line_break) would insert now,
+    /// at the caret or over the selection: `false` where the break would go
+    /// into a table cell or a code block, where it changes nothing and
+    /// Shift+Enter does what Enter does. It asks the same
     /// question as that call, so a menu row greyed by it never disagrees with
     /// it.
     ///
@@ -2673,9 +2674,10 @@ impl EditorHandle {
         inserted
     }
 
-    /// Whether [`insert_line_break`](Self::insert_line_break) would insert at
-    /// the caret now: `false` in a table cell or a code block, where it
-    /// changes nothing and Shift+Enter does what Enter does. It asks the same
+    /// Whether [`insert_line_break`](Self::insert_line_break) would insert now,
+    /// at the caret or over the selection: `false` where the break would go
+    /// into a table cell or a code block, where it changes nothing and
+    /// Shift+Enter does what Enter does. It asks the same
     /// question as that call, so a menu row greyed by it never disagrees with
     /// it.
     ///
@@ -4922,9 +4924,9 @@ impl teksilo_core::text_surface::TextSurface for EditorHandle {
         self.command_filter().accepts(EditCommandKind::Copy)
     }
 
-    /// What the editor's keys take: its [`CommandFilter`] and its clipboard
-    /// policy, so a routed Ctrl+X cannot take text from a forward-only editor
-    /// nor a routed Ctrl+V write into a read-only one. The handle's own
+    /// What the editor's keys take, by their own rule (its [`CommandFilter`]),
+    /// so a routed Ctrl+X cannot take text from a forward-only editor nor a
+    /// routed Ctrl+V write into a read-only one. The handle's own
     /// [`cut`](EditorHandle::cut) and [`paste`](EditorHandle::paste) stay
     /// unfiltered, for a host writing on its own account. `true` while the
     /// editor is busy with its own state, as the menu-row queries answer.

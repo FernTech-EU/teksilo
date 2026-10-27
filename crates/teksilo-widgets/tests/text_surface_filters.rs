@@ -197,3 +197,20 @@ fn a_masked_password_refuses_a_routed_copy() {
     );
     assert_eq!(text.get(), "hunter2");
 }
+
+/// `accepts` is the keys' own rule: an editor built read-only and opened up
+/// with `set_command_filter(All)` takes a routed paste, as its Ctrl+V does.
+#[test]
+fn a_routed_command_follows_the_filter_the_host_set() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("draft").unwrap();
+    let editor = RichTextEditor::read_only(doc.clone());
+    let handle = editor.handle();
+    let (mut tree, _clipboard) = focused(editor);
+    handle.set_command_filter(CommandFilter::All);
+    handle.select_range(5, 5);
+
+    assert!(surface(&tree).accepts(StandardEdit::Paste));
+    route(&mut tree, StandardEdit::Paste);
+    assert_eq!(doc.to_plain_text().unwrap(), "draftABC");
+}

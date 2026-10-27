@@ -1147,9 +1147,10 @@ where a line break cannot be kept.
 
 #### `pub fn can_insert_line_break(&self) -> bool`
 
-Whether `insert_line_break` would insert at
-the caret now: `false` in a table cell or a code block, where it
-changes nothing and Shift+Enter does what Enter does. It asks the same
+Whether `insert_line_break` would insert now,
+at the caret or over the selection: `false` where the break would go
+into a table cell or a code block, where it changes nothing and
+Shift+Enter does what Enter does. It asks the same
 question as that call, so a menu row greyed by it never disagrees with
 it.
 
@@ -2287,9 +2288,10 @@ where a line break cannot be kept.
 
 #### `pub fn can_insert_line_break(&self) -> bool`
 
-Whether `insert_line_break` would insert at
-the caret now: `false` in a table cell or a code block, where it
-changes nothing and Shift+Enter does what Enter does. It asks the same
+Whether `insert_line_break` would insert now,
+at the caret or over the selection: `false` where the break would go
+into a table cell or a code block, where it changes nothing and
+Shift+Enter does what Enter does. It asks the same
 question as that call, so a menu row greyed by it never disagrees with
 it.
 

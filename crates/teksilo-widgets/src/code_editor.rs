@@ -679,8 +679,8 @@ impl teksilo_core::text_surface::TextSurface for CodeEditorHandle {
             .accepts(policy::CodeCommand::Undo)
     }
 
-    /// What the editor's keys take: its command filter and its clipboard
-    /// policy, so a routed Ctrl+X or Ctrl+V cannot go around them. The
+    /// What the editor's keys take, by their own rule (its command filter),
+    /// so a routed Ctrl+X or Ctrl+V cannot go around it. The
     /// handle's own methods stay unfiltered, for a host writing on its own
     /// account. `true` while the editor is busy with its own state, as the
     /// menu-row queries answer.

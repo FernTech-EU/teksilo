@@ -21,7 +21,7 @@ use crate::editor_shortcuts::FormatShortcut;
 use teksilo_core::widget::EventContext;
 use teksilo_text::text_document::{
     BlockFormat, InsertionOrigin, ListFormat, MoveMode, MoveOperation, SelectionType, TableCellRef,
-    TextFormat,
+    TextCursor, TextFormat,
 };
 use teksilo_text::{CursorAffinity, TextDirection};
 
@@ -101,11 +101,17 @@ pub(super) fn line_break_fits_at_caret(state: &EditorState) -> bool {
     } else {
         position.min(anchor)
     };
-    let probe = state.document.cursor_at(at);
-    probe.current_table_cell().is_none()
-        && !probe
-            .block_format()
-            .is_ok_and(|format| format.is_code_block == Some(true))
+    let fits = |cursor: &TextCursor| {
+        cursor.current_table_cell().is_none()
+            && !cursor
+                .block_format()
+                .is_ok_and(|format| format.is_code_block == Some(true))
+    };
+    if at == position {
+        fits(cursor)
+    } else {
+        fits(&state.document.cursor_at(at))
+    }
 }
 
 /// Insert a line break at the caret, as Shift+Enter does: over the selection,
@@ -665,19 +671,11 @@ fn declines(st: &EditorState, command: StandardEdit, empty_history_passes_on: bo
 }
 
 /// Whether the editor takes `command` at all, from any route: what its keys
-/// decline (the command filter), and a cut, copy or paste its clipboard policy
-/// forbids. `TextSurface::accepts` answers with it, and the surface's own
-/// commands obey it.
+/// take, by the same rule ([`declines`], the command filter). `TextSurface::accepts`
+/// answers with it, and the surface's own commands obey it, so a routed command
+/// and the key agree.
 pub(super) fn accepts_standard_edit(st: &EditorState, command: StandardEdit) -> bool {
-    let clipboard = st.policy.clipboard_policy;
     !declines(st, command, false)
-        && match command {
-            StandardEdit::Cut => clipboard.allows_cut(),
-            StandardEdit::Copy => clipboard.allows_copy(),
-            StandardEdit::Paste => clipboard.allows_paste(),
-            StandardEdit::PastePlain => clipboard.allows_paste_unformatted(),
-            _ => true,
-        }
 }
 
 /// Run one of the standard edit commands, as its `edit.*` action does.
