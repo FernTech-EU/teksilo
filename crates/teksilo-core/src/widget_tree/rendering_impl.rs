@@ -150,7 +150,10 @@ impl WidgetTree {
         // (`TitleBar`) subtract them from the geometry they publish to
         // the OS — an overlay floats above the caption, so its pixels
         // must not be reported as draggable chrome.
-        let overlay_rects: Vec<Rect> = self.overlay_manager.interactive_rects();
+        let overlay_rects = crate::widget::OverlayRects {
+            all: self.overlay_manager.interactive_rects(),
+            over_chrome: self.overlay_manager.interactive_rects_over_chrome(),
+        };
 
         for root_id in self.arena.roots() {
             // Don't descend into overlay content via its anchor parent — it
@@ -292,7 +295,7 @@ fn paint_widget_cached(
     a11y_prefs: &A11yPaintPrefs,
     paint_epoch: u64,
     overlay_skip: &std::collections::HashSet<WidgetId>,
-    overlay_rects: &[Rect],
+    overlay_rects: &crate::widget::OverlayRects,
     layout_direction: crate::environment::LayoutDirection,
     parent_effective_enabled: bool,
     accumulated_raster_scale: f32,

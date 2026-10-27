@@ -85,6 +85,16 @@ by crate for clarity, not because crates version independently.
   less the taskbar, the Dock and the menu bar, the panels) and shrunk to fit
   if it must be, title bar included. Wayland still places windows itself.
 
+#### Widgets
+
+- **A custom title bar stays live under an in-window modal.** The modal's
+  scrim covered it: while a dialog was open in the window, the window could
+  not be moved, minimised or maximised, and its close button did nothing.
+  It now drags by its title bar, a double click maximises it, its buttons
+  and `WindowFrame` edges work, and the close button closes the modal as
+  Escape would, whatever `TitleBar::close_action` it was given. What the app
+  put in the title bar stays behind the modal.
+
 #### Platform
 
 - **A window with a menu of its own keeps the Window and Help menus on

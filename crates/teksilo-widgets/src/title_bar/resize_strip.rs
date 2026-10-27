@@ -164,7 +164,9 @@ impl Widget for ResizeStrip {
         let host = self.host.clone();
         let edge = self.edge;
 
+        // Window chrome: the window resizes with a modal open in it.
         let handlers = HandlerSet::new()
+            .window_chrome()
             .cursor(cursor_for_edge(edge))
             // The edge drag *is* the interaction: forbid every default touch
             // behaviour in this subtree and arm at the slop rather than after a

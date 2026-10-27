@@ -1090,6 +1090,17 @@ impl OverlayManager {
             .find(|overlay| overlay.placement.is_modal())
     }
 
+    /// Whether `overlay` is a modal's scrim: a full-viewport layer whose
+    /// parent is a modal, the dim the page sits under while it is open. The
+    /// window's own chrome stays live above it.
+    pub(crate) fn is_modal_scrim(&self, overlay: &ActiveOverlay) -> bool {
+        matches!(overlay.placement, OverlayPlacement::FullViewport)
+            && overlay
+                .parent_overlay
+                .and_then(|parent| self.overlay(parent))
+                .is_some_and(|parent| parent.placement.is_modal())
+    }
+
     /// Whether a modal overlay is open and not on its way out.
     pub(crate) fn has_open_modal(&self) -> bool {
         self.stack
@@ -1634,17 +1645,29 @@ impl OverlayManager {
     /// hamburger `MenuBar`'s revealed bar, a tall modal) stays
     /// clickable on Windows instead of dragging the window.
     pub fn interactive_rects(&self) -> Vec<Rect> {
-        self.stack
-            .iter()
-            .filter(|o| {
-                !o.inert
-                    && o.fade
-                        .as_ref()
-                        .is_none_or(|f| f.dismissing_started_real.is_none())
-            })
+        self.interactive()
             .map(|o| o.bounds)
             .filter(|r| r.width > 0.0 && r.height > 0.0)
             .collect()
+    }
+
+    /// [`interactive_rects`](Self::interactive_rects) less every modal's
+    /// scrim, which the window's chrome stays live above.
+    pub(crate) fn interactive_rects_over_chrome(&self) -> Vec<Rect> {
+        self.interactive()
+            .filter(|o| !self.is_modal_scrim(o))
+            .map(|o| o.bounds)
+            .filter(|r| r.width > 0.0 && r.height > 0.0)
+            .collect()
+    }
+
+    fn interactive(&self) -> impl Iterator<Item = &ActiveOverlay> {
+        self.stack.iter().filter(|o| {
+            !o.inert
+                && o.fade
+                    .as_ref()
+                    .is_none_or(|f| f.dismissing_started_real.is_none())
+        })
     }
 
     /// Get the topmost overlay.

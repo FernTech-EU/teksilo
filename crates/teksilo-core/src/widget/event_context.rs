@@ -382,6 +382,12 @@ pub struct EventContext<'ops> {
     /// dispatch via `WidgetTree::take_force_close_request`. The escape
     /// hatch a confirmation dialog uses once the user confirms.
     pub(crate) force_close_requested: bool,
+    /// Whether an in-window modal was open when this context was made. Read
+    /// by [`give_close_request_to_modal`](Self::give_close_request_to_modal).
+    pub(crate) modal_open: bool,
+    /// Set by [`give_close_request_to_modal`](Self::give_close_request_to_modal);
+    /// answered in `collect_from_ctx` as a close request with a modal open.
+    pub(crate) close_request_to_modal: bool,
     /// Set by [`request_accessibility_update`](EventContext::request_accessibility_update);
     /// drained in `collect_from_ctx` to set `WidgetTree::a11y_dirty`, forcing the
     /// next `sync_accessibility` to re-walk the AccessKit tree. The general lever for a
@@ -578,6 +584,8 @@ impl<'ops> EventContext<'ops> {
             pending_shortcut_mutations: Vec::new(),
             close_window_requested: false,
             force_close_requested: false,
+            modal_open: false,
+            close_request_to_modal: false,
             request_a11y_update: false,
             soft_keyboard_request: None,
             announcements: Vec::new(),
@@ -896,6 +904,12 @@ impl<'ops> EventContext<'ops> {
         self
     }
 
+    /// Record whether an in-window modal is open in the tree.
+    pub(crate) fn with_modal_open(mut self, open: bool) -> Self {
+        self.modal_open = open;
+        self
+    }
+
     /// Attach the tree's shared "inside focus dispatch" flag (WCAG 3.2.1
     /// debug guard). See [`EventContext::open_window`].
     pub(crate) fn with_focus_dispatch_flag(
@@ -1175,6 +1189,21 @@ impl<'ops> EventContext<'ops> {
     /// with [`close_window_by_id`](Self::close_window_by_id).
     pub fn close_window_forced(&mut self) {
         self.force_close_requested = true;
+    }
+
+    /// Give the window's close button's request to the in-window modal open
+    /// in it, if one is: the modal does what Escape does there, and the window
+    /// is not asked to close, as with Alt+F4 or the OS close button. Returns
+    /// `false`, doing nothing, when no in-window modal is open, and the caller
+    /// closes the window as it would.
+    ///
+    /// For a title bar's close button, which stays live under a modal's scrim;
+    /// [`close_window`](Self::close_window) asks the window's guard with the
+    /// modal still up.
+    #[doc(hidden)]
+    pub fn give_close_request_to_modal(&mut self) -> bool {
+        self.close_request_to_modal |= self.modal_open;
+        self.modal_open
     }
 
     // -------------------- Multi-window API --------------------

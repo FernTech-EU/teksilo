@@ -211,6 +211,13 @@ pub struct WidgetNode {
     /// `-webkit-app-region: no-drag`. Default `false`. See the `DeadZone`
     /// wrapper widget.
     pub gesture_dead_zone: bool,
+    /// When `true`, this node is part of the window's own chrome: a title
+    /// bar's drag surface, a window button, a resize edge. A modal in the
+    /// window dims it but leaves it live, as the window system's frame stays
+    /// live above any dialog in the window; the app's own content stays
+    /// blocked, including what it puts in a title bar. See
+    /// `WidgetTree::window_chrome_under_modal`. Default `false`.
+    pub(crate) window_chrome: bool,
     /// When `false`, a click or a tap that lands on this node or anywhere in
     /// its subtree moves no focus: not to this node, not to a focusable node
     /// inside it, not to a focusable ancestor. Keyboard focus, programmatic
@@ -527,6 +534,7 @@ impl WidgetNode {
             ime: None,
             event_pass_through: false,
             gesture_dead_zone: false,
+            window_chrome: false,
             focus_on_click: true,
             long_press_role: crate::widget_tree::touch_route::LongPressRole::Auto,
             touch_action: TouchAction::AUTO,
@@ -2235,6 +2243,9 @@ impl WidgetArena {
             }
             if let Some(dead_zone) = handler_set.gesture_dead_zone {
                 node.gesture_dead_zone = dead_zone;
+            }
+            if let Some(chrome) = handler_set.window_chrome {
+                node.window_chrome = chrome;
             }
             if let Some(focus_on_click) = handler_set.focus_on_click {
                 node.focus_on_click = focus_on_click;

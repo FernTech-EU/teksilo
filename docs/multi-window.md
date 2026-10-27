@@ -1033,8 +1033,9 @@ the dialog is brought forward instead (see
 [A dialog belongs to the window it blocks](#a-dialog-belongs-to-the-window-it-blocks)).
 
 A close the user asks for (the first two rows: the OS close button, `Alt+F4`,
-the taskbar's Close, the custom title bar's close button) while an in-window
-modal is open does what Escape would there, and nothing more. The modal goes
+the taskbar's Close, the custom title bar's close button, whatever
+`TitleBar::close_action` it was given) while an in-window modal is open does
+what Escape would there, and nothing more. The modal goes
 through its own dismissal, `DismissReason::Escape`, its Cancel path, and the
 window's guard is not asked; a modal Escape cannot close
 (`ModalCloseBehavior::Manual`) stays, and nothing closes. The next request
@@ -1043,6 +1044,15 @@ dialog window, which closes the dialog and not the window behind it, and
 how libadwaita answers a close request with one of its in-window dialogs
 open. `ctx.close_window()` and a quit are not the user's gesture on the
 window: they ask its guard as before, with the modal still up.
+
+A custom title bar stays live under an in-window modal, as the window
+system's frame does above a dialog. The modal's scrim dims it, but the window
+still drags by it, a double click still maximises, the minimise and maximise
+buttons work, and the resize edges of a `WindowFrame` still resize. What the
+app put in the title bar (a menu bar, a search field, any control in a
+`DeadZone`) stays behind the modal with the rest of the app. libadwaita leaves
+a window with an open dialog draggable the same way, and WinUI keeps its
+caption buttons working.
 
 ### Quitting the application
 

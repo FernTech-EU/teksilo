@@ -64,6 +64,8 @@ mod repaint_trigger_tests;
 mod test_api;
 pub mod touch_route;
 #[cfg(test)]
+mod window_chrome_tests;
+#[cfg(test)]
 mod window_name_tests;
 #[cfg(test)]
 mod windowless_contract_tests;
@@ -1235,6 +1237,7 @@ impl WidgetTree {
             .with_pointer_captor(self.current_pointer_capture())
             .with_layout_direction(self.layout_direction)
             .with_window_active(self.is_window_active())
+            .with_modal_open(self.overlay_manager.has_open_modal())
             .with_input_snapshot(self.current_input.clone())
             .with_touch_action(self.current_frozen_touch_action())
             .with_press(self.current_press_snapshot())
@@ -4834,6 +4837,9 @@ impl WidgetTree {
                         if let Some(dead_zone) = handler_set.gesture_dead_zone {
                             node.gesture_dead_zone = dead_zone;
                         }
+                        if let Some(chrome) = handler_set.window_chrome {
+                            node.window_chrome = chrome;
+                        }
                         if let Some(focus_on_click) = handler_set.focus_on_click {
                             node.focus_on_click = focus_on_click;
                         }
@@ -5024,6 +5030,9 @@ impl WidgetTree {
                         }
                         if let Some(dead_zone) = handler_set.gesture_dead_zone {
                             node.gesture_dead_zone = dead_zone;
+                        }
+                        if let Some(chrome) = handler_set.window_chrome {
+                            node.window_chrome = chrome;
                         }
                         if let Some(focus_on_click) = handler_set.focus_on_click {
                             node.focus_on_click = focus_on_click;

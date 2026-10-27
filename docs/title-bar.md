@@ -202,6 +202,18 @@ TitleBar::new(host).close_action(|ctx| ctx.send_intent(AppIntent::RequestQuit))
 
 The override fires on **every** backend including Windows: when the OS reports `WM_NCLBUTTONUP` over the close-button rect, teksilo-platform posts a `TitleBarSyntheticEvent` through `AppEvent::External`, the dispatcher resolves the button's `WidgetId` via `host.title_bar_widget_id(Close)`, and `WidgetTree::synthesise_tap` runs the same `on_tap` handler the override installed.
 
+Neither path runs while an in-window modal is open: the button then closes the modal as Escape would, as `Alt+F4` and the OS close button do (see the next section).
+
+---
+
+## Under an in-window modal
+
+A modal's scrim covers the whole window, title bar included, and dims it, but the title bar stays live, as the window system's frame does above a dialog: the window drags by the drag region, a double click maximises, the minimise and maximise buttons work, the close button closes the modal (above), and a `WindowFrame`'s resize edges still resize. What the app put in the bar (the leading and trailing slots, a control in a `DeadZone` in the centre) stays behind the modal with the rest of the app, and a press on passive app content in the drag region (a title) moves the window without reaching that content.
+
+The title bar's own widgets mark themselves with `HandlerSet::window_chrome()` (`DragRegion`, each `ControlButton`, each `ResizeStrip`), and the hit test lets a point through a modal's scrim, or a modal shown without one, to the nearest such node above what it lands on, unless a gesture dead zone is on the way (`WidgetTree::window_chrome_under_modal`). On Windows the scrim is left out of the overlays `after_paint` carves out of the caption (`WidgetTreeView::overlay_rects_over_chrome`), so the OS keeps dragging and keeps answering the caption buttons; a dead zone is still a hole, and the scrim takes what lands there.
+
+libadwaita and WinUI make the same split: libadwaita's dialog dim is a window handle, so a window with a dialog open still drags, and WinUI keeps its caption buttons working above a `ContentDialog`. Both block the app's own content in the title bar.
+
 ---
 
 ## Reactive maximize

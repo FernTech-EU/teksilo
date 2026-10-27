@@ -164,7 +164,11 @@ impl Widget for DragRegion {
         // A mouse reaches the same menu with the secondary button below.
         let host_long_press = self.host.clone();
 
+        // Window chrome: a modal in the window leaves the drag, the double
+        // click and the window menu working, as the OS frame does above a
+        // dialog.
         let mut handlers = HandlerSet::new()
+            .window_chrome()
             .on_drag(move |phase, ctx| {
                 if let DragPhase::Started {
                     button: PointerButton::Primary,

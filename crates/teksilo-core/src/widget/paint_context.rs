@@ -130,11 +130,19 @@ pub struct WidgetTreeView<'a> {
     arena: &'a WidgetArena,
     /// Screen rects of every interactive (non-fading) overlay this
     /// frame — see [`overlay_rects`](Self::overlay_rects).
-    overlay_rects: &'a [Rect],
+    overlay_rects: &'a OverlayRects,
+}
+
+/// The rects [`WidgetTreeView::overlay_rects`] and
+/// [`WidgetTreeView::overlay_rects_over_chrome`] answer, taken once a frame.
+#[derive(Debug, Default)]
+pub(crate) struct OverlayRects {
+    pub(crate) all: Vec<Rect>,
+    pub(crate) over_chrome: Vec<Rect>,
 }
 
 impl<'a> WidgetTreeView<'a> {
-    pub(crate) fn new(arena: &'a WidgetArena, overlay_rects: &'a [Rect]) -> Self {
+    pub(crate) fn new(arena: &'a WidgetArena, overlay_rects: &'a OverlayRects) -> Self {
         Self {
             arena,
             overlay_rects,
@@ -181,7 +189,19 @@ impl<'a> WidgetTreeView<'a> {
     /// `HTCAPTION` on Windows and the OS would swallow its clicks as a
     /// window drag.
     pub fn overlay_rects(&self) -> &[Rect] {
-        self.overlay_rects
+        &self.overlay_rects.all
+    }
+
+    /// [`overlay_rects`](Self::overlay_rects) less a modal's scrim: the
+    /// overlays the window's chrome is under. A modal dims a title bar but
+    /// leaves its drag surface, window buttons and resize edges live
+    /// ([`HandlerSet::window_chrome`]), so `TitleBar` carves only these out of
+    /// the caption it publishes to the OS.
+    ///
+    /// [`HandlerSet::window_chrome`]: crate::widget_builder::HandlerSet::window_chrome
+    #[doc(hidden)]
+    pub fn overlay_rects_over_chrome(&self) -> &[Rect] {
+        &self.overlay_rects.over_chrome
     }
 }
 

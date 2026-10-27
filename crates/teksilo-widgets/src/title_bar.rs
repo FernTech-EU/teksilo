@@ -454,9 +454,13 @@ impl Widget for TitleBar {
         // Clip to the title bar's own strip — every rect this snapshot
         // publishes lies inside it, so anything outside is already client
         // area and would only bloat the per-message scan in the wndproc.
+        // A modal's scrim is not among them: the drag surface and the window
+        // buttons stay live under it (`HandlerSet::window_chrome`), and the
+        // app's controls in the bar are dead zones, holes already, which the
+        // scrim then takes.
         if let Some(strip_id) = self.root_child_id {
             let strip = view.bounds(strip_id);
-            for &overlay in view.overlay_rects() {
+            for &overlay in view.overlay_rects_over_chrome() {
                 if let Some(hole) = intersect(overlay, strip) {
                     regions.no_drag.push(hole);
                 }
@@ -1551,6 +1555,173 @@ mod tests {
             host.drags_started.get() >= 1,
             "the drag region outside the hole must still move the window"
         );
+    }
+
+    /// A modal in the window as the app presents one: a scrim over the
+    /// whole window, then the panel centred, below the title bar, the
+    /// scrim's parent.
+    fn open_modal(tree: &mut WidgetTree, anchor: WidgetId) {
+        use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
+
+        let scrim = tree.add(crate::ModalScrim::new());
+        let scrim = tree.show_overlay(OverlayRequest::new(
+            scrim,
+            anchor,
+            OverlayPlacement::FullViewport,
+            DismissBehavior::Manual,
+        ));
+        let panel = tree.add(FixedSize::new().width(200.0).height(100.0));
+        let modal = tree.show_overlay(OverlayRequest::new(
+            panel,
+            anchor,
+            OverlayPlacement::Centered,
+            DismissBehavior::EscapeKey,
+        ));
+        tree.overlay_manager_mut()
+            .set_parent_overlay(scrim, Some(modal));
+        paint_once(tree);
+    }
+
+    /// Under a modal the caption stays the window system's on Windows: the
+    /// scrim carves no hole in it, so the OS still drags the window, and its
+    /// buttons still answer as buttons. The scrim covered the whole strip,
+    /// and the title bar's ✕ did nothing while a dialog was open.
+    #[test]
+    fn a_modal_leaves_the_caption_to_the_window_system() {
+        let host = Rc::new(TestHost::default());
+        let (mut tree, bar) = build_realistic_tree(host.clone(), |b| b);
+        open_modal(&mut tree, bar);
+
+        let regions = host.last_regions.borrow();
+        assert!(
+            regions.no_drag.is_empty(),
+            "the scrim must not punch a hole in the caption, got {:?}",
+            regions.no_drag
+        );
+        assert_eq!(regions.drag.len(), 1);
+        assert!(regions.minimize.is_some() && regions.close.is_some());
+    }
+
+    #[test]
+    fn a_modal_leaves_the_window_buttons_working() {
+        let host = Rc::new(TestHost::default());
+        let (mut tree, bar) = build_realistic_tree(host.clone(), |b| b);
+        let state = attach_window_state(&mut tree);
+        open_modal(&mut tree, bar);
+
+        let [minimize, _max, _close] = locate_control_buttons(&tree, bar);
+        tree.click(minimize);
+        assert_eq!(
+            state.placement().get(),
+            teksilo_core::WindowPlacement::Minimized,
+            "the minimise button must work with a modal open"
+        );
+    }
+
+    #[test]
+    fn a_modal_leaves_the_window_draggable() {
+        let host = Rc::new(TestHost::default());
+        let (mut tree, bar) = build_realistic_tree(host.clone(), |b| b);
+        open_modal(&mut tree, bar);
+
+        let drag = tree.bounds(locate_drag_region(&tree, bar));
+        let from = Point::new(drag.right() - 40.0, drag.y + drag.height / 2.0);
+        tree.drag(from, Point::new(from.x - 160.0, from.y));
+        assert!(
+            host.drags_started.get() >= 1,
+            "the window must move with a modal open"
+        );
+    }
+
+    #[test]
+    fn a_modal_leaves_the_double_click_to_maximise() {
+        let host = Rc::new(TestHost::default());
+        let (mut tree, bar) = build_realistic_tree(host.clone(), |b| b);
+        let state = attach_window_state(&mut tree);
+        open_modal(&mut tree, bar);
+
+        let drag = locate_drag_region(&tree, bar);
+        tree.click(drag);
+        tree.click(drag);
+        assert_eq!(
+            state.placement().get(),
+            teksilo_core::WindowPlacement::Maximized
+        );
+    }
+
+    /// The close button closes a modal open in the window as Escape would,
+    /// and not the window, whatever the app's close action is, as Alt+F4 and
+    /// the OS close button do.
+    #[test]
+    fn the_close_button_closes_the_modal_first() {
+        let closes = Rc::new(Cell::new(0u32));
+        let counted = closes.clone();
+        let host = Rc::new(TestHost::default());
+        let (mut tree, bar) = build_realistic_tree(host, move |b| {
+            b.close_action(move |_ctx| counted.set(counted.get() + 1))
+        });
+        open_modal(&mut tree, bar);
+        let [_min, _max, close] = locate_control_buttons(&tree, bar);
+
+        tree.click(close);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "the modal, and its scrim with it, must close"
+        );
+        assert_eq!(closes.get(), 0, "the window is not asked to close");
+
+        paint_once(&mut tree);
+        tree.click(close);
+        assert_eq!(
+            closes.get(),
+            1,
+            "with no modal left, the button closes the window"
+        );
+    }
+
+    /// An app's control in the title bar stays behind the modal, as the
+    /// rest of the app does: it is a hole in the caption, which the scrim
+    /// then takes.
+    #[test]
+    fn a_control_in_the_title_bar_stays_behind_a_modal() {
+        use teksilo_core::widget_builder::WidgetBuilder;
+
+        let taps = Rc::new(Cell::new(0u32));
+        let host = Rc::new(TestHost::default());
+        let tapped = taps.clone();
+        let (mut tree, bar) = build_realistic_tree(host.clone(), |b| {
+            b.center(
+                HStack::new()
+                    .child(
+                        DeadZone::new().child(
+                            FixedSize::new()
+                                .width(60.0)
+                                .height(30.0)
+                                .on_tap(move |_, _| tapped.set(tapped.get() + 1)),
+                        ),
+                    )
+                    .child(Expand::new()),
+            )
+        });
+        paint_once(&mut tree);
+        let hole = host.last_regions.borrow().no_drag[0];
+        let centre = Point::new(hole.x + hole.width / 2.0, hole.y + hole.height / 2.0);
+        let tap = |tree: &mut WidgetTree| {
+            tree.pointer_down_button(centre, PointerButton::Primary);
+            tree.pointer_up_button(centre, PointerButton::Primary);
+        };
+        tap(&mut tree);
+        assert_eq!(taps.get(), 1, "the control works with no modal open");
+
+        open_modal(&mut tree, bar);
+        assert_eq!(
+            host.last_regions.borrow().no_drag,
+            vec![hole],
+            "the control is still a hole in the caption"
+        );
+        tap(&mut tree);
+        assert_eq!(taps.get(), 1, "the control must stay behind the modal");
+        assert_eq!(host.drags_started.get(), 0);
     }
 
     #[test]

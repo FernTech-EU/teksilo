@@ -15,6 +15,7 @@ pub use cursor::CursorIcon;
 pub use event_context::EventContext;
 pub(crate) use event_context::{CursorRequest, GestureAct};
 pub use layout_context::{LayoutContext, StackAxis};
+pub(crate) use paint_context::OverlayRects;
 pub use paint_context::{PaintContext, WidgetPlacement, WidgetTreeView};
 
 pub(crate) use event_context::{DismissScope, ShortcutMutation, TreeMutation};

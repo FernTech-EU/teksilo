@@ -209,14 +209,16 @@ impl Widget for ControlButton {
         );
 
         // Self handlers: tap fires the action, hover drives the `hovered`
-        // bool (which the derived role signal above reacts to).
+        // bool (which the derived role signal above reacts to). Window
+        // chrome: the button works with a modal open in the window, the close
+        // button then closing the modal as a close request does.
         let hovered_handler = hovered.clone();
-        let mut handlers =
-            HandlerSet::new()
-                .cursor(CursorIcon::Pointer)
-                .on_hover(move |entered, _ctx| {
-                    hovered_handler.set(entered);
-                });
+        let mut handlers = HandlerSet::new()
+            .window_chrome()
+            .cursor(CursorIcon::Pointer)
+            .on_hover(move |entered, _ctx| {
+                hovered_handler.set(entered);
+            });
 
         if let Some(action) = self.action.take() {
             // `accessibility` advertises `Action::Click`, and on macOS
@@ -439,6 +441,14 @@ impl Widget for WindowControls {
             Some(user_action) => user_action,
             None => Rc::new(move |ctx| ctx.close_window()),
         };
+        // With a modal open in the window the button is still live, and its
+        // click closes the modal as Escape would, as Alt+F4 and the OS close
+        // button do, whatever the app's close action is.
+        let close_action: ControlAction = Rc::new(move |ctx| {
+            if !ctx.give_close_request_to_modal() {
+                close_action(ctx);
+            }
+        });
 
         // `to_signal()` observes the i18n manager so the name updates
         // when `tree.set_locale(...)` is called; `resolve_now()` would

@@ -580,7 +580,9 @@ impl WidgetTree {
     /// `false` when none was open, and the window's close goes ahead.
     ///
     /// The window manager's seam, called for the user's own close gestures
-    /// only: `EventContext::close_window` and a quit ask the window directly.
+    /// only, and the one a title bar's close button reaches through
+    /// `EventContext::give_close_request_to_modal`: `EventContext::close_window`
+    /// and a quit ask the window directly.
     #[doc(hidden)]
     pub fn answer_close_request_with_modal(
         &mut self,
@@ -3093,6 +3095,9 @@ impl WidgetTree {
                 }
             }
         }
+        if ctx.close_request_to_modal {
+            self.answer_close_request_with_modal(&mut *ops);
+        }
         if ctx.close_window_requested {
             self.close_window_requested = true;
         }
@@ -3778,6 +3783,12 @@ impl WidgetTree {
             if Some(overlay_id) == exclude_overlay {
                 // Skip this excluded overlay, fall through to widget tree
             } else if let Some(overlay) = self.overlay_manager.overlay(overlay_id) {
+                // A modal's scrim dims the window's chrome but leaves it live.
+                if self.overlay_manager.is_modal_scrim(overlay)
+                    && let Some(chrome) = self.window_chrome_under_modal(point, exclude_widget, hit)
+                {
+                    return Some(chrome);
+                }
                 // Scoped to the overlay's content: this is what restricts the
                 // slop pass's candidates to the topmost layer the exact pass
                 // entered.
@@ -3816,7 +3827,7 @@ impl WidgetTree {
         }
 
         if self.overlay_manager.topmost_modal().is_some() {
-            return None;
+            return self.window_chrome_under_modal(point, exclude_widget, hit);
         }
 
         // The walk of the arena's roots honours event_pass_through and
@@ -3837,6 +3848,53 @@ impl WidgetTree {
         }
         self.arena
             .hit_test_roots_with_slop(roots, point, exclude_widget, hit)
+    }
+}
+
+impl WidgetTree {
+    /// What a point on the page takes while a modal is open: only the
+    /// window's own chrome (a title bar's drag surface, its window buttons,
+    /// the resize edges; [`HandlerSet::window_chrome`]). The window system's
+    /// frame stays live above a dialog in a window, so a window drawing its
+    /// own frame keeps it live too, as libadwaita's dialogs leave the window
+    /// draggable and WinUI's leave the caption buttons working.
+    ///
+    /// The closest chrome node above the page's own hit takes the point, so a
+    /// press on app content a drag surface holds (a title) moves the window
+    /// and never reaches that content. A gesture dead zone on the way, which
+    /// is how an app puts a control in a title bar, means the point is the
+    /// app's, and it goes nowhere: the app stays behind its modal.
+    ///
+    /// [`HandlerSet::window_chrome`]: crate::widget_builder::HandlerSet::window_chrome
+    fn window_chrome_under_modal(
+        &self,
+        point: Point,
+        exclude_widget: Option<WidgetId>,
+        hit: &crate::pointer::hit_slop::HitContext<'_>,
+    ) -> Option<WidgetId> {
+        let overlays: Vec<WidgetId> = self
+            .overlay_manager
+            .stack
+            .iter()
+            .map(|overlay| overlay.content_id)
+            .collect();
+        let mut roots = self.arena.roots();
+        roots.retain(|root| !overlays.contains(root));
+        let found = self
+            .arena
+            .hit_test_roots_with_slop(roots, point, exclude_widget, hit)?;
+        let mut node = Some(found);
+        while let Some(id) = node {
+            let current = self.arena.get(id)?;
+            if current.window_chrome {
+                return Some(id);
+            }
+            if current.gesture_dead_zone {
+                return None;
+            }
+            node = self.arena.parent(id);
+        }
+        None
     }
 }
 

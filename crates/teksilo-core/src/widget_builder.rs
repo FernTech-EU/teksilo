@@ -426,6 +426,9 @@ pub struct HandlerSet {
     /// drag/swipe on any ancestor above it (a *gesture dead zone*). See
     /// [`super::arena::WidgetNode::gesture_dead_zone`].
     pub(crate) gesture_dead_zone: Option<bool>,
+    /// When `Some(true)`, the node is part of the window's own chrome. See
+    /// [`HandlerSet::window_chrome`].
+    pub(crate) window_chrome: Option<bool>,
     /// When `Some(false)`, a click or tap activates the node without moving
     /// keyboard focus to it. See [`HandlerSet::focus_on_click`].
     pub(crate) focus_on_click: Option<bool>,
@@ -515,6 +518,7 @@ impl HandlerSet {
             ime,
             event_pass_through,
             gesture_dead_zone,
+            window_chrome,
             focus_on_click,
             long_press_role,
             touch_action,
@@ -559,6 +563,7 @@ impl HandlerSet {
             ime: None,
             event_pass_through: None,
             gesture_dead_zone: None,
+            window_chrome: None,
             focus_on_click: None,
             long_press_role: None,
             drag_activation: None,
@@ -866,6 +871,20 @@ impl HandlerSet {
     /// `PointerSequence` member enrolment; see the `DeadZone` wrapper widget.
     pub fn gesture_dead_zone(mut self, dead_zone: bool) -> Self {
         self.gesture_dead_zone = Some(dead_zone);
+        self
+    }
+
+    /// Mark this widget part of the window's own chrome: a title bar's drag
+    /// surface, a window button, a resize edge. While a modal is open in the
+    /// window it stays live under the modal's scrim, as the window system's
+    /// frame stays live above a dialog: a press on it goes to it, even one on
+    /// app content it holds, and one on a gesture dead zone inside it goes
+    /// nowhere, so the app's controls in a title bar stay blocked.
+    ///
+    /// For the title bar's own widgets; an app's widget is never chrome.
+    #[doc(hidden)]
+    pub fn window_chrome(mut self) -> Self {
+        self.window_chrome = Some(true);
         self
     }
 
