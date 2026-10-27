@@ -73,7 +73,8 @@ by crate for clarity, not because crates version independently.
   modal ("Save changes before closing?" over a settings dialog). A close the
   user asks for now does what Escape would in the modal, as Alt+F4 closes a
   dialog window and not the window behind it; a modal Escape cannot close
-  stays, and nothing closes. The next request reaches the window.
+  stays, and nothing closes. The next request reaches the window, and the
+  Alt of that Alt+F4 does not put its menu bar in keyboard mode.
   `ctx.close_window()` and a quit still ask the window's guard.
 
 #### Platform

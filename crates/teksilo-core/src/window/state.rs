@@ -554,6 +554,15 @@ impl WindowState {
         }
     }
 
+    /// The OS asked to close the window. With Alt held this was Alt+F4,
+    /// whose F4 winit does not report on Windows (it leaves it to
+    /// `DefWindowProc`), so the hold is a chord and its release no tap. The
+    /// window stays open when an in-window modal took the request, and the
+    /// release would otherwise put its menu bar in keyboard mode.
+    pub fn note_close_request_from_os(&self) {
+        self.note_non_alt_keydown_during_alt();
+    }
+
     /// A real press or release of an Alt key in this window, never a
     /// synthetic one (the keys a window is told are held as it takes or
     /// loses the focus). Returns `true` for the release that ends a bare Alt
@@ -801,6 +810,19 @@ mod tests {
         state.set_focused_from_os(false);
         state.set_focused_from_os(true);
         state.set_alt_from_os(true);
+        state.set_alt_from_os(false);
+        assert!(!state.note_alt_key_from_os(false));
+    }
+
+    /// Alt+F4 that an in-window modal takes leaves the window open, and
+    /// winit reports no F4 on Windows: the close request ends the tap.
+    #[test]
+    fn alt_f4_is_not_a_tap() {
+        let state = WindowState::new(init(1));
+        state.set_focused_from_os(true);
+        state.set_alt_from_os(true);
+        state.note_alt_key_from_os(true);
+        state.note_close_request_from_os();
         state.set_alt_from_os(false);
         assert!(!state.note_alt_key_from_os(false));
     }

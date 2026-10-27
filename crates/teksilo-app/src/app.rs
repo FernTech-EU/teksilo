@@ -4258,6 +4258,11 @@ impl TeksiloAppHandler {
 
         match event {
             WindowEvent::CloseRequested => {
+                // Alt+F4 is a chord whose F4 winit does not report on
+                // Windows: the Alt release that follows is no tap.
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    managed.state.note_close_request_from_os();
+                }
                 if let Some(fid) = teksilo_id {
                     // Guarded close: the OS close button / Alt+F4 / Cmd+W
                     // is an interactive gesture, so it runs through the
