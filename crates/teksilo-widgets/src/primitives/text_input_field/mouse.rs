@@ -284,8 +284,22 @@ pub(crate) fn hit_test_in(st: &TextInputState, local: Point) -> Option<usize> {
         return Some(doc_end);
     }
 
+    // A press in the frame's padding (`TextInputField::press_band`) or a drag
+    // that leaves the line vertically is a position on the line, at its x: a
+    // native line edit has one line to put the caret on. The middle of that
+    // line is asked rather than the nearest edge of the bounds, which the
+    // engine can lie just outside of.
+    let outside_line = local.y < 0.0 || (st.viewport_height > 0.0 && local.y >= st.viewport_height);
+    let engine_y = if outside_line {
+        let [_, y, _, h] = st
+            .engine
+            .caret_rect(0, teksilo_text::CursorAffinity::Downstream);
+        y + h * 0.5
+    } else {
+        local.y - st.text_offset_y
+    };
     let adjusted_x = local.x + st.scroll_x;
-    if let Some(result) = st.engine.hit_test(adjusted_x, local.y - st.text_offset_y) {
+    if let Some(result) = st.engine.hit_test(adjusted_x, engine_y) {
         return Some(result.position);
     }
 

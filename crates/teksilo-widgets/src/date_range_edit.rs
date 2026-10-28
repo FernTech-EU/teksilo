@@ -877,6 +877,7 @@ impl DateRangeEdit {
         let pattern_for_filter = pattern_rc.clone();
         let mut field = TextInputField::new(text_signal.clone())
             .enabled(self.enabled.clone())
+            .press_band(field_dims::TEXT_FIELD_PRESS_BAND)
             // An assistive-technology `SetValue` on the inner text node is a
             // finished edit, not a keystroke: push the string the technology
             // set and run the same commit `Enter` runs, or the typed value

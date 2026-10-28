@@ -1268,6 +1268,19 @@ impl Widget for TextInputField {
         }
     }
 
+    /// The frame's padding around the field belongs to the field (see
+    /// `TextInputField::press_band`, crate-private), for a mouse as much as
+    /// for a finger:
+    /// the padding is part of the control, not a neighbour the pointer might
+    /// have meant to reach.
+    fn hit_outset(
+        &self,
+        _kind: teksilo_tokens::PointerKind,
+        _tokens: &teksilo_tokens::InputTokens,
+    ) -> teksilo_canvas::EdgeInsets {
+        self.press_band
+    }
+
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         use teksilo_core::accesskit::{Action, Role};
 

@@ -243,6 +243,8 @@ pub struct TextInputField {
     /// `special_value_text` is active).
     suffix: Prop<String>,
     text_height: Option<f32>,
+    /// See [`press_band`](Self::press_band).
+    press_band: teksilo_canvas::EdgeInsets,
     /// See [`text_style`](Self::text_style). `None` shapes in the engine's
     /// default font, as every field did before the style could be chosen.
     text_style: Option<TextStyleProp>,
@@ -370,6 +372,7 @@ impl TextInputField {
             char_filter: None,
             suffix: Prop::Static(String::new()),
             text_height: None,
+            press_band: teksilo_canvas::EdgeInsets::ZERO,
             text_style: None,
             text_alignment: None,
             text_color: None,
@@ -586,6 +589,21 @@ impl TextInputField {
     /// derive: a composite that passes both asked for this height.
     pub fn text_height(mut self, height: f32) -> Self {
         self.text_height = Some(height);
+        self
+    }
+
+    /// The frame's padding around this field, which a press claims for the
+    /// field: a press there is a press on the text line, with its y put on the
+    /// line, as a native line edit takes it.
+    ///
+    /// A composite that frames the field in a `Padding` passes the padding's
+    /// insets here, and the field then wins every press the padding owns, for
+    /// every kind of pointer, with focus, drag selection and multi-click all
+    /// the field's own. It is a hit-only declaration (`Widget::hit_outset`):
+    /// no layout or paint moves. The insets must not exceed the padding, since
+    /// an outset never leaves the parent that owns it.
+    pub(crate) fn press_band(mut self, band: teksilo_canvas::EdgeInsets) -> Self {
+        self.press_band = band;
         self
     }
 

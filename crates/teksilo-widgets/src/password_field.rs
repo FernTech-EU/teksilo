@@ -418,6 +418,7 @@ impl Widget for PasswordField {
 
         // ── Secure inner field ──────────────────────────────────────
         let mut field = TextInputField::new(self.text.clone())
+            .press_band(field_dims::TEXT_FIELD_PRESS_BAND)
             .enabled(self.enabled.clone())
             .read_only(self.read_only)
             .placeholder(self.placeholder.clone())

@@ -227,33 +227,6 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               raised -- which would clear both shapes at once.",
     },
     AllowedViolation {
-        path: "Expand > Padding > TextInputField",
-        measured: &[PinnedGeometry {
-            densities: AT_COMPACT,
-            themes: RECIPE_SPIN_BOX,
-            paints: (ClearsFloor, Is(20.0)),
-            reaches: (ClearsFloor, Is(20.0)),
-        }],
-        owner: Owner::Named(
-            "whoever revisits SpinBox's frame inset (the same owner as the \
-                step buttons above)",
-        ),
-        exception: None,
-        why: "A SpinBox's editable field is 20 dp tall inside the frame's own \
-              box because the frame reserves space above and below it, and it \
-              reaches exactly that 20 dp -- the width clears the floor and is \
-              not the finding. Compact only: at Comfortable and Touch the box's \
-              own MinSize carries the field to 24 and 36 dp, which is the \
-              density ladder working. Neither mechanism can serve it: the step \
-              buttons beside it are targets at distance zero, so the slop pass \
-              is denied, and an outset would have to grow into the frame it is \
-              inset from. A real AA shortfall with no exception behind it -- \
-              the field IS the target for placing a caret, and no conforming \
-              control does that job. The remedy is a taller field at Compact, \
-              which the invariant forbids. Not under KDE, whose Breeze spin box \
-              is 32 dp tall at Compact and whose field clears the floor.",
-    },
-    AllowedViolation {
         // Scoped to the fixture, deliberately: the POPULATED field's clear slot
         // is the same `HitTarget` node on the same `HStack > HitTarget` path,
         // and 16 x 16 reaching 22 x 24 at Compact is exactly the regression
@@ -767,7 +740,7 @@ fn the_allow_lists_roster_is_what_it_says_it_is() {
     let findings = gate::roster_defects(census(), &ROSTER);
     assert!(findings.is_empty(), "{}", findings.join("\n"));
 
-    assert_eq!(ALLOW_LIST.len(), 15, "fifteen written findings");
+    assert_eq!(ALLOW_LIST.len(), 14, "fourteen written findings");
     let on_an_exception = ALLOW_LIST.iter().filter(|e| e.exception.is_some()).count();
     assert_eq!(
         on_an_exception,
@@ -781,8 +754,8 @@ fn the_allow_lists_roster_is_what_it_says_it_is() {
     );
     assert_eq!(
         ALLOW_LIST.len() - on_an_exception,
-        9,
-        "and nine are real failures escalated to an owner",
+        8,
+        "and eight are real failures escalated to an owner",
     );
     assert_eq!(
         ALLOW_LIST
@@ -950,7 +923,7 @@ fn the_allow_list_excuses_only_the_geometry_it_pinned() {
     // region the new rows fall into.
     assert_eq!(
         census().len(),
-        584,
+        556,
         "the (theme x density) census moved — this test is proving something \
          else until the figure, the per-preset seed floor above, and the \
          entries covering any new rows are re-derived together",

@@ -9,6 +9,8 @@ use teksilo_core::signal::Signal;
 use teksilo_core::widget_tree::WidgetTree;
 use teksilo_i18n::lit;
 
+use teksilo_core::widget::Widget;
+
 use super::TextInput;
 
 fn setup(
@@ -1200,4 +1202,193 @@ fn the_placeholder_takes_the_text_style() {
     let body = measure(input());
     let large = measure(input().text_style(style(26.0, 1.4)));
     assert!(large > body * 1.5, "{large} vs {body}");
+}
+
+// ── A press in the frame, off the text line ───────────────────────
+
+/// A `TextInput` with text, laid out and rendered (the engine lays out in
+/// paint, so a tree that never renders hit-tests an empty document), with the
+/// caret signal and the field's bounds.
+fn pressable(
+    text: &str,
+    configure: impl FnOnce(TextInput) -> TextInput,
+) -> (
+    WidgetTree,
+    Signal<usize>,
+    teksilo_core::widget_id::WidgetId,
+    teksilo_canvas::Rect,
+) {
+    let input = configure(TextInput::new(Signal::new(text.to_string())));
+    let caret = input.caret_position();
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(input);
+    tree.layout(SizeProposal::exact(300.0, 40.0));
+    let _ = tree.render();
+    let field = tree
+        .first_focusable_descendant(id)
+        .expect("the field is focusable");
+    let bounds = tree.bounds(field);
+    (tree, caret, field, bounds)
+}
+
+fn click(tree: &mut WidgetTree, at: teksilo_canvas::Point) {
+    use teksilo_core::event::PointerButton;
+    tree.pointer_down_button(at, PointerButton::Primary);
+    tree.pointer_up_button(at, PointerButton::Primary);
+}
+
+/// The text line is 20 dp tall inside a 28 dp frame, and the 4 dp above and
+/// below it belong to the frame as much as the line does. A native line edit
+/// puts the caret where the pointer's x lands on its line, whatever the y.
+#[test]
+fn a_press_above_or_below_the_line_places_the_caret_at_the_x_position() {
+    use teksilo_canvas::Point;
+
+    let (mut tree, caret, field, bounds) = pressable("hello world", |i| i);
+    // Where a click on the line puts the caret, for the x the others use.
+    let x = bounds.x + 30.0;
+    click(&mut tree, Point::new(x, bounds.y + bounds.height / 2.0));
+    let on_the_line = caret.get();
+    assert!(
+        (1..11).contains(&on_the_line),
+        "the reference click should land inside the text, got {on_the_line}"
+    );
+
+    for (label, y) in [
+        ("above", bounds.y - 2.0),
+        ("below", bounds.y + bounds.height + 2.0),
+    ] {
+        // Move the caret away first, so a press that does nothing shows.
+        click(&mut tree, Point::new(bounds.x + 1.0, bounds.y + 5.0));
+        assert_eq!(caret.get(), 0, "setup: the caret is at the start");
+        click(&mut tree, Point::new(x, y));
+        assert_eq!(
+            caret.get(),
+            on_the_line,
+            "a press {label} the line did not place the caret at its x position"
+        );
+    }
+    let _ = field;
+}
+
+/// The press takes focus too, when the field had none.
+#[test]
+fn a_press_in_the_padding_focuses_the_field() {
+    use teksilo_canvas::Point;
+
+    let (mut tree, caret, field, bounds) = pressable("hello world", |i| i);
+    assert_ne!(tree.focused(), Some(field));
+    click(&mut tree, Point::new(bounds.x + 30.0, bounds.y - 2.0));
+    assert_eq!(tree.focused(), Some(field));
+    assert!(caret.get() > 0);
+}
+
+/// A drag that starts in the padding selects as a drag from the line would.
+#[test]
+fn a_drag_from_the_padding_selects_text() {
+    use teksilo_canvas::Point;
+    use teksilo_core::event::PointerButton;
+
+    let input = TextInput::new(Signal::new("hello world".to_string()));
+    let handle = input.handle();
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(input);
+    tree.layout(SizeProposal::exact(300.0, 40.0));
+    let _ = tree.render();
+    let field = tree.first_focusable_descendant(id).expect("focusable");
+    let bounds = tree.bounds(field);
+
+    let from = Point::new(bounds.x + 1.0, bounds.y - 2.0);
+    let to = Point::new(bounds.x + 60.0, bounds.y + bounds.height + 2.0);
+    tree.pointer_down_button(from, PointerButton::Primary);
+    tree.pointer_move(to);
+    tree.pointer_up_button(to, PointerButton::Primary);
+    assert!(handle.has_selection(), "the drag selected nothing");
+}
+
+/// The trailing clear button sits inside the frame and keeps its presses.
+#[test]
+fn a_press_on_the_clear_button_still_clears() {
+    let text = Signal::new("hello".to_string());
+    let row_taps = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let (mut tree, field) = field_in_a_tappable_row(text.clone(), row_taps.clone());
+    let _ = tree.render();
+    let clear = clear_slot(&tree, field).expect("the clear slot is in the row");
+    click(&mut tree, clear.center());
+    assert_eq!(text.get(), "");
+    assert_eq!(row_taps.get(), 0);
+}
+
+/// Every `TextInputField` under `root`, by type name.
+fn text_fields(
+    tree: &WidgetTree,
+    root: teksilo_core::widget_id::WidgetId,
+) -> Vec<teksilo_core::widget_id::WidgetId> {
+    let mut found = Vec::new();
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        if tree
+            .widget_type_name(id)
+            .is_some_and(|n| n.ends_with("TextInputField"))
+        {
+            found.push(id);
+        }
+        stack.extend(tree.children(id).iter().copied());
+    }
+    found
+}
+
+/// Each composite that frames a `TextInputField` in the 4 dp vertical padding
+/// hands that padding to the field: a mouse press above or below the line
+/// resolves to the field, which then takes it as a press on the line.
+#[test]
+fn every_framed_field_claims_the_padding_around_its_line() {
+    use crate::{
+        DateEdit, DateRangeEdit, DateTimeEdit, FilePickerField, HexColorInput, PasswordField,
+        SearchField, SpinBox, TimeEdit,
+    };
+    use teksilo_canvas::Point;
+
+    fn check(name: &str, widget: impl Widget + 'static) {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let root = tree.add(widget);
+        tree.layout(SizeProposal::exact(400.0, 60.0));
+        let _ = tree.render();
+        let fields = text_fields(&tree, root);
+        assert!(!fields.is_empty(), "{name}: no text field was built");
+        for field in fields {
+            let b = tree.bounds(field);
+            for (label, y) in [("above", b.y - 2.0), ("below", b.y + b.height + 2.0)] {
+                let at = Point::new(b.x + b.width / 2.0, y);
+                assert_eq!(
+                    tree.hit_test(at),
+                    Some(field),
+                    "{name}: a press {label} the line does not reach the field"
+                );
+            }
+        }
+    }
+
+    check("TextInput", TextInput::new(Signal::new("abc".to_string())));
+    check(
+        "SearchField",
+        SearchField::new(Signal::new("abc".to_string())),
+    );
+    check(
+        "FilePickerField",
+        FilePickerField::new(Signal::new("abc".to_string())),
+    );
+    check(
+        "PasswordField",
+        PasswordField::new(Signal::new("abc".to_string())),
+    );
+    check("SpinBox", SpinBox::new(Signal::new(5_i32), 0, 10));
+    check("DateEdit", DateEdit::new(Signal::new(None)));
+    check("TimeEdit", TimeEdit::new(Signal::new(None)));
+    check("DateRangeEdit", DateRangeEdit::new(Signal::new(None)));
+    check("DateTimeEdit", DateTimeEdit::new(Signal::new(None)));
+    check(
+        "HexColorInput",
+        HexColorInput::new(Signal::new(teksilo_tokens::Color::from_rgb(0.1, 0.2, 0.3))),
+    );
 }

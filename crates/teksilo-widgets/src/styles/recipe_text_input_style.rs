@@ -47,6 +47,17 @@ use teksilo_core::styles::density::{dp, spacing};
 pub const TEXT_FIELD_HEIGHT: f32 = 28.0;
 pub const TEXT_FIELD_PADDING_HORIZONTAL: f32 = 4.0;
 pub const TEXT_FIELD_PADDING_VERTICAL: f32 = 4.0;
+/// The vertical padding that frames a text field's line, as the insets the
+/// field claims presses over (`TextInputField::press_band`). Every composite
+/// that wraps its field in `Padding::new(TEXT_FIELD_PADDING_VERTICAL, ..)` passes
+/// this, so a press in the padding is a press on the line.
+pub(crate) const TEXT_FIELD_PRESS_BAND: teksilo_canvas::EdgeInsets =
+    teksilo_canvas::EdgeInsets::new(
+        TEXT_FIELD_PADDING_VERTICAL,
+        0.0,
+        TEXT_FIELD_PADDING_VERTICAL,
+        0.0,
+    );
 pub const TEXT_FIELD_BORDER_WIDTH: f32 = 1.0;
 pub const TEXT_FIELD_CORNER_RADIUS: f32 = 4.0;
 pub const TEXT_FIELD_CARET_WIDTH: f32 = 1.0;

@@ -222,6 +222,13 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A click in the padding of a text field places the caret.** A press in
+  the few pixels above or below the text line of a `TextInput`, `SearchField`,
+  `PasswordField`, `SpinBox`, the date and time editors, `HexColorInput` or
+  `FilePickerField` did nothing: no caret, no focus, no selection. It now
+  acts as a press on the line at the same horizontal position, for a mouse,
+  a finger and a pen, and a drag that starts or leaves there selects as one
+  from the line would.
 - **Undo no longer replays an input method's composition.** In a
   `RichTextEditor`, a `TextInputField` (with `TextInput`, `SearchField` and
   `PasswordField`) and a `CodeEditor`, an undo after a commit walked back

@@ -1276,6 +1276,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
 
         let mut field = TextInputField::new(self.text_signal.clone())
             .share_handle(&field_handle)
+            .press_band(field_dims::TEXT_FIELD_PRESS_BAND)
             // An assistive-technology `SetValue` on the inner text node is a
             // finished edit, not a keystroke, so it takes the same parse,
             // clamp and revert `Enter` takes. Handed the string rather than

@@ -35,7 +35,9 @@ impl Widget for TextInput {
             &ctx.theme().input,
         );
 
-        let mut field = TextInputField::new(self.text.clone()).share_handle(&self.field_handle);
+        let mut field = TextInputField::new(self.text.clone())
+            .share_handle(&self.field_handle)
+            .press_band(field_dims::TEXT_FIELD_PRESS_BAND);
         field = field
             .enabled(self.enabled.clone())
             .read_only(self.read_only)
