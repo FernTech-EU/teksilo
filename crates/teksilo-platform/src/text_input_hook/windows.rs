@@ -127,6 +127,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use raw_window_handle::RawWindowHandle;
 use teksilo_core::AppEventPoster;
 use teksilo_core::raw_handle::ParentHandle;
+use teksilo_core::text_surface::TextSurfaces;
 use teksilo_core::window::TeksiloWindowId;
 
 use windows::Win32::Foundation::{
@@ -257,9 +258,10 @@ pub(super) fn attach(
     window_id: TeksiloWindowId,
     parent: &ParentHandle,
     poster: Arc<dyn AppEventPoster>,
+    surfaces: TextSurfaces,
 ) {
-    // Nothing is posted yet: the tap only traces.
-    let _ = poster;
+    // Nothing is posted or answered yet: the tap only traces.
+    let _ = (poster, surfaces);
     if !super::trace_enabled() {
         return;
     }

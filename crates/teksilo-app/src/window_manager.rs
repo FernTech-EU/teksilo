@@ -2550,8 +2550,11 @@ impl WindowManager {
 
     /// Attach the platform text-input hook to the just-created window, so the
     /// text the OS writes outside a key press (Emoji & Symbols, Dictation,
-    /// AutoFill on macOS; injected Unicode keystrokes on Windows) reaches it.
-    /// Always on: it is correctness for every text field, not an opt-in.
+    /// AutoFill on macOS; injected Unicode keystrokes on Windows) reaches it,
+    /// and the OS's questions about the document (where the selection is,
+    /// what the text is) are answered from the window tree's focused text
+    /// widget, through the tree's text surfaces. Always on: it is
+    /// correctness for every text field, not an opt-in.
     fn attach_text_input_hook(
         &self,
         teksilo_id: TeksiloWindowId,
@@ -2570,7 +2573,12 @@ impl WindowManager {
         if let Some(parent) =
             teksilo_core::raw_handle::ParentHandle::from_window(managed.platform_window.window())
         {
-            teksilo_platform::text_input_hook::attach(teksilo_id, &parent, poster);
+            teksilo_platform::text_input_hook::attach(
+                teksilo_id,
+                &parent,
+                poster,
+                managed.tree.text_surfaces(),
+            );
         }
     }
 

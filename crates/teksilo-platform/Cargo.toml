@@ -126,6 +126,9 @@ objc2-app-kit = { version = "0.3", features = [
     # Each screen's `visibleFrame`, the work area a restored window is kept
     # inside (`desktop.rs`).
     "NSScreen",
+    # `NSTextAlternativesAttributeName`, the mark dictation leaves on the text
+    # it inserts (`text_input_hook/macos.rs`).
+    "NSAttributedString",
 ] }
 objc2-foundation = { version = "0.3", features = [
     "NSArray",

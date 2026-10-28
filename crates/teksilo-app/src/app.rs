@@ -3648,6 +3648,74 @@ impl TeksiloAppHandler {
         Ok(())
     }
 
+    /// Try to route an `AppEvent::External` payload as an
+    /// [`ImeCommitPayload`](teksilo_platform::text_input_hook::ImeCommitPayload):
+    /// text the platform's input system inserted outside a key press (macOS
+    /// Emoji & Symbols, for one), posted by the window's text input hook.
+    ///
+    /// It reaches the window's focused widget as the
+    /// [`WidgetEvent::ImeCommit`] a `WindowEvent::Ime(Ime::Commit)` becomes,
+    /// with the payload's origin and replacement, and is treated as one: the
+    /// user's activation, swallowed by a window a modal child blocks, the
+    /// window's empty-preedit dedup reset, a redraw. A payload for a window
+    /// that has closed since is dropped silently.
+    ///
+    /// Returns `Ok(())` if the payload was one (consumed), or `Err(payload)`
+    /// to hand it back for other downcast attempts.
+    fn try_route_ime_commit_payload(
+        &mut self,
+        payload: Box<dyn std::any::Any + Send>,
+        event_loop: &ActiveEventLoop,
+    ) -> Result<(), Box<dyn std::any::Any + Send>> {
+        use teksilo_platform::text_input_hook::ImeCommitPayload;
+
+        let ImeCommitPayload {
+            window_id_owner,
+            text,
+            origin,
+            replacement,
+        } = *payload.downcast::<ImeCommitPayload>()?;
+        let Some(winit_id) = self
+            .wm
+            .teksilo_to_winit_map()
+            .get(&window_id_owner)
+            .copied()
+        else {
+            // Window already torn down: drop silently.
+            return Ok(());
+        };
+        // Committed text is the user acting, as an `Ime::Commit` is (see
+        // `input_routing::is_user_activation`).
+        self.wm.note_user_activation();
+        // And like any of the user's input, a window a modal child blocks
+        // does not take it (`input_loop::blocked_disposition`).
+        if self.wm.is_blocked(window_id_owner) {
+            return Ok(());
+        }
+        // What the `WindowEvent::Ime` arm's dedup records for a commit: the
+        // next empty preedit is meaningful again.
+        match self.wm.get_by_winit_mut(winit_id) {
+            Some(managed) => managed.last_ime_preedit_empty = false,
+            None => return Ok(()),
+        }
+        self.dispatch_in_window(
+            winit_id,
+            WidgetEvent::ImeCommit {
+                text,
+                origin,
+                replacement,
+            },
+            event_loop,
+        );
+        if let Some(managed) = self.wm.get_by_winit_mut(winit_id) {
+            if let Some(trace) = &mut self.idle_trace {
+                trace.note_redraw_request("ime");
+            }
+            managed.request_redraw();
+        }
+        Ok(())
+    }
+
     /// Tick gestures on every window with a real `WindowOps` sink so
     /// long-press / drag-tick handlers can open windows.
     fn tick_gestures_in_window(
@@ -4399,12 +4467,25 @@ impl TeksiloAppHandler {
             } => {
                 self.note_physical_key(window_id, &key_event);
                 self.note_alt_key(window_id, &key_event, is_synthetic, event_loop);
+                // A key the platform's input method took for itself (on
+                // macOS, the accent popup's auto-repeats and the key that
+                // picks an accent, which it then inserts on its own) still
+                // reaches the widgets as a key, for shortcuts and
+                // navigation, but its text is not typed. Asked now, while
+                // winit is still inside the key's `keyDown:`: it delivers
+                // this event from there when its handler is idle. When it
+                // had to buffer the event (the handler was busy), the key
+                // press is over by now, the answer is `false`, and the text
+                // is typed as before. Always `false` off macOS.
+                let swallowed = key_event.state.is_pressed()
+                    && teksilo_id.is_some_and(teksilo_platform::text_input_hook::key_was_swallowed);
+                let text = key_event.text.as_deref().filter(|_| !swallowed);
                 // A synthetic press becomes nothing, here and for the
                 // menubar below: see `key_widget_event`.
                 let maybe_evt = self.wm.get_by_winit_mut(window_id).and_then(|managed| {
                     crate::input_routing::key_widget_event(
                         &key_event.logical_key,
-                        key_event.text.as_deref(),
+                        text,
                         key_event.state,
                         is_synthetic,
                         event_translation::translate_modifiers(managed.current_modifiers),
@@ -5000,6 +5081,10 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
                     Some(payload) => self
                         .try_route_native_menu_payload(payload, event_loop)
                         .err(),
+                };
+                let payload = match payload {
+                    None => None,
+                    Some(payload) => self.try_route_ime_commit_payload(payload, event_loop).err(),
                 };
                 let payload = match payload {
                     None => None,
