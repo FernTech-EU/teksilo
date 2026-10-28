@@ -193,6 +193,23 @@ pub(crate) fn key_widget_event(
     })
 }
 
+/// Whether a key press ends a pending bare-Alt tap. The menu-bar tap is Alt
+/// pressed and released alone (the Windows and KDE convention), so every key
+/// but Alt itself ends it: the modifier keys too (Alt+Shift switches the input
+/// language, Ctrl+Alt+Shift+U is an input method's Unicode picker, whose `U`
+/// the window never sees), and a key Teksilo has no [`Key`](teksilo_core::event::Key)
+/// for (the Japanese IME's on/off key, `VK_KANJI`). Dispatch is a separate
+/// question, see [`key_widget_event`].
+pub(crate) fn key_cancels_alt_tap(logical_key: &winit::keyboard::Key) -> bool {
+    use winit::keyboard::{Key, NamedKey};
+    logical_key != &Key::Named(NamedKey::Alt)
+}
+
+/// Whether no modifier but Alt is held, as Alt goes down.
+pub(crate) fn alt_pressed_alone(held: winit::keyboard::ModifiersState) -> bool {
+    !(held.control_key() || held.shift_key() || held.super_key())
+}
+
 /// Route one pointer/gesture event into `tree`.
 ///
 /// Returns `true` when the event was one of the arms this module owns —
@@ -391,6 +408,65 @@ fn gesture_position(
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use winit::keyboard::{Key, ModifiersState, NamedKey};
+    /// What the app does with one hold of Alt: the keys winit reports
+    /// between its press and release (each cancels unless it is Alt), and
+    /// the modifiers already held when Alt went down.
+    fn alt_hold_is_a_tap(held_before: ModifiersState, keys_between: &[Key]) -> bool {
+        use teksilo_core::window::WindowState;
+        use teksilo_core::window::state::WindowStateInit;
+        let state = WindowState::new(WindowStateInit {
+            id: teksilo_core::window::TeksiloWindowId::new(1),
+            string_id: None,
+            placement: teksilo_core::window::WindowPlacement::Floating,
+            title: String::new(),
+            size: (800, 600),
+            position: (0, 0),
+            focused: true,
+            resizable: true,
+            always_on_top: false,
+        });
+        state.set_alt_from_os(true);
+        state.note_alt_key_from_os(true, super::alt_pressed_alone(held_before));
+        for k in keys_between {
+            if super::key_cancels_alt_tap(k) {
+                state.note_non_alt_keydown_during_alt();
+            }
+        }
+        state.set_alt_from_os(false);
+        state.note_alt_key_from_os(false, true)
+    }
+
+    #[test]
+    fn only_alt_pressed_alone_is_a_tap() {
+        let named = |n| Key::Named(n);
+        let none = ModifiersState::empty();
+        assert!(alt_hold_is_a_tap(none, &[]));
+        // A repeat of Alt itself changes nothing.
+        assert!(alt_hold_is_a_tap(none, &[named(NamedKey::Alt)]));
+        // Alt+Shift, Alt+Ctrl, Ctrl+Alt+Shift with a swallowed key.
+        assert!(!alt_hold_is_a_tap(none, &[named(NamedKey::Shift)]));
+        assert!(!alt_hold_is_a_tap(none, &[named(NamedKey::Control)]));
+        assert!(!alt_hold_is_a_tap(
+            none,
+            &[named(NamedKey::Control), named(NamedKey::Shift)]
+        ));
+        // Shift+Alt, Ctrl+Alt: the other modifier went down first.
+        assert!(!alt_hold_is_a_tap(ModifiersState::SHIFT, &[]));
+        assert!(!alt_hold_is_a_tap(ModifiersState::CONTROL, &[]));
+        assert!(!alt_hold_is_a_tap(ModifiersState::SUPER, &[]));
+        // Alt+`, and the Japanese IME's on/off key, which Teksilo does not
+        // translate.
+        assert!(!alt_hold_is_a_tap(none, &[Key::Character("`".into())]));
+        let kanji = named(NamedKey::KanjiMode);
+        assert!(teksilo_platform::event_translation::translate_key(&kanji).is_none());
+        assert!(!alt_hold_is_a_tap(none, &[kanji]));
+        assert!(!alt_hold_is_a_tap(
+            none,
+            &[Key::Unidentified(winit::keyboard::NativeKey::Unidentified)]
+        ));
+    }
+
     use std::cell::RefCell;
     use std::rc::Rc;
 

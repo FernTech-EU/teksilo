@@ -568,9 +568,15 @@ impl WindowState {
     /// loses the focus). Returns `true` for the release that ends a bare Alt
     /// tap: this window saw the press, and no other key went down before
     /// the release.
-    pub fn note_alt_key_from_os(&self, pressed: bool) -> bool {
+    ///
+    /// `alone` is whether no other modifier (Control, Shift, Super) was
+    /// already held as Alt went down; it is read on the press only. Alt+Shift,
+    /// Ctrl+Alt and the like are chords, not the lone Alt that opens the menu
+    /// bar, even when the key that completes them never reaches the window
+    /// (an input method swallows it).
+    pub fn note_alt_key_from_os(&self, pressed: bool, alone: bool) -> bool {
         if pressed {
-            self.inner.alt_press_seen.set(true);
+            self.inner.alt_press_seen.set(alone);
             return false;
         }
         self.inner.alt_press_seen.replace(false) && !self.inner.other_key_pressed_during_alt.get()
@@ -780,14 +786,25 @@ mod tests {
         state.set_focused_from_os(true);
         // Windows: the modifier state, then the key.
         state.set_alt_from_os(true);
-        assert!(!state.note_alt_key_from_os(true));
+        assert!(!state.note_alt_key_from_os(true, true));
         state.set_alt_from_os(false);
-        assert!(state.note_alt_key_from_os(false));
+        assert!(state.note_alt_key_from_os(false, true));
         // Wayland: the key, then the modifier state.
-        assert!(!state.note_alt_key_from_os(true));
+        assert!(!state.note_alt_key_from_os(true, true));
         state.set_alt_from_os(true);
-        assert!(state.note_alt_key_from_os(false));
+        assert!(state.note_alt_key_from_os(false, true));
         state.set_alt_from_os(false);
+    }
+
+    /// Another modifier already held as Alt went down (Shift+Alt, Ctrl+Alt).
+    #[test]
+    fn alt_pressed_with_another_modifier_held_is_not_a_tap() {
+        let state = WindowState::new(init(1));
+        state.set_focused_from_os(true);
+        state.set_alt_from_os(true);
+        assert!(!state.note_alt_key_from_os(true, false));
+        state.set_alt_from_os(false);
+        assert!(!state.note_alt_key_from_os(false, true));
     }
 
     #[test]
@@ -795,10 +812,10 @@ mod tests {
         let state = WindowState::new(init(1));
         state.set_focused_from_os(true);
         state.set_alt_from_os(true);
-        state.note_alt_key_from_os(true);
+        state.note_alt_key_from_os(true, true);
         state.note_non_alt_keydown_during_alt();
         state.set_alt_from_os(false);
-        assert!(!state.note_alt_key_from_os(false));
+        assert!(!state.note_alt_key_from_os(false, true));
     }
 
     /// The window behind one Alt+F4 closed takes the focus with Alt held. It
@@ -811,7 +828,7 @@ mod tests {
         state.set_focused_from_os(true);
         state.set_alt_from_os(true);
         state.set_alt_from_os(false);
-        assert!(!state.note_alt_key_from_os(false));
+        assert!(!state.note_alt_key_from_os(false, true));
     }
 
     /// Alt+F4 that an in-window modal takes leaves the window open, and
@@ -821,10 +838,10 @@ mod tests {
         let state = WindowState::new(init(1));
         state.set_focused_from_os(true);
         state.set_alt_from_os(true);
-        state.note_alt_key_from_os(true);
+        state.note_alt_key_from_os(true, true);
         state.note_close_request_from_os();
         state.set_alt_from_os(false);
-        assert!(!state.note_alt_key_from_os(false));
+        assert!(!state.note_alt_key_from_os(false, true));
     }
 
     /// Alt+Tab away and back: the press seen before the focus left is
@@ -834,11 +851,11 @@ mod tests {
         let state = WindowState::new(init(1));
         state.set_focused_from_os(true);
         state.set_alt_from_os(true);
-        state.note_alt_key_from_os(true);
+        state.note_alt_key_from_os(true, true);
         state.set_focused_from_os(false);
         state.set_focused_from_os(true);
         state.set_alt_from_os(false);
-        assert!(!state.note_alt_key_from_os(false));
+        assert!(!state.note_alt_key_from_os(false, true));
     }
 
     #[test]

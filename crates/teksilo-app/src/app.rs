@@ -3798,7 +3798,10 @@ impl TeksiloAppHandler {
         }
         let pressed = key_event.state == winit::event::ElementState::Pressed;
         let action = self.wm.get_by_winit_mut(window_id).and_then(|managed| {
-            if managed.state.note_alt_key_from_os(pressed) {
+            if managed.state.note_alt_key_from_os(
+                pressed,
+                crate::input_routing::alt_pressed_alone(managed.current_modifiers),
+            ) {
                 managed
                     .state
                     .menubar_dispatcher()
@@ -3842,7 +3845,10 @@ impl TeksiloAppHandler {
         // so they never count: Alt's own press, and Shift added to it, leave
         // the tap intact. Every key that does translate counts, Caps Lock
         // included.
-        if key.is_some() {
+        // A key Teksilo cannot translate counts too (the Japanese IME's
+        // on/off key between Alt's press and release is one): only the
+        // modifier keys themselves do not.
+        if key.is_some() || crate::input_routing::key_cancels_alt_tap(&key_event.logical_key) {
             managed.state.note_non_alt_keydown_during_alt();
         }
     }
