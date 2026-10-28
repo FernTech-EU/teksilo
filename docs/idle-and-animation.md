@@ -163,6 +163,17 @@ TEKSILO_IDLE_TRACE=1 timeout 10 ./target/profiling/widget-catalog 2> /tmp/idle.l
 wc -l /tmp/idle.log   # expect 0
 ```
 
+When it does print, each line says what woke the loop in the second it
+covers. `woken_by` counts the timer wakes by the timer that set them:
+`wake_at` (a caret blink, a held-back accessibility delivery, a toast's
+timer), `frame_tick`, `animation`, `animated_quad`, `gesture`, the tooltip
+and overlay timers, and the loop's own (`redraw_gate`, `occlusion_probe`,
+`app_tree`, `session`, `pen`, `gpu_reclaim`). `window_events` counts what
+winit delivered, by kind, and `user_events` every event posted to the loop,
+the framework's own wakes included. A focused text field blinks its caret
+twice a second, so `woken_by={wake_at:2}` and `rendered_frames=2` is that
+field's floor; with no caret on screen the floor is no line at all.
+
 CPU and GPU deltas can be read from the kernel:
 
 ```bash

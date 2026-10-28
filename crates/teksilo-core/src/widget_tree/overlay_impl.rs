@@ -1819,6 +1819,18 @@ impl WidgetTree {
     /// quads, input gestures, an explicit wake-at and the per-frame tick
     /// (if any).
     pub fn next_timer_deadline(&self) -> Option<std::time::Instant> {
+        self.next_timer_deadline_source().map(|(at, _)| at)
+    }
+
+    /// [`next_timer_deadline`](Self::next_timer_deadline), with the name of
+    /// the timer that sets it: `tooltip`, `tooltip_dwell`,
+    /// `delayed_overlay`, `overlay_auto_dismiss`, `overlay_pointer_leave`,
+    /// `overlay_fade`, `animation`, `animated_quad`, `gesture`, `wake_at` (a
+    /// caret blink, a held-back accessibility delivery, a toast timer) or
+    /// `frame_tick`. The first named when several are due at once. Read by
+    /// `TEKSILO_IDLE_TRACE`'s `woken_by` counts.
+    #[doc(hidden)]
+    pub fn next_timer_deadline_source(&self) -> Option<(std::time::Instant, &'static str)> {
         let now = std::time::Instant::now();
         let session_active = self.tooltip_session_active_real(now);
         let tooltip_deadline = self
@@ -1922,21 +1934,21 @@ impl WidgetTree {
         let frame_tick_deadline = self.frame_tick_deadline();
 
         [
-            tooltip_deadline,
-            dwell_tooltip_deadline,
-            delayed_overlay_deadline,
-            auto_dismiss_deadline,
-            pointer_leave_deadline,
-            fade_dismiss_deadline,
-            animation_deadline,
-            animated_quad_deadline,
-            gesture_deadline,
-            wake_at_deadline,
-            frame_tick_deadline,
+            (tooltip_deadline, "tooltip"),
+            (dwell_tooltip_deadline, "tooltip_dwell"),
+            (delayed_overlay_deadline, "delayed_overlay"),
+            (auto_dismiss_deadline, "overlay_auto_dismiss"),
+            (pointer_leave_deadline, "overlay_pointer_leave"),
+            (fade_dismiss_deadline, "overlay_fade"),
+            (animation_deadline, "animation"),
+            (animated_quad_deadline, "animated_quad"),
+            (gesture_deadline, "gesture"),
+            (wake_at_deadline, "wake_at"),
+            (frame_tick_deadline, "frame_tick"),
         ]
         .into_iter()
-        .flatten()
-        .min()
+        .filter_map(|(at, source)| Some((at?, source)))
+        .min_by_key(|&(at, _)| at)
     }
 
     /// When a tree that is never painted must next be laid out: the part
@@ -2320,6 +2332,26 @@ mod tests {
     use super::*;
     use crate::test_widgets::FillWidget;
     use crate::test_widgets::StackWidget;
+
+    /// The idle trace names what wakes the loop from this, so the name must
+    /// be the earliest timer's.
+    #[test]
+    fn the_next_timer_deadline_is_named_for_its_timer() {
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(tree.next_timer_deadline_source(), None, "an idle tree");
+
+        let blink = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        tree.request_wake_at(blink);
+        assert_eq!(tree.next_timer_deadline_source(), Some((blink, "wake_at")));
+        assert_eq!(tree.next_timer_deadline(), Some(blink));
+
+        tree.request_frame();
+        let (at, source) = tree.next_timer_deadline_source().expect("a frame is due");
+        assert_eq!(source, "frame_tick", "the frame is due before the blink");
+        assert!(at < blink);
+    }
 
     #[test]
     fn is_visible_reflects_dormancy() {

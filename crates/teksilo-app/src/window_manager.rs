@@ -711,15 +711,37 @@ impl ManagedWindow {
     /// next timer deadline, held back while it awaits a redraw it requested
     /// and while it draws nothing. See
     /// [`RedrawGate::deadline`](crate::redraw_gate::RedrawGate::deadline).
+    /// Only `winit_loop_tests` ask it, and they build on Linux only.
+    #[cfg(all(test, target_os = "linux"))]
     pub(crate) fn wake_deadline(&self, now: std::time::Instant) -> Option<std::time::Instant> {
+        self.wake_deadline_source(now).map(|(at, _)| at)
+    }
+
+    /// When the event loop should next wake for this window (see
+    /// [`RedrawGate::deadline`](crate::redraw_gate::RedrawGate::deadline)),
+    /// with the timer behind it for the idle trace: the tree's
+    /// (`WidgetTree::next_timer_deadline_source`), `redraw_gate` when the gate
+    /// moved it or set it, or `occlusion_probe`.
+    pub(crate) fn wake_deadline_source(
+        &self,
+        now: std::time::Instant,
+    ) -> Option<(std::time::Instant, &'static str)> {
         let probe = self
             .occlusion_probed_at
             .map(|at| at + OCCLUSION_PROBE_INTERVAL);
-        let gate = self.redraw.deadline(now, self.tree.next_timer_deadline());
-        if let Some(probe) = probe {
-            return Some(gate.map_or(probe, |gate| gate.min(probe)));
+        let timer = self.tree.next_timer_deadline_source();
+        let gate = self
+            .redraw
+            .deadline(now, timer.map(|(at, _)| at))
+            .map(|at| match timer {
+                Some((timer_at, source)) if timer_at == at => (at, source),
+                _ => (at, "redraw_gate"),
+            });
+        match (gate, probe) {
+            (Some(gate), Some(probe)) if probe < gate.0 => Some((probe, "occlusion_probe")),
+            (None, Some(probe)) => Some((probe, "occlusion_probe")),
+            (gate, _) => gate,
         }
-        gate
     }
 }
 

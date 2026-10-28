@@ -76,6 +76,13 @@ by crate for clarity, not because crates version independently.
   `writing_tools`, `insertion`), so a headless test can commit text as the
   input system would.
 
+#### App
+
+- **`TEKSILO_IDLE_TRACE` says what woke the loop**: timer wakes by the timer
+  that set them (`woken_by`, for example `wake_at` for a caret blink),
+  window events by kind (`window_events`) and every posted event
+  (`user_events`). See [docs/idle-and-animation.md](docs/idle-and-animation.md).
+
 ### Changed
 
 #### Core

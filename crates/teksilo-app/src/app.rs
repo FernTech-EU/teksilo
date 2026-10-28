@@ -775,6 +775,17 @@ pub(crate) struct IdleTrace {
     timer_windows: usize,
     animation_timers: usize,
     tooltip_timers: usize,
+    /// The timer behind the deadline the last control-flow decision kept
+    /// (`WidgetTree::next_timer_deadline_source`, or one of the loop's own),
+    /// counted in `woken_by` when that deadline wakes the loop.
+    deadline_source: Option<&'static str>,
+    /// Timer wakes, by the timer that set them.
+    woken_by: std::collections::BTreeMap<&'static str, u64>,
+    /// Window events winit delivered, by kind: what wakes the loop that no
+    /// timer explains.
+    window_events: std::collections::BTreeMap<&'static str, u64>,
+    /// Every user event, the framework's own wakes included.
+    user_events: u64,
     #[cfg(feature = "live-image-timings")]
     live: LiveTrace,
 }
@@ -826,6 +837,39 @@ fn live_trace_line(
     )
 }
 
+/// `{a:1,b:2}`'s inside, for the idle trace.
+fn trace_counts(counts: &std::collections::BTreeMap<&'static str, u64>) -> String {
+    counts
+        .iter()
+        .map(|(name, count)| format!("{name}:{count}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// A window event's kind, for the idle trace.
+fn window_event_name(event: &WindowEvent) -> &'static str {
+    match event {
+        WindowEvent::RedrawRequested => "redraw_requested",
+        WindowEvent::CursorMoved { .. } => "cursor_moved",
+        WindowEvent::CursorEntered { .. } => "cursor_entered",
+        WindowEvent::CursorLeft { .. } => "cursor_left",
+        WindowEvent::MouseInput { .. } => "mouse_input",
+        WindowEvent::MouseWheel { .. } => "mouse_wheel",
+        WindowEvent::KeyboardInput { .. } => "keyboard_input",
+        WindowEvent::ModifiersChanged(_) => "modifiers_changed",
+        WindowEvent::Ime(_) => "ime",
+        WindowEvent::Focused(_) => "focused",
+        WindowEvent::Occluded(_) => "occluded",
+        WindowEvent::Resized(_) => "resized",
+        WindowEvent::Moved(_) => "moved",
+        WindowEvent::ScaleFactorChanged { .. } => "scale_factor_changed",
+        WindowEvent::ThemeChanged(_) => "theme_changed",
+        WindowEvent::Touch(_) => "touch",
+        WindowEvent::ActivationTokenDone { .. } => "activation_token_done",
+        _ => "other",
+    }
+}
+
 impl IdleTrace {
     fn from_env() -> Option<Self> {
         match std::env::var("TEKSILO_IDLE_TRACE") {
@@ -864,6 +908,10 @@ impl IdleTrace {
             timer_windows: 0,
             animation_timers: 0,
             tooltip_timers: 0,
+            deadline_source: None,
+            woken_by: std::collections::BTreeMap::new(),
+            window_events: std::collections::BTreeMap::new(),
+            user_events: 0,
             #[cfg(feature = "live-image-timings")]
             live: LiveTrace::default(),
         }
@@ -871,17 +919,18 @@ impl IdleTrace {
 
     fn note_control_flow(
         &mut self,
-        has_deadline: bool,
+        deadline_source: Option<&'static str>,
         timer_windows: usize,
         animation_timers: usize,
         tooltip_timers: usize,
         gpu_reclaim: bool,
     ) {
-        if has_deadline {
+        if deadline_source.is_some() {
             self.control_flow_wait_until += 1;
         } else {
             self.control_flow_wait += 1;
         }
+        self.deadline_source = deadline_source;
         if gpu_reclaim {
             self.gpu_reclaim_waits += 1;
         }
@@ -915,6 +964,22 @@ impl IdleTrace {
 
     fn note_resume_time_reached(&mut self) {
         self.resume_time_reached += 1;
+        if let Some(source) = self.deadline_source {
+            *self.woken_by.entry(source).or_default() += 1;
+        }
+        self.maybe_report();
+    }
+
+    fn note_window_event(&mut self, event: &WindowEvent) {
+        *self
+            .window_events
+            .entry(window_event_name(event))
+            .or_default() += 1;
+        self.maybe_report();
+    }
+
+    fn note_user_event(&mut self) {
+        self.user_events += 1;
         self.maybe_report();
     }
 
@@ -981,13 +1046,16 @@ impl IdleTrace {
         }
 
         eprintln!(
-            "teksilo_idle_trace t={:.3} redraw_requested={} rendered_frames={} hidden_redraws={} ticks={} resume_time_reached={} request_redraw_all={} cross_window_redraws={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{},frame_request:{}}} idle_callbacks={} app_events={} posted_wakes={{draw:{},layout:{}}} waker_wakes={} waker_wakes_dropped={} control_flow={{wait:{},wait_until:{},gpu_reclaim:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
+            "teksilo_idle_trace t={:.3} redraw_requested={} rendered_frames={} hidden_redraws={} ticks={} resume_time_reached={} woken_by={{{}}} window_events={{{}}} user_events={} request_redraw_all={} cross_window_redraws={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{},frame_request:{}}} idle_callbacks={} app_events={} posted_wakes={{draw:{},layout:{}}} waker_wakes={} waker_wakes_dropped={} control_flow={{wait:{},wait_until:{},gpu_reclaim:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
             self.started.elapsed().as_secs_f64(),
             self.redraw_requested,
             self.rendered_frames,
             self.hidden_redraws,
             self.ticks,
             self.resume_time_reached,
+            trace_counts(&self.woken_by),
+            trace_counts(&self.window_events),
+            self.user_events,
             self.request_redraw_all,
             self.cross_window_redraws,
             self.cursor_redraw_requests,
@@ -1012,6 +1080,9 @@ impl IdleTrace {
 
         self.last_report = Instant::now();
         self.resume_time_reached = 0;
+        self.woken_by.clear();
+        self.window_events.clear();
+        self.user_events = 0;
         self.redraw_requested = 0;
         self.rendered_frames = 0;
         self.hidden_redraws = 0;
@@ -1889,7 +1960,15 @@ impl TeksiloAppHandler {
             }
         }
 
+        // The earliest deadline, and the timer behind it for the idle trace.
         let mut earliest_deadline: Option<Instant> = None;
+        let mut deadline_source: Option<&'static str> = None;
+        let mut keep_earliest = |at: Instant, source: &'static str| {
+            if earliest_deadline.is_none_or(|current| at < current) {
+                earliest_deadline = Some(at);
+                deadline_source = Some(source);
+            }
+        };
         let mut timer_windows = 0_usize;
         let mut animation_timers = 0_usize;
         let mut tooltip_timers = 0_usize;
@@ -1909,11 +1988,8 @@ impl TeksiloAppHandler {
             // the display's refresh rate — 300 fps on a 300 Hz panel).
             // Held back for a window awaiting a redraw it requested or
             // drawing nothing: see `crate::redraw_gate`.
-            if let Some(deadline) = managed.wake_deadline(now) {
-                earliest_deadline = Some(match earliest_deadline {
-                    Some(current) => current.min(deadline),
-                    None => deadline,
-                });
+            if let Some((deadline, source)) = managed.wake_deadline_source(now) {
+                keep_earliest(deadline, source);
             }
         }
 
@@ -1924,19 +2000,13 @@ impl TeksiloAppHandler {
             .app_tree()
             .and_then(|tree| tree.next_unpainted_deadline())
         {
-            earliest_deadline = Some(match earliest_deadline {
-                Some(current) => current.min(deadline),
-                None => deadline,
-            });
+            keep_earliest(deadline, "app_tree");
         }
 
         // While nothing on screen can be seen, the session watch rereads the
         // system's state now and then (`WindowManager::recheck_session`).
         if let Some(recheck) = self.wm.session_deadline() {
-            earliest_deadline = Some(match earliest_deadline {
-                Some(current) => current.min(recheck),
-                None => recheck,
-            });
+            keep_earliest(recheck, "session");
         }
 
         // The digitizer, whose packets arrive on a thread of its own and so
@@ -1944,10 +2014,7 @@ impl TeksiloAppHandler {
         // a `Poll`: see `input_loop::pen_deadline` for when each of its two
         // terms applies and when neither does.
         if let Some(pen) = self.pen_deadline(now) {
-            earliest_deadline = Some(match earliest_deadline {
-                Some(current) => current.min(pen),
-                None => pen,
-            });
+            keep_earliest(pen, "pen");
         }
 
         // Textures a renderer dropped (a live picture left a window, a window
@@ -1959,10 +2026,7 @@ impl TeksiloAppHandler {
         let reclaim_pending = (self.gpu_reclaim)();
         if reclaim_pending {
             let reclaim = now + GPU_RECLAIM_POLL;
-            earliest_deadline = Some(match earliest_deadline {
-                Some(current) => current.min(reclaim),
-                None => reclaim,
-            });
+            keep_earliest(reclaim, "gpu_reclaim");
         }
 
         // The ONLY consumer that forces true `ControlFlow::Poll`: an installed
@@ -1991,7 +2055,7 @@ impl TeksiloAppHandler {
                 )
             }));
             trace.note_control_flow(
-                earliest_deadline.is_some(),
+                deadline_source,
                 timer_windows,
                 animation_timers,
                 tooltip_timers,
@@ -4891,6 +4955,9 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
+        if let Some(trace) = &mut self.idle_trace {
+            trace.note_user_event();
+        }
         // A payload that came with an activation token: every handler sees
         // what it wraps, and the token waits for the first raise or open.
         let (event, token) = unwrap_activation_token(event);
@@ -5286,6 +5353,9 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        if let Some(trace) = &mut self.idle_trace {
+            trace.note_window_event(&event);
+        }
         self.handle_window_event_inner(event_loop, window_id, event);
     }
 
@@ -9825,6 +9895,36 @@ mod display_connection_tests {
     #[test]
     fn a_loop_that_could_not_be_built_stays_fatal() {
         assert!(!display_connection_lost(&EventLoopError::RecreationAttempt));
+    }
+}
+
+#[cfg(test)]
+mod idle_trace_tests {
+    use super::*;
+
+    /// A timer wake is counted for the timer the control flow last waited
+    /// on, and a decision with no deadline names none.
+    #[test]
+    fn a_timer_wake_is_counted_for_the_timer_it_waited_on() {
+        let mut trace = IdleTrace::new();
+        trace.note_control_flow(Some("wake_at"), 1, 0, 0, false);
+        trace.note_resume_time_reached();
+        trace.note_control_flow(Some("frame_tick"), 1, 0, 0, false);
+        trace.note_resume_time_reached();
+        trace.note_control_flow(Some("wake_at"), 1, 0, 0, false);
+        trace.note_resume_time_reached();
+        trace.note_control_flow(None, 0, 0, 0, false);
+        trace.note_resume_time_reached();
+        assert_eq!(trace_counts(&trace.woken_by), "frame_tick:1,wake_at:2");
+        assert_eq!(trace.resume_time_reached, 4);
+
+        trace.note_window_event(&WindowEvent::RedrawRequested);
+        trace.note_window_event(&WindowEvent::Occluded(false));
+        trace.note_window_event(&WindowEvent::RedrawRequested);
+        assert_eq!(
+            trace_counts(&trace.window_events),
+            "occluded:1,redraw_requested:2"
+        );
     }
 }
 
