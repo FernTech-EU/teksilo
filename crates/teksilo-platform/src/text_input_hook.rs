@@ -75,6 +75,8 @@ mod key_press;
 mod left_behind;
 #[cfg(target_os = "macos")]
 mod macos;
+mod tsf_lock;
+mod tsf_mirror;
 #[cfg(target_os = "windows")]
 mod windows;
 mod winit_ime;
@@ -310,6 +312,79 @@ pub fn take_marked_replacement(window_id: TeksiloWindowId) -> Option<Range<usize
     }
 }
 
+/// Which path the platform's text input system takes to a focused text
+/// field, chosen with `TEKSILO_TSF` (read once). Windows only; `Off`
+/// everywhere else.
+///
+/// The TSF text store is Phase 0 of `engineering/docs/tsf-text-store.md`: a
+/// measuring build. Its store answers text services from a copy of the
+/// focused document and keeps what they write to itself, so text composed
+/// or dictated through it does **not** reach the field.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextStoreMode {
+    /// IMM32 alone, through winit (the default).
+    Off,
+    /// `TEKSILO_TSF=1`: a TSF text store for every focused field that
+    /// describes its document, and winit's IME off there.
+    Store,
+    /// `TEKSILO_TSF=associated`: the same store, with winit's IME (its IMM
+    /// context) left on, for comparing the two (M10).
+    StoreKeepingImm,
+}
+
+/// The [`TextStoreMode`] this process runs with.
+#[doc(hidden)]
+pub fn text_store_mode() -> TextStoreMode {
+    static MODE: OnceLock<TextStoreMode> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        if cfg!(target_os = "windows") {
+            parse_text_store_mode(std::env::var("TEKSILO_TSF").ok().as_deref())
+        } else {
+            TextStoreMode::Off
+        }
+    })
+}
+
+/// `TEKSILO_TSF`'s value as a mode: `1` (or `store`) and `associated`; off
+/// for anything else.
+fn parse_text_store_mode(value: Option<&str>) -> TextStoreMode {
+    match value.map(str::trim) {
+        Some("1" | "store") => TextStoreMode::Store,
+        Some("associated") => TextStoreMode::StoreKeepingImm,
+        _ => TextStoreMode::Off,
+    }
+}
+
+/// What has the keyboard focus in a window, as the text store sees it.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoreFocus {
+    /// No text field, or a secure one: TSF gets an empty, disabled context.
+    None,
+    /// A text field that does not describe its document (`CodeEditor`, the
+    /// terminal): the IMM path, CUAS's own document.
+    Imm,
+    /// A text field that describes its document: a store of its own, a new
+    /// one each time a widget takes the focus.
+    Document {
+        /// The focused widget.
+        widget: teksilo_core::WidgetId,
+    },
+}
+
+/// Give the window's text store `focus`, and bring its copy of the focused
+/// document up to date. Main thread only, from the application's handling
+/// of an event (it makes TSF calls, which can deliver messages), after
+/// every dispatched event. Does nothing unless [`text_store_mode`] is on.
+#[doc(hidden)]
+pub fn set_text_store_focus(window: &ParentHandle, focus: StoreFocus) {
+    #[cfg(target_os = "windows")]
+    windows::set_text_store_focus(window, focus);
+    #[cfg(not(target_os = "windows"))]
+    let _ = (window, focus);
+}
+
 /// Attach to a window's native surface. Main thread only, once the window
 /// exists. A no-op where the platform needs nothing.
 ///
@@ -346,6 +421,18 @@ pub fn detach(window_id: TeksiloWindowId) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_text_store_is_off_unless_asked_for() {
+        assert_eq!(parse_text_store_mode(None), TextStoreMode::Off);
+        assert_eq!(parse_text_store_mode(Some("0")), TextStoreMode::Off);
+        assert_eq!(parse_text_store_mode(Some("1")), TextStoreMode::Store);
+        assert_eq!(parse_text_store_mode(Some(" store ")), TextStoreMode::Store);
+        assert_eq!(
+            parse_text_store_mode(Some("associated")),
+            TextStoreMode::StoreKeepingImm
+        );
+    }
 
     #[test]
     fn classify_follows_the_precedence_dictation_writing_tools_marked_text() {

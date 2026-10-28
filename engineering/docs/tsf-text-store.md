@@ -238,16 +238,17 @@ COM), and UIA calls are incoming.
 - **Non-text focus**: an empty, disabled context (`GUID_COMPARTMENT_KEYBOARD_DISABLED` = 1 on the
   context, and `GUID_COMPARTMENT_EMPTYCONTEXT` = 1 where supported), as both browsers do (Chromium
   `InitializeDisabledContext`, Firefox `TSFEmptyTextStore.cpp`), rather than TSF focus null, which
-  Chromium calls "TSF's default document which is only there for app compat". What the emoji panel
-  does there (refuses, or still loses the pick of scenario 5) is M5.
-- **How**, following Chromium (`tsf_bridge.cc`): each window is associated, once, with its own empty
-  document manager (`AssociateFocus`, which does not AddRef and "calls SetFocus on the document
+  Chromium calls "TSF's default document which is only there for app compat". Measured (M5): the
+  emoji panel opens there and a pick is lost.
+- **How**, following Chromium (`tsf_bridge.cc`): each window is associated with its own empty
+  document manager (once, while a store or the empty context has the focus: an IMM-path widget needs
+  the association dropped, M2) (`AssociateFocus`, which does not AddRef and "calls SetFocus on the document
   manager internally", so that manager lives as long as the window). A text field's document is
   focused with `SetFocus` only, never with both calls for one change (duplicate notifications), and
   only for the window that has the Win32 focus: a switch in a background window (a programmatic
   focus change) is recorded and applied when the window regains focus, so it never takes TSF focus
-  from the window the user types in. The order of TSF's own `WM_SETFOCUS` handling against winit's
-  `Focused(true)` is M14.
+  from the window the user types in. Measured (M14): the window's `WM_SETFOCUS` comes first, and the
+  store's `SetFocus` at the next settle is in time.
 
 ### 4.7 The lock model
 
@@ -367,6 +368,10 @@ M4 and M5:
    (`GUID_PROP_LMLATTICE`, not in the `windows` crate) are candidates.
 3. **Hints only**: an active speech profile, the speech compartments (empty under CUAS).
 
+Measured for the keyboard IMEs and the emoji panel (M4, M5): candidate 1 fails, every composition
+has the same owner (`D7487DBF-804E-41C5-894D-AD96FD4EEA13`) and the same `TEXTOWNER` atom. Whether
+voice typing's writes carry a property of their own (candidate 2, the lattice) is M1.
+
 `classify` gains a speech-owner input that yields `Dictation`. Without a signal, text written
 outside a composition is `Insertion` and a composition's is `Composition`, as today.
 
@@ -442,7 +447,13 @@ cannot compose breaks every IME.
 - **Phase 0, measure** (about 1,000 lines). Chromium's key model, a store answering reads from the
   document and taking writes into a private mirror (kept afterwards as a debug fallback), the empty
   disabled context, `ITfKeyTraceEventSink`, `ITfTextEditSink` with `EnumProperties`, tracing.
-  Answers M1 to M5, M9, M10, M12, M14. A design change they force comes back here first.
+  Answers M1 to M5, M9, M10, M12, M14 (7.2 has what was found; M1 is still open). A design change
+  they force comes back here first.
+  Built behind `TEKSILO_TSF=1` (`TEKSILO_TSF=associated` keeps winit's IMM context for M10):
+  `text_input_hook/windows/tsf.rs`, with the pure `tsf_mirror.rs` and `tsf_lock.rs`. `#[implement]`
+  accepts a type holding an `Rc` (4.5's compile check). The store syncs its mirror at every
+  `settle_ime` while no lock is held and no composition is in progress, so a text service's writes
+  live until the next sync after its composition ends; nothing reaches the field.
 - **Phase 0.5, the shared core API** (about 2,000 lines with the two widgets and their headless
   tests). Section 3's teksilo-core items: write half with dry run and correction, batch bracket,
   `is_available`, `flush_pending_input`, journal with cause, composition-as-range mode in both
@@ -471,28 +482,64 @@ semantics (Chromium); the lock contract and the compartments' levels (Microsoft)
 store (its source). Still to be measured on the VM, through the `win` worker on the desktop (session
 0 over `ssh win` does not load TIPs representatively):
 
-- M1: voice typing into the store, French and English: flyout, interim text, commands, the calls it
-  makes and how much it reads; voice access.
-- M2: CUAS for an IMM-path focus once the thread is activated.
-- M3: keys in Chromium's model; the hook variant; double processing.
-- M4: owners and every property on written ranges, for voice typing and the three IMEs.
-- M5: how the emoji panel writes, its owner; type-to-search; with the empty context.
-- M6: placement with approximate rectangles (confirmation).
-- M7: secure and read-only contexts, the thread-level speech compartment, input scopes, the touch
-  keyboard with `TS_SD_INPUTPANEMANUALDISPLAYENABLE`; hardware-keyboard suggestions.
-- M8: context creation, `GetText` volume, a Japanese keystroke in a document of 1 MB or more, the
-  UTF-16 index rebuild.
-- M9: what winit sees for an eaten key; Alt+` and the menu; eaten key-down with a passed key-up.
-- M10: IMM context disassociated against associated with a store focused; a legacy IMM-IME.
-- M11: NVDA through the store; nothing read from a secure field.
-- M12: which edit-session flags TIPs use (`TF_ES_SYNC` or asynchronous), with round 7's bursts.
-- M13: termination before a press: the Japanese trailing `n` lands before the press hit-tests.
-- M14: TSF's focus handling against winit's `Focused(true)`; a background window's switch.
+Measured in Phase 0 (`cross_tasks/tsf-phase-0-windows-findings.md`, Windows 11 22621, the
+Microsoft Japanese, Pinyin and Korean IMEs, the emoji panel; no hang, no crash). The answers:
+
+- M1: voice typing into the store: **not measured yet** (it needs someone to speak); flyout, interim
+  text, commands, the calls it makes and how much it reads; voice access.
+- M2: **with our empty document associated with the HWND, the IMM path did not compose**: TSF focused
+  that disabled context as winit's IMM context activated (the probe read a context with no flags
+  where CUAS's reads `[TRANSITORY]`), Alt+` toggled nothing and keys stayed plain. Fixed by
+  associating the HWND back (with what `AssociateFocus` first handed back: nothing) while an IMM-path
+  widget has the focus, and with the empty document again when it leaves. **Settled** in round 2
+  (`tsf-phase-0-windows-2-findings.md`): the code editor composes Japanese and Pinyin under
+  `TEKSILO_TSF=1` after every switch with a store field, by click and by Tab, and the focused
+  context reads CUAS's `[TRANSITORY]`. So 4.6's "associated once" becomes "associated while the store or the
+  empty context has the focus".
+- M3: Chromium's model works with no hook: TSF processes the keys; a key a text service takes
+  reaches winit as **its key-up only** (no `WM_KEYDOWN`, neither `VK_PROCESSKEY` nor the plain key,
+  and no `WM_CHAR`), between the key trace's down and up. A key it passes on (an arrow ending a Korean
+  syllable, letters with the IME off) arrives as usual. No double processing seen. The key-trace
+  verdict (4.3) is what tells winit's lone key-ups apart.
+- M4: **one owner for everything**: `D7487DBF-804E-41C5-894D-AD96FD4EEA13` for the Japanese, Pinyin
+  and Korean compositions and for the emoji picks, not any TIP's CLSID, and `TEXTOWNER` the same atom
+  (2) on all of them; so **no attribution from the owner**, as section 5 feared. Properties per IME:
+  Japanese `ATTRIBUTE` (30 while typing, 62 once converted), `READING` (half-width katakana),
+  `COMPOSING`, `TEXTOWNER`; Pinyin `ATTRIBUTE` 94, `COMPOSING`, `TEXTOWNER`, no `READING`; Korean
+  `ATTRIBUTE` 126, `READING` the syllable itself, one composition per syllable, the next one started
+  in the same edit session. After a composition ends, `READING` and `TEXTOWNER` stay (Japanese),
+  `TEXTOWNER` alone (Pinyin, emoji). Voice typing's are M1's.
+- M5: **an emoji pick is a one-shot composition** (`OnStartComposition`, `SetText`,
+  `OnEndComposition` in one edit session), not `InsertTextAtSelection`, with the same owner and
+  `TEXTOWNER` alone; search works when typed right after Win+. **With a non-text widget focused (the
+  empty, disabled context) the panel opens and a pick is lost**, with no call at all, as the IMM path
+  loses it without a field.
+- M6: the candidate list and the prediction list open under the caret. Phase 0's store answers every
+  `GetTextExt` with the caret rectangle (the composition is in the mirror, not the document), so
+  per-clause placement waits for the write half.
+- M7, M8, M11, M13: not measured yet. For M8, on a 7709-unit document the text service read about
+  6000 units at focus, in 63 `GetText` calls of 128 units stepping by 96.
+- M9: Alt+` with the Japanese IME toggles it and **the menu bar keeps away**: between Alt's down
+  and up winit sees `WM_SYSKEYDOWN`/`WM_SYSKEYUP` for `VK_KANJI` (the key was passed on), so the
+  Alt tap is cancelled; Alt's own release came as `WM_KEYUP`, not `WM_SYSKEYUP`.
+- M10: **associated and disassociated behave the same for the store**: the same locks, writes,
+  owner, properties and keys, and no `WM_IME_*` message during typing in either. Associated adds a
+  `WM_IME_SETCONTEXT` pair and two candidate-placement rounds at start-up; disassociated gets
+  `IMN_*` notifications with no input context to read (Alt+`, layout switches). The design keeps
+  disassociation; association is a working fallback.
+- M12: **every lock a text service asked for was asynchronous** (`0x6` read-write, `0x2` read), and
+  none was queued or refused. Synchronous read locks (`0x3`) came only with a plain keyboard layout
+  active (TSF itself, at a key-up), each followed by one `GetSelection`. So a refused synchronous
+  request costing a key (risk 4) did not occur.
+- M14: leaving the window gives `WM_KILLFOCUS` and nothing from the store; coming back, the
+  window's `WM_SETFOCUS` precedes the store's `SetFocus`, applied from the next settle, and Japanese
+  composes at once. Between fields of one window the stores swap with no window focus message.
 
 ### 7.3 Risks
 
 1. **Messages delivered during TSF calls** (4.4): measured to lose input once.
-2. **The untrodden IMM configuration** (M10) and **CUAS after activation** (M2).
+2. **The untrodden IMM configuration** (M10, measured: no difference) and **CUAS after activation**
+   (M2, settled: the HWND is not associated with the empty document on the IMM path).
 3. **Eaten keys**: the Alt tap and `alt_down` (M9).
 4. **Reentrancy under a lock**: a nested dispatch changing the document; a refused synchronous lock
    costing a key (M12).

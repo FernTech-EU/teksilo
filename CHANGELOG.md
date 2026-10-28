@@ -26,6 +26,9 @@ by crate for clarity, not because crates version independently.
   [docs/native-menu.md](docs/native-menu.md).
 - **`TEKSILO_TEXT_INPUT_TRACE=1`** logs what the platform's text input system
   sends a window, on macOS and Windows.
+- **`TEKSILO_TSF=1`** (Windows) runs a measuring TSF text store: text
+  services read the focused field through it, and what they write stays in
+  the store's own copy and does not reach the field. For diagnosing only.
 - **Windows: a text field answers the input method's questions about its
   text.** The candidate window follows the character being converted, and
   the input method reads the text around the composition as it predicts.

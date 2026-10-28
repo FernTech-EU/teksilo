@@ -184,9 +184,11 @@ use teksilo_core::text_input_document::TextInputDocument;
 use teksilo_core::text_surface::TextSurfaces;
 use teksilo_core::window::TeksiloWindowId;
 
-use super::FinishedComposition;
+mod tsf;
+
 use super::imm_completion::{self, ImmCompletion, ImmMessage};
 use super::imm_requests::{self, ReconvertString};
+use super::{FinishedComposition, StoreFocus};
 
 use windows::Win32::Foundation::{
     CO_E_NOTINITIALIZED, CloseHandle, HWND, LPARAM, LRESULT, POINT, RECT, S_OK, WPARAM,
@@ -248,8 +250,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetClassNameW, GetForegroundWindow, GetMessageExtraInfo, GetWindowThreadProcessId,
     UNICODE_NOCHAR, WM_CHAR, WM_DEADCHAR, WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
     WM_IME_KEYDOWN, WM_IME_KEYUP, WM_IME_NOTIFY, WM_IME_REQUEST, WM_IME_SELECT, WM_IME_SETCONTEXT,
-    WM_IME_STARTCOMPOSITION, WM_INPUTLANGCHANGE, WM_KEYDOWN, WM_KEYUP, WM_NCDESTROY, WM_SYSCHAR,
-    WM_SYSDEADCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_UNICHAR,
+    WM_IME_STARTCOMPOSITION, WM_INPUTLANGCHANGE, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_NCDESTROY,
+    WM_SETFOCUS, WM_SYSCHAR, WM_SYSDEADCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_UNICHAR,
 };
 use windows::core::{GUID, HRESULT, Interface, PWSTR, s, w};
 
@@ -345,7 +347,15 @@ pub(super) fn attach(
     // A second attach for one window replaces the first.
     detach(window_id);
     WINDOWS.with_borrow_mut(|windows| windows.insert(window_id, hwnd));
-    install_tap(window_id, hwnd, surfaces);
+    install_tap(window_id, hwnd, surfaces.clone());
+    tsf::attach(window_id, hwnd, surfaces);
+}
+
+/// See [`super::set_text_store_focus`].
+pub(super) fn set_text_store_focus(parent: &ParentHandle, focus: StoreFocus) {
+    if let Some(hwnd) = hwnd_of(parent) {
+        tsf::set_text_store_focus(hwnd, focus);
+    }
 }
 
 /// The HWND behind a window handle, `None` for one that is not a Win32 one.
@@ -396,7 +406,9 @@ fn install_tap(window_id: TeksiloWindowId, hwnd: HWND, surfaces: TextSurfaces) {
 }
 
 pub(super) fn detach(window_id: TeksiloWindowId) {
-    WINDOWS.with_borrow_mut(|windows| windows.remove(&window_id));
+    if let Some(hwnd) = WINDOWS.with_borrow_mut(|windows| windows.remove(&window_id)) {
+        tsf::detach(hwnd);
+    }
     // Taken out of the map first and dropped after the borrow ends, so
     // nothing `RemoveWindowSubclass` might run can find the map borrowed.
     let tap = TAPS.with_borrow_mut(|taps| taps.remove(&window_id));
@@ -623,6 +635,8 @@ fn message_name(msg: u32) -> Option<&'static str> {
         WM_IME_KEYDOWN => "WM_IME_KEYDOWN",
         WM_IME_KEYUP => "WM_IME_KEYUP",
         WM_INPUTLANGCHANGE => "WM_INPUTLANGCHANGE",
+        WM_SETFOCUS => "WM_SETFOCUS",
+        WM_KILLFOCUS => "WM_KILLFOCUS",
         _ => return None,
     })
 }

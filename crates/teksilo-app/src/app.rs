@@ -725,6 +725,18 @@ impl crate::input_loop::InputChrome for WindowChrome<'_> {
         }
     }
 
+    fn text_store_mode(&self) -> teksilo_platform::text_input_hook::TextStoreMode {
+        teksilo_platform::text_input_hook::text_store_mode()
+    }
+
+    fn set_text_store_focus(&mut self, focus: teksilo_platform::text_input_hook::StoreFocus) {
+        if let Some(parent) =
+            teksilo_core::raw_handle::ParentHandle::from_window(self.window.window())
+        {
+            teksilo_platform::text_input_hook::set_text_store_focus(&parent, focus);
+        }
+    }
+
     fn ime_host(&self) -> crate::input_loop::ImeHost {
         let window_system =
             winit::raw_window_handle::HasDisplayHandle::display_handle(self.window.window())

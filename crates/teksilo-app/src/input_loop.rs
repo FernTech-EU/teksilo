@@ -54,13 +54,14 @@ use teksilo_platform::TranslationState;
 use teksilo_platform::pen::PenSource;
 use teksilo_platform::pointer_backend::PointerBackend;
 use teksilo_platform::safe_area::SafeAreaSides;
+use teksilo_platform::text_input_hook::{StoreFocus, TextStoreMode};
 use teksilo_platform::window_system::WindowSystem;
 use teksilo_tokens::InputTokens;
 use winit::event::WindowEvent;
 
 /// The window-shaped operations the input half of a turn performs.
 ///
-/// Seven, and none of them takes a winit type: a test supplies a recorder, the
+/// Nine, and none of them takes a winit type: a test supplies a recorder, the
 /// loop supplies the real window. Everything else the input path touches — the
 /// tree, the translator, the ops sink — is already constructible headless.
 pub(crate) trait InputChrome {
@@ -95,6 +96,14 @@ pub(crate) trait InputChrome {
     /// Which platform the window's input method runs on, for
     /// [`ime_allowed_for`].
     fn ime_host(&self) -> ImeHost;
+
+    /// Whether the window's text input runs through a TSF text store
+    /// ([`teksilo_platform::text_input_hook::text_store_mode`]).
+    fn text_store_mode(&self) -> TextStoreMode;
+
+    /// Give the window's text store the focus [`settle_ime`] decided, and
+    /// let it bring its copy of the focused document up to date.
+    fn set_text_store_focus(&mut self, focus: StoreFocus);
 }
 
 /// What a window blocked by a modal child does with one event.
@@ -499,14 +508,49 @@ pub(crate) fn settle_ime(
     last_purpose: &mut Option<teksilo_core::ImePurpose>,
     last_allowed: &mut Option<bool>,
 ) {
-    let wanted = tree
-        .ime_context_for_focused()
-        .map(|context| context.purpose);
+    let ime = tree.ime_context_for_focused();
+    let mut wanted = ime.map(|context| context.purpose);
+    let mode = chrome.text_store_mode();
+    if mode != TextStoreMode::Off {
+        let secure = tree
+            .text_surfaces()
+            .with_focused_input_document(|document| document.is_secure());
+        let focus = store_focus(tree.focused(), ime, secure);
+        if mode == TextStoreMode::Store && matches!(focus, StoreFocus::Document { .. }) {
+            // The store takes the field's input: winit's IME (its IMM
+            // context) is off there (design 4.2).
+            wanted = None;
+        }
+        chrome.set_text_store_focus(focus);
+    }
     let decision = ime_reconcile(wanted, chrome.ime_host(), last_purpose, last_allowed);
     if decision.purpose.is_some() || decision.allowed.is_some() {
         chrome.set_ime(decision.purpose, decision.allowed);
     }
     apply_soft_keyboard_request(chrome, tree, support);
+}
+
+/// What the text store is given for the focused widget: a store of its own
+/// for a field that describes its document (`secure` is that document's
+/// answer, `None` for a field that describes none), the IMM path for a text
+/// field that does not, an empty, disabled context for anything else and
+/// for a secure field (design section 6).
+pub(crate) fn store_focus(
+    focused: Option<teksilo_core::WidgetId>,
+    ime: Option<teksilo_core::ime::ImeContext>,
+    secure: Option<bool>,
+) -> StoreFocus {
+    let (Some(widget), Some(ime)) = (focused, ime) else {
+        return StoreFocus::None;
+    };
+    if ime.purpose == teksilo_core::ImePurpose::Password {
+        return StoreFocus::None;
+    }
+    match secure {
+        Some(false) => StoreFocus::Document { widget },
+        Some(true) => StoreFocus::None,
+        None => StoreFocus::Imm,
+    }
 }
 
 /// Revoke every live contact at the translator as its window closes.
@@ -584,6 +628,10 @@ mod tests {
         ime: Vec<(Option<teksilo_core::ImePurpose>, Option<bool>)>,
         /// What [`InputChrome::ime_host`] answers; `Other` when unset.
         host: Option<ImeHost>,
+        /// What [`InputChrome::text_store_mode`] answers; `Off` when unset.
+        store_mode: Option<TextStoreMode>,
+        /// Every [`InputChrome::set_text_store_focus`], in order.
+        store_focus: Vec<StoreFocus>,
         /// What [`InputChrome::safe_area`] answers.
         sides: SafeAreaSides,
         /// What [`InputChrome::occluded_band`] answers, and what it was asked.
@@ -613,6 +661,12 @@ mod tests {
         }
         fn ime_host(&self) -> ImeHost {
             self.host.unwrap_or(ImeHost::Other)
+        }
+        fn text_store_mode(&self) -> TextStoreMode {
+            self.store_mode.unwrap_or(TextStoreMode::Off)
+        }
+        fn set_text_store_focus(&mut self, focus: StoreFocus) {
+            self.store_focus.push(focus);
         }
     }
 
@@ -1217,6 +1271,83 @@ mod tests {
                 allowed: None,
             },
         );
+    }
+
+    #[test]
+    fn the_text_store_gets_a_store_for_a_described_field_only() {
+        use teksilo_core::ime::ImeContext;
+
+        let widget = WidgetTree::new().add(teksilo_widgets::VStack::new());
+        let text = Some(ImeContext::text());
+        assert_eq!(
+            store_focus(Some(widget), text, Some(false)),
+            StoreFocus::Document { widget }
+        );
+        assert_eq!(
+            store_focus(Some(widget), text, None),
+            StoreFocus::Imm,
+            "a text field that describes no document: the IMM path"
+        );
+        assert_eq!(
+            store_focus(Some(widget), text, Some(true)),
+            StoreFocus::None,
+            "a secure document: the empty context"
+        );
+        assert_eq!(
+            store_focus(Some(widget), Some(ImeContext::password()), Some(false)),
+            StoreFocus::None
+        );
+        assert_eq!(store_focus(Some(widget), None, None), StoreFocus::None);
+        assert_eq!(store_focus(None, text, Some(false)), StoreFocus::None);
+    }
+
+    #[test]
+    fn with_a_text_store_the_field_it_serves_has_winits_ime_off() {
+        use teksilo_canvas::SizeProposal;
+        use teksilo_core::ImePurpose;
+        use teksilo_core::signal::Signal;
+        use teksilo_widgets::TextInput;
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let root = tree
+            .add(teksilo_widgets::VStack::new().child(TextInput::new(Signal::new(String::new()))));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let field = tree.tab_stops_within(root)[0];
+        tree.focus(field);
+        let focused = tree.focused().expect("focused");
+
+        for (mode, allowed) in [
+            (TextStoreMode::Store, false),
+            (TextStoreMode::StoreKeepingImm, true),
+            (TextStoreMode::Off, true),
+        ] {
+            let mut chrome = Chrome {
+                host: Some(ImeHost::Windows),
+                store_mode: Some(mode),
+                ..Chrome::default()
+            };
+            let mut purpose = None;
+            let mut last_allowed = None;
+            settle_ime(
+                &mut chrome,
+                &mut tree,
+                SoftKeyboardSupport::None,
+                &mut purpose,
+                &mut last_allowed,
+            );
+            assert_eq!(last_allowed, Some(allowed), "{mode:?}");
+            let expected_focus = if mode == TextStoreMode::Off {
+                vec![]
+            } else {
+                vec![StoreFocus::Document { widget: focused }]
+            };
+            assert_eq!(chrome.store_focus, expected_focus, "{mode:?}");
+            if mode == TextStoreMode::Store {
+                assert_eq!(chrome.ime, vec![(None, Some(false))]);
+            } else {
+                assert_eq!(chrome.ime, vec![(Some(ImePurpose::Normal), Some(true))]);
+            }
+        }
     }
 
     #[test]

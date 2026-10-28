@@ -26,7 +26,10 @@
 //!   keywords, the editor filters by the word under the caret.
 //! - The gutter numbers every line; the caret's line gets a background band.
 //!
-//! The status bar reflects the live caret position and caret count.
+//! The status bar reflects the live caret position and caret count. Its
+//! "File name" field is an ordinary text field, for comparing the two kinds of
+//! text input side by side (the code editor describes no document to the
+//! platform's text input system, the field does).
 
 use std::sync::Arc;
 
@@ -37,7 +40,7 @@ use teksilo::text_document::{
 };
 use teksilo::widgets::{
     COMMON_BRACKETS, CodeEditor, CodeEditorHandle, CompletionContext, CompletionItem,
-    CompletionKind, Expand, HStack, TextWidget, ThemeSwitcher, Toolbar,
+    CompletionKind, Expand, FixedSize, HStack, TextInput, TextWidget, ThemeSwitcher, Toolbar,
 };
 
 /// The one list of "words this language knows" — shared by the highlighter and
@@ -222,6 +225,9 @@ impl EditorDemo {
                                 .style(TextStyleRole::Small),
                         ),
                     )
+                    .child(FixedSize::new().width(160.0).child(
+                        TextInput::new(Signal::new("main.rs".to_string())).label(lit!("File name")),
+                    ))
                     .child(ThemeSwitcher::new()),
             ),
         )
