@@ -268,9 +268,14 @@ impl Widget for CodeEditorBody {
         // has run but the frame loop has not yet ticked.
         st.sync_viewport(bounds);
 
+        // A flavour that changed since the frame loop last laid out is brought in
+        // step here, before the layout reads it; a flip relays out everything.
+        if st.sync_transient_flavour().is_some() {
+            st.needs_full_layout = true;
+        }
         let did_full_layout = st.needs_full_layout || !st.engine.has_full_layout();
         if did_full_layout {
-            let flow = st.document.snapshot_flow();
+            let flow = st.flow_snapshot();
             st.engine.layout_full(&flow);
             st.needs_full_layout = false;
             st.content_dirty = true;
@@ -295,16 +300,7 @@ impl Widget for CodeEditorBody {
         // Publish every caret to the engine in one call. A single-caret editor
         // is just the one-element case, so there is no second code path to keep
         // in step.
-        let cursors: Vec<teksilo_text::CursorDisplay> = st
-            .all_carets()
-            .map(|c| teksilo_text::CursorDisplay {
-                position: c.position(),
-                anchor: c.anchor(),
-                affinity: st.cursor_affinity,
-                visible: caret_on,
-                selected_cells: Vec::new(),
-            })
-            .collect();
+        let cursors = st.cursor_displays(caret_on);
         st.engine.set_cursors(&cursors);
 
         let scroll_y = st.scroll_y.get();

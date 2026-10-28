@@ -55,7 +55,6 @@ use teksilo_text::text_document::{MoveMode, SelectionKind, SelectionType};
 
 use teksilo_tokens::{InputTokens, PointerKind, TargetRole};
 
-use super::hit_test;
 use super::state::{DragState, SharedState};
 use super::sync_cursor_signals;
 use super::touch_mount::{EditorTouch, ToolbarIntent};
@@ -485,7 +484,7 @@ pub(super) fn handle_pointer_event(
             }
             let hit = {
                 let st = state.borrow();
-                hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+                st.hit_test(local)
             };
             let Some(hit) = hit else {
                 // Return Ignored so the gesture arena still sees the
@@ -692,7 +691,7 @@ pub(super) fn handle_pointer_event(
                     let local = to_engine_local(state, position);
                     let over_link = {
                         let st = state.borrow();
-                        hit_test::hit_test_at(&st.engine, local, 0.0, 0.0).is_some_and(|hit| {
+                        st.hit_test(local).is_some_and(|hit| {
                             matches!(hit.region, teksilo_text::HitRegion::Link { .. })
                         })
                     };
@@ -713,7 +712,7 @@ pub(super) fn handle_pointer_event(
             );
             let hit = {
                 let st = state.borrow();
-                hit_test::hit_test_at(&st.engine, clamped, 0.0, 0.0)
+                st.hit_test(clamped)
             };
             if let Some(hit) = hit {
                 {
@@ -762,7 +761,7 @@ pub(super) fn handle_pointer_event(
                 let local = to_engine_local(state, position);
                 let hit = {
                     let st = state.borrow();
-                    hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+                    st.hit_test(local)
                 };
                 {
                     let mut st = state.borrow_mut();
@@ -901,7 +900,7 @@ fn handle_direct_pointer_event(
             let hit = {
                 let st = state.borrow();
                 let local = super::touch::window_to_engine_local(&st, window);
-                hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+                st.hit_test(local)
             };
             let Some(hit) = hit else {
                 return EventResponse::Ignored;
@@ -1028,7 +1027,7 @@ fn tap_select(state: &SharedState, pos: Point, kind: SelectionType) {
     let local = to_engine_local(state, &pos);
     let hit = {
         let st = state.borrow();
-        hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+        st.hit_test(local)
     };
     if let Some(hit) = hit {
         let st = state.borrow();
@@ -1071,7 +1070,7 @@ pub(super) fn reposition_caret_for_context_menu(state: &SharedState, window_posi
     let local = engine_local_of_window(state, window_position);
     let hit = {
         let st = state.borrow();
-        hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+        st.hit_test(local)
     };
     let Some(hit) = hit else {
         return;
@@ -1113,7 +1112,7 @@ pub(super) fn move_caret_for_drag(state: &SharedState, local: Point) -> bool {
     super::frame_loop::insert_typing_before_pointer(&mut state.borrow_mut());
     let hit = {
         let st = state.borrow();
-        hit_test::hit_test_at(&st.engine, to_engine_local(state, &local), 0.0, 0.0)
+        st.hit_test(to_engine_local(state, &local))
     };
     let Some(hit) = hit else { return false };
     {
@@ -1141,7 +1140,7 @@ pub(super) fn clear_drop_caret(state: &SharedState) {
 pub(super) fn offset_at_window_point(state: &SharedState, window_position: Point) -> Option<usize> {
     let local = engine_local_of_window(state, window_position);
     let st = state.borrow();
-    hit_test::hit_test_at(&st.engine, local, 0.0, 0.0).map(|hit| hit.position)
+    st.hit_test(local).map(|hit| hit.position)
 }
 
 #[cfg(test)]

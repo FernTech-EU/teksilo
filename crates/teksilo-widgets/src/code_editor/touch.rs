@@ -33,7 +33,6 @@ use teksilo_core::text_touch::{TextAffordances, TextHitSource};
 use teksilo_core::widget::{EventContext, Widget};
 use teksilo_text::text_document::{MoveMode, SelectionType};
 
-use crate::rich_text::hit_test;
 use crate::rich_text::touch_mount::{EditorTouch, LensPainter, TouchTextSurface};
 
 use super::state::{CodeEditorState, SharedState};
@@ -70,7 +69,7 @@ impl TextHitSource for CodeHitSource {
     fn offset_at(&self, point: Point) -> usize {
         let st = self.state.borrow();
         let local = window_to_engine_local(&st, point);
-        if let Some(hit) = hit_test::hit_test_at(&st.engine, local, 0.0, 0.0) {
+        if let Some(hit) = st.hit_test(local) {
             return hit.position;
         }
         // The engine answers `None` outside the laid-out text, and a handle drag
@@ -213,7 +212,7 @@ impl TouchTextSurface for CodeTouchSurface {
         let hit = {
             let st = self.state.borrow();
             let local = window_to_engine_local(&st, window);
-            hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+            st.hit_test(local)
         };
         let Some(hit) = hit else { return false };
         {

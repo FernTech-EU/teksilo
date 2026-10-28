@@ -178,22 +178,28 @@ fn first_line_rect(st: &EditorState, range: Range<usize>) -> Option<FirstLineRec
         return None;
     }
     let range = clamp(range, document_end(st));
-    let start = range.start;
     if range.is_empty() {
         // At the caret, the caret's own placement, so the answer is where the
         // editor draws it; elsewhere the editor's default placement.
-        let affinity = if start == st.cursor.position() {
+        let affinity = if range.start == st.cursor.position() {
             st.cursor_affinity
         } else {
             CursorAffinity::Downstream
         };
-        let rect = engine_caret_to_window(st, st.engine.caret_rect(start, affinity));
+        let at = st.shown_position(range.start);
+        let rect = engine_caret_to_window(st, st.engine.caret_rect(at, affinity));
         return Some(FirstLineRect {
             rect,
-            covered: start..start,
+            covered: range.start..range.start,
         });
     }
 
+    // Measured in the layout's positions, which are the recorded document's in
+    // a view that does not show the transient edits (see
+    // `EditorState::shows_transient_edits`); what it covers is told in the
+    // document's.
+    let start = st.shown_position(range.start);
+    let end = st.shown_position(range.end);
     let first = engine_caret_to_window(st, st.engine.caret_rect(start, CursorAffinity::Upstream));
     let line_end = st
         .engine
@@ -202,7 +208,7 @@ fn first_line_rect(st: &EditorState, range: Range<usize>) -> Option<FirstLineRec
         .filter(|&end| end > start);
     let (covered_end, last_x) = match line_end {
         Some(line_end) => {
-            let end = range.end.min(line_end);
+            let end = end.min(line_end);
             let last =
                 engine_caret_to_window(st, st.engine.caret_rect(end, CursorAffinity::Downstream));
             (end, last.x)
@@ -215,9 +221,13 @@ fn first_line_rect(st: &EditorState, range: Range<usize>) -> Option<FirstLineRec
     };
     let left = first.x.min(last_x);
     let right = first.x.max(last_x);
+    let covered_end = st
+        .document_position(covered_end)
+        .max(range.start + 1)
+        .min(range.end);
     Some(FirstLineRect {
         rect: Rect::new(left, first.y, (right - left).max(1.0), first.height),
-        covered: start..covered_end,
+        covered: range.start..covered_end,
     })
 }
 
@@ -237,7 +247,7 @@ fn offset_at_point(st: &EditorState, window_point: Point) -> Option<usize> {
     // The engine finds no block only in the empty part of the body below the
     // last line, which belongs to the end of the text.
     Some(
-        super::hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+        st.hit_test(local)
             .map_or_else(|| document_end(st), |hit| hit.position),
     )
 }

@@ -3117,3 +3117,119 @@ mod log {
         );
     }
 }
+
+// ── Two editors of one document ─────────────────────────────────────────────
+
+/// Two code editors of one document holding `text`, one above the other.
+fn two_editors(
+    text: &str,
+) -> (
+    WidgetTree,
+    [SharedState; 2],
+    [teksilo_core::widget_id::WidgetId; 2],
+) {
+    let doc = TextDocument::new();
+    doc.set_plain_text(text).unwrap();
+    doc.clear_undo_redo();
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let editors = [
+        super::widget::CodeEditor::new(doc.clone()),
+        super::widget::CodeEditor::new(doc),
+    ];
+    let states = [
+        editors[0].handle().state_handle(),
+        editors[1].handle().state_handle(),
+    ];
+    let [first, second] = editors;
+    let ids = [tree.add(first), tree.add(second)];
+    let boxes = ids.map(|id| tree.add(crate::primitives::FixedSize::new().height(150.0).child(id)));
+    tree.add(
+        crate::primitives::VStack::new()
+            .child(boxes[0])
+            .child(boxes[1]),
+    );
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+    let _ = tree.render();
+    let focusable = boxes.map(|b| tree.first_focusable_descendant(b).expect("focusable"));
+    ime_frame(&mut tree);
+    (tree, states, focusable)
+}
+
+/// Where the first line of `st`'s layout ends, read off the layout itself.
+fn laid_out_line_end(st: &SharedState) -> usize {
+    let st = st.borrow();
+    let caret = st
+        .engine
+        .caret_rect(0, teksilo_text::CursorAffinity::Downstream);
+    st.engine
+        .hit_test(st.engine.layout_width() - 1.0, caret[1] + caret[3] / 2.0)
+        .expect("the line is laid out")
+        .position
+}
+
+#[test]
+fn a_composition_in_either_code_editor_shows_only_there() {
+    for (composing, other) in [(0, 1), (1, 0)] {
+        let (mut tree, states, focusable) = two_editors("hello world");
+        // The other editor's caret after the place the composition goes.
+        states[other]
+            .borrow()
+            .cursor
+            .set_position(8, MoveMode::MoveAnchor);
+        tree.focus(focusable[composing]);
+        states[composing]
+            .borrow()
+            .cursor
+            .set_position(5, MoveMode::MoveAnchor);
+        ime_frame(&mut tree);
+        compose(&mut tree, "ni");
+        ime_frame(&mut tree);
+        let _ = tree.render();
+        assert_eq!(
+            laid_out_line_end(&states[composing]),
+            13,
+            "editor {composing}"
+        );
+        assert_eq!(laid_out_line_end(&states[other]), 11, "editor {other}");
+        // A full layout of the other editor, a resize say, lays out the same.
+        states[other].borrow_mut().needs_full_layout = true;
+        ime_frame(&mut tree);
+        let _ = tree.render();
+        assert_eq!(
+            laid_out_line_end(&states[other]),
+            11,
+            "editor {other}, laid out again"
+        );
+        // The other editor's caret shows on the text it shows.
+        assert_eq!(states[other].borrow().cursor.position(), 10);
+        let shown = states[other].borrow().cursor_displays(false)[0].position;
+        assert_eq!(shown, 8);
+    }
+}
+
+#[test]
+fn two_code_editors_agree_once_a_composition_is_committed_or_cancelled() {
+    for commit_it in [true, false] {
+        let (mut tree, states, focusable) = two_editors("hello world");
+        tree.focus(focusable[0]);
+        states[0]
+            .borrow()
+            .cursor
+            .set_position(5, MoveMode::MoveAnchor);
+        ime_frame(&mut tree);
+        compose(&mut tree, "ni");
+        ime_frame(&mut tree);
+        if commit_it {
+            commit(&mut tree, "\u{4F60}");
+        } else {
+            compose(&mut tree, "");
+            ime_frame(&mut tree);
+            ime_frame(&mut tree);
+        }
+        let _ = tree.render();
+        let expected = if commit_it { 12 } else { 11 };
+        assert_eq!(laid_out_line_end(&states[0]), expected);
+        assert_eq!(laid_out_line_end(&states[1]), expected);
+        assert!(!states[0].borrow().document.has_transient_edits());
+    }
+}

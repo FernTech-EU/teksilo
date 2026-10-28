@@ -521,10 +521,17 @@ impl Widget for RichTextEditorBody {
         // incremental render paths (`with_render_block_only`,
         // `with_render_cursor_only`) assume a valid prior full
         // render exists.
+        // A flavour that changed since the frame loop last laid out is brought in
+        // step here, before the layout reads it; a flip relays out everything.
+        if st.sync_transient_flavour().is_some() {
+            st.needs_full_layout = true;
+        }
         let did_full_layout = st.needs_full_layout || !st.engine.has_full_layout();
         if did_full_layout {
             let flow = st.flow_snapshot();
             st.engine.layout_full(&flow);
+            #[cfg(test)]
+            st.full_layouts.set(st.full_layouts.get() + 1);
             st.needs_full_layout = false;
             st.content_dirty = true;
             // The re-wrap a width change forces lands here, after the pass that
@@ -619,7 +626,12 @@ impl Widget for RichTextEditorBody {
         // still see them. `cursor_affinity` matches what `caret_rect`
         // queries elsewhere.
         let scroll_x_logical = st.scroll_x.get();
-        let ime_preedit_range = st.composition.range(&st.document);
+        // A view laying out the recorded document shows no composition, its own
+        // included (see `EditorState::shows_transient_edits`).
+        let ime_preedit_range = st
+            .composition
+            .range(&st.document)
+            .filter(|_| st.shows_transient_edits());
         let ime_affinity = st.cursor_affinity;
 
         // Clip to bounds so overflowing glyphs don't bleed into siblings.
@@ -672,10 +684,8 @@ impl Widget for RichTextEditorBody {
         // Read before the split borrow below, which reborrows `state_ref`
         // field by field.
         let selection_range = {
-            let (s, e) = (
-                state_ref.cursor.selection_start(),
-                state_ref.cursor.selection_end(),
-            );
+            let (anchor, position) = state_ref.shown_selection();
+            let (s, e) = (anchor.min(position), anchor.max(position));
             (s != e).then_some((s, e))
         };
         let EditorState {
@@ -817,9 +827,15 @@ impl Widget for RichTextEditorBody {
         // the AT selection so screen readers / braille track the tentative
         // text — the composing characters are already in the runs / value.
         // Falls back to the live cursor/selection otherwise.
-        let (user_anchor, user_pos) = match st.composition.range(&st.document) {
+        // A view laying out the recorded document reports the cursor where it
+        // shows it (see `EditorState::shows_transient_edits`).
+        let composing = st
+            .composition
+            .range(&st.document)
+            .filter(|_| st.shows_transient_edits());
+        let (user_anchor, user_pos) = match composing {
             Some(range) => (range.start, range.end),
-            None => (st.cursor.anchor(), st.cursor.position()),
+            None => st.shown_selection(),
         };
         let emits_children = !builder.emits_no_children();
 

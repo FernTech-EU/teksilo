@@ -91,6 +91,23 @@ pub(crate) fn catch_up_layout(state: &mut EditorState) -> bool {
         }
     }
 
+    // Step 2c: the flavour this view shows, the document's transient edits or
+    // the recorded document, follows whether they are its own composition
+    // (see `EditorState::shows_transient_edits`). Brought in step after the
+    // drain, which forgets a composition a write took away, and before the
+    // layout below reads the document; a flip with transient edits outstanding
+    // relays out what they changed, once.
+    match state.sync_transient_flavour() {
+        Some(crate::common::composition::FlipRelayout::Block(position)) => {
+            if single_pos.is_some_and(|pos| pos != position) {
+                state.needs_full_layout = true;
+            }
+            single_pos = Some(position);
+        }
+        Some(crate::common::composition::FlipRelayout::Full) => state.needs_full_layout = true,
+        None => {}
+    }
+
     // Step 3: forward the viewport to the typesetter.
     //
     // Overlay scrollbars (the editor's default) float on top of the
@@ -130,6 +147,8 @@ pub(crate) fn catch_up_layout(state: &mut EditorState) -> bool {
     if viewport_ready && (state.needs_full_layout || layout_stale) {
         let flow = state.flow_snapshot();
         state.engine.layout_full(&flow);
+        #[cfg(test)]
+        state.full_layouts.set(state.full_layouts.get() + 1);
         state.needs_full_layout = false;
         state.last_relayout_block_id = None;
         state.content_dirty = true;

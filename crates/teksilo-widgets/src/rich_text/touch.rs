@@ -92,7 +92,7 @@ impl TextHitSource for RichTextHitSource {
     fn offset_at(&self, point: Point) -> usize {
         let st = self.state.borrow();
         let local = window_to_engine_local(&st, point);
-        if let Some(hit) = super::hit_test::hit_test_at(&st.engine, local, 0.0, 0.0) {
+        if let Some(hit) = st.hit_test(local) {
             return hit.position;
         }
         // The engine answers `None` for a point outside the laid-out text, and
@@ -113,7 +113,9 @@ impl TextHitSource for RichTextHitSource {
 
     fn caret_rect(&self, offset: usize) -> Rect {
         let st = self.state.borrow();
-        caret_rect_in_window(&st, offset)
+        // `offset` is the document's; the layout may be the recorded document's
+        // (see `EditorState::shows_transient_edits`).
+        caret_rect_in_window(&st, st.shown_position(offset))
     }
 
     fn word_range_at(&self, offset: usize) -> Range<usize> {
@@ -177,7 +179,10 @@ impl TextHitSource for RichTextHitSource {
             return None;
         }
         let st = self.state.borrow();
-        super::keyboard::range_window_rect(&st, selection.start, selection.end)
+        // Where the layout shows the selection, which is not where the document
+        // has it when the layout is the recorded document's.
+        let (anchor, position) = st.shown_selection();
+        super::keyboard::range_window_rect(&st, anchor.min(position), anchor.max(position))
     }
 
     fn viewport(&self) -> Rect {
@@ -244,7 +249,7 @@ impl TouchTextSurface for RichTextTouchSurface {
         let hit = {
             let st = self.state.borrow();
             let local = window_to_engine_local(&st, window);
-            super::hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+            st.hit_test(local)
         };
         let Some(hit) = hit else { return false };
         {

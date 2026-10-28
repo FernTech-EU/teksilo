@@ -939,9 +939,7 @@ pub(super) fn caret_window_rect(st: &EditorState) -> Option<teksilo_canvas::Rect
     if !st.has_focus || !st.engine.has_full_layout() {
         return None;
     }
-    let caret = st
-        .engine
-        .caret_rect(st.cursor.position(), st.cursor_affinity);
+    let caret = st.engine.caret_rect(st.shown_caret(), st.cursor_affinity);
     Some(teksilo_canvas::Rect::new(
         st.viewport_origin.x + caret[0] - st.scroll_x.get(),
         st.viewport_origin.y + caret[1] + vertical_scroll_slip(st),
@@ -1719,7 +1717,8 @@ pub(super) fn ensure_caret_visible_locked(st: &mut EditorState) {
     // holds the caret from *before* the keystroke. Correcting against it revealed
     // the old caret and left the new one outside the viewport until the next key
     // press — which is what made walking with the arrows lurch a line behind.
-    let pos = st.cursor.position();
+    // Where the layout shows it, which may be the recorded document's.
+    let pos = st.shown_caret();
     let affinity = st.cursor_affinity;
     if let Some(new_off) = st.engine.ensure_position_visible(pos, affinity) {
         st.scroll_y.set(new_off);
@@ -1753,7 +1752,7 @@ fn ensure_caret_h_visible_locked(st: &mut EditorState) {
         return;
     }
 
-    let pos = st.cursor.position();
+    let pos = st.shown_caret();
     let caret = st.engine.caret_rect(pos, st.cursor_affinity);
     // The engine's `x` is content-space — it applies no horizontal scroll of its
     // own — so the viewport-relative position is this minus the widget's own
@@ -1865,7 +1864,7 @@ fn line_edge_op(forward: bool) -> LineEdge {
 /// Taken at the caret rather than from the paragraph, so an English quotation
 /// inside Arabic prose steps the way it reads.
 fn moves_forward(st: &EditorState, pressed: VisualDirection) -> bool {
-    let rtl = st.engine.direction_at(st.cursor.position()) == TextDirection::RightToLeft;
+    let rtl = st.engine.direction_at(st.shown_caret()) == TextDirection::RightToLeft;
     match pressed {
         VisualDirection::Right => !rtl,
         VisualDirection::Left => rtl,
@@ -1888,7 +1887,7 @@ fn moves_forward(st: &EditorState, pressed: VisualDirection) -> bool {
 /// existing value alone rather than resetting it and disturbing the
 /// soft-wrap placement the other handlers maintain.
 fn settle_affinity_at_seam(st: &mut EditorState, pressed: VisualDirection) {
-    let pos = st.cursor.position();
+    let pos = st.shown_caret();
     if !st.engine.is_direction_boundary_at(pos) {
         // Not a seam: match what ClearPreferredX would have done.
         st.cursor_affinity = CursorAffinity::Downstream;
@@ -1918,7 +1917,10 @@ fn move_cursor_to_line_edge(st: &mut EditorState, edge: LineEdge, mode: MoveMode
     if !st.engine.has_full_layout() {
         return;
     }
-    let pos = st.cursor.position();
+    // The layout's positions, which are the recorded document's in a view that
+    // does not show the transient edits (see `EditorState::shows_transient_edits`):
+    // the line is found in them, and the edge mapped back into the document.
+    let pos = st.shown_caret();
 
     // Ask the typesetter for the line's logical extent rather than
     // hit-testing a far-off-screen x. The probe used to be purely
@@ -1937,7 +1939,9 @@ fn move_cursor_to_line_edge(st: &mut EditorState, edge: LineEdge, mode: MoveMode
         LineEdge::Start => line_start,
         LineEdge::End => line_end,
     };
-    if target != pos && !move_moving_end(st, target, mode) {
+    let shown_target = target;
+    let target = st.document_position(target);
+    if target != st.cursor.position() && !move_moving_end(st, target, mode) {
         // The step gave back a table the selection held, and the caret is not
         // on this line at all.
         st.cursor_affinity = CursorAffinity::Downstream;
@@ -1961,7 +1965,7 @@ fn move_cursor_to_line_edge(st: &mut EditorState, edge: LineEdge, mode: MoveMode
         )
     };
     st.cursor_affinity = match edge {
-        LineEdge::Start if starts_a_wrap_continuation(st, target) => CursorAffinity::Upstream,
+        LineEdge::Start if starts_a_wrap_continuation(st, shown_target) => CursorAffinity::Upstream,
         LineEdge::Start | LineEdge::End => CursorAffinity::Downstream,
     };
 }
@@ -2055,7 +2059,9 @@ fn move_cursor_vertical(st: &mut EditorState, direction: i32, mode: MoveMode) {
     if !st.engine.has_full_layout() {
         return;
     }
-    let pos = st.cursor.position();
+    // Measured in the layout's positions, the hit mapped back into the document
+    // (see `move_cursor_to_line_edge`).
+    let pos = st.shown_caret();
     let caret = st.engine.caret_rect(pos, st.cursor_affinity);
 
     let x = st.preferred_x.unwrap_or(caret[0]);
@@ -2079,8 +2085,9 @@ fn move_cursor_vertical(st: &mut EditorState, direction: i32, mode: MoveMode) {
         return;
     }
 
-    if let Some(hit) = st.engine.hit_test(x, target_y) {
-        st.cursor_affinity = if hit.position == pos || move_moving_end(st, hit.position, mode) {
+    let from = st.cursor.position();
+    if let Some(hit) = st.hit_test(teksilo_canvas::Point::new(x, target_y)) {
+        st.cursor_affinity = if hit.position == from || move_moving_end(st, hit.position, mode) {
             hit.affinity
         } else {
             CursorAffinity::Downstream
@@ -2134,8 +2141,8 @@ fn move_cursor_page(st: &mut EditorState, direction: i32, mode: MoveMode) {
     if viewport_h <= 0.0 {
         return;
     }
-    let pos = st.cursor.position();
-    let caret = st.engine.caret_rect(pos, st.cursor_affinity);
+    let from = st.cursor.position();
+    let caret = st.engine.caret_rect(st.shown_caret(), st.cursor_affinity);
     let line_height = caret[3].max(16.0);
     let center_y = caret[1] + caret[3] * 0.5;
 
@@ -2150,8 +2157,8 @@ fn move_cursor_page(st: &mut EditorState, direction: i32, mode: MoveMode) {
     let target_y =
         (center_y + (direction as f32) * page_step).clamp(0.0, st.engine.content_height());
 
-    if let Some(hit) = st.engine.hit_test(x, target_y) {
-        st.cursor_affinity = if hit.position == pos || move_moving_end(st, hit.position, mode) {
+    if let Some(hit) = st.hit_test(teksilo_canvas::Point::new(x, target_y)) {
+        st.cursor_affinity = if hit.position == from || move_moving_end(st, hit.position, mode) {
             hit.affinity
         } else {
             CursorAffinity::Downstream

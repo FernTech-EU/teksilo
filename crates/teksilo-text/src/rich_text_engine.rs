@@ -62,6 +62,10 @@ pub struct RichTextEngine {
     /// Non-destructive default typography filled onto the layout snapshot for
     /// runs / blocks with no explicit override. Never touches the document.
     typography_defaults: EditorTypographyDefaults,
+    /// Whether the snapshots this engine pulls itself show the document's
+    /// transient edits. See
+    /// [`set_shows_transient_edits`](Self::set_shows_transient_edits).
+    shows_transient_edits: bool,
 }
 
 impl std::fmt::Debug for RichTextEngine {
@@ -87,6 +91,7 @@ impl RichTextEngine {
             default_face: None,
             wrap_mode: WrapMode::Word,
             typography_defaults: EditorTypographyDefaults::default(),
+            shows_transient_edits: true,
         };
         engine.flow.set_content_width_auto();
         engine
@@ -112,6 +117,7 @@ impl RichTextEngine {
             default_face,
             wrap_mode: WrapMode::Word,
             typography_defaults: EditorTypographyDefaults::default(),
+            shows_transient_edits: true,
         };
         engine.flow.set_content_width_auto();
         engine
@@ -272,6 +278,55 @@ impl RichTextEngine {
         self.flow.echo_char()
     }
 
+    /// Whether the snapshots this engine pulls from the document itself, in
+    /// [`relayout_block_snapshot`](Self::relayout_block_snapshot) and
+    /// [`apply_paint_highlights_for_range`](Self::apply_paint_highlights_for_range),
+    /// show its transient edits (an input method's composition). `true`, the
+    /// default, reads the document as it is; `false` reads it as recorded,
+    /// as a revert would leave it (`TextDocument::snapshot_recorded_flow_masked`
+    /// and its siblings), and every position the engine lays out is then one
+    /// of the recorded document's. The flow handed to
+    /// [`layout_full`](Self::layout_full) is the caller's to pull the same way.
+    ///
+    /// Takes effect at the next layout: the caller forces a full one after
+    /// changing it.
+    pub fn set_shows_transient_edits(&mut self, shows: bool) {
+        self.shows_transient_edits = shows;
+    }
+
+    /// Whether this engine's own snapshots show the document's transient
+    /// edits. See [`set_shows_transient_edits`](Self::set_shows_transient_edits).
+    pub fn shows_transient_edits(&self) -> bool {
+        self.shows_transient_edits
+    }
+
+    /// `doc`'s main flow under `mask`, as this engine shows it.
+    fn flow_snapshot(
+        &self,
+        doc: &TextDocument,
+        mask: &text_document::HighlightMask,
+    ) -> FlowSnapshot {
+        if self.shows_transient_edits {
+            doc.snapshot_flow_masked(mask)
+        } else {
+            doc.snapshot_recorded_flow_masked(mask)
+        }
+    }
+
+    /// The block at `position` of `doc` under `mask`, as this engine shows it.
+    fn block_snapshot(
+        &self,
+        doc: &TextDocument,
+        position: usize,
+        mask: &text_document::HighlightMask,
+    ) -> Option<text_document::BlockSnapshot> {
+        if self.shows_transient_edits {
+            doc.snapshot_block_at_position_masked(position, mask)
+        } else {
+            doc.snapshot_recorded_block_at_position_masked(position, mask)
+        }
+    }
+
     pub fn default_face(&self) -> Option<FontFaceId> {
         self.default_face
     }
@@ -372,7 +427,7 @@ impl RichTextEngine {
         if length == 0 {
             return None;
         }
-        let snap = doc.snapshot_block_at_position_masked(position, mask)?;
+        let snap = self.block_snapshot(doc, position, mask)?;
         // The extent must lie wholly inside this block; a range crossing a paragraph break
         // would leave the neighbour holding stale colours.
         if position < snap.position || position + length > snap.position + snap.length {
@@ -418,11 +473,12 @@ impl RichTextEngine {
         mask: &text_document::HighlightMask,
     ) -> Result<usize, String> {
         if !self.has_full_layout() {
-            self.layout_full(&doc.snapshot_flow_masked(mask));
+            let flow = self.flow_snapshot(doc, mask);
+            self.layout_full(&flow);
             return Ok(0);
         }
-        let mut snap = doc
-            .snapshot_block_at_position_masked(block_position, mask)
+        let mut snap = self
+            .block_snapshot(doc, block_position, mask)
             .ok_or_else(|| "no block at position".to_string())?;
         // Fill per-editor default typography onto the (already-detached) block
         // snapshot before it reaches the typesetter — same non-destructive path

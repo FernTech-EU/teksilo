@@ -310,6 +310,27 @@ impl CodeEditor {
         self
     }
 
+    /// Show every transient edit of the document, not only this view's own
+    /// composition: for transient edits the host makes itself through the API
+    /// (`TextCursor::insert_text_transient` and its siblings), an inline
+    /// suggestion shown before it is accepted, say. Off by default: a view shows
+    /// an input method's composition while it is its own, and lays out the
+    /// recorded document the rest of the time, so a composition made in one
+    /// editor of a shared document shows in no other. The document's transient
+    /// edits are one layer, whoever made them, so with this on the view also
+    /// shows another view's composition.
+    pub fn show_transient_edits(self, show: bool) -> Self {
+        {
+            let mut st = self.state.borrow_mut();
+            if st.show_transient_edits != show {
+                st.show_transient_edits = show;
+                st.needs_full_layout = true;
+                st.invalidate_accessibility_cache();
+            }
+        }
+        self
+    }
+
     /// A callback fired once per drain batch that contained a real content edit.
     pub fn on_change(self, callback: impl Fn() + 'static) -> Self {
         self.state.borrow_mut().on_change = Some(Rc::new(callback));
@@ -460,9 +481,7 @@ impl CodeEditor {
         if !st.engine.has_full_layout() {
             return None;
         }
-        let c = st
-            .engine
-            .caret_rect(st.cursor.position(), st.cursor_affinity);
+        let c = st.engine.caret_rect(st.shown_caret(), st.cursor_affinity);
         let y = st.viewport_origin.y + c[1] - st.scroll_y.get();
         Some((y, c[3]))
     }
@@ -1040,6 +1059,8 @@ impl Widget for CodeEditor {
             let scroll_x = st.scroll_x.get();
             let scroll_y = st.scroll_y.get();
             for p in [a, b] {
+                // A bracket's position is the document's.
+                let p = st.shown_position(p);
                 let r0 = st.engine.caret_rect(p, CursorAffinity::Downstream);
                 let r1 = st.engine.caret_rect(p + 1, CursorAffinity::Downstream);
                 let x = origin.x + r0[0] - scroll_x;
@@ -1164,6 +1185,13 @@ impl PlainTextEditor {
     /// Whether the editor follows the global accessibility text scale.
     pub fn follow_text_scale(mut self, follow: bool) -> Self {
         self.map(|e| e.follow_text_scale(follow));
+        self
+    }
+
+    /// Show every transient edit of the document, not only this view's own
+    /// composition. See [`CodeEditor::show_transient_edits`].
+    pub fn show_transient_edits(mut self, show: bool) -> Self {
+        self.map(|e| e.show_transient_edits(show));
         self
     }
 

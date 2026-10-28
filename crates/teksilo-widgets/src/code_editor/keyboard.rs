@@ -816,7 +816,7 @@ pub(super) fn ensure_caret_visible_locked(st: &mut CodeEditorState) {
     // and scrolls nothing at all. The rich-text editor names its position for
     // exactly this reason; this one did not, and that is what left a
     // document-end jump showing the top of the file.
-    let pos = st.cursor.position();
+    let pos = st.shown_caret();
     let affinity = st.cursor_affinity;
     if let Some(new_off) = st.engine.ensure_position_visible(pos, affinity) {
         st.scroll_y.set_if_changed(new_off);
@@ -982,9 +982,7 @@ pub(super) fn report_ime_cursor_area(state: &SharedState, ctx: &mut EventContext
         {
             return;
         }
-        let c = st
-            .engine
-            .caret_rect(st.cursor.position(), st.cursor_affinity);
+        let c = st.engine.caret_rect(st.shown_caret(), st.cursor_affinity);
         // Subtract BOTH scroll axes: `caret_rect` returns content-local
         // coordinates, and CodeEditor defaults to WrapMode::None, so horizontal
         // scroll is the everyday state — omitting scroll_x misplaces the IME
@@ -1017,7 +1015,10 @@ pub(super) fn window_rect_at(st: &CodeEditorState, pos: usize) -> Option<teksilo
     if !st.engine.has_full_layout() {
         return None;
     }
-    let c = st.engine.caret_rect(pos, st.cursor_affinity);
+    // `pos` is the document's; the layout may be the recorded document's.
+    let c = st
+        .engine
+        .caret_rect(st.shown_position(pos), st.cursor_affinity);
     Some(teksilo_canvas::Rect::new(
         st.viewport_origin.x + c[0] - st.scroll_x.get(),
         st.viewport_origin.y + c[1] - st.scroll_y.get(),

@@ -111,6 +111,8 @@ mod tests;
 #[cfg(test)]
 mod touch_tests;
 #[cfg(test)]
+mod transient_view_tests;
+#[cfg(test)]
 mod window_tests;
 
 pub use context_menu::{
@@ -279,7 +281,8 @@ impl RichTextEditor {
         // as an editor pane, but stays free of the document's search / spell /
         // syntax highlighting (those are authoring affordances). Opt back in
         // with `.show_highlights(true)` — e.g. a read-only code viewer that
-        // *wants* syntax coloring.
+        // *wants* syntax coloring. Like every view, it shows no composition
+        // but its own, and a viewer makes none: see `show_transient_edits`.
         Self::construct(document, READ_ONLY_PRESET).show_highlights(false)
     }
 
@@ -438,6 +441,31 @@ impl RichTextEditor {
                 st.show_highlights = show;
                 // Re-pull the snapshot in the new flavor on the next tick.
                 st.needs_full_layout = true;
+            }
+        }
+        self
+    }
+
+    /// Show every transient edit of the document, not only this view's own
+    /// composition: for transient edits the host makes itself through the API
+    /// (`TextCursor::insert_text_transient` and its siblings), a suggestion
+    /// shown in the text before it is accepted, say. Off by default.
+    ///
+    /// A view shows an input method's composition while it is its own, and
+    /// lays out the recorded document, as a revert would leave it, the rest of
+    /// the time: a composition made in one editor of a shared document shows
+    /// there, and in no other editor or viewer of it until it is committed or
+    /// cancelled. The document's transient edits are one layer, whoever made
+    /// them, so with this on the view also shows another view's composition.
+    pub fn show_transient_edits(self, show: bool) -> Self {
+        {
+            let mut st = self.state.borrow_mut();
+            if st.show_transient_edits != show {
+                st.show_transient_edits = show;
+                // The engine follows at the next layout
+                // (`EditorState::sync_transient_flavour`).
+                st.needs_full_layout = true;
+                *st.accessibility_flow_snapshot.borrow_mut() = None;
             }
         }
         self
@@ -804,6 +832,7 @@ impl RichTextEditor {
             let mut engine = RichTextEngine::private_with_registrar(registrar);
             engine.set_wrap_mode(st.wrap_mode);
             engine.set_hyphenate_justified(true);
+            engine.set_shows_transient_edits(st.engine.shows_transient_edits());
             st.engine = engine;
             st.needs_full_layout = true;
         }
@@ -1009,7 +1038,7 @@ impl RichTextEditor {
     /// land on any hit region.
     pub fn context_target_at(&self, point: Point) -> Option<hit_test::ContextTarget> {
         let st = self.state.borrow();
-        let hit = hit_test::hit_test_at(&st.engine, point, 0.0, 0.0)?;
+        let hit = st.hit_test(point)?;
         let selection = Some((st.cursor.anchor(), st.cursor.position()));
         Some(hit_test::classify(&hit, selection, &st.document))
     }
@@ -2788,7 +2817,9 @@ impl EditorHandle {
     /// annotation must stay aligned whether or not the writer is typing.
     pub fn range_rect(&self, start: usize, end: usize) -> Option<Rect> {
         let st = self.state.borrow();
-        keyboard::range_window_rect(&st, start, end)
+        // The offsets are the document's; the layout may be the recorded
+        // document's (see `show_transient_edits`).
+        keyboard::range_window_rect(&st, st.shown_position(start), st.shown_position(end))
     }
 
     /// The **window-space** caret rectangle at one offset — a zero-width
@@ -2813,7 +2844,7 @@ impl EditorHandle {
     /// `None` before the first full layout. Focus is not required.
     pub fn range_content_rect(&self, start: usize, end: usize) -> Option<Rect> {
         let st = self.state.borrow();
-        keyboard::range_content_rect(&st, start, end)
+        keyboard::range_content_rect(&st, st.shown_position(start), st.shown_position(end))
     }
 
     /// The **content-space** caret rectangle at one offset — a zero-width
@@ -3804,11 +3835,13 @@ impl Widget for RichTextEditor {
             // (Theme colours / font-scale re-derive themselves in `paint()`.)
             let typography = st.engine.typography_defaults().clone();
             let echo = st.engine.echo_char();
+            let shows_transient_edits = st.engine.shows_transient_edits();
             let mut engine = RichTextEngine::from_shared(shared.clone());
             engine.set_wrap_mode(wrap);
             engine.set_hyphenate_justified(true);
             engine.set_typography_defaults(typography);
             engine.set_echo_char(echo);
+            engine.set_shows_transient_edits(shows_transient_edits);
             st.engine = engine;
             st.needs_full_layout = true;
         }
@@ -4682,7 +4715,11 @@ fn reveal_range_impl(
         if st.activation.as_ref().is_some_and(|a| !a.get()) {
             return false;
         }
-        match self::keyboard::range_window_rect(&st, start, end) {
+        match self::keyboard::range_window_rect(
+            &st,
+            st.shown_position(start),
+            st.shown_position(end),
+        ) {
             Some(a) => (a, st.typewriter, st.self_id),
             None => return false,
         }
@@ -4820,7 +4857,10 @@ fn handle_access_action_request(
                 // reader's positions are in the text it was shown, without it.
                 let mut ends = [a, f];
                 self::frame_loop::flush_pending_chars_keeping(&mut st, &mut ends);
-                let [a, f] = ends;
+                // The reader's positions are in the text this view lays out,
+                // which may be the recorded document's (see
+                // `EditorState::shows_transient_edits`).
+                let [a, f] = ends.map(|end| st.document_position(end));
                 st.cursor.set_position(a, MoveMode::MoveAnchor);
                 st.cursor.set_position(f, MoveMode::KeepAnchor);
                 drop(st);

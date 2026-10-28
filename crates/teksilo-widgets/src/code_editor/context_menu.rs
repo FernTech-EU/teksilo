@@ -223,7 +223,7 @@ fn reposition_caret(state: &SharedState, window: teksilo_canvas::Point) {
     let hit = {
         let st = state.borrow();
         let local = super::touch::window_to_engine_local(&st, window);
-        crate::rich_text::hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+        st.hit_test(local)
     };
     let Some(hit) = hit else { return };
     {

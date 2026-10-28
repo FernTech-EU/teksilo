@@ -45,7 +45,6 @@ use teksilo_text::text_document::{MoveMode, SelectionType};
 
 use super::state::{DragState, SharedState};
 use super::sync_cursor_signals;
-use crate::rich_text::hit_test;
 use crate::rich_text::touch_mount::{EditorTouch, ToolbarIntent};
 
 /// Pointer positions arrive **wrapper-local**; the engine wants **body-local**.
@@ -107,7 +106,7 @@ pub(super) fn handle_pointer_event(
             let local = to_engine_local(state, position);
             let hit = {
                 let st = state.borrow();
-                hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+                st.hit_test(local)
             };
             let Some(hit) = hit else {
                 // Ignored, not Handled: a click that missed text still needs to
@@ -176,7 +175,7 @@ pub(super) fn handle_pointer_event(
             );
             let hit = {
                 let st = state.borrow();
-                hit_test::hit_test_at(&st.engine, clamped, 0.0, 0.0)
+                st.hit_test(clamped)
             };
             if let Some(hit) = hit {
                 {
@@ -292,7 +291,7 @@ fn handle_direct_pointer_event(
             let hit = {
                 let st = state.borrow();
                 let local = super::touch::window_to_engine_local(&st, window);
-                hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+                st.hit_test(local)
             };
             let Some(hit) = hit else {
                 return EventResponse::Ignored;
@@ -413,7 +412,7 @@ fn tap_select(state: &SharedState, pos: Point, kind: SelectionType) {
     let local = to_engine_local(state, &pos);
     let hit = {
         let st = state.borrow();
-        hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+        st.hit_test(local)
     };
     let Some(hit) = hit else {
         return;

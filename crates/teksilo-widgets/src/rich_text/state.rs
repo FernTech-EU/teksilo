@@ -227,6 +227,15 @@ pub(crate) struct EditorState {
     /// engine's per-block relayout. Default `true`; `read_only` defaults
     /// it to `false` (override either way via `RichTextEditor::show_highlights`).
     pub show_highlights: bool,
+    /// Whether this view lays out every transient edit of its document, not only
+    /// its own composition: the host's override, for transient edits it makes
+    /// itself through the API (see `RichTextEditor::show_transient_edits` and
+    /// [`shows_transient_edits`](Self::shows_transient_edits)). Default `false`.
+    pub show_transient_edits: bool,
+    /// How many times this view has laid out its whole text, for the tests that
+    /// check a composition costs no full layout per update.
+    #[cfg(test)]
+    pub full_layouts: std::cell::Cell<usize>,
     /// Annotation bodies (comment threads) covering ranges of this document, for
     /// the accessibility tree only.
     ///
@@ -914,6 +923,9 @@ impl EditorState {
             caret_highlight_active: false,
             wrap_mode,
             show_highlights: true,
+            show_transient_edits: false,
+            #[cfg(test)]
+            full_layouts: std::cell::Cell::new(0),
             window_to_clip: false,
             estimate_height_before_layout: false,
             widest_measured_width: 0.0,
@@ -1066,8 +1078,17 @@ impl EditorState {
     /// panes over one document can differ. (A11y correctness rides on the fact that paint-only
     /// sessions — find, spell — never touch the text fragments the AT tree reads; only
     /// metric-affecting sessions, e.g. syntax bold, reach it.)
+    ///
+    /// A view that does not show the document's transient edits (see
+    /// [`shows_transient_edits`](Self::shows_transient_edits)) snapshots the
+    /// document as recorded.
     pub fn flow_snapshot(&self) -> teksilo_text::text_document::FlowSnapshot {
-        self.document.snapshot_flow_masked(&self.effective_mask())
+        let mask = self.effective_mask();
+        if self.shows_transient_edits() {
+            self.document.snapshot_flow_masked(&mask)
+        } else {
+            self.document.snapshot_recorded_flow_masked(&mask)
+        }
     }
 
     /// The snapshot the accessibility tree is built from — same masked flavor as
@@ -1079,8 +1100,130 @@ impl EditorState {
     /// of thousands of ranges. (Metric sessions still split fragments here, so a
     /// syntax-bold run is reported to the reader exactly as before.)
     pub fn flow_snapshot_for_a11y(&self) -> teksilo_text::text_document::FlowSnapshot {
-        self.document
-            .snapshot_flow_masked_no_paint(&self.effective_mask())
+        let mask = self.effective_mask();
+        if self.shows_transient_edits() {
+            self.document.snapshot_flow_masked_no_paint(&mask)
+        } else {
+            self.document.snapshot_recorded_flow_masked_no_paint(&mask)
+        }
+    }
+
+    /// Whether this view's layout shows the document's transient edits, or the
+    /// document as recorded, as a revert would leave it: the transient edits
+    /// while they are this view's own composition, or always with the host's
+    /// override (`RichTextEditor::show_transient_edits`); see
+    /// [`shows_transient_edits`](crate::common::composition::shows_transient_edits).
+    /// It is the flavour the layout was built in, kept on the engine, which pulls
+    /// its incremental snapshots itself, and changed only by
+    /// [`sync_transient_flavour`](Self::sync_transient_flavour) before a layout,
+    /// so that what the view draws and maps always matches what it laid out.
+    ///
+    /// A view that shows the recorded document lays out recorded positions,
+    /// while its cursor, like every cursor of the document, stands in the
+    /// document as it is. The two meet at this view's edges and nowhere else:
+    /// what it draws or reads out of the cursor goes through
+    /// [`shown_selection`](Self::shown_selection) and
+    /// [`shown_caret`](Self::shown_caret), and a position it reads off its own
+    /// layout (a click, a touch handle, an assistive technology's selection)
+    /// through [`document_position`](Self::document_position). With no
+    /// transient edits outstanding all of them are the identity.
+    ///
+    /// Caret movement from the keyboard stays in the document's positions: a
+    /// view takes keys only once it has focus, and the view an input method
+    /// was composing in finishes its composition as it loses focus.
+    pub fn shows_transient_edits(&self) -> bool {
+        self.engine.shows_transient_edits()
+    }
+
+    /// Whether this view should lay out the document's transient edits now,
+    /// by the rule [`shows_transient_edits`](Self::shows_transient_edits) states:
+    /// what the next [`sync_transient_flavour`](Self::sync_transient_flavour)
+    /// brings the layout to. Until then, what the view draws, maps and reads out
+    /// follows the flavour its layout was built in.
+    pub fn wants_transient_edits(&self) -> bool {
+        crate::common::composition::shows_transient_edits(
+            &self.composition,
+            &self.document,
+            self.show_transient_edits,
+        )
+    }
+
+    /// Bring the engine's flavour in step with
+    /// [`shows_transient_edits`](Self::shows_transient_edits), before a layout
+    /// reads the document. Returns what the flip has to relay out, if it
+    /// flipped with transient edits outstanding (see
+    /// [`flip_relayout`](crate::common::composition::flip_relayout)): once as a
+    /// composition starts or ends here, never per update.
+    pub fn sync_transient_flavour(&mut self) -> Option<crate::common::composition::FlipRelayout> {
+        let shows = self.wants_transient_edits();
+        if self.engine.shows_transient_edits() == shows {
+            return None;
+        }
+        self.engine.set_shows_transient_edits(shows);
+        *self.accessibility_flow_snapshot.borrow_mut() = None;
+        crate::common::composition::flip_relayout(&self.document)
+    }
+
+    /// The cursor's anchor and position in the text this view lays out: as
+    /// they are, or where a revert puts them (see
+    /// [`shows_transient_edits`](Self::shows_transient_edits)).
+    pub fn shown_selection(&self) -> (usize, usize) {
+        if self.shows_transient_edits() {
+            (self.cursor.anchor(), self.cursor.position())
+        } else {
+            (
+                self.cursor.recorded_anchor(),
+                self.cursor.recorded_position(),
+            )
+        }
+    }
+
+    /// The cursor's position in the text this view lays out (see
+    /// [`shown_selection`](Self::shown_selection)).
+    pub fn shown_caret(&self) -> usize {
+        if self.shows_transient_edits() {
+            self.cursor.position()
+        } else {
+            self.cursor.recorded_position()
+        }
+    }
+
+    /// Where `position`, one of the document's, is in the text this view lays
+    /// out (see [`shows_transient_edits`](Self::shows_transient_edits)).
+    ///
+    /// One of the cursor's own ends (a touch handle stands at each) is placed
+    /// as [`shown_selection`](Self::shown_selection) places it: a cursor's
+    /// selection goes back as a whole, which at a place where text was only
+    /// removed is not where a caret at the same offset would.
+    pub fn shown_position(&self, position: usize) -> usize {
+        if self.shows_transient_edits() {
+            position
+        } else if position == self.cursor.position() {
+            self.cursor.recorded_position()
+        } else if position == self.cursor.anchor() {
+            self.cursor.recorded_anchor()
+        } else {
+            self.document.recorded_position(position)
+        }
+    }
+
+    /// Where `shown`, a position read off this view's layout, is in the
+    /// document (see [`shows_transient_edits`](Self::shows_transient_edits)).
+    pub fn document_position(&self, shown: usize) -> usize {
+        if self.shows_transient_edits() {
+            shown
+        } else {
+            self.document.position_from_recorded(shown)
+        }
+    }
+
+    /// The engine's hit test at `local` (widget-local, as
+    /// [`RichTextEngine::hit_test`] takes it), its position one of the
+    /// document's (see [`document_position`](Self::document_position)).
+    pub fn hit_test(&self, local: teksilo_canvas::Point) -> Option<teksilo_text::HitTestResult> {
+        let mut hit = self.engine.hit_test(local.x, local.y)?;
+        hit.position = self.document_position(hit.position);
+        Some(hit)
     }
 
     /// What the typesetter draws for the cursor: the caret, shown when
@@ -1099,9 +1242,10 @@ impl EditorState {
     /// `selected_cells_memo`: the paint asks twice a frame, and the read
     /// walks the document when the selection holds a table.
     pub fn cursor_display(&mut self, visible: bool) -> teksilo_text::CursorDisplay {
+        let (anchor, position) = self.shown_selection();
         teksilo_text::CursorDisplay {
-            position: self.cursor.position(),
-            anchor: self.cursor.anchor(),
+            position,
+            anchor,
             affinity: self.cursor_affinity,
             visible,
             selected_cells: self.selected_cells(),

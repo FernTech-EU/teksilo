@@ -36,6 +36,9 @@ pub enum ContextTarget {
 /// Convenience wrapper over [`RichTextEngine::hit_test`]. The
 /// engine's hit-test accepts widget-local pointer coordinates
 /// directly — scroll offset and zoom are applied internally.
+///
+/// The rich text editor asks `EditorState::hit_test` instead, which answers
+/// in the document's positions when the view lays out the recorded document.
 pub fn hit_test_at(
     engine: &RichTextEngine,
     screen: Point,

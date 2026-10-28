@@ -36,7 +36,22 @@ pub(crate) fn tick(state: &mut CodeEditorState, delta: f32) -> bool {
     flush_pending_chars(state);
 
     // 2. Drain.
-    let (had_events, single_pos) = state.drain_events();
+    let (had_events, mut single_pos) = state.drain_events();
+
+    // 2b. The flavour this view shows follows whether the transient edits are
+    //     its own composition (see `CodeEditorState::shows_transient_edits`):
+    //     brought in step after the drain and before the layout, a flip with
+    //     transient edits outstanding relaying out what they changed, once.
+    match state.sync_transient_flavour() {
+        Some(crate::common::composition::FlipRelayout::Block(position)) => {
+            if single_pos.is_some_and(|pos| pos != position) {
+                state.needs_full_layout = true;
+            }
+            single_pos = Some(position);
+        }
+        Some(crate::common::composition::FlipRelayout::Full) => state.needs_full_layout = true,
+        None => {}
+    }
 
     // 3. Blink. Gated on focus AND window activity — a caret in an inactive
     //    window is hidden on every desktop platform.
@@ -67,7 +82,7 @@ pub(crate) fn tick(state: &mut CodeEditorState, delta: f32) -> bool {
     //    below and compute a wrong max_scroll.
     let layout_stale = viewport_ready && !state.engine.has_full_layout();
     if viewport_ready && (state.needs_full_layout || layout_stale) {
-        let flow = state.document.snapshot_flow();
+        let flow = state.flow_snapshot();
         state.engine.layout_full(&flow);
         state.needs_full_layout = false;
         state.last_relayout_block_id = None;
@@ -103,7 +118,7 @@ pub(crate) fn tick(state: &mut CodeEditorState, delta: f32) -> bool {
             && viewport_ready
             && state.engine.has_full_layout()
         {
-            let flow = state.document.snapshot_flow();
+            let flow = state.flow_snapshot();
             state.engine.apply_paint_highlights(&flow);
             state.content_dirty = true;
             state.pending_full_render = true;
@@ -121,17 +136,7 @@ pub(crate) fn tick(state: &mut CodeEditorState, delta: f32) -> bool {
     //    concern and belongs to the keyboard handler.
     if state.engine.has_full_layout() {
         let caret_on = state.caret_visible.get() && state.has_focus && state.window_active;
-        let affinity = state.cursor_affinity;
-        let cursors: Vec<teksilo_text::CursorDisplay> = state
-            .all_carets()
-            .map(|c| teksilo_text::CursorDisplay {
-                position: c.position(),
-                anchor: c.anchor(),
-                affinity,
-                visible: caret_on,
-                selected_cells: Vec::new(),
-            })
-            .collect();
+        let cursors = state.cursor_displays(caret_on);
         state.engine.set_cursors(&cursors);
     }
 

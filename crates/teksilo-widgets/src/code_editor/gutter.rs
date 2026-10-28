@@ -248,9 +248,7 @@ impl Widget for CodeGutter {
 
 /// Which line the primary caret is on, or `None` when it cannot be resolved.
 fn caret_line_index(st: &super::state::CodeEditorState, line_h: f32) -> Option<usize> {
-    let caret = st
-        .engine
-        .caret_rect(st.cursor.position(), st.cursor_affinity);
+    let caret = st.engine.caret_rect(st.shown_caret(), st.cursor_affinity);
     let y = caret[1];
     if line_h <= 0.0 {
         return None;

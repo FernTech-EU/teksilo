@@ -68,9 +68,15 @@ pub(crate) fn set_role(st: &CodeEditorState, builder: &mut AccessNodeBuilder) {
 /// composing, else the primary caret (secondary carets are editing-only and the
 /// AT tree reports just the primary, as documented on the state).
 fn user_selection(st: &CodeEditorState) -> (usize, usize) {
-    match st.composition.range(&st.document) {
+    // A view laying out the recorded document reports the caret where it shows
+    // it (see `CodeEditorState::shows_transient_edits`).
+    match st
+        .composition
+        .range(&st.document)
+        .filter(|_| st.shows_transient_edits())
+    {
         Some(range) => (range.start, range.end),
-        None => (st.cursor.anchor(), st.cursor.position()),
+        None => st.shown_selection(&st.cursor),
     }
 }
 
@@ -301,6 +307,10 @@ pub(crate) fn handle_access_action(
                         // invariant the rest of the editor holds.
                         let mut st = state.borrow_mut();
                         st.clear_extra_carets();
+                        // The reader's positions are in the text this view lays
+                        // out, which may be the recorded document's.
+                        let (anchor, focus) =
+                            (st.document_position(anchor), st.document_position(focus));
                         st.cursor.set_position(anchor, MoveMode::MoveAnchor);
                         st.cursor.set_position(focus, MoveMode::KeepAnchor);
                     }

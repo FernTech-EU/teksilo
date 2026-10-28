@@ -213,6 +213,11 @@ pub(crate) struct CodeEditorState {
     /// say (`TextDocument::transient_range`): any recorded write reverts it.
     /// See [`Composition`].
     pub composition: Composition,
+    /// Whether this view lays out every transient edit of its document, not only
+    /// its own composition: the host's override, for transient edits it makes
+    /// itself through the API (see `CodeEditor::show_transient_edits` and
+    /// [`shows_transient_edits`](Self::shows_transient_edits)). Default `false`.
+    pub show_transient_edits: bool,
     pub last_ime_area: Option<teksilo_canvas::Rect>,
     pub last_chase_pos: Option<usize>,
 
@@ -360,6 +365,7 @@ impl CodeEditorState {
             _event_subscription: subscription,
             pending_chars: String::new(),
             composition: Composition::default(),
+            show_transient_edits: false,
             last_ime_area: None,
             last_chase_pos: None,
             pending_text_changed: false,
@@ -500,8 +506,136 @@ impl CodeEditorState {
     /// document). A code editor always renders every highlight session, so the
     /// mask is `all` — there is no show/hide-highlights toggle to honour.
     pub fn flow_snapshot_for_a11y(&self) -> teksilo_text::text_document::FlowSnapshot {
-        self.document
-            .snapshot_flow_masked_no_paint(&teksilo_text::text_document::HighlightMask::all())
+        let all = teksilo_text::text_document::HighlightMask::all();
+        if self.shows_transient_edits() {
+            self.document.snapshot_flow_masked_no_paint(&all)
+        } else {
+            self.document.snapshot_recorded_flow_masked_no_paint(&all)
+        }
+    }
+
+    /// The flow snapshot the layout reads: every highlight session, of the
+    /// document as it is or as recorded (see
+    /// [`shows_transient_edits`](Self::shows_transient_edits)).
+    pub fn flow_snapshot(&self) -> teksilo_text::text_document::FlowSnapshot {
+        let all = teksilo_text::text_document::HighlightMask::all();
+        if self.shows_transient_edits() {
+            self.document.snapshot_flow_masked(&all)
+        } else {
+            self.document.snapshot_recorded_flow_masked(&all)
+        }
+    }
+
+    /// Whether this view's layout shows the document's transient edits, or the
+    /// document as recorded, as a revert would leave it: the transient edits
+    /// while they are this view's own composition, or always with the host's
+    /// override; see
+    /// [`shows_transient_edits`](crate::common::composition::shows_transient_edits).
+    /// It is the flavour the layout was built in, kept on the engine and changed
+    /// only by [`sync_transient_flavour`](Self::sync_transient_flavour) before a
+    /// layout.
+    ///
+    /// A view that shows the recorded document lays out recorded positions,
+    /// while its carets stand in the document as it is. The two meet at this
+    /// view's edges: what it draws of a caret goes through
+    /// [`shown_selection`](Self::shown_selection), a document position it
+    /// places through [`shown_position`](Self::shown_position), and a position
+    /// it reads off its own layout through
+    /// [`document_position`](Self::document_position). Keyboard caret movement
+    /// stays in the document's positions, as in the rich text editor.
+    pub fn shows_transient_edits(&self) -> bool {
+        self.engine.shows_transient_edits()
+    }
+
+    /// Whether this view should lay out the document's transient edits now,
+    /// by the rule [`shows_transient_edits`](Self::shows_transient_edits) states:
+    /// what the next [`sync_transient_flavour`](Self::sync_transient_flavour)
+    /// brings the layout to. Until then, what the view draws, maps and reads out
+    /// follows the flavour its layout was built in.
+    pub fn wants_transient_edits(&self) -> bool {
+        crate::common::composition::shows_transient_edits(
+            &self.composition,
+            &self.document,
+            self.show_transient_edits,
+        )
+    }
+
+    /// Bring the engine's flavour in step with
+    /// [`shows_transient_edits`](Self::shows_transient_edits) before a layout
+    /// reads the document. Returns what the flip has to relay out, if it flipped
+    /// with transient edits outstanding.
+    pub fn sync_transient_flavour(&mut self) -> Option<crate::common::composition::FlipRelayout> {
+        let shows = self.wants_transient_edits();
+        if self.engine.shows_transient_edits() == shows {
+            return None;
+        }
+        self.engine.set_shows_transient_edits(shows);
+        self.invalidate_accessibility_cache();
+        crate::common::composition::flip_relayout(&self.document)
+    }
+
+    /// `caret`'s anchor and position in the text this view lays out.
+    pub fn shown_selection(&self, caret: &TextCursor) -> (usize, usize) {
+        if self.shows_transient_edits() {
+            (caret.anchor(), caret.position())
+        } else {
+            (caret.recorded_anchor(), caret.recorded_position())
+        }
+    }
+
+    /// The primary caret's position in the text this view lays out.
+    pub fn shown_caret(&self) -> usize {
+        self.shown_selection(&self.cursor).1
+    }
+
+    /// Where `position`, one of the document's, is in the text this view lays
+    /// out. One of a caret's own ends is placed as its selection is.
+    pub fn shown_position(&self, position: usize) -> usize {
+        if self.shows_transient_edits() {
+            return position;
+        }
+        for caret in self.all_carets() {
+            if position == caret.position() {
+                return caret.recorded_position();
+            }
+            if position == caret.anchor() {
+                return caret.recorded_anchor();
+            }
+        }
+        self.document.recorded_position(position)
+    }
+
+    /// Where `shown`, a position read off this view's layout, is in the
+    /// document.
+    pub fn document_position(&self, shown: usize) -> usize {
+        if self.shows_transient_edits() {
+            shown
+        } else {
+            self.document.position_from_recorded(shown)
+        }
+    }
+
+    /// The engine's hit test at `local`, its position one of the document's.
+    pub fn hit_test(&self, local: teksilo_canvas::Point) -> Option<teksilo_text::HitTestResult> {
+        let mut hit = self.engine.hit_test(local.x, local.y)?;
+        hit.position = self.document_position(hit.position);
+        Some(hit)
+    }
+
+    /// The carets as the engine draws them, in the text this view lays out.
+    pub fn cursor_displays(&self, visible: bool) -> Vec<teksilo_text::CursorDisplay> {
+        self.all_carets()
+            .map(|caret| {
+                let (anchor, position) = self.shown_selection(caret);
+                teksilo_text::CursorDisplay {
+                    position,
+                    anchor,
+                    affinity: self.cursor_affinity,
+                    visible,
+                    selected_cells: Vec::new(),
+                }
+            })
+            .collect()
     }
 
     /// Invalidate the cached accessibility snapshot. Called whenever the
