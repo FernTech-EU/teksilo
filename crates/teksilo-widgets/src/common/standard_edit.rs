@@ -84,6 +84,21 @@ pub(crate) fn register_command_action(
     register_action(ctx, id, run, None);
 }
 
+/// Whether `command` changes the text: the ones a text surface ends an input
+/// method's composition in progress before, its text kept, so the edit does
+/// not take the composition out while the input method still holds it.
+/// Select-all and copy leave it alive.
+pub(crate) fn edits_text(command: StandardEdit) -> bool {
+    matches!(
+        command,
+        StandardEdit::Cut
+            | StandardEdit::Paste
+            | StandardEdit::PastePlain
+            | StandardEdit::Undo
+            | StandardEdit::Redo
+    )
+}
+
 /// What a menu row asks of a command: whether it has anything to act on,
 /// and whether its action would pass it on.
 type RowQuestions = (Box<dyn Fn() -> bool>, Box<dyn Fn() -> bool>);

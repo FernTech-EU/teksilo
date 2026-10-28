@@ -14,9 +14,12 @@
 //!    becomes one `insert_text` and therefore one `ContentsChanged` — which is
 //!    what keeps relayout O(burst) instead of O(keystrokes).
 //! 2. Drain document events, learning whether one block changed or many.
-//! 3. Blink.
-//! 4. Lay out: full, one-block incremental, or not at all.
+//! 3. Lay out: full, one-block incremental, or not at all.
+//! 4. Blink.
 //! 5. Recolour, if a highlighter repainted without the text changing.
+//!
+//! Steps 1 to 3 are also [`catch_up_layout`], for a press that hit-tests the
+//! text an edit just changed outside a frame.
 //! 6. Publish the carets to the engine.
 //! 7. Publish scroll metrics, apply drag auto-scroll.
 //! 8. Drain the debounce window.
@@ -27,33 +30,10 @@ use crate::common::editor_runtime::ScrollMetrics;
 /// Run one frame step. `delta` is seconds since the previous tick. Returns
 /// `true` when the editor still has work and needs another frame.
 pub(crate) fn tick(state: &mut CodeEditorState, delta: f32) -> bool {
-    // 0. A composition the input method ended with its empty update and did
-    //    not commit before this frame was cancelled.
-    super::keyboard::settle_cancelled_composition(state);
+    // 0 to 3. Settle, flush, drain, lay out.
+    let had_events = catch_up_layout(state);
 
-    // 1. Flush typed characters as one insert. Typing over a selection replaces
-    //    it, which `insert_text` already does.
-    flush_pending_chars(state);
-
-    // 2. Drain.
-    let (had_events, mut single_pos) = state.drain_events();
-
-    // 2b. The flavour this view shows follows whether the transient edits are
-    //     its own composition (see `CodeEditorState::shows_transient_edits`):
-    //     brought in step after the drain and before the layout, a flip with
-    //     transient edits outstanding relaying out what they changed, once.
-    match state.sync_transient_flavour() {
-        Some(crate::common::composition::FlipRelayout::Block(position)) => {
-            if single_pos.is_some_and(|pos| pos != position) {
-                state.needs_full_layout = true;
-            }
-            single_pos = Some(position);
-        }
-        Some(crate::common::composition::FlipRelayout::Full) => state.needs_full_layout = true,
-        None => {}
-    }
-
-    // 3. Blink. Gated on focus AND window activity — a caret in an inactive
+    // 4. Blink. Gated on focus AND window activity: a caret in an inactive
     //    window is hidden on every desktop platform.
     let caret_active = state.has_focus && state.window_active;
     let policy = state.policy.caret_policy;
@@ -66,47 +46,6 @@ pub(crate) fn tick(state: &mut CodeEditorState, delta: f32) -> bool {
     let viewport_width = state.viewport_width;
     let viewport_height = state.viewport_height;
     let viewport_ready = viewport_width > 0.0 && viewport_height > 0.0;
-    if viewport_ready {
-        state.engine.set_viewport(viewport_width, viewport_height);
-    }
-
-    // 4. Layout. Gated on a real viewport: the tree's first `layout()` fires
-    //    this effect before any paint has recorded bounds, and laying out at a
-    //    zero viewport poisons the engine's glyph cache with a degenerate
-    //    result that later renders inherit.
-    //
-    //    `has_full_layout()` also goes false when the shared typesetter now
-    //    belongs to another engine — two editors over one document share the
-    //    atlas but own independent flow state — so re-check it rather than
-    //    trusting our own flag, or we read the *other* editor's content height
-    //    below and compute a wrong max_scroll.
-    let layout_stale = viewport_ready && !state.engine.has_full_layout();
-    if viewport_ready && (state.needs_full_layout || layout_stale) {
-        let flow = state.flow_snapshot();
-        state.engine.layout_full(&flow);
-        state.needs_full_layout = false;
-        state.last_relayout_block_id = None;
-        state.content_dirty = true;
-        state.pending_full_render = true;
-    } else if viewport_ready && let Some(pos) = single_pos {
-        // Every highlight session: a code editor's highlighter *is* the point,
-        // unlike a prose viewer that may want to render bare.
-        let mask = teksilo_text::text_document::HighlightMask::all();
-        match state
-            .engine
-            .relayout_block_snapshot(&state.document, pos, &mask)
-        {
-            Ok(block_id) => {
-                state.last_relayout_block_id = Some(block_id);
-                state.content_dirty = true;
-            }
-            Err(_) => {
-                // The block vanished between the event and now: fall back to a
-                // full layout next frame rather than rendering a stale one.
-                state.needs_full_layout = true;
-            }
-        }
-    }
 
     // 5. Recolour. A highlighter that repainted without editing changed only
     //    colours, and a colour cannot change a glyph advance — so re-derive the
@@ -189,6 +128,86 @@ pub(crate) fn tick(state: &mut CodeEditorState, delta: f32) -> bool {
     // wake-up instead, so the loop can idle between toggles rather than pump at
     // the display's rate to catch a transition that happens twice a second.
     had_events || debounce_pending || drag_active
+}
+
+/// Bring the layout up to date with the document: the first steps of a frame
+/// (settle a cancelled composition, flush the typing, drain the document's
+/// events, lay out what they changed). A press hit-tests the layout, so one
+/// that follows an edit made outside a frame (a composition the press ended)
+/// calls this first. Returns whether there were document events.
+pub(crate) fn catch_up_layout(state: &mut CodeEditorState) -> bool {
+    // 0. A composition the input method ended with its empty update and did
+    //    not commit before this frame was cancelled.
+    super::keyboard::settle_cancelled_composition(state);
+
+    // 1. Flush typed characters as one insert. Typing over a selection replaces
+    //    it, which `insert_text` already does.
+    flush_pending_chars(state);
+
+    // 2. Drain.
+    let (had_events, mut single_pos) = state.drain_events();
+
+    // 2b. The flavour this view shows follows whether the transient edits are
+    //     its own composition (see `CodeEditorState::shows_transient_edits`):
+    //     brought in step after the drain and before the layout, a flip with
+    //     transient edits outstanding relaying out what they changed, once.
+    match state.sync_transient_flavour() {
+        Some(crate::common::composition::FlipRelayout::Block(position)) => {
+            if single_pos.is_some_and(|pos| pos != position) {
+                state.needs_full_layout = true;
+            }
+            single_pos = Some(position);
+        }
+        Some(crate::common::composition::FlipRelayout::Full) => state.needs_full_layout = true,
+        None => {}
+    }
+
+    let viewport_width = state.viewport_width;
+    let viewport_height = state.viewport_height;
+    let viewport_ready = viewport_width > 0.0 && viewport_height > 0.0;
+    if viewport_ready {
+        state.engine.set_viewport(viewport_width, viewport_height);
+    }
+
+    // 3. Layout. Gated on a real viewport: the tree's first `layout()` fires
+    //    this effect before any paint has recorded bounds, and laying out at a
+    //    zero viewport poisons the engine's glyph cache with a degenerate
+    //    result that later renders inherit.
+    //
+    //    `has_full_layout()` also goes false when the shared typesetter now
+    //    belongs to another engine (two editors over one document share the
+    //    atlas but own independent flow state), so re-check it rather than
+    //    trusting our own flag, or we read the *other* editor's content height
+    //    below and compute a wrong max_scroll.
+    let layout_stale = viewport_ready && !state.engine.has_full_layout();
+    if viewport_ready && (state.needs_full_layout || layout_stale) {
+        let flow = state.flow_snapshot();
+        state.engine.layout_full(&flow);
+        state.needs_full_layout = false;
+        state.last_relayout_block_id = None;
+        state.content_dirty = true;
+        state.pending_full_render = true;
+    } else if viewport_ready && let Some(pos) = single_pos {
+        // Every highlight session: a code editor's highlighter *is* the point,
+        // unlike a prose viewer that may want to render bare.
+        let mask = teksilo_text::text_document::HighlightMask::all();
+        match state
+            .engine
+            .relayout_block_snapshot(&state.document, pos, &mask)
+        {
+            Ok(block_id) => {
+                state.last_relayout_block_id = Some(block_id);
+                state.content_dirty = true;
+            }
+            Err(_) => {
+                // The block vanished between the event and now: fall back to a
+                // full layout next frame rather than rendering a stale one.
+                state.needs_full_layout = true;
+            }
+        }
+    }
+
+    had_events
 }
 
 /// Insert the characters typed since the last insert, as one, at every caret.

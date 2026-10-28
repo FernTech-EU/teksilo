@@ -275,6 +275,13 @@ by crate for clarity, not because crates version independently.
   command, and a click on a control that takes no focus (a toolbar button,
   built with `focus_on_click(false)` or not focusable at all), end it the
   same way before they run.
+- **A `CodeEditor` (and `PlainTextEditor`) ends a composition the same
+  way**: a click, a tap or a hold in it, a focus change, an undo, redo, cut,
+  paste, comment toggle or duplicate, and a click on a control that takes no
+  focus keep the composition's text where it stands as one undo step and tell
+  the input method it is over. A focus change threw the composition away,
+  and the other cases left the input method composing at the old place. With
+  several carets, the composition stays at the primary one.
 - **Text typed or committed just before a click goes in where it was
   typed**, not at the click. The Microsoft Korean IME commits its syllable on
   the mouse press, so the syllable landed inside the word clicked on.

@@ -27,6 +27,7 @@
 use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
 use teksilo_core::shortcut::{KeyStroke, StandardEdit};
 
+use crate::common::composition::position_after_commit;
 use crate::editor_shortcuts::CodeShortcut;
 use teksilo_core::widget::EventContext;
 use teksilo_i18n::tr_widget;
@@ -457,6 +458,16 @@ pub(super) fn run_standard_edit(
     empty_history_passes_on: bool,
     ctx: &mut EventContext,
 ) -> bool {
+    // A command that edits the text ends a composition in progress first, its
+    // text kept, as a click elsewhere does (see `finish_composition`). Left
+    // alive, the edit would take the composition out of the text while the
+    // input method still held it, and its next update would bring it back at
+    // the caret. The keys, the native menu and a menu row all come here.
+    if crate::common::standard_edit::edits_text(command)
+        && !declines(&state.borrow(), command, false)
+    {
+        finish_composition(state, ctx);
+    }
     {
         let mut st = state.borrow_mut();
         if declines(&st, command, empty_history_passes_on) {
@@ -510,6 +521,18 @@ pub(super) fn run_code_shortcut(
     command: CodeShortcut,
     ctx: &mut EventContext,
 ) -> bool {
+    // Both edit the text, so a composition in progress ends first, its text
+    // kept, as for an edit command (see `run_standard_edit`).
+    let runs = {
+        let filter = state.borrow().policy.command_filter;
+        match command {
+            CodeShortcut::ToggleComment => filter.accepts(CodeCommand::ToggleLineComment),
+            CodeShortcut::Duplicate => filter.accepts(CodeCommand::DuplicateSelection),
+        }
+    };
+    if runs {
+        finish_composition(state, ctx);
+    }
     {
         let mut st = state.borrow_mut();
         let filter = st.policy.command_filter;
@@ -931,17 +954,100 @@ fn commit_composition(state: &SharedState, ctx: &mut EventContext, text: &str) -
     EventResponse::Handled
 }
 
-/// Cancel any composition, discarding the tentative text: the document goes
-/// back to what it was before it, nothing recorded.
+/// Before a pointer moves the caret or starts a selection (a press, a tap's
+/// release, a hold, a multi-tap): a composition in progress ends with its
+/// text kept (see [`finish_composition`]), so the input method does not go on
+/// composing at the old place and commit there later. A press inside the
+/// composition's own text is no different, as in the other text surfaces.
+pub(super) fn settle_before_press(state: &SharedState, ctx: &mut EventContext) {
+    finish_composition(state, ctx);
+}
+
+/// End the composition the input method still holds, keeping it as committed
+/// text: for a press in the editor, a focus change, an edit command, and the
+/// commit the framework asks for before the command of a control that takes
+/// no focus. What a native text view does, rather than leave the composition
+/// to be committed later at its old place (or in the next field focused), or
+/// throw it away.
 ///
-/// Called on focus loss. Leaving a preedit in the document when focus moves
-/// away would make tentative text permanent.
-pub(super) fn clear_ime_preedit(state: &SharedState) {
-    let mut guard = state.borrow_mut();
-    let st = &mut *guard;
-    if st.composition.cancel(&st.document) {
-        st.pending_text_changed = true;
+/// The platform is told first ([`EventContext::finish_ime_composition`]),
+/// while the composition is still live, and answers with what the input
+/// method committed for it, if anything (on Windows its commit can differ from
+/// what it showed: Microsoft Pinyin commits "nihao" for "ni'hao"). That text
+/// is kept, or the text the composition showed when there is none, as one
+/// undo step that takes it back out. What the platform still delivers for the
+/// composition (an empty update, an empty commit) arrives after this handler
+/// returns and finds no composition to change. A composition the input method
+/// had already ended (its empty update, no commit) is settled as the cancel it
+/// was, and the platform is not told. With no composition, does nothing.
+///
+/// The composition is at the primary caret only (see
+/// [`handle_ime_composition`]), so the other carets are left as they are.
+pub(super) fn finish_composition(state: &SharedState, ctx: &mut EventContext) {
+    let live = {
+        let mut guard = state.borrow_mut();
+        let st = &mut *guard;
+        if settle_cancelled_composition(st) {
+            false
+        } else if st.composition.is_live(&st.document) {
+            true
+        } else {
+            return;
+        }
+    };
+    let committed = if live {
+        ctx.finish_ime_composition()
+    } else {
+        None
+    };
+    {
+        let mut guard = state.borrow_mut();
+        let st = &mut *guard;
+        if live {
+            keep_composition(st, committed.as_deref());
+        }
+        // The press that follows hit-tests the layout: bring it up to date.
+        super::frame_loop::catch_up_layout(st);
     }
+    sync_cursor_signals(state);
+    ctx.request_frame();
+}
+
+/// Commit the live composition where it stands, as its own commit would: as
+/// `committed`, the input method's commit for it, cleaned as a commit is, or
+/// as the text it showed when there is none or nothing of it is left. The
+/// caret ends after the text, unless it stood outside the composition (a
+/// right-click put it there before the menu took focus), where it stays,
+/// moved with the composition's end.
+fn keep_composition(st: &mut CodeEditorState, committed: Option<&str>) {
+    let caret = (st.cursor.anchor(), st.cursor.position());
+    let range = st.composition.range(&st.document);
+    let outside = range.as_ref().is_some_and(|range| {
+        let inside = |at: usize| range.start <= at && at <= range.end;
+        !inside(caret.0) || !inside(caret.1)
+    });
+    let Some(shown) = st.composition.text(&st.document).map(str::to_owned) else {
+        return;
+    };
+    let text = committed
+        .map(|text| text.chars().filter(|c| !c.is_control()).collect::<String>())
+        .filter(|text| !text.is_empty())
+        .unwrap_or(shown);
+    st.composition
+        .commit(&st.document, &st.cursor, &text, false);
+    // A caret after the composition moves with its end, by the difference
+    // between the committed text and the text shown.
+    if outside && let Some(range) = range {
+        let length = text.chars().count();
+        let carried = |at| position_after_commit(at, &range, length);
+        st.cursor
+            .set_position(carried(caret.0), MoveMode::MoveAnchor);
+        st.cursor
+            .set_position(carried(caret.1), MoveMode::KeepAnchor);
+    }
+    st.preferred_x = None;
+    st.cursor_affinity = teksilo_text::CursorAffinity::Downstream;
+    st.pending_text_changed = true;
 }
 
 fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -> EventResponse {

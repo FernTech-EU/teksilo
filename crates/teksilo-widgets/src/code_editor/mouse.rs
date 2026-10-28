@@ -102,6 +102,10 @@ pub(super) fn handle_pointer_event(
             {
                 return EventResponse::Ignored;
             }
+            // Before the press moves the caret, a composition in progress ends
+            // with its text kept where it is. Otherwise the input method keeps
+            // composing at the old place and commits there later.
+            super::keyboard::settle_before_press(state, ctx);
 
             let local = to_engine_local(state, position);
             let hit = {
@@ -288,6 +292,11 @@ fn handle_direct_pointer_event(
             if !touch.press_is_still_a_tap(ctx.pointer().id, window, tap_slop) {
                 return EventResponse::Ignored;
             }
+            // A tap ends a composition in progress before it moves the caret,
+            // as a click does on its press (see the precise arm above). Not on
+            // this pointer's press: that may yet be a pan, which leaves the
+            // editor as it found it.
+            super::keyboard::settle_before_press(state, ctx);
             let hit = {
                 let st = state.borrow();
                 let local = super::touch::window_to_engine_local(&st, window);
@@ -343,6 +352,9 @@ pub(super) fn handle_long_press(
             event.position.y + st.node_origin.y,
         )
     };
+    // A hold selects, so it ends a composition in progress first, as a tap
+    // does. A finger's press did not (it may have been a pan).
+    super::keyboard::settle_before_press(state, ctx);
     if !touch.select_word_at(event.pointer, window, ctx) {
         return EventResponse::Ignored;
     }
@@ -394,6 +406,8 @@ pub(super) fn add_caret_at(st: &mut super::state::CodeEditorState, pos: usize) {
 
 /// Double-click selects the word.
 pub(super) fn handle_double_tap(state: &SharedState, pos: Point, ctx: &mut EventContext) {
+    // The press before it ended a composition already; a finger's did not.
+    super::keyboard::settle_before_press(state, ctx);
     tap_select(state, pos, SelectionType::WordUnderCursor);
     ctx.request_frame();
 }
@@ -404,6 +418,7 @@ pub(super) fn handle_double_tap(state: &SharedState, pos: Point, ctx: &mut Event
 /// saying so explicitly keeps this correct if a wrapped plain-text editor ever
 /// makes the two diverge.
 pub(super) fn handle_triple_tap(state: &SharedState, pos: Point, ctx: &mut EventContext) {
+    super::keyboard::settle_before_press(state, ctx);
     tap_select(state, pos, SelectionType::LineUnderCursor);
     ctx.request_frame();
 }

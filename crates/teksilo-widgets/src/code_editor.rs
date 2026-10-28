@@ -54,6 +54,8 @@ mod touch;
 mod widget;
 
 #[cfg(test)]
+mod composition_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod touch_tests;

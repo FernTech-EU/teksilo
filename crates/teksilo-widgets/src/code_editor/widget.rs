@@ -623,7 +623,12 @@ impl Widget for CodeEditor {
                     if gained {
                         super::keyboard::report_ime_cursor_area(&state, ctx);
                     } else {
-                        super::keyboard::clear_ime_preedit(&state);
+                        // Keep any in-progress composition's text in place and
+                        // end the platform's composition (see
+                        // `keyboard::finish_composition`): thrown away, the
+                        // writer's text was lost; left alive, the input method
+                        // commits it later, here or in the field focused next.
+                        super::keyboard::finish_composition(&state, ctx);
                         // A popup that outlived its editor's focus would float
                         // detached — close it on blur.
                         completion::close(&state, ctx);
@@ -637,6 +642,16 @@ impl Widget for CodeEditor {
                     }
                     ctx.request_frame();
                 }
+            })
+            // A click on a control that takes no focus (a toolbar button)
+            // blurs nothing, so the framework asks the editor to commit here
+            // first: a composition in progress ends with its text kept, as on
+            // a blur. Left alive, the command (an undo, an edit through the
+            // handle) would take it out of the text while the input method
+            // still holds it, and the next key would bring it back at the caret.
+            .on_commit_edit({
+                let state = self.state.clone();
+                move |ctx| super::keyboard::finish_composition(&state, ctx)
             })
             .on_pointer_event({
                 let state = self.state.clone();

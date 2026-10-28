@@ -939,7 +939,11 @@ fn a_cancelled_composition_leaves_the_document_clean() {
         assert!(s.composition.show(&s.document, &s.cursor, "ん"));
     }
     assert_eq!(st.borrow().document.to_plain_text().unwrap(), "aんb");
-    super::keyboard::clear_ime_preedit(&st);
+    {
+        let mut guard = st.borrow_mut();
+        let s = &mut *guard;
+        s.composition.cancel(&s.document);
+    }
     let s = st.borrow();
     assert_eq!(
         s.document.to_plain_text().unwrap(),
@@ -965,7 +969,11 @@ fn a_composition_an_edit_reverted_is_not_removed_twice() {
         // Any recorded write reverts the composition first.
         s.document.cursor_at(0).insert_text("z").unwrap();
     }
-    super::keyboard::clear_ime_preedit(&st);
+    {
+        let mut guard = st.borrow_mut();
+        let s = &mut *guard;
+        s.composition.cancel(&s.document);
+    }
     assert_eq!(
         st.borrow().document.to_plain_text().unwrap(),
         "zab",
@@ -1065,15 +1073,16 @@ fn a_cancelled_composition_leaves_the_history_alone() {
     assert_eq!(text_of(&st), "abc");
 }
 
-/// Undo pressed while a composition is shown takes it away, and the editor
-/// no longer claims it.
+/// Undo pressed while a composition is shown: the composition ends first, its
+/// text kept, and the undo takes that text back, leaving the typing before
+/// it. The editor no longer claims a composition.
 #[test]
 fn an_undo_during_a_composition_takes_it_away() {
     let (mut tree, st) = composing_editor("");
     type_keys(&mut tree, "abc");
     compose(&mut tree, "ni");
     tree.press_key(Key::Z, Modifiers::COMMAND);
-    assert_eq!(text_of(&st), "");
+    assert_eq!(text_of(&st), "abc", "the kept composition is undone");
     {
         let s = st.borrow();
         assert_eq!(s.composition.range(&s.document), None);
@@ -1081,9 +1090,9 @@ fn an_undo_during_a_composition_takes_it_away() {
     ime_frame(&mut tree);
     compose(&mut tree, "nih");
     commit(&mut tree, "\u{4F60}");
-    assert_eq!(text_of(&st), "\u{4F60}");
+    assert_eq!(text_of(&st), "abc\u{4F60}");
     let _ = st.borrow().document.undo();
-    assert_eq!(text_of(&st), "");
+    assert_eq!(text_of(&st), "abc");
 }
 
 // --- Smart Home -----------------------------------------------------------
