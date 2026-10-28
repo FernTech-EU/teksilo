@@ -412,14 +412,20 @@ pub(crate) fn flush_pending_chars(state: &mut EditorState) {
         // to collapse the selection here first, one layer above the
         // insert that would otherwise swallow it.
         super::keyboard::collapse_selection_before_insert(state);
-        if batch.contains('\u{2029}') {
-            // A typed paragraph separator ends the paragraph, as a pasted one
-            // does. Only then: a batch in an edit block of its own would not
-            // merge with the typing around it into one undo step.
-            super::clipboard::insert_plain_text(state, &batch);
-        } else {
-            let _ = state.cursor.insert_text(&batch);
-        }
+        // In the format toggled on the caret before it, if any (see
+        // `typing_format`).
+        super::typing_format::insert_with(state, |state| {
+            if batch.contains('\u{2029}') {
+                // A typed paragraph separator ends the paragraph, as a pasted
+                // one does. Only then: a batch in an edit block of its own
+                // would not merge with the typing around it into one undo step.
+                super::clipboard::insert_plain_text(state, &batch)
+            } else if state.cursor.insert_text(&batch).is_ok() {
+                batch.chars().count()
+            } else {
+                0
+            }
+        });
         // Counted as the characters went in, which is what was written. A caret
         // delta would be a different number whenever the insert above replaced a
         // selection, and the routes are reported apart because a settled IME

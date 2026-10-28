@@ -71,6 +71,9 @@ pub(crate) struct EditorState {
     /// `document_version`, which bumps on both content and format
     /// changes — toolbars that want to react to just format changes
     /// (e.g. refresh Bold / Italic button state) observe this signal.
+    /// Also bumps when the format toggled on a collapsed caret for the text
+    /// typed next changes ([`typing_format`](Self::typing_format)), which is
+    /// what such a toolbar shows there.
     pub format_version: Signal<u64>,
     /// Bumps once per [`DocumentEvent::LongOperationFinished`]. Starts
     /// at 0; observers see a strictly increasing count as async
@@ -584,6 +587,10 @@ pub(crate) struct EditorState {
     pub pending_text_changed: bool,
     pub pending_format_changed: bool,
 
+    /// Bold, Italic, Underline or Strikethrough toggled on the collapsed
+    /// caret, for the text typed next there. See [`super::typing_format`].
+    pub typing_format: Option<super::typing_format::TypingFormat>,
+
     /// Latest `(can_undo, can_redo)` pair from a `DocumentEvent::UndoRedoChanged`
     /// arriving during `drain_events`. Debounced alongside text/format
     /// changes so rapid typing doesn't hammer toolbar observers.
@@ -814,6 +821,13 @@ impl EditorState {
         self.report_inserted_chars(source, text.chars().count());
     }
 
+    /// Tell format observers (a toolbar's Bold toggle) to read the caret's
+    /// format again, when it changed with no document event to say so.
+    pub fn bump_format_version(&self) {
+        self.format_version
+            .set(self.format_version.get().wrapping_add(1));
+    }
+
     /// As [`Self::report_inserted`], for a caller that counted as it went.
     ///
     /// Zero reports nothing — there is no such thing as zero characters
@@ -974,6 +988,7 @@ impl EditorState {
             debounce: Debounce::new(),
             pending_text_changed: false,
             pending_format_changed: false,
+            typing_format: None,
             pending_undo_redo: None,
             drag_state: DragState::Idle,
             rich_clipboard_fragment: None,

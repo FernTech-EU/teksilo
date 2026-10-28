@@ -89,6 +89,7 @@ mod reading_order;
 mod state;
 pub(crate) mod touch;
 pub(crate) mod touch_mount;
+mod typing_format;
 
 pub use self::lists::list_style_is_ordered;
 
@@ -114,6 +115,8 @@ mod tests;
 mod touch_tests;
 #[cfg(test)]
 mod transient_view_tests;
+#[cfg(test)]
+mod typing_format_tests;
 #[cfg(test)]
 mod window_tests;
 #[cfg(test)]
@@ -995,19 +998,15 @@ impl RichTextEditor {
     /// first character of the selected range, so the reading is
     /// stable and matches what a user would expect from "tell me the
     /// format of what I have selected."
+    ///
+    /// On a collapsed caret it is the format the next typed character takes:
+    /// the format of the character before the caret, which typed text
+    /// inherits (at the start of a paragraph the format of its first
+    /// character, none in an empty paragraph), with Bold, Italic,
+    /// Underline and Strikethrough as toggled on that caret since it was put
+    /// there (see [`toggle_bold`](Self::toggle_bold)).
     pub fn caret_char_format(&self) -> TextFormat {
-        let st = self.state.borrow();
-        let probe_pos = if st.cursor.has_selection() {
-            st.cursor.selection_start()
-        } else {
-            st.cursor.position()
-        };
-        // Read through a fresh cursor so we don't disturb the widget's
-        // own cursor (the widget's own cursor has its own position /
-        // anchor state that we must not move).
-        let probe = st.document.cursor();
-        probe.set_position(probe_pos, teksilo_text::text_document::MoveMode::MoveAnchor);
-        probe.char_format().unwrap_or_default()
+        typing_format::shown_format(&self.state.borrow())
     }
 
     /// Clone the internal shared state handle for test observation.
@@ -1309,24 +1308,26 @@ impl RichTextEditor {
     // --- Character-format commands ----------------------------------------
     //
     // Each setter writes to `TextCursor::merge_char_format`, which
-    // applies to the current selection — a collapsed caret formats
-    // nothing, since the document model has no typing/pending format. Toggle
+    // applies to the current selection. On a collapsed caret, which selects
+    // nothing, Bold, Italic, Underline and Strikethrough are kept for the
+    // text typed next at that caret, as a word processor keeps them, until
+    // the caret moves; the other setters format nothing there. Toggle
     // variants (`toggle_bold`, `toggle_italic`, `toggle_underline`,
     // `toggle_strikethrough`) read the current state via
     // [`caret_char_format`](Self::caret_char_format) first and flip,
     // which matches the Ctrl+B / Ctrl+I / Ctrl+U keyboard shortcuts.
 
     fn apply_char_format(&self, fmt: TextFormat) {
-        let st = self.state.borrow();
-        let _ = st.cursor.merge_char_format(&fmt);
+        typing_format::apply_command(&mut self.state.borrow_mut(), &fmt);
         // `pending_format_changed` gets set by `drain_events` when the
         // document emits its `FormatChanged` event in response to the
         // cursor mutation, so no manual bookkeeping is needed here.
     }
 
-    /// Apply **bold** to the current selection. A no-op when nothing is
-    /// selected — the document model has no typing format. Pairs with
-    /// [`is_bold`](Self::is_bold) and [`toggle_bold`](Self::toggle_bold).
+    /// Apply **bold** to the current selection. On a collapsed caret, bold
+    /// (or not) is kept for the text typed next at the caret, until the caret
+    /// moves. Pairs with [`is_bold`](Self::is_bold) and
+    /// [`toggle_bold`](Self::toggle_bold).
     pub fn set_bold(&self, enabled: bool) {
         self.apply_char_format(TextFormat {
             font_bold: Some(enabled),
@@ -2984,20 +2985,11 @@ impl EditorHandle {
     /// extension (same rule as
     /// [`RichTextEditor::caret_char_format`]).
     pub fn caret_char_format(&self) -> TextFormat {
-        let st = self.state.borrow();
-        let probe_pos = if st.cursor.has_selection() {
-            st.cursor.selection_start()
-        } else {
-            st.cursor.position()
-        };
-        let probe = st.document.cursor();
-        probe.set_position(probe_pos, MoveMode::MoveAnchor);
-        probe.char_format().unwrap_or_default()
+        typing_format::shown_format(&self.state.borrow())
     }
 
     fn apply_char_format(&self, fmt: TextFormat) {
-        let st = self.state.borrow();
-        let _ = st.cursor.merge_char_format(&fmt);
+        typing_format::apply_command(&mut self.state.borrow_mut(), &fmt);
     }
 
     /// Apply **bold** to the current selection.
@@ -3034,9 +3026,10 @@ impl EditorHandle {
 
     /// Set the font family for the current selection (a character-format
     /// change applied over the selected range). Like the other char-format
-    /// setters (`set_bold`, …), this is a **no-op when there is no
-    /// selection** — the document model has no typing/pending format, so a
-    /// bare caret has no range to format. `family` must be a name resolvable
+    /// setters other than the four toggles (`set_bold`, `set_italic`,
+    /// `set_underline`, `set_strikethrough`, which a collapsed caret keeps for
+    /// the text typed next), this is a **no-op when there is no selection**:
+    /// a bare caret has no range to format. `family` must be a name resolvable
     /// by the shared typesetter's font registrar — e.g. a value chosen from
     /// a [`FontPicker`](crate::font_picker::FontPicker).
     pub fn set_font_family(&self, family: impl Into<String>) {
@@ -4808,12 +4801,18 @@ pub(super) fn sync_cursor_signals(state: &SharedState) {
     if blink_reset {
         st.blink.restart();
     }
+    // A caret that moved or selected drops the format toggled on it for the
+    // text typed next; a toolbar showing that format reads it again.
+    let format_sig = typing_format::prune(&mut st).then(|| st.format_version.clone());
     drop(st);
     pos_sig.set(pos);
     anc_sig.set(anc);
     sel_sig.set(has_sel);
     if blink_reset && !caret_vis_sig.get() {
         caret_vis_sig.set(true);
+    }
+    if let Some(format_sig) = format_sig {
+        format_sig.set(format_sig.get().wrapping_add(1));
     }
 }
 

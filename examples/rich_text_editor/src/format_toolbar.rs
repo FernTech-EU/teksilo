@@ -665,11 +665,9 @@ mod tests {
 
     #[test]
     fn handle_bold_round_trip_on_selection() {
-        // `is_bold()` probes the document's char format at the
-        // selection start, so a selection is required for the round-
-        // trip to be observable — without a selection, toggle_bold
-        // changes the *typing format* only, and `is_bold` still
-        // reads the un-bolded character at the caret.
+        // With a selection, `is_bold()` reads the document's format at
+        // the selection start, which `toggle_bold` changes. See the next
+        // test for a collapsed caret.
         let doc = TextDocument::new();
         doc.set_markdown("Hello world")
             .expect("parse")
@@ -683,6 +681,26 @@ mod tests {
         assert!(handle.is_bold(), "toggle_bold flips selection bold on");
         handle.toggle_bold();
         assert!(!handle.is_bold(), "toggle_bold flips selection bold off");
+    }
+
+    #[test]
+    fn handle_bold_on_a_collapsed_caret_reads_on() {
+        // With nothing selected, `toggle_bold` keeps bold for the text typed
+        // next at the caret, and `is_bold()` (the Bold button's state) reads
+        // it, until the caret moves.
+        let doc = TextDocument::new();
+        doc.set_markdown("Hello world")
+            .expect("parse")
+            .wait()
+            .expect("import");
+        let editor = RichTextEditor::editor(doc);
+        let handle = editor.handle();
+        handle.select_range(5, 5);
+        assert!(!handle.is_bold(), "plain text before the caret");
+        handle.toggle_bold();
+        assert!(handle.is_bold(), "the text typed next will be bold");
+        handle.toggle_bold();
+        assert!(!handle.is_bold(), "toggled back off");
     }
 
     #[test]

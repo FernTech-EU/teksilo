@@ -17,6 +17,7 @@
 use teksilo_core::event::{EventResponse, Key, ScrollMotion, WidgetEvent};
 use teksilo_core::shortcut::StandardEdit;
 
+use super::typing_format::FormatToggle;
 use crate::editor_shortcuts::FormatShortcut;
 use teksilo_core::widget::EventContext;
 use teksilo_text::text_document::{
@@ -1310,14 +1311,22 @@ enum FormatBit {
 /// To get a meaningful read for the toggle decision we use
 /// `selection_start()` when a selection is active — that position
 /// is always the actual first character of the selected range.
+///
+/// On a collapsed caret the toggle is kept for the text typed next there,
+/// flipped from the format that text would have had (see
+/// [`super::typing_format`]).
 fn toggle_char_format(st: &mut EditorState, bit: FormatBit) {
-    let probe = st.document.cursor();
-    if st.cursor.has_selection() {
-        let start = st.cursor.selection_start();
-        probe.set_position(start, MoveMode::MoveAnchor);
-    } else {
-        probe.set_position(st.cursor.position(), MoveMode::MoveAnchor);
+    if !st.cursor.has_selection() {
+        let toggle = match bit {
+            FormatBit::Bold => FormatToggle::Bold,
+            FormatBit::Italic => FormatToggle::Italic,
+            FormatBit::Underline => FormatToggle::Underline,
+        };
+        super::typing_format::toggle(st, toggle);
+        return;
     }
+    let probe = st.document.cursor();
+    probe.set_position(st.cursor.selection_start(), MoveMode::MoveAnchor);
     let current = probe.char_format().unwrap_or_default();
     let new_value = !match bit {
         FormatBit::Bold => current.font_bold.unwrap_or(false),
@@ -1430,7 +1439,13 @@ fn handle_ime_composition(
                 collapse_selection_before_insert(st);
             }
         }
-        if st.composition.show(&st.document, &st.cursor, &clean) {
+        // In the format toggled on the caret before the composition, if any:
+        // the commit gives it to the text it records.
+        let typing = super::typing_format::pending(st).cloned();
+        if st
+            .composition
+            .show_in(&st.document, &st.cursor, &clean, typing.as_ref())
+        {
             // Which part the input method is on: the segment it converts, or
             // the caret's place inside the composition.
             let kept: Vec<bool> = text.chars().map(|c| !c.is_control()).collect();
@@ -1503,9 +1518,14 @@ fn commit_composition(
             st.composition.cancel(&st.document);
             return EventResponse::Ignored;
         }
-        let arrived = st
-            .composition
-            .commit(&st.document, &st.cursor, &clean, true);
+        // In the format toggled on the caret before the composition, if any.
+        let mut arrived = 0;
+        super::typing_format::insert_with(st, |st| {
+            arrived = st
+                .composition
+                .commit(&st.document, &st.cursor, &clean, true);
+            arrived
+        });
         st.report_inserted_chars(source, arrived);
         st.preferred_x = None;
         st.cursor_affinity = CursorAffinity::Downstream;
@@ -1602,7 +1622,11 @@ fn keep_composition(st: &mut EditorState, committed: Option<&str>) {
         .map(|text| text.chars().filter(|c| !c.is_control()).collect::<String>())
         .filter(|text| !text.is_empty())
         .unwrap_or_else(|| shown.to_owned());
-    let arrived = st.composition.commit(&st.document, &st.cursor, &text, true);
+    let mut arrived = 0;
+    super::typing_format::insert_with(st, |st| {
+        arrived = st.composition.commit(&st.document, &st.cursor, &text, true);
+        arrived
+    });
     st.report_inserted_chars(EditSource::Ime, arrived);
     // A caret after the composition moves with its end, by the difference
     // between the committed text and the text shown.

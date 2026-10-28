@@ -1,0 +1,325 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 FernTech
+
+//! Bold, Italic, Underline and Strikethrough toggled on a collapsed caret
+//! format the text typed next at that caret, as in every word processor, and
+//! the toggle reads On until the caret moves. See `typing_format`.
+
+use teksilo_canvas::SizeProposal;
+use teksilo_core::event::{Key, Modifiers, WidgetEvent};
+use teksilo_core::widget_tree::WidgetTree;
+use teksilo_text::text_document::{MoveMode, TextDocument, TextFormat};
+
+use super::state::SharedState;
+use super::{EditorHandle, RichTextEditor};
+use crate::common::ime_ops_test::ImeOps;
+
+fn viewport() -> SizeProposal {
+    SizeProposal::exact(480.0, 300.0)
+}
+
+struct Editor {
+    tree: WidgetTree,
+    state: SharedState,
+    handle: EditorHandle,
+    doc: TextDocument,
+    ops: ImeOps,
+}
+
+impl Editor {
+    /// A focused editor holding `text`, its caret at `caret`, its undo
+    /// history empty.
+    fn new(text: &str, caret: usize) -> Self {
+        let doc = TextDocument::new();
+        doc.set_plain_text(text).unwrap();
+        doc.clear_undo_redo();
+        let editor = RichTextEditor::editor(doc.clone());
+        let handle = editor.handle();
+        let state = editor.state_handle();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(editor);
+        tree.layout(viewport());
+        let _ = tree.render();
+        let focus = tree.first_focusable_descendant(id).expect("focusable");
+        tree.focus(focus);
+        let mut e = Self {
+            tree,
+            state,
+            handle,
+            doc,
+            ops: ImeOps::default(),
+        };
+        e.settle();
+        e.handle.select_range(caret, caret);
+        e.settle();
+        e
+    }
+
+    fn settle(&mut self) {
+        for _ in 0..3 {
+            self.tree.request_frame();
+            self.tree
+                .tick_animations(std::time::Duration::from_millis(16));
+            self.tree.layout(viewport());
+        }
+        let _ = self.tree.render();
+    }
+
+    fn type_keys(&mut self, text: &str) {
+        let editor = self.tree.focused().expect("the editor is focused");
+        self.tree.type_text(editor, text);
+        self.settle();
+    }
+
+    fn key(&mut self, key: Key, modifiers: Modifiers) {
+        self.tree.press_key(key, modifiers);
+        self.settle();
+    }
+
+    fn compose(&mut self, text: &str) {
+        self.tree.dispatch_event_with_ops(
+            WidgetEvent::ImeComposition {
+                text: text.to_string(),
+                cursor: None,
+                replacement: None,
+            },
+            &mut self.ops,
+        );
+    }
+
+    fn commit(&mut self, text: &str) {
+        self.compose("");
+        self.tree
+            .dispatch_event_with_ops(WidgetEvent::ime_commit(text), &mut self.ops);
+        self.settle();
+    }
+
+    fn text(&self) -> String {
+        self.doc.to_plain_text().unwrap_or_default()
+    }
+
+    /// The document's format of the character at `at`.
+    fn format_at(&self, at: usize) -> TextFormat {
+        let probe = self.doc.cursor();
+        probe.set_position(at, MoveMode::MoveAnchor);
+        probe.char_format().unwrap_or_default()
+    }
+
+    fn bold_at(&self, at: usize) -> bool {
+        self.format_at(at).font_bold == Some(true)
+    }
+
+    fn undo(&mut self) {
+        self.handle.undo();
+        self.settle();
+    }
+}
+
+/// Ctrl+B with nothing selected, then typing: the typed word is bold, the
+/// text around it is not, and the toggle read On from the press on.
+#[test]
+fn ctrl_b_on_a_collapsed_caret_bolds_what_is_typed_next() {
+    let mut e = Editor::new("one  two", 4);
+    let version = e.handle.format_version().get();
+    e.key(Key::B, Modifiers::COMMAND);
+    assert!(e.handle.is_bold(), "the toggle reads On right after Ctrl+B");
+    assert!(
+        e.handle.format_version().get() != version,
+        "a toolbar watching the format is told"
+    );
+    assert_eq!(e.text(), "one  two", "nothing is formatted or typed yet");
+
+    e.type_keys("bold");
+    assert_eq!(e.text(), "one bold two");
+    assert!((4..8).all(|at| e.bold_at(at)), "the typed word is bold");
+    assert!(
+        !e.bold_at(3) && !e.bold_at(8),
+        "the spaces around it are not"
+    );
+    assert!(
+        e.handle.is_bold(),
+        "after the commit, the next character is bold still"
+    );
+
+    e.undo();
+    assert_eq!(e.text(), "one  two", "one undo takes the bold word out");
+    assert!(!e.bold_at(4));
+}
+
+/// The toolbar path: the handle's toggles on a collapsed caret, each of the
+/// four, read back On before anything is typed.
+#[test]
+fn every_toggle_on_a_collapsed_caret_formats_what_is_typed_next() {
+    let mut e = Editor::new("ab", 1);
+    e.handle.toggle_bold();
+    e.handle.toggle_italic();
+    e.handle.toggle_underline();
+    e.handle.toggle_strikethrough();
+    assert!(e.handle.is_bold());
+    assert!(e.handle.is_italic());
+    assert!(e.handle.is_underline());
+    assert!(e.handle.is_strikethrough());
+
+    e.type_keys("X");
+    assert_eq!(e.text(), "aXb");
+    let x = e.format_at(1);
+    assert_eq!(
+        (
+            x.font_bold,
+            x.font_italic,
+            x.font_underline,
+            x.font_strikeout
+        ),
+        (Some(true), Some(true), Some(true), Some(true)),
+        "the typed character takes all four"
+    );
+    let a = e.format_at(0);
+    assert_ne!(a.font_bold, Some(true), "the text before it does not");
+}
+
+/// Toggled twice, nothing is kept: the typed text is plain.
+#[test]
+fn toggling_twice_types_plain() {
+    let mut e = Editor::new("ab", 1);
+    e.key(Key::B, Modifiers::COMMAND);
+    e.key(Key::B, Modifiers::COMMAND);
+    assert!(!e.handle.is_bold());
+    e.type_keys("X");
+    assert!(!e.bold_at(1));
+}
+
+/// Moving the caret drops the toggle, even back to where it was.
+#[test]
+fn moving_the_caret_drops_the_toggle() {
+    let mut e = Editor::new("abc", 1);
+    e.key(Key::B, Modifiers::COMMAND);
+    assert!(e.handle.is_bold());
+    e.key(Key::ArrowRight, Modifiers::NONE);
+    assert!(
+        !e.handle.is_bold(),
+        "the toggle reads Off once the caret moves"
+    );
+    e.key(Key::ArrowLeft, Modifiers::NONE);
+    assert!(!e.handle.is_bold(), "and stays Off back where it was set");
+    e.type_keys("X");
+    assert_eq!(e.text(), "aXbc");
+    assert!(!e.bold_at(1));
+}
+
+/// At the end of a bold word, typing continues bold, which the toggle shows;
+/// Ctrl+B there turns it off for the text typed next.
+#[test]
+fn ctrl_b_after_bold_text_types_plain() {
+    let mut e = Editor::new("bold text", 4);
+    e.handle.select_range(0, 4);
+    e.settle();
+    e.key(Key::B, Modifiers::COMMAND);
+    assert!(e.bold_at(0));
+    e.handle.select_range(4, 4);
+    e.settle();
+    assert!(
+        e.handle.is_bold(),
+        "after a bold word, the next character is bold"
+    );
+
+    e.key(Key::B, Modifiers::COMMAND);
+    assert!(!e.handle.is_bold(), "Ctrl+B turns it off");
+    e.type_keys("X");
+    assert_eq!(e.text(), "boldX text");
+    assert!(!e.bold_at(4), "the typed character is plain");
+}
+
+/// An input method's commit takes the toggle, and one undo takes it out.
+#[test]
+fn an_ime_commit_takes_the_toggle() {
+    let mut e = Editor::new("ab", 1);
+    e.key(Key::B, Modifiers::COMMAND);
+    for state in ["n", "ni"] {
+        e.compose(state);
+        e.settle();
+        assert_eq!(e.text(), format!("a{state}b"));
+        assert!(
+            (1..1 + state.len()).all(|at| e.bold_at(at)),
+            "the composition {state:?} is shown bold"
+        );
+        assert!(!e.bold_at(0), "the text before it is not");
+    }
+    assert!(e.handle.is_bold(), "the toggle reads On while composing");
+    e.commit("\u{4F60}");
+    assert_eq!(e.text(), "a\u{4F60}b");
+    assert!(e.bold_at(1), "the committed text is bold");
+    assert!(!e.bold_at(0) && !e.bold_at(2));
+
+    e.undo();
+    assert_eq!(e.text(), "ab", "one undo takes the committed text out");
+}
+
+/// A commit with no composition before it (a dead key, the emoji panel)
+/// takes the toggle as typing does.
+#[test]
+fn a_commit_without_a_composition_takes_the_toggle() {
+    let mut e = Editor::new("ab", 1);
+    e.key(Key::B, Modifiers::COMMAND);
+    e.tree
+        .dispatch_event_with_ops(WidgetEvent::ime_commit("\u{E9}"), &mut e.ops);
+    e.settle();
+    assert_eq!(e.text(), "a\u{E9}b");
+    assert!(e.bold_at(1));
+}
+
+/// Text typed in the same frame before Ctrl+B goes in without it.
+#[test]
+fn typing_before_the_toggle_in_the_same_frame_stays_plain() {
+    let mut e = Editor::new("", 0);
+    let editor = e.tree.focused().expect("focused");
+    e.tree.type_text(editor, "ab");
+    e.tree.press_key(Key::B, Modifiers::COMMAND);
+    e.tree.type_text(editor, "cd");
+    e.settle();
+    assert_eq!(e.text(), "abcd");
+    assert!(!e.bold_at(0) && !e.bold_at(1));
+    assert!(e.bold_at(2) && e.bold_at(3));
+}
+
+/// At the start of a bold paragraph the next typed character is bold, as in a
+/// word processor, and the toggle says so; Ctrl+B there types plain.
+#[test]
+fn at_the_start_of_a_bold_paragraph_typing_is_bold() {
+    let mut e = Editor::new("plain\nBold", 6);
+    e.handle.select_range(6, 10);
+    e.settle();
+    e.key(Key::B, Modifiers::COMMAND);
+    e.handle.select_range(6, 6);
+    e.settle();
+    assert!(
+        e.handle.is_bold(),
+        "the paragraph's first character is bold"
+    );
+    e.type_keys("X");
+    assert_eq!(e.text(), "plain\nXBold");
+    assert!(e.bold_at(6), "typed in its format");
+
+    e.handle.select_range(6, 6);
+    e.settle();
+    e.key(Key::B, Modifiers::COMMAND);
+    assert!(!e.handle.is_bold());
+    e.type_keys("Y");
+    assert_eq!(e.text(), "plain\nYXBold");
+    assert!(!e.bold_at(6), "Ctrl+B there types plain");
+    assert!(e.bold_at(7));
+}
+
+/// In an empty paragraph the next typed character is plain: nothing to take
+/// a format from.
+#[test]
+fn in_an_empty_paragraph_typing_is_plain() {
+    let mut e = Editor::new("Bold\n\nafter", 5);
+    e.handle.select_range(0, 4);
+    e.settle();
+    e.key(Key::B, Modifiers::COMMAND);
+    e.handle.select_range(5, 5);
+    e.settle();
+    assert!(!e.handle.is_bold());
+    e.type_keys("X");
+    assert!(!e.bold_at(5));
+}

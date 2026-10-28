@@ -852,11 +852,10 @@ fn bold_follows_a_rebind_of_format_bold() {
 #[test]
 fn editor_bold_toggle_applies_to_selection() {
     // `TextCursor::merge_char_format` operates on the selection range
-    // `[anchor, position]`. With no selection the range is empty and
-    // no character is touched — that matches the godot reference,
-    // where Ctrl+B only takes visible effect when there's a
-    // selection. This test selects "text" and confirms Ctrl+B bolds
-    // the whole run.
+    // `[anchor, position]`. With no selection Ctrl+B formats nothing in
+    // the document and is kept for the text typed next instead (see
+    // `typing_format_tests`). This test selects "text" and confirms
+    // Ctrl+B bolds the whole run.
     let doc = TextDocument::new();
     doc.set_plain_text("text").unwrap();
     let editor = RichTextEditor::editor(doc);

@@ -64,7 +64,7 @@
 use std::ops::Range;
 
 use teksilo_text::text_document::{
-    InsertionOrigin, MoveMode, TextCursor, TextDocument, TransientLayerId,
+    InsertionOrigin, MoveMode, TextCursor, TextDocument, TextFormat, TransientLayerId,
 };
 
 /// Whether a view with `composition` lays out `doc`'s transient edits: while
@@ -260,13 +260,31 @@ impl Composition {
     /// The cursor is left after it. Returns whether it is shown; when the
     /// document refuses it, the composition is cancelled.
     pub(crate) fn show(&mut self, doc: &TextDocument, cursor: &TextCursor, text: &str) -> bool {
+        self.show_in(doc, cursor, text, None)
+    }
+
+    /// [`show`](Self::show), the text in the format it inherits with the
+    /// fields `format` sets over it, when given: the format a writer toggled
+    /// on the caret before the composition (Bold with nothing selected),
+    /// which the commit then gives the text it records.
+    pub(crate) fn show_in(
+        &mut self,
+        doc: &TextDocument,
+        cursor: &TextCursor,
+        text: &str,
+        format: Option<&TextFormat>,
+    ) -> bool {
         if self.is_live(doc)
             && let Some(range) = doc.transient_range()
         {
             cursor.set_position(range.start, MoveMode::MoveAnchor);
             cursor.set_position(range.end, MoveMode::KeepAnchor);
         }
-        if cursor.insert_text_transient(text).is_ok() {
+        let shown = match format {
+            Some(format) => cursor.insert_text_transient_merged(text, format),
+            None => cursor.insert_text_transient(text),
+        };
+        if shown.is_ok() {
             self.shown = Some(text.to_owned());
             self.ended = false;
             self.segment = None;

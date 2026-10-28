@@ -233,6 +233,22 @@ by crate for clarity, not because crates version independently.
   text, and the preview hit-tested its layout from before that text: a drag
   from the first word of a wrapped line selected from the space where the
   line above wraps, or earlier.
+- **Bold, Italic, Underline and Strikethrough toggled with nothing selected
+  format the text typed next**, in a `RichTextEditor`, as in a word
+  processor: Ctrl+B (or `toggle_bold`, `set_bold` and their siblings) on a
+  collapsed caret did nothing, and the text typed there came out plain. The
+  text typed or committed by an input method at that caret now takes the
+  format, as one undo step with it, until the caret moves, and an input
+  method's composition is shown in it while it is typed. On a collapsed
+  caret `caret_char_format` and `is_bold` (and its siblings) report the
+  format the next typed character will have: the text before the caret's
+  (at the start of a paragraph, its first character's), with those toggles
+  over it, so a toolbar's Bold button reads On after the toggle and at the
+  end of a bold word.
+- **Text typed at the start of a paragraph takes the format of its first
+  character**, in a `RichTextEditor` as in Word and TextEdit: at the start
+  of a bold paragraph it is bold, where it came out plain. An empty
+  paragraph still types plain.
 - **The segment an input method is converting is underlined thick.** In a
   `TextInput`, `SearchField`, `PasswordField`, `RichTextEditor` and the other
   text fields, the part of a composition the input method is working on (a
