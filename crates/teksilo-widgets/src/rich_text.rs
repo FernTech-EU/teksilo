@@ -116,6 +116,8 @@ mod touch_tests;
 mod transient_view_tests;
 #[cfg(test)]
 mod window_tests;
+#[cfg(test)]
+mod wrap_press_tests;
 
 pub use context_menu::{
     INTENT_COPY, INTENT_CUT, INTENT_PASTE, INTENT_PASTE_UNFORMATTED, INTENT_SELECT_ALL,

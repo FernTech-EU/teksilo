@@ -228,6 +228,11 @@ by crate for clarity, not because crates version independently.
   "Heading"), until the host's next `refresh_if_stale` and the frame after
   it. They now move with the text as it is edited; the refresh still finds
   the matches the edit made or broke.
+- **A press in a read-only preview while the editor beside it composes lands
+  where it was aimed.** The press ends the editor's composition, keeping its
+  text, and the preview hit-tested its layout from before that text: a drag
+  from the first word of a wrapped line selected from the space where the
+  line above wraps, or earlier.
 - **The segment an input method is converting is underlined thick.** In a
   `TextInput`, `SearchField`, `PasswordField`, `RichTextEditor` and the other
   text fields, the part of a composition the input method is working on (a

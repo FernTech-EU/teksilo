@@ -453,14 +453,28 @@ pub(crate) fn flush_pending_chars_keeping(state: &mut EditorState, offsets: &mut
 /// and the input system's commits batched for this frame (those with no
 /// composition before them: a dead key, the emoji panel) where they were
 /// typed, and lay the text out with them, so that the pointer hit-tests the
-/// text the screen showed. Returns whether there was a batch.
+/// text the screen showed. Returns whether there was a batch, or a change of
+/// the document this view had not laid out yet.
 ///
 /// Left for the next frame, the batch went in at the caret the pointer had
 /// just placed. The commit of a composition is not batched: it takes the
 /// composition's place as it arrives (`keyboard::commit_composition`), which
 /// is where the Microsoft Korean IME's commit on the mouse-down itself lands.
+///
+/// A change this view has not laid out is caught up the same way. A press
+/// ends the composition of the field that has the focus before it reaches
+/// the view it lands in, so a press in a preview finds the editor's committed
+/// text in the document and not yet in the preview's layout: the offsets that
+/// layout answered were the old text's, and the press landed that many
+/// characters early (a drag from a line's first word started at the space
+/// where the line above wraps).
 pub(crate) fn insert_typing_before_pointer(state: &mut EditorState) -> bool {
-    if state.pending_chars.is_empty() {
+    let unread = !state
+        .event_queue
+        .lock()
+        .expect("event queue mutex poisoned")
+        .is_empty();
+    if state.pending_chars.is_empty() && !unread {
         return false;
     }
     catch_up_layout(state);
