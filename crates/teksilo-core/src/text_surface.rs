@@ -65,7 +65,7 @@ use std::rc::Rc;
 
 use crate::shortcut::StandardEdit;
 use crate::signal::Signal;
-use crate::text_input_document::TextInputDocument;
+use crate::text_input_document::{TextInputDocument, TextInputEditor};
 use crate::widget::EventContext;
 use crate::widget_id::WidgetId;
 
@@ -157,6 +157,16 @@ pub trait TextSurface {
     fn input_document(&self) -> Option<&dyn TextInputDocument> {
         None
     }
+
+    /// The half of this surface's document the platform's input system
+    /// writes through. See
+    /// [`TextInputEditor`].
+    ///
+    /// `None` by default, and for a surface that takes no text now (a
+    /// read-only field).
+    fn input_editor(&self) -> Option<&dyn TextInputEditor> {
+        None
+    }
 }
 
 /// A cloneable view of one tree's registered text surfaces.
@@ -239,6 +249,18 @@ impl TextSurfaces {
         let surface = self.focused()?;
         let document = surface.input_document()?;
         Some(f(document))
+    }
+
+    /// Run `f` on the writing half of the focused text widget's document
+    /// ([`TextSurface::input_editor`]). `None` when focus is not on a text
+    /// widget, or on one that takes no writes from the input system.
+    pub fn with_focused_input_editor<R>(
+        &self,
+        f: impl FnOnce(&dyn TextInputEditor) -> R,
+    ) -> Option<R> {
+        let surface = self.focused()?;
+        let editor = surface.input_editor()?;
+        Some(f(editor))
     }
 
     /// Does the widget registered under `owner` refuse edits?

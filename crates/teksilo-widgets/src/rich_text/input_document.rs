@@ -54,7 +54,9 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use teksilo_canvas::{Point, Rect};
-use teksilo_core::text_input_document::{FirstLineRect, TextInputDocument, Utf16Index};
+use teksilo_core::text_input_document::{
+    FirstLineRect, InputRevisions, TextChanged, TextInputDocument, Utf16Index,
+};
 use teksilo_text::CursorAffinity;
 
 use super::EditorHandle;
@@ -166,6 +168,43 @@ impl TextInputDocument for EditorHandle {
 
     fn utf16_index(&self) -> Option<Rc<Utf16Index>> {
         self.with_typing_inserted(|st| st.utf16.index(&st.document))
+    }
+
+    fn flush_pending_input(&self) -> bool {
+        let Ok(mut st) = self.state.try_borrow_mut() else {
+            return false;
+        };
+        if st.pending_chars.is_empty() {
+            return false;
+        }
+        super::frame_loop::flush_pending_chars(&mut st);
+        if let Some(request) = &st.frame_request {
+            request.set(true);
+        }
+        true
+    }
+
+    /// Read as the editor stands, typing waiting or not: inserting it would
+    /// change what is counted.
+    fn revisions(&self) -> Option<InputRevisions> {
+        let st = self.state.try_borrow().ok()?;
+        let caret = st.cursor.position();
+        let caret_rect = first_line_rect(&st, caret..caret).map(|line| line.rect);
+        Some(st.input_system.revisions(
+            st.cursor.anchor(),
+            caret,
+            caret_rect,
+            visible_text_rect(&st),
+        ))
+    }
+
+    fn text_changed_since(&self, revision: u64) -> Option<TextChanged> {
+        self.state
+            .try_borrow()
+            .ok()?
+            .input_system
+            .journal
+            .changed_since(revision)
     }
 }
 

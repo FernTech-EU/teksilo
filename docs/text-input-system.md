@@ -238,6 +238,21 @@ first, running the change callbacks; the request is then answered
 "nothing". It is `true` by default; a widget that batches typing or holds
 its state while it works answers it.
 
+A widget can also take the input system's writes, by returning a
+`TextInputEditor` from `TextSurface::input_editor` (`None` while it takes no
+text). The input system replaces ranges (`replace_text`), sets the selection,
+and writes its composition into the document itself, then marks it
+(`mark_composition`); while one is marked, its writes are not recorded and
+the field's rules (filters, a length cap) wait for `end_composition`, which
+records the final text as one undo step. Writes come between
+`begin_input_batch` and `end_input_batch`; inside a batch the widget changes
+only its own state and holds back what the application would see. Every
+method has a default that refuses, so a widget that implements none of it
+keeps the platform's other paths. The stock widgets implement it. For the
+platform to report changes back, `revisions` and `text_changed_since` say
+what changed since a revision and whether the input system caused it, and
+`flush_pending_input` inserts batched typing at a moment the platform picks.
+
 ## 7. Platforms
 
 A password field (`PasswordField`, or any field whose IME purpose is

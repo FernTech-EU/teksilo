@@ -935,7 +935,7 @@ pub(crate) fn clipboard_cut(state: &mut TextInputState, ctx: &EventContext) {
 /// separator (U+2028, U+2029): the typesetter breaks the line at either, and a
 /// single-line field would show two. Typing, input methods and paste all ask
 /// this, so they keep out the same characters.
-fn single_line_admits(c: char) -> bool {
+pub(super) fn single_line_admits(c: char) -> bool {
     !c.is_control() && !matches!(c, '\u{2028}' | '\u{2029}')
 }
 

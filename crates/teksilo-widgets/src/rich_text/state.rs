@@ -529,6 +529,11 @@ pub(crate) struct EditorState {
     /// See [`Composition`].
     pub composition: Composition,
 
+    /// What the platform's input system writes through and reads back: the
+    /// journal of the document's changes, the batch of its writes, the
+    /// styled stretches of its composition. See `common::input_editor`.
+    pub input_system: crate::common::input_editor::InputSystemState,
+
     /// Document position (scalar-indexed caret offset) of the most recent
     /// [`chase_caret_into_view`](super::keyboard::chase_caret_into_view). The
     /// page-follow chase reveals the caret only when it actually *moves*: a
@@ -833,7 +838,7 @@ impl EditorState {
     /// Zero reports nothing — there is no such thing as zero characters
     /// arriving, and a consumer would only have to filter it out again.
     pub fn report_inserted_chars(&self, source: crate::EditSource, chars: usize) {
-        if chars == 0 {
+        if chars == 0 || self.input_system.batch.defer_arrival(source, chars) {
             return;
         }
         if let Some(callback) = self.on_text_inserted.as_ref() {
@@ -893,6 +898,7 @@ impl EditorState {
         let initial_can_redo = document.can_redo();
 
         let utf16 = DocumentUtf16::watching(&document);
+        let input_system = crate::common::input_editor::InputSystemState::watching(&document);
 
         Rc::new(RefCell::new(Self {
             document,
@@ -978,6 +984,7 @@ impl EditorState {
             pending_chars: String::new(),
             pending_arrivals: PendingArrivals::default(),
             composition: Composition::default(),
+            input_system,
             last_chase_pos: None,
             last_chase_y: None,
             typewriter: None,

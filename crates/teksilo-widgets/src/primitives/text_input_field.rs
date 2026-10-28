@@ -66,6 +66,7 @@
 //! [`SpinBox`]: crate::spin_box::SpinBox
 
 mod input_document;
+mod input_editor;
 mod keyboard;
 pub mod mask;
 mod mouse;
@@ -1709,6 +1710,8 @@ mod arrival_tests;
 /// the UTF-16 offsets, through the window's registry.
 #[cfg(test)]
 mod input_document_tests;
+#[cfg(test)]
+mod input_editor_tests;
 
 /// **A composition that takes the place of text, and one a press or a focus
 /// change ends**: Hanja conversion, a cancel that puts the text back, and the
@@ -1947,5 +1950,14 @@ impl teksilo_core::text_surface::TextSurface for TextFieldHandle {
     /// The field answers for its document; see the `input_document` module.
     fn input_document(&self) -> Option<&dyn teksilo_core::text_input_document::TextInputDocument> {
         Some(self)
+    }
+
+    /// The field takes the input system's writes while it takes text and
+    /// keeps it to itself: not read-only, not secure. See the `input_editor`
+    /// module.
+    fn input_editor(&self) -> Option<&dyn teksilo_core::text_input_document::TextInputEditor> {
+        let state = self.shared_state()?;
+        let st = state.try_borrow().ok()?;
+        (!st.read_only && !st.secure).then_some(self as _)
     }
 }

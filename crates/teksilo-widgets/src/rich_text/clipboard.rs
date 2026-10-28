@@ -37,7 +37,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use teksilo_core::widget::EventContext;
 use teksilo_platform::clipboard::ClipboardHandle;
-use teksilo_text::text_document::{DocumentFragment, LINE_SEPARATOR};
+use teksilo_text::text_document::{DocumentFragment, LINE_SEPARATOR, TextCursor};
 
 use super::state::EditorState;
 
@@ -369,23 +369,29 @@ pub(crate) fn can_paste(ctx: &EventContext) -> bool {
 /// new block, and each line break (U+2028 LINE SEPARATOR, or the vertical tab
 /// Word writes for one) becomes the document's [`LINE_SEPARATOR`].
 pub(super) fn insert_plain_text(state: &EditorState, text: &str) -> usize {
+    insert_plain_text_at(&state.cursor, text)
+}
+
+/// [`insert_plain_text`] at `cursor`, for a caller that holds the editor's
+/// state apart (the input system's writes).
+pub(super) fn insert_plain_text_at(state_cursor: &TextCursor, text: &str) -> usize {
     let normalised = plain_text_breaks(text);
     // One insertion, one undo step. Without the edit block each line is its own
     // entry, so undoing a four-line paste took four presses of Ctrl+Z and left
     // three quarters of it behind — every other multi-step mutation in the
     // editor is grouped for exactly this reason.
-    state.cursor.begin_edit_block();
+    state_cursor.begin_edit_block();
     let mut lines = normalised.split('\n');
     if let Some(first) = lines.next() {
-        let _ = state.cursor.insert_text(first);
+        let _ = state_cursor.insert_text(first);
     }
     for line in lines {
-        let _ = state.cursor.insert_block();
+        let _ = state_cursor.insert_block();
         if !line.is_empty() {
-            let _ = state.cursor.insert_text(line);
+            let _ = state_cursor.insert_text(line);
         }
     }
-    state.cursor.end_edit_block();
+    state_cursor.end_edit_block();
     normalised.chars().count()
 }
 

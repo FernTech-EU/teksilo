@@ -193,6 +193,219 @@ pub trait TextInputDocument {
     fn utf16_range_to_chars(&self, range: Range<usize>) -> Option<Range<usize>> {
         Some(self.utf16_index()?.utf16_range_to_chars(range))
     }
+
+    /// Insert typing the widget batched for its next frame, now, firing what
+    /// its frame tick would (the change callbacks, the arrivals report).
+    /// Returns whether anything was inserted.
+    ///
+    /// Call it only where a change may be reported: from the application's
+    /// handling of an event, never inside a platform lock nor ahead of the
+    /// toolkit in a window procedure. After it,
+    /// [`is_available`](Self::is_available) answers `true` unless the widget
+    /// is busy. `false` by default: a document that batches nothing has
+    /// nothing to insert.
+    fn flush_pending_input(&self) -> bool {
+        false
+    }
+
+    /// The document's revisions: of its text, its selection and its layout.
+    /// Each grows whenever the thing it counts changes, and never goes back.
+    ///
+    /// A platform bridge keeps the revisions it last reported and asks again
+    /// after every event: what grew is what it reports (`OnTextChange`,
+    /// `OnSelectionChange`, `OnLayoutChange` on Windows). `None` by default,
+    /// and while the widget is busy: the bridge then compares the text itself.
+    fn revisions(&self) -> Option<InputRevisions> {
+        None
+    }
+
+    /// What changed in the text since text revision `revision`, merged into
+    /// one range, and what caused it. Ask it only when
+    /// [`revisions`](Self::revisions) says the text revision grew.
+    ///
+    /// `None` when the widget no longer knows (the revision is too old, or a
+    /// change came with no range): the caller treats the whole text as
+    /// changed. `None` by default.
+    fn text_changed_since(&self, revision: u64) -> Option<TextChanged> {
+        let _ = revision;
+        None
+    }
+}
+
+/// The revisions [`TextInputDocument::revisions`] answers.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct InputRevisions {
+    /// Grows with every change of the text.
+    pub text: u64,
+    /// Grows with every move of the selection or the caret.
+    pub selection: u64,
+    /// Grows whenever the text is drawn elsewhere (a relayout, a scroll).
+    pub layout: u64,
+}
+
+/// What caused a change of the text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeCause {
+    /// Writes through [`TextInputEditor`], the platform's input system: a
+    /// bridge does not report these back to it.
+    InputSystem,
+    /// Anything else: typing, a paste, an undo, the application.
+    Other,
+}
+
+/// A change of the text, as [`TextInputDocument::text_changed_since`]
+/// answers it: the text `start..old_end` became `start..new_end`, in
+/// character offsets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextChanged {
+    pub start: usize,
+    pub old_end: usize,
+    pub new_end: usize,
+    /// [`ChangeCause::InputSystem`] only when every change merged here came
+    /// from the input system.
+    pub cause: ChangeCause,
+}
+
+/// What a write through [`TextInputEditor::replace_text`] may do.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WriteOptions {
+    /// Say where the text would land, and change nothing (`QueryInsert`,
+    /// `TS_IAS_QUERYONLY` on Windows).
+    pub dry_run: bool,
+    /// A correction: the new text takes the replaced text's character format
+    /// (`TS_ST_CORRECTION`).
+    pub correction: bool,
+}
+
+/// Where a write landed, in the document's character offsets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Landed {
+    /// The range the new text occupies.
+    pub inserted: Range<usize>,
+    /// The range it replaced, before the write.
+    pub replaced: Range<usize>,
+}
+
+/// Why a [`TextInputEditor`] refused a write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum WriteRefused {
+    /// The document takes no writes from the input system (the default).
+    #[error("the document takes no writes from the input system")]
+    Unsupported,
+    /// The field is read-only.
+    #[error("the field is read-only")]
+    ReadOnly,
+    /// The range is outside the document, or ends before it starts.
+    #[error("the range is outside the document")]
+    InvalidRange,
+    /// The widget is in the middle of its own work, or holds typing not
+    /// inserted yet ([`TextInputDocument::flush_pending_input`]).
+    #[error("the widget is busy")]
+    Busy,
+}
+
+/// How a stretch of a composition is drawn: TSF's display attributes, the
+/// underlines of macOS marked text, Android's composing spans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SegmentStyle {
+    /// Text being typed, not converted yet.
+    Input,
+    /// A converted clause.
+    Converted,
+    /// The converted clause the input method is working on.
+    Target,
+    /// The unconverted clause the input method is working on.
+    TargetInput,
+}
+
+/// A styled stretch of a composition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompositionSegment {
+    /// Relative to the composition's start, in characters.
+    pub range: Range<usize>,
+    pub style: SegmentStyle,
+}
+
+/// The half of a text widget's document a platform's input system writes
+/// through, beside the [`TextInputDocument`] it reads: a TSF text store on
+/// Windows writes under its locks, and reads back at once what it wrote.
+///
+/// A widget hands it out with
+/// [`TextSurface::input_editor`](crate::text_surface::TextSurface::input_editor),
+/// `None` for a field that takes no text. Every method has a default that
+/// refuses or does nothing, so a custom widget that implements none of them
+/// keeps working: the platform treats it as read-only, or takes another path.
+///
+/// # The batch
+///
+/// Writes come between [`begin_input_batch`](Self::begin_input_batch) and
+/// [`end_input_batch`](Self::end_input_batch) (a TSF lock). Inside it the
+/// widget changes only its own state; every effect the application can
+/// observe (its callbacks, signal writes) is queued, and runs, in order, at
+/// the end of the outermost batch. The batch is also where the writes
+/// outside a composition are grouped into one undo step.
+///
+/// # A composition is a range of text
+///
+/// The input system writes its composition into the document itself, then
+/// marks it ([`mark_composition`](Self::mark_composition)); it is not a
+/// preedit the widget inserts and withdraws. While one is marked, writes
+/// change the document without an undo record, and the field's rules
+/// (filters, a length cap, a single line) wait: they apply to the final text
+/// at [`end_composition`](Self::end_composition), which records it as one
+/// undo step.
+pub trait TextInputEditor {
+    /// Replace `range` with `text`. Outside a composition the field's rules
+    /// apply and what landed is reported; inside one, `text` lands as given.
+    /// A `\r\n` or a lone `\r` lands as one line break.
+    fn replace_text(
+        &self,
+        range: Range<usize>,
+        text: &str,
+        options: WriteOptions,
+    ) -> Result<Landed, WriteRefused> {
+        let _ = (range, text, options);
+        Err(WriteRefused::Unsupported)
+    }
+
+    /// Set the selection, the caret at its start when `caret_at_start`.
+    fn set_selection(
+        &self,
+        selection: Range<usize>,
+        caret_at_start: bool,
+    ) -> Result<(), WriteRefused> {
+        let _ = (selection, caret_at_start);
+        Err(WriteRefused::Unsupported)
+    }
+
+    /// Mark `range` of the document as the input system's composition, drawn
+    /// as `segments` say. The first mark starts the composition (over text
+    /// already in the document, for a reconversion, or as an empty range at
+    /// the caret); a later one moves or restyles it.
+    fn mark_composition(
+        &self,
+        range: Range<usize>,
+        segments: &[CompositionSegment],
+    ) -> Result<(), WriteRefused> {
+        let _ = (range, segments);
+        Err(WriteRefused::Unsupported)
+    }
+
+    /// The composition is over: its text stays, under the field's rules, as
+    /// one undo step, reported as arriving through `origin`'s channel.
+    fn end_composition(&self, origin: crate::ImeOrigin) -> Result<(), WriteRefused> {
+        let _ = origin;
+        Err(WriteRefused::Unsupported)
+    }
+
+    /// Start a batch of writes. Batches nest.
+    fn begin_input_batch(&self) {}
+
+    /// End a batch of writes; at the end of the outermost one, what the
+    /// batch queued runs.
+    fn end_input_batch(&self) {}
 }
 
 /// The answer to [`TextInputDocument::first_line_rect`].
@@ -422,6 +635,82 @@ mod tests {
         let index = Utf16Index::new("abc");
         assert_eq!(index.char_range_to_utf16(2..1), 2..2);
         assert_eq!(index.utf16_range_to_chars(2..1), 2..2);
+    }
+
+    /// A widget that implemented the trait before the write half and the
+    /// journal existed, and implements none of it.
+    struct Older;
+
+    impl TextInputDocument for Older {
+        fn char_count(&self) -> Option<usize> {
+            Some(0)
+        }
+        fn text_in(&self, _: Range<usize>) -> Option<String> {
+            Some(String::new())
+        }
+        fn selection(&self) -> Option<Range<usize>> {
+            Some(0..0)
+        }
+        fn caret(&self) -> Option<usize> {
+            Some(0)
+        }
+        fn composition_range(&self) -> Option<Range<usize>> {
+            None
+        }
+        fn first_line_rect(&self, _: Range<usize>) -> Option<FirstLineRect> {
+            None
+        }
+        fn offset_at_point(&self, _: Point) -> Option<usize> {
+            None
+        }
+        fn visible_text_rect(&self) -> Option<Rect> {
+            None
+        }
+        fn is_editable(&self) -> bool {
+            true
+        }
+        fn is_secure(&self) -> bool {
+            false
+        }
+        fn writing_tools_allowed(&self) -> bool {
+            false
+        }
+        fn utf16_index(&self) -> Option<Rc<Utf16Index>> {
+            Some(Rc::new(Utf16Index::default()))
+        }
+    }
+
+    impl TextInputEditor for Older {}
+
+    /// The defaults keep an older implementer working: available, nothing to
+    /// flush, no journal (the bridge compares the text itself), and every
+    /// write refused, so the platform treats it as read-only.
+    #[test]
+    fn a_custom_implementer_keeps_the_defaults() {
+        let older = Older;
+        assert!(older.is_available());
+        assert!(!older.flush_pending_input());
+        assert_eq!(older.revisions(), None);
+        assert_eq!(older.text_changed_since(0), None);
+        let editor: &dyn TextInputEditor = &older;
+        assert_eq!(
+            editor.replace_text(0..0, "x", WriteOptions::default()),
+            Err(WriteRefused::Unsupported)
+        );
+        assert_eq!(
+            editor.set_selection(0..0, false),
+            Err(WriteRefused::Unsupported)
+        );
+        assert_eq!(
+            editor.mark_composition(0..0, &[]),
+            Err(WriteRefused::Unsupported)
+        );
+        assert_eq!(
+            editor.end_composition(crate::ImeOrigin::Composition),
+            Err(WriteRefused::Unsupported)
+        );
+        editor.begin_input_batch();
+        editor.end_input_batch();
     }
 
     #[test]

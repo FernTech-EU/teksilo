@@ -79,6 +79,7 @@ mod frame_loop;
 pub(crate) mod hit_test;
 pub(crate) mod image_cache;
 mod input_document;
+mod input_editor;
 mod keyboard;
 pub(crate) use keyboard::neighbour_line_center_y;
 mod lists;
@@ -100,6 +101,8 @@ mod composition_tests;
 mod find_highlight_tests;
 #[cfg(test)]
 mod input_document_tests;
+#[cfg(test)]
+mod input_editor_tests;
 #[cfg(test)]
 mod line_break_tests;
 #[cfg(test)]
@@ -5054,5 +5057,11 @@ impl teksilo_core::text_surface::TextSurface for EditorHandle {
     /// The editor answers for its document; see the `input_document` module.
     fn input_document(&self) -> Option<&dyn teksilo_core::text_input_document::TextInputDocument> {
         Some(self)
+    }
+
+    /// The editor takes the input system's writes while it takes text; see
+    /// the `input_editor` module.
+    fn input_editor(&self) -> Option<&dyn teksilo_core::text_input_document::TextInputEditor> {
+        (!teksilo_core::text_surface::TextSurface::is_read_only(self)).then_some(self as _)
     }
 }

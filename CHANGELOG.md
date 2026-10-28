@@ -46,6 +46,20 @@ by crate for clarity, not because crates version independently.
   the focused field's composition is over, and returns the text the input
   method committed for it, which the field keeps in place of what the
   composition showed (`None` keeps what it showed).
+- **`TextInputEditor`**, the half of a text widget's document the
+  platform's input system writes through, handed out by
+  `TextSurface::input_editor` (and `TextSurfaces::with_focused_input_editor`):
+  `replace_text` with `WriteOptions` (a dry run, a correction) answering
+  `Landed` or `WriteRefused`, `set_selection`, a composition marked as a range
+  of text (`mark_composition` with `CompositionSegment`s and their
+  `SegmentStyle`) and ended as one undo step (`end_composition`), and a batch
+  (`begin_input_batch`, `end_input_batch`) that holds back what the
+  application sees until it ends. Every method has a default that refuses or
+  does nothing. `RichTextEditor` and `TextInputField` implement it.
+- **`TextInputDocument::flush_pending_input`**, **`revisions`** and
+  **`text_changed_since`** (`InputRevisions`, `TextChanged`, `ChangeCause`):
+  insert batched typing where a change may be reported, and tell what changed
+  since a revision and whether the input system caused it.
 - **`TextInputDocument::is_available`** says whether a document can answer
   the platform now without any change (no batched typing inserted, no
   callback run). `true` by default.

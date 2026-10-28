@@ -302,6 +302,10 @@ pub(crate) struct TextInputState {
     /// Secure masking / echo applies to it like any other content, so a
     /// password composition shows as bullets. See [`Composition`].
     pub composition: Composition,
+    /// What the platform's input system writes through and reads back: the
+    /// journal of the document's changes, the batch of its writes, the
+    /// styled stretches of its composition. See `common::input_editor`.
+    pub input_system: crate::common::input_editor::InputSystemState,
     /// Last IME candidate-window rectangle reported to the platform. Reporting
     /// is deduped against this: re-sending an unchanged area is wasted work and,
     /// on some winit IME backends (ibus / fcitx), echoes back a fresh empty
@@ -430,6 +434,7 @@ impl TextInputState {
         let initial_can_undo = document.can_undo();
         let initial_can_redo = document.can_redo();
         let utf16 = DocumentUtf16::watching(&document);
+        let input_system = crate::common::input_editor::InputSystemState::watching(&document);
 
         Rc::new(RefCell::new(Self {
             document,
@@ -495,6 +500,7 @@ impl TextInputState {
             suffix_width: 0.0,
             field_widget_id: None,
             composition: Composition::default(),
+            input_system,
             last_ime_area: None,
             at_published: Cell::new(AtPublished::Nothing),
             at_republish: Signal::new(0),
@@ -539,7 +545,7 @@ impl TextInputState {
     /// Zero reports nothing: there is no such thing as zero characters
     /// arriving.
     pub fn report_inserted_chars(&self, source: EditSource, chars: usize) {
-        if chars == 0 {
+        if chars == 0 || self.input_system.batch.defer_arrival(source, chars) {
             return;
         }
         if let Some(callback) = self.on_text_inserted.as_ref() {

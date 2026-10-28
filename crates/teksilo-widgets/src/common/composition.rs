@@ -192,6 +192,9 @@ pub(crate) struct Composition {
     /// reverts this composition, then transient edits someone else makes, leave
     /// a layer outstanding that is not this one.
     layer: Option<TransientLayerId>,
+    /// The input system writes this composition itself
+    /// ([`begin_written`](Self::begin_written)).
+    written: bool,
 }
 
 impl Composition {
@@ -448,6 +451,67 @@ impl Composition {
         self.shown = None;
         self.ended = false;
         self.layer = None;
+        self.written = false;
+    }
+
+    // ── A composition the input system writes itself ───────────────────
+    //
+    // A TSF text store's composition is text the text service writes into
+    // the document, at ranges it names, then marks; the surface neither
+    // inserts nor withdraws it. Its writes are transient edits all the same,
+    // so the undo history keeps none of its states and its end records one
+    // step (`commit`). `shown` holds an empty string for as long as it lasts:
+    // the text it shows is whatever the document holds over
+    // `TextDocument::transient_range`.
+
+    /// Start a composition the input system writes itself, at the cursor:
+    /// transient edits that are not this surface's are reverted first, as
+    /// [`begin`](Self::begin) does.
+    pub(crate) fn begin_written(&mut self, doc: &TextDocument) {
+        self.begin(doc);
+        self.shown = Some(String::new());
+        self.written = true;
+    }
+
+    /// Whether a written composition is going on (begun and not ended),
+    /// whether or not anything was written yet.
+    pub(crate) fn is_written(&self, doc: &TextDocument) -> bool {
+        self.written && (self.layer.is_none() || self.owns_layer(doc))
+    }
+
+    /// Replace `range` with `text` as the written composition: a transient
+    /// edit. Returns whether the document took it; a refusal cancels the
+    /// composition.
+    pub(crate) fn write(
+        &mut self,
+        doc: &TextDocument,
+        cursor: &TextCursor,
+        range: Range<usize>,
+        text: &str,
+    ) -> bool {
+        cursor.set_position(range.start, MoveMode::MoveAnchor);
+        cursor.set_position(range.end, MoveMode::KeepAnchor);
+        let removed = range.is_empty() || cursor.remove_selected_text_transient().is_ok();
+        let inserted = removed && (text.is_empty() || cursor.insert_text_transient(text).is_ok());
+        if !inserted {
+            self.cancel(doc);
+            return false;
+        }
+        if let Some(layer) = doc.transient_layer() {
+            self.layer = Some(layer);
+        }
+        true
+    }
+
+    /// The text of the written composition, as the document holds it now.
+    pub(crate) fn written_text(&self, doc: &TextDocument) -> Option<String> {
+        if !self.is_written(doc) {
+            return None;
+        }
+        let Some(range) = doc.transient_range().filter(|_| self.layer.is_some()) else {
+            return Some(String::new());
+        };
+        doc.text_at(range.start, range.len()).ok()
     }
 }
 
@@ -482,6 +546,45 @@ mod tests {
         assert!(!composition.is_held(&doc));
         doc.undo().unwrap();
         assert_eq!(text(&doc), "abc");
+    }
+
+    /// A text service's writes at the ranges it names, then the end: the
+    /// states it went through are not in the history, the end is one step.
+    #[test]
+    fn a_written_composition_is_one_undo_step() {
+        let (doc, cursor) = doc("abc");
+        cursor.set_position(3, MoveMode::MoveAnchor);
+        let mut composition = Composition::default();
+        composition.begin_written(&doc);
+        assert!(composition.is_written(&doc));
+        assert_eq!(composition.written_text(&doc).as_deref(), Some(""));
+        assert!(composition.write(&doc, &cursor, 3..3, "n"));
+        assert!(composition.write(&doc, &cursor, 3..4, "に"));
+        assert!(composition.write(&doc, &cursor, 4..4, "ほ"));
+        assert_eq!(text(&doc), "abcにほ");
+        assert_eq!(composition.range(&doc), Some(3..5));
+        assert_eq!(composition.written_text(&doc).as_deref(), Some("にほ"));
+        assert!(composition.write(&doc, &cursor, 3..5, "日本"));
+        let final_text = composition.written_text(&doc).unwrap();
+        assert_eq!(composition.commit(&doc, &cursor, &final_text, false), 2);
+        assert_eq!(text(&doc), "abc日本");
+        assert!(!composition.is_written(&doc));
+        doc.undo().unwrap();
+        assert_eq!(text(&doc), "abc", "one step, none of the states");
+    }
+
+    /// A reconversion: the text service composes over text already recorded,
+    /// and a cancel puts it back.
+    #[test]
+    fn a_written_composition_over_recorded_text_is_put_back_on_cancel() {
+        let (doc, cursor) = doc("ab日本");
+        let mut composition = Composition::default();
+        composition.begin_written(&doc);
+        assert!(composition.write(&doc, &cursor, 2..4, "日本"));
+        assert!(composition.write(&doc, &cursor, 2..4, "二本"));
+        assert_eq!(text(&doc), "ab二本");
+        assert!(composition.cancel(&doc));
+        assert_eq!(text(&doc), "ab日本");
     }
 
     #[test]

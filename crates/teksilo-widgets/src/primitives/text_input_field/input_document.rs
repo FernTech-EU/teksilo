@@ -41,7 +41,9 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use teksilo_canvas::{Point, Rect};
-use teksilo_core::text_input_document::{FirstLineRect, TextInputDocument, Utf16Index};
+use teksilo_core::text_input_document::{
+    FirstLineRect, InputRevisions, TextChanged, TextInputDocument, Utf16Index,
+};
 use teksilo_text::CursorAffinity;
 
 use super::TextFieldHandle;
@@ -50,7 +52,7 @@ use super::state::{SharedState, TextInputState};
 impl TextFieldHandle {
     /// The field's shared state, while it is built and the handle's slot is
     /// free.
-    fn shared_state(&self) -> Option<SharedState> {
+    pub(super) fn shared_state(&self) -> Option<SharedState> {
         let slot = self.slot.try_borrow().ok()?;
         slot.as_ref().cloned()
     }
@@ -159,6 +161,39 @@ impl TextInputDocument for TextFieldHandle {
 
     fn utf16_index(&self) -> Option<Rc<Utf16Index>> {
         self.with_typing_inserted(|st| st.utf16.index(&st.document))
+    }
+
+    fn flush_pending_input(&self) -> bool {
+        let Some(state) = self.shared_state() else {
+            return false;
+        };
+        let Ok(mut st) = state.try_borrow_mut() else {
+            return false;
+        };
+        if st.pending_chars.is_empty() {
+            return false;
+        }
+        st.apply_pending_chars();
+        if let Some(request) = &st.frame_request {
+            request.set(true);
+        }
+        true
+    }
+
+    /// Read as the field stands, typing waiting or not: inserting it would
+    /// change what is counted.
+    fn revisions(&self) -> Option<InputRevisions> {
+        self.with_state(|st| {
+            let caret = st.cursor.position();
+            let caret_rect = first_line_rect(st, caret..caret).map(|line| line.rect);
+            st.input_system
+                .revisions(st.cursor.anchor(), caret, caret_rect, visible_text_rect(st))
+        })
+    }
+
+    fn text_changed_since(&self, revision: u64) -> Option<TextChanged> {
+        self.with_state(|st| st.input_system.journal.changed_since(revision))
+            .flatten()
     }
 }
 

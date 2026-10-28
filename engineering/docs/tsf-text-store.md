@@ -458,6 +458,14 @@ cannot compose breaks every IME.
   tests). Section 3's teksilo-core items: write half with dry run and correction, batch bracket,
   `is_available`, `flush_pending_input`, journal with cause, composition-as-range mode in both
   widgets, undo across turns, refusing default bodies. Reviewed as public API before any COM write.
+  Decided by the maintainer (`claude_reviews/tsf-phase-0.5-api-proposal.md`) and built: the write
+  half is a second trait, `TextInputEditor`, reached through `TextSurface::input_editor` (`None`
+  for a read-only or secure field); `WriteOptions` is a struct with `Default`. The widgets share
+  `common::input_editor` (the order of things), `input_journal` (from the document's change events,
+  the cause from a flag set around the input system's writes) and `input_batch`; a written
+  composition is `Composition`'s second mode on text-document's transient edits. The batch holds
+  back the widgets' own effects; the document's own subscribers wait for text-document's event
+  hold, which is being added on `feat/transient-edits`.
 - **Phase 1, reads** (about 800 lines). Real answers, the arbiter, notifications per message, focus
   in `settle_ime`, the secure, read-only and empty contexts. NVDA with the Japanese IME (M11).
 - **Phases 2 and 3, writes and compositions, one unit** (about 2,500 lines). The write half wired,
