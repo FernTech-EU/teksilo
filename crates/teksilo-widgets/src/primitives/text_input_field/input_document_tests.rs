@@ -478,7 +478,55 @@ fn a_busy_field_answers_nothing_instead_of_panicking() {
 fn a_field_not_yet_built_answers_nothing() {
     let handle = TextInputField::new(Signal::new("hello".to_string())).handle();
     let d: &dyn TextInputDocument = &handle;
+    assert!(!d.is_available());
     assert_eq!(d.char_count(), None);
     assert_eq!(d.selection(), None);
     assert!(!d.is_editable());
+}
+
+/// The probe a bridge asks first, where application code must not run: with
+/// typing waiting for the frame tick, a read would insert it and fire the
+/// callbacks, so the document is not available; asking inserts nothing,
+/// reports nothing and requests no frame.
+#[test]
+fn typing_waiting_makes_the_document_unavailable_and_asking_changes_nothing() {
+    let mut f = Field::new("ab", |field| field);
+    f.select(2, 2);
+    assert!(f.ask(|d| d.is_available()));
+
+    f.tree.type_text(f.field, "cd");
+    let frame_requested = |f: &Field| {
+        f.state()
+            .borrow()
+            .frame_request
+            .as_ref()
+            .is_some_and(|request| request.get())
+    };
+    let requested_before = frame_requested(&f);
+    assert!(
+        !f.ask(|d| d.is_available()),
+        "a read would insert the typing first"
+    );
+    assert_eq!(
+        f.state().borrow().pending_chars,
+        "cd",
+        "asking inserted nothing"
+    );
+    assert_eq!(f.text.get(), "ab");
+    assert!(f.arrivals.borrow().is_empty(), "no callback ran");
+    assert_eq!(frame_requested(&f), requested_before, "no frame requested");
+
+    f.settle();
+    let handle = f.handle();
+    let d: &dyn TextInputDocument = &handle;
+    let state = f.state();
+    assert!(d.is_available(), "the tick inserted it");
+    {
+        let _reading = state.borrow();
+        assert!(d.is_available(), "another reader does not stop the reads");
+    }
+    {
+        let _held = state.borrow_mut();
+        assert!(!d.is_available(), "the field at work");
+    }
 }

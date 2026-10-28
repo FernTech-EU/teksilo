@@ -89,6 +89,15 @@ impl EditorHandle {
 }
 
 impl TextInputDocument for EditorHandle {
+    /// Whether the reads would answer without inserting anything: the state
+    /// can be borrowed and no typing waits for the frame tick. The borrow is
+    /// dropped at once.
+    fn is_available(&self) -> bool {
+        self.state
+            .try_borrow()
+            .is_ok_and(|st| st.pending_chars.is_empty())
+    }
+
     fn char_count(&self) -> Option<usize> {
         self.with_typing_inserted(document_end)
     }

@@ -74,6 +74,26 @@ use teksilo_canvas::{Point, Rect};
 /// coordinates (window-logical) and what `None` means. Object-safe: a bridge
 /// holds `&dyn TextInputDocument` for whichever widget has focus.
 pub trait TextInputDocument {
+    /// Can the document answer now **without changing anything**? Asking
+    /// changes nothing, and when the answer is `true` neither do the queries
+    /// that follow, until the application runs again: they insert no typing,
+    /// run no callback and request no frame.
+    ///
+    /// `false` while the widget is in the middle of its own work, and while
+    /// it holds typing not yet inserted, which a query would insert first
+    /// (see the [module documentation](self#typing-not-yet-inserted)), firing
+    /// the application's change callbacks. A bridge called where application
+    /// code must not run (Windows asks from inside a window procedure, ahead
+    /// of winit) asks it first and answers as if there were no document when
+    /// it is `false`. None of the other queries can serve as this question.
+    ///
+    /// `true` by default: a document that batches nothing and never holds its
+    /// state across a call into the platform answers every query or `None`,
+    /// changing nothing.
+    fn is_available(&self) -> bool {
+        true
+    }
+
     /// The length of the document, in characters.
     fn char_count(&self) -> Option<usize>;
 

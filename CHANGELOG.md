@@ -39,6 +39,9 @@ by crate for clarity, not because crates version independently.
   the focused field's composition is over, and returns the text the input
   method committed for it, which the field keeps in place of what the
   composition showed (`None` keeps what it showed).
+- **`TextInputDocument::is_available`** says whether a document can answer
+  the platform now without any change (no batched typing inserted, no
+  callback run). `true` by default.
 - **`TextInputDocument`**, reached through `TextSurface::input_document` and
   `TextSurfaces::with_focused_input_document`, lets a custom text widget tell
   the platform where its selection is, what its text is and where a range is

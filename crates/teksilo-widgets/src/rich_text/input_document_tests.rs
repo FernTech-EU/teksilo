@@ -646,3 +646,52 @@ fn a_busy_editor_answers_nothing_instead_of_panicking() {
     }
     assert_eq!(editor.doc().caret(), Some(6));
 }
+
+/// The probe a bridge asks first, where application code must not run: with
+/// typing waiting for the frame tick, a read would insert it and fire the
+/// callbacks, so the document is not available; asking inserts nothing,
+/// reports nothing and requests no frame.
+#[test]
+fn typing_waiting_makes_the_document_unavailable_and_asking_changes_nothing() {
+    let mut editor = Editor::with_text("ab", 400.0);
+    editor.handle.select_range(2, 2);
+    assert!(editor.doc().is_available());
+
+    editor.tree.type_text(editor.id, "cd");
+    let frame_requested = || {
+        editor
+            .handle
+            .state
+            .borrow()
+            .frame_request
+            .as_ref()
+            .is_some_and(|request| request.get())
+    };
+    let requested_before = frame_requested();
+    assert!(
+        !editor.doc().is_available(),
+        "a read would insert the typing first"
+    );
+    assert_eq!(
+        editor.handle.state.borrow().pending_chars,
+        "cd",
+        "asking inserted nothing"
+    );
+    assert_eq!(editor.doc.to_plain_text().unwrap(), "ab");
+    assert!(editor.arrivals.borrow().is_empty(), "no callback ran");
+    assert_eq!(frame_requested(), requested_before, "no frame requested");
+
+    editor.settle();
+    assert!(editor.doc().is_available(), "the tick inserted it");
+    {
+        let _reading = editor.handle.state.borrow();
+        assert!(
+            editor.doc().is_available(),
+            "another reader does not stop the reads"
+        );
+    }
+    {
+        let _held = editor.handle.state.borrow_mut();
+        assert!(!editor.doc().is_available(), "the editor at work");
+    }
+}
