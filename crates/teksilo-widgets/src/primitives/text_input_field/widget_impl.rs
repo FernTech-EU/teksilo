@@ -1150,12 +1150,13 @@ impl Widget for TextInputField {
         };
         st.engine.set_cursor(&cursor_display);
 
-        ensure_caret_visible_h(
-            &mut st,
+        let follow = CaretFollow {
             text_viewport_width,
-            &ctx.theme.input,
-            ctx.layout_direction == teksilo_core::environment::LayoutDirection::RightToLeft,
-        );
+            margin: scroll_margin(&ctx.theme.input),
+            rtl: ctx.layout_direction == teksilo_core::environment::LayoutDirection::RightToLeft,
+        };
+        st.caret_follow = Some(follow);
+        ensure_caret_visible_h(&mut st, follow);
 
         let scroll_x = st.scroll_x;
 

@@ -65,6 +65,7 @@
 //!
 //! [`SpinBox`]: crate::spin_box::SpinBox
 
+mod input_document;
 mod keyboard;
 pub mod mask;
 mod mouse;
@@ -102,7 +103,7 @@ use crate::menu_list::{MenuList, MenuSeparator};
 use crate::rich_text::paint::{PaintParams, paint_frame};
 
 use self::state::{
-    AtPublished, SharedState, TextInputConfig, TextInputState, TextInserted,
+    AtPublished, CaretFollow, SharedState, TextInputConfig, TextInputState, TextInserted,
     publish_cursor_signals, sync_cursor_signals,
 };
 pub(crate) use self::state::{CharFilter, CommandFactory};
@@ -998,10 +999,14 @@ fn base_text_direction(
 
 /// Adjust `scroll_x` so the caret stays within the visible viewport.
 ///
-/// `text_viewport_width` is the portion of the viewport reserved for
+/// `follow.text_viewport_width` is the portion of the viewport reserved for
 /// editable text, i.e. `viewport_width - suffix_width`. Callers pass
 /// the reduced width explicitly so the scroll never slides text
 /// behind the non-editable suffix.
+///
+/// Paint runs it with what it has just measured and keeps that in
+/// [`TextInputState::caret_follow`]; an input method's composition runs it
+/// again with the kept values before it reports where the caret is.
 ///
 /// With a [`text_alignment`](TextInputField::text_alignment) set, a text
 /// that fits is placed by a *negative* scroll: every conversion between the
@@ -1010,13 +1015,8 @@ fn base_text_direction(
 /// reader's character extents — so moving the text this way moves all of them
 /// with it, and none can be forgotten. A text that overflows scrolls exactly as
 /// an unaligned one does.
-fn ensure_caret_visible_h(
-    st: &mut TextInputState,
-    text_viewport_width: f32,
-    tokens: &InputTokens,
-    rtl: bool,
-) {
-    if !st.engine.has_full_layout() || text_viewport_width <= 0.0 {
+fn ensure_caret_visible_h(st: &mut TextInputState, follow: CaretFollow) {
+    if !st.engine.has_full_layout() || follow.text_viewport_width <= 0.0 {
         return;
     }
     let pos = st.cursor.position();
@@ -1024,21 +1024,21 @@ fn ensure_caret_visible_h(
     let caret = st.engine.caret_rect(pos, CursorAffinity::Downstream);
     let caret_x = caret[0];
     let caret_w = caret[2].max(1.0);
-    let vw = text_viewport_width;
+    let vw = follow.text_viewport_width;
 
     if let Some(alignment) = st.text_alignment {
         // The caret's width is part of the run, or a trailing-aligned caret at
         // the end of the text would sit one pixel outside the clip.
         let run = st.engine.max_content_width() + caret_w;
         if run <= vw {
-            st.scroll_x = -alignment.resolve(run, vw, rtl);
+            st.scroll_x = -alignment.resolve(run, vw, follow.rtl);
             return;
         }
         // Overflowing: whatever offset placed a short text is not a scroll.
         st.scroll_x = st.scroll_x.max(0.0);
     }
 
-    let margin = scroll_margin(tokens);
+    let margin = follow.margin;
     if caret_x - st.scroll_x < margin {
         st.scroll_x = (caret_x - margin).max(0.0);
     } else if caret_x + caret_w - st.scroll_x > vw - margin {
@@ -1137,11 +1137,32 @@ fn field_selection_color(
     }
 }
 
-/// Simplified frame-loop tick for single-line text input.
-fn tick(state: &mut TextInputState, delta: f32) -> bool {
+/// The first steps of [`tick`]: insert the typing batched for this frame,
+/// drain the document's events and lay the text out again if they changed it,
+/// so that the engine describes the field as it is now. Returns whether any
+/// document event was drained.
+///
+/// An input method's composition runs it too, before it tells the platform
+/// where the composition is (`keyboard::handle_ime_composition`): the preedit
+/// has just gone into the document, and until the text is laid out again the
+/// caret's offset after it is read off the text as it stood without it.
+fn catch_up_layout(state: &mut TextInputState) -> bool {
     state.apply_pending_chars();
 
     let had_events = state.drain_events();
+
+    if state.needs_full_layout && state.viewport_width > 0.0 {
+        state.layout_full_masked();
+        state.needs_full_layout = false;
+        state.content_dirty = true;
+    }
+
+    had_events
+}
+
+/// Simplified frame-loop tick for single-line text input.
+fn tick(state: &mut TextInputState, delta: f32) -> bool {
+    let had_events = catch_up_layout(state);
 
     // Blink only when focused AND the host window is active — the caret hides
     // in an inactive window (the universal desktop convention). The shared
@@ -1158,12 +1179,6 @@ fn tick(state: &mut TextInputState, delta: f32) -> bool {
         &caret_visible,
         wake.as_ref(),
     );
-
-    if state.needs_full_layout && state.viewport_width > 0.0 {
-        state.layout_full_masked();
-        state.needs_full_layout = false;
-        state.content_dirty = true;
-    }
 
     if state.pending_text_changed {
         let new_text = state.document.to_plain_text().unwrap_or_default();
@@ -1665,6 +1680,12 @@ mod focus_origin_tests;
 #[cfg(test)]
 mod arrival_tests;
 
+/// **What the platform's text input system reads**: the selection, the text
+/// (none from a secure field), the composition, where a range is drawn and
+/// the UTF-16 offsets, through the window's registry.
+#[cfg(test)]
+mod input_document_tests;
+
 /// A live handle on a [`TextInputField`] — its text-editing commands, for a
 /// caller outside the widget.
 ///
@@ -1886,5 +1907,10 @@ impl teksilo_core::text_surface::TextSurface for TextFieldHandle {
         if self.accepts(StandardEdit::SelectAll) {
             TextFieldHandle::select_all(self);
         }
+    }
+
+    /// The field answers for its document; see the `input_document` module.
+    fn input_document(&self) -> Option<&dyn teksilo_core::text_input_document::TextInputDocument> {
+        Some(self)
     }
 }

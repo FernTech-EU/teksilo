@@ -25,10 +25,19 @@ use crate::common::editor_runtime::ScrollMetrics;
 
 pub(crate) const SCROLLBAR_THICKNESS: f32 = 12.0;
 
-/// Run one frame-tick step. `delta` is the time since the previous
-/// tick in seconds (clamped by the tree). Returns `true` when another
-/// frame is needed (the editor has ongoing work).
-pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
+/// Steps 1 to 4 of [`tick`]: insert the typing batched for this frame, drain
+/// the document's events and lay out the text they changed, so that the engine
+/// describes the document as it is now. Returns whether any document event was
+/// drained.
+///
+/// [`tick`] starts with it. An input method's composition runs it too, before
+/// it tells the platform where the composition is
+/// (`keyboard::handle_ime_composition`): the preedit has just gone into the
+/// document, and until the text is laid out again the caret's offset after it
+/// is read off the text as it stood without it. Run twice before a paint, it
+/// asks that paint for a full render when the two relayouts touched different
+/// blocks (see the incremental path below).
+pub(crate) fn catch_up_layout(state: &mut EditorState) -> bool {
     // Step 1 (NEW for M8b): flush pending_chars BEFORE draining events.
     // Batching keystrokes into a single `insert_text` makes the
     // subsequent `drain_events` see one `ContentsChanged` instead of
@@ -81,19 +90,6 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
             }
         }
     }
-
-    // Caret blink — see `common::editor_runtime::CaretBlink`. Driven by
-    // wall-clock time (not accumulated delta) so the cadence stays locked to
-    // real seconds under irregular frame pacing, and gated on
-    // `has_focus && window_active` because a caret in an inactive window is
-    // hidden on every desktop platform.
-    let caret_active = state.has_focus && state.window_active;
-    let policy = state.policy.caret_policy;
-    let caret_visible = state.caret_visible.clone();
-    let wake = state.frame_wake_at.clone();
-    state
-        .blink
-        .tick(policy, caret_active, &caret_visible, wake.as_ref());
 
     // Step 3: forward the viewport to the typesetter.
     //
@@ -155,6 +151,16 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
             .relayout_block_snapshot(&state.document, pos, &mask)
         {
             Ok(block_id) => {
+                // Paint re-renders only the block named here. Another block
+                // relaid out since the last paint (a composition's preedit,
+                // laid out as its event was handled, then an edit elsewhere in
+                // the same frame) would keep its old glyphs: render it all.
+                if state
+                    .last_relayout_block_id
+                    .is_some_and(|earlier| earlier != block_id)
+                {
+                    state.pending_full_render = true;
+                }
                 state.last_relayout_block_id = Some(block_id);
                 state.content_dirty = true;
             }
@@ -172,6 +178,34 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     // Either branch above may have changed how tall the text is: publish it for
     // an editor sized to its content (see `EditorState::laid_out_height`).
     state.publish_laid_out_height();
+
+    had_events
+}
+
+/// Run one frame-tick step. `delta` is the time since the previous
+/// tick in seconds (clamped by the tree). Returns `true` when another
+/// frame is needed (the editor has ongoing work).
+pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
+    // Steps 1 to 4: the typing in, the document's events drained, the text
+    // laid out.
+    let had_events = catch_up_layout(state);
+
+    // Caret blink: see `common::editor_runtime::CaretBlink`. Driven by
+    // wall-clock time (not accumulated delta) so the cadence stays locked to
+    // real seconds under irregular frame pacing, and gated on
+    // `has_focus && window_active` because a caret in an inactive window is
+    // hidden on every desktop platform.
+    let caret_active = state.has_focus && state.window_active;
+    let policy = state.policy.caret_policy;
+    let caret_visible = state.caret_visible.clone();
+    let wake = state.frame_wake_at.clone();
+    state
+        .blink
+        .tick(policy, caret_active, &caret_visible, wake.as_ref());
+
+    let viewport_width = state.viewport_width;
+    let viewport_height = state.viewport_height;
+    let viewport_ready = viewport_width > 0.0 && viewport_height > 0.0;
 
     // Step 4b: paint-only highlight recolor. A `HighlightPaintChanged` event
     // only changes colors, so re-derive the cached layout's colors WITHOUT

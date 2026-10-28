@@ -3757,6 +3757,11 @@ impl WidgetTree {
 
     /// A cloneable view of this tree's text surfaces, for a caller that must ask
     /// the question later, without a `&WidgetTree` in hand.
+    ///
+    /// What a host hands a window's platform text-input bridge, which the
+    /// platform calls back while no tree is in reach: it answers for the
+    /// focused widget with
+    /// [`TextSurfaces::with_focused_input_document`](crate::text_surface::TextSurfaces::with_focused_input_document).
     pub fn text_surfaces(&self) -> crate::text_surface::TextSurfaces {
         self.text_surfaces.clone()
     }

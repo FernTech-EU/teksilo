@@ -47,14 +47,25 @@
 //! have Ctrl+Z in an empty search field undo something the user is not looking
 //! at.
 //!
+//! # What the platform's text input system reads
+//!
+//! A surface can also describe its document to the platform's text input
+//! system (where the selection is, what the text is, where a range is drawn),
+//! through [`TextSurface::input_document`]. A platform bridge takes the
+//! window's [`TextSurfaces`] with [`WidgetTree::text_surfaces`] and asks
+//! [`TextSurfaces::with_focused_input_document`]. See
+//! [`crate::text_input_document`].
+//!
 //! [`BuildContext::register_text_surface`]: crate::build_context::BuildContext::register_text_surface
 //! [`WidgetTree::focused_text_surface`]: crate::widget_tree::WidgetTree::focused_text_surface
+//! [`WidgetTree::text_surfaces`]: crate::widget_tree::WidgetTree::text_surfaces
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::shortcut::StandardEdit;
 use crate::signal::Signal;
+use crate::text_input_document::TextInputDocument;
 use crate::widget::EventContext;
 use crate::widget_id::WidgetId;
 
@@ -133,6 +144,19 @@ pub trait TextSurface {
     /// should do a plain paste rather than nothing.
     fn paste_plain(&self, ctx: &EventContext<'_>);
     fn select_all(&self);
+
+    /// This surface's document, as the platform's text input system reads
+    /// it: the selection, the text, where a range is drawn. See
+    /// [`crate::text_input_document`].
+    ///
+    /// `None` by default, for a surface that has not described its document:
+    /// a bridge then tells the platform there is no document, and the
+    /// features that read one (dictation, an accent popup, Writing Tools) do
+    /// not start there. `RichTextEditor` and `TextInputField`, with the fields
+    /// built on it, answer.
+    fn input_document(&self) -> Option<&dyn TextInputDocument> {
+        None
+    }
 }
 
 /// A cloneable view of one tree's registered text surfaces.
@@ -199,6 +223,22 @@ impl TextSurfaces {
     /// to step aside.
     pub fn focused_is_text_surface(&self) -> bool {
         self.focused().is_some()
+    }
+
+    /// Run `f` on the document of the text widget that holds the keyboard
+    /// focus, as the platform's text input system reads it.
+    ///
+    /// `None` when focus is not on a text widget, or is on one that does not
+    /// describe its document ([`TextSurface::input_document`]). The question
+    /// a platform bridge asks each time the input system asks it where the
+    /// selection is.
+    pub fn with_focused_input_document<R>(
+        &self,
+        f: impl FnOnce(&dyn TextInputDocument) -> R,
+    ) -> Option<R> {
+        let surface = self.focused()?;
+        let document = surface.input_document()?;
+        Some(f(document))
     }
 
     /// Does the widget registered under `owner` refuse edits?
@@ -282,6 +322,134 @@ mod tests {
         fn paste(&self, _: &EventContext<'_>) {}
         fn paste_plain(&self, _: &EventContext<'_>) {}
         fn select_all(&self) {}
+    }
+
+    /// A surface describing a fixed document, as a platform bridge sees it.
+    struct Described {
+        text: &'static str,
+    }
+
+    impl crate::text_input_document::TextInputDocument for Described {
+        fn char_count(&self) -> Option<usize> {
+            Some(self.text.chars().count())
+        }
+        fn text_in(&self, range: std::ops::Range<usize>) -> Option<String> {
+            Some(
+                self.text
+                    .chars()
+                    .skip(range.start)
+                    .take(range.len())
+                    .collect(),
+            )
+        }
+        fn selection(&self) -> Option<std::ops::Range<usize>> {
+            Some(1..2)
+        }
+        fn caret(&self) -> Option<usize> {
+            Some(2)
+        }
+        fn composition_range(&self) -> Option<std::ops::Range<usize>> {
+            None
+        }
+        fn first_line_rect(
+            &self,
+            _: std::ops::Range<usize>,
+        ) -> Option<crate::text_input_document::FirstLineRect> {
+            None
+        }
+        fn offset_at_point(&self, _: teksilo_canvas::Point) -> Option<usize> {
+            None
+        }
+        fn visible_text_rect(&self) -> Option<teksilo_canvas::Rect> {
+            None
+        }
+        fn is_editable(&self) -> bool {
+            true
+        }
+        fn is_secure(&self) -> bool {
+            false
+        }
+        fn writing_tools_allowed(&self) -> bool {
+            true
+        }
+        fn utf16_index(&self) -> Option<Rc<crate::text_input_document::Utf16Index>> {
+            Some(Rc::new(crate::text_input_document::Utf16Index::new(
+                self.text,
+            )))
+        }
+    }
+
+    impl TextSurface for Described {
+        fn can_undo(&self) -> bool {
+            false
+        }
+        fn can_redo(&self) -> bool {
+            false
+        }
+        fn undo(&self) {}
+        fn redo(&self) {}
+        fn has_selection(&self) -> bool {
+            true
+        }
+        fn is_read_only(&self) -> bool {
+            false
+        }
+        fn allows_copy(&self) -> bool {
+            true
+        }
+        fn cut(&self, _: &EventContext<'_>) {}
+        fn copy(&self, _: &EventContext<'_>) {}
+        fn paste(&self, _: &EventContext<'_>) {}
+        fn paste_plain(&self, _: &EventContext<'_>) {}
+        fn select_all(&self) {}
+        fn input_document(&self) -> Option<&dyn crate::text_input_document::TextInputDocument> {
+            Some(self)
+        }
+    }
+
+    /// A bridge reaches the focused widget's document, and only a widget that
+    /// describes one: a surface that does not is no document, not an empty
+    /// one.
+    #[test]
+    fn the_focused_input_document_is_the_focused_widgets_own() {
+        let focused = Signal::new(None);
+        let surfaces = TextSurfaces::new(focused.clone());
+        let described = WidgetId::from(slotmap::KeyData::from_ffi(1 << 32 | 1));
+        let plain = WidgetId::from(slotmap::KeyData::from_ffi(1 << 32 | 2));
+        surfaces.insert(
+            described,
+            Rc::new(Described {
+                text: "a\u{1F600}b",
+            }),
+        );
+        surfaces.insert(
+            plain,
+            Rc::new(Plain {
+                read_only: false,
+                allows_copy: true,
+                frozen: false,
+            }),
+        );
+
+        assert_eq!(surfaces.with_focused_input_document(|d| d.caret()), None);
+
+        focused.set(Some(described));
+        assert_eq!(
+            surfaces.with_focused_input_document(|d| d.selection()),
+            Some(Some(1..2))
+        );
+        assert_eq!(
+            surfaces.with_focused_input_document(|d| d.char_range_to_utf16(1..2)),
+            Some(Some(1..3)),
+            "the emoji is two UTF-16 units"
+        );
+
+        focused.set(Some(plain));
+        assert_eq!(
+            surfaces.with_focused_input_document(|d| d.caret()),
+            None,
+            "a surface that describes no document answers nothing"
+        );
     }
 
     /// The default `accepts` follows the questions an implementor already

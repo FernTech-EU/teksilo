@@ -47,6 +47,7 @@ pub struct TextAnnotationSpan {
 }
 use super::image_cache::ImageCache;
 use super::policy::{CaretPolicy, PolicyBundle};
+use crate::common::document_offsets::DocumentUtf16;
 use crate::common::editor_runtime::{CaretBlink, Debounce};
 use crate::common::pending_arrivals::PendingArrivals;
 
@@ -54,6 +55,9 @@ pub(crate) type SharedState = Rc<RefCell<EditorState>>;
 
 pub(crate) struct EditorState {
     pub document: TextDocument,
+    /// The document's UTF-16 index, for the platform's text input system,
+    /// which counts in UTF-16. See [`crate::common::document_offsets`].
+    pub utf16: DocumentUtf16,
     pub engine: RichTextEngine,
     pub cursor: TextCursor,
 
@@ -872,8 +876,11 @@ impl EditorState {
         let initial_can_undo = document.can_undo();
         let initial_can_redo = document.can_redo();
 
+        let utf16 = DocumentUtf16::watching(&document);
+
         Rc::new(RefCell::new(Self {
             document,
+            utf16,
             engine,
             cursor,
             policy,

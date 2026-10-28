@@ -900,6 +900,20 @@ pub(super) fn caret_window_rect(st: &EditorState) -> Option<teksilo_canvas::Rect
     ))
 }
 
+/// An engine caret rectangle (`[x, y, width, height]`, as
+/// `RichTextEngine::caret_rect` answers it) in window space, by the
+/// composition [`caret_window_rect`] and [`range_window_rect`] use: the body's
+/// window origin added to both axes, the horizontal scroll taken off `x`, the
+/// vertical scroll slip added to `y`. At least 1 wide and tall.
+pub(super) fn engine_caret_to_window(st: &EditorState, caret: [f32; 4]) -> teksilo_canvas::Rect {
+    teksilo_canvas::Rect::new(
+        st.viewport_origin.x + caret[0] - st.scroll_x.get(),
+        st.viewport_origin.y + caret[1] + vertical_scroll_slip(st),
+        caret[2].max(1.0),
+        caret[3].max(1.0),
+    )
+}
+
 /// How far the engine's idea of the scroll offset lags the widget's.
 ///
 /// The engine subtracts the offset it was last *given*, which the widget hands
@@ -1312,7 +1326,9 @@ fn handle_ime_composition(
         // intermediate candidate.
         st.cursor.begin_edit_block();
         if let Some(range) = st.ime_preedit_range.take() {
-            let doc_end = st.document.character_count();
+            // Paragraph breaks included, as in the range: `character_count`
+            // leaves them out, and cut a preedit in a later paragraph short.
+            let doc_end = super::input_document::document_end(&st);
             let start = range.start.min(doc_end);
             let end = range.end.min(doc_end);
             if start < end {
@@ -1352,6 +1368,16 @@ fn handle_ime_composition(
         // now. Render at the default downstream placement.
         st.cursor_affinity = CursorAffinity::Downstream;
         st.pending_text_changed = true;
+        // Lay the preedit out now, not at the next frame: the area reported
+        // below is where the platform opens its candidate window, and it is
+        // read off the layout. Without the preedit in it, the caret's offset
+        // after the preedit lies that many characters further into the old
+        // text, and at the end of a paragraph that is the next paragraph, at
+        // the editor's left edge. An input method that lists candidates from
+        // the first key (Microsoft Pinyin) opened them there; one that lists
+        // them only on conversion, once a frame has laid the reading out,
+        // happened to land close to the preedit.
+        super::frame_loop::catch_up_layout(&mut st);
     }
     report_ime_cursor_area(state, ctx);
     chase_caret_into_view(state, ctx);
@@ -1369,7 +1395,8 @@ pub(super) fn clear_ime_preedit(state: &SharedState) {
     // preedit range is still live, remove it so the commit insert
     // doesn't duplicate content.
     if let Some(range) = st.ime_preedit_range.take() {
-        let doc_end = st.document.character_count();
+        // Paragraph breaks included; see `handle_ime_composition`.
+        let doc_end = super::input_document::document_end(&st);
         let start = range.start.min(doc_end);
         let end = range.end.min(doc_end);
         if start < end {
@@ -1453,7 +1480,9 @@ fn replace_from_input_system(
     {
         let mut st = state.borrow_mut();
         super::frame_loop::flush_pending_chars(&mut st);
-        let doc_end = st.document.character_count();
+        // The document's last offset, paragraph breaks included: the range was
+        // read from text that has them. `character_count` leaves them out.
+        let doc_end = super::input_document::document_end(&st);
         let start = range.start.min(doc_end);
         let end = range.end.min(doc_end).max(start);
         st.cursor.set_position(start, MoveMode::MoveAnchor);

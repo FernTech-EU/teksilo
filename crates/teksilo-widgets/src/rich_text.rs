@@ -78,6 +78,7 @@ mod frame_loop;
 // the same question; the answer should not have two implementations.
 pub(crate) mod hit_test;
 pub(crate) mod image_cache;
+mod input_document;
 mod keyboard;
 mod lists;
 mod mouse;
@@ -91,6 +92,8 @@ pub(crate) mod touch_mount;
 
 pub use self::lists::list_style_is_ordered;
 
+#[cfg(test)]
+mod input_document_tests;
 #[cfg(test)]
 mod line_break_tests;
 #[cfg(test)]
@@ -4951,5 +4954,10 @@ impl teksilo_core::text_surface::TextSurface for EditorHandle {
         if self.accepts(StandardEdit::SelectAll) {
             EditorHandle::select_all(self);
         }
+    }
+
+    /// The editor answers for its document; see the `input_document` module.
+    fn input_document(&self) -> Option<&dyn teksilo_core::text_input_document::TextInputDocument> {
+        Some(self)
     }
 }

@@ -46,6 +46,7 @@ pub mod shortcut;
 pub mod signal;
 pub mod styles;
 pub mod telemetry;
+pub mod text_input_document;
 pub mod text_surface;
 pub mod text_touch;
 pub mod widget;

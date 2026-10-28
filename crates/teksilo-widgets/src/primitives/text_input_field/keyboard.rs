@@ -417,6 +417,10 @@ fn handle_ime_composition(
     }
     {
         let mut st = state.borrow_mut();
+        // The preedit goes in after what was typed before it in this frame,
+        // as in the rich text editor: the layout caught up below inserts that
+        // typing too, and would otherwise put it after the preedit.
+        st.apply_pending_chars();
         // Group remove+reinsert as one undo step so an undo after
         // composition pops the whole preedit, not each candidate.
         st.cursor.begin_edit_block();
@@ -466,6 +470,18 @@ fn handle_ime_composition(
         }
         st.cursor.end_edit_block();
         st.pending_text_changed = true;
+        // Lay the preedit out now, not at the next frame: the area reported
+        // below is where the platform opens its candidate window, and it is
+        // read off the layout. Without the preedit in it, the caret's offset
+        // after the preedit lies that many characters further into the old
+        // text, off by the difference between their widths.
+        super::catch_up_layout(&mut st);
+        // And scroll it into view as the next paint will: at the end of a
+        // field that overflows, the caret after the preedit is past the
+        // trailing edge until the text scrolls.
+        if let Some(follow) = st.caret_follow {
+            super::ensure_caret_visible_h(&mut st, follow);
+        }
     }
     sync_cursor_signals(state);
     report_ime_cursor_area(state, ctx);

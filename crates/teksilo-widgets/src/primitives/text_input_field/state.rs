@@ -26,6 +26,7 @@ use teksilo_tokens::{HAlignment, TextStyle};
 
 use super::{AtRevealPolicy, EchoMode};
 use crate::EditSource;
+use crate::common::document_offsets::DocumentUtf16;
 use crate::common::editor_runtime::{CaretBlink, Debounce};
 use crate::common::pending_arrivals::PendingArrivals;
 use crate::rich_text::image_cache::ImageCache;
@@ -64,8 +65,23 @@ pub(crate) enum DragState {
     Selecting,
 }
 
+/// What `ensure_caret_visible_h` keeps the caret in view with. See
+/// [`TextInputState::caret_follow`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CaretFollow {
+    /// The width the editable text may use: the field's, less its suffix.
+    pub text_viewport_width: f32,
+    /// How far the caret stays from either edge, at the field's density.
+    pub margin: f32,
+    /// Whether the field reads right to left, for an aligned short text.
+    pub rtl: bool,
+}
+
 pub(crate) struct TextInputState {
     pub document: TextDocument,
+    /// The document's UTF-16 index, for the platform's text input system,
+    /// which counts in UTF-16. See [`crate::common::document_offsets`].
+    pub utf16: DocumentUtf16,
     pub engine: RichTextEngine,
     pub cursor: TextCursor,
 
@@ -93,6 +109,11 @@ pub(crate) struct TextInputState {
     /// Pixel offset applied via canvas translation when text overflows
     /// the viewport width. Managed by `ensure_caret_visible_h`.
     pub scroll_x: f32,
+    /// What the last paint kept the caret in view with. Only paint has the
+    /// theme and the layout direction, and an input method's composition has
+    /// to scroll its caret into view before it reports where the caret is
+    /// (`keyboard::handle_ime_composition`). `None` before the first paint.
+    pub caret_follow: Option<CaretFollow>,
     pub viewport_width: f32,
     /// Height of the field's own box. Written by [`sync_viewport`](Self::sync_viewport)
     /// alongside the origin, and needed because the touch affordances are
@@ -409,9 +430,11 @@ impl TextInputState {
 
         let initial_can_undo = document.can_undo();
         let initial_can_redo = document.can_redo();
+        let utf16 = DocumentUtf16::watching(&document);
 
         Rc::new(RefCell::new(Self {
             document,
+            utf16,
             engine,
             cursor,
             text_signal: Signal::new(initial_text.clone()),
@@ -425,6 +448,7 @@ impl TextInputState {
             frame_wake_at: None,
             blink: CaretBlink::new(),
             scroll_x: 0.0,
+            caret_follow: None,
             viewport_width: 0.0,
             viewport_height: 0.0,
             viewport_origin: Point::ZERO,
