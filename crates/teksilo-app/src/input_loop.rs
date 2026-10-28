@@ -417,8 +417,10 @@ impl ImeHost {
 /// do yet; the purpose is a no-op in winit there today.)
 ///
 /// The field declares its purpose on every platform, and the window is told
-/// it: Windows' input scope, Wayland's content purpose, and a screen reader's
-/// key echo (`key_report`) all read it.
+/// it: Wayland's content purpose and a screen reader's key echo
+/// (`key_report`) read it. Windows gives the window no input scope for it:
+/// measured, `IS_PASSWORD` on the window closes the Japanese and Korean
+/// input methods for the whole window once the field is left.
 pub(crate) fn ime_allowed_for(purpose: teksilo_core::ImePurpose, host: ImeHost) -> bool {
     purpose != teksilo_core::ImePurpose::Password
         || matches!(host, ImeHost::MacOs | ImeHost::Wayland | ImeHost::Other)
@@ -1156,7 +1158,7 @@ mod tests {
                 purpose: Some(ImePurpose::Password),
                 allowed: Some(false),
             },
-            "the purpose still goes to the window (Windows' input scope)"
+            "the purpose still goes to the window"
         );
         assert_eq!(
             ime_reconcile(

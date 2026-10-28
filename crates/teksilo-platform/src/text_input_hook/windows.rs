@@ -38,10 +38,14 @@
 //! - `IMR_QUERYCHARPOSITION`, where a character of the composition is drawn,
 //!   converted to the screen with the window's DPI and `ClientToScreen`, so
 //!   the candidate window follows the character being converted;
-//! - `IMR_RECONVERTSTRING` and `IMR_CONFIRMRECONVERTSTRING`, the text to
-//!   reconvert and the part the input method reconverts, which becomes the
-//!   `replacement` of its next preedit ([`take_marked_replacement`]);
 //! - `IMR_DOCUMENTFEED`, the text around the composition.
+//!
+//! Reconversion (`IMR_RECONVERTSTRING`, `IMR_CONFIRMRECONVERTSTRING`) is not
+//! answered: measured on Windows 11 with the Microsoft Japanese IME, it
+//! opened 6 times of 6 in one session and 0 of 24 in later ones (with the
+//! text around the selection or the selection alone), while a Win32 edit
+//! control reconverted at the same moments, and a reconversion that does not
+//! open stays pending in the input method. See the design document.
 //!
 //! The tap runs before winit has the message, so it calls nothing that can
 //! deliver a message (see below), and runs no application code: it asks the
@@ -54,18 +58,15 @@
 //! request. Most requests arrive while winit handles another message (round
 //! 5), which is when a widget is likely to be busy.
 //!
-//! A reconverted range no preedit has taken is forgotten at the next key
-//! down the input method did not take, a click, the focus leaving and the end
-//! of a composition (`imm_requests::Reconversion`).
+//! # No input scope
 //!
-//! # The input scope
-//!
-//! [`set_input_purpose`] gives the window the input scope of the focused
-//! field's purpose (`SetInputScope`, which msctf exports and the `windows`
-//! crate does not bind): `IS_PASSWORD` for a password field, `IS_DEFAULT`
-//! otherwise. A window given another scope is set back to `IS_DEFAULT`
-//! before it is destroyed, as Microsoft requires: at [`detach`], and at
-//! `WM_DESTROY` for a window destroyed without one.
+//! A password field takes no input method on Windows because winit takes
+//! the window's input context away while it has the focus. The window keeps
+//! the `IS_DEFAULT` input scope: measured, `IS_PASSWORD` set on the window
+//! (`SetInputScope`) closes the Microsoft Japanese and Korean input methods
+//! for the whole window once the field is left, and opening the IMM context
+//! again does not bring them back. The password scope belongs to the TSF
+//! store's disabled context.
 //!
 //! # Tracing
 //!
@@ -169,24 +170,23 @@
 //! watched compartment that was not listed is marked `(unlisted)`.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ffi::c_void;
-use std::ops::Range;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock};
 
 use raw_window_handle::RawWindowHandle;
+use teksilo_core::AppEventPoster;
 use teksilo_core::raw_handle::ParentHandle;
 use teksilo_core::text_input_document::TextInputDocument;
 use teksilo_core::text_surface::TextSurfaces;
 use teksilo_core::window::TeksiloWindowId;
-use teksilo_core::{AppEventPoster, ImePurpose};
 
 use super::FinishedComposition;
 use super::imm_completion::{self, ImmCompletion, ImmMessage};
-use super::imm_requests::{self, Reconversion, ReconvertString};
+use super::imm_requests::{self, ReconvertString};
 
 use windows::Win32::Foundation::{
     CO_E_NOTINITIALIZED, CloseHandle, HWND, LPARAM, LRESULT, POINT, RECT, S_OK, WPARAM,
@@ -196,9 +196,7 @@ use windows::Win32::System::Com::{
     APTTYPE, APTTYPE_MAINSTA, APTTYPE_MTA, APTTYPE_NA, APTTYPE_STA, APTTYPEQUALIFIER,
     CLSCTX_INPROC_SERVER, CoCreateInstance, CoGetApartmentType,
 };
-use windows::Win32::System::LibraryLoader::{
-    GetModuleHandleW, GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW,
-};
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows::Win32::System::Threading::{
     GetCurrentProcessId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
     QueryFullProcessImageNameW,
@@ -212,14 +210,15 @@ use windows::Win32::UI::Input::Ime::{
     CPS_CANCEL, CPS_COMPLETE, CS_INSERTCHAR, CS_NOMOVECARET, GCS_COMPATTR, GCS_COMPCLAUSE,
     GCS_COMPREADATTR, GCS_COMPREADCLAUSE, GCS_COMPREADSTR, GCS_COMPSTR, GCS_CURSORPOS,
     GCS_DELTASTART, GCS_RESULTCLAUSE, GCS_RESULTREADCLAUSE, GCS_RESULTREADSTR, GCS_RESULTSTR, HIMC,
-    IME_COMPOSITION_STRING, IMECHARPOSITION, IMN_CHANGECANDIDATE, IMN_CLOSECANDIDATE,
-    IMN_CLOSESTATUSWINDOW, IMN_GUIDELINE, IMN_OPENCANDIDATE, IMN_OPENSTATUSWINDOW, IMN_PRIVATE,
-    IMN_SETCANDIDATEPOS, IMN_SETCOMPOSITIONFONT, IMN_SETCOMPOSITIONWINDOW, IMN_SETCONVERSIONMODE,
-    IMN_SETOPENSTATUS, IMN_SETSENTENCEMODE, IMN_SETSTATUSWINDOWPOS, IMN_SOFTKBDDESTROYED,
-    IMR_CANDIDATEWINDOW, IMR_COMPOSITIONFONT, IMR_COMPOSITIONWINDOW, IMR_CONFIRMRECONVERTSTRING,
-    IMR_DOCUMENTFEED, IMR_QUERYCHARPOSITION, IMR_RECONVERTSTRING, ImmGetCompositionStringW,
-    ImmGetContext, ImmGetOpenStatus, ImmNotifyIME, ImmReleaseContext, ImmSetOpenStatus,
-    NI_COMPOSITIONSTR, RECONVERTSTRING,
+    IME_COMPOSITION_STRING, IME_CONVERSION_MODE, IME_SENTENCE_MODE, IMECHARPOSITION,
+    IMN_CHANGECANDIDATE, IMN_CLOSECANDIDATE, IMN_CLOSESTATUSWINDOW, IMN_GUIDELINE,
+    IMN_OPENCANDIDATE, IMN_OPENSTATUSWINDOW, IMN_PRIVATE, IMN_SETCANDIDATEPOS,
+    IMN_SETCOMPOSITIONFONT, IMN_SETCOMPOSITIONWINDOW, IMN_SETCONVERSIONMODE, IMN_SETOPENSTATUS,
+    IMN_SETSENTENCEMODE, IMN_SETSTATUSWINDOWPOS, IMN_SOFTKBDDESTROYED, IMR_CANDIDATEWINDOW,
+    IMR_COMPOSITIONFONT, IMR_COMPOSITIONWINDOW, IMR_CONFIRMRECONVERTSTRING, IMR_DOCUMENTFEED,
+    IMR_QUERYCHARPOSITION, IMR_RECONVERTSTRING, ImmGetCompositionStringW, ImmGetContext,
+    ImmGetConversionStatus, ImmGetOpenStatus, ImmNotifyIME, ImmReleaseContext, NI_COMPOSITIONSTR,
+    RECONVERTSTRING,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_PACKET, VK_PROCESSKEY};
 use windows::Win32::UI::Input::{
@@ -238,20 +237,19 @@ use windows::Win32::UI::TextServices::{
     GUID_COMPARTMENT_SPEECH_GLOBALSTATE, GUID_COMPARTMENT_SPEECH_OPENCLOSE,
     GUID_COMPARTMENT_SPEECH_UI_STATUS, GUID_COMPARTMENT_TIPUISTATUS,
     GUID_COMPARTMENT_TRANSITORYEXTENSION, GUID_COMPARTMENT_TRANSITORYEXTENSION_DOCUMENTMANAGER,
-    GUID_COMPARTMENT_TRANSITORYEXTENSION_PARENT, GUID_TFCAT_TIP_KEYBOARD, IS_DEFAULT, IS_PASSWORD,
-    ITfCompartmentMgr, ITfContext, ITfContextComposition, ITfInputProcessorProfileMgr,
-    ITfThreadMgr, InputScope, TF_INPUTPROCESSORPROFILE, TF_IPP_FLAG_ACTIVE, TF_IPP_FLAG_ENABLED,
+    GUID_COMPARTMENT_TRANSITORYEXTENSION_PARENT, GUID_TFCAT_TIP_KEYBOARD, ITfCompartmentMgr,
+    ITfContext, ITfContextComposition, ITfInputProcessorProfileMgr, ITfThreadMgr,
+    TF_INPUTPROCESSORPROFILE, TF_IPP_FLAG_ACTIVE, TF_IPP_FLAG_ENABLED,
     TF_IPP_FLAG_SUBSTITUTEDBYINPUTPROCESSOR, TF_PROFILETYPE_INPUTPROCESSOR,
     TF_PROFILETYPE_KEYBOARDLAYOUT, TS_SS_DISJOINTSEL, TS_SS_NOHIDDENTEXT, TS_SS_REGIONS,
     TS_SS_TKBAUTOCORRECTENABLE, TS_SS_TKBPREDICTIONENABLE, TS_SS_TRANSITORY, TS_SS_UWPCONTROL,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClassNameW, GetForegroundWindow, GetMessageExtraInfo, GetWindowThreadProcessId,
-    UNICODE_NOCHAR, WM_CHAR, WM_DEADCHAR, WM_DESTROY, WM_IME_CHAR, WM_IME_COMPOSITION,
-    WM_IME_ENDCOMPOSITION, WM_IME_KEYDOWN, WM_IME_KEYUP, WM_IME_NOTIFY, WM_IME_REQUEST,
-    WM_IME_SELECT, WM_IME_SETCONTEXT, WM_IME_STARTCOMPOSITION, WM_INPUTLANGCHANGE, WM_KEYDOWN,
-    WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_NCDESTROY, WM_RBUTTONDOWN,
-    WM_SYSCHAR, WM_SYSDEADCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_UNICHAR,
+    UNICODE_NOCHAR, WM_CHAR, WM_DEADCHAR, WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
+    WM_IME_KEYDOWN, WM_IME_KEYUP, WM_IME_NOTIFY, WM_IME_REQUEST, WM_IME_SELECT, WM_IME_SETCONTEXT,
+    WM_IME_STARTCOMPOSITION, WM_INPUTLANGCHANGE, WM_KEYDOWN, WM_KEYUP, WM_NCDESTROY, WM_SYSCHAR,
+    WM_SYSDEADCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_UNICHAR,
 };
 use windows::core::{GUID, HRESULT, Interface, PWSTR, s, w};
 
@@ -287,12 +285,6 @@ thread_local! {
     static HANDLING: Cell<u32> = const { Cell::new(0) };
     /// Whether a probe is running on this thread.
     static PROBING: Cell<bool> = const { Cell::new(false) };
-    /// The windows [`set_input_purpose`] gave a scope other than
-    /// `IS_DEFAULT`, which must get it back before they are destroyed.
-    static SCOPED: RefCell<HashSet<isize>> = RefCell::new(HashSet::new());
-    /// The open status of each window's input context as a password field
-    /// took the focus, for [`input_method_allowed`] to give back.
-    static OPEN_BEFORE_PASSWORD: RefCell<HashMap<isize, bool>> = RefCell::new(HashMap::new());
 }
 
 /// What the subclass procedure reads through `dwRefData`.
@@ -301,8 +293,6 @@ struct TapState {
     /// The window tree's text surfaces, whose focused document answers the
     /// input method's requests.
     surfaces: TextSurfaces,
-    /// The reconversion the input method asked for, until a preedit takes it.
-    reconversion: RefCell<Reconversion>,
 }
 
 impl std::fmt::Debug for TapState {
@@ -374,7 +364,6 @@ fn install_tap(window_id: TeksiloWindowId, hwnd: HWND, surfaces: TextSurfaces) {
         state: Rc::new(TapState {
             window_id,
             surfaces,
-            reconversion: RefCell::new(Reconversion::default()),
         }),
     };
     let installed =
@@ -407,29 +396,11 @@ fn install_tap(window_id: TeksiloWindowId, hwnd: HWND, surfaces: TextSurfaces) {
 }
 
 pub(super) fn detach(window_id: TeksiloWindowId) {
-    let hwnd = WINDOWS.with_borrow_mut(|windows| windows.remove(&window_id));
-    if let Some(hwnd) = hwnd {
-        reset_input_scope(hwnd);
-        let _ =
-            OPEN_BEFORE_PASSWORD.try_with(|saved| saved.borrow_mut().remove(&(hwnd.0 as isize)));
-    }
+    WINDOWS.with_borrow_mut(|windows| windows.remove(&window_id));
     // Taken out of the map first and dropped after the borrow ends, so
     // nothing `RemoveWindowSubclass` might run can find the map borrowed.
     let tap = TAPS.with_borrow_mut(|taps| taps.remove(&window_id));
     drop(tap);
-}
-
-/// See [`super::take_marked_replacement`]: the range a reconversion the
-/// input method confirmed (or the selection it was handed) replaces.
-pub(super) fn take_marked_replacement(window_id: TeksiloWindowId) -> Option<Range<usize>> {
-    TAPS.try_with(|taps| {
-        let taps = taps.try_borrow().ok()?;
-        let tap = taps.get(&window_id)?;
-        let mut reconversion = tap.state.reconversion.try_borrow_mut().ok()?;
-        reconversion.take()
-    })
-    .ok()
-    .flatten()
 }
 
 fn next_sequence() -> u64 {
@@ -469,9 +440,11 @@ unsafe extern "system" fn text_input_proc(
             .ok()
             .flatten()
     });
-    if let Some(state) = state.as_deref() {
+    if let Some(state) = state.as_deref()
+        && msg == WM_IME_REQUEST
+    {
         let answer = catch_unwind(AssertUnwindSafe(|| {
-            before_winit(state, hwnd, msg, wparam, lparam)
+            answer_request(state, hwnd, wparam.0 as u32, lparam)
         }))
         .ok()
         .flatten();
@@ -490,55 +463,12 @@ unsafe extern "system" fn text_input_proc(
         let _handling = Handling::enter();
         unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
     };
-    // After winit has handled it. The state is this call's own reference:
-    // winit's handling may have detached the window.
-    if let Some(state) = state.as_deref() {
-        let _ = catch_unwind(AssertUnwindSafe(|| after_winit(state, hwnd, msg)));
-    }
+    // After winit has handled it: the probes. They read no state, since
+    // winit's handling may have closed the window.
     if let Some(seq) = probe_after {
         let _ = catch_unwind(AssertUnwindSafe(|| probe_message(hwnd, msg, seq)));
     }
     result
-}
-
-/// What the tap does with a message before winit has it: answer a request it
-/// answers (the result to return, instead of passing the message on), or
-/// forget a reconversion the message ends. Calls nothing that can deliver a
-/// message.
-fn before_winit(
-    state: &TapState,
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> Option<LRESULT> {
-    match msg {
-        WM_IME_REQUEST => answer_request(state, hwnd, wparam.0 as u32, lparam),
-        WM_KEYDOWN | WM_SYSKEYDOWN if imm_requests::key_ends_reconversion(wparam.0 as u16) => {
-            forget_reconversion(state);
-            None
-        }
-        WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_KILLFOCUS => {
-            forget_reconversion(state);
-            None
-        }
-        _ => None,
-    }
-}
-
-/// What the tap does with a message winit has handled.
-fn after_winit(state: &TapState, hwnd: HWND, msg: u32) {
-    match msg {
-        WM_IME_ENDCOMPOSITION => forget_reconversion(state),
-        WM_DESTROY => reset_input_scope(hwnd),
-        _ => {}
-    }
-}
-
-fn forget_reconversion(state: &TapState) {
-    if let Ok(mut reconversion) = state.reconversion.try_borrow_mut() {
-        reconversion.clear();
-    }
 }
 
 /// How a message reached the tap.
@@ -642,7 +572,11 @@ fn log_message(state: &TapState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Op
     let probed = matches!(
         msg,
         WM_IME_STARTCOMPOSITION | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION
-    );
+    ) || (msg == WM_IME_NOTIFY
+        && matches!(
+            wparam.0 as u32,
+            IMN_OPENCANDIDATE | IMN_CLOSECANDIDATE | IMN_SETOPENSTATUS
+        ));
     (probed && arrival == Arrival::Direct).then_some(seq)
 }
 
@@ -653,7 +587,10 @@ fn log_message(state: &TapState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Op
 /// string again (see `imm_completion`).
 fn probe_message(hwnd: HWND, msg: u32, seq: u64) {
     let _probing = Probing::enter();
-    if matches!(msg, WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION) {
+    if matches!(
+        msg,
+        WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION | WM_IME_NOTIFY
+    ) {
         probe_imm(hwnd, seq);
     }
     probe_tsf(seq, Reach::Message);
@@ -935,10 +872,17 @@ fn probe_imm(hwnd: HWND, seq: u64) {
     let result = composition_string(himc, GCS_RESULTSTR);
     let cursor = unsafe { ImmGetCompositionStringW(himc, GCS_CURSORPOS, None, 0) };
     let delta = unsafe { ImmGetCompositionStringW(himc, GCS_DELTASTART, None, 0) };
+    let open = unsafe { ImmGetOpenStatus(himc) }.as_bool();
+    let (mut conversion, mut sentence) = (IME_CONVERSION_MODE(0), IME_SENTENCE_MODE(0));
+    let _ = unsafe { ImmGetConversionStatus(himc, Some(&mut conversion), Some(&mut sentence)) };
     unsafe {
         let _ = ImmReleaseContext(hwnd, himc);
     }
-    tap_trace!("#{seq}   imm: comp={composition} result={result} cursor={cursor} delta={delta}");
+    tap_trace!(
+        "#{seq}   imm: comp={composition} result={result} cursor={cursor} delta={delta} open={open} conversion={:#x} sentence={:#x}",
+        conversion.0,
+        sentence.0
+    );
 }
 
 /// One of an input context's strings, with its UTF-16 units in hex, so a lone
@@ -1440,9 +1384,18 @@ const _: () = assert!(imm_requests::RECONVERTSTRING_HEADER == size_of::<RECONVER
 fn answer_request(state: &TapState, hwnd: HWND, command: u32, lparam: LPARAM) -> Option<LRESULT> {
     let name = match command {
         IMR_QUERYCHARPOSITION => "IMR_QUERYCHARPOSITION",
-        IMR_RECONVERTSTRING => "IMR_RECONVERTSTRING",
-        IMR_CONFIRMRECONVERTSTRING => "IMR_CONFIRMRECONVERTSTRING",
         IMR_DOCUMENTFEED => "IMR_DOCUMENTFEED",
+        IMR_RECONVERTSTRING | IMR_CONFIRMRECONVERTSTRING => {
+            if super::trace_enabled() {
+                tap_trace!(
+                    "#{} {} {}: not answered (reconversion is left for the TSF store); passed on",
+                    next_sequence(),
+                    state.window_id,
+                    named(command, REQUEST_COMMANDS)
+                );
+            }
+            return None;
+        }
         _ => return None,
     };
     let answer = state.surfaces.with_focused_input_document(|document| {
@@ -1454,34 +1407,6 @@ fn answer_request(state: &TapState, hwnd: HWND, command: u32, lparam: LPARAM) ->
         }
         Ok(match command {
             IMR_QUERYCHARPOSITION => query_char_position(document, hwnd, lparam),
-            IMR_RECONVERTSTRING => imm_requests::reconvert_string(document).and_then(|string| {
-                let answer = write_reconvert_string(&string, lparam)?;
-                if lparam.0 != 0
-                    && answer.0 != 0
-                    && let Ok(mut reconversion) = state.reconversion.try_borrow_mut()
-                {
-                    reconversion.offered(string);
-                }
-                Some(answer)
-            }),
-            IMR_CONFIRMRECONVERTSTRING => {
-                read_reconvert_string(lparam).map(|(units, composition)| {
-                    if super::trace_enabled() {
-                        tap_trace!(
-                            "  confirm: composition units {composition:?} of {:?}",
-                            String::from_utf16_lossy(&units)
-                        );
-                    }
-                    let accepted =
-                        state
-                            .reconversion
-                            .try_borrow_mut()
-                            .is_ok_and(|mut reconversion| {
-                                reconversion.confirm(document, &units, composition)
-                            });
-                    LRESULT(isize::from(accepted))
-                })
-            }
             _ => imm_requests::document_feed(document)
                 .and_then(|string| write_reconvert_string(&string, lparam)),
         })
@@ -1545,6 +1470,21 @@ fn query_char_position(
             right: bottom_right.x,
             bottom: bottom_right.y,
         };
+    }
+    if super::trace_enabled() {
+        let document = position.rcDocument;
+        tap_trace!(
+            "  char position {} -> screen ({}, {}) height {}, document ({}, {})..({}, {}); caret window-logical {:?}",
+            position.dwCharPos,
+            position.pt.x,
+            position.pt.y,
+            position.cLineHeight,
+            document.left,
+            document.top,
+            document.right,
+            document.bottom,
+            answer.caret
+        );
     }
     // SAFETY: as above.
     unsafe { request.write_unaligned(position) };
@@ -1613,187 +1553,6 @@ fn write_reconvert_string(string: &ReconvertString, lparam: LPARAM) -> Option<LR
         );
     }
     Some(LRESULT(fields.size as isize))
-}
-
-/// The string and the composition string (UTF-16 units of the string) of the
-/// `RECONVERTSTRING` at `lparam`, which `IMR_CONFIRMRECONVERTSTRING` hands
-/// over; `None` for one whose fields do not fit its `dwSize`.
-fn read_reconvert_string(lparam: LPARAM) -> Option<(Vec<u16>, Range<usize>)> {
-    let buffer = lparam.0 as *const u8;
-    if buffer.is_null() {
-        return None;
-    }
-    // SAFETY: as in `write_reconvert_string`; every read past the header is
-    // checked against `dwSize` first.
-    let header = unsafe { buffer.cast::<RECONVERTSTRING>().read_unaligned() };
-    let size = header.dwSize as usize;
-    let offset = header.dwStrOffset as usize;
-    let len = header.dwStrLen as usize;
-    if size < size_of::<RECONVERTSTRING>()
-        || offset < size_of::<RECONVERTSTRING>()
-        || offset.checked_add(len.checked_mul(2)?)? > size
-        || !header.dwCompStrOffset.is_multiple_of(2)
-    {
-        return None;
-    }
-    let composition_start = header.dwCompStrOffset as usize / 2;
-    let composition =
-        composition_start..composition_start.checked_add(header.dwCompStrLen as usize)?;
-    if composition.end > len {
-        return None;
-    }
-    let mut units = vec![0u16; len];
-    unsafe {
-        std::ptr::copy_nonoverlapping(buffer.add(offset), units.as_mut_ptr().cast::<u8>(), len * 2);
-    }
-    Some((units, composition))
-}
-
-// ---------------------------------------------------------------------------
-// The input scope
-// ---------------------------------------------------------------------------
-
-/// msctf's `SetInputScope`, which the `windows` crate does not bind.
-type SetInputScopeFn = unsafe extern "system" fn(HWND, InputScope) -> HRESULT;
-
-/// `SetInputScope` from the system's msctf, looked up once; `None` where it
-/// cannot be.
-fn set_input_scope_fn() -> Option<SetInputScopeFn> {
-    static FUNCTION: OnceLock<Option<usize>> = OnceLock::new();
-    let address = *FUNCTION.get_or_init(|| {
-        let module =
-            unsafe { LoadLibraryExW(w!("msctf.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) }.ok()?;
-        let address = unsafe { GetProcAddress(module, s!("SetInputScope")) }?;
-        Some(address as usize)
-    });
-    // SAFETY: the address is msctf's `SetInputScope`, whose signature is
-    // `HRESULT SetInputScope(HWND, InputScope)`.
-    address.map(|address| unsafe { std::mem::transmute::<usize, SetInputScopeFn>(address) })
-}
-
-/// The input scope for a field's purpose: `IS_PASSWORD` for a password,
-/// `IS_DEFAULT` otherwise (a terminal has no scope of its own).
-fn input_scope(purpose: ImePurpose) -> InputScope {
-    match purpose {
-        ImePurpose::Password => IS_PASSWORD,
-        ImePurpose::Normal | ImePurpose::Terminal => IS_DEFAULT,
-    }
-}
-
-/// See [`super::set_input_purpose`].
-pub(super) fn set_input_purpose(parent: &ParentHandle, purpose: ImePurpose) {
-    if let Some(hwnd) = hwnd_of(parent) {
-        apply_input_scope(hwnd, purpose);
-    }
-}
-
-/// Give `hwnd` the input scope of `purpose`. For a password, first note
-/// whether the input method is open, for [`input_method_allowed`].
-fn apply_input_scope(hwnd: HWND, purpose: ImePurpose) {
-    if purpose == ImePurpose::Password {
-        remember_open_status(hwnd);
-    }
-    let scope = input_scope(purpose);
-    if scope == IS_DEFAULT {
-        reset_input_scope(hwnd);
-        return;
-    }
-    let Some(set_input_scope) = set_input_scope_fn() else {
-        tap_trace!("SetInputScope is not available; the window keeps its scope");
-        return;
-    };
-    let result = unsafe { set_input_scope(hwnd, scope) };
-    tap_trace!(
-        "SetInputScope({:#x}, {}) returned {:#010x}",
-        hwnd.0 as usize,
-        scope.0,
-        result.0 as u32
-    );
-    if result.is_ok() {
-        let _ = SCOPED.try_with(|scoped| scoped.borrow_mut().insert(hwnd.0 as isize));
-    }
-}
-
-// ---------------------------------------------------------------------------
-// The open status across a password field
-// ---------------------------------------------------------------------------
-
-/// See [`super::input_method_allowed`].
-pub(super) fn input_method_allowed(parent: &ParentHandle, allowed: bool) {
-    if allowed && let Some(hwnd) = hwnd_of(parent) {
-        restore_open_status(hwnd);
-    }
-}
-
-/// Note whether `hwnd`'s input method is open, as a password field takes
-/// the focus and before winit takes the window's input context away. Kept
-/// from the first password field of a run of them; nothing is noted for a
-/// window with no context then (the focus came from a widget that takes no
-/// text, and the context keeps its own status while it is away).
-fn remember_open_status(hwnd: HWND) {
-    let key = hwnd.0 as isize;
-    if OPEN_BEFORE_PASSWORD
-        .try_with(|saved| saved.borrow().contains_key(&key))
-        .unwrap_or(true)
-    {
-        return;
-    }
-    let himc = unsafe { ImmGetContext(hwnd) };
-    if himc.is_invalid() {
-        return;
-    }
-    let open = unsafe { ImmGetOpenStatus(himc) }.as_bool();
-    unsafe {
-        let _ = ImmReleaseContext(hwnd, himc);
-    }
-    tap_trace!("open status as the password field takes the focus: {open}");
-    let _ = OPEN_BEFORE_PASSWORD.try_with(|saved| saved.borrow_mut().insert(key, open));
-}
-
-/// Give `hwnd`'s input context back the open status noted as a password
-/// field took the focus, once winit has given the window its context again:
-/// what WinForms does around a password box (`ImeMode.Disable`, then the
-/// next control's mode restored). Measured on Windows 11 with the Microsoft
-/// Japanese IME: left alone, the input method came back closed (`A`) after
-/// the password field, where a WinForms password box gives it back open.
-fn restore_open_status(hwnd: HWND) {
-    let Some(open) = OPEN_BEFORE_PASSWORD
-        .try_with(|saved| saved.borrow_mut().remove(&(hwnd.0 as isize)))
-        .ok()
-        .flatten()
-    else {
-        return;
-    };
-    let himc = unsafe { ImmGetContext(hwnd) };
-    if himc.is_invalid() {
-        return;
-    }
-    let now = unsafe { ImmGetOpenStatus(himc) }.as_bool();
-    if now != open {
-        let set = unsafe { ImmSetOpenStatus(himc, open) }.as_bool();
-        tap_trace!("open status after the password field was {now}: set back to {open}, {set}");
-    }
-    unsafe {
-        let _ = ImmReleaseContext(hwnd, himc);
-    }
-}
-
-/// Give `hwnd` back `IS_DEFAULT`, if it was given another scope.
-fn reset_input_scope(hwnd: HWND) {
-    let was_scoped = SCOPED
-        .try_with(|scoped| scoped.borrow_mut().remove(&(hwnd.0 as isize)))
-        .unwrap_or(false);
-    if !was_scoped {
-        return;
-    }
-    if let Some(set_input_scope) = set_input_scope_fn() {
-        let result = unsafe { set_input_scope(hwnd, IS_DEFAULT) };
-        tap_trace!(
-            "SetInputScope({:#x}, IS_DEFAULT) returned {:#010x}",
-            hwnd.0 as usize,
-            result.0 as u32
-        );
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2119,6 +1878,8 @@ fn winit_string(himc: HIMC, which: IME_COMPOSITION_STRING) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Range;
+
     use super::*;
     use teksilo_canvas::{Point, Rect, SizeProposal};
     use teksilo_core::text_input_document::{FirstLineRect, Utf16Index};
@@ -2225,6 +1986,30 @@ mod tests {
     }
 
     // -- The input method's requests --------------------------------------
+
+    /// Reconversion is not answered: it goes on to winit, which answers
+    /// nothing, and the document is not read for it.
+    #[test]
+    fn reconversion_is_passed_on() {
+        let window_id = TeksiloWindowId::new(0xFE_0008);
+        let document = line("abc", 1..2);
+        let (hwnd, _tree) = window_with(document.clone(), window_id);
+        let mut buffer = reconvert_buffer(64);
+        for command in [IMR_RECONVERTSTRING, IMR_CONFIRMRECONVERTSTRING] {
+            assert_eq!(request(hwnd, command, 0), 0);
+            assert_eq!(request(hwnd, command, buffer.as_mut_ptr() as isize), 0);
+        }
+        assert_eq!(document.reads.get(), 0);
+        assert_eq!(
+            request(hwnd, IMR_DOCUMENTFEED, 0),
+            32 + 6,
+            "the document feed is answered"
+        );
+        detach(window_id);
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
 
     /// One line of text, every character 10 wide and 20 tall, the text at
     /// (5, 7) in the window. Busy while `busy` is set. With `pending` set it
@@ -2426,99 +2211,30 @@ mod tests {
         )
     }
 
-    /// Japanese reconversion or Hanja on committed text: the input method
-    /// asks for the text, confirms the part it takes, and the next preedit
-    /// replaces that part, once.
+    /// The text around the composition, or around the selection with an
+    /// empty composition string at its start: written where the input method
+    /// says, and refused when its buffer is too small.
     #[test]
-    fn a_confirmed_reconversion_is_the_next_preedits_replacement() {
-        let window_id = TeksiloWindowId::new(0xFE_0001);
-        // "ab한" with the caret after the syllable.
-        let (hwnd, _tree) = window_with(line("ab\u{D55C}", 3..3), window_id);
-
-        let size = request(hwnd, IMR_RECONVERTSTRING, 0);
-        assert_eq!(size, 32 + 3 * 2, "the size, asked first");
-        let mut buffer = reconvert_buffer(size as usize);
-        let filled = request(hwnd, IMR_RECONVERTSTRING, buffer.as_mut_ptr() as isize);
-        assert_eq!(filled, size);
-        assert_eq!(
-            read_back(&buffer),
-            ("ab\u{D55C}".to_owned(), 3..3, 3..3),
-            "the text around the caret, the caret as an empty string"
-        );
-        assert_eq!(
-            take_marked_replacement(window_id),
-            None,
-            "nothing selected: nothing to replace until the input method says"
-        );
-
-        // The input method takes the syllable before the caret.
-        let filled = request(hwnd, IMR_RECONVERTSTRING, buffer.as_mut_ptr() as isize);
-        assert_eq!(filled, size);
-        buffer[4] = 1; // dwCompStrLen
-        buffer[5] = 4; // dwCompStrOffset, in bytes
-        assert_eq!(
-            request(
-                hwnd,
-                IMR_CONFIRMRECONVERTSTRING,
-                buffer.as_mut_ptr() as isize
-            ),
-            1,
-            "accepted"
-        );
-        assert_eq!(take_marked_replacement(window_id), Some(2..3));
-        assert_eq!(take_marked_replacement(window_id), None, "once");
-
-        // A key the input method passed on forgets a range no preedit took.
-        let _ = request(hwnd, IMR_RECONVERTSTRING, buffer.as_mut_ptr() as isize);
-        buffer[4] = 1;
-        buffer[5] = 4;
-        let _ = request(
-            hwnd,
-            IMR_CONFIRMRECONVERTSTRING,
-            buffer.as_mut_ptr() as isize,
-        );
-        unsafe {
-            let _ = SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(0x25)), Some(LPARAM(0)));
-        }
-        assert_eq!(take_marked_replacement(window_id), None, "the Left arrow");
-
-        detach(window_id);
-        unsafe {
-            let _ = DestroyWindow(hwnd);
-        }
-    }
-
-    #[test]
-    fn a_buffer_too_small_is_refused_and_other_text_is_not_confirmed() {
+    fn the_document_feed_is_written_and_a_buffer_too_small_is_refused() {
         let window_id = TeksiloWindowId::new(0xFE_0002);
         let (hwnd, _tree) = window_with(line("abc", 1..2), window_id);
+        assert_eq!(
+            request(hwnd, IMR_DOCUMENTFEED, 0),
+            38,
+            "the size, asked first"
+        );
         let mut small = reconvert_buffer(32 + 2);
         assert_eq!(
-            request(hwnd, IMR_RECONVERTSTRING, small.as_mut_ptr() as isize),
+            request(hwnd, IMR_DOCUMENTFEED, small.as_mut_ptr() as isize),
             0,
             "the string does not fit"
         );
         let mut buffer = reconvert_buffer(32 + 6);
         assert_eq!(
-            request(hwnd, IMR_RECONVERTSTRING, buffer.as_mut_ptr() as isize),
+            request(hwnd, IMR_DOCUMENTFEED, buffer.as_mut_ptr() as isize),
             38
         );
-        assert_eq!(read_back(&buffer), ("abc".to_owned(), 1..2, 1..2));
-        // Another string under the same offsets.
-        buffer[8] = u32::from(b'x') | (u32::from(b'y') << 16);
-        assert_eq!(
-            request(
-                hwnd,
-                IMR_CONFIRMRECONVERTSTRING,
-                buffer.as_mut_ptr() as isize
-            ),
-            0
-        );
-        assert_eq!(
-            take_marked_replacement(window_id),
-            Some(1..2),
-            "the selection handed over stands"
-        );
+        assert_eq!(read_back(&buffer), ("abc".to_owned(), 1..1, 1..2));
         detach(window_id);
         unsafe {
             let _ = DestroyWindow(hwnd);
@@ -2576,7 +2292,7 @@ mod tests {
         let (hwnd, _tree) = window_with(document.clone(), window_id);
         document.busy.set(true);
         let mut buffer = reconvert_buffer(64);
-        for command in [IMR_RECONVERTSTRING, IMR_DOCUMENTFEED] {
+        for command in [IMR_QUERYCHARPOSITION, IMR_DOCUMENTFEED] {
             assert_eq!(request(hwnd, command, 0), 0);
             assert_eq!(request(hwnd, command, buffer.as_mut_ptr() as isize), 0);
         }
@@ -2616,103 +2332,15 @@ mod tests {
             ),
             0
         );
-        for command in [IMR_RECONVERTSTRING, IMR_DOCUMENTFEED] {
-            assert_eq!(request(hwnd, command, 0), 0);
-            assert_eq!(request(hwnd, command, buffer.as_mut_ptr() as isize), 0);
-        }
+        assert_eq!(request(hwnd, IMR_DOCUMENTFEED, 0), 0);
+        assert_eq!(
+            request(hwnd, IMR_DOCUMENTFEED, buffer.as_mut_ptr() as isize),
+            0
+        );
         assert_eq!(document.insertions.get(), 0, "the typing is not inserted");
         assert_eq!(document.reads.get(), 0, "nor anything read");
         assert!(document.pending.get());
         detach(window_id);
-        unsafe {
-            let _ = DestroyWindow(hwnd);
-        }
-    }
-
-    #[test]
-    fn a_password_scope_is_set_and_given_back() {
-        let hwnd = hidden_window();
-        let key = hwnd.0 as isize;
-        let scoped = || SCOPED.with_borrow(|scoped| scoped.contains(&key));
-        assert!(
-            set_input_scope_fn().is_some(),
-            "msctf exports SetInputScope"
-        );
-        apply_input_scope(hwnd, ImePurpose::Password);
-        assert!(scoped(), "IS_PASSWORD set");
-        apply_input_scope(hwnd, ImePurpose::Normal);
-        assert!(!scoped(), "IS_DEFAULT given back");
-
-        let window_id = TeksiloWindowId::new(0xFE_0005);
-        WINDOWS.with_borrow_mut(|windows| windows.insert(window_id, hwnd));
-        apply_input_scope(hwnd, ImePurpose::Password);
-        detach(window_id);
-        assert!(!scoped(), "given back as the window is detached");
-
-        apply_input_scope(hwnd, ImePurpose::Password);
-        install_tap(window_id, hwnd, WidgetTree::new().text_surfaces());
-        unsafe {
-            let _ = DestroyWindow(hwnd);
-        }
-        assert!(!scoped(), "given back as the window is destroyed");
-        detach(window_id);
-    }
-
-    /// The Microsoft Japanese IME comes back closed after a password field
-    /// (measured): the open status noted as the field took the focus is given
-    /// back once winit has given the window its context again.
-    #[test]
-    fn the_open_status_comes_back_after_a_password_field() {
-        use windows::Win32::UI::Input::Ime::{IACE_CHILDREN, IACE_DEFAULT, ImmAssociateContextEx};
-
-        let hwnd = hidden_window();
-        let open = || unsafe {
-            let himc = ImmGetContext(hwnd);
-            assert!(!himc.is_invalid(), "the window has its default context");
-            let open = ImmGetOpenStatus(himc).as_bool();
-            let _ = ImmReleaseContext(hwnd, himc);
-            open
-        };
-        let himc = unsafe { ImmGetContext(hwnd) };
-        if himc.is_invalid() {
-            // IMM gives no window a context in a session with no desktop
-            // (session 0, over ssh): run it on a desktop session.
-            eprintln!("skipped: this session gives windows no input context");
-            unsafe {
-                let _ = DestroyWindow(hwnd);
-            }
-            return;
-        }
-        assert!(unsafe { ImmSetOpenStatus(himc, true) }.as_bool());
-        assert!(open());
-
-        // The password field takes the focus: the scope, then winit takes
-        // the context away.
-        apply_input_scope(hwnd, ImePurpose::Password);
-        unsafe {
-            let _ = ImmAssociateContextEx(hwnd, HIMC::default(), IACE_CHILDREN);
-            // The input method closes it meanwhile, as measured.
-            let _ = ImmSetOpenStatus(himc, false);
-            let _ = ImmReleaseContext(hwnd, himc);
-        }
-        // Back in an ordinary field: the scope, then winit gives the context
-        // back, then the hook.
-        apply_input_scope(hwnd, ImePurpose::Normal);
-        unsafe {
-            let _ = ImmAssociateContextEx(hwnd, HIMC::default(), IACE_DEFAULT);
-        }
-        assert!(!open(), "premise: it came back closed");
-        restore_open_status(hwnd);
-        assert!(open(), "given back open");
-
-        // Given back once: a status changed later is the user's.
-        let himc = unsafe { ImmGetContext(hwnd) };
-        unsafe {
-            let _ = ImmSetOpenStatus(himc, false);
-            let _ = ImmReleaseContext(hwnd, himc);
-        }
-        restore_open_status(hwnd);
-        assert!(!open());
         unsafe {
             let _ = DestroyWindow(hwnd);
         }

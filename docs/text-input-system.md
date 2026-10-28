@@ -228,8 +228,8 @@ implement the trait still receives `ImeCommit`s; Dictation and Writing Tools
 need the answers to start.
 
 On Windows the same answers serve the input method's own requests: where a
-character of the composition is drawn (its candidate window follows it), the
-text to reconvert, and the text around the composition. Windows asks from
+character of the composition is drawn (its candidate window follows it) and
+the text around the composition. Windows asks from
 inside the window's procedure, where no application code may run, so the
 bridge first asks `is_available`: whether the document can answer now
 without any change. It is `false` while the widget is in the middle of its
@@ -243,8 +243,7 @@ its state while it works answers it.
 A password field (`PasswordField`, or any field whose IME purpose is
 `ImePurpose::Password`) takes no input method on Windows and X11: its text
 comes from the keys alone, as in a native password field, and no
-composition, emoji panel or Windows voice typing reaches it. Windows is
-told the purpose as the `IS_PASSWORD` input scope. On Wayland and macOS the
+composition, emoji panel or Windows voice typing reaches it. On Wayland and macOS the
 input method stays allowed and is told the purpose: on Wayland that keeps
 the on-screen keyboard, and the input method types directly; on macOS a
 Roman layout's dead keys compose through the input system. macOS secure
@@ -254,7 +253,7 @@ turns on) is not done yet, and winit passes the purpose to nothing there.
 | Platform | What works | Notes |
 | --- | --- | --- |
 | macOS | Emoji & Symbols, Start Dictation, the press-and-hold accent popup, Writing Tools in its panel, Korean Hanja conversion of the syllable just typed. Keys the input method swallows (the accent popup open) do not type, a key it answers with a commit of its own (2-Set Korean's Space with nothing composed) types that commit once, and a key it types as another character (Kotoeri's full-width space, Pinyin's full-width punctuation) types that character. A switch to another input source in the middle of a composition commits it where it was, once, as the input method commits it (Pinyin's `ni hao` as `nihao`), whether the input method does so itself or not; another mode of the same input method (Kotoeri's Katakana after its Hiragana) leaves the composition going. | AutoFill is not supported. The rows come from the Edit menu: see [Rows macOS adds to the Edit menu](native-menu.md#rows-macos-adds-to-the-edit-menu). |
-| Windows | The emoji panel and voice typing insert, as do compositions from the Microsoft Japanese, Pinyin and Korean input methods, Hanja conversion of the syllable being composed included. | The emoji panel and voice typing arrive as IMM results and report as `Ime`: the two cannot be told apart without a TSF text store, and without one voice typing shows no text while you speak. The window answers the input method's requests about the document (where a character is drawn, the text to reconvert, the text around the composition), and a reconversion the input method asks for composes over the text it reconverts. Hanja conversion of a Korean syllable already committed reaches an IMM32 window as no request at all in the measurements so far, where Notepad, a TSF application, reconverts it. A design for a TSF text store is in `engineering/docs/tsf-text-store.md` in the repository. |
+| Windows | The emoji panel and voice typing insert, as do compositions from the Microsoft Japanese, Pinyin and Korean input methods, Hanja conversion of the syllable being composed included. | The emoji panel and voice typing arrive as IMM results and report as `Ime`: the two cannot be told apart without a TSF text store, and without one voice typing shows no text while you speak. The window answers the input method's requests about where a character is drawn and the text around the composition. Reconversion of committed text (the Japanese conversion key) is not answered yet: it did not open reliably. Hanja conversion of a Korean syllable already committed reaches an IMM32 window as no request at all in the measurements so far, where Notepad, a TSF application, reconverts it. A design for a TSF text store is in `engineering/docs/tsf-text-store.md` in the repository. |
 | Linux | Compositions, measured with fcitx5's Mozc, Pinyin and Hangul on KDE Plasma (Wayland). | Compositions arrive as `Composition`. winit 0.30 reports no surrounding text, so Korean Hanja conversion of text already committed does not work. |
 
 On macOS, dictated text carries no public marker: it streams in as marked text

@@ -750,8 +750,8 @@ impl Widget for TextInputField {
             // Secure fields declare `ImePurpose::Password`, for which the
             // application layer keeps the OS input method off on Windows and
             // X11, as native password fields do; the purpose itself reaches
-            // the platform everywhere (Windows' input scope, Wayland's content
-            // purpose). Masking a preedit, which Wayland and macOS still
+            // the platform everywhere (Wayland's content purpose, the screen
+            // reader's key echo). Masking a preedit, which Wayland and macOS still
             // deliver, is this widget's own job. Read by the platform IME
             // layer at focus-change time; an unset descriptor (the node
             // default) is what means "no OS IME".

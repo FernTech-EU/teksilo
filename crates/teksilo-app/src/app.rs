@@ -719,23 +719,9 @@ impl crate::input_loop::InputChrome for WindowChrome<'_> {
             self.window
                 .window()
                 .set_ime_purpose(TeksiloAppHandler::map_ime_purpose(purpose));
-            // winit's call does nothing on Windows: the hook gives the
-            // window its input scope.
-            if let Some(parent) =
-                teksilo_core::raw_handle::ParentHandle::from_window(self.window.window())
-            {
-                teksilo_platform::text_input_hook::set_input_purpose(&parent, purpose);
-            }
         }
         if let Some(allowed) = allowed {
             self.window.window().set_ime_allowed(allowed);
-            // On Windows, the input method's open status as it was before a
-            // password field.
-            if let Some(parent) =
-                teksilo_core::raw_handle::ParentHandle::from_window(self.window.window())
-            {
-                teksilo_platform::text_input_hook::input_method_allowed(&parent, allowed);
-            }
         }
     }
 

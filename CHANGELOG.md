@@ -27,11 +27,9 @@ by crate for clarity, not because crates version independently.
 - **`TEKSILO_TEXT_INPUT_TRACE=1`** logs what the platform's text input system
   sends a window, on macOS and Windows.
 - **Windows: a text field answers the input method's questions about its
-  text.** The candidate window follows the character being converted, a
-  reconversion of committed text (the Japanese conversion key) composes over
-  that text instead of beside it, and the input method reads the text around
-  the composition as it predicts. A password field gives the window the
-  `IS_PASSWORD` input scope.
+  text.** The candidate window follows the character being converted, and
+  the input method reads the text around the composition as it predicts.
+  Reconversion of committed text is not answered yet.
 
 #### Core
 
@@ -129,8 +127,7 @@ by crate for clarity, not because crates version independently.
 - **A password field takes no input method on Windows and X11**: a
   `PasswordField`, or any field with `ImePurpose::Password`, takes its text
   there from the keys alone, as native password fields do. Compositions, the
-  emoji panel and Windows voice typing no longer reach it, and on Windows
-  leaving it gives the input method back the state it had. On Wayland and
+  emoji panel and Windows voice typing no longer reach it. On Wayland and
   macOS the input method stays, told that the field is a password (on
   Wayland the on-screen keyboard and the input method's direct mode follow
   it); macOS secure event input is not done yet.

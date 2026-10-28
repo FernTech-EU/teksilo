@@ -381,11 +381,15 @@ outside a composition is `Insertion` and a composition's is `Composition`, as to
 - **Read-only fields**: a context with `TS_SD_READONLY`; writes return `TS_E_READONLY`,
   `OnStartComposition` refuses.
 - **Purposes**: `Normal` is `IS_DEFAULT`, `Password` `IS_PASSWORD`, `Terminal` `IS_DEFAULT` (it takes
-  the IMM path anyway), through `GUID_PROP_INPUTSCOPE` on the store. `SetInputScope` on the HWND
-  (msctf, not bound by the `windows` crate) is for the IMM path only: Microsoft says that on a window
-  "not associated with a Document Manager ... no text service notifications are sent to interested
-  clients (such as the touch keyboard)", so it may reach an IME (Firefox's `SetInputScopeForIMM32`)
-  and probably not the touch keyboard (M7). `IS_DEFAULT` before the window is destroyed.
+  the IMM path anyway), through `GUID_PROP_INPUTSCOPE` on the store. **Not `SetInputScope` on the
+  HWND** (msctf, not bound by the `windows` crate), which Phase -1 tried for the IMM path and
+  dropped: measured under CUAS (`tsf-phase-minus-1-windows-3-findings.md`), `IS_PASSWORD` on the
+  window closes the Microsoft Japanese and Korean TIPs for the whole window once the password field is
+  left; IMM's open status can be set back (`ImmSetOpenStatus`) and then says open while the TIP stays
+  off (the next Alt+` "opens" it), so an IMM-level repair does not work. Without the scope, the
+  disassociated context alone keeps the field plain and the TIP comes back as it was. The password
+  scope therefore belongs to the store's disabled context (Phase 1), and the touch keyboard's
+  password layout waits for it.
 - **Accessibility**: UIA's TextPattern is AccessKit's and stays separate, but **NVDA reads the
   store**: its injected helper advises `ITfTextEditSink` on the focused context and reads the
   composition through `ITfRange::GetText`. NVDA is one more TSF client of the arbiter, and a reason
@@ -406,7 +410,7 @@ cannot compose breaks every IME.
   documented exception to its rule. Most such requests arrive while winit handles another message
   (round 5), when a widget may be busy and the answer is "none", as today. The reconverted range
   becomes the next preedit's `replacement`, as `take_marked_replacement` does on macOS. The IME is
-  disallowed for passwords; `SetInputScope` per purpose. It also serves `CodeEditor`, the terminal
+  disallowed for passwords (no input scope, see below). It also serves `CodeEditor`, the terminal
   and, later, ATOK and Mozc under TSF. Then re-run Japanese reconversion and prediction and Korean
   Hanja on a committed syllable (round 6 saw no request for the latter; to be measured).
   Measured on 9c6641ae (`cross_tasks/tsf-phase-minus-1-windows-findings.md`): candidate placement,
@@ -415,8 +419,26 @@ cannot compose breaks every IME.
   reaches the window as a plain `WM_KEYDOWN` (`VK_HANJA`), with the caret after the syllable or the
   syllable selected, while Notepad reconverts it. The Korean IME does this through TSF only, so it is
   left for the store (Phase 2 and 3). Leaving a password field closed the Japanese IME (it came back
-  `A`, where a WinForms password box gives it back open): the hook now gives the input context back
-  the open status it had as the field took the focus.
+  `A`, where a WinForms password box gives it back open).
+  Rounds 2 and 3 (`tsf-phase-minus-1-windows-2-findings.md`, `-3-findings.md`): the close comes from
+  the `IS_PASSWORD` input scope, after the field is left; an `ImmSetOpenStatus` answering it leaves
+  IMM saying open while the TIP stays off, and keeping the context with the scope alone is worse (the
+  TIP closes as the field takes the focus and Win+. opens nothing). Without the scope the field stays
+  plain and the TIP comes back as it was. So Phase -1 sets **no input scope** (section 6). Round 4
+  (`-4-findings.md`) confirmed it: the IME comes back after every round trip (Japanese, Korean, by
+  click, by Tab, through two password fields), an IME that was off stays off, and the password
+  field stays plain. Win+. now opens no emoji panel at all in a password field (with the scope it
+  opened and the pick was dropped).
+  **Reconversion is not answered** in Phase -1: it opened 6 of 6 times in the first session and
+  0 of 24 in later ones (with the text around the selection or the selection alone, in fresh
+  processes), while Notepad and a WinForms (Win32 edit) box reconverted at the same moments, with our
+  answers the same. A reconversion that does not open stays pending in the IME, whose next
+  composition holds the text again (doubled after a caret move). The one marker: every failure
+  has 3 `IMR_QUERYCHARPOSITION` between the `VK_CONVERT` key-down and `IMN_OPENCANDIDATE`, the one
+  traced success 2, then 3 more and `WM_IME_STARTCOMPOSITION` where the failures get 2 and
+  `IMN_CLOSECANDIDATE`, all answered with the same position. **Open question for the store**: under
+  TSF a TIP reconverts through the store's own reads (`ITfFnReconversion`, `GetText`, `GetTextExt`),
+  not through these requests, so whether it is reliable there is measured in Phase 2 and 3.
 - **Phase 0, measure** (about 1,000 lines). Chromium's key model, a store answering reads from the
   document and taking writes into a private mirror (kept afterwards as a debug fallback), the empty
   disabled context, `ITfKeyTraceEventSink`, `ITfTextEditSink` with `EnumProperties`, tracing.

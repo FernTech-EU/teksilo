@@ -8,23 +8,12 @@
 //! winit 0.30 has no arm for `WM_IME_REQUEST`, so an input method asking an
 //! IMM32 window about its document was always answered "nothing", and so was
 //! every TSF text service CUAS serves the window through. The Windows hook
-//! answers four of the requests from the document:
+//! answers two of the requests from the document:
 //!
 //! - **`IMR_QUERYCHARPOSITION`**: where a character of the composition is
 //!   drawn, so the input method places its candidate window by the
 //!   character it converts. Round 5 counted 320 of them in one Japanese run.
 //!   [`char_position`] answers, through [`answers::first_rect`].
-//! - **`IMR_RECONVERTSTRING`**: the text to reconvert. The Japanese input
-//!   method's conversion key on committed text, Hanja on a committed Korean
-//!   syllable. [`reconvert_string`] hands over the selection with the text
-//!   around it on its line, or, with nothing selected, the text around the
-//!   caret and an empty composition string at the caret, for the input method
-//!   to choose what it reconverts.
-//! - **`IMR_CONFIRMRECONVERTSTRING`**: the input method names the part of
-//!   that text it reconverts. The field's [`Reconversion`] checks it against
-//!   what it handed over and keeps the range, as the next preedit's
-//!   `replacement`, so the composition shows over that text rather than
-//!   beside it ([`ImeComposition`](teksilo_core::WidgetEvent::ImeComposition)).
 //! - **`IMR_DOCUMENTFEED`**: the text around the composition or the caret,
 //!   which the Japanese input method reads as it predicts. [`document_feed`]
 //!   answers, with the composition (or the selection) as the target, as
@@ -38,6 +27,12 @@
 //! Every function answers `None` where the document cannot answer (busy, no
 //! layout, a secure field's text), and the hook then lets the request go on
 //! to winit, which answers it as it always did.
+//!
+//! Reconversion (`IMR_RECONVERTSTRING`, `IMR_CONFIRMRECONVERTSTRING`) is not
+//! answered: measured with the Microsoft Japanese IME, it opened in one
+//! session and never after, with the text around the selection or the
+//! selection alone, while a Win32 edit control reconverted; see the design
+//! document. It is left for the TSF store.
 
 #![cfg_attr(
     not(target_os = "windows"),
@@ -47,15 +42,12 @@
 use std::ops::Range;
 
 use teksilo_canvas::Rect;
-use teksilo_core::text_input_document::{TextInputDocument, Utf16Index};
+use teksilo_core::text_input_document::TextInputDocument;
 
 use super::answers::{self, Utf16Range};
-use super::composition::MarkedReplacement;
 
 /// The most characters handed over on either side of the text a request is
-/// about. Chromium hands 20 around a composition for `IMR_DOCUMENTFEED`; a
-/// reconversion with nothing selected needs the word around the caret, which
-/// is rarely longer.
+/// about. Chromium hands 20 around a composition for `IMR_DOCUMENTFEED`.
 pub(crate) const CONTEXT_CHARS: usize = 64;
 
 /// The size of `RECONVERTSTRING`'s header: eight `DWORD`s, the string after
@@ -112,18 +104,6 @@ impl ReconvertString {
             target_offset: bytes(self.target.start)?,
         })
     }
-
-    /// The document's characters that `units` (a range of this string's
-    /// UTF-16 units) covers, widened to whole characters; `None` for a range
-    /// past the end of the string.
-    pub(crate) fn document_range(&self, units: Range<usize>) -> Option<Range<usize>> {
-        if units.start > units.end || units.end > self.units.len() {
-            return None;
-        }
-        let text = String::from_utf16_lossy(&self.units);
-        let chars = Utf16Index::new(&text).utf16_range_to_chars(units);
-        Some(self.start + chars.start..self.start + chars.end)
-    }
 }
 
 /// The text around `target` (document characters) on its line, at most
@@ -172,22 +152,6 @@ fn around(
         composition: composition_units,
         target: target_units,
     })
-}
-
-/// `IMR_RECONVERTSTRING`: the selection, as the composition and target
-/// strings, with the text around it on its line. With nothing selected, the
-/// text around the caret and empty strings at it: the input method chooses
-/// what it reconverts and names it in `IMR_CONFIRMRECONVERTSTRING`.
-///
-/// `None` while a composition is in progress (Chromium refuses then too), in
-/// a field that takes no text or gives none out (read-only, secure), and
-/// where the document cannot answer.
-pub(crate) fn reconvert_string(document: &dyn TextInputDocument) -> Option<ReconvertString> {
-    if !document.is_editable() || document.is_secure() || document.composition_range().is_some() {
-        return None;
-    }
-    let selection = document.selection()?;
-    around(document, selection.clone(), selection)
 }
 
 /// `IMR_DOCUMENTFEED`: the text around the composition, which is its
@@ -252,113 +216,12 @@ pub(crate) fn char_position(
     })
 }
 
-/// Whether a key down with virtual key `vk` ends a reconversion no preedit
-/// has taken yet: every key but one the input method took (`VK_PROCESSKEY`),
-/// a modifier, and the input method keys that start one (`VK_CONVERT`, the
-/// Hanja key) or switch its mode. Those can reach the window as themselves
-/// around the input method's requests; any other key can move the selection
-/// or type.
-pub(crate) fn key_ends_reconversion(vk: u16) -> bool {
-    !matches!(
-        vk,
-        // VK_SHIFT, VK_CONTROL, VK_MENU.
-        0x10..=0x12
-        // VK_KANA / VK_HANGUL, VK_IME_ON, VK_JUNJA, VK_FINAL, VK_HANJA /
-        // VK_KANJI, VK_IME_OFF.
-        | 0x15..=0x1A
-        // VK_CONVERT, VK_NONCONVERT, VK_ACCEPT, VK_MODECHANGE.
-        | 0x1C..=0x1F
-        // VK_LWIN, VK_RWIN.
-        | 0x5B | 0x5C
-        // VK_LSHIFT to VK_RMENU.
-        | 0xA0..=0xA5
-        // VK_PROCESSKEY.
-        | 0xE5
-        // The Japanese keyboard's mode keys (0xF0 to 0xF6: alphanumeric,
-        // katakana, hiragana, single and double width, roman, no roman), and
-        // the OEM keys VK_ATTN to VK_EREOF on it.
-        | 0xF0..=0xF9
-    )
-}
-
-/// A field's reconversion, from the text it handed over to the preedit that
-/// shows over it.
-///
-/// The input method asks for the text (`IMR_RECONVERTSTRING`, kept here as
-/// the offer), may name the part it reconverts (`IMR_CONFIRMRECONVERTSTRING`,
-/// [`confirm`](Self::confirm)), then starts a composition, whose first
-/// preedit takes the range ([`take`](Self::take)) as its replacement. A
-/// selection handed over is that range until a confirmation names another:
-/// the input method reconverts what was selected. A range no preedit takes
-/// must not ride on a later one, so [`clear`](Self::clear) forgets it at
-/// every event that can move the selection or end the reconversion: a key
-/// the input method passed on, a click, the focus leaving, the end of a
-/// composition.
-#[derive(Debug, Default)]
-pub(crate) struct Reconversion {
-    offer: Option<ReconvertString>,
-    replacement: MarkedReplacement,
-}
-
-impl Reconversion {
-    /// `string` was handed over for a reconversion; a selection in it is the
-    /// range the input method reconverts, unless it confirms another.
-    pub(crate) fn offered(&mut self, string: ReconvertString) {
-        let selected = (!string.target.is_empty())
-            .then(|| string.document_range(string.target.clone()))
-            .flatten();
-        self.replacement.record(selected);
-        self.offer = Some(string);
-    }
-
-    /// The input method confirms it reconverts `composition` (UTF-16 units)
-    /// of `units`, which must be the text last handed over, still in the
-    /// document where it was. Returns whether it was accepted; the range is
-    /// then the next preedit's replacement.
-    pub(crate) fn confirm(
-        &mut self,
-        document: &dyn TextInputDocument,
-        units: &[u16],
-        composition: Range<usize>,
-    ) -> bool {
-        let Some(offer) = &self.offer else {
-            return false;
-        };
-        if offer.units != units {
-            return false;
-        }
-        let whole = offer.document_range(0..offer.units.len());
-        let still_there = whole
-            .and_then(|whole| document.text_in(whole))
-            .is_some_and(|text| text.encode_utf16().eq(offer.units.iter().copied()));
-        if !still_there {
-            return false;
-        }
-        let Some(range) = offer.document_range(composition) else {
-            return false;
-        };
-        self.replacement.record(Some(range));
-        true
-    }
-
-    /// The range the preedit being translated replaces; once.
-    pub(crate) fn take(&mut self) -> Option<Range<usize>> {
-        self.replacement.take()
-    }
-
-    /// Nothing is being reconverted any more.
-    pub(crate) fn clear(&mut self) {
-        self.offer = None;
-        self.replacement.clear();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
 
     use teksilo_canvas::Point;
-    use teksilo_core::text_input_document::FirstLineRect;
+    use teksilo_core::text_input_document::{FirstLineRect, Utf16Index};
 
     use super::*;
 
@@ -458,51 +321,30 @@ mod tests {
     }
 
     #[test]
-    fn a_selection_is_handed_over_with_its_line_around_it() {
-        // "한 漢字 test": select 漢字.
-        let mut document = Line::new("first\n\u{D55C} \u{6F22}\u{5B57} test\nlast");
-        document.selection = 8..10;
-        let string = reconvert_string(&document).expect("an answer");
-        assert_eq!(string.start, 6, "from the start of its paragraph");
-        assert_eq!(string.units, utf16("\u{D55C} \u{6F22}\u{5B57} test"));
-        assert_eq!(string.composition, 2..4);
-        assert_eq!(string.target, 2..4);
-        assert_eq!(string.document_range(2..4), Some(8..10));
-    }
-
-    #[test]
-    fn with_nothing_selected_the_caret_is_an_empty_string_in_its_text() {
-        // The caret right after a committed syllable: the input method
-        // chooses the syllable and confirms it.
-        let mut document = Line::new("ab\u{D55C}");
-        document.selection = 3..3;
-        let string = reconvert_string(&document).expect("an answer");
-        assert_eq!(string.units, utf16("ab\u{D55C}"));
-        assert_eq!(string.composition, 3..3);
-        assert_eq!(string.target, 3..3);
-    }
-
-    #[test]
     fn the_context_is_bounded_and_counted_in_utf16() {
         let text = format!("{}\u{1F600}x\u{1F600}{}", "a".repeat(100), "b".repeat(100));
         let mut document = Line::new(&text);
         // Select the "x" between the emoji.
         document.selection = 101..102;
-        let string = reconvert_string(&document).expect("an answer");
+        let string = document_feed(&document).expect("an answer");
         assert_eq!(string.start, 101 - CONTEXT_CHARS);
         // 63 "a", an emoji (two units), then the "x".
         assert_eq!(string.target, 65..66);
+        assert_eq!(string.composition, 65..65);
         assert_eq!(
             string.units.len(),
             (CONTEXT_CHARS - 1) + 2 + 1 + 2 + (CONTEXT_CHARS - 1)
         );
-        assert_eq!(string.document_range(65..66), Some(101..102));
-        assert_eq!(
-            string.document_range(64..65),
-            Some(100..101),
-            "half an emoji widens to the whole of it"
-        );
-        assert_eq!(string.document_range(0..1000), None, "past the end");
+    }
+
+    #[test]
+    fn the_context_stops_at_a_paragraph_break() {
+        let mut document = Line::new("first\n\u{D55C} \u{6F22}\u{5B57} test\nlast");
+        document.selection = 8..10;
+        let string = document_feed(&document).expect("an answer");
+        assert_eq!(string.start, 6, "from the start of its paragraph");
+        assert_eq!(string.units, utf16("\u{D55C} \u{6F22}\u{5B57} test"));
+        assert_eq!(string.target, 2..4);
     }
 
     #[test]
@@ -525,27 +367,6 @@ mod tests {
                 target_offset: 6,
             })
         );
-    }
-
-    #[test]
-    fn no_reconversion_while_composing_nor_in_a_secure_or_read_only_field() {
-        let mut document = Line::new("abc");
-        document.selection = 0..1;
-        document.composition = Some(1..2);
-        assert_eq!(
-            reconvert_string(&document),
-            None,
-            "a composition in progress"
-        );
-        document.composition = None;
-        document.secure = true;
-        assert_eq!(reconvert_string(&document), None);
-        document.secure = false;
-        document.editable = false;
-        assert_eq!(reconvert_string(&document), None);
-        document.editable = true;
-        document.busy = true;
-        assert_eq!(reconvert_string(&document), None);
     }
 
     #[test]
@@ -600,92 +421,5 @@ mod tests {
         assert_eq!(char_position(&document, 1), None);
         document.busy = true;
         assert_eq!(char_position(&document, 0), None);
-    }
-
-    #[test]
-    fn a_confirmed_range_replaces_the_next_preedit_once() {
-        let mut document = Line::new("ab\u{D55C}");
-        document.selection = 3..3;
-        let mut reconversion = Reconversion::default();
-        let string = reconvert_string(&document).expect("an answer");
-        let units = string.units.clone();
-        reconversion.offered(string);
-        assert_eq!(
-            reconversion.take(),
-            None,
-            "nothing selected: nothing replaced until the input method names it"
-        );
-        assert!(reconversion.confirm(&document, &units, 2..3));
-        assert_eq!(reconversion.take(), Some(2..3), "the syllable");
-        assert_eq!(reconversion.take(), None, "once");
-    }
-
-    #[test]
-    fn a_selection_handed_over_is_the_range_unless_another_is_confirmed() {
-        let mut document = Line::new("x \u{6F22}\u{5B57} y");
-        document.selection = 2..4;
-        let mut reconversion = Reconversion::default();
-        let string = reconvert_string(&document).expect("an answer");
-        let units = string.units.clone();
-        reconversion.offered(string.clone());
-        assert_eq!(reconversion.take(), Some(2..4));
-
-        reconversion.offered(string);
-        assert!(reconversion.confirm(&document, &units, 3..4));
-        assert_eq!(reconversion.take(), Some(3..4), "the confirmed part");
-    }
-
-    #[test]
-    fn a_confirmation_of_other_text_is_refused() {
-        let mut document = Line::new("abc");
-        document.selection = 1..2;
-        let mut reconversion = Reconversion::default();
-        assert!(
-            !reconversion.confirm(&document, &utf16("abc"), 0..1),
-            "nothing was handed over"
-        );
-        let string = reconvert_string(&document).expect("an answer");
-        reconversion.offered(string);
-        assert!(!reconversion.confirm(&document, &utf16("abd"), 0..1));
-        assert!(
-            !reconversion.confirm(&document, &utf16("abc"), 2..9),
-            "past the end of the string"
-        );
-        document.text = "zbc".to_owned();
-        assert!(
-            !reconversion.confirm(&document, &utf16("abc"), 0..1),
-            "the document changed since"
-        );
-        assert_eq!(reconversion.take(), Some(1..2), "the offer still stands");
-    }
-
-    #[test]
-    fn only_keys_that_can_move_the_selection_end_a_reconversion() {
-        // VK_PROCESSKEY, VK_CONVERT, VK_HANJA, VK_HANGUL, Shift, the left
-        // Windows key, the Japanese keyboard's Hiragana key.
-        for vk in [0xE5, 0x1C, 0x19, 0x15, 0x10, 0x5B, 0xF2] {
-            assert!(!key_ends_reconversion(vk), "{vk:#x}");
-        }
-        // A letter, Space, the arrows, Home, Backspace, Delete, Enter, Tab,
-        // Escape, a Unicode packet.
-        for vk in [
-            0x41, 0x20, 0x25, 0x26, 0x27, 0x28, 0x24, 0x08, 0x2E, 0x0D, 0x09, 0x1B, 0xE7,
-        ] {
-            assert!(key_ends_reconversion(vk), "{vk:#x}");
-        }
-    }
-
-    #[test]
-    fn a_range_no_preedit_took_is_cleared() {
-        let mut document = Line::new("abc");
-        document.selection = 0..2;
-        let mut reconversion = Reconversion::default();
-        reconversion.offered(reconvert_string(&document).expect("an answer"));
-        reconversion.clear();
-        assert_eq!(reconversion.take(), None);
-        assert!(
-            !reconversion.confirm(&document, &utf16("abc"), 0..1),
-            "the offer went too"
-        );
     }
 }
