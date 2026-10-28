@@ -1025,6 +1025,7 @@ fn typing_into_the_node_published_as_focus_keeps_the_keyboard_on_the_editor() {
             node: focus.0,
             preedit: None,
             commit: Some("!".into()),
+            origin: Default::default(),
         },
     ];
     for op in &ops {
@@ -5541,4 +5542,69 @@ fn a_screenshot_records_the_pictures_it_shows() {
         PixelRect::full(800, 600),
     );
     assert_eq!(shots[0].generation, 2);
+}
+
+/// A focusable widget that records the origin of every IME commit it gets.
+#[derive(Debug)]
+struct ImeRecorder {
+    seen: Signal<Vec<teksilo_core::ImeOrigin>>,
+}
+
+impl Widget for ImeRecorder {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let seen = self.seen.clone();
+        ctx.apply_self_handlers(
+            HandlerSet::new()
+                .focusable(true)
+                .on_key(move |event, _ctx| {
+                    if let WidgetEvent::ImeCommit { origin, .. } = event {
+                        let mut v = seen.get();
+                        v.push(*origin);
+                        seen.set(v);
+                        return EventResponse::Handled;
+                    }
+                    EventResponse::Ignored
+                }),
+        );
+        vec![]
+    }
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+}
+
+/// **`type_ime` commits with the origin it is given, composition when it names none.**
+#[test]
+fn type_ime_origin_reaches_the_dispatched_commit() {
+    use teksilo_core::ImeOrigin as O;
+    let seen = Signal::new(Vec::new());
+    let mut tree = WidgetTree::new();
+    let id = tree.add(ImeRecorder { seen: seen.clone() });
+    tree.layout(SizeProposal::exact(100.0, 100.0));
+    let node = teksilo_core::accessibility::widget_id_to_node_id(id).0;
+    let mut ops = RecordingWindowOps::new();
+
+    let old: AutomationOp =
+        serde_json::from_value(serde_json::json!({"TypeIme": {"node": node, "commit": "a"}}))
+            .expect("a request without origin still parses");
+    for (op, expected) in [
+        (old, O::Composition),
+        (op_with(node, ImeOriginDto::Dictation), O::Dictation),
+        (op_with(node, ImeOriginDto::WritingTools), O::WritingTools),
+        (op_with(node, ImeOriginDto::Insertion), O::Insertion),
+    ] {
+        let before = seen.get().len();
+        let reply = execute(&mut tree, &mut ops, &op, &default_settle());
+        assert!(reply.is_ok(), "{reply:?}");
+        assert_eq!(seen.get().get(before), Some(&expected));
+    }
+}
+
+fn op_with(node: u64, origin: ImeOriginDto) -> AutomationOp {
+    AutomationOp::TypeIme {
+        node,
+        preedit: None,
+        commit: Some("x".into()),
+        origin,
+    }
 }

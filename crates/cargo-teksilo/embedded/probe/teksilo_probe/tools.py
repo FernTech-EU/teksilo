@@ -493,9 +493,17 @@ def type_ime(
     window_id: int | None = None,
     preedit: str | None = None,
     commit: str | None = None,
+    origin: str | None = None,
     settle: Mapping[str, Any] | None = None,
 ) -> Any:
-    """Drive IME composition / commit on a node.
+    """Drive IME composition and commit on a node: `preedit` sets the composition
+    text, `commit` inserts text with no keys. `origin` says where the commit
+    claims to come from: composition (default, a typed composition ends),
+    dictation (speech the platform recognised), writing_tools (text a system
+    writing assistant produced) or insertion (the emoji viewer, AutoFill). The
+    receiving text widget reports it through on_text_inserted: EditSource::Ime
+    for composition and insertion, EditSource::Dictation,
+    EditSource::WritingTools.
 
     Mutating tool.
     """
@@ -504,6 +512,7 @@ def type_ime(
         "node": node,
         "preedit": preedit,
         "commit": commit,
+        "origin": origin,
         "settle": settle,
     }
     return session.call("type_ime", **_present(args))

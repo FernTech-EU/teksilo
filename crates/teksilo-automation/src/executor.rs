@@ -617,6 +617,7 @@ fn execute_op(
             node,
             preedit,
             commit,
+            origin,
         } => {
             let update = tree.sync_accessibility();
             let Some(widget) = resolve_widget(tree, &update, *node) else {
@@ -633,7 +634,14 @@ fn execute_op(
                 );
             }
             if let Some(text) = commit {
-                tree.dispatch_event_with_ops(WidgetEvent::ime_commit(text.clone()), ops);
+                tree.dispatch_event_with_ops(
+                    WidgetEvent::ImeCommit {
+                        text: text.clone(),
+                        origin: origin.to_core(),
+                        replacement: None,
+                    },
+                    ops,
+                );
             }
             finish_settle(tree, ops, settle)
         }

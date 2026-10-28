@@ -16,9 +16,9 @@ use rmcp::{ErrorData as McpError, ServerHandler, schemars, tool, tool_handler, t
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use teksilo_automation::dto::{
-    Assertion, AutomationOp, AutomationReply, AutomationRequest, DensityDto, KeyPhase,
-    PointerAction, PointerButtonDto, PointerKindDto, SettleSpec, TouchPhaseDto, TouchStep,
-    WaitCondition,
+    Assertion, AutomationOp, AutomationReply, AutomationRequest, DensityDto, ImeOriginDto,
+    KeyPhase, PointerAction, PointerButtonDto, PointerKindDto, SettleSpec, TouchPhaseDto,
+    TouchStep, WaitCondition,
 };
 
 use crate::headless::{HostReply, Job};
@@ -391,6 +391,8 @@ pub struct TypeImeParams {
     pub node: u64,
     pub preedit: Option<String>,
     pub commit: Option<String>,
+    /// composition (default), dictation, writing_tools or insertion.
+    pub origin: Option<String>,
     pub settle: Option<SettleArg>,
 }
 
@@ -805,7 +807,9 @@ impl AutomationServer {
         .await
     }
 
-    #[tool(description = "Drive IME composition / commit on a node.")]
+    #[tool(
+        description = "Drive IME composition and commit on a node: `preedit` sets the composition text, `commit` inserts text with no keys. `origin` says where the commit claims to come from: composition (default, a typed composition ends), dictation (speech the platform recognised), writing_tools (text a system writing assistant produced) or insertion (the emoji viewer, AutoFill). The receiving text widget reports it through on_text_inserted: EditSource::Ime for composition and insertion, EditSource::Dictation, EditSource::WritingTools."
+    )]
     pub(crate) async fn type_ime(
         &self,
         Parameters(p): Parameters<TypeImeParams>,
@@ -817,6 +821,7 @@ impl AutomationServer {
                 node: p.node,
                 preedit: p.preedit,
                 commit: p.commit,
+                origin: ime_origin(&p.origin)?,
             },
             settle,
         )
@@ -1227,10 +1232,12 @@ or the shortcuts `set_value` / `type_text` / `focus_node` / `expand` / \
 {x,y,node?,action?,button?,ctrl?,shift?,alt?,meta?,command?}` / `right_click {node}` \
 (opens the node's context menu — the coordinate-free form of a secondary \
 click) / `inject_key {key, text?, phase?, ctrl?,shift?,alt?,meta?,command?}` / \
-`type_ime` / `drag_node`. `type_text` types as a keyboard does — each character \
-a key pressed and released, a letter as its named key with Shift for a capital, \
-a space as Space, a line break as Enter, a tab as Tab — so shortcuts see what a \
-user's typing would fire; `type_ime {commit}` inserts text with no keys. \
+`type_ime {node, preedit?, commit?, origin?}` / `drag_node`. `type_text` types as a keyboard does, each character \
+pressed and released as a key, a letter as its named key with Shift for a capital, \
+a space as Space, a line break as Enter, a tab as Tab, so shortcuts see what a \
+user's typing would fire; `type_ime {commit}` inserts text with no keys, and its `origin` \
+(composition by default, dictation, writing_tools or insertion) is how the \
+widget's `on_text_inserted` tells a dictated or system-written insertion from a typed one. \
 `inject_key` sends one key: its press and release, or with `phase` down / up one \
 half, so a key can stay held across calls; `text` is what the press types (a \
 character key types nothing without it). Reach for `command`, not `ctrl`, whenever a chord means \"the \
@@ -1457,6 +1464,23 @@ fn key_phase(s: &Option<String>) -> Result<KeyPhase, McpError> {
         Some(other) => {
             return Err(McpError::invalid_params(
                 format!("unknown key phase '{other}' (press, down, up)"),
+                None,
+            ));
+        }
+    })
+}
+
+fn ime_origin(s: &Option<String>) -> Result<ImeOriginDto, McpError> {
+    Ok(match s.as_deref().map(str::to_ascii_lowercase).as_deref() {
+        None | Some("composition") => ImeOriginDto::Composition,
+        Some("dictation") => ImeOriginDto::Dictation,
+        Some("writing_tools") => ImeOriginDto::WritingTools,
+        Some("insertion") => ImeOriginDto::Insertion,
+        Some(other) => {
+            return Err(McpError::invalid_params(
+                format!(
+                    "unknown IME origin '{other}' (composition, dictation, writing_tools, insertion)"
+                ),
                 None,
             ));
         }

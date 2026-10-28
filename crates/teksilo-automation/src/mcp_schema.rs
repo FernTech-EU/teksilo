@@ -115,7 +115,7 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "type_ime",
-        description: "Drive IME composition / commit on a node.",
+        description: "Drive IME composition and commit on a node: `preedit` sets the composition text, `commit` inserts text with no keys. `origin` says where the commit claims to come from: composition (default, a typed composition ends), dictation (speech the platform recognised), writing_tools (text a system writing assistant produced) or insertion (the emoji viewer, AutoFill). The receiving text widget reports it through on_text_inserted: EditSource::Ime for composition and insertion, EditSource::Dictation, EditSource::WritingTools.",
         mutating: true,
     },
     ToolDescriptor {

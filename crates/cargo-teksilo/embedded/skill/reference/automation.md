@@ -140,6 +140,10 @@ wraps all of it (`click_source`, `source_of`, `capture`, `crop_visible`).
 released, a letter as its named key (Shift for a capital), a space, line break
 and tab as Space, Enter and Tab. So shortcuts fire as they would for a user, and
 a Tab in a field moves focus; `type_ime {commit}` inserts text with no keys.
+`type_ime` also takes `origin`: `"composition"` (default), `"dictation"`,
+`"writing_tools"` or `"insertion"`, which a text widget reports through
+`on_text_inserted` (`EditSource::Ime` for composition and insertion,
+`EditSource::Dictation`, `EditSource::WritingTools`).
 `inject_key` sends one key: `text` is what its press types (a character key
 types nothing without it), and `phase: "down"` / `"up"` holds a key across calls.
 

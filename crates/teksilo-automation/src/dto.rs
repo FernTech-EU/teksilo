@@ -280,6 +280,39 @@ pub enum KeyPhase {
     Up,
 }
 
+/// Where the text a `type_ime` commit inserts claims to come from.
+///
+/// A text widget reports the difference through `on_text_inserted`:
+/// `Composition` and `Insertion` as `EditSource::Ime`, `Dictation` as
+/// `EditSource::Dictation`, `WritingTools` as `EditSource::WritingTools`.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ImeOriginDto {
+    /// The end of a composition the user typed. The default, and what every
+    /// `type_ime` sent before `origin` existed.
+    #[default]
+    Composition,
+    /// Speech the platform's dictation recognised.
+    Dictation,
+    /// Text a system writing assistant produced (macOS Writing Tools).
+    WritingTools,
+    /// Text the input system inserted outside a key press and a composition:
+    /// the emoji viewer, AutoFill.
+    Insertion,
+}
+
+impl ImeOriginDto {
+    pub fn to_core(self) -> teksilo_core::ImeOrigin {
+        use teksilo_core::ImeOrigin as O;
+        match self {
+            ImeOriginDto::Composition => O::Composition,
+            ImeOriginDto::Dictation => O::Dictation,
+            ImeOriginDto::WritingTools => O::WritingTools,
+            ImeOriginDto::Insertion => O::Insertion,
+        }
+    }
+}
+
 /// Which mouse button an `inject_pointer` op uses.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -925,6 +958,9 @@ pub enum AutomationOp {
         preedit: Option<String>,
         #[serde(default)]
         commit: Option<String>,
+        /// Where the `commit` claims to come from. Omitted, a composition.
+        #[serde(default)]
+        origin: ImeOriginDto,
     },
     DragNode {
         node: NodeRef,
