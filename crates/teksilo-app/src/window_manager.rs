@@ -2543,8 +2543,35 @@ impl WindowManager {
         // was installed (no-op otherwise). Runs on the main thread, as macOS
         // requires for view manipulation.
         self.attach_external_dnd(teksilo_id, winit_id);
+        self.attach_text_input_hook(teksilo_id, winit_id);
 
         teksilo_id
+    }
+
+    /// Attach the platform text-input hook to the just-created window, so the
+    /// text the OS writes outside a key press (Emoji & Symbols, Dictation,
+    /// AutoFill on macOS; injected Unicode keystrokes on Windows) reaches it.
+    /// Always on: it is correctness for every text field, not an opt-in.
+    fn attach_text_input_hook(
+        &self,
+        teksilo_id: TeksiloWindowId,
+        winit_id: winit::window::WindowId,
+    ) {
+        let Some(poster) = self
+            .app_context_template
+            .as_ref()
+            .and_then(|template| template.poster().cloned())
+        else {
+            return;
+        };
+        let Some(managed) = self.windows.get(&winit_id) else {
+            return;
+        };
+        if let Some(parent) =
+            teksilo_core::raw_handle::ParentHandle::from_window(managed.platform_window.window())
+        {
+            teksilo_platform::text_input_hook::attach(teksilo_id, &parent, poster);
+        }
     }
 
     /// Register the just-created window as an OS drop target via the installed
@@ -2655,6 +2682,7 @@ impl WindowManager {
         {
             handle.detach(teksilo_id);
         }
+        teksilo_platform::text_input_hook::detach(teksilo_id);
         // Forget this window's native (OS) menu + its activation map.
         if let Some(handle) = self
             .app_context_template

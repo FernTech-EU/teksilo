@@ -27,6 +27,7 @@ pub mod safe_area;
 pub mod session;
 pub mod soft_keyboard;
 pub mod taskbar;
+pub mod text_input_hook;
 pub mod title_bar_host;
 mod wake;
 pub mod window;

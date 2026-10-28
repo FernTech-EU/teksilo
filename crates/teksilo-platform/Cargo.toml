@@ -142,6 +142,10 @@ objc2-foundation = { version = "0.3", features = [
     # `keyAEQuitReason`, which tells a logout from a Dock Quit.
     "NSAppleEventManager",
     "NSAppleEventDescriptor",
+    # What the text input system hands winit's view (`text_input_hook/macos.rs`):
+    # ranges, and attributed strings with their attribute runs.
+    "NSRange",
+    "NSAttributedString",
 ] }
 # The session watch's reading of the display's sleep and the session's lock
 # and console flags. Both already resolve through objc2-app-kit.
@@ -174,6 +178,13 @@ windows = { workspace = true, features = [
     # GetPointerTouchInfo and the POINTER_* structs they fill. winit 0.30
     # already receives the WM_POINTER* messages and reads none of this.
     "Win32_UI_Input_Pointer",
+    # The text input tap (`text_input_hook/windows.rs`): ImmGetContext /
+    # ImmGetCompositionStringW and the GCS_* / IMN_* / IMR_* constants, and
+    # TSF's thread manager, compositions, compartments and input processor
+    # profiles. `Win32_System_Variant` is `ITfCompartment::GetValue`'s VARIANT.
+    "Win32_UI_Input_Ime",
+    "Win32_UI_TextServices",
+    "Win32_System_Variant",
     "UI_ViewManagement",
     # Custom title bar (M4/M5): DwmExtendFrameIntoClientArea, the
     # subclass chain (SetWindowSubclass / DefSubclassProc), per-monitor
