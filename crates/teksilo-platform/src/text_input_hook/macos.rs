@@ -21,7 +21,19 @@
 //!
 //! - `selectedRange`: the selection, in UTF-16 units.
 //! - `markedRange`: the document's composition while winit's own
-//!   `hasMarkedText` says it holds marked text, `NSNotFound` otherwise.
+//!   `hasMarkedText` says it holds marked text, `NSNotFound` otherwise, and
+//!   `NSNotFound` too while winit holds marked text the document has no
+//!   composition for: after an input method commits inside a key press,
+//!   winit keeps its marked text until the key press is over, and its own
+//!   answer, `0..length` counted from its marked text's start, named the
+//!   document's first characters (Kotoeri read "Ric" there, measured on
+//!   macOS 27). `hasMarkedText` stays winit's in that moment and answers yes
+//!   (twice, after Kotoeri's commit, in round 11), where a native view
+//!   answers no. It is left so: winit's own `insertText:` asks it, through
+//!   the view, whether there is a composition to commit, so a no there would
+//!   drop a second commit in the same key press, and the input methods
+//!   measured asked `markedRange` next and went on correctly (Korean and
+//!   Kotoeri committed at every switch in round 11).
 //! - `attributedSubstringForProposedRange:actualRange:`: the text of the
 //!   range, plain, widened to whole characters, with the range it is in
 //!   `actualRange`; nil for a secure field.
@@ -119,27 +131,143 @@
 //! `stopDictation:` or the window closing. `_stopDictation:` is not
 //! used: AppKit sends it each time a window resigns key, dictating or not.
 //!
-//! # Keys the input method swallows
+//! # Keys the input method took
 //!
 //! winit hands a key press to the input method (`interpretKeyEvents:`, when
-//! IME is allowed) and then reports it as a `KeyboardInput` with its text,
-//! whatever the input method did, unless the input method composed. The
-//! press-and-hold accent popup takes the held letter's auto-repeats and the
-//! key that picks an accent without calling anything on the view, then
-//! inserts the accent on its own, so their text was typed too ("eeê" for
-//! "ê"). The view now records, per `keyDown:`, whether
-//! `interpretKeyEvents:` ran and whether the input method acted on the view
-//! meanwhile (`insertText:replacementRange:`,
-//! `setMarkedText:selectedRange:replacementRange:`, `unmarkText`,
-//! `doCommandBySelector:`), the bookkeeping in
-//! [`KeyPress`]. The application asks
-//! [`key_was_swallowed`] while handling the `KeyboardInput`, which winit
-//! delivers from inside that `keyDown:`, and drops the text of a swallowed
-//! key; the key itself is still delivered. A key with no input method
-//! (`interpretKeyEvents:` never ran), typing (`insertText:`), an arrow or
-//! Escape (`doCommandBySelector:`) and a dead key (`setMarkedText:`) are not
-//! swallowed. When winit buffers the event because its handler is busy, it
-//! arrives after the `keyDown:` and its text is typed, as before.
+//! IME is allowed) and then reports it as a `KeyboardInput` carrying the
+//! characters of the key event, unless it decides that the input method
+//! composed, which it reads from its IME state before and after the
+//! hand-over. Three answers went wrong that way:
+//!
+//! - The press-and-hold accent popup takes the held letter's auto-repeats
+//!   and the key that picks an accent without calling anything on the view,
+//!   then inserts the accent on its own ("eeê" for "ê"): the key was
+//!   **swallowed**.
+//! - 2-Set Korean answers Space with nothing composed by marking a space,
+//!   committing it and emptying its marked text, all inside the key press
+//!   (measured on macOS 27). winit commits the space, then the empty marked
+//!   text puts its IME state back to the ground state it started from, so it
+//!   reported the key with its " " as well: two spaces. The key was the
+//!   input method's **commit**, which winit means to keep to itself as it
+//!   keeps the key that ends a composition.
+//! - Kotoeri answers Space with nothing composed by inserting a full-width
+//!   space (U+3000), Pinyin answers ";" with "；" (measured on macOS 27): an
+//!   `insertText:` with nothing marked, which winit drops, reporting the key
+//!   with its own " " and ";". The input method **substituted** its
+//!   character for the key's; TextEdit gets the input method's.
+//!
+//! The view records, per `keyDown:`, whether `interpretKeyEvents:` ran, the
+//! characters of the event it was handed, and what the input method did
+//! meanwhile, the bookkeeping in [`KeyPress`]: an
+//! `insertText:replacementRange:` while winit holds marked text is a commit
+//! (winit's own rule: it commits then, a string that starts with a control
+//! character aside), one with nothing marked types the key as its string,
+//! `doCommandBySelector:` hands the key back as a key, and
+//! `setMarkedText:selectedRange:replacementRange:` and `unmarkText` compose.
+//! The application asks [`key_taken_by_input_method`] while handling the
+//! `KeyboardInput`, which winit delivers from inside that `keyDown:`:
+//!
+//! - a swallowed key is delivered without its text;
+//! - a key the input method committed for, and handed nothing back after,
+//!   is not delivered;
+//! - a key the input method typed, with nothing marked, as a string other
+//!   than its characters (the strings of every such `insertText:`, in order)
+//!   is delivered with that string as its text.
+//!
+//! A key with no input method (`interpretKeyEvents:` never ran), typing the
+//! key's own characters (`insertText:` with nothing marked), an arrow or
+//! Escape (`doCommandBySelector:`, also with a commit: 2-Set Korean commits
+//! the syllable on Escape, then passes the key on as `cancelOperation:`) and
+//! a dead key (`setMarkedText:`) go on as before. When winit buffers the
+//! event because its handler is busy, it arrives after the `keyDown:`, with
+//! the key's characters, as before.
+//!
+//! winit also disables its IME when a `keyDown:` finds the input source
+//! changed, and keeps its marked text; until its next `setMarkedText:` its
+//! `insertText:` commits nothing. Once on macOS 27, 2-Set Korean left 한
+//! marked across a switch, and Kotoeri's full-width space for the next Space
+//! was lost that way, the press taken for a commit. The view follows that
+//! part of winit's state ([`WinitIme`]: the source at each `setMarkedText:`,
+//! compared with the one selected at each `keyDown:` while winit holds
+//! marked text), and an in-key insertion winit would drop is committed by
+//! the hook instead, as an insertion outside a key press is (winit's
+//! `unmarkText`, then the text posted as a composition's commit, which
+//! takes the place of the marked text, as `insertText:` does in
+//! `NSTextInputClient`).
+//!
+//! # A composition left behind by an input-source switch
+//!
+//! An input method commits its composition as the user switches to another
+//! input source, before the switch is announced. Measured on macOS 27 (round
+//! 10), 2-Set Korean and Kotoeri usually did not in Teksilo (Korean in 2
+//! tries of 8, Kotoeri in none of 2; TextEdit in every try): at the switch
+//! they read the composition back (`hasMarkedText`, `markedRange`,
+//! `attributedSubstringForProposedRange:`, answered from the document) and
+//! inserted nothing. They kept it, and delivered it at a later turn of their
+//! source (selected or left again), outside any key press, into whichever
+//! field had the focus then: a Title's ニホン went into the editor clicked
+//! since, and the text was in both fields. Kotoeri delivers it as one
+//! `insertText:`, Korean as a `setMarkedText:` of the same text followed by
+//! its `insertText:`. The input context's `discardMarkedText` made after the
+//! switch (by a click ending the composition) did not stop it: it goes to
+//! the source selected then. With `markedRange` answered from the document
+//! after a commit in a key press (round 11), Korean and Kotoeri committed at
+//! every switch; Pinyin still did not, in 3 tries of 3, and delivered the
+//! letters typed (`nihao`) for its `ni hao` at its next turn, as one
+//! `insertText:` (TextEdit: `nihao`, committed at the switch).
+//!
+//! So the view observes
+//! `NSTextInputContextKeyboardSelectionDidChangeNotification` (posted after the
+//! change, its object nil). The key window's view, whose input context is the
+//! current one, is looked at: when winit still holds marked text composed under
+//! a source no longer selected ([`WinitIme::left_behind`]), the view ends the
+//! composition as the input method's commit would have: winit's own
+//! `unmarkText`, then the text posted as a composition's commit, which the
+//! focused field takes in place of its composition, as one undo step, as a
+//! click ends one. The text is the marked text as the input method commits it,
+//! without the spaces Pinyin shows between the syllables of the letters typed
+//! ([`left_behind::as_committed`]): `nihao`, as in TextEdit. An input method
+//! that commits at the switch has done so when the change is announced, winit
+//! holds nothing, and nothing more happens, so its commit is not doubled. The
+//! text is recorded ([`LeftBehind`]), and the input method's later delivery of
+//! it is dropped, wherever it lands, told from it whatever display separators
+//! (Pinyin's spaces, Microsoft Pinyin's apostrophes) either holds, and when it
+//! has the romaji the input method showed unconverted as kana (Kotoeri's `にほn`
+//! committed as `にほん`, [`left_behind::delivers`]): an `insertText:` of it
+//! outside a key press with nothing marked, or one following a `setMarkedText:`
+//! of it made outside a key press with nothing marked before, whose mark is
+//! then ended so the field cancels it. A record goes when its delivery comes,
+//! or when its input method marks or inserts text in a key press again. A field
+//! that ends a composition itself ([`finish_composition`]) while its input
+//! method is no longer selected records it the same way, with the text it
+//! shows. A change announced inside a key press is looked at once the key press
+//! is over.
+//!
+//! A switch between two modes of one input method is not one: measured on
+//! macOS 27 (round 12), with Kotoeri's Hiragana `にほn` composing, choosing
+//! Katakana from the input menu and then Hiragana again, TextEdit kept the
+//! composition alive and underlined through both, and Kotoeri committed it
+//! at the switch to French-PC. The input method still holds its composition
+//! then, so the view leaves it alone. Which input method a source is a mode
+//! of comes from Text Input Sources (the bundle identifier of an input
+//! mode, [`input_method_of`]); where they say nothing, a source named with
+//! the other's identifier and more (`….Japanese.Katakana` after
+//! `….Japanese`) is taken for a mode of it ([`winit_ime::same_input_method`]).
+//!
+//! # The first syllable after a switch, in a process with no bundle
+//!
+//! Measured on macOS 27 (rounds 6 and 7), not something the view can change:
+//! after every switch to 2-Set Korean, an unbundled `cargo run` binary gets
+//! the first jamo as an insertion (ㅎㅏㄴ for 한). The input method claims
+//! the key (`handleEvent:` returns YES) and inserts the jamo over IMK's XPC
+//! (`IMKInputSession_Modern`'s `insertText:` from `imkxpc_insertText`) after
+//! five `imkxpc_selectedRange` queries, where a composing first key starts
+//! with IMK's client session handling a mark request and then marks. The
+//! view's answers are the same in both. A bundled copy of the same binary
+//! composes, with one split in eleven switches, on the first Korean
+//! activation of a process. A bare `NSTextView` composes, bundled or not.
+//! The trace's `handleEvent:` lines and `TEKSILO_TEXT_INPUT_TRACE=stacks`
+//! show it.
 //!
 //! # Compositions that replace text, and ending one from the field
 //!
@@ -193,7 +321,8 @@
 //! method's actions; on `NSApplication` `showWritingTools:`,
 //! `startDictation:` and `stopDictation:`; on `NSTextInputContext` the two
 //! `_dictationDid…:`) always, every other one only with tracing on, and
-//! those only trace and call the original. The methods the
+//! those only trace and call the original. The observer of input-source
+//! changes is registered then too, always. The methods the
 //! view lacks are added with `class_addMethod` ([`Addition`]), each only
 //! where neither `WinitView` nor a superclass has the selector, with a type
 //! encoding written from its implementation's signature and checked once
@@ -217,14 +346,29 @@
 //! document). A line repeated as is is written once, then counted. An
 //! `insertText:` the hook takes over is followed by a line saying what it did
 //! with the text.
+//!
+//! To tell who answers a key (the first key after an input-source switch
+//! goes to 2-Set Korean differently in an unbundled process), the trace also
+//! hooks `NSTextInputContext`'s `handleEvent:` (a line before the input
+//! method has the key and one after, with what it returned),
+//! `selectedKeyboardInputSource`, `activate`, `deactivate`,
+//! `discardMarkedText` and `invalidateCharacterCoordinates`, each with the
+//! context's client, and writes a line for each
+//! `NSTextInputContextKeyboardSelectionDidChangeNotification`, then what
+//! each view holding marked text makes of it. `TEKSILO_TEXT_INPUT_TRACE=stacks`
+//! adds, inside a key press, the caller's stack (25 frames past this
+//! executable's own) to the `insertText:`, `setMarkedText:`,
+//! `selectedRange` and `markedRange` lines, and traces every
+//! `respondsToSelector:` asked of the view, with its stack, not only the
+//! first time a selector is asked.
 
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
-use std::ffi::{CStr, CString};
+use std::ffi::{CStr, CString, c_void};
 use std::fmt::{self, Write as _};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::ptr;
+use std::ptr::{self, NonNull};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
@@ -235,9 +379,14 @@ use objc2::runtime::{
 };
 use objc2::{MainThreadMarker, msg_send, sel};
 use objc2_app_kit::{
-    NSApplication, NSEvent, NSEventType, NSResponder, NSTextAlternativesAttributeName, NSView,
+    NSApplication, NSEvent, NSEventType, NSResponder, NSTextAlternativesAttributeName,
+    NSTextInputContextKeyboardSelectionDidChangeNotification, NSView,
 };
-use objc2_foundation::{NSArray, NSAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
+use objc2_core_foundation::{CFArray, CFDictionary, CFRetained, CFString, CFType};
+use objc2_foundation::{
+    NSArray, NSAttributedString, NSNotification, NSNotificationCenter, NSPoint, NSRange, NSRect,
+    NSSize, NSString,
+};
 use raw_window_handle::RawWindowHandle;
 use teksilo_canvas::Point as WindowPoint;
 use teksilo_canvas::Rect as WindowRect;
@@ -251,7 +400,9 @@ use super::answers::{self, NOT_FOUND, Substring, Utf16Range};
 use super::composition::MarkedReplacement;
 use super::dictation::{DictationEvent, DictationSession};
 use super::key_press::KeyPress;
-use super::{CommitSignals, ImeCommitPayload};
+use super::left_behind::{self, Delivery, LeftBehind};
+use super::winit_ime::{self, InKeyInsertion, WinitIme};
+use super::{CommitSignals, ImeCommitPayload, TakenKey};
 
 // ---------------------------------------------------------------------------
 // The attached views
@@ -283,6 +434,9 @@ struct AttachedView {
     /// The field characters the latest marked text replaces, until winit's
     /// preedit for it takes them ([`take_marked_replacement`]).
     marked_replacement: RefCell<MarkedReplacement>,
+    /// What of winit's IME state decides whether its `insertText:` commits:
+    /// see [`WinitIme`].
+    winit_ime: RefCell<WinitIme>,
 }
 
 thread_local! {
@@ -293,10 +447,20 @@ thread_local! {
     /// How many `keyDown:` calls are running, innermost included.
     static KEY_DOWN_DEPTH: Cell<u32> = const { Cell::new(0) };
 
-    /// Whether [`finish_composition`] is running: what the input method
-    /// commits meanwhile, as it discards its composition, the field has
-    /// already kept.
+    /// Whether [`finish_composition`] is running, or the view is ending a
+    /// composition itself: what the input method commits meanwhile, as it
+    /// discards its composition, the field has already kept, or is given.
     static FINISHING: Cell<bool> = const { Cell::new(false) };
+
+    /// The compositions the views kept as committed while their input
+    /// method was no longer selected, which it may deliver again: see
+    /// [`LeftBehind`]. For the process, not a view: the input method
+    /// delivers to whichever view is its client then.
+    static LEFT_BEHIND: RefCell<LeftBehind> = RefCell::new(LeftBehind::default());
+
+    /// The selected input source changed while a `keyDown:` was running:
+    /// what it leaves behind is looked at once the key press is over.
+    static SOURCE_CHANGED_IN_KEY: Cell<bool> = const { Cell::new(false) };
 
     /// The running `keyDown:` calls, innermost last: the view's address and
     /// what the input method did with the key.
@@ -333,6 +497,7 @@ pub(super) fn attach(
                 writing_tools: Cell::new(false),
                 dictation: Cell::new(DictationSession::Closed),
                 marked_replacement: RefCell::new(MarkedReplacement::default()),
+                winit_ime: RefCell::new(WinitIme::default()),
             },
         );
     });
@@ -488,6 +653,12 @@ enum Slot {
     ContextDictationDidEnd,
     ContextStopDictation,
     ContextShowWritingTools,
+    ContextHandleEvent,
+    ContextSelectedKeyboardInputSource,
+    ContextActivate,
+    ContextDeactivate,
+    ContextDiscardMarkedText,
+    ContextInvalidateCharacterCoordinates,
 }
 
 impl Slot {
@@ -497,7 +668,7 @@ impl Slot {
 }
 
 /// One slot per [`Slot`]: the last one's index, plus one.
-const SLOTS: usize = Slot::ContextShowWritingTools.index() + 1;
+const SLOTS: usize = Slot::ContextInvalidateCharacterCoordinates.index() + 1;
 
 /// The implementation each replacement took the place of. Set before the
 /// replacement is installed, never changed after.
@@ -565,6 +736,8 @@ type RectFn = unsafe extern "C-unwind" fn(*mut AnyObject, Sel) -> NSRect;
 type IntegerFn = unsafe extern "C-unwind" fn(*mut AnyObject, Sel) -> isize;
 /// `- (NSUInteger)method`
 type UnsignedFn = unsafe extern "C-unwind" fn(*mut AnyObject, Sel) -> usize;
+/// `- (BOOL)method:(id)argument`: `NSTextInputContext`'s `handleEvent:`.
+type ObjectArgBoolFn = unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) -> Bool;
 
 /// Call the implementation a replacement took the place of, with the
 /// replacement's own arguments. `$fallback` when there is none, which
@@ -640,6 +813,20 @@ macro_rules! action_hook {
             Slot::$slot,
             $wrapper::<{ Slot::$slot.index() }>,
             ObjectArgFn
+        )
+    };
+}
+
+/// A trace-only [`Hook`] on an `NSTextInputContext` method with no argument
+/// and no result, traced by [`context_call`].
+macro_rules! context_hook {
+    ($selector:expr, $slot:ident) => {
+        hook!(
+            WhenTracing,
+            $selector,
+            Slot::$slot,
+            context_call::<{ Slot::$slot.index() }>,
+            VoidFn
         )
     };
 }
@@ -906,7 +1093,13 @@ fn add_method(class: &AnyClass, addition: Addition) {
 /// them around a dictation however it was started (the Edit menu, the
 /// dictation key). `_stopDictation:` only traces: it is sent each time a
 /// window resigns key, dictating or not.
-fn context_hooks() -> [Hook; 4] {
+///
+/// The public methods after them only trace, to tell who answers a key after
+/// an input-source switch: `handleEvent:` (whether the input method claims
+/// the key), `selectedKeyboardInputSource` (winit asks it at every
+/// `keyDown:`), `activate`, `deactivate`, `discardMarkedText` and
+/// `invalidateCharacterCoordinates`.
+fn context_hooks() -> [Hook; 10] {
     [
         hook!(
             Always,
@@ -930,12 +1123,34 @@ fn context_hooks() -> [Hook; 4] {
             context_show_writing_tools,
             TwoObjectArgFn
         ),
+        hook!(
+            WhenTracing,
+            c"handleEvent:",
+            Slot::ContextHandleEvent,
+            context_handle_event,
+            ObjectArgBoolFn
+        ),
+        hook!(
+            WhenTracing,
+            c"selectedKeyboardInputSource",
+            Slot::ContextSelectedKeyboardInputSource,
+            context_selected_keyboard_input_source,
+            ObjectFn
+        ),
+        context_hook!(c"activate", ContextActivate),
+        context_hook!(c"deactivate", ContextDeactivate),
+        context_hook!(c"discardMarkedText", ContextDiscardMarkedText),
+        context_hook!(
+            c"invalidateCharacterCoordinates",
+            ContextInvalidateCharacterCoordinates
+        ),
     ]
 }
 
-/// Patch the classes, once per process. On the main thread, once winit has
-/// created a window, so that `WinitView` is registered.
-fn install(_mtm: MainThreadMarker) {
+/// Patch the classes, once per process, and observe input-source changes.
+/// On the main thread, once winit has created a window, so that `WinitView`
+/// is registered.
+fn install(mtm: MainThreadMarker) {
     static INSTALLED: AtomicBool = AtomicBool::new(false);
     if INSTALLED.load(Ordering::Relaxed) {
         return;
@@ -989,6 +1204,7 @@ fn install(_mtm: MainThreadMarker) {
     if !starts_reported {
         trace("install: dictation starts are not reported; startDictation: opens the session");
     }
+    observe_keyboard_selection(mtm);
     if tracing {
         trace_related_methods();
     }
@@ -1108,7 +1324,16 @@ fn trace_related_methods() {
         c"NSResponder",
         c"NSView",
     ];
-    const WORDS: [&str; 4] = ["dictation", "writingtools", "characterpalette", "autofill"];
+    const WORDS: [&str; 8] = [
+        "dictation",
+        "writingtools",
+        "characterpalette",
+        "autofill",
+        "inputsource",
+        "keyboardselection",
+        "handleevent",
+        "inputmode",
+    ];
     for name in CLASSES {
         let Some(class) = AnyClass::get(name) else {
             continue;
@@ -1232,33 +1457,129 @@ fn with_key_press<R>(f: impl FnOnce(usize, &mut KeyPress) -> R) -> Option<R> {
         .flatten()
 }
 
-/// The input method acted on a view: a call it makes while it has a key
-/// (inside `interpretKeyEvents:`) is its answer to that key.
-fn note_input_method_acted() {
-    let _ = with_key_press(|_, press| press.note_acted());
+/// The input method composed on a view (`setMarkedText:`, `unmarkText`): a
+/// call it makes while it has a key (inside `interpretKeyEvents:`) is its
+/// answer to that key. See [`KeyPress::note_composed`].
+fn note_input_method_composed() {
+    let _ = with_key_press(|_, press| press.note_composed());
 }
 
-/// See [`super::key_was_swallowed`]. The innermost running `keyDown:` must
-/// be on `window_id`'s view; winit queues its `KeyboardInput` inside that
-/// `keyDown:`, after `interpretKeyEvents:`, and delivers it there when its
-/// event handler is idle. When the handler is busy winit runs the event
-/// later, outside the `keyDown:`, and this answers `false`: the text is
-/// typed, as it was before this check existed.
-pub(super) fn key_was_swallowed(window_id: TeksiloWindowId) -> bool {
-    let Some((view, swallowed)) = with_key_press(|view, press| (view, press.swallowed())) else {
-        return false;
-    };
-    let swallowed = swallowed && attached_window(view as *const AnyObject) == Some(window_id);
-    if swallowed {
-        log(|line| {
-            let _ = write!(
-                line,
-                "keyDown: swallowed by the input method, its text is not typed {}",
-                Context::of(view as *mut AnyObject)
-            );
-        });
+/// The input method named a command (`doCommandBySelector:`): the key goes
+/// on as a key. See [`KeyPress::note_commanded`].
+fn note_input_method_commanded() {
+    let _ = with_key_press(|_, press| press.note_commanded());
+}
+
+/// What an `insertText:` of `text` into `view` is inside a key press (see
+/// [`InKeyInsertion`]), and its string; `None` outside one. Asked before
+/// winit's method changes anything.
+fn in_key_insertion(
+    view: *mut AnyObject,
+    text: *mut AnyObject,
+) -> Option<(InKeyInsertion, String)> {
+    if key_down_depth() == 0 {
+        return None;
     }
-    swallowed
+    let marked = original_has_marked_text(view) == Some(true);
+    let string = read_inserted(text)
+        .map(|(text, _)| text)
+        .unwrap_or_default();
+    let insertion = with_attached(view, |attached| {
+        attached
+            .winit_ime
+            .try_borrow()
+            .ok()
+            .map(|ime| ime.insertion(marked, &string))
+    })
+    .flatten()
+    // An unattached view, or a busy record: winit's own rule.
+    .unwrap_or(WinitIme::default().insertion(marked, &string));
+    Some((insertion, string))
+}
+
+/// The input method inserted text inside a key press, which `insertion`
+/// says what it is: a commit of the composition winit holds (winit's, or the
+/// hook's in winit's place), or the key typed as that string, which winit
+/// drops and replaces with the key's characters. See
+/// [`KeyPress::note_committed`] and [`KeyPress::note_typed`]; a string that
+/// starts with a control character is noted as typing nothing of its own,
+/// as winit takes none.
+fn note_input_method_inserted(insertion: Option<&(InKeyInsertion, String)>) {
+    let Some((insertion, string)) = insertion else {
+        return;
+    };
+    let control = string.chars().next().is_some_and(char::is_control);
+    let _ = with_key_press(|_, press| match insertion {
+        InKeyInsertion::WinitCommits | InKeyInsertion::HookCommits => press.note_committed(),
+        InKeyInsertion::Types if control => press.note_typed(""),
+        InKeyInsertion::Types => press.note_typed(string),
+    });
+}
+
+/// The keyboard input source `view`'s input context has selected, read past
+/// the trace's hook: what winit compares at each `keyDown:`. `None` for no
+/// context or no source.
+fn selected_source(view: *mut AnyObject) -> Option<String> {
+    // SAFETY: `view` is a live view; `inputContext` returns its input
+    // context or nil.
+    let context: Option<Retained<AnyObject>> =
+        unsafe { view.as_ref() }.and_then(|view| unsafe { msg_send![view, inputContext] });
+    let source = selected_source_untraced(object_ptr(context.as_deref()));
+    // SAFETY: an `NSString` or null, alive for the call (autoreleased).
+    unsafe { source.cast::<NSString>().as_ref() }.map(|source| source.to_string())
+}
+
+/// The characters of the key event `events` (`interpretKeyEvents:`'s
+/// argument) starts with: what winit types for the key when it reports it.
+/// `None` for no key event, or one without characters.
+fn key_event_characters(events: *mut AnyObject) -> Option<String> {
+    // SAFETY: AppKit passes a live array or nil, alive for the call.
+    let events = unsafe { events.as_ref() }?.downcast_ref::<NSArray>()?;
+    let first = events.iter().next()?;
+    let event = first.downcast_ref::<NSEvent>()?;
+    let kind = event.r#type();
+    if kind != NSEventType::KeyDown && kind != NSEventType::KeyUp {
+        // A key event's accessors raise on any other type.
+        return None;
+    }
+    event.characters().map(|text| text.to_string())
+}
+
+/// See [`super::key_taken_by_input_method`]. The innermost running
+/// `keyDown:` must be on `window_id`'s view; winit queues its
+/// `KeyboardInput` inside that `keyDown:`, after `interpretKeyEvents:`, and
+/// delivers it there when its event handler is idle. When the handler is
+/// busy winit runs the event later, outside the `keyDown:`, and this answers
+/// `None`: the key and its text go on, as they did before this check
+/// existed.
+pub(super) fn key_taken_by_input_method(window_id: TeksiloWindowId) -> Option<TakenKey> {
+    let (view, taken) = with_key_press(|view, press| (view, press.taken()))?;
+    if attached_window(view as *const AnyObject) != Some(window_id) {
+        return None;
+    }
+    let taken = taken?;
+    log(|line| {
+        let what = match &taken {
+            TakenKey::Swallowed => {
+                Cow::Borrowed("swallowed by the input method, its text is not typed")
+            }
+            TakenKey::Committed => {
+                Cow::Borrowed("answered by the input method's commit, it reaches no widget")
+            }
+            TakenKey::Substituted(text) => {
+                let mut what = String::from("typed by the input method as ");
+                write_escaped(&mut what, text, TEXT_LIMIT);
+                what.push_str(", in place of its characters");
+                Cow::Owned(what)
+            }
+        };
+        let _ = write!(
+            line,
+            "keyDown: {what} {}",
+            Context::of(view as *mut AnyObject)
+        );
+    });
+    Some(taken)
 }
 
 /// Whether `object` is an instance of `class` or of a subclass.
@@ -1692,35 +2013,76 @@ fn write_key_event(out: &mut String, event: *mut AnyObject) {
 /// Always installed. Counts the `keyDown:` calls running, which is how
 /// [`insert_text`] tells typing from an insertion made outside a key press,
 /// and ends the view's Writing Tools session and a dictation session left
-/// ending: a key pressed in the view is the user typing again.
+/// ending: a key pressed in the view is the user typing again. An
+/// input-source change announced while it ran is looked at once the
+/// outermost one is over ([`input_source_changed`]).
 extern "C-unwind" fn key_down(this: *mut AnyObject, cmd: Sel, event: *mut AnyObject) {
-    let _scope = KeyDownScope::enter(this);
-    log(|line| {
-        let _ = write!(line, "keyDown: {} |", Context::of(this));
-        write_key_event(line, event);
-    });
-    let ended = with_attached(this, |view| view.writing_tools.replace(false)).unwrap_or(false);
-    if ended {
+    {
+        let _scope = KeyDownScope::enter(this);
+        log(|line| {
+            let _ = write!(line, "keyDown: {} |", Context::of(this));
+            write_key_event(line, event);
+        });
+        let ended = with_attached(this, |view| view.writing_tools.replace(false)).unwrap_or(false);
+        if ended {
+            log(|line| {
+                let _ = write!(
+                    line,
+                    "keyDown: the Writing Tools session ends {}",
+                    Context::of(this)
+                );
+            });
+        }
+        composition_over(this, "keyDown:");
+        guarded(|| follow_winit_source_check(this), || ());
+        call_original!(Slot::KeyDown.index(), ObjectArgFn, (), (this, cmd, event));
+        log(|line| {
+            let _ = write!(line, "keyDown: end {}", Context::of(this));
+        });
+    }
+    let source_changed = key_down_depth() == 0
+        && SOURCE_CHANGED_IN_KEY
+            .try_with(|changed| changed.replace(false))
+            .unwrap_or(false);
+    if source_changed {
+        guarded(|| input_source_changed("keyDown: end"), || ());
+    }
+}
+
+/// winit's `keyDown:` is about to compare the selected input source with the
+/// one it recorded: follow it in the view's [`WinitIme`], which matters only
+/// while winit holds marked text (and asks for the source only then).
+fn follow_winit_source_check(view: *mut AnyObject) {
+    let Some(marked) = original_has_marked_text(view) else {
+        return;
+    };
+    let source = if marked { selected_source(view) } else { None };
+    let reset = with_attached(view, |attached| {
+        attached
+            .winit_ime
+            .try_borrow_mut()
+            .ok()
+            .map(|mut ime| ime.key_down(source.as_deref(), marked))
+    })
+    .flatten()
+    .unwrap_or(false);
+    if reset {
         log(|line| {
             let _ = write!(
                 line,
-                "keyDown: the Writing Tools session ends {}",
-                Context::of(this)
+                "keyDown: the input source changed while winit holds marked text: \
+                 winit disables its IME and keeps the marked text {}",
+                Context::of(view)
             );
         });
     }
-    composition_over(this, "keyDown:");
-    call_original!(Slot::KeyDown.index(), ObjectArgFn, (), (this, cmd, event));
-    log(|line| {
-        let _ = write!(line, "keyDown: end {}", Context::of(this));
-    });
 }
 
 /// Always installed, as an override of `NSResponder`'s method that calls it:
 /// winit hands each key press to the input method through it when IME is
-/// allowed. While it runs, the input method has the key; whether it acted on
-/// the view by the time it returns says whether it swallowed the key
-/// ([`key_was_swallowed`]).
+/// allowed. While it runs, the input method has the key; what it did on the
+/// view by the time it returns says whether the key's text is still to be
+/// typed ([`key_taken_by_input_method`]).
 extern "C-unwind" fn interpret_key_events(this: *mut AnyObject, cmd: Sel, events: *mut AnyObject) {
     /// The hand-over, ended for as long as the value lives (unwinding
     /// included).
@@ -1730,7 +2092,11 @@ extern "C-unwind" fn interpret_key_events(this: *mut AnyObject, cmd: Sel, events
             let _ = with_key_press(|_, press| press.end_interpreting());
         }
     }
-    let _ = with_key_press(|_, press| press.begin_interpreting());
+    let characters = guarded(|| key_event_characters(events), || None);
+    let _ = with_key_press(|_, press| {
+        press.note_characters(characters.as_deref());
+        press.begin_interpreting();
+    });
     let interpreting = Interpreting;
     log(|line| {
         let _ = write!(line, "interpretKeyEvents: {}", Context::of(this));
@@ -1743,14 +2109,22 @@ extern "C-unwind" fn interpret_key_events(this: *mut AnyObject, cmd: Sel, events
     );
     drop(interpreting);
     log(|line| {
-        let verdict = with_key_press(|_, press| press.swallowed());
+        let verdict = with_key_press(|_, press| press.taken());
         let _ = write!(
             line,
             "interpretKeyEvents: end {} | {}",
             Context::of(this),
             match verdict {
-                Some(true) => "swallowed: the input method did nothing with the key",
-                Some(false) => "the input method acted",
+                Some(Some(TakenKey::Swallowed)) => {
+                    "swallowed: the input method did nothing with the key"
+                }
+                Some(Some(TakenKey::Committed)) => {
+                    "the input method acted: it committed, and handed nothing back"
+                }
+                Some(Some(TakenKey::Substituted(_))) => {
+                    "the input method acted: it typed the key as other characters"
+                }
+                Some(None) => "the input method acted",
                 None => "outside a keyDown:",
             }
         );
@@ -1761,15 +2135,25 @@ extern "C-unwind" fn interpret_key_events(this: *mut AnyObject, cmd: Sel, events
 /// view nobody attached; anything else is text the input system inserted on
 /// its own, which [`insert_out_of_band`] takes. A panic there runs winit's
 /// method, which after an unmark has nothing left to commit, so no text is
-/// committed twice. Inside a key press, it is the input method acting on the
-/// key: the key is not swallowed.
+/// committed twice. Inside a key press, it is the input method's answer to
+/// the key: a commit when winit holds marked text, the key typed otherwise
+/// ([`in_key_insertion`], asked before winit's method changes anything).
+/// winit commits it, except when it disabled its IME for an input-source
+/// change with marked text still held, and would drop it: then
+/// [`insert_out_of_band`] commits it in winit's place. An input method that
+/// inserts in a key press holds no composition kept at a switch any more
+/// ([`note_left_behind_acted`]).
 extern "C-unwind" fn insert_text(
     this: *mut AnyObject,
     cmd: Sel,
     text: *mut AnyObject,
     replacement: NSRange,
 ) {
-    note_input_method_acted();
+    let insertion = guarded(|| in_key_insertion(this, text), || None);
+    note_input_method_inserted(insertion.as_ref());
+    if insertion.is_some() {
+        guarded(|| note_left_behind_acted(this), || ());
+    }
     log(|line| {
         let _ = write!(
             line,
@@ -1778,9 +2162,11 @@ extern "C-unwind" fn insert_text(
         );
         write_text(line, text);
         let _ = write!(line, " replacement={}", Range(replacement));
+        write_stack(line);
     });
+    let hook_commits = matches!(insertion, Some((InKeyInsertion::HookCommits, _)));
     let taken = catch_unwind(AssertUnwindSafe(|| {
-        insert_out_of_band(this, text, replacement)
+        insert_out_of_band(this, text, replacement, hook_commits)
     }))
     .unwrap_or(Inserted::ByWinit);
     if taken == Inserted::ByWinit {
@@ -1812,6 +2198,10 @@ enum Inserted {
     /// Dropped: the input method committed it while discarding its
     /// composition for [`finish_composition`], and the field already kept it.
     Finished,
+    /// Dropped: the input method delivered again a composition the view
+    /// kept as committed at an input-source switch ([`LeftBehind`]), marked
+    /// again first or not; a mark it made again is ended.
+    Again(Delivery),
     /// Posted to the view's window from this origin, replacing these
     /// characters of the focused document (the selection, for none).
     Posted(ImeOrigin, Option<std::ops::Range<usize>>),
@@ -1824,6 +2214,13 @@ impl fmt::Display for Inserted {
             Self::Control => f.write_str("dropped (a control character)"),
             Self::Empty => f.write_str("nothing to post (empty)"),
             Self::Finished => f.write_str("dropped (the field already kept the composition)"),
+            Self::Again(Delivery::MarkedAgain) => f.write_str(
+                "dropped (a composition kept at an input-source switch, marked again and \
+                 delivered again; winit's unmarkText ended the mark)",
+            ),
+            Self::Again(_) => f.write_str(
+                "dropped (a composition kept at an input-source switch, delivered again)",
+            ),
             Self::Posted(origin, None) => write!(f, "posted as {origin:?}"),
             Self::Posted(origin, Some(chars)) => write!(
                 f,
@@ -1835,13 +2232,25 @@ impl fmt::Display for Inserted {
 }
 
 /// Take `text`, which the input system inserted into `view` outside a key
-/// press, unless winit's own method is to run ([`Inserted::ByWinit`]).
+/// press, or inside one when winit would drop the commit
+/// (`winit_would_drop`, [`InKeyInsertion::HookCommits`]), unless winit's own
+/// method is to run ([`Inserted::ByWinit`]).
 fn insert_out_of_band(
     view: *mut AnyObject,
     text: *mut AnyObject,
     replacement: NSRange,
+    winit_would_drop: bool,
 ) -> Inserted {
-    if key_down_depth() > 0 {
+    if key_down_depth() > 0 && winit_would_drop {
+        log(|line| {
+            let _ = write!(
+                line,
+                "insertText:replacementRange: winit disabled its IME for an input-source change \
+                 and would drop this commit: the hook commits it {}",
+                Context::of(view)
+            );
+        });
+    } else if key_down_depth() > 0 {
         if replacement.location != NOT_FOUND {
             log(|line| {
                 let _ = write!(
@@ -1876,6 +2285,33 @@ fn insert_out_of_band(
     let Some(had_marked_text) = original_has_marked_text(view) else {
         return Inserted::ByWinit;
     };
+    if key_down_depth() == 0 {
+        let delivery = LEFT_BEHIND
+            .try_with(|left| {
+                left.try_borrow_mut()
+                    .map(|mut left| left.inserted_outside_key(&string, had_marked_text))
+                    .unwrap_or(Delivery::New)
+            })
+            .unwrap_or(Delivery::New);
+        match delivery {
+            Delivery::New => {}
+            Delivery::Again => {
+                composition_over(view, "insertText:replacementRange:");
+                return Inserted::Again(delivery);
+            }
+            Delivery::MarkedAgain => {
+                // The mark went to winit, which shows it as a composition:
+                // ended with nothing committed, the field cancels it.
+                if unmark_finishing(view) {
+                    composition_over(view, "insertText:replacementRange:");
+                    return Inserted::Again(delivery);
+                }
+                // winit's own method commits it: the text comes twice, as
+                // before the record.
+                return Inserted::ByWinit;
+            }
+        }
+    }
     if had_marked_text {
         if !winit_unmark_text(view) {
             // winit commits a composition itself.
@@ -2031,18 +2467,13 @@ pub(super) fn finish_composition(window_id: TeksiloWindowId) -> bool {
     let finished = guarded(
         || {
             let had_marked_text = original_has_marked_text(view)?;
-            /// [`FINISHING`], lowered for as long as the value lives
-            /// (unwinding included).
-            struct Finishing;
-            impl Drop for Finishing {
-                fn drop(&mut self) {
-                    let _ = FINISHING.try_with(|finishing| finishing.set(false));
-                }
+            let left = had_marked_text
+                .then(|| composition_left_behind(view))
+                .flatten();
+            let unmarked = unmark_finishing(view);
+            if unmarked && let Some((text, source)) = left {
+                record_left_behind(view, &source, &text, "finish_composition");
             }
-            let _ = FINISHING.try_with(|finishing| finishing.set(true));
-            let finishing = Finishing;
-            let unmarked = winit_unmark_text(view);
-            drop(finishing);
             Some((had_marked_text, unmarked))
         },
         || None,
@@ -2067,6 +2498,242 @@ pub(super) fn finish_composition(window_id: TeksiloWindowId) -> bool {
         );
     });
     true
+}
+
+/// Run winit's own `unmarkText` on `view` (see [`winit_unmark_text`]) with
+/// [`FINISHING`] raised, so that what the input method commits as it
+/// discards its composition is dropped: the field has kept the composition,
+/// or is given it by the caller. Whether winit's method ran.
+fn unmark_finishing(view: *mut AnyObject) -> bool {
+    /// [`FINISHING`], lowered for as long as the value lives (unwinding
+    /// included).
+    struct Finishing;
+    impl Drop for Finishing {
+        fn drop(&mut self) {
+            let _ = FINISHING.try_with(|finishing| finishing.set(false));
+        }
+    }
+    let _ = FINISHING.try_with(|finishing| finishing.set(true));
+    let _finishing = Finishing;
+    winit_unmark_text(view)
+}
+
+/// The text winit holds as marked text on `view` and the source it was
+/// composed under, when the source selected now is another, not a mode of
+/// the same input method ([`same_input_method_described`]): see
+/// [`WinitIme::left_behind`]. Asks winit's `hasMarkedText` and reads the
+/// selected source.
+fn composition_left_behind(view: *mut AnyObject) -> Option<(String, String)> {
+    let marked = original_has_marked_text(view)?;
+    let selected = selected_source(view);
+    // Out of the views, so they are not borrowed while Text Input Sources
+    // are asked.
+    let ime = with_attached(view, |attached| {
+        attached.winit_ime.try_borrow().ok().map(|ime| ime.clone())
+    })
+    .flatten()?;
+    ime.left_behind(selected.as_deref(), marked, same_input_method_described)
+        .map(|(text, source)| (text.to_owned(), source.to_owned()))
+}
+
+/// [`winit_ime::same_input_method`] for the keyboard input sources
+/// `composed_under` and `selected`, with the input method each is a mode of
+/// as Text Input Sources describe it ([`input_method_of`]), and a trace line
+/// saying what was found.
+fn same_input_method_described(composed_under: &str, selected: &str) -> bool {
+    let composed_method = input_method_of(composed_under);
+    let selected_method = input_method_of(selected);
+    let same = winit_ime::same_input_method(
+        composed_under,
+        composed_method.as_deref(),
+        selected,
+        selected_method.as_deref(),
+    );
+    log(|line| {
+        let _ = write!(
+            line,
+            "input source {selected:?} (a mode of {selected_method:?}) after {composed_under:?} \
+             (a mode of {composed_method:?}), which composed the marked text: {}",
+            if same {
+                "the same input method"
+            } else {
+                "another input method"
+            }
+        );
+    });
+    same
+}
+
+/// Record, in [`LEFT_BEHIND`], `text` composed under `source`, which the
+/// field on `view` has kept as committed while that input method was no
+/// longer selected: what it delivers of it later is dropped. `by` names the
+/// call, for the trace.
+fn record_left_behind(view: *mut AnyObject, source: &str, text: &str, by: &str) {
+    let _ = LEFT_BEHIND.try_with(|left| {
+        if let Ok(mut left) = left.try_borrow_mut() {
+            left.kept(source, text);
+        }
+    });
+    log(|line| {
+        let _ = write!(
+            line,
+            "{by}: the composition was made with {source:?}, no longer selected, which may \
+             deliver it again: "
+        );
+        write_escaped(line, text, TEXT_LIMIT);
+        let _ = write!(line, " is dropped then {}", Context::of(view));
+    });
+}
+
+/// The input method selected on `view` marked or inserted text in a key
+/// press: it holds nothing it composed before a switch any more (see
+/// [`LeftBehind::input_method_acted`]). The source is read only while a
+/// composition is recorded.
+fn note_left_behind_acted(view: *mut AnyObject) {
+    let recorded = LEFT_BEHIND
+        .try_with(|left| left.try_borrow().is_ok_and(|left| !left.is_empty()))
+        .unwrap_or(false);
+    if !recorded {
+        return;
+    }
+    let source = selected_source(view);
+    let _ = LEFT_BEHIND.try_with(|left| {
+        if let Ok(mut left) = left.try_borrow_mut() {
+            left.input_method_acted(source.as_deref());
+        }
+    });
+}
+
+/// The input method marks `text` on `view` outside a key press, before
+/// winit's method runs: the first half of 2-Set Korean's delivery of a
+/// composition kept at a switch, when it is one's text and winit holds no
+/// marked text (see [`LeftBehind::marked_outside_key`]).
+fn note_left_behind_marked(view: *mut AnyObject, text: &str) {
+    let held_before = original_has_marked_text(view).unwrap_or(false);
+    let again = LEFT_BEHIND
+        .try_with(|left| {
+            left.try_borrow_mut()
+                .is_ok_and(|mut left| left.marked_outside_key(text, held_before))
+        })
+        .unwrap_or(false);
+    if again {
+        log(|line| {
+            let _ = write!(
+                line,
+                "setMarkedText:selectedRange:replacementRange: marks again a composition kept at \
+                 an input-source switch; its insertText: is dropped {}",
+                Context::of(view)
+            );
+        });
+    }
+}
+
+/// The selected keyboard input source changed
+/// (`NSTextInputContextKeyboardSelectionDidChangeNotification`): the view
+/// the key window's first responder is, if it is an attached one, keeps a
+/// composition its input method left marked as committed
+/// ([`keep_left_behind`]). Its input context is the current one, whose
+/// source the user switched; a composition in another window is not its
+/// input method's to leave. Inside a key press it waits until the key press
+/// is over: winit's `keyDown:` reads its own marked text. `by` names the
+/// call, for the trace.
+fn input_source_changed(by: &str) {
+    if key_down_depth() > 0 {
+        let _ = SOURCE_CHANGED_IN_KEY.try_with(|changed| changed.set(true));
+        log(|line| {
+            let _ = write!(
+                line,
+                "{by}: the input source changed in a key press, looked at once it is over"
+            );
+        });
+        return;
+    }
+    let responder = key_first_responder();
+    let view = responder_ptr(responder.as_deref());
+    if attached_window(view).is_some() {
+        keep_left_behind(view, by);
+    }
+}
+
+/// Measured on macOS 27: an input method switched away from with a
+/// composition live can leave it marked (2-Set Korean and Kotoeri in most
+/// tries of round 10, Pinyin in every try of round 11), then delivers it at
+/// its next turn into whichever field has the focus. When winit still holds marked
+/// text composed under a source no longer selected, the view ends the
+/// composition as the input method's commit would have: winit's own
+/// `unmarkText` (so winit holds nothing, and the context is told to discard
+/// its marked text), then the text posted as a composition's commit, which
+/// the focused field takes in place of its composition, as one undo step.
+/// The text is the marked text as the input method commits it
+/// ([`left_behind::as_committed`]: Pinyin's `ni hao` as `nihao`).
+/// The composition is recorded in [`LEFT_BEHIND`], so its later delivery is
+/// dropped. An input method that commits at the switch does it before the
+/// change is announced, and winit then holds nothing here.
+fn keep_left_behind(view: *mut AnyObject, by: &str) {
+    if original_has_marked_text(view) != Some(true) {
+        return;
+    }
+    let Some((marked, source)) = composition_left_behind(view) else {
+        log(|line| {
+            let _ = write!(
+                line,
+                "{by}: the composition's input method is still selected (selected {:?}), \
+                 it goes on {}",
+                selected_source(view),
+                Context::of(view)
+            );
+        });
+        return;
+    };
+    let Some((window_id, poster, writing_tools, dictation)) = with_attached(view, |attached| {
+        (
+            attached.window_id,
+            Arc::clone(&attached.poster),
+            attached.writing_tools.get(),
+            attached.dictation.get().is_dictating(),
+        )
+    }) else {
+        return;
+    };
+    if !unmark_finishing(view) {
+        log(|line| {
+            let _ = write!(
+                line,
+                "{by}: winit's unmarkText is not recorded, the composition stays marked {}",
+                Context::of(view)
+            );
+        });
+        return;
+    }
+    let origin = super::classify(CommitSignals {
+        had_marked_text: true,
+        carries_text_alternatives: false,
+        dictation_session: dictation,
+        writing_tools_session: writing_tools,
+    });
+    // As the input method commits it: Pinyin's `ni hao` as `nihao`.
+    let text = left_behind::as_committed(&marked, dictation);
+    poster.post_external(Box::new(ImeCommitPayload {
+        window_id_owner: window_id,
+        text: text.clone(),
+        origin,
+        replacement: None,
+    }));
+    log(|line| {
+        let _ = write!(
+            line,
+            "{by}: the input method left its composition marked; winit's unmarkText ended it \
+             and it is posted as {origin:?}: "
+        );
+        write_escaped(line, &text, TEXT_LIMIT);
+        if text != marked {
+            line.push_str(", shown as ");
+            write_escaped(line, &marked, TEXT_LIMIT);
+        }
+        let _ = write!(line, " {}", Context::of(view));
+    });
+    composition_over(view, by);
+    record_left_behind(view, &source, &text, by);
 }
 
 /// The view's composition is over (committed, unmarked, emptied, finished
@@ -2124,8 +2791,11 @@ fn carries_text_alternatives(text: &NSAttributedString) -> bool {
 /// Always installed, for the key press it may answer (a dead key, an input
 /// method composing); winit's own method runs. Before it does, the range of
 /// field text the marked text replaces is recorded for winit's preedit
-/// ([`record_marked_replacement`]). An empty string ends the composition,
-/// and so a dictation session left ending.
+/// ([`record_marked_replacement`]), the text and the source selected are
+/// recorded in the view's [`WinitIme`], and the compositions kept at a
+/// switch are told ([`note_left_behind_acted`] in a key press,
+/// [`note_left_behind_marked`] outside one). An empty string ends the
+/// composition, and so a dictation session left ending.
 extern "C-unwind" fn set_marked_text(
     this: *mut AnyObject,
     cmd: Sel,
@@ -2133,7 +2803,7 @@ extern "C-unwind" fn set_marked_text(
     selected: NSRange,
     replacement: NSRange,
 ) {
-    note_input_method_acted();
+    note_input_method_composed();
     log(|line| {
         let _ = write!(
             line,
@@ -2147,8 +2817,28 @@ extern "C-unwind" fn set_marked_text(
             Range(selected),
             Range(replacement)
         );
+        write_stack(line);
     });
     guarded(|| record_marked_replacement(this, replacement), || ());
+    guarded(
+        || {
+            let source = selected_source(this);
+            let string = read_inserted(text)
+                .map(|(text, _)| text)
+                .unwrap_or_default();
+            let _ = with_attached(this, |attached| {
+                if let Ok(mut ime) = attached.winit_ime.try_borrow_mut() {
+                    ime.marked(source.as_deref(), &string);
+                }
+            });
+            if key_down_depth() > 0 {
+                note_left_behind_acted(this);
+            } else {
+                note_left_behind_marked(this, &string);
+            }
+        },
+        || (),
+    );
     call_original!(
         Slot::SetMarkedText.index(),
         SetMarkedTextFn,
@@ -2167,7 +2857,7 @@ extern "C-unwind" fn set_marked_text(
 /// The hooks' own unmark calls winit's method directly and is counted
 /// neither as the input method acting nor here.
 extern "C-unwind" fn unmark_text(this: *mut AnyObject, cmd: Sel) {
-    note_input_method_acted();
+    note_input_method_composed();
     log(|line| {
         let _ = write!(line, "unmarkText {}", Context::of(this));
     });
@@ -2191,8 +2881,10 @@ extern "C-unwind" fn has_marked_text(this: *mut AnyObject, cmd: Sel) -> Bool {
 }
 
 /// Always installed. The focused document's composition while winit holds
-/// marked text, none while it does not; winit's own answer with no
-/// document, or one that has no composition for winit's marked text.
+/// marked text, none while it does not, and none while winit holds marked
+/// text the document has no composition for (after a commit in a key press,
+/// see [`answers::marked_range`]); winit's own answer with no document, or
+/// one too busy to answer.
 extern "C-unwind" fn marked_range(this: *mut AnyObject, cmd: Sel) -> NSRange {
     let from_document = guarded(
         || {
@@ -2222,6 +2914,7 @@ extern "C-unwind" fn marked_range(this: *mut AnyObject, cmd: Sel) -> NSRange {
             Context::of(this),
             Range(range)
         );
+        write_stack(line);
     });
     range
 }
@@ -2249,6 +2942,7 @@ extern "C-unwind" fn selected_range(this: *mut AnyObject, cmd: Sel) -> NSRange {
             Context::of(this),
             Range(range)
         );
+        write_stack(line);
     });
     range
 }
@@ -2423,7 +3117,7 @@ extern "C-unwind" fn valid_attributes(this: *mut AnyObject, cmd: Sel) -> *mut An
 /// Always installed, for the key press it answers (an arrow, Escape, a
 /// command key with no menu item); winit's own method runs.
 extern "C-unwind" fn do_command_by_selector(this: *mut AnyObject, cmd: Sel, command: Option<Sel>) {
-    note_input_method_acted();
+    note_input_method_commanded();
     log(|line| {
         let _ = write!(
             line,
@@ -2496,19 +3190,18 @@ extern "C-unwind" fn union_rect_in_visible_selected_range(
     rect
 }
 
-/// Added. Whether the focused widget takes text; no with no document.
+/// Added. Always yes, so that AppKit gives the view an input context: see
+/// [`answers::is_editable`]. The trace adds what the focused widget says.
 extern "C-unwind" fn is_editable(this: *mut AnyObject, _cmd: Sel) -> Bool {
-    let (editable, source) = guarded(
-        || match ask_document(this, |document| Some(answers::is_editable(Some(document)))) {
-            Some(editable) => (editable, Source::Document),
-            None => (answers::is_editable(None), Source::NoDocument),
-        },
-        || (answers::is_editable(None), Source::NoDocument),
-    );
+    let editable = answers::is_editable();
     log(|line| {
+        let focused = guarded(
+            || ask_document(this, |document| Some(document.is_editable())),
+            || None,
+        );
         let _ = write!(
             line,
-            "isEditable {} | -> {editable} ({source})",
+            "isEditable {} | -> {editable} (the focused widget takes text: {focused:?})",
             Context::of(this)
         );
     });
@@ -2568,7 +3261,10 @@ extern "C-unwind" fn allowed_writing_tools_result_options(
 }
 
 /// Traced once per selector: AppKit asks this constantly, and the point is
-/// to learn which questions the text input system asks.
+/// to learn which questions the text input system asks. With
+/// `TEKSILO_TEXT_INPUT_TRACE=stacks`, every ask made inside a key press is
+/// traced too, so the questions asked at the first key after an input-source
+/// switch show.
 ///
 /// The only line that does not ask winit's `hasMarkedText` (`marked=?`):
 /// this one is also sent while a view is created and torn down, when
@@ -2586,16 +3282,25 @@ extern "C-unwind" fn responds_to_selector(
     );
     if let Some(selector) = selector
         && super::trace_enabled()
-        && first_probe(selector)
     {
-        log(|line| {
-            let _ = write!(
-                line,
-                "respondsToSelector: {} | selector={selector} -> {} (first time asked)",
-                Context::with_marked(this, None),
-                answer.as_bool()
-            );
-        });
+        let first = first_probe(selector);
+        let in_key = key_down_depth() > 0 && super::trace_stacks_enabled();
+        if first || in_key {
+            log(|line| {
+                let _ = write!(
+                    line,
+                    "respondsToSelector: {} | selector={selector} -> {}{}",
+                    Context::with_marked(this, None),
+                    answer.as_bool(),
+                    if first {
+                        " (first time asked)"
+                    } else {
+                        " (in a key press)"
+                    }
+                );
+                write_stack(line);
+            });
+        }
     }
     answer
 }
@@ -2899,6 +3604,303 @@ extern "C-unwind" fn context_action<const SLOT: usize>(
     call_original!(SLOT, ObjectArgFn, (), (this, cmd, argument));
 }
 
+// ---------------------------------------------------------------------------
+// Text Input Sources: which input method a source is a mode of
+// ---------------------------------------------------------------------------
+
+#[link(name = "Carbon", kind = "framework")]
+unsafe extern "C" {
+    /// `kTISPropertyInputSourceID`: a source's identifier, the string
+    /// `selectedKeyboardInputSource` answers.
+    static kTISPropertyInputSourceID: Option<&'static CFString>;
+    /// `kTISPropertyInputSourceType`: what kind of source it is.
+    static kTISPropertyInputSourceType: Option<&'static CFString>;
+    /// `kTISTypeKeyboardInputMode`: the type of a mode of an input method.
+    static kTISTypeKeyboardInputMode: Option<&'static CFString>;
+    /// `kTISPropertyBundleID`: a source's bundle identifier, which for an
+    /// input mode is its input method's.
+    static kTISPropertyBundleID: Option<&'static CFString>;
+
+    /// The sources whose properties match `properties`, installed ones
+    /// included with a non-zero `include_all_installed`; owned by the caller
+    /// (Create rule), or null.
+    fn TISCreateInputSourceList(
+        properties: &CFDictionary,
+        include_all_installed: u8,
+    ) -> Option<NonNull<CFArray>>;
+
+    /// A property of `source`, owned by the source (Get rule), or null.
+    fn TISGetInputSourceProperty(source: NonNull<c_void>, key: &CFString) -> *const c_void;
+}
+
+/// The input method the keyboard input source `source` is a mode of, by its
+/// bundle identifier, as Text Input Sources describe it: Kotoeri's Hiragana
+/// and Katakana name the same one. `None` for a source that is not an input
+/// mode (a keyboard layout), and for one they do not describe. Main thread,
+/// as Text Input Sources are.
+fn input_method_of(source: &str) -> Option<String> {
+    // SAFETY: HIToolbox's constants, set before any code runs.
+    let (id_key, type_key, input_mode, bundle_key) = unsafe {
+        (
+            kTISPropertyInputSourceID?,
+            kTISPropertyInputSourceType?,
+            kTISTypeKeyboardInputMode?,
+            kTISPropertyBundleID?,
+        )
+    };
+    let id = CFString::from_str(source);
+    let (key, value): (&CFType, &CFType) = (id_key, &id);
+    let filter = CFDictionary::<CFType, CFType>::from_slices(&[key], &[value]);
+    // SAFETY: a dictionary of Text Input Sources properties; the list comes
+    // back owned, or null.
+    let list = unsafe { TISCreateInputSourceList(filter.as_opaque(), 1) }?;
+    // SAFETY: the list is owned (Create rule): released when dropped.
+    let list: CFRetained<CFArray> = unsafe { CFRetained::from_raw(list) };
+    if list.count() < 1 {
+        return None;
+    }
+    // SAFETY: index 0 is in the list, whose values are input sources, alive
+    // as long as the list.
+    let found = NonNull::new(unsafe { list.value_at_index(0) }.cast_mut())?;
+    let property = |key: &CFString| -> Option<String> {
+        // SAFETY: a live input source and one of its property keys; the
+        // value is the source's own (Get rule), alive while the list is.
+        let value = unsafe { TISGetInputSourceProperty(found, key) };
+        // SAFETY: null, or a CF object.
+        let value = unsafe { value.cast::<CFType>().as_ref() }?;
+        value.downcast_ref::<CFString>().map(ToString::to_string)
+    };
+    if property(type_key)? != input_mode.to_string() {
+        return None;
+    }
+    property(bundle_key)
+}
+
+// ---------------------------------------------------------------------------
+// Who answers a key: trace only
+// ---------------------------------------------------------------------------
+
+/// Frames written by [`write_stack`].
+const STACK_FRAMES: usize = 25;
+
+/// With `TEKSILO_TEXT_INPUT_TRACE=stacks`, inside a key press, append the
+/// caller's stack to a trace line: [`STACK_FRAMES`] frames from
+/// `NSThread`'s `callStackSymbols`, innermost first, each as its image and
+/// symbol, after the frames of this executable the stack starts with (the
+/// trace's own and the hook's).
+fn write_stack(out: &mut String) {
+    if key_down_depth() == 0 || !super::trace_stacks_enabled() {
+        return;
+    }
+    let Some(thread) = AnyClass::get(c"NSThread") else {
+        return;
+    };
+    // SAFETY: `NSThread`'s class method `callStackSymbols` returns an array
+    // of strings (nil is tolerated).
+    let symbols: Option<Retained<NSArray<NSString>>> =
+        unsafe { msg_send![thread, callStackSymbols] };
+    let Some(symbols) = symbols else {
+        return;
+    };
+    static OWN_IMAGE: OnceLock<String> = OnceLock::new();
+    let own = OWN_IMAGE.get_or_init(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+            .unwrap_or_default()
+    });
+    out.push_str(" | stack:");
+    let frames = symbols
+        .iter()
+        .map(|frame| {
+            // "3   AppKit   0x000000018a1b2c3d -[NSTextInputContext handleEvent:] + 64"
+            let frame = frame.to_string();
+            let mut parts = frame.split_whitespace().skip(1);
+            let image = parts.next().unwrap_or_default().to_string();
+            let symbol: Vec<&str> = parts.skip(1).collect();
+            let end = match symbol.as_slice() {
+                [.., "+", _] => symbol.len() - 2,
+                _ => symbol.len(),
+            };
+            (image, symbol[..end].join(" "))
+        })
+        .skip_while(|(image, _)| image == own)
+        .take(STACK_FRAMES);
+    for (n, (image, symbol)) in frames.enumerate() {
+        out.push_str(if n == 0 { " " } else { " < " });
+        let _ = write!(out, "{image} ");
+        write_escaped_plain(out, &symbol, 120);
+    }
+}
+
+/// Write `text`, cut after `limit` characters, unquoted.
+fn write_escaped_plain(out: &mut String, text: &str, limit: usize) {
+    if text.chars().count() > limit {
+        out.extend(text.chars().take(limit));
+        out.push_str("...");
+    } else {
+        out.push_str(text);
+    }
+}
+
+/// The context's client for a trace line: its [`Context`], then its class
+/// when it is not a view this hook attached.
+fn write_client(out: &mut String, context: *mut AnyObject) {
+    let client = input_context_client(context);
+    let client_ptr = object_ptr(client.as_deref());
+    let _ = write!(out, "{}", Context::of(client_ptr));
+    if attached_window(client_ptr).is_none()
+        && let Some(client) = client.as_deref()
+    {
+        let _ = write!(out, " client={}", class_name(client));
+    }
+}
+
+/// Traced only. The input context hands a key event to the input method;
+/// what it returns says whether the input method claimed it. The input
+/// method's calls on the view run between the two lines.
+extern "C-unwind" fn context_handle_event(
+    this: *mut AnyObject,
+    cmd: Sel,
+    event: *mut AnyObject,
+) -> Bool {
+    log(|line| {
+        let _ = write!(line, "{cmd} (NSTextInputContext {this:p}, client) ");
+        write_client(line, this);
+        line.push_str(" | begin");
+        write_key_event(line, event);
+    });
+    let handled = call_original!(
+        Slot::ContextHandleEvent.index(),
+        ObjectArgBoolFn,
+        Bool::NO,
+        (this, cmd, event)
+    );
+    log(|line| {
+        let _ = write!(line, "{cmd} end (NSTextInputContext {this:p}, client) ");
+        write_client(line, this);
+        let _ = write!(line, " | -> {}", handled.as_bool());
+    });
+    handled
+}
+
+/// Traced only. winit asks it at the start of every `keyDown:`, before it
+/// hands the key to the input method, to notice an input-source switch.
+extern "C-unwind" fn context_selected_keyboard_input_source(
+    this: *mut AnyObject,
+    cmd: Sel,
+) -> *mut AnyObject {
+    let source = call_original!(
+        Slot::ContextSelectedKeyboardInputSource.index(),
+        ObjectFn,
+        ptr::null_mut(),
+        (this, cmd)
+    );
+    log(|line| {
+        let _ = write!(line, "{cmd} (NSTextInputContext {this:p}, client) ");
+        write_client(line, this);
+        line.push_str(" | -> ");
+        write_text(line, source);
+    });
+    source
+}
+
+/// Traced only: an `NSTextInputContext` method with no argument and no
+/// result (`activate`, `deactivate`, `discardMarkedText`,
+/// `invalidateCharacterCoordinates`).
+extern "C-unwind" fn context_call<const SLOT: usize>(this: *mut AnyObject, cmd: Sel) {
+    log(|line| {
+        let _ = write!(line, "{cmd} (NSTextInputContext {this:p}, client) ");
+        write_client(line, this);
+    });
+    call_original!(SLOT, VoidFn, (), (this, cmd));
+}
+
+objc2::define_class!(
+    // SAFETY: NSObject has no subclassing requirements; no `Drop`.
+    #[unsafe(super(objc2::runtime::NSObject))]
+    #[name = "TeksiloTextInputSourceObserver"]
+    struct KeyboardSelectionObserver;
+
+    impl KeyboardSelectionObserver {
+        #[unsafe(method(keyboardSelectionDidChange:))]
+        fn keyboard_selection_did_change(&self, notification: &NSNotification) {
+            trace_keyboard_selection_change(notification);
+            guarded(
+                || input_source_changed("NSTextInputContextKeyboardSelectionDidChangeNotification"),
+                || (),
+            );
+        }
+    }
+);
+
+/// Trace one `NSTextInputContextKeyboardSelectionDidChangeNotification`:
+/// the context it is about, its client, and the source it now has selected.
+fn trace_keyboard_selection_change(notification: &NSNotification) {
+    log(|line| {
+        let context = notification.object();
+        let context_ptr = object_ptr(context.as_deref());
+        let _ = write!(
+            line,
+            "NSTextInputContextKeyboardSelectionDidChangeNotification (NSTextInputContext {context_ptr:p}, client) "
+        );
+        write_client(line, context_ptr);
+        line.push_str(" | selected=");
+        write_text(line, selected_source_untraced(context_ptr));
+    });
+}
+
+/// The context's selected keyboard input source, asked past the trace's own
+/// hook (which would add a line of its own to the line being written): an
+/// `NSString`, or null.
+fn selected_source_untraced(context: *mut AnyObject) -> *mut AnyObject {
+    if context.is_null() {
+        return ptr::null_mut();
+    }
+    match ORIGINALS[Slot::ContextSelectedKeyboardInputSource.index()].get() {
+        // SAFETY: the slot holds `NSTextInputContext`'s own
+        // `selectedKeyboardInputSource`, whose encoding `install_hook`
+        // checked against `ObjectFn`; `context` is the live input context
+        // the notification is about.
+        Some(&original) => unsafe {
+            std::mem::transmute::<Imp, ObjectFn>(original)(
+                context,
+                sel!(selectedKeyboardInputSource),
+            )
+        },
+        // SAFETY: as above; the method is AppKit's own, not hooked.
+        None => unsafe { msg_send![context, selectedKeyboardInputSource] },
+    }
+}
+
+/// Register an observer of
+/// `NSTextInputContextKeyboardSelectionDidChangeNotification` from every
+/// input context, kept for the life of the process: it ends a composition an
+/// input-source switch leaves behind ([`input_source_changed`]), and traces
+/// the change.
+fn observe_keyboard_selection(mtm: MainThreadMarker) {
+    // SAFETY: `init` on a fresh allocation of an `NSObject` subclass with no
+    // instance variables.
+    let observer: Retained<KeyboardSelectionObserver> =
+        unsafe { msg_send![mtm.alloc::<KeyboardSelectionObserver>(), init] };
+    // SAFETY: an AppKit constant, set before any code runs; the observer
+    // implements the selector, taking the notification, and lives for the
+    // process (it is leaked below).
+    unsafe {
+        NSNotificationCenter::defaultCenter().addObserver_selector_name_object(
+            &observer,
+            sel!(keyboardSelectionDidChange:),
+            Some(NSTextInputContextKeyboardSelectionDidChangeNotification),
+            None,
+        );
+    }
+    std::mem::forget(observer);
+    trace("install: observing NSTextInputContextKeyboardSelectionDidChangeNotification");
+}
+
 #[cfg(test)]
 mod tests {
     //! The install mechanism, on classes of the test's own: no window, no
@@ -3021,6 +4023,31 @@ mod tests {
             implementation(class, sel!(respondsToSelector:)),
             hook.replacement as usize
         );
+    }
+
+    #[test]
+    fn text_input_sources_name_the_input_method_of_a_mode() {
+        // What holds whichever input methods a Mac has: a keyboard layout
+        // and an unknown source are no mode of anything. Measured on macOS
+        // 27: Hiragana and Katakana answer
+        // "com.apple.inputmethod.Kotoeri.RomajiTyping", Kana typing
+        // "com.apple.inputmethod.Kotoeri.KanaTyping".
+        assert_eq!(input_method_of("com.apple.keylayout.ABC"), None);
+        assert_eq!(input_method_of("com.example.no.such.source"), None);
+        let hiragana = input_method_of("com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese");
+        if let Some(hiragana) = &hiragana {
+            assert_eq!(
+                input_method_of("com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese.Katakana")
+                    .as_ref(),
+                Some(hiragana),
+                "two modes of one input method"
+            );
+            assert_ne!(
+                input_method_of("com.apple.inputmethod.Kotoeri.KanaTyping.Japanese").as_ref(),
+                Some(hiragana),
+                "Romaji and Kana typing are two input methods"
+            );
+        }
     }
 
     #[test]

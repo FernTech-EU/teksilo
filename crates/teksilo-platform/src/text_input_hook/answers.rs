@@ -89,9 +89,18 @@ pub(crate) fn selected_range(document: &dyn TextInputDocument) -> Option<Utf16Ra
 }
 
 /// `markedRange`: the composition, in UTF-16, while the platform's own view
-/// holds marked text (`view_has_marked_text`); none otherwise. `None` too
-/// when the view holds marked text the document has no composition for, so
-/// the view's own answer stands.
+/// holds marked text (`view_has_marked_text`); none otherwise, and none
+/// while the view holds marked text the document has no composition for.
+///
+/// That last case is the moment after an input method commits inside a key
+/// press: winit has sent the commit, which the field has taken, and keeps
+/// its marked text until the key press is over. Its own answer then is its
+/// marked text's range counted from its own start, `0..length`, which is not
+/// where anything is in the document: measured on macOS 27 (round 10),
+/// Kotoeri asked right after committing ニホン at the end of a heading, got
+/// 0..3, and read "Ric", the document's first characters, as its marked
+/// text. A native text view answers none after a commit. `None` (the view's
+/// own answer stands) only while the document cannot answer.
 pub(crate) fn marked_range(
     document: &dyn TextInputDocument,
     view_has_marked_text: bool,
@@ -100,10 +109,13 @@ pub(crate) fn marked_range(
         return Some(Utf16Range::NONE);
     }
     let index = document.utf16_index()?;
-    let composition = document.composition_range()?;
-    Some(Utf16Range::from_range(
-        index.char_range_to_utf16(composition),
-    ))
+    Some(
+        document
+            .composition_range()
+            .map_or(Utf16Range::NONE, |composition| {
+                Utf16Range::from_range(index.char_range_to_utf16(composition))
+            }),
+    )
 }
 
 /// The answer to `attributedSubstringForProposedRange:actualRange:`.
@@ -233,17 +245,21 @@ pub(crate) fn union_rect_in_visible_selection(document: &dyn TextInputDocument) 
     union
 }
 
-/// `isEditable`: whether the focused widget takes text. `false` with no
-/// document.
-pub(crate) fn is_editable(document: Option<&dyn TextInputDocument>) -> bool {
-    document.is_some_and(TextInputDocument::is_editable)
+/// `isEditable`: always `true`, whatever has focus. AppKit gives a view that
+/// answers `false` no input context, and winit's view reads its input context
+/// when it is created and at every `keyDown:`, and panics without one
+/// (measured on macOS 27: a window opened while no text field had focus).
+/// Writing Tools, which asks before it replaces text, is kept off text it may
+/// not replace by [`writing_tools_behavior`] instead.
+pub(crate) fn is_editable() -> bool {
+    true
 }
 
 /// `writingToolsBehavior`: [`WRITING_TOOLS_LIMITED`] where the focused
-/// widget lets Writing Tools at its text, [`WRITING_TOOLS_NONE`] otherwise
-/// and with no document.
+/// widget takes text and lets Writing Tools at it, [`WRITING_TOOLS_NONE`]
+/// otherwise and with no document.
 pub(crate) fn writing_tools_behavior(document: Option<&dyn TextInputDocument>) -> isize {
-    if document.is_some_and(TextInputDocument::writing_tools_allowed) {
+    if document.is_some_and(|document| document.is_editable() && document.writing_tools_allowed()) {
         WRITING_TOOLS_LIMITED
     } else {
         WRITING_TOOLS_NONE
@@ -448,8 +464,9 @@ mod tests {
         document.composition = None;
         assert_eq!(
             marked_range(&document, true),
-            None,
-            "marked text the document does not know: the view answers"
+            Some(Utf16Range::NONE),
+            "marked text the document does not know (winit's, after a commit \
+             in a key press): none, not the view's range from its own start"
         );
     }
 
@@ -574,10 +591,12 @@ mod tests {
     }
 
     #[test]
-    fn editable_and_writing_tools_need_a_document_that_allows_them() {
+    fn writing_tools_need_a_document_that_takes_text_and_allows_them() {
         let mut document = Grid::new("abc");
-        assert!(is_editable(Some(&document)));
-        assert!(!is_editable(None));
+        assert!(
+            is_editable(),
+            "never false: the view would lose its input context"
+        );
         assert_eq!(
             writing_tools_behavior(Some(&document)),
             WRITING_TOOLS_LIMITED
@@ -588,8 +607,13 @@ mod tests {
         document.writing_tools = true;
         document.secure = true;
         assert_eq!(writing_tools_behavior(Some(&document)), WRITING_TOOLS_NONE);
+        document.secure = false;
         document.editable = false;
-        assert!(!is_editable(Some(&document)));
+        assert_eq!(
+            writing_tools_behavior(Some(&document)),
+            WRITING_TOOLS_NONE,
+            "read-only text"
+        );
     }
 
     #[test]
@@ -607,7 +631,6 @@ mod tests {
         assert_eq!(character_index(&document, Point::new(5.0, 5.0)), None);
         assert_eq!(first_rect(&document, range(0, 1)), None);
         assert_eq!(union_rect_in_visible_selection(&document), None);
-        assert!(!is_editable(Some(&document)));
         assert_eq!(writing_tools_behavior(Some(&document)), WRITING_TOOLS_NONE);
     }
 

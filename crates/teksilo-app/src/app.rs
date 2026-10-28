@@ -4469,28 +4469,36 @@ impl TeksiloAppHandler {
             } => {
                 self.note_physical_key(window_id, &key_event);
                 self.note_alt_key(window_id, &key_event, is_synthetic, event_loop);
-                // A key the platform's input method took for itself (on
-                // macOS, the accent popup's auto-repeats and the key that
-                // picks an accent, which it then inserts on its own) still
-                // reaches the widgets as a key, for shortcuts and
-                // navigation, but its text is not typed. Asked now, while
+                // What the platform's input method took of the press: a key
+                // it swallowed (on macOS, the accent popup's auto-repeats and
+                // the key that picks an accent, which it then inserts on its
+                // own) still reaches the widgets as a key, for shortcuts and
+                // navigation, without its text; a key it answered with a
+                // commit of its own (2-Set Korean's Space) reaches none, as
+                // the key that ends a composition does not; a key it typed
+                // as another character (Kotoeri's full-width space) carries
+                // that character as its text. Asked now, while
                 // winit is still inside the key's `keyDown:`: it delivers
                 // this event from there when its handler is idle. When it
                 // had to buffer the event (the handler was busy), the key
-                // press is over by now, the answer is `false`, and the text
-                // is typed as before. Always `false` off macOS.
-                let swallowed = key_event.state.is_pressed()
-                    && teksilo_id.is_some_and(teksilo_platform::text_input_hook::key_was_swallowed);
-                let text = key_event.text.as_deref().filter(|_| !swallowed);
+                // press is over by now, the answer is `None`, and the key
+                // goes on with its text as before. Always `None` off macOS.
+                let taken = key_event
+                    .state
+                    .is_pressed()
+                    .then_some(teksilo_id)
+                    .flatten()
+                    .and_then(teksilo_platform::text_input_hook::key_taken_by_input_method);
                 // A synthetic press becomes nothing, here and for the
                 // menubar below: see `key_widget_event`.
                 let maybe_evt = self.wm.get_by_winit_mut(window_id).and_then(|managed| {
                     crate::input_routing::key_widget_event(
                         &key_event.logical_key,
-                        text,
+                        key_event.text.as_deref(),
                         key_event.state,
                         is_synthetic,
                         event_translation::translate_modifiers(managed.current_modifiers),
+                        taken,
                     )
                 });
                 if let Some(evt) = maybe_evt {

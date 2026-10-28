@@ -129,6 +129,9 @@ objc2-app-kit = { version = "0.3", features = [
     # `NSTextAlternativesAttributeName`, the mark dictation leaves on the text
     # it inserts (`text_input_hook/macos.rs`).
     "NSAttributedString",
+    # `NSTextInputContextKeyboardSelectionDidChangeNotification`, which the
+    # trace observes (`text_input_hook/macos.rs`).
+    "NSTextInputContext",
 ] }
 objc2-foundation = { version = "0.3", features = [
     "NSArray",
@@ -151,9 +154,12 @@ objc2-foundation = { version = "0.3", features = [
     "NSAttributedString",
 ] }
 # The session watch's reading of the display's sleep and the session's lock
-# and console flags. Both already resolve through objc2-app-kit.
+# and console flags. Both already resolve through objc2-app-kit. `CFArray`:
+# the list Text Input Sources answer which input method a keyboard input
+# source is a mode of with (`text_input_hook/macos.rs`).
 objc2-core-foundation = { version = "0.3", default-features = false, features = [
     "std",
+    "CFArray",
     "CFDictionary",
     "CFNumber",
     "CFString",

@@ -34,18 +34,26 @@
 //! platform.
 //!
 //! A key press the input method takes for itself, without typing or
-//! composing anything, must not type its text either: [`key_was_swallowed`]
-//! tells the application, while it handles the key, that it was one.
+//! composing anything, must not type its text either; one it answers with a
+//! commit of its own is the input method's, as the key that ends a
+//! composition is; and one it types as another character (a full-width
+//! space) types that character: [`key_taken_by_input_method`] tells the
+//! application, while it handles the key, which it was.
 //!
 //! Where it stands, measured on macOS 27: Emoji & Symbols, the press-and-hold
 //! accent popup, Dictation and Writing Tools (in its panel) insert into the
 //! focused field. Dictation is told apart from a composition through private
-//! AppKit methods (see the macOS backend). On Windows the hook ends a
-//! composition the field has kept ([`finish_composition`]) and, when asked,
-//! traces.
+//! AppKit methods (see the macOS backend). A composition its input method
+//! leaves marked when the user switches to another input source is kept as
+//! committed where it is, and the input method's later delivery of it is
+//! dropped. On Windows the hook ends a composition the field has kept
+//! ([`finish_composition`]) and, when asked, traces.
 //!
 //! With `TEKSILO_TEXT_INPUT_TRACE=1` set the hooks also log every call they
 //! see to stderr, which is how the per-OS behaviour they rely on was measured.
+//! `TEKSILO_TEXT_INPUT_TRACE=stacks` adds, on macOS, a short call stack to the
+//! input method's calls inside a key press, and every `respondsToSelector:`
+//! asked of the view inside one.
 
 use std::ops::Range;
 use std::sync::{Arc, OnceLock};
@@ -59,16 +67,30 @@ mod answers;
 mod composition;
 mod dictation;
 mod key_press;
+mod left_behind;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
+mod winit_ime;
 
 /// Whether `TEKSILO_TEXT_INPUT_TRACE` is set to anything but `0`. Read once.
 pub fn trace_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
         std::env::var_os("TEKSILO_TEXT_INPUT_TRACE").is_some_and(|value| value != "0")
+    })
+}
+
+/// Whether `TEKSILO_TEXT_INPUT_TRACE` is `stacks`, which turns tracing on
+/// and adds the detail for telling who answers a key: a short call stack on
+/// the input method's calls inside a key press, and every
+/// `respondsToSelector:` asked of the view inside one. Read once.
+#[allow(dead_code)] // Only the macOS backend writes stacks.
+pub(crate) fn trace_stacks_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var_os("TEKSILO_TEXT_INPUT_TRACE").is_some_and(|value| value == "stacks")
     })
 }
 
@@ -164,26 +186,47 @@ pub(crate) fn classify(signals: CommitSignals) -> ImeOrigin {
     }
 }
 
-/// Whether the platform's input method swallowed the key press `window_id`
-/// is handling right now: it had the key and did nothing with it, so the
-/// text the key press reports must not be typed (the key itself still
-/// counts, for shortcuts and navigation).
+/// What the platform's input method made of a key press, when it did not
+/// hand the key back as it was, as [`key_taken_by_input_method`] answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TakenKey {
+    /// It had the key and did nothing with it: the press-and-hold accent
+    /// popup taking a repeat of the held letter, or the key that picks an
+    /// accent. The key still counts, for shortcuts and navigation; its text
+    /// is not typed.
+    Swallowed,
+    /// It answered the key with a commit of its own and handed nothing back:
+    /// 2-Set Korean answering Space with nothing composed by marking a space
+    /// and committing it. The press is the input method's, as the key that
+    /// ends a composition is, which winit does not report: it reaches no
+    /// widget, and its text is not typed a second time.
+    Committed,
+    /// It typed the key, with nothing composed, as this text rather than the
+    /// key's own characters: Kotoeri's full-width space (U+3000) for Space,
+    /// Pinyin's "；" for ";". The key goes on with this text in place of the
+    /// characters winit reports for it.
+    Substituted(String),
+}
+
+/// What the platform's input method took of the key press `window_id` is
+/// handling right now, if anything: see [`TakenKey`].
 ///
 /// Ask it while handling winit's `KeyboardInput` for a pressed key, which
 /// macOS delivers from inside the view's `keyDown:`, after the input method
 /// has had the key. Outside a key press, for another window, for a key the
-/// input method never saw, and on every platform but macOS, `false`: the
-/// text is typed as winit reports it. See the macOS backend for what is
-/// tracked.
-pub fn key_was_swallowed(window_id: TeksiloWindowId) -> bool {
+/// input method never saw or handed back as it was (typed its own
+/// characters, or passed it on as a command), and on every platform but
+/// macOS, `None`: the key and its text go on as winit reports them. See the
+/// macOS backend for what is tracked.
+pub fn key_taken_by_input_method(window_id: TeksiloWindowId) -> Option<TakenKey> {
     #[cfg(target_os = "macos")]
     {
-        macos::key_was_swallowed(window_id)
+        macos::key_taken_by_input_method(window_id)
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = window_id;
-        false
+        None
     }
 }
 

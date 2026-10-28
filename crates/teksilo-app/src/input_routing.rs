@@ -143,23 +143,51 @@ pub(crate) fn bounces_to_modal(event: &WindowEvent) -> bool {
 /// the parent had focused, a list opening its row, for one. A synthetic
 /// *release*, made up for every held key when a window loses focus, is still
 /// delivered: it ends a press the window did see, so nothing stays pressed.
+///
+/// `taken` is what the platform's input method made of a press
+/// ([`key_taken_by_input_method`](teksilo_platform::text_input_hook::key_taken_by_input_method),
+/// asked while the press is handled). A swallowed press becomes a `KeyDown`
+/// with no text: the key still counts, for shortcuts and navigation, but the
+/// input method inserts on its own (the accent popup). A press the input
+/// method answered with a commit of its own becomes nothing: the commit is
+/// the press, as the key that ends a composition is, which winit does not
+/// report either. Without this, 2-Set Korean's Space typed its space twice,
+/// and a key passed on unhandled could reach an ancestor that acts on it. A
+/// press the input method typed as other characters (Kotoeri's full-width
+/// space for Space) becomes a `KeyDown` carrying those characters as its
+/// text, in place of the key's own `text`.
 pub(crate) fn key_widget_event(
     logical_key: &winit::keyboard::Key,
     text: Option<&str>,
     state: winit::event::ElementState,
     is_synthetic: bool,
     modifiers: teksilo_core::event::Modifiers,
+    taken: Option<teksilo_platform::text_input_hook::TakenKey>,
 ) -> Option<teksilo_core::event::WidgetEvent> {
     use teksilo_core::event::WidgetEvent;
+    use teksilo_platform::text_input_hook::TakenKey;
     if is_synthetic && state.is_pressed() {
         return None;
     }
     let key = teksilo_platform::event_translation::translate_key(logical_key)?;
     Some(match state {
-        winit::event::ElementState::Pressed => WidgetEvent::KeyDown {
-            key,
-            modifiers,
-            text: text.map(str::to_string),
+        winit::event::ElementState::Pressed => match taken {
+            Some(TakenKey::Committed) => return None,
+            Some(TakenKey::Swallowed) => WidgetEvent::KeyDown {
+                key,
+                modifiers,
+                text: None,
+            },
+            Some(TakenKey::Substituted(typed)) => WidgetEvent::KeyDown {
+                key,
+                modifiers,
+                text: Some(typed),
+            },
+            None => WidgetEvent::KeyDown {
+                key,
+                modifiers,
+                text: text.map(str::to_string),
+            },
         },
         winit::event::ElementState::Released => WidgetEvent::KeyUp { key, modifiers },
     })
@@ -1069,6 +1097,7 @@ pub(crate) mod tests {
             ElementState::Pressed,
             false,
             Modifiers::NONE,
+            None,
         );
         assert!(
             matches!(
@@ -1083,6 +1112,7 @@ pub(crate) mod tests {
             ElementState::Released,
             false,
             Modifiers::NONE,
+            None,
         );
         assert!(
             matches!(
@@ -1109,6 +1139,7 @@ pub(crate) mod tests {
             ElementState::Pressed,
             true,
             Modifiers::NONE,
+            None,
         );
         assert!(down.is_none(), "{down:?}");
         let up = key_widget_event(
@@ -1117,6 +1148,7 @@ pub(crate) mod tests {
             ElementState::Released,
             true,
             Modifiers::NONE,
+            None,
         );
         assert!(
             matches!(
@@ -1160,9 +1192,14 @@ pub(crate) mod tests {
             (ElementState::Pressed, true),
             (ElementState::Released, false),
         ] {
-            if let Some(event) =
-                key_widget_event(&enter(), Some("\r"), state, is_synthetic, Modifiers::NONE)
-            {
+            if let Some(event) = key_widget_event(
+                &enter(),
+                Some("\r"),
+                state,
+                is_synthetic,
+                Modifiers::NONE,
+                None,
+            ) {
                 tree.dispatch_event(event);
             }
         }
@@ -1172,12 +1209,220 @@ pub(crate) mod tests {
         // or the zero above would prove nothing.
         for state in [ElementState::Pressed, ElementState::Released] {
             if let Some(event) =
-                key_widget_event(&enter(), Some("\r"), state, false, Modifiers::NONE)
+                key_widget_event(&enter(), Some("\r"), state, false, Modifiers::NONE, None)
             {
                 tree.dispatch_event(event);
             }
         }
         assert_eq!(*activated.borrow(), 1);
+    }
+
+    /// A focused text field holding `text`, its caret at the end, laid out
+    /// and settled as a window's first frames would.
+    fn focused_field(text: &str) -> (WidgetTree, teksilo_core::signal::Signal<String>) {
+        let value = teksilo_core::signal::Signal::new(text.to_string());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let field = tree.add(teksilo_widgets::TextInputField::new(value.clone()));
+        tree.layout(SizeProposal::exact(400.0, 100.0));
+        let _ = tree.render();
+        let field = tree.first_focusable_descendant(field).unwrap_or(field);
+        tree.focus(field);
+        settle_frames(&mut tree);
+        tree.dispatch_event(teksilo_core::event::WidgetEvent::KeyDown {
+            key: teksilo_core::event::Key::End,
+            modifiers: teksilo_core::event::Modifiers::NONE,
+            text: None,
+        });
+        settle_frames(&mut tree);
+        (tree, value)
+    }
+
+    fn settle_frames(tree: &mut WidgetTree) {
+        for _ in 0..2 {
+            tree.request_frame();
+            tree.tick_animations(std::time::Duration::from_millis(16));
+            tree.layout(SizeProposal::exact(400.0, 100.0));
+        }
+        let _ = tree.render();
+    }
+
+    fn space() -> winit::keyboard::Key {
+        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space)
+    }
+
+    /// One Space with 2-Set Korean and nothing composed, as the window gets
+    /// it on macOS 27 (measured in round 5: `setMarkedText " "`,
+    /// `insertText " "`, `setMarkedText ""` inside the key press, then
+    /// winit's `KeyboardInput` with its " "), with `taken` as the platform
+    /// answers for the press, through the same translation the event loop
+    /// uses.
+    fn korean_space(
+        tree: &mut WidgetTree,
+        taken: Option<teksilo_platform::text_input_hook::TakenKey>,
+    ) {
+        use teksilo_core::event::Modifiers;
+        use winit::event::Ime;
+        let ime = [
+            Ime::Preedit(" ".to_string(), Some((1, 1))),
+            // winit's commit: an empty preedit, then the text.
+            Ime::Preedit(String::new(), None),
+            Ime::Commit(" ".to_string()),
+            // The input method's empty marked text.
+            Ime::Preedit(String::new(), None),
+        ];
+        for ime in ime {
+            if let Some(event) = teksilo_platform::event_translation::translate_ime(ime) {
+                tree.dispatch_event(event);
+            }
+        }
+        for (state, text) in [
+            (ElementState::Pressed, Some(" ")),
+            (ElementState::Released, None),
+        ] {
+            if let Some(event) =
+                key_widget_event(&space(), text, state, false, Modifiers::NONE, taken.clone())
+            {
+                tree.dispatch_event(event);
+            }
+        }
+        settle_frames(tree);
+    }
+
+    /// One press of `key`, whose event carries `text`, for which the input
+    /// method inserted its own string with nothing marked: winit sends no
+    /// IME event for that (it commits only with marked text), only its
+    /// `KeyboardInput` with the key's own `text`. `taken` is the platform's
+    /// answer for the press.
+    fn typed_by_input_method(
+        tree: &mut WidgetTree,
+        key: &winit::keyboard::Key,
+        text: &str,
+        taken: Option<teksilo_platform::text_input_hook::TakenKey>,
+    ) {
+        use teksilo_core::event::Modifiers;
+        for (state, text, taken) in [
+            (ElementState::Pressed, Some(text), taken),
+            (ElementState::Released, None, None),
+        ] {
+            if let Some(event) = key_widget_event(key, text, state, false, Modifiers::NONE, taken) {
+                tree.dispatch_event(event);
+            }
+        }
+        settle_frames(tree);
+    }
+
+    /// Kotoeri (Hiragana) answers Space with nothing composed with a
+    /// full-width space, Pinyin answers ";" with "；" (round 6, macOS 27: one
+    /// `insertText:` with nothing marked). The field types the input
+    /// method's character, as TextEdit does.
+    #[test]
+    fn a_character_the_input_method_substitutes_for_a_key_is_the_one_typed() {
+        use teksilo_platform::text_input_hook::TakenKey;
+        let semicolon = winit::keyboard::Key::Character(";".into());
+        let (mut tree, value) = focused_field("x");
+        typed_by_input_method(
+            &mut tree,
+            &space(),
+            " ",
+            Some(TakenKey::Substituted("\u{3000}".to_string())),
+        );
+        assert_eq!(value.get(), "x\u{3000}");
+        typed_by_input_method(
+            &mut tree,
+            &semicolon,
+            ";",
+            Some(TakenKey::Substituted("；".to_string())),
+        );
+        assert_eq!(value.get(), "x\u{3000}；");
+        // The key's own character, which the platform does not report as
+        // substituted: typed as winit reports it, as before.
+        typed_by_input_method(&mut tree, &semicolon, ";", None);
+        assert_eq!(value.get(), "x\u{3000}；;");
+
+        // The same presses reported as winit reports them, as before: the
+        // key's own characters. Without this the assertions above would
+        // prove nothing.
+        let (mut tree, value) = focused_field("x");
+        typed_by_input_method(&mut tree, &space(), " ", None);
+        typed_by_input_method(&mut tree, &semicolon, ";", None);
+        assert_eq!(value.get(), "x ;", "the round-6 half-width characters");
+    }
+
+    /// 2-Set Korean answers Space with nothing composed by committing a
+    /// space of its own, inside the key press. That press reaches no widget:
+    /// one space, as TextEdit types.
+    #[test]
+    fn korean_space_with_nothing_composed_types_one_space() {
+        use teksilo_platform::text_input_hook::TakenKey;
+        let (mut tree, value) = focused_field("한");
+        korean_space(&mut tree, Some(TakenKey::Committed));
+        assert_eq!(value.get(), "한 ");
+        korean_space(&mut tree, Some(TakenKey::Committed));
+        assert_eq!(value.get(), "한  ", "one more space per press");
+
+        // The same events with the press reported as winit reports it, as
+        // before: the key's " " is typed beside the commit. Without this the
+        // assertions above would prove nothing.
+        let (mut tree, value) = focused_field("한");
+        korean_space(&mut tree, None);
+        assert_eq!(value.get(), "한  ", "the round-5 double space");
+    }
+
+    /// A key the input method swallowed (the accent popup's repeat) is still a
+    /// key, without its text; one it committed for is not a key at all.
+    #[test]
+    fn a_taken_press_keeps_its_key_or_reaches_nothing() {
+        use teksilo_core::event::{Key, Modifiers, WidgetEvent};
+        use teksilo_platform::text_input_hook::TakenKey;
+        let letter = winit::keyboard::Key::Character("e".into());
+        let swallowed = key_widget_event(
+            &letter,
+            Some("e"),
+            ElementState::Pressed,
+            false,
+            Modifiers::NONE,
+            Some(TakenKey::Swallowed),
+        );
+        assert!(
+            matches!(
+                swallowed,
+                Some(WidgetEvent::KeyDown {
+                    key: Key::E,
+                    text: None,
+                    ..
+                })
+            ),
+            "{swallowed:?}"
+        );
+        let committed = key_widget_event(
+            &space(),
+            Some(" "),
+            ElementState::Pressed,
+            false,
+            Modifiers::NONE,
+            Some(TakenKey::Committed),
+        );
+        assert!(committed.is_none(), "{committed:?}");
+        // Its release is the end of a press like any other: winit reports
+        // it, and so does this.
+        let release = key_widget_event(
+            &space(),
+            None,
+            ElementState::Released,
+            false,
+            Modifiers::NONE,
+            Some(TakenKey::Committed),
+        );
+        assert!(
+            matches!(
+                release,
+                Some(WidgetEvent::KeyUp {
+                    key: Key::Space,
+                    ..
+                })
+            ),
+            "{release:?}"
+        );
     }
 
     /// A window-sized tree holding `menu_bar`, with the window state a bar
