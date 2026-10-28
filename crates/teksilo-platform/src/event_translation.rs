@@ -1344,7 +1344,7 @@ pub fn translate_ime(ime: winit::event::Ime) -> Option<WidgetEvent> {
             text,
             cursor: cursor.map(|(begin, end)| begin..end),
         }),
-        winit::event::Ime::Commit(text) => Some(WidgetEvent::ImeCommit { text }),
+        winit::event::Ime::Commit(text) => Some(WidgetEvent::ime_commit(text)),
         winit::event::Ime::Enabled | winit::event::Ime::Disabled => None,
     }
 }

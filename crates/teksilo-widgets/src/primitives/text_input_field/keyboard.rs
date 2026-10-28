@@ -64,7 +64,7 @@ pub(crate) fn handle_key(
     // IME commit — finalized grapheme cluster. Drop any live preedit first
     // (some backends skip the empty-preedit clear), then batch into
     // pending_chars like ordinary typed input.
-    if let WidgetEvent::ImeCommit { text } = event {
+    if let WidgetEvent::ImeCommit { text, .. } = event {
         clear_ime_preedit(state);
         return push_pending_chars(state, ctx, text);
     }

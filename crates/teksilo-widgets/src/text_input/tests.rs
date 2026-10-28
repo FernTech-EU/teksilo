@@ -312,9 +312,7 @@ fn ime_composition_then_commit_inserts_finalised_text() {
         text: String::new(),
         cursor: None,
     });
-    tree.dispatch_event(WidgetEvent::ImeCommit {
-        text: "你好".to_string(),
-    });
+    tree.dispatch_event(WidgetEvent::ime_commit("你好"));
     tick(&mut tree);
     tick(&mut tree);
     assert_eq!(
@@ -375,9 +373,7 @@ fn empty_ime_composition_flood_is_inert() {
         cursor: Some(1..1),
     });
     tick(&mut tree);
-    tree.dispatch_event(WidgetEvent::ImeCommit {
-        text: "c".to_string(),
-    });
+    tree.dispatch_event(WidgetEvent::ime_commit("c"));
     tick(&mut tree);
     assert!(
         text.get().contains('c'),
@@ -420,9 +416,7 @@ fn ime_commit_respects_char_filter() {
     tick(&mut tree);
     focus_field(&mut tree, id);
 
-    tree.dispatch_event(WidgetEvent::ImeCommit {
-        text: "4a2".to_string(),
-    });
+    tree.dispatch_event(WidgetEvent::ime_commit("4a2"));
     tick(&mut tree);
     tick(&mut tree);
     assert_eq!(

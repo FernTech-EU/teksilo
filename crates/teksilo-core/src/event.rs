@@ -577,6 +577,30 @@ pub enum ScrollMotion {
     Smooth,
 }
 
+/// Where the text of an [`WidgetEvent::ImeCommit`] came from: which part of the
+/// platform's text input system committed it.
+///
+/// `#[non_exhaustive]` because it is a platform input vocabulary that grows per
+/// OS, like [`CancelReason`]: match with a wildcard arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub enum ImeOrigin {
+    /// The end of a composition the user typed, such as a CJK candidate or a
+    /// dead-key accent; what winit reports as `Ime::Commit`. The default.
+    #[default]
+    Composition,
+    /// Speech the platform's dictation recognised (macOS Dictation, Windows
+    /// voice typing).
+    Dictation,
+    /// Text a system writing assistant produced to replace the user's (macOS
+    /// Writing Tools).
+    WritingTools,
+    /// Text the input system inserted outside a key press and outside a
+    /// composition, such as the emoji viewer or panel, AutoFill, or an accent
+    /// picked from the press-and-hold popup with the mouse.
+    Insertion,
+}
+
 /// Events dispatched to widgets.
 #[derive(Debug, Clone)]
 pub enum WidgetEvent {
@@ -737,8 +761,18 @@ pub enum WidgetEvent {
         text: String,
         cursor: Option<std::ops::Range<usize>>,
     },
+    /// Text the platform's input system committed into the focused field.
     ImeCommit {
+        /// The committed text.
         text: String,
+        /// Which part of the input system committed it.
+        origin: ImeOrigin,
+        /// The range of the focused field's text this commit replaces, in that
+        /// field's character (Unicode scalar) offsets, when the input system
+        /// named one (a dictation correction, a Writing Tools replacement).
+        /// `None` replaces the selection, or inserts at the caret when there
+        /// is none.
+        replacement: Option<std::ops::Range<usize>>,
     },
     FocusGained {
         origin: crate::focus::FocusOrigin,
@@ -804,6 +838,16 @@ pub enum WidgetEvent {
 }
 
 impl WidgetEvent {
+    /// An [`ImeCommit`](Self::ImeCommit) of `text` from a composition
+    /// ([`ImeOrigin::Composition`]) that names no range to replace.
+    pub fn ime_commit(text: impl Into<String>) -> Self {
+        Self::ImeCommit {
+            text: text.into(),
+            origin: ImeOrigin::Composition,
+            replacement: None,
+        }
+    }
+
     /// A wheel notch with no position — routed by the hovered (else focused)
     /// widget, exactly as every scroll in Teksilo was before the touch
     /// programme.
@@ -1005,5 +1049,26 @@ mod modifier_tests {
             Modifiers::CTRL | Modifiers::SHIFT
         );
         assert_eq!(all.without(Modifiers::ALT), all);
+    }
+}
+
+#[cfg(test)]
+mod ime_commit_tests {
+    use super::*;
+
+    #[test]
+    fn ime_commit_constructor_is_a_plain_composition_commit() {
+        match WidgetEvent::ime_commit("x") {
+            WidgetEvent::ImeCommit {
+                text,
+                origin,
+                replacement,
+            } => {
+                assert_eq!(text, "x");
+                assert_eq!(origin, ImeOrigin::Composition);
+                assert!(replacement.is_none());
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 }

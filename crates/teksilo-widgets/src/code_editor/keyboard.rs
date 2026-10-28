@@ -61,7 +61,7 @@ pub(super) fn handle_key(
     if let WidgetEvent::ImeComposition { text, .. } = event {
         return handle_ime_composition(state, ctx, text);
     }
-    if let WidgetEvent::ImeCommit { text } = event {
+    if let WidgetEvent::ImeCommit { text, .. } = event {
         clear_ime_preedit(state);
         return push_pending_chars(state, ctx, text);
     }

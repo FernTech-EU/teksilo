@@ -147,9 +147,9 @@ pub mod prelude {
     // Core widget types
     pub use teksilo_core::{
         AccessNodeBuilder, AccessSubtreeMode, AccessibilityOverrides, Action, AnimationSpec,
-        BuildContext, ButtonMask, CursorIcon, EventContext, EventResponse, ImeContext, ImePurpose,
-        Intent, IntentKind, IntentResponse, IntoTeksiChild, IntoTeksiCondition, Key, KeyStroke,
-        LayoutContext, LayoutResponse, ModalCloseBehavior, ModalPresentation, Modifiers,
+        BuildContext, ButtonMask, CursorIcon, EventContext, EventResponse, ImeContext, ImeOrigin,
+        ImePurpose, Intent, IntentKind, IntentResponse, IntoTeksiChild, IntoTeksiCondition, Key,
+        KeyStroke, LayoutContext, LayoutResponse, ModalCloseBehavior, ModalPresentation, Modifiers,
         OverscrollBehavior, PaintContext, PointerButton, Politeness, Prop, Shortcut,
         ShortcutRegistry, ShortcutScope, Signal, StandardEdit, TapEvent, TeksiBranch, TeksiBranch3,
         TeksiBranch4, TraversalScopePolicy, Widget, WidgetBuilder, WidgetEvent, WidgetId,

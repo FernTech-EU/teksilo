@@ -633,7 +633,7 @@ fn execute_op(
                 );
             }
             if let Some(text) = commit {
-                tree.dispatch_event_with_ops(WidgetEvent::ImeCommit { text: text.clone() }, ops);
+                tree.dispatch_event_with_ops(WidgetEvent::ime_commit(text.clone()), ops);
             }
             finish_settle(tree, ops, settle)
         }

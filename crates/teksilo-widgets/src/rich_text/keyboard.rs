@@ -170,7 +170,7 @@ pub(super) fn handle_key(
     // IME commit — the user picked a candidate or typed a printable
     // key that finalises the sequence. Clear any active preedit and
     // insert the committed text via the normal `pending_chars` batch.
-    if let WidgetEvent::ImeCommit { text } = event {
+    if let WidgetEvent::ImeCommit { text, .. } = event {
         clear_ime_preedit(state);
         return push_pending_chars(state, ctx, text);
     }

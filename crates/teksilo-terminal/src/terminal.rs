@@ -1425,7 +1425,7 @@ fn keyboard_handler(
             // A keyboard-capture surface consumes every key.
             EventResponse::Handled
         }
-        WidgetEvent::ImeCommit { text } => {
+        WidgetEvent::ImeCommit { text, .. } => {
             if !state.borrow().read_only {
                 let mut st = state.borrow_mut();
                 if let Some(engine) = st.engine.as_mut() {

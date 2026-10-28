@@ -186,7 +186,7 @@ fn ime_preedit_hide_cursor_maps_to_none() {
 #[test]
 fn ime_commit_translates() {
     let evt = translate_ime(winit::event::Ime::Commit("你".to_string())).unwrap();
-    assert!(matches!(evt, WidgetEvent::ImeCommit { ref text } if text == "你"));
+    assert!(matches!(evt, WidgetEvent::ImeCommit { ref text, .. } if text == "你"));
 }
 
 #[test]

@@ -2207,9 +2207,7 @@ fn editor_ime_composition_then_commit_inserts_finalised_text() {
     tree.tick_animations(std::time::Duration::from_millis(16));
     assert_eq!(doc.to_plain_text().unwrap_or_default(), "ni");
 
-    tree.dispatch_event(WidgetEvent::ImeCommit {
-        text: "你".to_string(),
-    });
+    tree.dispatch_event(WidgetEvent::ime_commit("你"));
     tick_past_debounce(&mut tree);
     assert_eq!(
         doc.to_plain_text().unwrap_or_default(),
@@ -2310,9 +2308,7 @@ fn a_composition_over_a_forward_selection_replaces_it_once() {
             "selected {anchor}..{position}: the next candidate replaces the preedit"
         );
 
-        tree.dispatch_event(WidgetEvent::ImeCommit {
-            text: "你".to_string(),
-        });
+        tree.dispatch_event(WidgetEvent::ime_commit("你"));
         tick_past_debounce(&mut tree);
         assert_eq!(
             doc.to_plain_text().unwrap_or_default(),
@@ -5323,9 +5319,7 @@ fn editor_on_change_stays_silent_during_ime_composition_then_fires_once_on_commi
         "a second intermediate composition step must still not fire on_change"
     );
 
-    tree.dispatch_event(WidgetEvent::ImeCommit {
-        text: "你".to_string(),
-    });
+    tree.dispatch_event(WidgetEvent::ime_commit("你"));
     tick_past_debounce(&mut tree);
     assert_eq!(doc.to_plain_text().unwrap_or_default(), "你");
     assert_eq!(
@@ -8853,9 +8847,7 @@ fn forward_only_ime_composition_does_not_eat_a_selection() {
         cursor: None,
     });
     tree.tick_animations(std::time::Duration::from_millis(16));
-    tree.dispatch_event(WidgetEvent::ImeCommit {
-        text: "你".to_string(),
-    });
+    tree.dispatch_event(WidgetEvent::ime_commit("你"));
     tick_past_debounce(&mut tree);
 
     assert_eq!(

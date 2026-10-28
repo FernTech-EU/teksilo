@@ -50,9 +50,7 @@ fn pinyin_script() -> Vec<WidgetEvent> {
             text: String::new(),
             cursor: None,
         },
-        WidgetEvent::ImeCommit {
-            text: "你好".to_string(),
-        },
+        WidgetEvent::ime_commit("你好"),
     ]
 }
 
@@ -67,9 +65,7 @@ fn dead_key_script() -> Vec<WidgetEvent> {
             text: String::new(),
             cursor: None,
         },
-        WidgetEvent::ImeCommit {
-            text: "ê".to_string(),
-        },
+        WidgetEvent::ime_commit("ê"),
     ]
 }
 
