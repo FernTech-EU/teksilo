@@ -61,10 +61,12 @@ pub(crate) fn handle_key(
 ) -> EventResponse {
     // IME composition (preedit) — tentative, replaceable text shown inline.
     if let WidgetEvent::ImeComposition {
-        text, replacement, ..
+        text,
+        cursor,
+        replacement,
     } = event
     {
-        return handle_ime_composition(state, ctx, text, replacement.as_ref());
+        return handle_ime_composition(state, ctx, text, cursor.as_ref(), replacement.as_ref());
     }
     // IME commit: a finalized grapheme cluster, or text the input system wrote
     // on its own account (dictation, Writing Tools, the emoji viewer). The
@@ -450,6 +452,7 @@ fn handle_ime_composition(
     state: &SharedState,
     ctx: &mut EventContext,
     text: &str,
+    cursor: Option<&std::ops::Range<usize>>,
     replacement: Option<&std::ops::Range<usize>>,
 ) -> EventResponse {
     if state.borrow().read_only {
@@ -531,8 +534,15 @@ fn handle_ime_composition(
         if clean.is_empty() {
             // Nothing of it is the field's to show.
             st.composition.cancel(&st.document);
-        } else {
-            st.composition.show(&st.document, &st.cursor, &clean);
+        } else if st.composition.show(&st.document, &st.cursor, &clean) {
+            // Which part the input method is on: the segment it converts, or
+            // the caret's place inside the composition.
+            let kept: Vec<bool> = text
+                .chars()
+                .map(|c| single_line_admits(c) && st.char_filter_admits(c))
+                .collect();
+            st.composition.mark(text, cursor, &kept);
+            st.composition.place_caret(&st.document, &st.cursor);
         }
         st.pending_text_changed = true;
         // Lay the preedit out now, not at the next frame: the area reported

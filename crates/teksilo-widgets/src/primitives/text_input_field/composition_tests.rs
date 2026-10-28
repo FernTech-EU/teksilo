@@ -977,3 +977,113 @@ fn undo_during_a_composition_ends_it_first() {
     assert_eq!(f.ops.finished, 1, "the platform is told");
     assert_eq!(f.text.get(), "", "the undo takes the kept composition back");
 }
+
+// ── The segment the input method is converting ─────────────────────────────
+
+impl Field {
+    /// Window x of the caret boundary before character `offset`.
+    fn x_of(&self, offset: usize) -> f32 {
+        let st = self.state.borrow();
+        let caret = st.engine.caret_rect(offset, CursorAffinity::Downstream);
+        st.viewport_origin.x + caret[0] - st.scroll_x
+    }
+
+    /// Whether a line `thickness` thick is drawn from the boundary before
+    /// character `from` to the one before `to`.
+    fn stroke_between(&mut self, from: usize, to: usize, thickness: f32) -> bool {
+        let (x0, x1) = (self.x_of(from), self.x_of(to));
+        self.tree.render().decorations.iter().any(|d| {
+            let r = d.rect;
+            (r[3] - thickness).abs() < 0.01
+                && (r[0] - x0).abs() < 0.5
+                && (r[0] + r[2] - x1).abs() < 0.5
+        })
+    }
+
+    fn compose_cursor(&mut self, text: &str, cursor: Option<std::ops::Range<usize>>) {
+        self.dispatch(WidgetEvent::ime_composition(text.to_string(), cursor));
+    }
+}
+
+/// Hangul's one-syllable preedit has a caret at its end and no segment, and it
+/// is underlined all the same: every composition is.
+#[test]
+fn a_hangul_syllable_is_underlined_with_the_caret_after_it() {
+    let mut f = Field::new("ab", 2);
+    f.compose_cursor("\u{D55C}", Some(3..3));
+    assert_eq!(f.composition(), Some(2..3));
+    assert!(
+        f.stroke_between(2, 3, 1.0),
+        "the syllable has a thin underline"
+    );
+    assert_eq!(f.caret(), 3);
+}
+
+/// A range with an extent is the segment being converted: thick under it, thin
+/// under the rest.
+#[test]
+fn the_converted_segment_is_underlined_thick_and_the_rest_thin() {
+    let mut f = Field::new("x", 1);
+    // "にほん", the first two characters being converted.
+    f.compose_cursor("\u{306B}\u{307B}\u{3093}", Some(0..6));
+    assert_eq!(f.composition(), Some(1..4));
+    assert!(f.stroke_between(1, 3, 2.0), "the segment is thick");
+    assert!(f.stroke_between(3, 4, 1.0), "the rest is thin");
+    assert!(
+        !f.stroke_between(1, 4, 1.0),
+        "and no thin one runs under it all"
+    );
+}
+
+/// A segment that is the whole composition (Pinyin's raw letters, Mozc's
+/// converted clause) is thick all along.
+#[test]
+fn a_segment_that_is_the_whole_composition_is_thick() {
+    let mut f = Field::new("", 0);
+    f.compose_cursor("zhong", Some(0..5));
+    assert!(f.stroke_between(0, 5, 2.0));
+}
+
+/// An input method that names no segment gets the thin underline, as before.
+#[test]
+fn a_composition_with_no_cursor_range_is_thin() {
+    let mut f = Field::new("", 0);
+    f.compose_cursor("ni", None);
+    assert!(f.stroke_between(0, 2, 1.0));
+}
+
+/// A cursor range with no extent places the caret inside the composition.
+#[test]
+fn a_cursor_inside_the_composition_places_the_caret_there() {
+    let mut f = Field::new("ab", 2);
+    f.compose_cursor("nihao", Some(3..3));
+    assert_eq!(f.composition(), Some(2..7));
+    assert_eq!(f.caret(), 5);
+    f.compose_cursor("nihao", Some(5..5));
+    assert_eq!(f.caret(), 7, "at its end, as before");
+}
+
+/// The segment is in the characters the field shows: the ones it dropped do
+/// not count.
+#[test]
+fn the_segment_skips_the_characters_a_filter_dropped() {
+    let signal = Signal::new(String::new());
+    let field = TextInputField::new(signal).char_filter(|c| c != '1');
+    let state_slot = field.state_slot.clone();
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(crate::primitives::Padding::symmetric(20.0, 20.0).child(field));
+    tree.layout(viewport());
+    let _ = tree.render();
+    let state = state_slot.borrow().clone().expect("the field was built");
+    let focus = tree.first_focusable_descendant(id).expect("focusable");
+    tree.focus(focus);
+    let mut ops = ImeOps::default();
+    // "a1b2c" with the "1" dropped shows "ab2c"; the range 1..4 covers "1b2".
+    tree.dispatch_event_with_ops(
+        WidgetEvent::ime_composition("a1b2c".to_string(), Some(1..4)),
+        &mut ops,
+    );
+    let st = state.borrow();
+    assert_eq!(st.document.to_plain_text().unwrap(), "ab2c");
+    assert_eq!(st.composition.segment(&st.document), Some(1..3));
+}

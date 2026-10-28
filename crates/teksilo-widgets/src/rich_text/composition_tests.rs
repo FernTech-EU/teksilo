@@ -659,6 +659,85 @@ fn the_preedit_underline_follows_the_editor_scroll() {
     );
 }
 
+// ── The segment the input method is converting ─────────────────────────────
+
+impl Editor {
+    /// Whether a line `thickness` thick is drawn from the boundary before
+    /// character `from` to the one before `to`.
+    fn stroke_between(&mut self, from: usize, to: usize, thickness: f32) -> bool {
+        let a = self.handle.offset_rect(from).expect("laid out");
+        let b = self.handle.offset_rect(to).expect("laid out");
+        self.tree.render().decorations.iter().any(|d| {
+            let r = d.rect;
+            (r[3] - thickness).abs() < 0.01
+                && (r[0] - a.x).abs() < 0.5
+                && (r[0] + r[2] - b.x).abs() < 0.5
+        })
+    }
+
+    fn compose_cursor(&mut self, text: &str, cursor: Option<std::ops::Range<usize>>) {
+        self.dispatch(WidgetEvent::ime_composition(text.to_string(), cursor));
+        self.settle();
+    }
+}
+
+/// Hangul's one-syllable preedit has a caret at its end and no segment, and it
+/// is underlined all the same: every composition is.
+#[test]
+fn a_hangul_syllable_is_underlined_with_the_caret_after_it() {
+    let mut e = Editor::new("ab", 2);
+    e.compose_cursor("\u{D55C}", Some(3..3));
+    assert_eq!(e.composition(), Some(2..3));
+    assert!(
+        e.stroke_between(2, 3, 1.0),
+        "the syllable has a thin underline"
+    );
+    assert_eq!(e.caret(), 3);
+}
+
+/// A range with an extent is the segment being converted: thick under it, thin
+/// under the rest.
+#[test]
+fn the_converted_segment_is_underlined_thick_and_the_rest_thin() {
+    let mut e = Editor::new("x", 1);
+    // "にほん", the first two characters being converted.
+    e.compose_cursor("\u{306B}\u{307B}\u{3093}", Some(0..6));
+    assert_eq!(e.composition(), Some(1..4));
+    assert!(e.stroke_between(1, 3, 2.0), "the segment is thick");
+    assert!(e.stroke_between(3, 4, 1.0), "the rest is thin");
+    assert!(
+        !e.stroke_between(1, 4, 1.0),
+        "and no thin one runs under it all"
+    );
+}
+
+/// A segment that is the whole composition is thick all along.
+#[test]
+fn a_segment_that_is_the_whole_composition_is_thick() {
+    let mut e = Editor::new("", 0);
+    e.compose_cursor("zhong", Some(0..5));
+    assert!(e.stroke_between(0, 5, 2.0));
+}
+
+/// An input method that names no segment gets the thin underline, as before.
+#[test]
+fn a_composition_with_no_cursor_range_is_thin() {
+    let mut e = Editor::new("", 0);
+    e.compose_cursor("ni", None);
+    assert!(e.stroke_between(0, 2, 1.0));
+}
+
+/// A cursor range with no extent places the caret inside the composition.
+#[test]
+fn a_cursor_inside_the_composition_places_the_caret_there() {
+    let mut e = Editor::new("ab", 2);
+    e.compose_cursor("nihao", Some(3..3));
+    assert_eq!(e.composition(), Some(2..7));
+    assert_eq!(e.caret(), 5);
+    e.compose_cursor("nihao", Some(5..5));
+    assert_eq!(e.caret(), 7, "at its end, as before");
+}
+
 // ── Undo after a composition ────────────────────────────────────────────────
 
 /// The states a composition went through are never recorded: one undo takes

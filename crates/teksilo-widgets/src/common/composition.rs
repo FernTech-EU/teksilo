@@ -40,6 +40,18 @@
 //! apply their own rules (filters, a length cap, a forward-only mode) to the
 //! text before handing it here.
 //!
+//! # The selected segment
+//!
+//! The input method also says which part of the composition it is working on
+//! (`Ime::Preedit`'s cursor range, byte offsets into the update's text). A
+//! range with an extent is the segment being converted (a Mozc clause, a
+//! highlighted Pinyin syllable run): native toolkits draw it with a thick
+//! underline and the rest of the composition with a thin one, and so does
+//! [`preedit_strokes`]. A range with no extent is the caret's place inside the
+//! composition, and [`Composition::place_caret`] puts the caret there.
+//! [`Composition::mark`] keeps both, as character offsets into what the
+//! surface actually showed (its filters may have dropped characters).
+//!
 //! # Whose composition a view shows
 //!
 //! The transient edits are the document's, and every view of a shared document
@@ -122,9 +134,51 @@ pub(crate) fn position_after_commit(at: usize, range: &Range<usize>, committed: 
     }
 }
 
+/// How a stretch of a composition is underlined.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PreeditStroke {
+    /// The composition's text: tentative, still being typed.
+    Thin,
+    /// The segment the input method is converting.
+    Thick,
+}
+
+/// The underlines a composition at `range` is drawn with, in order, as
+/// document ranges: all of it thin, except the `segment` (clamped into
+/// `range`), which is thick. Never empty for a non-empty `range`; the pieces
+/// are contiguous and cover `range` exactly.
+pub(crate) fn preedit_strokes(
+    range: &Range<usize>,
+    segment: Option<&Range<usize>>,
+) -> Vec<(Range<usize>, PreeditStroke)> {
+    if range.is_empty() {
+        return Vec::new();
+    }
+    let segment = segment
+        .map(|seg| seg.start.max(range.start)..seg.end.min(range.end))
+        .filter(|seg| seg.start < seg.end);
+    let Some(segment) = segment else {
+        return vec![(range.clone(), PreeditStroke::Thin)];
+    };
+    let mut strokes = Vec::with_capacity(3);
+    if range.start < segment.start {
+        strokes.push((range.start..segment.start, PreeditStroke::Thin));
+    }
+    strokes.push((segment.clone(), PreeditStroke::Thick));
+    if segment.end < range.end {
+        strokes.push((segment.end..range.end, PreeditStroke::Thin));
+    }
+    strokes
+}
+
 /// A text surface's composition. See the [module documentation](self).
 #[derive(Debug, Default)]
 pub(crate) struct Composition {
+    /// The segment the input method is converting, in characters of the
+    /// composition's text. See [`mark`](Self::mark).
+    segment: Option<Range<usize>>,
+    /// The caret's place inside the composition, in characters of its text.
+    caret: Option<usize>,
     /// The text the composition shows, as the surface inserted it: `Some`
     /// while it is live.
     shown: Option<String>,
@@ -215,6 +269,8 @@ impl Composition {
         if cursor.insert_text_transient(text).is_ok() {
             self.shown = Some(text.to_owned());
             self.ended = false;
+            self.segment = None;
+            self.caret = None;
             // The layer the first update began, or joined: an empty first update
             // changes nothing and begins none, and the next one notes it.
             self.layer = doc.transient_layer();
@@ -222,6 +278,57 @@ impl Composition {
         } else {
             self.cancel(doc);
             false
+        }
+    }
+
+    /// Note which part of the composition just [`show`](Self::show)n the input
+    /// method is on: `cursor` is its range, byte offsets into `update`, the
+    /// text of the update as it came, and `kept` says, for each character of
+    /// `update`, whether the surface kept it (its filters drop the rest). An
+    /// extent is the segment being converted, no extent the caret's place;
+    /// `None` (the input method hides its cursor) leaves the caret after the
+    /// composition and none of it selected.
+    pub(crate) fn mark(&mut self, update: &str, cursor: Option<&Range<usize>>, kept: &[bool]) {
+        self.segment = None;
+        self.caret = None;
+        let (Some(cursor), Some(shown)) = (cursor, self.shown.as_deref()) else {
+            return;
+        };
+        let shown_chars = shown.chars().count();
+        let kept_before = |byte: usize| {
+            update
+                .char_indices()
+                .take_while(|&(at, _)| at < byte)
+                .zip(kept)
+                .filter(|&(_, &kept)| kept)
+                .count()
+                .min(shown_chars)
+        };
+        let (a, b) = (kept_before(cursor.start), kept_before(cursor.end));
+        let (begin, end) = (a.min(b), a.max(b));
+        if begin == end {
+            self.caret = Some(begin);
+        } else {
+            self.segment = Some(begin..end);
+        }
+    }
+
+    /// The segment being converted, as a range of `doc`, while the composition
+    /// is live.
+    pub(crate) fn segment(&self, doc: &TextDocument) -> Option<Range<usize>> {
+        let range = self.range(doc)?;
+        let segment = self.segment.as_ref()?;
+        let start = (range.start + segment.start).min(range.end);
+        let end = (range.start + segment.end).min(range.end);
+        (start < end).then_some(start..end)
+    }
+
+    /// Put `cursor` where the input method says the caret is inside the live
+    /// composition, when it says. Otherwise the caret stays after it, where
+    /// [`show`](Self::show) left it.
+    pub(crate) fn place_caret(&self, doc: &TextDocument, cursor: &TextCursor) {
+        if let (Some(at), Some(range)) = (self.caret, self.range(doc)) {
+            cursor.set_position((range.start + at).min(range.end), MoveMode::MoveAnchor);
         }
     }
 
@@ -318,6 +425,8 @@ impl Composition {
     }
 
     fn forget(&mut self) {
+        self.segment = None;
+        self.caret = None;
         self.shown = None;
         self.ended = false;
         self.layer = None;
@@ -404,6 +513,81 @@ mod tests {
         assert_eq!(cursor.position(), 9);
         doc.undo().unwrap();
         assert_eq!(text(&doc), "ab", "one undo takes the whole commit back");
+    }
+
+    #[test]
+    fn strokes_are_thin_except_the_segment() {
+        use PreeditStroke::{Thick, Thin};
+        let range = 5..11;
+        assert_eq!(preedit_strokes(&range, None), vec![(5..11, Thin)]);
+        assert_eq!(
+            preedit_strokes(&range, Some(&(7..9))),
+            vec![(5..7, Thin), (7..9, Thick), (9..11, Thin)]
+        );
+        assert_eq!(
+            preedit_strokes(&range, Some(&(5..11))),
+            vec![(5..11, Thick)],
+            "a segment that is the whole composition is all thick"
+        );
+        assert_eq!(
+            preedit_strokes(&range, Some(&(5..8))),
+            vec![(5..8, Thick), (8..11, Thin)]
+        );
+        assert_eq!(
+            preedit_strokes(&range, Some(&(9..20))),
+            vec![(5..9, Thin), (9..11, Thick)],
+            "clamped into the composition"
+        );
+        assert_eq!(
+            preedit_strokes(&range, Some(&(20..30))),
+            vec![(5..11, Thin)]
+        );
+        assert!(preedit_strokes(&(3..3), Some(&(3..3))).is_empty());
+    }
+
+    #[test]
+    fn the_cursor_range_is_a_segment_or_a_caret_in_the_shown_characters() {
+        let (doc, cursor) = doc("ab");
+        cursor.set_position(2, MoveMode::MoveAnchor);
+        let mut composition = Composition::default();
+        // "にほん": three characters of three bytes. A range with an extent is
+        // the segment, in characters.
+        composition.show(&doc, &cursor, "にほん");
+        composition.mark("にほん", Some(&(0..6)), &[true; 3]);
+        assert_eq!(composition.segment(&doc), Some(2..4));
+        composition.place_caret(&doc, &cursor);
+        assert_eq!(
+            cursor.position(),
+            5,
+            "a segment leaves the caret at the end"
+        );
+        // No extent: the caret's place inside it.
+        composition.show(&doc, &cursor, "にほん");
+        composition.mark("にほん", Some(&(3..3)), &[true; 3]);
+        assert_eq!(composition.segment(&doc), None);
+        composition.place_caret(&doc, &cursor);
+        assert_eq!(cursor.position(), 3);
+        // The input method hides its cursor: neither.
+        composition.show(&doc, &cursor, "にほん");
+        composition.mark("にほん", None, &[true; 3]);
+        composition.place_caret(&doc, &cursor);
+        assert_eq!(composition.segment(&doc), None);
+        assert_eq!(cursor.position(), 5);
+    }
+
+    #[test]
+    fn the_cursor_range_counts_only_the_characters_the_surface_kept() {
+        let (doc, cursor) = doc("");
+        let mut composition = Composition::default();
+        // The surface dropped the second character of "a1b2c": the segment
+        // "1b2" (bytes 1..4) is "b" of what it shows, "abc".
+        composition.show(&doc, &cursor, "abc");
+        composition.mark("a1b2c", Some(&(1..4)), &[true, false, true, false, true]);
+        assert_eq!(composition.segment(&doc), Some(1..2));
+        // A range past what was kept is clamped to it.
+        composition.show(&doc, &cursor, "ab");
+        composition.mark("abcdef", Some(&(1..6)), &[true; 6]);
+        assert_eq!(composition.segment(&doc), Some(1..2));
     }
 
     #[test]

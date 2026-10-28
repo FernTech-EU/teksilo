@@ -166,10 +166,12 @@ pub(super) fn handle_key(
     // text match what the input method is showing. Replaced by the
     // next composition event, or finalised by the matching `ImeCommit`.
     if let WidgetEvent::ImeComposition {
-        text, replacement, ..
+        text,
+        cursor,
+        replacement,
     } = event
     {
-        return handle_ime_composition(state, ctx, text, replacement.as_ref());
+        return handle_ime_composition(state, ctx, text, cursor.as_ref(), replacement.as_ref());
     }
 
     // IME commit — the user picked a candidate or typed a printable
@@ -1356,6 +1358,7 @@ fn handle_ime_composition(
     state: &SharedState,
     ctx: &mut EventContext,
     text: &str,
+    cursor: Option<&std::ops::Range<usize>>,
     replacement: Option<&std::ops::Range<usize>>,
 ) -> EventResponse {
     let filter = state.borrow().policy.command_filter;
@@ -1427,7 +1430,13 @@ fn handle_ime_composition(
                 collapse_selection_before_insert(st);
             }
         }
-        st.composition.show(&st.document, &st.cursor, &clean);
+        if st.composition.show(&st.document, &st.cursor, &clean) {
+            // Which part the input method is on: the segment it converts, or
+            // the caret's place inside the composition.
+            let kept: Vec<bool> = text.chars().map(|c| !c.is_control()).collect();
+            st.composition.mark(text, cursor, &kept);
+            st.composition.place_caret(&st.document, &st.cursor);
+        }
         st.preferred_x = None;
         // Editing always lands the caret at a logical position; any
         // sticky upstream affinity from a previous click is invalid

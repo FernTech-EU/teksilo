@@ -1201,26 +1201,38 @@ impl Widget for TextInputField {
         }
 
         // IME preedit underline: a thin line under the composing range so
-        // the user sees the text is tentative. Single line → one segment;
-        // on a secure field it sits under the masked bullets. Drawn inside
-        // the text clip so it never spills past the viewport.
+        // the user sees the text is tentative, and a thick one under the
+        // segment the input method is converting. Single line → one stretch
+        // each; on a secure field it sits under the masked bullets. Drawn
+        // inside the text clip so it never spills past the viewport.
         if let Some(range) = st.composition.range(&st.document)
             && st.engine.has_full_layout()
             && range.start < range.end
         {
-            let start_c = st
-                .engine
-                .caret_rect(range.start, CursorAffinity::Downstream);
-            let end_c = st.engine.caret_rect(range.end, CursorAffinity::Downstream);
-            let x0 = bounds.x - scroll_x + start_c[0];
-            let x1 = bounds.x - scroll_x + end_c[0];
-            let y = bounds.y + offset_y + start_c[1] + start_c[3] - 1.0;
-            canvas.draw_line(
-                Point::new(x0, y),
-                Point::new(x1, y),
-                text_color,
-                teksilo_canvas::StrokeStyle::solid(1.0),
-            );
+            let segment = st.composition.segment(&st.document);
+            for (stretch, stroke) in
+                crate::common::composition::preedit_strokes(&range, segment.as_ref())
+            {
+                let start_c = st
+                    .engine
+                    .caret_rect(stretch.start, CursorAffinity::Downstream);
+                let end_c = st
+                    .engine
+                    .caret_rect(stretch.end, CursorAffinity::Downstream);
+                let x0 = bounds.x - scroll_x + start_c[0];
+                let x1 = bounds.x - scroll_x + end_c[0];
+                let y = bounds.y + offset_y + start_c[1] + start_c[3] - 1.0;
+                let weight = match stroke {
+                    crate::common::composition::PreeditStroke::Thin => 1.0,
+                    crate::common::composition::PreeditStroke::Thick => 2.0,
+                };
+                canvas.draw_line(
+                    Point::new(x0, y),
+                    Point::new(x1, y),
+                    text_color,
+                    teksilo_canvas::StrokeStyle::solid(weight),
+                );
+            }
         }
 
         canvas.clear_clip();

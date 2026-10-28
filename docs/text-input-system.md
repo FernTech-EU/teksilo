@@ -43,7 +43,10 @@ ImeComposition {
 `WidgetEvent::ime_composition(text, cursor)` builds an update with no
 `replacement`.
 
-The stock widgets show the composition inside their text, underlined, and
+The stock widgets show the composition inside their text, underlined, with
+a thick underline under the segment the input method is converting (a
+`cursor` range with an extent) and a thin one under the rest; a `cursor`
+range with no extent puts the caret there inside the composition. They
 record none of its updates in the undo history: one undo after a commit
 takes the committed text out. An edit the application makes while a
 composition shows (writing the text, say) takes the composition out of the

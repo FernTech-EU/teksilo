@@ -228,6 +228,13 @@ by crate for clarity, not because crates version independently.
   "Heading"), until the host's next `refresh_if_stale` and the frame after
   it. They now move with the text as it is edited; the refresh still finds
   the matches the edit made or broke.
+- **The segment an input method is converting is underlined thick.** In a
+  `TextInput`, `SearchField`, `PasswordField`, `RichTextEditor` and the other
+  text fields, the part of a composition the input method is working on (a
+  Mozc clause, Pinyin's highlighted run, a macOS conversion segment) has a
+  thick underline and the rest of the composition a thin one, so with several
+  segments you can see which one a key will convert. A caret the input method
+  puts inside its composition is where the caret shows.
 - **A click in the padding of a text field places the caret.** A press in
   the few pixels above or below the text line of a `TextInput`, `SearchField`,
   `PasswordField`, `SpinBox`, the date and time editors, `HexColorInput` or

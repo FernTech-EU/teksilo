@@ -632,6 +632,11 @@ impl Widget for RichTextEditorBody {
             .composition
             .range(&st.document)
             .filter(|_| st.shows_transient_edits());
+        // The segment the input method is converting, drawn thicker.
+        let ime_segment = st
+            .composition
+            .segment(&st.document)
+            .filter(|_| st.shows_transient_edits());
         let ime_affinity = st.cursor_affinity;
 
         // Clip to bounds so overflowing glyphs don't bleed into siblings.
@@ -741,41 +746,51 @@ impl Widget for RichTextEditorBody {
             && range.start < range.end
         {
             let color = ctx.theme.colors.text_primary;
-            let underline = |canvas: &mut Canvas, x0: f32, x1: f32, y: f32, h: f32| {
-                let uy = y + h - 1.0;
-                canvas.draw_line(
-                    Point::new(x0, uy),
-                    Point::new(x1, uy),
-                    color,
-                    teksilo_canvas::StrokeStyle::solid(1.0),
-                );
-            };
-            let mut seg_x0: Option<f32> = None;
-            let (mut seg_y, mut seg_h, mut last_x) = (0.0_f32, 0.0_f32, 0.0_f32);
-            for p in range.start..=range.end {
-                let c = engine.caret_rect(p, ime_affinity);
-                let x = bounds.x + c[0] - scroll_x_logical;
-                let y = bounds.y + c[1];
-                match seg_x0 {
-                    None => {
-                        seg_x0 = Some(x);
-                        seg_y = y;
-                        seg_h = c[3];
-                        last_x = x;
-                    }
-                    Some(x0) => {
-                        if (y - seg_y).abs() > 0.5 {
-                            underline(canvas, x0, last_x, seg_y, seg_h);
+            // One stroke per visual line of each stretch: the composition's
+            // text thin, the segment being converted thick.
+            for (stretch, stroke) in
+                crate::common::composition::preedit_strokes(&range, ime_segment.as_ref())
+            {
+                let weight = match stroke {
+                    crate::common::composition::PreeditStroke::Thin => 1.0,
+                    crate::common::composition::PreeditStroke::Thick => 2.0,
+                };
+                let underline = |canvas: &mut Canvas, x0: f32, x1: f32, y: f32, h: f32| {
+                    let uy = y + h - 1.0;
+                    canvas.draw_line(
+                        Point::new(x0, uy),
+                        Point::new(x1, uy),
+                        color,
+                        teksilo_canvas::StrokeStyle::solid(weight),
+                    );
+                };
+                let mut seg_x0: Option<f32> = None;
+                let (mut seg_y, mut seg_h, mut last_x) = (0.0_f32, 0.0_f32, 0.0_f32);
+                for p in stretch.start..=stretch.end {
+                    let c = engine.caret_rect(p, ime_affinity);
+                    let x = bounds.x + c[0] - scroll_x_logical;
+                    let y = bounds.y + c[1];
+                    match seg_x0 {
+                        None => {
                             seg_x0 = Some(x);
                             seg_y = y;
                             seg_h = c[3];
+                            last_x = x;
                         }
-                        last_x = x;
+                        Some(x0) => {
+                            if (y - seg_y).abs() > 0.5 {
+                                underline(canvas, x0, last_x, seg_y, seg_h);
+                                seg_x0 = Some(x);
+                                seg_y = y;
+                                seg_h = c[3];
+                            }
+                            last_x = x;
+                        }
                     }
                 }
-            }
-            if let Some(x0) = seg_x0 {
-                underline(canvas, x0, last_x, seg_y, seg_h);
+                if let Some(x0) = seg_x0 {
+                    underline(canvas, x0, last_x, seg_y, seg_h);
+                }
             }
         }
 
