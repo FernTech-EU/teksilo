@@ -88,6 +88,14 @@ by crate for clarity, not because crates version independently.
   `replacement`: the range of the field's text, in characters, that the
   composition takes the place of (Korean Hanja conversion). A `match` on it
   needs `..`; a literal needs `WidgetEvent::ime_composition`.
+- A click or a screen reader's Click on a control that is not focusable at
+  all (a `focusable(false)` icon, a plain `on_tap` node) has the focused
+  field commit its edit first (`on_commit_fn`, `on_commit_edit`), as one on
+  a control built with `focus_on_click(false)` does, so its command sees
+  what was typed. A click on a part of the field itself (its scroll bar, a
+  row of its completion popup), on scroll chrome (another view's scroll bar,
+  a tab strip's scroll arrows), on empty background, a drag and a scroll
+  commit nothing.
 
 #### Widgets
 
@@ -239,8 +247,9 @@ by crate for clarity, not because crates version independently.
   `TextInput`, `SearchField` and `PasswordField`). The input method went on
   composing at the old place and committed there later, or carried the
   composition into the next field. An undo, redo, cut, paste or format
-  command, and a click on a control that takes no focus (a toolbar button),
-  end it the same way before they run.
+  command, and a click on a control that takes no focus (a toolbar button,
+  built with `focus_on_click(false)` or not focusable at all), end it the
+  same way before they run.
 - **Text typed or committed just before a click goes in where it was
   typed**, not at the click. The Microsoft Korean IME commits its syllable on
   the mouse press, so the syllable landed inside the word clicked on.

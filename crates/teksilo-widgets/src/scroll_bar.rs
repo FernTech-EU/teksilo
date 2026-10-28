@@ -522,8 +522,10 @@ impl Widget for ScrollBar {
 
         // Scrollbars are pointer affordances. AT scrolls through the parent
         // ScrollView node's ScrollUp/Down/Left/Right actions, not by focusing
-        // the scrollbar widget itself.
-        let mut handlers = HandlerSet::new().focusable(false);
+        // the scrollbar widget itself. Scroll chrome: a click on the track or
+        // the thumb scrolls and runs no command, so the focused text field
+        // keeps its edit and its composition.
+        let mut handlers = HandlerSet::new().focusable(false).scroll_chrome();
 
         // Thumb drag — routed through the typed gesture API. The
         // framework auto-captures the pointer on `DragPhase::Started`
@@ -914,6 +916,63 @@ mod tests {
             saw_override.get(),
             "ScrollBar::thumb_color must thread into ScrollBarStyleConfig::thumb_color"
         );
+    }
+
+    /// A click on the track of another view's scroll bar pages that view and
+    /// runs no command, so the focused text field commits nothing (and keeps
+    /// an input method's composition): the bar is scroll chrome.
+    #[test]
+    fn a_click_on_another_views_scroll_bar_commits_nothing() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        use teksilo_canvas::Point;
+        use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+        let commits = Rc::new(Cell::new(0));
+        let position = Signal::new(0.0_f32);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let field = tree.add(crate::primitives::FixedSize::new().width(200.0).child(
+            crate::primitives::TextInputField::new(Signal::new(String::from("ab"))).on_commit_fn({
+                let commits = commits.clone();
+                move |_| commits.set(commits.get() + 1)
+            }),
+        ));
+        let bar = tree.add(
+            crate::primitives::FixedSize::new()
+                .width(12.0)
+                .height(400.0)
+                .child(
+                    ScrollBar::new(
+                        ScrollBarOrientation::Vertical,
+                        position.clone(),
+                        Signal::new(500.0),
+                        Signal::new(0.5),
+                    )
+                    .thickness(12.0),
+                ),
+        );
+        tree.add(crate::primitives::HStack::new().child(field).child(bar));
+        tree.layout(SizeProposal::exact(400.0, 400.0));
+        let _ = tree.render();
+        let focus = tree.first_focusable_descendant(field).unwrap();
+        tree.focus(focus);
+
+        // Below the thumb, which covers the top half of the track.
+        let b = tree.bounds(bar);
+        let at = Point::new(b.x + b.width / 2.0, b.y + b.height * 0.8);
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        assert!(position.get() > 0.0, "the click paged the view");
+        assert_eq!(commits.get(), 0, "and the field committed nothing");
+        assert_eq!(tree.focused(), Some(focus));
     }
 
     // ── Keyboard ───────────────────────────────────────────────────

@@ -429,6 +429,9 @@ pub struct HandlerSet {
     /// When `Some(true)`, the node is part of the window's own chrome. See
     /// [`HandlerSet::window_chrome`].
     pub(crate) window_chrome: Option<bool>,
+    /// When `Some(true)`, the node's subtree is scroll chrome. See
+    /// [`HandlerSet::scroll_chrome`].
+    pub(crate) scroll_chrome: Option<bool>,
     /// When `Some(false)`, a click or tap activates the node without moving
     /// keyboard focus to it. See [`HandlerSet::focus_on_click`].
     pub(crate) focus_on_click: Option<bool>,
@@ -519,6 +522,7 @@ impl HandlerSet {
             event_pass_through,
             gesture_dead_zone,
             window_chrome,
+            scroll_chrome,
             focus_on_click,
             long_press_role,
             touch_action,
@@ -564,6 +568,7 @@ impl HandlerSet {
             event_pass_through: None,
             gesture_dead_zone: None,
             window_chrome: None,
+            scroll_chrome: None,
             focus_on_click: None,
             long_press_role: None,
             drag_activation: None,
@@ -885,6 +890,21 @@ impl HandlerSet {
     #[doc(hidden)]
     pub fn window_chrome(mut self) -> Self {
         self.window_chrome = Some(true);
+        self
+    }
+
+    /// Mark this widget's subtree **scroll chrome**: a scroll bar's track and
+    /// thumb, a tab strip's scroll arrows. A click on it moves a view and runs
+    /// no command, so, although it takes no focus, it does not have the
+    /// focused text field commit its edit or end its input method's
+    /// composition first, as a click on another control that takes no focus
+    /// does (see [`focus_on_click`](Self::focus_on_click)). Scrolling a
+    /// neighbouring pane leaves the field as it is.
+    ///
+    /// For the stock widgets' scroll chrome.
+    #[doc(hidden)]
+    pub fn scroll_chrome(mut self) -> Self {
+        self.scroll_chrome = Some(true);
         self
     }
 

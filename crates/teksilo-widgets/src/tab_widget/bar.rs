@@ -2751,7 +2751,9 @@ fn build_scroll_arrow(
         }
     };
     // Takes no focus from a click (Qt's tab bar scroll buttons take none
-    // either): scrolling the strip leaves focus where it was.
+    // either): scrolling the strip leaves focus where it was. Scroll chrome,
+    // so the click runs no command and the focused text field keeps its edit
+    // and its composition.
     let button = IconButton::new(icon)
         .embedded()
         .size(IconButtonSize::Compact)
@@ -2768,7 +2770,9 @@ fn build_scroll_arrow(
             // `animate_to` is supported.
             scroll_main.animate_to(target, duration, easing);
         });
-    ctx.add(button.focus_on_click(false))
+    let id = ctx.add(button.focus_on_click(false));
+    ctx.apply_handlers(id, HandlerSet::new().scroll_chrome());
+    id
 }
 
 /// One entry in the overflow dropdown — a stable [`TabId`], the

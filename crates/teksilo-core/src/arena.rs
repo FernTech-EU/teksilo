@@ -218,6 +218,11 @@ pub struct WidgetNode {
     /// blocked, including what it puts in a title bar. See
     /// `WidgetTree::window_chrome_under_modal`. Default `false`.
     pub(crate) window_chrome: bool,
+    /// When `true`, this node and its subtree are scroll chrome: a scroll
+    /// bar, a tab strip's scroll arrows. A click on them moves a view and runs
+    /// no command, so it has the focused field commit nothing. Default
+    /// `false`. Set with `HandlerSet::scroll_chrome`.
+    pub(crate) scroll_chrome: bool,
     /// When `false`, a click or a tap that lands on this node or anywhere in
     /// its subtree moves no focus: not to this node, not to a focusable node
     /// inside it, not to a focusable ancestor. Keyboard focus, programmatic
@@ -535,6 +540,7 @@ impl WidgetNode {
             event_pass_through: false,
             gesture_dead_zone: false,
             window_chrome: false,
+            scroll_chrome: false,
             focus_on_click: true,
             long_press_role: crate::widget_tree::touch_route::LongPressRole::Auto,
             touch_action: TouchAction::AUTO,
@@ -2246,6 +2252,9 @@ impl WidgetArena {
             }
             if let Some(chrome) = handler_set.window_chrome {
                 node.window_chrome = chrome;
+            }
+            if let Some(chrome) = handler_set.scroll_chrome {
+                node.scroll_chrome = chrome;
             }
             if let Some(focus_on_click) = handler_set.focus_on_click {
                 node.focus_on_click = focus_on_click;

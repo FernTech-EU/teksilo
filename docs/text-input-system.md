@@ -120,6 +120,20 @@ stock widgets do the same, and also before an undo, redo, cut, paste or
 format command runs (from a key, a menu or the native menu bar) and before
 the command of a control that takes no focus (a toolbar button).
 
+That last case is the framework's: a click that completes a tap on a control
+built with `focus_on_click(false)`, or on one with nothing focusable from it
+up to the root (a `focusable(false)` icon, a plain `on_tap` node), blurs
+nothing, so before the control's handlers run the router calls the
+`on_commit_edit` hook of the focused widget and of its ancestors, and the
+stock widgets end their composition there. A screen reader's Click on such a
+control does the same. Nothing is committed for a hover, a scroll, a press on
+empty background (no command runs and focus stays), a press dragged off the
+control or taken by a drag, nor for a click on scroll chrome (another view's
+scroll bar, a tab strip's scroll arrows), which scrolls and runs no command,
+nor for a click on a part of the focused field itself: its own subtree (its
+scroll bar) and the popups attached to it (its completion or candidate list,
+its context menu).
+
 They call `ctx.finish_ime_composition()` first, while the composition still
 shows. It tells the input method that the composition is over and returns
 the text the input method committed for it, if it committed one. The field

@@ -4845,6 +4845,9 @@ impl WidgetTree {
                         if let Some(chrome) = handler_set.window_chrome {
                             node.window_chrome = chrome;
                         }
+                        if let Some(chrome) = handler_set.scroll_chrome {
+                            node.scroll_chrome = chrome;
+                        }
                         if let Some(focus_on_click) = handler_set.focus_on_click {
                             node.focus_on_click = focus_on_click;
                         }
@@ -5038,6 +5041,9 @@ impl WidgetTree {
                         }
                         if let Some(chrome) = handler_set.window_chrome {
                             node.window_chrome = chrome;
+                        }
+                        if let Some(chrome) = handler_set.scroll_chrome {
+                            node.scroll_chrome = chrome;
                         }
                         if let Some(focus_on_click) = handler_set.focus_on_click {
                             node.focus_on_click = focus_on_click;

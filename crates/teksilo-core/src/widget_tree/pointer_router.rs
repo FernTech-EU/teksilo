@@ -1125,7 +1125,9 @@ impl WidgetTree {
                     self.arm_touch_route(target, *position);
                 }
             }
-            WidgetEvent::PointerUp { position, .. } => {
+            WidgetEvent::PointerUp {
+                position, button, ..
+            } => {
                 // A `PointerCancel` is terminal. If this pointer's press was
                 // revoked, the `Up` that follows completes nothing — the widget
                 // has already been told to let go, and delivering the release
@@ -1173,12 +1175,15 @@ impl WidgetTree {
                 // editor, a row's button) leaves the ancestor's DragRecognizer
                 // armed, and the next hover move starts a phantom drag.
                 self.note_sequence_position(*position);
+                // Whether this release completes a tap on a control that
+                // takes no focus is read from the sequence, so before it ends.
+                let taps_unfocusable = self.release_taps_unfocusable(*position, *button);
                 self.end_sequence(&event, &mut *ops);
                 // A direct pointer's focus lands here, before the release is
                 // dispatched, so a handler activating on the `Up` runs with the
                 // focus its own press earned; so does the commit a click on a
                 // control that takes no focus makes, for every pointer.
-                self.focus_on_release(*position, &mut *ops);
+                self.focus_on_release(*position, taps_unfocusable, &mut *ops);
                 if let Some(captured) = self.current_pointer_capture() {
                     self.dispatch_to_widget(captured, &event, &mut *ops);
                     // Per pointer: this Up releases *this* pointer's capture and
@@ -1390,13 +1395,17 @@ impl WidgetTree {
                             };
                     } else {
                         // A Click on a control a click does not focus
-                        // (`focus_on_click(false)`) blurs nothing, as the
-                        // pointer's does not: the focused field commits what
-                        // was typed first, so the command sees it.
+                        // (`focus_on_click(false)`, or nothing focusable up to
+                        // the root) blurs nothing, as the pointer's does not:
+                        // the focused field commits what was typed first, so
+                        // the command sees it. Unless the control is part of
+                        // that field, or scroll chrome, as for the pointer.
                         if *action == accesskit::Action::Click
-                            && self
-                                .find_focusable_at_or_above(id)
-                                .is_some_and(|focusable| !self.click_may_focus(focusable))
+                            && !self.in_scroll_chrome(id)
+                            && match self.find_focusable_at_or_above(id) {
+                                Some(focusable) => !self.click_may_focus(focusable),
+                                None => !self.belongs_to_focused(id),
+                            }
                         {
                             self.commit_pending_edit(&mut *ops);
                         }
@@ -1959,7 +1968,8 @@ impl WidgetTree {
 
     /// The click about to be dispatched (by a pointer, or an
     /// assistive-technology Click) lands on a control that takes no
-    /// focus from it, so it blurs nothing: have the focused widget, and each
+    /// focus from it (built with `focus_on_click(false)`, or not focusable at
+    /// all), so it blurs nothing: have the focused widget, and each
     /// of its ancestors, commit the edit it holds
     /// ([`on_commit_edit`](crate::widget_builder::HandlerSet::on_commit_edit)),
     /// innermost first, as a blur would have made it, so that the command
@@ -2005,6 +2015,87 @@ impl WidgetTree {
         }
     }
 
+    /// Whether the release at `position` with `button` completes a tap on a
+    /// control that takes no focus at all, from the press to the root (a
+    /// `focusable(false)` icon, a plain `on_tap` node): the click runs that
+    /// control's command, and the focused field commits first, as for a
+    /// control built with `focus_on_click(false)`.
+    ///
+    /// The press must have been taken by a node whose `on_tap` answers the
+    /// button, and must end inside the tap boundary the tap recognizer
+    /// measures: a hover, a scroll, a press on empty background (no node took
+    /// it, nothing runs, focus does not move, so nothing has to be committed,
+    /// as a native line edit commits only when focus leaves it or a command
+    /// runs), a drag or a swipe that took the press, and a press dragged off
+    /// commit nothing. Nor does a tap on the focused widget's own parts
+    /// ([`belongs_to_focused`](Self::belongs_to_focused)): its scroll bar, or
+    /// a popup attached to it, act within the edit. Nor one on scroll chrome
+    /// ([`in_scroll_chrome`](Self::in_scroll_chrome)): another view's scroll
+    /// bar moves that view and runs no command.
+    ///
+    /// Read before the sequence ends, since the tap boundary is measured from
+    /// the press origin it holds.
+    fn release_taps_unfocusable(&self, position: Point, button: PointerButton) -> bool {
+        let Some(press) = self.presses.get(self.current_pointer_id()) else {
+            return false;
+        };
+        let Some(owner) = press.owner.filter(|_| press.focusable.is_none()) else {
+            return false;
+        };
+        if !self.arena.is_active(owner) || !self.tap_buttons(owner).contains(button) {
+            return false;
+        }
+        let Some(sequence) = self.current_sequence() else {
+            return false;
+        };
+        // Any winner ends the tap: a peer that claimed the press (an
+        // ancestor's drag, a pan), or the owner's own drag or swipe. An
+        // explicit capture the owner made (a raw member) decides without
+        // recognizing anything, and its tap may still follow.
+        if let Some(winner) = sequence.winner()
+            && (winner != owner
+                || sequence.members().iter().any(|member| {
+                    member.id == winner
+                        && matches!(member.role, crate::gesture::MemberRole::Gesture)
+                }))
+        {
+            return false;
+        }
+        let profile = self.current_profile();
+        let left = crate::gesture::TapBoundary::for_pointer(&self.current_input.pointer, &profile)
+            .left(
+                sequence.press_origin(),
+                position,
+                Some(self.arena.bounds(owner)),
+                &profile,
+            );
+        !left && !self.in_scroll_chrome(owner) && !self.belongs_to_focused(owner)
+    }
+
+    /// Whether `id` is in a subtree marked
+    /// [`scroll_chrome`](crate::widget_builder::HandlerSet::scroll_chrome): a
+    /// scroll bar, a tab strip's scroll arrows. A click there scrolls and runs
+    /// no command, so the focused field commits nothing for it.
+    fn in_scroll_chrome(&self, id: WidgetId) -> bool {
+        let mut current = Some(id);
+        while let Some(node) = current {
+            if self.arena.get(node).is_some_and(|n| n.scroll_chrome) {
+                return true;
+            }
+            current = self.arena.parent(node);
+        }
+        false
+    }
+
+    /// Whether `id` is part of the focused widget: in its subtree, or in a
+    /// popup attached to it or to a widget of its subtree (its completion or
+    /// candidate list, its context menu), which an intent's walk from `id`
+    /// crosses back to it ([`intent_walk`](Self::intent_walk)).
+    fn belongs_to_focused(&self, id: WidgetId) -> bool {
+        self.focused
+            .is_some_and(|focus| self.intent_walk(id, &[]).0.contains(&focus))
+    }
+
     /// Whether a click or a tap may move focus to `focusable`, the focusable
     /// widget it landed on or in: false when that widget was built with
     /// [`focus_on_click(false)`](crate::widget_builder::HandlerSet::focus_on_click),
@@ -2031,9 +2122,26 @@ impl WidgetTree {
     /// has the focused widget commit its pending edit instead
     /// ([`commit_pending_edit`](Self::commit_pending_edit)), under the same
     /// guard and for every pointer, a mouse included: a press dragged off or
-    /// cancelled has run no command, so nothing is committed for it.
+    /// cancelled has run no command, so nothing is committed for it, and
+    /// neither is a click on scroll chrome
+    /// ([`in_scroll_chrome`](Self::in_scroll_chrome)), which only scrolls.
     /// Otherwise a no-op for an indirect pointer, which focused at press.
-    fn focus_on_release(&mut self, position: Point, ops: &mut dyn crate::window::WindowOps) {
+    ///
+    /// A press that found no focusable at all commits the same way when
+    /// `taps_unfocusable` says its release completes a tap
+    /// ([`release_taps_unfocusable`](Self::release_taps_unfocusable)): a
+    /// toolbar icon built without focus runs its command as one built with
+    /// `focus_on_click(false)` does.
+    fn focus_on_release(
+        &mut self,
+        position: Point,
+        taps_unfocusable: bool,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        if taps_unfocusable {
+            self.commit_pending_edit(&mut *ops);
+            return;
+        }
         let releasing = self.current_input.pointer;
         let pointer = self.current_pointer_id();
         let Some(pressed) = self.presses.get(pointer).and_then(|p| p.focusable) else {
@@ -2049,7 +2157,11 @@ impl WidgetTree {
             return;
         }
         if !self.click_may_focus(pressed) {
-            self.commit_pending_edit(&mut *ops);
+            // Scroll chrome built this way (a tab strip's scroll arrows)
+            // scrolls and runs no command: nothing to commit for.
+            if !self.in_scroll_chrome(target) {
+                self.commit_pending_edit(&mut *ops);
+            }
         } else {
             self.focus_with_origin_ops(
                 pressed,
