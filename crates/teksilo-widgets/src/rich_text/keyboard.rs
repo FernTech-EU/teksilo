@@ -512,7 +512,10 @@ pub(super) fn handle_key(
                     let _ = st.cursor.unwrap_current_block_from_blockquote();
                 } else {
                     collapse_selection_before_insert(&st);
-                    let _ = st.cursor.insert_block();
+                    // The caret's format goes on in the new paragraph.
+                    super::typing_format::insert_paragraph(&mut st, |st| {
+                        let _ = st.cursor.insert_block();
+                    });
                 }
                 KeyAction::ClearPreferredX
             }
@@ -842,7 +845,9 @@ pub(super) fn run_format_shortcut(
                 // Always a new block, bypassing table-cell navigation.
                 // Matches the godot reference's forced-block-insert branch.
                 collapse_selection_before_insert(&st);
-                let _ = st.cursor.insert_block();
+                super::typing_format::insert_paragraph(&mut st, |st| {
+                    let _ = st.cursor.insert_block();
+                });
             }
             _ => return false,
         }

@@ -93,7 +93,8 @@ impl FormatToggle {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TypingFormat {
     at: usize,
-    /// Only the toggled fields are set.
+    /// Only the toggled fields are set, or the fields carried across a
+    /// paragraph break ([`insert_paragraph`]).
     format: TextFormat,
 }
 
@@ -133,18 +134,65 @@ pub(crate) fn caret_format(st: &EditorState) -> TextFormat {
     }
     let mut format = probe.char_format().unwrap_or_default();
     if let Some(kept) = pending(st) {
-        for toggle in [
-            FormatToggle::Bold,
-            FormatToggle::Italic,
-            FormatToggle::Underline,
-            FormatToggle::Strikethrough,
-        ] {
-            if let Some(value) = toggle.get(kept) {
-                toggle.set(&mut format, value);
-            }
-        }
+        overlay(&mut format, kept);
     }
     format
+}
+
+/// Every character field `over` sets, set on `format`. Not the link: a link
+/// is never kept for the text typed next.
+fn overlay(format: &mut TextFormat, over: &TextFormat) {
+    fn set<T: Clone>(field: &mut Option<T>, over: &Option<T>) {
+        if over.is_some() {
+            field.clone_from(over);
+        }
+    }
+    set(&mut format.font_family, &over.font_family);
+    set(&mut format.font_point_size, &over.font_point_size);
+    set(&mut format.font_weight, &over.font_weight);
+    set(&mut format.font_bold, &over.font_bold);
+    set(&mut format.font_italic, &over.font_italic);
+    set(&mut format.font_underline, &over.font_underline);
+    set(&mut format.font_overline, &over.font_overline);
+    set(&mut format.font_strikeout, &over.font_strikeout);
+    set(&mut format.letter_spacing, &over.letter_spacing);
+    set(&mut format.word_spacing, &over.word_spacing);
+    set(&mut format.underline_style, &over.underline_style);
+    set(&mut format.vertical_alignment, &over.vertical_alignment);
+    set(&mut format.foreground_color, &over.foreground_color);
+    set(&mut format.background_color, &over.background_color);
+    set(&mut format.underline_color, &over.underline_color);
+}
+
+/// Insert a paragraph break at the collapsed caret with `insert`, and carry
+/// the caret's format across it: the format the text typed before the break
+/// had (the character before the caret, with the pending toggles over it)
+/// becomes the pending format at the start of the new, empty paragraph, as
+/// Word, TextEdit and a `QTextEdit` (the new block's character format) carry
+/// it. So bold typing goes on bold after Enter, and the toggle reads On.
+///
+/// Only into an empty paragraph: one that starts with text (Enter in the
+/// middle of a run) types in the format of that text's first character,
+/// which text-document gives it. The link is not carried. With a selection,
+/// which the break replaces, nothing is.
+pub(crate) fn insert_paragraph(st: &mut EditorState, insert: impl FnOnce(&mut EditorState)) {
+    super::frame_loop::flush_pending_chars(st);
+    let mut carried = TextFormat::default();
+    if !st.cursor.has_selection() {
+        overlay(&mut carried, &caret_format(st));
+    }
+    st.typing_format = None;
+    insert(st);
+    let empty = st.cursor.current_block_is_empty();
+    if let Some(at) = collapsed_caret(st)
+        && empty
+        && carried != TextFormat::default()
+    {
+        st.typing_format = Some(TypingFormat {
+            at,
+            format: carried,
+        });
+    }
 }
 
 /// Keep `toggle` at `value` for the text typed next at the collapsed caret.

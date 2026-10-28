@@ -244,7 +244,9 @@ by crate for clarity, not because crates version independently.
   format the next typed character will have: the text before the caret's
   (at the start of a paragraph, its first character's), with those toggles
   over it, so a toolbar's Bold button reads On after the toggle and at the
-  end of a bold word.
+  end of a bold word. Enter (and Ctrl+Enter, and Enter in a list) carries
+  the format the caret had into the new, empty paragraph: bold typing goes
+  on bold after Enter, until the caret moves. A link is not carried.
 - **Text typed at the start of a paragraph takes the format of its first
   character**, in a `RichTextEditor` as in Word and TextEdit: at the start
   of a bold paragraph it is bold, where it came out plain. An empty

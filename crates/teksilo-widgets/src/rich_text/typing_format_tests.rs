@@ -323,3 +323,151 @@ fn in_an_empty_paragraph_typing_is_plain() {
     e.type_keys("X");
     assert!(!e.bold_at(5));
 }
+
+// ── Across a paragraph break ─────────────────────────────────────────────────
+
+impl Editor {
+    /// Make `[start, end)` bold, then put the caret at `caret`.
+    fn bold_range(&mut self, start: usize, end: usize, caret: usize) {
+        self.handle.select_range(start, end);
+        self.settle();
+        self.key(Key::B, Modifiers::COMMAND);
+        self.handle.select_range(caret, caret);
+        self.settle();
+    }
+
+    fn block_count(&self) -> usize {
+        self.text().split('\n').count()
+    }
+}
+
+/// Bold typing, Enter, more typing: it goes on bold, as in Word and TextEdit.
+#[test]
+fn bold_typing_goes_on_bold_after_enter() {
+    let mut e = Editor::new("", 0);
+    e.key(Key::B, Modifiers::COMMAND);
+    e.type_keys("ab");
+    e.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(e.block_count(), 2);
+    assert!(
+        e.handle.is_bold(),
+        "the toggle reads On in the new paragraph"
+    );
+    e.type_keys("cd");
+    assert_eq!(e.text(), "ab\ncd");
+    assert!((3..5).all(|at| e.bold_at(at)), "the new paragraph is bold");
+}
+
+/// Enter at the end of bold text carries its format, toggled or not.
+#[test]
+fn enter_after_bold_text_types_bold() {
+    let mut e = Editor::new("ab", 2);
+    e.bold_range(0, 2, 2);
+    e.key(Key::Enter, Modifiers::NONE);
+    e.type_keys("X");
+    assert_eq!(e.text(), "ab\nX");
+    assert!(e.bold_at(3));
+
+    // An Italic toggled after the break adds to what was carried.
+    e.key(Key::Enter, Modifiers::NONE);
+    e.key(Key::I, Modifiers::COMMAND);
+    e.type_keys("Y");
+    let y = e.format_at(5);
+    assert_eq!((y.font_bold, y.font_italic), (Some(true), Some(true)));
+}
+
+/// Ctrl+Enter, the forced paragraph, carries it too.
+#[test]
+fn the_forced_paragraph_carries_the_format() {
+    let mut e = Editor::new("ab", 2);
+    e.bold_range(0, 2, 2);
+    e.key(Key::Enter, Modifiers::COMMAND);
+    assert_eq!(e.block_count(), 2);
+    e.type_keys("X");
+    assert!(e.bold_at(3));
+}
+
+/// Any other move of the caret drops what was carried.
+#[test]
+fn moving_after_enter_drops_the_carried_format() {
+    let mut e = Editor::new("ab", 2);
+    e.bold_range(0, 2, 2);
+    e.key(Key::Enter, Modifiers::NONE);
+    e.key(Key::ArrowLeft, Modifiers::NONE);
+    e.key(Key::ArrowRight, Modifiers::NONE);
+    assert!(!e.handle.is_bold(), "an empty paragraph reads plain again");
+    e.type_keys("X");
+    assert!(!e.bold_at(3));
+}
+
+/// Enter in the middle of a bold run: the new paragraph starts with bold
+/// text, whose format the text typed before it takes; nothing is carried.
+#[test]
+fn enter_in_a_bold_run_types_in_the_runs_format() {
+    let mut e = Editor::new("abcd", 2);
+    e.bold_range(0, 4, 2);
+    e.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(e.text(), "ab\ncd");
+    assert!(e.state.borrow().typing_format.is_none(), "nothing carried");
+    assert!(e.handle.is_bold());
+    e.type_keys("X");
+    assert_eq!(e.text(), "ab\nXcd");
+    assert!(e.bold_at(3));
+}
+
+/// Enter at the end of a plain paragraph carries nothing.
+#[test]
+fn enter_after_plain_text_types_plain() {
+    let mut e = Editor::new("ab", 2);
+    e.key(Key::Enter, Modifiers::NONE);
+    assert!(e.state.borrow().typing_format.is_none());
+    e.type_keys("X");
+    assert!(!e.bold_at(3));
+}
+
+/// A link is not carried: the next paragraph is not part of it.
+#[test]
+fn a_link_is_not_carried() {
+    let mut e = Editor::new("ab", 2);
+    e.handle.select_range(0, 2);
+    e.settle();
+    e.handle.set_link("https://example.org");
+    e.key(Key::B, Modifiers::COMMAND);
+    e.handle.select_range(2, 2);
+    e.settle();
+    e.key(Key::Enter, Modifiers::NONE);
+    e.type_keys("X");
+    let x = e.format_at(3);
+    assert_eq!(x.font_bold, Some(true), "the bold is carried");
+    assert_eq!(x.anchor_href, None, "the link is not");
+}
+
+/// Enter at the end of a bold heading: the heading logic decides the new
+/// paragraph's level as before, and the bold goes on.
+#[test]
+fn enter_after_a_bold_heading_keeps_the_bold() {
+    let mut e = Editor::new("Title", 5);
+    e.handle.set_heading_level(1);
+    e.bold_range(0, 5, 5);
+    let level_without_carry = {
+        // What the heading logic gives the new paragraph, without typing.
+        e.key(Key::Enter, Modifiers::NONE);
+        e.handle.get_heading_level()
+    };
+    e.type_keys("X");
+    assert_eq!(e.text(), "Title\nX");
+    assert!(e.bold_at(6), "the bold goes on");
+    assert_eq!(e.handle.get_heading_level(), level_without_carry);
+}
+
+/// In a list, Enter makes the next item, which goes on bold.
+#[test]
+fn a_new_list_item_goes_on_bold() {
+    let mut e = Editor::new("item", 4);
+    e.handle.toggle_list(false);
+    e.bold_range(0, 4, 4);
+    e.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(e.block_count(), 2);
+    e.type_keys("X");
+    assert!(e.bold_at(5));
+}
