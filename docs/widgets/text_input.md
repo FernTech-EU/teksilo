@@ -40,6 +40,8 @@
 | `Self` | [`trailing_slot(widget: impl Widget + 'static)`](#textinput-trailing_slot) |
 | `Self` | [`on_submit_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinput-on_submit_fn) |
 | `Self` | [`on_access_set_value(f: impl Fn(&str, &mut EventContext) -> bool + 'static)`](#textinput-on_access_set_value) |
+| `Self` | [`on_text_inserted(f: impl Fn(EditSource, usize) + 'static)`](#textinput-on_text_inserted) |
+| `Self` | [`writing_tools(allowed: impl Into<Prop<bool>>)`](#textinput-writing_tools) |
 | `Self` | [`on_blur_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinput-on_blur_fn) |
 | `Self` | [`on_commit_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinput-on_commit_fn) |
 | `Self` | [`char_filter(f: impl Fn(char) -> bool + 'static)`](#textinput-char_filter) |
@@ -345,6 +347,26 @@ Handle an assistive technology's whole-value write, given the string it
 set. Forwarded 1:1 to `TextInputField::on_access_set_value`, where the
 reasoning lives. Composites whose text projects a typed value —
 `SpinBox`, the date and time editors — install one.
+
+<a id="textinput-on_text_inserted"></a>
+
+#### `pub fn on_text_inserted(mut self, f: impl Fn(EditSource, usize) + 'static) -> Self`
+
+Callback fired where text lands in the field, with the `EditSource`
+it came through and how many characters it was: typed, committed by
+the input system (an IME, dictation, Writing Tools), pasted, or written
+by an assistive technology. Counts only, never content; not fired when
+the application writes the bound `Signal<String>`. Forwarded 1:1 to
+`TextInputField::on_text_inserted`, where the details live.
+
+<a id="textinput-writing_tools"></a>
+
+#### `pub fn writing_tools(mut self, allowed: impl Into<Prop<bool>>) -> Self`
+
+Whether the system's Writing Tools may act on this field: on macOS,
+whether they may read its text and replace it. Other platforms have no
+such feature. Defaults to `true`; static or a `Signal<bool>`. Forwarded
+1:1 to `TextInputField::writing_tools`.
 
 <a id="textinput-on_blur_fn"></a>
 

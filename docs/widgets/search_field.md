@@ -27,6 +27,8 @@ content and escapes ancestor clipping (same pattern as `ComboBox`).
 | `Self` | [`drives_listbox(listbox: Signal<Option<WidgetId>>, active: Signal<Option<WidgetId>>)`](#searchfield-drives_listbox) |
 | `Self` | [`enabled(on: impl Into<Prop<bool>>)`](#searchfield-enabled) |
 | `Self` | [`on_submit_fn(f: impl Fn(&mut EventContext) + 'static)`](#searchfield-on_submit_fn) |
+| `Self` | [`on_text_inserted(f: impl Fn(EditSource, usize) + 'static)`](#searchfield-on_text_inserted) |
+| `Self` | [`writing_tools(allowed: impl Into<Prop<bool>>)`](#searchfield-writing_tools) |
 | `Self` | [`with_suggestions(f: impl Fn(&str) -> Vec<String> + 'static)`](#searchfield-with_suggestions) |
 | `Self` | [`max_suggestions(n: usize)`](#searchfield-max_suggestions) |
 | `Self` | [`min_chars(n: usize)`](#searchfield-min_chars) |
@@ -162,6 +164,27 @@ arena at build time; a bound `Signal<bool>` updates live.
 #### `pub fn on_submit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Install a callback invoked when the user presses Enter (or activates the search action).
+
+<a id="searchfield-on_text_inserted"></a>
+
+#### `pub fn on_text_inserted(mut self, f: impl Fn(EditSource, usize) + 'static) -> Self`
+
+Callback fired where text lands in the field, with the `EditSource`
+it came through and how many characters it was. Counts only, never
+content; not fired when the application writes the bound
+`Signal<String>`, nor when a picked suggestion replaces the query.
+Forwarded to the inner field; see
+`TextInputField::on_text_inserted`.
+
+<a id="searchfield-writing_tools"></a>
+
+#### `pub fn writing_tools(mut self, allowed: impl Into<Prop<bool>>) -> Self`
+
+Whether the system's Writing Tools may act on this field: on macOS,
+whether they may read its text and replace it. Other platforms have no
+such feature. Defaults to `true`; static or a `Signal<bool>`. Forwarded
+to the inner field; see
+`TextInputField::writing_tools`.
 
 <a id="searchfield-with_suggestions"></a>
 

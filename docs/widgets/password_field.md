@@ -33,6 +33,7 @@ toggle, masking, Caps Lock warning, and clipboard protection.
 | `Self` | [`validator(f: impl Fn(&str) -> ValidationOutcome + 'static)`](#passwordfield-validator) |
 | `Self` | [`on_submit_fn(f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static)`](#passwordfield-on_submit_fn) |
 | `Self` | [`on_blur_fn(f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static)`](#passwordfield-on_blur_fn) |
+| `Self` | [`on_text_inserted(f: impl Fn(EditSource, usize) + 'static)`](#passwordfield-on_text_inserted) |
 | `Self` | [`min_width(width: f32)`](#passwordfield-min_width) |
 | `Self` | [`variant(variant: TextInputVariant)`](#passwordfield-variant) |
 | `Self` | [`style(style: impl TextInputStyle)`](#passwordfield-style) |
@@ -198,6 +199,16 @@ Fired on Enter (focus stays put).
 #### `pub fn on_blur_fn( mut self, f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Fired once per focus-loss.
+
+<a id="passwordfield-on_text_inserted"></a>
+
+#### `pub fn on_text_inserted(mut self, f: impl Fn(EditSource, usize) + 'static) -> Self`
+
+Callback fired where text lands in the field, with the `EditSource`
+it came through and how many characters it was. Counts only, never the
+password itself; not fired when the application writes the bound
+`Signal<String>`. Forwarded 1:1 to
+`TextInputField::on_text_inserted`, where the details live.
 
 <a id="passwordfield-min_width"></a>
 

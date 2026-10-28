@@ -35,6 +35,7 @@ The public editing surfaces: `CodeEditor` and `PlainTextEditor`.
 | `Self` | [`font_family(family: impl Into<String>)`](#codeeditor-font_family) |
 | `Self` | [`font_size_scale(scale: f32)`](#codeeditor-font_size_scale) |
 | `Self` | [`follow_text_scale(follow: bool)`](#codeeditor-follow_text_scale) |
+| `Self` | [`show_transient_edits(show: bool)`](#codeeditor-show_transient_edits) |
 | `Self` | [`on_change(callback: impl Fn() + 'static)`](#codeeditor-on_change) |
 | `Self` | [`background(color: impl Into<teksilo_core::color_prop::ColorProp>)`](#codeeditor-background) |
 | `Self` | [`text_color(color: impl Into<teksilo_core::color_prop::ColorProp>)`](#codeeditor-text_color) |
@@ -68,6 +69,7 @@ The public editing surfaces: `CodeEditor` and `PlainTextEditor`.
 | `Self` | [`wrap_mode(mode: WrapMode)`](#plaintexteditor-wrap_mode) |
 | `Self` | [`font_family(family: impl Into<String>)`](#plaintexteditor-font_family) |
 | `Self` | [`follow_text_scale(follow: bool)`](#plaintexteditor-follow_text_scale) |
+| `Self` | [`show_transient_edits(show: bool)`](#plaintexteditor-show_transient_edits) |
 | `Self` | [`font_size_scale(scale: f32)`](#plaintexteditor-font_size_scale) |
 | `Self` | [`on_change(callback: impl Fn() + 'static)`](#plaintexteditor-on_change) |
 | `Self` | [`background(color: impl Into<teksilo_core::color_prop::ColorProp>)`](#plaintexteditor-background) |
@@ -265,6 +267,20 @@ Whether the editor grows text with the global accessibility text scale
 (default `true`). Turn off for a WYSIWYG surface whose font sizes are
 document content. Composed with `font_size_scale`.
 
+<a id="codeeditor-show_transient_edits"></a>
+
+#### `pub fn show_transient_edits(self, show: bool) -> Self`
+
+Show every transient edit of the document, not only this view's own
+composition: for transient edits the host makes itself through the API
+(`TextCursor::insert_text_transient` and its siblings), an inline
+suggestion shown before it is accepted, say. Off by default: a view shows
+an input method's composition while it is its own, and lays out the
+recorded document the rest of the time, so a composition made in one
+editor of a shared document shows in no other. The document's transient
+edits are one layer, whoever made them, so with this on the view also
+shows another view's composition.
+
 <a id="codeeditor-on_change"></a>
 
 #### `pub fn on_change(self, callback: impl Fn() + 'static) -> Self`
@@ -452,6 +468,13 @@ Fallback font family.
 #### `pub fn follow_text_scale(mut self, follow: bool) -> Self`
 
 Whether the editor follows the global accessibility text scale.
+
+<a id="plaintexteditor-show_transient_edits"></a>
+
+#### `pub fn show_transient_edits(mut self, show: bool) -> Self`
+
+Show every transient edit of the document, not only this view's own
+composition. See `CodeEditor::show_transient_edits`.
 
 <a id="plaintexteditor-font_size_scale"></a>
 

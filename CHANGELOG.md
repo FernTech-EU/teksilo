@@ -13,6 +13,185 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Platform
+
+- **The rows AppKit adds to a Mac app's Edit menu work in Teksilo text
+  fields.** Emoji & Symbols, Start Dictation, the press-and-hold accent popup
+  and Writing Tools (in its panel) insert into the focused `TextInput`,
+  `SearchField`, `PasswordField` (Writing Tools excepted) and
+  `RichTextEditor`, and read the field's selection and text. AutoFill is not
+  supported. See [docs/text-input-system.md](docs/text-input-system.md) and
+  [docs/native-menu.md](docs/native-menu.md).
+- **`TEKSILO_TEXT_INPUT_TRACE=1`** logs what the platform's text input system
+  sends a window, on macOS and Windows.
+
+#### Core
+
+- **`ImeOrigin`** (`Composition`, `Dictation`, `WritingTools`, `Insertion`;
+  `#[non_exhaustive]`) says which part of the input system committed a text.
+- **`WidgetEvent::ime_commit(text)`** builds the plain composition commit.
+- **`WidgetEvent::ime_composition(text, cursor)`** builds a composition
+  update that takes the place of no text.
+- **`EventContext::finish_ime_composition`** (and
+  `WindowOps::finish_ime_composition`) tells the platform's input method that
+  the focused field's composition is over, and returns the text the input
+  method committed for it, which the field keeps in place of what the
+  composition showed (`None` keeps what it showed).
+- **`TextInputDocument`**, reached through `TextSurface::input_document` and
+  `TextSurfaces::with_focused_input_document`, lets a custom text widget tell
+  the platform where its selection is, what its text is and where a range is
+  drawn, so Dictation and Writing Tools work in it on macOS.
+
+#### Widgets
+
+- **`TextInputField::on_text_inserted`**, forwarded by `TextInput`,
+  `PasswordField` and `SearchField`, reports each insertion's `EditSource`
+  and character count.
+- **`.writing_tools(impl Into<Prop<bool>>)`** on `TextInputField`,
+  `TextInput`, `SearchField` and `RichTextEditor` turns Writing Tools off for
+  a field (on by default; a password field is always off).
+- **`EditSource::Dictation` and `EditSource::WritingTools`.**
+- **`show_transient_edits(bool)`** on `RichTextEditor`, `CodeEditor` and
+  `PlainTextEditor` makes a view show every transient edit of its document,
+  for those the host makes itself through `text-document` (a suggestion shown
+  before it is accepted). Off by default: a view shows only its own input
+  method composition. The engine's side is
+  `RichTextEngine::set_shows_transient_edits`.
+- The `rich_text_editor` example has an Edit menu, a Title field, a line per
+  source counting arrivals and a Writing Tools checkbox.
+
+#### Automation
+
+- **`type_ime` takes an `origin`** (`composition`, `dictation`,
+  `writing_tools`, `insertion`), so a headless test can commit text as the
+  input system would.
+
+### Changed
+
+#### Core
+
+- **Breaking.** `WidgetEvent::ImeCommit` is `{ text, origin, replacement }`
+  where it was `{ text }`: `origin` is an `ImeOrigin` and `replacement` an
+  optional character range of the field's text to replace. A `match` on it
+  needs `..` or the two fields; a literal needs `WidgetEvent::ime_commit`.
+- **Breaking.** `WidgetEvent::ImeComposition` has a third field,
+  `replacement`: the range of the field's text, in characters, that the
+  composition takes the place of (Korean Hanja conversion). A `match` on it
+  needs `..`; a literal needs `WidgetEvent::ime_composition`.
+
+#### Widgets
+
+- **Breaking.** `EditSource` moved from `teksilo_widgets::rich_text` to
+  `teksilo_widgets::EditSource` (also `teksilo::widgets::EditSource`) and has
+  two new variants, so an exhaustive `match` over it needs the two arms.
+- A `RichTextEditor` and a `TextInputField` report dictation, Writing Tools
+  and emoji insertions to `on_text_inserted` under `EditSource::Dictation`,
+  `EditSource::WritingTools` and `EditSource::Ime`.
+
+### Fixed
+
+#### Platform
+
+- **On macOS, a key the input method swallows no longer types.** With the
+  press-and-hold accent popup open, the held letter's repeats and the key
+  that picked an accent typed their text as well ("eeê" for "ê").
+- **On macOS, Space with 2-Set Korean and nothing composed types one
+  space**, where it typed two. The input method commits a space of its own
+  for the key, and the key's own space was typed after it.
+- **On macOS, text the input method inserts while a composition it left
+  behind is still marked is no longer lost.** After a switch away from an
+  input method that did not commit its composition, the next input method's
+  insertion (Kotoeri's full-width space) went nowhere and the composition
+  stayed marked; the insertion now takes its place.
+- **On macOS, switching to another input source in the middle of a
+  composition keeps the composition where it was, once.** 2-Set Korean,
+  Kotoeri and Pinyin could leave it uncommitted, then committed it at a
+  later turn of their input source into whichever field had the focus then,
+  so the text could end up in two fields. It is now committed as the switch
+  happens, as the input method commits it (Pinyin's `ni hao` as `nihao`),
+  as one undo step, and the input method's later copy is dropped. Choosing
+  another mode of the same input method (Kotoeri's Katakana after its
+  Hiragana) is not such a switch: the composition goes on, as in TextEdit.
+- **On macOS, an input method asking where its composition is just after
+  committing it is told there is none.** Kotoeri, committing at the end of a
+  heading, was pointed at the document's first characters.
+- **On macOS, a character the input method types in place of a key's own
+  is the one typed.** With nothing composed, Kotoeri's Space typed a
+  half-width space instead of its full-width U+3000, and Pinyin's "；" and
+  "，" came out as ";" and ",".
+- **On macOS, Korean Hanja conversion replaces the syllable it converts.**
+  The Hanja went in after the Hangul ("한韓"), and in a `TextInput` the
+  whole Hangul run came out twice. A `RichTextEditor` and a `TextInputField`
+  put the syllable back if the conversion is cancelled.
+- **On Windows, a click or a focus change during a composition keeps the
+  text the input method commits for it, as Notepad does**, not the text it
+  showed. Microsoft Pinyin shows `nihao` as "ni'hao" and commits "nihao";
+  an apostrophe the writer typed, as in "xi'an", stays.
+
+#### Widgets
+
+- **Undo no longer replays an input method's composition.** In a
+  `RichTextEditor`, a `TextInputField` (with `TextInput`, `SearchField` and
+  `PasswordField`) and a `CodeEditor`, an undo after a commit walked back
+  through every state the composition went through ("nihao", "niha", ...).
+  One undo now takes the committed text out, and a cancelled composition
+  leaves the undo history as it was. Each committed composition is an undo
+  step of its own.
+- **A `RichTextEditor`'s IME composition, commit and Writing Tools
+  replacement reach the end of a paragraph after the first.** The range was
+  cut one character short per earlier paragraph break, leaving a stray
+  character behind.
+- **A `RichTextEditor` and a `TextInputField` (with `TextInput`,
+  `SearchField` and `PasswordField`) tell the input method where their
+  composition is.** The candidate window of an input method that lists
+  candidates from the first key, such as Microsoft Pinyin, opened at the
+  editor's left edge on the next line when composing at the end of a
+  paragraph, and beside the wrong character in the middle of a field or a
+  paragraph.
+- **In a `TextInputField`, keys typed in the frame a composition starts go
+  before the composition**, not after it.
+- **A click or a focus change during a composition keeps its text where it
+  stands and ends it**, in a `RichTextEditor` and a `TextInputField` (with
+  `TextInput`, `SearchField` and `PasswordField`). The input method went on
+  composing at the old place and committed there later, or carried the
+  composition into the next field. An undo, redo, cut, paste or format
+  command, and a click on a control that takes no focus (a toolbar button),
+  end it the same way before they run.
+- **Text typed or committed just before a click goes in where it was
+  typed**, not at the click. The Microsoft Korean IME commits its syllable on
+  the mouse press, so the syllable landed inside the word clicked on.
+- **A `RichTextEditor` scrolled by its scroll bar draws a composition's
+  underline under the composition**, not under an earlier line.
+- **A paste into a `TextInputField` (with `TextInput`, `SearchField` and
+  `PasswordField`) is an undo step of its own.** Pasted within a couple of
+  seconds of typing, it joined the word typed before it, so one undo took
+  both away.
+- **A view of a shared document no longer shows a composition made in another
+  view of it.** A `RichTextEditor`, editable or read-only, and a `CodeEditor`
+  showed the input method's candidates as the writer chose among them in
+  another editor of the same document. A view now shows only its own
+  composition; every other view shows the text as recorded, with its own
+  selection where it was, and changes once the composition is committed or
+  cancelled. Its screen reader text and its selection are the recorded ones
+  too.
+
+#### App
+
+- **Only Alt pressed and released on its own opens the menu bar.** An input
+  method's on/off key pressed with Alt (Alt+`, the Japanese IME toggle on a
+  US layout) and chords such as Ctrl+Alt+Shift+U moved the focus to the
+  in-window menu bar as a bare Alt tap does.
+- **On Linux (Wayland), the input method's first candidate window after a
+  field takes focus opens at the field's caret.** It opened at the screen's
+  top-left corner (GNOME with IBus, after F10 and Escape) and moved into
+  place only at the composition's second key.
+- **On Linux, a composition the input method sends again after the field
+  ended it is dropped.** On KDE Plasma (Wayland) with fcitx5, after a click
+  or F10 during a composition, the input method sent its old composition
+  again, which showed up in the field or in the next field focused.
+
 ## [0.23.0] - 2026-10-27
 
 ### Added

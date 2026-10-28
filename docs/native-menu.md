@@ -390,6 +390,30 @@ the OS focus, as the item's shortcut would be. An item of the application menu
 runs its closure in the application tree and sends its intent from the focused
 window's focus, or in the application tree when no window has it.
 
+## Rows macOS adds to the Edit menu
+
+AppKit adds four rows to the menu whose title is "Edit": Start Dictation,
+Emoji & Symbols, AutoFill and Writing Tools. They are not part of the model;
+macOS inserts them when the menu bar is shown, and it finds the menu **by its
+title**. A menu titled anything else gets none, so a localized model must
+title it the way AppKit expects for the app's language. A title with a
+trailing space ("Edit ") keeps the rows out, for an Edit menu that should not
+have them.
+
+In a Teksilo text field (`TextInput`, `SearchField`, `PasswordField`,
+`RichTextEditor`, and any widget that implements `TextInputDocument`):
+
+- **Start Dictation and Emoji & Symbols** insert into the focused field.
+- **Writing Tools** works in its panel, on the field's selection or its whole
+  text. `.writing_tools(false)` on the field turns it off: the rows are
+  greyed out while that field has focus. A password field never allows it.
+- **AutoFill does not work.** Its Contact, Passwords and Credit Card rows
+  stay greyed out: AppKit enables them only for a view that answers private
+  selectors Teksilo does not implement.
+
+How the text arrives, and how a custom text widget takes part, is in
+[The platform text input system](text-input-system.md).
+
 ## Standard macOS menus
 
 The App / Window / Help menus carry **system selectors** (About, Services,

@@ -352,6 +352,15 @@ moves focus. Text that must arrive without keys is committed through the input
 method: `type_ime {commit}`. The same rules are `WidgetTree::type_text`, so a
 widget test and a probe type alike.
 
+**`type_ime` takes an optional `origin`** saying where a `commit` claims to come
+from: `"composition"` (the default: a typed composition ends), `"dictation"`
+(speech the platform recognised), `"writing_tools"` (text a system writing
+assistant produced) or `"insertion"` (the emoji viewer, AutoFill); any other
+value is an error listing these four. A text widget reports it through
+`on_text_inserted` as `EditSource::Ime` for composition and insertion,
+`EditSource::Dictation` or `EditSource::WritingTools`, so a headless test can
+check how the app tells a dictated or system-written insertion from a typed one.
+
 **`inject_key` sends one key**, its press then its release. Two arguments
 refine it:
 

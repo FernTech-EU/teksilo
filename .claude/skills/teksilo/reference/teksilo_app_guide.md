@@ -944,6 +944,10 @@ Import from `teksilo::widgets`. The main families:
   module path, `use teksilo::widgets::rich_text::RichTextEditor;`. Call
   `RichTextEditor::read_only(doc)` for a read-only viewer (there is no separate
   `RichTextViewer` type; `RichTextEditor::editor(doc)` is the editable constructor).
+  Text the platform's input system inserts (macOS Dictation, Writing Tools, the emoji
+  viewer, an IME) reaches a field on its own. `.on_text_inserted(|EditSource, chars| ..)`
+  says by which channel each insertion came (`teksilo::widgets::EditSource`, exhaustive), and
+  `.writing_tools(false)` keeps macOS Writing Tools out of a field.
 - **Rendering primitives:** RectWidget, TextWidget.
 - **Tooltips:** three tiers — plain (`.tooltip(...)`), rich (`.rich_tooltip(key)`),
   composite (`.composite_tooltip(widget)`). Setters are mutually exclusive (last wins).

@@ -32,6 +32,8 @@
 | `Self` | [`max_length(max_length: usize)`](#textinputfield-max_length) |
 | `Self` | [`on_submit_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinputfield-on_submit_fn) |
 | `Self` | [`on_access_set_value(f: impl Fn(&str, &mut EventContext) -> bool + 'static)`](#textinputfield-on_access_set_value) |
+| `Self` | [`on_text_inserted(f: impl Fn(EditSource, usize) + 'static)`](#textinputfield-on_text_inserted) |
+| `Self` | [`writing_tools(allowed: impl Into<Prop<bool>>)`](#textinputfield-writing_tools) |
 | `Self` | [`on_blur_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinputfield-on_blur_fn) |
 | `Self` | [`on_commit_fn(f: impl Fn(&mut EventContext) + 'static)`](#textinputfield-on_commit_fn) |
 | `Self` | [`char_filter(f: impl Fn(char) -> bool + 'static)`](#textinputfield-char_filter) |
@@ -314,6 +316,53 @@ The string is handed over rather than read back from the bound signal
 because the document→signal sync is deferred to the next frame tick, so
 a host reading the signal here would parse the text from *before* this
 edit and revert.
+
+<a id="textinputfield-on_text_inserted"></a>
+
+#### `pub fn on_text_inserted(mut self, f: impl Fn(EditSource, usize) + 'static) -> Self`
+
+Install a callback fired **where text lands** in the field, with the
+`EditSource` it came through and how many characters it was.
+
+Counts only, never content, so it is as safe on a password field as on
+any other. The count is of what actually landed: after the single-line
+strip, the `char_filter` and the
+`max_length` truncation, so characters a filter
+refused were never written and are not reported.
+
+Fires for text arriving through:
+
+- the keyboard (`EditSource::Keyboard`), once per batched run of
+  typed characters;
+- the platform's text input system: an IME composition's settled
+  result, the emoji viewer and AutoFill (`EditSource::Ime`),
+  dictation (`EditSource::Dictation`) and Writing Tools
+  (`EditSource::WritingTools`), never for an intermediate
+  composition state;
+- a paste (`EditSource::Clipboard`);
+- an assistive technology, through AccessKit's `SetValue` and
+  `ReplaceSelectedText` (`EditSource::Accessibility`).
+
+It does **not** fire when the application writes the bound
+`Signal<String>`, nor for undo or redo: none of those is text arriving.
+
+The field is mid-edit while the callback runs, so it counts rather than
+reads the field back. Replaces any prior callback on this field.
+
+<a id="textinputfield-writing_tools"></a>
+
+#### `pub fn writing_tools(mut self, allowed: impl Into<Prop<bool>>) -> Self`
+
+Whether the system's Writing Tools may act on this field: on macOS,
+whether they may read its text and replace it with what they produce.
+Other platforms have no such feature, and there this changes nothing.
+
+Defaults to `true`. Pass `false`, or a `Signal<bool>` the application
+flips, for a field whose text must stay what the user wrote. A
+`secure` field never lets them in, whatever this says.
+
+Text Writing Tools do write arrives as `EditSource::WritingTools` in
+`on_text_inserted`.
 
 <a id="textinputfield-on_blur_fn"></a>
 

@@ -66,6 +66,7 @@
 - [Touch & pen](touch-and-pen.md)
 - [Porting widgets to the pointer model](porting-widgets-to-the-pointer-model.md)
 - [Soft keyboard](soft-keyboard.md)
+- [The platform text input system](text-input-system.md)
 - [Touch text editing](text-touch-editing.md)
 - [Kinetic scrolling](kinetic-scrolling.md)
 
@@ -146,6 +147,7 @@
 - [DragRegion](widgets/drag_region.md)
 - [DropTarget](widgets/drop_target.md)
 - [DropZone](widgets/drop_zone.md)
+- [EditSource](widgets/edit_source.md)
 - [Expand](widgets/expand.md)
 - [Fade](widgets/fade.md)
 - [FilePickerField](widgets/file_picker_field.md)

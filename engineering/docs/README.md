@@ -35,5 +35,6 @@ Inventories consumed by tests remain maintained at these paths.
 - [Touch & pen](touch-and-pen.md)
 - [Touch verification sign-off](touch-verification-signoff.md)
 - [Touch verification: the hardware procedure](touch-verification.md)
+- [A TSF text store on Windows: design](tsf-text-store.md)
 - [Widget pointer inventory](widget-pointer-inventory.md)
 - [Event design and dispatch reference](events-and-gestures.md)

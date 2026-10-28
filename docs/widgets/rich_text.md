@@ -12,7 +12,6 @@ Rich text editor and viewer widget.
 | Kind | Name |
 | ---: | :--- |
 | `enum` | [`ScrollPolicy`](#scrollpolicy) — Scroll bar visibility policy for `RichTextEditor`, applied independently per axis |
-| `enum` | [`EditSource`](#editsource) — How a piece of text reached the document — the **channel**, not the author |
 | `struct` | [`RichTextEditor`](#richtexteditor) |
 | `struct` | [`EditorHandle`](#editorhandle) — A clone-able, `'static` handle to a `RichTextEditor`'s shared state |
 | `struct` | [`WeakEditorHandle`](#weakeditorhandle) — An `EditorHandle` that does not keep its editor alive |
@@ -41,6 +40,7 @@ Rich text editor and viewer widget.
 | `Self` | [`content_padding_left(left: f32)`](#richtexteditor-content_padding_left) |
 | `Self` | [`wrap_mode(mode: WrapMode)`](#richtexteditor-wrap_mode) |
 | `Self` | [`show_highlights(show: bool)`](#richtexteditor-show_highlights) |
+| `Self` | [`show_transient_edits(show: bool)`](#richtexteditor-show_transient_edits) |
 | `Self` | [`annotation_spans(spans: Vec<TextAnnotationSpan>)`](#richtexteditor-annotation_spans) |
 | `Self` | [`typography_defaults(defaults: EditorTypographyDefaults)`](#richtexteditor-typography_defaults) |
 | `Self` | [`background(color: impl Into<ColorProp>)`](#richtexteditor-background) |
@@ -64,6 +64,7 @@ Rich text editor and viewer widget.
 | `Self` | [`font_registrar(registrar: &dyn FontRegistrar)`](#richtexteditor-font_registrar) |
 | `Self` | [`on_change(f: impl Fn() + 'static)`](#richtexteditor-on_change) |
 | `Self` | [`on_text_inserted(f: impl Fn(EditSource, usize) + 'static)`](#richtexteditor-on_text_inserted) |
+| `Self` | [`writing_tools(allowed: impl Into<Prop<bool>>)`](#richtexteditor-writing_tools) |
 | `Self` | [`on_link_activated(handler: impl Fn(&str, &mut teksilo_core::widget::EventContext) + 'static)`](#richtexteditor-on_link_activated) |
 | `Self` | [`on_image_missing(resolve: impl Fn(&str) -> Option<(String, Vec<u8>)> + 'static)`](#richtexteditor-on_image_missing) |
 | `Self` | [`on_files_dropped(handler: impl Fn(&[std::path::PathBuf], &mut teksilo_core::widget::EventContext) + 'static)`](#richtexteditor-on_files_dropped) |
@@ -415,38 +416,6 @@ pub enum ScrollPolicy { /* variants */ }
 - **`AlwaysOn`** — Always show the scroll bar, reserving gutter space even when content fits.
 - **`AlwaysOff`** — Never show the scroll bar; useful when embedding the editor inside an outer `ScrollArea` or in headless tests.
 
-<a id="editsource"></a>
-
-## `pub enum EditSource`
-
-**Import:** `use teksilo::widgets::rich_text::EditSource;`
-
-How a piece of text reached the document — the **channel**, not the author.
-
-Deliberately framework-generic, and deliberately small. These are the routes
-a toolkit can actually observe: which input path the characters came down.
-What that *means* is the application's to decide, and every application will
-decide differently — a writing tool cares that dictation is not typing, a
-code editor cares that a snippet is not either, and a form cares about none
-of it. Teksilo says what it saw; it does not interpret.
-
-⚠ **Not evidence of who wrote anything.** Text typed one character at a time
-was typed one character at a time, and that is the entire claim. Anything
-further — who, or whether a person at all — is an inference this cannot make
-and no consumer of it should pretend to.
-
-```rust
-pub enum EditSource { /* variants */ }
-```
-
-### Variants
-
-- **`Keyboard`** — Typed, one key at a time.
-- **`Ime`** — The settled result of an IME composition — CJK/Kana candidate selection, a dead-key accent. Separate from `Self::Keyboard` because the characters that land are not the keys that were pressed.
-- **`Clipboard`** — Pasted, as plain text or as HTML.
-- **`Accessibility`** — Arrived through an assistive technology: AccessKit's `SetValue` or `ReplaceSelectedText`, which is how dictation and a braille display write.  **Never folded into `Self::Keyboard`.** For some people this *is* typing, and a toolkit that reported it as something else — or as nothing — would be quietly erasing how they work.
-- **`Programmatic`** — Inserted by the application itself rather than by anything the person at the keyboard did: a template, a substitution, a completion.
-
 <a id="richtexteditor"></a>
 
 ## `pub struct RichTextEditor`
@@ -574,6 +543,22 @@ highlighting. `editor` defaults to `true`; `read_only` defaults to
 snapshot (no highlights at all, even metric ones like keyword bold) and
 ignores paint-only highlight events entirely, so it does zero work when
 the shared document's search/spell highlights change.
+
+<a id="richtexteditor-show_transient_edits"></a>
+
+#### `pub fn show_transient_edits(self, show: bool) -> Self`
+
+Show every transient edit of the document, not only this view's own
+composition: for transient edits the host makes itself through the API
+(`TextCursor::insert_text_transient` and its siblings), a suggestion
+shown in the text before it is accepted, say. Off by default.
+
+A view shows an input method's composition while it is its own, and
+lays out the recorded document, as a revert would leave it, the rest of
+the time: a composition made in one editor of a shared document shows
+there, and in no other editor or viewer of it until it is committed or
+cancelled. The document's transient edits are one layer, whoever made
+them, so with this on the view also shows another view's composition.
 
 <a id="richtexteditor-annotation_spans"></a>
 
@@ -951,6 +936,11 @@ Fires for text arriving through:
 - the keyboard, once per batched run of typed characters;
 - an IME commit, once for the settled result and never for the
   intermediate composition states;
+- the platform's text input system writing on its own account:
+  dictation (`EditSource::Dictation`), Writing Tools
+  (`EditSource::WritingTools`), the emoji viewer and AutoFill
+  (`EditSource::Ime`), once per commit, including one that replaces a
+  range of the text;
 - a paste, of plain text or HTML;
 - an assistive technology, through AccessKit's `SetValue` and
   `ReplaceSelectedText`.
@@ -960,6 +950,23 @@ It does **not** fire for a programmatic `set_djot` / `set_markdown` /
 those is text arriving.
 
 Replaces any prior callback on this editor. Runs on the UI thread.
+
+<a id="richtexteditor-writing_tools"></a>
+
+#### `pub fn writing_tools(self, allowed: impl Into<Prop<bool>>) -> Self`
+
+Whether the system's Writing Tools may act on this editor: on macOS,
+whether they may read its text and replace it with what they produce.
+Other platforms have no such feature, and there this changes nothing.
+
+Defaults to `true`. Pass `false`, or a `Signal<bool>` that the
+application flips, for an editor whose text must stay the writer's own:
+a field where machine-rewritten text has no place, or a session that
+has to account for every character. Read whenever a session would
+start, so a bound signal takes effect at once, without a rebuild.
+
+Text Writing Tools do write arrives as `EditSource::WritingTools` in
+`on_text_inserted`.
 
 <a id="richtexteditor-document_version"></a>
 
