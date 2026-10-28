@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Windows: completing a composition, and a subclass tap that traces.
+//! Windows: completing a composition, answering the input method's requests
+//! about the document, the input scope, and a subclass tap that traces.
 //!
 //! Every attached window's HWND is kept, so that [`finish_composition`] can
 //! have the input method complete the window's IME composition when the
@@ -17,18 +18,59 @@
 //! commit. Telling voice typing apart needs a TSF text store of our own
 //! (`engineering/docs/tsf-text-store.md`).
 //!
-//! The tap is a `SetWindowSubclass` on winit's HWND, so it sees every message
-//! winit sees, just before winit does. It is a tap, never a filter: **every**
-//! message is passed on with `DefSubclassProc`, unconditionally, so what winit
-//! receives is unchanged. It follows the two rules `pen/windows.rs` sets for
-//! sharing an HWND with the title bar's, the pen's and AccessKit's subclasses:
-//! a subclass id from a private range, and always chaining.
+//! The tap is a `SetWindowSubclass` on winit's HWND, installed on every
+//! attached window, so it sees every message winit sees, just before winit
+//! does. It is a tap, not a filter: every message is passed on with
+//! `DefSubclassProc`, unconditionally, so what winit receives is unchanged,
+//! with one documented exception, the input method's requests below. It
+//! follows the two rules `pen/windows.rs` sets for sharing an HWND with the
+//! title bar's, the pen's and AccessKit's subclasses: a subclass id from a
+//! private range, and always chaining.
 //!
-//! # The tap only traces
+//! # The input method's requests
 //!
-//! It is installed only when `TEKSILO_TEXT_INPUT_TRACE` is set, and then logs
-//! to stderr the keyboard, character and IME messages the window receives,
-//! each with where `GetCurrentInputMessageSource` says it came from and its
+//! An input method asks the window about its document with `WM_IME_REQUEST`,
+//! and winit has no arm for it: every request reached `DefWindowProc` and was
+//! answered "nothing". The tap answers four of them from the focused text
+//! widget's [`TextInputDocument`] (`imm_requests` holds the half that needs
+//! no platform) and returns that answer instead of passing the message on:
+//!
+//! - `IMR_QUERYCHARPOSITION`, where a character of the composition is drawn,
+//!   converted to the screen with the window's DPI and `ClientToScreen`, so
+//!   the candidate window follows the character being converted;
+//! - `IMR_RECONVERTSTRING` and `IMR_CONFIRMRECONVERTSTRING`, the text to
+//!   reconvert and the part the input method reconverts, which becomes the
+//!   `replacement` of its next preedit ([`take_marked_replacement`]);
+//! - `IMR_DOCUMENTFEED`, the text around the composition.
+//!
+//! The tap runs before winit has the message, so it calls nothing that can
+//! deliver a message (see below), and runs no application code: it asks the
+//! document whether it can answer without a change
+//! ([`is_available`](TextInputDocument::is_available)) before reading it,
+//! and a document that cannot (the widget is in the middle of its own work,
+//! or holds typing not yet inserted, which a read would insert, firing the
+//! application's change callbacks) is not read. Its request goes on to
+//! winit, which answers "nothing" as it always did, and so does every other
+//! request. Most requests arrive while winit handles another message (round
+//! 5), which is when a widget is likely to be busy.
+//!
+//! A reconverted range no preedit has taken is forgotten at the next key
+//! down the input method did not take, a click, the focus leaving and the end
+//! of a composition (`imm_requests::Reconversion`).
+//!
+//! # The input scope
+//!
+//! [`set_input_purpose`] gives the window the input scope of the focused
+//! field's purpose (`SetInputScope`, which msctf exports and the `windows`
+//! crate does not bind): `IS_PASSWORD` for a password field, `IS_DEFAULT`
+//! otherwise. A window given another scope is set back to `IS_DEFAULT`
+//! before it is destroyed, as Microsoft requires: at [`detach`], and at
+//! `WM_DESTROY` for a window destroyed without one.
+//!
+//! # Tracing
+//!
+//! When `TEKSILO_TEXT_INPUT_TRACE` is set, the tap also logs to stderr the
+//! keyboard, character and IME messages the window receives, each with where `GetCurrentInputMessageSource` says it came from and its
 //! `GetMessageExtraInfo`. After winit has handled the start of a composition,
 //! a composition message or the end of one, it also logs:
 //!
@@ -95,7 +137,9 @@
 //! winit before the commit did, which lost the committed syllable and its
 //! preedit. So before `DefSubclassProc` the tap only reads what describes the
 //! message being dispatched (its input source and extra info, which a later
-//! call would no longer report) and writes the log line. The IMM and TSF
+//! call would no longer report) and writes the log line; besides tracing, it
+//! answers a request from the document and forgets a reconversion, which
+//! read the widget's state and write the tap's own. The IMM and TSF
 //! probes run after `DefSubclassProc` returns: winit has handled the message
 //! by then, and its own read does not consume the strings, so the IMM probe
 //! reads what winit read unless something winit's handling caused changed
@@ -125,29 +169,36 @@
 //! watched compartment that was not listed is marked `(unlisted)`.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
+use std::ops::Range;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Arc;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use raw_window_handle::RawWindowHandle;
-use teksilo_core::AppEventPoster;
 use teksilo_core::raw_handle::ParentHandle;
+use teksilo_core::text_input_document::TextInputDocument;
 use teksilo_core::text_surface::TextSurfaces;
 use teksilo_core::window::TeksiloWindowId;
+use teksilo_core::{AppEventPoster, ImePurpose};
 
 use super::FinishedComposition;
 use super::imm_completion::{self, ImmCompletion, ImmMessage};
+use super::imm_requests::{self, Reconversion, ReconvertString};
 
 use windows::Win32::Foundation::{
-    CO_E_NOTINITIALIZED, CloseHandle, HWND, LPARAM, LRESULT, S_OK, WPARAM,
+    CO_E_NOTINITIALIZED, CloseHandle, HWND, LPARAM, LRESULT, POINT, RECT, S_OK, WPARAM,
 };
+use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::System::Com::{
     APTTYPE, APTTYPE_MAINSTA, APTTYPE_MTA, APTTYPE_NA, APTTYPE_STA, APTTYPEQUALIFIER,
     CLSCTX_INPROC_SERVER, CoCreateInstance, CoGetApartmentType,
 };
-use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+use windows::Win32::System::LibraryLoader::{
+    GetModuleHandleW, GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW,
+};
 use windows::Win32::System::Threading::{
     GetCurrentProcessId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
     QueryFullProcessImageNameW,
@@ -156,17 +207,18 @@ use windows::Win32::System::Variant::{
     VARIANT, VT_BOOL, VT_BSTR, VT_EMPTY, VT_I2, VT_I4, VT_INT, VT_UI4, VT_UINT, VT_UNKNOWN,
     VariantClear,
 };
+use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::Ime::{
     CPS_CANCEL, CPS_COMPLETE, CS_INSERTCHAR, CS_NOMOVECARET, GCS_COMPATTR, GCS_COMPCLAUSE,
     GCS_COMPREADATTR, GCS_COMPREADCLAUSE, GCS_COMPREADSTR, GCS_COMPSTR, GCS_CURSORPOS,
     GCS_DELTASTART, GCS_RESULTCLAUSE, GCS_RESULTREADCLAUSE, GCS_RESULTREADSTR, GCS_RESULTSTR, HIMC,
-    IME_COMPOSITION_STRING, IMN_CHANGECANDIDATE, IMN_CLOSECANDIDATE, IMN_CLOSESTATUSWINDOW,
-    IMN_GUIDELINE, IMN_OPENCANDIDATE, IMN_OPENSTATUSWINDOW, IMN_PRIVATE, IMN_SETCANDIDATEPOS,
-    IMN_SETCOMPOSITIONFONT, IMN_SETCOMPOSITIONWINDOW, IMN_SETCONVERSIONMODE, IMN_SETOPENSTATUS,
-    IMN_SETSENTENCEMODE, IMN_SETSTATUSWINDOWPOS, IMN_SOFTKBDDESTROYED, IMR_CANDIDATEWINDOW,
-    IMR_COMPOSITIONFONT, IMR_COMPOSITIONWINDOW, IMR_CONFIRMRECONVERTSTRING, IMR_DOCUMENTFEED,
-    IMR_QUERYCHARPOSITION, IMR_RECONVERTSTRING, ImmGetCompositionStringW, ImmGetContext,
-    ImmNotifyIME, ImmReleaseContext, NI_COMPOSITIONSTR,
+    IME_COMPOSITION_STRING, IMECHARPOSITION, IMN_CHANGECANDIDATE, IMN_CLOSECANDIDATE,
+    IMN_CLOSESTATUSWINDOW, IMN_GUIDELINE, IMN_OPENCANDIDATE, IMN_OPENSTATUSWINDOW, IMN_PRIVATE,
+    IMN_SETCANDIDATEPOS, IMN_SETCOMPOSITIONFONT, IMN_SETCOMPOSITIONWINDOW, IMN_SETCONVERSIONMODE,
+    IMN_SETOPENSTATUS, IMN_SETSENTENCEMODE, IMN_SETSTATUSWINDOWPOS, IMN_SOFTKBDDESTROYED,
+    IMR_CANDIDATEWINDOW, IMR_COMPOSITIONFONT, IMR_COMPOSITIONWINDOW, IMR_CONFIRMRECONVERTSTRING,
+    IMR_DOCUMENTFEED, IMR_QUERYCHARPOSITION, IMR_RECONVERTSTRING, ImmGetCompositionStringW,
+    ImmGetContext, ImmNotifyIME, ImmReleaseContext, NI_COMPOSITIONSTR, RECONVERTSTRING,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_PACKET, VK_PROCESSKEY};
 use windows::Win32::UI::Input::{
@@ -185,19 +237,20 @@ use windows::Win32::UI::TextServices::{
     GUID_COMPARTMENT_SPEECH_GLOBALSTATE, GUID_COMPARTMENT_SPEECH_OPENCLOSE,
     GUID_COMPARTMENT_SPEECH_UI_STATUS, GUID_COMPARTMENT_TIPUISTATUS,
     GUID_COMPARTMENT_TRANSITORYEXTENSION, GUID_COMPARTMENT_TRANSITORYEXTENSION_DOCUMENTMANAGER,
-    GUID_COMPARTMENT_TRANSITORYEXTENSION_PARENT, GUID_TFCAT_TIP_KEYBOARD, ITfCompartmentMgr,
-    ITfContext, ITfContextComposition, ITfInputProcessorProfileMgr, ITfThreadMgr,
-    TF_INPUTPROCESSORPROFILE, TF_IPP_FLAG_ACTIVE, TF_IPP_FLAG_ENABLED,
+    GUID_COMPARTMENT_TRANSITORYEXTENSION_PARENT, GUID_TFCAT_TIP_KEYBOARD, IS_DEFAULT, IS_PASSWORD,
+    ITfCompartmentMgr, ITfContext, ITfContextComposition, ITfInputProcessorProfileMgr,
+    ITfThreadMgr, InputScope, TF_INPUTPROCESSORPROFILE, TF_IPP_FLAG_ACTIVE, TF_IPP_FLAG_ENABLED,
     TF_IPP_FLAG_SUBSTITUTEDBYINPUTPROCESSOR, TF_PROFILETYPE_INPUTPROCESSOR,
     TF_PROFILETYPE_KEYBOARDLAYOUT, TS_SS_DISJOINTSEL, TS_SS_NOHIDDENTEXT, TS_SS_REGIONS,
     TS_SS_TKBAUTOCORRECTENABLE, TS_SS_TKBPREDICTIONENABLE, TS_SS_TRANSITORY, TS_SS_UWPCONTROL,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClassNameW, GetForegroundWindow, GetMessageExtraInfo, GetWindowThreadProcessId,
-    UNICODE_NOCHAR, WM_CHAR, WM_DEADCHAR, WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
-    WM_IME_KEYDOWN, WM_IME_KEYUP, WM_IME_NOTIFY, WM_IME_REQUEST, WM_IME_SELECT, WM_IME_SETCONTEXT,
-    WM_IME_STARTCOMPOSITION, WM_INPUTLANGCHANGE, WM_KEYDOWN, WM_KEYUP, WM_NCDESTROY, WM_SYSCHAR,
-    WM_SYSDEADCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_UNICHAR,
+    UNICODE_NOCHAR, WM_CHAR, WM_DEADCHAR, WM_DESTROY, WM_IME_CHAR, WM_IME_COMPOSITION,
+    WM_IME_ENDCOMPOSITION, WM_IME_KEYDOWN, WM_IME_KEYUP, WM_IME_NOTIFY, WM_IME_REQUEST,
+    WM_IME_SELECT, WM_IME_SETCONTEXT, WM_IME_STARTCOMPOSITION, WM_INPUTLANGCHANGE, WM_KEYDOWN,
+    WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_NCDESTROY, WM_RBUTTONDOWN,
+    WM_SYSCHAR, WM_SYSDEADCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_UNICHAR,
 };
 use windows::core::{GUID, HRESULT, Interface, PWSTR, s, w};
 
@@ -222,8 +275,8 @@ static NEXT_SUBCLASS_ID: AtomicUsize = AtomicUsize::new(0xFE_114_000);
 static NEXT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
-    /// Every attached window's HWND, tracing or not: what
-    /// [`finish_composition`] acts on. `attach`, `detach` and
+    /// Every attached window's HWND, whether its tap could be installed or
+    /// not: what [`finish_composition`] acts on. `attach`, `detach` and
     /// `finish_composition` run on the UI thread, which owns every HWND.
     static WINDOWS: RefCell<HashMap<TeksiloWindowId, HWND>> = RefCell::new(HashMap::new());
     /// The installed taps. `attach` and `detach` run on the UI thread, which
@@ -233,36 +286,50 @@ thread_local! {
     static HANDLING: Cell<u32> = const { Cell::new(0) };
     /// Whether a probe is running on this thread.
     static PROBING: Cell<bool> = const { Cell::new(false) };
+    /// The windows [`set_input_purpose`] gave a scope other than
+    /// `IS_DEFAULT`, which must get it back before they are destroyed.
+    static SCOPED: RefCell<HashSet<isize>> = RefCell::new(HashSet::new());
 }
 
 /// What the subclass procedure reads through `dwRefData`.
-#[derive(Debug)]
 struct TapState {
     window_id: TeksiloWindowId,
+    /// The window tree's text surfaces, whose focused document answers the
+    /// input method's requests.
+    surfaces: TextSurfaces,
+    /// The reconversion the input method asked for, until a preedit takes it.
+    reconversion: RefCell<Reconversion>,
 }
 
-/// One installed subclass. Dropping it removes the subclass before the state
-/// the procedure borrows goes away.
+impl std::fmt::Debug for TapState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TapState")
+            .field("window_id", &self.window_id)
+            .finish_non_exhaustive()
+    }
+}
+
+/// One installed subclass. Dropping it removes the subclass; the state the
+/// procedure reads lives on while a call of the procedure holds it.
 #[derive(Debug)]
 struct Tap {
     hwnd: HWND,
     subclass_id: usize,
-    state: Box<TapState>,
+    state: Rc<TapState>,
 }
 
 impl Tap {
-    /// The `dwRefData` the procedure is installed with: the boxed state, which
-    /// stays put however the `Tap` itself moves.
+    /// The `dwRefData` the procedure is installed with: the shared state,
+    /// which stays put however the `Tap` itself moves.
     fn ref_data(&self) -> usize {
-        &*self.state as *const TapState as usize
+        Rc::as_ptr(&self.state) as usize
     }
 }
 
 impl Drop for Tap {
     fn drop(&mut self) {
-        // Before `state` is freed, so the procedure can never read freed
-        // memory. Synchronous on this thread. Fails harmlessly when the window
-        // is already gone (the procedure removed itself at `WM_NCDESTROY`).
+        // Synchronous on this thread. Fails harmlessly when the window is
+        // already gone (the procedure removed itself at `WM_NCDESTROY`).
         unsafe {
             let _ = RemoveWindowSubclass(self.hwnd, Some(text_input_proc), self.subclass_id);
         }
@@ -275,33 +342,44 @@ pub(super) fn attach(
     poster: Arc<dyn AppEventPoster>,
     surfaces: TextSurfaces,
 ) {
-    // Nothing is posted or answered yet.
-    let _ = (poster, surfaces);
-    let RawWindowHandle::Win32(handle) = parent.raw_window_handle() else {
+    // Nothing is posted yet.
+    let _ = poster;
+    let Some(hwnd) = hwnd_of(parent) else {
         return;
     };
-    let hwnd = HWND(handle.hwnd.get() as *mut c_void);
 
     // A second attach for one window replaces the first.
     detach(window_id);
     WINDOWS.with_borrow_mut(|windows| windows.insert(window_id, hwnd));
-    if super::trace_enabled() {
-        install_tap(window_id, hwnd);
-    }
+    install_tap(window_id, hwnd, surfaces);
 }
 
-/// Install the trace subclass on a window.
-fn install_tap(window_id: TeksiloWindowId, hwnd: HWND) {
+/// The HWND behind a window handle, `None` for one that is not a Win32 one.
+fn hwnd_of(parent: &ParentHandle) -> Option<HWND> {
+    let RawWindowHandle::Win32(handle) = parent.raw_window_handle() else {
+        return None;
+    };
+    Some(HWND(handle.hwnd.get() as *mut c_void))
+}
+
+/// Install the tap on a window.
+fn install_tap(window_id: TeksiloWindowId, hwnd: HWND, surfaces: TextSurfaces) {
     let tap = Tap {
         hwnd,
         subclass_id: NEXT_SUBCLASS_ID.fetch_add(1, Ordering::Relaxed),
-        state: Box::new(TapState { window_id }),
+        state: Rc::new(TapState {
+            window_id,
+            surfaces,
+            reconversion: RefCell::new(Reconversion::default()),
+        }),
     };
     let installed =
         unsafe { SetWindowSubclass(hwnd, Some(text_input_proc), tap.subclass_id, tap.ref_data()) };
     let seq = next_sequence();
     if !installed.as_bool() {
-        tap_trace!("#{seq} {window_id} SetWindowSubclass returned FALSE; not traced");
+        tap_trace!(
+            "#{seq} {window_id} SetWindowSubclass returned FALSE; no requests answered, not traced"
+        );
         return;
     }
     tap_trace!(
@@ -312,22 +390,40 @@ fn install_tap(window_id: TeksiloWindowId, hwnd: HWND) {
     // A baseline for the compositions to come. Not while winit is handling a
     // message: a probe can deliver the messages sent to the window meanwhile,
     // and winit would see them in the middle of that one.
-    if winit_is_handling() {
-        tap_trace!("#{seq}   baseline skipped: winit is handling a message");
-    } else {
-        let _probing = Probing::enter();
-        probe_tsf(seq, Reach::Baseline);
-        probe_foreground(seq, hwnd);
+    if super::trace_enabled() {
+        if winit_is_handling() {
+            tap_trace!("#{seq}   baseline skipped: winit is handling a message");
+        } else {
+            let _probing = Probing::enter();
+            probe_tsf(seq, Reach::Baseline);
+            probe_foreground(seq, hwnd);
+        }
     }
     TAPS.with_borrow_mut(|taps| taps.insert(window_id, tap));
 }
 
 pub(super) fn detach(window_id: TeksiloWindowId) {
-    WINDOWS.with_borrow_mut(|windows| windows.remove(&window_id));
+    let hwnd = WINDOWS.with_borrow_mut(|windows| windows.remove(&window_id));
+    if let Some(hwnd) = hwnd {
+        reset_input_scope(hwnd);
+    }
     // Taken out of the map first and dropped after the borrow ends, so
     // nothing `RemoveWindowSubclass` might run can find the map borrowed.
     let tap = TAPS.with_borrow_mut(|taps| taps.remove(&window_id));
     drop(tap);
+}
+
+/// See [`super::take_marked_replacement`]: the range a reconversion the
+/// input method confirmed (or the selection it was handed) replaces.
+pub(super) fn take_marked_replacement(window_id: TeksiloWindowId) -> Option<Range<usize>> {
+    TAPS.try_with(|taps| {
+        let taps = taps.try_borrow().ok()?;
+        let tap = taps.get(&window_id)?;
+        let mut reconversion = tap.state.reconversion.try_borrow_mut().ok()?;
+        reconversion.take()
+    })
+    .ok()
+    .flatten()
 }
 
 fn next_sequence() -> u64 {
@@ -338,7 +434,8 @@ fn next_sequence() -> u64 {
 // The subclass procedure
 // ---------------------------------------------------------------------------
 
-/// Logs, chains, and probes after winit has handled the message.
+/// Answers the input method's requests, logs, chains, and probes after winit
+/// has handled the message.
 unsafe extern "system" fn text_input_proc(
     hwnd: HWND,
     msg: u32,
@@ -347,20 +444,35 @@ unsafe extern "system" fn text_input_proc(
     uid: usize,
     dw_ref_data: usize,
 ) -> LRESULT {
-    // Before winit has the message: only the log line, which nothing that
-    // can deliver another message goes into.
-    let probe_after = if dw_ref_data == 0 {
-        None
-    } else {
-        // SAFETY: `dw_ref_data` is the boxed `TapState` of the `Tap` that
-        // installed this subclass. Only code winit runs can drop that `Tap`,
-        // and none has run yet, so it is alive for this part of the call.
-        let state: &TapState = unsafe { &*(dw_ref_data as *const TapState) };
+    let state: Option<Rc<TapState>> = (dw_ref_data != 0).then(|| {
+        let state = dw_ref_data as *const TapState;
+        // SAFETY: `dw_ref_data` is `Rc::as_ptr` of the state of the `Tap`
+        // that installed this subclass. Only code winit runs can drop that
+        // `Tap`, and none has run yet, so the `Rc` is alive here; this call
+        // takes a reference of its own, which keeps the state alive past
+        // whatever winit's handling drops.
+        unsafe {
+            Rc::increment_strong_count(state);
+            Rc::from_raw(state)
+        }
+    });
+    // Before winit has the message: nothing that can deliver another one.
+    let probe_after = state.as_deref().and_then(|state| {
         // No panic may unwind into user32.
         catch_unwind(AssertUnwindSafe(|| log_message(state, msg, wparam, lparam)))
             .ok()
             .flatten()
-    };
+    });
+    if let Some(state) = state.as_deref() {
+        let answer = catch_unwind(AssertUnwindSafe(|| {
+            before_winit(state, hwnd, msg, wparam, lparam)
+        }))
+        .ok()
+        .flatten();
+        if let Some(answer) = answer {
+            return answer;
+        }
+    }
     if msg == WM_NCDESTROY {
         // The documented place to remove a subclass. `Tap::drop` then finds
         // nothing to remove, which is harmless.
@@ -372,12 +484,55 @@ unsafe extern "system" fn text_input_proc(
         let _handling = Handling::enter();
         unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
     };
-    // After winit has handled it: the probes. They read no `TapState`, since
-    // winit's handling may have closed the window and freed it.
+    // After winit has handled it. The state is this call's own reference:
+    // winit's handling may have detached the window.
+    if let Some(state) = state.as_deref() {
+        let _ = catch_unwind(AssertUnwindSafe(|| after_winit(state, hwnd, msg)));
+    }
     if let Some(seq) = probe_after {
         let _ = catch_unwind(AssertUnwindSafe(|| probe_message(hwnd, msg, seq)));
     }
     result
+}
+
+/// What the tap does with a message before winit has it: answer a request it
+/// answers (the result to return, instead of passing the message on), or
+/// forget a reconversion the message ends. Calls nothing that can deliver a
+/// message.
+fn before_winit(
+    state: &TapState,
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> Option<LRESULT> {
+    match msg {
+        WM_IME_REQUEST => answer_request(state, hwnd, wparam.0 as u32, lparam),
+        WM_KEYDOWN | WM_SYSKEYDOWN if imm_requests::key_ends_reconversion(wparam.0 as u16) => {
+            forget_reconversion(state);
+            None
+        }
+        WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_KILLFOCUS => {
+            forget_reconversion(state);
+            None
+        }
+        _ => None,
+    }
+}
+
+/// What the tap does with a message winit has handled.
+fn after_winit(state: &TapState, hwnd: HWND, msg: u32) {
+    match msg {
+        WM_IME_ENDCOMPOSITION => forget_reconversion(state),
+        WM_DESTROY => reset_input_scope(hwnd),
+        _ => {}
+    }
+}
+
+fn forget_reconversion(state: &TapState) {
+    if let Ok(mut reconversion) = state.reconversion.try_borrow_mut() {
+        reconversion.clear();
+    }
 }
 
 /// How a message reached the tap.
@@ -456,12 +611,15 @@ impl Drop for Probing {
     }
 }
 
-/// Log one message, before winit has it. Returns the message's sequence
-/// number when it is one to probe once winit has handled it: a composition
-/// message that arrived directly.
+/// Log one message, before winit has it, when tracing. Returns the
+/// message's sequence number when it is one to probe once winit has handled
+/// it: a composition message that arrived directly.
 ///
 /// Calls nothing that can deliver a message.
 fn log_message(state: &TapState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<u64> {
+    if !super::trace_enabled() {
+        return None;
+    }
     let name = message_name(msg)?;
     // Both describe the message being dispatched, and a later call would no
     // longer report them.
@@ -1261,6 +1419,291 @@ fn process_image(pid: u32) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Answering the input method's requests
+// ---------------------------------------------------------------------------
+
+// `imm_requests` lays the string out after a header of this size.
+const _: () = assert!(imm_requests::RECONVERTSTRING_HEADER == size_of::<RECONVERTSTRING>());
+
+/// Answer `WM_IME_REQUEST` `command` from the focused document: the result
+/// to return, or `None` to pass the request on to winit, which answers
+/// "nothing". Before winit has the message, so it calls nothing that can
+/// deliver one and runs no application code: the document's probe, its
+/// reads only once the probe says they change nothing, `GetDpiForWindow`,
+/// `ClientToScreen`.
+fn answer_request(state: &TapState, hwnd: HWND, command: u32, lparam: LPARAM) -> Option<LRESULT> {
+    let name = match command {
+        IMR_QUERYCHARPOSITION => "IMR_QUERYCHARPOSITION",
+        IMR_RECONVERTSTRING => "IMR_RECONVERTSTRING",
+        IMR_CONFIRMRECONVERTSTRING => "IMR_CONFIRMRECONVERTSTRING",
+        IMR_DOCUMENTFEED => "IMR_DOCUMENTFEED",
+        _ => return None,
+    };
+    let answer = state.surfaces.with_focused_input_document(|document| {
+        // Asked first, and alone when it says no: it changes nothing, where
+        // a read with typing not yet inserted would insert it and run the
+        // application's change callbacks, ahead of winit.
+        if !document.is_available() {
+            return Err(Unavailable);
+        }
+        Ok(match command {
+            IMR_QUERYCHARPOSITION => query_char_position(document, hwnd, lparam),
+            IMR_RECONVERTSTRING => imm_requests::reconvert_string(document).and_then(|string| {
+                let answer = write_reconvert_string(&string, lparam)?;
+                if lparam.0 != 0
+                    && answer.0 != 0
+                    && let Ok(mut reconversion) = state.reconversion.try_borrow_mut()
+                {
+                    reconversion.offered(string);
+                }
+                Some(answer)
+            }),
+            IMR_CONFIRMRECONVERTSTRING => {
+                read_reconvert_string(lparam).map(|(units, composition)| {
+                    let accepted =
+                        state
+                            .reconversion
+                            .try_borrow_mut()
+                            .is_ok_and(|mut reconversion| {
+                                reconversion.confirm(document, &units, composition)
+                            });
+                    LRESULT(isize::from(accepted))
+                })
+            }
+            _ => imm_requests::document_feed(document)
+                .and_then(|string| write_reconvert_string(&string, lparam)),
+        })
+    });
+    if super::trace_enabled() {
+        let seq = next_sequence();
+        let window_id = state.window_id;
+        match &answer {
+            Some(Ok(Some(LRESULT(result)))) => {
+                tap_trace!("#{seq} {window_id} answered {name}: {result:#x}")
+            }
+            Some(Ok(None)) => {
+                tap_trace!("#{seq} {window_id} {name}: nothing to answer; passed on")
+            }
+            Some(Err(Unavailable)) => tap_trace!(
+                "#{seq} {window_id} {name}: the document cannot answer without a change \
+                 (busy, or typing not yet inserted); passed on"
+            ),
+            None => tap_trace!("#{seq} {window_id} {name}: no focused document; passed on"),
+        }
+    }
+    answer.and_then(Result::ok).flatten()
+}
+
+/// The focused document cannot answer without a change: see
+/// [`TextInputDocument::is_available`].
+#[derive(Debug)]
+struct Unavailable;
+
+/// `IMR_QUERYCHARPOSITION`: fill the `IMECHARPOSITION` at `lparam` with
+/// where the asked character of the composition is drawn, on the screen.
+fn query_char_position(
+    document: &dyn TextInputDocument,
+    hwnd: HWND,
+    lparam: LPARAM,
+) -> Option<LRESULT> {
+    let request = lparam.0 as *mut IMECHARPOSITION;
+    if request.is_null() {
+        return None;
+    }
+    // SAFETY: the input method hands a structure it owns for the length of
+    // the call; its `dwSize` says how much of it there is.
+    let mut position = unsafe { request.read_unaligned() };
+    if (position.dwSize as usize) < size_of::<IMECHARPOSITION>() {
+        return None;
+    }
+    let answer = imm_requests::char_position(document, position.dwCharPos as usize)?;
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    if dpi == 0 {
+        return None;
+    }
+    let scale = dpi as f32 / 96.0;
+    position.pt = to_screen(hwnd, answer.caret.x, answer.caret.y, scale);
+    position.cLineHeight = (answer.caret.height * scale).round().max(1.0) as u32;
+    if let Some(visible) = answer.document {
+        let top_left = to_screen(hwnd, visible.x, visible.y, scale);
+        let bottom_right = to_screen(hwnd, visible.right(), visible.bottom(), scale);
+        position.rcDocument = RECT {
+            left: top_left.x,
+            top: top_left.y,
+            right: bottom_right.x,
+            bottom: bottom_right.y,
+        };
+    }
+    // SAFETY: as above.
+    unsafe { request.write_unaligned(position) };
+    Some(LRESULT(1))
+}
+
+/// A window-logical point on the screen: scaled to the client area's pixels,
+/// as winit scales the IME cursor area, then `ClientToScreen`.
+fn to_screen(hwnd: HWND, x: f32, y: f32, scale: f32) -> POINT {
+    let mut point = POINT {
+        x: (x * scale).round() as i32,
+        y: (y * scale).round() as i32,
+    };
+    unsafe {
+        let _ = ClientToScreen(hwnd, &mut point);
+    }
+    point
+}
+
+/// Answer `IMR_RECONVERTSTRING` or `IMR_DOCUMENTFEED` with `string`: its
+/// size when `lparam` is null (the input method's first call), else written
+/// into the `RECONVERTSTRING` there, which its `dwSize` says is large
+/// enough, and its size again (as Firefox answers); `0` when it is not.
+fn write_reconvert_string(string: &ReconvertString, lparam: LPARAM) -> Option<LRESULT> {
+    let fields = string.fields()?;
+    let buffer = lparam.0 as *mut u8;
+    if buffer.is_null() {
+        return Some(LRESULT(fields.size as isize));
+    }
+    // SAFETY: the input method hands a buffer it owns for the length of the
+    // call, `dwSize` bytes long, which is checked before anything past the
+    // header is written.
+    unsafe {
+        let header = buffer.cast::<RECONVERTSTRING>();
+        let given = header.read_unaligned().dwSize;
+        if given < fields.size {
+            return Some(LRESULT(0));
+        }
+        header.write_unaligned(RECONVERTSTRING {
+            dwSize: given,
+            dwVersion: 0,
+            dwStrLen: fields.str_len,
+            dwStrOffset: fields.str_offset,
+            dwCompStrLen: fields.comp_len,
+            dwCompStrOffset: fields.comp_offset,
+            dwTargetStrLen: fields.target_len,
+            dwTargetStrOffset: fields.target_offset,
+        });
+        std::ptr::copy_nonoverlapping(
+            string.units.as_ptr().cast::<u8>(),
+            buffer.add(fields.str_offset as usize),
+            string.units.len() * 2,
+        );
+    }
+    Some(LRESULT(fields.size as isize))
+}
+
+/// The string and the composition string (UTF-16 units of the string) of the
+/// `RECONVERTSTRING` at `lparam`, which `IMR_CONFIRMRECONVERTSTRING` hands
+/// over; `None` for one whose fields do not fit its `dwSize`.
+fn read_reconvert_string(lparam: LPARAM) -> Option<(Vec<u16>, Range<usize>)> {
+    let buffer = lparam.0 as *const u8;
+    if buffer.is_null() {
+        return None;
+    }
+    // SAFETY: as in `write_reconvert_string`; every read past the header is
+    // checked against `dwSize` first.
+    let header = unsafe { buffer.cast::<RECONVERTSTRING>().read_unaligned() };
+    let size = header.dwSize as usize;
+    let offset = header.dwStrOffset as usize;
+    let len = header.dwStrLen as usize;
+    if size < size_of::<RECONVERTSTRING>()
+        || offset < size_of::<RECONVERTSTRING>()
+        || offset.checked_add(len.checked_mul(2)?)? > size
+        || !header.dwCompStrOffset.is_multiple_of(2)
+    {
+        return None;
+    }
+    let composition_start = header.dwCompStrOffset as usize / 2;
+    let composition =
+        composition_start..composition_start.checked_add(header.dwCompStrLen as usize)?;
+    if composition.end > len {
+        return None;
+    }
+    let mut units = vec![0u16; len];
+    unsafe {
+        std::ptr::copy_nonoverlapping(buffer.add(offset), units.as_mut_ptr().cast::<u8>(), len * 2);
+    }
+    Some((units, composition))
+}
+
+// ---------------------------------------------------------------------------
+// The input scope
+// ---------------------------------------------------------------------------
+
+/// msctf's `SetInputScope`, which the `windows` crate does not bind.
+type SetInputScopeFn = unsafe extern "system" fn(HWND, InputScope) -> HRESULT;
+
+/// `SetInputScope` from the system's msctf, looked up once; `None` where it
+/// cannot be.
+fn set_input_scope_fn() -> Option<SetInputScopeFn> {
+    static FUNCTION: OnceLock<Option<usize>> = OnceLock::new();
+    let address = *FUNCTION.get_or_init(|| {
+        let module =
+            unsafe { LoadLibraryExW(w!("msctf.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) }.ok()?;
+        let address = unsafe { GetProcAddress(module, s!("SetInputScope")) }?;
+        Some(address as usize)
+    });
+    // SAFETY: the address is msctf's `SetInputScope`, whose signature is
+    // `HRESULT SetInputScope(HWND, InputScope)`.
+    address.map(|address| unsafe { std::mem::transmute::<usize, SetInputScopeFn>(address) })
+}
+
+/// The input scope for a field's purpose: `IS_PASSWORD` for a password,
+/// `IS_DEFAULT` otherwise (a terminal has no scope of its own).
+fn input_scope(purpose: ImePurpose) -> InputScope {
+    match purpose {
+        ImePurpose::Password => IS_PASSWORD,
+        ImePurpose::Normal | ImePurpose::Terminal => IS_DEFAULT,
+    }
+}
+
+/// See [`super::set_input_purpose`].
+pub(super) fn set_input_purpose(parent: &ParentHandle, purpose: ImePurpose) {
+    if let Some(hwnd) = hwnd_of(parent) {
+        apply_input_scope(hwnd, purpose);
+    }
+}
+
+/// Give `hwnd` the input scope of `purpose`.
+fn apply_input_scope(hwnd: HWND, purpose: ImePurpose) {
+    let scope = input_scope(purpose);
+    if scope == IS_DEFAULT {
+        reset_input_scope(hwnd);
+        return;
+    }
+    let Some(set_input_scope) = set_input_scope_fn() else {
+        tap_trace!("SetInputScope is not available; the window keeps its scope");
+        return;
+    };
+    let result = unsafe { set_input_scope(hwnd, scope) };
+    tap_trace!(
+        "SetInputScope({:#x}, {}) returned {:#010x}",
+        hwnd.0 as usize,
+        scope.0,
+        result.0 as u32
+    );
+    if result.is_ok() {
+        let _ = SCOPED.try_with(|scoped| scoped.borrow_mut().insert(hwnd.0 as isize));
+    }
+}
+
+/// Give `hwnd` back `IS_DEFAULT`, if it was given another scope.
+fn reset_input_scope(hwnd: HWND) {
+    let was_scoped = SCOPED
+        .try_with(|scoped| scoped.borrow_mut().remove(&(hwnd.0 as isize)))
+        .unwrap_or(false);
+    if !was_scoped {
+        return;
+    }
+    if let Some(set_input_scope) = set_input_scope_fn() {
+        let result = unsafe { set_input_scope(hwnd, IS_DEFAULT) };
+        tap_trace!(
+            "SetInputScope({:#x}, IS_DEFAULT) returned {:#010x}",
+            hwnd.0 as usize,
+            result.0 as u32
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Completing a composition
 // ---------------------------------------------------------------------------
 
@@ -1584,6 +2027,11 @@ fn winit_string(himc: HIMC, which: IME_COMPOSITION_STRING) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use teksilo_canvas::{Point, Rect, SizeProposal};
+    use teksilo_core::text_input_document::{FirstLineRect, Utf16Index};
+    use teksilo_core::text_surface::TextSurface;
+    use teksilo_core::{BuildContext, EventContext, HandlerSet, LayoutContext, LayoutResponse};
+    use teksilo_core::{Widget, WidgetTree};
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW, SendMessageW,
         WINDOW_EX_STYLE, WNDCLASSW, WS_OVERLAPPED,
@@ -1681,5 +2129,439 @@ mod tests {
         unsafe {
             let _ = DestroyWindow(hwnd);
         }
+    }
+
+    // -- The input method's requests --------------------------------------
+
+    /// One line of text, every character 10 wide and 20 tall, the text at
+    /// (5, 7) in the window. Busy while `busy` is set. With `pending` set it
+    /// holds typing not yet inserted, which a read inserts first, as the
+    /// framework's widgets do (counted in `insertions`, the change a
+    /// callback would report).
+    #[derive(Debug)]
+    struct Line {
+        text: String,
+        selection: Range<usize>,
+        busy: Cell<bool>,
+        pending: Cell<bool>,
+        /// How many reads it answered.
+        reads: Cell<usize>,
+        /// How many times a read inserted the pending typing.
+        insertions: Cell<usize>,
+    }
+
+    impl Line {
+        fn read(&self) -> Option<()> {
+            if self.busy.get() {
+                return None;
+            }
+            if self.pending.replace(false) {
+                self.insertions.set(self.insertions.get() + 1);
+            }
+            self.reads.set(self.reads.get() + 1);
+            Some(())
+        }
+        fn len(&self) -> usize {
+            self.text.chars().count()
+        }
+    }
+
+    impl TextInputDocument for Line {
+        fn is_available(&self) -> bool {
+            !self.busy.get() && !self.pending.get()
+        }
+        fn char_count(&self) -> Option<usize> {
+            self.read().map(|()| self.len())
+        }
+        fn text_in(&self, range: Range<usize>) -> Option<String> {
+            self.read()?;
+            let end = range.end.min(self.len());
+            let start = range.start.min(end);
+            Some(self.text.chars().skip(start).take(end - start).collect())
+        }
+        fn selection(&self) -> Option<Range<usize>> {
+            self.read().map(|()| self.selection.clone())
+        }
+        fn caret(&self) -> Option<usize> {
+            self.read().map(|()| self.selection.end)
+        }
+        fn composition_range(&self) -> Option<Range<usize>> {
+            None
+        }
+        fn first_line_rect(&self, range: Range<usize>) -> Option<FirstLineRect> {
+            self.read()?;
+            let end = range.end.min(self.len());
+            let start = range.start.min(end);
+            Some(FirstLineRect {
+                rect: Rect::new(
+                    5.0 + start as f32 * 10.0,
+                    7.0,
+                    ((end - start) as f32 * 10.0).max(1.0),
+                    20.0,
+                ),
+                covered: start..end,
+            })
+        }
+        fn offset_at_point(&self, _: Point) -> Option<usize> {
+            None
+        }
+        fn visible_text_rect(&self) -> Option<Rect> {
+            self.read().map(|()| Rect::new(5.0, 7.0, 300.0, 20.0))
+        }
+        fn is_editable(&self) -> bool {
+            !self.busy.get()
+        }
+        fn is_secure(&self) -> bool {
+            self.busy.get()
+        }
+        fn writing_tools_allowed(&self) -> bool {
+            false
+        }
+        fn utf16_index(&self) -> Option<Rc<Utf16Index>> {
+            self.read().map(|()| Rc::new(Utf16Index::new(&self.text)))
+        }
+    }
+
+    impl TextSurface for Line {
+        fn can_undo(&self) -> bool {
+            false
+        }
+        fn can_redo(&self) -> bool {
+            false
+        }
+        fn undo(&self) {}
+        fn redo(&self) {}
+        fn has_selection(&self) -> bool {
+            !self.selection.is_empty()
+        }
+        fn is_read_only(&self) -> bool {
+            false
+        }
+        fn allows_copy(&self) -> bool {
+            true
+        }
+        fn cut(&self, _: &EventContext<'_>) {}
+        fn copy(&self, _: &EventContext<'_>) {}
+        fn paste(&self, _: &EventContext<'_>) {}
+        fn paste_plain(&self, _: &EventContext<'_>) {}
+        fn select_all(&self) {}
+        fn input_document(&self) -> Option<&dyn TextInputDocument> {
+            Some(self)
+        }
+    }
+
+    /// A focusable widget that registers `line` as its text surface.
+    #[derive(Debug)]
+    struct Field {
+        line: Rc<Line>,
+    }
+
+    impl Widget for Field {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<teksilo_core::WidgetId> {
+            ctx.apply_self_handlers(HandlerSet::new().focusable(true));
+            ctx.register_text_surface(self.line.clone());
+            vec![]
+        }
+        fn layout_response(&self, proposal: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(300.0, 20.0).into()
+        }
+    }
+
+    /// A hidden window whose focused text field is `line`, with the tap
+    /// installed as `window_id`. The tree must outlive the requests.
+    fn window_with(line: Rc<Line>, window_id: TeksiloWindowId) -> (HWND, WidgetTree) {
+        let hwnd = hidden_window();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(Field { line });
+        tree.layout(SizeProposal::exact(300.0, 20.0));
+        tree.focus(id);
+        WINDOWS.with_borrow_mut(|windows| windows.insert(window_id, hwnd));
+        install_tap(window_id, hwnd, tree.text_surfaces());
+        (hwnd, tree)
+    }
+
+    fn line(text: &str, selection: Range<usize>) -> Rc<Line> {
+        Rc::new(Line {
+            text: text.to_owned(),
+            selection,
+            busy: Cell::new(false),
+            pending: Cell::new(false),
+            reads: Cell::new(0),
+            insertions: Cell::new(0),
+        })
+    }
+
+    fn request(hwnd: HWND, command: u32, lparam: isize) -> isize {
+        unsafe {
+            SendMessageW(
+                hwnd,
+                WM_IME_REQUEST,
+                Some(WPARAM(command as usize)),
+                Some(LPARAM(lparam)),
+            )
+        }
+        .0
+    }
+
+    /// A buffer of `bytes`, aligned for `RECONVERTSTRING`, its `dwSize` set.
+    fn reconvert_buffer(bytes: usize) -> Vec<u32> {
+        let mut buffer = vec![0u32; bytes.div_ceil(4)];
+        buffer[0] = bytes as u32;
+        buffer
+    }
+
+    /// The string, composition range and target range (UTF-16 units) a
+    /// filled `RECONVERTSTRING` carries.
+    fn read_back(buffer: &[u32]) -> (String, Range<usize>, Range<usize>) {
+        let header = unsafe { buffer.as_ptr().cast::<RECONVERTSTRING>().read() };
+        let units = unsafe {
+            std::slice::from_raw_parts(
+                buffer
+                    .as_ptr()
+                    .cast::<u8>()
+                    .add(header.dwStrOffset as usize)
+                    .cast::<u16>(),
+                header.dwStrLen as usize,
+            )
+        };
+        let comp = header.dwCompStrOffset as usize / 2;
+        let target = header.dwTargetStrOffset as usize / 2;
+        (
+            String::from_utf16(units).expect("UTF-16"),
+            comp..comp + header.dwCompStrLen as usize,
+            target..target + header.dwTargetStrLen as usize,
+        )
+    }
+
+    /// Japanese reconversion or Hanja on committed text: the input method
+    /// asks for the text, confirms the part it takes, and the next preedit
+    /// replaces that part, once.
+    #[test]
+    fn a_confirmed_reconversion_is_the_next_preedits_replacement() {
+        let window_id = TeksiloWindowId::new(0xFE_0001);
+        // "ab한" with the caret after the syllable.
+        let (hwnd, _tree) = window_with(line("ab\u{D55C}", 3..3), window_id);
+
+        let size = request(hwnd, IMR_RECONVERTSTRING, 0);
+        assert_eq!(size, 32 + 3 * 2, "the size, asked first");
+        let mut buffer = reconvert_buffer(size as usize);
+        let filled = request(hwnd, IMR_RECONVERTSTRING, buffer.as_mut_ptr() as isize);
+        assert_eq!(filled, size);
+        assert_eq!(
+            read_back(&buffer),
+            ("ab\u{D55C}".to_owned(), 3..3, 3..3),
+            "the text around the caret, the caret as an empty string"
+        );
+        assert_eq!(
+            take_marked_replacement(window_id),
+            None,
+            "nothing selected: nothing to replace until the input method says"
+        );
+
+        // The input method takes the syllable before the caret.
+        let filled = request(hwnd, IMR_RECONVERTSTRING, buffer.as_mut_ptr() as isize);
+        assert_eq!(filled, size);
+        buffer[4] = 1; // dwCompStrLen
+        buffer[5] = 4; // dwCompStrOffset, in bytes
+        assert_eq!(
+            request(
+                hwnd,
+                IMR_CONFIRMRECONVERTSTRING,
+                buffer.as_mut_ptr() as isize
+            ),
+            1,
+            "accepted"
+        );
+        assert_eq!(take_marked_replacement(window_id), Some(2..3));
+        assert_eq!(take_marked_replacement(window_id), None, "once");
+
+        // A key the input method passed on forgets a range no preedit took.
+        let _ = request(hwnd, IMR_RECONVERTSTRING, buffer.as_mut_ptr() as isize);
+        buffer[4] = 1;
+        buffer[5] = 4;
+        let _ = request(
+            hwnd,
+            IMR_CONFIRMRECONVERTSTRING,
+            buffer.as_mut_ptr() as isize,
+        );
+        unsafe {
+            let _ = SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(0x25)), Some(LPARAM(0)));
+        }
+        assert_eq!(take_marked_replacement(window_id), None, "the Left arrow");
+
+        detach(window_id);
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
+
+    #[test]
+    fn a_buffer_too_small_is_refused_and_other_text_is_not_confirmed() {
+        let window_id = TeksiloWindowId::new(0xFE_0002);
+        let (hwnd, _tree) = window_with(line("abc", 1..2), window_id);
+        let mut small = reconvert_buffer(32 + 2);
+        assert_eq!(
+            request(hwnd, IMR_RECONVERTSTRING, small.as_mut_ptr() as isize),
+            0,
+            "the string does not fit"
+        );
+        let mut buffer = reconvert_buffer(32 + 6);
+        assert_eq!(
+            request(hwnd, IMR_RECONVERTSTRING, buffer.as_mut_ptr() as isize),
+            38
+        );
+        assert_eq!(read_back(&buffer), ("abc".to_owned(), 1..2, 1..2));
+        // Another string under the same offsets.
+        buffer[8] = u32::from(b'x') | (u32::from(b'y') << 16);
+        assert_eq!(
+            request(
+                hwnd,
+                IMR_CONFIRMRECONVERTSTRING,
+                buffer.as_mut_ptr() as isize
+            ),
+            0
+        );
+        assert_eq!(
+            take_marked_replacement(window_id),
+            Some(1..2),
+            "the selection handed over stands"
+        );
+        detach(window_id);
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
+
+    #[test]
+    fn a_character_position_is_on_the_screen() {
+        let window_id = TeksiloWindowId::new(0xFE_0003);
+        let (hwnd, _tree) = window_with(line("abcdef", 2..2), window_id);
+        let mut position = IMECHARPOSITION {
+            dwSize: size_of::<IMECHARPOSITION>() as u32,
+            dwCharPos: 0,
+            ..Default::default()
+        };
+        assert_eq!(
+            request(
+                hwnd,
+                IMR_QUERYCHARPOSITION,
+                std::ptr::from_mut(&mut position) as isize
+            ),
+            1
+        );
+        let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
+        let expected = to_screen(hwnd, 25.0, 7.0, scale);
+        assert_eq!((position.pt.x, position.pt.y), (expected.x, expected.y));
+        assert_eq!(position.cLineHeight, (20.0 * scale).round() as u32);
+        let corner = to_screen(hwnd, 5.0, 7.0, scale);
+        assert_eq!(
+            (position.rcDocument.left, position.rcDocument.top),
+            (corner.x, corner.y)
+        );
+        position.dwCharPos = 1;
+        assert_eq!(
+            request(
+                hwnd,
+                IMR_QUERYCHARPOSITION,
+                std::ptr::from_mut(&mut position) as isize
+            ),
+            0,
+            "past the (empty) selection: passed on, and winit answers nothing"
+        );
+        detach(window_id);
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
+
+    /// A widget in the middle of its own work: the request goes on to winit
+    /// (here `DefWindowProc`, which answers 0), and the document is not read.
+    #[test]
+    fn a_busy_document_is_not_read_and_the_request_goes_on() {
+        let window_id = TeksiloWindowId::new(0xFE_0004);
+        let document = line("abc", 0..0);
+        let (hwnd, _tree) = window_with(document.clone(), window_id);
+        document.busy.set(true);
+        let mut buffer = reconvert_buffer(64);
+        for command in [IMR_RECONVERTSTRING, IMR_DOCUMENTFEED] {
+            assert_eq!(request(hwnd, command, 0), 0);
+            assert_eq!(request(hwnd, command, buffer.as_mut_ptr() as isize), 0);
+        }
+        assert_eq!(document.reads.get(), 0, "only the probe was asked");
+
+        document.busy.set(false);
+        assert_eq!(
+            request(hwnd, IMR_DOCUMENTFEED, 0),
+            32 + 6,
+            "an available document answers"
+        );
+        detach(window_id);
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
+
+    /// Typing not yet inserted: a read would insert it and run the
+    /// application's change callbacks ahead of winit, so the request goes on
+    /// to winit unanswered, and the typing stays where it was.
+    #[test]
+    fn a_request_does_not_insert_typing_not_yet_inserted() {
+        let window_id = TeksiloWindowId::new(0xFE_0006);
+        let document = line("abc", 1..1);
+        let (hwnd, _tree) = window_with(document.clone(), window_id);
+        document.pending.set(true);
+        let mut position = IMECHARPOSITION {
+            dwSize: size_of::<IMECHARPOSITION>() as u32,
+            ..Default::default()
+        };
+        let mut buffer = reconvert_buffer(64);
+        assert_eq!(
+            request(
+                hwnd,
+                IMR_QUERYCHARPOSITION,
+                std::ptr::from_mut(&mut position) as isize
+            ),
+            0
+        );
+        for command in [IMR_RECONVERTSTRING, IMR_DOCUMENTFEED] {
+            assert_eq!(request(hwnd, command, 0), 0);
+            assert_eq!(request(hwnd, command, buffer.as_mut_ptr() as isize), 0);
+        }
+        assert_eq!(document.insertions.get(), 0, "the typing is not inserted");
+        assert_eq!(document.reads.get(), 0, "nor anything read");
+        assert!(document.pending.get());
+        detach(window_id);
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
+
+    #[test]
+    fn a_password_scope_is_set_and_given_back() {
+        let hwnd = hidden_window();
+        let key = hwnd.0 as isize;
+        let scoped = || SCOPED.with_borrow(|scoped| scoped.contains(&key));
+        assert!(
+            set_input_scope_fn().is_some(),
+            "msctf exports SetInputScope"
+        );
+        apply_input_scope(hwnd, ImePurpose::Password);
+        assert!(scoped(), "IS_PASSWORD set");
+        apply_input_scope(hwnd, ImePurpose::Normal);
+        assert!(!scoped(), "IS_DEFAULT given back");
+
+        let window_id = TeksiloWindowId::new(0xFE_0005);
+        WINDOWS.with_borrow_mut(|windows| windows.insert(window_id, hwnd));
+        apply_input_scope(hwnd, ImePurpose::Password);
+        detach(window_id);
+        assert!(!scoped(), "given back as the window is detached");
+
+        apply_input_scope(hwnd, ImePurpose::Password);
+        install_tap(window_id, hwnd, WidgetTree::new().text_surfaces());
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+        assert!(!scoped(), "given back as the window is destroyed");
+        detach(window_id);
     }
 }

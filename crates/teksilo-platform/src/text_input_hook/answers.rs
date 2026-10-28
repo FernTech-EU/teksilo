@@ -23,7 +23,7 @@
     not(target_os = "macos"),
     allow(
         dead_code,
-        reason = "only the macOS view answers from the document, for now"
+        reason = "the macOS view answers every question here; the Windows hook a few"
     )
 )]
 

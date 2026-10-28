@@ -18,10 +18,18 @@
 //! the preedit does not take must not ride on a later one: the next
 //! `setMarkedText:` replaces it (with its own range, or none), and the next
 //! key press, the end of the composition and the window closing clear it.
+//!
+//! On Windows the range comes from an IMM32 reconversion instead: the input
+//! method asks for the text to reconvert and confirms the part it takes
+//! (`IMR_RECONVERTSTRING`, `IMR_CONFIRMRECONVERTSTRING`), then composes over
+//! it. `imm_requests::Reconversion` keeps it in the same slot.
 
 #![cfg_attr(
-    not(target_os = "macos"),
-    allow(dead_code, reason = "only the macOS view records it, for now")
+    not(any(target_os = "macos", target_os = "windows")),
+    allow(
+        dead_code,
+        reason = "only the macOS view and the Windows hook record it"
+    )
 )]
 
 use std::ops::Range;

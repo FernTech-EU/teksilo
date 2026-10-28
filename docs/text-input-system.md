@@ -207,7 +207,7 @@ secure field (`PasswordField`) never allows it. With it off, the Writing Tools
 rows of the Edit menu are greyed out while that field has focus. Other
 platforms have no such feature and the setting changes nothing there.
 
-## 6. A custom text widget on macOS: `TextInputDocument`
+## 6. A custom text widget: `TextInputDocument`
 
 Dictation, the accent popup and Writing Tools start by asking the window's
 view where the selection is and what the text is. There is one native view
@@ -227,12 +227,23 @@ characters and the UTF-16 offsets the platform uses. A widget that does not
 implement the trait still receives `ImeCommit`s; Dictation and Writing Tools
 need the answers to start.
 
+On Windows the same answers serve the input method's own requests: where a
+character of the composition is drawn (its candidate window follows it), the
+text to reconvert, and the text around the composition. Windows asks from
+inside the window's procedure, where no application code may run, so the
+bridge first asks `is_available`: whether the document can answer now
+without any change. It is `false` while the widget is in the middle of its
+own work, and while it holds batched typing, which a read would insert
+first, running the change callbacks; the request is then answered
+"nothing". It is `true` by default; a widget that batches typing or holds
+its state while it works answers it.
+
 ## 7. Platforms
 
 | Platform | What works | Notes |
 | --- | --- | --- |
 | macOS | Emoji & Symbols, Start Dictation, the press-and-hold accent popup, Writing Tools in its panel, Korean Hanja conversion of the syllable just typed. Keys the input method swallows (the accent popup open) do not type, a key it answers with a commit of its own (2-Set Korean's Space with nothing composed) types that commit once, and a key it types as another character (Kotoeri's full-width space, Pinyin's full-width punctuation) types that character. A switch to another input source in the middle of a composition commits it where it was, once, as the input method commits it (Pinyin's `ni hao` as `nihao`), whether the input method does so itself or not; another mode of the same input method (Kotoeri's Katakana after its Hiragana) leaves the composition going. | AutoFill is not supported. The rows come from the Edit menu: see [Rows macOS adds to the Edit menu](native-menu.md#rows-macos-adds-to-the-edit-menu). |
-| Windows | The emoji panel and voice typing insert, as do compositions from the Microsoft Japanese, Pinyin and Korean input methods, Hanja conversion of the syllable being composed included. | The emoji panel and voice typing arrive as IMM results and report as `Ime`: the two cannot be told apart without a TSF text store, and without one voice typing shows no text while you speak. Hanja conversion of text already committed does nothing, where Notepad, a TSF application, reconverts it. A design for a TSF text store is in `engineering/docs/tsf-text-store.md` in the repository. |
+| Windows | The emoji panel and voice typing insert, as do compositions from the Microsoft Japanese, Pinyin and Korean input methods, Hanja conversion of the syllable being composed included. | The emoji panel and voice typing arrive as IMM results and report as `Ime`: the two cannot be told apart without a TSF text store, and without one voice typing shows no text while you speak. The window answers the input method's requests about the document (where a character is drawn, the text to reconvert, the text around the composition), and a reconversion the input method asks for composes over the text it reconverts. Hanja conversion of a Korean syllable already committed reaches an IMM32 window as no request at all in the measurements so far, where Notepad, a TSF application, reconverts it. A design for a TSF text store is in `engineering/docs/tsf-text-store.md` in the repository. |
 | Linux | Compositions, measured with fcitx5's Mozc, Pinyin and Hangul on KDE Plasma (Wayland). | Compositions arrive as `Composition`. winit 0.30 reports no surrounding text, so Korean Hanja conversion of text already committed does not work. |
 
 On macOS, dictated text carries no public marker: it streams in as marked text

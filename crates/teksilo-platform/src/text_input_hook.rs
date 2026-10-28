@@ -48,7 +48,12 @@
 //! committed where it is, and the input method's later delivery of it is
 //! dropped. On Windows the hook has the input method complete a composition
 //! the field ends, and tells the field what it committed
-//! ([`finish_composition`]); when asked, it traces.
+//! ([`finish_composition`]); answers the input method's requests about the
+//! document (where a character is drawn, the text to reconvert, the text
+//! around the composition), so a reconversion composes over the text it
+//! reconverts ([`take_marked_replacement`]); gives the window the input
+//! scope of the focused field ([`set_input_purpose`]); and when asked, it
+//! traces.
 //!
 //! With `TEKSILO_TEXT_INPUT_TRACE=1` set the hooks also log every call they
 //! see to stderr, which is how the per-OS behaviour they rely on was measured.
@@ -68,6 +73,7 @@ mod answers;
 mod composition;
 mod dictation;
 mod imm_completion;
+mod imm_requests;
 mod key_press;
 mod left_behind;
 #[cfg(target_os = "macos")]
@@ -287,24 +293,48 @@ pub fn finish_composition(window_id: TeksiloWindowId) -> Option<FinishedComposit
 }
 
 /// The range of the focused field's text (its character offsets) that the
-/// macOS input method gave its latest `setMarkedText:` as the text the
-/// composition replaces, taken once.
+/// window's next composition replaces, taken once: on macOS, the range the
+/// input method gave its latest `setMarkedText:` (Korean Hanja conversion of
+/// the syllable just typed); on Windows, the range of an IMM32 reconversion,
+/// which the input method confirmed with `IMR_CONFIRMRECONVERTSTRING` or
+/// which was selected when it asked for the text (`IMR_RECONVERTSTRING`).
 ///
 /// The app calls it while it translates winit's `Ime::Preedit` for the
 /// window, and sets the result as the `replacement` of
 /// [`WidgetEvent::ImeComposition`](teksilo_core::WidgetEvent::ImeComposition).
 /// `None` when the input method named none, for another window, a second
-/// time for the same update, and on every platform but macOS.
+/// time for the same update, and on every other platform.
 pub fn take_marked_replacement(window_id: TeksiloWindowId) -> Option<Range<usize>> {
     #[cfg(target_os = "macos")]
     {
         macos::take_marked_replacement(window_id)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        windows::take_marked_replacement(window_id)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = window_id;
         None
     }
+}
+
+/// Tell the platform's input system what the window's focused text field is
+/// for, beyond what winit forwards. Main thread only, from the application's
+/// handling of an event, never from inside a window procedure ahead of
+/// winit: the call may deliver messages.
+///
+/// On Windows, the window's input scope (`SetInputScope`): `IS_PASSWORD`
+/// for [`ImePurpose::Password`](teksilo_core::ImePurpose::Password), `IS_DEFAULT` otherwise; winit 0.30's
+/// `set_ime_purpose` does nothing there. A window given a scope is set back
+/// to `IS_DEFAULT` when it is detached. Elsewhere winit's own
+/// `set_ime_purpose` says it, and this does nothing.
+pub fn set_input_purpose(window: &ParentHandle, purpose: teksilo_core::ImePurpose) {
+    #[cfg(target_os = "windows")]
+    windows::set_input_purpose(window, purpose);
+    #[cfg(not(target_os = "windows"))]
+    let _ = (window, purpose);
 }
 
 /// Attach to a window's native surface. Main thread only, once the window

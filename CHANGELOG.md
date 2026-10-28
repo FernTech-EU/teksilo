@@ -26,6 +26,12 @@ by crate for clarity, not because crates version independently.
   [docs/native-menu.md](docs/native-menu.md).
 - **`TEKSILO_TEXT_INPUT_TRACE=1`** logs what the platform's text input system
   sends a window, on macOS and Windows.
+- **Windows: a text field answers the input method's questions about its
+  text.** The candidate window follows the character being converted, a
+  reconversion of committed text (the Japanese conversion key) composes over
+  that text instead of beside it, and the input method reads the text around
+  the composition as it predicts. A password field gives the window the
+  `IS_PASSWORD` input scope.
 
 #### Core
 
