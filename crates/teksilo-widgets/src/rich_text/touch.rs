@@ -238,6 +238,9 @@ impl TouchTextSurface for RichTextTouchSurface {
     }
 
     fn place_caret_at(&self, window: Point, ctx: &mut EventContext<'_>) -> bool {
+        // What was typed in this frame goes in where it was typed, not at the
+        // new caret.
+        super::frame_loop::insert_typing_before_pointer(&mut self.state.borrow_mut());
         let hit = {
             let st = self.state.borrow();
             let local = window_to_engine_local(&st, window);

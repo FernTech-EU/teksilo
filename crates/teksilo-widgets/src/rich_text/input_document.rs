@@ -116,15 +116,10 @@ impl TextInputDocument for EditorHandle {
     }
 
     fn composition_range(&self) -> Option<Range<usize>> {
-        self.with_typing_inserted(|st| {
-            // An empty preedit with a range left is a cancelled composition
-            // whose range still needs clearing, not one in progress.
-            st.ime_preedit.as_ref().filter(|text| !text.is_empty())?;
-            st.ime_preedit_range
-                .clone()
-                .filter(|range| !range.is_empty())
-        })
-        .flatten()
+        // The document says where the composition is: a recorded write since
+        // it was shown reverted it, and an ended one waits only for its commit.
+        self.with_typing_inserted(|st| st.composition.range(&st.document))
+            .flatten()
     }
 
     fn first_line_rect(&self, range: Range<usize>) -> Option<FirstLineRect> {

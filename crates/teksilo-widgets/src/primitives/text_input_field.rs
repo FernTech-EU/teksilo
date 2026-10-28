@@ -1162,6 +1162,10 @@ fn catch_up_layout(state: &mut TextInputState) -> bool {
 
 /// Simplified frame-loop tick for single-line text input.
 fn tick(state: &mut TextInputState, delta: f32) -> bool {
+    // A composition the input method ended with its empty update and did not
+    // commit before this frame was cancelled; the text it took the place of
+    // goes back.
+    keyboard::settle_cancelled_composition(state);
     let had_events = catch_up_layout(state);
 
     // Blink only when focused AND the host window is active — the caret hides
@@ -1216,15 +1220,16 @@ fn handle_access_action(
 
     match (action, data) {
         (Action::SetTextSelection, Some(ActionData::SetTextSelection(sel))) => {
-            let st = state.borrow();
-            st.cursor.set_position(
-                sel.anchor.character_index,
-                teksilo_text::text_document::MoveMode::MoveAnchor,
-            );
-            st.cursor.set_position(
-                sel.focus.character_index,
-                teksilo_text::text_document::MoveMode::KeepAnchor,
-            );
+            let mut st = state.borrow_mut();
+            // What was typed in this frame goes in where it was typed; the
+            // reader's positions are in the text it was shown, without it.
+            let mut ends = [sel.anchor.character_index, sel.focus.character_index];
+            keyboard::apply_pending_chars_keeping(&mut st, &mut ends);
+            let [anchor, focus] = ends;
+            st.cursor
+                .set_position(anchor, teksilo_text::text_document::MoveMode::MoveAnchor);
+            st.cursor
+                .set_position(focus, teksilo_text::text_document::MoveMode::KeepAnchor);
             drop(st);
             sync_cursor_signals(state);
             ctx.request_frame();
@@ -1686,6 +1691,12 @@ mod arrival_tests;
 #[cfg(test)]
 mod input_document_tests;
 
+/// **A composition that takes the place of text, and one a press or a focus
+/// change ends**: Hanja conversion, a cancel that puts the text back, and the
+/// text a composition showed kept in place when the user clicks away.
+#[cfg(test)]
+mod composition_tests;
+
 /// A live handle on a [`TextInputField`] — its text-editing commands, for a
 /// caller outside the widget.
 ///
@@ -1781,7 +1792,12 @@ impl TextFieldHandle {
 
     /// Select the whole field.
     pub fn select_all(&self) {
-        self.with(|st| st.cursor.select(SelectionType::Document));
+        self.with(|st| {
+            // What was typed in this frame goes in first: left for the frame,
+            // it went in over the selection.
+            st.apply_pending_chars();
+            st.cursor.select(SelectionType::Document);
+        });
     }
 
     /// Copy the selection to the clipboard.

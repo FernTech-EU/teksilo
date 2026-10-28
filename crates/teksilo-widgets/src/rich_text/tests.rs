@@ -2277,7 +2277,10 @@ fn a_composition_over_a_forward_selection_replaces_it_once() {
             "selected {anchor}..{position}: the preedit replaces the selection"
         );
         assert_eq!(
-            state.borrow().ime_preedit_range,
+            {
+                let st = state.borrow();
+                st.composition.range(&st.document)
+            },
             Some(0..1),
             "selected {anchor}..{position}: the preedit is where the selection was"
         );

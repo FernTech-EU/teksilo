@@ -47,6 +47,7 @@ pub struct TextAnnotationSpan {
 }
 use super::image_cache::ImageCache;
 use super::policy::{CaretPolicy, PolicyBundle};
+use crate::common::composition::Composition;
 use crate::common::document_offsets::DocumentUtf16;
 use crate::common::editor_runtime::{CaretBlink, Debounce};
 use crate::common::pending_arrivals::PendingArrivals;
@@ -510,19 +511,11 @@ pub(crate) struct EditorState {
     /// Flushed with the batch. See [`Self::report_pending_arrivals`].
     pub pending_arrivals: PendingArrivals,
 
-    /// Active IME preedit text — the unfinalised string the input
-    /// method renders while the user is composing (CJK, Korean,
-    /// dead-key accents on Linux). `Some(text)` means there is a
-    /// tentative insert at `ime_preedit_range`; empty text + `Some`
-    /// means the composition was cancelled but the old range still
-    /// needs clearing. `None` means no active composition.
-    pub ime_preedit: Option<String>,
-    /// Character range (scalar-indexed, matching
-    /// `TextCursor::position`) of the tentative preedit insert. The
-    /// composition handler removes this range before inserting the
-    /// next preedit string so the document always reflects the
-    /// current IME state.
-    pub ime_preedit_range: Option<std::ops::Range<usize>>,
+    /// The input method's composition, shown in the document as transient
+    /// edits, which no undo history records. Its range is the document's to
+    /// say (`TextDocument::transient_range`): any recorded write reverts it.
+    /// See [`Composition`].
+    pub composition: Composition,
 
     /// Document position (scalar-indexed caret offset) of the most recent
     /// [`chase_caret_into_view`](super::keyboard::chase_caret_into_view). The
@@ -958,8 +951,7 @@ impl EditorState {
             frame_wake_at: None,
             pending_chars: String::new(),
             pending_arrivals: PendingArrivals::default(),
-            ime_preedit: None,
-            ime_preedit_range: None,
+            composition: Composition::default(),
             last_chase_pos: None,
             last_chase_y: None,
             typewriter: None,
@@ -1262,6 +1254,9 @@ impl EditorState {
             let mut q = self.event_queue.lock().expect("event queue mutex poisoned");
             q.drain(..).collect()
         };
+        // A recorded write since the last drain (an undo, a format, the
+        // application's own edit) reverted the composition, if one was shown.
+        self.composition.reconcile(&self.document);
 
         // Invalidate the accessibility flow snapshot + synthetic-id
         // map whenever the document actually changes structure or
@@ -1447,10 +1442,10 @@ impl EditorState {
         // not while an IME composition is still in progress: each intermediate
         // preedit keystroke (every CJK/Kana candidate change) mutates the
         // document through this same `ContentsChanged` path, but it is not yet
-        // a settled edit. `ime_preedit` is `None` once the composition either
-        // commits (`clear_ime_preedit` runs before the commit's own insert) or
-        // is cancelled to empty, so gating on it fires `on_change` exactly once
-        // for the final, real result.
+        // a settled edit. The composition is no longer live once it is
+        // committed, cancelled, ended by its empty update or reverted by a
+        // recorded write, so gating on it fires `on_change` exactly once for
+        // the final, real result.
         //
         // **A formatting change counts.** It was omitted for as long as this
         // callback existed, and the omission was not visible from here: a host
@@ -1467,7 +1462,7 @@ impl EditorState {
         // exactly as it already covered content.
         if (saw_content_change || saw_format_change)
             && !saw_reset_or_load
-            && self.ime_preedit.is_none()
+            && !self.composition.is_live(&self.document)
             && let Some(cb) = self.on_change.clone()
         {
             cb();

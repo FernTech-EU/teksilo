@@ -619,7 +619,7 @@ impl Widget for RichTextEditorBody {
         // still see them. `cursor_affinity` matches what `caret_rect`
         // queries elsewhere.
         let scroll_x_logical = st.scroll_x.get();
-        let ime_preedit_range = st.ime_preedit_range.clone();
+        let ime_preedit_range = st.composition.range(&st.document);
         let ime_affinity = st.cursor_affinity;
 
         // Clip to bounds so overflowing glyphs don't bleed into siblings.
@@ -719,8 +719,12 @@ impl Widget for RichTextEditorBody {
 
         // IME preedit underline. Walk the composing range char-by-char,
         // emitting one underline segment per visual line so a wrapped
-        // composition underlines correctly. Engine coords are content-
-        // space; screen = bounds + content − scroll (matches the glyphs).
+        // composition underlines correctly. The engine's caret `x` is
+        // content-space, so the horizontal scroll comes off it; its `y` is
+        // already screen-space (the engine subtracted the scroll offset set
+        // above), so the body's origin is all it needs, as for the glyphs.
+        // Taking the scroll off `y` as well drew the underline that far above
+        // the composition, under an earlier line.
         // On a read-only viewer there is never a preedit, so this is inert.
         if let Some(range) = ime_preedit_range
             && engine.has_full_layout()
@@ -741,7 +745,7 @@ impl Widget for RichTextEditorBody {
             for p in range.start..=range.end {
                 let c = engine.caret_rect(p, ime_affinity);
                 let x = bounds.x + c[0] - scroll_x_logical;
-                let y = bounds.y + c[1] - scroll_y_logical;
+                let y = bounds.y + c[1];
                 match seg_x0 {
                     None => {
                         seg_x0 = Some(x);
@@ -813,7 +817,7 @@ impl Widget for RichTextEditorBody {
         // the AT selection so screen readers / braille track the tentative
         // text — the composing characters are already in the runs / value.
         // Falls back to the live cursor/selection otherwise.
-        let (user_anchor, user_pos) = match st.ime_preedit_range.clone() {
+        let (user_anchor, user_pos) = match st.composition.range(&st.document) {
             Some(range) => (range.start, range.end),
             None => (st.cursor.anchor(), st.cursor.position()),
         };

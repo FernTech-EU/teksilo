@@ -932,44 +932,158 @@ fn a_cancelled_composition_leaves_the_document_clean() {
     let st = editor_state("ab");
     force_layout(&st, 400.0, 300.0);
     {
-        let mut s = st.borrow_mut();
+        let mut guard = st.borrow_mut();
+        let s = &mut *guard;
         s.cursor.set_position(1, MoveMode::MoveAnchor);
-        // Simulate a landed preedit.
-        let start = s.cursor.position();
-        let _ = s.cursor.insert_text("ん");
-        let end = s.cursor.position();
-        s.ime_preedit = Some("ん".to_string());
-        s.ime_preedit_range = Some(start..end);
+        // A landed preedit.
+        assert!(s.composition.show(&s.document, &s.cursor, "ん"));
     }
     assert_eq!(st.borrow().document.to_plain_text().unwrap(), "aんb");
     super::keyboard::clear_ime_preedit(&st);
+    let s = st.borrow();
     assert_eq!(
-        st.borrow().document.to_plain_text().unwrap(),
+        s.document.to_plain_text().unwrap(),
         "ab",
         "cancelling must remove the tentative text — leaving it would make an \
          abandoned composition permanent"
     );
-    assert!(st.borrow().ime_preedit.is_none());
-    assert!(st.borrow().ime_preedit_range.is_none());
+    assert!(!s.composition.is_held(&s.document));
+    assert!(!s.document.can_undo(), "and a cancel records nothing");
 }
 
-/// A stale preedit range must not delete the wrong text when the document
-/// shrank underneath it (an undo, a programmatic edit).
+/// A composition a recorded edit has already taken away (an undo, a
+/// programmatic edit) is not taken away again: cancelling it then must not
+/// touch the text that edit left.
 #[test]
-fn a_stale_preedit_range_cannot_delete_past_the_end() {
+fn a_composition_an_edit_reverted_is_not_removed_twice() {
     let st = editor_state("ab");
     {
-        let mut s = st.borrow_mut();
-        // A range describing a document that no longer exists.
-        s.ime_preedit_range = Some(100..200);
-        s.ime_preedit = Some("x".to_string());
+        let mut guard = st.borrow_mut();
+        let s = &mut *guard;
+        s.cursor.set_position(2, MoveMode::MoveAnchor);
+        assert!(s.composition.show(&s.document, &s.cursor, "x"));
+        // Any recorded write reverts the composition first.
+        s.document.cursor_at(0).insert_text("z").unwrap();
     }
     super::keyboard::clear_ime_preedit(&st);
     assert_eq!(
         st.borrow().document.to_plain_text().unwrap(),
-        "ab",
-        "a stale range must clamp to the live length rather than corrupt"
+        "zab",
+        "the edit's text stays as it left it"
     );
+}
+
+/// A focused code editor holding `text`, its caret at the end, in a tree that
+/// delivers input-method events and frames.
+fn composing_editor(text: &str) -> (WidgetTree, SharedState) {
+    let editor = super::widget::CodeEditor::new(TextDocument::new());
+    let st = editor.handle().state_handle();
+    st.borrow().document.set_plain_text(text).unwrap();
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+    let focus = tree.first_focusable_descendant(id).unwrap_or(id);
+    tree.focus(focus);
+    ime_frame(&mut tree);
+    let end = st.borrow().document.character_count();
+    st.borrow().cursor.set_position(end, MoveMode::MoveAnchor);
+    (tree, st)
+}
+
+fn ime_frame(tree: &mut WidgetTree) {
+    tree.request_frame();
+    tree.tick_animations(std::time::Duration::from_millis(16));
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+}
+
+fn compose(tree: &mut WidgetTree, text: &str) {
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::ime_composition(
+        text, None,
+    ));
+}
+
+/// What winit sends for a commit: an empty update, then the text.
+fn commit(tree: &mut WidgetTree, text: &str) {
+    compose(tree, "");
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::ime_commit(text));
+    ime_frame(tree);
+}
+
+fn type_keys(tree: &mut WidgetTree, text: &str) {
+    let focused = tree.focused().expect("the editor is focused");
+    tree.type_text(focused, text);
+    ime_frame(tree);
+}
+
+/// The states a composition went through are never recorded: one undo takes
+/// back what it committed, the next the typing before it.
+#[test]
+fn one_undo_takes_back_a_commit_and_none_its_states() {
+    let (mut tree, st) = composing_editor("");
+    type_keys(&mut tree, "abc");
+    for state in ["n", "ni", "nih", "niha", "nihao"] {
+        compose(&mut tree, state);
+    }
+    assert_eq!(text_of(&st), "abcnihao");
+    commit(&mut tree, "\u{4F60}\u{597D}");
+    assert_eq!(text_of(&st), "abc\u{4F60}\u{597D}");
+
+    let undo = |tree: &mut WidgetTree| {
+        let _ = st.borrow().document.undo();
+        ime_frame(tree);
+    };
+    undo(&mut tree);
+    assert_eq!(text_of(&st), "abc", "one undo takes back the commit");
+    undo(&mut tree);
+    assert_eq!(text_of(&st), "", "the next one the typing");
+    assert!(!st.borrow().document.can_undo());
+    let _ = st.borrow().document.redo();
+    let _ = st.borrow().document.redo();
+    assert_eq!(text_of(&st), "abc\u{4F60}\u{597D}");
+}
+
+/// A cancelled composition leaves the history as it found it.
+#[test]
+fn a_cancelled_composition_leaves_the_history_alone() {
+    let (mut tree, st) = composing_editor("");
+    type_keys(&mut tree, "abc");
+    let _ = st.borrow().document.undo();
+    ime_frame(&mut tree);
+    for state in ["n", "ni"] {
+        compose(&mut tree, state);
+    }
+    compose(&mut tree, "");
+    ime_frame(&mut tree);
+    assert_eq!(text_of(&st), "");
+    {
+        let s = st.borrow();
+        assert!(!s.document.can_undo());
+        assert!(s.document.can_redo(), "the redo stack survived it");
+        assert!(!s.composition.is_held(&s.document));
+    }
+    let _ = st.borrow().document.redo();
+    assert_eq!(text_of(&st), "abc");
+}
+
+/// Undo pressed while a composition is shown takes it away, and the editor
+/// no longer claims it.
+#[test]
+fn an_undo_during_a_composition_takes_it_away() {
+    let (mut tree, st) = composing_editor("");
+    type_keys(&mut tree, "abc");
+    compose(&mut tree, "ni");
+    tree.press_key(Key::Z, Modifiers::COMMAND);
+    assert_eq!(text_of(&st), "");
+    {
+        let s = st.borrow();
+        assert_eq!(s.composition.range(&s.document), None);
+    }
+    ime_frame(&mut tree);
+    compose(&mut tree, "nih");
+    commit(&mut tree, "\u{4F60}");
+    assert_eq!(text_of(&st), "\u{4F60}");
+    let _ = st.borrow().document.undo();
+    assert_eq!(text_of(&st), "");
 }
 
 // --- Smart Home -----------------------------------------------------------

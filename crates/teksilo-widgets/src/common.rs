@@ -11,6 +11,7 @@
 //! surface.
 
 pub(crate) mod column_geometry;
+pub(crate) mod composition;
 pub(crate) mod conformance_box;
 pub mod datetime;
 pub(crate) mod document_offsets;
@@ -23,6 +24,8 @@ pub(crate) mod editor_runtime;
 pub(crate) mod enabled_test;
 #[cfg(test)]
 pub(crate) mod heard_test;
+#[cfg(test)]
+pub(crate) mod ime_ops_test;
 pub(crate) mod interaction;
 pub(crate) mod list_nav;
 #[cfg(test)]

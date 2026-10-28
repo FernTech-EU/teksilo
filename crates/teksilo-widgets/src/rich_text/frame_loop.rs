@@ -186,6 +186,11 @@ pub(crate) fn catch_up_layout(state: &mut EditorState) -> bool {
 /// tick in seconds (clamped by the tree). Returns `true` when another
 /// frame is needed (the editor has ongoing work).
 pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
+    // Step 0: a composition the input method ended with its empty update and
+    // did not commit before this frame was cancelled: the document goes back
+    // to what it was before it, the text it took the place of included.
+    super::keyboard::settle_cancelled_composition(state);
+
     // Steps 1 to 4: the typing in, the document's events drained, the text
     // laid out.
     let had_events = catch_up_layout(state);
@@ -403,4 +408,42 @@ pub(crate) fn flush_pending_chars(state: &mut EditorState) {
         state.report_pending_arrivals();
         state.pending_text_changed = true;
     }
+}
+
+/// [`flush_pending_chars`] for something other than a key that is about to
+/// move the caret or the selection to `offsets` (a programmatic selection, an
+/// assistive client's), read from the text without the batch: the batch goes
+/// in where it was typed, and each offset is carried across it as the
+/// document carries a cursor. Left for the next frame, the batch went in at
+/// the caret the move had just placed, over the selection it had just made.
+pub(crate) fn flush_pending_chars_keeping(state: &mut EditorState, offsets: &mut [usize]) {
+    if state.pending_chars.is_empty() {
+        return;
+    }
+    let held: Vec<_> = offsets
+        .iter()
+        .map(|&at| state.document.cursor_at(at))
+        .collect();
+    flush_pending_chars(state);
+    for (offset, cursor) in offsets.iter_mut().zip(held) {
+        *offset = cursor.position();
+    }
+}
+
+/// Before a pointer moves the caret or starts a selection: insert the typing
+/// and the input system's commits batched for this frame (those with no
+/// composition before them: a dead key, the emoji panel) where they were
+/// typed, and lay the text out with them, so that the pointer hit-tests the
+/// text the screen showed. Returns whether there was a batch.
+///
+/// Left for the next frame, the batch went in at the caret the pointer had
+/// just placed. The commit of a composition is not batched: it takes the
+/// composition's place as it arrives (`keyboard::commit_composition`), which
+/// is where the Microsoft Korean IME's commit on the mouse-down itself lands.
+pub(crate) fn insert_typing_before_pointer(state: &mut EditorState) -> bool {
+    if state.pending_chars.is_empty() {
+        return false;
+    }
+    catch_up_layout(state);
+    true
 }

@@ -365,7 +365,7 @@ fn empty_ime_composition_flood_is_inert() {
 }
 
 #[test]
-fn ime_preedit_removed_on_focus_loss() {
+fn ime_preedit_kept_on_focus_loss() {
     let text = Signal::new(String::new());
     let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
     let id = tree.add(TextInput::new(text.clone()));
@@ -379,11 +379,14 @@ fn ime_preedit_removed_on_focus_loss() {
     tick(&mut tree);
     assert_eq!(text.get(), "ni");
 
-    // Move focus away — the tentative composition must be abandoned.
+    // Move focus away: the composition's text stays, as a native field keeps
+    // it, and a late empty update reaching the newly focused button is inert.
     tree.focus(tree.first_focusable_descendant(sink).unwrap());
+    tree.dispatch_event(WidgetEvent::ime_composition(String::new(), None));
+    tree.dispatch_event(WidgetEvent::ime_commit(""));
     tick(&mut tree);
     tick(&mut tree);
-    assert_eq!(text.get(), "", "blur abandons the in-progress composition");
+    assert_eq!(text.get(), "ni", "blur keeps the in-progress composition");
 }
 
 #[test]

@@ -27,13 +27,13 @@ use crate::common::editor_runtime::ScrollMetrics;
 /// Run one frame step. `delta` is seconds since the previous tick. Returns
 /// `true` when the editor still has work and needs another frame.
 pub(crate) fn tick(state: &mut CodeEditorState, delta: f32) -> bool {
+    // 0. A composition the input method ended with its empty update and did
+    //    not commit before this frame was cancelled.
+    super::keyboard::settle_cancelled_composition(state);
+
     // 1. Flush typed characters as one insert. Typing over a selection replaces
     //    it, which `insert_text` already does.
-    if !state.pending_chars.is_empty() {
-        let batch = std::mem::take(&mut state.pending_chars);
-        insert_at_every_caret(state, &batch);
-        state.pending_text_changed = true;
-    }
+    flush_pending_chars(state);
 
     // 2. Drain.
     let (had_events, single_pos) = state.drain_events();
@@ -184,6 +184,18 @@ pub(crate) fn tick(state: &mut CodeEditorState, delta: f32) -> bool {
     // wake-up instead, so the loop can idle between toggles rather than pump at
     // the display's rate to catch a transition that happens twice a second.
     had_events || debounce_pending || drag_active
+}
+
+/// Insert the characters typed since the last insert, as one, at every caret.
+/// Returns whether there were any.
+pub(crate) fn flush_pending_chars(state: &mut CodeEditorState) -> bool {
+    if state.pending_chars.is_empty() {
+        return false;
+    }
+    let batch = std::mem::take(&mut state.pending_chars);
+    insert_at_every_caret(state, &batch);
+    state.pending_text_changed = true;
+    true
 }
 
 /// Insert `text` at every caret.

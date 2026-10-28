@@ -26,6 +26,7 @@ use teksilo_tokens::{HAlignment, TextStyle};
 
 use super::{AtRevealPolicy, EchoMode};
 use crate::EditSource;
+use crate::common::composition::Composition;
 use crate::common::document_offsets::DocumentUtf16;
 use crate::common::editor_runtime::{CaretBlink, Debounce};
 use crate::common::pending_arrivals::PendingArrivals;
@@ -295,14 +296,12 @@ pub(crate) struct TextInputState {
     pub field_widget_id: Option<WidgetId>,
 
     // ── IME composition (preedit) ────────────────────────────────────
-    /// Active IME preedit (composition) string, or `None` when not
-    /// composing. The text is inserted into `document` tentatively and
-    /// tracked by `ime_preedit_range`; secure masking / echo applies to
-    /// it like any other content, so a password preedit shows as bullets.
-    pub ime_preedit: Option<String>,
-    /// Character range in `document` currently occupied by the live
-    /// preedit, so a follow-up composition event can remove and replace it.
-    pub ime_preedit_range: Option<std::ops::Range<usize>>,
+    /// The input method's composition, shown in `document` as transient
+    /// edits, which no undo history records. Its range is the document's to
+    /// say (`TextDocument::transient_range`): any recorded write reverts it.
+    /// Secure masking / echo applies to it like any other content, so a
+    /// password composition shows as bullets. See [`Composition`].
+    pub composition: Composition,
     /// Last IME candidate-window rectangle reported to the platform. Reporting
     /// is deduped against this: re-sending an unchanged area is wasted work and,
     /// on some winit IME backends (ibus / fcitx), echoes back a fresh empty
@@ -495,8 +494,7 @@ impl TextInputState {
             suffix_engine: None,
             suffix_width: 0.0,
             field_widget_id: None,
-            ime_preedit: None,
-            ime_preedit_range: None,
+            composition: Composition::default(),
             last_ime_area: None,
             at_published: Cell::new(AtPublished::Nothing),
             at_republish: Signal::new(0),
@@ -711,6 +709,10 @@ impl TextInputState {
             let mut q = self.event_queue.lock().expect("event queue mutex poisoned");
             q.drain(..).collect()
         };
+        // A recorded write since the last drain (an undo, a paste, the
+        // application writing the bound text) reverted the composition, if one
+        // was shown.
+        self.composition.reconcile(&self.document);
 
         let mut had_events = false;
         for event in drained {

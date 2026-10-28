@@ -452,6 +452,14 @@ pub(super) fn handle_pointer_event(
             {
                 return EventResponse::Ignored;
             }
+            // Before the press moves the caret: what was typed or committed in
+            // this frame goes in where it was typed, and a composition in
+            // progress ends with its text kept where it is. Otherwise the batch
+            // lands at the click, and the input method keeps composing at the
+            // old place and commits there later. A press inside the
+            // composition's own text is no different; input methods disagree
+            // about it, and one rule is easier to predict.
+            super::keyboard::settle_before_press(state, ctx);
             let shift = modifiers.shift();
             let local = to_engine_local(state, position);
             // A resize grip is checked before the hit-test, because a grip sits
@@ -885,6 +893,11 @@ fn handle_direct_pointer_event(
             if !touch.press_is_still_a_tap(ctx.pointer().id, window, tap_slop) {
                 return EventResponse::Ignored;
             }
+            // A tap settles the typing and a composition in progress before it
+            // moves the caret, as a click does on its press (see the precise arm
+            // above). Not on this pointer's press: that may yet be a pan, which
+            // leaves the editor as it found it.
+            super::keyboard::settle_before_press(state, ctx);
             let hit = {
                 let st = state.borrow();
                 let local = super::touch::window_to_engine_local(&st, window);
@@ -976,6 +989,10 @@ pub(super) fn handle_long_press(
             event.position.y + st.node_origin.y,
         )
     };
+    // A hold selects, so it settles the typing and a composition in progress
+    // first, as a tap does. A finger's press did not (it may have been a pan);
+    // a mouse's did, and this finds nothing left to settle.
+    super::keyboard::settle_before_press(state, ctx);
     if !touch.select_word_at(event.pointer, window, ctx) {
         return EventResponse::Ignored;
     }
@@ -986,6 +1003,9 @@ pub(super) fn handle_long_press(
 
 /// Select word under the caret on double-click.
 pub(super) fn handle_double_tap(state: &SharedState, pos: Point, ctx: &mut EventContext) {
+    // The presses before it settled the typing already; this finds nothing
+    // left unless a batch arrived between them.
+    super::keyboard::settle_before_press(state, ctx);
     tap_select(state, pos, SelectionType::WordUnderCursor);
     super::keyboard::chase_caret_into_view(state, ctx);
     ctx.request_frame();
@@ -994,6 +1014,7 @@ pub(super) fn handle_double_tap(state: &SharedState, pos: Point, ctx: &mut Event
 /// Select block under the caret on triple-click. Matches the godot reference's
 /// own triple-click rule.
 pub(super) fn handle_triple_tap(state: &SharedState, pos: Point, ctx: &mut EventContext) {
+    super::keyboard::settle_before_press(state, ctx);
     tap_select(state, pos, SelectionType::BlockUnderCursor);
     super::keyboard::chase_caret_into_view(state, ctx);
     ctx.request_frame();
@@ -1044,6 +1065,9 @@ fn engine_local_of_window(state: &SharedState, window_position: Point) -> Point 
 /// before `dispatch_to_widget` is ever called. Mirrors the single-line
 /// [`TextInputField`](crate::primitives::text_input_field)'s behavior.
 pub(super) fn reposition_caret_for_context_menu(state: &SharedState, window_position: Point) {
+    // What was typed in this frame goes in where it was typed, not at the
+    // right-click.
+    super::frame_loop::insert_typing_before_pointer(&mut state.borrow_mut());
     let local = engine_local_of_window(state, window_position);
     let hit = {
         let st = state.borrow();
@@ -1084,6 +1108,9 @@ pub(super) fn reposition_caret_for_context_menu(state: &SharedState, window_posi
 /// Returns `false` when the pointer is not over any text, so the caller can
 /// decline the drop rather than insert somewhere arbitrary.
 pub(super) fn move_caret_for_drag(state: &SharedState, local: Point) -> bool {
+    // What was typed in this frame goes in where it was typed, not at the
+    // drop point.
+    super::frame_loop::insert_typing_before_pointer(&mut state.borrow_mut());
     let hit = {
         let st = state.borrow();
         hit_test::hit_test_at(&st.engine, to_engine_local(state, &local), 0.0, 0.0)

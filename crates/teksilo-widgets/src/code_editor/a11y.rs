@@ -68,7 +68,7 @@ pub(crate) fn set_role(st: &CodeEditorState, builder: &mut AccessNodeBuilder) {
 /// composing, else the primary caret (secondary carets are editing-only and the
 /// AT tree reports just the primary, as documented on the state).
 fn user_selection(st: &CodeEditorState) -> (usize, usize) {
-    match st.ime_preedit_range.clone() {
+    match st.composition.range(&st.document) {
         Some(range) => (range.start, range.end),
         None => (st.cursor.anchor(), st.cursor.position()),
     }

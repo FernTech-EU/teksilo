@@ -93,6 +93,8 @@ pub(crate) mod touch_mount;
 pub use self::lists::list_style_is_ordered;
 
 #[cfg(test)]
+mod composition_tests;
+#[cfg(test)]
 mod input_document_tests;
 #[cfg(test)]
 mod line_break_tests;
@@ -911,7 +913,8 @@ impl RichTextEditor {
     /// own trigger logic the same way, as defense-in-depth alongside
     /// `on_change`'s own gate.
     pub fn is_composing(&self) -> bool {
-        self.state.borrow().ime_preedit.is_some()
+        let st = self.state.borrow();
+        st.composition.is_live(&st.document)
     }
 
     /// Reactive cursor position signal. Observers fire whenever the
@@ -1031,6 +1034,9 @@ impl RichTextEditor {
     pub fn select_all(&self) {
         {
             let mut st = self.state.borrow_mut();
+            // What was typed in this frame goes in first, where it was typed:
+            // left for the frame, it went in over the selection.
+            frame_loop::flush_pending_chars(&mut st);
             st.cursor.select(SelectionType::Document);
             st.select_all_level = 0;
             st.select_all_anchor_cell = None;
@@ -1042,6 +1048,9 @@ impl RichTextEditor {
     pub fn deselect(&self) {
         {
             let mut st = self.state.borrow_mut();
+            // What was typed in this frame goes in first, over the selection
+            // it was typed over.
+            frame_loop::flush_pending_chars(&mut st);
             st.cursor.clear_selection();
             st.select_all_level = 0;
             st.select_all_anchor_cell = None;
@@ -1165,7 +1174,9 @@ impl RichTextEditor {
     /// Select the word under the widget's caret.
     pub fn select_word(&self) {
         {
-            let st = self.state.borrow();
+            let mut st = self.state.borrow_mut();
+            // What was typed in this frame goes in first, where it was typed.
+            frame_loop::flush_pending_chars(&mut st);
             st.cursor.select(SelectionType::WordUnderCursor);
         }
         sync_cursor_signals(&self.state);
@@ -1174,7 +1185,9 @@ impl RichTextEditor {
     /// Select the paragraph / block under the widget's caret.
     pub fn select_line(&self) {
         {
-            let st = self.state.borrow();
+            let mut st = self.state.borrow_mut();
+            // What was typed in this frame goes in first, where it was typed.
+            frame_loop::flush_pending_chars(&mut st);
             st.cursor.select(SelectionType::LineUnderCursor);
         }
         sync_cursor_signals(&self.state);
@@ -1189,6 +1202,11 @@ impl RichTextEditor {
     pub fn set_caret_position(&self, position: usize) {
         {
             let mut st = self.state.borrow_mut();
+            // What was typed in this frame goes in where it was typed, and the
+            // position is read in the text without it.
+            let mut at = [position];
+            frame_loop::flush_pending_chars_keeping(&mut st, &mut at);
+            let [position] = at;
             st.cursor.set_position(position, MoveMode::MoveAnchor);
             st.cursor_affinity = teksilo_text::CursorAffinity::Downstream;
         }
@@ -1216,6 +1234,11 @@ impl RichTextEditor {
     pub fn select_range(&self, start: usize, end: usize) {
         {
             let mut st = self.state.borrow_mut();
+            // What was typed in this frame goes in where it was typed, and the
+            // range is read in the text without it.
+            let mut ends = [start, end];
+            frame_loop::flush_pending_chars_keeping(&mut st, &mut ends);
+            let [start, end] = ends;
             st.cursor.set_position(start, MoveMode::MoveAnchor);
             st.cursor.set_position(end, MoveMode::KeepAnchor);
             // The caret sits at `end`; downstream affinity matches placement at a range end.
@@ -1864,9 +1887,9 @@ impl RichTextEditor {
     // the user pressing Ctrl+Z once per property. Wrapping the sequence in
     // an edit block makes it one entry.
     //
-    // The editor already groups this way internally for IME composition
-    // (`keyboard.rs`) and for list nesting; these expose the same primitive
-    // to external toolbars. Composites nest, so it is safe to wrap calls
+    // The editor already groups this way internally for pasted paragraphs
+    // and for list nesting; these expose the same primitive to external
+    // toolbars. Composites nest, so it is safe to wrap calls
     // that open one of their own.
 
     /// Begin grouping subsequent edits into a single undo entry.
@@ -2507,6 +2530,11 @@ impl EditorHandle {
     pub fn select_range(&self, start: usize, end: usize) {
         {
             let mut st = self.state.borrow_mut();
+            // What was typed in this frame goes in where it was typed, and the
+            // range is read in the text without it.
+            let mut ends = [start, end];
+            frame_loop::flush_pending_chars_keeping(&mut st, &mut ends);
+            let [start, end] = ends;
             st.cursor.set_position(start, MoveMode::MoveAnchor);
             st.cursor.set_position(end, MoveMode::KeepAnchor);
             st.cursor_affinity = teksilo_text::CursorAffinity::Downstream;
@@ -3644,6 +3672,9 @@ impl EditorHandle {
     pub fn select_all(&self) {
         {
             let mut st = self.state.borrow_mut();
+            // What was typed in this frame goes in first, where it was typed:
+            // left for the frame, it went in over the selection.
+            frame_loop::flush_pending_chars(&mut st);
             st.cursor.select(SelectionType::Document);
             st.select_all_level = 0;
             st.select_all_anchor_cell = None;
@@ -3685,7 +3716,8 @@ impl EditorHandle {
     /// `true` while an IME composition is actively in progress. Mirrors
     /// [`RichTextEditor::is_composing`].
     pub fn is_composing(&self) -> bool {
-        self.state.borrow().ime_preedit.is_some()
+        let st = self.state.borrow();
+        st.composition.is_live(&st.document)
     }
 
     /// Reactive caret position signal.
@@ -4108,10 +4140,14 @@ impl Widget for RichTextEditor {
                         // Seed the OS IME candidate area at the caret.
                         self::keyboard::report_ime_cursor_area(&state, ctx);
                     } else {
-                        // Abandon any in-progress composition on blur, and drop
-                        // the IME-area / caret-chase caches. The OS IME candidate
-                        // area is a single *per-window* resource a sibling field
-                        // may have re-pointed while we were unfocused; clearing
+                        // Keep any in-progress composition's text in place and
+                        // end the platform's composition (see
+                        // `keyboard::finish_composition`): left alive, the input
+                        // method commits it later, here or in the field focused
+                        // next. And drop the IME-area / caret-chase caches. The
+                        // OS IME candidate area is a single *per-window*
+                        // resource a sibling field may have re-pointed while
+                        // we were unfocused; clearing
                         // `last_ime_area` forces the next focus-gain report to
                         // re-seed it (the dedup must not swallow that re-seed).
                         // Clearing `last_chase_pos` lets a refocus re-reveal the
@@ -4120,13 +4156,23 @@ impl Widget for RichTextEditor {
                         // dismissal — every caret-moving tap is outside a
                         // handle — so retirement on focus loss is the host's.
                         touch.dismiss();
-                        self::keyboard::clear_ime_preedit(&state);
+                        self::keyboard::finish_composition(&state, ctx);
                         let mut st = state.borrow_mut();
                         st.last_ime_area = None;
                         st.last_chase_pos = None;
                     }
                     ctx.request_frame();
                 }
+            })
+            // A click on a control that takes no focus (a toolbar button)
+            // blurs nothing, so the framework asks the editor to commit here
+            // first: a composition in progress ends with its text kept, as on
+            // a blur. Left alive, the command (an undo, a format) would take
+            // it out of the text while the input method still holds it, and
+            // the next key would bring it back at the caret.
+            .on_commit_edit({
+                let state = self.state.clone();
+                move |ctx| self::keyboard::finish_composition(&state, ctx)
             })
             .on_pointer_event({
                 let state = self.state.clone();
@@ -4769,7 +4815,12 @@ fn handle_access_action_request(
                 Some(er.absolute_start + pos.character_index.min(er.text.chars().count()))
             };
             if let (Some(a), Some(f)) = (resolve(sel.anchor), resolve(sel.focus)) {
-                let st = state.borrow();
+                let mut st = state.borrow_mut();
+                // What was typed in this frame goes in where it was typed; the
+                // reader's positions are in the text it was shown, without it.
+                let mut ends = [a, f];
+                self::frame_loop::flush_pending_chars_keeping(&mut st, &mut ends);
+                let [a, f] = ends;
                 st.cursor.set_position(a, MoveMode::MoveAnchor);
                 st.cursor.set_position(f, MoveMode::KeepAnchor);
                 drop(st);

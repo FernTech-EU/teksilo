@@ -760,6 +760,15 @@ impl Widget for TextInputField {
                 teksilo_core::ime::ImeContext::text()
             })
             .on_focus(move |gained, ctx| {
+                if !gained {
+                    // Keep any in-progress composition's text in place and end
+                    // the platform's composition, first, so that the commit and
+                    // blur callbacks below see the text it leaves (see
+                    // `keyboard::finish_composition`). Left alive, the input
+                    // method commits it later, here or in the field focused
+                    // next.
+                    keyboard::finish_composition(&state_for_focus, ctx);
+                }
                 interaction_for_focus.set(if gained {
                     InteractionState::Focused
                 } else {
@@ -873,9 +882,6 @@ impl Widget for TextInputField {
                     // is not a shape the host can verify from here. The call is
                     // what makes the answer the host's own.
                     touch_for_focus.dismiss();
-                    // Abandon any in-progress composition on blur — remove
-                    // the tentative preedit text from the document.
-                    keyboard::clear_ime_preedit(&state_for_focus);
                     sync_cursor_signals(&state_for_focus);
                 }
                 if let Some(cb) = commit_callback {
@@ -892,10 +898,12 @@ impl Widget for TextInputField {
             // the field's own (its validator, a spin box's parse, a date
             // field's), run while the field keeps focus; the app's
             // `on_blur_fn` waits for a real blur. The text it leaves is noted
-            // so that blur does not commit it again.
+            // so that blur does not commit it again. A composition in progress
+            // ends first, its text kept, as on a blur, so the commit sees it.
             .on_commit_edit({
                 let state = self.state().clone();
                 move |ctx| {
+                    keyboard::finish_composition(&state, ctx);
                     let commit = state.borrow().on_commit.clone();
                     if let Some(commit) = commit {
                         commit(ctx);
@@ -1196,7 +1204,7 @@ impl Widget for TextInputField {
         // the user sees the text is tentative. Single line → one segment;
         // on a secure field it sits under the masked bullets. Drawn inside
         // the text clip so it never spills past the viewport.
-        if let Some(range) = st.ime_preedit_range.clone()
+        if let Some(range) = st.composition.range(&st.document)
             && st.engine.has_full_layout()
             && range.start < range.end
         {
@@ -1397,7 +1405,7 @@ impl Widget for TextInputField {
         // indices (text-document is char-space), which the emission maps
         // onto the run that holds them — a caret past 255 characters is
         // in the second run, at its own offset.
-        let (anchor, pos) = match st.ime_preedit_range.clone() {
+        let (anchor, pos) = match st.composition.range(&st.document) {
             _ if hide_all => (0, 0),
             Some(range) if !protected => (range.start, range.end),
             _ => (st.cursor.anchor(), st.cursor.position()),

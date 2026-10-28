@@ -59,24 +59,42 @@ pub(crate) fn handle_key(
     ctx: &mut EventContext,
 ) -> EventResponse {
     // IME composition (preedit) — tentative, replaceable text shown inline.
-    if let WidgetEvent::ImeComposition { text, .. } = event {
-        return handle_ime_composition(state, ctx, text);
+    if let WidgetEvent::ImeComposition {
+        text, replacement, ..
+    } = event
+    {
+        return handle_ime_composition(state, ctx, text, replacement.as_ref());
     }
     // IME commit: a finalized grapheme cluster, or text the input system wrote
-    // on its own account (dictation, Writing Tools, the emoji viewer). Drop any
-    // live preedit first (some backends skip the empty-preedit clear), then
-    // batch into pending_chars like ordinary typed input, or replace the range
-    // the input system named.
+    // on its own account (dictation, Writing Tools, the emoji viewer). The
+    // commit of a composition takes its place; text with no composition before
+    // it is batched into pending_chars like ordinary typed input, or replaces
+    // the range the input system named.
     if let WidgetEvent::ImeCommit {
         text,
         origin,
         replacement,
     } = event
     {
-        clear_ime_preedit(state);
         let source = EditSource::from_ime_origin(*origin);
+        let composing = {
+            let mut guard = state.borrow_mut();
+            let st = &mut *guard;
+            st.composition.reconcile(&st.document);
+            st.composition.is_held(&st.document)
+        };
         return match replacement {
-            Some(range) => replace_from_input_system(state, ctx, text, range.clone(), source),
+            Some(range) => {
+                // A range the commit names itself is read against the text
+                // without the composition.
+                if composing {
+                    let mut guard = state.borrow_mut();
+                    let st = &mut *guard;
+                    st.composition.cancel(&st.document);
+                }
+                replace_from_input_system(state, ctx, text, range.clone(), source)
+            }
+            None if composing => commit_composition(state, ctx, text, source),
             None => push_pending_chars(state, ctx, text, source),
         };
     }
@@ -90,6 +108,13 @@ pub(crate) fn handle_key(
     else {
         return EventResponse::Ignored;
     };
+
+    // A key after a composition's empty update, where its commit would have
+    // been: the input method cancelled it.
+    if settle_cancelled_composition(&mut state.borrow_mut()) {
+        sync_cursor_signals(state);
+        ctx.request_frame();
+    }
 
     let shift = modifiers.shift();
     // The platform accelerator — ⌘ on macOS, Ctrl elsewhere. See the
@@ -362,6 +387,22 @@ pub(crate) fn run_standard_edit(
     empty_history_passes_on: bool,
     ctx: &mut EventContext,
 ) -> bool {
+    // A command that edits the text ends a composition in progress first, its
+    // text kept, as a click elsewhere does (see `finish_composition`). Left
+    // alive, the edit would take the composition out of the text while the
+    // input method still held it, and its next update would bring it back at
+    // the caret.
+    let edits_text = matches!(
+        command,
+        StandardEdit::Cut
+            | StandardEdit::Paste
+            | StandardEdit::PastePlain
+            | StandardEdit::Undo
+            | StandardEdit::Redo
+    );
+    if edits_text && !declines(&state.borrow(), command, false) {
+        finish_composition(state, ctx);
+    }
     {
         let mut st = state.borrow_mut();
         if declines(&st, command, empty_history_passes_on) {
@@ -388,50 +429,79 @@ pub(crate) fn run_standard_edit(
     true
 }
 
-/// Apply an `ImeComposition` event. Removes the previous preedit range (if
-/// any) from the document, inserts the new cleaned preedit text at the
-/// cursor, and records the resulting range so the next composition event can
-/// replace it. Single-line rules apply (newlines / control chars stripped,
-/// `char_filter` enforced, `max_length` respected); secure-field masking is
-/// handled at the engine layer so a password preedit renders as bullets. An
-/// empty composition cancels the preedit without inserting.
+/// Apply an `ImeComposition` event: show its text as the composition, a
+/// transient edit no undo history records (see [`crate::common::composition`]).
+/// Each update replaces the text of the one before. Single-line rules apply
+/// (newlines / control chars stripped, `char_filter` enforced, `max_length`
+/// respected, counting neither the composition's earlier text nor the text it
+/// takes the place of); secure-field masking is handled at the engine layer
+/// so a password preedit renders as bullets. An update the rules leave
+/// nothing of cancels the composition.
+///
+/// A first update that names a `replacement` (the input method marked text
+/// already in the field, as Korean Hanja conversion does) shows the
+/// composition in place of that text, which a cancel puts back. The empty
+/// update leaves the composition's text where it is: winit sends one right
+/// before every commit too, so the commit that follows decides (see
+/// [`commit_composition`]), and anything else cancels it (see
+/// [`settle_cancelled_composition`]).
 fn handle_ime_composition(
     state: &SharedState,
     ctx: &mut EventContext,
     text: &str,
+    replacement: Option<&std::ops::Range<usize>>,
 ) -> EventResponse {
     if state.borrow().read_only {
         return EventResponse::Handled;
     }
-    // A composition carrying no insertable text while there is no active preedit
-    // is a genuine no-op. Some Linux IME backends (ibus / fcitx via winit) flood
-    // empty `Ime::Preedit("")` events while a field is focused; processing each
-    // one — an undo block, a signal sync, an un-deduped IME-area report that
-    // re-arms that very loop, a repaint — is pure waste. Bail before any of it.
-    {
-        let st = state.borrow();
-        let empty = text.chars().all(|c| !single_line_admits(c));
-        if empty && st.ime_preedit_range.is_none() {
+    if text.chars().all(|c| !single_line_admits(c)) {
+        // The empty update of a live composition: leave its text where it is
+        // until the next event says whether it is committed. The frame asked
+        // for here settles a cancel if nothing else does first.
+        //
+        // With no live composition it is a genuine no-op. Some Linux IME
+        // backends (ibus / fcitx via winit) flood empty `Ime::Preedit("")`
+        // events while a field is focused; processing each one (a signal sync,
+        // an un-deduped IME-area report that re-arms that very loop, a repaint)
+        // is pure waste. Bail before any of it. An ended composition waits on:
+        // the flood must not cancel what the commit after it would commit.
+        let ended = {
+            let mut guard = state.borrow_mut();
+            let st = &mut *guard;
+            st.composition.reconcile(&st.document);
+            st.composition.end(&st.document)
+        };
+        if !ended {
             return EventResponse::Ignored;
         }
+        ctx.request_frame();
+        return EventResponse::Handled;
     }
     {
-        let mut st = state.borrow_mut();
+        let mut guard = state.borrow_mut();
+        let st = &mut *guard;
+        // An update after an earlier composition's empty one, with no commit in
+        // between: that composition was cancelled.
+        settle_cancelled_composition(st);
         // The preedit goes in after what was typed before it in this frame,
         // as in the rich text editor: the layout caught up below inserts that
-        // typing too, and would otherwise put it after the preedit.
+        // typing too, and would otherwise put it after the preedit. A recorded
+        // insertion, which would revert a live composition: there is none,
+        // unless keys typed during it, and it is then started again.
         st.apply_pending_chars();
-        // Group remove+reinsert as one undo step so an undo after
-        // composition pops the whole preedit, not each candidate.
-        st.cursor.begin_edit_block();
-        if let Some(range) = st.ime_preedit_range.take() {
-            let doc_end = st.document.character_count();
-            let start = range.start.min(doc_end);
-            let end = range.end.min(doc_end);
-            if start < end {
+        st.composition.reconcile(&st.document);
+        let live = st.composition.is_live(&st.document);
+        if !live {
+            st.composition.begin(&st.document);
+            // The first update of a composition that takes the place of text
+            // already in the field. Later updates name the same text, which
+            // the composition now stands in for: they replace its text.
+            if let Some(range) = replacement {
+                let doc_end = st.document.character_count();
+                let start = range.start.min(doc_end);
+                let end = range.end.min(doc_end).max(start);
                 st.cursor.set_position(start, MoveMode::MoveAnchor);
                 st.cursor.set_position(end, MoveMode::KeepAnchor);
-                let _ = st.cursor.remove_selected_text();
             }
         }
         // Single-line cleaning + per-character filter.
@@ -440,47 +510,41 @@ fn handle_ime_composition(
             .filter(|c| single_line_admits(*c))
             .filter(|c| st.char_filter_admits(*c))
             .collect();
-        // Max-length: cap against remaining capacity (the old preedit has
-        // already been removed, so the doc length here excludes it).
+        // Max-length: cap against the text the composition leaves in place.
+        // What it replaces is its own earlier text when it is live, else the
+        // selection, which is the text a replacement names.
         let clean = if let Some(max) = st.max_length {
-            let current_len = st.document.character_count();
-            let sel_len = if st.cursor.has_selection() {
-                st.cursor
-                    .selected_text()
-                    .ok()
-                    .unwrap_or_default()
-                    .chars()
-                    .count()
+            let taken = if live {
+                st.document.transient_range().map_or(0, |range| range.len())
             } else {
-                0
+                st.cursor.position().abs_diff(st.cursor.anchor())
             };
-            let remaining = max.saturating_sub(current_len.saturating_sub(sel_len));
-            clean.chars().take(remaining).collect::<String>()
+            let kept = st.document.character_count().saturating_sub(taken);
+            clean
+                .chars()
+                .take(max.saturating_sub(kept))
+                .collect::<String>()
         } else {
             clean
         };
-        if !clean.is_empty() {
-            let start = st.cursor.position();
-            let _ = st.cursor.insert_text(&clean);
-            let end = st.cursor.position();
-            st.ime_preedit = Some(clean);
-            st.ime_preedit_range = Some(start..end);
+        if clean.is_empty() {
+            // Nothing of it is the field's to show.
+            st.composition.cancel(&st.document);
         } else {
-            st.ime_preedit = None;
+            st.composition.show(&st.document, &st.cursor, &clean);
         }
-        st.cursor.end_edit_block();
         st.pending_text_changed = true;
         // Lay the preedit out now, not at the next frame: the area reported
         // below is where the platform opens its candidate window, and it is
         // read off the layout. Without the preedit in it, the caret's offset
         // after the preedit lies that many characters further into the old
         // text, off by the difference between their widths.
-        super::catch_up_layout(&mut st);
+        super::catch_up_layout(st);
         // And scroll it into view as the next paint will: at the end of a
         // field that overflows, the caret after the preedit is past the
         // trailing edge until the text scrolls.
         if let Some(follow) = st.caret_follow {
-            super::ensure_caret_visible_h(&mut st, follow);
+            super::ensure_caret_visible_h(st, follow);
         }
     }
     sync_cursor_signals(state);
@@ -489,21 +553,184 @@ fn handle_ime_composition(
     EventResponse::Handled
 }
 
-/// Drop any active preedit, removing its tentative text from the document.
-/// Called on commit (before the finalised insert) and on focus loss.
-pub(crate) fn clear_ime_preedit(state: &SharedState) {
-    let mut st = state.borrow_mut();
-    if let Some(range) = st.ime_preedit_range.take() {
-        let doc_end = st.document.character_count();
-        let start = range.start.min(doc_end);
-        let end = range.end.min(doc_end);
-        if start < end {
-            st.cursor.set_position(start, MoveMode::MoveAnchor);
-            st.cursor.set_position(end, MoveMode::KeepAnchor);
-            let _ = st.cursor.remove_selected_text();
-        }
+/// Cancel a composition the input method ended with its empty update and did
+/// not commit: the field back as it was before it, the text it took the place
+/// of included, nothing recorded. Called with whatever comes instead of the
+/// commit (a key, another composition, a press, a focus change) and at the
+/// start of every frame. Returns whether it changed the field.
+pub(crate) fn settle_cancelled_composition(st: &mut TextInputState) -> bool {
+    st.composition.reconcile(&st.document);
+    if !st.composition.is_ended(&st.document) {
+        return false;
     }
-    st.ime_preedit = None;
+    st.pending_text_changed = true;
+    st.composition.cancel(&st.document)
+}
+
+/// The commit of a composition: the committed text takes the composition's
+/// place, and the place of the text it stood in for, as one undo step of its
+/// own (see [`Composition::commit`](crate::common::composition::Composition::commit)),
+/// under the rules typing follows (the single-line strip, the `char_filter`,
+/// the `max_length` cap, counted without the composition and what it
+/// replaces). Reported under `source`. A commit the rules leave nothing of,
+/// and an empty one, commit nothing: the composition ends as a cancel.
+fn commit_composition(
+    state: &SharedState,
+    ctx: &mut EventContext,
+    text: &str,
+    source: EditSource,
+) -> EventResponse {
+    {
+        let mut guard = state.borrow_mut();
+        let st = &mut *guard;
+        if st.read_only {
+            // The field stopped taking text while the composition was shown.
+            st.composition.cancel(&st.document);
+            return EventResponse::Handled;
+        }
+        let clean: String = text
+            .chars()
+            .filter(|c| single_line_admits(*c))
+            .filter(|c| st.char_filter_admits(*c))
+            .collect();
+        let clean: String = match st.max_length {
+            Some(max) => {
+                let taken = st.document.transient_range().map_or(0, |range| range.len());
+                let kept = st.document.character_count().saturating_sub(taken);
+                clean.chars().take(max.saturating_sub(kept)).collect()
+            }
+            None => clean,
+        };
+        let arrived = st
+            .composition
+            .commit(&st.document, &st.cursor, &clean, false);
+        st.report_inserted_chars(source, arrived);
+        st.pending_text_changed = true;
+        // A press may follow before the next frame (the Microsoft Korean IME
+        // commits its syllable on the mouse-down itself), and it hit-tests the
+        // layout: bring it up to date, as the area reported below needs too.
+        super::catch_up_layout(st);
+    }
+    sync_cursor_signals(state);
+    report_ime_cursor_area(state, ctx);
+    ctx.request_frame();
+    EventResponse::Handled
+}
+
+/// Insert the typing and the input method's commit batched for this frame
+/// where they were typed, before something other than a key moves the caret
+/// or the selection to `offsets` (a programmatic selection, an assistive
+/// client's), read from the text without the batch: each offset is carried
+/// across it as the document carries a cursor. Left for the next frame, the
+/// batch went in at the caret the move had just placed, over the selection it
+/// had just made.
+pub(crate) fn apply_pending_chars_keeping(st: &mut TextInputState, offsets: &mut [usize]) {
+    if st.pending_chars.is_empty() {
+        return;
+    }
+    let held: Vec<_> = offsets
+        .iter()
+        .map(|&at| st.document.cursor_at(at))
+        .collect();
+    st.apply_pending_chars();
+    for (offset, cursor) in offsets.iter_mut().zip(held) {
+        *offset = cursor.position();
+    }
+}
+
+/// Before a pointer moves the caret or starts a selection: insert the typing
+/// and the input system's commits batched for this frame (those with no
+/// composition before them: a dead key, the emoji panel) where they were
+/// typed, and lay the text out with them, so that the pointer hit-tests the
+/// text the screen showed. Returns whether there was a batch.
+///
+/// Left for the next frame, the batch went in at the caret the pointer had
+/// just placed. The commit of a composition is not batched: it takes the
+/// composition's place as it arrives (see [`commit_composition`]), which is
+/// where the Microsoft Korean IME's commit on the mouse-down itself lands.
+pub(crate) fn insert_typing_before_pointer(st: &mut TextInputState) -> bool {
+    if st.pending_chars.is_empty() {
+        return false;
+    }
+    super::catch_up_layout(st);
+    true
+}
+
+/// Before a pointer moves the caret or starts a selection (a press, a tap's
+/// release, a hold, a multi-tap): the typing and the input method's commit
+/// batched for this frame go in where they were typed and are laid out (see
+/// [`insert_typing_before_pointer`]), then a composition in progress ends with
+/// its text kept (see [`finish_composition`]).
+pub(crate) fn settle_before_press(state: &SharedState, ctx: &mut EventContext) {
+    if insert_typing_before_pointer(&mut state.borrow_mut()) {
+        sync_cursor_signals(state);
+        ctx.request_frame();
+    }
+    finish_composition(state, ctx);
+}
+
+/// End the composition the input method still holds, keeping what it shows as
+/// committed text, for a press in the field or a focus change: what a native
+/// text field does, rather than leave the composition to be committed later at
+/// its old place (or in the next field focused).
+///
+/// The text is already in the field as the composition. It goes through what
+/// a commit does: one undo step that takes it back out, reported to
+/// `on_text_inserted` as [`EditSource::Ime`]. Only then is the platform told
+/// ([`EventContext::finish_ime_composition`]), so the empty update and the
+/// empty commit it may still deliver find no composition and change nothing.
+/// A composition the input method had already ended (its empty update, no
+/// commit) is settled as the cancel it was, and the platform is not told. With
+/// no composition, does nothing.
+pub(crate) fn finish_composition(state: &SharedState, ctx: &mut EventContext) {
+    let finished = {
+        let mut guard = state.borrow_mut();
+        let st = &mut *guard;
+        let finished = if settle_cancelled_composition(st) {
+            false
+        } else if st.composition.is_live(&st.document) {
+            keep_composition(st);
+            true
+        } else {
+            return;
+        };
+        // The press that follows hit-tests the layout: bring it up to date.
+        super::catch_up_layout(st);
+        finished
+    };
+    sync_cursor_signals(state);
+    ctx.request_frame();
+    if finished {
+        ctx.finish_ime_composition();
+    }
+}
+
+/// Commit the live composition's text where it stands, as its own commit
+/// would, reported as [`EditSource::Ime`]. The field reads the same
+/// afterwards. The caret ends after the text, unless it stood outside the
+/// composition (a right-click put it there before the menu took focus), where
+/// it stays.
+fn keep_composition(st: &mut TextInputState) {
+    let caret = (st.cursor.anchor(), st.cursor.position());
+    let outside = st.composition.range(&st.document).is_some_and(|range| {
+        let inside = |at: usize| range.start <= at && at <= range.end;
+        !inside(caret.0) || !inside(caret.1)
+    });
+    let Some(text) = st.composition.text(&st.document).map(str::to_owned) else {
+        return;
+    };
+    // The text was held to the field's rules when it was shown.
+    let arrived = st
+        .composition
+        .commit(&st.document, &st.cursor, &text, false);
+    st.report_inserted_chars(EditSource::Ime, arrived);
+    // The committed text is the text the composition showed, so the offsets
+    // read with it in place still name the same places.
+    if outside {
+        st.cursor.set_position(caret.0, MoveMode::MoveAnchor);
+        st.cursor.set_position(caret.1, MoveMode::KeepAnchor);
+    }
+    st.pending_text_changed = true;
 }
 
 /// Batch pending characters from an IME commit, counted under `source`.

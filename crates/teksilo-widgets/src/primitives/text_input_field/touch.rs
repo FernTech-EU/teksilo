@@ -439,6 +439,9 @@ impl FieldTouch {
         let Some(state) = self.state() else {
             return false;
         };
+        // What was typed in this frame goes in where it was typed, not at the
+        // new caret.
+        super::keyboard::insert_typing_before_pointer(&mut state.borrow_mut());
         let local = {
             let st = state.borrow();
             let mut local = window_to_local(&st, window);

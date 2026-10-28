@@ -30,6 +30,7 @@ use teksilo_text::{CursorAffinity, RichTextEngine, WrapMode};
 use teksilo_tokens::OverscrollStyle;
 
 use super::config::CodeConfig;
+use crate::common::composition::Composition;
 use crate::common::editor_runtime::{CaretBlink, CaretPolicy, Debounce, PolicyBundle};
 use crate::rich_text::image_cache::ImageCache;
 
@@ -207,8 +208,11 @@ pub(crate) struct CodeEditorState {
     /// Batching collapses a burst of keystrokes into a single
     /// `ContentsChanged`, keeping relayout O(burst) rather than O(keystrokes).
     pub pending_chars: String,
-    pub ime_preedit: Option<String>,
-    pub ime_preedit_range: Option<std::ops::Range<usize>>,
+    /// The input method's composition, shown in the document as transient
+    /// edits, which no undo history records. Its range is the document's to
+    /// say (`TextDocument::transient_range`): any recorded write reverts it.
+    /// See [`Composition`].
+    pub composition: Composition,
     pub last_ime_area: Option<teksilo_canvas::Rect>,
     pub last_chase_pos: Option<usize>,
 
@@ -355,8 +359,7 @@ impl CodeEditorState {
             event_queue,
             _event_subscription: subscription,
             pending_chars: String::new(),
-            ime_preedit: None,
-            ime_preedit_range: None,
+            composition: Composition::default(),
             last_ime_area: None,
             last_chase_pos: None,
             pending_text_changed: false,
@@ -521,6 +524,9 @@ impl CodeEditorState {
             let mut q = self.event_queue.lock().expect("event queue mutex poisoned");
             q.drain(..).collect()
         };
+        // A recorded write since the last drain (an undo, the application's
+        // own edit) reverted the composition, if one was shown.
+        self.composition.reconcile(&self.document);
         if drained.is_empty() {
             return (false, None);
         }
