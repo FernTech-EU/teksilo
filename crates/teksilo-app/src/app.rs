@@ -4108,11 +4108,12 @@ impl TeksiloAppHandler {
             self.key_report.warm_up();
         }
 
-        // Kept unconditional: `sync_accessibility` is not a pure builder —
-        // it steps the framework's live-region announcers, fills the
-        // automation announcement ring and maintains `at_version` — and all
+        // Kept unconditional: `refresh_accessibility` is not a pure builder.
+        // It steps the framework's live-region announcers, fills the
+        // automation announcement ring and maintains `at_version`, and all
         // three must run every frame whether or not anything is listening.
-        let _ = current.tree.sync_accessibility();
+        // It hands nothing out: a copy of the tree here was thrown away.
+        current.tree.refresh_accessibility();
         let walk = current.tree.a11y_walk_generation();
         let delivered_walk = current.a11y_delivered_walk;
         let delivered_at = current.a11y_delivered_at;
@@ -4124,8 +4125,11 @@ impl TeksiloAppHandler {
         {
             // Whatever reaches the adapter goes through the tree's delivery,
             // which hands a node that left the reader's tree and came back an
-            // id the adapter has never had (`deliver_accessibility`). Both
-            // closures deliver, and only one of them runs.
+            // id the adapter has never had (`deliver_accessibility`). Only
+            // one of the two closures runs. The second hands an update with
+            // no node when the adapter holds the tree as it is, which is
+            // every frame that only blinks a caret
+            // (`accessibility_unchanged`).
             let window_focused = current.focused;
             let tree = std::cell::RefCell::new(&mut current.tree);
             current.platform_window.update_accessibility_with(
@@ -4140,7 +4144,7 @@ impl TeksiloAppHandler {
                     (decided == A11yDelivery::Deliver)
                         .then(|| tree.borrow_mut().deliver_accessibility(window_focused))
                 },
-                || tree.borrow_mut().deliver_accessibility(window_focused),
+                || tree.borrow_mut().accessibility_unchanged(window_focused),
             );
         }
         match delivery {

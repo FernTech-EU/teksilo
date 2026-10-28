@@ -126,6 +126,19 @@ impl AdapterIds {
         self.outdated || self.last.is_none() || window_focused != self.window_focused
     }
 
+    /// An update that leaves the adapter's tree as the last one handed out
+    /// left it: no node, and the same focus. `None` before anything was
+    /// handed out. Only what the adapter holds while
+    /// [`owes`](Self::owes) is false.
+    pub(crate) fn unchanged(&self) -> Option<TreeUpdate> {
+        self.last.as_ref().map(|last| TreeUpdate {
+            nodes: Vec::new(),
+            tree: None,
+            tree_id: last.tree_id,
+            focus: last.focus,
+        })
+    }
+
     /// `source` as the adapter must be handed it.
     ///
     /// `window_focused` is what the adapter was last told about its window's

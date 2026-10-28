@@ -343,6 +343,12 @@ by crate for clarity, not because crates version independently.
   ended it is dropped.** On KDE Plasma (Wayland) with fcitx5, after a click
   or F10 during a composition, the input method sent its old composition
   again, which showed up in the field or in the next field focused.
+- **An idle window costs less while an assistive technology is attached.**
+  A frame that changed nothing a screen reader is shown (a caret blink)
+  copied the whole accessibility tree twice and gave the platform's adapter
+  one copy to compare node by node; it now copies nothing and gives it
+  nothing to compare. A blinking caret in the `rich-text-editor` example
+  cost about 30 % less CPU on Linux.
 
 ## [0.23.0] - 2026-10-27
 

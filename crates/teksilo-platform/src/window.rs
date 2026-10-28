@@ -1202,8 +1202,11 @@ impl PlatformWindow {
     /// nobody on every frame, and would make the throttle count frames
     /// nothing was listening to.
     ///
-    /// `build` returning `None` means "nothing to deliver"; the previously
-    /// delivered tree is re-sent, which the consumer treats as a no-op.
+    /// `build` returning `None` means "nothing to deliver": `previous` then
+    /// gives the adapter an update that leaves its tree as it is, since
+    /// `update_if_active` must be given one. An update with no node does
+    /// that without the adapter comparing a node
+    /// ([`WidgetTree::accessibility_unchanged`](teksilo_core::WidgetTree::accessibility_unchanged)).
     pub fn update_accessibility_with(
         &mut self,
         build: impl FnOnce() -> Option<accesskit::TreeUpdate>,

@@ -45,6 +45,22 @@ impl WidgetTree {
     /// [`request_accessibility_update`](Self::request_accessibility_update).
     /// A plain relayout does not invalidate the cache.
     pub fn sync_accessibility(&mut self) -> accesskit::TreeUpdate {
+        self.refresh_accessibility();
+        self.cached_a11y
+            .as_ref()
+            .expect("refresh_accessibility leaves an update behind")
+            .clone()
+    }
+
+    /// [`sync_accessibility`](Self::sync_accessibility) without handing out
+    /// the update: everything it does every frame (the announcers, the
+    /// announcement ring, `at_version`, the cache) at none of the cost of a
+    /// copy of the whole tree. For the event loop, which hands the adapter
+    /// [`deliver_accessibility`](Self::deliver_accessibility) or
+    /// [`accessibility_unchanged`](Self::accessibility_unchanged) and reads
+    /// nothing else.
+    #[doc(hidden)]
+    pub fn refresh_accessibility(&mut self) {
         // Explicit re-walk request (e.g. `SceneView` materialised / destroyed a
         // scene widget, or an a11y-only scene mutation). A relayout no longer
         // sets `a11y_dirty` on its own, so this is the lever; drain it before
@@ -135,11 +151,7 @@ impl WidgetTree {
             {
                 self.announcement_ring.observe(patched);
             }
-            return self
-                .cached_a11y
-                .as_ref()
-                .expect("the cache was present a line ago")
-                .clone();
+            return;
         }
 
         let (update, parents, local_bounds, descriptions, admitted) =
@@ -157,7 +169,7 @@ impl WidgetTree {
         // `TreeUpdate: PartialEq`, so this is a precise (if O(n)) comparison —
         // acceptable since it only runs on a real rebuild, not a cache hit.
         let content_changed = self.cached_a11y.as_ref() != Some(&update);
-        self.cached_a11y = Some(update.clone());
+        self.cached_a11y = Some(update);
         if content_changed {
             self.adapter_ids.source_changed();
         }
@@ -186,7 +198,6 @@ impl WidgetTree {
             self.request_accessibility_update();
             self.request_frame();
         }
-        update
     }
 
     /// The update the last [`sync_accessibility`](Self::sync_accessibility)
@@ -236,6 +247,25 @@ impl WidgetTree {
     #[doc(hidden)]
     pub fn accessibility_delivery_owed(&self, window_focused: bool) -> bool {
         self.cached_a11y.is_none() || self.adapter_ids.owes(window_focused)
+    }
+
+    /// What to hand a platform adapter on a frame that delivers nothing new.
+    ///
+    /// While nothing is [owed](Self::accessibility_delivery_owed), an update
+    /// with no node and the focus the adapter was last handed, which it
+    /// applies without comparing anything.
+    /// [`deliver_accessibility`](Self::deliver_accessibility) would hand it
+    /// a copy of every node it holds, to compare one by one: on a frame
+    /// that only blinks a caret, that was most of the frame's work. While
+    /// something is owed, what `deliver_accessibility` hands out.
+    #[doc(hidden)]
+    pub fn accessibility_unchanged(&mut self, window_focused: bool) -> accesskit::TreeUpdate {
+        if !self.accessibility_delivery_owed(window_focused)
+            && let Some(update) = self.adapter_ids.unchanged()
+        {
+            return update;
+        }
+        self.deliver_accessibility(window_focused)
     }
 
     /// An action a platform adapter asked for, with its node ids back in the
@@ -1864,6 +1894,74 @@ mod tests {
             "new content is owed"
         );
         let _ = tree.deliver_accessibility(true);
+        assert!(!tree.accessibility_delivery_owed(true));
+    }
+
+    /// A frame that changes nothing the adapter holds (a caret blink) hands
+    /// it an update with no node, which it applies without comparing a
+    /// node. Handing it the whole tree again cost a copy and a node by node
+    /// comparison on every frame an assistive technology was attached.
+    #[test]
+    fn an_idle_frame_hands_the_adapter_no_node() {
+        struct Count(usize);
+        impl accesskit_consumer::TreeChangeHandler for Count {
+            fn node_added(&mut self, _: &accesskit_consumer::NodeRef) {
+                self.0 += 1;
+            }
+            fn node_updated(
+                &mut self,
+                _: &accesskit_consumer::NodeRef,
+                _: &accesskit_consumer::NodeRef,
+            ) {
+                self.0 += 1;
+            }
+            fn focus_moved(
+                &mut self,
+                _: Option<&accesskit_consumer::NodeRef>,
+                _: Option<&accesskit_consumer::NodeRef>,
+            ) {
+                self.0 += 1;
+            }
+            fn node_removed(&mut self, _: &accesskit_consumer::NodeRef) {
+                self.0 += 1;
+            }
+        }
+
+        let mut tree = WidgetTree::new();
+        let inner = tree.add(FillWidget::new().label("Row").focusable());
+        let offset = crate::signal::Signal::new(0.0f32);
+        let root = tree.add(Mover {
+            offset: offset.clone(),
+            child: inner,
+        });
+        tree.focus(inner);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        let delivered = tree.deliver_accessibility(true);
+        let mut adapter = accesskit_consumer::Tree::new(delivered.clone(), true);
+
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        let idle = tree.accessibility_unchanged(true);
+        assert!(
+            idle.nodes.is_empty(),
+            "an idle frame handed the adapter {} nodes to compare",
+            idle.nodes.len()
+        );
+        assert_eq!(idle.tree, None);
+        assert_eq!(idle.tree_id, delivered.tree_id);
+        assert_eq!(idle.focus, delivered.focus, "the focus it holds");
+        let mut changes = Count(0);
+        adapter.update_and_process_changes(idle, &mut changes);
+        assert_eq!(changes.0, 0, "the adapter heard a change");
+
+        // Something owed is still handed out.
+        offset.set(20.0);
+        tree.arena.mark_needs_layout(root);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        let moved = tree.accessibility_unchanged(true);
+        assert!(!moved.nodes.is_empty(), "a move is delivered");
         assert!(!tree.accessibility_delivery_owed(true));
     }
 
