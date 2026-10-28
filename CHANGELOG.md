@@ -222,6 +222,12 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **Search highlights stay on the words they match while the text is
+  edited.** A `FindSession`'s boxes after an edit (an input method's commit,
+  a burst of typing) were drawn one edit behind, cut short ("Headin" of
+  "Heading"), until the host's next `refresh_if_stale` and the frame after
+  it. They now move with the text as it is edited; the refresh still finds
+  the matches the edit made or broke.
 - **A click in the padding of a text field places the caret.** A press in
   the few pixels above or below the text line of a `TextInput`, `SearchField`,
   `PasswordField`, `SpinBox`, the date and time editors, `HexColorInput` or

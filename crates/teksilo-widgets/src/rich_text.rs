@@ -95,6 +95,8 @@ pub use self::lists::list_style_is_ordered;
 #[cfg(test)]
 mod composition_tests;
 #[cfg(test)]
+mod find_highlight_tests;
+#[cfg(test)]
 mod input_document_tests;
 #[cfg(test)]
 mod line_break_tests;

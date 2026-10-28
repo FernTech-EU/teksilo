@@ -27,30 +27,38 @@
 //!
 //! ## Staleness on edit
 //!
-//! Matches are **absolute char offsets**, frozen at [`set_query`](FindSession::set_query). An
+//! Matches are **absolute char offsets**, found at [`set_query`](FindSession::set_query). An
 //! edit anywhere before a match shifts the text underneath those offsets, and text-document
-//! does **not** re-anchor a range session the way it re-anchors carets — so the boxes would
-//! drift onto the wrong characters. To make that impossible to forget, a `FindSession`
-//! subscribes to its document and marks itself stale on any content edit; the host calls
-//! [`refresh_if_stale`](FindSession::refresh_if_stale) (e.g. once per frame) to re-derive. The
-//! matcher is cheap over a single open document, and re-deriving is the same discipline the
-//! rest of search follows: never carry an offset across an edit.
+//! does **not** re-anchor a range session the way it re-anchors carets. So a `FindSession`
+//! subscribes to its document and does two things on every content edit, as the edit is
+//! announced:
+//!
+//! * It **moves its boxes with the text**: each match after the edit shifts by what the edit
+//!   added and removed, and the layer is pushed again. A view lays out the edit with the
+//!   boxes already on the characters they named, whatever order its frame runs in relative
+//!   to the host's: typing flushed by the editor's frame, an input method's commit and the
+//!   composition shown before it all arrive between two looks of the host. Left to the host,
+//!   a view that laid out first kept boxes one edit behind, until the next frame that
+//!   happened to come.
+//! * It **marks itself stale**: the edit may have made or broken a match, which only the
+//!   matcher can tell. The host calls [`refresh_if_stale`](FindSession::refresh_if_stale)
+//!   (e.g. once per frame) to re-derive the matches. The matcher is cheap over a single open
+//!   document, and re-deriving is the same discipline the rest of search follows: never trust
+//!   a match carried across an edit for longer than it takes to find it again.
 //!
 //! [`HighlightMask`]: teksilo_text::text_document::HighlightMask
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use teksilo_text::text_document::{
     DocumentEvent, FindMatch, FindOptions, HighlightFormat, RangeHighlight, SessionId,
     Subscription, TextDocument,
 };
 
-/// A search-highlight layer: the matches of a query, as a document range session, with the
-/// current match distinguished.
-pub struct FindSession {
-    doc: TextDocument,
-    session: SessionId,
+/// What the layer shows: the matches and how each is drawn. Shared with the document
+/// subscription, which moves the matches with an edit as it is announced.
+struct Layer {
     matches: Vec<FindMatch>,
     /// Index into `matches` of the current match — the one the reader is standing on.
     ///
@@ -60,6 +68,81 @@ pub struct FindSession {
     current: Option<usize>,
     current_format: HighlightFormat,
     other_format: HighlightFormat,
+}
+
+impl Layer {
+    /// The ranges to push: current match in one format, the rest in the other. The current
+    /// range is emitted **last**, so where matches abut, its format wins the registry's
+    /// last-writer-per-field merge.
+    fn ranges(&self) -> Vec<RangeHighlight> {
+        let mut ranges: Vec<RangeHighlight> = Vec::with_capacity(self.matches.len());
+        for (i, m) in self.matches.iter().enumerate() {
+            if Some(i) == self.current {
+                continue;
+            }
+            ranges.push(RangeHighlight {
+                start: m.position,
+                length: m.length,
+                format: self.other_format.clone(),
+            });
+        }
+        if let Some(cur) = self.current.and_then(|i| self.matches.get(i)) {
+            ranges.push(RangeHighlight {
+                start: cur.position,
+                length: cur.length,
+                format: self.current_format.clone(),
+            });
+        }
+        ranges
+    }
+
+    /// Move every match across an edit at `position` that removed `removed` characters and
+    /// added `added`. A match before the edit stays, one after it moves by the difference,
+    /// and one the edit cut into keeps what is left of it outside the edited text (nothing,
+    /// when the edit covered it). No match is dropped, so `current` still names the same
+    /// one; the next refresh re-derives them all. Returns whether any moved.
+    fn shift(&mut self, position: usize, removed: usize, added: usize) -> bool {
+        let edited_end = position + removed;
+        let mut moved = false;
+        for m in &mut self.matches {
+            let end = m.position + m.length;
+            let start = if m.position < position {
+                m.position
+            } else if m.position >= edited_end {
+                m.position + added - removed
+            } else {
+                position + added
+            };
+            let end = if end <= position {
+                end
+            } else if end >= edited_end {
+                end + added - removed
+            } else {
+                position
+            };
+            let length = end.saturating_sub(start);
+            if start != m.position || length != m.length {
+                m.position = start;
+                m.length = length;
+                moved = true;
+            }
+        }
+        moved
+    }
+}
+
+fn lock(layer: &Mutex<Layer>) -> MutexGuard<'_, Layer> {
+    layer
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// A search-highlight layer: the matches of a query, as a document range session, with the
+/// current match distinguished.
+pub struct FindSession {
+    doc: TextDocument,
+    session: SessionId,
+    layer: Arc<Mutex<Layer>>,
     /// The last query + options, kept so [`refresh_if_stale`](Self::refresh_if_stale) can
     /// re-run them after an edit without the caller re-passing them.
     query: String,
@@ -68,7 +151,8 @@ pub struct FindSession {
     /// [`refresh_if_stale`](Self::refresh_if_stale). `Arc` because the `on_change` callback is
     /// `Send + Sync`.
     dirty: Arc<AtomicBool>,
-    /// Kept alive so the subscription lives as long as the session (dropping it unsubscribes).
+    /// Kept alive so the subscription lives as long as the session (dropping it unsubscribes,
+    /// which also lets go of the document handle the subscription holds).
     _sub: Subscription,
 }
 
@@ -85,32 +169,55 @@ impl FindSession {
     ) -> Self {
         let session = doc.add_range_session();
         let dirty = Arc::new(AtomicBool::new(false));
+        let layer = Arc::new(Mutex::new(Layer {
+            matches: Vec::new(),
+            current: None,
+            current_format,
+            other_format,
+        }));
         let sub = {
             let dirty = dirty.clone();
+            let layer = layer.clone();
+            let target = doc.clone();
             doc.on_change(move |event| {
                 // Only edits that MOVE char offsets stale the cached matches. Format- and
                 // highlight-only events leave positions where they were — and reacting to
                 // `HighlightPaintChanged` here would loop, since this session's own
                 // `set_session_ranges` emits exactly that.
-                if matches!(
-                    event,
-                    DocumentEvent::ContentsChanged { .. }
-                        | DocumentEvent::DocumentReset
-                        | DocumentEvent::BlockCountChanged(_)
-                        | DocumentEvent::FlowElementsInserted { .. }
-                        | DocumentEvent::FlowElementsRemoved { .. }
-                ) {
-                    dirty.store(true, Ordering::Relaxed);
+                match event {
+                    DocumentEvent::ContentsChanged {
+                        position,
+                        chars_removed,
+                        chars_added,
+                        ..
+                    } => {
+                        dirty.store(true, Ordering::Relaxed);
+                        // The guard is let go before the push, which announces the new
+                        // ranges to every subscriber, this one included.
+                        let ranges = {
+                            let mut layer = lock(&layer);
+                            layer
+                                .shift(position, chars_removed, chars_added)
+                                .then(|| layer.ranges())
+                        };
+                        if let Some(ranges) = ranges {
+                            target.set_session_ranges(session, ranges);
+                        }
+                    }
+                    DocumentEvent::DocumentReset
+                    | DocumentEvent::BlockCountChanged(_)
+                    | DocumentEvent::FlowElementsInserted { .. }
+                    | DocumentEvent::FlowElementsRemoved { .. } => {
+                        dirty.store(true, Ordering::Relaxed);
+                    }
+                    _ => {}
                 }
             })
         };
         Self {
             doc: doc.clone(),
             session,
-            matches: Vec::new(),
-            current: None,
-            current_format,
-            other_format,
+            layer,
             query: String::new(),
             options: FindOptions::default(),
             dirty,
@@ -130,7 +237,10 @@ impl FindSession {
         self.query = query.to_string();
         self.options = options.clone();
         self.rerun();
-        self.current = (!self.matches.is_empty()).then_some(0);
+        {
+            let mut layer = lock(&self.layer);
+            layer.current = (!layer.matches.is_empty()).then_some(0);
+        }
         self.apply();
     }
 
@@ -142,11 +252,14 @@ impl FindSession {
     /// empty match set is `None`: a caller stepping into a document it has just re-run
     /// cannot be asked to know how many matches it turned out to have.
     pub fn set_current(&mut self, index: Option<usize>) -> Option<FindMatch> {
-        self.current = match index {
-            Some(_) if self.matches.is_empty() => None,
-            Some(i) => Some(i.min(self.matches.len() - 1)),
-            None => None,
-        };
+        {
+            let mut layer = lock(&self.layer);
+            layer.current = match index {
+                Some(_) if layer.matches.is_empty() => None,
+                Some(i) => Some(i.min(layer.matches.len() - 1)),
+                None => None,
+            };
+        }
         self.apply();
         self.current_match()
     }
@@ -163,19 +276,22 @@ impl FindSession {
             return false;
         }
         self.rerun();
-        if let Some(i) = self.current
-            && i >= self.matches.len()
         {
-            self.current = self.matches.len().checked_sub(1);
+            let mut layer = lock(&self.layer);
+            if let Some(i) = layer.current
+                && i >= layer.matches.len()
+            {
+                layer.current = layer.matches.len().checked_sub(1);
+            }
         }
         self.apply();
         true
     }
 
-    /// Run the stored query against the document now, into `self.matches`, and clear the dirty
-    /// flag. Does not touch `current` or push ranges — callers do that.
+    /// Run the stored query against the document now, into the layer's matches, and clear the
+    /// dirty flag. Does not touch `current` or push ranges: callers do that.
     fn rerun(&mut self) {
-        self.matches = if self.query.is_empty() {
+        let matches = if self.query.is_empty() {
             Vec::new()
         } else {
             // Best-effort: a search that errors (e.g. a malformed regex) simply highlights
@@ -184,35 +300,40 @@ impl FindSession {
                 .find_all(&self.query, &self.options)
                 .unwrap_or_default()
         };
+        lock(&self.layer).matches = matches;
         self.dirty.store(false, Ordering::Relaxed);
     }
 
     /// How many matches the last query found.
     pub fn match_count(&self) -> usize {
-        self.matches.len()
+        lock(&self.layer).matches.len()
     }
 
     /// The current match's 0-based index (`0` when the reader is not standing on one).
     pub fn current_index(&self) -> usize {
-        self.current.unwrap_or(0)
+        lock(&self.layer).current.unwrap_or(0)
     }
 
     /// The current match, if the reader is standing on one of this document's.
     pub fn current_match(&self) -> Option<FindMatch> {
-        self.matches.get(self.current?).cloned()
+        let layer = lock(&self.layer);
+        layer.matches.get(layer.current?).cloned()
     }
 
     /// Advance to the next match, wrapping past the end, and return it. `None` if there are no
     /// matches. From "no current match" it lands on the **first** — which is what stepping
     /// into this document from the one above it means.
     pub fn next_match(&mut self) -> Option<FindMatch> {
-        if self.matches.is_empty() {
-            return None;
+        {
+            let mut layer = lock(&self.layer);
+            if layer.matches.is_empty() {
+                return None;
+            }
+            layer.current = Some(match layer.current {
+                Some(i) => (i + 1) % layer.matches.len(),
+                None => 0,
+            });
         }
-        self.current = Some(match self.current {
-            Some(i) => (i + 1) % self.matches.len(),
-            None => 0,
-        });
         self.apply();
         self.current_match()
     }
@@ -221,13 +342,17 @@ impl FindSession {
     /// match" it lands on the **last**, the mirror of [`next_match`](Self::next_match):
     /// stepping backwards into a document arrives at its end.
     pub fn prev_match(&mut self) -> Option<FindMatch> {
-        if self.matches.is_empty() {
-            return None;
+        {
+            let mut layer = lock(&self.layer);
+            if layer.matches.is_empty() {
+                return None;
+            }
+            let count = layer.matches.len();
+            layer.current = Some(match layer.current {
+                Some(i) => (i + count - 1) % count,
+                None => count - 1,
+            });
         }
-        self.current = Some(match self.current {
-            Some(i) => (i + self.matches.len() - 1) % self.matches.len(),
-            None => self.matches.len() - 1,
-        });
         self.apply();
         self.current_match()
     }
@@ -235,34 +360,19 @@ impl FindSession {
     /// Clear all highlighting (the query went away, or the banner closed).
     pub fn clear(&mut self) {
         self.query.clear();
-        self.matches.clear();
-        self.current = None;
+        {
+            let mut layer = lock(&self.layer);
+            layer.matches.clear();
+            layer.current = None;
+        }
         self.dirty.store(false, Ordering::Relaxed);
         self.apply();
     }
 
-    /// Push the current match set to the document as range highlights — current match in one
-    /// format, the rest in the other. The current range is emitted **last**, so where matches
-    /// abut, its format wins the registry's last-writer-per-field merge.
+    /// Push the current match set to the document as range highlights (see
+    /// [`Layer::ranges`]).
     fn apply(&self) {
-        let mut ranges: Vec<RangeHighlight> = Vec::with_capacity(self.matches.len());
-        for (i, m) in self.matches.iter().enumerate() {
-            if Some(i) == self.current {
-                continue;
-            }
-            ranges.push(RangeHighlight {
-                start: m.position,
-                length: m.length,
-                format: self.other_format.clone(),
-            });
-        }
-        if let Some(cur) = self.current.and_then(|i| self.matches.get(i)) {
-            ranges.push(RangeHighlight {
-                start: cur.position,
-                length: cur.length,
-                format: self.current_format.clone(),
-            });
-        }
+        let ranges = lock(&self.layer).ranges();
         self.doc.set_session_ranges(self.session, ranges);
     }
 }
@@ -388,6 +498,49 @@ mod tests {
 
         // …and a second refresh with no edit is a cheap no-op.
         assert!(!fs.refresh_if_stale());
+    }
+
+    /// The boxes move with an edit as it is announced, before any refresh: an insertion
+    /// before a match moves it, a deletion that takes a match away leaves it empty without
+    /// moving which one is current, and a match before the edit stays.
+    #[test]
+    fn an_edit_moves_the_boxes_before_any_refresh() {
+        let d = doc("cat and cat and cat");
+        let mut fs = FindSession::new(&d, bg(CURRENT), bg(OTHER));
+        fs.set_query("cat", &FindOptions::default());
+        fs.set_current(Some(2));
+
+        let cursor = d.cursor_at(4);
+        cursor.insert_text("big ").unwrap();
+        let mut boxes: Vec<_> = paint_spans(&d)
+            .iter()
+            .map(|s| (s.start, s.length))
+            .collect();
+        boxes.sort();
+        assert_eq!(
+            boxes,
+            [(0, 3), (12, 3), (20, 3)],
+            "the two after it moved by four"
+        );
+
+        // Take the middle "cat" away with the text around it.
+        let cursor = d.cursor_at(8);
+        cursor.set_position(16, teksilo_text::text_document::MoveMode::KeepAnchor);
+        cursor.remove_selected_text().unwrap();
+        let mut boxes: Vec<_> = paint_spans(&d)
+            .iter()
+            .map(|s| (s.start, s.length))
+            .collect();
+        boxes.sort();
+        assert_eq!(boxes, [(0, 3), (12, 3)], "the removed match boxes nothing");
+        assert_eq!(fs.current_match().map(|m| m.position), Some(12));
+
+        assert!(fs.refresh_if_stale());
+        assert_eq!(
+            fs.match_count(),
+            2,
+            "the refresh finds the two that are left"
+        );
     }
 
     /// A refresh whose re-run drops the match the writer was on clamps the index rather than
