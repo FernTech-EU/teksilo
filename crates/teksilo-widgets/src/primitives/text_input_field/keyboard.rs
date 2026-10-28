@@ -923,6 +923,10 @@ pub(crate) fn clipboard_paste(state: &mut TextInputState, ctx: &EventContext) {
     if clean.is_empty() {
         return;
     }
+    // A paste is an undo step of its own, as in a native field: it goes in
+    // with the call typing uses, whose merge rule would otherwise join it to
+    // the word typed just before it, and the text typed just after it to it.
+    state.document.break_undo_merge();
     // Max-length enforcement.
     if let Some(max) = state.max_length {
         let current_len = state
@@ -953,6 +957,7 @@ pub(crate) fn clipboard_paste(state: &mut TextInputState, ctx: &EventContext) {
         let _ = state.cursor.insert_text(&clean);
         state.report_inserted_chars(EditSource::Clipboard, clean.chars().count());
     }
+    state.document.break_undo_merge();
     state.cursor.clear_selection();
     state.pending_text_changed = true;
 }

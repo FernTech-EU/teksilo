@@ -323,3 +323,24 @@ fn a_paste_leaves_line_separators_out_of_the_field() {
     f.press(Key::V, Modifiers::COMMAND);
     assert_eq!(f.text.get(), "onetwothreefour");
 }
+
+/// A paste is an undo step of its own, with no pause around it: typing
+/// before it and typing after it each undo apart from it, as in a native
+/// field. It went in with the call typing uses, whose merge rule joined it to
+/// the word typed just before it.
+#[test]
+fn a_paste_is_an_undo_step_of_its_own() {
+    let mut f = Field::alone("", false);
+    let field = f.field;
+    f.tree.type_text(field, "abc def");
+    f.tree.layout(SizeProposal::exact(300.0, 40.0));
+    f.clipboard.set_text("XYZ").unwrap();
+    f.press(Key::V, Modifiers::COMMAND);
+    f.tree.type_text(field, "gh");
+    f.tree.layout(SizeProposal::exact(300.0, 40.0));
+    assert_eq!(f.text.get(), "abc defXYZgh");
+    f.press(Key::Z, Modifiers::COMMAND);
+    assert_eq!(f.text.get(), "abc defXYZ", "the typing after the paste");
+    f.press(Key::Z, Modifiers::COMMAND);
+    assert_eq!(f.text.get(), "abc def", "the paste alone");
+}
