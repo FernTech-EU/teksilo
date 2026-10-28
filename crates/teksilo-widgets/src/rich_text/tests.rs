@@ -8825,6 +8825,41 @@ fn forward_only_ime_composition_does_not_eat_a_selection() {
 }
 
 #[test]
+fn a_redo_leaves_the_caret_after_the_redone_text() {
+    // Type, undo, redo, type: the letter goes after the redone text, as in
+    // TextEdit and Word. The caret used to land at the start of what the redo
+    // put back, so this gave `abc Ydef`.
+    use teksilo_core::event::{Key, Modifiers};
+    let doc = TextDocument::new();
+    let editor = RichTextEditor::editor(doc.clone());
+    let mut tree = WidgetTree::new();
+    let _ = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    for ch in "abc def".chars() {
+        press_char(&mut tree, ch);
+    }
+    tick_past_debounce(&mut tree);
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "abc def");
+
+    press_key(&mut tree, Key::Z, Modifiers::COMMAND);
+    tick_past_debounce(&mut tree);
+    assert_ne!(
+        doc.to_plain_text().unwrap_or_default(),
+        "abc def",
+        "the undo took the typing back"
+    );
+    press_key(&mut tree, Key::Z, Modifiers::COMMAND | Modifiers::SHIFT);
+    tick_past_debounce(&mut tree);
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "abc def");
+
+    press_char(&mut tree, 'Y');
+    tick_past_debounce(&mut tree);
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "abc defY");
+}
+
+#[test]
 fn undo_follows_a_rebind_of_edit_undo() {
     // Undo is the `edit.undo` shortcut, not a chord the editor matches itself:
     // moving it in the registry moves it here.

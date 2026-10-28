@@ -344,3 +344,21 @@ fn a_paste_is_an_undo_step_of_its_own() {
     f.press(Key::Z, Modifiers::COMMAND);
     assert_eq!(f.text.get(), "abc def", "the paste alone");
 }
+
+/// A redo leaves the caret where the edit it redoes left it, at the end of
+/// the text it puts back, as TextEdit and Word do: what is typed next goes
+/// after it. It used to land at the start of the redone text.
+#[test]
+fn a_redo_leaves_the_caret_after_the_redone_text() {
+    let mut f = Field::alone("", false);
+    let field = f.field;
+    f.tree.type_text(field, "abc def");
+    f.tree.layout(SizeProposal::exact(300.0, 40.0));
+    f.press(Key::Z, Modifiers::COMMAND);
+    assert_ne!(f.text.get(), "abc def", "the undo took the typing back");
+    f.press(Key::Z, Modifiers::COMMAND | Modifiers::SHIFT);
+    assert_eq!(f.text.get(), "abc def");
+    f.tree.type_text(field, "Y");
+    f.tree.layout(SizeProposal::exact(300.0, 40.0));
+    assert_eq!(f.text.get(), "abc defY");
+}

@@ -280,6 +280,12 @@ by crate for clarity, not because crates version independently.
   selection where it was, and changes once the composition is committed or
   cancelled. Its screen reader text and its selection are the recorded ones
   too.
+- **A redo leaves the caret where the edit it redoes left it**, in a
+  `RichTextEditor`, a `CodeEditor` and a `TextInputField` (with `TextInput`,
+  `SearchField` and `PasswordField`): after redone typing, what is typed
+  next goes after it, as in TextEdit and Word. Typing `abc def`, undoing,
+  redoing and typing `Y` gave `abc Ydef`. An undo of a deletion now leaves
+  the caret after the text it brings back, where it landed in front of it.
 
 #### App
 
